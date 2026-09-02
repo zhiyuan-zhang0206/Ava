@@ -51,7 +51,7 @@ assert "agent.loop" not in sys.modules, "runtime work imported before admission"
 async def claim() -> None:
     from agent.db import claim_inbound_batch
 
-    async with AsyncConnectionPool(
+    async with AsyncConnectionPool[psycopg.AsyncConnection](
         settings.data_plane.db_url,
         min_size=1,
         max_size=1,

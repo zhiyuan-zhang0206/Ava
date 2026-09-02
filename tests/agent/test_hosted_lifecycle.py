@@ -6,6 +6,7 @@ from uuid import uuid4
 
 import psycopg
 import pytest
+from langchain_core.messages import SystemMessage
 from psycopg_pool import AsyncConnectionPool
 
 from agent.db import ClaimedInbound, claim_inbound_batch
@@ -27,8 +28,10 @@ async def test_hosted_restart_marker_does_not_claim_completion() -> None:
         state,
     )
     assert state.restart_requested
-    assert "Restart was accepted" in str(state.new_msgs[0].content)
-    assert "have been restarted" not in str(state.new_msgs[0].content)
+    assert isinstance(state.new_msgs[0], SystemMessage)
+    assert isinstance(state.new_msgs[0].content, str)
+    assert "Restart was accepted" in state.new_msgs[0].content
+    assert "have been restarted" not in state.new_msgs[0].content
 
 
 @pytest.mark.parametrize("kind", ["restart", "terminate"])

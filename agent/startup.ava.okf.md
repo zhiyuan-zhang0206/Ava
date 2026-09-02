@@ -21,19 +21,9 @@ gateway spawn → unclaimed 'idling' → claim 'running' → heavy import → ru
 ```
 
 ### Stage 1: Schema Gate (`agent/_starting.py:claim_agent_row_or_die_on_stale_schema()`)
-Parent launch records use unique boot-attempt names on POSIX and Windows. Only
-the actual PostgreSQL admission winner publishes the canonical agent record,
-including ordinary legacy births and explicit resurrection. A resident or
-unreadable old canonical process refuses replacement; no revive/retry path kills
-it by name. This preflight is not a reservation: the admission CAS and bounded
-canonical publication lock protect a winner that appears after the preflight.
-
-- **Before claiming 'running'**, validates that DB schema matches the local code.
-- **Two mismatch types have the same runtime behavior**: both reject boot; only genuinely unowned legacy rows are marked terminated. A rejected attempt cannot settle an owned lifecycle command.
-- `CodeBehindSchema` (local code behind) — host layer can self-heal afterwards: update checkout to match cluster then resurrect
-- `SchemaVersionMismatch` (code ahead, checkout carries a migration unseen by DB) — host layer cannot self-heal (the code itself is the problem): must revert checkout to `main`
-- On failure: do not claim. Legacy unowned 'idling' rows become terminated; owned/prepared rows remain under their durable command controller.
-- Both boot-rejection paths call `_mark_preclaim_terminated`; its legacy-only predicate requires absent runtime kind/generation/owner and command pointer before stamping `termination_source='launch-confirm'`. Owned attempts fail without rewriting the prepared target; their original command deadline and attempt budget govern recovery. Legacy crash-auto-resurrection still applies after schema or placement repair.
+Validate schema before claiming running. Rejected owned attempts cannot settle
+another runtime or durable command. Exact rejection and launch-record contracts:
+[[startup/admission.ava.okf.md]].
 
 ### Stage 0: Arm the boot watchdog (`agent/__main__.py` → `_boot_deadline.arm()`)
 - Runs before the `_starting` import, so it covers the import chain itself — which is why the window arrives on argv (`--boot-stall-seconds`, from `settings.gateway.agent_boot_stall_seconds` via `ops/agent_launch.py`) and not from `shared.config`: importing that module is part of what needs watching
@@ -47,36 +37,8 @@ canonical publication lock protect a winner that appears after the preflight.
 - Record pid, publish `agent_updated` event
 - **Write the liveness lease** (`lease_expires_at = now() + TTL`) in the same UPDATE — the claim is the lease's birth; the run loop renews it ([[lease.ava.okf.md|Agent Liveness Lease]])
 - **Do not import any langgraph/langchain** — minimize delay to claim the row
-- An applied durable restart requires its exact `--restart-command-id` at early
-  admission. Under the metadata row lock, `agent/restart_admission.py` checks
-  the retained target incarnation, pending pointer and original application-time
-  boot deadline. Missing, delayed or superseded attempts cannot use legacy admission.
-- `agent/session_admission.py` publishes the winning process's canonical session
-  record before admission commits. The record is a repairable observation, not a
-  second ownership authority. Publication failure rolls the DB transaction back;
-  live or unreadable previous identities refuse replacement without signalling.
-  The controller launches under `ava-boot-<agent>-<command>-<attempt>`; only the
-  admitted child publishes the canonical agent record. These attempt records do
-  not count as admitted agents or interactive shells. Filesystem/DB publication
-  is not atomic; real subprocess crash coverage remains a deployment gate.
-- The existing restarter controller allocates `payload.launch_attempts` in a
-  short metadata-then-inbound transaction before spawning. A crash after that
-  commit consumes an attempt, including when no OS process was started. Both
-  the retry ceiling and original command deadline apply. Exhaustion records an
-  explicit unobserved result without pretending `observed_at` or a new PID exists.
-  Before the deadline, exhausted attempts remain explicitly unobserved. After
-  the original deadline, positive target absence permits a failed command result
-  and fenced pointer release, never a successful observation timestamp. The
-  ended runtime becomes terminated; its restart failure remains in the command.
-- Live runtime and cold controller acceptance share `shared/lifecycle_acceptance.py`.
-  The existing controller accepts a new explicit restart/terminate only after
-  proving no admitted owner for that exact agent. A new command has its own
-  budget; the old command is never retargeted or reset. Ordinary chat, compact
-  and system-note delivery cannot revive a released failed process: both the
-  watchdog candidate selection and final pending-work resurrection CAS refuse.
-  Explicit restart queues through the public lifecycle operation. Legacy
-  unowned terminated-agent policy is unchanged. Protocol advertisement and
-  full mixed-writer rollout validation remain activation gates.
+- Durable command identity, fixed deadline/attempt budget, canonical publication
+  and explicit cold acceptance: [[startup/admission.ava.okf.md]].
 
 ### Stage 3: Boot Stage
 - This stage is between '_starting' and run loop
