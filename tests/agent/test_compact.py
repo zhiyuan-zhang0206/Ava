@@ -1007,7 +1007,7 @@ async def test_compact_in_same_batch_as_restart(
     tid = spawn_agent()
     with db_conn.cursor() as cur:
         cur.execute(
-            "INSERT INTO agents_meta (id, spawner, status) VALUES (%s, 'test', 'running')",
+            "UPDATE agents_meta SET status='running' WHERE id=%s",
             (tid,),
         )
     db_conn.commit()
