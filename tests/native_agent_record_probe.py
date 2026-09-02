@@ -13,6 +13,8 @@ import time
 import unittest
 from pathlib import Path
 
+import psutil
+
 from ops.agent_launch import _require_released_agent_session
 from shared.cluster import session_name
 from shared.config import settings
@@ -39,6 +41,8 @@ class NativeAgentRecordOrdering(unittest.TestCase):
                     "from shared.runtime_incarnation import RuntimeIncarnation;"
                     f"time.sleep({child_delay});"
                     "publish_admitted_session(RuntimeIncarnation(123,UUID(int=1),UUID(int=2)));"
+                    "import os;"
+                    f"Path({str(home / 'actual-agent-pid')!r}).write_text(str(os.getpid()));"
                     "time.sleep(30)"
                 )
                 try:
@@ -48,7 +52,7 @@ class NativeAgentRecordOrdering(unittest.TestCase):
                         )
                     )
                     deadline = time.monotonic() + 15
-                    while not canonical.exists() and time.monotonic() < deadline:
+                    while not (home / "actual-agent-pid").exists() and time.monotonic() < deadline:
                         time.sleep(0.05)
                     admitted = SessionRecord.read(canonical)
                     launched = SessionRecord.read(attempt_path)
@@ -58,6 +62,19 @@ class NativeAgentRecordOrdering(unittest.TestCase):
                         self.fail("native child did not publish both record identities")
                     self.assertEqual(admitted.pid, launched.pid)
                     self.assertEqual(admitted.create_time, launched.create_time)
+                    actual_agent_pid = int((home / "actual-agent-pid").read_text())
+                    actual_agent = psutil.Process(actual_agent_pid)
+                    if actual_agent_pid != admitted.pid:
+                        self.assertEqual(os.name, "nt")
+                        parent = actual_agent.parent()
+                        self.assertIsNotNone(parent)
+                        if parent is None:
+                            self.fail("redirected Python lost its verified session parent")
+                        self.assertEqual(parent.pid, admitted.pid)
+                        self.assertEqual(parent.create_time(), admitted.create_time)
+                        self.assertEqual(
+                            Path(parent.exe()).resolve(), Path(sys.executable).resolve()
+                        )
                     self.assertEqual(launched.cwd, str(Path.cwd()))
                     self.assertIn("publish_admitted_session", launched.cmd)
                     self.assertEqual(admitted.generation, "00000000-0000-0000-0000-000000000001")
@@ -70,6 +87,7 @@ class NativeAgentRecordOrdering(unittest.TestCase):
                             {
                                 "platform": sys.platform,
                                 "pid": admitted.pid,
+                                "actual_agent_pid": actual_agent_pid,
                                 "birth": admitted.create_time,
                                 "pgid": process_group,
                                 "starttime": admitted.starttime,
