@@ -257,12 +257,35 @@ def test_editable_install_violations_accepts_repeated_checkout_pth_entries(
     assert editable_install.editable_install_violations(source_root) == ()
 
 
-def test_editable_install_violations_missing_records_are_empty(tmp_path: Path) -> None:
-    """A venv with no editable records has nothing to assert (repair: no-op)."""
+def test_editable_install_violations_both_missing_records_are_empty(tmp_path: Path) -> None:
+    """A venv with no editable records has nothing to assert or repair."""
     source_root = tmp_path / "prod" / "source"
     source_root.mkdir(parents=True)
 
     assert editable_install.editable_install_violations(source_root) == ()
+    assert editable_install.repair_editable_install(source_root) == ()
+
+
+def test_half_uninstall_pointer_missing_beside_metadata_is_repaired(tmp_path: Path) -> None:
+    """Existing editable metadata makes a missing pointer a repairable violation."""
+    source_root = tmp_path / "prod" / "source"
+    direct_url = _write_direct_url(source_root, source_root.as_uri())
+    pth = direct_url.parent.parent / editable_install.EDITABLE_PTH_NAME
+
+    violations = editable_install.editable_install_violations(source_root)
+
+    assert len(violations) == 1
+    assert str(pth) in violations[0]
+    assert "metadata present but pointer missing" in violations[0]
+    repairs = editable_install.repair_editable_install(source_root)
+    assert pth.read_text() == str(source_root)
+    assert repairs == (
+        editable_install.EditableInstallRepair(
+            path=pth,
+            poisoned_target="(missing)",
+            source_root=source_root,
+        ),
+    )
 
 
 def test_editable_install_violations_allowlisted_clone_is_empty(tmp_path: Path) -> None:
@@ -372,6 +395,19 @@ def test_guard_editable_install_repairs_all_records_and_emits_exec_event(
             },
         },
     )
+
+
+def test_guard_editable_install_recovers_a_half_uninstall(tmp_path: Path) -> None:
+    """The exec boundary repairs a pointer uv removed before it can import Ava."""
+    source_root = tmp_path / "prod" / "source"
+    direct_url = _write_direct_url(source_root, source_root.as_uri())
+    pth = direct_url.parent.parent / editable_install.EDITABLE_PTH_NAME
+
+    violations = editable_install.guard_editable_install(source_root)
+
+    assert len(violations) == 1
+    assert "half-uninstalled" in violations[0]
+    assert pth.read_text() == str(source_root)
 
 
 def test_guard_editable_install_repairs_with_registered_real_emitter(tmp_path: Path) -> None:
@@ -496,4 +532,21 @@ def test_repair_editable_install_opens_protected_site_packages_directory(
 
     assert pth.read_text() == str(source_root)
     assert json.loads(direct_url.read_text())["url"] == source_root.as_uri()
+    assert stat.S_IMODE(site_packages.stat().st_mode) == 0o555
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX directory modes are not Windows ACLs")
+def test_repair_half_uninstall_opens_protected_site_packages_directory(
+    tmp_path: Path,
+) -> None:
+    """The write window can recreate a missing pointer after directory hardening."""
+    source_root = tmp_path / "prod" / "source"
+    direct_url = _write_direct_url(source_root, source_root.as_uri())
+    pth = direct_url.parent.parent / editable_install.EDITABLE_PTH_NAME
+    site_packages = pth.parent
+    site_packages.chmod(0o555)
+
+    editable_install.repair_editable_install(source_root)
+
+    assert pth.read_text() == str(source_root)
     assert stat.S_IMODE(site_packages.stat().st_mode) == 0o555
