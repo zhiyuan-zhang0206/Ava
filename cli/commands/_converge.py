@@ -528,6 +528,9 @@ def _warn_untracked_migrations(ctx: ConvergeCtx) -> None:  # noqa: ARG001
 
 
 CONVERGE_STEPS: tuple[ConvergeStep, ...] = (
+    # Warning-only ownership preflight must run before every write-capable step:
+    # root-owned paths otherwise fail before converge can print the exact repair.
+    ConvergeStep("$AVA_HOME ownership preflight", _ensure_ownership_preflight),
     # Reset the prod checkout before any other step reads the tree: a tampered
     # tree would make every later step misbehave, and resetting first means the
     # rest of converge runs against the installed commit.
@@ -541,10 +544,6 @@ CONVERGE_STEPS: tuple[ConvergeStep, ...] = (
     ConvergeStep("ava symlink on PATH", _ensure_ava_symlink, host_global=True),
     ConvergeStep("~/.local/bin on PATH", _ensure_local_bin_on_path, host_global=True),
     ConvergeStep("$AVA_HOME dir skeleton", _ensure_ava_home_dirs),
-    # Warning-only ownership preflight: root-owned probe captures and other
-    # files under $AVA_HOME make later converge writes fail unclearly. Print
-    # the exact repair command now, but never turn the warning into a start block.
-    ConvergeStep("$AVA_HOME ownership preflight", _ensure_ownership_preflight),
     # Warning-only port preflight: bind-check the cluster's port block + this
     # unit's health ports before anything is launched; foreign occupants are
     # printed and logged, never blocking (the blocking health-port gate is

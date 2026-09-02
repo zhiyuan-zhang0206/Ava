@@ -112,9 +112,8 @@ def test_ownership_preflight_never_fails_converge_when_its_scan_errors(
 
 
 def test_ownership_preflight_is_a_file_only_converge_step() -> None:
-    step = next(
-        step for step in _converge.CONVERGE_STEPS if step.name == "$AVA_HOME ownership preflight"
-    )
+    step = _converge.CONVERGE_STEPS[0]
 
+    assert step.name == "$AVA_HOME ownership preflight"
     assert step.apply is _ownership.ensure_ownership_preflight
     assert step.requires_unit_config is False
