@@ -35,9 +35,9 @@ import hashlib
 import json
 from collections.abc import Awaitable, Callable
 from contextvars import ContextVar
-from typing import Any, cast
+from typing import Any, Literal, cast
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from mcp.server.context import CallNext, HandlerResult, ServerRequestContext
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
@@ -61,8 +61,9 @@ from shared.machine import machine_name
 
 # Provenance of everything this surface creates. `spawner` groups the agents
 # an external tool created under their own root in the fleet views; `source`
-# must be one of the envelope's legal kinds (shared/envelope.py), and "user"
-# is the honest one: an MCP client acts for the human driving it.
+# retains legacy attribution only for non-opted-in clients. This is not evidence
+# that an MCP invocation came from a human. V1 derives external provenance from
+# the authenticated client row and still requires target protocol admission.
 _SPAWNER = "mcp"
 _MESSAGE_SOURCE = "user"
 
@@ -187,6 +188,13 @@ def _tool_result_is_error(result: HandlerResult) -> bool:
     return bool(is_error)
 
 
+def _validate_mcp_identity_arguments(tool: str, args: dict[str, Any]) -> None:
+    if tool == "send_message" and args.get("caller_protocol") == "v1":
+        reserved = {"source", "instance", "caller_identity", "auth_principal", "client_id"}
+        if reserved.intersection(args):
+            raise ToolError("caller identity is server-derived; remove identity arguments")
+
+
 class _AuditMiddleware:
     """Record client identity, outcome, and redacted args for every tools/call."""
 
@@ -214,6 +222,7 @@ class _AuditMiddleware:
             "auth_principal": {"kind": "mcp_client", "id": client["id"]},
         }
         try:
+            _validate_mcp_identity_arguments(tool, args)
             result = await call_next(ctx)
         except Exception as exc:
             insert_event_log(
@@ -365,7 +374,9 @@ def _register_fleet_tools(server: MCPServer, pool: Any) -> None:
         return spawned.model_dump(mode="json")
 
     @server.tool()
-    async def send_message(agent_id: int, content: str) -> dict[str, Any]:
+    async def send_message(
+        agent_id: int, content: str, caller_protocol: Literal["v1"] | None = None
+    ) -> dict[str, Any]:
         """Send a message to a running agent — a new instruction, more context,
         or the answer to a question it is blocked on.
 
@@ -374,8 +385,21 @@ def _register_fleet_tools(server: MCPServer, pool: Any) -> None:
         not return the agent's reply. Read the reply with `get_messages`.
         Messaging an agent that has already terminated brings it back with its
         history intact.
+
+        Explicit caller_protocol='v1' labels the authenticated MCP client as an
+        external caller. It adds no permissions and requires an already-live
+        target with negotiated v1 support; legacy/default and bootstrap behavior
+        are unchanged. Do not supply source or instance: the server owns them.
         """
         _require_write_scope("send_message")
+        source = _MESSAGE_SOURCE
+        if caller_protocol == "v1":
+            client = _CURRENT_MCP_CLIENT.get()
+            if client is None:
+                raise ToolError("authenticated MCP client context is missing")
+            source = CallerIdentity(
+                kind="external_agent", subject="mcp", instance=str(client["id"])
+            ).source()
         # Existence check first (raises AgentNotFound, like the REST route);
         # deliver_chat_inbound then auto-resurrects a terminated target.
         try:
@@ -384,11 +408,13 @@ def _register_fleet_tools(server: MCPServer, pool: Any) -> None:
                 pool,
                 agent_id,
                 prepare=lambda _conn: content,
-                source=_MESSAGE_SOURCE,
+                source=source,
                 payload=None,
             )
         except AvaAgentError as exc:
             raise ToolError(str(exc)) from exc
+        except HTTPException as exc:
+            raise ToolError(str(exc.detail)) from exc
         return {"status": delivery.status}
 
     @server.tool()
