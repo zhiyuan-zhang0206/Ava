@@ -127,6 +127,20 @@ def test_readonly_ensure_schema_refuses_dim_mismatch_without_dropping_rows(
     assert _rows(db_conn) == [("/survives.md\x1fbody\x1f0", "/survives.md", "body", 0, 1.0, "hash")]
 
 
+def test_readonly_connect_forwards_validation_and_closes_pool_on_mismatch(
+    db_conn: psycopg.Connection, backend: PGVectorBackend
+) -> None:
+    """connect() preserves the read-only mismatch guarantee and pool cleanup."""
+    backend.upsert("/survives.md", 1.0, "hash", _vec(0))
+    readonly_backend = PGVectorBackend(dim=_DIM + 1, fingerprint=_FP, readonly=True)
+
+    with pytest.raises(RuntimeError, match="vector dimension 8, expected 9"):
+        readonly_backend.connect()
+
+    assert readonly_backend._pool is None
+    assert _rows(db_conn) == [("/survives.md\x1fbody\x1f0", "/survives.md", "body", 0, 1.0, "hash")]
+
+
 def test_readonly_ensure_schema_accepts_matching_table(
     db_conn: psycopg.Connection, backend: PGVectorBackend
 ) -> None:
