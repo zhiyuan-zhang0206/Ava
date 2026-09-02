@@ -134,7 +134,7 @@ def test_probe_numpy_unreachable_is_actionable(monkeypatch: pytest.MonkeyPatch) 
     result = probe.probe_backend("numpy")
     assert not result.fatal  # booting is transient — the retry loop owns the wait
     assert "memory_search service is not reachable" in (result.message or "")
-    assert "AVA_MEMORY_SEARCH_BACKEND=milvus" in (result.message or "")
+    assert "AVA_MEMORY_SEARCH_BACKEND=numpy" in (result.message or "")
 
 
 def test_probe_milvus_unreachable_is_actionable(monkeypatch: pytest.MonkeyPatch) -> None:
