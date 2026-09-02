@@ -33,25 +33,22 @@ from cli.commands._update_orchestration import _classify_rollout
 
 def _changed_paths_vs_origin() -> list[str]:
     """Fetch the track target, then the files that differ between the
-    running commit (recorded by `ava start`) and that target (origin/main in
-    `latest` mode, the newest release tag in `releases` mode) — what the
-    imminent update will change. Empty = already up to date.
-
-    Uses the running-commit bookmark instead of HEAD so a manual `git pull`
-    between start and update cannot advance HEAD past origin/main and empty
-    the diff (the bookmark is only written at start, never on pull). Falls
-    back to HEAD when the bookmark has never been recorded (first-ever start
-    or uninitialised host).
+    last fully installed commit and that target (origin/main in `latest` mode,
+    the newest release tag in `releases` mode) — what the imminent update will
+    change. The installed bookmark is the authoritative update baseline; the
+    running bookmark is only its legacy fallback for installations that predate
+    the bookmark.
 
     Raises:
         GitPullFailed: any git subcommand non-zero exit. The caller falls back
             to a full restart so a fetch hiccup never causes an under-restart.
     """
     import shared.running_sha as _rsha
+    import shared.source_integrity as _integrity
     from cli.commands._update_git import track_fetch, tracking_target_ref
 
     track_fetch()
-    baseline = _rsha.get() or "HEAD"
+    baseline = _integrity.get() or _rsha.get() or "HEAD"
     out = _git("diff", "--name-only", baseline, tracking_target_ref())
     return [line for line in out.splitlines() if line.strip()]
 

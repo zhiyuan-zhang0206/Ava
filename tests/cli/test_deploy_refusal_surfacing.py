@@ -144,6 +144,32 @@ def test_a_dispatched_rollout_still_reports_normally(monkeypatch: pytest.MonkeyP
     assert cmd_update() == 0
 
 
+def test_dispatched_replay_names_the_half_deployed_state(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A bookmark disagreement is a repair rollout, never an ordinary no-op."""
+
+    class _Resp:
+        status_code = 202
+
+        def raise_for_status(self) -> None: ...
+
+        def json(self) -> dict[str, object]:
+            return {
+                "session": "ava-rollout",
+                "log": "/var/log/rollout.log",
+                "needs_replay": True,
+            }
+
+    monkeypatch.setattr("shared.machine.gateway_api_base", lambda: "http://gw:8000")
+    monkeypatch.setattr("httpx.post", lambda *_a, **_k: _Resp())  # pyright: ignore[reportUnknownArgumentType]
+
+    from cli.commands import cmd_update
+
+    assert cmd_update() == 0
+    assert "half-deployed state" in capsys.readouterr().out
+
+
 # ─── `ava cluster restart` — the same refusal, over HTTP ─────────────────────
 
 

@@ -213,7 +213,8 @@ function ServicesPanel({ data }: { data: ClusterPanel }) {
     enabled: isGateway && visible,
   });
   const behind = check.data?.behind;
-  const noUpdates = behind === 0;
+  const needsReplay = check.data?.needs_replay === true;
+  const noUpdates = behind === 0 && !needsReplay;
   const restartSides = (details: ClusterUpdateCheck) => {
     const sides = [
       details.frontend_changed ? t("frontend") : null,
@@ -293,8 +294,16 @@ function ServicesPanel({ data }: { data: ClusterPanel }) {
     // Native confirm — cluster-wide restart is irreversible-in-progress; one
     // misclick stops every agent. Native dialog is mobile-friendly, blocks
     // the event loop until decided, and adds no headless-component baggage.
-    const sides = check.data ? t("restartSides", { sides: restartSides(check.data) }) : "";
-    const n = typeof behind === "number" ? t("commitsBehind", { count: behind }) : "";
+    const sides = check.data
+      ? needsReplay
+        ? t("replaySides")
+        : t("restartSides", { sides: restartSides(check.data) })
+      : "";
+    const n = needsReplay
+      ? t("replayRequired")
+      : typeof behind === "number"
+        ? t("commitsBehind", { count: behind })
+        : "";
     const ok = window.confirm(t("rolloutConfirm", { behind: n, sides }));
     if (ok) update.mutate();
   };
@@ -338,7 +347,15 @@ function ServicesPanel({ data }: { data: ClusterPanel }) {
               <RefreshCw className="size-3.5" />
             )}
             <span className="ml-1.5">
-              {updating ? t("updating") : noUpdates ? t("upToDate") : behind ? t("updateWithCount", { count: behind }) : t("update")}
+              {updating
+                ? t("updating")
+                : needsReplay
+                  ? t("replayUpdate")
+                  : noUpdates
+                    ? t("upToDate")
+                    : behind
+                      ? t("updateWithCount", { count: behind })
+                      : t("update")}
             </span>
           </Button>
         </div>
@@ -383,6 +400,8 @@ function ServicesPanel({ data }: { data: ClusterPanel }) {
               <span>{t("checkingUpdates")}</span>
             ) : check.error ? (
               <span>{t("checkUnavailable")}</span>
+            ) : needsReplay ? (
+              <span className="text-amber-600 dark:text-amber-400">{t("replayRequired")}</span>
             ) : noUpdates ? (
               <span className="text-green-600 dark:text-green-400">{t("upToDateOrigin")}</span>
             ) : check.data ? (
