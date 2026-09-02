@@ -131,6 +131,9 @@ def claim_agent_row(agent_id: int) -> None:
                 f"agent --agent-id {agent_id}: agents row is no longer an unclaimed idling row "
                 f"(rowcount={cur.rowcount}); another process or lifecycle operation won the race."
             )
+        from agent.lifecycle_observe import observe_process_admission
+
+        observe_process_admission(conn, incarnation)
         conn.commit()
         bind_process_incarnation(incarnation)
         publish_agent_updated_sync(conn, agent_id)

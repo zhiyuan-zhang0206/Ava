@@ -39,6 +39,9 @@ async def admit_hosted_runtime(
             )
         ).fetchone()
         if row is not None:
+            from agent.lifecycle_observe import observe_hosted_admission
+
+            await observe_hosted_admission(conn, RuntimeIncarnation(agent_id, row[0], owner))
             await insert_event_log_async(
                 event_type="status_change",
                 agent_id=agent_id,
