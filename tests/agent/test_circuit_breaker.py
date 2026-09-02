@@ -46,6 +46,7 @@ from tests.agent.test_claim import (
 )
 from tests.agent.test_llm_helpers import _CONFIG as _LLM_CONFIG
 from tests.agent.test_llm_helpers import _make_runtime as _llm_make_runtime
+from tests.conftest import spawn_agent
 
 # A summary long enough to clear COMPACT_MIN_SUMMARY_CHARS.
 _LONG_SUMMARY = "## Requests\nfollow the template. " * 60
@@ -265,7 +266,7 @@ async def test_chat_cobatched_with_open_breaker_heartbeat_reaches_llm(
     aredis_inbound_listener: RedisInboundListener,
 ) -> None:
     """A parked heartbeat must not bury a same-batch chat in either FIFO order."""
-    tid = create_agent(db_conn)
+    tid = spawn_agent()
     inbound_ids: dict[str, int] = {}
     for kind in (first_kind, second_kind):
         content = "real user work" if kind == "chat" else "Heartbeat."

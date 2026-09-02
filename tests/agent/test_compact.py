@@ -48,6 +48,7 @@ from agent.messages import inbound_message
 from agent.state import AgentState, CompactState
 from shared.db import create_agent as _create_agent
 from shared.lm.context_budget import ContextBudget
+from tests.conftest import spawn_agent
 
 
 def _compact_tail(update: Any) -> list[AnyMessage]:
@@ -884,7 +885,7 @@ async def test_consecutive_compacts_both_processed(
 ):
     """Two consecutive compact_summary → first replaces with [sys, summary1]; second on that
     state replaces again with [sys, summary2]."""
-    tid = _create_agent(db_conn)
+    tid = spawn_agent()
     sys_msg = SystemMessage(content="<test sys prompt>")
 
     # ---- first compact ----
