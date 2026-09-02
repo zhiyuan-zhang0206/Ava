@@ -20,6 +20,14 @@ deployment -> registry before any agent row lock, refuses unsettled deployment,
 pending/new units/image-selector mismatch, and retains the row locks through birth.
 Committed state outlives its originating lease; it is not liveness evidence.
 
+`adopt_pending_collection` obtains expected challenge and full receipt hashes
+from locked pending state, validates live operation/fresh observations/all units,
+and preserves current without allowing admission. Explicit recovery compares the
+abandoned operation, requires a different live operation and challenge plus new
+complete closure, and keeps births frozen. The takeover producer must positively
+observe old-holder exit before obtaining that lease; expiry is not that evidence.
+Cached or mismatched acknowledgements cannot replace pending or authorize rollback.
+
 The current-publication commit producer is not connected: bootstrap observations
 are not normal ready-service readbacks, and historical version-1 collections are
 not converted to current permits. No admission callsite or protocol-1 activation
