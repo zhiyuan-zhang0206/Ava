@@ -7,11 +7,13 @@ fixture to keep records/logs under a tmp $AVA_HOME.
 from __future__ import annotations
 
 import contextlib
+import json
 import os
 import signal
 import subprocess
 import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 import psutil
@@ -126,7 +128,10 @@ def test_process_is_live_treats_zombie_as_dead() -> None:
         os.waitpid(pid, 0)  # reap so the test never leaks a zombie
 
 
-def test_new_session_reparents_to_init_no_zombie(unit_home) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_new_session_reparents_to_init_no_zombie(
+    unit_home,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    record_property: Callable[[str, object], None],
+) -> None:
     """The launched child double-forks: it reparents to init (PPID==1) immediately,
     so the spawner (this test process) accretes no zombie, and the record tracks
     the real child pid."""
@@ -140,6 +145,7 @@ def test_new_session_reparents_to_init_no_zombie(unit_home) -> None:  # pyright:
         assert rec is not None
         assert rec.starttime == pid_starttime_ticks(rec.pid)
         child = psutil.Process(rec.pid)
+        record_property("detach_process_evidence", json.dumps(detach_evidence(rec.pid)))
         # The record is written the instant the reparent helper reports the
         # grandchild pid, which can be microseconds BEFORE that grandchild
         # execvp's into /bin/sleep — until then psutil reads the pre-exec
@@ -467,6 +473,7 @@ def test_new_session_dead_child_records_sentinel(
 def test_kill_session_group_kill_reaps_late_spawned_child(
     unit_home,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
     tmp_path: Path,
+    record_property: Callable[[str, object], None],
 ) -> None:
     """A child spawned DURING the graceful wait (an unwound finally's process,
     a bash wrapper's foreground command) shares the session's process group, so
@@ -507,6 +514,7 @@ def test_kill_session_group_kill_reaps_late_spawned_child(
         assert _wait(lambda: not psutil.pid_exists(pid)), "top process must be gone"
         assert _wait(late_file.exists), "late child never spawned"
         late_pid = int(late_file.read_text())
+        record_property("late_child_evidence", json.dumps(detach_evidence(late_pid)))
 
         def child_exited() -> bool:
             try:
