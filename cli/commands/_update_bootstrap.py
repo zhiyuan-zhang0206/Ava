@@ -44,7 +44,12 @@ from shared.managed_writer_observation import (
 )
 from shared.native_job_observation import read_crontab
 from shared.platform import file_lock
-from shared.runtime_release import ReleaseRejectedError, VerifiedRelease, verify_release
+from shared.runtime_release import (
+    ReleaseRejectedError,
+    VerifiedRelease,
+    file_sha256,
+    verify_release,
+)
 from shared.session_backend import get_backend
 from shared.session_record import SessionRecord
 
@@ -126,7 +131,12 @@ def bootstrap_command(image: VerifiedRelease, context: Path) -> list[str]:
     ]
 
 
-def probe_bootstrap(context: PreparedObservation, projection: ObserverProjection) -> str:
+def probe_bootstrap(
+    context: PreparedObservation,
+    projection: ObserverProjection,
+    *,
+    verified_image: VerifiedRelease | None = None,
+) -> str:
     """Challenge the actual same endpoint; ordinary health or an ACK is insufficient."""
     validate_operation(context, projection)
     request = urllib.request.Request(
@@ -144,7 +154,19 @@ def probe_bootstrap(context: PreparedObservation, projection: ObserverProjection
         raise ReleaseRejectedError("bootstrap readback exceeds its budget")
     raw = json.loads(body)
     identity = BootstrapRuntimeIdentity.model_validate_json(json.dumps(raw["runtime"]))
-    image = _verify_image(context)
+    # A plan already performed complete verification before quiesce. Reuse that
+    # invocation-local result while challenging the running process, not a
+    # process-global cache or a new traversal inside the readiness deadline.
+    image = verified_image if verified_image is not None else _verify_image(context)
+    expected_root = Path(context.expected.home) / "releases" / context.expected.artifact_digest
+    if (
+        image.root != expected_root
+        or image.root.resolve(strict=True) != expected_root
+        or image.digest != context.expected.artifact_digest
+        or image.manifest_digest != context.expected.manifest_digest
+        or file_sha256(image.root / "manifest.json") != image.manifest_digest
+    ):
+        raise ReleaseRejectedError("bootstrap image differs from the verified invocation")
     if (
         raw["mode"] != "bootstrap_observation"
         or raw["full_ready"] is not False
@@ -255,7 +277,7 @@ def prepare_bootstrap_hop(request_path: Path) -> PreparedBootstrapHop:  # noqa: 
             raise ReleaseRejectedError(
                 "normal/source ops has no verified bootstrap recovery contract"
             )
-        probe_bootstrap(recovery, projection)
+        probe_bootstrap(recovery, projection, verified_image=recovery_image)
         record = json.loads(_regular_bytes(home / "run/sessions/ava-ops.json"))
         if shlex.split(record["cmd"]) != ["exec", *wanted]:
             raise ReleaseRejectedError("ops session record differs from the live restricted image")
@@ -490,7 +512,11 @@ def _await_observer(plan: PreparedBootstrapHop, kind: Literal["A", "B"]) -> None
         if actual_kind != kind or observe_process(process) != "alive":
             raise ReleaseRejectedError("candidate did not retain its exact session identity")
         try:
-            probe_bootstrap(context, plan.projection)
+            probe_bootstrap(
+                context,
+                plan.projection,
+                verified_image=plan.recovery_image if kind == "A" else plan.image,
+            )
             return
         except urllib.error.URLError:
             time.sleep(0.05)

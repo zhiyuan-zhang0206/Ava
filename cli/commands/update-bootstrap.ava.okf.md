@@ -29,6 +29,12 @@ and home. The updater cross-checks these against the local exact native exec
 session and command; an unexpected child or substituted identity refuses.
 Neither port reachability nor supervisor disappearance alone proves writer exit.
 
+Admission completely verifies both images before quiesce. Endpoint challenges
+reuse those invocation-local verified paths and recheck the manifest binding;
+they do not hash the entire retained environment inside the readiness deadline.
+No verification result is cached across updater invocations. A live or unknown
+predecessor is rejected before image traversal and checked again afterward.
+
 Candidate startup failure compensates to the verified restricted A and restores
 only the unchanged original cron definition. Dead updater recovery reclaims the
 same journal and observes actual A/B state. A post-fork outcome without a new
