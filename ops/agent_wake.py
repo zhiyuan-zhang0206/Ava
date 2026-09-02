@@ -568,6 +568,11 @@ def respawn_agent(agent_id: int) -> bool:
         False: another dispatcher won / status changed, noop (does not raise —
             dispatcher should keep polling).
     """
+    from ops.lifecycle_recovery import recover_lifecycle_command
+
+    recovered = recover_lifecycle_command(agent_id)
+    if recovered is not None:
+        return recovered
     hosted = runner_mode.is_hosted()
     if hosted and not _hosted_agent_host_healthy():
         logger.error(
