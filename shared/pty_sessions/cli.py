@@ -232,8 +232,7 @@ def write_env_file(env: dict[str, str]) -> Path:
 # session listing; a dead record is swept as it is discovered).
 # ---------------------------------------------------------------------------
 
-# A pid is "the same process we launched" only if its start-time matches to
-# within this tolerance (mirrors posixproc).
+# Legacy epoch identity tolerance (mirrors posixproc).
 _CREATE_TIME_TOLERANCE_S = 2.0
 
 
