@@ -33,8 +33,17 @@ processes, exited processes and reused PID identities remain distinct. Session
 records that are malformed, unreadable, substituted or still present never
 become absent by convenience. No signal or session mutation is performed.
 
+The actual ops daemon recognizes `--bootstrap-observation <private-context>`
+before normal imports. The restricted entry validates the complete prepared
+image, its loaded module origin, canonical home and registered machine/home,
+and the live old-schema rollout lease before binding. It consumes only the
+existing DB/secret/ops-port aliases pre-projected by its parent; it neither
+fetches gateway configuration nor reads an ordinary Settings singleton. Each
+challenge revalidates the operation. The normal daemon PID and unit registration
+paths are never invoked. Auth/bind posture remains the existing ops policy.
+
 The current observer returns `closure: unknown` unconditionally: platform job
-observation, prepared-image/home/operation entry validation, actual updater
-replacement and complete inventory production are not yet connected. An empty
+observation, actual updater replacement and complete inventory production are
+not yet connected. An empty
 test inventory is not evidence of complete unit or fleet closure. Normal ops
 routes are not registered on the test observation socket.
