@@ -181,6 +181,10 @@ def prepare_bootstrap_hop(request_path: Path) -> PreparedBootstrapHop:  # noqa: 
     if sys.platform != "linux":
         raise ReleaseRejectedError("restricted updater hop has no native proof on this platform")
     request = BootstrapHopRequest.model_validate_json(_regular_bytes(request_path))
+    # A live/unknown predecessor is already disqualifying. Refuse before the
+    # expensive complete image reads; this grants no authority or side effect.
+    if observe_process(request.predecessor) != "exited":
+        raise ReleaseRejectedError("old orchestrator has not positively handed off")
     candidate = read_prepared_context(Path(request.candidate_context))
     home = Path(candidate.expected.home)
     _private_reference(str(request_path), home)
