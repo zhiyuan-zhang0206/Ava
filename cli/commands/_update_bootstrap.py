@@ -614,6 +614,20 @@ def _resume_hop(
 
 
 def execute_bootstrap_hop(plan: PreparedBootstrapHop, generation: str) -> int:
+    """Expose phase observations without starting the ordinary telemetry writer."""
+    sink = logger.add(
+        sys.stderr,
+        format="{message}",
+        level="INFO",
+        filter=lambda record: record["message"].startswith("bootstrap_hop_phase "),
+    )
+    try:
+        return _execute_bootstrap_hop(plan, generation)
+    finally:
+        logger.remove(sink)
+
+
+def _execute_bootstrap_hop(plan: PreparedBootstrapHop, generation: str) -> int:
     """Prepared restricted A -> B only; never marks the unit normally ready."""
     validate_operation(plan.candidate, plan.projection)
     original_cron, quiesced_cron = _cron_tables(plan)
