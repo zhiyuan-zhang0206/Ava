@@ -1,3 +1,12 @@
+---
+type: doc
+title: Loaded-runtime interpreter binding
+description: Absolute interpreter binding to the loaded wheel generation without release activation.
+tags:
+- shared
+- runtime
+---
+
 # Loaded-runtime interpreter binding
 
 `runtime_interpreter.py` distinguishes imported wheel code inside `sys.prefix`

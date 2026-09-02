@@ -13,14 +13,14 @@ from pathlib import Path
 from shared.platform import IS_WINDOWS
 
 _PREFIX = Path(sys.prefix).resolve()
-INSTALLED_RUNTIME = Path(__file__).resolve().is_relative_to(_PREFIX.resolve())
+WHEEL_RUNTIME = Path(__file__).resolve().is_relative_to(_PREFIX)
 
 
 def runtime_venv(*, checkout: Path | None = None) -> Path:
     """Return the current runtime environment or an explicitly targeted checkout."""
     if checkout is not None:
         return checkout / ".venv"
-    if INSTALLED_RUNTIME:
+    if WHEEL_RUNTIME:
         if sys.prefix == sys.base_prefix:
             raise RuntimeError("installed Ava requires an isolated virtual environment")
         return _PREFIX

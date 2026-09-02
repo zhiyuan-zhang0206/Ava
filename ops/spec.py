@@ -583,10 +583,10 @@ def build_services() -> tuple[ServiceSpec, ...]:
 
 def _bind_runtime_command(spec: ServiceSpec) -> ServiceSpec:
     """Bind Python services to the loaded runtime without changing their gates."""
-    from shared.runtime_interpreter import INSTALLED_RUNTIME, runtime_python
+    from shared.runtime_interpreter import WHEEL_RUNTIME, runtime_python
 
     prefix = ".venv/bin/python "
-    if not INSTALLED_RUNTIME or not spec.cmd.startswith(prefix):
+    if not WHEEL_RUNTIME or not spec.cmd.startswith(prefix):
         return spec
     return replace(
         spec, cmd=f"{shlex.quote(str(runtime_python()))} -I -B -X utf8 {spec.cmd[len(prefix) :]}"
