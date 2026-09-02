@@ -135,11 +135,12 @@ from agent._runloop import _graph_config
 from agent.db import LoggingConnectionPool
 from agent.hosted_ownership import (
     admit_hosted_runtime,
+    apply_hosted_lifecycle,
+    observe_hosted_termination,
     release_hosted_owner,
     renew_hosted_owner,
     settle_hosted_runtime,
 )
-from agent.lifecycle import _notify_exit
 from agent.startup import (
     _reconcile_claimed_inbounds_at_startup,
     _repair_dangling_tool_use_at_startup,
@@ -550,10 +551,10 @@ class AgentHost:
                     "    )"
                     "  ) "
                     "  AND m.machine = %s "
-                    "  AND EXISTS ("
+                    "  AND (m.lifecycle_command_id IS NOT NULL OR EXISTS ("
                     "    SELECT 1 FROM inbound_messages pending "
                     "    WHERE pending.agent_id = m.id AND pending.status = 'pending'"
-                    "  )",
+                    "  ))",
                     (
                         stale_after_s,
                         stale_after_s,
@@ -649,30 +650,23 @@ class AgentHost:
                 )
             # [] not .get(): this invocation's input wrote both channels, so a
             # missing key is a bug, not a state to tolerate.
-            if result["exit_requested"]:
-                logger.info(
-                    "hosted agent {agent_id} requested exit after {turns} turn(s) — "
-                    "ending its turn task",
-                    agent_id=agent_id,
-                    turns=turn,
-                )
-                self.drop_agent(agent_id)
-                _notify_exit(agent_id)
-                return True
-            if result["restart_requested"]:
-                logger.info(
-                    "hosted agent {agent_id} requested a restart after {turns} turn(s) — "
-                    "dropping its runtime and ending the turn task; the next wake "
-                    "starts clean (no exit-notify: the row stays runnable)",
-                    agent_id=agent_id,
-                    turns=turn,
-                )
-                self.drop_agent(agent_id)
+            if result["exit_requested"] or result["restart_requested"]:
                 incarnation = current_incarnation(agent_id)
                 if incarnation is None:
-                    raise RuntimeError("hosted restart has no admitted incarnation")
-                await settle_hosted_runtime(self._pool, incarnation, release=True)
-                return False
+                    raise RuntimeError("hosted lifecycle return has no admitted incarnation")
+                kind = await apply_hosted_lifecycle(self._pool, incarnation)
+                # The graph continuation has returned under existing single-flight.
+                # Cache loss is a consequence of the durable command, not its identity.
+                self.drop_agent(agent_id)
+                if kind == "terminate":
+                    await observe_hosted_termination(self._pool, incarnation)
+                logger.info(
+                    "hosted lifecycle return settled",
+                    agent_id=agent_id,
+                    generation=str(incarnation.generation),
+                    command_kind=kind,
+                )
+                return kind == "terminate"
             if result["turn_idle"]:
                 return False
             # Turn boundary: go round again on the same checkpointer thread.

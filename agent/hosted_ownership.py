@@ -12,6 +12,58 @@ from shared.log import logger
 from shared.runtime_incarnation import RuntimeIncarnation
 
 
+async def apply_hosted_lifecycle(
+    pool: AsyncConnectionPool, incarnation: RuntimeIncarnation
+) -> str | None:
+    """Apply after the existing single-flight continuation has safely ended.
+
+    The durable pointer, not a graph boolean or cache entry, identifies the
+    command. Restart releases ownership atomically with its decision, so any
+    successor admission must create a new incarnation before observing it.
+    """
+    async with async_write_transaction(pool) as conn:
+        cursor = await conn.execute(
+            "SELECT lifecycle_command_id,lease_expires_at FROM agents_meta WHERE id=%s "
+            "AND runtime_generation=%s AND runtime_owner=%s AND runtime_kind='hosted' "
+            "AND status IN ('running','idling') FOR UPDATE",
+            (incarnation.agent_id, incarnation.generation, incarnation.owner),
+        )
+        row = await cursor.fetchone()
+        if row is None or row[0] is None or row[1] is None:
+            return None
+        cursor = await conn.execute("SELECT %s > clock_timestamp()", (row[1],))
+        if await cursor.fetchone() != (True,):
+            return None
+        cursor = await conn.execute(
+            "SELECT kind FROM inbound_messages WHERE id=%s AND agent_id=%s "
+            "AND target_generation=%s AND target_owner=%s AND status='claimed' "
+            "AND applied_at IS NULL FOR UPDATE",
+            (row[0], incarnation.agent_id, incarnation.generation, incarnation.owner),
+        )
+        command = await cursor.fetchone()
+        if command is None:
+            return None
+        if command[0] == "restart":
+            await conn.execute(
+                "UPDATE agents_meta SET status='idling',runtime_generation=NULL,"
+                "runtime_owner=NULL,runtime_kind=NULL,lease_expires_at=NULL,"
+                "runtime_protocol_version=0 WHERE id=%s",
+                (incarnation.agent_id,),
+            )
+        elif command[0] == "terminate":
+            await conn.execute(
+                "UPDATE agents_meta SET status='terminated',termination_source='user',"
+                "lease_expires_at=NULL,runtime_protocol_version=0 WHERE id=%s",
+                (incarnation.agent_id,),
+            )
+        else:
+            raise ValueError(f"not an executable lifecycle command: {command[0]}")
+        await conn.execute(
+            "UPDATE inbound_messages SET applied_at=clock_timestamp() WHERE id=%s", (row[0],)
+        )
+        return command[0]
+
+
 async def admit_hosted_runtime(
     pool: AsyncConnectionPool,
     agent_id: int,
@@ -57,28 +109,48 @@ async def admit_hosted_runtime(
     return RuntimeIncarnation(agent_id, row[0], owner)
 
 
+async def observe_hosted_termination(
+    pool: AsyncConnectionPool, incarnation: RuntimeIncarnation
+) -> bool:
+    """After graph continuation and cache drop, observe this exact termination."""
+    async with async_write_transaction(pool) as conn:
+        cursor = await conn.execute(
+            "SELECT lifecycle_command_id FROM agents_meta WHERE id=%s "
+            "AND runtime_generation=%s AND runtime_owner=%s AND status='terminated' "
+            "AND runtime_kind='hosted' FOR UPDATE",
+            (incarnation.agent_id, incarnation.generation, incarnation.owner),
+        )
+        pointer = await cursor.fetchone()
+        if pointer is None or pointer[0] is None:
+            return False
+        cursor = await conn.execute(
+            "UPDATE inbound_messages SET observed_at=clock_timestamp(),status='done' "
+            "WHERE id=%s AND agent_id=%s AND target_generation=%s AND target_owner=%s "
+            "AND kind='terminate' AND status='claimed' AND applied_at IS NOT NULL "
+            "AND observed_at IS NULL RETURNING id",
+            (pointer[0], incarnation.agent_id, incarnation.generation, incarnation.owner),
+        )
+        if await cursor.fetchone() is None:
+            return False
+        await conn.execute(
+            "UPDATE agents_meta SET lifecycle_command_id=NULL WHERE id=%s AND lifecycle_command_id=%s",
+            (incarnation.agent_id, pointer[0]),
+        )
+        return True
+
+
 async def settle_hosted_runtime(
     pool: AsyncConnectionPool,
     incarnation: RuntimeIncarnation,
-    *,
-    release: bool = False,
 ) -> bool:
-    """Settle before scheduler releases single-flight; restart releases ownership."""
+    """Settle an ordinary turn; only durable lifecycle apply releases ownership."""
     async with async_write_transaction(pool) as conn:
         cur = await conn.execute(
             "UPDATE agents_meta SET status = 'idling', "
-            "runtime_generation = CASE WHEN %s THEN NULL ELSE runtime_generation END, "
-            "runtime_owner = CASE WHEN %s THEN NULL ELSE runtime_owner END, "
-            "runtime_kind = CASE WHEN %s THEN NULL ELSE runtime_kind END, "
-            "lease_expires_at = CASE WHEN %s THEN NULL ELSE lease_expires_at END, "
             "runtime_protocol_version = 0 "
             "WHERE id = %s AND status = 'running' AND runtime_kind = 'hosted' "
             "AND runtime_generation = %s AND runtime_owner = %s",
             (
-                release,
-                release,
-                release,
-                release,
                 incarnation.agent_id,
                 incarnation.generation,
                 incarnation.owner,
