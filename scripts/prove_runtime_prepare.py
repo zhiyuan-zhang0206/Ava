@@ -17,6 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from shared.runtime_prepare import (
     PrepareInputs,
+    _copy_python,
     inventory_digest,
     prepare_release,
     verify_loaded_images,
@@ -93,6 +94,37 @@ def prepare_with_diagnostics(store: Path, inputs: PrepareInputs) -> VerifiedRele
         candidates = [str(path.relative_to(store)) for path in store.rglob("*.pth")]
         exc.add_note(f"retained .pth inventory: {candidates}")
         raise
+
+
+def prove_copy_race(
+    store: Path, inputs: PrepareInputs, requirements: Path, serving: Path, original: bytes
+) -> None:
+    """Reject corruption in the private copy before invoking any copied executable."""
+    from dataclasses import replace
+
+    requirements.write_text(requirements.read_text() + "\n# copy-race negative\n")
+    race_inputs = replace(inputs, requirements_digest=file_sha256(requirements))
+
+    def corrupt_private_copy(source: Path, target: Path) -> None:
+        _copy_python(source, target)
+        # Input remains pristine: checking its digest again would miss this.
+        with (target / "bin/python3").open("ab") as stream:
+            stream.write(b"untrusted-copy-race")
+
+    with (
+        patch("shared.runtime_prepare._copy_python", side_effect=corrupt_private_copy),
+        patch("shared.runtime_prepare._run") as execute,
+    ):
+        try:
+            prepare_release(store, race_inputs)
+        except ReleaseRejectedError as exc:
+            if str(exc) != "retained Python bytes differ from trusted input inventory":
+                raise AssertionError("copy-race failed for the wrong reason") from exc
+        else:
+            raise AssertionError("corrupted retained Python was accepted")
+        execute.assert_not_called()
+    if serving.read_bytes() != original:
+        raise AssertionError("copy-race rejection changed serving pointer")
 
 
 def main() -> None:
@@ -176,7 +208,9 @@ def main() -> None:
             raise AssertionError("failed preparation was accepted")
     if serving.read_bytes() != original:
         raise AssertionError("failed preparation changed serving pointer")
+    prove_copy_race(store, inputs, requirements, serving, original)
     evidence = {
+        "corrupt_private_python_rejected_before_execution": True,
         "cold_offline_prepare": True,
         "input_paths_retired_imports": True,
         "checkout_absent_imports_and_existing_cli": True,

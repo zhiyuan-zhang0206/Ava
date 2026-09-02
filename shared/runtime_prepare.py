@@ -91,6 +91,12 @@ def _copy_python(source: Path, target: Path) -> None:
     shutil.copytree(source, target, symlinks=False)
 
 
+def _copy_verified_python(source: Path, target: Path, expected: dict[str, str]) -> None:
+    _copy_python(source, target)
+    if tree_inventory(target) != expected:
+        raise ReleaseRejectedError("retained Python bytes differ from trusted input inventory")
+
+
 def _materialize_venv_links(root: Path) -> None:
     # stdlib venv creates lib64 -> lib on Linux even with --copies.
     for path in sorted(root.rglob("*")):
@@ -282,7 +288,7 @@ def prepare_release(store: Path, inputs: PrepareInputs) -> VerifiedRelease:
     root = store / identity
     root.mkdir(mode=0o700)  # Never reuse a partial or previously sealed generation.
     _retain_startup_wheel(wheels, root)
-    _copy_python(source, root / "python")
+    _copy_verified_python(source, root / "python", python_files)
     python = root / "python/bin/python3"
     _run(
         [str(python), "-I", "-B", "-m", "venv", "--copies", "--without-pip", str(root / "venv")],
