@@ -95,6 +95,8 @@ def validate_entry(context: PreparedObservation, projection: ObserverProjection)
     home = Path(context.expected.home)
     if not home.is_absolute() or home.resolve(strict=True) != home:
         raise ReleaseRejectedError("prepared observer home must be canonical and existing")
+    if (home / "machine_name").read_text(encoding="utf-8").strip() != context.expected.machine:
+        raise ReleaseRejectedError("prepared observer machine differs from this installed unit")
     release = verify_release(
         home / "releases",
         context.expected.artifact_digest,
