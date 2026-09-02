@@ -76,10 +76,22 @@ class _EditableRecordSnapshot:
 
 
 def _prod_sync_argv(repo: Path) -> list[str]:
-    """Production sync command pinned to ``repo``'s virtualenv interpreter."""
+    """Production sync command pinned to ``repo``'s virtualenv interpreter.
+
+    The ``--python`` pin only applies when that interpreter already exists: a
+    real host's venv is present (the pin keeps the sync on the venv the
+    editable-install machinery converged), but a fresh dry-run staging
+    worktree has no venv yet, and pointing ``--python`` at the not-yet-created
+    ``.venv/bin/python`` makes uv fail with "No interpreter found" instead of
+    creating the venv (2026-09-02: every rollout since 93aab30 aborted in
+    prepare with exactly that). With no pin uv creates the venv from the same
+    managed interpreter the lockfile's ``requires-python`` selects.
+    """
 
     python_name = "python.exe" if IS_WINDOWS else "python"
     interpreter = repo / ".venv" / get_backend().venv_bin_dir_name() / python_name
+    if not interpreter.exists():
+        return [*_PROD_SYNC_ARGS]
     return [*_PROD_SYNC_ARGS, "--python", str(interpreter)]
 
 
