@@ -1,3 +1,12 @@
+---
+type: doc
+title: "Asserted External Caller Identity"
+description: "Bounded external caller provenance, structured inbound and audit persistence, and reader-first rollout constraints."
+tags:
+- shared
+- identity
+---
+
 # Asserted external caller identity
 
 `CallerIdentity` is the bounded external/unknown provenance value object. It is
@@ -9,6 +18,13 @@ human identity belong in an instance identifier.
 `shared.envelope` reads them as explicitly asserted external or unknown callers,
 never as User, Ava Agent, or system. Existing source formats remain readable.
 
+Chat and lifecycle inbound writes persist the parsed object in the existing
+JSONB `payload.caller_identity` sidecar. Audit events carry the same reserved
+structured attribute. Conflicting or malformed reserved metadata is rejected
+before writing, other payload fields are preserved, and legacy source values
+receive no inferred identity. Chat reconciliation normalizes this sidecar in
+the same way as insertion, so retries compare the same immutable payload.
+
 ## Rollout boundary
 
 This reader foundation does not enable any producer. Older binaries reject the
@@ -17,9 +33,7 @@ and consumer-convergence gate is deployed. Never wrap external provenance in
 `system:*` or `agent:*` to bypass an old validator. A caller field accepted by an
 HTTP schema but discarded before persistence is not structured audit storage.
 
-Subsequent integration must persist nullable structured provenance at the
-initiating write and audit boundary, reject conflicts with the display source,
-and preserve null historical provenance as unverified legacy. CLI/MCP/SDK
-producers must fail clearly against incompatible consumers. Shared cluster
+Subsequent integration must propagate explicit provenance from CLI/MCP/SDK.
+Producers must fail clearly against incompatible consumers. Shared cluster
 credentials cannot prove the caller label: authorization and idempotency scopes
 must derive from actual server-bound credentials, not this object.

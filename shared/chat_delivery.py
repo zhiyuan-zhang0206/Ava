@@ -17,6 +17,7 @@ from dataclasses import dataclass
 import psycopg
 
 from shared.audit_events import insert_event_log
+from shared.caller_identity import caller_payload
 from shared.db import fetch_one, publish_inbound_wake
 
 
@@ -87,6 +88,7 @@ def reconcile_chat_inbound(
     payload: dict[str, object] | None,
 ) -> ChatInboundReceipt | None:
     """Return the matching durable inbound, absent, or fail on key misuse."""
+    payload = caller_payload(source, payload)
     with db.cursor() as cur:
         cur.execute(
             "SELECT id, agent_id, content, kind, source, payload, status "
@@ -116,6 +118,7 @@ def insert_chat_inbound_once(
     client_message_id: str | None,
 ) -> ChatInboundReceipt:
     """Insert one logical chat, or return its existing same-key inbound id."""
+    payload = caller_payload(source, payload)
     encoded_payload = json.dumps(payload) if payload else None
     with db.cursor() as cur:
         cur.execute(
