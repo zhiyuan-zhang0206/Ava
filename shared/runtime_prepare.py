@@ -106,84 +106,64 @@ def _materialize_venv_links(root: Path) -> None:
             shutil.copy2(resolved, path)
 
 
-def native_dependencies(root: Path) -> list[str]:
-    """Reject application libraries outside the image; declare trusted OS ABI.
+def loaded_native_images(root: Path) -> list[str]:
+    """Prove declared capabilities and record their actual loaded native images.
 
-    Kernel/system libraries are platform prerequisites, not release artifacts.
-    Optional user plugins/dlopen paths are not covered by this initial adapter.
-    Only trusted, hash-verified build inputs may reach the platform loader tools.
+    This deliberately does not emulate ELF/dyld lookup or promise every optional
+    dlopen path. The real loader receives the retained interpreter's context.
     """
-    external: set[str] = set()
-    darwin = platform.system() == "Darwin"
-    for path in sorted(root.rglob("*")):
-        if not path.is_file():
-            continue
-        # Retained stdlib bytes are inventoried, but optional extension modules
-        # are not all runtime capabilities. Inspect the executable and installed
-        # application dependencies; declared boot imports validate their stdlib
-        # closure. In particular, ldd(_tkinter) omits its executable's RPATH:
-        # https://github.com/astral-sh/python-build-standalone/issues/742
-        if path.is_relative_to(root / "python") and path.parent != root / "python/bin":
-            continue
-        with path.open("rb") as stream:
-            magic = stream.read(4)
-            if magic not in (
-                b"\x7fELF",
-                b"\xcf\xfa\xed\xfe",
-                b"\xfe\xed\xfa\xcf",
-                b"\xca\xfe\xba\xbe",
-            ):
-                continue
-        output = _run(
-            ["/usr/bin/otool", "-L", str(path)] if darwin else ["/usr/bin/ldd", str(path)], root
-        )
-        own_ids = (
-            set(_run(["/usr/bin/otool", "-D", str(path)], root).splitlines()[1:])
-            if darwin
-            else set()
-        )
-        for line in output.splitlines()[1:] if darwin else output.splitlines():
-            fields = line.strip().split()
-            if not fields or fields[0].startswith("linux-vdso") or line.endswith(":"):
-                continue
-            if "not found" in line:
-                raise ReleaseRejectedError(
-                    f"unresolved native library {line.strip()!r} in {path.relative_to(root)}"
-                )
-            name = fields[2] if not darwin and len(fields) > 2 and fields[1] == "=>" else fields[0]
-            if darwin:
-                name = line.strip().split(" (compatibility version", 1)[0]
-                if name in own_ids:
-                    continue  # LC_ID_DYLIB names this image, not a dependency.
-            if darwin and name.startswith(("/usr/lib/", "/System/Library/")):
-                external.add(name)  # dyld shared-cache entries may have no disk file.
-                continue
-            name = name.replace("@loader_path", str(path.parent)).replace(
-                "@executable_path", str(root / "python/bin")
-            )
-            if name.startswith("@rpath/"):
-                # Managed CPython/wheels normally use loader-relative links.
-                # Unknown search-path contracts are not silently accepted.
-                raise ReleaseRejectedError(
-                    f"unresolved Mach-O rpath {name!r} in {path.relative_to(root)}"
-                )
-            dependency = Path(name)
-            if not dependency.is_absolute() or not dependency.is_file():
-                raise ReleaseRejectedError(
-                    f"unrecognized native dependency {name!r} in {path.relative_to(root)}"
-                )
-            dependency = dependency.resolve(strict=True)
-            if not dependency.is_relative_to(root):
-                if not darwin and any(
-                    dependency.is_relative_to(prefix)
-                    for prefix in (Path("/usr/lib"), Path("/lib"), Path("/lib64"))
-                ):
-                    external.add(str(dependency))
-                else:
-                    raise ReleaseRejectedError("native application dependency escaped generation")
-    if not external:
-        raise ReleaseRejectedError("native dependency receipt is empty")
-    return sorted(external)
+    probe = """
+import ctypes, importlib, json, os, pathlib, platform
+from unittest.mock import patch
+with patch('socket.socket.connect', side_effect=RuntimeError('network forbidden')), \\
+     patch('socket.socket.connect_ex', side_effect=RuntimeError('network forbidden')), \\
+     patch('socket.create_connection', side_effect=RuntimeError('network forbidden')):
+    for name in ('cli.main', 'agent.exec_child', 'ops.spec', 'services.agent_host.daemon', 'gateway.app'):
+        importlib.import_module(name)
+    import numpy as np, faiss, pyarrow as pa, psycopg.pq
+    vectors = np.array([[1.0, 2.0]], dtype='float32')
+    index = faiss.IndexFlatL2(2)
+    index.add(vectors)
+    distances, identifiers = index.search(vectors, 1)
+    assert identifiers[0, 0] == 0 and distances[0, 0] == 0
+    assert np.dot(vectors, vectors.T)[0, 0] == 5
+    table = pa.table({'n': [1, 2]})
+    sink = pa.BufferOutputStream()
+    with pa.ipc.new_stream(sink, table.schema) as writer:
+        writer.write_table(table)
+    assert pa.ipc.open_stream(sink.getvalue()).read_all().equals(table)
+    assert psycopg.pq.version() > 0
+if platform.system() == 'Darwin':
+    dyld = ctypes.CDLL(None)
+    dyld._dyld_image_count.restype = ctypes.c_uint32
+    dyld._dyld_get_image_name.argtypes = [ctypes.c_uint32]
+    dyld._dyld_get_image_name.restype = ctypes.c_char_p
+    images = [os.fsdecode(dyld._dyld_get_image_name(i)) for i in range(dyld._dyld_image_count())]
+else:
+    images = []
+    for line in pathlib.Path('/proc/self/maps').read_text().splitlines():
+        fields = line.split(maxsplit=5)
+        if len(fields) == 6 and 'x' in fields[1] and fields[5].startswith('/'):
+            images.append(fields[5].replace('\\\\040', ' '))
+print(json.dumps(sorted(set(images))))
+"""
+    images = json.loads(_run([str(root / "venv/bin/python"), "-I", "-B", "-c", probe], root))
+    if not isinstance(images, list) or not images:
+        raise ReleaseRejectedError("loaded-image receipt is empty or invalid")
+    allowed = (
+        (Path("/usr/lib"), Path("/System/Library"))
+        if platform.system() == "Darwin"
+        else (Path("/usr/lib"), Path("/lib"), Path("/lib64"))
+    )
+    result: list[str] = []
+    for name in images:
+        if not isinstance(name, str) or not Path(name).is_absolute():
+            raise ReleaseRejectedError("invalid loaded native image path")
+        path = Path(name).resolve()
+        if not path.is_relative_to(root) and not any(path.is_relative_to(p) for p in allowed):
+            raise ReleaseRejectedError(f"loaded native image escaped generation/OS ABI: {name}")
+        result.append(str(path))
+    return sorted(set(result))
 
 
 @dataclass(frozen=True)
@@ -359,7 +339,7 @@ assert hashlib.sha256(schema.read_bytes()).hexdigest() == sys.argv[1], 'schema m
         or file_sha256(inputs.requirements) != inputs.requirements_digest
     ):
         raise ReleaseRejectedError("inputs changed during preparation")
-    _write_json(root / "native-closure.json", native_dependencies(root))
+    _write_json(root / "loaded-native-images.json", loaded_native_images(root))
     manifest = {
         "version": 1,
         "artifact_digest": identity,
@@ -385,8 +365,8 @@ assert hashlib.sha256(schema.read_bytes()).hexdigest() == sys.argv[1], 'schema m
     return release
 
 
-def verify_native_closure(release: VerifiedRelease) -> None:
+def verify_loaded_images(release: VerifiedRelease) -> None:
     """Recheck application closure, without attesting trusted host OS bytes."""
-    expected = json.loads((release.root / "native-closure.json").read_text(encoding="utf-8"))
-    if native_dependencies(release.root) != expected:
+    expected = json.loads((release.root / "loaded-native-images.json").read_text(encoding="utf-8"))
+    if loaded_native_images(release.root) != expected:
         raise ReleaseRejectedError("native dependency closure changed")

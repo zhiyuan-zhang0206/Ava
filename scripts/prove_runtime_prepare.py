@@ -19,7 +19,7 @@ from shared.runtime_prepare import (
     PrepareInputs,
     inventory_digest,
     prepare_release,
-    verify_native_closure,
+    verify_loaded_images,
 )
 from shared.runtime_release import (
     ReleaseRejectedError,
@@ -136,7 +136,7 @@ def main() -> None:
     private_python.rename(root / "retired-python-input")
     wheels.rename(root / "retired-wheels")
     prove_checkout_absent(root, checkout, application.name, release)
-    verify_native_closure(release)
+    verify_loaded_images(release)
     import platform
 
     verify_release(

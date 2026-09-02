@@ -15,16 +15,18 @@ the serving pointer and retains the failed generation for operator inspection;
 it is never silently reused or deleted.
 
 Kernel and OS system libraries are explicit trusted platform prerequisites.
-Native application dependencies must resolve inside the generation; Homebrew or
-other mutable dependency paths are rejected. The receipt declares system-library
+Loaded application dependencies must resolve inside the generation; Homebrew or
+other mutable dependency paths are rejected. The receipt declares loaded-image
 paths without claiming to attest the host OS. Optional plugin/dlopen behavior,
-Windows preparation, Mach-O rpath contracts not yet understood, process privilege
+Windows preparation, process privilege
 separation, frontend artifacts and plugin state compatibility are not covered.
 Same-UID chmod is accidental-write protection, not an adversarial security seal.
 
 The declared import roots are CLI, exec child, ops spec, agent-host and gateway.
-The native scan covers their interpreter executables and installed application
-dependencies, not every optional stdlib extension. All retained stdlib bytes are
+After imports, the proof performs local NumPy dot, Faiss add/search, Arrow IPC
+roundtrip, and libpq version calls to exercise delayed native loads, with network
+connections denied. Linux process maps or macOS dyld supply actual loaded images;
+there is no second per-file ldd/otool emulation. All retained stdlib bytes are
 hashed, but this is not a claim that every GUI/optional module works. A separate
 receipt compares `_tkinter` availability in the managed input, retained base,
 and venv; changing the retained base capability fails preparation. This avoids
