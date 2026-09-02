@@ -650,8 +650,8 @@ export const api = {
   },
 
   // Read-only preflight for the Update button: how far the gateway is
-  // behind origin/main and which side a rollout would restart. behind===0 means
-  // "no updates" — the UI shows that and does not launch a rollout.
+  // behind origin/main and which side a rollout would restart. A clean
+  // behind===0 means "no updates"; needs_replay keeps a half-deployed state actionable.
   checkClusterUpdate: (): Promise<ClusterUpdateCheck> => {
     return f("/api/cluster/update-check").then(ok<ClusterUpdateCheck>);
   },
