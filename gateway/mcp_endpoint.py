@@ -46,6 +46,7 @@ from starlette.responses import JSONResponse
 
 from gateway import mcp_clients
 from gateway.error_envelope import error_response
+from gateway.request_principal import AuthPrincipal, PrincipalScopeError, principal_key
 from gateway.routers import agents as _agents_router
 from gateway.routers._delivery import deliver_chat_inbound
 from gateway.routers.agents_lifecycle import post_agent_terminate
@@ -56,6 +57,7 @@ from shared import agent_snapshot
 from shared.agents import AvaAgentError
 from shared.audit_events import insert_event_log
 from shared.caller_identity import CallerIdentity
+from shared.chat_delivery import ClientMessageConflictError
 from shared.checkpoint import CheckpointReadError, load_checkpoint_messages
 from shared.machine import machine_name
 
@@ -375,7 +377,10 @@ def _register_fleet_tools(server: MCPServer, pool: Any) -> None:
 
     @server.tool()
     async def send_message(
-        agent_id: int, content: str, caller_protocol: Literal["v1"] | None = None
+        agent_id: int,
+        content: str,
+        caller_protocol: Literal["v1"] | None = None,
+        idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         """Send a message to a running agent — a new instruction, more context,
         or the answer to a question it is blocked on.
@@ -390,6 +395,10 @@ def _register_fleet_tools(server: MCPServer, pool: Any) -> None:
         external caller. It adds no permissions and requires an already-live
         target with negotiated v1 support; legacy/default and bootstrap behavior
         are unchanged. Do not supply source or instance: the server owns them.
+
+        An optional idempotency_key identifies a retry of this exact message.
+        The server always scopes it to your authenticated MCP client identity;
+        another token client using the same key cannot retrieve your receipt.
         """
         _require_write_scope("send_message")
         source = _MESSAGE_SOURCE
@@ -400,6 +409,20 @@ def _register_fleet_tools(server: MCPServer, pool: Any) -> None:
             source = CallerIdentity(
                 kind="external_agent", subject="mcp", instance=str(client["id"])
             ).source()
+        stored_key = None
+        if idempotency_key is not None:
+            client = _CURRENT_MCP_CLIENT.get()
+            if client is None:
+                raise ToolError("authenticated MCP client context is missing")
+            try:
+                stored_key = principal_key(
+                    AuthPrincipal("mcp_client", str(client["id"])),
+                    "POST",
+                    f"/api/agents/{agent_id}/messages",
+                    idempotency_key,
+                )
+            except PrincipalScopeError as exc:
+                raise ToolError(str(exc)) from exc
         # Existence check first (raises AgentNotFound, like the REST route);
         # deliver_chat_inbound then auto-resurrects a terminated target.
         try:
@@ -410,12 +433,13 @@ def _register_fleet_tools(server: MCPServer, pool: Any) -> None:
                 prepare=lambda _conn: content,
                 source=source,
                 payload=None,
+                client_message_id=stored_key,
             )
-        except AvaAgentError as exc:
+        except (AvaAgentError, ClientMessageConflictError) as exc:
             raise ToolError(str(exc)) from exc
         except HTTPException as exc:
             raise ToolError(str(exc.detail)) from exc
-        return {"status": delivery.status}
+        return {"status": delivery.status, "inbound_id": delivery.inbound_id}
 
     @server.tool()
     async def get_messages(agent_id: int, limit: int = _DEFAULT_MESSAGE_LIMIT) -> dict[str, Any]:

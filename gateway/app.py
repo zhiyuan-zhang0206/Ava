@@ -591,6 +591,10 @@ async def _cluster_auth_middleware(
       middleware while keeping the cluster secret for internal
       service-to-service auth (ops / restarter).
     """
+    from gateway.request_principal import AuthPrincipal
+
+    # This is set only by credential verification, never by caller/source JSON.
+    request.state.auth_principal = None
     secret = settings.data_plane.cluster_secret
     if not settings.gateway.auth_middleware_enabled or not secret:
         return await call_next(request)
@@ -619,6 +623,7 @@ async def _cluster_auth_middleware(
         request.app.state.db_pool,
         cookie_token,
     ):
+        request.state.auth_principal = AuthPrincipal("cluster", "administrator")
         origin = request.headers.get("Origin")
         # Origin is checked only after valid cookie auth; without it, the request
         # reaches 401 unless another explicit credential authenticates it.
@@ -652,6 +657,7 @@ async def _cluster_auth_middleware(
     # 2. Check Bearer token
     authorization = request.headers.get("Authorization")
     if verify_bearer(authorization, secret):
+        request.state.auth_principal = AuthPrincipal("cluster", "administrator")
         return await call_next(request)
 
     _log_auth401_rejection(request)

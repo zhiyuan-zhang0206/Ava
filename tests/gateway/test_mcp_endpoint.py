@@ -289,6 +289,49 @@ def test_send_message_and_get_messages() -> None:
         assert {m["role"] for m in payload["messages"]} <= {"human", "ai", "system"}
 
 
+def test_token_clients_same_key_are_isolated_and_body_reuse_conflicts() -> None:
+    with TestClient(app) as client:
+        first = _create_token(client, name="idem-first")
+        second = _create_token(client, name="idem-second")
+        agent_id = int(
+            _tool_result(_tool_call(client, first, "spawn_agent", {"prompt": "goal"}))["id"]
+        )
+        args = {"agent_id": agent_id, "content": "same", "idempotency_key": "same-key"}
+        one = _tool_result(_tool_call(client, first, "send_message", args))
+        repeat = _tool_result(_tool_call(client, first, "send_message", args))
+        two = _tool_result(_tool_call(client, second, "send_message", args))
+        assert one["inbound_id"] == repeat["inbound_id"]
+        assert one["inbound_id"] != two["inbound_id"]
+        conflict = _tool_call(client, first, "send_message", args | {"content": "different"})
+        assert conflict["result"].get("isError") is True
+        assert "different message" in _tool_result(conflict)
+
+
+def test_revoked_client_cannot_replay_prior_key() -> None:
+    with TestClient(app) as client:
+        created = client.post(
+            "/api/mcp/clients", json={"name": "idem-revoked", "scope": "write"}
+        ).json()
+        token = created["token"]
+        agent_id = int(
+            _tool_result(_tool_call(client, token, "spawn_agent", {"prompt": "goal"}))["id"]
+        )
+        args = {"agent_id": agent_id, "content": "same", "idempotency_key": "prior-key"}
+        _tool_call(client, token, "send_message", args)
+        client.post(f"/api/mcp/clients/{created['id']}/revoke").raise_for_status()
+        response = client.post(
+            "/mcp",
+            headers={"Accept": _ACCEPT, "Authorization": f"Bearer {token}"},
+            json={
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/call",
+                "params": {"name": "send_message", "arguments": args},
+            },
+        )
+        assert response.status_code == 401
+
+
 def test_read_scope_cannot_call_write_tools() -> None:
     with TestClient(app) as client:
         token = _create_token(client, name="read-client", scope="read")
