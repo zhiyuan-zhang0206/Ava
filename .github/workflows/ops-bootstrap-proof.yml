@@ -23,3 +23,6 @@ jobs:
       - uses: ./.github/actions/install-pg-redis
       - run: uv sync --frozen
       - run: uv run pytest tests/shared/test_daemon_http.py tests/shared/test_daemon_health.py tests/shared/test_managed_writer_barrier.py tests/shared/test_managed_writer_observation.py -q
+      - name: Diagnose markerless fallback scenario (not a production fix)
+        run: uv run pytest tests/ops/test_restart_fallback_scenario.py -q -s
+      - run: uv run pyright tests/ops/test_restart_fallback_scenario.py
