@@ -18,6 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from shared.runtime_prepare import (
     CollectorInput,
     FrontendInput,
+    PluginInput,
     PrepareInputs,
     _copy_python,
     _python_input_inventory,
@@ -46,6 +47,8 @@ def prove_checkout_absent(
     shutil.copy2(checkout / "scripts/prove_runtime_migration.py", migration)
     collector = root / "prove_runtime_otel.py"
     shutil.copy2(checkout / "scripts/prove_runtime_otel.py", collector)
+    plugin_proof = root / "prove_runtime_plugins.py"
+    shutil.copy2(checkout / "scripts/prove_runtime_plugins.py", plugin_proof)
     alias = root / "runtime-entry-alias"
     alias.symlink_to(release.root / "venv", target_is_directory=True)
     if (
@@ -69,6 +72,14 @@ def prove_checkout_absent(
     }
     checkout.rename(retired_checkout)
     try:
+        if (release.root / "plugins").is_dir():
+            subprocess.run(  # noqa: S603 — installed image, private CI home only.
+                [str(release.interpreter), "-I", "-B", str(plugin_proof)],
+                cwd=root,
+                env=child_env | {"GITHUB_ACTIONS": "true"},
+                check=True,
+                timeout=120,
+            )
         if (release.root / "otel").is_dir():
             subprocess.run(  # noqa: S603 — retained interpreter and copied CI-only proof.
                 [str(release.interpreter), "-I", "-B", str(collector)],
@@ -176,6 +187,32 @@ def prepare_with_diagnostics(store: Path, inputs: PrepareInputs) -> VerifiedRele
         raise
 
 
+def prove_half_plugin_refusal(store: Path, inputs: PrepareInputs) -> None:
+    from dataclasses import replace
+
+    if inputs.plugins is None:
+        raise AssertionError("plugin proof input missing")
+    entry = inputs.plugins.root / "runtime_fixture/plugin.py"
+    held = inputs.plugins.root.parent / "held-plugin-entry.py"
+    before = set(store.iterdir())
+    entry.rename(held)
+    try:
+        half = replace(inputs.plugins, digest=inventory_digest(tree_inventory(inputs.plugins.root)))
+        with patch("shared.runtime_prepare._run") as execute:
+            try:
+                prepare_release(store, replace(inputs, plugins=half))
+            except ReleaseRejectedError as exc:
+                if "complete declared package" not in str(exc):
+                    raise AssertionError("wrong half-install rejection") from exc
+            else:
+                raise AssertionError("half-installed candidate accepted")
+            execute.assert_not_called()
+        if set(store.iterdir()) != before:
+            raise AssertionError("half-install rejection mutated generation store")
+    finally:
+        held.rename(entry)
+
+
 def prove_copy_race(
     store: Path, inputs: PrepareInputs, requirements: Path, serving: Path, original: bytes
 ) -> None:
@@ -237,12 +274,16 @@ def prove_prepared_frontend(
     )
 
 
-def main() -> None:
+def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--python", type=Path, required=True)
     parser.add_argument("--uv", type=Path, required=True)
-    args = parser.parse_args()
+    return parser.parse_args()
+
+
+def main() -> None:
+    args = parse_args()
     root = args.root.resolve()
     source = Path(
         subprocess.check_output(  # noqa: S603 — CI supplies a managed interpreter path.
@@ -293,8 +334,14 @@ def main() -> None:
             if (root / "otel-input").is_dir()
             else None
         ),
+        plugins=PluginInput(
+            root / "plugin-input",
+            inventory_digest(tree_inventory(root / "plugin-input")),
+            ("runtime_fixture",),
+        ),
     )
     release = prepare_with_diagnostics(store, inputs)
+    prove_half_plugin_refusal(store, inputs)
     if serving.read_bytes() != original:
         raise AssertionError("successful preparation changed serving pointer")
     # Remove the input locations from their original names, proving that a
