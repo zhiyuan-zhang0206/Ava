@@ -27,9 +27,11 @@ Checks:
    carry `IF EXISTS`, so a repeated or standalone rollback cannot blow up on a
    schema that already lacks the object (drops inside guarded DO blocks are
    exempt).
-7. **backfill snapshot retirement** — every `*_backfill_*` table created by an
-   up migration must have a later up migration that drops it. The table is a
-   finite rollback buffer, never durable application state.
+7. **rollback-snapshot retirement** — every table following the shared
+   `*_backfill_*` rollback-snapshot convention that is created by an up
+   migration must have a later up migration that drops it. The archive CLI
+   accepts the same convention; the table is a finite recovery buffer, never
+   durable application state.
 
 Deliberately **no** continuity / next-number / cross-branch-collision checks:
 timestamp names are collision-free by construction, which is the whole point of
@@ -44,6 +46,7 @@ from datetime import datetime
 from pathlib import Path
 
 from shared.migrations import _BASELINE_NAME, _DOWN_FILENAME_RE, _FILENAME_RE
+from shared.rollback_snapshot import is_rollback_snapshot_table
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 MIGRATIONS_DIR = REPO_ROOT / "migrations"
@@ -306,7 +309,7 @@ def _check_backfill_snapshot_drop_plans() -> list[str]:
         text = _mask_nonstatic_sql(entry.read_text(encoding="utf-8"))
         for match in _CREATE_TABLE_RE.finditer(text):
             table = match.group("table").lower()
-            if "_backfill_" in table:
+            if is_rollback_snapshot_table(table):
                 creations.append((entry.name, table))
         for match in _DROP_TABLE_IF_EXISTS_RE.finditer(text):
             table = match.group("table").lower()
@@ -317,7 +320,7 @@ def _check_backfill_snapshot_drop_plans() -> list[str]:
         if any(dropped_by > created_by for dropped_by in drops.get(table, [])):
             continue
         errors.append(
-            f"{created_by}: backfill snapshot table {table!r} has no later drop plan — "
+            f"{created_by}: rollback snapshot table {table!r} has no later drop plan — "
             "add a later up migration with DROP TABLE IF EXISTS after its recovery data is archived"
         )
     return errors

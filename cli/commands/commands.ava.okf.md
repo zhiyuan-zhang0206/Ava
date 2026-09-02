@@ -20,7 +20,7 @@ no registry or plugin mechanism, the wiring is the parser.
 Two kinds of module live here, distinguished by filename:
 
 - **public** (`start.py`, `stop.py`, `status.py`, `logs.py`, `update.py`,
-  `cluster.py`, `agents.py`, `config.py`, `plugins.py`, `skill.py`, `mcp.py`,
+  `cluster.py`, `agents.py`, `config.py`, `plugins.py`, `skill.py`, `mcp.py`, `pitr.py`,
   `memory.py`, `presets.py`, `pty.py`, `schedules.py`, `trace.py`, `migrations.py`,
   `cluster_lifecycle.py`) — reachable from the command line.
 - **internal** (`_`-prefixed) — steps `start` / `update` call, never dispatched
@@ -74,6 +74,8 @@ schema change catches the DB up on its own.
   (`ava mcp serve`) rather than a `commands/` module: it is a long-running
   stdio server, not a command that renders and exits, and it pulls in the mcp
   SDK that no other verb needs. See [[cli/commands/packages.ava.okf.md]].
+- [[pitr.ava.okf.md]] defines the PITR inspection surface and the archive →
+  verify → retire guard for finite migration rollback snapshots.
 
 ## Key Dependencies
 

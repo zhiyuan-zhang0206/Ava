@@ -109,3 +109,32 @@ artifact — the local copy remains the primary. Because only encrypted
 artifacts reach the store, its access model does not expose database contents.
 Remote objects are append-only (the store contract has no delete verb); remote
 retention is a shared planner concern and a follow-up.
+
+## Migration rollback-snapshot archive
+
+Tables named `*_backfill_*` are finite migration recovery snapshots, not
+durable application state. The migration lint requires a later forward
+migration with `DROP TABLE IF EXISTS` for every such table. Before that forward
+retirement may run against a populated table, preserve its recovery data with
+the official three-step workflow from the gateway checkout:
+
+```bash
+.venv/bin/ava pitr snapshot archive <table>
+.venv/bin/ava pitr snapshot verify <table>
+.venv/bin/ava pitr snapshot retire <table>
+```
+
+`archive` creates a custom-format dump of the one table, encrypts it with the
+configured PITR AES-GCM key, and publishes it under a content-addressed
+rollback-snapshot object name through the configured offsite store. The local
+owner-only evidence record at `$AVA_HOME/rollback-snapshot-archives/<table>.json`
+contains the backend acknowledgement: object name, generation pin, checksum,
+and metadata.
+
+`verify` downloads exactly that recorded generation through the viewer path,
+authenticates and decrypts it, restores it into a throwaway PostgreSQL cluster,
+and reads the restored table. It then records successful verification in the
+same local evidence record. `retire` refuses until that verification exists;
+once it does, it performs the idempotent `DROP TABLE IF EXISTS` on the live
+snapshot table. Do not delete or edit the evidence record between these steps:
+the record is the guard that binds retirement to the archived, drilled object.

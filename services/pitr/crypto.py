@@ -56,7 +56,7 @@ class EncryptionPlan:
 
 
 def create_plan(source: Path, *, key_id: str, object_name: str) -> EncryptionPlan:
-    source_hash, source_size = _source_identity(source)
+    source_hash, source_size = source_identity(source)
     return EncryptionPlan(
         archive_name=source.name,
         key_id=key_id,
@@ -105,7 +105,7 @@ class _EncryptedReader(io.RawIOBase):
 def open_encrypted(source: Path, *, key: bytes, plan: EncryptionPlan) -> BinaryIO:
     if len(key) != 32:
         raise ValueError("PITR backup key must contain exactly 32 bytes")
-    source_hash, source_size = _source_identity(source)
+    source_hash, source_size = source_identity(source)
     if (
         source.name != plan.archive_name
         or source_hash != plan.source_sha256
@@ -115,7 +115,8 @@ def open_encrypted(source: Path, *, key: bytes, plan: EncryptionPlan) -> BinaryI
     return io.BufferedReader(_EncryptedReader(source, key, plan))
 
 
-def _source_identity(path: Path) -> tuple[str, int]:
+def source_identity(path: Path) -> tuple[str, int]:
+    """Return the stable plaintext identity used in an encrypted PITR header."""
     digest = hashlib.sha256()
     size = 0
     with path.open("rb") as source:
@@ -131,7 +132,7 @@ def encrypt_archive(
     """Encrypt without loading a WAL segment or key into argv/log output."""
     if len(key) != 32:
         raise ValueError("PITR backup key must contain exactly 32 bytes")
-    source_hash, source_size = _source_identity(source)
+    source_hash, source_size = source_identity(source)
     nonce = os.urandom(12)
     header = json.dumps(
         {
