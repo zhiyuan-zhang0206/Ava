@@ -226,7 +226,7 @@ def test_write_transaction_repairs_connect_and_watcher_writes(
 ) -> None:
     """Rule A writes, including watcher cleanup DELETE, survive poisoned backends."""
     from shared import config
-    from shared.cluster_lock import force_release_update_lock
+    from shared.cluster_lock import acquire_update_lock, release_update_lock
     from shared.watcher_registry import delete_watcher, mark_status, register_watcher
 
     with postgres() as pg_url, _pgbouncer_in_front(pg_url) as pooled:
@@ -234,7 +234,8 @@ def test_write_transaction_repairs_connect_and_watcher_writes(
         agent_id = _insert_agent(pg_url)
         _poison_pooled_backends(pooled)
 
-        force_release_update_lock()
+        assert acquire_update_lock("pgbouncer-wire-test") is True
+        release_update_lock("pgbouncer-wire-test")
         register_watcher(agent_id, 7, kind="at", name="poisoned", message="wake")
         mark_status(agent_id, 7, "missed")
         delete_watcher(agent_id, 7)

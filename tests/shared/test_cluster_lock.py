@@ -23,7 +23,6 @@ from shared.cluster_lock import (
     DeployLease,
     acquire_update_lock,
     claim_recovery_lock,
-    force_release_update_lock,
     read_update_lease,
     release_settle_hold,
     release_update_lock,
@@ -104,21 +103,6 @@ def test_expired_lock_is_reclaimable() -> None:
     assert acquire_update_lock("B") is True  # reclaimed
 
 
-def test_force_release_clears_a_live_holder() -> None:
-    """Unlike release_update_lock, force_release ignores the holder — it clears a
-    still-live lock (a hard-killed rollout's stale lock) and returns who held it."""
-    assert acquire_update_lock("A") is True
-    assert force_release_update_lock() == "A"
-    assert update_lock_holder() is None
-    assert acquire_update_lock("B") is True  # freed for the next rollout
-
-
-def test_force_release_on_free_lock_returns_none() -> None:
-    """Idempotent on an already-free lock — returns None, no error."""
-    assert force_release_update_lock() is None
-    assert update_lock_holder() is None
-
-
 def test_recovery_claim_loses_if_a_new_rollout_acquires_after_its_free_read() -> None:
     observed = read_update_lease()
     assert observed is None
@@ -146,7 +130,7 @@ def test_stale_recovery_snapshot_cannot_replace_a_reclaimed_lease() -> None:
     assert acquire_update_lock("old", kind="rollout") is True
     observed = read_update_lease()
     assert observed is not None
-    assert force_release_update_lock() == "old"
+    release_update_lock("old")
     assert acquire_update_lock("new", kind="restart") is True
 
     claim = claim_recovery_lock("recovery", observed)
@@ -266,10 +250,10 @@ def test_acquire_clears_a_previous_settle_note() -> None:
     assert lease is not None and lease.holder == "B" and lease.note is None
 
 
-def test_force_release_clears_the_note() -> None:
+def test_release_clears_the_note() -> None:
     assert acquire_update_lock("A") is True
     settle_update_lock("A", hosts=["wsl"])
-    assert force_release_update_lock() == "A"
+    release_update_lock("A")
     assert read_update_lease() is None
     assert acquire_update_lock("B") is True
     lease = read_update_lease()
