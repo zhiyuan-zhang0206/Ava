@@ -345,7 +345,7 @@ def _verify_plugins(plugins: PluginInput | None, root: Path) -> None:
                 "-c",
                 "import sys,json;from pathlib import Path;"
                 "from shared.runtime_plugins import verify_plugin_dependencies;"
-                "from shared.runtime_plugins import prove_plugin_registration;"
+                "from cli.commands._release_plugin_probe import prove_plugin_registration;"
                 "root=Path(sys.argv[1]);names=tuple(json.loads(sys.argv[2]));"
                 "verify_plugin_dependencies(root,names);prove_plugin_registration(root,names)",
                 str(root / "plugins"),

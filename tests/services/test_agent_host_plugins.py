@@ -29,7 +29,7 @@ def test_fingerprint_empty_when_no_plugins_dir(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """A missing plugins dir is a valid no-plugins state — empty, not an error."""
-    monkeypatch.setattr(daemon.paths, "plugins_dir", lambda: tmp_path / "nope")
+    monkeypatch.setattr(daemon, "external_plugin_read_root", lambda: tmp_path / "nope")
     assert daemon._plugins_fingerprint() == ""
 
 
@@ -38,7 +38,7 @@ def test_fingerprint_tracks_plugin_add_change_remove(
 ) -> None:
     """Fingerprint changes when a plugin dir is added, its plugin.py changes,
     or it is removed; unrelated files do not affect it."""
-    monkeypatch.setattr(daemon.paths, "plugins_dir", lambda: tmp_path)
+    monkeypatch.setattr(daemon, "external_plugin_read_root", lambda: tmp_path)
 
     assert daemon._plugins_fingerprint() == ""
     _make_plugin(tmp_path, "alpha")
@@ -72,7 +72,7 @@ async def test_watch_restarts_on_plugin_change(
 ) -> None:
     """A fingerprint change makes the watcher SIGTERM itself once, then stop —
     the supervisor restarts the host, which loads the new plugin at boot."""
-    monkeypatch.setattr(daemon.paths, "plugins_dir", lambda: tmp_path)
+    monkeypatch.setattr(daemon, "external_plugin_read_root", lambda: tmp_path)
     monkeypatch.setattr(daemon, "_PLUGINS_POLL_INTERVAL_S", 0.01)
 
     killed: list[tuple[int, signal.Signals]] = []
