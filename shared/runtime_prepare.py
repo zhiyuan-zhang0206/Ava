@@ -97,6 +97,21 @@ def _copy_verified_python(source: Path, target: Path, expected: dict[str, str]) 
         raise ReleaseRejectedError("retained Python bytes differ from trusted input inventory")
 
 
+def _python_input_inventory(source: Path) -> dict[str, str]:
+    """File links are supported; directory links have no finite tree contract here."""
+    for path in source.rglob("*"):
+        if path.is_symlink():
+            if not path.resolve(strict=True).is_relative_to(source):
+                raise ReleaseRejectedError("Python bundle has an escaping symlink")
+            if path.is_dir():
+                raise ReleaseRejectedError("Python input directory symlinks are unsupported")
+    return {
+        p.relative_to(source).as_posix(): file_sha256(p)
+        for p in sorted(source.rglob("*"))
+        if p.is_file()
+    }
+
+
 def _materialize_venv_links(root: Path) -> None:
     # stdlib venv creates lib64 -> lib on Linux even with --copies.
     for path in sorted(root.rglob("*")):
@@ -245,15 +260,7 @@ def prepare_release(store: Path, inputs: PrepareInputs) -> VerifiedRelease:
     wheels = inputs.wheelhouse.resolve(strict=True)
     if inventory_digest(tree_inventory(wheels)) != inputs.wheelhouse_digest:
         raise ReleaseRejectedError("wheelhouse hash mismatch")
-    # Hash dereferenced files for the source bundle while refusing escaping links.
-    for path in source.rglob("*"):
-        if path.is_symlink() and not path.resolve(strict=True).is_relative_to(source):
-            raise ReleaseRejectedError("Python bundle has an escaping symlink")
-    python_files = {
-        p.relative_to(source).as_posix(): file_sha256(p)
-        for p in sorted(source.rglob("*"))
-        if p.is_file()
-    }
+    python_files = _python_input_inventory(source)
     if inventory_digest(python_files) != inputs.python_digest:
         raise ReleaseRejectedError("Python input hash mismatch")
     if file_sha256(inputs.requirements) != inputs.requirements_digest:

@@ -18,6 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from shared.runtime_prepare import (
     PrepareInputs,
     _copy_python,
+    _python_input_inventory,
     inventory_digest,
     prepare_release,
     verify_loaded_images,
@@ -113,6 +114,18 @@ def prove_copy_race(
     """Reject corruption in the private copy before invoking any copied executable."""
     from dataclasses import replace
 
+    directory_alias = inputs.python_tree / "unsupported-directory-alias"
+    directory_alias.symlink_to(inputs.python_tree / "bin", target_is_directory=True)
+    try:
+        try:
+            _python_input_inventory(inputs.python_tree)
+        except ReleaseRejectedError as exc:
+            if str(exc) != "Python input directory symlinks are unsupported":
+                raise AssertionError("directory link failed for the wrong reason") from exc
+        else:
+            raise AssertionError("directory-link input was silently accepted")
+    finally:
+        directory_alias.unlink()
     requirements.write_text(requirements.read_text() + "\n# copy-race negative\n")
     race_inputs = replace(inputs, requirements_digest=file_sha256(requirements))
 
