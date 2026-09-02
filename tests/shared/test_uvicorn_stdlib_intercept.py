@@ -22,6 +22,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+import uvicorn
 from uvicorn.config import LOGGING_CONFIG
 
 from shared.log import _install_stdlib_intercept
@@ -67,6 +68,29 @@ def test_intercept_restores_uvicorn_propagation_after_default_config(
     logging.getLogger("uvicorn.error").error("Uvicorn error after default config")
     assert any(
         r["level"].name == "ERROR" and "Uvicorn error after default config" in r["message"]  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+        for r in loguru_records  # pyright: ignore[reportUnknownVariableType]
+    )
+
+
+def test_intercept_resets_uvicorn_error_level_after_default_config(
+    loguru_records: list[dict],
+) -> None:  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+    """A prior Uvicorn Config must not leave uvicorn.error at CRITICAL.
+
+    ``Config.__init__`` applies Uvicorn's logging config immediately, including
+    the requested critical level. The intercept must restore the root INFO
+    floor so an unhandled-ASGI-exception ERROR reaches loguru.
+    """
+
+    async def asgi_app(_scope: object, _receive: object, _send: object) -> None:
+        pass
+
+    uvicorn.Config(asgi_app, log_level="critical")
+    _install_stdlib_intercept()
+    assert logging.getLogger("uvicorn.error").getEffectiveLevel() <= logging.INFO
+    logging.getLogger("uvicorn.error").error("Uvicorn error after critical config")
+    assert any(
+        r["level"].name == "ERROR" and "Uvicorn error after critical config" in r["message"]  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
         for r in loguru_records  # pyright: ignore[reportUnknownVariableType]
     )
 
@@ -120,3 +144,36 @@ def test_gateway_uvicorn_run_passes_log_config_none() -> None:
     assert found, "uvicorn.run call not found in gateway/_server.py"
     assert len(found) == 1
     assert isinstance(found[0].value, ast.Constant) and found[0].value.value is None
+
+
+def _assert_uvicorn_config_passes_log_config_none(path: Path) -> None:
+    src = path.read_text()
+    tree = ast.parse(src)
+    found: list[ast.keyword] = []
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "Config"
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id == "uvicorn"
+        ):
+            found = [keyword for keyword in node.keywords if keyword.arg == "log_config"]
+            break
+    assert found, f"uvicorn.Config call not found in {path.relative_to(_REPO_ROOT)}"
+    assert len(found) == 1
+    assert isinstance(found[0].value, ast.Constant) and found[0].value.value is None
+
+
+def test_numpy_backend_uvicorn_config_passes_log_config_none() -> None:
+    """The session test server must not reconfigure shared Uvicorn logging."""
+    _assert_uvicorn_config_passes_log_config_none(
+        _REPO_ROOT / "tests" / "services" / "test_numpy_backend.py"
+    )
+
+
+def test_memory_search_daemon_uvicorn_config_passes_log_config_none() -> None:
+    """The daemon must preserve the process-level Uvicorn logging setup."""
+    _assert_uvicorn_config_passes_log_config_none(
+        _REPO_ROOT / "services" / "memory_search" / "daemon.py"
+    )
