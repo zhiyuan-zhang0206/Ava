@@ -141,6 +141,37 @@ describe("RunTimelineChart", () => {
     }
   });
 
+  it("includes seconds in sub-minute tick labels so consecutive labels stay unique", () => {
+    const subMinuteTimeline = {
+      ...timeline,
+      window: { from: "2026-08-29T08:00:00Z", to: "2026-08-29T08:00:40Z" },
+    };
+    const { container } = render(<RunTimelineChart timeline={subMinuteTimeline} labels={labels} />);
+
+    const tickLabels = Array.from(container.querySelectorAll("[data-timeline-tick]"), (tick) => tick.textContent);
+    expect(tickLabels).toEqual(["08:00:00", "08:00:10", "08:00:20", "08:00:30", "08:00:40"]);
+    expect(tickLabels).toEqual([...new Set(tickLabels)]);
+  });
+
+  it("includes seconds when a minute-plus window still has sub-minute tick spacing", () => {
+    const ninetySecondTimeline = {
+      ...timeline,
+      window: { from: "2026-08-29T08:00:00Z", to: "2026-08-29T08:01:30Z" },
+    };
+    const { container } = render(<RunTimelineChart timeline={ninetySecondTimeline} labels={labels} />);
+
+    const tickLabels = Array.from(container.querySelectorAll("[data-timeline-tick]"), (tick) => tick.textContent);
+    expect(tickLabels).toEqual(["08:00:00", "08:00:22", "08:00:45", "08:01:07", "08:01:30"]);
+    expect(tickLabels).toEqual([...new Set(tickLabels)]);
+  });
+
+  it("keeps minute-only tick labels for the one-hour window", () => {
+    const { container } = render(<RunTimelineChart timeline={timeline} labels={labels} />);
+
+    const tickLabels = Array.from(container.querySelectorAll("[data-timeline-tick]"), (tick) => tick.textContent);
+    expect(tickLabels).toEqual(["08:00", "08:15", "08:30", "08:45", "09:00"]);
+  });
+
   it("anchors connector paths to the exact source and destination node coordinates", () => {
     const { container } = render(<RunTimelineChart timeline={timeline} labels={labels} />);
     const connector = container.querySelector('[data-testid="event-connector"][data-event-index="0"]');
