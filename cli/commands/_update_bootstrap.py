@@ -379,7 +379,7 @@ def _journal(plan: PreparedBootstrapHop, generation: str, stage: str, cron: byte
         path = updater_handoff.state_path()
         payload = json.loads(_regular_bytes(path))
         previous = (
-            BootstrapJournal.model_validate(payload["bootstrap_hop"]).phases
+            BootstrapJournal.model_validate_json(json.dumps(payload["bootstrap_hop"])).phases
             if "bootstrap_hop" in payload
             else ()
         )
