@@ -136,8 +136,14 @@ def test_pure_station_runs_no_session_services() -> None:
 
 
 def test_gateway_roster_ordering_is_load_bearing() -> None:
-    """milvus must precede memory-indexer (memory-indexer cold-start connects to it)."""
-    order = [s.session for s in spec.services_for_capabilities(frozenset({"gateway"}))]
+    """milvus must precede memory-indexer (memory-indexer cold-start connects to it).
+
+    Uses the ungated declaration order (``build_services``): the invariant is
+    the load-bearing spec sequence. The start roster drops milvus entirely
+    under the numpy backend (see test_milvus_gated_out_unless_milvus_backend),
+    so it cannot carry an ordering check.
+    """
+    order = [s.session for s in spec.build_services()]
     assert order.index("milvus") < order.index("memory-indexer")
 
 
@@ -433,6 +439,21 @@ def test_im_bridge_gated_when_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
     }
     assert "im-bridge" in annotated
     assert annotated["im-bridge"] == "disabled (AVA_IM_BRIDGE_ENABLED off)"
+
+
+def test_milvus_gated_out_unless_milvus_backend(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The milvus-lite server gates on the memory-search backend: numpy
+    (default) and pgvector never dial it, so the ~1GB daemon must not be in
+    the start roster (2026-09-02 numpy-default ruling, task #2347)."""
+    from shared.config import settings
+
+    monkeypatch.setattr(settings.services, "memory_search_backend", "numpy")
+    reason = spec.gate_reason_for_session("milvus")
+    assert reason is not None
+    assert "milvus not needed" in reason
+
+    monkeypatch.setattr(settings.services, "memory_search_backend", "milvus")
+    assert spec.gate_reason_for_session("milvus") is None
 
 
 # ── AVA_PROCESS_PROFILE marker derivation (task #1230) ──
