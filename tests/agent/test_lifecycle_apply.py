@@ -1,8 +1,10 @@
 """Real process admission -> durable queue -> graph dispatch, no OS effect."""
 
+import os
 from pathlib import Path
 from uuid import uuid4
 
+import psutil
 import psycopg
 import pytest
 from psycopg_pool import AsyncConnectionPool
@@ -18,6 +20,9 @@ from shared.context import AvaContext
 from shared.db import insert_inbound_message
 from shared.db_transaction import async_write_transaction
 from shared.inbound import InboundKind
+from shared.lifecycle_process_identity import capture_process_identity, target_process_ended
+from shared.lifecycle_termination_observe import observe_applied_termination
+from shared.machine import machine_name
 from shared.runtime_incarnation import current_incarnation
 from shared.turn_identity import bind_turn_identity
 from tests.agent.test_lifecycle_intent import _command
@@ -29,6 +34,73 @@ def test_payload_cannot_mint_accepted_dispatch_receipt() -> None:
         (1, 2, "", "terminate", "user", {"durable_lifecycle": True}, None, None)
     )
     assert not item.durable_lifecycle
+
+
+async def test_process_identity_is_reserved_fixed_and_not_an_exit_receipt(
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+) -> None:
+    agent_id = _row(db_conn)
+    claim_agent_row(agent_id)
+    with pytest.raises(ValueError, match="reserved"):
+        insert_inbound_message(
+            db_conn,
+            agent_id,
+            "",
+            source="user",
+            kind="terminate",
+            payload={"target_process_identity": {"pid": 1}},
+        )
+    command_id = _command(db_conn, agent_id, "terminate")
+    await claim_inbound_batch(aops_pool, agent_id)
+    async with async_write_transaction(aops_pool) as conn:
+        assert await apply_process_lifecycle(conn, agent_id, command_id)
+    first = db_conn.execute(
+        "SELECT payload,applied_at FROM inbound_messages WHERE id=%s", (command_id,)
+    ).fetchone()
+    assert first is not None
+    assert first[0]["target_process_identity"]["pid"] == os.getpid()
+    async with async_write_transaction(aops_pool) as conn:
+        assert await apply_process_lifecycle(conn, agent_id, command_id)
+    assert (
+        db_conn.execute(
+            "SELECT payload,applied_at FROM inbound_messages WHERE id=%s", (command_id,)
+        ).fetchone()
+        == first
+    )
+    # Even after a DB release, this test's actual admitted Python is still live.
+    db_conn.execute(
+        "UPDATE agents_meta SET pid=NULL,lease_expires_at=NULL WHERE id=%s", (agent_id,)
+    )
+    assert not observe_applied_termination(db_conn, agent_id, machine_name())
+    assert db_conn.execute(
+        "SELECT status,observed_at FROM inbound_messages WHERE id=%s", (command_id,)
+    ).fetchone() == ("claimed", None)
+    db_conn.commit()
+
+
+@pytest.mark.parametrize("observation", ["gone", "reused", "live", "unknown", "missing"])
+def test_exact_process_observation_does_not_need_session_record(
+    monkeypatch: pytest.MonkeyPatch, observation: str
+) -> None:
+    identity = capture_process_identity(os.getpid(), machine_name())
+    payload = {"target_process_identity": identity}
+    if observation == "missing":
+        assert not target_process_ended({}, machine_name())
+        return
+    if observation == "reused":
+        # Same numeric PID, different birth, with no canonical record involved.
+        identity["starttime"] = None
+        identity["create_time"] = 1.0
+    elif observation in {"gone", "unknown"}:
+
+        def unavailable(pid: int) -> psutil.Process:
+            if observation == "gone":
+                raise psutil.NoSuchProcess(pid)
+            raise psutil.AccessDenied(pid)
+
+        monkeypatch.setattr("shared.lifecycle_process_identity.psutil.Process", unavailable)
+    assert target_process_ended(payload, machine_name()) is (observation in {"gone", "reused"})
+    assert not target_process_ended(payload, "different-machine")
 
 
 @pytest.mark.parametrize("replacement", ["none", "owner", "pointer"])

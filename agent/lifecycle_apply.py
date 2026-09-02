@@ -2,7 +2,9 @@
 
 import psycopg
 from psycopg.pq import TransactionStatus
+from psycopg.types.json import Jsonb
 
+from shared.lifecycle_process_identity import capture_process_identity
 from shared.runtime_incarnation import current_incarnation
 
 
@@ -23,7 +25,7 @@ async def apply_process_lifecycle(
         raise RuntimeError("lifecycle apply requires an admitted incarnation")
     cursor = await conn.execute(
         "SELECT runtime_generation,runtime_owner,runtime_kind,lifecycle_command_id,"
-        "status,lease_expires_at FROM agents_meta WHERE id=%s FOR UPDATE",
+        "status,lease_expires_at,pid,machine FROM agents_meta WHERE id=%s FOR UPDATE",
         (agent_id,),
     )
     row = await cursor.fetchone()
@@ -44,6 +46,7 @@ async def apply_process_lifecycle(
     cursor = await conn.execute("SELECT %s > clock_timestamp()", (row[5],))
     if await cursor.fetchone() != (True,):
         return False
+    identity = capture_process_identity(row[6], row[7])
     if command[0] == "restart":
         await conn.execute("UPDATE agents_meta SET status='restarting' WHERE id=%s", (agent_id,))
     elif command[0] == "terminate":
@@ -54,6 +57,8 @@ async def apply_process_lifecycle(
     else:
         raise ValueError(f"not an executable lifecycle command: {command[0]}")
     await conn.execute(
-        "UPDATE inbound_messages SET applied_at=clock_timestamp() WHERE id=%s", (command_id,)
+        "UPDATE inbound_messages SET applied_at=clock_timestamp(),"
+        "payload=COALESCE(payload,'{}'::jsonb)||%s WHERE id=%s",
+        (Jsonb({"target_process_identity": identity}), command_id),
     )
     return True
