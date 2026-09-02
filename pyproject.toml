@@ -196,6 +196,7 @@ ignore_imports = [
     "services.agent_host.* -> agent._runloop",
     "services.agent_host.* -> agent.db",
     "services.agent_host.* -> agent.graph",
+    "services.agent_host.* -> agent.hosted_ownership",
     "services.agent_host.* -> agent.lifecycle",
     "services.agent_host.* -> agent.startup",
     "services.agent_host.* -> agent.state",
