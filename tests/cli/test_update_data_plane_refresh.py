@@ -336,7 +336,7 @@ def test_postgres_password_mutation_cannot_block_adoption_failure_recovery(
                 order.append("ava-start")
             return _Result()
 
-    def _sync(_repo: object) -> _Result:
+    def _sync(_repo: object, *, timeout_s: float = 600.0) -> _Result:
         order.append("uv-sync")
         return _Result()
 

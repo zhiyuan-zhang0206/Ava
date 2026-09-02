@@ -20,6 +20,7 @@ import pytest
 
 import cli.commands as _cli
 from cli.commands import _update_agent_runner as _runner
+from shared.deploy_timing import UV_SYNC_TIMEOUT_S
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _STAGE_TIMEOUT_LINE = "STAGE_NO_PROGRESS_TIMEOUT_S = 675.0"
@@ -127,8 +128,15 @@ def test_updater_hands_off_to_fresh_interpreter_after_sync(
     handoff_argv: list[list[str]] = []
     stopped: list[bool] = []
 
+    def sync_verified(
+        _repo: Path,
+        *,
+        timeout_s: float = UV_SYNC_TIMEOUT_S,
+    ) -> subprocess.CompletedProcess[bytes]:
+        return subprocess.CompletedProcess(["uv", "sync"], returncode=0)
+
     monkeypatch.setattr(_runner, "git_checkout_sha", lambda _sha: "oldsha0000")  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-    monkeypatch.setattr(_runner, "run_uv_sync", lambda _repo: SimpleNamespace(returncode=0))  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(_runner, "run_uv_sync_verified", sync_verified)
     monkeypatch.setattr("shared.source_integrity.set_installed", lambda _sha: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     monkeypatch.setattr(
         _runner,

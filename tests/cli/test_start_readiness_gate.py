@@ -677,9 +677,14 @@ def test_rollback_keeps_the_rollback_when_a_service_is_unready(
     from cli.commands import _cluster_rollback as _rb
 
     undone: list[str] = []
+
+    def sync(_repo: Path, *, timeout_s: float = 600.0) -> _FakeResult:
+        del timeout_s
+        return _FakeResult(returncode=0)
+
     monkeypatch.setattr(_rb, "git_reset_hard", undone.append)
     monkeypatch.setattr(_rb, "rollback_schema_to", lambda *_a, **_kw: (True, []))  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_rb, "run_uv_sync", lambda _repo: _FakeResult(returncode=0))  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(_rb, "run_uv_sync", sync)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_rb, "current_schema_state", set)
     monkeypatch.setattr(_rb, "_migration_set_at_commit", lambda _sha: set())  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_rb, "git_head_sha", lambda: "f" * 40)
@@ -711,9 +716,13 @@ def test_gateway_recovery_reports_degraded_not_down(
     back with one straggling daemon is degraded, not down."""
     from cli.commands import _update_recover as _rec
 
+    def sync(_repo: Path, *, timeout_s: float = 600.0) -> _FakeResult:
+        del timeout_s
+        return _FakeResult(returncode=0)
+
     monkeypatch.setattr(_rec, "rollback_schema_to", lambda *_a, **_kw: (True, []))  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_rec, "git_reset_hard", lambda _sha: None)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_rec, "run_uv_sync", lambda _repo: _FakeResult(returncode=0))  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(_rec, "run_uv_sync", sync)  # pyright: ignore[reportUnknownArgumentType]
 
     def _fake_run(args, **_kw):
         argv = [str(a) for a in args]  # pyright: ignore[reportUnknownArgumentType]

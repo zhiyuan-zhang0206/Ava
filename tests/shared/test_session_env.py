@@ -61,6 +61,23 @@ def test_forward_env_dict_drops_cluster_scope(monkeypatch: pytest.MonkeyPatch) -
     assert "AVA_CONFIG_SOURCE" not in env
 
 
+def test_forward_env_dict_without_venv_activation_keeps_path_but_omits_virtual_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A foreign-cwd shell still finds tools on PATH without selecting this venv for uv."""
+
+    monkeypatch.setattr(
+        os,
+        "environ",
+        {"AVA_HOME": "/tmp/ava-home", "PATH": "/usr/bin"},  # noqa: S108 — literal env only
+    )
+
+    env = session_env.forward_env_dict(activate_venv=False)
+
+    assert "VIRTUAL_ENV" not in env
+    assert "/usr/bin" in env["PATH"].split(os.pathsep)
+
+
 def test_forward_env_dict_carries_temp_dir_and_windows_system_keys(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

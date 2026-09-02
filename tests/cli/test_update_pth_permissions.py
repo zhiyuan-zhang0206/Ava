@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import stat
+from collections.abc import Iterable
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -29,6 +30,14 @@ def _read_only_pth(repo: Path) -> Path:
     return pth
 
 
+def _passing_import_gate(
+    _repo: Path,
+    *,
+    allowed_roots: Iterable[Path] = (),
+) -> tuple[str, ...]:
+    return ()
+
+
 def test_gateway_update_makes_pth_writable_only_while_uv_sync_runs(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -38,7 +47,7 @@ def test_gateway_update_makes_pth_writable_only_while_uv_sync_runs(
     modes_during_sync: list[int] = []
 
     def sync_run(args: list[str], **_kwargs: object) -> SimpleNamespace:
-        assert args == _native_sync._PROD_SYNC_ARGS
+        assert args == _native_sync._prod_sync_argv(repo)
         modes_during_sync.append(_read_mode(pth))
         return SimpleNamespace(returncode=0)
 
@@ -50,6 +59,7 @@ def test_gateway_update_makes_pth_writable_only_while_uv_sync_runs(
 
     monkeypatch.setattr(_up, "git_checkout_sha", checkout)
     monkeypatch.setattr(_native_sync, "run_bounded", sync_run)
+    monkeypatch.setattr(_native_sync, "editable_import_gate", _passing_import_gate)
     monkeypatch.setattr("shared.source_integrity.set_installed", ignore_installed)
 
     result = _local._checkout_and_sync(
@@ -78,7 +88,7 @@ def test_start_source_integrity_sync_restores_read_only_pth(
         return SimpleNamespace(returncode=0, stdout="target-sha\n")
 
     def sync_run(args: list[str], **_kwargs: object) -> SimpleNamespace:
-        assert args == _native_sync._PROD_SYNC_ARGS
+        assert args == _native_sync._prod_sync_argv(repo)
         modes_during_sync.append(_read_mode(pth))
         return SimpleNamespace(returncode=0)
 
@@ -103,7 +113,7 @@ def test_gateway_recovery_restores_pth_before_start(
     observed: list[tuple[str, int]] = []
 
     def sync_run(args: list[str], **_kwargs: object) -> SimpleNamespace:
-        assert args == _native_sync._PROD_SYNC_ARGS
+        assert args == _native_sync._prod_sync_argv(repo)
         observed.append(("sync", _read_mode(pth)))
         return SimpleNamespace(returncode=0)
 
@@ -143,7 +153,7 @@ def test_agent_runner_failed_sync_still_restores_read_only_pth(
     modes_during_sync: list[int] = []
 
     def sync_run(args: list[str], **_kwargs: object) -> SimpleNamespace:
-        assert args == _native_sync._PROD_SYNC_ARGS
+        assert args == _native_sync._prod_sync_argv(repo)
         modes_during_sync.append(_read_mode(pth))
         return SimpleNamespace(returncode=1)
 
@@ -153,6 +163,7 @@ def test_agent_runner_failed_sync_still_restores_read_only_pth(
     monkeypatch.setattr(_runner, "_source_switch_window", contextlib.nullcontext)
     monkeypatch.setattr(_runner, "git_checkout_sha", checkout)
     monkeypatch.setattr(_native_sync, "run_bounded", sync_run)
+    monkeypatch.setattr(_native_sync, "editable_import_gate", _passing_import_gate)
 
     result = _runner._run_agent_runner_self_update_inner(
         repo,
@@ -175,7 +186,7 @@ def test_native_update_sync_entry_restores_read_only_pth(
     monkeypatch.setattr(_native_sync, "_repo_root", lambda: repo)
 
     def sync_run(args: list[str], **_kwargs: object) -> SimpleNamespace:
-        assert args == _native_sync._PROD_SYNC_ARGS
+        assert args == _native_sync._prod_sync_argv(repo)
         modes_during_sync.append(_read_mode(pth))
         return SimpleNamespace(returncode=0)
 

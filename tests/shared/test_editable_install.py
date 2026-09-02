@@ -4,7 +4,11 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import stat
+import subprocess
+import sys
+import venv
 from pathlib import Path
 
 import pytest
@@ -78,6 +82,77 @@ def test_exact_allowlisted_dev_clone_target_is_left_unchanged(tmp_path: Path) ->
     assert pth.read_text() == str(dev_clone)
 
 
+def test_repair_leaves_a_legal_single_line_pointer_byte_identical(tmp_path: Path) -> None:
+    """A single allowed source line is legal regardless of a trailing newline."""
+
+    source_root = tmp_path / "prod" / "source"
+    dev_clone = tmp_path / "Ava"
+    dev_clone.mkdir(parents=True)
+    pth = _write_pth(source_root, dev_clone)
+    pth.write_text(str(dev_clone))
+
+    editable_install.repair_editable_ava_pth(source_root, allowed_roots=(dev_clone,))
+
+    assert pth.read_bytes() == str(dev_clone).encode()
+
+
+def test_repair_leaves_uv_native_repeated_pth_entries_byte_identical(tmp_path: Path) -> None:
+    """uv's one-line-per-wheel pointer is legal when every line is allowed."""
+
+    source_root = tmp_path / "prod" / "source"
+    pth = _write_pth(source_root, source_root)
+    _write_direct_url(source_root, source_root.as_uri())
+    pth.write_text(f"{source_root}\n{source_root}")
+    before = pth.read_bytes()
+
+    assert editable_install.editable_install_violations(source_root) == ()
+    assert editable_install.repair_editable_ava_pth(source_root) == ()
+
+    assert pth.read_bytes() == before
+
+
+def test_repair_leaves_a_legal_source_pointer_without_trailing_newline(tmp_path: Path) -> None:
+    """Pointer legality is semantic rather than a trailing-newline byte form."""
+
+    source_root = tmp_path / "prod" / "source"
+    pth = _write_pth(source_root, source_root)
+    pth.write_text(str(source_root))
+
+    editable_install.repair_editable_ava_pth(source_root)
+
+    assert pth.read_bytes() == str(source_root).encode()
+
+
+def test_crlf_semantic_pth_is_read_without_repair(tmp_path: Path) -> None:
+    """Universal-newline reading accepts a Windows pointer without changing its bytes."""
+
+    source_root = tmp_path / "prod" / "source"
+    pth = _write_pth(source_root, source_root)
+    _write_direct_url(source_root, source_root.as_uri())
+    pth.write_bytes(f"{source_root}\r\n".encode())
+    before = pth.read_bytes()
+
+    assert editable_install.editable_install_violations(source_root) == ()
+    assert editable_install.repair_editable_ava_pth(source_root) == ()
+    assert pth.read_bytes() == before
+
+
+def test_empty_pth_is_reported_and_repaired_to_source_content(tmp_path: Path) -> None:
+    """An empty pointer cannot be interpreted as a legal editable target."""
+
+    source_root = tmp_path / "prod" / "source"
+    pth = _write_pth(source_root, source_root)
+    _write_direct_url(source_root, source_root.as_uri())
+    pth.write_text("")
+
+    violations = editable_install.editable_install_violations(source_root)
+    editable_install.repair_editable_ava_pth(source_root)
+
+    assert len(violations) == 1
+    assert "names" in violations[0]
+    assert pth.read_bytes() == str(source_root).encode()
+
+
 def _write_direct_url(source_root: Path, url: str, *, editable: bool = True) -> Path:
     """A direct_url.json matching uv's editable-install record shape."""
     du = (
@@ -92,6 +167,86 @@ def _write_direct_url(source_root: Path, url: str, *, editable: bool = True) -> 
     du.parent.mkdir(parents=True)
     du.write_text(json.dumps({"url": url, "dir_info": {"editable": editable}}))
     return du
+
+
+def test_missing_direct_url_beside_pth_is_reported_and_repaired(tmp_path: Path) -> None:
+    """A removed direct-URL record is the reverse half-uninstall direction."""
+
+    source_root = tmp_path / "prod" / "source"
+    pth = _write_pth(source_root, source_root)
+    direct_url = _write_direct_url(source_root, source_root.as_uri())
+    direct_url.unlink()
+
+    violations = editable_install.editable_install_violations(source_root)
+    repairs = editable_install.repair_editable_install(source_root)
+
+    assert len(violations) == 1
+    assert str(pth) in violations[0]
+    assert "metadata missing" in violations[0]
+    assert json.loads(direct_url.read_text()) == {
+        "url": source_root.as_uri(),
+        "dir_info": {"editable": True},
+    }
+    assert repairs == (
+        editable_install.EditableInstallRepair(
+            path=direct_url,
+            poisoned_target="(missing)",
+            source_root=source_root,
+        ),
+    )
+
+
+def test_missing_dist_info_beside_pth_is_reported_without_fabrication(tmp_path: Path) -> None:
+    """A missing directory supplies no version, so only uv may recreate it."""
+
+    source_root = tmp_path / "prod" / "source"
+    pth = _write_pth(source_root, source_root)
+
+    violations = editable_install.editable_install_violations(source_root)
+    repairs = editable_install.repair_editable_install(source_root)
+
+    assert len(violations) == 1
+    assert str(pth) in violations[0]
+    assert "metadata missing" in violations[0]
+    assert repairs == ()
+    assert not list(pth.parent.glob("ava-*.dist-info"))
+
+
+def test_editable_console_script_violations_follow_the_posix_venv_layout(tmp_path: Path) -> None:
+    """The POSIX launcher is judged beside the POSIX venv interpreter."""
+
+    source_root = tmp_path / "source"
+    interpreter = source_root / ".venv" / "bin" / "python"
+    console_script = interpreter.with_name("ava")
+    interpreter.parent.mkdir(parents=True)
+    interpreter.touch()
+    console_script.touch()
+
+    assert editable_install.editable_console_script_violations(source_root) == ()
+
+    console_script.unlink()
+
+    assert editable_install.editable_console_script_violations(source_root) == (
+        f"{console_script} editable console script missing",
+    )
+
+
+def test_editable_console_script_violations_follow_the_windows_venv_layout(tmp_path: Path) -> None:
+    """A Windows tree is inspected structurally even on a POSIX test host."""
+
+    source_root = tmp_path / "source"
+    interpreter = source_root / ".venv" / "Scripts" / "python.exe"
+    console_script = interpreter.with_name("ava.exe")
+    interpreter.parent.mkdir(parents=True)
+    interpreter.touch()
+
+    assert editable_install.editable_console_script_violations(source_root) == (
+        f"{console_script} editable console script missing",
+    )
+
+    console_script.touch()
+
+    assert editable_install.editable_console_script_violations(source_root) == ()
 
 
 def test_poisoned_direct_url_is_repaired_and_emits_warning_event(
@@ -248,10 +403,11 @@ def test_editable_install_violations_healthy_is_empty(tmp_path: Path) -> None:
 def test_editable_install_violations_accepts_repeated_checkout_pth_entries(
     tmp_path: Path,
 ) -> None:
-    """Repeated equivalent .pth entries are harmless, unlike a foreign entry."""
+    """Repeated allowed entries are uv's normal one-line-per-wheel layout."""
     source_root = tmp_path / "prod" / "source"
     source_root.mkdir(parents=True)
     pth = _write_pth(source_root, source_root)
+    _write_direct_url(source_root, source_root.as_uri())
     pth.write_text(f"{source_root}\n{source_root}")
 
     assert editable_install.editable_install_violations(source_root) == ()
@@ -329,6 +485,144 @@ def test_editable_install_violations_unparsable_record_is_reported(
     violations = editable_install.editable_install_violations(source_root)
 
     assert len(violations) == 1 and str(record) in violations[0]
+
+
+def test_editable_import_gate_requires_the_checkout_editable_import(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The gate rejects a poisoned pointer and a cwd decoy outside the checkout."""
+
+    source_root = tmp_path / "source"
+    agent_package = source_root / "agent"
+    agent_package.mkdir(parents=True)
+    (agent_package / "__init__.py").write_text("")
+    (agent_package / "exec_child.py").write_text("VALUE = 'source'\n")
+    subprocess.run(  # noqa: S603 — test-owned interpreter and venv path
+        [sys.executable, "-m", "venv", str(source_root / ".venv")],
+        check=True,
+        capture_output=True,
+    )
+    interpreter = editable_install._venv_python(source_root)
+    assert interpreter is not None
+    site_packages = Path(
+        subprocess.check_output(  # noqa: S603 — test-owned interpreter and venv path
+            [str(interpreter), "-c", "import site; print(site.getsitepackages()[0])"],
+            text=True,
+        ).strip()
+    )
+    pth = site_packages / editable_install.EDITABLE_PTH_NAME
+    pth.write_text(f"{source_root}\n")
+
+    assert editable_install.editable_import_gate(source_root) == ()
+
+    allowed_root = tmp_path / "Ava"
+    allowed_agent = allowed_root / "agent"
+    allowed_agent.mkdir(parents=True)
+    (allowed_agent / "__init__.py").write_text("")
+    (allowed_agent / "exec_child.py").write_text("VALUE = 'allowed'\n")
+    pth.write_text(str(allowed_root))
+
+    assert (
+        editable_install.editable_import_gate(
+            source_root,
+            allowed_roots=(allowed_root,),
+        )
+        == ()
+    )
+
+    pth.write_text(f"{tmp_path / 'missing'}\n")
+    assert editable_install.editable_import_gate(source_root)
+
+    neutral_dir = tmp_path / "neutral"
+    decoy = neutral_dir / "agent"
+    decoy.mkdir(parents=True)
+    (decoy / "__init__.py").write_text("")
+    (decoy / "exec_child.py").write_text("VALUE = 'decoy'\n")
+    pth.write_text(f"{neutral_dir}\n")
+    monkeypatch.setattr(editable_install.tempfile, "gettempdir", lambda: str(neutral_dir))
+    violations = editable_install.editable_import_gate(source_root)
+
+    assert len(violations) == 1
+    assert "path=" in violations[0]
+    assert str(decoy / "exec_child.py") in violations[0]
+
+    for candidate in (
+        source_root / ".venv" / "bin" / "python3",
+        source_root / ".venv" / "bin" / "python",
+        source_root / ".venv" / "Scripts" / "python.exe",
+    ):
+        candidate.unlink(missing_ok=True)
+
+    assert editable_install.editable_import_gate(source_root) == ("venv python missing",)
+
+
+@pytest.mark.skipif(
+    shutil.which("uv") is None, reason="uv is required for the native editable test"
+)
+def test_uv_native_editable_records_are_legal_and_exec_guard_accepts_them(tmp_path: Path) -> None:
+    """A real uv install keeps its per-wheel pointer byte-identical through both guards."""
+
+    checkout = Path(__file__).parents[2]
+    uv_built_venv_root = tmp_path / "uv-built-venv"
+    venv.create(uv_built_venv_root / ".venv", with_pip=False, symlinks=True)
+    interpreter = uv_built_venv_root / ".venv" / "bin" / "python"
+    install = subprocess.run(  # noqa: S603 — test-owned venv and checkout path
+        [
+            "env",
+            "-u",
+            "VIRTUAL_ENV",
+            "uv",
+            "pip",
+            "install",
+            "-e",
+            str(checkout),
+            "--python",
+            str(interpreter),
+        ],
+        cwd=checkout,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert install.returncode == 0, install.stderr
+
+    pth_paths = editable_install.editable_ava_pth_paths(uv_built_venv_root)
+    assert pth_paths
+    before = {path: path.read_bytes() for path in pth_paths}
+    assert (
+        editable_install.editable_install_violations(
+            uv_built_venv_root,
+            allowed_roots=(checkout,),
+        )
+        == ()
+    )
+    assert (
+        editable_install.guard_editable_install(
+            uv_built_venv_root,
+            allowed_roots=(checkout,),
+        )
+        == ()
+    )
+    assert {path: path.read_bytes() for path in pth_paths} == before
+
+    child_env = dict(os.environ)
+    child_env["PYTHONPATH"] = str(checkout)
+    child = subprocess.run(  # noqa: S603 — current test interpreter and test-owned code
+        [
+            sys.executable,
+            "-c",
+            "from pathlib import Path\n"
+            "from shared.editable_install import guard_editable_install\n"
+            f"raise SystemExit(bool(guard_editable_install(Path({str(uv_built_venv_root)!r}), "
+            f"allowed_roots=(Path({str(checkout)!r}),))))\n",
+        ],
+        env=child_env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert child.returncode == 0, child.stderr
 
 
 def test_current_interpreter_source_root_reads_a_posix_venv_layout(

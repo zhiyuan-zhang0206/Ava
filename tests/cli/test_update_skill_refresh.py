@@ -11,6 +11,7 @@ derived state.
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -19,6 +20,7 @@ import cli.commands as _cli
 from cli.commands import _update_agent_runner as _runner
 from cli.commands import _update_local as _local
 from shared import host_deploy_state
+from shared.deploy_timing import UV_SYNC_TIMEOUT_S
 
 
 @pytest.fixture
@@ -108,8 +110,15 @@ def test_runner_leg_refreshes_after_checkout(monkeypatch: pytest.MonkeyPatch, re
         def run(self, *_a, **_kw):  # pyright: ignore[reportUnknownParameterType]
             return type("R", (), {"returncode": 0})()
 
+    def sync_verified(
+        _repo: Path,
+        *,
+        timeout_s: float = UV_SYNC_TIMEOUT_S,
+    ) -> subprocess.CompletedProcess[bytes]:
+        return subprocess.CompletedProcess(["uv", "sync"], returncode=0)
+
     monkeypatch.setattr(_runner, "subprocess", _FakeSubprocess())  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_runner, "run_uv_sync", lambda _repo: type("R", (), {"returncode": 0})())  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(_runner, "run_uv_sync_verified", sync_verified)
 
     assert (
         _runner._run_agent_runner_self_update_inner(

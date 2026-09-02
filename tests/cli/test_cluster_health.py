@@ -1956,7 +1956,7 @@ def _write_editable_records(
     site.mkdir(parents=True)
     pth = site / "_editable_impl_ava.pth"
     if pth_target is not None:
-        pth.write_text(pth_target)
+        pth.write_text(f"{pth_target}\n")
     record = site / "ava-0.1.5.dist-info" / "direct_url.json"
     if direct_url is not None:
         record.parent.mkdir(parents=True, exist_ok=True)
@@ -2079,6 +2079,23 @@ def test_editable_install_empty_pth_alerts(_prod_source: Path) -> None:
     assert failure is not None and "(empty)" in failure
 
 
+def test_editable_install_missing_console_script_alerts(_prod_source: Path) -> None:
+    """The read-only probe also catches a half-uninstalled ava launcher."""
+
+    _write_editable_records(
+        _prod_source,
+        pth_target=str(_prod_source.resolve()),
+        direct_url=_legal_direct_url(_prod_source),
+    )
+    interpreter = _prod_source / ".venv" / "bin" / "python"
+    interpreter.parent.mkdir(parents=True, exist_ok=True)
+    interpreter.touch()
+
+    failure = _cluster_health._editable_install_failure()
+
+    assert failure is not None and "editable console script missing" in failure
+
+
 def test_editable_install_unreadable_record_alerts(_prod_source: Path) -> None:
     """A record that cannot be read cannot be verified — alert, never crash."""
     pth, _record = _write_editable_records(_prod_source, pth_target=str(_prod_source.resolve()))
@@ -2098,7 +2115,7 @@ def test_editable_install_failure_alerts_without_rollback_counter(
     never feeds the auto-rollback counter — rolling back code does not fix a
     venv record; the converge guard repairs it (the 2026-08-27 outage class)."""
     detail = (
-        "prod venv editable install names non-allowlisted source: "
+        "prod venv editable install violation: "
         ".../_editable_impl_ava.pth names '.../deleted-worktree'"
     )
     monkeypatch.setattr(_cluster_health, "_editable_install_failure", lambda: detail)

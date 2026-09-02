@@ -4,13 +4,17 @@ import inspect
 import json
 import os
 import stat
+import subprocess
+from collections.abc import Iterable
 from pathlib import Path
 from typing import cast
 
 import pytest
 
-from cli.commands import _converge
+from cli.commands import _converge, _update_uv_sync
 from cli.commands import _converge_frontend_env as _fe_env
+from shared import editable_install
+from shared.deploy_timing import UV_SYNC_TIMEOUT_S
 
 
 @pytest.fixture
@@ -186,7 +190,7 @@ def test_prod_editable_dir_protection_is_host_global_and_sets_read_only_mode(
     source_root = tmp_path / "prod" / "source"
     pth = source_root / ".venv" / "lib" / "python3.12" / "site-packages" / "_editable_impl_ava.pth"
     pth.parent.mkdir(parents=True)
-    pth.write_text(str(source_root))
+    pth.write_text(f"{source_root}\n")
     pth.parent.chmod(0o755)
     monkeypatch.setattr("shared.cluster_drift.prod_source_dir", lambda: source_root)
     monkeypatch.setattr("cli.commands.status._update_in_flight", lambda: False)
@@ -308,6 +312,132 @@ def test_prod_editable_pth_converge_step_leaves_healthy_direct_url_alone(
         step.apply(_ctx(source_root, tmp_path / ".ava"))
 
     assert du.read_text() == original
+
+
+def _prod_editable_gate_step() -> _converge.ConvergeStep:
+    return next(step for step in _converge.CONVERGE_STEPS if step.name == "prod editable exec gate")
+
+
+def _write_healthy_prod_editable_install(source_root: Path) -> Path:
+    site_packages = source_root / ".venv" / "lib" / "python3.12" / "site-packages"
+    pth = site_packages / "_editable_impl_ava.pth"
+    pth.parent.mkdir(parents=True)
+    pth.write_text(f"{source_root}\n")
+    direct_url = site_packages / "ava-0.1.5.dist-info" / "direct_url.json"
+    direct_url.parent.mkdir()
+    direct_url.write_text(json.dumps({"url": source_root.as_uri(), "dir_info": {"editable": True}}))
+    launcher_dir = source_root / ".venv" / "bin"
+    launcher_dir.mkdir(parents=True)
+    (launcher_dir / "python").touch()
+    return launcher_dir / "ava"
+
+
+def test_prod_editable_exec_gate_is_host_global_and_skips_healthy_sync(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A healthy prod venv reaches the import proof without another uv sync."""
+
+    source_root = tmp_path / "prod" / "source"
+    launcher = _write_healthy_prod_editable_install(source_root)
+    launcher.touch()
+    calls: list[tuple[Path, str | None]] = []
+
+    def import_gate(
+        _root: Path,
+        *,
+        allowed_roots: Iterable[Path] = (),
+    ) -> tuple[str, ...]:
+        return ()
+
+    def sync(
+        root: Path,
+        *,
+        timeout_s: float = UV_SYNC_TIMEOUT_S,
+        reinstall_package: str | None = None,
+    ) -> subprocess.CompletedProcess[bytes]:
+        calls.append((root, reinstall_package))
+        return subprocess.CompletedProcess(["uv", "sync"], returncode=0)
+
+    monkeypatch.setattr("shared.cluster_drift.prod_source_dir", lambda: source_root)
+    monkeypatch.setattr(editable_install, "editable_import_gate", import_gate)
+    monkeypatch.setattr(_update_uv_sync, "run_uv_sync", sync)
+
+    step = _prod_editable_gate_step()
+    step.apply(_ctx(source_root, tmp_path / ".ava"))
+
+    assert step.host_global
+    assert calls == []
+
+
+def test_prod_editable_exec_gate_recovers_a_missing_console_script(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The one recovery sync may restore a launcher erased by a half-uninstall."""
+
+    source_root = tmp_path / "prod" / "source"
+    launcher = _write_healthy_prod_editable_install(source_root)
+    calls: list[tuple[Path, str | None]] = []
+    monkeypatch.setattr("shared.cluster_drift.prod_source_dir", lambda: source_root)
+
+    def import_gate(
+        _root: Path,
+        *,
+        allowed_roots: Iterable[Path] = (),
+    ) -> tuple[str, ...]:
+        return ()
+
+    def recover(
+        root: Path,
+        *,
+        timeout_s: float = UV_SYNC_TIMEOUT_S,
+        reinstall_package: str | None = None,
+    ) -> subprocess.CompletedProcess[bytes]:
+        calls.append((root, reinstall_package))
+        if reinstall_package == "ava":
+            launcher.touch()
+        return subprocess.CompletedProcess(["uv", "sync"], returncode=0)
+
+    monkeypatch.setattr(editable_install, "editable_import_gate", import_gate)
+    monkeypatch.setattr(_update_uv_sync, "run_uv_sync", recover)
+
+    _prod_editable_gate_step().apply(_ctx(source_root, tmp_path / ".ava"))
+
+    assert calls == [(source_root, "ava")]
+    assert launcher.exists()
+
+
+def test_prod_editable_exec_gate_rejects_a_fake_successful_recovery(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Converge fails when uv returns zero without restoring the missing launcher."""
+
+    source_root = tmp_path / "prod" / "source"
+    _write_healthy_prod_editable_install(source_root)
+    monkeypatch.setattr("shared.cluster_drift.prod_source_dir", lambda: source_root)
+
+    def import_gate(
+        _root: Path,
+        *,
+        allowed_roots: Iterable[Path] = (),
+    ) -> tuple[str, ...]:
+        return ()
+
+    def fake_success(
+        _root: Path,
+        *,
+        timeout_s: float = UV_SYNC_TIMEOUT_S,
+        reinstall_package: str | None = None,
+    ) -> subprocess.CompletedProcess[bytes]:
+        return subprocess.CompletedProcess(["uv", "sync"], returncode=0)
+
+    monkeypatch.setattr(editable_install, "editable_import_gate", import_gate)
+    monkeypatch.setattr(_update_uv_sync, "run_uv_sync", fake_success)
+
+    with pytest.raises(
+        RuntimeError,
+        match=r"cd .* && uv sync --reinstall-package ava",
+    ):
+        _prod_editable_gate_step().apply(_ctx(source_root, tmp_path / ".ava"))
 
 
 def test_source_tree_guard_is_registered_as_host_global() -> None:
@@ -672,6 +802,15 @@ def test_cmd_converge_unconfigured_returns_zero(
     (seeded_ext / rb._PGVECTOR_SQL).write_text("-- seeded\n")
     monkeypatch.setattr(_ns, "_repo_root", lambda: repo)
     monkeypatch.setattr(_ns, "_roles_or_none", lambda: None)
+
+    def import_gate(
+        _root: Path,
+        *,
+        allowed_roots: Iterable[Path] = (),
+    ) -> tuple[str, ...]:
+        return ()
+
+    monkeypatch.setattr(editable_install, "editable_import_gate", import_gate)
     # host-global wiring (the ava symlink) is prod-install only, so this test must
     # run as the default home, not the suite's ambient tmpfs home.
     monkeypatch.setattr(_converge, "is_default_home", lambda _h: True)  # pyright: ignore[reportUnknownArgumentType]

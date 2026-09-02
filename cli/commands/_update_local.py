@@ -320,7 +320,7 @@ def _checkout_and_sync(
     # 3) uv sync (new code may introduce dependencies)
     print("\n→ uv sync")
     with _stage_telemetry("uv_sync"):
-        sync_result = _update_uv_sync.run_uv_sync(repo)
+        sync_result = _update_uv_sync.run_uv_sync_verified(repo)
     if sync_result.returncode != 0:
         print("  ✗ uv sync failed", file=sys.stderr)
         return _recover_rc(repo, pull_recover, preserve_frontend)
