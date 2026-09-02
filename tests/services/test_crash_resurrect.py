@@ -23,7 +23,7 @@ Covers the pieces that make crash recovery correct and bounded:
 - **the controller**: resurrects eligible corpses (stamping the backoff clock),
   gateway-health gated, 30s-throttled, no-op when disabled.
 
-Launch is stubbed by the autouse `_guard_agent_launch`; `_kill_stale_session` is
+Launch is stubbed by the autouse `_guard_agent_launch`; `_require_released_agent_session` is
 stubbed per-reconcile-test (resurrect_agent shells out to it before relaunch).
 """
 
@@ -274,7 +274,7 @@ class TestTerminationSourceStamping:
             raise RuntimeError("launch failed")
 
         monkeypatch.setattr(agent_launch, "_launch_agent_process", _boom)  # pyright: ignore[reportUnknownArgumentType]
-        monkeypatch.setattr(agent_launch, "_kill_stale_session", lambda _id: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        monkeypatch.setattr(agent_launch, "_require_released_agent_session", lambda _id: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
         monkeypatch.setattr(agent_launch, "_LAUNCH_MAX_RETRIES", 0)  # no retry sleeps
         _open_page(db_conn, aid)
         closed = _capture_page_closed(monkeypatch, agent_launch)
@@ -718,7 +718,7 @@ class TestResurrectClearsSource:
         """The mark is per-death: bringing a corpse back to unclaimed 'idling' clears
         termination_source, so a write site that later forgets to stamp leaves NULL
         (not eligible) instead of a stale 'reaper'."""
-        monkeypatch.setattr("ops.agent_launch._kill_stale_session", lambda _id: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        monkeypatch.setattr("ops.agent_launch._require_released_agent_session", lambda _id: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
         aid = _corpse(db_conn, source="reaper")
         resurrect_agent(aid, resurrected_by="system")
         assert _row(db_conn, aid) == ("idling", None)
@@ -747,7 +747,7 @@ class TestControllerReconcile:
         monkeypatch.setattr(settings.daemon, "auto_resurrect_enabled", True)
         monkeypatch.setattr(settings.daemon, "auto_resurrect_backoff_seconds", _BACKOFF)
         monkeypatch.setattr(cr, "_gateway_healthy", lambda: True)
-        monkeypatch.setattr("ops.agent_launch._kill_stale_session", lambda _id: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        monkeypatch.setattr("ops.agent_launch._require_released_agent_session", lambda _id: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
         monkeypatch.setattr(
             agent_launch,
             "_confirm_launch_or_force_terminated",
@@ -1003,7 +1003,7 @@ class TestBootRevivePass:
         monkeypatch.setattr(settings.daemon, "auto_resurrect_enabled", True)
         monkeypatch.setattr(settings.daemon, "auto_resurrect_backoff_seconds", _BACKOFF)
         monkeypatch.setattr(cr, "_gateway_healthy", lambda: True)
-        monkeypatch.setattr("ops.agent_launch._kill_stale_session", lambda _id: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        monkeypatch.setattr("ops.agent_launch._require_released_agent_session", lambda _id: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
         monkeypatch.setattr(
             agent_launch,
             "_confirm_launch_or_force_terminated",

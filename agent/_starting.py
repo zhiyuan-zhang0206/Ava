@@ -138,11 +138,9 @@ def claim_agent_row(agent_id: int, *, restart_command_id: int | None = None) -> 
                 f"(rowcount={cur.rowcount}); another process or lifecycle operation won the race."
             )
         from agent.lifecycle_observe import observe_process_admission
+        from agent.session_admission import publish_admitted_session
 
-        if restart_command_id is not None:
-            from agent.session_admission import publish_admitted_session
-
-            publish_admitted_session(incarnation)
+        publish_admitted_session(incarnation)
         observe_process_admission(conn, incarnation)
         conn.commit()
         bind_process_incarnation(incarnation)
