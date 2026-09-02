@@ -31,7 +31,8 @@ jobs:
           mkdir -p proof
           git rev-parse HEAD > proof/head-sha.txt
           timeout 360 uv run pytest tests/ops/test_cold_lifecycle.py tests/ops/test_lifecycle_recovery.py tests/agent/test_lifecycle_intent.py tests/agent/test_lifecycle_apply.py tests/agent/test_hosted_lifecycle.py tests/agent/test_restart_process_crash.py -q --junitxml=proof/head.xml
-          git show 981a3bbe8:ops/agent_wake.py > ops/agent_wake.py
+          git fetch origin 981a3bbe8ddeb20226420d41e52d49990604b679
+          git show 981a3bbe8ddeb20226420d41e52d49990604b679:ops/agent_wake.py > ops/agent_wake.py
           set +e
           timeout 120 uv run pytest tests/ops/test_cold_lifecycle.py::test_watchdog_and_final_pending_work_cas_refuse_failed_restart_chat -q --junitxml=proof/baseline.xml
           result=$?
