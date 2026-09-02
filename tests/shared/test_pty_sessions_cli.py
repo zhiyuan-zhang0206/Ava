@@ -24,6 +24,7 @@ import threading
 import time
 from collections.abc import Iterator
 from pathlib import Path
+from unittest.mock import Mock
 
 import psutil
 import pytest
@@ -223,6 +224,40 @@ def _make_session(home: Path, name: str, *, log_cap: int = 1024) -> PtySession:
     )
 
 
+@pytest.mark.parametrize("starttime", [None, 123])
+@pytest.mark.parametrize("observer", ["cli", "host"])
+def test_zombie_is_not_a_live_pty_session(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    starttime: int | None,
+    observer: str,
+) -> None:
+    """Both epoch and Linux tick identities must reject a matching zombie."""
+    session = _make_session(tmp_path, "ava-test-zombie")
+    session.record = SessionRecord(
+        pid=session.pid,
+        create_time=0.0,
+        cmd="",
+        cwd="",
+        started_at=0.0,
+        starttime=starttime,
+    )
+    proc = Mock()
+    proc.is_running.return_value = True
+    proc.status.return_value = psutil.STATUS_ZOMBIE
+    proc.create_time.return_value = 0.0
+    monkeypatch.setattr(psutil, "Process", lambda _pid: proc)
+    monkeypatch.setattr(SessionRecord, "identifies", lambda _rec, _pid: True)
+    try:
+        observed = (
+            pty_cli._record_alive(session.record) if observer == "cli" else session.pid_matches()
+        )
+        assert not observed
+    finally:
+        os.close(session.master_fd)
+        os.close(session._log_fd)
+
+
 def test_begin_finish_has_single_winner(tmp_path: Path) -> None:
     """Concurrent teardown claims must have exactly one winner: a double
     winner would double-close the master fd (the _finish race class)."""
@@ -356,7 +391,18 @@ def test_crashed_host_is_swept_lazily(sessions: Path) -> None:
     rec = _record(home, name)
     assert rec is not None
     os.kill(host_pid, signal.SIGKILL)
-    assert _wait(lambda: not psutil.pid_exists(rec.pid)), "shell must HUP when its host dies"
+
+    def shell_exited() -> bool:
+        try:
+            # A zombie cannot execute; init's reap timing is not the PTY contract.
+            return psutil.Process(rec.pid).status() == psutil.STATUS_ZOMBIE
+        except psutil.NoSuchProcess:
+            return True
+
+    assert _wait(shell_exited), (
+        f"shell must exit when its host dies: pid={rec.pid}, "
+        f"status={psutil.Process(rec.pid).status()}"
+    )
     assert not _has(home, name), "a dead shell reads dead regardless of the leftover record"
     assert _run_cli(home, "list").stdout.strip() == ""
     assert not record_path(name).exists(), "list must sweep the dead record"
