@@ -314,6 +314,12 @@ def main() -> None:  # noqa: PLR0915 — isolated CI native lifetimes, always re
                     require(refused.returncode != 0, "live predecessor was accepted")
                     require(read_crontab(until) == cron, "refusal changed native launcher")
                     wait_endpoint(old_context, projection)
+                except subprocess.TimeoutExpired as exc:
+                    stderr = exc.stderr or b""
+                    raise AssertionError(
+                        "live-predecessor refusal timed out: "
+                        + stderr.decode(errors="replace")[-12000:]
+                    ) from exc
                 finally:
                     if predecessor.stdin is None:
                         raise AssertionError("predecessor lacks its requested pipe")

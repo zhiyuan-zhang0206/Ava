@@ -114,7 +114,7 @@ jobs:
         run: uv run --locked --no-dev python scripts/prepare_otel_release.py "$RUNNER_TEMP/prepare/otel-input"
       - name: Type-check retained collector integration
         shell: bash
-        run: uv run --locked pyright scripts/prepare_otel_release.py scripts/prove_runtime_otel.py scripts/prove_runtime_plugins.py scripts/prove_release_inventory.py scripts/prepare_plugin_fixture.py shared/runtime_plugins.py shared/runtime_prepare.py shared/runtime_interpreter.py shared/paths.py cli/commands/_otel_collector.py cli/commands/_release_inventory.py
+        run: uv run --locked pyright scripts/prepare_otel_release.py scripts/prove_runtime_otel.py scripts/prove_runtime_plugins.py scripts/prove_release_inventory.py scripts/prepare_plugin_fixture.py scripts/prove_updater_bootstrap.py shared/runtime_plugins.py shared/runtime_prepare.py shared/runtime_interpreter.py shared/paths.py shared/updater_handoff.py cli/commands/_otel_collector.py cli/commands/_release_inventory.py cli/commands/_update_bootstrap.py cli/commands/_update_agent_runner.py
       - name: Real offline prepare, retained interpreter and failure isolation
         shell: bash
         run: |
