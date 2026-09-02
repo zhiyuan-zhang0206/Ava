@@ -27,9 +27,14 @@ the same way as insertion, so retries compare the same immutable payload.
 
 ## Rollout boundary
 
-This reader foundation does not enable any producer. Older binaries reject the
-new source formats, so producers must remain disabled until an explicit protocol
-and consumer-convergence gate is deployed. Never wrap external provenance in
+This reader foundation does not enable any producer. HTTP/RPC source validators
+and initiating chat/lifecycle write helpers reject new formats actionably before
+enqueueing, including manual and internal/plugin supplied sources. Storage tests
+exercise the future admitted path with the fence explicitly replaced in that
+test only; independent real-write tests prove today's fence inserts zero rows.
+Older binaries reject new formats, so writers must remain fenced until an
+explicit target-runtime protocol and consumer-convergence gate is deployed.
+Never wrap external provenance in
 `system:*` or `agent:*` to bypass an old validator. A caller field accepted by an
 HTTP schema but discarded before persistence is not structured audit storage.
 

@@ -4,7 +4,7 @@ import pytest
 from pydantic import ValidationError
 
 from shared.caller_identity import CallerIdentity, caller_payload
-from shared.envelope import validate_source, wrap_inbound
+from shared.envelope import validate_source, validate_writable_source, wrap_inbound
 
 
 @pytest.mark.parametrize("subject", ["codex", "claude_code", "mcp"])
@@ -83,3 +83,15 @@ def test_reserved_metadata_cannot_claim_verified_identity() -> None:
             "external_agent:codex",
             {"caller_identity": {"kind": "external_agent", "subject": "codex", "verified": True}},
         )
+
+
+@pytest.mark.parametrize("source", ["external_agent:codex:run-42", "unknown:cli"])
+def test_reader_support_is_not_permission_to_enqueue(source: str) -> None:
+    validate_source(source)
+    with pytest.raises(ValueError, match="target runtime protocol"):
+        validate_writable_source(source)
+
+
+@pytest.mark.parametrize("source", ["user", "agent:405", "system:update", "shell:123"])
+def test_existing_writers_remain_compatible(source: str) -> None:
+    validate_writable_source(source)

@@ -19,6 +19,7 @@ import psycopg
 from shared.audit_events import insert_event_log
 from shared.caller_identity import caller_payload
 from shared.db import fetch_one, publish_inbound_wake
+from shared.envelope import reject_unnegotiated_caller
 
 
 class ClientMessageConflictError(ValueError):
@@ -118,6 +119,7 @@ def insert_chat_inbound_once(
     client_message_id: str | None,
 ) -> ChatInboundReceipt:
     """Insert one logical chat, or return its existing same-key inbound id."""
+    reject_unnegotiated_caller(source)
     payload = caller_payload(source, payload)
     encoded_payload = json.dumps(payload) if payload else None
     with db.cursor() as cur:
