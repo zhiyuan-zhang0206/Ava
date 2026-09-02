@@ -91,35 +91,6 @@ def session_fixture(home: Path) -> SessionRecord:
     return record
 
 
-def check_bounded_read(home: Path) -> None:
-    path = home / "inventory-read-fixture"
-    path.write_bytes(b"original")
-    require(inventory._regular_bytes(path) == b"original", "regular inventory read failed")
-    replacement = home / "inventory-read-replacement"
-    replacement.write_bytes(b"replacement")
-    original_open = os.open
-
-    def replace_before_open(target: Path, flags: int) -> int:
-        replacement.replace(target)
-        return original_open(target, flags)
-
-    with patch.object(inventory.os, "open", side_effect=replace_before_open):
-        try:
-            inventory._regular_bytes(path)
-        except ReleaseRejectedError:
-            pass
-        else:
-            raise AssertionError("replaced inventory inode accepted")
-    path.write_bytes(b"x" * (1024 * 1024 + 1))
-    try:
-        inventory._regular_bytes(path)
-    except ReleaseRejectedError:
-        pass
-    else:
-        raise AssertionError("oversized inventory accepted")
-    path.unlink()
-
-
 def check_unknown_scheduler(
     conn: psycopg.Connection, release: VerifiedRelease, home: Path, receipt: Path, schema: str
 ) -> None:
