@@ -176,6 +176,53 @@ def test_run_capture_failure_carries_the_child_output(tmp_path: Path) -> None:
     assert "boom-detail" in message
 
 
+def test_run_capture_stop_path_carries_the_child_output(tmp_path: Path) -> None:
+    """An interrupted capture must still name what the child emitted before it
+    was stopped — the stop and six-hour-bound branches share this shape."""
+    command = [
+        sys.executable,
+        "-c",
+        "import sys, time; print('partial-out', file=sys.stderr); sys.stderr.flush(); time.sleep(30)",
+    ]
+    stop = threading.Event()
+    timer = threading.Timer(0.4, stop.set)
+    timer.start()
+    try:
+        with pytest.raises(BaseCandidateError) as caught:
+            base_candidate._run_capture(
+                command,
+                env={"PGPASSWORD": "x"},
+                owner=tmp_path / "owner.json",
+                stop=stop,
+            )
+    finally:
+        timer.cancel()
+    message = str(caught.value)
+    assert "was stopped" in message
+    assert "partial-out" in message
+
+
+def test_verify_candidate_failure_carries_the_child_output(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The pg_verifybackup failure path must carry its stdout AND stderr tails —
+    its report is stdout-only, so a DEVNULL'd stdout would hide it."""
+    fake = tmp_path / "pg_verifybackup"
+    fake.write_text("#!/bin/sh\nprintf 'verify-out\\n'\nprintf 'verify-err\\n' >&2\nexit 2\n")
+    fake.chmod(0o755)
+
+    def fake_pg_tool(_name: str) -> Path:
+        return fake
+
+    monkeypatch.setattr(base_candidate, "pg_tool", fake_pg_tool)
+    with pytest.raises(BaseCandidateError) as caught:
+        base_candidate._verify_candidate(tmp_path / "backup", threading.Event())
+    message = str(caught.value)
+    assert "exited 2" in message
+    assert "verify-out" in message
+    assert "verify-err" in message
+
+
 # ─── pg_hba replication-rule preflight ───────────────────────────────────────
 
 

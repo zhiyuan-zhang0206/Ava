@@ -9,8 +9,8 @@ from shared.log import logger
 
 # Message persistence is scoped to BaseCandidateError: its raise sites carry the
 # static, secret-free failure vocabulary of the candidate pipeline (exit codes +
-# bounded child stderr — credentials ride env vars, never argv), so the text is
-# safe to durably record. Foreign exception types stay type-only: their messages
+# bounded child stdout/stderr — credentials ride env vars, never argv), so the
+# text is safe to durably record. Foreign exception types stay type-only: their messages
 # can carry credential-bearing conninfo and are not worth the redaction risk
 # (2026-08-30: "BaseCandidateError" with no message was the entire record while
 # the real FATAL sat in a DEVNULL'd pipe).
