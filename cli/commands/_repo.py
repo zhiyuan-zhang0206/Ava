@@ -36,6 +36,7 @@ from shared.config import settings
 from shared.deploy_timing import GATEWAY_PREFLIGHT_BUDGET_S
 from shared.machine import MachineRoles
 from shared.platform_backend import get_backend
+from shared.session_env import frontend_toolchain_env
 
 ServiceSpec = _spec.ServiceSpec
 build_services = _spec.build_services
@@ -89,7 +90,13 @@ def _ensure_frontend_deps(repo: Path) -> None:
     print(f"  · frontend deps {reason}, running npm ci (~30-60s)")
     # On Windows `npm` is `npm.cmd`, which CreateProcess won't resolve from a bare
     # "npm" argv — run it through the shell so the .cmd shim is found.
-    subprocess.run(["npm", "ci"], cwd=str(fe), check=True, shell=get_backend().npm_shell_flag())
+    subprocess.run(
+        ["npm", "ci"],
+        cwd=str(fe),
+        check=True,
+        shell=get_backend().npm_shell_flag(),
+        env=frontend_toolchain_env(),
+    )
     stamp.write_text(want)
 
 

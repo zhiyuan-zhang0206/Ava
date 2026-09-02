@@ -13,6 +13,24 @@ import os
 import pytest
 
 from shared import session_env
+from shared.platform import IS_WINDOWS
+
+
+@pytest.mark.skipif(IS_WINDOWS, reason="POSIX toolchain paths are injected only on POSIX")
+@pytest.mark.parametrize("shell_path", ["/usr/bin:/bin", "/bin"])
+def test_frontend_toolchain_path_is_independent_of_shell_profile(shell_path: str) -> None:
+    """The Node locations are injected even when a remote shell exports only system dirs."""
+    assert session_env.frontend_toolchain_path(shell_path).split(":")[:4] == [
+        "/opt/homebrew/bin",
+        "/usr/local/bin",
+        "/usr/bin",
+        "/bin",
+    ]
+
+
+def test_venv_activation_prefix_omits_an_empty_path_entry() -> None:
+    """An empty login-shell PATH does not add the working directory to lookup."""
+    assert "${PATH:+:$PATH}" in session_env.venv_activation_prefix()
 
 
 def test_forward_env_dict_drops_cluster_scope(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -35,7 +53,7 @@ def test_forward_env_dict_drops_cluster_scope(monkeypatch: pytest.MonkeyPatch) -
     env = session_env.forward_env_dict()
     assert env["AVA_HOME"] == "/tmp/ava-home"  # noqa: S108 — literal, never opened
     assert env["AVA_GATEWAY_URL"] == "http://gw:9000"
-    assert env["PATH"].endswith("/usr/bin")  # whole-env copy keeps PATH (venv-prefixed)
+    assert "/usr/bin" in env["PATH"]  # whole-env copy keeps PATH (venv-prefixed)
     assert "AVA_DB_URL" not in env
     assert "AVA_REDIS_URL" not in env
     assert "DEEPSEEK_API_KEY" not in env

@@ -44,6 +44,7 @@ pytestmark = [
 
 _EXPECTED_BIN = str(repo_root() / ".venv" / "bin")
 _EXPECTED_VENV = str(repo_root() / ".venv")
+_EXPECTED_TOOLCHAIN = ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"]
 
 
 def _probe_cmd(out: Path) -> str:
@@ -86,6 +87,7 @@ def test_launch_path_activates_venv(unit_home: Path) -> None:
     try:
         env = _read(out)
         assert _path0(env) == _EXPECTED_BIN, env
+        assert env["PATH"].split(":")[1:5] == _EXPECTED_TOOLCHAIN, env
         assert env.get("VE") == _EXPECTED_VENV, env
     finally:
         backend.kill_session("venvcheck-launch", graceful=False)
