@@ -30,7 +30,7 @@ from pathlib import Path
 import psycopg
 import pytest
 from psycopg.conninfo import conninfo_to_dict
-from psycopg_pool import AsyncConnectionPool
+from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
 from cli.commands._pgbouncer import pgbouncer_bin
 from tests._containers import _free_port, _wait_port, postgres
@@ -263,6 +263,24 @@ def test_write_transaction_repairs_connect_and_watcher_writes(
         delete_watcher(agent_id, 7)
 
 
+def test_schedule_provision_repairs_connect_write_on_poisoned_backend(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """R3 Rule A schedule provisioning declares direct writes read-write."""
+    from cli.commands.schedules import cmd_schedules_provision
+    from shared import config
+
+    with postgres() as pg_url, _pgbouncer_in_front(pg_url) as pooled:
+        monkeypatch.setattr(config.settings.data_plane, "db_url", pooled)
+        _poison_pooled_backends(pooled)
+
+        assert cmd_schedules_provision() == 0
+
+        with psycopg.connect(pg_url) as verify:
+            row = verify.execute("SELECT count(*) FROM schedules").fetchone()
+        assert row is not None and int(row[0]) > 0
+
+
 def test_write_transaction_repairs_pooled_borrow_write(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -293,6 +311,37 @@ def test_write_transaction_repairs_pooled_borrow_write(
                 (agent_id, 7),
             ).fetchone()
         assert row is None
+
+
+def test_session_touch_repairs_pooled_borrow_on_poisoned_backend() -> None:
+    """R3 Rule B session writes declare a raw pool borrow read-write first."""
+    from gateway.session_store import touch_session
+
+    with postgres() as pg_url, _pgbouncer_in_front(pg_url) as pooled:
+        with psycopg.connect(pg_url) as setup:
+            setup.execute(
+                "INSERT INTO web_sessions (id, expires_at) VALUES (%s, now() + interval '1 hour')",
+                ("pgbouncer-session-touch",),
+            )
+        _poison_pooled_backends(pooled)
+        db_pool = ConnectionPool(
+            pooled,
+            min_size=1,
+            max_size=2,
+            open=True,
+            kwargs={"prepare_threshold": None},
+        )
+        try:
+            touch_session(db_pool, "pgbouncer-session-touch")
+        finally:
+            db_pool.close()
+
+        with psycopg.connect(pg_url) as verify:
+            row = verify.execute(
+                "SELECT last_seen_at FROM web_sessions WHERE id = %s",
+                ("pgbouncer-session-touch",),
+            ).fetchone()
+        assert row is not None and row[0] is not None
 
 
 def test_async_write_transaction_repairs_async_pool_write() -> None:
