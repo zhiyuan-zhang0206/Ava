@@ -2359,7 +2359,10 @@ export interface paths {
          * @description Partial-update a schedule — only the fields present in the body change. A
          *     script/command change is snapshotted into schedule_versions and, if the
          *     schedule is enabled, applied immediately (the session is relaunched on the new
-         *     script). 400 on a script syntax error, 404 if missing, 409 on a name clash.
+         *     script). An enabled-flag value change also converges immediately, so disable
+         *     reaps the session and enable creates it; a same-value update leaves the
+         *     session intact. 400 on a script syntax error, 404 if missing, 409 on a name
+         *     clash.
          */
         put: operations["update_schedule_api_schedules__schedule_id__put"];
         post?: never;

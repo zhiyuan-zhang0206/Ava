@@ -144,8 +144,9 @@ def cmd_schedules_update(
     Partial update — only the flags passed change (PUT with an exclude-unset
     body). A script/command change is snapshotted into `schedule_versions` and,
     when the schedule is enabled, the session is relaunched onto the new script
-    immediately. --enable / --disable set the desired state (the same field
-    `start`/`stop` flip, without the immediate sync semantics differing)."""
+    immediately. --enable / --disable converge when they change desired state:
+    the same field `start`/`stop` flip is paired with session reaping or
+    creation before the command returns, while a same-value update is a no-op."""
     from shared.http_dial import put as dial_put
 
     schedule_id = _resolve_id(identifier)

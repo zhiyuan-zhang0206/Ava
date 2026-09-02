@@ -71,6 +71,7 @@ _BREAKER_MAX = 5
 _BACKOFF_BASE_S = 2.0
 _BACKOFF_CAP_S = 60.0
 _STABLE_S = 60.0
+_PTY_FAILURE_LOG_INTERVAL_S = 60.0
 
 # Repo root (gateway/.. == <repo>/) — the cwd the runner launches from, so its
 # relative `.venv/bin/python` resolves into this checkout's venv.
@@ -90,6 +91,14 @@ class ScheduleManager:
         # schedule_id -> (launch_count, next-eligible monotonic time). launch_count
         # climbs on each (re)launch and resets after _STABLE_S of uptime.
         self._backoff: dict[int, tuple[int, float]] = {}
+        # Enabled sessions whose stale same-name survivor resisted a reap. A
+        # live session normally means adopt, but these need another official
+        # reap before their replacement may launch.
+        self._reap_retries: set[int] = set()
+        # schedule id -> (last error-log monotonic time, suppressed failures).
+        # A D-state survivor can resist each five-second reconcile forever; log
+        # the first failure and periodic summaries rather than flooding ERROR.
+        self._reap_failure_logs: dict[int, tuple[float, int]] = {}
         # Serializes the reconcile tick against API-driven control ops (restart),
         # which run on separate threads via asyncio.to_thread and both touch
         # backend + _backoff.
@@ -128,7 +137,10 @@ class ScheduleManager:
     def _sync_blocking(self, schedule_id: int) -> None:
         with self._lock:
             self._backoff.pop(schedule_id, None)
-            self._kill(schedule_id)
+            if not self._reap(schedule_id):
+                if schedule_id in self._load_enabled():
+                    self._reap_retries.add(schedule_id)
+                return
             if schedule_id in self._load_enabled():
                 self._launch(schedule_id)
 
@@ -169,12 +181,28 @@ class ScheduleManager:
         live = self._live_ids()  # {id}
         status = self._load_enabled()  # {id: status}
         enabled = set(status)
+        known = live | enabled
+        self._reap_retries.intersection_update(known)
+        self._reap_failure_logs = {
+            schedule_id: state
+            for schedule_id, state in self._reap_failure_logs.items()
+            if schedule_id in known
+        }
         now = time.monotonic()
+
+        # A launch can find a same-name session after liveness initially said it
+        # was absent. If the official reap refused it, this set makes the next
+        # reconcile retry rather than adopting the stale survivor forever.
+        retrying = live & self._reap_retries
+        for sid in retrying:
+            if self._reap(sid):
+                live.remove(sid)
 
         # Kill sessions we no longer want (disabled / deleted).
         for sid in live - enabled:
-            self._kill(sid)
             self._backoff.pop(sid, None)
+            if sid not in retrying:
+                self._reap(sid)
 
         # (Re)launch enabled schedules with no live session — unless the row is in
         # a terminal status that must not be auto-launched:
@@ -277,7 +305,9 @@ class ScheduleManager:
         # same-name survivor is by definition stale.
         if name in backend.list_sessions():
             _log.warning("schedule %s: reaping stale session %s", schedule_id, name)
-            backend.kill_session(name)
+            if not self._reap(schedule_id):
+                self._reap_retries.add(schedule_id)
+                return
         # _launch is only reached for a schedule with no live session, so any
         # in-progress run row at this point belongs to a dead process (the
         # reaped survivor, an externally killed runner, a crash that skipped
@@ -327,6 +357,7 @@ class ScheduleManager:
                 name,
             )
             return
+        self._reap_retries.discard(schedule_id)
         _log.info("schedule %s launched (session %s)", schedule_id, name)
         # A successful launch clears any stale breaker-trip text: the row was
         # left in 'error' by a prior crash loop, then recovered via an explicit
@@ -335,8 +366,53 @@ class ScheduleManager:
         # all 4 schedules had stale text after a rollout crash-loop).
         self._set_status(schedule_id, "running", clear_last_error=True)
 
-    def _kill(self, schedule_id: int) -> None:
-        get_shell_backend().kill_session(session_name(f"schedule-{schedule_id}"))
+    def _log_reap_failure(
+        self, schedule_id: int, name: str, failure: str, *, exc_info: bool = False
+    ) -> None:
+        """Log an unresolved reap at most once per schedule per cooldown."""
+        now = time.monotonic()
+        prior = self._reap_failure_logs.get(schedule_id)
+        if prior is not None:
+            last_logged, suppressed = prior
+            if now - last_logged < _PTY_FAILURE_LOG_INTERVAL_S:
+                self._reap_failure_logs[schedule_id] = (last_logged, suppressed + 1)
+                return
+        else:
+            suppressed = 0
+        self._reap_failure_logs[schedule_id] = (now, 0)
+        summary = "" if suppressed == 0 else f" (suppressed {suppressed} repeats)"
+        _log.error(
+            "schedule %s: PTY reap %s for session %s%s",
+            schedule_id,
+            failure,
+            name,
+            summary,
+            exc_info=exc_info,
+        )
+
+    def _reap(self, schedule_id: int) -> bool:
+        """Reap one schedule PTY through its identity-checked backend.
+
+        The backend's success result means the session is confirmed gone. Do
+        not record a stopped schedule or close its in-progress run before that
+        confirmation: disabled rows with a surviving PTY remain in the
+        reconcile set and receive another official reap attempt next tick.
+        """
+        name = session_name(f"schedule-{schedule_id}")
+        try:
+            reaped, mode = get_shell_backend().kill_session(name)
+        except Exception:
+            self._log_reap_failure(schedule_id, name, "raised", exc_info=True)
+            return False
+        if not reaped:
+            # SessionBackend's false verdict means the session survived its
+            # own identity-aware kill. Keep metadata truthful until reconcile
+            # can try the same official path again.
+            self._set_status(schedule_id, "running")
+            self._log_reap_failure(schedule_id, name, "survived")
+            return False
+        self._reap_retries.discard(schedule_id)
+        self._reap_failure_logs.pop(schedule_id, None)
         self._set_status(schedule_id, "stopped")
         # The killed process can never close its own run rows (the kill chain
         # is SIGKILL — no handler runs); close them now so a stop/restart/
@@ -344,6 +420,8 @@ class ScheduleManager:
         # P2-2). The next reconcile sweep is the backstop for kills that do
         # not route through here.
         self._close_null_runs(schedule_id)
+        _log.info("schedule %s: PTY session %s reaped (%s)", schedule_id, name, mode)
+        return True
 
     def _trip_breaker(self, schedule_id: int, count: int) -> None:
         # Only write once per trip: flip to error the first time we cross the ceiling.
