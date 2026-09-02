@@ -235,13 +235,10 @@ def agent_spawn_env_dict() -> dict[str, str]:
 def _agent_interpreter() -> tuple[str, str, str]:
     """The venv python that runs the agent, its VIRTUAL_ENV root, and its bin dir.
 
-    Launch execs this interpreter directly instead of `uv run python`: the
-    `uv run` parent stayed resident (~17MB, no exec-replace) for every agent, so
-    dropping it saves one process + that RSS per agent. The venv is at
-    `<checkout>/.venv` — populated by `uv sync`, which `ava start` / `ava cluster update`
-    already run on every bring-up / upgrade, so the only thing lost by not going
-    through `uv run` is its lock-vs-venv consistency re-check, which those flows
-    perform anyway.
+    Launch execs the current installed runtime's absolute interpreter; editable
+    development retains `<checkout>/.venv`. No child re-resolves a moving release
+    selector and no launch performs a dependency sync. Installation and admission
+    belong to the deployment workflow, not this process factory.
 
     Callers reproduce what `uv run` used to inject into the child env — the venv
     root as VIRTUAL_ENV and its bin dir prepended to PATH — so the agent's own
@@ -249,7 +246,9 @@ def _agent_interpreter() -> tuple[str, str, str]:
     agent shell commands via a non-login `sh -c` that inherits this env: bare
     `python` / `ava` in agent commands must keep resolving into the venv.
     """
-    venv = repo_root() / ".venv"
+    from shared.runtime_interpreter import runtime_venv
+
+    venv = runtime_venv()
     bindir = venv / ("Scripts" if IS_WINDOWS else "bin")
     python = bindir / ("python.exe" if IS_WINDOWS else "python")
     return str(python), str(venv), str(bindir)
