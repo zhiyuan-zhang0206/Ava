@@ -15,8 +15,9 @@
 > 2026-08);
 > the per-agent lease renewer and the lease-zombie reaper remain process-mode
 > machinery, gated off a hosted cluster with the restarter. The flag defaults
-> to `process` and the service is gated off the roster until a cluster opts
-> in. Migration step 3's remaining deletions stay future work.
+> to `hosted` (2026-09-02) and the service is on the start roster by
+> default; `process` is the explicit rollback opt-out. Migration step 3's
+> remaining deletions stay future work.
 >
 > One Phase 1 property was NOT achieved and is worth knowing before a soak: the
 > host builds ONE compiled graph per process, because `build_graph` mutates

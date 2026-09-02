@@ -101,11 +101,14 @@ class TestSelectIdleAgents:
         assert float(selected[aid]) == pytest.approx(400 / 60.0, abs=0.5)  # pyright: ignore[reportUnknownMemberType]
 
     def test_idling_without_a_live_lease_is_not_selected(
-        self, pool: ConnectionPool, db_conn: psycopg.Connection
+        self, pool: ConnectionPool, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """R1 (Task #1021): an idling row whose lease expired (or was never
         granted) is a zombie the reaper is collecting — nudging it would only
-        keep a corpse busy. The daemon must not select it."""
+        keep a corpse busy. The daemon must not select it. (Process-shape
+        semantics: hosted is the default since 2026-09, and the hosted clause
+        deliberately drops this guard.)"""
+        monkeypatch.setattr("ops.runner_mode.runner_mode", lambda: "process")
         from datetime import UTC, datetime, timedelta
 
         aid = _make_idle(db_conn, status_changed_s_ago=400)
@@ -136,11 +139,13 @@ class TestSelectIdleAgents:
         assert aid in _selected(pool)
 
     def test_preclaim_idling_row_is_not_selected(
-        self, pool: ConnectionPool, db_conn: psycopg.Connection
+        self, pool: ConnectionPool, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """A just-spawned idling row has no process or lease yet. It is not an
         idle process to nudge; launch confirmation and the dead-birth reaper own
-        that interval."""
+        that interval. (Process-shape semantics, pinned: hosted is the default
+        since 2026-09.)"""
+        monkeypatch.setattr("ops.runner_mode.runner_mode", lambda: "process")
         aid = _make_idle(db_conn, status_changed_s_ago=400)
         with db_conn.cursor() as cur:
             cur.execute(

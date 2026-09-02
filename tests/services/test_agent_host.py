@@ -652,9 +652,12 @@ class TestGateFailsClosed:
 
         return next(s for s in build_services() if s.session == "agent-host")
 
-    def test_process_mode_gates_the_host_out(self) -> None:
+    def test_process_mode_gates_the_host_out(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from ops.spec import _gate_reason
+        from shared.config import settings
 
+        # Explicit process override: hosted is the default since 2026-09.
+        monkeypatch.setattr(settings.daemon, "runner_mode", "process")
         assert _gate_reason(self._spec()) == "disabled (AVA_RUNNER_MODE is process)"
 
     def test_hosted_mode_lets_it_start(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -686,12 +689,14 @@ class TestGateFailsClosed:
         monkeypatch.setattr(spec_mod.settings, "daemon", _Exploding())
         assert spec_mod._gate_reason(self._spec()) == "disabled (AVA_RUNNER_MODE is process)"
 
-    def test_the_daemon_refuses_in_process_mode(self) -> None:
+    def test_the_daemon_refuses_in_process_mode(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """The second line of the same defence: a hand-started daemon on a
         process cluster exits instead of double-serving agents that already have
         processes of their own."""
         from services.agent_host.daemon import _refuse_in_process_mode
+        from shared.config import settings
 
+        monkeypatch.setattr(settings.daemon, "runner_mode", "process")
         with pytest.raises(SystemExit) as exc:
             _refuse_in_process_mode()
         assert exc.value.code == 0
