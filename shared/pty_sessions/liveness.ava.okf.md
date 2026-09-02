@@ -13,6 +13,8 @@ A matching PID/start-time is not sufficient for liveness: both the record
 reader (`cli._record_alive`) and host (`PtySession.pid_matches`) reject
 `STATUS_ZOMBIE`. A zombie cannot execute, even when its parent or init has not
 reaped its PID yet. Start-time identity still rejects recycled PIDs.
+The lazy record sweep uses the same terminal observation: a confirmed zombie's
+record and socket can be removed; a running or unreadable shell is retained.
 
 Crash tests require the shell/child to be gone or zombie; running and
 unreadable survivors still fail. PID disappearance alone measures the parent's
