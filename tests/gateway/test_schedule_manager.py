@@ -64,7 +64,7 @@ def pool() -> Iterator[ConnectionPool[psycopg.Connection]]:
 
 
 @pytest.fixture
-def fake_session(monkeypatch: pytest.MonkeyPatch) -> tuple[_FakeBackend, list[int]]:
+def fake_session(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> tuple[_FakeBackend, list[int]]:
     from shared import start_serving
     from shared.pty_sessions import allocation_freeze
 
@@ -85,7 +85,9 @@ def fake_session(monkeypatch: pytest.MonkeyPatch) -> tuple[_FakeBackend, list[in
     monkeypatch.setattr(sm, "get_shell_backend", lambda: backend)
     monkeypatch.setattr(_FakeBackend, "new_session", _fake_new_session)
     monkeypatch.setattr(allocation_freeze, "current_generation", lambda: None)
-    monkeypatch.setattr(start_serving, "is_serving", lambda: True)
+    monkeypatch.setattr(start_serving, "state_path", lambda: tmp_path / "start-serving.json")
+    generation = start_serving.begin_start()
+    assert start_serving.mark_serving(generation) is True
     return backend, launched
 
 
@@ -235,8 +237,7 @@ def test_reconcile_defers_enabled_launch_until_the_host_is_serving(
     from shared import start_serving
 
     _backend, launched = fake_session
-    serving = False
-    monkeypatch.setattr(start_serving, "is_serving", lambda: serving)
+    start_serving.clear_serving()
     sid = _insert(db_conn, "await-serving")
     manager = sm.ScheduleManager(pool)
 
@@ -245,7 +246,8 @@ def test_reconcile_defers_enabled_launch_until_the_host_is_serving(
     assert launched == []
     assert _status(db_conn, sid) == "stopped"
 
-    serving = True
+    generation = start_serving.begin_start()
+    assert start_serving.mark_serving(generation) is True
     manager._reconcile()
 
     assert launched == [sid]

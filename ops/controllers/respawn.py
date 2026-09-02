@@ -247,6 +247,8 @@ def _revive_local_dead_running_idling(
 
     Returns the ids revived this pass (for the caller's log line).
     """
+    from shared import start_serving
+
     revived: list[int] = []
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
@@ -278,8 +280,12 @@ def _revive_local_dead_running_idling(
         elif identity is not AgentProcessIdentity.GONE:
             continue  # OWNED (alive) or UNREADABLE (no evidence of death) — safety floor
         try:
-            if revive_agent(agent_id, pid):
-                revived.append(agent_id)
+            with start_serving.recovery_permitted() as permitted:
+                if not permitted:
+                    _log.debug("[ops.respawn] revive pass deferred until this host is serving")
+                    break
+                if revive_agent(agent_id, pid):
+                    revived.append(agent_id)
         except Exception as exc:
             _log.error("[ops.respawn] revive agent %s failed: %r", agent_id, exc)
     return revived
@@ -372,27 +378,30 @@ class RespawnController:
         ids = _select_local_restarting_ids(self._pool, local_machine)
         from shared import start_serving
 
-        if ids and not start_serving.is_serving():
-            _log.debug("[ops.respawn] respawn deferred until this host is serving")
-            return False
         if ids and not _gateway_healthy():
             _log.debug(
                 "[ops.respawn] gateway not healthy, deferring respawn of %d agent(s)", len(ids)
             )
             return False
+        attempted = False
         for tid in ids:
-            try:
-                started = respawn_agent(tid)
-                if started:
-                    _log.info("[ops.respawn] respawned agent %s (new PID)", tid)
-                else:
-                    # The CAS inside respawn_agent lost — another dispatcher / a
-                    # concurrent lifecycle op won. Log it so an agent that stays
-                    # 'restarting' shows a respawn attempt with an outcome.
-                    _log.info("[ops.respawn] respawn agent %s: no-op, lost the claim race", tid)
-            except Exception as exc:
-                _log.error("[ops.respawn] respawn agent %s failed: %r", tid, exc)
-        return bool(ids)
+            with start_serving.recovery_permitted() as permitted:
+                if not permitted:
+                    _log.debug("[ops.respawn] respawn deferred until this host is serving")
+                    break
+                attempted = True
+                try:
+                    started = respawn_agent(tid)
+                    if started:
+                        _log.info("[ops.respawn] respawned agent %s (new PID)", tid)
+                    else:
+                        # The CAS inside respawn_agent lost — another dispatcher / a
+                        # concurrent lifecycle op won. Log it so an agent that stays
+                        # 'restarting' shows a respawn attempt with an outcome.
+                        _log.info("[ops.respawn] respawn agent %s: no-op, lost the claim race", tid)
+                except Exception as exc:
+                    _log.error("[ops.respawn] respawn agent %s failed: %r", tid, exc)
+        return attempted
 
     def _reap_corpses(self, local_machine: str, *, grace_until: float = 0.0) -> bool:
         """Run the dead-birth, boot-death, and normal revive passes.
@@ -443,9 +452,10 @@ class RespawnController:
                 )
         from shared import start_serving
 
-        if not start_serving.is_serving():
-            _log.debug("[ops.respawn] revive pass deferred until this host is serving")
-            return acted
+        with start_serving.recovery_permitted() as permitted:
+            if not permitted:
+                _log.debug("[ops.respawn] revive pass deferred until this host is serving")
+                return acted
         for tid in _revive_local_dead_running_idling(
             self._pool, local_machine, settings.daemon.revive_max_per_pass
         ):

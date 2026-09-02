@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import socket
 import time
+from pathlib import Path
 from typing import Any, Never, cast
 
 import httpx
@@ -26,11 +27,13 @@ from shared.log import _install_stdlib_intercept
 
 
 @pytest.fixture(autouse=True)
-def _host_is_serving(monkeypatch: pytest.MonkeyPatch) -> None:
+def _host_is_serving(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Controller cases start from a host that already passed its start gate."""
     from shared import start_serving
 
-    monkeypatch.setattr(start_serving, "is_serving", lambda: True)
+    monkeypatch.setattr(start_serving, "state_path", lambda: tmp_path / "start-serving.json")
+    generation = start_serving.begin_start()
+    assert start_serving.mark_serving(generation) is True
 
 
 def test_gateway_health_pins_private_ipv4_and_follows_redirects(
@@ -139,9 +142,8 @@ def test_restart_respawn_waits_until_the_host_is_serving(
     """A restart queued before readiness remains queued for the next pass."""
     from shared import start_serving
 
-    serving = False
     respawned: list[int] = []
-    monkeypatch.setattr(start_serving, "is_serving", lambda: serving)
+    start_serving.clear_serving()
     monkeypatch.setattr(respawn_mod, "_select_local_restarting_ids", lambda *_args: [11])
     monkeypatch.setattr(respawn_mod, "_gateway_healthy", lambda: True)
     monkeypatch.setattr(
@@ -152,7 +154,8 @@ def test_restart_respawn_waits_until_the_host_is_serving(
     assert controller._dispatch_respawns("test-machine") is False
     assert respawned == []
 
-    serving = True
+    generation = start_serving.begin_start()
+    assert start_serving.mark_serving(generation) is True
 
     assert controller._dispatch_respawns("test-machine") is True
     assert respawned == [11]
@@ -259,8 +262,7 @@ def test_reap_corpses_defers_revival_until_the_host_is_serving(
 
     cleanup: list[str] = []
     revived: list[int] = []
-    serving = False
-    monkeypatch.setattr(start_serving, "is_serving", lambda: serving)
+    start_serving.clear_serving()
     monkeypatch.setattr(
         respawn_mod,
         "_reap_local_unclaimed_idling",
@@ -283,7 +285,8 @@ def test_reap_corpses_defers_revival_until_the_host_is_serving(
     assert cleanup == ["unclaimed", "boot-phase"]
     assert revived == []
 
-    serving = True
+    generation = start_serving.begin_start()
+    assert start_serving.mark_serving(generation) is True
 
     assert controller._reap_corpses("test-machine") is True
     assert revived == [42]

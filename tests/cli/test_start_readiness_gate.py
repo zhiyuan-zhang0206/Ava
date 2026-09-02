@@ -466,6 +466,21 @@ def test_no_readiness_gate_still_prints_but_exits_zero(
     assert "never became ready" in combined
 
 
+def test_waived_unready_start_keeps_recovery_gated(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """An exit-code waiver never substitutes for the readiness boundary."""
+    from shared import start_serving
+
+    path = tmp_path / "start-serving.json"
+    monkeypatch.setattr(start_serving, "state_path", lambda: path)
+    _roster(monkeypatch, (("gateway", None),))
+    _probes(monkeypatch, ready=set())
+
+    assert _cli.cmd_start(readiness_gate=False) == 0
+    assert start_serving.is_serving() is False
+
+
 def test_live_update_lease_waives_the_gate_on_a_gateway(
     monkeypatch: pytest.MonkeyPatch, capsys
 ) -> None:
