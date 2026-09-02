@@ -20,6 +20,7 @@ the message is surfaced, and the exit code is non-zero.
 from __future__ import annotations
 
 import httpx
+import psycopg
 import pytest
 
 from cli.commands import cluster as _cluster
@@ -32,6 +33,17 @@ _REFUSAL = (
     "rollout's own safety. Wait for `ava cluster status` to show every host on the "
     "pin, or re-run with --force if you are certain that deploy is dead."
 )
+
+
+def _clear_update_lock(db_conn: psycopg.Connection) -> None:
+    """Reset this module's singleton lock setup without a production escape hatch."""
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "UPDATE deployment_state SET holder=NULL, acquired_at=NULL, expires_at=NULL, "
+            "note=NULL, settle_hosts=NULL, settle_note=NULL, settle_started_at=NULL, "
+            "phase='stable', kind=NULL WHERE id=1"
+        )
+    db_conn.commit()
 
 
 def test_update_reports_a_refused_deploy_instead_of_raising(
@@ -234,7 +246,7 @@ def test_conflict_detail_survives_a_body_it_did_not_expect() -> None:
 
 
 def test_recover_clears_a_dead_holders_lock(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], db_conn: psycopg.Connection
 ) -> None:
     """`--force` skips the deploy-window check but not the lock `ava cluster update` takes
     after it, so a crashed orchestration still blocks every deploy until its TTL
@@ -243,11 +255,10 @@ def test_recover_clears_a_dead_holders_lock(
     from cli.commands import _cluster_recover
     from shared.cluster_lock import (
         acquire_update_lock,
-        force_release_update_lock,
         update_lock_holder,
     )
 
-    force_release_update_lock()
+    _clear_update_lock(db_conn)
     try:
         acquire_update_lock("gateway-host:pid81319")
         monkeypatch.setattr(
@@ -262,11 +273,11 @@ def test_recover_clears_a_dead_holders_lock(
         assert update_lock_holder() is None  # deployable again
         assert "gateway-host:pid81319" in capsys.readouterr().out  # names what it cleared
     finally:
-        force_release_update_lock()
+        _clear_update_lock(db_conn)
 
 
 def test_recover_refuses_while_the_holder_is_alive(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], db_conn: psycopg.Connection
 ) -> None:
     """The override must not become a way to stomp a rollout that is running fine —
     that would reintroduce the collision the deploy window exists to prevent."""
@@ -274,11 +285,10 @@ def test_recover_refuses_while_the_holder_is_alive(
     from cli.commands import _cluster_recover
     from shared.cluster_lock import (
         acquire_update_lock,
-        force_release_update_lock,
         update_lock_holder,
     )
 
-    force_release_update_lock()
+    _clear_update_lock(db_conn)
     try:
         acquire_update_lock("gateway-host:pid81319")
         monkeypatch.setattr(
@@ -291,4 +301,4 @@ def test_recover_refuses_while_the_holder_is_alive(
         assert update_lock_holder() == "gateway-host:pid81319"  # untouched
         assert "live process" in capsys.readouterr().err
     finally:
-        force_release_update_lock()
+        _clear_update_lock(db_conn)
