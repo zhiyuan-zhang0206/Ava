@@ -120,12 +120,9 @@ Every long-running process (gateway / agent / restarter / labeler) calls
 `CodeBehindSchema` is what makes an offline runner self-heal: the watchdog sees
 it and spawns an `ava cluster update`, which takes the self-update branch on a runner.
 
-Because this is the **first** thing a daemon does at boot, its connection carries
-`shared.db.PG_KEEPALIVE_KWARGS` — most importantly the 5s `connect_timeout`. A
-database that black-holes packets (dropped traffic, not `ECONNREFUSED`) would
-otherwise park the whole boot on the OS TCP-retransmit timeout, and the daemon
-would read as "failed to start" while it is really blocked on a socket. Bounded,
-boot raises the socket error and the supervisor's report matches reality.
+Startup schema connections use `shared.db.PG_KEEPALIVE_KWARGS`, including a 5s
+`connect_timeout`, so dropped packets raise a bounded connection failure rather
+than leaving startup blocked on the OS TCP retransmission timeout.
 
 ## Notes
 
