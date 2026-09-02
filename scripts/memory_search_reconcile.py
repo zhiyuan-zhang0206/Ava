@@ -1,4 +1,4 @@
-"""Memory search backend reconciliation — same queries, two backends, diff.
+"""Read-only memory search backend reconciliation — queries, two backends, diff.
 
 The pilot tool for the backend switch: run the SAME query texts through
 two backends and compare their path orderings. Sample queries come from
@@ -9,6 +9,9 @@ the diff makes exactly that visible.
 
 Runs on the gateway box: needs GEMINI_API_KEY (embedding) and both
 backends' services up (milvus daemon / memory_search daemon / cluster PG).
+It opens both backends read-only by default: the indexer daemon's cold-start
+reconcile is the only normal writer. `--allow-write` is an intentional
+operator escape hatch that requires a second confirmation before connecting.
 
 Usage:
     .venv/bin/python scripts/memory_search_reconcile.py --a milvus --b numpy --limit 50 --k 10
@@ -17,8 +20,10 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import builtins
 import sys
 
+from services.memory_indexer.backends.base import MemorySearchBackend
 from services.memory_indexer.backends.factory import get_backend_named
 from services.memory_indexer.embeddings.base import EmbeddingAPIError
 from services.memory_indexer.embeddings.factory import get_provider
@@ -38,13 +43,65 @@ def _sample_queries(limit: int) -> list[str]:
     return queries
 
 
+def _confirm_writable_connect() -> bool:
+    """Require an interactive, exact confirmation before enabling writes."""
+    if not sys.stdin.isatty():
+        print(
+            "--allow-write requires an interactive terminal; no backend connected", file=sys.stderr
+        )
+        return False
+    try:
+        answer = builtins.input("This may rebuild backend storage. Type exact 'yes' to continue: ")
+    except EOFError:
+        print(
+            "--allow-write confirmation was unavailable (EOF); no backend connected",
+            file=sys.stderr,
+        )
+        return False
+    if answer != "yes":
+        print("--allow-write was not confirmed; no backend connected", file=sys.stderr)
+        return False
+    return True
+
+
+def _connect_backends(
+    backend_a: MemorySearchBackend, backend_b: MemorySearchBackend, *, readonly: bool
+) -> bool:
+    """Connect both backends and report a safe read-only schema refusal."""
+    try:
+        backend_a.connect()
+        backend_b.connect()
+    except Exception as exc:
+        backend_a.close()
+        backend_b.close()
+        if readonly:
+            print(f"read-only backend connection refused: {exc}", file=sys.stderr)
+            print(
+                "Run the indexer daemon's cold-start reconcile on startup to repair the "
+                "backend, or use --allow-write only if you own that backend.",
+                file=sys.stderr,
+            )
+        else:
+            print(f"backend connection failed: {exc}", file=sys.stderr)
+        return False
+    return True
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--a", required=True, help="first backend name (e.g. milvus)")
     parser.add_argument("--b", required=True, help="second backend name (e.g. numpy)")
     parser.add_argument("--limit", type=int, default=50, help="max sample queries")
     parser.add_argument("--k", type=int, default=10, help="top-k per query")
+    parser.add_argument(
+        "--allow-write",
+        action="store_true",
+        help="allow writable backend connects after typing exact 'yes' interactively",
+    )
     args = parser.parse_args()
+    readonly = not args.allow_write
+    if args.allow_write and not _confirm_writable_connect():
+        return 1
 
     queries = _sample_queries(args.limit)
     if not queries:
@@ -53,10 +110,14 @@ def main() -> int:
     print(f"{len(queries)} sample queries, k={args.k}")
 
     provider = get_provider()
-    backend_a = get_backend_named(args.a, dim=provider.dim, fingerprint=provider.fingerprint)
-    backend_b = get_backend_named(args.b, dim=provider.dim, fingerprint=provider.fingerprint)
-    backend_a.connect()
-    backend_b.connect()
+    backend_a = get_backend_named(
+        args.a, dim=provider.dim, fingerprint=provider.fingerprint, readonly=readonly
+    )
+    backend_b = get_backend_named(
+        args.b, dim=provider.dim, fingerprint=provider.fingerprint, readonly=readonly
+    )
+    if not _connect_backends(backend_a, backend_b, readonly=readonly):
+        return 1
     try:
         meta_a = backend_a.all_meta()
         meta_b = backend_b.all_meta()
@@ -72,7 +133,10 @@ def main() -> int:
                 file=sys.stderr,
             )
             print(f"only in {args.b}: {only_b[:5]}", file=sys.stderr)
-            print("sync the backends (cold-start reconcile) and re-run", file=sys.stderr)
+            print(
+                "sync the backends with the indexer daemon's cold-start reconcile and re-run",
+                file=sys.stderr,
+            )
             return 2
         exact = 0
         for i, text in enumerate(queries, start=1):

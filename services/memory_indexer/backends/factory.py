@@ -28,26 +28,32 @@ from services.memory_indexer.backends.pgvector import PGVectorBackend
 from shared.config import settings
 
 
-def _numpy_backend(dim: int, fingerprint: str) -> NumPyBackend:
+def _numpy_backend(dim: int, fingerprint: str, *, readonly: bool = False) -> NumPyBackend:
     """NumPyBackend is a thin HTTP client — the vector space lives in the
     memory_search service process, so dim/fingerprint are accepted for the
     uniform factory signature only and deliberately not used."""
     del dim, fingerprint
-    return NumPyBackend()
+    return NumPyBackend(readonly=readonly)
 
 
-# Uniform constructor shape `(dim: int, fingerprint: str)`; numpy's backend
+# Uniform constructor shape `(dim: int, fingerprint: str, readonly: bool)`; numpy's backend
 # is wrapped above instead of taking dead parameters.
-_BACKENDS: dict[str, Callable[[int, str], MemorySearchBackend]] = {
-    MilvusBackend.name: lambda dim, fingerprint: MilvusBackend(dim=dim, fingerprint=fingerprint),
-    NumPyBackend.name: _numpy_backend,
-    PGVectorBackend.name: lambda dim, fingerprint: PGVectorBackend(
-        dim=dim, fingerprint=fingerprint
+_BACKENDS: dict[str, Callable[[int, str, bool], MemorySearchBackend]] = {
+    MilvusBackend.name: lambda dim, fingerprint, readonly: MilvusBackend(
+        dim=dim, fingerprint=fingerprint, readonly=readonly
+    ),
+    NumPyBackend.name: lambda dim, fingerprint, readonly: _numpy_backend(
+        dim, fingerprint, readonly=readonly
+    ),
+    PGVectorBackend.name: lambda dim, fingerprint, readonly: PGVectorBackend(
+        dim=dim, fingerprint=fingerprint, readonly=readonly
     ),
 }
 
 
-def get_backend_named(name: str, *, dim: int, fingerprint: str) -> MemorySearchBackend:
+def get_backend_named(
+    name: str, *, dim: int, fingerprint: str, readonly: bool = False
+) -> MemorySearchBackend:
     """Construct a backend by name — the one dispatch path; unknown names
     fail fast (an unrecognized value must not silently fall back to milvus:
     a typo would otherwise keep the old storage while the operator believes
@@ -57,7 +63,7 @@ def get_backend_named(name: str, *, dim: int, fingerprint: str) -> MemorySearchB
     except KeyError:
         known = ", ".join(sorted(_BACKENDS))
         raise ValueError(f"unknown memory search backend {name!r} (known: {known})") from None
-    return ctor(dim, fingerprint)
+    return ctor(dim, fingerprint, readonly)
 
 
 def get_backend(dim: int, fingerprint: str) -> MemorySearchBackend:

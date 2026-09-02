@@ -20,7 +20,7 @@ import psycopg
 import pytest
 from psycopg import sql as pgsql
 
-from services.memory_indexer.backends.pgvector import _TABLE, PGVectorBackend
+from services.memory_indexer.backends.pgvector import _TABLE, PGVectorBackend, _ensure_schema
 
 _DIM = 8
 _FP = "test:gemini:dim=8"
@@ -113,6 +113,54 @@ def test_connect_drops_and_recreates_on_dim_mismatch(
             assert row is not None and row[0] == _DIM  # pyright: ignore[reportUnknownMemberType]
     finally:
         fresh.close()
+
+
+def test_readonly_ensure_schema_refuses_dim_mismatch_without_dropping_rows(
+    db_conn: psycopg.Connection, backend: PGVectorBackend
+) -> None:
+    """D3 regression: a comparison validation cannot rebuild the live table."""
+    backend.upsert("/survives.md", 1.0, "hash", _vec(0))
+
+    with pytest.raises(RuntimeError, match="vector dimension 8, expected 9"):
+        _ensure_schema(db_conn, _DIM + 1, readonly=True)
+
+    assert _rows(db_conn) == [("/survives.md\x1fbody\x1f0", "/survives.md", "body", 0, 1.0, "hash")]
+
+
+def test_readonly_connect_forwards_validation_and_closes_pool_on_mismatch(
+    db_conn: psycopg.Connection, backend: PGVectorBackend
+) -> None:
+    """connect() preserves the read-only mismatch guarantee and pool cleanup."""
+    backend.upsert("/survives.md", 1.0, "hash", _vec(0))
+    readonly_backend = PGVectorBackend(dim=_DIM + 1, fingerprint=_FP, readonly=True)
+
+    with pytest.raises(RuntimeError, match="vector dimension 8, expected 9"):
+        readonly_backend.connect()
+
+    assert readonly_backend._pool is None
+    assert _rows(db_conn) == [("/survives.md\x1fbody\x1f0", "/survives.md", "body", 0, 1.0, "hash")]
+
+
+def test_readonly_ensure_schema_accepts_matching_table(
+    db_conn: psycopg.Connection, backend: PGVectorBackend
+) -> None:
+    """Validation reads the current schema without provisioning anything."""
+    backend.upsert("/present.md", 1.0, "hash", _vec(0))
+
+    _ensure_schema(db_conn, _DIM, readonly=True)
+
+    assert _rows(db_conn) == [("/present.md\x1fbody\x1f0", "/present.md", "body", 0, 1.0, "hash")]
+
+
+def test_readonly_ensure_schema_refuses_missing_table(db_conn: psycopg.Connection) -> None:
+    """Validation cannot create an absent derived-cache table."""
+    with pytest.raises(RuntimeError, match="is missing"):
+        _ensure_schema(db_conn, _DIM, readonly=True)
+
+    with db_conn.cursor() as cur:
+        cur.execute("SELECT to_regclass(%s)", (_TABLE,))
+        row = cur.fetchone()
+    assert row is not None and row[0] is None  # pyright: ignore[reportUnknownMemberType]
 
 
 # ── write path (indexer daemon contract) ──────────────────────────────────
