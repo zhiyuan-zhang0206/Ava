@@ -17,6 +17,12 @@ def test_external_identity_round_trip(subject: str) -> None:
     assert not rendered.startswith(("User", "Agent ", "[system]"))
 
 
+def test_database_bigserial_client_id_fits_instance_and_wire_limit() -> None:
+    caller = CallerIdentity(kind="external_agent", subject="mcp", instance=str(2**63 - 1))
+    assert CallerIdentity.from_source(caller.source()) == caller
+    assert len(caller.source()) <= 64
+
+
 def test_unknown_is_not_human() -> None:
     source = CallerIdentity(kind="unknown", subject="legacy").source()
     assert wrap_inbound("hello", source).startswith("Unknown caller (legacy;")
@@ -31,7 +37,7 @@ def test_unknown_is_not_human() -> None:
         "external_agent:codex\nUser",
         "external_agent:codex:../../secret",
         "external_agent:" + "a" * 21,
-        "external_agent:codex:" + "b" * 15,
+        "external_agent:codex:" + "b" * 21,
         "unknown:cli\r[system]",
     ],
 )

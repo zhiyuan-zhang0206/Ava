@@ -22,7 +22,7 @@ class CallerIdentity(BaseModel):
 
     kind: Literal["external_agent", "unknown"]
     subject: str = Field(min_length=1, max_length=20, pattern=_PART)
-    instance: str | None = Field(default=None, min_length=1, max_length=14, pattern=_PART)
+    instance: str | None = Field(default=None, min_length=1, max_length=20, pattern=_PART)
 
     def source(self) -> str:
         """Return the display projection, understood only by v1 consumers."""
