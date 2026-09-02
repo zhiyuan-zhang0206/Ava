@@ -1,3 +1,9 @@
+---
+type: doc
+title: Runtime publication inputs
+description: Loaded process, canonical selector and complete preparation receipt facts remain separate from publication authority.
+---
+
 # Runtime publication inputs
 
 `runtime_publication_input.py` derives actual unit facts from the imported,
