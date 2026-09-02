@@ -459,4 +459,11 @@ def test_tool_call_audit_identifies_client_and_redacts_args() -> None:
     }
     assert prompt not in json.dumps(attributes, ensure_ascii=False)
     assert hits[-1]["category"] == "audit"
-    assert hits[-1]["source"] == "mcp"
+    assert hits[-1]["source"] == f"external_agent:mcp:{body['id']}"
+    assert attributes["auth_principal"] == {"kind": "mcp_client", "id": body["id"]}
+    assert attributes["caller_identity"] == {
+        "kind": "external_agent",
+        "subject": "mcp",
+        "instance": str(body["id"]),
+    }
+    assert body["token"] not in json.dumps(attributes)
