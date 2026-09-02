@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime, timedelta
-from typing import Any, Literal, overload
+from typing import Any, Literal, LiteralString, cast, overload
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from psycopg_pool import ConnectionPool
@@ -24,6 +24,7 @@ from gateway.schemas import (
     TaskSummaryRow,
     TaskUpdateRequest,
 )
+from shared.db_transaction import write_transaction
 from shared.task_owner_notifications import TaskOwnerNotification, owner_change_notifications
 from shared.task_reparent import resolve_reparent
 
@@ -275,7 +276,7 @@ def _patch_task_blocking(
     sets.append("last_reminded_at = NULL")
     sets.append("reminder_count = 0")
 
-    with pool.connection() as conn, conn.cursor() as cur:
+    with write_transaction(pool) as conn, conn.cursor() as cur:
         # The system root task is immutable (the task-tree anchor / default
         # parent) — reject any edit before writing, same rule as the SDK
         # update() path. Check existence here too so a missing task still 404s.
@@ -337,14 +338,17 @@ def _patch_task_blocking(
                     f"titles are not allowed.",
                 )
         cur.execute(
-            f"WITH updated AS ( "  # noqa: S608
-            f"    UPDATE agent_tasks AS t SET {', '.join(sets)}, updated_at = now() "
-            f"    WHERE t.id = %s "
-            f"    RETURNING {_TASK_COLS} "
-            f") "
-            f"SELECT u.*, a.label AS owner_label "
-            f"FROM updated u "
-            f"LEFT JOIN agents a ON u.owner = a.id",
+            cast(
+                LiteralString,
+                f"WITH updated AS ( "  # noqa: S608
+                f"    UPDATE agent_tasks AS t SET {', '.join(sets)}, updated_at = now() "
+                f"    WHERE t.id = %s "
+                f"    RETURNING {_TASK_COLS} "
+                f") "
+                f"SELECT u.*, a.label AS owner_label "
+                f"FROM updated u "
+                f"LEFT JOIN agents a ON u.owner = a.id",
+            ),
             (*params, task_id),
         )
         row = cur.fetchone()
