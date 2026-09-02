@@ -135,6 +135,21 @@ function guides(container: HTMLElement) {
 }
 
 describe("AgentRow tree-guide rendering", () => {
+  it("keeps missing observation distinct from lifecycle running", () => {
+    render(<AgentRow {...baseProps} agent={ag(1)} depth={0} ancestorsIsLast={[]} />);
+    expect(screen.getByText("unknown").getAttribute("title")).toContain("runtime owner: unknown");
+  });
+
+  it("shows stale machine evidence without inventing runtime ownership", () => {
+    render(<AgentRow {...baseProps} agent={ag(1, { observation: {
+      machine_probe_at: new Date(Date.now() - 180_000).toISOString(),
+      machine_probe_valid_until: new Date(Date.now() - 60_000).toISOString(),
+      runtime_lease_expires_at: new Date(Date.now() + 60_000).toISOString(),
+      runtime_owner: "unknown",
+    } })} depth={0} ancestorsIsLast={[]} />);
+    expect(screen.getByText("stale").getAttribute("title")).toContain("runtime lease: unexpired; runtime owner: unknown");
+  });
+
   it("depth=0 (top-level): renders no guide bars", () => {
     const { container } = render(
       <AgentRow {...baseProps} agent={ag(1)} depth={0} ancestorsIsLast={[]} />,

@@ -134,6 +134,28 @@ class FakeProbe:
 
 
 class TestLivenessPass:
+    def test_missing_probe_never_fabricates_online_or_observation_time(self, db_conn, pool):
+        _register_machine(db_conn)
+        aid = _make_agent(db_conn)
+        _merge_liveness(pool)
+        assert _state(db_conn, aid) == ("unknown", None)
+
+    def test_merge_retains_actual_probe_time(self, db_conn, pool):
+        _register_machine(db_conn)
+        aid = _make_agent(db_conn)
+        _set_machine_probe(db_conn, _MACHINE, online=True, failures=0)
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "UPDATE machine_probe SET last_probe_at=now()-interval '10 minutes' WHERE machine_name=%s RETURNING last_probe_at",
+                (_MACHINE,),
+            )
+            row = cur.fetchone()
+            assert row is not None
+            observed = row[0]
+        db_conn.commit()
+        _merge_liveness(pool)
+        assert _state(db_conn, aid)[1] == observed
+
     def test_probe_timeout_comes_from_settings(
         self,
         pool: ConnectionPool,

@@ -44,6 +44,7 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import { api } from "@/lib/api";
+import { observationText } from "@/lib/agent-observation";
 import { useUserSettings } from "@/lib/use-user-settings";
 import type { TimeMode, DateFormat } from "@/lib/types";
 import { PRIORITY_BG, topNoticePriority } from "@/lib/notices";
@@ -336,6 +337,12 @@ const dateFormat: DateFormat = rawDateFormat === "absolute" || rawDateFormat ===
                     : STATUS_DOT[agent.status],
                 )}
               />
+            ) : null}
+            {agent.status !== "terminated" ? (
+              <span className="text-[9px] text-amber-600" title={observationText(agent.observation)}>
+                {agent.observation?.machine_probe_valid_until &&
+                Date.parse(agent.observation.machine_probe_valid_until) <= Date.now() ? "stale" : "unknown"}
+              </span>
             ) : null}
             {/* notices-awaiting-response badge — count colored by highest
                 priority; only when notification.awaiting_reply is on (a

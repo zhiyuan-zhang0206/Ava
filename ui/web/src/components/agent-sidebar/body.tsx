@@ -22,6 +22,7 @@ import { SORT_DEFAULT_DIR, useSidebarSort, type FlatSortKey, type SidebarSort } 
 import { useStore } from "@/lib/store";
 import type { AgentRow } from "@/lib/types";
 import { useUserSettings } from "@/lib/use-user-settings";
+import { useNow } from "@/lib/use-now";
 import { cn } from "@/lib/utils";
 
 import type { InnerProps } from "./types";
@@ -52,6 +53,8 @@ function sortAgentsFlat(agents: AgentRow[], sort: SidebarSort): AgentRow[] {
 
 
 export function SidebarBody(props: InnerProps & { wide: boolean }) {
+  // One rendering clock for the mounted list, no per-agent timer or fetch.
+  useNow(60_000);
   const t = useTranslations("sidebar");
   const { agents, pendingSpawnCount, showTerminated, onToggleTerminated, viewMode, onToggleViewMode, onSpawn, isLoading } =
     props;

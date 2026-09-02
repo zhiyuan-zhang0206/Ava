@@ -641,6 +641,7 @@ def test_inspect_live_probe_failure_degrades_to_empty_shells(
         response = client.get(f"/api/agents/{aid}/inspect/live")
     assert response.status_code == 200
     assert response.json()["shells"] == []
+    assert response.json()["shells_available"] is False
 
 
 @pytest.mark.parametrize(
