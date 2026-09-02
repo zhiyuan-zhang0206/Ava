@@ -50,7 +50,7 @@ class FeishuSettings(EnvSettings):
     )
 
     feishu_poll_interval_seconds: float = Field(
-        default=1.0,
+        default=0.5,
         alias="AVA_FEISHU_POLL_INTERVAL_SECONDS",
         description="Polling interval (seconds) for the p2p chat fallback. The Feishu platform does not deliver im.message.receive_v1 for this app (diagnosed 2026-09-01), so the adapter polls the known p2p chat via ListMessage and feeds new user texts like WS events. 0 disables polling (WS-only).",
         json_schema_extra={
