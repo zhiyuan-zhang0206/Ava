@@ -15,6 +15,7 @@ from unittest.mock import patch
 # subprocesses use -I and cannot see this checkout.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from shared.private_storage import write_private_bytes
 from shared.runtime_prepare import (
     PrepareInputs,
     _copy_python,
@@ -98,6 +99,18 @@ def prove_checkout_absent(
         if "usage:" not in launched.stdout.lower():
             raise AssertionError("existing CLI did not execute from prepared generation")
         if "AVA_RUNTIME_PROOF_PG" in os.environ:
+            # Cluster-scoped URLs are file-authoritative, not ambient env
+            # overrides. Model a real installed unit in this isolated CI home.
+            unit_env = root / "unit/.env"
+            if unit_env.exists():
+                raise AssertionError("CI unit unexpectedly already has configuration")
+            write_private_bytes(
+                unit_env,
+                (
+                    f"AVA_DB_URL={os.environ['AVA_RUNTIME_PROOF_PG']}\n"
+                    "AVA_REDIS_URL=redis://127.0.0.1:1/0\n"
+                ).encode(),
+            )
             migration_env = child_env | {
                 "AVA_DB_URL": os.environ["AVA_RUNTIME_PROOF_PG"],
                 "AVA_MACHINE_NAME": "runtime-proof",
