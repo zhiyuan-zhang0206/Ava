@@ -93,8 +93,8 @@ class _Launch:
 
     `command` is either an argv (launched directly, no shell) or a fully formed
     command line string (``cmd /s /c "…"``, passed verbatim so no quoting layer
-    sits between the caller's cmd.exe syntax and cmd.exe). `creationflags` follows
-    from that choice — see `_PRIVATE_CONSOLE_FLAGS` / `_PRIVATE_CONSOLE_FLAGS`.
+    sits between the caller's cmd.exe syntax and cmd.exe). Both shapes use a
+    private hidden console and preserve the explicit log-file handles.
     """
 
     command: str | list[str]
@@ -293,11 +293,12 @@ def new_session(
 
 
 def graceful_signal(name: str) -> bool:
-    """Send the graceful-stop signal (Ctrl-Break) to the session's process group
-    without waiting or force-killing.
+    """Request Ctrl-Break in a verified private console without force-killing.
 
     The Windows analog of posixproc.graceful_signal: the agent maps Ctrl-Break to
-    its shutdown path (runs finally). Returns True if a live process was signaled.
+    its shutdown path (runs finally). True means Windows accepted delivery, not
+    that Python dispatched its handler or the process exited. Helper failure
+    and timeout propagate; legacy control provenance is refused.
     `ava stop`'s reap uses this to signal every agent, then wait on all of them
     under one shared deadline before force-killing stragglers.
     """
