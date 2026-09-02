@@ -71,17 +71,14 @@ the loop *is* skill-shaped, so it is built as skills, not framework machinery.
 
 ### Notice — in-moment, every turn
 
-> **Status (v0 shipped).** The in-moment half is live as one always-on
-> system-prompt section, "Beyond the task at hand" (`agent/graph/_system_prompt.py`,
-> gated by `AVA_AGENT_REFLECTION`, default on). v0 scopes the stance to
-> *surfacing follow-ups* and names the sinks
-> (a procedure -> a skill; a conflict/rough edge in the agent's own
-> prompts/tools/skills -> an issue or an in-place fix; a tangential follow-up ->
-> raise it with the user), and the agent acts on the existing sinks directly. The
-> **jot buffer + the weekly forked Curator** below (dedup, batch triage, prune,
-> report) are the deferred automation — added when in-moment volume justifies the
-> batching, per fail-fast (don't pre-build machinery for noise that isn't there
-> yet).
+> **Status (v0 shipped).** The in-moment half is live as the merged authoritative
+> system-prompt section "# Invest in the future" (`agent/graph/_system_prompt.py`,
+> gated by `AVA_SYSTEM_PROMPT_INVEST_FUTURE`, default on), which merged the former
+> "Beyond the task at hand": any noticed signal that could improve later work gets
+> an immediate closing action (resolve and verify / escalate with evidence and
+> recommendation / land a tracked task with owner and evidence), with closing
+> presentation of candidate next steps. The **jot buffer + the weekly forked
+> Curator** below remain the deferred automation.
 
 Memory already has a system-prompt section telling the agent *when* to record a
 durable fact. Skills and follow-ups have none. The addition is **one sibling

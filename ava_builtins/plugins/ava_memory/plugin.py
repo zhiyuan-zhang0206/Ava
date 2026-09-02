@@ -169,8 +169,7 @@ You must write or update memory when:
   this machine or cluster that a fresh lookup would not reveal.
 
 Write it in the same turn you engage the correction, before you treat that turn
-as finished. An offered next step is a finished engagement, not permission to
-defer.
+as finished.
 
 Memory maintenance is an important standing duty — not a side chore you
 fit in after your real task. When you notice a memory that is stale or wrong,

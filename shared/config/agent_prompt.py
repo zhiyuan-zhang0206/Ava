@@ -294,22 +294,6 @@ class AgentPromptSettings(EnvSettings):
         },
     )
 
-    agent_reflection_enabled: bool | None = Field(
-        default=None,
-        alias="AVA_AGENT_REFLECTION",
-        description=(
-            "Inject the 'Beyond the task at hand' section: prompt the agent to "
-            "surface follow-ups and candidate next steps after finishing a task. "
-            "Unset resolves the per-model default (shared floor: on)."
-        ),
-        json_schema_extra={
-            "restart_required": "agent",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-        },
-    )
-
     prompt_output_conciseness_enabled: bool | None = Field(
         default=None,
         alias="AVA_SYSTEM_PROMPT_CONCISENESS",
@@ -490,6 +474,23 @@ class AgentPromptSettings(EnvSettings):
             "after the training cutoff (product/model/framework versions, recent "
             "releases), search before answering. Unset resolves the per-model "
             "default (shared floor: on)."
+        ),
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    prompt_invest_future_enabled: bool | None = Field(
+        default=None,
+        alias="AVA_SYSTEM_PROMPT_INVEST_FUTURE",
+        description=(
+            "Inject the merged future-signal section (former 'Beyond the task at hand' "
+            "content): act on anything that could improve later work this turn with "
+            "the smallest closing action. Unset resolves the per-model default "
+            "(shared floor: on)."
         ),
         json_schema_extra={
             "restart_required": "agent",
