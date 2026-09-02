@@ -121,6 +121,10 @@ CREATE TABLE agents (
 --                             point at a specific snapshot rather than "latest" — latest drifts under
 --                             concurrent writes, and a fork should be reproducible
 CREATE TABLE agents_meta (
+    runtime_generation UUID,
+    runtime_kind TEXT CHECK (runtime_kind IN ('process', 'hosted')),
+    runtime_owner UUID,
+    runtime_protocol_version INTEGER NOT NULL DEFAULT 0 CHECK (runtime_protocol_version >= 0),
     id                         BIGINT PRIMARY KEY REFERENCES agents(id),
     spawner                    TEXT NOT NULL DEFAULT 'user',
     fork_source_agent_id       BIGINT REFERENCES agents(id),

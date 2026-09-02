@@ -11,6 +11,7 @@ reached its own exit (`mark_agent_exited_op`).
 from __future__ import annotations
 
 import asyncio
+from uuid import UUID
 
 from psycopg_pool import ConnectionPool
 
@@ -114,7 +115,13 @@ def _force_mark_terminated(
     return page_names
 
 
-async def mark_agent_exited_op(agent_id: int, db_pool: ConnectionPool) -> list[str]:
+async def mark_agent_exited_op(
+    agent_id: int,
+    db_pool: ConnectionPool,
+    *,
+    generation: UUID | None = None,
+    owner: UUID | None = None,
+) -> list[str]:
     """Finalize a self-exiting agent process: guarded status flip + events.
 
     POST /api/agents/{id}/exited calls this when an agent reaches its own
@@ -143,7 +150,7 @@ async def mark_agent_exited_op(agent_id: int, db_pool: ConnectionPool) -> list[s
     other: the PK guarantees <=1 row; anything else is table corruption -> raise.
     """
     rowcount, page_names, actual_status = await asyncio.to_thread(
-        _mark_exited_blocking, agent_id, db_pool
+        _mark_exited_blocking, agent_id, db_pool, generation, owner
     )
     if rowcount == 1:
         logger.info(
@@ -168,7 +175,10 @@ async def mark_agent_exited_op(agent_id: int, db_pool: ConnectionPool) -> list[s
 
 
 def _mark_exited_blocking(
-    agent_id: int, db_pool: ConnectionPool
+    agent_id: int,
+    db_pool: ConnectionPool,
+    generation: UUID | None = None,
+    owner: UUID | None = None,
 ) -> tuple[int, list[str], str | None]:
     """Sync DB section of mark_agent_exited_op — via to_thread (the status flip,
     the exit event_log row, the AgentUpdated publish). Returns
@@ -186,12 +196,17 @@ def _mark_exited_blocking(
                 # catches that dead pid and stamps 'reaper' instead.
                 "UPDATE agents_meta SET status = %s, termination_source = 'exit', "
                 "heartbeat_paused_until = NULL, lease_expires_at = NULL "
-                "WHERE id = %s AND status IN (%s, %s)",
+                "WHERE id = %s AND status IN (%s, %s) "
+                "AND runtime_generation IS NOT DISTINCT FROM %s "
+                "AND runtime_owner IS NOT DISTINCT FROM %s "
+                "AND (runtime_kind IS NULL OR (runtime_kind = 'process' AND pid IS NOT NULL))",
                 (
                     AgentStatus.TERMINATED,
                     agent_id,
                     AgentStatus.RUNNING,
                     AgentStatus.IDLING,
+                    generation,
+                    owner,
                 ),
             )
             rowcount = cur.rowcount

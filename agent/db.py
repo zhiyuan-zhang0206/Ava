@@ -629,12 +629,24 @@ async def renew_agent_lease(
     """
     from shared.db import ALIVE_STATUSES
     from shared.deploy_timing import AGENT_LEASE_TTL_S
+    from shared.runtime_incarnation import current_incarnation
+
+    incarnation = current_incarnation(agent_id)
 
     async with async_write_transaction(pool) as conn, conn.cursor() as cur:
         await cur.execute(
             "UPDATE agents_meta SET lease_expires_at = now() + make_interval(secs => %s) "
-            "WHERE id = %s AND status = ANY(%s)",
-            (ttl_s if ttl_s is not None else AGENT_LEASE_TTL_S, agent_id, list(ALIVE_STATUSES)),
+            "WHERE id = %s AND status = ANY(%s) "
+            "AND runtime_generation IS NOT DISTINCT FROM %s "
+            "AND runtime_owner IS NOT DISTINCT FROM %s "
+            "AND (runtime_kind IS NULL OR (runtime_kind = 'process' AND pid IS NOT NULL))",
+            (
+                ttl_s if ttl_s is not None else AGENT_LEASE_TTL_S,
+                agent_id,
+                list(ALIVE_STATUSES),
+                incarnation.generation if incarnation else None,
+                incarnation.owner if incarnation else None,
+            ),
         )
 
 

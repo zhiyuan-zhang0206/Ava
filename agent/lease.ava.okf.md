@@ -10,6 +10,12 @@ tags:
 
 # Agent Liveness Lease
 
+Process admission also stamps `agents_meta.runtime_generation`, `runtime_owner`,
+and `runtime_kind='process'`. Renewal matches that originally bound incarnation;
+a delayed old process cannot refresh its replacement's lease. Untokened legacy
+renewal only matches unknown ownership. Protocol remains zero in this foundation;
+hosted admission/renewal and an old-writer upgrade barrier remain required.
+
 ## What it is
 
 The **lease half of the registry × lease frame** ([[okf/design/r1-state-liveness/r1-state-liveness.ava.okf.md|R1 design]]) for agent processes: `agents_meta.lease_expires_at` is the liveness authority — a row with an unexpired lease IS a live process. The registry row ("should it exist?") and the lease ("is it alive?") answer separate questions; status carries lifecycle intent, the lease carries the process-level fact. A process that died without writing `terminated` leaves its status behind and the lease expires; a process that cannot renew (wedged, pre-lease code) is a zombie the reaper collects.

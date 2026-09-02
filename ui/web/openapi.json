@@ -575,6 +575,23 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/AgentExitedRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
         "responses": {
           "204": {
             "description": "Successful Response"
@@ -6541,6 +6558,28 @@
         ],
         "title": "AgentEventsResponse",
         "description": "GET /api/cluster/admin/events response — newest-first slice."
+      },
+      "AgentExitedRequest": {
+        "properties": {
+          "generation": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Generation"
+          },
+          "owner": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Owner"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "generation",
+          "owner"
+        ],
+        "title": "AgentExitedRequest",
+        "description": "The actual admitted runtime reporting exit, never a freshly read token."
       },
       "AgentInspect": {
         "properties": {
