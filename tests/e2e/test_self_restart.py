@@ -73,9 +73,13 @@ def test_self_restart_respawns_process_with_new_pid(e2e_env: E2EEnv, restarter_p
             row = cur.fetchone()
             if row:
                 last_status, last_pid = row
+        # #1464: the restarter pass is gateway-health-gated. When it defers
+        # (slow pass under CI load), the agent's own self-respawn fallback
+        # completes the restart cycle — new pid, row back to idling — without
+        # inserting the restarter's 'restart_completed' row. Both paths are a
+        # complete restart cycle; require only the observable outcome.
         if (
-            last_completed
-            and last_status == AgentStatus.IDLING.value
+            last_status == AgentStatus.IDLING.value
             and last_pid is not None
             and last_pid != first_pid
         ):
