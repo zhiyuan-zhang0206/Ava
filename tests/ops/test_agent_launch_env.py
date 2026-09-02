@@ -95,7 +95,14 @@ def test_agent_spawn_replaces_gateway_owner_url_with_runner_projection(
             "AVA_REDIS_PASSWORD": "redis-runtime-only",
         },
     )
-    monkeypatch.setattr("shared.cluster.runner_password_from_env", lambda: "runner-password")
+    monkeypatch.setattr("shared.bootstrap.config_source_is_local", lambda: True)
+    monkeypatch.setattr(
+        "shared.runtime_config.read_env_aliases",
+        lambda: {
+            "AVA_DB_URL": "postgresql://ava:owner-password@127.0.0.1:5433/ava",
+            "AVA_RUNNER_DB_PASSWORD": "runner-password",
+        },
+    )
 
     env = agent_launch.agent_spawn_env_dict()
 

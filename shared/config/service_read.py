@@ -249,7 +249,7 @@ def _decode_env_file_values(
         out[name] = getattr(decoded, name)
 
 
-def _warn_undecodable_field(name: str, alias: str, raw: str) -> None:
+def _warn_undecodable_field(name: str, alias: str, _raw: str) -> None:
     """Warn about a `.env` value the owning model cannot decode — the next
     process start's Settings construction will fail on it, so the operator must
     hear about it at panel-read time rather than at the next boot (audit
@@ -257,7 +257,7 @@ def _warn_undecodable_field(name: str, alias: str, raw: str) -> None:
     from shared.log import logger
 
     logger.warning(
-        f"current_field_values: {alias}={raw!r} in .env cannot be decoded "
+        f"current_field_values: {alias} in .env cannot be decoded "
         f"by the {name!r} config field; serving the boot-time value instead — "
         f"fix or remove the line before the next process start (Settings "
         f"construction will fail on it)"
@@ -296,7 +296,6 @@ def bootstrap_config_values(role: str | None = None) -> dict[str, str]:
 
     from shared import runtime_config
     from shared.config import BOOTSTRAP_FIELDS, field_alias
-    from shared.url_secret import url_with_userinfo
 
     if role not in (None, "runner"):
         raise ValueError(
@@ -327,7 +326,7 @@ def bootstrap_config_values(role: str | None = None) -> dict[str, str]:
     for binding in provider_api.REGISTRY.bindings.values():
         if binding.key_env in aliases and binding.key_env not in out:
             out[binding.key_env] = aliases[binding.key_env]
-    from shared.cluster.derive import RUNNER_DB_PASSWORD_ENV, RUNNER_ROLE
+    from shared.cluster.derive import RUNNER_DB_PASSWORD_ENV, project_runner_db_url
 
     runner_password = aliases.get(RUNNER_DB_PASSWORD_ENV) or ""
     if not runner_password:
@@ -347,7 +346,7 @@ def bootstrap_config_values(role: str | None = None) -> dict[str, str]:
         raise ValueError(
             "AVA_DB_URL is not served by bootstrap — cannot project the runner credential onto it"
         )
-    out["AVA_DB_URL"] = url_with_userinfo(db_url, RUNNER_ROLE, runner_password)
+    out["AVA_DB_URL"] = project_runner_db_url(db_url, runner_password)
     return out
 
 
