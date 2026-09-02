@@ -32,6 +32,7 @@ jobs:
       - name: Verify existing database observations and failure distinction
         run: uv run pytest tests/shared/test_agent_observation.py tests/services/test_heartbeat_liveness.py tests/gateway/test_agent_inspect.py -q
       - name: Verify rendered observation states
+        if: success() || failure()
         working-directory: ui/web
         run: npx vitest run src/lib/agent-observation.test.ts src/components/agent-row.test.tsx src/components/inspector-panel.test.tsx
       - if: always()

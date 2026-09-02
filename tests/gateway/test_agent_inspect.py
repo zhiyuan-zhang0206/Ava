@@ -596,6 +596,8 @@ def test_inspect_live_returns_only_window_independent_fields(
         "machine",
         "liveness_state",
         "last_probe_at",
+        "observation",
+        "shells_available",
         "spawned_at",
         "started_at",
         "shells",
@@ -605,6 +607,8 @@ def test_inspect_live_returns_only_window_independent_fields(
     }
     assert body["agent_id"] == aid
     assert body["machine"] == "wsl"
+    assert body["shells_available"] is True
+    assert body["observation"]["runtime_owner"] == "unknown"
     assert body["config_overlay"] == {"llm_model": "claude-opus-4-8"}
     assert body["shells"] == [
         {
@@ -3001,7 +3005,7 @@ def test_inspect_releases_live_db_borrow_before_cached_loki_fanout(
     class TrackingCursor:
         def __init__(self) -> None:
             self.rows: list[tuple[Any, ...]] = [
-                ({}, "runner", "running", now, now, now, None, "online", now),
+                ({}, "runner", "running", now, now, now, None, "online", now, None, now),
                 (False,),
             ]
 
