@@ -13,6 +13,7 @@ import os
 import platform
 import stat
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 
 import psycopg
@@ -74,10 +75,21 @@ def read_prepared_context(path: Path) -> PreparedObservation:
 
 def validate_operation(context: PreparedObservation, projection: ObserverProjection) -> None:
     """Only old-schema columns; no config bootstrap, schema assertion or writes."""
+    remaining = int((context.challenge.valid_until - datetime.now(UTC)).total_seconds())
+    if remaining < 2:
+        raise ReleaseRejectedError("bootstrap challenge has no connection budget remaining")
     with (
-        psycopg.connect(projection.db_url.get_secret_value(), connect_timeout=5) as conn,
+        psycopg.connect(
+            projection.db_url.get_secret_value(), connect_timeout=min(5, remaining)
+        ) as conn,
         conn.transaction(),
     ):
+        remaining_ms = int(
+            (context.challenge.valid_until - datetime.now(UTC)).total_seconds() * 1000
+        )
+        if remaining_ms <= 0:
+            raise ReleaseRejectedError("bootstrap challenge expired while connecting")
+        conn.execute("SELECT set_config('statement_timeout',%s,true)", (str(remaining_ms),))
         at = lock_rollout(conn, context.operation)
         row = conn.execute(
             "SELECT home FROM machine_units WHERE machine_name=%s AND home=%s",
@@ -112,20 +124,30 @@ def validate_entry(context: PreparedObservation, projection: ObserverProjection)
     return release
 
 
+async def observe_response(
+    context: PreparedObservation,
+    projection: ObserverProjection,
+    observer: UnitObserver,
+    body: bytes,
+) -> tuple[int, bytes, str]:
+    try:
+        await asyncio.to_thread(validate_operation, context, projection)
+        result = await observer.respond(body)
+        if result[0] == 200:
+            # OS observation cannot hold a database lock. Revalidate afterward;
+            # adoption still needs its own fresh, locked operation check.
+            await asyncio.to_thread(validate_operation, context, projection)
+        return result
+    except (psycopg.Error, RuntimeError, ValueError):
+        return (409, b'{"error":"bootstrap operation is unavailable or stale"}', "application/json")
+
+
 async def serve(context: PreparedObservation, projection: ObserverProjection) -> None:
     await asyncio.to_thread(validate_entry, context, projection)
     observer = UnitObserver(context.expected, context.challenge)
 
     async def observe(body: bytes) -> tuple[int, bytes, str]:
-        try:
-            await asyncio.to_thread(validate_operation, context, projection)
-        except (psycopg.Error, RuntimeError, ValueError):
-            return (
-                409,
-                b'{"error":"bootstrap operation is unavailable or stale"}',
-                "application/json",
-            )
-        return await observer.respond(body)
+        return await observe_response(context, projection, observer, body)
 
     secret = projection.cluster_secret.get_secret_value()
     server = await start_daemon_http(
