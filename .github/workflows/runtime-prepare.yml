@@ -42,7 +42,8 @@ jobs:
         shell: bash
         run: |
           initdb -D "$RUNNER_TEMP/runtime-pg" --auth=trust --username=runtimeproof
-          pg_ctl -D "$RUNNER_TEMP/runtime-pg" -l "$RUNNER_TEMP/runtime-pg.log" -o '-h 127.0.0.1 -p 55439' -w start
+          mkdir -m 700 "$RUNNER_TEMP/runtime-pg-socket"
+          pg_ctl -D "$RUNNER_TEMP/runtime-pg" -l "$RUNNER_TEMP/runtime-pg.log" -o "-h 127.0.0.1 -p 55439 -k $RUNNER_TEMP/runtime-pg-socket" -w start || { tail -80 "$RUNNER_TEMP/runtime-pg.log"; exit 1; }
           echo 'AVA_RUNTIME_PROOF_PG=postgresql://runtimeproof@127.0.0.1:55439/postgres' >> "$GITHUB_ENV"
       - name: Fetch immutable build inputs before offline preparation
         shell: bash
@@ -82,4 +83,13 @@ jobs:
       - name: Stop isolated native PG
         if: always() && runner.os == 'Linux'
         shell: bash
-        run: pg_ctl -D "$RUNNER_TEMP/runtime-pg" -m fast -w stop
+        run: |
+          if test -f "$RUNNER_TEMP/runtime-pg/postmaster.pid"; then
+            pg_ctl -D "$RUNNER_TEMP/runtime-pg" -m fast -w stop
+          fi
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always() && runner.os == 'Linux'
+        with:
+          name: migration-pg-log-${{ github.event.pull_request.head.sha }}
+          path: ${{ runner.temp }}/runtime-pg.log
+          if-no-files-found: error
