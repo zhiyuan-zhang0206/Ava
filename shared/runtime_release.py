@@ -17,7 +17,7 @@ import stat
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import Any
+from typing import Any, cast
 
 from shared.platform import file_lock
 
@@ -126,7 +126,8 @@ def verify_release(
         raise ReleaseRejectedError("release platform/schema incompatible with observed host")
     if not isinstance(manifest["files"], dict) or not manifest["files"]:
         raise ReleaseRejectedError("release must declare a nonempty complete file inventory")
-    files = {_relative(name): _digest(value) for name, value in manifest["files"].items()}
+    raw_files = cast(dict[object, object], manifest["files"])
+    files = {_relative(name): _digest(value) for name, value in raw_files.items()}
     if "manifest.json" in files:
         raise ReleaseRejectedError("manifest cannot hash itself")
     actual: set[str] = set()
@@ -172,9 +173,12 @@ def current_pointer(store: Path) -> tuple[str, str] | None:
         value = json.loads(pointer.read_text(encoding="ascii"))
     except FileNotFoundError:
         return None
-    if not isinstance(value, dict) or set(value) != {"artifact_digest", "manifest_digest"}:
+    if not isinstance(value, dict):
         raise ReleaseRejectedError("invalid release pointer")
-    return _digest(value["artifact_digest"]), _digest(value["manifest_digest"])
+    pointer_fields = cast(dict[object, object], value)
+    if set(pointer_fields) != {"artifact_digest", "manifest_digest"}:
+        raise ReleaseRejectedError("invalid release pointer")
+    return _digest(pointer_fields["artifact_digest"]), _digest(pointer_fields["manifest_digest"])
 
 
 def activate_release(
