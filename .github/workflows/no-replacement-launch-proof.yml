@@ -30,7 +30,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p proof
-          uv run python -m unittest tests.native_agent_record_probe -v 2>&1 | tee proof/native.log
+          uv run python -m unittest tests.native_agent_record_probe tests.windows_job_hypothesis_probe -v 2>&1 | tee proof/native.log
         env:
           AVA_HOME: ${{ runner.temp }}/ava-native-record-probe
       - name: Verify composed complete wheel without source or PYTHONPATH
