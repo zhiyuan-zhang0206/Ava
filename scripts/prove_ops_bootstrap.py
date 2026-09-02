@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import socket
@@ -10,7 +11,8 @@ import sys
 import time
 import urllib.error
 import urllib.request
-from datetime import timedelta
+from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -19,13 +21,20 @@ import psutil
 import psycopg
 from psycopg import sql
 from psycopg.conninfo import make_conninfo
+from pydantic import SecretStr
 
-from services.agent_ops.bootstrap import PreparedObservation
+from services.agent_ops.bootstrap import (
+    ObserverProjection,
+    PreparedObservation,
+    observe_response,
+    validate_operation,
+)
 from shared.managed_writer_barrier import RolloutIdentity
 from shared.managed_writer_observation import (
     ExpectedProcess,
     ExpectedUnitWriters,
     ObservationChallenge,
+    UnitObserver,
 )
 
 
@@ -93,6 +102,50 @@ def main() -> None:  # noqa: PLR0915 — one bounded CI process/DB lifetime with
             "AVA_MACHINE_SERVE_AGENT_RUNNER": "true",
         }
         pid_files = set(home.rglob("*.pid"))
+        # Actual competing PG transaction: query budget must not wait forever
+        # behind an old operation holder. Scope order releases the lock even on
+        # timeout failure before waiting for the test worker to join.
+        short = context.model_copy(
+            update={
+                "challenge": context.challenge.model_copy(
+                    update={"valid_until": datetime.now(UTC) + timedelta(seconds=3)}
+                )
+            }
+        )
+        projection = ObserverProjection(
+            db_url=SecretStr(env["AVA_DB_URL"]), cluster_secret=SecretStr(token), ops_port=port
+        )
+        with ThreadPoolExecutor(max_workers=1) as executor, conn.transaction():
+            conn.execute("SELECT id FROM deployment_state FOR UPDATE")
+            future = executor.submit(validate_operation, short, projection)
+            try:
+                future.result(timeout=5)
+            except psycopg.errors.QueryCanceled:
+                pass
+            else:
+                raise AssertionError("bootstrap did not enforce the outstanding challenge deadline")
+
+        class ExpiringObserver(UnitObserver):
+            async def respond(self, body: bytes) -> tuple[int, bytes, str]:
+                result = await super().respond(body)
+                await asyncio.to_thread(
+                    conn.execute,
+                    "UPDATE deployment_state SET expires_at=clock_timestamp()-interval '1 second'",
+                )
+                return result
+
+        expired_result = asyncio.run(
+            observe_response(
+                context,
+                projection,
+                ExpiringObserver(context.expected, context.challenge),
+                json.dumps({"challenge": str(context.challenge.challenge)}).encode(),
+            )
+        )
+        require(expired_result[0] == 409, "operation expiry during observation returned success")
+        conn.execute(
+            "UPDATE deployment_state SET expires_at=clock_timestamp()+interval '10 minutes'"
+        )
 
         def argv(candidate: PreparedObservation) -> list[str]:
             path = home.parent / f"observer-context-{uuid4().hex}.json"
@@ -202,6 +255,7 @@ def main() -> None:  # noqa: PLR0915 — one bounded CI process/DB lifetime with
                             "realPidObserved": True,
                             "expiredOperationRefused": True,
                             "noOrdinaryPidEffects": True,
+                            "lockWaitDeadline": True,
                         }
                     )
                 )
