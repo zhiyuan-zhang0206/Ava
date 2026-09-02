@@ -1,5 +1,7 @@
 """One applied-termination observer reused by recovery and explicit resurrection."""
 
+from typing import Any, cast
+
 import psycopg
 from psycopg.pq import TransactionStatus
 
@@ -34,7 +36,7 @@ def observe_applied_termination(conn: psycopg.Connection, agent_id: int, machine
     ).fetchone()
     if command is None or not isinstance(command[0], dict):
         return False
-    if not target_process_ended(command[0], machine):
+    if not target_process_ended(cast(dict[str, Any], command[0]), machine):
         return False
     observed = conn.execute(
         "UPDATE inbound_messages SET observed_at=clock_timestamp(),status='done' WHERE id=%s "

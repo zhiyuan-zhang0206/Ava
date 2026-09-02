@@ -124,9 +124,11 @@ async def test_termination_observation_rejects_changed_locked_target(
             "UPDATE agents_meta SET lifecycle_command_id=%s WHERE id=%s", (other, agent_id)
         )
     else:
-        monkeypatch.setattr(
-            "shared.lifecycle_termination_observe.target_process_ended", lambda *_: True
-        )
+
+        def ended(_payload: object, _machine: str) -> bool:
+            return True
+
+        monkeypatch.setattr("shared.lifecycle_termination_observe.target_process_ended", ended)
     before = db_conn.execute(
         "SELECT runtime_owner,lifecycle_command_id FROM agents_meta WHERE id=%s", (agent_id,)
     ).fetchone()

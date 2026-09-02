@@ -7,7 +7,7 @@ generation/owner fence. Session-record cleanup cannot erase this evidence.
 
 import math
 import os
-from typing import Any
+from typing import Any, cast
 
 import psutil
 
@@ -29,9 +29,10 @@ def capture_process_identity(admitted_pid: int, machine: str) -> dict[str, objec
 
 def target_process_ended(payload: dict[str, Any], machine: str) -> bool:
     """Positive old-process exit/reuse only; absent or unreadable evidence defers."""
-    value = payload.get("target_process_identity")
-    if not isinstance(value, dict):
+    raw: object = payload.get("target_process_identity")
+    if not isinstance(raw, dict):
         return False
+    value = cast(dict[str, Any], raw)
     if set(value) != {"machine", "pid", "create_time", "starttime"}:
         return False
     pid, birth, ticks = value["pid"], value["create_time"], value["starttime"]
