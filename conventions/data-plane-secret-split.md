@@ -14,6 +14,14 @@ Agents must never receive either admin password, `AVA_REDIS_PASSWORD` as a
 standalone variable, or a main-identity `AVA_DB_URL`. Bootstrap always projects
 the `ava_runner` URL; its Redis URL carries the runtime ACL password.
 
+The same rule applies to every `AVA_PROCESS_PROFILE=agent` process, not only
+detached agents. In particular, the single-box hosted agent-host receives an
+explicit `ava_runner` URL from both the initial service launch and its watchdog
+respawn. Agent-profile startup rejects a loopback owner URL on a
+secret-bearing cluster: profile hygiene intentionally removes owner credentials,
+so deriving an owner password from `AVA_CLUSTER_SECRET` there would create an
+invalid mixed credential instead of a legal runner connection.
+
 ## Upgrade a legacy cluster
 
 On the first eligible gateway `ava start` after this version is installed, Ava

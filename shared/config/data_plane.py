@@ -443,12 +443,25 @@ class DataPlaneSettings(EnvSettings):
         Runs after `_dial_self_host_via_loopback` (declared above it), so the
         local/foreign decision sees the dial host the cluster will actually use.
         """
-        if (
-            self.cluster_secret
-            and self.db_url != UNANCHORED_DB_SENTINEL
+        local_owner_url = (
+            self.db_url != UNANCHORED_DB_SENTINEL
             and not _is_runner_db_url(self.db_url)
             and is_loopback_host(urlsplit(self.db_url).hostname or "")
+        )
+        if (
+            os.environ.get("AVA_PROCESS_PROFILE") == "agent"
+            and self.cluster_secret
+            and local_owner_url
         ):
+            # Agent-profile startup protects launcher-injected AVA_DB_URL from
+            # dotenv replacement. Without this check, a missing projection would
+            # combine the owner username with the cluster secret after agent
+            # hygiene removes the owner password, granting the wrong identity.
+            raise ValueError(
+                "agent-profile processes must receive an ava_runner AVA_DB_URL; "
+                "refusing a local owner URL derived from AVA_CLUSTER_SECRET"
+            )
+        if self.cluster_secret and local_owner_url:
             self.db_url = url_with_password(
                 self.db_url, self.db_admin_password or self.cluster_secret
             )

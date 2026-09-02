@@ -40,6 +40,7 @@ import time
 import httpx
 from psycopg_pool import ConnectionPool
 
+from ops import runner_mode
 from ops.agent_identity import RESIDENT_IDENTITIES, AgentProcessIdentity, probe_agent_process
 from ops.agent_wake import revive_agent
 from ops.agents import respawn_agent
@@ -355,6 +356,9 @@ class RespawnController:
         self._lease_zombie_grace_until = deadline
 
     def reconcile(self, role: MachineRole) -> ReconcileResult:  # noqa: ARG002 — agent-runner-only, uniform Controller signature
+        if runner_mode.is_hosted():
+            _log.debug("[ops.respawn] hosted mode owns no process rows; reconcile skipped")
+            return ReconcileResult(dimension=self.name, blocks=BlockScope.NONE, acted=False)
         local_machine = machine_name()
         acted = self._dispatch_respawns(local_machine)
 

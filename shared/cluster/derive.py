@@ -238,6 +238,27 @@ def runner_password_from_env(home: Path | None = None) -> str:
     return (dotenv_values(env_path).get(RUNNER_DB_PASSWORD_ENV) or "").strip()
 
 
+def runner_db_url_projection(db_url: str) -> str:
+    """Project ``db_url`` onto the least-privilege runner identity.
+
+    Agent processes and agent-profile daemons receive the runner credential
+    inside their database URL, never as a standalone secret. Keep an already
+    projected URL byte-for-byte: it may have arrived from a remote gateway and
+    carries the runner role's current password.
+    """
+    from shared.config.data_plane import _is_runner_db_url
+
+    if _is_runner_db_url(db_url):
+        return db_url
+    runner_password = cluster.runner_password_from_env()
+    if not runner_password:
+        raise RuntimeError(
+            "AVA_RUNNER_DB_PASSWORD is not set in the gateway's .env — run "
+            "`ava cluster ensure-db-role` before spawning agents."
+        )
+    return url_with_userinfo(db_url, RUNNER_ROLE, runner_password)
+
+
 def redis_channel_prefix() -> str:
     """The pub/sub channel prefix (`ava`) — the events channel is `<prefix>:events`,
     so strip that suffix. Fixed across clusters now that each owns its redis: there

@@ -39,6 +39,8 @@ from cli.commands._repo import (
     profile_marker,
     session_name,
 )
+from shared.cluster.derive import runner_db_url_projection
+from shared.config import settings
 from shared.machine import MachineRoles
 
 
@@ -257,6 +259,17 @@ def _launch_roster(roles: MachineRoles, skip: set[str]) -> tuple[ServiceSpec, ..
     )
 
 
+def _service_extra_env(spec: ServiceSpec) -> dict[str, str]:
+    """Profile and database projection required by one service session."""
+    extra: dict[str, str] = {}
+    marker = profile_marker(spec)
+    if marker is not None:
+        extra["AVA_PROCESS_PROFILE"] = marker
+    if marker == "agent":
+        extra["AVA_DB_URL"] = runner_db_url_projection(settings.data_plane.db_url)
+    return extra
+
+
 def _relaunch_once(sess: str, cmd: str, cwd: Path, extra: dict[str, str] | None) -> bool:
     """One retry of a `new-session` that just failed; True when the session is up.
 
@@ -383,10 +396,7 @@ def _launch_sessions(roles: MachineRoles, skip: set[str], repo: Path) -> LaunchO
         # shared.dotenv_boot._enforce_cluster_env_authority — the gateway pop
         # removes agent-runner cluster keys (LLM provider keys) from os.environ,
         # which is exactly why the labeler opts out (it builds chat models).
-        extra: dict[str, str] = {}
-        marker = profile_marker(spec)
-        if marker is not None:
-            extra["AVA_PROCESS_PROFILE"] = marker
+        extra = _service_extra_env(spec)
         if not _ns._new_session(
             sess, spec.cmd, repo, extra_env=extra or None
         ) and not _relaunch_once(sess, spec.cmd, repo, extra or None):

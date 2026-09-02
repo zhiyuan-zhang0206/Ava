@@ -70,6 +70,8 @@ from shared.agents import (
     TerminationSource,
 )
 from shared.audit_events import insert_event_log
+from shared.config import settings
+from shared.daemon_health import health_port, probe_daemon
 from shared.db import fetch_one, publish_inbound_wake
 from shared.db_transaction import write_transaction
 from shared.live_announce import publish_agent_updated_sync, publish_page_closed_sync
@@ -109,6 +111,15 @@ class _PreparedResurrect:
 
 class _ResurrectSessionStartError(RuntimeError):
     """Detached session creation failed before the resurrect commit."""
+
+
+def _hosted_agent_host_healthy() -> bool:
+    """Whether this hosted cluster's sole restart consumer is live and ours."""
+    return probe_daemon(
+        "agent_host",
+        f"http://localhost:{health_port('agent_host')}/healthz",
+        pidfile=settings.services.agent_host_pidfile,
+    ).alive
 
 
 def _lock_active_home_machine(cur: psycopg.Cursor, agent_id: int) -> None:
@@ -557,6 +568,16 @@ def respawn_agent(agent_id: int) -> bool:
         False: another dispatcher won / status changed, noop (does not raise —
             dispatcher should keep polling).
     """
+    hosted = runner_mode.is_hosted()
+    if hosted and not _hosted_agent_host_healthy():
+        logger.error(
+            "agent {agent_id} restart handoff failed: hosted agent-host is unhealthy; "
+            "leaving row restarting for retry",
+            event="restart_handoff_host_unhealthy",
+            agent_id=agent_id,
+        )
+        return False
+
     with write_transaction() as conn, conn.cursor() as cur:
         # Phase 1: race-safe gate — UPDATE + commit. Commit makes the
         # restarter see status no longer 'restarting' so it no longer polls
@@ -687,7 +708,7 @@ def respawn_agent(agent_id: int) -> bool:
         )
         conn.commit()
         publish_agent_updated_sync(conn, agent_id)
-    if runner_mode.is_hosted():
+    if hosted:
         # Hosted restart (PR-side change) never flips a row to 'restarting', so
         # this branch is defensive — but if a row does land here, the hosted
         # answer is the same as everywhere else: the dispatcher owns delivery.
