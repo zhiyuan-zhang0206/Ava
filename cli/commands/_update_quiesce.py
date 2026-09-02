@@ -139,14 +139,13 @@ def _quiesce_all_agents(timeout_s: float) -> bool:
     Args:
         timeout_s: max seconds to wait for all agents to quiesce.
 
-    Hosted mode is a no-op returning True: hosted rows stay `idling` for life
-    (D1 zero-state-write) so the poll has no drain to converge on — it would
-    burn its whole window and still report stragglers. The hosted
-    stop-the-world is the fleet's agent-host service stops (Phase B per host),
-    whose scheduler checkpoints every in-flight turn on SIGTERM; signalling
-    here would restart every agent mid-work for nothing. Returning True also
-    keeps the orchestration from computing force_reap, which hosted rows must
-    never see (no restarter exists to respawn a CAS-marked 'restarting' row).
+    Hosted mode is a no-op returning True because there are no per-agent
+    processes to drain or restart. The hosted stop-the-world is the fleet's
+    agent-host service stops (Phase B per host), whose scheduler checkpoints
+    every in-flight turn on SIGTERM; signalling here would restart every agent
+    mid-work for nothing. Returning True also keeps the orchestration from
+    computing force_reap, which hosted rows must never see (no restarter exists
+    to respawn a CAS-marked 'restarting' row).
     """
     from ops.runner_mode import is_hosted
 
@@ -206,14 +205,15 @@ def _force_reap_local_agents(*, defer_process_stop: bool = False) -> list[int]:
     Returns the ids that were marked (an agent that exited cleanly meanwhile is
     left untouched and its dead process is a noop kill).
 
-    Hosted mode is a no-op returning []: hosted rows stay `idling` for life and
-    carry no pid, so "live" is not a straggler signal, and CAS-marking them
-    'restarting' would orphan them permanently once the restarter is gated
-    out of the hosted roster (PR #1029 — until that gate lands, the
-    restarter's hosted branch self-heals a marked row back to idling at the
-    cost of one spurious restart_completed per agent, which is why #1029 must
-    land before hosted goes live). A hosted force-reap is the one operation
-    that can turn a fleet of reachable agents into unreachable ones.
+    Hosted mode is a no-op returning []: hosted rows carry no per-agent pid,
+    and the status is maintained by the host's turn tasks rather than a
+    restarter-managed process. CAS-marking them 'restarting' would orphan them
+    permanently once the restarter is gated out of the hosted roster (PR #1029
+    — until that gate lands, the restarter's hosted branch self-heals a marked
+    row back to idling at the cost of one spurious restart_completed per agent,
+    which is why #1029 must land before hosted goes live). A hosted force-reap
+    is the one operation that can turn a fleet of reachable agents into
+    unreachable ones.
     """
     from ops.runner_mode import is_hosted
 
@@ -269,17 +269,16 @@ def _quiesce_local_agents(mode: str) -> bool:
 
     Returns True when every agent quiesced (or none were live).
 
-    Hosted mode is a no-op returning True (and never pauses): agents run
-    inside the agent-host and their rows stay `idling` for life, so there are
-    no per-agent processes to signal and no drain to poll. The hosted quiesce
-    IS the service stop that follows this function — the update flow's
-    graceful stop SIGTERMs the agent-host, whose dispatcher unwinds into
-    `scheduler.aclose()` and checkpoints every in-flight turn before exit;
-    `ava restart`'s non-graceful kill cuts in-flight turns at their last step
-    checkpoint instead (the same accepted degradation as a process-mode
-    force-reap). Signalling here would insert one restart inbound per agent
-    for nothing, and a reap would CAS-mark rows 'restarting' that no
-    restarter will ever respawn.
+    Hosted mode is a no-op returning True (and never pauses): agents run inside
+    the agent-host, so there are no per-agent processes to signal and no
+    restarter drain to poll. The hosted quiesce IS the service stop that follows
+    this function — the update flow's graceful stop SIGTERMs the agent-host,
+    whose dispatcher unwinds into `scheduler.aclose()` and checkpoints every
+    in-flight turn before exit; `ava restart`'s non-graceful kill cuts in-flight
+    turns at their last step checkpoint instead (the same accepted degradation
+    as a process-mode force-reap). Signalling here would insert one restart
+    inbound per agent for nothing, and a reap would CAS-mark rows 'restarting'
+    that no restarter will ever respawn.
     """
     import shared.db
     from cli.commands import update as _up_mod

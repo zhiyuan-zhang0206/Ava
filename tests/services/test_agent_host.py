@@ -283,6 +283,11 @@ def wired(monkeypatch: pytest.MonkeyPatch, host_plugin: None) -> _Build:
 
     monkeypatch.setattr(host_mod, "AgentEventPublisher", _Publisher)
 
+    async def _flip_hosted_status(*_args: object, **_kwargs: object) -> bool:
+        return True
+
+    monkeypatch.setattr(host_mod, "flip_hosted_status", _flip_hosted_status)
+
     def _swallow_notify(_agent_id: int) -> None:
         """Overridden per-test where the notify itself is the contract."""
 
@@ -308,7 +313,7 @@ def wired(monkeypatch: pytest.MonkeyPatch, host_plugin: None) -> _Build:
 
 
 class TestPendingInboundBackstop:
-    async def test_local_pending_rows_become_stale_aware_wake_candidates(self) -> None:
+    async def test_stale_running_rows_qualified_by_the_scan(self) -> None:
         """The hosted dispatcher scans only this machine's runnable rows. A
         fresh pending inbound wakes its agent; only the database predicate marks
         a long-silent one stale enough for cancellation recovery."""
@@ -326,8 +331,9 @@ class TestPendingInboundBackstop:
             (17, True),
             (23, False),
         ]
-        assert pool.params == (180.0, 180.0, "this-box")
+        assert pool.params == (180.0, 180.0, 180.0, 180.0, "this-box")
         assert "m.status = 'idling'" in pool.sql
+        assert "m.status = 'running'" in pool.sql
         assert "m.machine = %s" in pool.sql
         assert "pending.status = 'pending'" in pool.sql
 
@@ -458,6 +464,110 @@ class TestConfigRebind:
 
 
 class TestTurnLoop:
+    async def test_a_turn_flips_status_running_then_idling(
+        self, wired: _Build, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import services.agent_host.host as host_mod
+
+        flips: list[tuple[int, str, str]] = []
+
+        async def _flip(_pool: object, agent_id: int, to: str, *, expected_from: str) -> bool:
+            flips.append((agent_id, to, expected_from))
+            return True
+
+        monkeypatch.setattr(host_mod, "flip_hosted_status", _flip)
+        host, _, _ = wired({1: _Row(status="idling")})
+
+        await asyncio.wait_for(host.run_turn(1), 2)
+
+        assert flips == [(1, "running", "idling"), (1, "idling", "running")]
+
+    async def test_a_crashing_turn_restores_idling(
+        self, wired: _Build, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import services.agent_host.host as host_mod
+
+        flips: list[tuple[int, str, str]] = []
+
+        async def _flip(_pool: object, agent_id: int, to: str, *, expected_from: str) -> bool:
+            flips.append((agent_id, to, expected_from))
+            return True
+
+        async def _boom(*_args: object, **_kwargs: object) -> dict[str, Any]:
+            raise RuntimeError("turn exploded")
+
+        monkeypatch.setattr(host_mod, "flip_hosted_status", _flip)
+        host, graph, _ = wired({1: _Row(status="idling")})
+        graph.ainvoke = _boom  # pyright: ignore[reportAttributeAccessIssue]
+
+        with pytest.raises(RuntimeError, match="turn exploded"):
+            await asyncio.wait_for(host.run_turn(1), 2)
+
+        assert flips[-1] == (1, "idling", "running")
+
+    async def test_exit_requested_does_not_restore_idling(
+        self, wired: _Build, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import services.agent_host.host as host_mod
+
+        flips: list[tuple[int, str, str]] = []
+
+        async def _flip(_pool: object, agent_id: int, to: str, *, expected_from: str) -> bool:
+            flips.append((agent_id, to, expected_from))
+            return True
+
+        monkeypatch.setattr(host_mod, "flip_hosted_status", _flip)
+        host, _, _ = wired(
+            {1: _Row(status="idling")},
+            {1: [{"exit_requested": True, "turn_idle": False, "restart_requested": False}]},
+        )
+
+        await asyncio.wait_for(host.run_turn(1), 2)
+
+        assert flips == [(1, "running", "idling")]
+
+    async def test_a_losing_start_flip_skips_the_turn(
+        self, wired: _Build, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import services.agent_host.host as host_mod
+
+        flips: list[tuple[int, str, str]] = []
+
+        async def _flip(_pool: object, agent_id: int, to: str, *, expected_from: str) -> bool:
+            flips.append((agent_id, to, expected_from))
+            return False
+
+        monkeypatch.setattr(host_mod, "flip_hosted_status", _flip)
+        host, graph, _ = wired({1: _Row(status="idling")})
+
+        await asyncio.wait_for(host.run_turn(1), 2)
+
+        assert flips == [(1, "running", "idling")]
+        assert graph.observations == []
+        assert host._runtimes == {}
+        assert host.stats.cache_misses == 0
+
+    async def test_restart_requested_restores_idling(
+        self, wired: _Build, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import services.agent_host.host as host_mod
+
+        flips: list[tuple[int, str, str]] = []
+
+        async def _flip(_pool: object, agent_id: int, to: str, *, expected_from: str) -> bool:
+            flips.append((agent_id, to, expected_from))
+            return True
+
+        monkeypatch.setattr(host_mod, "flip_hosted_status", _flip)
+        host, _, _ = wired(
+            {1: _Row(status="idling")},
+            {1: [{"exit_requested": False, "turn_idle": False, "restart_requested": True}]},
+        )
+
+        await asyncio.wait_for(host.run_turn(1), 2)
+
+        assert flips[-1] == (1, "idling", "running")
+
     async def test_turn_idle_ends_the_task(self, wired: _Build) -> None:
         host, graph, _ = wired(
             {1: _Row()},

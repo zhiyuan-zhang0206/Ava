@@ -99,11 +99,11 @@ This module runs turns. The rest of the agent lifecycle is hosted-aware:
   terminate marks the row dead without a kill and best-effort cancels the turn
   task through this host's `/cancel-turn` route (`ops/ops_lifecycle.py`).
 - **cluster update** — the hosted-aware quiesce skips the per-agent drain
-  (hosted rows stay idling for life, so there is no straggler signal to wait
-  on); the stop-the-world is this host's own service stop, which checkpoints
-  every in-flight turn on SIGTERM (`cli/commands/_update_quiesce.py`). The
-  roster gates the process-mode restarter off while this host runs
-  (`ops/spec.py`).
+  because hosted turns are checkpointer tasks rather than per-agent processes.
+  The host maintains each row's `running` / `idling` status around those turns;
+  the stop-the-world is this host's own service stop, which checkpoints every
+  in-flight turn on SIGTERM (`cli/commands/_update_quiesce.py`). The roster
+  gates the process-mode restarter off while this host runs (`ops/spec.py`).
 
 The lease renewer and the lease-zombie reaper remain process-mode machinery
 (gated off a hosted cluster with the restarter); the hibernation chain
@@ -130,7 +130,7 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent._process_boot import boot_agent_scope
 from agent._runloop import _graph_config
-from agent.db import LoggingConnectionPool
+from agent.db import LoggingConnectionPool, flip_hosted_status
 from agent.lifecycle import _notify_exit
 from agent.startup import (
     _reconcile_claimed_inbounds_at_startup,
@@ -237,6 +237,34 @@ class HostStats:
         }
 
 
+async def settle_stale_running_rows(pool: AsyncConnectionPool, machine: str) -> list[int]:
+    """Restore rows left running by a previous hosted-runner instance.
+
+    Hosted rows have no per-agent pid, so a running row without one at host boot
+    cannot own a live task. Soft-CAS each candidate because a concurrent
+    lifecycle operation may have claimed it while this scan was in progress.
+    """
+    async with pool.connection() as conn:
+        rows = await (
+            await conn.execute(
+                "SELECT id FROM agents_meta "
+                "WHERE status = 'running' AND pid IS NULL AND machine = %s",
+                (machine,),
+            )
+        ).fetchall()
+    settled: list[int] = []
+    for row in rows:
+        agent_id = row[0]
+        if await flip_hosted_status(pool, agent_id, "idling", expected_from="running"):
+            settled.append(agent_id)
+    logger.info(
+        "hosted stale-running settle: settled {n} row(s)",
+        event="host_stale_running_settled",
+        n=len(settled),
+    )
+    return settled
+
+
 class AgentHost:
     """Runs one agent's turns on demand, over process-wide shared machinery.
 
@@ -283,6 +311,18 @@ class AgentHost:
 
         async with self._turn_slots:
             self.stats.turns_started += 1
+            running = await flip_hosted_status(
+                self._pool, agent_id, "running", expected_from=stored.status
+            )
+            if not running:
+                logger.info(
+                    "hosted turn for agent {agent_id} not started — row left {status} "
+                    "(concurrent lifecycle op); skipping",
+                    agent_id=agent_id,
+                    status=stored.status,
+                )
+                return
+            exited = False
             pins = resolve_agent_config_pins(stored.config_overlay, stored.birth_config)
             plugin_pins = resolve_agent_plugin_pins(stored.config_overlay)
             # All three binds wrap the whole turn, so every node task copies
@@ -299,7 +339,7 @@ class AgentHost:
                 self._in_flight.add(agent_id)
                 try:
                     runtime = await self._runtime_for(agent_id, stored.fingerprint)
-                    await self._drive_turns(agent_id, runtime)
+                    exited = await self._drive_turns(agent_id, runtime)
                 except Exception:
                     # The scheduler logs and drops the task; dropping the runtime
                     # too is what makes the retry equivalent to process mode's
@@ -310,6 +350,10 @@ class AgentHost:
                     raise
                 finally:
                     self._in_flight.discard(agent_id)
+                    if not exited:
+                        await flip_hosted_status(
+                            self._pool, agent_id, "idling", expected_from="running"
+                        )
 
     # ── locality / runnability ───────────────────────────────────────────────
 
@@ -487,12 +531,30 @@ class AgentHost:
                     "      AND stale.created_at < now() - make_interval(secs => %s)"
                     "  ) "
                     "FROM agents_meta m "
-                    "WHERE m.machine = %s AND m.status = 'idling' "
+                    "WHERE ("
+                    "    m.status = 'idling' "
+                    "    OR (m.status = 'running' "
+                    "        AND (m.last_active_at IS NULL "
+                    "             OR m.last_active_at < now() - make_interval(secs => %s)) "
+                    "        AND EXISTS ("
+                    "          SELECT 1 FROM inbound_messages stale2 "
+                    "          WHERE stale2.agent_id = m.id AND stale2.status = 'pending' "
+                    "            AND stale2.created_at < now() - make_interval(secs => %s)"
+                    "        )"
+                    "    )"
+                    "  ) "
+                    "  AND m.machine = %s "
                     "  AND EXISTS ("
                     "    SELECT 1 FROM inbound_messages pending "
                     "    WHERE pending.agent_id = m.id AND pending.status = 'pending'"
                     "  )",
-                    (stale_after_s, stale_after_s, self._machine),
+                    (
+                        stale_after_s,
+                        stale_after_s,
+                        stale_after_s,
+                        stale_after_s,
+                        self._machine,
+                    ),
                 )
             ).fetchall()
         return [PendingInboundWake(agent_id=row[0], stale=row[1]) for row in rows]
@@ -505,7 +567,7 @@ class AgentHost:
 
     # ── the turn loop ────────────────────────────────────────────────────────
 
-    async def _drive_turns(self, agent_id: int, runtime: _AgentRuntime) -> None:
+    async def _drive_turns(self, agent_id: int, runtime: _AgentRuntime) -> bool:
         """Build this turn task's context and invoke the graph until it is done.
 
         The event publisher is created per turn task rather than cached with the
@@ -528,11 +590,11 @@ class AgentHost:
             hosted=True,
         )
         try:
-            await self._invoke_until_done(agent_id, ctx)
+            return await self._invoke_until_done(agent_id, ctx)
         finally:
             await event_publisher.aclose()
 
-    async def _invoke_until_done(self, agent_id: int, ctx: AvaContext) -> None:
+    async def _invoke_until_done(self, agent_id: int, ctx: AvaContext) -> bool:
         """Invoke the graph until this agent has nothing left to do.
 
         Four-way, and the four cases are genuinely different:
@@ -590,7 +652,7 @@ class AgentHost:
                 )
                 self.drop_agent(agent_id)
                 _notify_exit(agent_id)
-                return
+                return True
             if result["restart_requested"]:
                 logger.info(
                     "hosted agent {agent_id} requested a restart after {turns} turn(s) — "
@@ -600,9 +662,9 @@ class AgentHost:
                     turns=turn,
                 )
                 self.drop_agent(agent_id)
-                return
+                return False
             if result["turn_idle"]:
-                return
+                return False
             # Turn boundary: go round again on the same checkpointer thread.
 
     async def aclose(self) -> None:

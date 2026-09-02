@@ -127,9 +127,9 @@ async def _claim_node_impl(
                 # runner exists to delete (future/infra/agent-runner-as-server.md).
                 # End the turn instead and let the host drop the task; its
                 # dispatcher holds one subscription for every local agent and
-                # creates a fresh task when a wake lands. Note this returns
-                # BEFORE the idle flip, so a hosted agent never enters IDLING —
-                # idle is the absence of a task, not a status.
+                # creates a fresh task when a wake lands. Claim never owns a
+                # hosted status flip: the host marks the row running around a
+                # task and idling after it settles.
                 return Command[ClaimGoto](
                     update={"turn_active": False, "turn_idle": True}, goto=END
                 )
