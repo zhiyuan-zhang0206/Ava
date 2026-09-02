@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import stat
 import subprocess
 import sys
+import venv
 from pathlib import Path
 
 import pytest
@@ -17,7 +19,7 @@ from shared import editable_install
 def _write_pth(source_root: Path, target: Path) -> Path:
     pth = source_root / ".venv" / "lib" / "python3.12" / "site-packages" / "_editable_impl_ava.pth"
     pth.parent.mkdir(parents=True)
-    pth.write_text(f"{target}\n")
+    pth.write_text(str(target))
     return pth
 
 
@@ -37,7 +39,7 @@ def test_poisoned_missing_target_is_repaired_and_emits_warning_event(
 
     editable_install.repair_editable_ava_pth(source_root)
 
-    assert pth.read_text() == f"{source_root}\n"
+    assert pth.read_text() == str(source_root)
     assert stat.S_IMODE(pth.stat().st_mode) == 0o444
     assert emitted == [
         (
@@ -65,7 +67,7 @@ def test_worktree_below_allowlisted_dev_clone_is_still_repaired(tmp_path: Path) 
 
     editable_install.repair_editable_ava_pth(source_root, allowed_roots=(dev_clone,))
 
-    assert pth.read_text() == f"{source_root}\n"
+    assert pth.read_text() == str(source_root)
 
 
 def test_exact_allowlisted_dev_clone_target_is_left_unchanged(tmp_path: Path) -> None:
@@ -77,11 +79,11 @@ def test_exact_allowlisted_dev_clone_target_is_left_unchanged(tmp_path: Path) ->
 
     editable_install.repair_editable_ava_pth(source_root, allowed_roots=(dev_clone,))
 
-    assert pth.read_text() == f"{dev_clone}\n"
+    assert pth.read_text() == str(dev_clone)
 
 
-def test_repair_canonicalizes_an_allowlisted_clone_missing_its_newline(tmp_path: Path) -> None:
-    """A legal target keeps its identity while its pointer bytes are normalized."""
+def test_repair_leaves_a_legal_single_line_pointer_byte_identical(tmp_path: Path) -> None:
+    """A single allowed source line is legal regardless of a trailing newline."""
 
     source_root = tmp_path / "prod" / "source"
     dev_clone = tmp_path / "Ava"
@@ -91,24 +93,26 @@ def test_repair_canonicalizes_an_allowlisted_clone_missing_its_newline(tmp_path:
 
     editable_install.repair_editable_ava_pth(source_root, allowed_roots=(dev_clone,))
 
-    assert pth.read_bytes() == f"{dev_clone}\n".encode()
+    assert pth.read_bytes() == str(dev_clone).encode()
 
 
-def test_repair_canonicalizes_duplicate_pth_entries(tmp_path: Path) -> None:
-    """The same root twice is still repaired to the one-line pointer contract."""
+def test_repair_leaves_uv_native_repeated_pth_entries_byte_identical(tmp_path: Path) -> None:
+    """uv's one-line-per-wheel pointer is legal when every line is allowed."""
 
     source_root = tmp_path / "prod" / "source"
     pth = _write_pth(source_root, source_root)
     _write_direct_url(source_root, source_root.as_uri())
-    pth.write_text(f"{source_root}\n{source_root}\n")
+    pth.write_text(f"{source_root}\n{source_root}")
+    before = pth.read_bytes()
 
-    editable_install.repair_editable_ava_pth(source_root)
+    assert editable_install.editable_install_violations(source_root) == ()
+    assert editable_install.repair_editable_ava_pth(source_root) == ()
 
-    assert pth.read_bytes() == f"{source_root}\n".encode()
+    assert pth.read_bytes() == before
 
 
-def test_repair_adds_missing_pth_trailing_newline(tmp_path: Path) -> None:
-    """A syntactically legal target is not canonical until it ends in one newline."""
+def test_repair_leaves_a_legal_source_pointer_without_trailing_newline(tmp_path: Path) -> None:
+    """Pointer legality is semantic rather than a trailing-newline byte form."""
 
     source_root = tmp_path / "prod" / "source"
     pth = _write_pth(source_root, source_root)
@@ -116,10 +120,10 @@ def test_repair_adds_missing_pth_trailing_newline(tmp_path: Path) -> None:
 
     editable_install.repair_editable_ava_pth(source_root)
 
-    assert pth.read_bytes() == f"{source_root}\n".encode()
+    assert pth.read_bytes() == str(source_root).encode()
 
 
-def test_crlf_canonical_pth_is_read_without_repair(tmp_path: Path) -> None:
+def test_crlf_semantic_pth_is_read_without_repair(tmp_path: Path) -> None:
     """Universal-newline reading accepts a Windows pointer without changing its bytes."""
 
     source_root = tmp_path / "prod" / "source"
@@ -133,7 +137,7 @@ def test_crlf_canonical_pth_is_read_without_repair(tmp_path: Path) -> None:
     assert pth.read_bytes() == before
 
 
-def test_empty_pth_is_reported_and_repaired_to_canonical_content(tmp_path: Path) -> None:
+def test_empty_pth_is_reported_and_repaired_to_source_content(tmp_path: Path) -> None:
     """An empty pointer cannot be interpreted as a legal editable target."""
 
     source_root = tmp_path / "prod" / "source"
@@ -145,8 +149,8 @@ def test_empty_pth_is_reported_and_repaired_to_canonical_content(tmp_path: Path)
     editable_install.repair_editable_ava_pth(source_root)
 
     assert len(violations) == 1
-    assert "non-canonical editable pointer" in violations[0]
-    assert pth.read_bytes() == f"{source_root}\n".encode()
+    assert "names" in violations[0]
+    assert pth.read_bytes() == str(source_root).encode()
 
 
 def _write_direct_url(source_root: Path, url: str, *, editable: bool = True) -> Path:
@@ -367,7 +371,7 @@ def test_repair_editable_install_repairs_pointer_and_direct_url(tmp_path: Path) 
 
     repairs = editable_install.repair_editable_install(source_root)
 
-    assert pth.read_text() == f"{source_root}\n"
+    assert pth.read_text() == str(source_root)
     assert json.loads(du.read_text())["url"] == source_root.as_uri()
     assert len(repairs) == 2
 
@@ -396,20 +400,17 @@ def test_editable_install_violations_healthy_is_empty(tmp_path: Path) -> None:
     assert editable_install.editable_install_violations(source_root) == ()
 
 
-def test_editable_install_violations_reports_repeated_checkout_pth_entries(
+def test_editable_install_violations_accepts_repeated_checkout_pth_entries(
     tmp_path: Path,
 ) -> None:
-    """Repeated equivalent .pth entries are import-ambiguous and non-canonical."""
+    """Repeated allowed entries are uv's normal one-line-per-wheel layout."""
     source_root = tmp_path / "prod" / "source"
     source_root.mkdir(parents=True)
     pth = _write_pth(source_root, source_root)
     _write_direct_url(source_root, source_root.as_uri())
-    pth.write_text(f"{source_root}\n{source_root}\n")
+    pth.write_text(f"{source_root}\n{source_root}")
 
-    violations = editable_install.editable_install_violations(source_root)
-
-    assert len(violations) == 1
-    assert "non-canonical editable pointer" in violations[0]
+    assert editable_install.editable_install_violations(source_root) == ()
 
 
 def test_editable_install_violations_both_missing_records_are_empty(tmp_path: Path) -> None:
@@ -433,7 +434,7 @@ def test_half_uninstall_pointer_missing_beside_metadata_is_repaired(tmp_path: Pa
     assert str(pth) in violations[0]
     assert "metadata present but pointer missing" in violations[0]
     repairs = editable_install.repair_editable_install(source_root)
-    assert pth.read_text() == f"{source_root}\n"
+    assert pth.read_text() == str(source_root)
     assert repairs == (
         editable_install.EditableInstallRepair(
             path=pth,
@@ -514,6 +515,21 @@ def test_editable_import_gate_requires_the_checkout_editable_import(
 
     assert editable_install.editable_import_gate(source_root) == ()
 
+    allowed_root = tmp_path / "Ava"
+    allowed_agent = allowed_root / "agent"
+    allowed_agent.mkdir(parents=True)
+    (allowed_agent / "__init__.py").write_text("")
+    (allowed_agent / "exec_child.py").write_text("VALUE = 'allowed'\n")
+    pth.write_text(str(allowed_root))
+
+    assert (
+        editable_install.editable_import_gate(
+            source_root,
+            allowed_roots=(allowed_root,),
+        )
+        == ()
+    )
+
     pth.write_text(f"{tmp_path / 'missing'}\n")
     assert editable_install.editable_import_gate(source_root)
 
@@ -538,6 +554,75 @@ def test_editable_import_gate_requires_the_checkout_editable_import(
         candidate.unlink(missing_ok=True)
 
     assert editable_install.editable_import_gate(source_root) == ("venv python missing",)
+
+
+@pytest.mark.skipif(
+    shutil.which("uv") is None, reason="uv is required for the native editable test"
+)
+def test_uv_native_editable_records_are_legal_and_exec_guard_accepts_them(tmp_path: Path) -> None:
+    """A real uv install keeps its per-wheel pointer byte-identical through both guards."""
+
+    checkout = Path(__file__).parents[2]
+    uv_built_venv_root = tmp_path / "uv-built-venv"
+    venv.create(uv_built_venv_root / ".venv", with_pip=False, symlinks=True)
+    interpreter = uv_built_venv_root / ".venv" / "bin" / "python"
+    install = subprocess.run(  # noqa: S603 — test-owned venv and checkout path
+        [
+            "env",
+            "-u",
+            "VIRTUAL_ENV",
+            "uv",
+            "pip",
+            "install",
+            "-e",
+            str(checkout),
+            "--python",
+            str(interpreter),
+        ],
+        cwd=checkout,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert install.returncode == 0, install.stderr
+
+    pth_paths = editable_install.editable_ava_pth_paths(uv_built_venv_root)
+    assert pth_paths
+    before = {path: path.read_bytes() for path in pth_paths}
+    assert (
+        editable_install.editable_install_violations(
+            uv_built_venv_root,
+            allowed_roots=(checkout,),
+        )
+        == ()
+    )
+    assert (
+        editable_install.guard_editable_install(
+            uv_built_venv_root,
+            allowed_roots=(checkout,),
+        )
+        == ()
+    )
+    assert {path: path.read_bytes() for path in pth_paths} == before
+
+    child_env = dict(os.environ)
+    child_env["PYTHONPATH"] = str(checkout)
+    child = subprocess.run(  # noqa: S603 — current test interpreter and test-owned code
+        [
+            sys.executable,
+            "-c",
+            "from pathlib import Path\n"
+            "from shared.editable_install import guard_editable_install\n"
+            f"raise SystemExit(bool(guard_editable_install(Path({str(uv_built_venv_root)!r}), "
+            f"allowed_roots=(Path({str(checkout)!r}),))))\n",
+        ],
+        env=child_env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert child.returncode == 0, child.stderr
 
 
 def test_current_interpreter_source_root_reads_a_posix_venv_layout(
@@ -585,7 +670,7 @@ def test_guard_editable_install_repairs_all_records_and_emits_exec_event(
     violations = editable_install.guard_editable_install(source_root)
 
     assert len(violations) == 2
-    assert pth.read_text() == f"{source_root}\n"
+    assert pth.read_text() == str(source_root)
     assert json.loads(direct_url.read_text())["url"] == source_root.as_uri()
     assert [entry[0][1] for entry in emitted] == [
         "editable_pth_repaired",
@@ -616,7 +701,7 @@ def test_guard_editable_install_recovers_a_half_uninstall(tmp_path: Path) -> Non
 
     assert len(violations) == 1
     assert "half-uninstalled" in violations[0]
-    assert pth.read_text() == f"{source_root}\n"
+    assert pth.read_text() == str(source_root)
 
 
 def test_guard_editable_install_repairs_with_registered_real_emitter(tmp_path: Path) -> None:
@@ -629,7 +714,7 @@ def test_guard_editable_install_repairs_with_registered_real_emitter(tmp_path: P
     violations = editable_install.guard_editable_install(source_root)
 
     assert len(violations) == 2
-    assert pth.read_text() == f"{source_root}\n"
+    assert pth.read_text() == str(source_root)
     assert json.loads(direct_url.read_text())["url"] == source_root.as_uri()
 
 
@@ -651,7 +736,7 @@ def test_guard_editable_install_repairs_when_telemetry_emit_fails(
     violations = editable_install.guard_editable_install(source_root)
 
     assert len(violations) == 2
-    assert pth.read_text() == f"{source_root}\n"
+    assert pth.read_text() == str(source_root)
     assert json.loads(direct_url.read_text())["url"] == source_root.as_uri()
 
 
@@ -739,7 +824,7 @@ def test_repair_editable_install_opens_protected_site_packages_directory(
 
     editable_install.repair_editable_install(source_root)
 
-    assert pth.read_text() == f"{source_root}\n"
+    assert pth.read_text() == str(source_root)
     assert json.loads(direct_url.read_text())["url"] == source_root.as_uri()
     assert stat.S_IMODE(site_packages.stat().st_mode) == 0o555
 
@@ -757,5 +842,5 @@ def test_repair_half_uninstall_opens_protected_site_packages_directory(
 
     editable_install.repair_editable_install(source_root)
 
-    assert pth.read_text() == f"{source_root}\n"
+    assert pth.read_text() == str(source_root)
     assert stat.S_IMODE(site_packages.stat().st_mode) == 0o555

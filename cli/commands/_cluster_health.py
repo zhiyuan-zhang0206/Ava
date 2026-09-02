@@ -513,7 +513,10 @@ def _editable_install_failure() -> str | None:
     violations.extend(ei.editable_console_script_violations(source_root))
     if not violations:
         return None
-    return "prod venv editable install violation: " + "; ".join(violations)
+    return (
+        "prod venv editable install names non-allowlisted source or is inconsistent: "
+        + "; ".join(violations)
+    )
 
 
 def _source_tree_failure() -> str | None:

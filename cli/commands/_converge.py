@@ -167,7 +167,7 @@ def _ensure_prod_editable_exec_gate(ctx: ConvergeCtx) -> None:  # noqa: ARG001
 
     The earlier repair step can restore known pointer and direct-URL records.
     This final gate covers the remaining half-uninstalls, including a missing
-    dist-info directory or console script that only a verified ``uv sync`` can
+    dist-info directory or console script that only a package reinstall can
     restore. An import proof is the final discriminator because a read-only
     site-packages directory can make uv report success after a partial change.
     """
@@ -189,10 +189,10 @@ def _ensure_prod_editable_exec_gate(ctx: ConvergeCtx) -> None:  # noqa: ARG001
     violations.extend(shared.editable_install.editable_console_script_violations(source_root))
     if violations:
         print(
-            "  ! prod editable install incomplete; attempting one uv sync recovery",
+            "  ! prod editable install incomplete; attempting one package reinstall recovery",
             file=sys.stderr,
         )
-        sync_result = run_uv_sync(source_root)
+        sync_result = run_uv_sync(source_root, reinstall_package="ava")
         violations = list(
             shared.editable_install.editable_install_violations(
                 source_root,
@@ -202,12 +202,17 @@ def _ensure_prod_editable_exec_gate(ctx: ConvergeCtx) -> None:  # noqa: ARG001
         violations.extend(shared.editable_install.editable_console_script_violations(source_root))
         if sync_result.returncode != 0:
             violations.append(f"uv sync recovery failed (rc={sync_result.returncode})")
-    violations.extend(shared.editable_install.editable_import_gate(source_root))
+    violations.extend(
+        shared.editable_install.editable_import_gate(source_root, allowed_roots=allowed_roots)
+    )
     if not violations:
         return
     detail = "\n".join(f"- {violation}" for violation in violations)
     print(f"  ✗ prod editable exec gate failed:\n{detail}", file=sys.stderr)
-    raise RuntimeError(f"prod editable exec gate failed:\n{detail}")
+    manual_recovery = f"cd {source_root} && uv sync --reinstall-package ava"
+    raise RuntimeError(
+        f"prod editable exec gate failed:\n{detail}\nRun {manual_recovery} or ava cluster update."
+    )
 
 
 def _ensure_pg_binaries_step(ctx: ConvergeCtx) -> None:  # noqa: ARG001

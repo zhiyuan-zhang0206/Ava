@@ -34,8 +34,12 @@ def test_create_session_activates_only_checkout_cwds(
 
     checkout = tmp_path / "checkout"
     inside = checkout / "nested"
+    sibling_worktree = checkout / ".worktrees" / "feature"
+    claude_sibling_worktree = checkout / ".claude" / "worktrees" / "feature"
     outside = tmp_path / "worktree"
     inside.mkdir(parents=True)
+    sibling_worktree.mkdir(parents=True)
+    claude_sibling_worktree.mkdir(parents=True)
     outside.mkdir()
     backend = _CapturingBackend()
     activations: list[bool] = []
@@ -51,9 +55,13 @@ def test_create_session_activates_only_checkout_cwds(
     monkeypatch.setattr(sessions, "forward_env_dict", forward)
 
     sessions._create_session("inside", cwd=str(inside))
+    sessions._create_session("sibling", cwd=str(sibling_worktree))
+    sessions._create_session("claude-sibling", cwd=str(claude_sibling_worktree))
     sessions._create_session("outside", cwd=str(outside))
 
-    assert activations == [True, False]
+    assert activations == [True, False, False, False]
     assert backend.environments[0]["VIRTUAL_ENV"] == "/venv"
     assert "VIRTUAL_ENV" not in backend.environments[1]
+    assert "VIRTUAL_ENV" not in backend.environments[2]
+    assert "VIRTUAL_ENV" not in backend.environments[3]
     assert backend.environments[1]["PATH"] == "/venv/bin:/usr/bin"

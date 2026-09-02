@@ -153,31 +153,21 @@ def _normalized_exact_path(path: Path) -> str:
     return os.path.normcase(str(path.expanduser().resolve(strict=False)))
 
 
-def _allowed_pth_target(raw_text: str, allowed_roots: frozenset[str]) -> str | None:
-    """Return the one allowed pointer target represented by ``raw_text``.
+def _pth_content_is_allowed(raw_text: str, allowed_roots: frozenset[str]) -> bool:
+    """Whether every editable-pointer line names an allowlisted exact root.
 
-    The line is retained rather than replaced with a normalized spelling: an
-    allowlisted stable clone remains its own legal target. Callers separately
-    enforce the on-disk canonical form (one target line plus one newline).
+    uv writes one line for each wheel package, so a healthy project with
+    multiple packages can legitimately repeat the same checkout path. Pointer
+    legality is therefore semantic rather than a particular byte layout.
     """
 
-    target = raw_text.strip()
-    if not target or len(target.splitlines()) != 1:
-        return None
+    targets = raw_text.splitlines()
+    if not targets or any(not target for target in targets):
+        return False
     try:
-        normalized = _normalized_exact_path(Path(target))
+        return all(_normalized_exact_path(Path(target)) in allowed_roots for target in targets)
     except (OSError, ValueError):
-        return None
-    return target if normalized in allowed_roots else None
-
-
-def _canonical_pth_target(raw_text: str, allowed_roots: frozenset[str]) -> str | None:
-    """Return a legal target only when the pointer has its canonical bytes."""
-
-    target = _allowed_pth_target(raw_text, allowed_roots)
-    if target is None or raw_text != f"{target}\n":
-        return None
-    return target
+        return False
 
 
 def _atomic_write_text(path: Path, text: str) -> None:
@@ -257,7 +247,7 @@ def repair_editable_ava_pth(
     *,
     allowed_roots: Iterable[Path] = (),
 ) -> tuple[EditableInstallRepair, ...]:
-    """Repair missing or non-canonical pointers to an allowed exact root.
+    """Repair missing or illegal pointers to the resolved source root.
 
     An allowlisted clone root is legal only as that exact path. Its
     ``.worktrees/*`` descendants remain disposable and are repaired. A missing
@@ -276,16 +266,15 @@ def repair_editable_ava_pth(
     }
     for pth_path in editable_ava_pth_paths(resolved_source):
         raw_text = pth_path.read_text()
-        if _canonical_pth_target(raw_text, normalized_allowed) is not None:
+        if _pth_content_is_allowed(raw_text, normalized_allowed):
             continue
-        target = _allowed_pth_target(raw_text, normalized_allowed) or str(resolved_source)
-        pending_repairs[pth_path] = (raw_text.strip() or "(empty)", target)
+        pending_repairs[pth_path] = (raw_text.strip() or "(empty)", str(resolved_source))
     repairs: list[EditableInstallRepair] = []
     for pth_path, (poisoned_target, target) in sorted(
         pending_repairs.items(), key=lambda item: str(item[0])
     ):
         with editable_pth_write_window(resolved_source):
-            _atomic_write_text(pth_path, f"{target}\n")
+            _atomic_write_text(pth_path, target)
         repair = EditableInstallRepair(
             path=pth_path,
             poisoned_target=poisoned_target,
@@ -413,7 +402,7 @@ def editable_install_violations(
     converge guard's repair semantics. A record that cannot be read is
     reported as a violation rather than crashing the caller.
 
-    Returns an empty tuple when every record is canonical. Both editable
+    Returns an empty tuple when every record is legal. Both editable
     records missing is a no-op, while a missing pointer or metadata beside its
     existing sibling is a half-uninstall violation repaired by the write side
     when the sibling supplies enough information.
@@ -443,11 +432,10 @@ def editable_install_violations(
         except OSError:
             violations.append(f"{pth_path} unreadable")
             continue
-        if _canonical_pth_target(raw_text, normalized_allowed) is None:
+        if not _pth_content_is_allowed(raw_text, normalized_allowed):
             target = raw_text.strip() or "(empty)"
             violations.append(
-                f"{pth_path} names {target!r}; non-canonical editable pointer "
-                "(expected a single allowed <root> line with trailing newline)"
+                f"{pth_path} names {target!r}; non-allowlisted source or is inconsistent"
             )
     for record in editable_direct_url_paths(resolved_source):
         try:
@@ -497,7 +485,11 @@ def _stderr_tail(stderr: str | bytes | None) -> str:
     return stderr[-1000:].strip()
 
 
-def editable_import_gate(source_root: Path) -> tuple[str, ...]:
+def editable_import_gate(
+    source_root: Path,
+    *,
+    allowed_roots: Iterable[Path] = (),
+) -> tuple[str, ...]:
     """Prove the checkout venv imports ``agent.exec_child`` through its pointer.
 
     The probe deliberately starts in the platform temp directory and removes
@@ -544,7 +536,11 @@ def editable_import_gate(source_root: Path) -> tuple[str, ...]:
         imported_path = reported_path.resolve(strict=False)
     except (OSError, ValueError):
         return (f"editable import gate failed ({diagnostic})",)
-    if not imported_path.is_relative_to(resolved_source):
+    allowed_source_roots = (
+        resolved_source,
+        *(root.expanduser().resolve(strict=False) for root in allowed_roots),
+    )
+    if not any(imported_path.is_relative_to(root) for root in allowed_source_roots):
         return (f"editable import gate failed ({diagnostic})",)
     return ()
 

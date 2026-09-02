@@ -56,6 +56,16 @@ from . import _exec_process
 _POLL_INTERVAL_S = 0.05
 
 
+def _cwd_is_inside_checkout(cwd: Path, checkout_root: Path) -> bool:
+    """Whether an exec child cwd may inherit its interpreter's virtualenv."""
+
+    return (
+        cwd.is_relative_to(checkout_root)
+        and not cwd.is_relative_to(checkout_root / ".worktrees")
+        and not cwd.is_relative_to(checkout_root / ".claude" / "worktrees")
+    )
+
+
 def _default_editable_guard() -> tuple[str, ...]:
     """Repair this interpreter's poisoned editable install, or no-op outside a venv."""
     source_root = editable_install.current_interpreter_source_root()
@@ -80,6 +90,36 @@ def _editable_guard_failure(
         )
     if not violations:
         return None
+    source_root = editable_install.current_interpreter_source_root()
+    remaining: tuple[str, ...] = ()
+    if source_root is not None:
+        try:
+            remaining = editable_install.editable_install_violations(
+                source_root,
+                allowed_roots=(Path.home() / "Ava",),
+            )
+        except Exception as exc:
+            return _ExecCrashed(
+                output=(
+                    f"exec editable-install guard could not recheck the interpreter: {exc}\n\n"
+                    "Do not retry this execute_code call. Report the error to the operator."
+                ),
+                exc=exc,
+            )
+    if remaining:
+        output = (
+            "exec editable install was poisoned, but automatic repair left unresolved records and "
+            "no child was started. Do not retry this execute_code call. The remaining problems need "
+            "operator recovery: run ava converge or ava cluster update on this host.\n\n"
+            "Polluted records:\n"
+            + "\n".join(f"- {violation}" for violation in violations)
+            + "\n\nRemaining records:\n"
+            + "\n".join(f"- {violation}" for violation in remaining)
+        )
+        return _ExecCrashed(
+            output=output,
+            exc=ExecChildError("exec_editable_install_poisoned", output, None),
+        )
     output = (
         "exec editable install was poisoned, auto-repaired, and no child was started. "
         "Retry this execute_code call.\n\n"
@@ -112,7 +152,9 @@ def _build_child_env(
     """
     env = os.environ.copy()
     source_root = editable_install.current_interpreter_source_root()
-    if source_root is not None and not Path.cwd().resolve().is_relative_to(source_root):
+    if source_root is not None and not _cwd_is_inside_checkout(
+        Path.cwd().resolve(), source_root.resolve()
+    ):
         env.pop("VIRTUAL_ENV", None)
     if agent_id is not None:
         env["AVA_AGENT_ID"] = str(agent_id)

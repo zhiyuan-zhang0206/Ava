@@ -20,6 +20,7 @@ subprocess):
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
@@ -200,9 +201,16 @@ def _patch_recover(monkeypatch: pytest.MonkeyPatch, *, rollback, sync_rc=0, star
     def _git_reset_hard(sha):  # type: ignore[no-untyped-def]
         order.append(f"reset:{sha}")
 
-    def _sync(_repo: Path) -> SimpleNamespace:
+    def _sync(_repo: Path, *, timeout_s: float = 600.0) -> SimpleNamespace:
         order.append("uv-sync")
         return SimpleNamespace(returncode=sync_rc)
+
+    def _import_gate(
+        _repo: Path,
+        *,
+        allowed_roots: Iterable[Path] = (),
+    ) -> tuple[str, ...]:
+        return ()
 
     def _rc_for(argv: list[str]) -> int:
         if _is_ava_start(argv):
@@ -214,6 +222,7 @@ def _patch_recover(monkeypatch: pytest.MonkeyPatch, *, rollback, sync_rc=0, star
     monkeypatch.setattr(_rec, "rollback_schema_to", _rollback_schema_to)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_rec, "git_reset_hard", _git_reset_hard)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_rec, "run_uv_sync", _sync)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_update_uv_sync, "editable_import_gate", _import_gate)
     monkeypatch.setattr(_rec, "subprocess", fake)
     return order, fake
 
@@ -425,10 +434,18 @@ def _patch_local_update(
 
     monkeypatch.setattr(_up, "git_checkout_sha", _checkout)  # pyright: ignore[reportUnknownArgumentType]
 
-    def _sync(_repo: Path) -> SimpleNamespace:
+    def _sync(_repo: Path, *, timeout_s: float = 600.0) -> SimpleNamespace:
         return SimpleNamespace(returncode=sync_rc)
 
+    def _import_gate(
+        _repo: Path,
+        *,
+        allowed_roots: Iterable[Path] = (),
+    ) -> tuple[str, ...]:
+        return ()
+
     monkeypatch.setattr(_update_uv_sync, "run_uv_sync", _sync)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_update_uv_sync, "editable_import_gate", _import_gate)
 
     def _rc_for(argv: list[str]) -> int:
         if _is_ava_start(argv):

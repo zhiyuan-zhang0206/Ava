@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import stat
+from collections.abc import Iterable
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -29,6 +30,14 @@ def _read_only_pth(repo: Path) -> Path:
     return pth
 
 
+def _passing_import_gate(
+    _repo: Path,
+    *,
+    allowed_roots: Iterable[Path] = (),
+) -> tuple[str, ...]:
+    return ()
+
+
 def test_gateway_update_makes_pth_writable_only_while_uv_sync_runs(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -50,7 +59,7 @@ def test_gateway_update_makes_pth_writable_only_while_uv_sync_runs(
 
     monkeypatch.setattr(_up, "git_checkout_sha", checkout)
     monkeypatch.setattr(_native_sync, "run_bounded", sync_run)
-    monkeypatch.setattr(_native_sync, "editable_import_gate", lambda _repo: ())
+    monkeypatch.setattr(_native_sync, "editable_import_gate", _passing_import_gate)
     monkeypatch.setattr("shared.source_integrity.set_installed", ignore_installed)
 
     result = _local._checkout_and_sync(
@@ -154,7 +163,7 @@ def test_agent_runner_failed_sync_still_restores_read_only_pth(
     monkeypatch.setattr(_runner, "_source_switch_window", contextlib.nullcontext)
     monkeypatch.setattr(_runner, "git_checkout_sha", checkout)
     monkeypatch.setattr(_native_sync, "run_bounded", sync_run)
-    monkeypatch.setattr(_native_sync, "editable_import_gate", lambda _repo: ())
+    monkeypatch.setattr(_native_sync, "editable_import_gate", _passing_import_gate)
 
     result = _runner._run_agent_runner_self_update_inner(
         repo,
