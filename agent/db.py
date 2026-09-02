@@ -43,6 +43,7 @@ from typing import Any, NamedTuple, TypeVar
 import psycopg
 from psycopg_pool import AsyncConnectionPool, PoolTimeout
 
+from agent.inbound_ownership import lock_inbound_owner
 from shared.agents import AgentStatus
 from shared.config import settings
 from shared.db import InboundRow
@@ -151,6 +152,7 @@ async def claim_inbound_batch(
     read-write transaction commits the batch when its context exits.
     """
     async with async_write_transaction(pool) as conn, conn.cursor() as cur:
+        await lock_inbound_owner(conn, agent_id)
         # CASE-on-kind in a single UPDATE keeps the batch grab atomic — chat
         # and non-chat rows in the same batch all commit together. RETURNING
         # order for UPDATE … WHERE id IN (subquery) is heap-scan order, not
@@ -392,6 +394,7 @@ async def mark_agent_status(
     state machine; the schema CHECK constraint additionally rejects illegal status values.
     """
     async with async_write_transaction(pool) as conn, conn.cursor() as cur:
+        await lock_inbound_owner(conn, agent_id)
         await cur.execute(
             "UPDATE agents_meta SET status = %s WHERE id = %s AND status = %s",
             (status, agent_id, expected_from),
