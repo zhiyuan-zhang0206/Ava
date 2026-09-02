@@ -142,6 +142,7 @@ def test_adopted_stop_evidence_is_not_current_permission(
     begin_pending_publication(publication_db, proposal)
     collected = closure(publication_db, proposal)
     adopt_pending_collection(publication_db, collected)
+    begin_pending_publication(publication_db, proposal)
     row = publication_db.execute("SELECT managed_writer_evidence FROM deployment_state").fetchone()
     assert row is not None
     assert row[0]["current"] == current.model_dump(mode="json")
