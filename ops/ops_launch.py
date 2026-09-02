@@ -97,7 +97,7 @@ async def launch_agent_op(body: LaunchAgentRequest, db_pool: ConnectionPool) -> 
     # _launch_agent_process is synchronous (detached-process launch). Run it off
     # the event loop so a launch never blocks the ops dispatch loop and starves
     # concurrent requests (status probes / other ops) while it runs.
-    await asyncio.to_thread(
+    attempt_session = await asyncio.to_thread(
         agent_launch._launch_agent_process,
         body.agent_id,
         body.config,
@@ -106,7 +106,7 @@ async def launch_agent_op(body: LaunchAgentRequest, db_pool: ConnectionPool) -> 
     )
     # Confirm the launched child claimed its row off this response path; a launch
     # that never claims is forced 'terminated' there (reaper backstops).
-    agent_launch.schedule_launch_confirm(body.agent_id)
+    agent_launch.schedule_launch_confirm(body.agent_id, attempt_session)
     if body.prompt is not None:
         assert body.prompt_source is not None  # narrowed by the caller  # noqa: S101
         prompt = body.prompt

@@ -109,7 +109,9 @@ async def test_launch_agent_op_launches_precreated_row(
 
     monkeypatch.setattr(ops_launch.agent_launch, "_launch_agent_process", _fake_launch)
     monkeypatch.setattr(  # pyright: ignore[reportUnknownArgumentType]
-        ops_launch.agent_launch, "schedule_launch_confirm", confirmed.append
+        ops_launch.agent_launch,
+        "schedule_launch_confirm",
+        lambda agent_id, _attempt: confirmed.append(agent_id),
     )
     body = LaunchAgentRequest(
         agent_id=7,
@@ -132,7 +134,9 @@ async def test_launch_agent_op_delivers_plain_spawn_prompt(
     """A plain spawn's first prompt is inserted + InboundArrived published on
     the runner side after launch (inbound INSERT is within the runner role)."""
     monkeypatch.setattr(ops_launch.agent_launch, "_launch_agent_process", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-    monkeypatch.setattr(ops_launch.agent_launch, "schedule_launch_confirm", lambda _id: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(
+        ops_launch.agent_launch, "schedule_launch_confirm", lambda _id, _attempt=None: None
+    )  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     seen: dict[str, object] = {}
 
     def _fake_insert(_pool: object, agent_id: int, prompt: str, source: str) -> int:
@@ -167,7 +171,9 @@ async def test_launch_agent_op_skips_prompt_for_fork(
     """A fork's prompt was already delivered pre-launch by create_agent_row —
     the launch op must not insert a second inbound."""
     monkeypatch.setattr(ops_launch.agent_launch, "_launch_agent_process", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-    monkeypatch.setattr(ops_launch.agent_launch, "schedule_launch_confirm", lambda _id: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(
+        ops_launch.agent_launch, "schedule_launch_confirm", lambda _id, _attempt=None: None
+    )  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     inserted: list[int] = []
 
     def _fake_insert(_pool: object, _agent_id: int, _prompt: str, _source: str) -> int:
@@ -1148,7 +1154,11 @@ async def test_launch_agent_op_hosted_skips_process_and_wakes(
         "_launch_agent_process",
         lambda *_a, **_k: launches.append(1),  # pyright: ignore[reportUnknownArgumentType]
     )
-    monkeypatch.setattr(ops_launch.agent_launch, "schedule_launch_confirm", confirmed.append)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(
+        ops_launch.agent_launch,
+        "schedule_launch_confirm",
+        lambda agent_id, _attempt: confirmed.append(agent_id),
+    )  # pyright: ignore[reportUnknownArgumentType]
     inserted: list[tuple[int, str, str]] = []
 
     def _fake_insert(_pool: object, agent_id: int, prompt: str, source: str) -> int:
@@ -1184,7 +1194,9 @@ async def test_launch_agent_op_hosted_fork_still_wakes(
     not insert a second prompt."""
     monkeypatch.setattr(ops_launch.runner_mode, "is_hosted", lambda: True)
     monkeypatch.setattr(ops_launch.agent_launch, "_launch_agent_process", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-    monkeypatch.setattr(ops_launch.agent_launch, "schedule_launch_confirm", lambda _id: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(
+        ops_launch.agent_launch, "schedule_launch_confirm", lambda _id, _attempt=None: None
+    )  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     inserted: list[int] = []
 
     def _fake_insert(_pool: object, _agent_id: int, _prompt: str, _source: str) -> int:
