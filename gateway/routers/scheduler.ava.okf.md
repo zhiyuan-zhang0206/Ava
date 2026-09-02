@@ -13,8 +13,9 @@ A **schedule** is a **resident process** supervised by the gateway (supervised r
 
 ### ScheduleManager (`gateway/schedule_manager.py`)
 - **Background reconcile loop**: every 5 seconds, compares the database `schedules` table (desired: enabled rows) against actual sessions (actual: live sessions)
-- **Starts missing** sessions, **kills excess** sessions (when a schedule is disabled/deleted)
-- **Liveness identity**: the session name `ava-schedule-<id>` is the schedule's stable identity—it encodes no cluster/machine name (path-only cluster identity, #629/#633); the session namespace itself is host-local + per-home (`$AVA_HOME/run/sessions`), and home already isolates sessions adequately
+- **Starts missing** sessions, **kills excess** sessions (when a schedule is disabled/deleted). Every explicit stop and enabled-state value change synchronously invokes the identity-checked PTY backend; `stopped` is written only after that backend confirms the session is gone, while a failed reap remains queued for an identity-checked retry.
+- **Generation boundary**: exact old-session records support cleanup only; they never decide desired state. A missing PTY is rebuilt after gateway restart when, and only when, the current schedule row remains enabled.
+- **Liveness identity**: the session name `ava-schedule-<id>` is the schedule's stable identity—it encodes no cluster/machine name (path-only cluster identity, #629/#633); the PTY session namespace itself is host-local + per-home (`$AVA_HOME/run/pty/`), and home already isolates sessions adequately
 - **Gateway restart safe**: after a restart, it re-identifies existing sessions (no need to recreate)
 - **Distinguishes clean exit from crash**: each tick reads liveness before status. When a session disappears, it reads its terminal state—`status='completed'` (written by the runner before exiting with rc=0) = the resident process finished on its own, **terminal state, no restart, not counted toward circuit breaker**; no completed marker = crash (non-zero rc / signal / hard kill), brought up according to crash handling
 

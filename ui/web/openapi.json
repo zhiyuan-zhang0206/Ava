@@ -3769,7 +3769,7 @@
       },
       "put": {
         "summary": "Update Schedule",
-        "description": "Partial-update a schedule — only the fields present in the body change. A\nscript/command change is snapshotted into schedule_versions and, if the\nschedule is enabled, applied immediately (the session is relaunched on the new\nscript). 400 on a script syntax error, 404 if missing, 409 on a name clash.",
+        "description": "Partial-update a schedule — only the fields present in the body change. A\nscript/command change is snapshotted into schedule_versions and, if the\nschedule is enabled, applied immediately (the session is relaunched on the new\nscript). An enabled-flag value change also converges immediately, so disable\nreaps the session and enable creates it; a same-value update leaves the\nsession intact. 400 on a script syntax error, 404 if missing, 409 on a name\nclash.",
         "operationId": "update_schedule_api_schedules__schedule_id__put",
         "parameters": [
           {
