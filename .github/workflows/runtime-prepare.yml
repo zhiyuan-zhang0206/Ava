@@ -10,6 +10,7 @@ on:
       - 'shared/session_env.py'
       - 'ops/spec.py'
       - 'ops/agent_launch.py'
+      - 'agent/graph/_exec_subprocess.py'
       - 'scripts/prove_runtime_consumer.py'
       - 'scripts/prove_runtime_prepare.py'
       - 'scripts/verify_runtime_wheel.py'
