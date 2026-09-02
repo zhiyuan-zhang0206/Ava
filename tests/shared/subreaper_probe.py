@@ -11,6 +11,9 @@ from pathlib import Path
 
 import psutil
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from tests.shared.process_evidence import detached_to_known_reaper
+
 
 def middle(root: Path) -> None:
     helper = subprocess.run(  # noqa: S603 — fixed module/command, isolated test paths
@@ -30,7 +33,16 @@ def middle(root: Path) -> None:
     )
     child = psutil.Process(int(helper.stdout.strip()))
     sys.stdout.write(
-        json.dumps({"pid": child.pid, "birth": child.create_time(), "caller": os.getpid()}) + "\n"
+        json.dumps(
+            {
+                "pid": child.pid,
+                "birth": child.create_time(),
+                "caller": os.getpid(),
+                "caller_sid": os.getsid(0),
+                "ancestors": [(p.pid, p.create_time()) for p in psutil.Process().parents()],
+            }
+        )
+        + "\n"
     )
 
 
@@ -55,6 +67,15 @@ def ancestor(root: Path) -> None:
         assert child.status() != psutil.STATUS_ZOMBIE
         assert os.getsid(child.pid) != os.getsid(0)
         assert not psutil.pid_exists(record["caller"])
+        births = {(pid, birth) for pid, birth in record["ancestors"]}
+        assert detached_to_known_reaper(child.pid, record["caller"], record["caller_sid"], births)
+        assert not detached_to_known_reaper(child.pid, os.getpid(), record["caller_sid"], births)
+        assert not detached_to_known_reaper(
+            child.pid, record["caller"], record["caller_sid"], set()
+        )
+        assert not detached_to_known_reaper(
+            child.pid, record["caller"], os.getsid(child.pid), births
+        )
         record.update(
             adopter=os.getpid(),
             old_init_predicate=child.ppid() == 1,
