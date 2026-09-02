@@ -132,6 +132,17 @@ def main() -> None:
         "artifact_digest": release.digest,
         "manifest_digest": release.manifest_digest,
         "platform": platform.platform(),
+        "architecture": platform.machine(),
+        "python_abi": subprocess.check_output(  # noqa: S603 — verified interpreter.
+            [
+                str(release.interpreter),
+                "-I",
+                "-B",
+                "-c",
+                "import sysconfig;print(sysconfig.get_config_var('SOABI'))",
+            ],
+            text=True,
+        ).strip(),
         "file_count": len(json.loads((release.root / "manifest.json").read_text())["files"]),
     }
     (root / "proof.json").write_text(json.dumps(evidence, indent=2) + "\n")

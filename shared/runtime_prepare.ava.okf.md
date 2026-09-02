@@ -31,3 +31,11 @@ The existing updater is deliberately not wired yet: supported-host proof, disk
 budget/GC policy, recovery-point verification, migration compatibility, retained
 LKG, consumer cutover and an old-orchestrator/legacy-writer barrier must precede
 any runtime activation. This is a preparation primitive, not a second controller.
+
+macOS activation additionally requires pre-stop read-only firewall audit of the
+new interpreter path and actual Tailnet inbound verification. Existing
+`ava firewall status` / `audit_allowlist` can supply evidence; automatic
+`firewall sync` prunes/adds rules and is not authorized by a read-only preflight.
+CI imports/loopback do not prove OS approval or off-box reachability. Missing or
+unreadable approval must hold activation while the old generation still serves;
+manual OS approval, when needed, belongs to the user. Never disable firewall/TCC.

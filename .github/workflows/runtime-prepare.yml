@@ -38,7 +38,7 @@ jobs:
           locked = []
           for wheel in sorted((root / 'wheels').glob('*.whl')):
               with zipfile.ZipFile(wheel) as archive:
-                  metadata, = [name for name in archive.namelist() if name.endswith('.dist-info/METADATA')]
+                  metadata, = [name for name in archive.namelist() if name.endswith('.dist-info/METADATA') and name.count('/') == 1]
                   package = email.message_from_bytes(archive.read(metadata))
               if package['Name'].lower() == 'ava':
                   continue
