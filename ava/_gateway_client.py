@@ -696,8 +696,9 @@ def exited(agent_id: int) -> None:
     Called from the process-exit path itself (not by a peer): the gateway
     finalizes status to 'terminated' (guarded, so a concurrent restart's
     'restarting' is left untouched), closes this agent's show() pages, and
-    keeps daemon-supervised serve() pages open. No body — the agent is
-    finalizing itself.
+    keeps daemon-supervised serve() pages open. The body carries the original
+    admitted process incarnation. Legacy hosted callers send no body and may
+    finalize only rows with unknown ownership, never a token-owned process.
     """
     from shared.runtime_incarnation import current_incarnation
 
