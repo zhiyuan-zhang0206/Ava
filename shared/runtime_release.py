@@ -122,7 +122,7 @@ def verify_release(
     """Hash the complete generation and reject unknown files or compatibility."""
     digest = _digest(digest)
     root = store / digest
-    if store.is_symlink() or root.is_symlink() or not root.is_dir():
+    if store.resolve() != store.absolute() or root.is_symlink() or not root.is_dir():
         raise ReleaseRejectedError("release store/generation must be a real directory")
     manifest_path = _plain_file(root, "manifest.json")
     if file_sha256(manifest_path) != _digest(manifest_digest):
@@ -157,6 +157,8 @@ def verify_release(
     for path in root.rglob("*"):
         if path.is_symlink():
             raise ReleaseRejectedError("release contains a symlink")
+        if not (path.is_file() or path.is_dir()):
+            raise ReleaseRejectedError("release contains a special file")
         if path.is_file() and path != manifest_path:
             actual.add(path.relative_to(root).as_posix())
     if actual != set(files):
@@ -226,7 +228,7 @@ def activate_release(
     retains the returned absolute paths for spawning; it must not execute via
     a pointer that can change again. No release deletion/GC is performed here.
     """
-    if not store.is_dir() or store.is_symlink():
+    if not store.is_dir() or store.resolve() != store.absolute():
         raise ReleaseRejectedError("release store must already exist as a real directory")
     if expected_current is not None:
         for digest in expected_current:
