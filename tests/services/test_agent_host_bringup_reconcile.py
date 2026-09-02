@@ -26,10 +26,17 @@ def _spec(session: str, cmd: str, pidfile: Path) -> types.SimpleNamespace:
 
 
 def _stub_roster(
+    monkeypatch: pytest.MonkeyPatch,
     gate_reasons: dict[str, str | None],
     specs: list[types.SimpleNamespace],
 ) -> None:
-    """Point the function's lazy `from ops.spec import ...` at canned data."""
+    """Point the function's lazy `from ops.spec import ...` at canned data.
+
+    ``monkeypatch.setitem`` (not a bare ``sys.modules`` assignment) so the real
+    module is restored when the test ends — a leaked stub would poison later
+    files in the same shard whose lazy ``from ops.spec import ...`` resolves
+    against the residue (watchdog daemon import, #1460 CI att1/att2).
+    """
     mod = types.ModuleType("ops.spec")
 
     def _gate_reason(spec: types.SimpleNamespace) -> str | None:
@@ -40,7 +47,7 @@ def _stub_roster(
 
     mod._gate_reason = _gate_reason  # type: ignore[attr-defined]
     mod.build_services = _build_services  # type: ignore[attr-defined]
-    sys.modules["ops.spec"] = mod
+    monkeypatch.setitem(sys.modules, "ops.spec", mod)
 
 
 def _record_kill(killed: list[tuple[int, int]]) -> Callable[[int, int], None]:
@@ -71,7 +78,7 @@ class TestStopStrayModeGatedServices:
         pidfile = tmp_path / "restarter.pid"
         pidfile.write_text("4242\n")
         spec = _spec("restarter", ".venv/bin/python -m services.restarter.daemon", pidfile)
-        _stub_roster({"restarter": _HOSTED_RESTARTER}, [spec])
+        _stub_roster(monkeypatch, {"restarter": _HOSTED_RESTARTER}, [spec])
         monkeypatch.setattr(daemon, "_runner_mode", lambda: "hosted")
         # running before the kill, gone after — the grace loop exits immediately
         monkeypatch.setattr(daemon, "pidfile_holds_daemon", _holds_when(iter([True, False])))
@@ -86,7 +93,7 @@ class TestStopStrayModeGatedServices:
         pidfile = tmp_path / "restarter.pid"
         pidfile.write_text("4242\n")
         spec = _spec("restarter", ".venv/bin/python -m services.restarter.daemon", pidfile)
-        _stub_roster({"restarter": _HOSTED_RESTARTER}, [spec])
+        _stub_roster(monkeypatch, {"restarter": _HOSTED_RESTARTER}, [spec])
         monkeypatch.setattr(daemon, "_runner_mode", lambda: "hosted")
         monkeypatch.setattr(daemon, "pidfile_holds_daemon", _holds_when(iter([False])))
         killed: list[tuple[int, int]] = []
@@ -102,7 +109,7 @@ class TestStopStrayModeGatedServices:
         pidfile = tmp_path / "heartbeat.pid"
         pidfile.write_text("4242\n")
         spec = _spec("heartbeat", ".venv/bin/python -m services.heartbeat.daemon", pidfile)
-        _stub_roster({"heartbeat": "disabled (AVA_HEARTBEAT_ENABLED off)"}, [spec])
+        _stub_roster(monkeypatch, {"heartbeat": "disabled (AVA_HEARTBEAT_ENABLED off)"}, [spec])
         monkeypatch.setattr(daemon, "_runner_mode", lambda: "hosted")
         monkeypatch.setattr(daemon, "pidfile_holds_daemon", _holds_when(iter([True])))
         killed: list[tuple[int, int]] = []
@@ -118,7 +125,7 @@ class TestStopStrayModeGatedServices:
         pidfile = tmp_path / "agent-host.pid"
         pidfile.write_text("4242\n")
         spec = _spec("agent-host", ".venv/bin/python -m services.agent_host.daemon", pidfile)
-        _stub_roster({"agent-host": "disabled (AVA_RUNNER_MODE is process)"}, [spec])
+        _stub_roster(monkeypatch, {"agent-host": "disabled (AVA_RUNNER_MODE is process)"}, [spec])
         monkeypatch.setattr(daemon, "_runner_mode", lambda: "hosted")
         monkeypatch.setattr(daemon, "pidfile_holds_daemon", _holds_when(iter([True])))
         killed: list[tuple[int, int]] = []
@@ -134,7 +141,7 @@ class TestStopStrayModeGatedServices:
         pidfile = tmp_path / "restarter.pid"
         pidfile.write_text("4242\n")
         spec = _spec("restarter", ".venv/bin/python -m services.restarter.daemon", pidfile)
-        _stub_roster({"restarter": _HOSTED_RESTARTER}, [spec])
+        _stub_roster(monkeypatch, {"restarter": _HOSTED_RESTARTER}, [spec])
         monkeypatch.setattr(daemon, "_runner_mode", lambda: "hosted")
         monkeypatch.setattr(daemon, "pidfile_holds_daemon", _holds_when(iter([True])))
         killed: list[tuple[int, int]] = []
@@ -154,6 +161,6 @@ class TestStopStrayModeGatedServices:
     ) -> None:
         """A roster read failure must not block the host from serving agents."""
         mod = types.ModuleType("ops.spec")  # no _gate_reason / build_services
-        sys.modules["ops.spec"] = mod
+        monkeypatch.setitem(sys.modules, "ops.spec", mod)
         monkeypatch.setattr(daemon, "_runner_mode", lambda: "hosted")
         daemon._stop_stray_mode_gated_services()  # must not raise
