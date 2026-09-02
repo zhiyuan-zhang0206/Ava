@@ -65,6 +65,56 @@ def _count_inbounds(conn: psycopg.Connection, agent_id: int, content: str) -> in
         return int(row[0])
 
 
+def test_authenticated_admin_legacy_retry_and_scoped_reconcile(
+    client: TestClient,
+    db_conn: psycopg.Connection,
+    agent_id: int,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from shared.config import settings
+
+    secret = "principal-scope-test-secret"  # noqa: S105 — isolated test credential
+    monkeypatch.setattr(settings.data_plane, "cluster_secret", secret)
+    monkeypatch.setattr(settings.gateway, "auth_middleware_enabled", True)
+    url = f"/api/agents/{agent_id}/messages"
+    body = {"content": "admin principal retry", "source": "user"}
+    legacy_headers = {"Authorization": f"Bearer {secret}", "Idempotency-Key": "legacy-flight"}
+    first = client.post(url, json=body, headers=legacy_headers)
+    repeated = client.post(url, json=body, headers=legacy_headers)
+    assert first.status_code == repeated.status_code == 201
+    assert first.json()["inbound_id"] == repeated.json()["inbound_id"]
+    headers = legacy_headers | {
+        "Idempotency-Scope": "principal-v1",
+        "Idempotency-Key": "new-logical-message",
+    }
+    scoped = client.post(url, json=body, headers=headers)
+    assert scoped.status_code == 201, scoped.text
+    reconciled = client.post(f"{url}/reconcile", json=body, headers=headers)
+    assert reconciled.status_code == 200, reconciled.text
+    assert reconciled.json()["inbound_id"] == scoped.json()["inbound_id"]
+    conflict = client.post(url, json=body | {"content": "changed"}, headers=headers)
+    assert conflict.status_code == 409
+    assert _count_inbounds(db_conn, agent_id, "admin principal retry") == 2
+
+
+def test_no_auth_mode_cannot_claim_verified_principal_namespace(
+    client: TestClient,
+    db_conn: psycopg.Connection,
+    agent_id: int,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from shared.config import settings
+
+    monkeypatch.setattr(settings.gateway, "auth_middleware_enabled", False)
+    response = client.post(
+        f"/api/agents/{agent_id}/messages",
+        json={"content": "must not insert scoped", "source": "user"},
+        headers={"Idempotency-Key": "no-auth-key", "Idempotency-Scope": "principal-v1"},
+    )
+    assert response.status_code == 422
+    assert _count_inbounds(db_conn, agent_id, "must not insert scoped") == 0
+
+
 def test_same_key_retry_lands_once(
     client: TestClient, db_conn: psycopg.Connection, agent_id: int
 ) -> None:
