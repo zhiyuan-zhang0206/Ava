@@ -62,7 +62,6 @@ from psycopg_pool import AsyncConnectionPool
 from services._pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 from services.agent_host.dispatcher import InboundWakeDispatcher, TurnScheduler
 from services.agent_host.host import AgentHost, build_shared_pool
-from shared import paths
 from shared.config import settings
 from shared.daemon_health import Liveness, health_port, start_health_server, stop_health_server
 from shared.daemon_shutdown import install_graceful_shutdown
@@ -231,7 +230,9 @@ def _plugins_fingerprint() -> str:
     any other file under the dir does not. The directory itself missing is a
     valid state (no plugins) — the fingerprint is then empty, not an error.
     """
-    root = paths.plugins_dir()
+    from shared.runtime_interpreter import external_plugin_read_root
+
+    root = external_plugin_read_root()
     if not root.exists():
         return ""
     parts: list[str] = []

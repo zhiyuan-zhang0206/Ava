@@ -9,6 +9,7 @@ from pathlib import Path
 
 from agent.graph._build import _load_extensions
 from ops.spec import _plugin_services
+from services.agent_host.daemon import _plugins_fingerprint
 from shared import paths, plugins_config
 from shared.runtime_interpreter import runtime_plugins_dir
 
@@ -30,10 +31,12 @@ def main() -> None:
     _load_extensions()
     module = sys.modules["plugins.runtime_fixture.plugin"]
     require(module.VALUE == "retained-resource", "agent plugin did not import resource")
+    fingerprint = _plugins_fingerprint()
     mutable = paths.plugins_dir() / "runtime_fixture"
     mutable.mkdir()
     (mutable / "plugin.py").write_text("raise RuntimeError('mutable poison must not execute')\n")
     _load_extensions()
+    require(_plugins_fingerprint() == fingerprint, "mutable input triggered host restart")
     require(module.VALUE == "retained-resource", "mutable install changed loaded image")
     # Machine services depend on presence, not agent-facing enable-state.
     config["plugins"]["runtime_fixture"]["enabled"] = False

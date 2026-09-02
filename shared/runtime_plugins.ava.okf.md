@@ -15,10 +15,13 @@ installation/scaffold destination; it is not redirected into an image. Builtin
 plugins remain wheel resources. Both agent extension discovery and machine
 service discovery consume the same retained external roots. Machine service
 presence remains distinct from agent-facing plugin enable state.
+Plugin command/MCP configuration reads and the hosted plugin-change fingerprint
+also use this read root; changing a future install cannot restart the current
+host or redirect delayed discovery to mutable code.
 
 Preparation accepts complete privately hashed package trees with existing v2
 manifests and required external names. Missing entry points/manifests, name
-conflicts, unknown host capability requirements, dependency mismatches, links,
+conflicts, unknown host capability or MCP executable requirements, dependency mismatches, links,
 special files and checkout/secret configuration refuse preparation. Python
 dependencies must already be in the locked wheel environment; preparation does
 not install new packages to satisfy a plugin. Code, sibling modules, static and
