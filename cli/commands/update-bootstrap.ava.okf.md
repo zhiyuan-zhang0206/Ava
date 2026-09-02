@@ -34,6 +34,9 @@ reuse those invocation-local verified paths and recheck the manifest binding;
 they do not hash the entire retained environment inside the readiness deadline.
 No verification result is cached across updater invocations. A live or unknown
 predecessor is rejected before image traversal and checked again afterward.
+Each startup wait uses at most half the outstanding challenge, reserving the
+remaining authority window for compensation. Transient unproven exec identity
+is only retried as not-ready; it never authorizes a signal or successful closure.
 
 Candidate startup failure compensates to the verified restricted A and restores
 only the unchanged original cron definition. Dead updater recovery reclaims the

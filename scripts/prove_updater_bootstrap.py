@@ -20,6 +20,7 @@ from pathlib import Path
 from unittest.mock import patch
 from uuid import uuid4
 
+import psutil
 import psycopg
 from psycopg import sql
 from psycopg.conninfo import make_conninfo
@@ -48,6 +49,12 @@ def private_json(path: Path, value: str) -> None:
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     with os.fdopen(fd, "w") as stream:
         stream.write(value)
+
+
+def challenge_budget(until: datetime) -> float:
+    remaining = (until - datetime.now(UTC)).total_seconds()
+    require(remaining > 0, "CI operation challenge expired before invocation")
+    return remaining
 
 
 def fault_worker(mode: str, request: Path) -> int:
@@ -165,6 +172,13 @@ def failure_snapshot(home: Path, old: hop.ExpectedProcess) -> str:
         )
         evidence["record_identity"] = current.model_dump()
         evidence["record_state"] = observe_process(current)
+        if evidence["record_state"] == "alive":
+            proc = psutil.Process(current.pid)
+            evidence["record_executable"] = proc.exe()
+            evidence["children"] = [
+                {"pid": child.pid, "birth": child.create_time(), "name": child.name()}
+                for child in proc.children(recursive=True)
+            ]
     except FileNotFoundError:
         evidence["record_identity"] = "absent"
     return json.dumps(evidence, sort_keys=True)
@@ -391,7 +405,7 @@ def main() -> None:  # noqa: PLR0915 — isolated CI native lifetimes, always re
                         cwd=home,
                         env=env,
                         capture_output=True,
-                        timeout=60,
+                        timeout=challenge_budget(until),
                         check=False,
                     )
                 except subprocess.TimeoutExpired as exc:
@@ -422,7 +436,12 @@ def main() -> None:  # noqa: PLR0915 — isolated CI native lifetimes, always re
                         "crash discarded compensating inputs",
                     )
                     resumed = subprocess.run(  # noqa: S603 — same verified updater and retained request.
-                        normal, cwd=home, env=env, capture_output=True, timeout=60, check=False
+                        normal,
+                        cwd=home,
+                        env=env,
+                        capture_output=True,
+                        timeout=challenge_budget(until),
+                        check=False,
                     )
                     require(resumed.returncode == 1, "dead-owner resume did not restore A")
                 if mode in {"expire-after-stop", "holder-change-after-stop"}:

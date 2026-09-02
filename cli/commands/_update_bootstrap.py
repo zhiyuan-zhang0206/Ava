@@ -506,9 +506,19 @@ def _signal_expected(plan: PreparedBootstrapHop, process: ExpectedProcess) -> bo
 def _await_observer(plan: PreparedBootstrapHop, kind: Literal["A", "B"]) -> None:
     context = plan.recovery if kind == "A" else plan.candidate
     remaining = (context.challenge.valid_until - datetime.now(UTC)).total_seconds()
-    deadline = time.monotonic() + min(5, max(0, remaining / 2))
+    # A fresh bootstrap verifies its entire image before binding. Reserve half
+    # the outstanding challenge for compensation instead of imposing a five-
+    # second cap that can expire during that mandatory cold verification.
+    deadline = time.monotonic() + max(0, remaining / 2)
     while time.monotonic() < deadline:
-        process, actual_kind = _recorded_observer(plan)
+        try:
+            process, actual_kind = _recorded_observer(plan)
+        except ReleaseRejectedError:
+            # Native launch can still be in its shell-to-exec transition or a
+            # bootstrap's platform probe. Unknown is never ready or killable;
+            # only this read-only startup wait may retry it. Stop stays strict.
+            time.sleep(0.05)
+            continue
         if actual_kind != kind or observe_process(process) != "alive":
             raise ReleaseRejectedError("candidate did not retain its exact session identity")
         try:
