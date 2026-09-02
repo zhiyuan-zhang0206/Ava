@@ -51,6 +51,7 @@ def prove_checkout_absent(
     collector = _copy_proof(root, checkout, "prove_runtime_otel.py")
     plugin_proof = _copy_proof(root, checkout, "prove_runtime_plugins.py")
     inventory_proof = _copy_proof(root, checkout, "prove_release_inventory.py")
+    bootstrap = _copy_proof(root, checkout, "prove_ops_bootstrap.py")
     alias = root / "runtime-entry-alias"
     alias.symlink_to(release.root / "venv", target_is_directory=True)
     if (
@@ -154,6 +155,21 @@ def prove_checkout_absent(
                 "RUNNER_TEMP": os.environ["RUNNER_TEMP"],
             }
             schema = json.loads((release.root / "manifest.json").read_text())["schema_digest"]
+            subprocess.run(  # noqa: S603 — real retained ops entry, isolated old-schema CI database.
+                [
+                    str(release.interpreter),
+                    "-I",
+                    "-B",
+                    str(bootstrap),
+                    release.digest,
+                    release.manifest_digest,
+                    schema,
+                ],
+                cwd=root,
+                env=migration_env,
+                check=True,
+                timeout=600,
+            )
             result = subprocess.run(  # noqa: S603 — CI-only native PG at the prepared image boundary.
                 [
                     str(release.interpreter),

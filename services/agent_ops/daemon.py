@@ -68,13 +68,25 @@ loop — see that function for the two-hour prod wedge that established it, and
 
 from __future__ import annotations
 
+import sys
+
+if __name__ == "__main__" and any(
+    arg == "--bootstrap-observation" or arg.startswith("--bootstrap-observation=")
+    for arg in sys.argv[1:]
+):
+    # This must precede ordinary imports: Settings may fetch a stopped gateway,
+    # and normal daemon initialization writes PID/schema/registration state.
+    from services.agent_ops.bootstrap import main as bootstrap_main
+
+    raise SystemExit(bootstrap_main())
+
+
 import asyncio
 import contextlib
 import functools
 import json
 import logging
 import os
-import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor

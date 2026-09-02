@@ -26,6 +26,10 @@ on:
       - 'scripts/prove_release_inventory.py'
       - 'cli/commands/_release_inventory.py'
       - 'scripts/prepare_plugin_fixture.py'
+      - 'scripts/prove_ops_bootstrap.py'
+      - 'services/agent_ops/bootstrap.py'
+      - 'services/agent_ops/daemon.py'
+      - 'shared/managed_writer_observation.py'
       - 'scripts/prove_runtime_migration.py'
       - 'shared/runtime_migration.py'
       - 'cli/commands/_release_candidate.py'
@@ -118,6 +122,7 @@ jobs:
           if test "$RUNNER_OS" = Linux; then
             test -s "$RUNNER_TEMP/prepare/inventory-proof.json"
           fi
+          if [[ "$RUNNER_OS" == Linux ]]; then test -s "$RUNNER_TEMP/prepare/ops-bootstrap-proof.json"; fi
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: inactive-prepare-${{ matrix.os }}-${{ github.event.pull_request.head.sha }}
@@ -128,6 +133,7 @@ jobs:
             ${{ runner.temp }}/prepare/plugin-proof.json
             ${{ runner.temp }}/prepare/inventory-proof.json
             ${{ runner.temp }}/frontend-proof.json
+            ${{ runner.temp }}/prepare/ops-bootstrap-proof.json
           if-no-files-found: error
       - name: Stop isolated native PG
         if: always() && runner.os == 'Linux'
