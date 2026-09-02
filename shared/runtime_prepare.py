@@ -140,7 +140,9 @@ def native_dependencies(root: Path) -> list[str]:
             if not fields or fields[0].startswith("linux-vdso") or line.endswith(":"):
                 continue
             if "not found" in line:
-                raise ReleaseRejectedError("unresolved native library")
+                raise ReleaseRejectedError(
+                    f"unresolved native library {line.strip()!r} in {path.relative_to(root)}"
+                )
             name = fields[2] if not darwin and len(fields) > 2 and fields[1] == "=>" else fields[0]
             if darwin:
                 name = line.strip().split(" (compatibility version", 1)[0]
@@ -156,7 +158,7 @@ def native_dependencies(root: Path) -> list[str]:
                 # Managed CPython/wheels normally use loader-relative links.
                 # Unknown search-path contracts are not silently accepted.
                 raise ReleaseRejectedError(
-                    "unresolved Mach-O rpath; preparation adapter needs explicit support"
+                    f"unresolved Mach-O rpath {name!r} in {path.relative_to(root)}"
                 )
             dependency = Path(name)
             if not dependency.is_absolute() or not dependency.is_file():
