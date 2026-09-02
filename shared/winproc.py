@@ -453,8 +453,9 @@ def _terminate_tree(
         with contextlib.suppress(*_GONE):
             p.kill()
     _gone, alive = psutil.wait_procs([proc, *children], timeout=5)
-    if alive:
-        raise RuntimeError("native session descendants survived force cleanup")
+    survivors = [p.pid for p in alive if p.is_running()]
+    if survivors:
+        raise RuntimeError(f"native session processes survived force cleanup: {survivors}")
     return "forced"
 
 
@@ -493,7 +494,7 @@ def kill_session(name: str, *, graceful: bool = False, timeout: float = 15.0) ->
             spare=_spared_pids(name, proc),
         )
     except Exception as exc:
-        logger.warning("winproc kill {name} hit {exc}", name=name, exc=exc)
+        logger.error("winproc kill {name} hit {exc}", name=name, exc=exc)
         return False, mode
     if proc.is_running():
         logger.error(
