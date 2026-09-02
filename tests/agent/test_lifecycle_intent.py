@@ -97,6 +97,23 @@ async def test_acceptance_rollback_leaves_no_pointer_or_claim(
     ).fetchone() == ("pending", None, None)
 
 
+async def test_old_unconditional_writer_still_requires_upgrade_barrier(
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+) -> None:
+    """Schema alone cannot fence an N-1 writer: deployment must stop it first."""
+    agent_id = _agent(db_conn)
+    owner = await _admit(aops_pool, agent_id)
+    inbound = _command(db_conn, agent_id, "restart")
+    with bind_turn_identity(agent_id, incarnation=owner):
+        async with async_write_transaction(aops_pool) as conn:
+            await accept_lifecycle_intent(conn, agent_id)
+    with db_conn.transaction(force_rollback=True):
+        db_conn.execute("UPDATE inbound_messages SET status='done' WHERE id=%s", (inbound,))
+        assert db_conn.execute(
+            "SELECT status,applied_at FROM inbound_messages WHERE id=%s", (inbound,)
+        ).fetchone() == ("done", None)
+
+
 async def test_pending_pointer_blocks_retention_and_foreign_agent_reference(
     db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
 ) -> None:

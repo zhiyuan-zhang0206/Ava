@@ -23,8 +23,19 @@ def _shape(conn: psycopg.Connection) -> list[tuple[object, ...]]:
     ).fetchall()
 
 
+def _constraints(conn: psycopg.Connection) -> list[tuple[object, ...]]:
+    return conn.execute(
+        "SELECT conname,contype,convalidated,pg_get_constraintdef(oid) "
+        "FROM pg_constraint WHERE conrelid IN ('agents_meta'::regclass,'inbound_messages'::regclass) "
+        "AND conname IN ('inbound_agent_command_unique','inbound_lifecycle_target_check',"
+        "'agents_meta_lifecycle_command_fk') ORDER BY conname"
+    ).fetchall()
+
+
 def test_lifecycle_schema_up_down_and_legacy_compatibility(db_conn: psycopg.Connection) -> None:
     expected = _shape(db_conn)
+    expected_constraints = _constraints(db_conn)
+    assert len(expected_constraints) == 3
     schema = "lifecycle_" + uuid4().hex
     up = sql.SQL(cast(LiteralString, _MIGRATION.with_suffix(".sql").read_text()))
     down = sql.SQL(cast(LiteralString, _MIGRATION.with_suffix(".down.sql").read_text()))
@@ -42,14 +53,17 @@ def test_lifecycle_schema_up_down_and_legacy_compatibility(db_conn: psycopg.Conn
         db_conn.execute("INSERT INTO inbound_messages VALUES(2,1,'restart','done',now())")
         db_conn.execute(up)
         assert _shape(db_conn) == expected
+        assert _constraints(db_conn) == expected_constraints
         db_conn.execute(up)
         assert db_conn.execute(
             "SELECT target_generation,target_owner,applied_at,observed_at FROM inbound_messages"
         ).fetchone() == (None, None, None, None)
         db_conn.execute(down)
         assert _shape(db_conn) == []
+        assert _constraints(db_conn) == []
         db_conn.execute(up)
         assert _shape(db_conn) == expected
+        assert _constraints(db_conn) == expected_constraints
         with pytest.raises(psycopg.errors.CheckViolation), db_conn.transaction():
             db_conn.execute("UPDATE inbound_messages SET target_generation=%s", (uuid4(),))
         db_conn.execute("UPDATE agents_meta SET lifecycle_command_id=2 WHERE id=1")
