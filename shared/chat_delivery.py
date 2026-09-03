@@ -18,8 +18,8 @@ import psycopg
 
 from shared.audit_events import insert_event_log
 from shared.caller_identity import caller_payload
+from shared.caller_protocol import require_caller_protocol
 from shared.db import fetch_one, publish_inbound_wake
-from shared.envelope import reject_unnegotiated_caller
 
 
 class ClientMessageConflictError(ValueError):
@@ -119,7 +119,32 @@ def insert_chat_inbound_once(
     client_message_id: str | None,
 ) -> ChatInboundReceipt:
     """Insert one logical chat, or return its existing same-key inbound id."""
-    reject_unnegotiated_caller(source)
+    with db.transaction():
+        require_caller_protocol(db, agent_id, source)
+        receipt = _insert_chat_inbound_once(
+            db,
+            agent_id=agent_id,
+            content=content,
+            source=source,
+            payload=payload,
+            client_message_id=client_message_id,
+        )
+    db.commit()
+    if receipt.inserted:
+        publish_inbound_wake(agent_id, str(receipt.inbound_id))
+    return receipt
+
+
+def _insert_chat_inbound_once(
+    db: psycopg.Connection,
+    *,
+    agent_id: int,
+    content: str,
+    source: str,
+    payload: dict[str, object] | None,
+    client_message_id: str | None,
+) -> ChatInboundReceipt:
+    """The locked INSERT body; ownership cannot change before commit."""
     payload = caller_payload(source, payload)
     encoded_payload = json.dumps(payload) if payload else None
     with db.cursor() as cur:
@@ -167,7 +192,4 @@ def insert_chat_inbound_once(
                 payload={"inbound_id": receipt.inbound_id, "content": content},
             )
 
-    db.commit()
-    if receipt.inserted:
-        publish_inbound_wake(agent_id, str(receipt.inbound_id))
     return receipt

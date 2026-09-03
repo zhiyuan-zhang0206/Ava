@@ -265,7 +265,9 @@ class TestWaitForInbound:
     ) -> None:
         """Hosted turn boundaries write their transition, while a lifecycle
         winner merely rejects the stale compare-and-swap."""
-        from agent.db import flip_hosted_status
+        from uuid import uuid4
+
+        from agent.hosted_ownership import admit_hosted_runtime, settle_hosted_runtime
 
         tid = create_agent(db_conn)
         with db_conn.cursor() as cur:
@@ -276,7 +278,10 @@ class TestWaitForInbound:
             )
         db_conn.commit()
 
-        assert await flip_hosted_status(aops_pool, tid, "running", expected_from="idling")
+        incarnation = await admit_hosted_runtime(
+            aops_pool, tid, "unknown", uuid4(), expected_from="idling"
+        )
+        assert incarnation is not None
         async with aops_pool.connection() as conn:
             row = await (
                 await conn.execute("SELECT status FROM agents_meta WHERE id = %s", (tid,))
@@ -287,7 +292,7 @@ class TestWaitForInbound:
             cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (tid,))
         db_conn.commit()
 
-        assert not await flip_hosted_status(aops_pool, tid, "idling", expected_from="running")
+        assert not await settle_hosted_runtime(aops_pool, incarnation)
         async with aops_pool.connection() as conn:
             row = await (
                 await conn.execute("SELECT status FROM agents_meta WHERE id = %s", (tid,))
