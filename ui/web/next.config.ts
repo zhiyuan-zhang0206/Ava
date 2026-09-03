@@ -14,6 +14,9 @@ import withBundleAnalyzer from "@next/bundle-analyzer";
 // empty by default.
 
 const nextConfig: NextConfig = {
+  // Release preparation traces runtime dependencies before maintenance. Ordinary
+  // development/source installs retain their existing next-start output.
+  output: process.env.AVA_FRONTEND_RELEASE === "1" ? "standalone" : undefined,
   // -- Security hardening --
   // Strip X-Powered-By header, don't expose the stack
   poweredByHeader: false,

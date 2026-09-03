@@ -13,6 +13,8 @@ helper `per_cluster_base_urls`).
 from __future__ import annotations
 
 import hashlib
+import json
+import shlex
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -183,6 +185,25 @@ def frontend_service_cmd(port: int, frontend_dir: str | Path = "ui/web") -> str:
             inlined and never reaches the build from a unit .env); see
             ``fe_build_env``.
     """
+    from shared.runtime_interpreter import WHEEL_RUNTIME, runtime_frontend_dir
+
+    if WHEEL_RUNTIME:
+        if IS_WINDOWS:
+            raise RuntimeError("retained frontend launch has no Windows closure proof")
+        retained = runtime_frontend_dir()
+        manifest = json.loads((retained / "frontend-manifest.json").read_text(encoding="utf-8"))
+        if manifest["publicBuildConfig"] != {
+            "gatewayPort": settings.gateway.gateway_port,
+            "apiBase": "",
+        }:
+            raise RuntimeError("prepared frontend public configuration differs from this unit")
+        # The release admission gate verifies the complete image before start.
+        # Missing assets never trigger npm/download or a source fallback here.
+        return (
+            f"NODE_ENV=production HOSTNAME=127.0.0.1 PORT={port} "
+            f"exec {shlex.quote(str(retained / 'node'))} "
+            f"{shlex.quote(str(retained / 'server/server.js'))}"
+        )
     frontend_dir = Path(frontend_dir).as_posix()
     build_env = fe_build_env()
     if IS_WINDOWS:

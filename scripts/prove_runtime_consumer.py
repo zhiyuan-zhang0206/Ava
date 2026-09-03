@@ -11,6 +11,7 @@ from pathlib import Path
 
 from ops.agent_launch import _agent_interpreter
 from ops.spec import build_services
+from shared.cluster import frontend_service_cmd
 from shared.migrations import required_migration_set
 from shared.platform_backend import get_backend
 from shared.runtime_interpreter import WHEEL_RUNTIME, runtime_python, runtime_venv
@@ -20,6 +21,27 @@ from shared.session_env import forward_env_dict, venv_activation_prefix
 def require(condition: bool, detail: str) -> None:  # noqa: FBT001 — assertion predicate, not a mode flag.
     if not condition:
         raise AssertionError(detail)
+
+
+def prove_frontend_config_rejection(python: Path, root: Path) -> None:
+    probe = """
+from shared.config import settings
+from shared.cluster import frontend_service_cmd
+assert settings.gateway.gateway_port == 8001, 'negative config was not applied'
+try:
+    frontend_service_cmd(43871)
+except RuntimeError as exc:
+    assert 'public configuration differs' in str(exc), str(exc)
+else:
+    raise AssertionError('mismatched public build configuration returned a launch command')
+"""
+    subprocess.run(  # noqa: S603 — same retained wheel, wrong public port, no service launch.
+        [str(python), "-I", "-B", "-c", probe],
+        cwd=root,
+        env=os.environ.copy() | {"AVA_GATEWAY_PORT": "8001"},
+        check=True,
+        timeout=30,
+    )
 
 
 def main() -> None:
@@ -32,9 +54,19 @@ def main() -> None:
         "interpreter canonicalized the entry alias; this is not a moving-prefix proof",
     )
     require(WHEEL_RUNTIME, "proof did not load the installed wheel")
+    frontend_command = frontend_service_cmd(43871)
+    require(
+        "npm" not in frontend_command and "build" not in frontend_command,
+        "release frontend rebuilds",
+    )
+    require(
+        str(prefix.parent / "frontend/node") in frontend_command,
+        "frontend escaped loaded generation",
+    )
     require(bool(required_migration_set()), "installed read-only schema inventory is unavailable")
     require(runtime_venv().resolve() == prefix, "venv escaped current prefix")
     python = runtime_python()
+    prove_frontend_config_rejection(python, root)
     require(Path(_agent_interpreter()[0]) == python, "agent interpreter mismatch")
     require(
         Path(get_backend().venv_python()).parent == python.parent, "platform interpreter mismatch"
@@ -56,6 +88,7 @@ def main() -> None:
         alias.unlink()
         alias.symlink_to(other, target_is_directory=True)
         require(runtime_python() == python, "selector changed running interpreter")
+        require(frontend_service_cmd(43871) == frontend_command, "selector changed frontend image")
         late = subprocess.run(  # noqa: S603 — exact current generation, no shell.
             [str(python), "-I", "-B", "-c", "import sys;print(sys.prefix)"],
             cwd=root,
