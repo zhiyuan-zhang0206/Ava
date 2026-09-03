@@ -9,9 +9,9 @@ themselves -- so the privileged, permission-granted work happens in the one
 signed helper process, not in every caller.
 
 Because the helper is that single process, it is also the only place the
-desktop permission grants can be read from; `check_screen_capture` is the one
-interpreted call here, turning a `ping` into the status the converge preflight
-reports.
+desktop permission grants can be read from; `check_screen_capture` and
+`check_accessibility` are the interpreted calls here, turning a `ping` into the
+statuses the converge preflight reports.
 """
 
 from __future__ import annotations
@@ -24,8 +24,9 @@ import os
 import socket
 import time
 from pathlib import Path
-from typing import Any, TypedDict
+from typing import Any, NotRequired, TypedDict
 
+from shared.accessibility import AccessibilityState, AccessibilityStatus
 from shared.paths import permissions_helper_socket
 from shared.screen_capture import ScreenCaptureState, ScreenCaptureStatus
 
@@ -155,7 +156,7 @@ def _parse_reply(buf: bytes, method: str) -> Any:
 class PingResult(TypedDict):
     pong: bool
     preflight_screen: bool  # Screen Recording grant held
-    ax_trusted: bool  # Accessibility grant held
+    ax_trusted: NotRequired[bool]  # Accessibility grant held (macOS only)
 
 
 class ScreencaptureResult(TypedDict):
@@ -330,6 +331,15 @@ _NO_GRANT_DIAGNOSTIC = (
     "`launchctl kickstart -k gui/$(id -u)/<label>`)."
 )
 
+_NO_AX_GRANT_DIAGNOSTIC = (
+    "The permissions helper is running but holds no Accessibility grant, so macOS silently "
+    "drops the synthetic clicks and keystrokes it posts (calls return success but the desktop "
+    "never sees them). Screen Recording is a separate grant and is unaffected. Fix: System "
+    "Settings > Privacy & Security > Accessibility, enable AvaPermissionsHelper — rebuilding "
+    "or re-signing the helper resets this grant once. The grant applies to the running helper "
+    "immediately; no launchd restart is needed."
+)
+
 
 def check_screen_capture(
     *, sock_path: str | Path | None = None, settle_s: float = _PROBE_SETTLE_S
@@ -370,4 +380,43 @@ def check_screen_capture(
             return ScreenCaptureStatus(state=ScreenCaptureState.AVAILABLE)
         return ScreenCaptureStatus(
             state=ScreenCaptureState.NO_GRANT, diagnostic=_NO_GRANT_DIAGNOSTIC
+        )
+
+
+def check_accessibility(
+    *, sock_path: str | Path | None = None, settle_s: float = _PROBE_SETTLE_S
+) -> AccessibilityStatus:
+    """Report whether the helper holds the Accessibility grant.
+
+    The helper posts the synthetic input and reads the accessibility tree, so a
+    caller-side probe would report a different process's grant. An unreachable
+    helper is distinct from a missing grant: its answer was never read and the
+    repair is its launchd job, not System Settings.
+    """
+    deadline = time.monotonic() + settle_s
+    while True:
+        try:
+            result = ping(sock_path=sock_path)
+        except PermissionsHelperError as exc:
+            if time.monotonic() < deadline:
+                time.sleep(_PROBE_RETRY_DELAY_S)
+                continue
+            return AccessibilityStatus(
+                state=AccessibilityState.HELPER_UNREACHABLE,
+                diagnostic=(
+                    f"The permissions helper did not answer on its socket ({exc}), so its "
+                    "Accessibility grant could not be read -- this is a helper liveness "
+                    "problem, not a permission one. While it is down every desktop action "
+                    "it performs fails: OS-level screenshots, clicks, keystrokes, window "
+                    "geometry. Check its launchd job "
+                    "(`launchctl list | grep com.ava.permissions-helper`) and "
+                    "$AVA_HOME/logs/permissions-helper.log."
+                ),
+            )
+        # The Windows helper has no Accessibility concept: SendInput is not
+        # TCC-gated, so its older ping shape correctly means this axis is granted.
+        if "ax_trusted" not in result or result["ax_trusted"] is True:
+            return AccessibilityStatus(state=AccessibilityState.GRANTED)
+        return AccessibilityStatus(
+            state=AccessibilityState.NOT_GRANTED, diagnostic=_NO_AX_GRANT_DIAGNOSTIC
         )

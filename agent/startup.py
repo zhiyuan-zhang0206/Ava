@@ -10,8 +10,8 @@
   inbound rows left behind by the previous process of this agent
 - `_write_effective_config_to_restart_completed` — write the freshly
   applied config_overlay snapshot into the pending restart_completed row
-- `_notify_screen_capture_at_startup` — surface broken OS-level screen capture
-  (detected at converge) to the user, exactly once
+- `_notify_desktop_permissions_at_startup` — surface broken Screen Recording
+  or Accessibility permission (detected at converge) to the user, exactly once
 - `reconcile_open_pages` — probe every open page's server and restore it
   (re-serve dead serve_dir pages, close dead no-dir pages); runs at boot,
   on heartbeat, and on the periodic `page_reconcile_loop` as a catch-all
@@ -32,6 +32,7 @@ from __future__ import annotations
 import time
 from collections.abc import Awaitable, Callable, Sequence
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any, cast
 
 from langchain_core.runnables import RunnableConfig
@@ -311,56 +312,74 @@ def _write_effective_config_to_restart_completed(agent_id: int) -> None:
         conn.commit()
 
 
-async def _notify_screen_capture_at_startup() -> None:
-    """Surface broken OS-level screen capture (detected by the converge
-    preflight) to the user via ava.ui.notify, exactly once.
+async def _notify_desktop_permissions_at_startup() -> None:
+    """Surface broken helper desktop permissions via ava.ui.notify, once.
 
-    The status carries which of the two faults it is — the permissions helper holds
-    no Screen Recording grant, or the helper never answered so the grant is
-    unknown — along with the matching fix, so this only has to render it.
-
-    Notifies at most once even when several agents start concurrently: the
-    status file is claimed with an atomic rename, so exactly one starter reads
-    it and fires the notice while the others find nothing and skip. On a failed
-    notify (e.g. the gateway is unreachable) the file is restored so the next
-    startup retries instead of dropping the notice. The next `ava start`
-    converge pass rewrites the file if the condition persists.
+    The converge preflight writes independent Screen Recording and
+    Accessibility status files. Each is atomically claimed, so concurrent
+    starters may independently lose either claim. Unavailable claimed statuses
+    share one notice; unreadable and available statuses are stale cleanup. If
+    notify fails, every claimed fault is restored for the next startup to retry.
 
     Must run after SDK init so ava.ui.notify is registered.
     """
-    from shared.screen_capture import ScreenCaptureStatus, status_file_path
+    from shared.accessibility import AccessibilityStatus
+    from shared.accessibility import status_file_path as accessibility_status_file_path
+    from shared.screen_capture import ScreenCaptureStatus
+    from shared.screen_capture import status_file_path as screen_capture_status_file_path
 
-    status_path = status_file_path()
-    processing_path = status_path.with_suffix(".processing")
-    # Atomic claim: only one of several concurrent agents wins the
-    # rename. The losers raise FileNotFoundError (source already moved) and skip.
-    try:
-        status_path.rename(processing_path)
-    except FileNotFoundError:
+    claimed: list[tuple[Path, Path, ScreenCaptureStatus | AccessibilityStatus]] = []
+    for status_path, status_type in (
+        (screen_capture_status_file_path(), ScreenCaptureStatus),
+        (accessibility_status_file_path(), AccessibilityStatus),
+    ):
+        processing_path = status_path.with_suffix(".processing")
+        # Atomic claim: each concurrent starter can win only this status file.
+        try:
+            status_path.rename(processing_path)
+        except FileNotFoundError:
+            continue
+        status = status_type.from_file(processing_path)
+        if status is None or status.available:
+            processing_path.unlink(missing_ok=True)
+            continue
+        claimed.append((status_path, processing_path, status))
+
+    if not claimed:
         return
-    status = ScreenCaptureStatus.from_file(processing_path)
-    if status is None or status.available:
-        # Available (or unreadable) status is just stale cleanup — drop it.
-        processing_path.unlink(missing_ok=True)
-        return
+
+    if len(claimed) == 1:
+        _, _, status = claimed[0]
+        title = status.headline
+        content = status.diagnostic
+    else:
+        _, _, screen_status = claimed[0]
+        _, _, accessibility_status = claimed[1]
+        title = "Desktop permissions missing"
+        content = (
+            f"{screen_status.headline}: {screen_status.diagnostic}\n\n"
+            f"{accessibility_status.headline}: {accessibility_status.diagnostic}"
+        )
 
     import ava
 
     try:
         ava.ui.notify(  # type: ignore[attr-defined]
-            title=status.headline,
-            content=status.diagnostic,
+            title=title,
+            content=content,
             priority="P1",
         )
     except Exception:
         logger.opt(exception=True).warning(
-            "Failed to post screen capture notification",
+            "Failed to post desktop permissions notification",
             event="screen_capture_notify_failed",
         )
-        # Restore the claim so the next agent startup retries the notification.
-        processing_path.rename(status_path)
+        # Restore every claim so the next agent startup retries the notification.
+        for status_path, processing_path, _ in claimed:
+            processing_path.rename(status_path)
         return
-    processing_path.unlink(missing_ok=True)
+    for _, processing_path, _ in claimed:
+        processing_path.unlink(missing_ok=True)
 
 
 def _page_server_alive(host: str, port: int) -> bool:

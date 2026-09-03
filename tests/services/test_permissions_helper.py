@@ -25,6 +25,7 @@ import pytest
 
 from services.permissions_helper import client
 from services.permissions_helper.client import PermissionsHelperError
+from shared.accessibility import AccessibilityState
 from shared.screen_capture import ScreenCaptureState
 
 
@@ -420,11 +421,17 @@ def test_label_is_per_cluster(monkeypatch: pytest.MonkeyPatch) -> None:
 # reads it from the helper; the calling process's own grant is a different fact.
 
 
-def _ping_reply(preflight_screen: bool) -> Callable[[dict], dict]:  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+def _ping_reply(  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+    preflight_screen: bool, ax_trusted: bool = True
+) -> Callable[[dict], dict]:
     return lambda req: {  # pyright: ignore[reportUnknownLambdaType, reportUnknownVariableType]
         "id": req["id"],
         "ok": True,
-        "result": {"pong": True, "preflight_screen": preflight_screen, "ax_trusted": True},
+        "result": {
+            "pong": True,
+            "preflight_screen": preflight_screen,
+            "ax_trusted": ax_trusted,
+        },
     }
 
 
@@ -481,6 +488,49 @@ def test_screen_capture_probe_waits_out_a_cold_helper(monkeypatch: pytest.Monkey
     status = client.check_screen_capture(settle_s=2.0)
     assert len(calls) == 2
     assert status.state is ScreenCaptureState.AVAILABLE
+
+
+# --- Accessibility probe --------------------------------------------------
+# Like screen capture, this asks the helper because its grant -- not the
+# caller's inherited grant -- determines whether macOS accepts the action.
+
+
+def test_accessibility_probe_reads_the_helpers_grant(fake_helper) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    status = client.check_accessibility(sock_path=fake_helper(_ping_reply(True, True)))  # pyright: ignore[reportUnknownArgumentType]
+    assert status.state is AccessibilityState.GRANTED
+    assert status.available is True
+
+
+def test_accessibility_probe_reports_missing_grant(fake_helper) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    status = client.check_accessibility(sock_path=fake_helper(_ping_reply(True, False)))  # pyright: ignore[reportUnknownArgumentType]
+    assert status.state is AccessibilityState.NOT_GRANTED
+    assert status.available is False
+    assert "System Settings" in status.diagnostic
+    assert "Accessibility" in status.diagnostic
+
+
+def test_accessibility_probe_keeps_unreachable_distinct_from_missing_grant() -> None:
+    status = client.check_accessibility(
+        sock_path="/tmp/ava-native-does-not-exist.sock",  # noqa: S108 — nonexistent by design
+        settle_s=0.0,
+    )
+    assert status.state is AccessibilityState.HELPER_UNREACHABLE
+    assert status.available is False
+    assert "launchctl" in status.diagnostic
+    assert "System Settings" not in status.diagnostic
+
+
+def test_accessibility_probe_treats_the_windows_wire_shape_as_granted(fake_helper) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    def ping_without_ax(req: dict) -> dict:  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+        return {
+            "id": req["id"],
+            "ok": True,
+            "result": {"pong": True, "preflight_screen": True},
+        }
+
+    status = client.check_accessibility(sock_path=fake_helper(ping_without_ax))  # pyright: ignore[reportUnknownArgumentType]
+    assert status.state is AccessibilityState.GRANTED
+    assert status.available is True
 
 
 # --- Signing --------------------------------------------------------------

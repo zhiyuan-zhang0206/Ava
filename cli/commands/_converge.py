@@ -44,6 +44,12 @@ from cli.commands._ownership_preflight import (
 )
 from cli.commands._pgbouncer import _ensure_pgbouncer_step
 from cli.commands._port_preflight import ensure_port_preflight as _ensure_port_preflight
+from shared.accessibility import (
+    clear_status as clear_accessibility_status,
+)
+from shared.accessibility import (
+    write_status as write_accessibility_status,
+)
 from shared.browser_deps import browser_deps_notice, browser_deps_warning
 from shared.cluster import is_default_home
 from shared.config import settings
@@ -603,6 +609,33 @@ def _ensure_screen_capture(ctx: ConvergeCtx) -> None:  # noqa: ARG001
     print(f"  ! {status.headline}: {status.diagnostic}", file=sys.stderr)
 
 
+def _ensure_accessibility(ctx: ConvergeCtx) -> None:  # noqa: ARG001
+    """Preflight Accessibility on agent-runner hosts.
+
+    Accessibility gates the helper's synthetic clicks and keystrokes; macOS
+    silently drops those events when the helper lacks the grant. Record the
+    helper's answer for the next agent startup to report, after the helper has
+    been brought up and only where it can exist.
+    """
+    from shared.platform_probes import permissions_helper_incapability
+
+    if (
+        not settings.services.permissions_helper_enabled
+        or permissions_helper_incapability() is not None
+    ):
+        clear_accessibility_status()
+        return
+
+    from services.permissions_helper.client import check_accessibility
+
+    status = check_accessibility()
+    if status.available:
+        clear_accessibility_status()
+        return
+    write_accessibility_status(status)
+    print(f"  ! {status.headline}: {status.diagnostic}", file=sys.stderr)
+
+
 def _warn_untracked_migrations(ctx: ConvergeCtx) -> None:  # noqa: ARG001
     """Operator-visible warning when migrations/ holds files git does not track.
 
@@ -796,6 +829,12 @@ CONVERGE_STEPS: tuple[ConvergeStep, ...] = (
     ConvergeStep(
         "screen capture availability",
         _ensure_screen_capture,
+        roles=frozenset({"agent-runner"}),
+        requires_unit_config=True,
+    ),
+    ConvergeStep(
+        "accessibility availability",
+        _ensure_accessibility,
         roles=frozenset({"agent-runner"}),
         requires_unit_config=True,
     ),
