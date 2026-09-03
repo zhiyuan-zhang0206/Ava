@@ -62,6 +62,47 @@ provide: it shows up in `ava.shell.sessions.list()` as `{"id": wid, "name":
 asked it to stop). When the watcher stops on its own, the session closes
 itself; the exit notice points at the log file holding its full output.
 
+## Report on change, not on every poll
+
+A watcher's `send_message` wakes you for a full turn, so every message is a
+cost even when it carries no news (user ruling 2026-09-03). Two rules keep a
+watcher cheap:
+
+1. **Message only when the observed state changed.** Keep the last-seen
+   state and compare on every poll; a poll that observes the same state as
+   the previous one stays silent. Initialize the previous-state variable
+   before the loop so the first poll still counts as a change:
+
+   ```python
+   code = '''
+   import ava
+   import time
+
+   last = None
+   while True:
+       cur = ava.shell.run("ls /tmp/done.flag 2>/dev/null").strip()
+       if cur != last:                  # state changed (or first poll)
+           last = cur
+           if cur:                      # only interesting states send
+               ava.agents.send_message(ava.self.AGENT_ID, "the done.flag file appeared")
+               break
+       time.sleep(5)
+   '''
+   ```
+
+   The `last`-comparison is the whole trick: compare the *state*, not the
+   clock, and message only on the transitions you care about. A watcher
+   that would re-send the same message on the next poll is buggy, not
+   cautious.
+
+2. **Prefer event-driven over periodic for anything time-shaped.** A
+   periodic heartbeat ("still waiting", "no news yet") is a message that
+   exists to say nothing — use `ava.watcher.at` / `ava.watcher.cron` for
+   fixed times, and let the automatic exit notice (every watcher sends one
+   when it stops) be the "still alive" signal. If you catch yourself
+   writing a heartbeat, you are usually waiting on the wrong condition:
+   watch the event, not the calendar.
+
 ## Time watchers
 
 ```python

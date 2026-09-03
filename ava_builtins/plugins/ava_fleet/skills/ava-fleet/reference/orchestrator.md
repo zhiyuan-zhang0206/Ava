@@ -41,7 +41,14 @@ An agent's context — the files it has read, the analysis it has run, the desig
 
 - **Give missions, not micro-tasks.** A spawn prompt should be a complete mission the agent owns end to end: "Design the Task Registry, serve it to the user, then wait for my review" — not "Design the Task Registry." The agent carries its context through every step; no rediscovery, no wasted tokens.
 
-Every spawn brief carries three fields: (1) the **mission** — the outcome and what done looks like; (2) the **skill(s)** the worker must use, named explicitly — its index lists every skill, but naming makes it load the right one first; and (3) the **report-back contract** — when and how to report. A brief missing the skill name is incomplete.
+Every spawn brief carries three fields: (1) the **mission** — the outcome
+and what done looks like; (2) the **skill(s)** the worker must use, named
+explicitly — its index lists every skill, but naming makes it load the
+right one first; and (3) the **report-back contract** — when to report,
+milestone-based by default (user ruling 2026-09-03): at real milestones,
+blockers, completion, or when it needs something from you; routine
+progress pings and bare acknowledgments are never required. A brief
+missing the skill name is incomplete.
 
 - **After a mission, reuse before you replace.** If the agent has deep domain context and more work in that domain is coming, send it the next task. A terminated agent can be resurrected — its context is preserved — but a fresh spawn starts blank.
 
@@ -66,7 +73,7 @@ One agent, one mission, one context — no rediscovery.
 
 A worker is as smart as you. You hand it a *piece* of the work and the context to do it; it owns that piece end to end. What makes a delegation work is a clean assignment and a clear way back to you — not supervision of its every step.
 
-- **Give goals, not recipes.** A good assignment has a **clear goal** (what "done" looks like), **boundary conditions** (constraints, non-goals, must-not-touch areas), and a **reporting cadence** — how often the worker reports back, set here at delegation from the nature of the work (per-PR, daily, per-milestone, or only on completion; different workers can differ by orders of magnitude). Leave out step-by-step procedures, which files to edit, or what to name things — spelling out the how constrains a capable worker rather than helping it.
+- **Give goals, not recipes.** A good assignment has a **clear goal** (what "done" looks like), **boundary conditions** (constraints, non-goals, must-not-touch areas), and a **report-back contract** — when to report, milestone-based by default (user ruling 2026-09-03): real milestones, blockers, completion, or a real need; no routine progress updates and no bare acknowledgments — each message costs the recipient a turn. A delegator wanting more frequent updates names it explicitly in the brief. Leave out step-by-step procedures, which files to edit, or what to name things — spelling out the how constrains a capable worker rather than helping it.
 - **Tier the worker to the sub-task.** A worker's model is an Effort choice — overlay it with `ava.agents.spawn(config_overlay={"llm_model": "..."})`; no overlay = the default model. A cheaper model cross-checked by a second run and a single stronger run are two ways to spend the same Effort.
 - **Point the worker at its skills; don't ration them.** A worker's index already lists every loaded skill, so there is nothing to add — name the skill you expect it to use in the spawn prompt instead. `skills_to_inject_into_system_prompt` in a `config_overlay` now only *narrows* an index, and narrowing is an attention decision, not a permission one: it shortens the listing the worker reads, while `ava.help(ava.skills)` still enumerates the whole catalog and any skill stays loadable by name. Reach for it to keep a long index from burying the two skills a worker actually needs — never as a boundary. When a skill must be read in full before the worker's first turn, preload it with `skills_to_expand_at_start`.
 - **Name the role as you spawn.** Pass `label=` so the worker shows up as its role in the fleet view and is discoverable by its peers from the first moment — `ava.agents.spawn(prompt=..., label="auth-refactor lead")`.
