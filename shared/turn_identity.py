@@ -36,11 +36,20 @@ import os
 from collections.abc import Generator
 from contextvars import ContextVar
 
+from shared.runtime_incarnation import RuntimeIncarnation
+
 _TURN_AGENT_ID: ContextVar[int | None] = ContextVar("ava_turn_agent_id", default=None)
+_TURN_INCARNATION: ContextVar[RuntimeIncarnation | None] = ContextVar(
+    "ava_turn_incarnation", default=None
+)
 
 
 @contextlib.contextmanager
-def bind_turn_identity(agent_id: int) -> Generator[None, None, None]:
+def bind_turn_identity(
+    agent_id: int,
+    *,
+    incarnation: RuntimeIncarnation | None = None,
+) -> Generator[None, None, None]:
     """Bind `agent_id` as the current context's turn identity.
 
     The hosted dispatcher wraps turn-task creation in this (together with
@@ -48,10 +57,16 @@ def bind_turn_identity(agent_id: int) -> Generator[None, None, None]:
     the context) -> reset. Nesting rebinds cleanly.
     """
     token = _TURN_AGENT_ID.set(agent_id)
+    runtime_token = _TURN_INCARNATION.set(incarnation)
     try:
         yield
     finally:
+        _TURN_INCARNATION.reset(runtime_token)
         _TURN_AGENT_ID.reset(token)
+
+
+def current_turn_incarnation() -> RuntimeIncarnation | None:
+    return _TURN_INCARNATION.get()
 
 
 def current_turn_agent_id() -> int | None:
