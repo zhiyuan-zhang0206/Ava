@@ -20,7 +20,7 @@ import asyncio
 import contextlib
 import threading
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -306,7 +306,7 @@ async def _aclose_without_hanging(sched: TurnScheduler, stuck: _StuckTurn) -> bo
 
 
 @contextlib.asynccontextmanager
-async def _releasing_stuck_turn() -> AsyncIterator[_StuckTurn]:
+async def _releasing_stuck_turn() -> AsyncGenerator[_StuckTurn, None]:
     """Release the cancellation-resistant fixture even when an assertion fails."""
     turn = _StuckTurn()
     try:
