@@ -1,0 +1,39 @@
+name: Verified release migration authority
+on:
+  pull_request:
+    paths:
+      - 'shared/runtime_migration.py'
+      - 'shared/migrations.py'
+      - 'cli/commands/_release_candidate.py'
+      - 'cli/commands/start.py'
+      - 'cli/commands/migrations.py'
+      - 'scripts/prove_runtime_migration.py'
+      - 'tests/shared/test_runtime_migration.py'
+      - '.github/workflows/runtime-migration.yml'
+permissions:
+  contents: read
+jobs:
+  authority:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      AVA_DB_URL: postgresql://unused@127.0.0.1:1/unused
+      AVA_REDIS_URL: redis://127.0.0.1:1/0
+      AVA_RUNNER_MODE: process
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d
+        with:
+          python-version: '3.12'
+      - uses: ./.github/actions/install-pg-redis
+      - run: uv sync --locked
+      - name: Type-check the candidate admission boundary
+        run: uv run pyright shared/runtime_migration.py cli/commands/_release_candidate.py cli/commands/migrations.py scripts/prove_runtime_migration.py tests/shared/test_runtime_migration.py
+      - name: Real native PG authority and checkout regression cases
+        run: uv run pytest -q tests/shared/test_runtime_migration.py tests/shared/test_migration_authority.py --junitxml=runtime-migration.xml
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: runtime-migration-${{ github.event.pull_request.head.sha }}
+          path: runtime-migration.xml
+          if-no-files-found: error

@@ -13,6 +13,9 @@ on:
       - 'agent/graph/_exec_subprocess.py'
       - 'scripts/prove_runtime_consumer.py'
       - 'scripts/prove_runtime_prepare.py'
+      - 'scripts/prove_runtime_migration.py'
+      - 'shared/runtime_migration.py'
+      - 'cli/commands/_release_candidate.py'
       - 'scripts/verify_runtime_wheel.py'
       - 'pyproject.toml'
       - 'uv.lock'
@@ -32,6 +35,16 @@ jobs:
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d
         with:
           python-version: '3.12'
+      - uses: ./.github/actions/install-pg-redis
+        if: runner.os == 'Linux'
+      - name: Start isolated native PG for wheel admission proof
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          initdb -D "$RUNNER_TEMP/runtime-pg" --auth=trust --username=runtimeproof
+          mkdir -m 700 "$RUNNER_TEMP/runtime-pg-socket"
+          pg_ctl -D "$RUNNER_TEMP/runtime-pg" -l "$RUNNER_TEMP/runtime-pg.log" -o "-h 127.0.0.1 -p 55439 -k $RUNNER_TEMP/runtime-pg-socket" -w start || { tail -80 "$RUNNER_TEMP/runtime-pg.log"; exit 1; }
+          echo 'AVA_RUNTIME_PROOF_PG=postgresql://runtimeproof@127.0.0.1:55439/postgres' >> "$GITHUB_ENV"
       - name: Fetch immutable build inputs before offline preparation
         shell: bash
         run: |
@@ -63,5 +76,20 @@ jobs:
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: inactive-prepare-${{ matrix.os }}-${{ github.event.pull_request.head.sha }}
-          path: ${{ runner.temp }}/prepare/proof.json
+          path: |
+            ${{ runner.temp }}/prepare/proof.json
+            ${{ runner.temp }}/prepare/migration-proof.json
+          if-no-files-found: error
+      - name: Stop isolated native PG
+        if: always() && runner.os == 'Linux'
+        shell: bash
+        run: |
+          if test -f "$RUNNER_TEMP/runtime-pg/postmaster.pid"; then
+            pg_ctl -D "$RUNNER_TEMP/runtime-pg" -m fast -w stop
+          fi
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always() && runner.os == 'Linux'
+        with:
+          name: migration-pg-log-${{ github.event.pull_request.head.sha }}
+          path: ${{ runner.temp }}/runtime-pg.log
           if-no-files-found: error

@@ -39,6 +39,8 @@ def prove_checkout_absent(
     shutil.copy2(checkout / "scripts/verify_runtime_wheel.py", verifier)
     consumer = root / "prove_runtime_consumer.py"
     shutil.copy2(checkout / "scripts/prove_runtime_consumer.py", consumer)
+    migration = root / "prove_runtime_migration.py"
+    shutil.copy2(checkout / "scripts/prove_runtime_migration.py", migration)
     alias = root / "runtime-entry-alias"
     alias.symlink_to(release.root / "venv", target_is_directory=True)
     if (
@@ -56,7 +58,7 @@ def prove_checkout_absent(
         "HOME": str(root),
         "AVA_CONFIG_FETCH": "skip",
         "AVA_TIMEZONE": "UTC",
-        "AVA_HOME": str(root / "probe-home"),
+        "AVA_HOME": str(root / "unit"),
         "AVA_DB_URL": "postgresql://unused@127.0.0.1:1/unused",
         "AVA_REDIS_URL": "redis://127.0.0.1:1/0",
     }
@@ -95,6 +97,59 @@ def prove_checkout_absent(
         )
         if "usage:" not in launched.stdout.lower():
             raise AssertionError("existing CLI did not execute from prepared generation")
+        if "AVA_RUNTIME_PROOF_PG" in os.environ:
+            # Cluster-scoped URLs are file-authoritative, not ambient env
+            # overrides. Model a real installed unit in this isolated CI home.
+            unit_env = root / "unit/.env"
+            if unit_env.exists():
+                raise AssertionError("CI unit unexpectedly already has configuration")
+            # The proof orchestrator is stdlib-only, before dependencies exist.
+            # Exclusive creation is sufficient for this never-reused CI fixture.
+            fd = os.open(unit_env, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            with os.fdopen(fd, "w", encoding="utf-8") as stream:
+                stream.write(
+                    f"AVA_DB_URL={os.environ['AVA_RUNTIME_PROOF_PG']}\n"
+                    "AVA_REDIS_URL=redis://127.0.0.1:1/0\n"
+                )
+            for field, value in (
+                ("machine_name", "runtime-proof"),
+                ("machine_serve_gateway", "true"),
+                ("machine_serve_agent_runner", "true"),
+            ):
+                fd = os.open(root / "unit" / field, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                with os.fdopen(fd, "w", encoding="utf-8") as stream:
+                    stream.write(value + "\n")
+            migration_env = child_env | {
+                "AVA_DB_URL": os.environ["AVA_RUNTIME_PROOF_PG"],
+                "AVA_MACHINE_NAME": "runtime-proof",
+                "AVA_MACHINE_SERVE_GATEWAY": "true",
+                "AVA_MACHINE_SERVE_AGENT_RUNNER": "true",
+                "GITHUB_ACTIONS": "true",
+                "RUNNER_TEMP": os.environ["RUNNER_TEMP"],
+            }
+            schema = json.loads((release.root / "manifest.json").read_text())["schema_digest"]
+            result = subprocess.run(  # noqa: S603 — CI-only native PG at the prepared image boundary.
+                [
+                    str(release.interpreter),
+                    "-I",
+                    "-B",
+                    str(migration),
+                    release.digest,
+                    release.manifest_digest,
+                    schema,
+                ],
+                cwd=root,
+                env=migration_env,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=180,
+            )
+            if result.returncode:
+                # This child has only explicit CI scratch credentials, not the
+                # runner's ambient environment. Retain the actual admission error.
+                raise AssertionError(f"wheel/PG admission failed:\n{result.stderr[-8000:]}")
+            (root / "migration-proof.json").write_text(result.stdout)
     finally:
         retired_checkout.rename(checkout)
 
@@ -168,8 +223,8 @@ def main() -> None:
     wheels = root / "wheels"
     (application,) = wheels.glob("ava-*.whl")
     requirements = root / "requirements.txt"
-    store = root / "store"
-    store.mkdir(mode=0o700)
+    store = root / "unit/releases"
+    store.mkdir(mode=0o700, parents=True)
     # Sentinel is intentionally not a real active image: preparation must never
     # read/replace it, even when it cannot understand the serving generation.
     serving = store / "current-release"
