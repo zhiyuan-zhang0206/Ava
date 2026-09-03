@@ -412,7 +412,6 @@ def test_crashed_host_is_swept_lazily(sessions: Path) -> None:
         f"shell must exit when its host dies: pid={rec.pid}, "
         f"status={psutil.Process(rec.pid).status()}"
     )
-    )
     assert not _has(home, name), "a dead shell reads dead regardless of the leftover record"
     assert _run_cli(home, "list").stdout.strip() == ""
     assert not record_path(name).exists(), "list must sweep the dead record"
