@@ -143,11 +143,12 @@ Passed at spawn time — not edited on a running agent:
 ava.agents.spawn(prompt="...", preset="coder")
 
 # Via config_overlay (precise override)
-ava.agents.spawn(prompt="...", config_overlay={"llm_model": "claude-sonnet-4-5-20250929"})
+# model id from the registry roster — see the models sub-skill
+ava.agents.spawn(prompt="...", config_overlay={"llm_model": "gemini-3.8-flash"})
 
 # Both (overlay wins per-key)
 ava.agents.spawn(prompt="...", preset="coder",
-                 config_overlay={"llm_model": "claude-opus-4-5-20251101"})
+                 config_overlay={"llm_model": "claude-opus-5"})
 ```
 
 Per-agent config is snapshotted into the agent row at spawn; changing a preset
