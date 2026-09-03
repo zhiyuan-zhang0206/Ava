@@ -389,17 +389,18 @@ MODELS: dict[str, ModelSpec] = {
         media_types=frozenset({"image", "pdf"}),
     ),
     # -- gemini --
-    "gemini-3.7-flash": ModelSpec(
+    "gemini-3.8-flash": ModelSpec(
         provider="gemini",
         spawnable=True,
         context_window=1_048_576,
-        # Google does not publish a cutoff for 3.7 Flash; carries the 3.6
-        # estimate forward (3.6 GA'd 2026-07-21, 3.7 GA'd 2026-08-13).
+        # Google does not publish a cutoff for 3.8 Flash; carries the 3.7
+        # estimate forward (3.7 GA'd 2026-08-13, 3.8 GA'd 2026-09-02).
         knowledge_cutoff="2026-03",
-        effort_levels=("minimal", "low", "medium", "high"),  # thinking_level vocabulary
+        # thinking_level vocabulary; `minimal` 400s (verified live 2026-09-03).
+        effort_levels=("low", "medium", "high"),
         tuning=ModelTuning(
-            # Pinned 2026-08-01 (task #568): Gemini flash default thinking_level
-            # is `medium` (decisions/2026-07-25-per-model-tuning-values.md).
+            # The model page says its default thinking_level is `medium`
+            # (decisions/2026-07-25-per-model-tuning-values.md).
             reasoning_effort="medium",
         ),
         media_types=frozenset({"image", "pdf", "audio", "video"}),
@@ -412,7 +413,7 @@ MODELS: dict[str, ModelSpec] = {
         effort_levels=("minimal", "low", "medium", "high"),
         tuning=ModelTuning(
             # Pinned 2026-08-01 (task #568): flash default thinking_level is
-            # `medium` (see gemini-3.7-flash).
+            # `medium` (see gemini-3.8-flash).
             reasoning_effort="medium",
         ),
         media_types=frozenset({"image", "pdf", "audio", "video"}),
@@ -425,7 +426,9 @@ MODELS: dict[str, ModelSpec] = {
         # claim traces back to speculative blogs about a rumored Ultra tier.
         context_window=1_048_576,
         knowledge_cutoff="2025-01",
-        effort_levels=("minimal", "low", "medium", "high"),
+        # `minimal` returns 400 (verified live 2026-09-03); matches the
+        # recorded decision that this model cannot drop to minimal.
+        effort_levels=("low", "medium", "high"),
         tuning=ModelTuning(
             # Pinned 2026-08-01 (task #568): this model defaults to
             # thinking_level=high and cannot drop to minimal (Google docs;

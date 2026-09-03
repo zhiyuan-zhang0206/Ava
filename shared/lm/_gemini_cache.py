@@ -9,8 +9,9 @@ cadence, and cache-read tokens bill at ~0.1x input (cache storage bills per
 token-hour; a ~10-20k-token prompt costs fractions of a cent per hour).
 
 Wire contract (verified live 2026-07-25 against gemini-3.6-flash; carries
-over to gemini-3.7-flash — same 3.x flash wire, re-verify if the 400/403
-shapes drift):
+over to gemini-3.8-flash — same 3.x flash wire; caching is supported on both
+model pages, but was not re-verified live against 3.8; re-verify if the
+400/403 shapes drift):
 
 - The cache carries ``system_instruction`` + ``tools``. A generate request
   referencing it must NOT set system_instruction / tools / tool_config (the

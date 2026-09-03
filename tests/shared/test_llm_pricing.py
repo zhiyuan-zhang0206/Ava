@@ -69,7 +69,7 @@ def test_pricing_catalog_schema_v2_vendor_lock() -> None:
     assert {
         "deepseek-v4-pro": models["deepseek-v4-pro"]["vendor"],
         "claude-opus-4-8": models["claude-opus-4-8"]["vendor"],
-        "gemini-3.7-flash": models["gemini-3.7-flash"]["vendor"],
+        "gemini-3.8-flash": models["gemini-3.8-flash"]["vendor"],
         "gpt-5.6-sol": models["gpt-5.6-sol"]["vendor"],
         "mimo-v2.5-pro": models["mimo-v2.5-pro"]["vendor"],
         "kimi-k3": models["kimi-k3"]["vendor"],
@@ -78,7 +78,7 @@ def test_pricing_catalog_schema_v2_vendor_lock() -> None:
     } == {
         "deepseek-v4-pro": "deepseek",
         "claude-opus-4-8": "anthropic",
-        "gemini-3.7-flash": "google",
+        "gemini-3.8-flash": "google",
         "gpt-5.6-sol": "openai",
         "mimo-v2.5-pro": "xiaomi",
         "kimi-k3": "moonshot",
@@ -285,13 +285,13 @@ def test_input_token_tier_boundary_is_inclusive() -> None:
     assert rates_at("gemini-3.1-pro-preview", at, 200_001) == Rates(4.0, 0.4, 18.0)
 
 
-def test_gemini_3_7_date_only_increase_uses_earliest_global_boundary() -> None:
+def test_gemini_3_8_date_only_increase_uses_earliest_global_boundary() -> None:
     """The source omits a timezone, so UTC+14 prevents underestimating cost."""
     before = datetime(2026, 12, 31, 9, 59, 59, 999999, tzinfo=UTC)
     after = datetime(2026, 12, 31, 10, 0, tzinfo=UTC)
 
-    assert rates_at("gemini-3.7-flash", before, _M) == Rates(0.75, 0.075, 3.75)
-    assert rates_at("gemini-3.7-flash", after, _M) == Rates(1.5, 0.15, 7.5)
+    assert rates_at("gemini-3.8-flash", before, _M) == Rates(0.75, 0.075, 3.75)
+    assert rates_at("gemini-3.8-flash", after, _M) == Rates(1.5, 0.15, 7.5)
 
 
 def test_quote_returns_cost_and_the_exact_selected_rates() -> None:

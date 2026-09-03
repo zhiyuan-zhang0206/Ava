@@ -297,12 +297,12 @@ def _build_gemini_model(
     #
     # Thinking depth rides `thinking_level`. Gemini 3.x cannot fully turn
     # thinking off, so a caller disabling thinking (short-text paths) gets
-    # the lowest level "minimal" + include_thoughts=False — dropping
+    # the model's lowest declared level + include_thoughts=False — dropping
     # include_thoughts alone would only hide the thought blocks while the
     # model keeps thinking (and billing) at its default level. Otherwise
     # the cross-provider effort maps onto the thinking_level vocabulary;
     # unset effort leaves thinking_level None → the model default
-    # (3.6/3.5 Flash medium, 3.1 Pro high).
+    # (3.8/3.5 Flash medium, 3.1 Pro high).
     thinking_disabled = thinking is not None and thinking.get("type") == "disabled"
     thinking_level: str | None = None
     if media_thinking_level is not None:
@@ -321,16 +321,24 @@ def _build_gemini_model(
         # so the operator knows the request was not honored.
         spec = MODELS.get(model)
         if spec is not None and spec.effort_levels is not None:
-            thinking_level = "minimal"
+            thinking_level = spec.effort_levels[0] if spec.effort_levels else "minimal"
         else:
             logger.warning(
                 f"{model} does not support the thinking_level vocabulary; "
                 f"thinking={{'type': 'disabled'}} ignored (issue #190)"
             )
     elif resolved_effort:
+        # A declared model vocabulary is authoritative: 3.8 Flash does not
+        # accept `minimal`, even though the Gemini-wide fallback includes it.
+        spec = MODELS.get(model)
+        levels = (
+            spec.effort_levels
+            if spec is not None and spec.effort_levels
+            else _PROVIDER_EFFORT_LEVELS["gemini"]
+        )
         thinking_level = _clamp_effort(
             resolved_effort,
-            _PROVIDER_EFFORT_LEVELS["gemini"],
+            levels,
             target="gemini",
         )
     # include_thoughts only on the vocabulary-supporting path: passing it to a
