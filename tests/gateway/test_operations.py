@@ -1244,16 +1244,16 @@ async def test_force_terminate_hosted_skips_process_kill_and_cancels_turn(
 
     def _fake_force_blocking(  # pyright: ignore[reportUnknownParameterType]
         aid: int, _body: object, _pool: object, *, kill_process: bool
-    ) -> tuple[AgentStatus, int | None, list[str]]:
+    ) -> tuple[AgentStatus, int | None, list[str], int]:
         captured["agent_id"] = aid
         captured["kill_process"] = kill_process
-        return AgentStatus.RUNNING, None, []
+        return AgentStatus.RUNNING, None, [], 91
 
     monkeypatch.setattr(ops_lifecycle, "_terminate_force_blocking", _fake_force_blocking)
-    cancelled: list[int] = []
+    cancelled: list[tuple[int, int]] = []
 
-    async def _fake_cancel(aid: int) -> None:
-        cancelled.append(aid)
+    async def _fake_cancel(aid: int, command_id: int) -> None:
+        cancelled.append((aid, command_id))
 
     monkeypatch.setattr(ops_lifecycle, "_cancel_hosted_turn_best_effort", _fake_cancel)
 
@@ -1267,9 +1267,9 @@ async def test_force_terminate_hosted_skips_process_kill_and_cancels_turn(
         TerminateAgentRequest(force=True),
         stub_pool,  # type: ignore[arg-type]
     )
-    assert resp.status == "force_killed"
+    assert resp.status == "enqueued"
     assert captured == {"agent_id": 9, "kill_process": False}
-    assert cancelled == [9]
+    assert cancelled == [(9, 91)]
 
 
 @pytest.mark.asyncio
@@ -1285,14 +1285,14 @@ async def test_force_terminate_process_mode_still_kills_the_process(
 
     def _fake_force_blocking(  # pyright: ignore[reportUnknownParameterType]
         aid: int, _body: object, _pool: object, *, kill_process: bool
-    ) -> tuple[AgentStatus, int | None, list[str]]:
+    ) -> tuple[AgentStatus, int | None, list[str], int]:
         captured["agent_id"] = aid
         captured["kill_process"] = kill_process
-        return AgentStatus.RUNNING, 1234, []
+        return AgentStatus.RUNNING, 1234, [], 91
 
     monkeypatch.setattr(ops_lifecycle, "_terminate_force_blocking", _fake_force_blocking)
 
-    async def _fake_cancel(_aid: int) -> None:
+    async def _fake_cancel(_aid: int, _command_id: int) -> None:
         raise AssertionError("process mode must not call the hosted cancel")
 
     monkeypatch.setattr(ops_lifecycle, "_cancel_hosted_turn_best_effort", _fake_cancel)
