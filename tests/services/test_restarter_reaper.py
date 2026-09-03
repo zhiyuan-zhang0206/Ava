@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import LiteralString
 
 import psycopg
 import pytest
@@ -700,6 +701,65 @@ def test_collector_ignores_other_statuses(
             (terminated,),
         )
         assert cur.fetchall() == [("terminated",)]
+
+
+@pytest.mark.parametrize("change", ["renewed", "replacement", "terminated", "moved"])
+def test_lease_reaper_rechecks_candidate_under_row_lock(
+    db_conn: psycopg.Connection,
+    sync_pool: ConnectionPool,
+    monkeypatch: pytest.MonkeyPatch,
+    change: str,
+) -> None:
+    """A stale candidate cannot license a kill after ownership/liveness changed."""
+    tid = _make_lease_zombie(db_conn, status="running", pid=4242)
+    killed: list[int] = []
+    changed = False
+
+    def probe(_pid: int, _agent_id: int) -> AgentProcessIdentity:
+        nonlocal changed
+        if not changed:
+            changed = True
+            updates: dict[str, LiteralString] = {
+                "renewed": "UPDATE agents_meta SET lease_expires_at = now() + interval '10 minutes' WHERE id = %s",
+                "replacement": "UPDATE agents_meta SET started_at = now() WHERE id = %s",
+                "terminated": "UPDATE agents_meta SET status = 'terminated', termination_source = 'user' WHERE id = %s",
+                "moved": "UPDATE agents_meta SET machine = 'replacement-host' WHERE id = %s",
+            }
+            with db_conn.cursor() as cur:
+                cur.execute(updates[change], (tid,))
+            db_conn.commit()
+        return AgentProcessIdentity.OWNED
+
+    monkeypatch.setattr(rd, "probe_agent_process", probe)
+    monkeypatch.setattr(rd, "force_kill", killed.append)
+    assert rd._collect_local_lease_zombies(sync_pool, machine_name()) == []
+    assert killed == []
+
+
+@pytest.mark.parametrize("unreadable_on", [1, 2])
+def test_lease_reaper_never_signals_unreadable_identity(
+    db_conn: psycopg.Connection,
+    sync_pool: ConnectionPool,
+    monkeypatch: pytest.MonkeyPatch,
+    unreadable_on: int,
+) -> None:
+    _make_lease_zombie(db_conn, status="running", pid=4242)
+    killed: list[int] = []
+    probes = 0
+
+    def probe(_pid: int, _agent_id: int) -> AgentProcessIdentity:
+        nonlocal probes
+        probes += 1
+        return (
+            AgentProcessIdentity.UNREADABLE
+            if probes == unreadable_on
+            else AgentProcessIdentity.OWNED
+        )
+
+    monkeypatch.setattr(rd, "probe_agent_process", probe)
+    monkeypatch.setattr(rd, "force_kill", killed.append)
+    assert rd._collect_local_lease_zombies(sync_pool, machine_name()) == []
+    assert killed == []
 
 
 class TestReviveAgent:
