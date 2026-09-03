@@ -96,9 +96,11 @@ PG_STATEMENT_TIMEOUT_OPTIONS = "-c statement_timeout=60000"
 # to clients, GUC_REPORT, and statement_timeout is not one of them — verified
 # against 1.25 source + live probe). A client-side SET is forwarded to the
 # backend like any query and sticks — pgbouncer transaction pooling does NOT
-# reset backend session state between clients (server_reset_query_always=1 was
-# measured inert on the ordinary release path, pgbouncer 1.25.2; the 2026-09-02
-# P0 pooled read-only pollution rode exactly this). The uniform ceiling
+# reset backend session state between clients on the ordinary release path
+# (server_reset_query_always=0, the 2026-09-03 ruling: always=1 fired after
+# every transaction and its DISCARD ALL wiped this client-side SET; the
+# 2026-09-02 P0 pooled read-only pollution rode the pre-fix era). The uniform
+# ceiling
 # therefore holds because every sanctioned pooled entry point restores the
 # baseline session on use (see _restore_pooled_session).
 # `connect()` / `pool()` issue it on every pooled dial/borrow;
