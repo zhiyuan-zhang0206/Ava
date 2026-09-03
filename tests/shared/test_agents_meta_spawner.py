@@ -10,7 +10,6 @@ import psycopg
 import pytest
 from psycopg import errors, sql
 
-
 _BORN_SPAWNER_MIGRATION = (
     Path(__file__).resolve().parents[2] / "migrations" / "20260903T175722_add-born-spawner.sql"
 )

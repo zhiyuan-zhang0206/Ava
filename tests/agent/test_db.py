@@ -134,8 +134,7 @@ class TestFatalProviderReport:
         assert recipient == root
         with db_conn.cursor() as cur:
             cur.execute(
-                "SELECT agent_id, kind, source FROM inbound_messages "
-                "WHERE kind = 'system_note'"
+                "SELECT agent_id, kind, source FROM inbound_messages WHERE kind = 'system_note'"
             )
             row = cur.fetchone()
         assert row == (root, "system_note", "system")

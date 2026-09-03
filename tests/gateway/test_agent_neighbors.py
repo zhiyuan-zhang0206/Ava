@@ -439,7 +439,9 @@ def test_ancestors_read_born_spawner_not_loki_parentage(
     a = _seed_agent(db_conn)
     stale_event_parent = _seed_agent(db_conn)
     b = _seed_agent(db_conn, born_spawner=f"agent:{a}")
-    _archive_event(fake_loki, event_type="spawn", agent_id=b, target=stale_event_parent, age_hours=2.0)
+    _archive_event(
+        fake_loki, event_type="spawn", agent_id=b, target=stale_event_parent, age_hours=2.0
+    )
     _event(fake_loki, event_type="spawn", agent_id=b, target=stale_event_parent)
 
     with TestClient(app) as client:
