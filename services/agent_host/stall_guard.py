@@ -127,9 +127,13 @@ async def _abort_stalled_invocation(
         "The agent will resume on its next wake.",
     )
     invoke_task.cancel()
-    try:
-        await asyncio.wait_for(asyncio.shield(invoke_task), timeout=CANCEL_UNWIND_TIMEOUT_S)
-    except TimeoutError:
+    # `asyncio.wait`, NOT `asyncio.wait_for(asyncio.shield(...))`: a shield
+    # wrapping a task that gets cancelled never completes its own future —
+    # the bounded unwind would hang (verified by reproduction; see the test's
+    # refuses-to-unwind case for the intended refusal shape). `asyncio.wait`
+    # reports the straggler instead, and never cancels the task itself.
+    done, _pending = await asyncio.wait({invoke_task}, timeout=CANCEL_UNWIND_TIMEOUT_S)
+    if invoke_task not in done:
         logger.error(
             "hosted turn for agent {agent_id} did not unwind within the "
             "bounded window after a stall-cancel — the daemon must exit; "
@@ -140,8 +144,6 @@ async def _abort_stalled_invocation(
         raise HostRestartRequiredError(
             f"hosted turn for agent {agent_id} did not unwind after a stall-cancel"
         ) from None
-    except asyncio.CancelledError:
-        raise
     try:
         return invoke_task.result()
     except asyncio.CancelledError:

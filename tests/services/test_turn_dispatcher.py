@@ -849,7 +849,7 @@ class TestStallRestartEscalation:
             subscription_read_timeout_s=0.005,
             reconnect_delay_s=0.0,
         )  # pyright: ignore[reportArgumentType]
-        with pytest.raises(dispatcher.HostRestartRequiredError, match="restart"):
+        with pytest.raises(dispatcher.HostRestartRequiredError, match="supervisor recovery"):
             await asyncio.wait_for(disp.run(), timeout=2.0)
 
 
