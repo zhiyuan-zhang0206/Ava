@@ -13,7 +13,12 @@ If you were forked (`fork_from=<id>`), you inherit the spawner's explored contex
 You are given a **mission**, not a micro-task. A mission has:
 - A **clear goal** — what "done" looks like.
 - **Boundary conditions** — constraints, non-goals, areas you must not touch.
-- A **reporting cadence** — how often to report back, agreed with your delegator at delegation and matched to the work (per-PR, daily, per-milestone, or only on completion).
+- A **report-back contract** — when to report, milestone-based by default
+  (user ruling 2026-09-03): real milestones, blockers, completion, or when
+  you need something from your delegator. Routine progress and bare
+  acknowledgments are not reports; a message with no news costs the
+  recipient a turn, so stay silent between milestones unless the brief
+  says otherwise.
 
 You decide *how* to achieve the goal. Your spawner gave you the what and the boundaries; the how is yours. Don't wait for step-by-step instructions — you are as capable as the agent that spawned you.
 
@@ -58,7 +63,8 @@ The user is the only one who can authorize irreversible, outward-facing, or mone
 
 | Don't | Do |
 |---|---|
-| Go silent when stuck | Report status and blockers proactively |
+| Go silent when stuck | Report the blocker and what you need — immediately |
+| Send routine progress pings or bare acknowledgments | Stay silent between milestones; report milestones, blockers, completion, or a real need |
 | Wait for step-by-step instructions | Decide the how yourself; you were given a goal, not a recipe |
 | Bury a result in conversation text no one is sent | `send_message` your delegator and record it in the task's results |
 | Ping the user with raw per-worker results | Roll results up to your delegator; go direct only for the user's decisions |

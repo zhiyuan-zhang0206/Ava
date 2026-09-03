@@ -20,6 +20,12 @@ The old tenet "any agent reaches the user directly, no relay chain" was over-ext
 
 - **Authorization / decisions** (things only the user can determine)—reach the **user directly** from any depth (user sovereignty preserved).
 - **Progress / conclusions**—sent to one's own **delegator** (the agent that spawned / assigned the work, i.e., the parent task's owner) via `send_message` for digestion and aggregation, only later possibly entering the user's view.
+- **Milestone-based messaging (user ruling 2026-09-03):** peer
+  `send_message` traffic is milestone-based by default — real milestones,
+  blockers, completion, or genuine requests. Routine progress pings and
+  bare acknowledgments are noise (each message costs the recipient a
+  turn). Task-assignment delivery stays full-text: a summary-plus-link
+  redesign would cost an extra round-trip.
 - No task, no delegator: deliver directly; do not fabricate a hierarchy just to forward.
 
 ## Task ↔ Fleet Interaction Rules

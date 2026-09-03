@@ -1,7 +1,7 @@
 ---
 type: doc
 title: reduce-context-switch-for-human — Interrupt Discipline
-description: Interrupt discipline when human attention is elsewhere (added in #620): default to queueing via ava.ui.notify, never push; one rolling notice per manager, update cadence agreed upon at delegation time (not a framework-fixed batch boundary); progress rolls up along the delegation tree; out-of-band push is only allowed for truly urgent matters.
+description: Interrupt discipline when human attention is elsewhere (added in #620): default to queueing via ava.ui.notify, never push; one rolling notice per manager, updates are milestone-based by default (user ruling 2026-09-03); progress rolls up along the delegation tree; out-of-band push is only allowed for truly urgent matters.
 tags:
 - fleet
 - agent-instruction
@@ -17,7 +17,17 @@ Every push costs a human a context switch. This skill (`plugins/ava_fleet/skills
 ## Discipline
 
 - **Default queue, never push**: the human-facing channel is `ava.ui.notify` (queue semantics). The queue only holds roll-up survivors — manager's aggregated results, or deliveries from agents without a manager; delegated agents' progress goes via `send_message` to the manager, not into the queue. **Delivery into the queue is completion**, no escalation due to lack of ack.
-- **Cadence is an agreement at delegation time** (formerly "Batch boundary", revised): one notice per manager — a single rolling update, a new `ava.ui.notify` replaces the old one in place, the queue will not accumulate a manager's history. How often to update is **agreed upon at delegation time** by the delegator and executor based on the nature of the work — it can be per PR, per day, per milestone, or only once upon completion; different agents' cadences can differ by orders of magnitude. The framework does not fix the interval or trigger condition; **cadence sits alongside budget** — budget cap and cadence are both part of the per-delegation agreement (for soft enforcement of budget see [[ava_builtins/plugins/ava_fleet/skills/ava-fleet/ava-fleet.ava.okf.md|ava-fleet skill]]'s Autonomy boundaries).
+- **Updates are milestone-based by default** (formerly "Batch boundary" →
+  "agreed at delegation time", now fixed by user ruling 2026-09-03): one
+  notice per manager — a single rolling update, a new `ava.ui.notify`
+  replaces the old one in place, the queue will not accumulate a manager's
+  history. Roll up on a **real milestone, a blocker, completion, or a real
+  need**; routine progress and bare acknowledgments are noise — each
+  message costs the recipient a turn. A different interval is the
+  exception: a delegator that wants one names it explicitly in the brief.
+  **Budget remains per-delegation** — budget cap and any reporting
+  exception are both part of the brief (for soft enforcement of budget see
+  [[ava_builtins/plugins/ava_fleet/skills/ava-fleet/ava-fleet.ava.okf.md|ava-fleet skill]]'s Autonomy boundaries).
 - **Direct reply means user has responded**: when the user sends you a direct message, judge whether this exchange resolves the open notice you have — if resolved, withdraw it (or let a new notify replace it); if not, keep or resend. Whether to clear is judged by the agent itself, not automatically closed by the framework.
 - **Roll-up dichotomy**: authorization/decisions go directly to the user from any depth; progress/conclusions roll up to the manager (owner of the parent task) for aggregation; when there is no task and no manager, deliver directly (do not fabricate hierarchy).
 

@@ -91,7 +91,7 @@ Every agent in a fleet is either an **orchestrator** (delegating work to others)
 | **Orchestrator** | Decompose a goal, spawn workers with the right skills, supervise them, gather and judge results | [reference/orchestrator.md](reference/orchestrator.md) |
 | **Worker** | Own a mission end to end, report results to your delegator, reach the user for their decisions | [reference/worker.md](reference/worker.md) |
 
-Both roles share the same communication primitives: `send_message` for peer-to-peer, `ava.ui.notify` for the user, and task updates for the durable record. Reporting responsibility is split in two: anything needing the user's **authorization or decision** goes to the user directly, from any agent — that authority is never relayed. **Progress and conclusions** roll up to the delegator (the parent task's owner), who aggregates before the user sees anything — raw per-worker results do not land in the user's queue. An agent with no delegator delivers directly. How often that roll-up reports up — its **cadence** — is agreed at delegation time from the nature of the work, not fixed by the framework. Interruption discipline while the user is away: the `reduce-context-switch-for-human` skill.
+Both roles share the same communication primitives: `send_message` for peer-to-peer, `ava.ui.notify` for the user, and task updates for the durable record. Reporting responsibility is split in two: anything needing the user's **authorization or decision** goes to the user directly, from any agent — that authority is never relayed. **Progress and conclusions** roll up to the delegator (the parent task's owner), who aggregates before the user sees anything — raw per-worker results do not land in the user's queue. An agent with no delegator delivers directly. **Roll-ups are milestone-based by default** (user ruling 2026-09-03): send on a real milestone, a blocker, a completion, or when the other side genuinely needs something — never for routine progress, and never a bare acknowledgment. A delegator that wants a different pattern names it in the brief; silence between milestones is the default, not a failure. Interruption discipline while the user is away: the `reduce-context-switch-for-human` skill.
 
 ## Two Dials: Effort and Autonomy
 
@@ -132,6 +132,25 @@ The **user** is the only one who can authorize what no agent may decide alone �
 ## Reporting
 
 Your replies to the delegator are the ambient record — how the work progressed shows in your message trail and the task's results. `ava.ui.notify` is the push: when something rises above ambient — worth a glance or needing an answer — promote it to the user's queue. Don't promote routine progress; don't bury a decision that needs an answer.
+
+### Message discipline: milestone-based, no noise
+
+Peer messages are wake-ups: each one costs the recipient a full turn (user
+ruling 2026-09-03). So send only when there is a real reason:
+
+- **Send** at a milestone (a stage finished, a decision made, a result
+  landed), at a **blocker** (something only the other side can resolve), at
+  **completion** (with the delivered result — see Task Status Done above),
+  or for a genuine **request** for something you need.
+- **Do not send** routine progress ("still working", "step 3 of 7 done"),
+  and **do not send pure acknowledgments** ("ok", "got it"). A message that
+  changes nothing for the recipient is a cost with no benefit; if an
+  inbound message needs no action and no answer, do not reply.
+
+A delegator decides the exception — "ping me when the branch is pushed" is
+a valid line in a brief — but the default is silence between milestones.
+(Task-assignment delivery stays full-text by design; a summary-plus-link
+redesign was rejected because it costs an extra round-trip.)
 
 **When the user is actively chatting with you, reply in the conversation — do not post a notice.** The notify queue is for async updates the user should discover independently: a worker finished, a new issue arose, a status change on something you own. If the user is talking to *you* right now, just reply.
 
