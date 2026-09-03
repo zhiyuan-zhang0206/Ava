@@ -51,7 +51,9 @@ jobs:
           test -s "$RUNNER_TEMP/legacy-lkg/image-proof.json"
       - name: Exact compatibility contract tests
         shell: bash
-        run: uv run --directory "$RUNNER_TEMP/legacy-lkg/source" --locked pytest tests/shared/test_retained_legacy.py -q
+        # These six pure path contracts use only pytest built-ins; the preceding
+        # cold proof already exercises the actual native PG/schema/normal daemon.
+        run: uv run --directory "$RUNNER_TEMP/legacy-lkg/source" --locked pytest --confcutdir=tests/shared tests/shared/test_retained_legacy.py -q
       - name: Stop isolated native PG
         if: always()
         shell: bash
