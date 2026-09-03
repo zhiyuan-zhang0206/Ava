@@ -303,13 +303,13 @@ def test_zombie_only_group_eperm_is_a_verified_noop(
     def _has_live_member(_pgid: int) -> bool:
         return next(live_checks)
 
-    monkeypatch.setattr("agent.graph._exec_process.IS_WINDOWS", False)
+    monkeypatch.setattr("shared.exec_process_domain.IS_WINDOWS", False)
     monkeypatch.setattr(
-        "agent.graph._exec_process._process_group_has_live_member",
+        "shared.exec_process_domain._process_group_has_live_member",
         _has_live_member,
     )
     monkeypatch.setattr(
-        "agent.graph._exec_process.os.killpg",
+        "shared.exec_process_domain.os.killpg",
         MagicMock(side_effect=PermissionError),
     )
 
