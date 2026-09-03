@@ -954,13 +954,14 @@ async def test_compact_with_super_long_summary_in_claim(
     assert long_summary in tail[0].content  # pyright: ignore[reportUnknownMemberType]
 
 
-async def test_compact_summary_with_chat_and_terminate_in_same_batch_ignores_terminate(
+async def test_terminate_preserves_pending_summary_without_wiping_history(
     db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
 ):
-    """Same batch contains compact_summary + terminate → compact_summary takes effect first,
-    but next_goto is overwritten to END by the later-appearing terminate.
-    This is the current claim_node's sequential dispatch behavior — documented, not a bug."""
+    """Lifecycle acceptance is serial; a summary cannot run in the exiting owner."""
+    from agent._starting import claim_agent_row
+
     tid = spawn_agent()
+    claim_agent_row(tid)
     summary_text = "summary before terminate"
     _insert_compact_summary(db_conn, tid, summary_text)
     with db_conn.cursor() as cur:
@@ -979,35 +980,38 @@ async def test_compact_summary_with_chat_and_terminate_in_same_batch_ignores_ter
 
     cmd = await claim_node(state, _make_runtime(aops_pool), _config(tid))
 
-    # compact still takes effect
-    tail = _compact_tail(cmd.update)
-    assert tail[0].content == compose_summary_message(summary_text)  # pyright: ignore[reportUnknownMemberType]
-    # The batch still ends at END — the compaction detours through init_context
-    # to have the head rebuilt, and hands END on as where to resume, so the
-    # terminate's override survives the detour.
-    assert cmd.goto == "init_context"
-    resume = cmd.update["context_reset"].resume  # type: ignore[index]
-    assert resume == END, (
-        f"compact_summary + terminate same batch: the batch should resume at END "
-        f"(terminate overwrote), actual {resume}"
-    )
+    assert cmd.goto == END
+    assert "context_reset" not in cmd.update  # type: ignore[operator]
+    assert state.messages == initial_msgs
+    assert db_conn.execute(
+        "SELECT kind,status,applied_at IS NOT NULL,observed_at FROM inbound_messages "
+        "WHERE agent_id=%s ORDER BY id",
+        (tid,),
+    ).fetchall() == [
+        ("compact_summary", "pending", False, None),
+        ("terminate", "claimed", True, None),
+    ]
+    # This process remains alive: NULL/released state must not fabricate exit
+    # merely to let the summary run. Explicit resurrection is covered by the
+    # real-process E2E, which proves exit and successor response separately.
+    from shared.lifecycle_termination_observe import observe_applied_termination
+    from shared.machine import machine_name
+
+    assert not observe_applied_termination(db_conn, tid, machine_name())
+    db_conn.commit()
 
 
 async def test_compact_in_same_batch_as_restart(
     db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
 ):
-    """Same batch has compact_summary + restart → compact takes effect first, restart
-    later marks RESTARTING + goto END.
+    """The admitted successor, not the exiting owner, consumes the same summary."""
+    from agent._starting import claim_agent_row
+    from shared.runtime_incarnation import current_incarnation
 
-    This is the currently expected sequential dispatch behavior — restart causes agent to enter restart process after compact (gateway respawn)."""
-    # restart path calls mark_agent_status('restarting') — needs agents row to exist
     tid = spawn_agent()
-    with db_conn.cursor() as cur:
-        cur.execute(
-            "UPDATE agents_meta SET status='running' WHERE id=%s",
-            (tid,),
-        )
-    db_conn.commit()
+    claim_agent_row(tid)
+    old = current_incarnation(tid)
+    assert old is not None
 
     summary_text = "summary pre-restart"
     _insert_compact_summary(db_conn, tid, summary_text)
@@ -1027,12 +1031,40 @@ async def test_compact_in_same_batch_as_restart(
 
     cmd = await claim_node(state, _make_runtime(aops_pool), _config(tid))
 
-    # compact still takes effect
-    tail = _compact_tail(cmd.update)
+    assert cmd.goto == END
+    assert "context_reset" not in cmd.update  # type: ignore[operator]
+    assert state.messages == initial_msgs
+    rows = db_conn.execute(
+        "SELECT id,kind,status,applied_at IS NOT NULL,observed_at FROM inbound_messages "
+        "WHERE agent_id=%s ORDER BY id",
+        (tid,),
+    ).fetchall()
+    assert [row[1:] for row in rows] == [
+        ("compact_summary", "pending", False, None),
+        ("restart", "claimed", True, None),
+    ]
+    summary_id, restart_id = rows[0][0], rows[1][0]
+    # Simulate the controller's already-verified exit/launch boundary only;
+    # actual OS disappearance is proved by strict test_self_restart E2E.
+    db_conn.execute("UPDATE agents_meta SET status='idling',pid=NULL WHERE id=%s", (tid,))
+    db_conn.execute(
+        "UPDATE inbound_messages SET payload=payload||jsonb_build_object('launch_attempts',1) "
+        "WHERE id=%s",
+        (restart_id,),
+    )
+    db_conn.commit()
+    claim_agent_row(tid, restart_command_id=restart_id)
+    assert current_incarnation(tid) != old
+    assert db_conn.execute(
+        "SELECT status,observed_at IS NOT NULL FROM inbound_messages WHERE id=%s", (restart_id,)
+    ).fetchone() == ("done", True)
+    resumed = await claim_node(state, _make_runtime(aops_pool), _config(tid))
+    tail = _compact_tail(resumed.update)
     assert tail[0].content == compose_summary_message(summary_text)  # pyright: ignore[reportUnknownMemberType]
-    # resume is END (restart overwrote), carried through the init_context detour
-    assert cmd.goto == "init_context"
-    assert cmd.update["context_reset"].resume == END  # type: ignore[index]
+    assert resumed.goto == "init_context"
+    assert db_conn.execute(
+        "SELECT status FROM inbound_messages WHERE id=%s", (summary_id,)
+    ).fetchone() == ("done",)
 
 
 # --- helpers (reusing pattern from test_claim.py) ---

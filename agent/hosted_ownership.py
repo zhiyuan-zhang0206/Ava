@@ -20,6 +20,8 @@ async def apply_hosted_lifecycle(
     The durable pointer, not a graph boolean or cache entry, identifies the
     command. Restart releases ownership atomically with its decision, so any
     successor admission must create a new incarnation before observing it.
+    Termination is observed in this same transaction: the caller has already
+    returned from the real continuation and dropped its non-authoritative cache.
     """
     async with async_write_transaction(pool) as conn:
         cursor = await conn.execute(
@@ -61,6 +63,17 @@ async def apply_hosted_lifecycle(
         await conn.execute(
             "UPDATE inbound_messages SET applied_at=clock_timestamp() WHERE id=%s", (row[0],)
         )
+        if command[0] == "terminate":
+            await conn.execute(
+                "UPDATE inbound_messages SET observed_at=clock_timestamp(),status='done' "
+                "WHERE id=%s",
+                (row[0],),
+            )
+            await conn.execute(
+                "UPDATE agents_meta SET lifecycle_command_id=NULL WHERE id=%s "
+                "AND lifecycle_command_id=%s",
+                (incarnation.agent_id, row[0]),
+            )
         return command[0]
 
 
@@ -107,36 +120,6 @@ async def admit_hosted_runtime(
         "hosted runtime admitted", agent_id=agent_id, generation=str(row[0]), owner=str(owner)
     )
     return RuntimeIncarnation(agent_id, row[0], owner)
-
-
-async def observe_hosted_termination(
-    pool: AsyncConnectionPool, incarnation: RuntimeIncarnation
-) -> bool:
-    """After graph continuation and cache drop, observe this exact termination."""
-    async with async_write_transaction(pool) as conn:
-        cursor = await conn.execute(
-            "SELECT lifecycle_command_id FROM agents_meta WHERE id=%s "
-            "AND runtime_generation=%s AND runtime_owner=%s AND status='terminated' "
-            "AND runtime_kind='hosted' FOR UPDATE",
-            (incarnation.agent_id, incarnation.generation, incarnation.owner),
-        )
-        pointer = await cursor.fetchone()
-        if pointer is None or pointer[0] is None:
-            return False
-        cursor = await conn.execute(
-            "UPDATE inbound_messages SET observed_at=clock_timestamp(),status='done' "
-            "WHERE id=%s AND agent_id=%s AND target_generation=%s AND target_owner=%s "
-            "AND kind='terminate' AND status='claimed' AND applied_at IS NOT NULL "
-            "AND observed_at IS NULL RETURNING id",
-            (pointer[0], incarnation.agent_id, incarnation.generation, incarnation.owner),
-        )
-        if await cursor.fetchone() is None:
-            return False
-        await conn.execute(
-            "UPDATE agents_meta SET lifecycle_command_id=NULL WHERE id=%s AND lifecycle_command_id=%s",
-            (incarnation.agent_id, pointer[0]),
-        )
-        return True
 
 
 async def settle_hosted_runtime(

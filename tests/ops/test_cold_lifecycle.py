@@ -7,15 +7,18 @@ from unittest.mock import Mock
 
 import psycopg
 import pytest
+from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
 from ops import agent_launch
 from ops.agent_identity import AgentProcessIdentity
-from ops.agent_wake import respawn_agent
+from ops.agent_wake import respawn_agent, resurrect_agent
+from ops.ops_exit import _force_terminate_transaction
 from ops.ops_lifecycle import _restart_blocking
 from ops.rpc_schemas import RestartAgentRequest
 from shared.config import settings
 from shared.db import PG_KEEPALIVE_KWARGS, insert_inbound_message
+from shared.machine import machine_name
 from tests.agent.test_lifecycle_intent import _command
 from tests.agent.test_restart_admission import _prepared
 from tests.agent.test_restart_process_crash import _boot
@@ -33,8 +36,21 @@ def _expire(conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch) -> tuple[
     agent_id, command_id = _prepared(conn)
     conn.execute("UPDATE agents_meta SET pid=12345,status='restarting' WHERE id=%s", (agent_id,))
     conn.execute(
-        "UPDATE inbound_messages SET applied_at=clock_timestamp()-interval '1 day' WHERE id=%s",
-        (command_id,),
+        "UPDATE inbound_messages SET applied_at=clock_timestamp()-interval '1 day',"
+        "payload=payload||%s WHERE id=%s",
+        (
+            Jsonb(
+                {
+                    "target_process_identity": {
+                        "machine": machine_name(),
+                        "pid": 12345,
+                        "create_time": 1.0,
+                        "starttime": None,
+                    }
+                }
+            ),
+            command_id,
+        ),
     )
     conn.commit()
     monkeypatch.setattr(
@@ -50,6 +66,31 @@ def _expire(conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch) -> tuple[
         "SELECT status,observed_at FROM inbound_messages WHERE id=%s", (command_id,)
     ).fetchone() == ("done", None)
     return agent_id, command_id, launch
+
+
+@pytest.mark.parametrize("identity", ["missing", "unverified"])
+def test_cold_command_without_positive_exact_absence_remains_pending(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, identity: str
+) -> None:
+    agent_id, old, launch = _expire(db_conn, monkeypatch)
+    if identity == "missing":
+        db_conn.execute(
+            "UPDATE inbound_messages SET payload=payload-'target_process_identity' WHERE id=%s",
+            (old,),
+        )
+        db_conn.commit()
+    else:
+        monkeypatch.setattr("ops.cold_lifecycle.target_process_ended", Mock(return_value=False))
+    command = _command(db_conn, agent_id, "terminate")
+    assert not respawn_agent(agent_id)
+    launch.assert_not_called()
+    assert db_conn.execute(
+        "SELECT status,claimed_at,applied_at,observed_at FROM inbound_messages WHERE id=%s",
+        (command,),
+    ).fetchone() == ("pending", None, None, None)
+    assert db_conn.execute(
+        "SELECT lifecycle_command_id FROM agents_meta WHERE id=%s", (agent_id,)
+    ).fetchone() == (None,)
 
 
 def test_failed_command_then_explicit_restart_admits_one_real_consumer(
@@ -77,6 +118,121 @@ def test_failed_command_then_explicit_restart_admits_one_real_consumer(
         "SELECT payload->'lifecycle_result'->>'outcome',observed_at FROM inbound_messages WHERE id=%s",
         (old_command,),
     ).fetchone() == ("failed", None)
+
+
+def test_real_exit_then_cold_terminate_and_explicit_resurrect(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    agent_id, initial = _prepared(db_conn)
+    child = _boot(agent_id, initial, tmp_path, "apply-restart-exit")
+    assert child.returncode == 0, child.stderr
+    assert "RESTART_APPLIED" in child.stdout
+    row = db_conn.execute(
+        "SELECT lifecycle_command_id,pid FROM agents_meta WHERE id=%s", (agent_id,)
+    ).fetchone()
+    assert row is not None and row[0] is not None and row[1] is not None
+    failed, old_pid = row
+    db_conn.execute(
+        "UPDATE inbound_messages SET applied_at=clock_timestamp()-interval '1 day' WHERE id=%s",
+        (failed,),
+    )
+    db_conn.commit()
+    assert not respawn_agent(agent_id)
+    stop = _command(db_conn, agent_id, "terminate")
+    assert not respawn_agent(agent_id)
+    assert db_conn.execute(
+        "SELECT status,applied_at IS NOT NULL,observed_at IS NOT NULL "
+        "FROM inbound_messages WHERE id=%s",
+        (stop,),
+    ).fetchone() == ("done", True, True)
+    assert db_conn.execute(
+        "SELECT lifecycle_command_id FROM agents_meta WHERE id=%s", (agent_id,)
+    ).fetchone() == (None,)
+    # Use the real preparer/authorization and a disposable child for the exact
+    # returned identity; the parent test never starts a long-lived agent.
+    attempts: list[int] = []
+
+    def launch(*args: object, **kwargs: object) -> str:
+        from typing import cast
+
+        value = kwargs["resurrect_attempt"]
+        assert isinstance(value, tuple)
+        command: object = cast(tuple[object, ...], value)[0]
+        assert type(command) is int
+        attempts.append(command)
+        return "test-owned-cold-attempt"
+
+    monkeypatch.setattr(agent_launch, "_launch_agent_process", launch)
+    resurrect_agent(agent_id, resurrected_by="user", prompt="after cold terminate")
+    assert len(attempts) == 1
+    successor = _boot(agent_id, attempts[0], tmp_path, "resurrect")
+    assert successor.returncode == 0, successor.stderr
+    assert "EXECUTION_ALLOWED" in successor.stdout
+    assert db_conn.execute(
+        "SELECT pid<>%s FROM agents_meta WHERE id=%s", (old_pid, agent_id)
+    ).fetchone() == (True,)
+    assert db_conn.execute(
+        "SELECT status FROM inbound_messages WHERE agent_id=%s AND content='after cold terminate'",
+        (agent_id,),
+    ).fetchone() == ("claimed",)
+
+
+def test_force_supersedes_old_restart_but_preserves_later_explicit_command(
+    db_conn: psycopg.Connection,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    sync_pool: ConnectionPool,
+) -> None:
+    agent_id, initial = _prepared(db_conn)
+    child = _boot(agent_id, initial, tmp_path, "apply-restart-exit")
+    assert child.returncode == 0, child.stderr
+    before = db_conn.execute(
+        "SELECT i.id,i.target_generation,i.target_owner,i.applied_at "
+        "FROM agents_meta m JOIN inbound_messages i ON i.id=m.lifecycle_command_id "
+        "WHERE m.id=%s",
+        (agent_id,),
+    ).fetchone()
+    assert before is not None
+    queued_old = _command(db_conn, agent_id, "restart")
+    chat = insert_inbound_message(db_conn, agent_id, "preserve ordinary chat", "user")
+    db_conn.commit()
+    _, _, _, force = _force_terminate_transaction(
+        agent_id, sync_pool, source="user", kill_process=False
+    )
+    later = _command(db_conn, agent_id, "restart")
+    assert db_conn.execute(
+        "SELECT status,payload->'lifecycle_result'->>'reason',observed_at "
+        "FROM inbound_messages WHERE id IN (%s,%s) ORDER BY id",
+        (before[0], queued_old),
+    ).fetchall() == [("done", "force_terminate", None), ("done", "force_terminate", None)]
+    assert (
+        db_conn.execute(
+            "SELECT id,target_generation,target_owner,applied_at FROM inbound_messages WHERE id=%s",
+            (before[0],),
+        ).fetchone()
+        == before
+    )
+    late = _boot(agent_id, before[0], tmp_path, "none")
+    assert late.returncode != 0 and "EXECUTION_ALLOWED" not in late.stdout
+    assert "restart admission command" in late.stderr
+    launched = Mock(return_value="test-owned-force-successor")
+    monkeypatch.setattr(agent_launch, "_launch_agent_process", launched)
+    assert not respawn_agent(agent_id)  # discharge the force, not the old restart
+    launched.assert_not_called()
+    assert db_conn.execute(
+        "SELECT status,observed_at IS NOT NULL FROM inbound_messages WHERE id=%s", (force,)
+    ).fetchone() == ("done", True)
+    assert db_conn.execute(
+        "SELECT id,status FROM inbound_messages WHERE id IN (%s,%s) ORDER BY id", (chat, later)
+    ).fetchall() == [(chat, "pending"), (later, "pending")]
+    assert respawn_agent(agent_id)
+    launched.assert_called_once()
+    assert launched.call_args.kwargs["restart_attempt"][:2] == (later, 1)
+    successor = _boot(agent_id, later, tmp_path, "none")
+    assert successor.returncode == 0, successor.stderr
+    assert db_conn.execute(
+        "SELECT status,observed_at IS NOT NULL FROM inbound_messages WHERE id=%s", (later,)
+    ).fetchone() == ("done", True)
 
 
 @pytest.mark.parametrize("followup", ["none", "chat", "terminate"])

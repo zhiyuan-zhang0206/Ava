@@ -12,6 +12,7 @@ from uuid import UUID
 
 import psycopg
 from psycopg.pq import TransactionStatus
+from psycopg.types.json import Jsonb
 
 from shared.runtime_incarnation import RuntimeIncarnation
 
@@ -96,3 +97,46 @@ async def accept_lifecycle_command_async(
         raise RuntimeError("lifecycle acceptance requires an explicit transaction")
     cursor = await conn.execute(_ACCEPT, (target.agent_id, target.generation, target.owner))
     return _decode(await cursor.fetchone())
+
+
+def supersede_lifecycle_for_force(conn: psycopg.Connection, agent_id: int, force_id: int) -> None:
+    """The existing explicit force fence cancels earlier commands, not their history.
+
+    Applied is preserved: an in-flight external effect cannot be undone. No
+    observation timestamp is invented. The new terminate is left for actual
+    settlement; ordinary chat remains pending behind its existing force cutoff.
+    """
+    if conn.info.transaction_status != TransactionStatus.INTRANS:
+        raise RuntimeError("force lifecycle settlement requires an explicit transaction")
+    row = conn.execute(
+        "SELECT lifecycle_command_id,last_force_terminate_inbound_id FROM agents_meta "
+        "WHERE id=%s FOR UPDATE",
+        (agent_id,),
+    ).fetchone()
+    if row is None or row[1] != force_id:
+        raise RuntimeError("force lifecycle settlement lost its intent fence")
+    if row[0] is not None and row[0] >= force_id:
+        raise RuntimeError("force lifecycle settlement cannot cancel a later pointer")
+    conn.execute(
+        "SELECT id FROM inbound_messages WHERE agent_id=%s AND id<%s "
+        "AND kind IN ('restart','terminate') AND status IN ('pending','claimed') "
+        "ORDER BY id FOR UPDATE",
+        (agent_id, force_id),
+    ).fetchall()
+    conn.execute(
+        "UPDATE inbound_messages SET status='done',payload=COALESCE(payload,'{}'::jsonb)||%s "
+        "WHERE agent_id=%s AND id<%s AND kind IN ('restart','terminate') "
+        "AND status IN ('pending','claimed')",
+        (
+            Jsonb({"lifecycle_result": {"outcome": "superseded", "reason": "force_terminate"}}),
+            agent_id,
+            force_id,
+        ),
+    )
+    cleared = conn.execute(
+        "UPDATE agents_meta SET lifecycle_command_id=NULL WHERE id=%s "
+        "AND last_force_terminate_inbound_id=%s AND lifecycle_command_id IS NOT DISTINCT FROM %s",
+        (agent_id, force_id, row[0]),
+    )
+    if cleared.rowcount != 1:
+        raise RuntimeError("force lifecycle settlement lost its locked pointer")
