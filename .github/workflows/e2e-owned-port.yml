@@ -1,0 +1,30 @@
+name: Owned gateway socket transport
+on:
+  pull_request:
+    paths:
+      - 'tests/e2e/_ports.py'
+      - 'tests/e2e/_proc.py'
+      - 'tests/e2e/conftest.py'
+      - 'tests/ci/test_owned_gateway_port.py'
+      - '.github/workflows/e2e-owned-port.yml'
+permissions:
+  contents: read
+jobs:
+  actual-transport:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d
+        with:
+          python-version: '3.12'
+      - run: uv sync --locked
+      - run: uv run pytest --confcutdir=tests/ci tests/ci/test_owned_gateway_port.py -q
+        env:
+          AVA_PORT_PROOF_OUTPUT: ${{ runner.temp }}/owned-port.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: owned-port-${{ github.event.pull_request.head.sha }}
+          path: ${{ runner.temp }}/owned-port.json
+          if-no-files-found: error
