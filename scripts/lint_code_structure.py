@@ -188,6 +188,11 @@ _OVERSIZE_ALLOWED: dict[str, tuple[str, int, str]] = {
     # (2026-09-02 P0 read-only pollution). Was exactly 800 lines on main; the
     # restore helpers pushed it over.
     "shared/db.py": ("#5716", 800, "2026-12-31"),
+    # Kernel inbound queue + lifecycle SQL (claim / restart helpers) — one
+    # cohesive kernel-DB module; the #1587 fatal-provider heartbeat throttle
+    # (last_heartbeat_at + pending-wake accounting) regrew it past the ceiling
+    # after the #1500-era removal (767 < 800). Split tracked, not forgotten.
+    "agent/db.py": ("#5770", 800, "2026-12-31"),
 }
 
 
