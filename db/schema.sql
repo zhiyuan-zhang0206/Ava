@@ -1260,6 +1260,27 @@ CREATE TABLE IF NOT EXISTS web_sessions (
 
 CREATE INDEX IF NOT EXISTS web_sessions_expires_idx ON web_sessions (expires_at);
 
+-- ─────────────── llm_usage_hourly ───────────────
+-- The restored historical LLM usage/cost curve. Rows before 2026-08-13 survive
+-- only in the frozen 2026-08-28 cold PG events archive (Loki's 7d retention lost
+-- that window), so the curve is re-derived from that archive's JSONL extract by
+-- `scripts/backfill_llm_usage_hourly.py` and stored here. Derived artifact, not
+-- a write path: every column is recomputable by re-running the backfill.
+CREATE TABLE IF NOT EXISTS llm_usage_hourly (
+    ts_hour          TIMESTAMPTZ NOT NULL,
+    model            TEXT NOT NULL,
+    in_total         BIGINT NOT NULL DEFAULT 0,
+    cache_read       BIGINT NOT NULL DEFAULT 0,
+    out_total        BIGINT NOT NULL DEFAULT 0,
+    reasoning        BIGINT NOT NULL DEFAULT 0,
+    cost_peak_usd    DOUBLE PRECISION NOT NULL DEFAULT 0,
+    cost_offpeak_usd DOUBLE PRECISION NOT NULL DEFAULT 0,
+    PRIMARY KEY (ts_hour, model)
+);
+
+COMMENT ON TABLE llm_usage_hourly IS
+    'Hourly model-level LLM usage/cost, restored historical curve from the 2026-08-28 cold archive; recomputable from the source JSONL.';
+
 -- ─────────────── schema_migrations ───────────────
 -- Applied-migration registry — maintained by `shared.migrations`. Keyed by
 -- migration NAME (an applied SET, not a high-water integer). This whole file is

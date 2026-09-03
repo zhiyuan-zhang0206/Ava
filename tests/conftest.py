@@ -727,6 +727,7 @@ _PER_TEST_TRUNCATE_TABLES = (
     # Loki, and tests read it through the FakeLoki / live-stream fakes.
     "event_dismissals",
     "rollup_day_state",
+    "llm_usage_hourly",
     "agents",
     "alerts",
     "machines",
