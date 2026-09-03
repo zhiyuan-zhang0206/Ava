@@ -147,6 +147,29 @@ def editable_site_packages_dirs(source_root: Path) -> tuple[Path, ...]:
     return tuple(sorted(matches, key=str))
 
 
+def editable_dist_info_dirs(source_root: Path) -> tuple[Path, ...]:
+    """Existing ``ava-*.dist-info`` directories under ``source_root/.venv``.
+
+    The structural scan mirrors :func:`editable_site_packages_dirs` and is
+    deliberately independent of the editable-install records: a converged host
+    may carry a read-only ``0o555`` dist-info directory from an earlier
+    protection pass, and uv's reinstall uninstall removes the files *inside*
+    that directory before it can rewrite the distribution — operations that
+    need owner write on the directory itself, not only on its parent
+    site-packages.
+    """
+
+    venv = source_root / ".venv"
+    matches: set[Path] = set()
+    for pattern in (
+        "Lib/site-packages/ava-*.dist-info",
+        "lib/python*/site-packages/ava-*.dist-info",
+        "lib64/python*/site-packages/ava-*.dist-info",
+    ):
+        matches.update(path for path in venv.glob(pattern) if path.is_dir())
+    return tuple(sorted(matches, key=str))
+
+
 def _normalized_exact_path(path: Path) -> str:
     """Platform-native exact path identity, including Windows case folding."""
 
@@ -233,12 +256,17 @@ def editable_pth_write_window(source_root: Path) -> Generator[None, None, None]:
     """Temporarily open protected Ava records and their directories, then restore.
 
     The exact original mode is restored in ``finally`` on both successful and
-    failed syncs. Directory access covers uv's atomic replacement, while file
+    failed syncs. Directory access covers uv's atomic replacement and the
+    reinstall uninstall of a hardened ``ava-*.dist-info`` directory, while file
     access keeps direct repair compatible with the legacy file-level guard.
     """
 
     records = editable_ava_pth_paths(source_root) + editable_direct_url_paths(source_root)
-    with editable_site_packages_write_window(source_root), _write_window(records):
+    with (
+        editable_site_packages_write_window(source_root),
+        _write_window(editable_dist_info_dirs(source_root)),
+        _write_window(records),
+    ):
         yield
 
 

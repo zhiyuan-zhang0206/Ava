@@ -156,7 +156,11 @@ def _ensure_prod_editable_dir_protection(ctx: ConvergeCtx) -> None:  # noqa: ARG
     source_root = shared.cluster_drift.prod_source_dir()
     if source_root is None:
         return
-    for directory in shared.editable_install.editable_site_packages_dirs(source_root):
+    directories = (
+        *shared.editable_install.editable_site_packages_dirs(source_root),
+        *shared.editable_install.editable_dist_info_dirs(source_root),
+    )
+    for directory in directories:
         if directory.stat().st_mode & 0o777 == 0o555:
             continue
         directory.chmod(0o555)

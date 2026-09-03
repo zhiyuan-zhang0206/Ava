@@ -192,6 +192,12 @@ def test_prod_editable_dir_protection_is_host_global_and_sets_read_only_mode(
     pth.parent.mkdir(parents=True)
     pth.write_text(f"{source_root}\n")
     pth.parent.chmod(0o755)
+    dist_info = pth.parent / "ava-0.1.5.dist-info"
+    dist_info.mkdir()
+    (dist_info / "direct_url.json").write_text(
+        json.dumps({"url": source_root.as_uri(), "dir_info": {"editable": True}})
+    )
+    dist_info.chmod(0o755)
     monkeypatch.setattr("shared.cluster_drift.prod_source_dir", lambda: source_root)
     monkeypatch.setattr("cli.commands.status._update_in_flight", lambda: False)
     step = next(
@@ -204,6 +210,7 @@ def test_prod_editable_dir_protection_is_host_global_and_sets_read_only_mode(
 
     assert step.host_global
     assert stat.S_IMODE(pth.parent.stat().st_mode) == 0o555
+    assert stat.S_IMODE(dist_info.stat().st_mode) == 0o555
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX site-packages protection")
