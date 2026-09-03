@@ -1,28 +1,45 @@
-"""Explicit operator admission for a retained image, before settings or source.
+"""Explicit operator dispatch for a retained image, before settings or source.
 
 Image and expected inventory are not a bootable rollback or all-writer closure.
-This entry deliberately refuses an unimplemented first-cutover contract before
-creating an updater session, taking a deployment lease, or stopping a service.
+After read-only validation this entry creates/joins the prepared operation:
+the verified coordinator acquires the sole deployment operation and every unit
+binds the exact request, records its preflight, and waits at the all-unit
+barrier. No post-barrier cutover stage (writer closure, migration, selector,
+service start/readback, finalization) is implemented or authorized here.
 """
 
 from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import os
 import platform
 import stat
 import sys
+import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal, Self
 from uuid import UUID
 
+import psycopg
 from pydantic import AwareDatetime, Field, ValidationError, model_validator
 
-from shared.managed_writer_barrier import Digest, EvidenceModel
-from shared.managed_writer_publication import NormalStartPlan, PublishedUnit
+from services.agent_ops.bootstrap import ObserverProjection
+from shared.managed_writer_barrier import (
+    Digest,
+    EvidenceModel,
+    ManagedWriterBarrierError,
+    ManagedWriterCollection,
+)
+from shared.managed_writer_publication import (
+    NormalStartPlan,
+    PreparedDispatch,
+    PreparedUnitPreflight,
+    PublishedUnit,
+)
 from shared.runtime_interpreter import WHEEL_RUNTIME, runtime_venv
 from shared.runtime_publication_input import PreparationReceipt
 from shared.runtime_release import (
@@ -32,6 +49,11 @@ from shared.runtime_release import (
     verify_release,
 )
 from shared.verified_file import regular_bytes
+
+
+def _now() -> datetime:
+    """Provide a narrow clock seam for deadline-bound dispatch polling."""
+    return datetime.now(UTC)
 
 
 class PreparedOperatorUnit(EvidenceModel):
@@ -50,6 +72,7 @@ class PreparedOperatorPlan(EvidenceModel):
     units: tuple[PreparedOperatorUnit, ...] = Field(min_length=1)
     valid_until: AwareDatetime
     normal: NormalStartPlan
+    recovery_collection: str | None = None
 
     @model_validator(mode="after")
     def exact_roster(self) -> Self:
@@ -155,6 +178,250 @@ def prepare_operator_input(path: Path) -> PreparedOperatorInput:
     )
 
 
+def _connect_timeout(valid_until: AwareDatetime) -> int:
+    """Refuse a database dial that cannot finish before the immutable deadline."""
+    remaining = int((valid_until - _now()).total_seconds())
+    if remaining <= 0:
+        raise ReleaseRejectedError("prepared dispatch deadline expired; no services were stopped")
+    return min(5, remaining)
+
+
+def _prepared_evidence_digest(prepared: PreparedOperatorInput) -> str:
+    """Hash deterministic local preparation facts for one immutable unit request."""
+    payload = {
+        "request_digest": prepared.digest,
+        "unit": prepared.local.unit.model_dump(mode="json"),
+        "image_digest": prepared.image.digest,
+        "manifest_digest": prepared.image.manifest_digest,
+        "receipt_inventory_digest": prepared.receipt.inventory_digest,
+    }
+    return hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+
+
+def _set_deadline(conn: psycopg.Connection, valid_until: AwareDatetime) -> None:
+    """Bound one caller-owned database transaction by the original dispatch deadline."""
+    remaining_ms = int((valid_until - _now()).total_seconds() * 1000)
+    if remaining_ms <= 0:
+        raise ReleaseRejectedError("prepared dispatch deadline expired; no services were stopped")
+    conn.execute("SELECT set_config('statement_timeout',%s,true)", (str(remaining_ms),))
+
+
+def _run_prepared_participant(
+    prepared: PreparedOperatorInput, projection: ObserverProjection
+) -> int:
+    """Bind and record one local unit's preflight; never acquire or reattach an operation.
+
+    Any participant may call this with its validated immutable request and the
+    pre-projected database credentials. It only accepts the coordinator's exact
+    operation before the original deadline and refuses without stopping services.
+    """
+    from shared.prepared_rollout import (
+        bind_prepared_participant,
+        record_prepared_preflight,
+        require_all_prepared_preflights,
+        require_prepared_dispatch,
+    )
+
+    request = prepared.request
+    with psycopg.connect(
+        projection.db_url.get_secret_value(),
+        autocommit=True,
+        connect_timeout=_connect_timeout(request.valid_until),
+    ) as conn:
+        operation = None
+        while _now() < request.valid_until:
+            try:
+                with conn.transaction():
+                    _set_deadline(conn, request.valid_until)
+                    operation = bind_prepared_participant(
+                        conn,
+                        request_id=request.request_id,
+                        request_digest=prepared.digest,
+                        valid_until=request.valid_until,
+                        unit=prepared.local.unit,
+                    )
+            except ManagedWriterBarrierError:
+                time.sleep(0.2)
+                continue
+            break
+        if operation is None:
+            sys.stderr.write("prepared dispatch deadline expired; no services were stopped\n")
+            return 2
+        with conn.transaction():
+            _set_deadline(conn, request.valid_until)
+            pending = require_prepared_dispatch(
+                conn, operation, request.request_id, prepared.digest, prepared.local.unit
+            )
+        if pending.dispatch is None:
+            raise ManagedWriterBarrierError("prepared dispatch disappeared")
+        evidence_digest = _prepared_evidence_digest(prepared)
+        previous = next(
+            (item for item in pending.dispatch.preflights if item.unit == prepared.local.unit), None
+        )
+        if previous is None or previous.evidence_digest != evidence_digest:
+            evidence = PreparedUnitPreflight(
+                unit=prepared.local.unit,
+                request_digest=prepared.digest,
+                evidence_digest=evidence_digest,
+                # Exact retries reproduce the same evidence; this is a bind-time
+                # operation identity, not a renewed local observation timestamp.
+                observed_at=operation.acquired_at,
+            )
+            with conn.transaction():
+                _set_deadline(conn, request.valid_until)
+                record_prepared_preflight(conn, operation, request.request_id, evidence)
+        while _now() < request.valid_until:
+            try:
+                with conn.transaction():
+                    _set_deadline(conn, request.valid_until)
+                    require_all_prepared_preflights(
+                        conn,
+                        operation,
+                        request.request_id,
+                        prepared.digest,
+                        prepared.local.unit,
+                    )
+            except ManagedWriterBarrierError:
+                time.sleep(0.2)
+                continue
+            sys.stdout.write(
+                f"prepared barrier complete for {prepared.local.unit.machine} "
+                f"{prepared.local.unit.home}; operation {operation.holder}\n"
+            )
+            return 0
+    sys.stderr.write("prepared dispatch deadline expired; no services were stopped\n")
+    return 2
+
+
+def _recover_or_refuse(
+    conn: psycopg.Connection,
+    prepared: PreparedOperatorInput,
+    dispatch: PreparedDispatch,
+    cause: ManagedWriterBarrierError,
+    projection: ObserverProjection | None = None,
+) -> int:
+    """Recover a coordinator's exact abandoned operation only with fresh closure.
+
+    The coordinator may call this after failed creation. It refuses a missing
+    predecessor or a plan without its new collection; it never renews an old
+    lease, and it delegates no service start beyond the participant preflight.
+    """
+    from shared.prepared_rollout import read_prepared_blockage, recover_prepared_operation
+
+    with conn.transaction():
+        _set_deadline(conn, prepared.request.valid_until)
+        blockage = read_prepared_blockage(conn)
+    if blockage.operation is None:
+        sys.stderr.write(f"prepared update refused: {cause}\n")
+        return 2
+    if prepared.request.recovery_collection is None:
+        sys.stderr.write(
+            "prepared update refused: existing prepared operation "
+            f"holder={blockage.operation.holder} acquired_at={blockage.operation.acquired_at} "
+            f"target_sha={blockage.operation.target_sha} requires recovery with a NEW lawful "
+            "operation (new plan with a new request_id), exact predecessor CAS, and a fresh "
+            "all-unit writer closure\n"
+        )
+        return 2
+    home = Path(prepared.local.unit.home)
+    collection_path = Path(prepared.request.recovery_collection)
+    collection = ManagedWriterCollection.model_validate_json(_private_plan(collection_path, home))
+    with conn.transaction():
+        _set_deadline(conn, prepared.request.valid_until)
+        operation = recover_prepared_operation(
+            conn,
+            abandoned=blockage.operation,
+            dispatch=dispatch,
+            plan=prepared.request.normal,
+            target_sha=prepared.request.target_sha,
+            fresh_collection=collection,
+        )
+    sys.stdout.write(
+        "prepared operation recovered: new operation "
+        f"{operation.holder} replaced {blockage.operation.holder} via exact predecessor CAS\n"
+    )
+    if projection is None:
+        projection = ObserverProjection.from_environment()
+    rc = _run_prepared_participant(prepared, projection)
+    if rc != 0:
+        sys.stderr.write(
+            "prepared dispatch barrier incomplete; operation remains pending until explicit "
+            "recovery — no services were stopped\n"
+        )
+    return rc
+
+
+def _run_prepared_coordinator(
+    prepared: PreparedOperatorInput, projection: ObserverProjection
+) -> int:
+    """Create the sole prepared operation at the verified coordinator, then participate.
+
+    Only the local unit named as coordinator may call this. Database checks
+    independently enforce the unique gateway and roster; recovery is explicit,
+    and no post-barrier cutover is authorized here.
+    """
+    from shared.prepared_rollout import create_prepared_operation
+
+    request = prepared.request
+    machine = regular_bytes(Path(prepared.local.unit.home) / "machine_name").decode().strip()
+    holder = f"prepared:{machine}:pid{os.getpid()}"
+    dispatch = PreparedDispatch(
+        request_id=request.request_id,
+        request_digest=prepared.digest,
+        coordinator=request.coordinator,
+        valid_until=request.valid_until,
+    )
+    with psycopg.connect(
+        projection.db_url.get_secret_value(),
+        autocommit=True,
+        connect_timeout=_connect_timeout(request.valid_until),
+    ) as conn:
+        try:
+            with conn.transaction():
+                _set_deadline(conn, request.valid_until)
+                operation = create_prepared_operation(
+                    conn,
+                    dispatch=dispatch,
+                    plan=request.normal,
+                    target_sha=request.target_sha,
+                    holder=holder,
+                )
+        except ManagedWriterBarrierError as exc:
+            return _recover_or_refuse(conn, prepared, dispatch, exc, projection)
+    sys.stdout.write(
+        "prepared operation created: "
+        f"holder={operation.holder} target_sha={operation.target_sha} "
+        f"expires_at={request.valid_until}\n"
+    )
+    rc = _run_prepared_participant(prepared, projection)
+    if rc == 0:
+        sys.stdout.write(
+            "all-unit prepared barrier complete; maintenance phase owns the operation until "
+            "finalization\n"
+        )
+    else:
+        sys.stderr.write(
+            "prepared dispatch barrier incomplete; operation remains pending until explicit "
+            "recovery — no services were stopped\n"
+        )
+    return rc
+
+
+def dispatch_prepared_update(prepared: PreparedOperatorInput) -> int:
+    """Dispatch only the validated local coordinator or participant prepared leg.
+
+    This reads the already-projected environment without Settings or a gateway
+    fetch. It refuses missing projection variables and does not authorize any
+    source cutover stage after the all-unit preflight barrier.
+    """
+    projection = ObserverProjection.from_environment()
+    if prepared.local.unit == prepared.request.coordinator:
+        return _run_prepared_coordinator(prepared, projection)
+    return _run_prepared_participant(prepared, projection)
+
+
 def run_prepared_update(args: argparse.Namespace) -> int:
     """Never silently reinterpret prepared flags as an ordinary source rollout."""
     if (
@@ -172,15 +439,15 @@ def run_prepared_update(args: argparse.Namespace) -> int:
         return 2
     try:
         prepared = prepare_operator_input(Path(args.prepared))
-        # Do not convert the existing inventory's unknown closure into permission.
-        # First normal-source quiesce/LKG and all-unit coordination remain real
-        # missing producers, not optional flags an operator may assert in JSON.
-        sys.stderr.write(
-            "first source cutover is not implemented: requires fresh-operation native "
-            "handoff, bootable normal LKG, full unit/job closure and checked recovery; "
-            f"verified preparation {prepared.digest} did not stop or change any service\n"
-        )
-        return 2
-    except (OSError, ValueError, ValidationError, ReleaseRejectedError) as exc:
+        return dispatch_prepared_update(prepared)
+    except (
+        OSError,
+        ValueError,
+        ValidationError,
+        ReleaseRejectedError,
+        ManagedWriterBarrierError,
+        psycopg.Error,
+        KeyError,
+    ) as exc:
         sys.stderr.write(f"prepared update refused: {exc}\n")
         return 2

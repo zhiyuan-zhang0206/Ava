@@ -7,13 +7,16 @@ subsequent checks never discover or attach to a replacement operation.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime
 from uuid import UUID
 
 import psycopg
+from pydantic import AwareDatetime
 
 from shared.managed_writer_barrier import (
     ManagedWriterBarrierError,
+    ManagedWriterCollection,
     RolloutIdentity,
     lock_registered_units,
     lock_rollout,
@@ -27,7 +30,21 @@ from shared.managed_writer_publication import (
     WriterPublication,
     _locked_publication,
     _store,
+    recover_pending_publication,
 )
+
+
+@dataclass(frozen=True)
+class PreparedBlockage:
+    """The locked pending operation and deployment row a coordinator may recover."""
+
+    operation: RolloutIdentity | None
+    predecessor: UUID | None
+    phase: str
+    holder: str | None
+    acquired_at: AwareDatetime | None
+    expires_at: AwareDatetime | None
+    target_sha: str | None
 
 
 def create_prepared_operation(
@@ -93,6 +110,110 @@ def create_prepared_operation(
     )
     _store(conn, WriterPublication(current=state.current, pending=pending))
     return operation
+
+
+def read_prepared_blockage(conn: psycopg.Connection) -> PreparedBlockage:
+    """Read the coordinator's exact blocked operation in its owned transaction.
+
+    This authorizes no transition and refuses a missing deployment row. Its
+    returned identity is only a predecessor candidate for explicit recovery.
+    """
+    state = _locked_publication(conn)
+    row = conn.execute(
+        "SELECT phase, holder, acquired_at, expires_at, target_sha FROM deployment_state WHERE id=1"
+    ).fetchone()
+    if row is None:
+        raise ManagedWriterBarrierError("deployment state is missing")
+    pending = state.pending
+    return PreparedBlockage(
+        operation=None if pending is None else pending.operation,
+        predecessor=None if state.current is None else state.current.publication_id,
+        phase=row[0],
+        holder=row[1],
+        acquired_at=row[2],
+        expires_at=row[3],
+        target_sha=row[4],
+    )
+
+
+def recover_prepared_operation(
+    conn: psycopg.Connection,
+    *,
+    abandoned: RolloutIdentity,
+    dispatch: PreparedDispatch,
+    plan: NormalStartPlan,
+    target_sha: str,
+    fresh_collection: ManagedWriterCollection,
+) -> RolloutIdentity:
+    """Replace one exact abandoned pending operation in a coordinator transaction.
+
+    Only the verified coordinator may call this after staging a fresh all-unit
+    writer closure. The closure supplies the immutable replacement identity;
+    this function cross-checks its target against the validated plan, performs
+    an exact predecessor CAS, and refuses any stale, partial, or mismatched
+    recovery without publishing or starting a service.
+    """
+    units = tuple(entry.unit for entry in plan.units)
+    if dispatch.preflights or dispatch.coordinator not in units:
+        raise ManagedWriterBarrierError("prepared recovery must begin without unit preflights")
+    state = _locked_publication(conn)
+    if state.pending is None or state.pending.operation != abandoned:
+        raise ManagedWriterBarrierError("abandoned pending operation no longer matches")
+    registered = lock_registered_units(conn)
+    if {(unit.machine, unit.home) for unit in units} != registered:
+        raise ManagedWriterBarrierError("prepared recovery must cover every registered unit")
+    gateways = conn.execute(
+        "SELECT machine_name, home FROM machine_units WHERE serve_gateway "
+        "ORDER BY machine_name, home"
+    ).fetchall()
+    if gateways != [(dispatch.coordinator.machine, dispatch.coordinator.home)]:
+        raise ManagedWriterBarrierError("prepared coordinator is not the unique gateway unit")
+    row = conn.execute("SELECT clock_timestamp() FROM deployment_state WHERE id=1").fetchone()
+    if row is None:
+        raise ManagedWriterBarrierError("deployment state is missing")
+    now = row[0]
+    if dispatch.valid_until <= now:
+        raise ManagedWriterBarrierError("prepared recovery deadline expired")
+    new_operation = fresh_collection.operation
+    if (
+        new_operation == abandoned
+        or new_operation.holder == abandoned.holder
+        or new_operation.target_sha != target_sha
+        or fresh_collection.challenge != dispatch.request_id
+        or fresh_collection.candidate_digest != dispatch.request_digest
+    ):
+        raise ManagedWriterBarrierError(
+            "prepared recovery collection has a different operation or target"
+        )
+    cursor = conn.execute(
+        "UPDATE deployment_state SET phase='updating',kind='rollout',holder=%s,"
+        "acquired_at=%s,expires_at=%s,target_sha=%s,started_at=%s,ended_at=NULL,"
+        "note=NULL,outcome=NULL WHERE id=1 AND phase='updating' AND holder=%s "
+        "AND acquired_at=%s AND target_sha=%s",
+        (
+            new_operation.holder,
+            new_operation.acquired_at,
+            dispatch.valid_until,
+            new_operation.target_sha,
+            now,
+            abandoned.holder,
+            abandoned.acquired_at,
+            abandoned.target_sha,
+        ),
+    )
+    if cursor.rowcount != 1:
+        raise ManagedWriterBarrierError("prepared predecessor CAS failed")
+    replacement = PendingPublication(
+        operation=new_operation,
+        predecessor=None if state.current is None else state.current.publication_id,
+        candidate_digest=dispatch.request_digest,
+        challenge=dispatch.request_id,
+        units=units,
+        normal_start_plan=plan,
+        dispatch=dispatch,
+    )
+    recover_pending_publication(conn, abandoned, replacement, fresh_collection)
+    return new_operation
 
 
 def bind_prepared_participant(

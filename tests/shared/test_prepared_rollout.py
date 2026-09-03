@@ -12,7 +12,13 @@ import psycopg
 import pytest
 from psycopg import sql
 
-from shared.managed_writer_barrier import ManagedWriterBarrierError
+from shared.managed_writer_barrier import (
+    ManagedUnit,
+    ManagedUnitClosure,
+    ManagedWriterBarrierError,
+    ManagedWriterCollection,
+    RolloutIdentity,
+)
 from shared.managed_writer_publication import (
     CandidateUnitPlan,
     NormalService,
@@ -24,7 +30,9 @@ from shared.managed_writer_publication import (
 from shared.prepared_rollout import (
     bind_prepared_participant,
     create_prepared_operation,
+    read_prepared_blockage,
     record_prepared_preflight,
+    recover_prepared_operation,
     require_all_prepared_preflights,
     require_prepared_dispatch,
 )
@@ -98,6 +106,41 @@ def proposal(conn: psycopg.Connection) -> tuple[PreparedDispatch, NormalStartPla
         coordinator=unit,
         valid_until=now[0] + timedelta(seconds=60),
     ), plan
+
+
+def recovery_collection(
+    conn: psycopg.Connection,
+    dispatch: PreparedDispatch,
+    plan: NormalStartPlan,
+    *,
+    target_sha: str,
+) -> ManagedWriterCollection:
+    row = conn.execute("SELECT clock_timestamp()").fetchone()
+    assert row is not None
+    operation = RolloutIdentity(
+        holder="prepared:gateway:recovery:1", acquired_at=row[0], target_sha=target_sha
+    )
+    return ManagedWriterCollection(
+        operation=operation,
+        candidate_digest=dispatch.request_digest,
+        challenge=dispatch.request_id,
+        collected_at=row[0],
+        valid_until=dispatch.valid_until,
+        units=tuple(
+            ManagedUnitClosure(
+                unit=ManagedUnit(
+                    machine=entry.unit.machine,
+                    home=entry.unit.home,
+                    inventory_digest=entry.unit.inventory_digest,
+                ),
+                boot_id=uuid4(),
+                observer_instance=uuid4(),
+                observation_digest="9" * 64,
+                outcome="old_writers_absent_relaunchers_fenced",
+            )
+            for entry in plan.units
+        ),
+    )
 
 
 def test_one_operation_and_exact_participant_binding(dispatch_db: psycopg.Connection) -> None:
@@ -184,3 +227,115 @@ def test_pre_effect_rejection(dispatch_db: psycopg.Connection, mutation: str) ->
         )
     row = conn.execute("SELECT managed_writer_evidence FROM deployment_state WHERE id=1").fetchone()
     assert row is not None and row[0] is None
+
+
+def test_blockage_read_reports_exact_abandoned_operation(dispatch_db: psycopg.Connection) -> None:
+    dispatch, plan = proposal(dispatch_db)
+    with dispatch_db.transaction():
+        operation = create_prepared_operation(
+            dispatch_db,
+            dispatch=dispatch,
+            plan=plan,
+            target_sha="1" * 40,
+            holder="gateway:pid123",
+        )
+    with dispatch_db.transaction():
+        blockage = read_prepared_blockage(dispatch_db)
+    assert blockage.operation == operation
+    assert blockage.predecessor is None
+    assert blockage.phase == "updating"
+    assert blockage.holder == operation.holder
+    assert blockage.acquired_at == operation.acquired_at
+    assert blockage.target_sha == operation.target_sha
+
+
+def test_recovery_cas_replaces_exact_predecessor(dispatch_db: psycopg.Connection) -> None:
+    dispatch, plan = proposal(dispatch_db)
+    with dispatch_db.transaction():
+        abandoned = create_prepared_operation(
+            dispatch_db,
+            dispatch=dispatch,
+            plan=plan,
+            target_sha="1" * 40,
+            holder="gateway:pid123",
+        )
+    replacement_dispatch = dispatch.model_copy(
+        update={"request_id": uuid4(), "request_digest": "7" * 64}
+    )
+    collection = recovery_collection(dispatch_db, replacement_dispatch, plan, target_sha="2" * 40)
+    wrong_collection = collection.model_copy(
+        update={"operation": collection.operation.model_copy(update={"target_sha": "3" * 40})}
+    )
+    with pytest.raises(ManagedWriterBarrierError, match="target"), dispatch_db.transaction():
+        recover_prepared_operation(
+            dispatch_db,
+            abandoned=abandoned,
+            dispatch=replacement_dispatch,
+            plan=plan,
+            target_sha="2" * 40,
+            fresh_collection=wrong_collection,
+        )
+    with dispatch_db.transaction():
+        recovered = recover_prepared_operation(
+            dispatch_db,
+            abandoned=abandoned,
+            dispatch=replacement_dispatch,
+            plan=plan,
+            target_sha="2" * 40,
+            fresh_collection=collection,
+        )
+        row = dispatch_db.execute(
+            "SELECT holder, acquired_at, target_sha, managed_writer_evidence "
+            "FROM deployment_state WHERE id=1"
+        ).fetchone()
+    assert recovered == collection.operation
+    assert row is not None
+    assert row[:3] == (recovered.holder, recovered.acquired_at, recovered.target_sha)
+    assert row[3]["pending"]["operation"] == recovered.model_dump(mode="json")
+    assert row[3]["pending"]["predecessor"] is None
+
+    with (
+        pytest.raises(ManagedWriterBarrierError, match="no longer matches"),
+        dispatch_db.transaction(),
+    ):
+        recover_prepared_operation(
+            dispatch_db,
+            abandoned=abandoned,
+            dispatch=replacement_dispatch,
+            plan=plan,
+            target_sha="2" * 40,
+            fresh_collection=collection,
+        )
+
+
+def test_recovery_cas_refuses_tampered_deployment_holder(
+    dispatch_db: psycopg.Connection,
+) -> None:
+    dispatch, plan = proposal(dispatch_db)
+    with dispatch_db.transaction():
+        abandoned = create_prepared_operation(
+            dispatch_db,
+            dispatch=dispatch,
+            plan=plan,
+            target_sha="1" * 40,
+            holder="gateway:pid123",
+        )
+        dispatch_db.execute("UPDATE deployment_state SET holder='tampered:pid456' WHERE id=1")
+    replacement_dispatch = dispatch.model_copy(
+        update={"request_id": uuid4(), "request_digest": "7" * 64}
+    )
+    collection = recovery_collection(dispatch_db, replacement_dispatch, plan, target_sha="2" * 40)
+    with (
+        pytest.raises(ManagedWriterBarrierError, match="predecessor CAS failed"),
+        dispatch_db.transaction(),
+    ):
+        recover_prepared_operation(
+            dispatch_db,
+            abandoned=abandoned,
+            dispatch=replacement_dispatch,
+            plan=plan,
+            target_sha="2" * 40,
+            fresh_collection=collection,
+        )
+    row = dispatch_db.execute("SELECT holder FROM deployment_state WHERE id=1").fetchone()
+    assert row == ("tampered:pid456",)
