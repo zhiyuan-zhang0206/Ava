@@ -442,7 +442,7 @@ async def run() -> None:
             liveness=liveness,
             extra_routes={
                 ("GET", "/stats"): _stats_route(host, scheduler),
-                ("POST", "/cancel-turn"): _cancel_turn_route(scheduler),
+                ("POST", "/cancel-turn"): _cancel_turn_route(scheduler, host),
             },
         )
         logger.info(
@@ -486,11 +486,11 @@ async def run() -> None:
         _log.info("[agent-host] daemon stopped")
 
 
-def _cancel_turn_route(scheduler: TurnScheduler):  # noqa: ANN202 — RouteHandler, declared in shared.daemon_health
+def _cancel_turn_route(scheduler: TurnScheduler, host: AgentHost):  # noqa: ANN202
     """A `POST /cancel-turn` handler — the hosted force-terminate / wedged
     recovery primitive.
 
-    Body: `{"agent_id": <int>}`. Cancels that agent's turn task with the
+    Body: `{"agent_id": <int>, "command_id": <int>}`. Cancels the captured task with the
     bounded unwind (a C-call-blocked turn is reported, not awaited forever) and
     answers `{"cancelled": true|false}` — false means no task was running,
     which the ops caller treats as "nothing to accelerate", never as an error.
@@ -506,14 +506,21 @@ def _cancel_turn_route(scheduler: TurnScheduler):  # noqa: ANN202 — RouteHandl
 
         try:
             payload = json.loads(body or b"{}")
-            agent_id = int(payload["agent_id"])  # type: ignore[reportUnknownArgumentType]
+            agent_id, command_id = payload["agent_id"], payload["command_id"]
         except (ValueError, KeyError, TypeError, json.JSONDecodeError):
             return (
                 400,
-                json.dumps({"error": "agent_id (int) required"}).encode(),
+                json.dumps({"error": "positive agent_id and command_id required"}).encode(),
                 "application/json",
             )
-        cancelled = await scheduler.cancel_agent(agent_id)
+        if (
+            type(agent_id) is not int
+            or type(command_id) is not int
+            or agent_id <= 0
+            or command_id <= 0
+        ):
+            return 400, b'{"error":"positive integer identifiers required"}', "application/json"
+        cancelled = await scheduler.cancel_exact_force(agent_id, command_id, host.accepts_force)
         return 200, json.dumps({"cancelled": cancelled}).encode(), "application/json"
 
     return handler

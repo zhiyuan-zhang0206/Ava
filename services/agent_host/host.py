@@ -94,10 +94,11 @@ This module runs turns. The rest of the agent lifecycle is hosted-aware:
   `restart_requested` channel; this host drops the runtime and ends the task
   without an exit-notify, so the row stays runnable and the next wake starts
   clean with a rebinded config view.
-- **terminate** — graceful terminate is the durable terminate inbound, claimed
-  by the running turn (or the next wake of a still-runnable row); force
-  terminate marks the row dead without a kill and best-effort cancels the turn
-  task through this host's `/cancel-turn` route (`ops/ops_lifecycle.py`).
+- **terminate** — force fixes the original command/target as an active pointer.
+  `/cancel-turn` validates that command against this boot owner before cancelling
+  the captured Task. Actual work is shielded until its resources settle; only
+  the original serialized pump can observe completion. Force returns accepted,
+  not a claim that the continuation or its child processes have already exited.
 - **cluster update** — the hosted-aware quiesce skips the per-agent drain
   because hosted turns are checkpointer tasks rather than per-agent processes.
   The host maintains each row's `running` / `idling` status around those turns;
@@ -304,6 +305,71 @@ class AgentHost:
     # ── the scheduler's entry point ──────────────────────────────────────────
 
     async def run_turn(self, agent_id: int) -> None:
+        """Retain the scheduler slot until real work, including threads, settles.
+
+        Cancelling an await of ``to_thread`` does not stop the thread. Shield the
+        whole owned turn (including boot and cleanup), not only graph return.
+        Durable interrupts still stop cooperative LLM/exec work. Repeated outer
+        cancellation must not release this agent to a concurrent successor.
+        """
+        from shared.turn_identity import HostedTurnResources, bind_hosted_resources
+
+        resources = HostedTurnResources()
+        with bind_hosted_resources(resources):
+            work = asyncio.create_task(self._run_turn(agent_id))
+        cancelled = False
+        try:
+            while not work.done():
+                try:
+                    await asyncio.shield(work)
+                except asyncio.CancelledError:
+                    cancelled = True
+            work.result()
+        finally:
+            from shared.hosted_force import original_host_force
+
+            if resources.unresolved:
+                # Keep the actual domains and scheduler registration alive.
+                # No timer/cache reset can turn a failed close into quiescence.
+                self._in_flight.add(agent_id)
+                logger.error(
+                    "hosted resources unresolved; force remains unobserved, "
+                    "exact resource inspection required: {requests}",
+                    agent_id=agent_id,
+                    requests=[str(path) for path in resources.unresolved],
+                )
+                while True:
+                    try:
+                        await asyncio.Future[None]()
+                    except asyncio.CancelledError:
+                        continue
+            # Still inside the existing scheduler's exclusive per-agent pump.
+            # No-task wakes also take this path without admitting a runtime.
+            if cancelled:
+                self.drop_agent(agent_id)
+            settlement = asyncio.create_task(
+                original_host_force(
+                    self._pool, agent_id, self._owner, self._machine, quiescent=True
+                )
+            )
+            while not settlement.done():
+                try:
+                    await asyncio.shield(settlement)
+                except asyncio.CancelledError:
+                    cancelled = True
+            settlement.result()
+        if cancelled:
+            raise asyncio.CancelledError
+
+    async def accepts_force(self, agent_id: int, command_id: int) -> bool:
+        """Authenticate cancellation against this live host's actual boot owner."""
+        from shared.hosted_force import original_host_force
+
+        return await original_host_force(
+            self._pool, agent_id, self._owner, self._machine, command_id=command_id
+        )
+
+    async def _run_turn(self, agent_id: int) -> None:
         """Run `agent_id` until it has nothing left to claim, then return.
 
         One read decides everything: whether this agent is ours to run, and what
@@ -539,6 +605,14 @@ class AgentHost:
                     "FROM agents_meta m "
                     "WHERE ("
                     "    m.status = 'idling' "
+                    "    OR (m.status='terminated' AND m.runtime_kind='hosted' "
+                    "        AND m.runtime_owner=%s AND EXISTS ("
+                    "          SELECT 1 FROM inbound_messages force "
+                    "          WHERE force.id=m.lifecycle_command_id AND force.agent_id=m.id "
+                    "          AND force.target_generation=m.runtime_generation "
+                    "          AND force.target_owner=m.runtime_owner AND force.kind='terminate' "
+                    "          AND force.status='claimed' AND force.applied_at IS NOT NULL "
+                    "          AND force.observed_at IS NULL)) "
                     "    OR (m.status = 'running' "
                     "        AND (m.last_active_at IS NULL "
                     "             OR m.last_active_at < now() - make_interval(secs => %s)) "
@@ -557,6 +631,7 @@ class AgentHost:
                     (
                         stale_after_s,
                         stale_after_s,
+                        self._owner,
                         stale_after_s,
                         stale_after_s,
                         self._machine,

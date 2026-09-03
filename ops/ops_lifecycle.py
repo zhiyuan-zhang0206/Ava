@@ -133,29 +133,23 @@ async def terminate_agent_op(
     """Local-target graceful or force terminate. Caller handles cross-machine."""
     if body.force:
         hosted = runner_mode.is_hosted()
-        old_status, pid, killed_page_names = await asyncio.to_thread(
+        old_status, pid, killed_page_names, command_id = await asyncio.to_thread(
             _terminate_force_blocking, agent_id, body, db_pool, kill_process=not hosted
         )
-        if old_status is AgentStatus.TERMINATED:
+        if old_status is AgentStatus.TERMINATED and not hosted:
             return TerminateAgentResponse(status="already_terminated")
         if hosted:
-            # No process to SIGKILL — the row is terminated and the durable
-            # terminate inbound (inserted inside the force transaction) is the
-            # correctness mechanism: a running turn claims it and exits. This
-            # call only ACCELERATES a turn wedged inside a long await, and it
-            # is best-effort by construction: a host that is down or
-            # restarting means the turn is already gone (checkpointed, and no
-            # wake will resurrect a terminated row).
-            await _cancel_hosted_turn_best_effort(agent_id)
+            await _cancel_hosted_turn_best_effort(agent_id, command_id)
         for page_name in killed_page_names:
             await publish_page_closed(agent_id, page_name)
         _log.info(
-            "[gateway] agent %s force-killed by %s (pid=%s)",
+            "[gateway] agent %s force requested by %s (pid=%s)",
             agent_id,
             body.source,
             pid,
         )
-        return TerminateAgentResponse(status="force_killed")
+        # Neither HTTP delivery nor Task.cancel proves resource quiescence.
+        return TerminateAgentResponse(status="enqueued" if hosted else "force_killed")
 
     s = await asyncio.to_thread(get_agent_status, agent_id)
     if s is AgentStatus.TERMINATED:
@@ -173,16 +167,14 @@ async def terminate_agent_op(
     return TerminateAgentResponse(status="enqueued")
 
 
-async def _cancel_hosted_turn_best_effort(agent_id: int) -> None:
+async def _cancel_hosted_turn_best_effort(agent_id: int, command_id: int) -> None:
     """Accelerate a hosted force-terminate by cancelling the agent's turn task.
 
     Dials the local agent-host's loopback health port (`POST /cancel-turn`);
     the host cancels the turn with its bounded unwind and reports a
     C-call-blocked straggler instead of hanging. Every failure is swallowed at
-    INFO with the exception — the durable terminate inbound already inserted by
-    the force transaction is what makes the row dead; this hop only shortens
-    the window for a turn stuck inside a long await, and a host that is down /
-    restarting means the turn is already gone.
+    INFO with the exception. The durable force pointer stays unobserved until
+    the original host actually settles; a dead host is not child-exit proof.
     """
     import httpx
 
@@ -192,13 +184,13 @@ async def _cancel_hosted_turn_best_effort(agent_id: int) -> None:
         async with httpx.AsyncClient(timeout=httpx.Timeout(2.0)) as client:
             resp = await client.post(
                 f"http://127.0.0.1:{health_port('agent_host')}/cancel-turn",
-                json={"agent_id": agent_id},
+                json={"agent_id": agent_id, "command_id": command_id},
             )
             resp.raise_for_status()
     except Exception:
         _log.info(
             "hosted turn-cancel call for agent %s failed (non-fatal; the durable "
-            "terminate inbound already finalized the row)",
+            "force command remains accepted; quiescence is not confirmed)",
             agent_id,
             exc_info=True,
         )
@@ -210,7 +202,7 @@ def _terminate_force_blocking(
     db_pool: ConnectionPool,
     *,
     kill_process: bool,
-) -> tuple[AgentStatus, int | None, list[str]]:
+) -> tuple[AgentStatus, int | None, list[str], int]:
     """Sync force-kill section — via to_thread: session kill + SIGKILL + status
     flip + AgentUpdated + terminate inbound. Returns (old status, pid, page names).
 
@@ -227,7 +219,7 @@ def _terminate_force_blocking(
     _publish_force_terminate_inbound(agent_id, inbound_id, body.source)
     with db_pool.connection() as conn:
         publish_agent_updated_sync(conn, agent_id)
-    return old_status, pid, killed_page_names
+    return old_status, pid, killed_page_names, inbound_id
 
 
 def _terminate_graceful_blocking(

@@ -23,6 +23,10 @@ async def apply_hosted_lifecycle(
     Termination is observed in this same transaction: the caller has already
     returned from the real continuation and dropped its non-authoritative cache.
     """
+    from shared.turn_identity import hosted_resources_settled
+
+    if not hosted_resources_settled():
+        return None
     async with async_write_transaction(pool) as conn:
         cursor = await conn.execute(
             "SELECT lifecycle_command_id,lease_expires_at FROM agents_meta WHERE id=%s "
@@ -96,6 +100,11 @@ async def admit_hosted_runtime(
                 "runtime_protocol_version = 0, "
                 "lease_expires_at = now() + make_interval(secs => %s) "
                 "WHERE id = %s AND machine = %s AND status = %s AND pid IS NULL "
+                "AND status IN ('running','idling') "
+                "AND NOT EXISTS (SELECT 1 FROM inbound_messages force "
+                "WHERE force.id=agents_meta.lifecycle_command_id AND force.kind='terminate' "
+                "AND force.status='claimed' AND force.applied_at IS NOT NULL "
+                "AND force.observed_at IS NULL) "
                 "AND (runtime_kind IS NULL OR runtime_kind = 'hosted') "
                 "AND (runtime_owner IS NULL OR runtime_owner = %s "
                 "OR lease_expires_at IS NULL OR lease_expires_at <= now()) "
@@ -127,6 +136,10 @@ async def settle_hosted_runtime(
     incarnation: RuntimeIncarnation,
 ) -> bool:
     """Settle an ordinary turn; only durable lifecycle apply releases ownership."""
+    from shared.turn_identity import hosted_resources_settled
+
+    if not hosted_resources_settled():
+        return False
     async with async_write_transaction(pool) as conn:
         cur = await conn.execute(
             "UPDATE agents_meta SET status = 'idling', "
