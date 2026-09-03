@@ -31,6 +31,16 @@ _DRY_RUN_UV_SYNC_TIMEOUT_S = 180.0
 _RUNNER_PROBE_TIMEOUT_S = 5.0
 _OFFSITE_PROBE_TIMEOUT_S = 5.0
 _WINDOW_STAGES = ("stop_the_world", "local_leg", "readiness", "phase_b")
+# The maintenance window the gate estimates: the period the cluster entry
+# (gateway + local services) is down. phase_b is deliberately excluded — it
+# is the remote-runner fan-out after readiness already passed (gateway
+# serving), its duration is dominated by the slowest remote runner (the
+# Windows leg is ~2 orders of magnitude slower) and bounded by poll
+# timeouts, so counting it fully makes the estimate describe convergence,
+# not the maintenance window; with the 10-value window a single slow
+# rollout pins p95 at its max and the gate refuses every rollout with no
+# way to refresh (2026-09-02 self-lock, estimate 126.2s >= 120s).
+_WINDOW_ESTIMATE_STAGES = ("stop_the_world", "local_leg", "readiness")
 _SEED_STAGE_DURATIONS = {
     "stop_the_world": 8.0,
     "local_leg": 30.0,
@@ -100,18 +110,24 @@ def _p95(durations: list[float]) -> float:
 
 
 def maintenance_window_breakdown(*, persist_seed: bool = True) -> dict[str, float]:
-    """Return the p95 durations for exactly the commit-window stages."""
+    """Return the p95 durations for all recorded rollout stages."""
     baseline = _load_maintenance_baseline(persist_seed=persist_seed)
     stages = cast(dict[str, list[float]], baseline["stages"])
     return {name: _p95([float(value) for value in stages[name]]) for name in _WINDOW_STAGES}
 
 
 def estimate_maintenance_window(*, persist_seed: bool = True) -> float:
-    """Estimate commit duration from p95 telemetry, conservatively before the first run."""
+    """Estimate the entry's downtime, excluding recorded Phase B remote fan-out.
+
+    The gateway is serving during Phase B, so including its slowest runner would
+    describe convergence rather than the maintenance window and repeat the
+    2026-09-02 self-lock (Ava-5733 / #2343).
+    """
     baseline = _load_maintenance_baseline(persist_seed=persist_seed)
     stages = cast(dict[str, list[float]], baseline["stages"])
-    breakdown = {name: _p95([float(value) for value in stages[name]]) for name in _WINDOW_STAGES}
-    estimate = sum(breakdown.values())
+    estimate = sum(
+        _p95([float(value) for value in stages[name]]) for name in _WINDOW_ESTIMATE_STAGES
+    )
     n = cast(int, baseline["n"])
     return estimate + _NO_BASELINE_MARGIN_S if n == 0 else estimate
 
