@@ -350,11 +350,13 @@ class AgentHost:
                     agent_id=agent_id,
                     requests=[str(path) for path in resources.unresolved],
                 )
-                while True:
+                while resources.unresolved:
+                    resources.changed.clear()
                     try:
-                        await asyncio.Future[None]()
+                        await resources.changed.wait()
                     except asyncio.CancelledError:
-                        continue
+                        cancelled = True
+                self._in_flight.discard(agent_id)
             # Still inside the existing scheduler's exclusive per-agent pump.
             # No-task wakes also take this path without admitting a runtime.
             if cancelled:

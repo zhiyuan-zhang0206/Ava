@@ -45,6 +45,7 @@ from agent.graph._exec_result import (
 from agent.graph._exec_stream import ExecOutputChunkPublisher, StreamCap, StreamingTextIO
 from shared import editable_install
 from shared.env_registry import AGENT_BIRTH_CONFIG_ENV, AGENT_CONFIG_OVERLAY_ENV
+from shared.log import logger
 from shared.paths import exec_run_dir
 from shared.platform import CREATE_NO_WINDOW, IS_WINDOWS
 from shared.turn_identity import current_hosted_resources
@@ -171,6 +172,10 @@ def _build_child_env(
     return env
 
 
+class _ExecNeverStartedError(OSError):
+    """Popen refused before returning a child; preallocated resources closed."""
+
+
 def _spawn(
     request_path: Path,
     result_path: Path,
@@ -201,6 +206,10 @@ def _spawn(
             creationflags=CREATE_NO_WINDOW,
             start_new_session=not IS_WINDOWS,
         )
+    except OSError as original:
+        if windows_job is not None:
+            windows_job.close()
+        raise _ExecNeverStartedError(str(original)) from original
     except BaseException as original:
         if windows_job is not None:
             _attempt_spawn_cleanup(original, "job_close", windows_job.close)
@@ -339,6 +348,8 @@ async def _finish_failed_run(
     domain_close: _exec_process.DomainCloseOwner | None,
     reader_join_task: asyncio.Task[None] | None,
     reader: threading.Thread | None,
+    *,
+    request_paths: tuple[Path, Path, Path | None] | None = None,
 ) -> bool:
     """Settle an interrupted run without replacing its primary failure."""
     if root_exit_task is None or reap_task is None or domain_close is None:
@@ -350,6 +361,10 @@ async def _finish_failed_run(
             root_exit_task, reap_task, domain_close, reader_join_task
         )
     _exec_process.annotate_original_failure(original, failures)
+    if failures and request_paths is not None:
+        _retain_late_reader_completion(
+            _exec_process.ExecTeardownError(failures), *request_paths, reader
+        )
     return not failures
 
 
@@ -370,11 +385,50 @@ def _finish_request_evidence(
     if scope is not None:
         if not settled:
             return
-        scope.unresolved.pop(request_path)
+        scope.complete(request_path, scope.unresolved[request_path])
     for path in (request_path, result_path, gate):
         if path is not None:
             with contextlib.suppress(FileNotFoundError):
                 path.unlink()
+
+
+def _retain_late_reader_completion(
+    failure: _exec_process.ExecTeardownError,
+    request: Path,
+    result: Path,
+    gate: Path | None,
+    reader: threading.Thread | None,
+) -> None:
+    """A failed bounded join may later finish; other failed stages stay unknown.
+
+    ExecTeardownError includes every failed stage after all owner tasks have
+    completed. A reader-only failure therefore positively proves close/root/reap.
+    This callback waits for that same reader, never retries a released POSIX pgid.
+    """
+    scope = current_hosted_resources()
+    if scope is None or reader is None or not failure.failures:
+        return
+    if any(item.stage != "reader_join" for item in failure.failures):
+        return
+    domain = scope.unresolved[request]
+
+    async def complete_reader() -> None:
+        await asyncio.to_thread(reader.join)
+        if scope.complete(request, domain):
+            for path in (request, result, gate):
+                if path is not None:
+                    with contextlib.suppress(FileNotFoundError):
+                        path.unlink()
+
+    task = asyncio.create_task(complete_reader(), name=f"exec-late-reader-{request.stem}")
+    scope.completions.add(task)
+
+    def finished(completed: asyncio.Task[None]) -> None:
+        scope.completions.discard(completed)
+        if not completed.cancelled() and completed.exception() is not None:
+            logger.error("late exec reader completion failed: {error}", error=completed.exception())
+
+    task.add_done_callback(finished)
 
 
 async def _run_in_subprocess(
@@ -415,7 +469,6 @@ async def _run_in_subprocess(
         return request_error, None
 
     stream = StreamingTextIO()
-    cancelled = timed_out = False
     proc: subprocess.Popen[bytes] | None = None
     reader: threading.Thread | None = None
     root_exit_task: asyncio.Task[None] | None = None
@@ -440,6 +493,7 @@ async def _run_in_subprocess(
             if resource_scope is not None:
                 resource_scope.unresolved[request_path] = domain
         except OSError as exc:
+            resources_settled = isinstance(exc, _ExecNeverStartedError)
             return _ExecCrashed(
                 output=f"exec subprocess could not be spawned: {exc}",
                 exc=exc,
@@ -482,24 +536,33 @@ async def _run_in_subprocess(
         resources_settled = True
 
         payload, envelope_error = _read_result_envelope(result_path, proc.returncode)
-        result = _result_from_payload(
-            stream.getvalue(),
+        return (
+            _result_from_payload(
+                stream.getvalue(),
+                payload,
+                cancelled=cancelled,
+                timed_out=timed_out,
+                envelope_error=envelope_error,
+                stream_cap=stream.cap(),
+            ),
             payload,
-            cancelled=cancelled,
-            timed_out=timed_out,
-            envelope_error=envelope_error,
-            stream_cap=stream.cap(),
         )
-        return result, payload
     except asyncio.CancelledError as original:
         # The exec node's outer shield (asyncio.wait_for) cancels this task on
         # node timeout. Cancellation is not complete until every owned resource
         # is settled; otherwise the next exec inherits a zombie/thread leak.
         resources_settled = await _finish_failed_run(
-            original, root_exit_task, reap_task, domain_close, reader_join_task, reader
+            original,
+            root_exit_task,
+            reap_task,
+            domain_close,
+            reader_join_task,
+            reader,
+            request_paths=(request_path, result_path, windows_job_gate),
         )
         raise
     except _exec_process.ExecTeardownError as exc:
+        _retain_late_reader_completion(exc, request_path, result_path, windows_job_gate, reader)
         # Cleanup failure is an exec outcome, not an agent-process failure.
         return (
             _ExecCrashed(
@@ -515,7 +578,13 @@ async def _run_in_subprocess(
         )
     except Exception as original:
         resources_settled = await _finish_failed_run(
-            original, root_exit_task, reap_task, domain_close, reader_join_task, reader
+            original,
+            root_exit_task,
+            reap_task,
+            domain_close,
+            reader_join_task,
+            reader,
+            request_paths=(request_path, result_path, windows_job_gate),
         )
         raise
     finally:
