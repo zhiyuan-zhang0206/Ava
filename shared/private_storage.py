@@ -67,7 +67,11 @@ def converge_private_tree(path: Path) -> Path:
     storage convention. Converge owns their durable permission repair, but it
     must never follow a symlink out of the tree while doing so.
     """
-    if _is_foreign_owned(path.lstat()):
+    try:
+        current = path.lstat()
+    except FileNotFoundError:
+        current = None
+    if current is not None and _is_foreign_owned(current):
         # A directory owned by another account can never be chmod'd by
         # converge — warn and leave it (and its subtree) alone instead of
         # aborting the whole converge run (wsl 2026-09-02 boot loop).
