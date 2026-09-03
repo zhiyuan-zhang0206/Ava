@@ -1,16 +1,7 @@
-"""
-System Prompt Extension Point — plugins inject behavior conventions into the system prompt.
+"""System-prompt extension point for framework and plugin behavior sections.
 
-Plugins register section functions via `register_system_prompt_section(fn)`.
-`build_system_prompt()` concatenates in registration order: base prompt + SDK overview + all sections.
-
-Usage (in plugin's plugin.py):
-
-    from agent.graph._system_prompt import register_system_prompt_section
-
-    @register_system_prompt_section
-    def my_conventions() -> str:
-        return "## My Plugin Conventions\\n\\nAlways do X before Y."
+`build_system_prompt()` combines the base prompt, SDK overview, and sections
+registered through `register_system_prompt_section()` in registration order.
 """
 
 import contextlib
@@ -75,14 +66,7 @@ def register_system_prompt_section(fn: Callable[[], str]) -> Callable[[], str]:
     return fn
 
 
-# Framework-owned behavioral sections, grouped by bucket and registered (=
-# rendered) in bucket order: SDK detail -> Conversation -> Conduct ->
-# Capabilities. Each stays an independent AVA_SYSTEM_PROMPT_* / AVA_SDK_* toggle; the
-# grouping is reading-order only, not nested headings (deferred until the count
-# outgrows flat `#` headings — see future/coding/prompt-architecture.md
-# "Section taxonomy"). Plugin tool sections append after these, so the full
-# flow is identity (base, ends with the SDK overview) -> SDK detail ->
-# conversation -> conduct -> capabilities -> tools.
+# Framework sections render by bucket: SDK detail -> Conversation -> Conduct -> Capabilities.
 
 
 # --- SDK detail: expanded contracts for the highest-frequency namespaces ---
@@ -378,6 +362,23 @@ def _communication_style_section() -> str:
     if style == "off":
         return ""
     return _COMMUNICATION_STYLE_SECTIONS[style]
+
+
+_STRONG_USER_TONE = "You are a trusted peer to the user, not a cheerleader. Never open with empty praise or reassurance — answer the question, do not validate it. Assess the user's ideas on your own before responding; when you hold a real reservation or disagreement, say it and the reasoning behind it before carrying out the adopted course. Honest judgment is more useful than agreement, and unsupported approval is not helpful even when it feels polite. Keep the tone direct and equal — be the partner who keeps the user honest, not the echo that repeats them."
+_LIGHT_USER_TONE = "State conclusions and judgments directly instead of hedging what you know. Declare uncertainty only where it is genuinely real; do not perform modesty or dress a known fact as a guess. Be direct and to the point — the useful answer is the specific one, not the careful one."
+_VERY_LIGHT_USER_TONE = "Be honest and direct, and keep honesty from turning into lecturing. Disagree when it is warranted and give the reasoning — but stay a peer, not a schoolmaster. Warmth and candor both belong here; condescension does not."
+_USER_TONE_SECTIONS = {"gemini": _STRONG_USER_TONE, "claude": _VERY_LIGHT_USER_TONE}
+
+
+@register_system_prompt_section
+def _user_tone_section() -> str:
+    """Independent from ``agent_communication_style`` (narration volume vs tone), with a per-family strength gradient; every Claude model defaults off unless explicitly enabled."""
+    if not _resolved("prompt_user_tone_enabled"):
+        return ""
+    from shared.lm.registry import MODELS
+
+    spec = MODELS.get(turn_settings.lm.llm_model)
+    return f"# Communicating with the user\n\n{_USER_TONE_SECTIONS.get(spec.provider if spec is not None else '', _LIGHT_USER_TONE)}"
 
 
 @register_system_prompt_section
