@@ -66,7 +66,7 @@ from tests.e2e._proc import (
 # ---- module-level overrides (run after top-level conftest) ---------------------
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-_PREVIOUS_GATEWAY: subprocess.Popen[str] | None = None
+_previous_gateway: subprocess.Popen[str] | None = None
 
 
 def pytest_collection_modifyitems(
@@ -523,8 +523,8 @@ def gateway_proc(scenario_env: None, monkeypatch: pytest.MonkeyPatch) -> Iterato
     """
     from shared import start_serving
 
-    global _PREVIOUS_GATEWAY  # noqa: PLW0603 — retain the exact prior fixture child, not just its PID.
-    if _PREVIOUS_GATEWAY is not None and _PREVIOUS_GATEWAY.poll() is None:
+    global _previous_gateway  # noqa: PLW0603 — retain the exact prior fixture child, not just its PID.
+    if _previous_gateway is not None and _previous_gateway.poll() is None:
         raise RuntimeError("previous exact gateway fixture has not exited")
 
     # The pytest process imported Settings before this package redirected
@@ -556,7 +556,7 @@ def gateway_proc(scenario_env: None, monkeypatch: pytest.MonkeyPatch) -> Iterato
         log_path=str(log_path),
         pass_fds=(GATEWAY_SOCKET.fileno(),),
     ) as gateway:
-        _PREVIOUS_GATEWAY = gateway
+        _previous_gateway = gateway
         gateway_birth = psutil.Process(gateway.pid).create_time()
         # The retained listener alone is not readiness: require normal HTTP lifespan.
         # /api/agents returns 200 = app is up (lifespan has started db_pool/redis pool)
