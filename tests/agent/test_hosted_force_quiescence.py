@@ -28,6 +28,27 @@ from shared.lifecycle_termination_observe import observe_applied_termination
 from tests.agent.test_inbound_ownership import _agent, _insert
 
 
+def _allow_model_config(
+    *, model: str | None = None, config: dict[str, object] | None = None
+) -> str:
+    """Return the model name unchanged; fake-host tests carry no provider keys."""
+
+    return model or "deepseek-v4-flash-vision-exp"
+
+
+@pytest.fixture(autouse=True)
+def _host_wakes_need_no_provider_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
+    """AgentHost validates the wake's model config before admitting a turn.
+
+    Main's reject-invalid-hosted-model-wake gate (#1494) needs a provider key
+    for the cluster-default model; fake-host force-quiescence tests keep turns
+    independent of installed credentials (same stance as
+    tests/services/test_agent_host.py's wired fixture).
+    """
+
+    monkeypatch.setattr("services.agent_host.host.validate_model_config", _allow_model_config)
+
+
 def _blocking_work(entered: threading.Event, release: threading.Event) -> None:
     entered.set()
     assert release.wait(20), "test must release the real thread"
