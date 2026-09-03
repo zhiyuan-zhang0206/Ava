@@ -695,6 +695,63 @@ def test_start_poller_honors_zero_interval(monkeypatch: pytest.MonkeyPatch) -> N
     assert adapter._poll_task is None
 
 
+async def test_poll_seed_restores_owner_open_id_after_restart(adapter: FeishuAdapter) -> None:
+    """After a daemon restart the owner open id is gone from memory; the
+    seed round restores it from the newest user message in the window so
+    outbound notifications do not fail until the user's next message."""
+    rest = FakeRestClient()
+    adapter._rest_client = rest
+    adapter._poll_chats.add("oc_p2p_1")
+    rest.list_responses = [
+        make_list_response(
+            [
+                make_list_item(message_id="om_3", open_id="ou_owner"),
+                make_list_item(message_id="om_2"),
+            ]
+        )
+    ]
+    assert adapter._last_open_id == ""
+    await adapter._poll_once("oc_p2p_1")
+    assert adapter._last_open_id == "ou_owner"
+    assert adapter.core.received == []  # seed still delivers nothing
+
+
+async def test_poll_seed_restores_open_id_from_list_api_shape(adapter: FeishuAdapter) -> None:
+    """The restore path also understands the ListMessage sender shape."""
+    rest = FakeRestClient()
+    adapter._rest_client = rest
+    adapter._poll_chats.add("oc_p2p_1")
+    rest.list_responses = [
+        make_list_response(
+            [
+                make_list_item_listapi(message_id="om_5", sender_id="ou_listowner"),
+                make_list_item_listapi(message_id="om_4"),
+            ]
+        )
+    ]
+    await adapter._poll_once("oc_p2p_1")
+    assert adapter._last_open_id == "ou_listowner"
+
+
+async def test_poll_seed_ignores_app_messages_for_owner_restore(
+    adapter: FeishuAdapter,
+) -> None:
+    """Bot sends in the window must not masquerade as the owner."""
+    rest = FakeRestClient()
+    adapter._rest_client = rest
+    adapter._poll_chats.add("oc_p2p_1")
+    rest.list_responses = [
+        make_list_response(
+            [
+                make_list_item_listapi(message_id="om_6", sender_id="ou_app", sender_type="app"),
+                make_list_item_listapi(message_id="om_5", sender_id="ou_owner"),
+            ]
+        )
+    ]
+    await adapter._poll_once("oc_p2p_1")
+    assert adapter._last_open_id == "ou_owner"
+
+
 async def test_poll_normalizes_list_message_api_shape(adapter: FeishuAdapter) -> None:
     """Regression: ListMessage items carry no chat_type and put the open id
     on sender.id (id_type=open_id) — the poller must deliver them, not
@@ -741,7 +798,8 @@ async def test_poll_list_api_item_with_union_id_rejected(adapter: FeishuAdapter)
     await adapter._poll_once("oc_p2p_1")
     await adapter._poll_once("oc_p2p_1")
     assert adapter.core.received == []
-    assert adapter._last_open_id == ""
+    # The union-id message must not replace the seed-restored owner id.
+    assert adapter._last_open_id == "ou_user_1"
 
 
 def test_poll_round_delay_partial_failure_keeps_cadence(adapter: FeishuAdapter) -> None:
