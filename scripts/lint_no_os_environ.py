@@ -70,6 +70,8 @@ _SCAN_DIRS = (
 # include a one-line inline comment explaining why.
 _ALLOWED_FILES = frozenset(
     {
+        "scripts/legacy_lkg/prepare.py",  # CI fixed-base reconstruction, before either app Settings exists; never a production entry.
+        "scripts/legacy_lkg/cold_boot.py",  # CI private normal-process env and pre-Settings home rejection proof.
         "shared/config/__init__.py",  # Settings aggregate; role-derives the gateway-config fetch before sub-models construct
         "shared/config/_base.py",  # _unit_home reads AVA_HOME to root path-field defaults at field-construction time
         "shared/config/data_plane.py",  # _self_machine_host reads AVA_MACHINE_HOST/AVA_HOME at sub-model construction time — the settings singleton does not exist yet, sibling sub-models are unreachable, and shared.machine imports settings (circular)
