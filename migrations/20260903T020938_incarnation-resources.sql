@@ -6,7 +6,7 @@ BEGIN
     IF NOT EXISTS (
         SELECT 1 FROM pg_attribute
         WHERE attrelid='agents_meta'::regclass AND attname='incarnation_resources'
-        AND atttypid='jsonb'::regtype AND NOT attnotnull AND NOT attisdropped
+        AND atttypid='jsonb'::regtype AND NOT attnotnull AND NOT atthasdef AND NOT attisdropped
     ) THEN
         RAISE EXCEPTION 'incompatible existing incarnation_resources column';
     END IF;
