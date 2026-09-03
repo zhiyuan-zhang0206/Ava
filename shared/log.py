@@ -490,6 +490,8 @@ def _message_to_params(
     `source` comes from record.extra["source"] (default "system") —
     the unified events table's source column; callers that represent
     an external origin (user / self / agent:N) pass it explicitly.
+    A record with ``transport_source`` instead keeps its ``source`` extra in
+    the payload and uses ``transport_source`` for the table column.
 
     `payload` (dict, serialized to jsonb by the emitter) = record.extra
     minus dedicated columns, plus `msg` (`record.message` formatted
@@ -509,7 +511,8 @@ def _message_to_params(
     if event_explicit == "":
         raise ValueError(f"empty event= passed to logger: {record['message']!r}")
     event = event_explicit or extra.get("label") or "log"
-    source = extra.pop("source", "system")
+    transport_source = extra.pop("transport_source", None)
+    source = transport_source if transport_source is not None else extra.pop("source", "system")
     # "-" sentinel = no agent (gateway / unbound logger), maps to
     # NULL. Other values must be real agent_ids (accepts str | int;
     # int() direct cast).

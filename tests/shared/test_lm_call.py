@@ -127,6 +127,68 @@ def test_invoke_text_emits_chat_billing_span_from_llm_model_name(
     assert tracer.spans[0].attributes["ava.billing.cache_read_tokens"] == 20
 
 
+def test_invoke_text_logs_priced_chat_usage_with_source(
+    loguru_records: list[dict[str, Any]],
+) -> None:
+    """A successful auxiliary text call enters the durable usage ledger.
+
+    Removing the usage emitter would leave ``ava.web.fetch`` and
+    ``ava.understand`` invisible to per-agent cost accounting even though
+    their billing spans still exist.
+    """
+    llm = _FakeLLM(
+        AIMessage(
+            content="answer",
+            usage_metadata={
+                "input_tokens": 100,
+                "output_tokens": 10,
+                "total_tokens": 110,
+                "input_token_details": {"cache_read": 20},
+                "output_token_details": {"reasoning": 4},
+            },
+        ),
+        model_name="deepseek-v4-pro",
+    )
+
+    assert (
+        invoke_text(
+            llm,
+            [{"type": "text", "text": "q"}],
+            desc="d",
+            error_type=ValueError,
+            usage_source="web.fetch",
+        )
+        == "answer"
+    )
+
+    [record] = [record for record in loguru_records if record["extra"].get("event") == "llm_usage"]
+    extra = record["extra"]
+    assert extra["calls"] == 1
+    assert extra["in_total"] == 100
+    assert extra["cache_read"] == 20
+    assert extra["out_total"] == 10
+    assert extra["reasoning"] == 4
+    assert extra["model"] == "deepseek-v4-pro"
+    assert extra["usage_kind"] == "chat"
+    assert extra["source"] == "web.fetch"
+    assert extra["transport_source"] == "system"
+    assert extra["cost_usd"] > 0
+
+
+def test_invoke_text_skips_usage_log_without_usage_metadata(
+    loguru_records: list[dict[str, Any]],
+) -> None:
+    """A response without provider token counts must not masquerade as metered."""
+    llm = _FakeLLM(_FakeResponse("answer"), model_name="deepseek-v4-pro")
+
+    assert (
+        invoke_text(llm, [{"type": "text", "text": "q"}], desc="d", error_type=ValueError)
+        == "answer"
+    )
+
+    assert not [record for record in loguru_records if record["extra"].get("event") == "llm_usage"]
+
+
 def test_invoke_text_empty_response_raises_error_type() -> None:
     """An empty (safety-blocked) response raises the caller's error type, not
     a silent empty string."""

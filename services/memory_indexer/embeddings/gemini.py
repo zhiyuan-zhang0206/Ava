@@ -128,7 +128,7 @@ def _vectors_from_body(body: dict[str, Any], texts: list[str]) -> np.ndarray:
 
 
 def _emit_billing(body: dict[str, Any]) -> None:
-    """Emit the completed Gemini embedding call without affecting it.
+    """Emit completed Gemini embedding accounting without affecting the call.
 
     Called before `_vectors_from_body` on purpose: the provider bills the
     request whether or not our shape validation accepts the response, so a
@@ -136,23 +136,15 @@ def _emit_billing(body: dict[str, Any]) -> None:
     failures are swallowed — they can never break the embed call.
     """
     try:
-        from shared.lm.billing import emit_billing_event, vendor_of_model
-        from shared.lm.pricing import quote
+        from shared.lm.usage import log_usage_fields
 
         usage: dict[str, Any] = body.get("usageMetadata") or {}
         tok_in = int(usage.get("promptTokenCount") or 0)
-        vendor = vendor_of_model(_MODEL_ID)
-        if vendor is None:
-            return
-        priced = quote(_MODEL_ID, tok_in, 0)
-        emit_billing_event(
-            vendor=vendor,
+        log_usage_fields(
             model=_MODEL_ID,
             tok_in=tok_in,
             tok_out=0,
-            cost_usd=priced.cost_usd if priced is not None else 0.0,
             usage_kind="embedding",
-            unpriced=priced is None,
         )
     except Exception:
         return

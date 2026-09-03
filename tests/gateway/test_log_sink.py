@@ -176,6 +176,21 @@ def test_sink_payload_excludes_meta_columns_includes_msg(
     assert payload["custom_field"] == 1
 
 
+def test_sink_preserves_llm_usage_source_in_payload(sink_logger) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    """A usage-path discriminator must not be consumed as event provenance."""
+    sink_logger.info(  # pyright: ignore[reportUnknownMemberType]
+        "metered web answer",
+        event="llm_usage",
+        source="web.fetch",
+        transport_source="system",
+        calls=1,
+    )
+
+    _event, _agent_id, _level, payload = _last_event()  # pyright: ignore[reportUnknownVariableType]
+    assert payload["source"] == "web.fetch"
+    assert "transport_source" not in payload
+
+
 def test_sink_level_is_recorded(sink_logger) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
     """WARNING / ERROR level goes into DB level column — used by sidebar warn_24h/err_24h."""
     sink_logger.warning("uh oh", event="sse_drop")  # pyright: ignore[reportUnknownMemberType]

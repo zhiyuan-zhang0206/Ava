@@ -209,7 +209,10 @@ def test_embed_query_shape(monkeypatch: pytest.MonkeyPatch) -> None:
     assert body["requests"][0]["taskType"] == "RETRIEVAL_QUERY"
 
 
-def test_embed_batch_emits_unpriced_billing_span(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_embed_batch_emits_unpriced_billing_span(
+    monkeypatch: pytest.MonkeyPatch,
+    loguru_records: list[dict[str, Any]],
+) -> None:
     fake = _FakePost(vectors=[[1.0] * DIM], prompt_token_count=123)
     _patch_post(monkeypatch, fake)
     tracer = _enable_tracing(monkeypatch)
@@ -217,10 +220,14 @@ def test_embed_batch_emits_unpriced_billing_span(monkeypatch: pytest.MonkeyPatch
     _provider().embed_batch(["hello"])
 
     _assert_unpriced_embedding_span(tracer, tok_in=123)
+    [record] = [record for record in loguru_records if record["extra"].get("event") == "llm_usage"]
+    assert record["extra"]["usage_kind"] == "embedding"
+    assert record["extra"]["unpriced"] == 1
 
 
-def test_embed_batch_emits_zero_token_span_without_usage_metadata(
+def test_embed_batch_emits_unpriced_accounting_without_usage_metadata(
     monkeypatch: pytest.MonkeyPatch,
+    loguru_records: list[dict[str, Any]],
 ) -> None:
     fake = _FakePost(vectors=[[1.0] * DIM])
     _patch_post(monkeypatch, fake)
@@ -229,6 +236,9 @@ def test_embed_batch_emits_zero_token_span_without_usage_metadata(
     _provider().embed_batch(["hello"])
 
     _assert_unpriced_embedding_span(tracer, tok_in=0)
+    [record] = [record for record in loguru_records if record["extra"].get("event") == "llm_usage"]
+    assert record["extra"]["usage_kind"] == "embedding"
+    assert record["extra"]["unpriced"] == 1
 
 
 def test_embed_query_async_shape(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -328,14 +338,20 @@ def test_embed_batch_empty_short_circuit(monkeypatch: pytest.MonkeyPatch) -> Non
     assert tracer.spans == []
 
 
-def test_embed_retries_then_succeeds(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_embed_retries_then_succeeds(
+    monkeypatch: pytest.MonkeyPatch,
+    loguru_records: list[dict[str, Any]],
+) -> None:
     fake = _FakePost(vectors=[[1.0] * DIM], raises_times=2)
     _patch_post(monkeypatch, fake)
     tracer = _enable_tracing(monkeypatch)
     result = _provider().embed_batch(["hello"])
     assert result.shape == (1, DIM)
     assert fake.call_count == 3
-    assert len(tracer.spans) == 1  # one span per completed call, not per attempt
+    _assert_unpriced_embedding_span(tracer, tok_in=0)
+    [record] = [record for record in loguru_records if record["extra"].get("event") == "llm_usage"]
+    assert record["extra"]["usage_kind"] == "embedding"
+    assert record["extra"]["unpriced"] == 1
 
 
 def test_embed_raises_after_max_retries(monkeypatch: pytest.MonkeyPatch) -> None:

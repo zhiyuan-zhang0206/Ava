@@ -116,18 +116,42 @@ async def test_labeler_emits_batch_billing_after_a_successful_llm_call(
         async def ainvoke(self, _messages: list[Any]) -> AIMessage:
             return response
 
-    def _emit(message: AIMessage, **kwargs: object) -> None:
-        emitted.append((message, kwargs))
+    def _emit(
+        message: AIMessage,
+        model: str,
+        *,
+        usage_kind: str,
+        for_agent_id: int | None = None,
+    ) -> None:
+        emitted.append(
+            (
+                message,
+                {
+                    "model": model,
+                    "usage_kind": usage_kind,
+                    "for_agent_id": for_agent_id,
+                },
+            )
+        )
 
     monkeypatch.setattr(
         labels_module,
         "build_chat_model",
         lambda _model, **_kwargs: _ResponseLLM(),  # pyright: ignore[reportUnknownArgumentType]
     )
-    monkeypatch.setattr("shared.lm.billing.emit_billing_from_message", _emit)
+    monkeypatch.setattr("shared.lm.usage.log_usage_from_message", _emit)
 
     assert await generate_label_async(1, "prompt", "deepseek-v4-pro") is False
-    assert emitted == [(response, {"model": "deepseek-v4-pro", "usage_kind": "batch"})]
+    assert emitted == [
+        (
+            response,
+            {
+                "model": "deepseek-v4-pro",
+                "usage_kind": "batch",
+                "for_agent_id": 1,
+            },
+        )
+    ]
 
 
 class TestGenerateLabelAsync:
