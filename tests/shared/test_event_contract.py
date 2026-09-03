@@ -130,8 +130,10 @@ def test_category_projection_matches_telemetry_whitelist() -> None:
     # 137; restart_handoff_host_unhealthy (Task #2338's hosted restart
     # handoff failure marker) raises it to 138; host_stale_running_settled
     # (the hosted boot settle of rows a dead host left running) raises it to
-    # 139; host_dispatcher_scan_failed (Task #2255) raises it to 140.
-    assert len(_TELEMETRY_KINDS) == 140
+    # 139; host_dispatcher_scan_failed (Task #2255) raises it to 140;
+    # host_stdout_log_rotated (task #2356's raw-transcript size rotation)
+    # raises it to 141.
+    assert len(_TELEMETRY_KINDS) == 141
 
 
 def test_checkpoint_table_sizes_payload_and_metric_disposition() -> None:
