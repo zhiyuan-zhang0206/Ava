@@ -11,8 +11,9 @@ enqueues one event; the drain thread batch-writes (default 100/batch, 0.5 s
 interval) in one transaction:
 
 1. append the batch to the local JSONL mirrors under `logs_dir()` — the full
-   event stream for 7 days plus a filtered ledger-rollup source for 90 days by
-   default — then
+   event stream for 7 days, a filtered ledger-rollup source for 90 days by
+   default, and a filtered lineage copy for 365 days (the permanently retained
+   class's second, independent failure domain) — then
 2. export the batch to the OTLP backend (`shared.telemetry_otlp`) — events ->
    OTLP logs (Loki), telemetry numeric payloads -> OTLP metrics (Prometheus) —
    when `AVA_TELEMETRY_OTLP_ENABLED` is on (default). Fully failure-isolated:
@@ -25,7 +26,8 @@ writes it, the read side is Loki/Prometheus, and `events_maintenance`'s
 events-archive slices are disabled (the daemon still always runs its checkpoint
 reaper + blob vacuum, which are independent of the events pipeline). The full
 JSONL mirror remains the local debugging backfill; its filtered rollup-source
-mirror is the automated ledger-gap recovery source.
+mirror is the automated ledger-gap recovery source, and its filtered lineage
+mirror is the local copy of the permanently retained lineage class.
 
 Backpressure: the queue is bounded (10 000); a producer that outruns the drain
 thread sheds records instead of growing memory, and the shed count is reported
@@ -74,7 +76,7 @@ from datetime import UTC, datetime, timedelta
 from hashlib import blake2b
 from typing import Any, Literal
 
-from shared.events.contract import EVENTS
+from shared.events.contract import EVENTS, lineage_event_names
 from shared.events.contract import category_for_kind as registry_category
 from shared.observability import cluster_label
 from shared.paths import logs_dir
@@ -117,6 +119,17 @@ _AUDIT_BLOCK_S = 5.0
 # JSONL mirror retention (day-stamped files, like the trace mirror).
 _JSONL_RETENTION_DAYS = 7
 _JSONL_ROLLUP_RETENTION_DAYS = 90
+# Lineage mirror retention (design 2026-09-02 §3C). The lineage class is
+# permanent in Loki (a 100-year per-stream override, see
+# `shared/loki_index_labels.LINEAGE_RETENTION_PERIOD`); this mirror exists
+# because that is ONE copy in ONE failure domain, and 2026-08-20 is what a
+# single copy is worth — a global-retention bucket deleted the pre-cutover
+# archive and nothing else held those rows. Its failure domain is this box's
+# disk, independent of Loki's config and data volume. At ~412 rows/day
+# cluster-wide (<1MB/day) a year of it costs ~100MB, so the retention is long
+# rather than tuned; unlike the rollup tier nothing replays it on a schedule,
+# so it stays a constant instead of a settings knob until an operator needs it.
+_JSONL_LINEAGE_RETENTION_DAYS = 365
 
 # MUST match the event selectors aggregated by
 # services/events_maintenance/rollup.py:_tokens_queries/_metrics_queries
@@ -134,6 +147,19 @@ def _is_rollup_source(event_name: str) -> bool:
         or event_name == "exec"
         or event_name.startswith(("exec_", "exec("))
     )
+
+
+# Derived from the registry's `retention_class="lineage"` declarations — the
+# same source the deployed Loki per-stream selector is validated against
+# (`shared/loki_index_labels.validate_loki_deploy_config`), so the two
+# permanent copies cannot come to disagree about what lineage is. Snapshotted
+# at import: the drain thread tests it once per event.
+_JSONL_LINEAGE_SOURCE_EVENTS = lineage_event_names()
+
+
+def _is_lineage_source(event_name: str) -> bool:
+    """Whether an event belongs to the permanently retained lineage class."""
+    return event_name in _JSONL_LINEAGE_SOURCE_EVENTS
 
 
 def event_id(line: str, ts_ns: int) -> int:
@@ -261,6 +287,12 @@ def _prune_jsonl_mirror() -> None:
         if day.isdigit() and day < rollup_cutoff:
             with contextlib.suppress(OSError):
                 path.unlink()
+    lineage_cutoff = (now - timedelta(days=_JSONL_LINEAGE_RETENTION_DAYS)).strftime("%Y%m%d")
+    for path in logs_dir().glob("events-????????.lineage.jsonl"):
+        day = path.name.removeprefix("events-").removesuffix(".lineage.jsonl")
+        if day.isdigit() and day < lineage_cutoff:
+            with contextlib.suppress(OSError):
+                path.unlink()
 
 
 def _append_jsonl(events: list[Event]) -> None:
@@ -268,6 +300,10 @@ def _append_jsonl(events: list[Event]) -> None:
 
     Each row carries the stable surrogate ``id`` derived from its id-free body
     and timestamp, matching the id Loki's read path returns for the same event.
+
+    Three tiers, one pass over the batch: the full mirror, the filtered
+    rollup source, and the filtered lineage copy — all written under the same
+    try, so one failure reports once for the batch rather than three times.
 
     Best-effort — the mirror is a fallback, not a critical path; a write
     failure must never break the batch. But it must not be SILENT either:
@@ -284,6 +320,7 @@ def _append_jsonl(events: list[Event]) -> None:
     try:
         lines: list[str] = []
         rollup_lines: list[str] = []
+        lineage_lines: list[str] = []
         for e in events:
             body = {
                 "ts": e.ts.isoformat(),
@@ -312,6 +349,8 @@ def _append_jsonl(events: list[Event]) -> None:
             lines.append(line)
             if _is_rollup_source(e.event_name):
                 rollup_lines.append(line)
+            if _is_lineage_source(e.event_name):
+                lineage_lines.append(line)
         path = logs_dir() / f"events-{day}.jsonl"
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a", encoding="utf-8") as f:
@@ -320,6 +359,10 @@ def _append_jsonl(events: list[Event]) -> None:
             rollup_path = logs_dir() / f"events-{day}.rollup.jsonl"
             with rollup_path.open("a", encoding="utf-8") as f:
                 f.write("".join(rollup_lines))
+        if lineage_lines:
+            lineage_path = logs_dir() / f"events-{day}.lineage.jsonl"
+            with lineage_path.open("a", encoding="utf-8") as f:
+                f.write("".join(lineage_lines))
     except Exception as exc:  # report, never raise
         global _jsonl_failures  # noqa: PLW0603 — module-level counter
         _jsonl_failures += 1
