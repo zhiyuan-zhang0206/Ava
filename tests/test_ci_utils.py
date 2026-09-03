@@ -34,7 +34,14 @@ _spec.loader.exec_module(ci_utils)
 CIStatus = ci_utils.CIStatus
 
 
-def _check(name: str, conclusion: str, *, workflow: str = "CI", status: str = "COMPLETED") -> dict:
+def _check(
+    name: str,
+    conclusion: str,
+    *,
+    workflow: str = "CI",
+    status: str = "COMPLETED",
+    completed_at: str | None = None,
+) -> dict:
     """One statusCheckRollup entry. `workflow=""` models a GitHub App check."""
     return {
         "__typename": "CheckRun",
@@ -42,6 +49,7 @@ def _check(name: str, conclusion: str, *, workflow: str = "CI", status: str = "C
         "status": status,
         "conclusion": conclusion,
         "workflowName": workflow,
+        "completedAt": completed_at,
     }
 
 
@@ -223,6 +231,117 @@ def test_merge_conflict_keeps_qa_approved_gate_out_of_completed(
     assert r.verdict is CIStatus.MERGE_CONFLICT
     assert r.completed == ["backend"]
     assert r.gate_checks == [gate]
+
+
+def test_status_context_gate_success_is_not_a_pending_check(gh: Any, has_workflows: Any) -> None:
+    """qa_gate.py publishes the receipt as a commit STATUS (StatusContext):
+    it carries context+state, no name/status/conclusion. It must land in
+    gate_checks, never read as a nameless "?" pending entry (2026-09-04:
+    five green PRs froze on exactly that phantom)."""
+    status_ctx = {
+        "__typename": "StatusContext",
+        "context": "qa-approved-gate",
+        "state": "SUCCESS",
+        "targetUrl": "",
+    }
+    gh([_check("backend (pytest + pyright)", "SUCCESS"), status_ctx])
+    has_workflows(True)
+    r = ci_utils.check_ci("1")
+    assert r.verdict is CIStatus.ALL_PASSED
+    assert r.gate_checks == [status_ctx]
+    assert "?" not in r.pending
+
+
+def test_status_context_other_context_success_counts_as_passed(gh: Any, has_workflows: Any) -> None:
+    status_ctx = {
+        "__typename": "StatusContext",
+        "context": "coverage/deploy",
+        "state": "SUCCESS",
+        "targetUrl": "",
+    }
+    gh([_check("backend (pytest + pyright)", "SUCCESS"), status_ctx])
+    has_workflows(True)
+    r = ci_utils.check_ci("1")
+    assert r.verdict is CIStatus.ALL_PASSED
+    assert "coverage/deploy" in r.passed
+
+
+def test_status_context_failure_counts_as_failed(gh: Any, has_workflows: Any) -> None:
+    status_ctx = {
+        "__typename": "StatusContext",
+        "context": "coverage/deploy",
+        "state": "FAILURE",
+        "targetUrl": "",
+    }
+    gh([_check("backend (pytest + pyright)", "SUCCESS"), status_ctx])
+    has_workflows(True)
+    r = ci_utils.check_ci("1")
+    assert r.verdict is CIStatus.FAILED
+    assert {"name": "coverage/deploy", "conclusion": "FAILURE"} in r.failed
+
+
+def test_status_context_pending_state_is_pending(gh: Any, has_workflows: Any) -> None:
+    status_ctx = {
+        "__typename": "StatusContext",
+        "context": "coverage/deploy",
+        "state": "PENDING",
+        "targetUrl": "",
+    }
+    gh([_check("backend (pytest + pyright)", "SUCCESS"), status_ctx])
+    has_workflows(True)
+    r = ci_utils.check_ci("1")
+    assert r.verdict is CIStatus.PENDING
+    assert r.pending == ["coverage/deploy"]
+
+
+def test_stale_cancelled_run_loses_to_newer_success_of_same_name(
+    gh: Any, has_workflows: Any
+) -> None:
+    """cancel-in-progress on the QA evaluator leaves a CANCELLED run and a
+    SUCCESS run of the same name on one SHA; GitHub treats them as one
+    logical check whose state is the newest run's (2026-09-04 #1636)."""
+    stale = _check(
+        "evaluate-qa-evidence",
+        "CANCELLED",
+        workflow="QA Approved Gate",
+        completed_at="2026-09-03T17:25:42Z",
+    )
+    fresh = _check(
+        "evaluate-qa-evidence",
+        "SUCCESS",
+        workflow="QA Approved Gate",
+        completed_at="2026-09-03T18:04:17Z",
+    )
+    gh(
+        [
+            _check("backend (pytest + pyright)", "SUCCESS"),
+            stale,
+            fresh,
+        ]
+    )
+    has_workflows(True)
+    r = ci_utils.check_ci("1")
+    assert r.verdict is CIStatus.ALL_PASSED
+    assert r.completed.count("evaluate-qa-evidence") == 1
+
+
+def test_cancelled_check_is_failing_without_a_newer_success(gh: Any, has_workflows: Any) -> None:
+    """A CANCELLED run that no newer run supersedes still means not green."""
+    gh(
+        [
+            _check("backend (pytest + pyright)", "SUCCESS"),
+            _check(
+                "evaluate-qa-evidence",
+                "CANCELLED",
+                workflow="QA Approved Gate",
+                completed_at="2026-09-03T17:25:42Z",
+            ),
+        ]
+    )
+    has_workflows(True)
+    r = ci_utils.check_ci("1")
+    assert r.verdict is CIStatus.FAILED
+    assert [f["name"] for f in r.failed] == ["evaluate-qa-evidence"]
 
 
 def test_empty_rollup(gh: Any, has_workflows: Any) -> None:
