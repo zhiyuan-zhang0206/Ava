@@ -44,7 +44,10 @@ def bind(incarnation: RuntimeIncarnation) -> None:
 session_admission.publish_admitted_session = publish
 lifecycle_observe.observe_process_admission = observe
 _starting.bind_process_incarnation = bind
-_starting.claim_agent_row(agent_id, restart_command_id=command_id)
+if fault == "resurrect":
+    _starting.claim_agent_row(agent_id, resurrect_command_id=command_id)
+else:
+    _starting.claim_agent_row(agent_id, restart_command_id=command_id)
 assert "agent.loop" not in sys.modules, "runtime work imported before admission"
 
 
@@ -58,6 +61,19 @@ async def claim() -> None:
         open=False,
         kwargs=PG_KEEPALIVE_KWARGS,
     ) as pool:
+        if fault == "apply-restart-exit":
+            from agent.lifecycle_apply import apply_process_lifecycle
+            from shared.db import insert_inbound_message
+            from shared.db_transaction import async_write_transaction
+
+            with psycopg.connect(settings.data_plane.db_url) as conn:
+                next_command = insert_inbound_message(conn, agent_id, "", "self", kind="restart")
+            batch = await claim_inbound_batch(pool, agent_id)
+            assert [item.id for item in batch] == [next_command]
+            async with async_write_transaction(pool) as conn:
+                assert await apply_process_lifecycle(conn, agent_id, next_command)
+            sys.stdout.write(f"RESTART_APPLIED {next_command}\n")
+            return
         batch = await claim_inbound_batch(pool, agent_id)
         sys.stdout.write(f"EXECUTION_ALLOWED {[item.id for item in batch]}\n")
 

@@ -23,13 +23,15 @@ class ResurrectTriggerStaleError(ResurrectError):
     """The exact pending wake no longer qualifies; the local op returns a no-op."""
 
 
-def lock_active_home_machine(cur: psycopg.Cursor, agent_id: int) -> None:
+def lock_active_home_machine(cur: psycopg.Cursor, agent_id: int) -> str:
     """Share the pause latch before metadata/inbound locks or budget writes."""
     cur.execute("SELECT machine FROM agents_meta WHERE id = %s", (agent_id,))
     agent_row = cur.fetchone()
     if agent_row is None:
         raise AgentNotFound(f"agent {agent_id} does not exist")
     home_machine = agent_row[0]
+    if not isinstance(home_machine, str):
+        raise ResurrectTriggerStaleError("resurrection target has no registered placement")
     cur.execute("SELECT paused_at FROM machines WHERE name = %s FOR SHARE", (home_machine,))
     machine_row = cur.fetchone()
     if machine_row is not None and machine_row[0] is not None:
@@ -37,6 +39,7 @@ def lock_active_home_machine(cur: psycopg.Cursor, agent_id: int) -> None:
             f"agent {agent_id} home machine {home_machine!r} is paused; "
             "resume it before resurrecting"
         )
+    return home_machine
 
 
 def validate_pending_retry(conn: psycopg.Connection, agent_id: int, inbound_id: int) -> None:
@@ -86,7 +89,7 @@ def authorize_pending_retry(agent_id: int, inbound_id: int, kind: str, limit: in
     """
     with write_transaction() as conn:
         with conn.cursor() as cur:
-            lock_active_home_machine(cur, agent_id)
+            latched_machine = lock_active_home_machine(cur, agent_id)
         owner = conn.execute(
             "SELECT runtime_generation,runtime_owner,lifecycle_command_id,status,machine "
             "FROM agents_meta WHERE id=%s FOR UPDATE",
@@ -94,6 +97,8 @@ def authorize_pending_retry(agent_id: int, inbound_id: int, kind: str, limit: in
         ).fetchone()
         if owner is None:
             raise AgentNotFound(f"agent {agent_id} does not exist")
+        if owner[4] != latched_machine:
+            raise ResurrectTriggerStaleError("resurrection placement changed after pause latch")
         if owner[:3] == (None, None, None):
             # No owned termination/wait budget: the original preparation gate
             # still owns placement, pause and exact pending-work diagnostics.

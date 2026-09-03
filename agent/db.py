@@ -144,9 +144,8 @@ async def claim_inbound_batch(
     caller payload. Other inbounds remain pending for the successor.
 
     Without an active lifecycle command, chat becomes claimed for checkpoint
-    reconciliation and other kinds become done. Legacy unowned lifecycle rows
-    retain their historical acknowledgement behavior; this is not an
-    exactly-once external-effect guarantee.
+    reconciliation and other kinds become done. An unowned consumer cannot
+    acknowledge lifecycle work it has no authority to apply.
     """
     async with async_write_transaction(pool) as conn, conn.cursor() as cur:
         await lock_inbound_owner(conn, agent_id)
@@ -190,6 +189,14 @@ async def claim_inbound_batch(
                 if row is None:
                     raise RuntimeError("accepted lifecycle command disappeared")
                 return [ClaimedInbound.from_row(row)._replace(durable_lifecycle=True)]
+        else:
+            await cur.execute(
+                "SELECT id FROM inbound_messages WHERE agent_id=%s AND status='pending' "
+                "AND kind IN ('restart','terminate') ORDER BY id LIMIT 1 FOR UPDATE",
+                (agent_id,),
+            )
+            if await cur.fetchone() is not None:
+                raise RuntimeError("lifecycle claim requires an admitted runtime incarnation")
         # CASE-on-kind in a single UPDATE keeps the batch grab atomic — chat
         # and non-chat rows in the same batch all commit together. RETURNING
         # order for UPDATE … WHERE id IN (subquery) is heap-scan order, not

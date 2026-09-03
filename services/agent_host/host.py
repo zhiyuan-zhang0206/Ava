@@ -136,7 +136,6 @@ from agent.db import LoggingConnectionPool
 from agent.hosted_ownership import (
     admit_hosted_runtime,
     apply_hosted_lifecycle,
-    observe_hosted_termination,
     release_hosted_owner,
     renew_hosted_owner,
     settle_hosted_runtime,
@@ -654,12 +653,10 @@ class AgentHost:
                 incarnation = current_incarnation(agent_id)
                 if incarnation is None:
                     raise RuntimeError("hosted lifecycle return has no admitted incarnation")
-                kind = await apply_hosted_lifecycle(self._pool, incarnation)
                 # The graph continuation has returned under existing single-flight.
                 # Cache loss is a consequence of the durable command, not its identity.
                 self.drop_agent(agent_id)
-                if kind == "terminate":
-                    await observe_hosted_termination(self._pool, incarnation)
+                kind = await apply_hosted_lifecycle(self._pool, incarnation)
                 logger.info(
                     "hosted lifecycle return settled",
                     agent_id=agent_id,

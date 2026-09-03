@@ -921,8 +921,9 @@ class TestResurrectAgent:
 
         def _launch(_aid: int, **kwargs: object) -> None:
             attempt = kwargs["resurrect_attempt"]
-            assert isinstance(attempt, tuple) and type(attempt[0]) is int
-            command = attempt[0]
+            assert isinstance(attempt, tuple)
+            command: object = cast(tuple[object, ...], attempt)[0]
+            assert type(command) is int
             # This independent connection must acquire the lock immediately;
             # the real launcher must never run inside its authorization TX.
             db_conn.rollback()
@@ -1422,14 +1423,14 @@ class TestResurrectAgent:
 
         def tracking_execute(self: Any, query: Any, *args: Any, **kwargs: Any) -> Any:
             result = original_execute(self, query, *args, **kwargs)
-            if query == "SELECT status FROM agents_meta WHERE id = %s FOR UPDATE":
+            if query == "SELECT status,machine FROM agents_meta WHERE id = %s FOR UPDATE":
                 status_select_cursors.add(id(self))
             return result
 
         def lying_fetchone(self: Any) -> Any:
             if id(self) in status_select_cursors:
                 status_select_cursors.remove(id(self))
-                return ("terminated",)  # target status SELECT lies to enter UPDATE branch
+                return ("terminated", machine_name())  # enter UPDATE while preserving placement
             return original_fetchone(self)  # pyright: ignore[reportUnknownArgumentType]
 
         monkeypatch.setattr(psycopg.Cursor, "execute", tracking_execute)  # pyright: ignore[reportUnknownArgumentType]

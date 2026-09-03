@@ -10,6 +10,8 @@ import psycopg
 from psycopg.types.json import Jsonb
 
 from shared.lifecycle_acceptance import accept_lifecycle_command
+from shared.lifecycle_process_identity import target_process_ended
+from shared.machine import machine_name
 from shared.runtime_incarnation import RuntimeIncarnation
 
 
@@ -58,10 +60,33 @@ def accept_cold_command(conn: psycopg.Connection, owner: dict[str, Any]) -> int 
     Reuses precisely the live-runtime acceptance SQL; the controller does not
     invent another queue, claim timestamp or target-selection rule.
     """
+    # An argv probe or a released row can suggest a candidate, but neither is
+    # authority to complete a cold termination. Reuse the admitted runtime's
+    # immutable process identity from its original applied command. Missing
+    # historical evidence stays unknown; do not manufacture a new identity.
+    evidence = conn.execute(
+        "SELECT payload FROM inbound_messages WHERE agent_id=%s AND target_generation=%s "
+        "AND target_owner=%s AND applied_at IS NOT NULL "
+        "AND payload ? 'target_process_identity' ORDER BY id DESC LIMIT 1 FOR UPDATE",
+        (owner["id"], owner["runtime_generation"], owner["runtime_owner"]),
+    ).fetchone()
+    if (
+        owner["machine"] != machine_name()
+        or evidence is None
+        or not isinstance(evidence[0], dict)
+        or not target_process_ended(evidence[0], machine_name())
+    ):
+        return None
     target = RuntimeIncarnation(owner["id"], owner["runtime_generation"], owner["runtime_owner"])
     command = accept_lifecycle_command(conn, target)
     if command is None:
         return None
+    if (command.agent_id, command.generation, command.owner) != (
+        target.agent_id,
+        target.generation,
+        target.owner,
+    ):
+        raise RuntimeError("cold lifecycle acceptance returned another target")
     if command.kind == "restart":
         conn.execute("UPDATE agents_meta SET status='restarting' WHERE id=%s", (owner["id"],))
     elif command.kind == "terminate":
@@ -75,4 +100,20 @@ def accept_cold_command(conn: psycopg.Connection, owner: dict[str, Any]) -> int 
         "UPDATE inbound_messages SET applied_at=clock_timestamp() WHERE id=%s AND applied_at IS NULL",
         (command.id,),
     )
+    if command.kind == "terminate":
+        # The exact entity was already absent before this command was accepted;
+        # apply and observation therefore share one locked transaction.
+        observed = conn.execute(
+            "UPDATE inbound_messages SET observed_at=clock_timestamp(),status='done' "
+            "WHERE id=%s AND agent_id=%s AND target_generation=%s AND target_owner=%s "
+            "AND status='claimed'",
+            (command.id, target.agent_id, target.generation, target.owner),
+        )
+        cleared = conn.execute(
+            "UPDATE agents_meta SET lifecycle_command_id=NULL WHERE id=%s "
+            "AND lifecycle_command_id=%s AND runtime_generation=%s AND runtime_owner=%s",
+            (target.agent_id, command.id, target.generation, target.owner),
+        )
+        if observed.rowcount != 1 or cleared.rowcount != 1:
+            raise RuntimeError("cold termination observation lost its fixed target")
     return command.id

@@ -324,7 +324,6 @@ def wired(monkeypatch: pytest.MonkeyPatch, host_plugin: None) -> _Build:
         return "terminate"
 
     monkeypatch.setattr(host_mod, "apply_hosted_lifecycle", _apply_lifecycle)
-    monkeypatch.setattr(host_mod, "observe_hosted_termination", _noop_reconcile)
 
     def _build(
         rows: dict[int, _Row], results: dict[int, list[dict[str, Any]]] | None = None
