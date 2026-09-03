@@ -1442,7 +1442,7 @@ class TestValidateModelConfig:
 class TestThinkingDisabledAcrossRoster:
     """issue #190: `thinking={"type": "disabled"}` must be expressible — or a
     no-op — for every model in the supported roster, never a 400. This is the
-    assertion whose absence let gemini-2.5-flash / gemini-3.7-flash become
+    assertion whose absence let gemini-2.5-flash / gemini-3.8-flash become
     silently unusable as labeler_model."""
 
     _ALL_KEY_FIELDS = (
@@ -1487,15 +1487,16 @@ class TestThinkingDisabledAcrossRoster:
             "gemini-2.5-flash" in r["message"] and "ignored" in r["message"] for r in loguru_records
         )
 
-    def test_gemini_3_7_thinking_disabled_maps_to_minimal(
-        self, monkeypatch: pytest.MonkeyPatch
+    @pytest.mark.parametrize("model", ("gemini-3.8-flash", "gemini-3.1-pro-preview"))
+    def test_gemini_3_x_thinking_disabled_maps_to_lowest_declared_level(
+        self, model: str, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """gemini-3.x declares the thinking_level vocabulary: disabled maps to
-        minimal + no thought blocks on the wire."""
+        """Models that reject `minimal` map disabled thinking to their lowest
+        declared level, while retaining no thought blocks on the wire."""
         monkeypatch.setattr(settings.lm, "gemini_api_key", SecretStr("sk-test"))
         from langchain_google_genai import ChatGoogleGenerativeAI
 
-        llm = build_chat_model("gemini-3.7-flash", thinking={"type": "disabled"})
+        llm = build_chat_model(model, thinking={"type": "disabled"})
         assert isinstance(llm, ChatGoogleGenerativeAI)
-        assert llm.thinking_level == "minimal"
+        assert llm.thinking_level == "low"
         assert llm.include_thoughts is False

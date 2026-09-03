@@ -237,7 +237,7 @@ def test_image_media_types_match_the_verified_model_matrix() -> None:
         "claude-opus-4-7",
         "claude-opus-4-6",
         "claude-haiku-4-5",
-        "gemini-3.7-flash",
+        "gemini-3.8-flash",
         "gemini-3.5-flash",
         "gemini-3.1-pro-preview",
         "gemini-2.5-pro",

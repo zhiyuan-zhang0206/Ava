@@ -137,12 +137,27 @@ def test_get_models_reasoning_effort_options_match_factory_tables() -> None:
 
     # And the registry vocabulary for the OpenAI-style providers matches the
     # per-provider wire clamp, so UI options and clamp cannot diverge.
-    for provider in ("gemini", "kimi", "glm", "mimo", "qwen"):
+    # Providers whose whole registry shares one vocabulary mirror the
+    # per-provider wire clamp table exactly (UI options == clamp). Gemini
+    # diverged deliberately: the agent build path clamps per model
+    # (`ModelSpec.effort_levels`), so a model's options equal its own registry
+    # vocabulary (verified in the loop above), and the provider-wide table is
+    # only the fallback for models without a declared vocabulary (media path).
+    # The gemini invariant is that every declared vocabulary stays a subset of
+    # that fallback — a model must never accept a level the fallback cannot
+    # express.
+    for provider in ("kimi", "glm", "mimo", "qwen"):
         expected = list(_PROVIDER_EFFORT_LEVELS[provider])
         provider_models = [m for m, info in models.items() if info["provider"] == provider]
         assert provider_models, f"no models registered for provider {provider!r}"
         for model in provider_models:
             assert models[model]["reasoning_effort_options"] == expected, model
+    gemini_fallback = set(_PROVIDER_EFFORT_LEVELS["gemini"])
+    gemini_models = [m for m, info in models.items() if info["provider"] == "gemini"]
+    assert gemini_models, "no gemini models registered for the subset check"
+    for model in gemini_models:
+        options = set(models[model]["reasoning_effort_options"])
+        assert options <= gemini_fallback, model
 
     assert models["claude-haiku-4-5-20251001"]["reasoning_effort_options"] == ["none", "high"]
 
