@@ -11,9 +11,13 @@
 //
 // Content is a unified spawn tree (no spawner group header) — top level
 // flattens all non-sub-agents (triggered by user / claude-code / any
-// external spawner), sub-agents indent under their spawner. Terminated
-// agents are hidden by default; a toggle above the tree reveals them
-// (when shown they keep their lineage position via buildAgentTree).
+// external spawner), sub-agents indent under their spawner. The roster
+// always carries the terminated rows too (use-agents merges both scopes) —
+// they are the lineage joints the tree walker needs, and they keep their
+// true lineage position. Terminated agents are hidden from RENDERING by
+// default: the toggle above the tree reveals them, and while hidden
+// buildAgentTree flattens them out and re-parents their live children
+// under the nearest visible ancestor (user ruling 2026-08-28 -> 09-02).
 //
 // Two view modes (a DB-backed user setting, display.sidebar_view_mode):
 //   tree — spawn lineage tree (default)
@@ -64,6 +68,9 @@ export function AgentSidebar(props: Props) {
   // either place updates the same ["user-settings"] cache, so they stay in
   // lockstep across the sidebar and settings. Default false
   // (USER_SETTING_DEFAULTS); opaque non-boolean DB values remain opt-out.
+  // It is a RENDER-only switch: the terminated roster is fetched and merged
+  // into `agents` unconditionally (its rows anchor spawn-lineage walks),
+  // so this flag never gates a fetch.
   const { settings: userSettings, setSetting, isLoading: settingsLoading } = useUserSettings();
   const showTerminated = userSettings["display.show_terminated"] === true;
   const setShowTerminated = (v: boolean) => setSetting("display.show_terminated", v);
@@ -174,13 +181,16 @@ export function AgentSidebar(props: Props) {
       />
       )}
       {/* Floating search overlay — search lives here, not inline in the
-          sidebar (#723); the query filters the sidebar list in sync. */}
+          sidebar (#723); the query filters the sidebar list in sync. The
+          overlay mirrors the visible roster: terminated rows are always in
+          `agents` (lineage joints), but search only surfaces them when the
+          show-terminated toggle is on. */}
       <SearchOverlay
         open={searchOpen}
         onClose={closeSearch}
         searchQuery={searchQuery}
         onSearchQueryChange={setSearchQuery}
-        agents={agents}
+        agents={showTerminated ? agents : agents.filter((a) => a.status !== "terminated")}
         onSelect={handleSelect}
       />
     </>
