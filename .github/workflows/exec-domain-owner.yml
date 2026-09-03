@@ -16,6 +16,7 @@ on:
       - 'shared/resource_admission.py'
       - 'shared/winjob_pipes.py'
       - 'shared/winjob_spawn.py'
+      - 'shared/exec_process_domain.py'
       - 'tests/agent/test_exec_owner_entry.py'
       - 'tests/agent/test_resource_admission.py'
       - 'shared/runtime_admission.py'
@@ -80,7 +81,7 @@ jobs:
           # The existing cross-platform domain uses IS_WINDOWS, which pyright
           # cannot narrow; type its POSIX API surface explicitly, and check the
           # native Job implementation against Windows separately on every lane.
-          uv run pyright --pythonplatform Linux shared/winjob.py agent/graph/_exec_process.py tests/agent/test_exec_domain_confirmation.py
+          uv run pyright --pythonplatform Linux shared/winjob.py shared/exec_process_domain.py agent/graph/_exec_process.py tests/agent/test_exec_domain_confirmation.py
           uv run pyright --pythonplatform Windows shared/winjob.py shared/winjob_pipes.py shared/exec_owner_protocol.py
           uv run pytest --confcutdir=tests/agent tests/agent/test_exec_domain_confirmation.py tests/agent/test_exec_owner_entry.py -q --junitxml=proof/native-domain.xml
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
