@@ -96,6 +96,9 @@ def insert_event_log(
             Left untyped here on purpose; see the module docstring's payload
             tiering rule for when an event's payload gets a model instead.
     """
+    from shared.caller_identity import caller_payload
+
+    payload = caller_payload(source, payload)
     telemetry.emit(
         "audit",
         event_type,
@@ -123,13 +126,11 @@ def insert_event_log_many(
     skill per agent run, dedup'd on the producer side).
     """
     for payload in payloads:
-        telemetry.emit(
-            "audit",
-            event_type,
-            level="info",
+        insert_event_log(
+            event_type=event_type,
             agent_id=agent_id,
             source=source,
-            attributes=payload,
+            payload=payload,
         )
 
 
