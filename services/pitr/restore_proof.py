@@ -50,6 +50,35 @@ class RestoreSpaceBudget:
     emergency_floor: int
 
 
+# Longest allowed restore run-directory name (".{token}.partial"): the restore
+# sandbox's PostgreSQL listens on a unix socket inside the run directory, and
+# macOS caps socket paths at 103 bytes. For the real restore root
+# (~/.ava/physical-backup/restore, 47 chars) the fixed suffix
+# "/socket/.s.PGSQL.<port>" leaves 33 chars for the directory name — a name
+# carrying the full run_id (chain ids are ~17-86 chars) deterministically
+# exceeded it and every restore proof on the host died at postmaster start
+# ("Unix-domain socket path ... is too long", 2026-09-03 activation #7; CI
+# never caught it because tests use short tmp_path roots). Keep the on-disk
+# name within this budget and carry the full run_id in the owner evidence.
+_MAX_RUN_DIR_NAME_LEN = 33
+
+
+def _restore_run_token(chain_id: str, now: datetime) -> str:
+    """Short, deterministic on-disk identity for one restore run.
+
+    The token is the run timestamp plus the first six characters of the
+    chain id's last dash-segment (the activation operation uuid, or the whole
+    id for the dash-less scheduled chain id), so a run directory still tells
+    which chain and when while fitting the socket-path budget
+    (`_MAX_RUN_DIR_NAME_LEN`). Distinct chains starting in the same second
+    collide only when their six-character prefixes do (1/16M for two random
+    uuids) — a run that finds an existing partial refuses via the owner
+    evidence instead of overwriting.
+    """
+    stamp = now.astimezone(UTC).strftime("%Y%m%dT%H%M%SZ")
+    return f"{stamp}-{chain_id.rsplit('-', 1)[-1][:6]}"
+
+
 @dataclass(frozen=True)
 class LivePostgresIdentity:
     pid: int
@@ -539,8 +568,14 @@ def prove_candidate(  # noqa: PLR0915
     _require_space(root, _required_bytes(candidate, base, wal, budget))
     now = datetime.now(UTC) if now is None else now.astimezone(UTC)
     run_id = f"{candidate.chain_id}-{now.strftime('%Y%m%dT%H%M%SZ')}"
-    partial = root / "restore" / f".{run_id}.partial"
-    owner = root / "restore-owners" / f"{run_id}.owner.json"
+    # The on-disk run identity is a SHORT token, not the full run_id: the
+    # sandboxed PostgreSQL's unix socket lives under the run directory, and
+    # macOS caps socket paths at 103 bytes (see _restore_run_token / the
+    # _MAX_RUN_DIR_NAME_LEN budget). The full run_id rides in the owner
+    # evidence below and in the published proof.
+    token = _restore_run_token(candidate.chain_id, now)
+    partial = root / "restore" / f".{token}.partial"
+    owner = root / "restore-owners" / f"{token}.owner.json"
     if partial.exists() or partial.is_symlink():
         raise RestoreProofError("restore proof has unresolved owned work")
     process = psutil.Process()
@@ -554,6 +589,7 @@ def prove_candidate(  # noqa: PLR0915
         {
             "schema_version": 1,
             "state": "spawning",
+            "run_id": run_id,
             "partial": str(partial),
             "pid": process.pid,
             "created_at": process.create_time(),
