@@ -38,7 +38,7 @@ QUEUED_NOTICE = "⚠️ Gateway temporarily unavailable — messages queued, wil
 # -- /list /switch /status /commands /help ---------------------------------
 
 NO_LIVE_AGENTS = "No live agents."
-LIVE_AGENTS_TITLE = "Live agents — tap one to switch:"
+LIVE_AGENTS_TITLE = "Live agents — reply /switch <id> to pick one:"
 LIVE_AGENTS_TITLE_BUTTONS = "Live agents — tap one to switch"
 SWITCH_USAGE = "Usage: /switch <agent id>. Run /list to pick an agent to switch to."
 AGENT_NOT_FOUND = "Agent not found: {arg}. Run /list to see live agents."
