@@ -17,7 +17,7 @@ unified gateway: every trigger entering an agent goes through it):
                          (vetoed — consumed no-op, agent stays alive — when a newer/unseen message waits;
                          see has_pending_inbound_after + the veto block in agent/graph/_claim.py)
     restart            — ava.self.restart() / admin restart; claim only marks RESTARTING + goto END (does not append message)
-    restart_completed  — respawn_agent or its self-respawn fallback INSERT; new process starts, claim appends "You have been restarted by X" marker
+    restart_completed  — respawn_agent INSERT; new process starts, claim appends "You have been restarted by X" marker
     resurrect          — resurrect_agent INSERT; new process starts, claim appends "You have been resurrected by X" marker
     fork               — spawn_agent INSERT on a fork; new process starts, claim appends "you are now agent N, forked from agent:M" identity marker
 
@@ -53,7 +53,6 @@ from shared.db_transaction import async_write_transaction
 from shared.live_announce import publish_agent_updated
 from shared.log import logger
 from shared.redis_listener import RedisInboundListener
-from shared.timing import self_respawn_restarter_grace_s
 
 # wait_for_inbound's fallback SELECT rechecks a missed pub/sub wake; configurable
 # through `AVA_DB_NOTIFY_WAIT_TIMEOUT_SECONDS`.
@@ -126,6 +125,8 @@ class ClaimedInbound(NamedTuple):
     payload: dict[str, object] | None = None
     created_at: datetime | None = None
     claimed_at: datetime | None = None
+    durable_lifecycle: bool = False
+    """Internal dispatch fact from the locked command pointer, never payload input."""
 
     @classmethod
     def from_row(cls, row: tuple[Any, ...]) -> "ClaimedInbound":
@@ -204,24 +205,67 @@ async def claim_inbound_batch(
     pool: AsyncConnectionPool,
     agent_id: int,
 ) -> list[ClaimedInbound]:
-    """Atomically grab all pending rows for `agent_id`. Chat kinds flip to
-    `'claimed'` (entered the two-phase reconcile path); every other kind
-    flips straight to `'done'`. Returns the rows so the claim node can
-    dispatch.
+    """Claim under current runtime ownership in one explicit write transaction.
 
-    Chat uses pending → claimed → done|pending, reconciled against committed
-    checkpoint ava_inbound_id anchors. Lifecycle/compact records lack those
-    anchors (restart adds no message); naive replay could repeat termination
-    after resurrection. They still mark done at claim: crash-before-effect
-    loss is an unresolved durable acknowledgement gap, not an exactly-once
-    guarantee. See db.ava.okf.md for the queue contract.
+    Owned restart/terminate commands are accepted serially and returned alone,
+    retaining their fixed target and active pointer until observed or failed.
+    The internal dispatch fact is minted only from that locked pointer, never
+    caller payload. Other inbounds remain pending for the successor.
 
-    All kinds claimed together (no kind filter on the SELECT) — dispatch
-    happens inside the claim Node, not at the SQL layer. The explicit
-    read-write transaction commits the batch when its context exits.
+    Without an active lifecycle command, chat becomes claimed for checkpoint
+    reconciliation and other kinds become done. An unowned consumer cannot
+    acknowledge lifecycle work it has no authority to apply.
     """
     async with async_write_transaction(pool) as conn, conn.cursor() as cur:
         await lock_inbound_owner(conn, agent_id)
+        await cur.execute("SELECT runtime_kind FROM agents_meta WHERE id=%s", (agent_id,))
+        runtime = await cur.fetchone()
+        runtime_owned = runtime in (("process",), ("hosted",))
+        if runtime_owned:
+            from agent.lifecycle_intent import accept_lifecycle_intent, settle_superseded_intent
+            from shared.runtime_incarnation import current_incarnation
+
+            command = await accept_lifecycle_intent(conn, agent_id)
+            token = current_incarnation(agent_id)
+            if (
+                command is not None
+                and token is not None
+                and (command.generation != token.generation or command.owner != token.owner)
+            ):
+                if not await settle_superseded_intent(conn, command):
+                    raise RuntimeError(
+                        "replacement cannot execute or settle the prior lifecycle target"
+                    )
+                command = await accept_lifecycle_intent(conn, agent_id)
+            if command is not None:
+                if token is None or (command.generation, command.owner) != (
+                    token.generation,
+                    token.owner,
+                ):
+                    raise RuntimeError("lifecycle dispatch target is not the current incarnation")
+                await cur.execute(
+                    "SELECT i.id,i.agent_id,i.content,i.kind,i.source,i.payload,"
+                    "i.created_at,i.claimed_at FROM inbound_messages i JOIN agents_meta m "
+                    "ON m.id=i.agent_id AND m.lifecycle_command_id=i.id "
+                    "WHERE i.id=%s AND m.id=%s AND i.status='claimed' "
+                    "AND i.kind IN ('restart','terminate') "
+                    "AND i.target_generation=m.runtime_generation "
+                    "AND i.target_owner=m.runtime_owner "
+                    "AND m.runtime_generation=%s AND m.runtime_owner=%s",
+                    (command.id, agent_id, token.generation, token.owner),
+                )
+                row = await cur.fetchone()
+                if row is None:
+                    raise RuntimeError("accepted lifecycle command disappeared")
+                return [ClaimedInbound.from_row(row)._replace(durable_lifecycle=True)]
+        else:
+            await cur.execute(
+                "SELECT id FROM inbound_messages WHERE agent_id=%s AND status='pending' "
+                "AND kind IN ('restart','terminate') ORDER BY id LIMIT 1 FOR UPDATE",
+                (agent_id,),
+            )
+            if await cur.fetchone() is not None:
+                raise RuntimeError("lifecycle claim requires an admitted runtime incarnation")
         # CASE-on-kind in a single UPDATE keeps the batch grab atomic — chat
         # and non-chat rows in the same batch all commit together. RETURNING
         # order for UPDATE … WHERE id IN (subquery) is heap-scan order, not
@@ -234,10 +278,11 @@ async def claim_inbound_batch(
             "WHERE id IN ("
             "  SELECT id FROM inbound_messages "
             "  WHERE status = 'pending' AND agent_id = %s "
+            "  AND (NOT %s OR kind NOT IN ('restart','terminate')) "
             "  ORDER BY created_at ASC, id ASC "
             "  FOR UPDATE SKIP LOCKED"
             ") RETURNING id, agent_id, content, kind, source, payload, created_at, claimed_at",
-            (agent_id,),
+            (agent_id, runtime_owned),
         )
         rows = await cur.fetchall()
     rows.sort(key=lambda r: r[6])  # created_at FIFO (index follows SELECT column count)
@@ -442,9 +487,13 @@ async def has_pending_interrupt(pool: AsyncConnectionPool, agent_id: int) -> boo
     """
     async with pool.connection() as conn, conn.cursor() as cur:
         await cur.execute(
-            "SELECT 1 FROM inbound_messages "
-            "WHERE status = 'pending' AND agent_id = %s AND kind IN ('cancel', 'terminate') "
-            "AND source <> 'self' "
+            "SELECT 1 FROM inbound_messages i WHERE i.agent_id=%s "
+            "AND i.kind IN ('cancel','terminate') AND i.source <> 'self' "
+            "AND (i.status='pending' OR (i.status='claimed' AND i.kind='terminate' "
+            "AND i.applied_at IS NOT NULL AND i.observed_at IS NULL AND EXISTS ("
+            "SELECT 1 FROM agents_meta m WHERE m.id=i.agent_id "
+            "AND m.lifecycle_command_id=i.id AND m.runtime_kind='hosted' "
+            "AND m.runtime_generation=i.target_generation AND m.runtime_owner=i.target_owner))) "
             "LIMIT 1",
             (agent_id,),
         )
@@ -668,176 +717,3 @@ async def renew_agent_lease(
                 incarnation.owner if incarnation else None,
             ),
         )
-
-
-def _restarter_claimed_before_deadline(cur: psycopg.Cursor, agent_id: int) -> bool:
-    """Poll the authoritative row until the restarter wins or its grace ends."""
-    deadline = time.monotonic() + self_respawn_restarter_grace_s()
-    while True:
-        cur.execute("SELECT status FROM agents_meta WHERE id = %s", (agent_id,))
-        row = cur.fetchone()
-        if row is None or row[0] != "restarting":
-            logger.debug(
-                "[self-respawn] agent %s: restarter claimed restart, skipping self-respawn",
-                agent_id,
-            )
-            return True
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            return False
-        time.sleep(min(settings.daemon.restarter_poll_interval_seconds, remaining))
-
-
-def schedule_self_respawn(agent_id: int) -> None:
-    """Register an atexit handler that self-respawns this agent if the restarter
-    daemon doesn't pick it up within a few seconds.
-
-    This is a **fallback** for self-initiated restarts (``source='self'``)
-    when the restarter is paused (during a cluster update rollout) or dead.
-    The restarter is the primary mechanism — the atexit handler checks whether
-    the row is still ``'restarting'`` and only acts when the restarter has not
-    claimed it.
-
-    Race-safe: the handler's ``UPDATE … WHERE status='restarting'`` CAS ensures
-    only one winner (restarter or self-respawn) launches the replacement
-    process.
-
-    The replacement carries this agent's per-agent config forward
-    (``$AVA_AGENT_CONFIG_OVERLAY`` / ``$AVA_AGENT_BIRTH_CONFIG``, read off the
-    row in the same connection as the CAS, and set in the child's env — never
-    argv, since either may carry a provider api_key and argv is world-readable
-    via `ps` (issue #974)). Without that, a restart taken over by THIS path —
-    which happens exactly when the restarter is paused, i.e. mid-rollout —
-    would silently drop the agent back onto cluster defaults: a different
-    model, a different skill set, a different identity, with nothing in the
-    trail saying so. The read is best-effort like the CAS itself; if it fails
-    the replacement still launches, just without the maps.
-    """
-    import atexit
-    import json
-    import os
-    import subprocess
-    import sys
-
-    from shared.config import settings
-    from shared.env_registry import AGENT_BIRTH_CONFIG_ENV, AGENT_CONFIG_OVERLAY_ENV
-    from shared.log import logger
-
-    python = sys.executable
-    # The boot-watchdog windows too, and for the same reason they are on argv at
-    # all: the replacement must arm its watchdog before it can import
-    # `shared.config`, so the values have to arrive on a channel readable at that
-    # point. This is the ONE launch path outside `ops/agent_launch.py`, and a
-    # child launched without them arms nothing — quietly returning the launcher's
-    # liveness probe to the guess it used to be, with no error anywhere. It
-    # matters most precisely here: this path runs when the restarter is paused
-    # mid-rollout, which is when boxes are busiest.
-    base_argv = [
-        python,
-        "-m",
-        "agent",
-        "--agent-id",
-        str(agent_id),
-        "--boot-stall-seconds",
-        str(settings.gateway.agent_boot_stall_seconds),
-        "--boot-budget-seconds",
-        str(settings.gateway.agent_boot_budget_seconds),
-    ]
-
-    # Reproduce the agent's launch environment so the child inherits the same
-    # venv / PATH as the current process.
-    env = os.environ.copy()
-
-    def _config_env_updates(cur: psycopg.Cursor) -> dict[str, str]:
-        """`$AVA_AGENT_CONFIG_OVERLAY` / `$AVA_AGENT_BIRTH_CONFIG` for whichever
-        of the two the row carries — the same pair `ops/agent_launch.py` sets
-        on every other launch path (child env, never argv)."""
-        cur.execute(
-            "SELECT config_overlay, birth_config FROM agents_meta WHERE id = %s", (agent_id,)
-        )
-        row = cur.fetchone()
-        if row is None:
-            return {}
-        updates: dict[str, str] = {}
-        for env_name, value in (
-            (AGENT_CONFIG_OVERLAY_ENV, row[0]),
-            (AGENT_BIRTH_CONFIG_ENV, row[1]),
-        ):
-            if value:
-                updates[env_name] = json.dumps(value, sort_keys=True)
-        return updates
-
-    def _respawn() -> None:
-        from shared.platform import (
-            CREATE_NO_WINDOW,
-        )  # used below, outside the try (import must not live in it)
-
-        try:
-            import psycopg
-
-            from shared.db import PG_STATEMENT_TIMEOUT_KWARGS, insert_restart_completed_inbound
-
-            # Poll before the fallback CAS until a fixed deadline. The restarter
-            # owns session cleanup, wake publication, and hosted handling.
-            # Autocommit observes its latest status while CAS picks one launch winner.
-            conn = psycopg.connect(
-                settings.data_plane.db_url, autocommit=True, **PG_STATEMENT_TIMEOUT_KWARGS
-            )
-            try:
-                with conn.cursor() as cur:
-                    if _restarter_claimed_before_deadline(cur, agent_id):
-                        return
-                    with conn.transaction():
-                        conn.execute("SET TRANSACTION READ WRITE")
-                        cur.execute(
-                            "UPDATE agents_meta SET status = 'idling', pid = NULL, "
-                            "started_at = NULL, lease_expires_at = NULL "
-                            "WHERE id = %s AND status = 'restarting'",
-                            (agent_id,),
-                        )
-                        if cur.rowcount == 0:
-                            logger.debug(
-                                "[self-respawn] agent %s: status no longer 'restarting' — "
-                                "restarter won the race, skipping self-respawn",
-                                agent_id,
-                            )
-                            return
-                        env.update(_config_env_updates(cur))
-                        restart_trace = insert_restart_completed_inbound(cur, agent_id)
-                        if restart_trace is None:
-                            logger.warning(
-                                "[self-respawn] agent %s: no restart inbound found; "
-                                "launching replacement anyway",
-                                agent_id,
-                            )
-                        else:
-                            logger.info(
-                                "[self-respawn] agent %s: wrote restart_completed from %s",
-                                agent_id,
-                                restart_trace[0],
-                            )
-            finally:
-                conn.close()
-        except Exception:
-            logger.warning(
-                "[self-respawn] agent %s: DB update failed, launching anyway",
-                agent_id,
-                exc_info=True,
-            )
-
-        logger.info(
-            "[self-respawn] agent %s: restarter did not claim restart, "
-            "launching replacement process",
-            agent_id,
-        )
-        subprocess.Popen(  # noqa: S603 — argv is sys.executable + trusted agent_id (int)
-            base_argv,
-            env=env,
-            start_new_session=True,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            creationflags=CREATE_NO_WINDOW,
-        )
-
-    atexit.register(_respawn)

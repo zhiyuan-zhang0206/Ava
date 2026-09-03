@@ -45,10 +45,9 @@ from typing import Any, cast
 
 from langchain_core.messages import BaseMessage, RemoveMessage
 from langgraph.graph.message import REMOVE_ALL_MESSAGES
-from psycopg_pool import AsyncConnectionPool
 
 from agent import state as _state
-from agent.db import ClaimedInbound, mark_agent_status
+from agent.db import ClaimedInbound
 from agent.graph._chat_inbound import build_chat_inbound
 from agent.graph._context import AvaContext
 from agent.graph._context_notes import fork_notes
@@ -59,11 +58,12 @@ from agent.hooks.compact import (
     conversation_messages,
     generate_summary,
 )
+from agent.lifecycle_apply import apply_process_lifecycle
 from agent.messages import NoteTag, system_note_message
 from agent.state_channels import CIRCUIT_REASON_CONTEXT_OVERFLOW
 from ava.security import scan_content
-from shared.agents import AgentStatus
 from shared.config import now_timestamp, settings
+from shared.db_transaction import async_write_transaction
 from shared.inbound import InboundKind
 from shared.live_events import Cancelled
 from shared.log import logger
@@ -360,6 +360,7 @@ async def _handle_heartbeat(
 
 
 async def _handle_terminate(
+    ctx: AvaContext,
     item: ClaimedInbound,
     st: _BatchState,
 ) -> None:
@@ -368,60 +369,19 @@ async def _handle_terminate(
     Only called when this terminate IS the routing winner (guard in
     dispatch_batch). Vetoed terminates never reach here.
     """
+    if not ctx.hosted and ctx.ops_pool is not None:
+        async with async_write_transaction(ctx.ops_pool) as conn:
+            if not await apply_process_lifecycle(conn, item.agent_id, item.id):
+                st.next_goto = END
+                return
     st.new_msgs.append(
         system_note_message(
-            content=f"{_ts_prefix()}You are terminated by {_by_who(item.source)}",
+            content=f"{_ts_prefix()}Termination was accepted from {_by_who(item.source)}",
             tag=NoteTag.LIFECYCLE_TERMINATE,
             created_at=datetime.now(UTC),
         )
     )
     st.next_goto = END
-
-
-async def _flip_to_restarting(pool: AsyncConnectionPool, agent_id: int) -> None:
-    """CAS the row running->restarting, tolerating a concurrent lifecycle op.
-
-    A lost CAS used to raise RuntimeError straight out of the graph and kill
-    the process (agent 2147, 2026-08-03: a lost CAS during a network outage
-    crashed the agent, and a crash mid-outage cannot be resurrected -- 4h
-    dead, audit #689 G2). The realistic loser is a re-entered claim that
-    left the row 'idling'. Adapt instead of dying: re-read the row and retry
-    the flip from the actual live state (running or idling -- the restarter
-    respawns 'restarting' rows regardless of which it came from); any other
-    state (terminated / unclaimed idling) means another op owns the row, so
-    the restart is moot -- log and let the process END normally.
-    """
-    try:
-        await mark_agent_status(
-            pool, agent_id, AgentStatus.RESTARTING, expected_from=AgentStatus.RUNNING
-        )
-        return
-    except RuntimeError:
-        # CAS lost -- a concurrent lifecycle op (a re-entered claim's idle
-        # flip) moved the row between the claim's running-mark and this CAS.
-        # Re-read and adapt instead of crashing:
-        # a crash during a network outage cannot be resurrected (agent 2147,
-        # 2026-08-03: 4h dead; audit #689 G2).
-        async with pool.connection() as conn, conn.cursor() as cur:
-            await cur.execute("SELECT status FROM agents_meta WHERE id = %s", (agent_id,))
-            row = await cur.fetchone()
-        actual = row[0] if row else None
-        if actual is not None and actual in (AgentStatus.RUNNING, AgentStatus.IDLING):
-            try:
-                await mark_agent_status(
-                    pool, agent_id, AgentStatus.RESTARTING, expected_from=actual
-                )
-                return
-            except RuntimeError:
-                actual = None  # moved again mid-retry -- treat as foreign
-        if actual != AgentStatus.RESTARTING:
-            logger.warning(
-                "restart CAS lost for agent {agent_id} (actual status {actual}) -- "
-                "another lifecycle op owns the row; restart not re-queued",
-                event="restart_cas_lost",
-                agent_id=agent_id,
-                actual=actual,
-            )
 
 
 async def _handle_restart(
@@ -432,9 +392,9 @@ async def _handle_restart(
 ) -> None:
     """RESTART: route to END.
 
-    Process mode: flip status to 'restarting' (the restarter relaunches a
-    process; the self-restart atexit fallback arms for the rollout window when
-    the restarter is paused) — the NEW process writes the lifecycle marker via
+    Process mode: install the durable restart decision. The restarter alone
+    relaunches the process after its normal pause and ownership gates; no
+    agent-side fallback bypasses them. The NEW process writes the marker via
     RESTART_COMPLETED, so no message is appended here.
 
     Hosted mode: there is no process to relaunch and no restarter to flip the
@@ -442,8 +402,7 @@ async def _handle_restart(
     the next wake starts clean (the config view rebinds from `agents_meta`,
     which is exactly the hosted replacement for "the process exits and boots
     with the merged config"). The row must therefore NEVER leave a runnable
-    status, so the 'restarting' flip and the self-respawn are skipped, the
-    lifecycle marker renders right here (nothing else will), and the separate
+    status. An acceptance marker renders here, and the separate
     `restart_requested` channel carries the intent to the host — `exit_requested`
     stays False so the END does not route through the process-exit path.
 
@@ -453,7 +412,7 @@ async def _handle_restart(
     if ctx.hosted:
         st.new_msgs.append(
             system_note_message(
-                content=_render_restart_completed_marker(item.source, item.payload),
+                content=f"{_ts_prefix()}Restart was accepted from {_by_who(item.source)}",
                 tag=NoteTag.LIFECYCLE_RESTART,
                 created_at=datetime.now(UTC),
             )
@@ -463,12 +422,11 @@ async def _handle_restart(
         return
     if not st.restart_cas_applied:
         assert ctx.ops_pool is not None, "_handle_restart requires ctx.ops_pool"  # noqa: S101
-        await _flip_to_restarting(ctx.ops_pool, agent_id)
+        async with async_write_transaction(ctx.ops_pool) as conn:
+            if not await apply_process_lifecycle(conn, agent_id, item.id):
+                st.next_goto = END
+                return
         st.restart_cas_applied = True
-        if item.source == "self":
-            from agent.db import schedule_self_respawn
-
-            schedule_self_respawn(agent_id)
 
     st.next_goto = END
 
@@ -646,7 +604,7 @@ async def dispatch_batch(
         elif kind == InboundKind.HEARTBEAT:
             await _handle_heartbeat(ctx, agent_id, item, st, state)
         elif kind == InboundKind.TERMINATE:
-            await _handle_terminate(item, st)
+            await _handle_terminate(ctx, item, st)
         elif kind == InboundKind.RESTART:
             await _handle_restart(ctx, agent_id, item, st)
             await _handle_restart_stateful(state, item, st)

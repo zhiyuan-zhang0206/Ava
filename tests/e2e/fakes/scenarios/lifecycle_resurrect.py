@@ -23,10 +23,14 @@ the only INSERTer of this kind):
 
 from __future__ import annotations
 
+import atexit
+import time
+
 import psycopg
 from langchain_core.messages import AIMessage
 
 import ava
+from ops import runner_mode
 from shared.config import settings
 from tests.e2e.fakes._chat_model import ScriptedFakeChatModel
 
@@ -47,7 +51,7 @@ TERMINATE_SCRIPT: tuple[AIMessage, ...] = (
 )
 
 IDLE_SCRIPT: tuple[AIMessage, ...] = (
-    AIMessage(content="\u6211\u5df2\u88ab\u590d\u6d3b\u3002", usage_metadata=_USAGE),
+    AIMessage(content="I processed the wake after resurrection.", usage_metadata=_USAGE),
 )
 
 
@@ -64,3 +68,26 @@ def build(model: str) -> ScriptedFakeChatModel:
     if _is_post_resurrect_process():
         return ScriptedFakeChatModel(script=IDLE_SCRIPT)
     return ScriptedFakeChatModel(script=TERMINATE_SCRIPT)
+
+
+def build_waiting_for_chat(model: str) -> ScriptedFakeChatModel:
+    """Hold the real old process until its wake has retried, not an arbitrary sleep."""
+    if not runner_mode.is_hosted() and not _is_post_resurrect_process():
+        agent_id = int(ava.self.AGENT_ID)
+
+        def wait_for_retry() -> None:
+            deadline = time.monotonic() + 15
+            while time.monotonic() < deadline:
+                with psycopg.connect(settings.data_plane.db_url) as conn:
+                    row = conn.execute(
+                        "SELECT 1 FROM inbound_messages WHERE agent_id=%s AND kind='chat' "
+                        "AND (payload->'resurrection_retry'->>'attempts')::integer>=2 LIMIT 1",
+                        (agent_id,),
+                    ).fetchone()
+                if row is not None:
+                    return
+                time.sleep(0.05)
+            raise RuntimeError("old process never observed its queued wake retry authorization")
+
+        atexit.register(wait_for_retry)
+    return build(model)

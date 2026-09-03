@@ -20,6 +20,7 @@ import asyncio
 import contextlib
 import os
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock
@@ -35,6 +36,7 @@ from langgraph.runtime import Runtime
 from langgraph.types import Command
 from psycopg_pool import AsyncConnectionPool
 
+from agent._starting import claim_agent_row
 from agent.graph import claim_node
 from agent.graph._context import AvaContext
 from agent.hooks.compact import compose_summary_message
@@ -250,8 +252,10 @@ def _config(tid: int) -> RunnableConfig:
 
 
 @pytest.fixture
-def running_agent(db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch):
-    """factory: spawn agent row + directly UPDATE to 'running'.
+def running_agent(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> Callable[[], int]:
+    """Factory: actual admission binds the token before lifecycle dispatch.
 
     Simulates production: the bootstrap CAS has already created a running row
     before the process enters claim_node. Dispatch tests need that row for the
@@ -260,7 +264,7 @@ def running_agent(db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch):
 
     def _make() -> int:
         tid = spawn_agent()
-        _set_agent_status(db_conn, tid, "running")
+        claim_agent_row(tid)
         return tid
 
     return _make
@@ -316,16 +320,14 @@ async def test_claim_subsequent_entry_does_not_disturb_running(
 
 
 async def test_claim_inbound_batch_stamps_claimed_at(
+    running_agent: Callable[[], int],
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
 ):
-    """claim_inbound_batch stamps claimed_at = now() on every grabbed row
-    (chat -> claimed, lifecycle kinds -> done), so the gateway can compute
-    creation -> pickup latency (claimed_at - created_at) after the fact. A row
-    nobody claimed keeps claimed_at NULL."""
+    """Only the accepted command gets pickup time; queued chat stays unclaimed."""
     from agent.db import claim_inbound_batch
 
-    tid = spawn_agent()
+    tid = running_agent()
     chat_id = insert_inbound_message(db_conn, tid, "hello", source="user")
     with db_conn.cursor() as cur:
         cur.execute(
@@ -340,9 +342,7 @@ async def test_claim_inbound_batch_stamps_claimed_at(
 
     rows = await claim_inbound_batch(aops_pool, tid)
     by_id = {r.id: r for r in rows}
-    assert set(by_id) == {chat_id, term_id}
-    # RETURNING carries claimed_at for both kinds (chat + lifecycle).
-    assert by_id[chat_id].claimed_at is not None
+    assert set(by_id) == {term_id}
     assert by_id[term_id].claimed_at is not None
 
     with db_conn.cursor() as cur:
@@ -351,8 +351,8 @@ async def test_claim_inbound_batch_stamps_claimed_at(
             ([chat_id, term_id],),
         )
         state = cur.fetchall()
-    assert [(r[0], r[1]) for r in state] == [(chat_id, "claimed"), (term_id, "done")]
-    assert all(r[2] is not None for r in state)
+    assert [(r[0], r[1]) for r in state] == [(chat_id, "pending"), (term_id, "claimed")]
+    assert state[0][2] is None and state[1][2] is not None
 
     # A fresh unclaimed row keeps claimed_at NULL.
     fresh_id = insert_inbound_message(db_conn, tid, "later", source="user")
@@ -809,15 +809,16 @@ async def test_claim_unknown_kind_raises(
 
 
 async def test_claim_terminate_kind_appends_lifecycle_marker_and_routes_to_end(
+    running_agent: Callable[[], int],
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     aredis_inbound_listener: RedisInboundListener,
 ):
     """terminate inbound → claim appends lifecycle marker (HumanMessage containing
-    'You are terminated by {source}' text + ava_msg_type='lifecycle' metadata)
+    'Termination was accepted from {source}' text + ava_msg_type='lifecycle' metadata)
     + goto END with exit_requested=True, so the per-turn runloop returns
     (instead of re-invoking) and the process exits naturally."""
-    tid = spawn_agent()
+    tid = running_agent()
     _insert_inbound_kind(db_conn, tid, "", "terminate", source="user")
 
     cmd = await claim_node(
@@ -836,7 +837,7 @@ async def test_claim_terminate_kind_appends_lifecycle_marker_and_routes_to_end(
     # passes str, narrow with string methods
     assert isinstance(lifecycle.content, str)  # pyright: ignore[reportUnknownMemberType]
     content = lifecycle.content
-    assert "You are terminated by user" in content
+    assert "Termination was accepted from user" in content
     # marker content has timestamp prefix + [system] in single brackets (now_timestamp already has square brackets, no nesting)
     assert content.startswith("[")  # timestamp start: e.g. [2026-...
     assert "[system]" in content
@@ -1083,6 +1084,7 @@ async def test_claim_cancel_before_chat_cobatch_wakes_to_process_chat(
 
 
 async def test_claim_cancel_batched_with_terminate_terminate_wins(
+    running_agent: Callable[[], int],
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     aredis_inbound_listener: RedisInboundListener,
@@ -1092,7 +1094,7 @@ async def test_claim_cancel_batched_with_terminate_terminate_wins(
     the cancel idle. Both rows are claimed/done in one pass; the pause must not
     swallow the stronger kill. Regression for the cancel-over-terminate
     precedence inversion."""
-    tid = spawn_agent()
+    tid = running_agent()
     # insertion order shouldn't matter; put cancel first to make the override tempting
     _insert_inbound_kind(db_conn, tid, "", "cancel", source="user")
     _insert_inbound_kind(db_conn, tid, "", "terminate", source="user")
@@ -1108,12 +1110,13 @@ async def test_claim_cancel_batched_with_terminate_terminate_wins(
     assert any(
         isinstance(m, HumanMessage)
         and isinstance(m.content, str)  # pyright: ignore[reportUnknownMemberType]
-        and "You are terminated" in m.content
+        and "Termination was accepted" in m.content
         for m in msgs
     )
 
 
 async def test_claim_lifecycle_marker_drops_timestamp_when_disabled(
+    running_agent: Callable[[], int],
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     aredis_inbound_listener: RedisInboundListener,
@@ -1122,7 +1125,7 @@ async def test_claim_lifecycle_marker_drops_timestamp_when_disabled(
     """settings.general.message_timestamps=False → the lifecycle marker has no leading
     timestamp; it starts straight at `[system]` with no stray space."""
     monkeypatch.setattr(settings.general, "message_timestamps", False)
-    tid = spawn_agent()
+    tid = running_agent()
     _insert_inbound_kind(db_conn, tid, "", "terminate", source="user")
 
     cmd = await claim_node(
@@ -1131,17 +1134,18 @@ async def test_claim_lifecycle_marker_drops_timestamp_when_disabled(
         _config(tid),
     )
     content = cmd.update["messages"][-1].content  # type: ignore[index]
-    assert content.startswith("[system] You are terminated by user")  # pyright: ignore[reportUnknownMemberType]
+    assert content.startswith("[system] Termination was accepted from user")  # pyright: ignore[reportUnknownMemberType]
 
 
 async def test_claim_terminate_self_renders_by_yourself(
+    running_agent: Callable[[], int],
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     aredis_inbound_listener: RedisInboundListener,
 ):
     """source='self' (ava.self.terminate() suicide) → marker text spells 'by yourself'
     instead of 'by self', more accurately expressing 'agent shuts itself down' semantics."""
-    tid = spawn_agent()
+    tid = running_agent()
     _insert_inbound_kind(db_conn, tid, "", "terminate", source="self")
 
     cmd = await claim_node(
@@ -1152,22 +1156,17 @@ async def test_claim_terminate_self_renders_by_yourself(
     assert cmd.goto == END
     msgs = cmd.update["messages"]  # type: ignore[index]
     lifecycle = msgs[0]
-    assert "You are terminated by yourself" in lifecycle.content  # pyright: ignore[reportUnknownMemberType]
+    assert "Termination was accepted from yourself" in lifecycle.content  # pyright: ignore[reportUnknownMemberType]
 
 
-async def test_claim_self_terminate_with_chat_cobatch_abandons_terminate(
+async def test_claim_self_terminate_retains_peer_chat_for_successor(
+    running_agent: Callable[[], int],
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     aredis_inbound_listener: RedisInboundListener,
 ):
-    """The terminate race: an agent calls ava.self.terminate() while a peer
-    message arrives at the same moment; both land pending and are claimed in one
-    batch. The chat arrived during the very turn the agent terminated in — the
-    agent never saw it (its LLM context only holds messages claimed at the turn's
-    start), so the death decision must be abandoned: the chat is committed and
-    drives a wake (goto before_llm), the terminate is a consumed no-op (no
-    marker, no END), the agent stays alive to process the message."""
-    tid = spawn_agent()
+    """Accepting self termination never acknowledges an unseen peer message."""
+    tid = running_agent()
     insert_inbound_message(db_conn, tid, "peer message during suicide", source="agent:1")
     terminate_id = _insert_inbound_kind(db_conn, tid, "", "terminate", source="self")
     await _await_inbound_visible(aops_pool, terminate_id)
@@ -1178,28 +1177,24 @@ async def test_claim_self_terminate_with_chat_cobatch_abandons_terminate(
         _config(tid),
     )
 
-    assert cmd.goto == "before_llm"  # wake to process the chat, not END
-    assert cmd.goto != END
-    assert cmd.update["halted"] is False  # type: ignore[index]
+    assert cmd.goto == END
     msgs = cmd.update["messages"]  # type: ignore[index]
     assert len(msgs) == 1  # pyright: ignore[reportUnknownArgumentType]
     assert isinstance(msgs[0], HumanMessage)
-    assert "peer message during suicide" in msgs[0].content  # pyright: ignore[reportUnknownMemberType]
-    # no terminate lifecycle marker — the death was abandoned
-    assert not any("You are terminated" in m.content for m in msgs)  # pyright: ignore[reportUnknownMemberType]
+    assert "Termination was accepted" in msgs[0].content  # pyright: ignore[reportUnknownMemberType]
+    assert db_conn.execute(
+        "SELECT status,content FROM inbound_messages WHERE agent_id=%s AND kind='chat'", (tid,)
+    ).fetchone() == ("pending", "peer message during suicide")
 
 
-async def test_claim_self_terminate_with_older_chat_cobatch_abandons_terminate(
+async def test_claim_self_terminate_retains_older_user_chat(
+    running_agent: Callable[[], int],
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     aredis_inbound_listener: RedisInboundListener,
 ):
-    """Order-independence half of the self-terminate race: the chat can arrive
-    just BEFORE the agent calls ava.self.terminate() (sitting pending during the
-    terminating turn). It is still unseen by the agent, so it vetoes the death
-    just the same — a co-batched chat is by construction not in the LLM context
-    (only chats claimed in an earlier batch are)."""
-    tid = spawn_agent()
+    """An older user chat remains durable without vetoing the accepted command."""
+    tid = running_agent()
     chat_id = insert_inbound_message(db_conn, tid, "queued before the suicide", source="user")
     await _await_inbound_visible(aops_pool, chat_id)
     _insert_inbound_kind(db_conn, tid, "", "terminate", source="self")
@@ -1210,22 +1205,22 @@ async def test_claim_self_terminate_with_older_chat_cobatch_abandons_terminate(
         _config(tid),
     )
 
-    assert cmd.goto == "before_llm"
+    assert cmd.goto == END
     msgs = cmd.update["messages"]  # type: ignore[index]
-    assert any("queued before the suicide" in m.content for m in msgs)  # pyright: ignore[reportUnknownMemberType]
-    assert not any("You are terminated" in m.content for m in msgs)  # pyright: ignore[reportUnknownMemberType]
+    assert any("Termination was accepted" in m.content for m in msgs)  # pyright: ignore[reportUnknownMemberType]
+    assert db_conn.execute(
+        "SELECT status,content FROM inbound_messages WHERE id=%s", (chat_id,)
+    ).fetchone() == ("pending", "queued before the suicide")
 
 
-async def test_claim_external_terminate_with_newer_chat_abandons_terminate(
+async def test_claim_external_terminate_retains_newer_chat(
+    running_agent: Callable[[], int],
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     aredis_inbound_listener: RedisInboundListener,
 ):
-    """External terminate (user/admin/peer) with a chat that arrived AFTER it:
-    the chat is the most recent genuine intent — same recency rule as the
-    resurrect veto — so the terminate is abandoned (consumed no-op, no marker)
-    and the agent wakes to process the chat."""
-    tid = spawn_agent()
+    """Newer chat does not replace an accepted lifecycle command or get lost."""
+    tid = running_agent()
     _insert_inbound_kind(db_conn, tid, "", "terminate", source="user")
     chat_id = insert_inbound_message(db_conn, tid, "message after the kill", source="user")
     await _await_inbound_visible(aops_pool, chat_id)
@@ -1236,14 +1231,16 @@ async def test_claim_external_terminate_with_newer_chat_abandons_terminate(
         _config(tid),
     )
 
-    assert cmd.goto == "before_llm"
-    assert cmd.goto != END
+    assert cmd.goto == END
     msgs = cmd.update["messages"]  # type: ignore[index]
-    assert any("message after the kill" in m.content for m in msgs)  # pyright: ignore[reportUnknownMemberType]
-    assert not any("You are terminated" in m.content for m in msgs)  # pyright: ignore[reportUnknownMemberType]
+    assert any("Termination was accepted" in m.content for m in msgs)  # pyright: ignore[reportUnknownMemberType]
+    assert db_conn.execute(
+        "SELECT status,content FROM inbound_messages WHERE id=%s", (chat_id,)
+    ).fetchone() == ("pending", "message after the kill")
 
 
 async def test_claim_external_terminate_with_older_chat_still_dies(
+    running_agent: Callable[[], int],
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     aredis_inbound_listener: RedisInboundListener,
@@ -1253,7 +1250,7 @@ async def test_claim_external_terminate_with_older_chat_still_dies(
     terminate is the latest intent and the agent dies (END + marker). The
     pre-death chat is committed to history as before; it is visible after a
     resurrect."""
-    tid = spawn_agent()
+    tid = running_agent()
     chat_id = insert_inbound_message(db_conn, tid, "old message before the kill", source="user")
     await _await_inbound_visible(aops_pool, chat_id)
     _insert_inbound_kind(db_conn, tid, "", "terminate", source="user")
@@ -1266,8 +1263,10 @@ async def test_claim_external_terminate_with_older_chat_still_dies(
 
     assert cmd.goto == END
     msgs = cmd.update["messages"]  # type: ignore[index]
-    assert any("You are terminated by user" in m.content for m in msgs)  # pyright: ignore[reportUnknownMemberType]
-    assert any("old message before the kill" in m.content for m in msgs)  # pyright: ignore[reportUnknownMemberType]
+    assert any("Termination was accepted from user" in m.content for m in msgs)  # pyright: ignore[reportUnknownMemberType]
+    assert db_conn.execute(
+        "SELECT status,content FROM inbound_messages WHERE agent_id=%s AND kind='chat'", (tid,)
+    ).fetchone() == ("pending", "old message before the kill")
 
 
 async def test_claim_terminate_vetoed_by_pending_inbound_after_claim(
@@ -1339,6 +1338,7 @@ async def test_claim_terminate_vetoed_by_pending_inbound_after_claim(
 
 @pytest.mark.flaky  # poll _await_status for claim_node status transition
 async def test_claim_restart_kind_marks_restarting_and_no_message(
+    running_agent: Callable[[], int],
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     aredis_inbound_listener: RedisInboundListener,
@@ -1347,7 +1347,7 @@ async def test_claim_restart_kind_marks_restarting_and_no_message(
     """restart inbound → mark agents.status running→restarting + goto END,
     does **not** append message (old process writing 'has been restarted' is writing for the future,
     left to the new process's 'restart_completed' kind dispatch)."""
-    tid = spawn_agent()
+    tid = running_agent()
     # simulate process already up: unclaimed idling → running (mark_agent_status 'restarting' expects from='running')
     _set_agent_status(db_conn, tid, "running")
     restart_id = _insert_inbound_kind(db_conn, tid, "", "restart", source="user")
@@ -1372,6 +1372,7 @@ async def test_claim_restart_kind_marks_restarting_and_no_message(
 
 @pytest.mark.flaky  # poll _await_status for claim_node status transition
 async def test_claim_multiple_restart_in_one_batch_flips_status_once(
+    running_agent: Callable[[], int],
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     aredis_inbound_listener: RedisInboundListener,
@@ -1382,7 +1383,7 @@ async def test_claim_multiple_restart_in_one_batch_flips_status_once(
     restarting status -> raises RuntimeError, claim_node crashes, old process does not exit cleanly,
     agent gets stuck and eventually the reaper flips it to terminated. After fix: the second restart
     skips CAS, claim_node returns normally with goto END, status is restarting."""
-    tid = spawn_agent()
+    tid = running_agent()
     _set_agent_status(db_conn, tid, "running")
     _insert_inbound_kind(db_conn, tid, "", "restart", source="user")
     r2 = _insert_inbound_kind(db_conn, tid, "", "restart", source="system:update")
@@ -1486,25 +1487,34 @@ async def test_claim_restart_kind_hosted_ends_turn_and_stays_runnable(
     no 'restarting' flip (there is no restarter to pick the row up — it must
     stay runnable), and the lifecycle marker renders inline (nothing else will:
     the restarter is what writes restart_completed in process mode)."""
-    tid = spawn_agent()
-    _set_agent_status(db_conn, tid, "running")
+    from shared.turn_identity import bind_turn_identity
+    from tests.agent.test_inbound_ownership import _admit, _agent
+
+    tid = _agent(db_conn)
+    owner = await _admit(aops_pool, tid)
     restart_id = _insert_inbound_kind(db_conn, tid, "", "restart", source="user")
     await _await_inbound_visible(aops_pool, restart_id)
 
-    cmd = await claim_node(
-        AgentState(messages=[SystemMessage(content="sys")]),
-        _make_runtime(ops_pool=aops_pool, inbound_listener=aredis_inbound_listener, hosted=True),
-        _config(tid),
-    )
+    with bind_turn_identity(tid, incarnation=owner):
+        cmd = await claim_node(
+            AgentState(messages=[SystemMessage(content="sys")]),
+            _make_runtime(
+                ops_pool=aops_pool, inbound_listener=aredis_inbound_listener, hosted=True
+            ),
+            _config(tid),
+        )
 
     assert cmd.goto == END
     assert cmd.update["restart_requested"] is True  # type: ignore[index]
     assert cmd.update["exit_requested"] is False  # type: ignore[index]
     msgs = cmd.update["messages"]  # type: ignore[index]
     assert len(msgs) == 1  # pyright: ignore[reportUnknownArgumentType]
-    assert "You have been restarted by user" in msgs[0].content  # pyright: ignore[reportUnknownMemberType]
+    assert "Restart was accepted from user" in msgs[0].content  # pyright: ignore[reportUnknownMemberType]
     # the row never left a runnable status — no restarter will come for it
     await _await_status(aops_pool, tid, "running")
+    assert db_conn.execute(
+        "SELECT status,applied_at,observed_at FROM inbound_messages WHERE id=%s", (restart_id,)
+    ).fetchone() == ("claimed", None, None)
 
 
 async def test_claim_restart_kind_hosted_self_arms_no_process_respawn(
@@ -1516,20 +1526,24 @@ async def test_claim_restart_kind_hosted_self_arms_no_process_respawn(
     """A hosted self-restart must not arm the atexit self-respawn fallback —
     that fallback forks a replacement PROCESS, which hosted mode has no use
     for and which would double-claim with the dispatcher's turn task."""
-    from agent import db as agent_db
+    from shared.turn_identity import bind_turn_identity
+    from tests.agent.test_inbound_ownership import _admit, _agent
 
     scheduled: list[int] = []
-    monkeypatch.setattr(agent_db, "schedule_self_respawn", scheduled.append)
-    tid = spawn_agent()
-    _set_agent_status(db_conn, tid, "running")
+    monkeypatch.setattr("atexit.register", scheduled.append)
+    tid = _agent(db_conn)
+    owner = await _admit(aops_pool, tid)
     restart_id = _insert_inbound_kind(db_conn, tid, "", "restart", source="self")
     await _await_inbound_visible(aops_pool, restart_id)
 
-    cmd = await claim_node(
-        AgentState(messages=[SystemMessage(content="sys")]),
-        _make_runtime(ops_pool=aops_pool, inbound_listener=aredis_inbound_listener, hosted=True),
-        _config(tid),
-    )
+    with bind_turn_identity(tid, incarnation=owner):
+        cmd = await claim_node(
+            AgentState(messages=[SystemMessage(content="sys")]),
+            _make_runtime(
+                ops_pool=aops_pool, inbound_listener=aredis_inbound_listener, hosted=True
+            ),
+            _config(tid),
+        )
 
     assert cmd.goto == END
     assert cmd.update["restart_requested"] is True  # type: ignore[index]
@@ -1663,13 +1677,14 @@ async def test_claim_system_note_unknown_tag_fails_loud(
 
 
 async def test_claim_restart_while_idle_commits_halted_true(
+    running_agent: Callable[[], int],
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     aredis_inbound_listener: RedisInboundListener,
 ):
     """external restart hits idle agent (halted=True) → committed halted=True,
     carrying 'no in-flight work before restart' across the respawn boundary for the new process to read."""
-    tid = spawn_agent()
+    tid = running_agent()
     _set_agent_status(db_conn, tid, "running")
     _insert_inbound_kind(db_conn, tid, "", "restart", source="system:update")
 
@@ -1685,6 +1700,7 @@ async def test_claim_restart_while_idle_commits_halted_true(
 
 @pytest.mark.parametrize("source", ["self"])
 async def test_claim_restart_self_source_commits_halted_false(
+    running_agent: Callable[[], int],
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     aredis_inbound_listener: RedisInboundListener,
@@ -1693,7 +1709,7 @@ async def test_claim_restart_self_source_commits_halted_false(
     """agent-initiated restart (ava.self.restart) → even if the exec path
     set halted to True (turn-end semantics), committed halted must be False — agent has in-flight
     intent, must wake after respawn to confirm result and continue."""
-    tid = spawn_agent()
+    tid = running_agent()
     _set_agent_status(db_conn, tid, "running")
     _insert_inbound_kind(db_conn, tid, "", "restart", source=source)
 
@@ -1708,6 +1724,7 @@ async def test_claim_restart_self_source_commits_halted_false(
 
 
 async def test_claim_restart_system_update_after_self_update_wakes(
+    running_agent: Callable[[], int],
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     aredis_inbound_listener: RedisInboundListener,
@@ -1716,7 +1733,7 @@ async def test_claim_restart_system_update_after_self_update_wakes(
     self:update path) + the rollout quiesce system:update restart → committed
     halted must be False — an update-interrupted agent wakes after respawn, not
     silently idle."""
-    tid = spawn_agent()
+    tid = running_agent()
     _set_agent_status(db_conn, tid, "running")
     _insert_inbound_kind(db_conn, tid, "", "restart", source="system:update")
 
@@ -1734,15 +1751,14 @@ async def test_claim_restart_system_update_after_self_update_wakes(
     assert cmd.update["halted"] is False  # type: ignore[index]
 
 
-async def test_claim_restart_idle_with_chat_cobatch_commits_halted_false(
+async def test_claim_restart_preserves_chat_for_successor(
+    running_agent: Callable[[], int],
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     aredis_inbound_listener: RedisInboundListener,
 ):
-    """idle agent's same batch has both chat + restart (user message coinciding with restart) →
-    chat already committed into messages, committed halted must be False, otherwise after respawn
-    it would silently idle and this user message would never be answered."""
-    tid = spawn_agent()
+    """Only the accepted lifecycle command dispatches; chat remains durable pending work."""
+    tid = running_agent()
     _set_agent_status(db_conn, tid, "running")
     insert_inbound_message(db_conn, tid, "hello", source="user")
     _insert_inbound_kind(db_conn, tid, "", "restart", source="system:update")
@@ -1754,26 +1770,26 @@ async def test_claim_restart_idle_with_chat_cobatch_commits_halted_false(
     )
 
     assert cmd.goto == END
-    assert cmd.update["halted"] is False  # type: ignore[index]
+    assert cmd.update["halted"] is True  # type: ignore[index]
     msgs = cmd.update["messages"]  # type: ignore[index]
-    assert len(msgs) == 1 and "hello" in msgs[0].content  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+    assert msgs == []
+    assert db_conn.execute(
+        "SELECT status,content FROM inbound_messages WHERE agent_id=%s AND kind='chat'", (tid,)
+    ).fetchone() == ("pending", "hello")
 
 
-async def test_claim_restart_batched_with_terminate_terminate_wins(
+async def test_claim_restart_before_terminate_preserves_serial_order(
+    running_agent: Callable[[], int],
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     aredis_inbound_listener: RedisInboundListener,
 ):
-    """restart then terminate in one batch — terminate is the NEWER intent, so it
-    wins by recency: status does **not** flip to 'restarting' (else the restarter
-    would respawn an agent the user just killed), goto END via the plain terminate
-    exit, restart consumed and dropped. The reverse order (terminate older, restart
-    newer) is covered by test_claim_terminate_then_restart_respawns."""
-    tid = spawn_agent()
+    """The active restart is not discarded by a later termination request."""
+    tid = running_agent()
     _set_agent_status(db_conn, tid, "running")
-    # terminate inserted last -> newer id -> wins the recency contest over restart
+    # Later termination remains pending for the admitted successor.
     _insert_inbound_kind(db_conn, tid, "", "restart", source="user")
-    _insert_inbound_kind(db_conn, tid, "", "terminate", source="user")
+    terminate_id = _insert_inbound_kind(db_conn, tid, "", "terminate", source="user")
 
     cmd = await claim_node(
         AgentState(messages=[SystemMessage(content="sys")], halted=True),
@@ -1782,18 +1798,14 @@ async def test_claim_restart_batched_with_terminate_terminate_wins(
     )
 
     assert cmd.goto == END
-    # terminate should not be overridden by restart's idle preserve — halted=False (end state is fine but don't silently lurk)
-    assert cmd.update["halted"] is False  # type: ignore[index]
-    msgs = cmd.update["messages"]  # type: ignore[index]
-    assert len(msgs) == 1 and "You are terminated by user" in msgs[0].content  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
-    # status remains running — exit finalize follows normal terminate path, restarter doesn't touch
-    with db_conn.cursor() as cur:
-        cur.execute("SELECT status FROM agents_meta WHERE id = %s", (tid,))
-        row = cur.fetchone()
-    assert row is not None and row[0] == "running"
+    await _await_status(aops_pool, tid, "restarting")
+    assert db_conn.execute(
+        "SELECT status FROM inbound_messages WHERE id=%s", (terminate_id,)
+    ).fetchone() == ("pending",)
 
 
 async def test_claim_terminate_before_restart_completed_still_exits(
+    running_agent: Callable[[], int],
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     aredis_inbound_listener: RedisInboundListener,
@@ -1803,7 +1815,7 @@ async def test_claim_terminate_before_restart_completed_still_exits(
     override the stronger END back to wake' — the marker arm once unconditionally set
     next_goto=BEFORE_LLM; this ordering would consume the terminate but the agent wakes up alive
     (ordering-dependent bug)."""
-    tid = spawn_agent()
+    tid = running_agent()
     _insert_inbound_kind(db_conn, tid, "", "terminate", source="user")
     _insert_inbound_kind(db_conn, tid, "", "restart_completed", source="user")
 
@@ -1814,14 +1826,18 @@ async def test_claim_terminate_before_restart_completed_still_exits(
     )
 
     assert cmd.goto == END
-    # both markers are still committed as usual (terminate's exit + restart's completion leave traces)
+    # The accepted command does not consume an unrelated completion marker.
     contents = [m.content for m in cmd.update["messages"]]  # type: ignore[index]
-    assert any("You are terminated by user" in c for c in contents)
-    assert any("You have been restarted by user" in c for c in contents)
+    assert any("Termination was accepted from user" in c for c in contents)
+    assert not any("You have been restarted" in c for c in contents)
+    assert db_conn.execute(
+        "SELECT status FROM inbound_messages WHERE agent_id=%s AND kind='restart_completed'", (tid,)
+    ).fetchone() == ("pending",)
 
 
 @pytest.mark.flaky  # poll _await_status for claim_node status transition
 async def test_claim_cancel_batched_with_restart_idle_respawn_silent(
+    running_agent: Callable[[], int],
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     aredis_inbound_listener: RedisInboundListener,
@@ -1829,7 +1845,7 @@ async def test_claim_cancel_batched_with_restart_idle_respawn_silent(
     """cancel + restart in the same batch (user clicks Stop then Restart) → restart wins over cancel:
     exits normally via respawn; the Cancelled event for cancel is still emitted (frontend clears
     turn-active), the pause intent is absorbed into 'silent idle after respawn' (halted=True preserved)."""
-    tid = spawn_agent()
+    tid = running_agent()
     _set_agent_status(db_conn, tid, "running")
     _insert_inbound_kind(db_conn, tid, "", "cancel", source="user")
     restart_id = _insert_inbound_kind(db_conn, tid, "", "restart", source="user")
@@ -1848,13 +1864,17 @@ async def test_claim_cancel_batched_with_restart_idle_respawn_silent(
     assert cmd.goto == END
     # idle before restart (halted=True) + external → silent after respawn
     assert cmd.update["halted"] is True  # type: ignore[index]
-    # Cancelled event still emitted
-    assert any("cancelled" in str(c.args[0]).lower() for c in pub.emit.call_args_list)
+    # No phantom cancellation: the successor will consume the still-pending command.
+    assert not any("cancelled" in str(c.args[0]).lower() for c in pub.emit.call_args_list)
+    assert db_conn.execute(
+        "SELECT status FROM inbound_messages WHERE agent_id=%s AND kind='cancel'", (tid,)
+    ).fetchone() == ("pending",)
     await _await_status(aops_pool, tid, "restarting")
 
 
 @pytest.mark.flaky  # poll _await_status for claim_node status transition
 async def test_claim_second_restart_batched_with_restart_completed_exits_again(
+    running_agent: Callable[[], int],
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     aredis_inbound_listener: RedisInboundListener,
@@ -1862,7 +1882,7 @@ async def test_claim_second_restart_batched_with_restart_completed_exits_again(
     """boot batch [restart_completed, restart] (user clicked restart again within the respawn window) →
     the second restart wins over wake: after committing marker, exits again via respawn, idle preserved
     (external + halted=True) → second respawn remains silent."""
-    tid = spawn_agent()
+    tid = running_agent()
     _set_agent_status(db_conn, tid, "running")
     _insert_inbound_kind(db_conn, tid, "", "restart_completed", source="user")
     restart_id = _insert_inbound_kind(db_conn, tid, "", "restart", source="user")
@@ -1877,12 +1897,16 @@ async def test_claim_second_restart_batched_with_restart_completed_exits_again(
     assert cmd.goto == END
     assert cmd.update["halted"] is True  # type: ignore[index]
     msgs = cmd.update["messages"]  # type: ignore[index]
-    assert len(msgs) == 1 and "You have been restarted by user" in msgs[0].content  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+    assert msgs == []
+    assert db_conn.execute(
+        "SELECT status FROM inbound_messages WHERE agent_id=%s AND kind='restart_completed'", (tid,)
+    ).fetchone() == ("pending",)
     await _await_status(aops_pool, tid, "restarting")
 
 
 @pytest.mark.flaky  # poll _await_status for claim_node status transition
 async def test_claim_compact_request_batched_with_restart_is_dropped(
+    running_agent: Callable[[], int],
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     aredis_inbound_listener: RedisInboundListener,
@@ -1890,7 +1914,7 @@ async def test_claim_compact_request_batched_with_restart_is_dropped(
     """compact_request + restart in same batch → compact_request is the discarded loser:
     does **not** run the backend Compaction LLM (if it raised, the already consumed restart row
     would be lost before the RESTARTING marker), restart exits normally. Re-trigger /compact afterwards."""
-    tid = spawn_agent()
+    tid = running_agent()
     _set_agent_status(db_conn, tid, "running")
     _insert_inbound_kind(db_conn, tid, "", "compact_request", source="user")
     restart_id = _insert_inbound_kind(db_conn, tid, "", "restart", source="user")
@@ -1915,6 +1939,7 @@ async def test_claim_compact_request_batched_with_restart_is_dropped(
 
 @pytest.mark.flaky  # poll _await_status for claim_node status transition
 async def test_claim_compact_summary_batched_with_restart_applies_and_keeps_idle(
+    running_agent: Callable[[], int],
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     aredis_inbound_listener: RedisInboundListener,
@@ -1922,12 +1947,12 @@ async def test_claim_compact_summary_batched_with_restart_applies_and_keeps_idle
     """compact_summary + restart in same batch → summary is data the agent already wrote itself,
     applied as usual (discarding = silently swallowing the agent's work), while the restart's idle
     preservation is not overwritten by the compact return path's halted — remains silent after respawn."""
-    tid = spawn_agent()
+    tid = running_agent()
     # Confirm the spawn is visible on the async pool before we start writing
     # through it.  Every subsequent write goes through `aops_pool` too, so there
     # is no sync→async visibility window — the same pool is used for writes and
     # for the claim_node read.
-    await _await_status(aops_pool, tid, "idling")
+    await _await_status(aops_pool, tid, "running")
     await _set_agent_status_async(aops_pool, tid, "running")
     # Confirm the status update is visible before inserting inbounds — a second
     # read-after-write barrier on the same pool eliminates any residual
@@ -1945,12 +1970,13 @@ async def test_claim_compact_summary_batched_with_restart_applies_and_keeps_idle
         _config(tid),
     )
 
-    # The compaction detours through init_context to have the head rebuilt, and
-    # carries END on as where the batch resumes — the restart's override survives.
-    assert cmd.goto == "init_context"
-    assert cmd.update["context_reset"].resume == END  # type: ignore[index]
-    tail = _compact_tail(cmd.update)
-    assert any(isinstance(m, HumanMessage) and "compacted summary" in m.content for m in tail)  # pyright: ignore[reportUnknownMemberType]
+    # Already-authored data is retained for the successor, not applied by an exiting owner.
+    assert cmd.goto == END
+    assert cmd.update["messages"] == []  # type: ignore[index]
+    assert db_conn.execute(
+        "SELECT status,content FROM inbound_messages WHERE agent_id=%s AND kind='compact_summary'",
+        (tid,),
+    ).fetchone() == ("pending", "compacted summary")
     # external restart + idle before restart → halted=True preserved (respawn silent)
     assert cmd.update["halted"] is True  # type: ignore[index]
     # Read status on the pool claim_node wrote through; _await_status dumps full
@@ -2063,23 +2089,17 @@ async def test_claim_resurrect_batch_appends_only_latest_marker(
 
 
 # ────────────────────────────────────────────────────────────────────────
-# Lifecycle routing by recency: when a claim batch carries several conflicting
-# intents (only happens after the agent was stuck / down long enough for them to
-# pile up), the LATEST one by row id wins — not a fixed kind precedence. This is
-# what stops a stale terminate from a prior life killing an agent a newer
-# resurrect just brought back (production agent 716).
+# Lifecycle commands bind to an admitted incarnation and dispatch serially.
+# A notification's recency cannot stand in for completed termination or actual
+# successor admission. Unaccepted work survives for the correct consumer.
 
 
-async def test_claim_stale_terminate_loses_to_newer_resurrect(
+async def test_unowned_resurrect_notification_cannot_cancel_pending_terminate(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     aredis_inbound_listener: RedisInboundListener,
 ):
-    """The production stuck-agent recovery batch [cancel, cancel, terminate,
-    resurrect]: the resurrect (newest id) brought the process up and is the user's
-    latest intent → the agent wakes (goto before_llm), the stale prior-life
-    terminate is the consumed loser (no terminate marker, no END). Without recency
-    the terminate would kill the freshly-resurrected process on its first claim."""
+    """A newer notification is not admission or proof that prior intent completed."""
     tid = spawn_agent()
     # id == insertion order: terminate older than the resurrect that follows it
     _insert_inbound_kind(db_conn, tid, "", "cancel", source="user")
@@ -2087,31 +2107,28 @@ async def test_claim_stale_terminate_loses_to_newer_resurrect(
     _insert_inbound_kind(db_conn, tid, "", "terminate", source="user")
     _insert_inbound_kind(db_conn, tid, "", "resurrect", source="user")
 
-    cmd = await claim_node(
-        AgentState(messages=[SystemMessage(content="sys")]),
-        _make_runtime(ops_pool=aops_pool, inbound_listener=aredis_inbound_listener),
-        _config(tid),
-    )
-
-    assert cmd.goto == "before_llm"  # wakes, not END — the kill was vetoed
-    assert cmd.update["halted"] is False  # type: ignore[index]
-    contents = [m.content for m in cmd.update["messages"]]  # type: ignore[index]
-    assert any("You have been resurrected by user" in c for c in contents)
-    assert not any("You are terminated" in c for c in contents)  # stale terminate dropped
+    with pytest.raises(RuntimeError, match="lifecycle claim requires an admitted"):
+        await claim_node(
+            AgentState(messages=[SystemMessage(content="sys")]),
+            _make_runtime(ops_pool=aops_pool, inbound_listener=aredis_inbound_listener),
+            _config(tid),
+        )
+    assert db_conn.execute(
+        "SELECT kind,status,claimed_at FROM inbound_messages WHERE agent_id=%s ORDER BY id", (tid,)
+    ).fetchall() == [
+        (kind, "pending", None) for kind in ["cancel", "cancel", "terminate", "resurrect"]
+    ]
 
 
 async def test_claim_resurrect_then_terminate_still_dies(
+    running_agent: Callable[[], int],
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     aredis_inbound_listener: RedisInboundListener,
 ):
-    """Mirror case: the user resurrects an agent, then terminates the fresh
-    process before its first claim. The terminate is the newer intent → the agent
-    dies (goto END + terminate marker); the resurrect is the consumed loser (no
-    'resurrected' marker). Fixed `resurrect > terminate` priority would wrongly
-    keep alive an agent the user just killed; recency resolves it correctly."""
-    tid = spawn_agent()
-    _insert_inbound_kind(db_conn, tid, "", "resurrect", source="user")
+    """An owned terminate dispatches alone; an older notification is not lost."""
+    tid = running_agent()
+    notice = _insert_inbound_kind(db_conn, tid, "", "resurrect", source="user")
     _insert_inbound_kind(db_conn, tid, "", "terminate", source="user")
 
     cmd = await claim_node(
@@ -2122,24 +2139,28 @@ async def test_claim_resurrect_then_terminate_still_dies(
 
     assert cmd.goto == END
     contents = [m.content for m in cmd.update["messages"]]  # type: ignore[index]
-    assert any("You are terminated by user" in c for c in contents)
-    assert not any("resurrected" in c for c in contents)  # superseded revive dropped
+    assert any("Termination was accepted from user" in c for c in contents)
+    assert not any("resurrected" in c for c in contents)
+    assert db_conn.execute(
+        "SELECT status,claimed_at FROM inbound_messages WHERE id=%s", (notice,)
+    ).fetchone() == ("pending", None)
 
 
 @pytest.mark.flaky  # poll _await_status for claim_node status transition
-async def test_claim_terminate_then_restart_respawns(
+async def test_claim_terminate_then_restart_preserves_serial_order(
+    running_agent: Callable[[], int],
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     aredis_inbound_listener: RedisInboundListener,
 ):
-    """Reverse of test_claim_restart_batched_with_terminate_terminate_wins:
-    terminate older, restart newer → restart wins (the user's latest intent is to
-    recycle). status flips to 'restarting' (the restarter respawns); the stale
-    terminate is the consumed loser (no marker). Recency resolves both directions
-    of the terminate/restart conflict, not a fixed terminate > restart."""
-    tid = spawn_agent()
+    """An owned runtime accepts the first lifecycle command, not latest-wins.
+
+    A following explicit restart remains pending for cold acceptance after exit;
+    it must not silently discard the accepted termination.
+    """
+    tid = running_agent()
     _set_agent_status(db_conn, tid, "running")
-    # restart inserted last -> newer id -> wins over the older terminate
+    # A later restart cannot replace the active command pointer.
     _insert_inbound_kind(db_conn, tid, "", "terminate", source="user")
     restart_id = _insert_inbound_kind(db_conn, tid, "", "restart", source="user")
     await _await_inbound_visible(aops_pool, restart_id)
@@ -2151,27 +2172,58 @@ async def test_claim_terminate_then_restart_respawns(
     )
 
     assert cmd.goto == END
-    # terminate lost -> no terminate marker; restart writes no marker either
-    assert cmd.update["messages"] == []  # type: ignore[index]
-    # Read status on the pool claim_node wrote through; _await_status dumps full
-    # state on timeout (the CI-only `idling != restarting` flake).
-    await _await_status(aops_pool, tid, "restarting")
+    await _await_status(aops_pool, tid, "terminated")
+    assert db_conn.execute(
+        "SELECT status FROM inbound_messages WHERE id=%s", (restart_id,)
+    ).fetchone() == ("pending",)
 
 
 async def test_claim_auto_resurrect_chat_batch_wakes_and_keeps_chat(
+    running_agent: Callable[[], int],
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     aredis_inbound_listener: RedisInboundListener,
+    monkeypatch: pytest.MonkeyPatch,
 ):
-    """Auto-resurrect-on-chat path: a chat delivered to a terminated agent inserts
-    the chat then a resurrect, so a stale prior-life terminate is co-batched as
-    [terminate, chat, resurrect]. The resurrect (newest) wins → the agent wakes and
-    the chat survives to be answered; the stale terminate is vetoed. Without recency
-    the auto-resurrected agent would die before reading the message."""
-    tid = spawn_agent()
-    _insert_inbound_kind(db_conn, tid, "", "terminate", source="user")
+    """A settled prior command, not marker recency, protects the real successor."""
+    from agent._starting import claim_agent_row
+    from ops.agent_wake import resurrect_agent
+    from shared.lifecycle_termination_observe import observe_applied_termination
+    from shared.machine import machine_name
+
+    tid = running_agent()
+    stop = _insert_inbound_kind(db_conn, tid, "", "terminate", source="user")
+    assert (
+        await claim_node(
+            AgentState(messages=[SystemMessage(content="sys")]),
+            _make_runtime(ops_pool=aops_pool, inbound_listener=aredis_inbound_listener),
+            _config(tid),
+        )
+    ).goto == END
+
+    # This PG test supplies an explicit exit observation; actual process exit
+    # and automatic user-wake ownership are separately exercised by E2E.
+    def observed_exit(_payload: object, _machine: str) -> bool:
+        return True
+
+    with monkeypatch.context() as patch:
+        patch.setattr("shared.lifecycle_termination_observe.target_process_ended", observed_exit)
+        with db_conn.transaction():
+            assert observe_applied_termination(db_conn, tid, machine_name())
+    assert db_conn.execute(
+        "SELECT status,observed_at IS NOT NULL FROM inbound_messages WHERE id=%s", (stop,)
+    ).fetchone() == ("done", True)
+    db_conn.commit()
     insert_inbound_message(db_conn, tid, "are you there?", source="user")
-    _insert_inbound_kind(db_conn, tid, "", "resurrect", source="user")
+    resurrect_agent(tid, resurrected_by="user")
+    launch = db_conn.execute(
+        "SELECT id FROM inbound_messages WHERE agent_id=%s AND kind='resurrect' "
+        "AND status='pending'",
+        (tid,),
+    ).fetchone()
+    assert launch is not None
+    db_conn.commit()
+    claim_agent_row(tid, resurrect_command_id=launch[0])
 
     cmd = await claim_node(
         AgentState(messages=[SystemMessage(content="sys")]),
@@ -2184,7 +2236,7 @@ async def test_claim_auto_resurrect_chat_batch_wakes_and_keeps_chat(
     contents = [m.content for m in cmd.update["messages"]]  # type: ignore[index]
     assert any("You have been resurrected by user" in c for c in contents)
     assert any("are you there?" in c for c in contents)  # chat not swallowed
-    assert not any("You are terminated" in c for c in contents)
+    assert not any("Termination was accepted" in c for c in contents)
 
 
 async def test_claim_auto_resurrect_compact_request_batch_compacts_and_wakes(
@@ -2394,20 +2446,14 @@ async def test_claim_chat_marks_inbound_claimed_immediately(
     assert status == "claimed"
 
 
-async def test_claim_lifecycle_marks_inbound_done_immediately(
+async def test_claim_lifecycle_applied_is_not_observed_completion(
+    running_agent: Callable[[], int],
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     aredis_inbound_listener: RedisInboundListener,
 ):
-    """Non-chat kinds (lifecycle / compact) keep the legacy one-step pending→done
-    semantics so the new two-phase reconcile doesn't loop them.
-
-    Critical: if a lifecycle inbound (terminate/restart/restart_completed/resurrect)
-    or compact (compact_summary/compact_request) ended up `claimed`, the next
-    startup's reconcile would see no `ava_inbound_id` in state.messages for it
-    and reset it to `pending` — that loops resurrect→terminate→resurrect, and
-    re-delivers compact summaries on every boot. See codex review of PR #539."""
-    tid = spawn_agent()
+    """Decision installation stays claimed until a real lifecycle observation."""
+    tid = running_agent()
     iid = _insert_inbound_kind(db_conn, tid, "terminate me", "terminate", source="user")
 
     await claim_node(
@@ -2416,13 +2462,13 @@ async def test_claim_lifecycle_marks_inbound_done_immediately(
         _config(tid),
     )
 
-    with db_conn.cursor() as cur:
-        cur.execute("SELECT status FROM inbound_messages WHERE id = %s", (iid,))
-        status = cur.fetchone()[0]  # type: ignore[index]
-    assert status == "done", (
-        f"non-chat kind 'terminate' must skip two-phase claim (codex PR #539 review); "
-        f"got status={status!r}"
-    )
+    row = db_conn.execute(
+        "SELECT status,applied_at,observed_at FROM inbound_messages WHERE id=%s", (iid,)
+    ).fetchone()
+    assert row is not None and row[0] == "claimed" and row[1] is not None and row[2] is None
+    assert db_conn.execute(
+        "SELECT lifecycle_command_id FROM agents_meta WHERE id=%s", (tid,)
+    ).fetchone() == (iid,)
 
 
 @pytest.mark.flaky  # parks in real wait_for_inbound; woken by a real Redis pub/sub publish
@@ -2492,7 +2538,7 @@ async def test_claim_short_path_does_not_enter_idling(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     aredis_inbound_listener: RedisInboundListener,
-    running_agent,
+    running_agent: Callable[[], int],
 ) -> None:
     """first SELECT already has inbound → does not enter wait branch, status not switched to idling.
 
@@ -2556,6 +2602,7 @@ async def test_claim_chat_publishes_inbound_committed_per_id(
 
 @pytest.mark.parametrize("kind", ["terminate", "restart_completed", "resurrect"])
 async def test_claim_lifecycle_kind_does_not_publish_committed(
+    running_agent: Callable[[], int],
     kind: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
@@ -2567,7 +2614,7 @@ async def test_claim_lifecycle_kind_does_not_publish_committed(
     part of the inbound_chat anchor sequence).
 
     The restart test below (claim does not append message nor publish)."""
-    tid = spawn_agent()
+    tid = running_agent()
     _insert_inbound_kind(db_conn, tid, "", kind, source="user")
 
     pub = MagicMock()
@@ -2582,6 +2629,7 @@ async def test_claim_lifecycle_kind_does_not_publish_committed(
 
 
 async def test_claim_restart_kind_does_not_publish_committed(
+    running_agent: Callable[[], int],
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     aredis_inbound_listener: RedisInboundListener,
@@ -2589,7 +2637,7 @@ async def test_claim_restart_kind_does_not_publish_committed(
 ) -> None:
     """restart kind does not publish InboundCommitted (appends no message and no chat
     inbound id enters committed list)."""
-    tid = spawn_agent()
+    tid = running_agent()
     _set_agent_status(db_conn, tid, "running")
     _insert_inbound_kind(db_conn, tid, "", "restart", source="user")
 
@@ -2991,7 +3039,7 @@ async def test_claim_multi_step_continue_no_inbound(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     aredis_inbound_listener: RedisInboundListener,
-    running_agent,
+    running_agent: Callable[[], int],
 ):
     """state.halted=False + state.messages non-empty + no pending inbound →
     `_claim_node_impl` does not enter _wait_for_batch, immediately goto before_llm to let LLM
@@ -3080,13 +3128,14 @@ async def test_claim_halted_with_messages_waits_for_inbound(
 
 
 async def test_claim_terminate_external_source_renders_source_verbatim(
+    running_agent: Callable[[], int],
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     aredis_inbound_listener: RedisInboundListener,
 ):
     """source='agent:42' (another agent triggering terminate) → marker uses 'by agent:42'
     as-is, does not go through _by_who's self special case."""
-    tid = spawn_agent()
+    tid = running_agent()
     _insert_inbound_kind(db_conn, tid, "", "terminate", source="agent:42")
     cmd = await claim_node(
         AgentState(messages=[SystemMessage(content="sys")]),
@@ -3096,7 +3145,7 @@ async def test_claim_terminate_external_source_renders_source_verbatim(
     assert cmd.goto == END
     msgs = cmd.update["messages"]  # type: ignore[index]
     assert isinstance(msgs[0].content, str)  # pyright: ignore[reportUnknownMemberType]
-    assert "You are terminated by agent:42" in msgs[0].content
+    assert "Termination was accepted from agent:42" in msgs[0].content
     # anti-regression: must not contain 'yourself' (mutation that changed != to == made all sources go through self)
     assert "yourself" not in msgs[0].content
 
@@ -3394,6 +3443,7 @@ def test_mark_preclaim_terminated_guarded_to_unclaimed_idling(
 
 
 async def test_claim_restart_self_source_sets_update_initiated(
+    running_agent: Callable[[], int],
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     aredis_inbound_listener: RedisInboundListener,
@@ -3401,7 +3451,7 @@ async def test_claim_restart_self_source_sets_update_initiated(
     """self source RESTART → update_initiated stays True, writing 'this agent
     is in an update session' into Checkpoint (historical: only the removed
     self:update path set it; self.restart preserves whatever was there)."""
-    tid = spawn_agent()
+    tid = running_agent()
     _set_agent_status(db_conn, tid, "running")
     _insert_inbound_kind(db_conn, tid, "", "restart", source="self")
 
@@ -3509,6 +3559,7 @@ async def test_claim_node_idle_enter_publishes_full_window_snapshot(
 
 
 async def test_claim_restart_cas_lost_retries_from_idling(
+    running_agent: Callable[[], int],
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     aredis_inbound_listener: RedisInboundListener,
@@ -3518,7 +3569,7 @@ async def test_claim_restart_cas_lost_retries_from_idling(
     and killed the process; a crash during a network outage cannot be resurrected).
     _flip_to_restarting re-reads the row, retries the flip from 'idling', and the
     claim completes normally with goto END."""
-    tid = spawn_agent()
+    tid = running_agent()
     _set_agent_status(db_conn, tid, "idling")  # race: row no longer 'running'
     restart_id = _insert_inbound_kind(db_conn, tid, "", "restart", source="user")
     await _await_inbound_visible(aops_pool, restart_id)
@@ -3534,42 +3585,26 @@ async def test_claim_restart_cas_lost_retries_from_idling(
     await _await_status(aops_pool, tid, "restarting")
 
 
-async def test_flip_to_restarting_cas_lost_foreign_status_ends_normally(
+@pytest.mark.parametrize("status,expected", [("terminated", False), ("idling", True)])
+async def test_durable_restart_apply_rechecks_current_status(
+    running_agent: Callable[[], int],
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
+    status: str,
+    expected: bool,
 ):
-    """_flip_to_restarting loses the running→restarting CAS to a foreign status
-    (e.g. a terminate parked the row 'terminated' between the claim's
-    running-mark and the CAS) — it logs and returns without raising, leaving
-    the row untouched. Pre-fix code raised RuntimeError out of the graph and
-    killed the process; a crash during a network outage cannot be resurrected
-    (audit #689 G2, agent 2147 2026-08-03: 4h dead)."""
-    tid = spawn_agent()
-    _set_agent_status(db_conn, tid, "terminated")  # race: terminate won
+    """The replacement for the removed status-only writer preserves both races."""
+    from agent.db import claim_inbound_batch
+    from agent.lifecycle_apply import apply_process_lifecycle
+    from shared.db_transaction import async_write_transaction
 
-    from agent.graph._claim import _flip_to_restarting
-
-    await _flip_to_restarting(aops_pool, tid)  # must not raise
-
-    await _await_status(aops_pool, tid, "terminated")  # untouched
-
-
-async def test_flip_to_restarting_cas_lost_retries_from_idling(
-    db_conn: psycopg.Connection,
-    aops_pool: AsyncConnectionPool,
-):
-    """_flip_to_restarting loses the running→restarting CAS to a re-entered claim
-    that left the row 'idling' — it re-reads and retries from the actual live
-    state, landing 'restarting' for the restarter (the claim-level variant of
-    this is covered by test_claim_restart_cas_lost_retries_from_idling)."""
-    tid = spawn_agent()
-    _set_agent_status(db_conn, tid, "idling")
-
-    from agent.graph._claim import _flip_to_restarting
-
-    await _flip_to_restarting(aops_pool, tid)
-
-    await _await_status(aops_pool, tid, "restarting")
+    tid = running_agent()
+    command_id = _insert_inbound_kind(db_conn, tid, "", "restart", source="user")
+    assert [item.id for item in await claim_inbound_batch(aops_pool, tid)] == [command_id]
+    _set_agent_status(db_conn, tid, status)
+    async with async_write_transaction(aops_pool) as conn:
+        assert await apply_process_lifecycle(conn, tid, command_id) is expected
+    await _await_status(aops_pool, tid, "restarting" if expected else status)
 
 
 def test_claim_agent_row_grants_the_liveness_lease(db_conn: psycopg.Connection) -> None:

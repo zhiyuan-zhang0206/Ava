@@ -44,7 +44,7 @@ def test_shell_free_command_launches_as_argv(cmd: str, tmp_path: Path) -> None:
     assert not launch.via_shell
     assert isinstance(launch.command, list)
     assert "cmd" not in launch.command
-    assert launch.creationflags == winproc._DETACHED_FLAGS
+    assert launch.creationflags == winproc._PRIVATE_CONSOLE_FLAGS
 
 
 @pytest.mark.parametrize(
@@ -66,8 +66,8 @@ def test_shell_command_goes_through_cmd_with_a_console(cmd: str, tmp_path: Path)
     launch = winproc._plan_launch(cmd, tmp_path)
     assert launch.via_shell
     assert launch.command == f'cmd /s /c "{cmd}"'
-    assert launch.creationflags == winproc._CMD_FLAGS
-    assert launch.creationflags != winproc._DETACHED_FLAGS
+    assert launch.creationflags == winproc._PRIVATE_CONSOLE_FLAGS
+    assert launch.creationflags == 0x10  # NEW_CONSOLE, not DETACHED or NO_WINDOW
 
 
 def test_shell_command_keeps_its_own_quotes_verbatim(tmp_path: Path) -> None:
@@ -89,7 +89,7 @@ def test_argv_command_is_passed_through_untouched(tmp_path: Path) -> None:
     launch = winproc._plan_launch(argv, tmp_path)
     assert launch.command == argv
     assert launch.command is not argv  # copied, not aliased
-    assert launch.creationflags == winproc._DETACHED_FLAGS
+    assert launch.creationflags == winproc._PRIVATE_CONSOLE_FLAGS
 
 
 def test_argv_posix_venv_token_is_rewritten(tmp_path: Path) -> None:
@@ -105,7 +105,7 @@ def test_argv_posix_venv_token_is_rewritten(tmp_path: Path) -> None:
     argv = [".venv/bin/python", "-m", "services.browser.daemon"]
     launch = winproc._plan_launch(argv, cwd)
     assert launch.command == [str(scripts / "python.exe"), "-m", "services.browser.daemon"]
-    assert launch.creationflags == winproc._DETACHED_FLAGS
+    assert launch.creationflags == winproc._PRIVATE_CONSOLE_FLAGS
 
 
 def test_argv_posix_venv_token_falls_back_to_path_python(tmp_path: Path) -> None:
@@ -244,7 +244,7 @@ def test_browser_respawn_command_rewrites_on_windows(tmp_path: Path) -> None:
     launch = winproc._plan_launch(cmd, cwd)
     assert not launch.via_shell
     assert launch.command == [str(scripts / "python.exe"), "-m", "services.browser.daemon"]
-    assert launch.creationflags == winproc._DETACHED_FLAGS
+    assert launch.creationflags == winproc._PRIVATE_CONSOLE_FLAGS
 
 
 def test_frontend_respawn_command_rewrites_in_the_shell_branch(tmp_path: Path) -> None:
@@ -274,7 +274,7 @@ def test_new_session_launches_a_daemon_with_the_log_handles(
     )
     call = fake_popen.calls[-1]
     assert call.command == ["python", "-m", "services.browser.daemon"]
-    assert call.creationflags == winproc._DETACHED_FLAGS
+    assert call.creationflags == winproc._PRIVATE_CONSOLE_FLAGS
     log = winproc.session_log_path("zz-daemon")
     assert call.stdout == str(log)
     assert call.stderr == str(log)
@@ -307,15 +307,15 @@ def test_new_session_shell_command_reaches_popen_as_a_string(
     assert winproc.new_session("zz-updater", "git fetch && ava restart", tmp_path, env={})
     call = fake_popen.calls[-1]
     assert call.command == 'cmd /s /c "git fetch && ava restart"'
-    assert call.creationflags == winproc._CMD_FLAGS
+    assert call.creationflags == winproc._PRIVATE_CONSOLE_FLAGS
     assert call.stdout == str(winproc.session_log_path("zz-updater"))
 
 
 @pytest.mark.parametrize(
     ("name", "cmd", "base_flags"),
     [
-        ("zz-exec-direct", "python -m worker", winproc._DETACHED_FLAGS),
-        ("zz-exec-shell", "build && run", winproc._CMD_FLAGS),
+        ("zz-exec-direct", "python -m worker", winproc._PRIVATE_CONSOLE_FLAGS),
+        ("zz-exec-shell", "build && run", winproc._PRIVATE_CONSOLE_FLAGS),
     ],
 )
 def test_persistent_session_breaks_away_only_from_an_exec_job(

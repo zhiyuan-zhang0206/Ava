@@ -1120,7 +1120,6 @@ EVENTS: dict[str, EventSpec] = {
     "delivery_stalled": _telemetry(
         "delivery_stalled", "delivery backlog", payload=DeliveryStalled, tier="anomaly"
     ),
-    "restart_cas_lost": _telemetry("restart_cas_lost", "restart CAS race lost", tier="anomaly"),
     "claim_cas_lost": _telemetry(
         "claim_cas_lost", "claim CAS race lost — another lifecycle op owns the row", tier="anomaly"
     ),

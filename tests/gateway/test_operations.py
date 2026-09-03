@@ -11,8 +11,9 @@ endpoint smoke tests live in tests/gateway/test_cluster_endpoints.py.
 from __future__ import annotations
 
 import re
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
+import psycopg
 import pytest
 from pydantic import ValidationError
 
@@ -109,7 +110,9 @@ async def test_launch_agent_op_launches_precreated_row(
 
     monkeypatch.setattr(ops_launch.agent_launch, "_launch_agent_process", _fake_launch)
     monkeypatch.setattr(  # pyright: ignore[reportUnknownArgumentType]
-        ops_launch.agent_launch, "schedule_launch_confirm", confirmed.append
+        ops_launch.agent_launch,
+        "schedule_launch_confirm",
+        lambda agent_id, _attempt: confirmed.append(agent_id),
     )
     body = LaunchAgentRequest(
         agent_id=7,
@@ -132,7 +135,9 @@ async def test_launch_agent_op_delivers_plain_spawn_prompt(
     """A plain spawn's first prompt is inserted + InboundArrived published on
     the runner side after launch (inbound INSERT is within the runner role)."""
     monkeypatch.setattr(ops_launch.agent_launch, "_launch_agent_process", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-    monkeypatch.setattr(ops_launch.agent_launch, "schedule_launch_confirm", lambda _id: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(
+        ops_launch.agent_launch, "schedule_launch_confirm", lambda _id, _attempt=None: None
+    )  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     seen: dict[str, object] = {}
 
     def _fake_insert(_pool: object, agent_id: int, prompt: str, source: str) -> int:
@@ -167,7 +172,9 @@ async def test_launch_agent_op_skips_prompt_for_fork(
     """A fork's prompt was already delivered pre-launch by create_agent_row —
     the launch op must not insert a second inbound."""
     monkeypatch.setattr(ops_launch.agent_launch, "_launch_agent_process", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-    monkeypatch.setattr(ops_launch.agent_launch, "schedule_launch_confirm", lambda _id: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(
+        ops_launch.agent_launch, "schedule_launch_confirm", lambda _id, _attempt=None: None
+    )  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     inserted: list[int] = []
 
     def _fake_insert(_pool: object, _agent_id: int, _prompt: str, _source: str) -> int:
@@ -247,17 +254,25 @@ class TestSpawnPrechecksBlocking:
 
 
 async def test_restart_agent_op_terminated_short_circuits(
-    monkeypatch: pytest.MonkeyPatch, stub_pool: object
+    monkeypatch: pytest.MonkeyPatch, db_conn: psycopg.Connection
 ) -> None:
-    from shared.agents import AgentStatus
+    from tests.conftest import spawn_agent
+    from tests.gateway.test_agents_internals import _test_pool
 
-    monkeypatch.setattr(ops_lifecycle, "get_agent_status", lambda _aid: AgentStatus.TERMINATED)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-    resp = await ops_lifecycle.restart_agent_op(
-        9,
-        RestartAgentRequest(source="user"),
-        stub_pool,  # type: ignore[arg-type]
-    )
+    agent_id = spawn_agent()
+    db_conn.execute("UPDATE agents_meta SET status='terminated' WHERE id=%s", (agent_id,))
+    db_conn.commit()
+    wake = AsyncMock()
+    monkeypatch.setattr(ops_lifecycle, "publish_inbound_arrived", wake)
+    with _test_pool() as pool:
+        resp = await ops_lifecycle.restart_agent_op(
+            agent_id, RestartAgentRequest(source="user"), pool
+        )
     assert resp.status == "already_terminated"
+    wake.assert_not_awaited()
+    assert db_conn.execute(
+        "SELECT count(*) FROM inbound_messages WHERE agent_id=%s AND kind='restart'", (agent_id,)
+    ).fetchone() == (0,)
 
 
 @pytest.mark.asyncio
@@ -1148,7 +1163,11 @@ async def test_launch_agent_op_hosted_skips_process_and_wakes(
         "_launch_agent_process",
         lambda *_a, **_k: launches.append(1),  # pyright: ignore[reportUnknownArgumentType]
     )
-    monkeypatch.setattr(ops_launch.agent_launch, "schedule_launch_confirm", confirmed.append)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(
+        ops_launch.agent_launch,
+        "schedule_launch_confirm",
+        lambda agent_id, _attempt: confirmed.append(agent_id),
+    )  # pyright: ignore[reportUnknownArgumentType]
     inserted: list[tuple[int, str, str]] = []
 
     def _fake_insert(_pool: object, agent_id: int, prompt: str, source: str) -> int:
@@ -1184,7 +1203,9 @@ async def test_launch_agent_op_hosted_fork_still_wakes(
     not insert a second prompt."""
     monkeypatch.setattr(ops_launch.runner_mode, "is_hosted", lambda: True)
     monkeypatch.setattr(ops_launch.agent_launch, "_launch_agent_process", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-    monkeypatch.setattr(ops_launch.agent_launch, "schedule_launch_confirm", lambda _id: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(
+        ops_launch.agent_launch, "schedule_launch_confirm", lambda _id, _attempt=None: None
+    )  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     inserted: list[int] = []
 
     def _fake_insert(_pool: object, _agent_id: int, _prompt: str, _source: str) -> int:
@@ -1223,16 +1244,16 @@ async def test_force_terminate_hosted_skips_process_kill_and_cancels_turn(
 
     def _fake_force_blocking(  # pyright: ignore[reportUnknownParameterType]
         aid: int, _body: object, _pool: object, *, kill_process: bool
-    ) -> tuple[AgentStatus, int | None, list[str]]:
+    ) -> tuple[AgentStatus, int | None, list[str], int]:
         captured["agent_id"] = aid
         captured["kill_process"] = kill_process
-        return AgentStatus.RUNNING, None, []
+        return AgentStatus.RUNNING, None, [], 91
 
     monkeypatch.setattr(ops_lifecycle, "_terminate_force_blocking", _fake_force_blocking)
-    cancelled: list[int] = []
+    cancelled: list[tuple[int, int]] = []
 
-    async def _fake_cancel(aid: int) -> None:
-        cancelled.append(aid)
+    async def _fake_cancel(aid: int, command_id: int) -> None:
+        cancelled.append((aid, command_id))
 
     monkeypatch.setattr(ops_lifecycle, "_cancel_hosted_turn_best_effort", _fake_cancel)
 
@@ -1246,9 +1267,9 @@ async def test_force_terminate_hosted_skips_process_kill_and_cancels_turn(
         TerminateAgentRequest(force=True),
         stub_pool,  # type: ignore[arg-type]
     )
-    assert resp.status == "force_killed"
+    assert resp.status == "enqueued"
     assert captured == {"agent_id": 9, "kill_process": False}
-    assert cancelled == [9]
+    assert cancelled == [(9, 91)]
 
 
 @pytest.mark.asyncio
@@ -1264,14 +1285,14 @@ async def test_force_terminate_process_mode_still_kills_the_process(
 
     def _fake_force_blocking(  # pyright: ignore[reportUnknownParameterType]
         aid: int, _body: object, _pool: object, *, kill_process: bool
-    ) -> tuple[AgentStatus, int | None, list[str]]:
+    ) -> tuple[AgentStatus, int | None, list[str], int]:
         captured["agent_id"] = aid
         captured["kill_process"] = kill_process
-        return AgentStatus.RUNNING, 1234, []
+        return AgentStatus.RUNNING, 1234, [], 91
 
     monkeypatch.setattr(ops_lifecycle, "_terminate_force_blocking", _fake_force_blocking)
 
-    async def _fake_cancel(_aid: int) -> None:
+    async def _fake_cancel(_aid: int, _command_id: int) -> None:
         raise AssertionError("process mode must not call the hosted cancel")
 
     monkeypatch.setattr(ops_lifecycle, "_cancel_hosted_turn_best_effort", _fake_cancel)

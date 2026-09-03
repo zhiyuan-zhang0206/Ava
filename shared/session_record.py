@@ -45,8 +45,13 @@ class SessionRecord:
     `pid` + `starttime` are the liveness key on Linux; `create_time` is the
     compatibility fallback for legacy and Windows records. A matching process
     start-time defeats pid recycling. `cmd` / `cwd` / `started_at` are diagnostic
-    provenance. `generation` binds a PTY record to the allocation generation
-    that admitted its exact session; non-PTY and legacy records leave it null.
+    provenance. `generation` is the admitting allocation/runtime generation:
+    PTYs use their allocation, admitted agent records their runtime incarnation.
+    It is a derived observation, not permission to claim work or signal a PID.
+    Legacy and other service records leave it null.
+    On Windows a Python venv redirector can be the native session/group control
+    PID while agents_meta.pid remains the admitted interpreter child. Publication
+    must verify that direct wrapper ancestry and birth identity, never guess it.
     """
 
     pid: int
@@ -56,6 +61,7 @@ class SessionRecord:
     started_at: float
     starttime: int | None = None
     generation: str | None = None
+    control_mode: str | None = None
 
     @classmethod
     def read(cls, path: Path) -> SessionRecord | None:
@@ -82,6 +88,7 @@ class SessionRecord:
                 if isinstance(record.get("generation"), str) and record["generation"]
                 else None
             ),
+            control_mode=record.get("control_mode"),
         )
 
     def identifies(self, pid: int) -> bool | None:

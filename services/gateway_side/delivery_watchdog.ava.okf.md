@@ -18,6 +18,13 @@ A gateway daemon with four jobs on one fast tick (user-confirmed design 2026-08-
 3. **Terminated-owner resurrect retry** — every tick, for each DISTINCT terminated agent holding a `pending` chat created **after its current `status_changed_at` death** and with an id greater than `last_force_terminate_inbound_id`, re-run `resurrect_if_terminated` with that exact chat id and kind (delivery-path auto-resurrect retry, Task #689 G4). The home runner's final terminated → idling CAS re-checks all of those predicates, so an old/claimed row or an RPC racing a later explicit kill cannot reverse the kill. A per-agent in-flight task map prevents a slow RPC from being queued again across ticks; completed attempts then enter the 60s per-agent cooldown. The per-tick cap limits new eligible-owner admissions and the two-way semaphore limits active RPC concurrency; in-flight/cooling owners do not consume a later tick's admission cap.
 4. **Stale-claimed dead-letter sweep** — every 30s, flip `claimed` chat inbounds of TERMINATED owners older than `AVA_DELIVERY_WATCHDOG_STALE_CLAIMED_THRESHOLD_SECONDS` (default 24h; age from `claimed_at`, falling back to `created_at` for pre-2026-08-02 rows) to `done`. Terminated agents leave claimed rows behind (reconcile runs only at boot); a resurrect would otherwise flip them all to `pending` and re-deliver ancient messages (Task #654). The reconcile-side cutoff (`agent/db.py::reconcile_claimed_inbounds`) applies the same threshold at boot, closing the resurrect race at the source.
 
+The same resurrection retry owner also resumes an `idling` allocation with no
+PID only when an existing server-prepared resurrect inbound binds this exact
+pending chat, allocation epoch, old incarnation, machine and unexpired deadline.
+It uses the same in-flight map, cooldown and RPC budget. The home resumes that
+allocation without replacing its identity or resetting the durable OS counter;
+ordinary idle agents and historical task-owner records do not qualify.
+
 `running` owners are never dispatched or alerted — a chat queued behind a long in-flight turn is normal; the claim's turn-end SELECT picks it up. `restarting` is left to its own reaper; unclaimed idling rows have no owner.
 
 ## Key Dependencies

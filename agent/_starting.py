@@ -28,7 +28,9 @@ from shared.migrations import (
 from shared.runtime_incarnation import bind_process_incarnation, new_process_incarnation
 
 
-def claim_agent_row_or_die_on_stale_schema(agent_id: int) -> None:
+def claim_agent_row_or_die_on_stale_schema(
+    agent_id: int, *, restart_command_id: int | None = None, resurrect_command_id: int | None = None
+) -> None:
     """Schema-gate, then claim this process's row in one early boot step.
 
     A schema or placement failure happens before the claim, so the guarded
@@ -46,7 +48,9 @@ def claim_agent_row_or_die_on_stale_schema(agent_id: int) -> None:
         _mark_preclaim_terminated(agent_id)
         raise
     _boot_timing.mark("schema_check")
-    claim_agent_row(agent_id)
+    claim_agent_row(
+        agent_id, restart_command_id=restart_command_id, resurrect_command_id=resurrect_command_id
+    )
 
 
 def _mark_preclaim_terminated(agent_id: int) -> None:
@@ -63,7 +67,9 @@ def _mark_preclaim_terminated(agent_id: int) -> None:
         cur.execute(
             "UPDATE agents_meta SET status = 'terminated', "
             "termination_source = 'launch-confirm' "
-            "WHERE id = %s AND status = 'idling' AND pid IS NULL",
+            "WHERE id = %s AND status = 'idling' AND pid IS NULL "
+            "AND runtime_generation IS NULL AND runtime_owner IS NULL AND runtime_kind IS NULL "
+            "AND lifecycle_command_id IS NULL",
             (agent_id,),
         )
         transitioned = cur.rowcount == 1
@@ -74,7 +80,9 @@ def _mark_preclaim_terminated(agent_id: int) -> None:
             publish_page_closed_sync(agent_id, page_name)
 
 
-def claim_agent_row(agent_id: int) -> None:
+def claim_agent_row(
+    agent_id: int, *, restart_command_id: int | None = None, resurrect_command_id: int | None = None
+) -> None:
     """Atomically claim an unowned row as running and grant its first lease.
 
     ``status='idling' AND pid IS NULL`` is the single-winner boundary. A
@@ -83,6 +91,9 @@ def claim_agent_row(agent_id: int) -> None:
     """
     local_machine = machine_name()
     incarnation = new_process_incarnation(agent_id)
+    from agent.session_admission import wait_for_launch_record
+
+    wait_for_launch_record(agent_id)
     with write_transaction() as conn, conn.cursor() as cur:
         # A guarded auto-resurrect transaction may still be committing the row
         # when its child starts. Lock first so this process validates that final
@@ -107,8 +118,13 @@ def claim_agent_row(agent_id: int) -> None:
                 "Process started on the wrong host."
             )
         _boot_timing.mark("placement_check")
+        from agent.restart_admission import require_restart_admission
         from shared.deploy_timing import AGENT_LEASE_TTL_S
 
+        require_restart_admission(conn, agent_id, restart_command_id)
+        from shared.resurrection_launch import require_admission
+
+        require_admission(conn, agent_id, resurrect_command_id)
         cur.execute(
             "UPDATE agents_meta SET status = %s, pid = %s, started_at = now(), "
             "lease_expires_at = now() + make_interval(secs => %s), "
@@ -127,10 +143,18 @@ def claim_agent_row(agent_id: int) -> None:
             ),
         )
         if cur.rowcount != 1:
+            cur.execute("SELECT status,pid,runtime_kind FROM agents_meta WHERE id=%s", (agent_id,))
+            observed = cur.fetchone()
             raise RuntimeError(
                 f"agent --agent-id {agent_id}: agents row is no longer an unclaimed idling row "
-                f"(rowcount={cur.rowcount}); another process or lifecycle operation won the race."
+                f"(rowcount=0, observed={observed!r}); "
+                "another process or lifecycle operation won the race."
             )
+        from agent.lifecycle_observe import observe_process_admission
+        from agent.session_admission import publish_admitted_session
+
+        publish_admitted_session(incarnation)
+        observe_process_admission(conn, incarnation)
         conn.commit()
         bind_process_incarnation(incarnation)
         publish_agent_updated_sync(conn, agent_id)

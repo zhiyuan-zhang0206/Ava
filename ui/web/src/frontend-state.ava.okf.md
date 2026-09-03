@@ -8,9 +8,12 @@ tags:
 
 # Frontend State Management
 
-Three mechanisms, one writer per cache/flag (`ui/web/CLAUDE.md` + `conventions/frontend-stack.md`). Ava-1968 (2026-07) eliminated races from mirroring server data into Zustand; #657 moved nearly all persistent UI preferences from localStorage to server-side `user_settings`; the `useSyncExternalStore` singleton is gone.
+One writer per cache/flag: TanStack Query owns server data and persisted preferences; Zustand and localStorage retain only the volatile/device state listed below.
 
 ## Three Mechanisms Division of Responsibilities
+
+Termination toasts follow the response: `enqueued` means requested, not exited,
+even for force. Only SSE updates lifecycle rows.
 
 | Mechanism | Responsibility | File |
 |---|---|---|

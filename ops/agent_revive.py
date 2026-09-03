@@ -92,7 +92,7 @@ def revive_agent(agent_id: int, dead_pid: int) -> bool:
             dead_pid=dead_pid,
         )
         return True
-    agent_launch._kill_stale_session(agent_id)
+    agent_launch._require_released_agent_session(agent_id)
     agent_launch._launch_or_force_terminated(
         agent_id, config_overlay=config_overlay, birth_config=birth_config
     )

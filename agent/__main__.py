@@ -34,9 +34,14 @@ if _agent_id is not None:
     _boot_deadline.arm(_agent_id, _boot_stall_seconds, _boot_budget_seconds)
 
     from agent._starting import claim_agent_row_or_die_on_stale_schema
+    from agent.restart_admission import consume_restart_command
 
     _boot_timing.mark("starting_import")
-    claim_agent_row_or_die_on_stale_schema(_agent_id)
+    claim_agent_row_or_die_on_stale_schema(
+        _agent_id,
+        restart_command_id=consume_restart_command(sys.argv),
+        resurrect_command_id=consume_restart_command(sys.argv, flag="--resurrect-command-id"),
+    )
     _boot_timing.mark("claim_row")
     _boot_deadline.disarm()
 

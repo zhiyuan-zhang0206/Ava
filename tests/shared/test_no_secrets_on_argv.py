@@ -11,9 +11,8 @@ argv-carried JSON blob fails here rather than in a `ps` listing.
 Coverage is per *launcher*, not per caller: the `ava start` session launch,
 `spawn_update` / `spawn_rollout` / `spawn_restart` / `unpause_local_cluster`
 (all four via `_spawn_detached_session`), the healthcheck respawns (via
-`respawn_service`), and `agent.db.schedule_self_respawn` (the atexit fallback
-that replaces the restarter mid-rollout) each funnel into one of the functions
-below.
+`respawn_service`), and the official agent launcher each funnel into one of
+the functions below. Agents do not own an independent atexit launcher.
 """
 
 from __future__ import annotations
@@ -315,90 +314,28 @@ def test_agent_process_launch(monkeypatch: pytest.MonkeyPatch) -> None:
             return (True, "noop")
 
     monkeypatch.setattr("ops.agent_launch.native_proc", lambda: _FakeSupervisor)
-    monkeypatch.setattr("ops.agent_launch._wait_for_agent_claim", lambda _id: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr("ops.agent_launch._wait_for_agent_claim", lambda _id, _attempt=None: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     monkeypatch.setattr("ops.agent_launch.agent_spawn_env_dict", lambda: dict(_SECRET_ENV))
 
-    _launch_agent_process(11, config_overlay={"deepseek_api_key": _API_KEY})
+    _launch_agent_process(
+        11,
+        config_overlay={"deepseek_api_key": _API_KEY},
+        birth_config={"llm_model": "frozen-test-model"},
+    )
 
     argv, env = captured[0]
     _assert_clean(argv, label="_launch_agent_process")
     # ... and the values really did reach the child, just by the other channel
     assert env["AVA_CLUSTER_SECRET"] == _SECRET
     assert _API_KEY in env["AVA_AGENT_CONFIG_OVERLAY"]
+    assert "frozen-test-model" in env["AVA_AGENT_BIRTH_CONFIG"]
+    from ops.agent_launch import BOOT_BUDGET_SEC, BOOT_STALL_SEC
 
-
-def test_self_respawn_fallback(secret_env: None, monkeypatch: pytest.MonkeyPatch) -> None:
-    """The atexit self-respawn fallback (`agent.db.schedule_self_respawn`) — a
-    launch path outside `ops/agent_launch.py` entirely, so it needs its own
-    coverage here rather than inheriting `_launch_agent_process`'s."""
-    import atexit
-    import subprocess
-    import time
-
-    import psycopg
-
-    from agent import db as agent_db
-    from agent.db import schedule_self_respawn
-
-    class _FakeCursor:
-        rowcount = 1
-
-        def __init__(self) -> None:
-            self.query = ""
-
-        def execute(self, query: str, *_a: Any, **_kw: Any) -> None:
-            self.query = query
-
-        def fetchone(self) -> tuple[object, object]:
-            if self.query.startswith("SELECT status"):
-                return ("restarting", None)
-            return ({"deepseek_api_key": _API_KEY}, None)
-
-        def __enter__(self) -> _FakeCursor:
-            return self
-
-        def __exit__(self, *_a: Any) -> None:
-            return None
-
-    class _FakeConn:
-        def cursor(self) -> _FakeCursor:
-            return _FakeCursor()
-
-        def transaction(self) -> _FakeConn:
-            return self
-
-        def execute(self, *_a: Any, **_kw: Any) -> None:
-            return None
-
-        def __enter__(self) -> _FakeConn:
-            return self
-
-        def __exit__(self, *_a: Any) -> None:
-            return None
-
-        def close(self) -> None:
-            pass
-
-    registered: list[Any] = []
-    monkeypatch.setattr(atexit, "register", registered.append)
-    monkeypatch.setattr(time, "sleep", lambda _s: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-    clock = iter((0.0, 0.0, agent_db.self_respawn_restarter_grace_s()))
-    monkeypatch.setattr(agent_db.time, "monotonic", lambda: next(clock))  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-    monkeypatch.setattr(psycopg, "connect", lambda *_a, **_kw: _FakeConn())  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-    launched: list[tuple[list[str], dict[str, str]]] = []
-    monkeypatch.setattr(
-        subprocess,
-        "Popen",
-        lambda argv, *, env, **_kw: launched.append((list(argv), dict(env))),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-    )
-
-    schedule_self_respawn(11)
-    registered[0]()  # type: ignore[operator] — the atexit callable
-
-    assert launched, "self-respawn should have launched a replacement"
-    argv, env = launched[0]
-    _assert_clean(argv, label="schedule_self_respawn")
-    assert _API_KEY in env["AVA_AGENT_CONFIG_OVERLAY"]
+    for flag, expected in (
+        ("--boot-stall-seconds", BOOT_STALL_SEC),
+        ("--boot-budget-seconds", BOOT_BUDGET_SEC),
+    ):
+        assert float(argv[argv.index(flag) + 1]) == expected
 
 
 def test_redis_bringup(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

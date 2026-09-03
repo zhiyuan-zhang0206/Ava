@@ -75,6 +75,12 @@ def _force_terminate_transaction(
             "WHERE id = %s",
             (terminate_inbound_id, agent_id),
         )
+        from shared.lifecycle_acceptance import supersede_lifecycle_for_force
+
+        supersede_lifecycle_for_force(conn, agent_id, terminate_inbound_id)
+        from shared.hosted_force import install_hosted_force
+
+        install_hosted_force(conn, agent_id, terminate_inbound_id)
         if kill_process:
             agent_session = session_name(f"agent-{agent_id}")
             native_proc().kill_session(agent_session, graceful=False)

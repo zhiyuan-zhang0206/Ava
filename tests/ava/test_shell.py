@@ -311,36 +311,20 @@ def test_rebuild_uses_new_id_and_old_handle_stays_rejected(_agent_row: int) -> N
         shell.kill(new_id)
 
 
-def test_stale_session_cleanup_spares_lone_shell(_agent_row: int) -> None:
-    """Resurrect/respawn's stale-session cleanup must not kill a surviving shell.
-
-    `_kill_stale_session` targets the agent PROCESS — a native-supervisor
-    record (`ava-agent-{id}`) — never the shell backend. The agent's shells
-    live in a different subsystem (per-session PTY hosts) under a longer name,
-    so a stale-process kill can never reach them. Here no process record exists
-    (the common post-exit state), so the kill is a noop and the lone shell
-    survives.
-    """
+def test_released_process_preflight_spares_lone_shell(_agent_row: int) -> None:
+    """Absence of the canonical process record never targets persistent shells."""
     from ops import agent_launch
 
     sid = shell.new(name="claude", ttl=120)  # the lone surviving session
     try:
-        agent_launch._kill_stale_session(_agent_row)
-        assert sid in shell.list()  # process kill never touches the shell backend
+        agent_launch._require_released_agent_session(_agent_row)
+        assert sid in shell.list()
     finally:
         shell.kill(sid)
 
 
-def test_stale_session_cleanup_kills_process_session_spares_shell(_agent_row: int) -> None:
-    """_kill_stale_session removes a lingering agent PROCESS while sparing the shell.
-
-    Companion to test_stale_session_cleanup_spares_lone_shell: when a stale agent
-    PROCESS (a native-supervisor record, here a real detached `sleep`) IS still
-    present — the resurrect/respawn race — the kill removes it, while the agent's
-    shell (a different subsystem — the PTY session backend) is left untouched. No
-    prefix-match hazard is even possible now: the process and its shells no
-    longer share a namespace.
-    """
+def test_resident_process_refusal_spares_process_and_shell(_agent_row: int) -> None:
+    """A canonical name does not authorize replacing a live native process."""
     from ops import agent_launch
     from shared import posixproc
     from shared.cluster import session_name
@@ -351,9 +335,10 @@ def test_stale_session_cleanup_kills_process_session_spares_shell(_agent_row: in
     sid = shell.new(name="claude", ttl=120)
     try:
         assert posixproc.has_session(agent_sess)
-        agent_launch._kill_stale_session(_agent_row)
-        # the stale process session is killed ...
-        assert not posixproc.has_session(agent_sess)
+        with pytest.raises(RuntimeError, match="still live"):
+            agent_launch._require_released_agent_session(_agent_row)
+        # A name alone is no authority to kill the resident process.
+        assert posixproc.has_session(agent_sess)
         # ... but the shell survived
         assert sid in shell.list()
     finally:

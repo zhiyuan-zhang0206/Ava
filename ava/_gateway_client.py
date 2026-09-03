@@ -674,9 +674,9 @@ def terminate(agent_id: int, *, source: str | None = None, force: bool = False) 
     tells the peer who terminated it. Pass source=None to use the gateway
     default ("user").
 
-    force=True skips the graceful inbound path; directly kills the session +
-    OS process + forcibly marks terminated — for peer agent stuck (hung LLM
-    call etc.) scenarios. Returns "force_killed".
+    force=True requests interruption. Hosted force returns "enqueued" while
+    the original host drains actual work; acceptance is not observed exit.
+    Detached process force retains its "force_killed" result.
     """
     body: dict = {}
     if source is not None:

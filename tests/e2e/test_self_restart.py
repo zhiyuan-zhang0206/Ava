@@ -1,19 +1,9 @@
-"""ava.self.restart cross-process e2e — agent self-restarts, restarter daemon spawns
-a new process.
+"""Real UI self-restart through durable application and successor admission.
 
-Full cycle:
-  agent code: ava.self.restart() → exec AgentRestart + INSERT 'restart' inbound
-  → claim marks agents.status='restarting' + goto END → ainvoke returns → process exits
-  → services/restarter daemon 1s poll sees 'restarting' → respawn_agent
-  → INSERT 'restart_completed' inbound + status='idling' + session spawn
-  → new process starts, claim_agent_row UPDATE 'idling'→'running'
-  → claim processes 'restart_completed', writes "[system ts] You have been restarted" marker
-  → idles waiting for next inbound (status='idling')
-
-Verifies:
-- inbound_messages has kind='restart_completed' row (restarter's sole marker)
-- agents.status eventually returns to 'idling'
-- agents.pid differs from first process (new PID = new process)
+Process mode requires a new PID, one completion marker, the original command's
+applied/observed timestamps and a subsequent answered message on that same PID.
+Hosted mode verifies its distinct acceptance marker and runnable pidless state;
+it must not borrow process completion language or manufacture an exit event.
 """
 
 from __future__ import annotations
@@ -73,16 +63,14 @@ def test_self_restart_respawns_process_with_new_pid(e2e_env: E2EEnv, restarter_p
             row = cur.fetchone()
             if row:
                 last_status, last_pid = row
-        # #1464: the restarter pass is gateway-health-gated. When it defers
-        # (slow pass under CI load), the agent's own self-respawn fallback
-        # completes the restart cycle — new pid, row back to idling — without
-        # inserting the restarter's 'restart_completed' row. Both paths are a
-        # complete restart cycle; require only the observable outcome.
+        # New PID alone cannot discharge the durable command or prove completion.
         if (
-            last_status == AgentStatus.IDLING.value
+            last_completed
+            and last_status == AgentStatus.IDLING.value
             and last_pid is not None
             and last_pid != first_pid
         ):
+            _assert_successor_consumes_next_message(e2e_env, last_pid)
             return
         time.sleep(0.5)
     raise RuntimeError(
@@ -90,6 +78,54 @@ def test_self_restart_respawns_process_with_new_pid(e2e_env: E2EEnv, restarter_p
         f"first_pid={first_pid} completed={last_completed} "
         f"status={last_status!r} pid={last_pid}"
     )
+
+
+def _assert_successor_consumes_next_message(env: E2EEnv, successor_pid: int) -> None:
+    """Real UI -> queue -> admitted successor, with no second self restart."""
+    env.page.fill('[data-testid="composer-input"]', "continue after verified restart")
+    env.page.click('[data-testid="composer-send"]')
+    deadline = time.monotonic() + 90
+    while True:
+        with psycopg.connect(settings.data_plane.db_url) as conn:
+            row = conn.execute(
+                "SELECT status,pid,lifecycle_command_id FROM agents_meta WHERE id=%s",
+                (env.agent_id,),
+            ).fetchone()
+            chats = conn.execute(
+                "SELECT status,claimed_at IS NOT NULL FROM inbound_messages "
+                "WHERE agent_id=%s AND kind='chat' "
+                "AND content='continue after verified restart'",
+                (env.agent_id,),
+            ).fetchall()
+            commands = conn.execute(
+                "SELECT status,applied_at IS NOT NULL,observed_at IS NOT NULL "
+                "FROM inbound_messages WHERE agent_id=%s AND kind='restart' AND source='self'",
+                (env.agent_id,),
+            ).fetchall()
+            completions = conn.execute(
+                "SELECT count(*) FROM inbound_messages WHERE agent_id=%s AND kind='restart_completed'",
+                (env.agent_id,),
+            ).fetchone()
+        assert commands == [("done", True, True)], commands
+        assert completions == (1,), completions
+        # Ordinary chat is checkpoint-backed: done is reconciled on restart or
+        # compaction, not at each idle transition. Claim alone is insufficient;
+        # require the persisted answer below while the same successor is idle.
+        if row == ("idling", successor_pid, None) and chats in (
+            [("claimed", True)],
+            [("done", True)],
+        ):
+            items = httpx.get(
+                f"{env.gateway_url}/api/agents/{env.agent_id}/timeline?limit=1000", timeout=30
+            ).json()["items"]
+            if any(
+                item["kind"] == "agent_chat"
+                and "Follow-up processed by successor." in item["payload"]
+                for item in items
+            ):
+                return
+        assert time.monotonic() < deadline, (row, chats, commands, completions)
+        time.sleep(0.5)
 
 
 def _assert_hosted_self_restart(e2e_env: E2EEnv, page: Page, agent_id: int) -> None:
@@ -117,7 +153,7 @@ def _assert_hosted_self_restart(e2e_env: E2EEnv, page: Page, agent_id: int) -> N
         ).json()["items"]
         seen_marker = any(
             it.get("kind") == "system_marker"
-            and "You have been restarted" in (it.get("payload") or "")
+            and "Restart was accepted" in (it.get("payload") or "")
             for it in items
         )
         if seen_marker or time.monotonic() > deadline:
