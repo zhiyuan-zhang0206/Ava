@@ -391,6 +391,128 @@ def test_off_style_is_absent_from_the_full_system_prompt(monkeypatch: pytest.Mon
     assert "# Talking to the user" not in prompt
 
 
+# --- User tone (AVA_SYSTEM_PROMPT_USER_TONE) ---
+
+
+@pytest.mark.parametrize(
+    ("enabled", "expect_section"),
+    [
+        (True, True),
+        (False, False),
+    ],
+)
+def test_user_tone_section_gating(
+    monkeypatch: pytest.MonkeyPatch, enabled: bool, expect_section: bool
+) -> None:
+    monkeypatch.setattr(settings.agent, "prompt_user_tone_enabled", enabled)
+    monkeypatch.setattr(settings.lm, "llm_model", "deepseek-v4-pro")
+
+    from agent.graph._system_prompt import _user_tone_section
+
+    rendered = _user_tone_section()
+
+    if expect_section:
+        assert rendered.startswith("# Communicating with the user\n\n")
+    else:
+        assert rendered == ""
+
+
+def test_user_tone_defaults_on_for_non_claude(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings.agent, "prompt_user_tone_enabled", None)
+    monkeypatch.setattr(settings.lm, "llm_model", "deepseek-v4-pro")
+
+    from agent.graph._system_prompt import _user_tone_section
+
+    assert _user_tone_section().startswith("# Communicating with the user\n\n")
+
+
+def test_user_tone_uses_strong_gemini_variant(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A registered gemini model gets the strong variant. The id is picked from
+    the registry rather than hardcoded: a model swap (gemini-3.7-flash ->
+    gemini-3.8-flash, #1535) must not break this contract test by drifting the
+    id out of MODELS."""
+    from shared.lm.registry import MODELS
+
+    gemini_id = next(
+        model for model, spec in MODELS.items() if spec.provider == "gemini" and spec.spawnable
+    )
+    monkeypatch.setattr(settings.agent, "prompt_user_tone_enabled", None)
+    monkeypatch.setattr(settings.lm, "llm_model", gemini_id)
+
+    from agent.graph._system_prompt import _user_tone_section
+
+    rendered = _user_tone_section()
+
+    assert rendered.startswith("# Communicating with the user\n\n")
+    assert "trusted peer" in rendered
+    assert "not a cheerleader" in rendered
+
+
+def test_user_tone_defaults_off_for_claude(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings.agent, "prompt_user_tone_enabled", None)
+    monkeypatch.setattr(settings.lm, "llm_model", "claude-sonnet-5")
+
+    from agent.graph._system_prompt import _user_tone_section
+
+    assert _user_tone_section() == ""
+
+
+def test_user_tone_claude_variant_requires_explicit_enablement(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings.agent, "prompt_user_tone_enabled", True)
+    monkeypatch.setattr(settings.lm, "llm_model", "claude-sonnet-5")
+
+    from agent.graph._system_prompt import _user_tone_section
+
+    rendered = _user_tone_section()
+
+    assert "lecturing" in rendered
+    assert "trusted peer" not in rendered
+    assert "not a cheerleader" not in rendered
+
+
+def test_user_tone_unknown_model_uses_light_variant(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings.agent, "prompt_user_tone_enabled", True)
+    monkeypatch.setattr(settings.lm, "llm_model", "unknown-model-v1")
+
+    from agent.graph._system_prompt import _user_tone_section
+
+    assert "State conclusions and judgments directly" in _user_tone_section()
+
+
+def test_user_tone_section_stays_semantic_not_api_specific(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings.agent, "prompt_user_tone_enabled", True)
+    monkeypatch.setattr(settings.lm, "llm_model", "deepseek-v4-pro")
+
+    from agent.graph._system_prompt import _user_tone_section
+
+    rendered = _user_tone_section()
+
+    assert "ava.ui." not in rendered
+    assert "spawn(" not in rendered
+
+
+@pytest.mark.parametrize(
+    ("enabled", "expect_section"),
+    [
+        (True, True),
+        (False, False),
+    ],
+)
+def test_user_tone_section_is_present_in_the_full_prompt_when_enabled(
+    monkeypatch: pytest.MonkeyPatch, enabled: bool, expect_section: bool
+) -> None:
+    monkeypatch.setattr(settings.agent, "prompt_user_tone_enabled", enabled)
+    monkeypatch.setattr(settings.lm, "llm_model", "deepseek-v4-pro")
+
+    prompt = build_system_prompt()
+
+    assert ("# Communicating with the user" in prompt) is expect_section
+
+
 # --- Knowledge cutoff ---
 
 

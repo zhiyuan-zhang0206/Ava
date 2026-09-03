@@ -280,6 +280,15 @@ def test_model_ids_match_their_provider_prefix() -> None:
         assert model.startswith(spec.provider), (model, spec.provider)
 
 
+def test_user_tone_defaults_are_per_family() -> None:
+    """The shared tone guidance is on, except every Claude entry explicitly
+    opts out so the user must deliberately enable its lighter variant."""
+    assert DEFAULT_TUNING.prompt_user_tone_enabled is True
+    for model, spec in MODELS.items():
+        expected = False if spec.provider == "claude" else None
+        assert spec.tuning.prompt_user_tone_enabled is expected, model
+
+
 # ---------------------------------------------------------------------------
 # resolve_setting layering
 # ---------------------------------------------------------------------------

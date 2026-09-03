@@ -291,6 +291,7 @@ Dimensions the upstream prompts cover that Ava's is silent on, classified.
 | Dimension | Lands in | Status |
 |-----------|----------|--------|
 | Progress narration / interleaved updates | Ava core (config-selected style) | ✅ `_communication_style_section` |
+| Tone / candor toward the user (honesty over flattery, directness, no condescension) | Ava core (per-model family gradient) | ✅ `_user_tone_section` |
 | Output conciseness + final-answer shape (don't dump files, reference paths) | Ava core | ✅ `_output_conciseness_section` |
 | Verify-before-claiming-done (run the narrow test, then widen) | `ava_code` | ✅ `_coding_tools_section` preamble |
 | Editing discipline (minimal focused diffs, comment-only-when-why, don't revert working-tree changes) | — | ❌ dropped — the model already self-applies these, and Ava rarely edits a human-authored working tree; not worth prompt weight |
@@ -326,6 +327,8 @@ Landed so far:
   toggle into a four-way communication style (`AVA_AGENT_COMMUNICATION_STYLE`:
   `off` (default) / `oriented` / `concise` / `silent`, with `off` omitting the section
   entirely).
+- The core user-tone section (`AVA_SYSTEM_PROMPT_USER_TONE`, default on), with a
+  per-family strength gradient and the Claude family defaulting off.
 - The `ava_memory` behavior section (`AVA_SYSTEM_PROMPT_MEMORY`, default on) —
   the durable-knowledge "when / what to remember" layer.
 - The merged `# Invest in the future` section
