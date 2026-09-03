@@ -4,6 +4,8 @@ import asyncio
 import json
 import subprocess
 import threading
+import traceback
+from collections.abc import Iterator
 from pathlib import Path
 from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
@@ -31,6 +33,25 @@ def _blocking_work(entered: threading.Event, release: threading.Event) -> None:
     assert release.wait(20), "test must release the real thread"
 
 
+def _observed_host(
+    pool: AsyncConnectionPool, graph: Mock, patch: pytest.MonkeyPatch
+) -> tuple[AgentHost, list[str]]:
+    host = AgentHost(pool=pool, checkpointer=Mock(), graph=graph, machine="claim-test")
+    patch.setattr(host, "_runtime_for", AsyncMock(return_value=Mock(llm=None)))
+    original = host._run_turn
+    errors: list[str] = []
+
+    async def observed(agent_id: int) -> None:
+        try:
+            await original(agent_id)
+        except BaseException:
+            errors.append(traceback.format_exc())
+            raise
+
+    patch.setattr(host, "_run_turn", observed)
+    return host, errors
+
+
 def _configure_late_reader(kind: str, patch: pytest.MonkeyPatch, release: threading.Event) -> None:
     if kind != "reader":
         return
@@ -54,6 +75,7 @@ async def _assert_pending_force(
         "SELECT status,applied_at IS NOT NULL,observed_at FROM inbound_messages WHERE id=%s",
         (command,),
     ).fetchone() == ("claimed", True, None)
+    conn.commit()  # The observer must not be a savepoint inside the earlier read transaction.
     with conn.transaction():
         assert not observe_applied_termination(conn, agent_id, "claim-test")
     assert (
@@ -65,6 +87,7 @@ async def _assert_pending_force(
     assert conn.execute("SELECT status FROM inbound_messages WHERE id=%s", (chat,)).fetchone() == (
         "pending",
     )
+    conn.commit()
 
 
 async def _prove_successor_ignores_old_cancel(
@@ -79,6 +102,7 @@ async def _prove_successor_ignores_old_cancel(
 ) -> None:
     # Simulate explicit resurrection's allocation, not a claim of RPC coverage.
     conn.execute("UPDATE agents_meta SET status='idling' WHERE id=%s", (agent_id,))
+    conn.commit()
     replacement = AgentHost(pool=pool, checkpointer=Mock(), graph=graph, machine="claim-test")
     patch.setattr(replacement, "_runtime_for", AsyncMock(return_value=Mock()))
     scheduler = TurnScheduler(replacement.run_turn)
@@ -141,16 +165,16 @@ async def test_force_waits_for_real_work_and_delayed_cancel_cannot_hit_successor
 
     graph = Mock()
     graph.ainvoke = AsyncMock(side_effect=graph_return)
-    host = AgentHost(pool=aops_pool, checkpointer=Mock(), graph=graph, machine="claim-test")
-    monkeypatch.setattr(host, "_runtime_for", AsyncMock(return_value=Mock()))
+    host, errors = _observed_host(aops_pool, graph, monkeypatch)
     monkeypatch.setattr("services.agent_host.dispatcher.CANCEL_UNWIND_TIMEOUT_S", 0.05)
     scheduler = TurnScheduler(host.run_turn)
     scheduler.wake(agent_id)
     try:
         async with asyncio.timeout(15):
             while not (entered.is_set() if work_kind == "thread" else marker.exists()):
+                assert not errors, "\n".join(errors)
                 await asyncio.sleep(0.01)
-        with ConnectionPool(settings.data_plane.db_url) as pool:
+        with ConnectionPool[psycopg.Connection](settings.data_plane.db_url) as pool:
             _, _, _, command = await asyncio.to_thread(
                 _force_terminate_transaction, agent_id, pool, source="user", kill_process=False
             )
@@ -197,7 +221,7 @@ async def test_idle_force_only_original_live_host_can_observe(
         )
         is not None
     )
-    with ConnectionPool(settings.data_plane.db_url) as pool:
+    with ConnectionPool[psycopg.Connection](settings.data_plane.db_url) as pool:
         _, _, _, command = await asyncio.to_thread(
             _force_terminate_transaction, agent_id, pool, source="user", kill_process=False
         )
@@ -243,6 +267,8 @@ async def test_formatted_exec_cleanup_failure_retains_actual_resource_evidence(
         assert len(scope.unresolved) == 1
         path, domain = next(iter(scope.unresolved.items()))
         assert path.exists() and isinstance(domain, ExecProcessDomain)
+        assert not scope.complete(path, object())
+        assert scope.unresolved[path] is domain
         assert domain.proc.poll() is not None
         # A formatted tool failure cannot become a positive lifecycle barrier.
         assert await apply_hosted_lifecycle(aops_pool, incarnation) is None
@@ -279,7 +305,11 @@ def test_unreadable_group_member_is_not_an_empty_domain(
     from agent.graph._exec_process import _process_group_has_live_member
 
     process = Mock(info={"pid": 123, "status": psutil.STATUS_RUNNING})
-    monkeypatch.setattr(psutil, "process_iter", lambda *_args: iter([process]))
+
+    def iter_processes(_attrs: list[str]) -> Iterator[Mock]:
+        return iter([process])
+
+    monkeypatch.setattr(psutil, "process_iter", iter_processes)
 
     def unreadable(pid: int) -> int:
         raise failure()
