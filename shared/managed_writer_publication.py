@@ -7,6 +7,7 @@ unregistered credential holders, or activate caller protocol support by themselv
 
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import dataclass
 from typing import Literal, Self
@@ -60,8 +61,10 @@ class PublishedUnit(ManagedUnit):
 
 
 class NormalService(EvidenceModel):
-    session: str = Field(min_length=1, max_length=256)
-    module: str = Field(min_length=1, max_length=512)
+    session: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
+    module: str | None = Field(default=None, min_length=1, max_length=512)
+    executable: str = Field(min_length=1, max_length=4096)
+    entrypoint: str = Field(min_length=1, max_length=4096)
     command_digest: Digest
 
 
@@ -76,6 +79,24 @@ class CandidateUnitPlan(EvidenceModel):
         names = [service.session for service in self.services]
         if names != sorted(set(names)):
             raise ValueError("normal services must be unique and sorted")
+        root = self.unit.home + "/releases/" + self.unit.artifact_digest + "/"
+        if not self.unit.home.startswith("/"):
+            raise ValueError("normal candidate startup has no Windows platform adapter")
+        for service in self.services:
+            if service.session.startswith("ava-agent-"):
+                raise ValueError("normal service startup cannot authorize an agent session")
+            for path in (service.executable, service.entrypoint):
+                if not path.startswith(root) or ".." in path.split("/"):
+                    raise ValueError("normal service command must belong to its retained image")
+        selector = {
+            "version": 2,
+            "artifact_digest": self.unit.artifact_digest,
+            "manifest_digest": self.unit.manifest_digest,
+            "inventory_receipt_digest": self.unit.inventory_digest,
+        }
+        encoded = (json.dumps(selector, sort_keys=True, separators=(",", ":")) + "\n").encode()
+        if hashlib.sha256(encoded).hexdigest() != self.selector_digest:
+            raise ValueError("selector digest does not encode the exact v2 unit tuple")
         return self
 
 
@@ -106,6 +127,7 @@ class CommittedPublication(EvidenceModel):
     committed_at: AwareDatetime
     units: tuple[PublishedUnit, ...] = Field(min_length=1)
     activation_digest: Digest | None = None
+    activation_challenge: UUID | None = None
 
 
 class PendingPublication(EvidenceModel):
