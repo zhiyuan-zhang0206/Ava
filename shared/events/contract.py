@@ -783,6 +783,12 @@ class LogPayload(TypedDict):
     msg: str
 
 
+class HostDispatcherScanFailed(TypedDict):
+    """`host_dispatcher_scan_failed` payload — agent-host durable backstop."""
+
+    backoff_s: float
+
+
 @dataclass(frozen=True)
 class EventSpec:
     """One declared event: name x category x payload x destination.
@@ -1010,6 +1016,13 @@ EVENTS: dict[str, EventSpec] = {
         "hosted dispatcher's wake subscription dropped — reconnecting (wakes published "
         "while down are lost; the delivery watchdog re-publish covers them)",
         tier="noise",
+    ),
+    "host_dispatcher_scan_failed": _telemetry(
+        "host_dispatcher_scan_failed",
+        "hosted dispatcher's durable pending scan failed; the wake subscription remains "
+        "open and attributes carry the next scan backoff_s",
+        payload=HostDispatcherScanFailed,
+        tier="anomaly",
     ),
     "host_dispatcher_restart_required": _telemetry(
         "host_dispatcher_restart_required",

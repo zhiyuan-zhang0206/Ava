@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import time
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -643,6 +644,7 @@ class _ScanScheduler:
         self._unwinds_on_cancel = unwinds_on_cancel
         self.woken: list[int] = []
         self.cancelled: list[int] = []
+        self.woken_event = asyncio.Event()
 
     @property
     def active_agents(self) -> frozenset[int]:
@@ -650,6 +652,7 @@ class _ScanScheduler:
 
     def wake(self, agent_id: int) -> None:
         self.woken.append(agent_id)
+        self.woken_event.set()
 
     async def cancel_agent(self, agent_id: int) -> bool:
         self.cancelled.append(agent_id)
@@ -715,7 +718,198 @@ class TestPendingScan:
         assert scheduler.woken == []
 
 
+class _QueueingPubSub:
+    """Subscription fake that stays live while tests inject wake frames."""
+
+    def __init__(self) -> None:
+        self.messages: asyncio.Queue[dict[str, object]] = asyncio.Queue()
+        self.closed = False
+
+    async def psubscribe(self, _pattern: str) -> None:
+        return None
+
+    async def get_message(self, *, timeout: float) -> dict[str, object] | None:
+        try:
+            return await asyncio.wait_for(self.messages.get(), timeout=timeout)
+        except TimeoutError:
+            return None
+
+    async def aclose(self) -> None:
+        self.closed = True
+
+
+class _QueueingRedis:
+    def __init__(self, pubsub: _QueueingPubSub) -> None:
+        self._pubsub = pubsub
+        self.closed = False
+
+    def pubsub(self, **_kwargs: object) -> _QueueingPubSub:
+        return self._pubsub
+
+    async def aclose(self) -> None:
+        self.closed = True
+
+
+def _patch_redis(monkeypatch: pytest.MonkeyPatch, pubsub: _QueueingPubSub) -> list[_QueueingRedis]:
+    """Record every client open; a scan failure must never add one."""
+    clients: list[_QueueingRedis] = []
+
+    def _open(_url: str) -> _QueueingRedis:
+        client = _QueueingRedis(pubsub)
+        clients.append(client)
+        return client
+
+    from shared import redis_client
+
+    monkeypatch.setattr(redis_client, "open_async_redis", _open)
+    return clients
+
+
 class TestSubscriptionRecovery:
+    async def test_db_down_scan_keeps_the_redis_subscription_open(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The durable backstop may be down while the Redis wake path remains healthy."""
+        pubsub = _QueueingPubSub()
+        clients = _patch_redis(monkeypatch, pubsub)
+        failures_seen = asyncio.Event()
+        failure_events: list[dict[str, object]] = []
+        scans = 0
+
+        def _warning(_message: str, **fields: object) -> None:
+            if fields["event"] == "host_dispatcher_scan_failed":
+                failure_events.append(fields)
+
+        async def _pending(_stale_after_s: float) -> list[dispatcher.PendingInboundWake]:
+            nonlocal scans
+            scans += 1
+            if scans >= 3:
+                failures_seen.set()
+            raise RuntimeError("database unavailable")
+
+        monkeypatch.setattr(dispatcher.logger, "warning", _warning)
+        disp = InboundWakeDispatcher(
+            "redis://unused",
+            _ScanScheduler(),
+            pending_scan=_pending,
+            stale_after_s=180.0,
+            scan_interval_s=0.02,
+            max_scan_backoff_s=0.04,
+            subscription_read_timeout_s=0.005,
+            reconnect_delay_s=0.0,
+        )  # pyright: ignore[reportArgumentType]
+        task = asyncio.create_task(disp.run())
+        try:
+            await asyncio.wait_for(failures_seen.wait(), timeout=1.0)
+
+            assert len(clients) == 1
+            assert len(failure_events) >= 3
+            assert [event["backoff_s"] for event in failure_events[:3]] == [0.02, 0.04, 0.04]
+        finally:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+
+    async def test_failing_scan_does_not_interrupt_the_pubsub_fast_path(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A DB outage must not create a gap in the subscription's wake delivery."""
+        pubsub = _QueueingPubSub()
+        clients = _patch_redis(monkeypatch, pubsub)
+        first_failure = asyncio.Event()
+        scheduler = _ScanScheduler()
+
+        async def _pending(_stale_after_s: float) -> list[dispatcher.PendingInboundWake]:
+            first_failure.set()
+            raise RuntimeError("database unavailable")
+
+        disp = InboundWakeDispatcher(
+            "redis://unused",
+            scheduler,
+            pending_scan=_pending,
+            stale_after_s=180.0,
+            scan_interval_s=0.02,
+            subscription_read_timeout_s=0.005,
+            reconnect_delay_s=0.0,
+        )  # pyright: ignore[reportArgumentType]
+        task = asyncio.create_task(disp.run())
+        try:
+            await asyncio.wait_for(first_failure.wait(), timeout=1.0)
+            pubsub.messages.put_nowait({"type": "pmessage", "channel": "ava:inbound:23"})
+            await asyncio.wait_for(scheduler.woken_event.wait(), timeout=1.0)
+
+            assert scheduler.woken == [23]
+            assert len(clients) == 1
+        finally:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+
+    async def test_scan_backoff_recovers_on_the_existing_subscription(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A recovered scan resets to its normal cadence without reconnecting Redis."""
+        pubsub = _QueueingPubSub()
+        clients = _patch_redis(monkeypatch, pubsub)
+        recovered_twice = asyncio.Event()
+        scans = 0
+        successful_scans = 0
+        successful_scan_times: list[float] = []
+
+        async def _pending(_stale_after_s: float) -> list[dispatcher.PendingInboundWake]:
+            nonlocal scans, successful_scans
+            scans += 1
+            if scans <= 2:
+                raise RuntimeError("database unavailable")
+            successful_scans += 1
+            successful_scan_times.append(time.monotonic())
+            if successful_scans == 2:
+                recovered_twice.set()
+            return []
+
+        disp = InboundWakeDispatcher(
+            "redis://unused",
+            _ScanScheduler(),
+            pending_scan=_pending,
+            stale_after_s=180.0,
+            scan_interval_s=0.02,
+            subscription_read_timeout_s=0.005,
+            reconnect_delay_s=0.0,
+        )  # pyright: ignore[reportArgumentType]
+        task = asyncio.create_task(disp.run())
+        try:
+            await asyncio.wait_for(recovered_twice.wait(), timeout=1.0)
+
+            assert scans >= 4
+            assert successful_scan_times[1] - successful_scan_times[0] < 0.06
+            assert len(clients) == 1
+        finally:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+
+    async def test_scan_restart_required_error_exits_without_reconnecting(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A stale turn that cannot unwind remains a host-level recovery condition."""
+        pubsub = _QueueingPubSub()
+        clients = _patch_redis(monkeypatch, pubsub)
+
+        async def _pending(_stale_after_s: float) -> list[dispatcher.PendingInboundWake]:
+            raise dispatcher.HostRestartRequiredError("stale turn did not unwind")
+
+        disp = InboundWakeDispatcher(
+            "redis://unused",
+            _ScanScheduler(),
+            pending_scan=_pending,
+            stale_after_s=180.0,
+        )  # pyright: ignore[reportArgumentType]
+
+        with pytest.raises(dispatcher.HostRestartRequiredError, match="did not unwind"):
+            await disp.run()
+
+        assert len(clients) == 1
+
     async def test_half_open_subscription_read_is_bounded_and_reconnected(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
