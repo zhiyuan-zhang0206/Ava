@@ -150,13 +150,24 @@ def _run(command: list[str], *, timeout: float) -> None:
     result = subprocess.run(  # noqa: S603
         command,
         stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
         timeout=timeout,
         check=False,
     )
     if result.returncode != 0:
-        raise RestoreProofError(f"restore command exited {result.returncode}: {command[0]}")
+        # Carry the child's own output in the error (a tail, bounded): the
+        # 2026-09-03 activation #7 sandbox postmaster failure ("socket path too
+        # long") was invisible because the previous DEVNULL discard ate pg_ctl's
+        # stderr and the CLI refusal truncates to the first 300 chars of the
+        # worker traceback — the cause must ride with the exception itself.
+        detail = (result.stderr or result.stdout or "").strip()
+        if len(detail) > 4000:
+            detail = f"\u2026{detail[-4000:]}"
+        raise RestoreProofError(
+            f"restore command exited {result.returncode}: {command[0]}"
+            + (f": {detail}" if detail else "")
+        )
 
 
 @dataclass(frozen=True)
