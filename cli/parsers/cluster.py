@@ -12,6 +12,11 @@ import argparse
 
 
 def _h_cluster_update(args: argparse.Namespace) -> int:
+    if args.prepared is not None:
+        from cli.prepared_update import run_prepared_update
+
+        return run_prepared_update(args)
+
     from cli.commands import cmd_update
 
     return cmd_update(
@@ -300,6 +305,11 @@ def _add_cluster_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]
         help="bounce every service on the current code (no git pull / uv sync / migration) "
         "— used to apply config changes cluster-wide. POSTs /api/cluster/restart "
         "to the gateway from any host.",
+    )
+    cluster_update_p.add_argument(
+        "--prepared",
+        metavar="PLAN",
+        help="explicit retained-image operator entry; requires --local, never POSTs an old gateway",
     )
     cluster_update_p.add_argument(
         "--local",

@@ -164,6 +164,34 @@ class CommittedPublication(EvidenceModel):
     activation_challenge: UUID | None = None
 
 
+class PreparedUnitPreflight(EvidenceModel):
+    """Actual local preflight, not permission or a post-stop acknowledgement."""
+
+    unit: PublishedUnit
+    request_digest: Digest
+    evidence_digest: Digest
+    observed_at: AwareDatetime
+
+
+class PreparedDispatch(EvidenceModel):
+    """One operator request and deadline, shared by coordinator and participants."""
+
+    request_id: UUID
+    request_digest: Digest
+    coordinator: PublishedUnit
+    valid_until: AwareDatetime
+    preflights: tuple[PreparedUnitPreflight, ...] = ()
+
+    @model_validator(mode="after")
+    def unique_preflights(self) -> Self:
+        keys = [(item.unit.machine, item.unit.home) for item in self.preflights]
+        if keys != sorted(set(keys)) or any(
+            item.request_digest != self.request_digest for item in self.preflights
+        ):
+            raise ValueError("prepared dispatch has inconsistent unit preflights")
+        return self
+
+
 class PendingPublication(EvidenceModel):
     operation: RolloutIdentity
     predecessor: UUID | None
@@ -174,6 +202,7 @@ class PendingPublication(EvidenceModel):
     normal_start_plan: NormalStartPlan | None = None
     migration: PendingMigrationReceipt | None = None
     unit_readbacks: tuple[UnitActivationReadback, ...] = ()
+    dispatch: PreparedDispatch | None = None
 
 
 class WriterPublication(EvidenceModel):
@@ -196,6 +225,21 @@ class WriterPublication(EvidenceModel):
             plan = self.pending.normal_start_plan
             if plan is not None and tuple(entry.unit for entry in plan.units) != self.pending.units:
                 raise ValueError("normal startup plan must cover the exact prepared units")
+            dispatch = self.pending.dispatch
+            if dispatch is not None and (
+                dispatch.coordinator not in self.pending.units
+                or dispatch.valid_until <= self.pending.operation.acquired_at
+                or dispatch.request_id != self.pending.challenge
+                or dispatch.request_digest != self.pending.candidate_digest
+                or any(item.unit not in self.pending.units for item in dispatch.preflights)
+                or any(
+                    not self.pending.operation.acquired_at
+                    <= item.observed_at
+                    < dispatch.valid_until
+                    for item in dispatch.preflights
+                )
+            ):
+                raise ValueError("prepared dispatch differs from the pending operation")
             readback_units = [item.selector.unit for item in self.pending.unit_readbacks]
             keys = [(unit.machine, unit.home) for unit in readback_units]
             if keys != sorted(set(keys)) or any(
@@ -245,7 +289,12 @@ def begin_pending_publication(
     A crash leaves pending in place even after lease expiry; only explicit
     verified completion/recovery may clear it. A new holder cannot overwrite it.
     """
-    if pending.collection is not None or pending.migration is not None or pending.unit_readbacks:
+    if (
+        pending.collection is not None
+        or pending.migration is not None
+        or pending.unit_readbacks
+        or (pending.dispatch is not None and pending.dispatch.preflights)
+    ):
         raise ManagedWriterBarrierError("prepare cannot import a cached collection")
     lock_rollout(conn, pending.operation)
     state = _locked_publication(conn)
@@ -321,6 +370,7 @@ def recover_pending_publication(
         replacement.collection is not None
         or replacement.migration is not None
         or replacement.unit_readbacks
+        or (replacement.dispatch is not None and replacement.dispatch.preflights)
         or replacement.operation == abandoned
     ):
         raise ManagedWriterBarrierError("recovery requires a new operation and fresh collection")
