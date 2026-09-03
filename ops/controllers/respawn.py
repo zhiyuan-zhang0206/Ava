@@ -448,6 +448,10 @@ class RespawnController:
         grace window (and the revive pass is what relaunches rows whose
         processes really died in the outage). Returns True if any row was acted on."""
         acted = False
+        from ops.resource_birth import resume_births
+
+        if resume_births(self._pool, local_machine, settings.daemon.revive_max_per_pass):
+            acted = True
         for tid in _reap_local_unclaimed_idling(self._pool, local_machine, BOOT_REAP_GRACE_SEC):
             acted = True
             _log.warning(
