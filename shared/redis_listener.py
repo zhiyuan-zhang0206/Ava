@@ -22,9 +22,11 @@ does not crash the idle-wait. It logs once and degrades to the SELECT recheck in
 recovering automatically if the ACL is later fixed.
 
 Wake health is latched as HEALTHY or DEGRADED so wake-path failures cannot look
-healthy to callers. A clean consume restores HEALTHY; a consume abandonment
-closes both handles because a black-holed pubsub socket can answer ping while
-its `get_message` remains stuck forever.
+healthy to callers. It covers every instant-wake-off cause: abandoned
+open/consume, wake-key GETDEL timeout/error, and ACL-denied subscribe (whose
+channel denial is surfaced lazily on the first read). A clean consume restores
+HEALTHY; a consume abandonment closes both handles because a black-holed pubsub
+socket can answer ping while its `get_message` remains stuck forever.
 """
 
 from __future__ import annotations
@@ -83,6 +85,7 @@ class WakeFailure(StrEnum):
     GETDEL_TIMEOUT = "getdel_timeout"
     GETDEL_ERROR = "getdel_error"
     CONSUME_ABANDON = "consume_abandon"
+    ACL_DENIED = "acl_denied"
 
 
 class RedisInboundListener:
@@ -281,6 +284,7 @@ class RedisInboundListener:
         if self._acl_denied_logged:
             return
         self._acl_denied_logged = True
+        self._mark_wake_degraded(WakeFailure.ACL_DENIED)
         logger.warning(
             "RedisInboundListener[agent={a}]: subscribe to {ch!r} rejected by redis "
             "({exc!r}) — the cluster redis ACL user is not granted this channel. "

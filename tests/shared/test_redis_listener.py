@@ -582,6 +582,10 @@ class TestAclScopedChannel:
             elapsed = time.monotonic() - started
             # Degraded path sleeps out the budget then returns (no crash, no hot loop).
             assert 0.4 < elapsed < 3.0, f"degraded wait_one elapsed {elapsed:.2f}s"
+            # Instant wake is genuinely off for the episode — the wake-health view
+            # must say DEGRADED, not look healthy (fake-alive).
+            assert listener.wake_state is WakeState.DEGRADED
+            assert listener.wake_degrade_reason == WakeFailure.ACL_DENIED.value
         finally:
             await listener.close()
         assert any("rejected by redis" in r["message"] for r in loguru_records), (  # pyright: ignore[reportUnknownVariableType]
