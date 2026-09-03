@@ -47,6 +47,12 @@ include:
 | `passive_memory_recall_enabled` | Enable passive memory recall | bool |
 | `agent_reply_reminder_cadence` | Reply reminder cadence | int |
 
+> **Model ids come from the registry, not from memory.** `llm_model` values must
+> be ids on the current roster — list them with `GET /api/models` or read
+> `shared/lm/registry.py` (`MODELS` / `SUPPORTED_MODELS`); a name copied from an
+> old doc or spawn may be stale or unregistered (see the
+> [models sub-skill](../models/SKILL.md)).
+
 ## Process
 
 ### 1. Clarify Requirements
@@ -67,7 +73,7 @@ config = {
     # differentiates a role. Keep it to short disciplinary skills; a large
     # reference skill is already one ava.help() away via the index.
     "skills_to_expand_at_start": ["ava-code.conventions"],
-    "llm_model": "claude-sonnet-5",
+    "llm_model": "gemini-3.8-flash",
 }
 ```
 
@@ -90,7 +96,7 @@ body = {
     "name": "my-preset",           # kebab-case, unique identifier
     "label": "My Preset",          # Human-readable name
     "description": "What this preset is for",
-    "config": {"llm_model": "claude-sonnet-4-5-20250929", ...}
+    "config": {"llm_model": "gemini-3.8-flash", ...}
 }
 r = httpx.post(
     f"{base}/api/presets", json=body,
@@ -104,7 +110,7 @@ Or use the CLI:
 ```bash
 ava presets create --name my-preset --label "My Preset" \
     --description "What this preset is for" \
-    --config '{"llm_model":"claude-sonnet-4-5-20250929"}'
+    --config '{"llm_model":"gemini-3.8-flash"}'
 ```
 
 ### 4. Verify
