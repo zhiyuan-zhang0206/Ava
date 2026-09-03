@@ -135,11 +135,12 @@ def test_category_projection_matches_telemetry_whitelist() -> None:
     # raises it to 141; host_config_rejected (Task #2344's wake-time model-config
     # fail-fast) raises it to 142; wake_degraded + wake_restored (Task #2418's
     # RedisInboundListener wake-health episodes) raise it to 144;
-    # host_turn_stall_detected (task #2417's turn-level fake-alive detection)
-    # raises it to 145 — and the schedule_self_respawn removal takes
-    # restart_cas_lost back out, so the merged total is one below that.
+    # host_turn_stall_detected / _timeout / _uncancellable / _aborted (task
+    # #2417's turn-level fake-alive detection + stall guard) raise it to 147;
+    # and the schedule_self_respawn removal takes restart_cas_lost back out,
+    # which the guard below keeps asserted.
     assert "restart_cas_lost" not in _TELEMETRY_KINDS
-    assert len(_TELEMETRY_KINDS) == 144
+    assert len(_TELEMETRY_KINDS) == 147
 
 
 def test_checkpoint_table_sizes_payload_and_metric_disposition() -> None:
