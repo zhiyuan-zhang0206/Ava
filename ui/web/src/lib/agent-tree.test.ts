@@ -471,3 +471,46 @@ describe("buildAgentTree hideTerminated", () => {
     expect(childIds.sort((x, y) => x - y)).toEqual([2, 4]);
   });
 });
+
+describe("buildAgentTree nearest-visible-ancestor mounting (#312 regression)", () => {
+  // Real-world shape from the #312 orphan report (T2409): 228 (alive,
+  // user-spawned) -> 240 (terminated) -> 312 (alive). The roster always
+  // carries the terminated joint row (use-agents merges the terminated
+  // scope), so the derivation must mount 312 under its TRUE parent 240
+  // when terminated rows are shown, and under the nearest VISIBLE ancestor
+  // 228 when they are hidden — never as a detached root orphan.
+  const roster = () => [
+    ag(228, "user", "idling"),
+    ag(240, "agent:228", "terminated"),
+    ag(312, "agent:240", "idling"),
+  ];
+
+  it("hidden terminated: 312 mounts under the nearest visible ancestor 228 (no orphan root)", () => {
+    const roots = buildAgentTree(roster(), undefined, { hideTerminated: true });
+    expect(roots).toHaveLength(1);
+    expect(roots[0].agent.agent_id).toBe(228);
+    expect(roots[0].children).toHaveLength(1);
+    expect(roots[0].children[0].agent.agent_id).toBe(312);
+    expect(roots[0].children[0].children).toEqual([]);
+    // 240 is hidden but its row was the lineage joint — no detached root.
+    expect(roots.some((r) => r.agent.agent_id === 240)).toBe(false);
+  });
+
+  it("shown terminated: 312 keeps its true lineage position under terminated 240", () => {
+    const roots = buildAgentTree(roster(), undefined, { hideTerminated: false });
+    expect(roots).toHaveLength(1);
+    expect(roots[0].agent.agent_id).toBe(228);
+    expect(roots[0].children).toHaveLength(1);
+    const node240 = roots[0].children[0];
+    expect(node240.agent.agent_id).toBe(240);
+    expect(node240.agent.status).toBe("terminated");
+    expect(node240.children).toHaveLength(1);
+    expect(node240.children[0].agent.agent_id).toBe(312);
+    expect(node240.children[0].agent.status).toBe("idling");
+  });
+
+  it("default options (no hideTerminated) keep the true lineage like shown mode", () => {
+    const roots = buildAgentTree(roster());
+    expect(roots[0].children[0].children[0].agent.agent_id).toBe(312);
+  });
+});

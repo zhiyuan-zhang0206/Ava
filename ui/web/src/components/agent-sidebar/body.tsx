@@ -66,7 +66,12 @@ export function SidebarBody(props: InnerProps & { wide: boolean }) {
   const notifyAwaitingReply = userSettings["notification.awaiting_reply"] === true;
   const terminatedCount = agents.filter((a) => a.status === "terminated").length;
 
-  // When hidden, drop terminated agents before folding the tree.
+  // `agents` is the combined live + terminated roster (use-agents always
+  // merges the terminated scope — the tree builder needs terminated parent
+  // rows to re-parent live children under their nearest visible ancestor).
+  // showTerminated is a pure render filter: when hidden, drop terminated
+  // rows from the flat list and let buildAgentTree flatten them out of the
+  // tree (children re-parent under the nearest visible ancestor).
   const visibleAgents = showTerminated
     ? agents
     : agents.filter((a) => a.status !== "terminated");
@@ -82,6 +87,16 @@ export function SidebarBody(props: InnerProps & { wide: boolean }) {
   const flatAgents = useMemo(
     () => sortAgentsFlat(visibleAgents, sort),
     [visibleAgents, sort],
+  );
+
+  // Fold the tree once per roster/sort/toggle change. The combined roster
+  // (live + terminated history) can be large, so the fold must not re-run on
+  // every unrelated sidebar render. hideTerminated=!showTerminated lets
+  // buildAgentTree re-parent children of hidden terminated nodes to the
+  // nearest visible ancestor (#312 orphan regression).
+  const tree = useMemo(
+    () => buildAgentTree(agents, sort, { hideTerminated: !showTerminated }),
+    [agents, sort, showTerminated],
   );
 
   const waiting = agents.reduce((n, a) => n + a.notices_awaiting_response.length, 0);
@@ -272,7 +287,7 @@ export function SidebarBody(props: InnerProps & { wide: boolean }) {
             {Array.from({ length: pendingSpawnCount }, (_, i) => (
               <SpawningRow key={`spawning-${i}`} active={i === 0} showStatus={showAgentStatus} />
             ))}
-            {buildAgentTree(agents, sort, { hideTerminated: !showTerminated }).map((node) => (
+            {tree.map((node) => (
               <TreeNode
                 key={node.agent.agent_id}
                 node={node}
