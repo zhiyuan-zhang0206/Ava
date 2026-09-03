@@ -322,7 +322,7 @@ def _launch_agent_process(
     if resource_attempt is None and restart_attempt is None and resurrect_attempt is None:
         from ops.resource_birth import launch_birth
 
-        managed = launch_birth(agent_id)
+        managed = launch_birth(agent_id, confirm=confirm)
         if managed is not None:
             return managed
     supervisor = native_proc()
