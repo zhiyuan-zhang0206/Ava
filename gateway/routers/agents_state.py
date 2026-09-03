@@ -153,6 +153,16 @@ def _message_content_size_bytes(content: str | list[ContentBlock]) -> int:
     return len(json.dumps(wire_content, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
 
 
+def _scoped_message_key(request: Request, agent_id: int, key: str) -> str:
+    """Delivery and reconciliation identify the same logical POST operation."""
+    from gateway.request_principal import PrincipalScopeError, request_key
+
+    try:
+        return request_key(request, key, method="POST", path=f"/api/agents/{agent_id}/messages")
+    except PrincipalScopeError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
 @router.post("/api/agents/{agent_id}/messages", status_code=201)
 async def post_agent_message(
     agent_id: int,
@@ -180,6 +190,8 @@ async def post_agent_message(
     413: message content exceeds the 1 MiB transport limit.
     422: a block list gated out (non-vision model) or referencing a bad upload.
     """
+    if idempotency_key is not None:
+        idempotency_key = _scoped_message_key(request, agent_id, idempotency_key)
     if _message_content_size_bytes(body.content) > _MAX_MESSAGE_CONTENT_BYTES:
         raise HTTPException(
             status_code=413,
@@ -330,6 +342,7 @@ async def reconcile_agent_message(
     idempotency_key: str = Header(alias="Idempotency-Key", min_length=1, max_length=128),
 ) -> AgentMessageEnqueued:
     """Resolve a timed-out POST and heal its still-pending delivery tail."""
+    idempotency_key = _scoped_message_key(request, agent_id, idempotency_key)
     if _message_content_size_bytes(body.content) > _MAX_MESSAGE_CONTENT_BYTES:
         raise HTTPException(
             status_code=413,
