@@ -143,8 +143,7 @@ def _verify_submitted(sid: int, codex_home: Path, timeout: float = 60.0) -> None
         if sessions_dir.is_dir():
             now = time.time()
             recent = any(
-                p.is_file() and now - p.stat().st_mtime < 30
-                for p in sessions_dir.rglob("*.jsonl")
+                p.is_file() and now - p.stat().st_mtime < 30 for p in sessions_dir.rglob("*.jsonl")
             )
             if recent:
                 print("  -> submitted (fresh session jsonl)")
