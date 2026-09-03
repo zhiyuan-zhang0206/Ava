@@ -31,6 +31,7 @@ time, for sinks that are handed a value once and format it per record —
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import os
 from collections.abc import Generator
@@ -51,6 +52,16 @@ class HostedTurnResources:
     """Actual unresolved domains held by one turn Task, never by the model cache."""
 
     unresolved: dict[Path, object | None] = field(default_factory=dict)
+    changed: asyncio.Event = field(default_factory=asyncio.Event)
+    completions: set[asyncio.Task[None]] = field(default_factory=set)
+
+    def complete(self, request: Path, expected: object | None) -> bool:
+        """Only the original resource owner may discharge its exact entry."""
+        if request not in self.unresolved or self.unresolved[request] is not expected:
+            return False
+        del self.unresolved[request]
+        self.changed.set()
+        return True
 
 
 _TURN_RESOURCES: ContextVar[HostedTurnResources | None] = ContextVar(

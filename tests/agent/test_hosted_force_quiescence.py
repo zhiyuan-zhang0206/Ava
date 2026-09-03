@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import subprocess
 import threading
 from pathlib import Path
 from unittest.mock import AsyncMock, Mock
@@ -13,6 +14,7 @@ import pytest
 from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
 from agent.db import has_pending_interrupt
+from agent.graph._exec_stream import StreamingTextIO
 from agent.hosted_ownership import admit_hosted_runtime
 from ops.ops_exit import _force_terminate_transaction
 from services.agent_host.daemon import _cancel_turn_route
@@ -27,6 +29,21 @@ from tests.agent.test_inbound_ownership import _agent, _insert
 def _blocking_work(entered: threading.Event, release: threading.Event) -> None:
     entered.set()
     assert release.wait(20), "test must release the real thread"
+
+
+def _configure_late_reader(kind: str, patch: pytest.MonkeyPatch, release: threading.Event) -> None:
+    if kind != "reader":
+        return
+    from agent.graph import _exec_subprocess
+
+    original = _exec_subprocess._drain_output
+
+    def delayed(proc: subprocess.Popen[bytes], stream: StreamingTextIO) -> None:
+        original(proc, stream)
+        assert release.wait(20), "test must release real output reader"
+
+    patch.setattr(_exec_subprocess, "_drain_output", delayed)
+    patch.setattr("agent.graph._exec_process._READER_JOIN_TIMEOUT_S", 0.01)
 
 
 async def _assert_pending_force(
@@ -81,7 +98,7 @@ async def _prove_successor_ignores_old_cancel(
         await scheduler.aclose()
 
 
-@pytest.mark.parametrize("work_kind", ["thread", "exec"])
+@pytest.mark.parametrize("work_kind", ["thread", "exec", "reader"])
 async def test_force_waits_for_real_work_and_delayed_cancel_cannot_hit_successor(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
@@ -91,6 +108,7 @@ async def test_force_waits_for_real_work_and_delayed_cancel_cannot_hit_successor
 ) -> None:
     agent_id = _agent(db_conn)
     entered, release = threading.Event(), threading.Event()
+    _configure_late_reader(work_kind, monkeypatch, release)
     marker, release_file = tmp_path / "entered", tmp_path / "release"
     successor_entered, successor_release = asyncio.Event(), asyncio.Event()
     calls = 0
@@ -109,7 +127,11 @@ async def test_force_waits_for_real_work_and_delayed_cancel_cannot_hit_successor
             await _run_in_subprocess(
                 "from pathlib import Path\nimport time\n"
                 f"Path({str(marker)!r}).touch()\n"
-                f"while not Path({str(release_file)!r}).exists(): time.sleep(0.01)\n",
+                + (
+                    "print('reader finishes after bounded join')\n"
+                    if work_kind == "reader"
+                    else f"while not Path({str(release_file)!r}).exists(): time.sleep(0.01)\n"
+                ),
                 agent_id,
                 asyncio.Event(),
                 20,
@@ -123,7 +145,6 @@ async def test_force_waits_for_real_work_and_delayed_cancel_cannot_hit_successor
     monkeypatch.setattr(host, "_runtime_for", AsyncMock(return_value=Mock()))
     monkeypatch.setattr("services.agent_host.dispatcher.CANCEL_UNWIND_TIMEOUT_S", 0.05)
     scheduler = TurnScheduler(host.run_turn)
-    route = _cancel_turn_route(scheduler, host)
     scheduler.wake(agent_id)
     try:
         async with asyncio.timeout(15):
@@ -135,7 +156,7 @@ async def test_force_waits_for_real_work_and_delayed_cancel_cannot_hit_successor
             )
         chat = _insert(db_conn, agent_id)
         payload = json.dumps({"agent_id": agent_id, "command_id": command}).encode()
-        status, response, _ = await route(payload)
+        status, response, _ = await _cancel_turn_route(scheduler, host)(payload)
         assert status == 200 and json.loads(response) == {"cancelled": False}
         assert agent_id in scheduler.active_agents
         await _assert_pending_force(db_conn, aops_pool, agent_id, command, chat)
@@ -227,6 +248,28 @@ async def test_formatted_exec_cleanup_failure_retains_actual_resource_evidence(
         assert await apply_hosted_lifecycle(aops_pool, incarnation) is None
         assert not await settle_hosted_runtime(aops_pool, incarnation)
     assert len(scope.unresolved) == 1  # cache/context reset does not erase the evidence
+
+
+async def test_real_missing_executable_is_not_an_unresolved_child(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from agent.graph._exec_result import _ExecCrashed
+    from agent.graph._exec_subprocess import _run_in_subprocess
+    from shared.turn_identity import HostedTurnResources, bind_hosted_resources
+
+    monkeypatch.setattr("agent.graph._exec_subprocess.sys.executable", str(tmp_path / "absent"))
+    scope = HostedTurnResources()
+    with bind_hosted_resources(scope):
+        outcome, _ = await _run_in_subprocess(
+            "raise AssertionError('must never execute')",
+            None,
+            asyncio.Event(),
+            2,
+            exec_dir=tmp_path,
+        )
+    assert isinstance(outcome, _ExecCrashed)
+    assert "could not be spawned" in outcome.output
+    assert not scope.unresolved
 
 
 @pytest.mark.parametrize("failure", [PermissionError, psutil.AccessDenied])
