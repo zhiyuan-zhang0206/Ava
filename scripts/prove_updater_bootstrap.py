@@ -106,6 +106,10 @@ def fault_worker(mode: str, request: Path) -> int:  # noqa: PLR0915 — scoped r
             real_start(plan, image, context_path)
             return
         with socket.socket() as occupied:
+            # A has exited, but its accepted connections can remain in TIME_WAIT.
+            # Reuse that address without SO_REUSEPORT: an existing live listener
+            # still refuses, and B must actually fail against this occupied one.
+            occupied.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             occupied.bind(("127.0.0.1", plan.projection.ops_port))
             occupied.listen()
             real_start(plan, image, context_path)
