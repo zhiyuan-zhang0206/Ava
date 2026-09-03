@@ -2036,6 +2036,32 @@ async def test_claim_resurrect_kind_appends_marker_and_continues(
     assert lifecycle.additional_kwargs.get("ava_note_tag") == "lifecycle_resurrect"  # pyright: ignore[reportUnknownMemberType]
 
 
+async def test_claim_resurrect_batch_appends_only_latest_marker(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    aredis_inbound_listener: RedisInboundListener,
+):
+    """Repeated failed recoveries are consumed together but render one marker."""
+    tid = create_agent(db_conn)
+    first = _insert_inbound_kind(db_conn, tid, "", "resurrect", source="system:retry")
+    latest = _insert_inbound_kind(db_conn, tid, "", "resurrect", source="user")
+
+    cmd = await claim_node(
+        AgentState(messages=[SystemMessage(content="sys")]),
+        _make_runtime(ops_pool=aops_pool, inbound_listener=aredis_inbound_listener),
+        _config(tid),
+    )
+
+    msgs = cmd.update["messages"]  # type: ignore[index]
+    assert len(msgs) == 1  # pyright: ignore[reportUnknownArgumentType]
+    assert "You have been resurrected by user" in msgs[0].content  # pyright: ignore[reportUnknownMemberType]
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "SELECT id, status FROM inbound_messages WHERE id = ANY(%s)", ([first, latest],)
+        )
+        assert dict(cur.fetchall()) == {first: "done", latest: "done"}
+
+
 # ────────────────────────────────────────────────────────────────────────
 # Lifecycle routing by recency: when a claim batch carries several conflicting
 # intents (only happens after the agent was stuck / down long enough for them to
