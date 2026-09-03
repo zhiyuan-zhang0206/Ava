@@ -11,6 +11,7 @@ from agent.db import claim_inbound_batch
 from agent.graph._chat_inbound import build_chat_inbound
 from gateway.app import app
 from shared.config import settings
+from shared.turn_identity import bind_turn_identity
 from tests.gateway.test_caller_protocol_path import _admit, _after_proven_old_writer_barrier
 from tests.gateway.test_mcp_endpoint import _ACCEPT, _initialize, _tool_call
 
@@ -45,7 +46,8 @@ async def test_token_derived_mcp_source_reaches_real_claim(
             },
         )
         assert not _failed(result), result
-    claimed = await claim_inbound_batch(aops_pool, incarnation.agent_id)
+    with bind_turn_identity(incarnation.agent_id, incarnation=incarnation):
+        claimed = await claim_inbound_batch(aops_pool, incarnation.agent_id)
     assert len(claimed) == 1
     assert claimed[0].source == f"external_agent:mcp:{credential['id']}"
     assert claimed[0].payload == {
