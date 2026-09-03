@@ -753,13 +753,22 @@ class TestResurrectAgent:
         with ThreadPoolExecutor(max_workers=2, thread_name_prefix="resurrect-cas") as executor:
             results = list(executor.map(_attempt_ignoring_index, range(2)))
 
-        assert sorted(results) == ["ResurrectTriggerStaleError", "spawned"]
+        assert results.count("spawned") == 1
+        assert next(result for result in results if result != "spawned") in {
+            "ResurrectTriggerStaleError",
+            "ResurrectAlreadyAlive",
+        }
         assert len(barrier_hits) == 2
         assert launched == [agent_id]
         assert _inbound_rows(db_conn, agent_id) == [
             ("one wake", "chat", "user"),
             ("", "resurrect", "system"),
         ]
+        assert db_conn.execute(
+            "SELECT payload->'resurrection_launch'->'attempts' FROM inbound_messages "
+            "WHERE agent_id=%s AND kind='resurrect'",
+            (agent_id,),
+        ).fetchall() == [(1,)]
 
     def test_force_row_lock_first_makes_guarded_resurrect_stale(
         self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch

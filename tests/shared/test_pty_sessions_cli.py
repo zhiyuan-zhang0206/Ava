@@ -837,6 +837,8 @@ def test_new_reaps_a_recordless_host_before_replacement(sessions: Path) -> None:
     assert first is not None and identity is not None
     old_shell = psutil.Process(first.pid)
     old_host = psutil.Process(identity[0])
+    assert old_host.create_time() == identity[1]
+    assert old_shell.create_time() == first.create_time
     record_path(name).unlink()
     assert not _has(home, name), "the missing record must make the session unlisted"
 
