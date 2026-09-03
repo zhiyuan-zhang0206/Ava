@@ -359,6 +359,7 @@ jobs:
             --splitting-algorithm least_duration \
             --cov=agent --cov=ava --cov=cli --cov=gateway --cov=shared --cov=ui \
             --cov=ops --cov=services --cov=ava_builtins \
+            --junit-xml=tmp/junit-backend-shard-${{ matrix.group }}-a1.xml -o junit_family=xunit1 \
             2>&1 | tee tmp/flake-attempt1-shard-${{ matrix.group }}.log
           status=$?
           if [ "$status" -ne 0 ]; then
@@ -373,10 +374,20 @@ jobs:
               --splits 16 --group ${{ matrix.group }} \
               --splitting-algorithm least_duration \
               --cov=agent --cov=ava --cov=cli --cov=gateway --cov=shared --cov=ui \
-              --cov=ops --cov=services --cov=ava_builtins
+              --cov=ops --cov=services --cov=ava_builtins \
+              --junit-xml=tmp/junit-backend-shard-${{ matrix.group }}-a2.xml -o junit_family=xunit1
             status=$?
           fi
           exit "$status"
+
+      - name: Upload test results to Trunk
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        uses: trunk-io/analytics-uploader@385f1ccdf345b4532dc4b6c665dd432b702b8e28 # v2.1.2
+        with:
+          junit-paths: tmp/junit-backend-shard-${{ matrix.group }}-*.xml
+          org-slug: ${{ secrets.TRUNK_ORG_URL_SLUG }}
+          token: ${{ secrets.TRUNK_API_TOKEN }}
 
       - name: Upload flake telemetry (attempt-1 failure)
         if: ${{ always() && steps.pytest-shard.outputs.retried == 'true' }}
@@ -435,9 +446,20 @@ jobs:
 
       - name: Run flaky pytest bucket serially
         run: >
+          mkdir -p tmp &&
           uv run pytest tests/ -m flaky --ignore=tests/e2e -q
           --cov=agent --cov=ava --cov=cli --cov=gateway --cov=shared --cov=ui
           --cov=ops --cov=services --cov=ava_builtins
+          --junit-xml=tmp/junit-backend-serial.xml -o junit_family=xunit1
+
+      - name: Upload test results to Trunk
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        uses: trunk-io/analytics-uploader@385f1ccdf345b4532dc4b6c665dd432b702b8e28 # v2.1.2
+        with:
+          junit-paths: tmp/junit-backend-serial.xml
+          org-slug: ${{ secrets.TRUNK_ORG_URL_SLUG }}
+          token: ${{ secrets.TRUNK_API_TOKEN }}
 
       - name: Upload coverage data
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -615,6 +637,15 @@ jobs:
         working-directory: ui/web
         run: npx vitest run --config vitest.flaky.config.ts
 
+      - name: Upload test results to Trunk
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        uses: trunk-io/analytics-uploader@385f1ccdf345b4532dc4b6c665dd432b702b8e28 # v2.1.2
+        with:
+          junit-paths: ui/web/junit.xml,ui/web/junit-flaky.xml
+          org-slug: ${{ secrets.TRUNK_ORG_URL_SLUG }}
+          token: ${{ secrets.TRUNK_API_TOKEN }}
+
   e2e-shard:
     name: e2e shard (${{ matrix.group }}/4)
     runs-on: ubuntu-24.04
@@ -687,6 +718,16 @@ jobs:
           uv run pytest tests/e2e/ -v -n 2
           --splits 4 --group ${{ matrix.group }}
           --splitting-algorithm least_duration
+          --junit-xml=tmp/junit-e2e-shard-${{ matrix.group }}.xml -o junit_family=xunit1
+
+      - name: Upload test results to Trunk
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        uses: trunk-io/analytics-uploader@385f1ccdf345b4532dc4b6c665dd432b702b8e28 # v2.1.2
+        with:
+          junit-paths: tmp/junit-e2e-shard-${{ matrix.group }}.xml
+          org-slug: ${{ secrets.TRUNK_ORG_URL_SLUG }}
+          token: ${{ secrets.TRUNK_API_TOKEN }}
 
       - name: Upload e2e logs on failure
         if: failure()
@@ -771,6 +812,16 @@ jobs:
           tests/e2e/test_compact_flow.py
           tests/e2e/test_self_resurrect.py
           -v -n 1
+          --junit-xml=tmp/junit-e2e-hosted.xml -o junit_family=xunit1
+
+      - name: Upload test results to Trunk
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        uses: trunk-io/analytics-uploader@385f1ccdf345b4532dc4b6c665dd432b702b8e28 # v2.1.2
+        with:
+          junit-paths: tmp/junit-e2e-hosted.xml
+          org-slug: ${{ secrets.TRUNK_ORG_URL_SLUG }}
+          token: ${{ secrets.TRUNK_API_TOKEN }}
 
       - name: Upload e2e logs on failure
         if: failure()
@@ -842,6 +893,16 @@ jobs:
         # sharded jobs never collect tests/test_home_isolation.py.
         run: >
           uv run pytest tests/e2e/ tests/test_home_isolation.py -v -n 1
+          --junit-xml=tmp/junit-e2e-env-guard.xml -o junit_family=xunit1
+
+      - name: Upload test results to Trunk
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        uses: trunk-io/analytics-uploader@385f1ccdf345b4532dc4b6c665dd432b702b8e28 # v2.1.2
+        with:
+          junit-paths: tmp/junit-e2e-env-guard.xml
+          org-slug: ${{ secrets.TRUNK_ORG_URL_SLUG }}
+          token: ${{ secrets.TRUNK_API_TOKEN }}
 
       - name: Upload e2e logs on failure
         if: failure()
