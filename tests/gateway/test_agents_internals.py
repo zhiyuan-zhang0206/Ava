@@ -289,13 +289,15 @@ class TestSpawnAgent:
     def test_spawner_recorded(
         self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """The spawner string is written to agents.spawner (lineage) — the agent:N format lets the frontend build a tree."""
+        """The birth-time lineage string is stamped into both metadata fields."""
         parent_id = _spawn_agent()  # spawner='user' default
         child_id = _spawn_agent(spawner=f"agent:{parent_id}")
 
-        row = _agents_row(db_conn, child_id)  # pyright: ignore[reportUnknownVariableType]
+        with db_conn.cursor() as cur:
+            cur.execute("SELECT spawner, born_spawner FROM agents_meta WHERE id = %s", (child_id,))
+            row = cur.fetchone()
         assert row is not None
-        assert row[1] == f"agent:{parent_id}"
+        assert row == (f"agent:{parent_id}", f"agent:{parent_id}")
 
     def test_label_stored_sticky(
         self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
@@ -2572,10 +2574,10 @@ class TestSpawnFork:
         assert fork_rows[0]["attributes"]["fork_from"] == source  # pyright: ignore[reportUnknownVariableType]
 
         with db_conn.cursor() as cur:
-            cur.execute("SELECT spawner FROM agents_meta WHERE id = %s", (new_id,))
+            cur.execute("SELECT spawner, born_spawner FROM agents_meta WHERE id = %s", (new_id,))
             row = cur.fetchone()
         assert row is not None
-        assert row[0] == f"agent:{source}"
+        assert row == (f"agent:{source}", f"agent:{source}")
 
     def test_spawn_event_target_is_spawner(
         self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
@@ -2610,10 +2612,10 @@ class TestSpawnFork:
         assert spawn_rows[0]["target_agent_id"] == parent  # pyright: ignore[reportUnknownVariableType]
 
         with db_conn.cursor() as cur:
-            cur.execute("SELECT spawner FROM agents_meta WHERE id = %s", (new_id,))
+            cur.execute("SELECT spawner, born_spawner FROM agents_meta WHERE id = %s", (new_id,))
             row = cur.fetchone()
         assert row is not None
-        assert row[0] == f"agent:{parent}"
+        assert row == (f"agent:{parent}", f"agent:{parent}")
 
     def test_fork_inbound_via_unified_path_emits_fork_source_target(
         self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch

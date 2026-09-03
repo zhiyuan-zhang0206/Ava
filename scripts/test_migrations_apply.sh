@@ -27,10 +27,12 @@ export PGHOST PGUSER PGPORT
 
 TEST_DB="ava_migration_smoke_$$"
 FULL_DB="ava_migration_full_$$"
+BORN_SPAWNER_DB="ava_born_spawner_smoke_$$"
 
 cleanup() {
     psql -d "$ADMIN_DB" -c "DROP DATABASE IF EXISTS $TEST_DB" >/dev/null 2>&1 || true
     psql -d "$ADMIN_DB" -c "DROP DATABASE IF EXISTS $FULL_DB" >/dev/null 2>&1 || true
+    psql -d "$ADMIN_DB" -c "DROP DATABASE IF EXISTS $BORN_SPAWNER_DB" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
 
@@ -99,6 +101,61 @@ BEGIN
     IF resurrected_spawner <> 'agent:991002' THEN
         RAISE EXCEPTION 'resurrecting agent rewrote spawner — resurrected_spawner=%',
             resurrected_spawner;
+    END IF;
+END $$;
+SQL
+
+echo "-> born_spawner migration smoke: backfill and append-only trigger"
+psql -d "$ADMIN_DB" -v ON_ERROR_STOP=1 -c "CREATE DATABASE $BORN_SPAWNER_DB"
+psql -d "$BORN_SPAWNER_DB" -v ON_ERROR_STOP=1 <<'SQL'
+CREATE TABLE agents_meta (
+    id BIGINT PRIMARY KEY,
+    spawner TEXT NOT NULL,
+    fork_source_agent_id BIGINT,
+    spawned_at TIMESTAMPTZ NOT NULL
+);
+CREATE TABLE inbound_messages (
+    id BIGINT PRIMARY KEY,
+    agent_id BIGINT NOT NULL,
+    kind TEXT NOT NULL,
+    source TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL
+);
+INSERT INTO agents_meta (id, spawner, fork_source_agent_id, spawned_at) VALUES
+    (991101, 'agent:405', 2524, '2026-09-03 00:00:00+00'),
+    (991102, 'agent:405', NULL, '2026-09-03 00:00:00+00'),
+    (991103, 'user', NULL, '2026-09-03 00:00:00+00'),
+    (991104, 'user', NULL, '2026-08-10 00:00:00+00');
+INSERT INTO inbound_messages (id, agent_id, kind, source, created_at) VALUES
+    (1, 991102, 'chat', 'agent:2524', '2026-09-03 00:00:01+00'),
+    (2, 991103, 'chat', 'agent:565', '2026-09-03 00:10:01+00'),
+    (3, 991104, 'chat', 'agent:565', '2026-08-10 00:01:00+00');
+SQL
+psql -d "$BORN_SPAWNER_DB" -v ON_ERROR_STOP=1 -f migrations/20260903T175722_add-born-spawner.sql
+psql -d "$BORN_SPAWNER_DB" -v ON_ERROR_STOP=1 <<'SQL'
+DO $$
+DECLARE rejected_update BOOLEAN := FALSE;
+BEGIN
+    IF (SELECT born_spawner FROM agents_meta WHERE id = 991101) <> 'agent:2524' THEN
+        RAISE EXCEPTION 'fork born_spawner backfill failed';
+    END IF;
+    IF (SELECT born_spawner FROM agents_meta WHERE id = 991102) <> 'agent:405' THEN
+        RAISE EXCEPTION 'post-ruling spawner must outrank the timed agent chat';
+    END IF;
+    IF (SELECT born_spawner FROM agents_meta WHERE id = 991103) <> 'user' THEN
+        RAISE EXCEPTION 'late agent chat must leave spawner fallback';
+    END IF;
+    IF (SELECT born_spawner FROM agents_meta WHERE id = 991104) <> 'agent:565' THEN
+        RAISE EXCEPTION 'pre-ruling timed agent chat born_spawner backfill failed';
+    END IF;
+
+    BEGIN
+        UPDATE agents_meta SET born_spawner = 'agent:1' WHERE id = 991101;
+    EXCEPTION WHEN raise_exception THEN
+        rejected_update := TRUE;
+    END;
+    IF NOT rejected_update THEN
+        RAISE EXCEPTION 'born_spawner update was not rejected';
     END IF;
 END $$;
 SQL

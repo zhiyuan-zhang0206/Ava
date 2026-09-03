@@ -632,18 +632,23 @@ class TestGetAncestors:
     """SDK get_ancestors maps the gateway `ancestors` rows to Neighbor
     dataclasses. The chain walk itself is covered in
     tests/gateway/test_agent_neighbors.py; here we verify the wrapper + wire
-    path only, seeding the spawn tie through the FakeLoki live tail."""
+    path only. Ancestry is the immutable `agents_meta.born_spawner` chain, so
+    it is seeded on the row; the FakeLoki spawn event only feeds the tie
+    graph."""
 
     @staticmethod
-    def _seed(db: psycopg.Connection, *, status: str = "running") -> int:
+    def _seed(
+        db: psycopg.Connection, *, status: str = "running", born_spawner: str | None = None
+    ) -> int:
         with db.cursor() as cur:
             cur.execute("INSERT INTO agents DEFAULT VALUES RETURNING id")
             row = cur.fetchone()
             assert row is not None
             aid = row[0]
             cur.execute(
-                "INSERT INTO agents_meta (id, spawner, status) VALUES (%s, 'test', %s)",
-                (aid, status),
+                "INSERT INTO agents_meta (id, spawner, born_spawner, status) "
+                "VALUES (%s, 'test', %s, %s)",
+                (aid, born_spawner, status),
             )
         db.commit()
         return aid
@@ -665,7 +670,7 @@ class TestGetAncestors:
         fake = FakeLoki()
         monkeypatch.setattr(loki_events, "query_events", fake.query_events)
         a = self._seed(db_conn, status="terminated")
-        b = self._seed(db_conn)
+        b = self._seed(db_conn, born_spawner=f"agent:{a}")
         self._spawn(fake, b, a)
 
         rows = ava.agents.get_ancestors(b)

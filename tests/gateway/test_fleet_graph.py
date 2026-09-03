@@ -33,15 +33,21 @@ from shared.paths import ava_home
 from tests.gateway.loki_fake import FakeLoki
 
 
-def _seed_agent(db_conn: psycopg.Connection, *, status: str = "running") -> int:
+def _seed_agent(
+    db_conn: psycopg.Connection,
+    *,
+    status: str = "running",
+    spawner: str = "test",
+    born_spawner: str | None = None,
+) -> int:
     with db_conn.cursor() as cur:
         cur.execute("INSERT INTO agents DEFAULT VALUES RETURNING id")
         row = cur.fetchone()
         assert row is not None
         new_id = row[0]
         cur.execute(
-            "INSERT INTO agents_meta (id, spawner, status) VALUES (%s, 'test', %s)",
-            (new_id, status),
+            "INSERT INTO agents_meta (id, spawner, born_spawner, status) VALUES (%s, %s, %s, %s)",
+            (new_id, spawner, born_spawner, status),
         )
     db_conn.commit()
     return new_id
@@ -215,6 +221,21 @@ def _nodes_by_id(client: TestClient, query: str = "") -> dict[int, dict]:  # pyr
     resp = client.get(f"/api/fleet/graph{query}")
     assert resp.status_code == 200, resp.text
     return {n["agent_id"]: n for n in resp.json()["nodes"]}  # pyright: ignore[reportUnknownVariableType]
+
+
+def test_nodes_use_immutable_birth_parent(db_conn: psycopg.Connection) -> None:
+    folded_parent = _seed_agent(db_conn)
+    birth_parent = _seed_agent(db_conn)
+    child = _seed_agent(
+        db_conn,
+        spawner=f"agent:{folded_parent}",
+        born_spawner=f"agent:{birth_parent}",
+    )
+
+    with TestClient(app) as client:
+        nodes = _nodes_by_id(client)
+
+    assert nodes[child]["spawner"] == f"agent:{birth_parent}"
 
 
 def test_total_tokens_sums_in_plus_out_counters(
