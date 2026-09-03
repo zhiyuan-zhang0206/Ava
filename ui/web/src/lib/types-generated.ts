@@ -7725,6 +7725,8 @@ export interface components {
             stages?: {
                 [key: string]: number;
             };
+            /** Total S */
+            total_s?: number | null;
             /** Current Stage */
             current_stage?: string | null;
             /** Current Stage S */

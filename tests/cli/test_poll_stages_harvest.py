@@ -1,4 +1,4 @@
-"""The Phase-B poll's per-host updater-stage harvest (Task #1820).
+"""The Phase-B poll's per-host updater telemetry harvest (Task #1820).
 
 A converged host's completed stage breakdown — `start` included — lands in its
 updater log only after the posture row goes idle, so the probe that sees the
@@ -69,13 +69,46 @@ def test_the_convergence_probe_carries_the_completed_stages(
     calls, responses, _idle_at = poll_seams
     responses.append({"last_updater_outcome": _outcome({"checkout": 3.2})})
     responses.append({"last_updater_outcome": _outcome({"checkout": 3.2, "start": 14.6})})
-    host_outcomes: dict[str, dict[str, float]] = {}
+    host_outcomes: dict[str, dict[str, object]] = {}
 
     out = _cli._poll_until_unpaused([(HOST, "http://unused")], host_outcomes=host_outcomes)
 
     assert {n: v.status for n, v in out.items()} == {HOST: _cli.POLL_OK}
-    assert host_outcomes[HOST] == {"checkout": 3.2, "start": 14.6}
+    assert host_outcomes[HOST] == {
+        "checkout": 3.2,
+        "start": 14.6,
+        "outcome": {"kind": "exited", "rc": 0},
+    }
     assert calls["n"] == 2  # no harvest re-probe: the start stage was already there
+
+
+def test_the_convergence_probe_carries_terminal_wall_time_and_outcome(
+    poll_seams: tuple[dict[str, int], list[dict[str, object]], dict[str, int]],
+) -> None:
+    """Host telemetry adds the terminal outcome and wall time beside the existing
+    per-stage values, so old stage readers remain valid."""
+    _calls, responses, _idle_at = poll_seams
+    responses.append(
+        {
+            "last_updater_outcome": {
+                "kind": "exited",
+                "rc": 0,
+                "stages": {"checkout": 3.2, "start": 14.6},
+                "total_s": 75.8,
+            }
+        }
+    )
+    host_outcomes: dict[str, dict[str, object]] = {}
+
+    out = _cli._poll_until_unpaused([(HOST, "http://unused")], host_outcomes=host_outcomes)
+
+    assert {name: verdict.status for name, verdict in out.items()} == {HOST: _cli.POLL_OK}
+    assert host_outcomes[HOST] == {
+        "checkout": 3.2,
+        "start": 14.6,
+        "total_s": 75.8,
+        "outcome": {"kind": "exited", "rc": 0},
+    }
 
 
 def test_a_missing_start_stage_triggers_one_harvest_probe(
@@ -89,12 +122,16 @@ def test_a_missing_start_stage_triggers_one_harvest_probe(
     responses.append({"last_updater_outcome": _outcome({"checkout": 3.2})})
     responses.append({"last_updater_outcome": _outcome({"checkout": 3.2})})
     responses.append({"last_updater_outcome": _outcome({"checkout": 3.2, "start": 14.6})})
-    host_outcomes: dict[str, dict[str, float]] = {}
+    host_outcomes: dict[str, dict[str, object]] = {}
 
     out = _cli._poll_until_unpaused([(HOST, "http://unused")], host_outcomes=host_outcomes)
 
     assert {n: v.status for n, v in out.items()} == {HOST: _cli.POLL_OK}
-    assert host_outcomes[HOST] == {"checkout": 3.2, "start": 14.6}
+    assert host_outcomes[HOST] == {
+        "checkout": 3.2,
+        "start": 14.6,
+        "outcome": {"kind": "exited", "rc": 0},
+    }
     assert calls["n"] == 3  # exactly one harvest probe
 
 
@@ -106,12 +143,16 @@ def test_a_fast_host_is_served_by_the_fresh_idle_read(
     the first probe that finds it converged."""
     calls, responses, _idle_at = poll_seams
     responses.append({"last_updater_outcome": _outcome({"checkout": 3.2, "start": 14.6})})
-    host_outcomes: dict[str, dict[str, float]] = {}
+    host_outcomes: dict[str, dict[str, object]] = {}
 
     out = _cli._poll_until_unpaused([(HOST, "http://unused")], host_outcomes=host_outcomes)
 
     assert {n: v.status for n, v in out.items()} == {HOST: _cli.POLL_OK}
-    assert host_outcomes[HOST] == {"checkout": 3.2, "start": 14.6}
+    assert host_outcomes[HOST] == {
+        "checkout": 3.2,
+        "start": 14.6,
+        "outcome": {"kind": "exited", "rc": 0},
+    }
     assert calls["n"] == 1
 
 
@@ -125,10 +166,13 @@ def test_the_harvest_is_best_effort(
     responses.append({"last_updater_outcome": _outcome({"checkout": 3.2})})
     responses.append({"last_updater_outcome": _outcome({"checkout": 3.2})})
     responses.append({})  # harvest probe: no outcome at all
-    host_outcomes: dict[str, dict[str, float]] = {}
+    host_outcomes: dict[str, dict[str, object]] = {}
 
     out = _cli._poll_until_unpaused([(HOST, "http://unused")], host_outcomes=host_outcomes)
 
     assert {n: v.status for n, v in out.items()} == {HOST: _cli.POLL_OK}
-    assert host_outcomes[HOST] == {"checkout": 3.2}
+    assert host_outcomes[HOST] == {
+        "checkout": 3.2,
+        "outcome": {"kind": "exited", "rc": 0},
+    }
     assert calls["n"] == 3

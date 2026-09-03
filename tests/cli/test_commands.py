@@ -825,7 +825,8 @@ def test_cmd_restart_calls_stop_then_start(monkeypatch: pytest.MonkeyPatch) -> N
         order.append("stop")
         return 0
 
-    def fake_cmd_start_body(**_kw) -> int:
+    def fake_cmd_start_body(**kwargs: object) -> int:
+        assert kwargs["updater_telemetry"] is True
         order.append("start")
         return 0
 
@@ -834,6 +835,31 @@ def test_cmd_restart_calls_stop_then_start(monkeypatch: pytest.MonkeyPatch) -> N
     rc = _cli.cmd_restart()
     assert order == ["stop", "start"]
     assert rc == 0
+
+
+def test_cmd_restart_records_its_full_wall_time_as_an_updater_stage(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The restart marker's self-contained duration must win over the Windows
+    ladder's first nested marker, which otherwise records only the preflight lead-in."""
+    from contextlib import contextmanager
+
+    from cli.commands import stop as stop_mod
+
+    seen: list[str] = []
+
+    @contextmanager
+    def _stage(name: str):
+        seen.append(name)
+        yield
+
+    monkeypatch.setattr(stop_mod, "updater_stage", _stage)
+    monkeypatch.setattr(_cli, "_preflight_probes", lambda: 0)
+    monkeypatch.setattr(_cli, "_do_stop", lambda *_args, **_kwargs: 0)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_cli, "_cmd_start_body", lambda **_kwargs: 0)  # pyright: ignore[reportUnknownArgumentType]
+
+    assert _cli.cmd_restart() == 0
+    assert seen[0] == "restart"
 
 
 def test_cmd_restart_short_circuits_on_stop_failure(monkeypatch: pytest.MonkeyPatch) -> None:

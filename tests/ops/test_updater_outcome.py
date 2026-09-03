@@ -674,6 +674,49 @@ def test_parse_stages_pairs_consecutive_ladder_markers() -> None:
     }
 
 
+def test_final_marker_exposes_the_host_wall_time_and_closes_restart() -> None:
+    """The Windows ladder's endpoint marker makes the terminal restart segment
+    and the whole host self-update observable from its one updater log."""
+    outcome = uo._classify(
+        "[updater] stage=run t=100.000\n"
+        "[updater] stage=fetch t=100.000\n"
+        "[updater] stage=checkout t=107.600\n"
+        "[updater] stage=uv t=111.100\n"
+        "[updater] stage=restart t=120.600\n"
+        "[updater] stage=final t=170.600\n",
+        Path("updater.log"),
+    )
+
+    assert outcome.stages["restart"] == 50.0
+    assert outcome.total_s == 70.6
+
+
+def test_final_marker_without_the_authoritative_run_start_has_no_wall_time() -> None:
+    """A partial tail cannot become a precise host wall-time measurement."""
+    outcome = uo._classify(
+        "[updater] stage=final t=170.600\n",
+        Path("updater.log"),
+    )
+
+    assert outcome.total_s is None
+
+
+def test_a_truncated_tail_never_invents_a_host_wall_time(home: Path) -> None:
+    """The run start can fall before the reader's bounded log tail."""
+    _paused(home)
+    _write_log(
+        home / "logs" / "updater-1785470000.log",
+        "[updater] stage=run t=100.000\n"
+        + "x" * uo._TAIL_BYTES
+        + "\n[updater] stage=final t=200.000\n[session-exit] rc=0\n",
+    )
+
+    outcome = uo.last_updater_outcome()
+
+    assert outcome is not None
+    assert outcome.total_s is None
+
+
 def test_parse_stages_keeps_the_last_dur_value_and_never_overwrites_with_markers() -> None:
     tail = (
         "[updater] stage=checkout dur=1.0s\n"

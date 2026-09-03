@@ -50,12 +50,14 @@ from __future__ import annotations
 
 import subprocess
 import sys
+from contextlib import nullcontext
 from pathlib import Path
 
 from cli.commands._probe import _probe_judges_a_fresh_launch
 from cli.commands._repo import ServiceSpec, _repo_root, session_name
 from cli.commands._session_lifecycle import _launch_roster, _launch_sessions
 from cli.commands._setup import _print_missing_setup_error
+from cli.commands._start_bookmarks import record_running_sha as _record_running_sha
 from cli.commands._update_uv_sync import run_uv_sync
 from cli.commands.migrations import cmd_migrations_apply
 from cli.commands.status import _update_in_flight, cmd_status
@@ -64,6 +66,7 @@ from shared.deploy_timing import SERVICE_READY_TIMEOUT_S
 from shared.exit_codes import SERVICES_NOT_READY_EXIT_CODE
 from shared.machine import MachineRoles
 from shared.paths import prod_service_checkout_error
+from shared.rollout_telemetry import updater_stage
 
 
 def _consume_rollout_parent_handoff() -> bool:
@@ -196,30 +199,6 @@ def _verify_source_integrity(repo: Path) -> int:
     return 0
 
 
-def _record_running_sha(repo: Path) -> None:
-    """Record the current HEAD commit as the running-sha bookmark.
-
-    Best-effort — a missing git repo or uninitialised checkout just means
-    the update path falls back to HEAD for change detection."""
-    try:
-        import subprocess as _sp
-
-        _result = _sp.run(
-            ["git", "rev-parse", "HEAD"],
-            cwd=repo,
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=10,
-        )
-        if _result.returncode == 0:
-            import shared.running_sha as _rsha
-
-            _rsha.set(_result.stdout.strip())
-    except Exception as _exc:
-        print(f"  · running-sha bookmark skipped ({_exc})")
-
-
 def _seed_known_good_if_null(roles: frozenset[str]) -> None:
     """Seed the cluster's `last_known_good_sha` to the current HEAD when it has
     never been set — the automatic-rollback floor for a cluster that has not yet
@@ -344,6 +323,7 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
     *,
     persist_services: bool = True,
     readiness_gate: bool = True,
+    updater_telemetry: bool = False,
 ) -> int:
     """Core start logic, shared by cmd_start and cmd_restart.
 
@@ -481,7 +461,8 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
     # applied 0; first-time bench run -> applies the full set.
     print("\n→ apply pending migrations")
     try:
-        applied = cmd_migrations_apply()
+        with updater_stage("migration") if updater_telemetry else nullcontext():
+            applied = cmd_migrations_apply()
     except Exception as e:
         print(f"  ✗ migrations apply failed: {e}", file=sys.stderr)
         return 1
@@ -665,10 +646,11 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
     # check in `_launch_sessions`, which must exempt exactly the same services
     # for exactly the same reason.
     print("\n→ waiting for services to come up")
-    wait = _ns._wait_for_services_ready(
-        tuple(s for s in started if _probe_judges_a_fresh_launch(s)),
-        timeout_s=SERVICE_READY_TIMEOUT_S,
-    )
+    with updater_stage("readiness") if updater_telemetry else nullcontext():
+        wait = _ns._wait_for_services_ready(
+            tuple(s for s in started if _probe_judges_a_fresh_launch(s)),
+            timeout_s=SERVICE_READY_TIMEOUT_S,
+        )
 
     # 5.6) seed last_known_good_sha on the first successful gateway start. The pin
     # is only advanced by a completed rollout, so a fresh cluster's automatic
@@ -761,6 +743,7 @@ def cmd_start(
     *,
     persist_services: bool = True,
     readiness_gate: bool = True,
+    updater_telemetry: bool = False,
 ) -> int:
     """Start the cluster.
 
@@ -796,4 +779,5 @@ def cmd_start(
         disabled_services=disabled_services,
         persist_services=persist_services,
         readiness_gate=readiness_gate,
+        updater_telemetry=updater_telemetry,
     )

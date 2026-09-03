@@ -14657,6 +14657,17 @@
             "type": "object",
             "title": "Stages"
           },
+          "total_s": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total S"
+          },
           "current_stage": {
             "anyOf": [
               {

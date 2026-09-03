@@ -300,11 +300,13 @@ def spawn_update(  # noqa: PLR0915 — one pause-to-detached-child transaction
         # bounce with services stopped.
         inner_cmd = (
             f"{{ {venv_activation_prefix()}"
+            f"(python -m cli.commands._updater_stage run || true); "
             f"if cd {shlex.quote(str(repo))}; "
             f"then python -m cli.commands._update_agent_runner --restart-only"
             f"{_update_entry_args(mode=mode, force_reap=force_reap, handoff_generation=handoff_generation)}; "
             f"rc=$?; "
             f"else rc=$?; echo '[updater] cannot enter the repo; nothing to bounce'; fi; "
+            f"(python -m cli.commands._updater_stage final || true); "
             f'echo "[session-exit] rc=$rc"; }} '
             f"2>&1 | tee -a {shlex.quote(str(log_path))}"
         )
@@ -312,6 +314,7 @@ def spawn_update(  # noqa: PLR0915 — one pause-to-detached-child transaction
         # so `ava` resolves without an activation prefix.
         native_cmd = (
             f"python -m cli.commands._updater_lease touch --handoff-generation {_native_arg(handoff_generation)}"
+            f" && (python -m cli.commands._updater_stage run || ver>nul)"
             f" && (python -m cli.commands._updater_stage restart || ver>nul)"
             f" && {_restart_recovery_cmd(quiesce=quiesce, mode=mode, force_reap=force_reap)}"
             f" & (python -m cli.commands._updater_stage done || ver>nul)"
@@ -334,12 +337,14 @@ def spawn_update(  # noqa: PLR0915 — one pause-to-detached-child transaction
         ref = shlex.quote(target_sha) if target_sha else f"origin/{settings.general.track_branch}"
         inner_cmd = (
             f"{{ {venv_activation_prefix()}"
+            f"(python -m cli.commands._updater_stage run || true); "
             f"if cd {shlex.quote(str(repo))}; "
             f"then echo '[updater] self-update to {ref} via in-process path (force-checkout discards any unpushed local commits / dirty tree; recover via git reflog)'; "
             f"python -m cli.commands._update_agent_runner"
             f"{_update_entry_args(target_sha=target_sha, mode=mode, force_reap=force_reap, handoff_generation=handoff_generation)}; "
             f"rc=$?; "
             f"else rc=$?; echo '[updater] cannot enter the repo; nothing to update'; fi; "
+            f"(python -m cli.commands._updater_stage final || true); "
             f'echo "[session-exit] rc=$rc"; }} '
             f"2>&1 | tee -a {shlex.quote(str(log_path))}"
         )
@@ -369,6 +374,7 @@ def spawn_update(  # noqa: PLR0915 — one pause-to-detached-child transaction
             # looking ownerless (stranded-pause controller) mid-update. `ver>nul`
             # is the fail-soft spelling of `|| true`.
             f"python -m cli.commands._updater_lease touch --handoff-generation {_native_arg(handoff_generation)}"
+            f" && (python -m cli.commands._updater_stage run || ver>nul)"
             f" && (python -m cli.commands._source_switch_marker on || ver>nul)"
             f" && echo [updater] force-checkout to {native_ref} -- discards any unpushed "
             f"local commits or a dirty tree, recover via git reflog"
