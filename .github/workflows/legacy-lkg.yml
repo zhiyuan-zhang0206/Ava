@@ -1,0 +1,60 @@
+name: Fixed-base legacy normal ops cold boot
+on:
+  pull_request:
+    paths:
+      - 'scripts/legacy_lkg/**'
+      - '.github/workflows/legacy-lkg.yml'
+permissions:
+  contents: read
+jobs:
+  real-normal-ops:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: '202bd127f8506ecb0fa489ca390f732ec8c548a5'
+          path: .legacy-preparation-tools
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d
+        with:
+          python-version: '3.12'
+      - uses: ./.github/actions/install-pg-redis
+      - name: Start isolated native PG
+        shell: bash
+        run: |
+          initdb -D "$RUNNER_TEMP/legacy-pg" --auth=trust --username=legacyproof
+          mkdir -m 700 "$RUNNER_TEMP/legacy-pg-socket"
+          pg_ctl -D "$RUNNER_TEMP/legacy-pg" -l "$RUNNER_TEMP/legacy-pg.log" -o "-h 127.0.0.1 -p 55439 -k $RUNNER_TEMP/legacy-pg-socket" -w start
+          echo 'AVA_LEGACY_PROOF_PG=postgresql://legacyproof@127.0.0.1:55439/postgres' >> "$GITHUB_ENV"
+      - name: Reconstruct pinned legacy source, prepare retained wheel, prove real normal ops
+        shell: bash
+        run: |
+          set -euo pipefail
+          uv python install 3.12
+          python3 scripts/legacy_lkg/prepare.py --root "$RUNNER_TEMP/legacy-lkg" --tools "$GITHUB_WORKSPACE/.legacy-preparation-tools" --python "$(uv python find --managed-python 3.12)" --uv "$(command -v uv)"
+          test -s "$RUNNER_TEMP/legacy-lkg/cold-boot-proof.json"
+          test -s "$RUNNER_TEMP/legacy-lkg/image-proof.json"
+      - name: Exact compatibility contract tests
+        shell: bash
+        run: uv run --directory "$RUNNER_TEMP/legacy-lkg/source" --locked pytest tests/shared/test_retained_legacy.py -q
+      - name: Stop isolated native PG
+        if: always()
+        shell: bash
+        run: |
+          if test -f "$RUNNER_TEMP/legacy-pg/postmaster.pid"; then
+            pg_ctl -D "$RUNNER_TEMP/legacy-pg" -m fast -w stop
+          fi
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: legacy-normal-ops-${{ github.event.pull_request.head.sha }}
+          path: |
+            ${{ runner.temp }}/legacy-lkg/provenance.json
+            ${{ runner.temp }}/legacy-lkg/cold-boot-proof.json
+            ${{ runner.temp }}/legacy-lkg/image-proof.json
+            ${{ runner.temp }}/legacy-lkg/normal-*.log
+            ${{ runner.temp }}/legacy-pg.log
+          if-no-files-found: error

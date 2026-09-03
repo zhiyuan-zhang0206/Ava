@@ -1,0 +1,394 @@
+diff --git a/ava/_commands.py b/ava/_commands.py
+index 96364f5b0..46cd5cf56 100644
+--- a/ava/_commands.py
++++ b/ava/_commands.py
+@@ -75,7 +75,8 @@ from ava import skills
+ from shared.config import settings
+ from shared.frontmatter import FrontmatterError, parse_frontmatter
+ from shared.log import logger
+-from shared.paths import ava_home, plugins_dir, repo_plugins_dir, repo_root
++from shared.paths import ava_home, repo_plugins_dir, repo_root
++from shared.retained_legacy import external_plugin_read_root
+ from shared.skill_names import display_name, match_key
+ 
+ 
+@@ -136,7 +137,7 @@ def _command_dirs() -> list[tuple[Path, tuple[str, ...]]]:
+         (repo_root() / "commands", ()),
+         (ava_home() / "commands", ()),
+     ]
+-    for base in (repo_plugins_dir(), plugins_dir()):
++    for base in (repo_plugins_dir(), external_plugin_read_root()):
+         if base.is_dir():
+             dirs.extend(
+                 (p / "commands", (p.name,))
+diff --git a/ava/_extend.py b/ava/_extend.py
+index d33cf2362..1fbe901e1 100644
+--- a/ava/_extend.py
++++ b/ava/_extend.py
+@@ -322,8 +322,8 @@ def scan_and_load(
+     level — side-effect driven registration; importing here triggers it.
+ 
+     Args:
+-        plugin_dir: scan root. `None` uses `paths.plugins_dir()` (respects
+-            AVA_HOME). String with `~` is auto-expanded to user home.
++        plugin_dir: scan root. `None` uses the loaded retained image's plugins,
++            or the development unit's plugins. String with `~` is expanded.
+         enabled: explicit set of enabled names. Empty set = load none
+             (distinct from `None`); `None` (default) loads all valid plugins
+             under plugin_dir (legacy behavior, for tests; production passes a
+@@ -335,9 +335,9 @@ def scan_and_load(
+     """
+     if plugin_dir is None:
+         # lazy import to avoid top-level cycle (shared.paths indirectly imports shared.config)
+-        from shared import paths
++        from shared.retained_legacy import external_plugin_read_root
+ 
+-        root = paths.plugins_dir()
++        root = external_plugin_read_root()
+     else:
+         root = Path(plugin_dir).expanduser()
+     if not root.exists():
+diff --git a/ava/_mcp_config.py b/ava/_mcp_config.py
+index 4b704bbe7..69bc11dd6 100644
+--- a/ava/_mcp_config.py
++++ b/ava/_mcp_config.py
+@@ -32,7 +32,8 @@ import json
+ from pathlib import Path
+ from typing import Any, TypedDict
+ 
+-from shared.paths import ava_home, mcps_dir, plugins_dir, repo_root
++from shared.paths import ava_home, mcps_dir, repo_root
++from shared.retained_legacy import external_plugin_read_root
+ from shared.platform import IS_WINDOWS
+ from shared.platform_probes import display_available, unix_sockets_available
+ 
+@@ -315,7 +316,7 @@ def _plugin_config_paths() -> list[Path]:
+     """
+     paths: list[Path] = []
+     repo_plugins = Path(__file__).resolve().parent.parent / "ava_builtins" / "plugins"
+-    for root in (repo_plugins, plugins_dir()):
++    for root in (repo_plugins, external_plugin_read_root()):
+         if not root.is_dir():
+             continue
+         for plugin_dir in sorted(root.iterdir()):
+diff --git a/pyproject.toml b/pyproject.toml
+index 2ad0aa419..dd7873ed0 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -101,15 +101,21 @@ Issues = "https://github.com/zhiyuan-zhang0206/Ava/issues"
+ [build-system]
+ # hatchling is the default minimal builder for the uv / PEP 621 stack. `[tool.uv] package
+ # = true` makes `[project.scripts]` take effect and install the `ava` CLI entry point. Other top-level dirs
+-# (agent/ gateway/ services/ shared/) don't go into the wheel — these are an application,
+-# not a library.
++# The retained compatibility image includes the application, not only its SDK.
+ requires = ["hatchling"]
+ build-backend = "hatchling.build"
+ 
+ [tool.hatch.build.targets.wheel]
+-# vendor `ava/` (SDK) + `cli/` (ops CLI); two independent packages, agent unaware of
+-# CLI's existence. Both dev / deploy use editable install, the actual source running is the working tree.
+-packages = ["ava", "cli"]
++# Packaging compatibility backport; application behavior stays at the base commit.
++packages = ["ava", "cli", "agent", "shared", "ops", "gateway", "services", "ava_builtins"]
++
++[tool.hatch.build.targets.wheel.force-include]
++"db/schema.sql" = "db/schema.sql"
++"migrations" = "migrations"
++"commands" = "commands"
++"schedules" = "schedules"
++"deploy/otel-collector/otel-collector.yaml" = "deploy/otel-collector/otel-collector.yaml"
++"deploy/lgtm/config" = "deploy/lgtm/config"
+ 
+ [tool.uv]
+ package = true
+diff --git a/services/agent_host/daemon.py b/services/agent_host/daemon.py
+index 67d0b7e2b..7d465a5ba 100644
+--- a/services/agent_host/daemon.py
++++ b/services/agent_host/daemon.py
+@@ -231,7 +231,9 @@ def _plugins_fingerprint() -> str:
+     any other file under the dir does not. The directory itself missing is a
+     valid state (no plugins) — the fingerprint is then empty, not an error.
+     """
+-    root = paths.plugins_dir()
++    from shared.retained_legacy import external_plugin_read_root
++
++    root = external_plugin_read_root()
+     if not root.exists():
+         return ""
+     parts: list[str] = []
+diff --git a/shared/dotenv_boot.py b/shared/dotenv_boot.py
+index da546361f..c2f918856 100644
+--- a/shared/dotenv_boot.py
++++ b/shared/dotenv_boot.py
+@@ -241,7 +241,17 @@ def resolve_ava_home() -> tuple[Path, bool]:
+     that claims no home of its own (an enrolled runner, a gateway-launched
+     daemon, a fresh clone) resolves exactly as before.
+     """
++    from shared.retained_legacy import retained_home
++
++    image_home = retained_home()
+     env = os.environ.get("AVA_HOME")
++    if image_home is not None:
++        if not env or not Path(env).is_absolute() or Path(env) != image_home:
++            raise AvaHomeContradictionError(
++                "legacy retained runtime requires explicit canonical AVA_HOME matching "
++                f"its loaded image's unit: {image_home}"
++            )
++        return image_home, True
+     if env:
+         home = Path(env).expanduser()
+         _assert_env_agrees_with_checkout(home)
+diff --git a/shared/migrations.py b/shared/migrations.py
+index 106f06da1..d04001af5 100644
+--- a/shared/migrations.py
++++ b/shared/migrations.py
+@@ -327,6 +327,11 @@ def _tracked_migration_paths() -> set[Path] | None:
+     entries.
+     """
+ 
++    from shared.retained_legacy import retained_migration_paths
++
++    retained = retained_migration_paths(MIGRATIONS_DIR)
++    if retained is not None:
++        return retained
+     root_result = _git_probe(["-C", str(MIGRATIONS_DIR), "rev-parse", "--show-toplevel"])
+     if root_result.returncode != 0:
+         return None
+@@ -777,6 +782,9 @@ def apply_pending_migrations(conn: psycopg.Connection) -> list[str]:
+         MigrationLayoutError: layout broken.
+         MigrationAuthorityMismatch: this checkout does not own the cluster.
+     """
++    from shared.retained_legacy import refuse_retained_migration_write
++
++    refuse_retained_migration_write()
+     with _schema_mutation_lock(conn):
+         _ensure_cutover(conn)
+         files = _list_migration_files()
+@@ -878,6 +886,9 @@ def apply_down(conn: psycopg.Connection, name: str) -> None:
+         MigrationFailed: the down SQL failed; `__cause__` is the psycopg error.
+         MigrationLayoutError: no `.down.sql` for this name.
+     """
++    from shared.retained_legacy import refuse_retained_migration_write
++
++    refuse_retained_migration_write()
+     path = _down_path(name)
+     body = path.read_text()
+     logger.info("[migration] {name} rolling back...", name=name)
+@@ -913,6 +924,9 @@ def rollback_to(conn: psycopg.Connection, keep: set[str]) -> list[str]:
+             predates the cutover).
+         MigrationFailed / MigrationLayoutError: from `apply_down`.
+     """
++    from shared.retained_legacy import refuse_retained_migration_write
++
++    refuse_retained_migration_write()
+     with _schema_mutation_lock(conn):
+         rolled: list[str] = []
+         with conn.transaction():
+diff --git a/shared/plugins_config.py b/shared/plugins_config.py
+index bfeaabcdb..3f69882af 100644
+--- a/shared/plugins_config.py
++++ b/shared/plugins_config.py
+@@ -92,7 +92,9 @@ def _discover_plugins() -> dict[str, Path]:
+                 discovered[p.name] = p
+ 
+     # External plugin: ~/.ava/plugins/<name>/plugin.py
+-    user_dir = paths.plugins_dir()
++    from shared.retained_legacy import external_plugin_read_root
++
++    user_dir = external_plugin_read_root()
+     if user_dir.exists():
+         for p in sorted(user_dir.iterdir()):
+             if p.name.startswith("."):
+diff --git a/shared/retained-legacy.ava.okf.md b/shared/retained-legacy.ava.okf.md
+new file mode 100644
+index 000000000..f4558e4cb
+--- /dev/null
++++ b/shared/retained-legacy.ava.okf.md
+@@ -0,0 +1,37 @@
++---
++type: doc
++title: Retained legacy runtime path compatibility
++description: Fixed-base legacy wheel path bindings without lifecycle or schema permission.
++---
++
++# Retained legacy runtime path compatibility
++
++This compatibility patch targets base
++`612326d130fdc5322e40cb8e688e8ba623d9bc5d`. It is not the unmodified base
++release. A build must record that base, the exact compatibility patch hash,
++the reconstructed tree and wheel/image digests. A synthetic PR merge built
++with newer application code is not evidence for the legacy artifact.
++
++`shared.retained_legacy` is Settings-free. A loaded wheel uses its resolved
++venv prefix under `<unit>/releases/<64-hex>/venv`. Before dotenv or normal
++service imports, it requires explicit canonical `AVA_HOME` equal to that unit.
++The developer checkout path retains its existing semantics. The legacy
++override flag cannot redirect an installed image to another home.
++
++External plugin discovery reads the loaded generation's `plugins` directory.
++Package installation, scaffolding, configuration and user memory retain their
++existing mutable home destinations. The read resolver does not create a plugin
++directory or change the loaded root when an environment variable changes.
++
++These bindings do not verify an image seal, grant an operation lease, select
++a release, migrate a database or permit agent admission. The verified builder
++and existing lifecycle retain those responsibilities. The old exact applied
++migration-set check and unknown wheel `process_sha` remain unchanged.
++
++Cold boot evidence must use the reconstructed legacy wheel, no source checkout,
++an actual private home and compatible schema. It must observe the real normal
++ops process, native readiness and loaded image origin, and reject wrong home
++and schema. Contract tests alone do not establish this. A bootable artifact is
++not a complete LKG: safe down-migration and persisted message/protocol readability
++are separate required rollback gates. Correct refusal to roll back existing
++data means automatic legacy rollback is unavailable for that state.
+diff --git a/shared/retained_legacy.py b/shared/retained_legacy.py
+new file mode 100644
+index 000000000..c85c4899d
+--- /dev/null
++++ b/shared/retained_legacy.py
+@@ -0,0 +1,77 @@
++"""Narrow legacy-image path compatibility, not rollout or schema permission.
++
++The image builder verifies/seals bytes. This early, Settings-free reader binds
++the loaded wheel to its private retained unit before normal imports can create
++pid/config paths. Development checkout semantics remain unchanged.
++"""
++
++from __future__ import annotations
++
++import hashlib
++import json
++import sys
++from pathlib import Path
++
++_PREFIX = Path(sys.prefix).resolve()
++_INSTALLED = Path(__file__).resolve().is_relative_to(_PREFIX)
++
++
++def retained_home() -> Path | None:
++    """Return the loaded generation's unit, never an environment-selected home."""
++    if not _INSTALLED:
++        return None
++    if sys.prefix == sys.base_prefix or _PREFIX.name != "venv":
++        raise RuntimeError("legacy retained runtime requires its private generation venv")
++    image = _PREFIX.parent
++    if (
++        image.parent.name != "releases"
++        or len(image.name) != 64
++        or any(c not in "0123456789abcdef" for c in image.name)
++    ):
++        raise RuntimeError("legacy retained runtime is outside a canonical release image")
++    return image.parent.parent
++
++
++def external_plugin_read_root() -> Path:
++    """Discovery reads retained bytes; installer/scaffold destinations stay mutable."""
++    if retained_home() is not None:
++        return _PREFIX.parent / "plugins"
++    from shared.paths import plugins_dir
++
++    return plugins_dir()
++
++
++def retained_migration_paths(root: Path) -> set[Path] | None:
++    """Read exact built SQL inventory; never infer permission to execute SQL."""
++    if retained_home() is None:
++        return None
++    package = Path(__file__).resolve().parent.parent
++    if root.resolve() != package / "migrations":
++        raise RuntimeError("legacy SQL inventory root differs from loaded package")
++    receipt = package / "shared/legacy_inventory.json"
++    if receipt.is_symlink() or not receipt.is_file():
++        raise RuntimeError("legacy wheel lacks its fixed-build SQL inventory")
++    value = json.loads(receipt.read_bytes())
++    if set(value) != {"base_sha", "patch_sha256", "build_tree", "sql"}:
++        raise RuntimeError("legacy SQL inventory has unknown fields")
++    if value["base_sha"] != "612326d130fdc5322e40cb8e688e8ba623d9bc5d":
++        raise RuntimeError("legacy SQL inventory has a different base")
++    expected = value["sql"]
++    if not isinstance(expected, dict) or "db/schema.sql" not in expected:
++        raise RuntimeError("legacy SQL inventory lacks the baseline")
++    actual = {p.relative_to(package).as_posix() for p in root.rglob("*.sql")}
++    if set(expected) != actual | {"db/schema.sql"}:
++        raise RuntimeError("legacy SQL inventory membership changed")
++    for name, digest in expected.items():
++        path = package / name
++        if path.is_symlink() or not path.is_file() or path.resolve() != path:
++            raise RuntimeError("legacy SQL inventory has a noncanonical member")
++        if hashlib.sha256(path.read_bytes()).hexdigest() != digest:
++            raise RuntimeError("legacy SQL bytes differ from the built inventory")
++    return {package / name for name in actual}
++
++
++def refuse_retained_migration_write() -> None:
++    """Compatibility permits cold reads, not legacy migration orchestration."""
++    if retained_home() is not None:
++        raise RuntimeError("legacy retained runtime has no migration-write authority")
+diff --git a/tests/shared/test_retained_legacy.py b/tests/shared/test_retained_legacy.py
+new file mode 100644
+index 000000000..a2b19cf71
+--- /dev/null
++++ b/tests/shared/test_retained_legacy.py
+@@ -0,0 +1,59 @@
++"""Legacy path compatibility contracts; actual installed cold boot is separate CI."""
++
++from pathlib import Path
++
++import pytest
++
++from shared import dotenv_boot, retained_legacy
++
++
++def _image(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
++    home = tmp_path / "unit"
++    prefix = home / "releases" / ("a" * 64) / "venv"
++    prefix.mkdir(parents=True)
++    monkeypatch.setattr(retained_legacy, "_PREFIX", prefix)
++    monkeypatch.setattr(retained_legacy, "_INSTALLED", True)
++    monkeypatch.setattr(retained_legacy.sys, "prefix", str(prefix))
++    return home
++
++
++def test_loaded_image_requires_its_exact_home(
++    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
++) -> None:
++    home = _image(monkeypatch, tmp_path)
++    monkeypatch.setenv("AVA_HOME", str(home))
++    assert dotenv_boot.resolve_ava_home() == (home, True)
++
++
++@pytest.mark.parametrize("wrong", [None, "relative", "/other/unit"])
++def test_loaded_home_cannot_be_overridden(
++    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, wrong: str | None
++) -> None:
++    _image(monkeypatch, tmp_path)
++    monkeypatch.setenv("AVA_HOME_OVERRIDE", "1")
++    if wrong is None:
++        monkeypatch.delenv("AVA_HOME", raising=False)
++    else:
++        monkeypatch.setenv("AVA_HOME", wrong)
++    with pytest.raises(dotenv_boot.AvaHomeContradictionError):
++        dotenv_boot.resolve_ava_home()
++
++
++def test_installed_non_generation_venv_refused(
++    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
++) -> None:
++    _image(monkeypatch, tmp_path)
++    monkeypatch.setattr(retained_legacy, "_PREFIX", tmp_path / "random" / "venv")
++    with pytest.raises(RuntimeError, match="canonical release image"):
++        retained_legacy.retained_home()
++
++
++def test_plugin_reads_remain_bound_after_mutable_home_changes(
++    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
++) -> None:
++    home = _image(monkeypatch, tmp_path)
++    expected = home / "releases" / ("a" * 64) / "plugins"
++    assert retained_legacy.external_plugin_read_root() == expected
++    monkeypatch.setenv("AVA_HOME", str(tmp_path / "poison"))
++    assert retained_legacy.external_plugin_read_root() == expected
++    assert not expected.exists()
+
