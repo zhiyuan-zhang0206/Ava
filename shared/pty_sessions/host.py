@@ -233,11 +233,11 @@ class PtySession:
         """True when this shell's pid has not been recycled."""
         try:
             proc = psutil.Process(self.pid)
+            if not proc.is_running() or proc.status() == psutil.STATUS_ZOMBIE:
+                return False
             if self.record.starttime is not None:
-                return proc.is_running() and self.record.identifies(self.pid) is True
-            return proc.is_running() and (
-                abs(proc.create_time() - self.record.create_time) <= _CREATE_TIME_TOLERANCE_S
-            )
+                return self.record.identifies(self.pid) is True
+            return abs(proc.create_time() - self.record.create_time) <= _CREATE_TIME_TOLERANCE_S
         except psutil.Error:
             return False
 
