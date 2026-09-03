@@ -1053,6 +1053,13 @@ EVENTS: dict[str, EventSpec] = {
         "the hosted agent-runner finished process-scope boot and its dispatcher is live",
         tier="noise",
     ),
+    "host_stdout_log_rotated": _telemetry(
+        "host_stdout_log_rotated",
+        "the hosted daemon rotated its raw stdout transcript at the size ceiling "
+        "(task #2356) — carries size and ceiling; a crash storm shows up as repeated "
+        "rotation events instead of an unbounded file",
+        tier="noise",
+    ),
     "host_turn_uncancellable": _telemetry(
         "host_turn_uncancellable",
         "a hosted turn did not unwind after being cancelled — it is blocked where asyncio "
