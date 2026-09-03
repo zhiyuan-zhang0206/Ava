@@ -12,6 +12,7 @@ import psutil
 from shared.db_transaction import write_transaction
 from shared.exec_owner_protocol import OwnerClosed, read_owner_bytes, read_owner_context
 from shared.incarnation_resources import (
+    ExecAllocation,
     IncarnationResources,
     ResourceEvidenceError,
     ResourceProcess,
@@ -51,7 +52,7 @@ def recover_local_resources(agent_id: int, machine: str) -> None:
     target = RuntimeIncarnation(agent_id, state.generation, state.owner)
     if row[1:3] != (target.generation, target.owner):
         return
-    completed = []
+    completed: list[ExecAllocation] = []
     for allocation in state.requests.values():
         if allocation.owner_process is None or not process_ended(allocation.owner_process):
             continue

@@ -19,7 +19,7 @@ from shared.incarnation_resources import (
 from shared.runtime_incarnation import RuntimeIncarnation
 
 _LOCK = "SELECT incarnation_resources,runtime_generation,runtime_owner,runtime_kind,pid,started_at,runtime_protocol_version FROM agents_meta WHERE id=%s FOR UPDATE"
-_PREDECESSOR = "SELECT id FROM inbound_messages WHERE agent_id=%s AND target_generation=%s AND target_owner=%s AND applied_at IS NOT NULL AND ((kind='restart' AND status='claimed') OR (kind='terminate' AND status='done' AND observed_at IS NOT NULL)) LIMIT 1"
+_PREDECESSOR = "SELECT i.id FROM inbound_messages i JOIN agents_meta m ON m.id=i.agent_id WHERE i.agent_id=%s AND i.target_generation=%s AND i.target_owner=%s AND i.applied_at IS NOT NULL AND ((i.kind='restart' AND i.status='claimed' AND m.lifecycle_command_id=i.id) OR (i.kind='terminate' AND i.status='done' AND i.observed_at IS NOT NULL)) LIMIT 1"
 _STORE = "UPDATE agents_meta SET incarnation_resources=%s WHERE id=%s"
 
 

@@ -32,6 +32,7 @@ from shared.exec_owner_protocol import (
 from shared.incarnation_resources import ResourceProcess
 from shared.platform import CREATE_NO_WINDOW, IS_WINDOWS
 from shared.winjob import WindowsJob
+from shared.winjob_pipes import PipedJobChild, start_piped_job_process
 
 
 def _ended(identity: psutil.Process) -> bool:
@@ -49,7 +50,7 @@ def _control(messages: queue.Queue[bytes]) -> None:
             return
 
 
-def _relay(root: subprocess.Popen[bytes], failures: list[BaseException]) -> None:
+def _relay(root: subprocess.Popen[bytes] | PipedJobChild, failures: list[BaseException]) -> None:
     if root.stdout is None:
         failures.append(RuntimeError("owner root has no output pipe"))
         return
@@ -86,24 +87,29 @@ def run(context_path: Path) -> None:  # noqa: PLR0915 -- one native owner retain
     messages: queue.Queue[bytes] = queue.Queue(maxsize=2)
     threading.Thread(target=_control, args=(messages,), daemon=True).start()
     job = WindowsJob.create() if IS_WINDOWS else None
+    argv = [
+        sys.executable,
+        "-I",
+        "-X",
+        "utf8",
+        "-m",
+        "agent.exec_owner_child",
+        "--context",
+        str(context_path),
+    ]
     try:
-        root = subprocess.Popen(  # noqa: S603 -- fixed isolated entry; no caller-selected executable.
-            [
-                sys.executable,
-                "-I",
-                "-X",
-                "utf8",
-                "-m",
-                "agent.exec_owner_child",
-                "--context",
-                str(context_path),
-            ],
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            close_fds=True,
-            creationflags=CREATE_NO_WINDOW,
-            start_new_session=not IS_WINDOWS,
+        root = (
+            start_piped_job_process(argv, job)
+            if job is not None
+            else subprocess.Popen(  # noqa: S603 -- fixed isolated entry; no caller-selected executable.
+                argv,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                close_fds=True,
+                creationflags=CREATE_NO_WINDOW,
+                start_new_session=not IS_WINDOWS,
+            )
         )
     except BaseException:
         if job is not None:
@@ -114,9 +120,8 @@ def run(context_path: Path) -> None:  # noqa: PLR0915 -- one native owner retain
     reader = threading.Thread(target=_relay, args=(root, reader_failures), daemon=True)
     reason: Literal["completed", "host_eof", "cancel", "timeout"] = "completed"
     attached = False
+    close_attempted = False
     try:
-        if job is not None:
-            job.assign(root)
         attached = True
         root_identity = psutil.Process(root.pid)
         owner_identity = psutil.Process()
@@ -156,6 +161,7 @@ def run(context_path: Path) -> None:  # noqa: PLR0915 -- one native owner retain
             root.stdin.flush()
             root.stdin.close()
             permitted = True
+        close_attempted = True
         domain.close_confirmed(close_deadline)
         code = root.wait(timeout=max(0.001, close_deadline - time.monotonic()))
         reader.join(timeout=max(0, close_deadline - time.monotonic()))
@@ -172,9 +178,10 @@ def run(context_path: Path) -> None:  # noqa: PLR0915 -- one native owner retain
         )
     except BaseException as original:
         try:
-            if attached:
+            if attached and not close_attempted:
+                close_attempted = True
                 domain.close_confirmed(close_deadline)
-            else:
+            elif not attached:
                 root.kill()
             root.wait(timeout=max(0.001, close_deadline - time.monotonic()))
         except BaseException as cleanup:

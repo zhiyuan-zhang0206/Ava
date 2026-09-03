@@ -20,6 +20,7 @@ from shared.exec_owner_protocol import (
     OwnerReady,
     publish_owner_message,
     read_owner_context,
+    validate_native_ready,
 )
 from shared.incarnation_resources import ExecAllocation
 
@@ -93,10 +94,12 @@ def test_eof_closes_exact_domain_before_user_code(tmp_path: Path) -> None:
     try:
         ready = _ready(tmp_path, proc)
         assert ready.allocation.owner_process is not None
-        assert ready.allocation.owner_process.pid == proc.pid
+        validate_native_ready(
+            ready, proc.pid, psutil.Process(proc.pid).create_time(), tmp_path / "owner.json"
+        )
         assert ready.allocation.root_process is not None
         root = psutil.Process(ready.allocation.root_process.pid)
-        assert root.ppid() == proc.pid
+        assert root.ppid() == ready.allocation.owner_process.pid
         assert root.create_time() == ready.allocation.root_process.birth
         assert not context.result_path.exists()
         assert proc.stdin is not None

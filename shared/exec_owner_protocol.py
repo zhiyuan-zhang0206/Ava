@@ -2,11 +2,13 @@
 
 import os
 import stat
+import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Literal
 from uuid import UUID
 
+import psutil
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from shared.incarnation_resources import ExecAllocation
@@ -59,6 +61,39 @@ class OwnerClosed(BaseModel):
     root_exit_code: int
     reason: Literal["completed", "host_eof", "cancel", "timeout"]
     observed_at: datetime
+
+
+def validate_native_ready(
+    ready: OwnerReady, launcher_pid: int, launcher_birth: float, context_path: Path
+) -> None:
+    """Bind actual owner Python, allowing only the native Windows venv redirector."""
+    owner, root = ready.allocation.owner_process, ready.allocation.root_process
+    if owner is None or root is None:
+        raise ValueError("ready receipt lacks owner/root identities")
+    launcher = psutil.Process(launcher_pid)
+    actual = psutil.Process(owner.pid)
+    if launcher.create_time() != launcher_birth or actual.create_time() != owner.birth:
+        raise ValueError("ready owner or launcher native birth changed")
+    if owner.pid != launcher_pid:
+        arguments = [
+            "-I",
+            "-X",
+            "utf8",
+            "-m",
+            "agent.exec_domain_owner",
+            "--context",
+            str(context_path),
+        ]
+        if (
+            sys.platform != "win32"
+            or actual.ppid() != launcher_pid
+            or actual.cmdline()[1:] != arguments
+            or launcher.cmdline()[1:] != arguments
+        ):
+            raise ValueError("ready owner is not the exact launched Python/redirector")
+    child = psutil.Process(root.pid)
+    if child.create_time() != root.birth or child.ppid() != owner.pid:
+        raise ValueError("ready root is not the exact owner's direct child")
 
 
 def read_owner_context(path: Path) -> OwnerContext:
