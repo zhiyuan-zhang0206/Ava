@@ -26,6 +26,14 @@ from pydantic import BaseModel
 _TIMEOUT_S = 15.0
 
 
+def _caller_body(source: str | None, *, field: str = "source") -> dict[str, str]:
+    """Opt-in provenance; no caller metadata is authentication evidence."""
+    from shared.external_caller import explicit_caller_source
+
+    resolved = explicit_caller_source(source)
+    return {field: resolved} if resolved is not None else {}
+
+
 class _AgentListItem(BaseModel):
     """The small subset rendered by ``ava agents ls``."""
 
@@ -66,11 +74,13 @@ def cmd_agents_ls() -> int:
 _TAIL_BYTES = 2048
 
 
-def cmd_agents_send(agent_id: int, content: str, source: str, tail_file: str | None = None) -> int:
+def cmd_agents_send(
+    agent_id: int, content: str, source: str | None, tail_file: str | None = None
+) -> int:
     """`ava agents send <id> <content> --source S [--tail-file PATH]` — deliver a
     chat inbound via POST /api/agents/{id}/messages.
 
-    `--source` is required (no default): every message must carry an honest
+    `--source` or AVA_CALLER_IDENTITY is required: every message must carry an honest
     provenance — machine callers pass `shell:N` / `watcher:N`, a human operator
     passes `user`. An illegal source is rejected 422 at the gateway boundary
     (`AgentMessageIn.source` -> `shared.envelope.validate_source`) and the
@@ -88,6 +98,9 @@ def cmd_agents_send(agent_id: int, content: str, source: str, tail_file: str | N
     from shared.http_dial import post as dial_post
     from shared.machine import gateway_api_base, gateway_auth_headers
 
+    caller = _caller_body(source)
+    if "source" not in caller:
+        raise ValueError("send requires --source or an explicit AVA_CALLER_IDENTITY profile")
     if tail_file is not None:
         # Delivering the notice is the primary contract; the tail is a rider.
         # An unreadable tail file must not abort the POST — the failure is
@@ -106,7 +119,7 @@ def cmd_agents_send(agent_id: int, content: str, source: str, tail_file: str | N
     url = f"{gateway_api_base()}/api/agents/{agent_id}/messages"
     resp = dial_post(
         url,
-        json={"content": content, "source": source},
+        json={"content": content, **caller},
         timeout=_TIMEOUT_S,
         headers=gateway_auth_headers(),
     )
@@ -137,7 +150,12 @@ def cmd_agents_cancel(agent_id: int) -> int:
     return 0
 
 
-def cmd_agents_restart(agent_id: int, config_json: str | None = None) -> int:
+def cmd_agents_restart(
+    agent_id: int,
+    config_json: str | None = None,
+    *,
+    source: str | None = None,
+) -> int:
     """`ava agents restart <id> [--config JSON]` — POST /api/agents/{id}/restart.
 
     The agent exits after its current turn and a fresh process is respawned
@@ -151,8 +169,14 @@ def cmd_agents_restart(agent_id: int, config_json: str | None = None) -> int:
     from shared.machine import gateway_api_base, gateway_auth_headers
 
     url = f"{gateway_api_base()}/api/agents/{agent_id}/restart"
+    caller = _caller_body(source)
     if config_json is None:
-        resp = dial_post(url, timeout=_TIMEOUT_S, headers=gateway_auth_headers())
+        resp = dial_post(
+            url,
+            **({"json": caller} if caller else {}),
+            timeout=_TIMEOUT_S,
+            headers=gateway_auth_headers(),
+        )
     else:
         try:
             config_overlay = json.loads(config_json)
@@ -164,7 +188,7 @@ def cmd_agents_restart(agent_id: int, config_json: str | None = None) -> int:
             return 1
         resp = dial_post(
             url,
-            json={"config_overlay": config_overlay},
+            json={"config_overlay": config_overlay, **caller},
             timeout=_TIMEOUT_S,
             headers=gateway_auth_headers(),
         )
@@ -173,7 +197,7 @@ def cmd_agents_restart(agent_id: int, config_json: str | None = None) -> int:
     return 0
 
 
-def cmd_agents_resurrect(agent_id: int) -> int:
+def cmd_agents_resurrect(agent_id: int, *, source: str | None = None) -> int:
     """`ava agents resurrect <id>` — POST /api/agents/{id}/resurrect.
 
     Brings a terminated agent back: a fresh process is respawned attached to the
@@ -183,36 +207,48 @@ def cmd_agents_resurrect(agent_id: int) -> int:
     from shared.machine import gateway_api_base, gateway_auth_headers
 
     url = f"{gateway_api_base()}/api/agents/{agent_id}/resurrect"
-    resp = dial_post(url, timeout=_TIMEOUT_S, headers=gateway_auth_headers())
+    caller = _caller_body(source, field="resurrected_by")
+    resp = dial_post(
+        url,
+        **({"json": caller} if caller else {}),
+        timeout=_TIMEOUT_S,
+        headers=gateway_auth_headers(),
+    )
     resp.raise_for_status()
     print(f"  ✓ agent {agent_id} resurrect: {resp.json().get('status')}")
     return 0
 
 
-def _terminate(agent_id: int, *, force: bool) -> int:
+def _terminate(agent_id: int, *, force: bool, source: str | None = None) -> int:
     """Shared POST for `terminate` (graceful) and `kill` (force) — both hit
     POST /api/agents/{id}/terminate, differing only in the `force` flag. The
-    inbound source defaults server-side to `user` (same as the web button)."""
+    An explicit source/profile is forwarded unchanged. Non-opted-in legacy
+    callers retain the old server default until the negotiated transition."""
     from shared.http_dial import post as dial_post
     from shared.machine import gateway_api_base, gateway_auth_headers
 
     verb = "kill" if force else "terminate"
     url = f"{gateway_api_base()}/api/agents/{agent_id}/terminate"
-    resp = dial_post(url, json={"force": force}, timeout=_TIMEOUT_S, headers=gateway_auth_headers())
+    resp = dial_post(
+        url,
+        json={"force": force, **_caller_body(source)},
+        timeout=_TIMEOUT_S,
+        headers=gateway_auth_headers(),
+    )
     resp.raise_for_status()
     print(f"  ✓ agent {agent_id} {verb}: {resp.json().get('status')}")
     return 0
 
 
-def cmd_agents_terminate(agent_id: int) -> int:
+def cmd_agents_terminate(agent_id: int, *, source: str | None = None) -> int:
     """`ava agents terminate <id>` — graceful stop: the agent exits after
     processing its current turn. For an agent wedged mid-turn (a hung step) that
     cannot reach the graceful exit, use `kill`."""
-    return _terminate(agent_id, force=False)
+    return _terminate(agent_id, force=False, source=source)
 
 
-def cmd_agents_kill(agent_id: int) -> int:
+def cmd_agents_kill(agent_id: int, *, source: str | None = None) -> int:
     """`ava agents kill <id>` — hard stop: kills the OS process + marks terminated
     directly, for an agent stuck mid-turn that a graceful `terminate` cannot
     reach. The forceful sibling of `terminate`."""
-    return _terminate(agent_id, force=True)
+    return _terminate(agent_id, force=True, source=source)

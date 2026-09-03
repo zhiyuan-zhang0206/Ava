@@ -108,6 +108,8 @@ def _wait_for_ready(sid: int, timeout: float = 30.0) -> None:
 
 
 def main() -> int:
+    from shared.external_caller import launch_caller_assignment
+
     parser = argparse.ArgumentParser(
         description="Pre-trust a workspace and launch Claude Code in a persistent shell session."
     )
@@ -127,7 +129,15 @@ def main() -> int:
         help="Where the agent reports STATUS + log; this is what watch_work.py "
         "polls. Absolute, or relative to the workspace (default: %(default)s).",
     )
+    parser.add_argument(
+        "--caller-instance",
+        default=None,
+        help="opt in to v1 external provenance (bounded instance ID); requires target protocol support",
+    )
     args = parser.parse_args()
+    # Validate before creating files or sessions. This assignment belongs only
+    # to the external process, not the Ava-owned launcher/supervisor.
+    caller_assignment = launch_caller_assignment("claude_code", args.caller_instance)
 
     # Agent identity is picked up from the AVA_AGENT_ID environment variable
     # (forwarded by the session machinery and auto-established by ava._boot).
@@ -150,7 +160,7 @@ def main() -> int:
     # — the supervisor re-spawns the script if a session is ever reclaimed.
     sid = ava.shell.sessions.new(name=session_name, ttl=24 * 3600)
 
-    inner = f"cd {shlex.quote(workspace.as_posix())} && unset ANTHROPIC_API_KEY && claude --dangerously-skip-permissions"
+    inner = f"cd {shlex.quote(workspace.as_posix())} && unset ANTHROPIC_API_KEY && {caller_assignment}claude --dangerously-skip-permissions"
     ava.shell.sessions.send(sid, inner)
     print(f"+ persistent shell session: {sid} ({session_name})")
 

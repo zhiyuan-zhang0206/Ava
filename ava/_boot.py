@@ -171,8 +171,12 @@ def require_agent_id() -> int:
 
 
 def require_actor() -> str:
-    """Return this process's provenance principal — an explicit non-agent actor
+    """Return this process's asserted provenance — an explicit non-agent actor
     (`establish_actor`) if set, else `agent:<id>` from the established agent id.
+
+    A real hosted turn identity takes precedence. An explicitly configured
+    external tool profile takes precedence over inherited agent environment.
+    Neither is a substitute for the gateway's credential checks.
 
     Use at every call site that stamps provenance into durable data (spawner /
     message source). Fails fast if neither a system actor nor an agent id was
@@ -184,6 +188,11 @@ def require_actor() -> str:
     turn = current_turn_agent_id()
     if turn is not None:
         return f"agent:{turn}"
+    from shared.external_caller import external_caller
+
+    external = external_caller()
+    if external is not None:
+        return external.source()
     _try_establish_from_env()
     if _actor is not None:
         return _actor
@@ -205,6 +214,11 @@ def default_actor() -> str:
     turn = current_turn_agent_id()
     if turn is not None:
         return f"agent:{turn}"
+    from shared.external_caller import external_caller
+
+    external = external_caller()
+    if external is not None:
+        return external.source()
     _try_establish_from_env()
     if _actor is not None:
         return _actor
