@@ -42,8 +42,14 @@ Any retained inbound/checkpoint replay using that format must block old-version
 rollback until a separately reviewed compatibility/retirement path exists;
 rewriting the source label to make the old reader accept it is not that path.
 
-This first CI lane is Linux x86_64. It is not macOS arm64/Windows normal-service
-proof, full enabled-service closure, a selector commit or a production update.
+CI has Linux x86_64 and macOS arm64 lanes, with actual architecture recorded and
+the macOS runner explicitly checked. On macOS a proof-only observer thread in
+the actual normal process waits for that PID's native health readiness, then
+records the dyld image list; it does not replace daemon startup or readiness.
+The parent matches PID/birth and only accepts retained-image or OS ABI paths.
+This is not Windows normal-service proof, full enabled-service closure, a
+selector commit or a production update. macOS loopback readiness does not prove
+Tailnet reachability or authorize firewall/local-network approval changes.
 Successful cold boot is not complete LKG recovery: actual down-migration safety,
 persisted message/protocol readability, old orchestrator handoff and all managed
 writer closure remain required. Correct refusal of a lossy down means automatic
