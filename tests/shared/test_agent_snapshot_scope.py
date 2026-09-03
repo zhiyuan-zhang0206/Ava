@@ -44,7 +44,7 @@ def _seed_agents_meta(
     db_conn: psycopg.Connection,
     rows: list[tuple[int, str, str]],
 ) -> None:
-    """Insert agent rows with explicit lineage for roster projection tests."""
+    """Insert agent rows with explicit lineage for roster scope tests."""
     with db_conn.cursor() as cur:
         for agent_id, spawner, status in rows:
             cur.execute("INSERT INTO agents (id) VALUES (%s)", (agent_id,))
@@ -166,9 +166,11 @@ def test_compact_projection_reads_only_cli_columns_in_sql(
     assert conn.recording_cursor.query == expected_query
 
 
-def test_live_roster_projects_dead_spawner_chains_to_nearest_live_ancestor(
+def test_live_roster_keeps_raw_spawner_lineage_for_dead_parents(
     db_conn: psycopg.Connection,
 ) -> None:
+    """Every scope carries raw spawner truth; the view layer derives
+    nearest-visible attachment (user ruling 2026-08-28 -> 09-02)."""
     _seed_agents_meta(
         db_conn,
         [
@@ -185,11 +187,13 @@ def test_live_roster_projects_dead_spawner_chains_to_nearest_live_ancestor(
 
     spawners = _spawners_for_scope(db_conn, "live")
 
-    assert spawners[2894] == "agent:228"
-    assert spawners[312] == "agent:228"
+    # 312 -> agent:240 -> agent:228: the live roster keeps the dead direct
+    # parent (240), never rewrites it to the nearest live ancestor (228).
+    assert spawners[2894] == "agent:2147"
+    assert spawners[312] == "agent:240"
     assert spawners[5709] == "agent:405"
     assert spawners[228] == "user"
-    assert _summary_spawners_for_scope(db_conn, "live")[2894] == "agent:228"
+    assert _summary_spawners_for_scope(db_conn, "live")[312] == "agent:240"
 
 
 def test_non_live_rosters_keep_raw_spawner_lineage(
@@ -240,7 +244,7 @@ def test_live_roster_keeps_unresolvable_and_external_spawners(
     assert spawners[782] == "agent:783"
 
 
-def test_live_roster_projection_uses_only_read_queries(
+def test_live_roster_scope_uses_only_read_queries(
     db_conn: psycopg.Connection,
 ) -> None:
     _seed_agents_meta(
@@ -254,4 +258,4 @@ def test_live_roster_projection_uses_only_read_queries(
 
     with db_conn.transaction():
         db_conn.execute("SET TRANSACTION READ ONLY")
-        assert _spawners_for_scope(db_conn, "live")[2894] == "agent:228"
+        assert _spawners_for_scope(db_conn, "live")[2894] == "agent:2147"
