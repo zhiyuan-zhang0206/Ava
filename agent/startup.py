@@ -132,7 +132,9 @@ def _wrap_saver_writes_with_nstep_interval(
     next retained step. Those writes and retained checkpoints use the last
     persisted config, so every parent and write target has a checkpoint row. A
     completed turn flushes the latest skipped update through
-    ``_ava_nstep_flush(thread_id)``; a crash may instead replay up to
+    ``_ava_nstep_flush(thread_id)``; retained and flushed checkpoints persist
+    one full snapshot's blobs per channel, so every referenced channel value
+    stays readable; a crash may instead replay up to
     ``interval - 1`` super-steps. A callable resolves an interval in the
     current turn context, so the hosted runner can share one saver without
     sharing a throttle between agents.
@@ -149,6 +151,23 @@ def _wrap_saver_writes_with_nstep_interval(
     orig_aput = checkpointer.aput
     orig_aput_writes = checkpointer.aput_writes
     states: dict[str, _NstepCheckpointState] = {}
+
+    def _versions_with_current_blobs(
+        new_versions: ChannelVersions, checkpoint: Checkpoint
+    ) -> ChannelVersions:
+        """Extend new_versions with every current channel version.
+
+        The saver writes a channel's blob only when that channel appears in
+        new_versions. A version born on a skipped super-step gets no blob row,
+        yet the next retained checkpoint's channel_versions still reference
+        it; the row then dangles and readers that reconstruct channel_values
+        (timeline cold load, crash recovery) lose the messages channel
+        entirely. Merging the full current version map makes the retained /
+        final write persist exactly one full snapshot per channel, keeping the
+        throttle's write reduction while every referenced version stays
+        readable.
+        """
+        return {**new_versions, **checkpoint["channel_versions"]}
 
     async def _throttled_aput(
         config: RunnableConfig,
@@ -182,7 +201,12 @@ def _wrap_saver_writes_with_nstep_interval(
         # (and therefore nonexistent) checkpoint row.
         parent_config = state.last_persisted_config or config
         if step % current_interval == 0:
-            saved_config = await orig_aput(parent_config, checkpoint, metadata, new_versions)
+            saved_config = await orig_aput(
+                parent_config,
+                checkpoint,
+                metadata,
+                _versions_with_current_blobs(new_versions, checkpoint),
+            )
             state.last_persisted_config = saved_config
             state.last_skipped_aput = None
             return saved_config
@@ -223,7 +247,12 @@ def _wrap_saver_writes_with_nstep_interval(
         if state is None or state.last_skipped_aput is None:
             return
         config, checkpoint, metadata, new_versions = state.last_skipped_aput
-        await orig_aput(state.last_persisted_config or config, checkpoint, metadata, new_versions)
+        await orig_aput(
+            state.last_persisted_config or config,
+            checkpoint,
+            metadata,
+            _versions_with_current_blobs(new_versions, checkpoint),
+        )
 
     checkpointer.aput = _throttled_aput  # type: ignore[method-assign]
     checkpointer.aput_writes = _throttled_aput_writes  # type: ignore[method-assign]
