@@ -486,10 +486,17 @@ async def _build_checkpointer(
     which is the correct outcome for a runner that should never have been
     pointed at an unmigrated database.
     """
+    from agent.startup import _wrap_saver_writes_with_nstep_interval
     from agent.state import build_checkpoint_serde
+    from shared.config.turn_view import turn_settings
 
     saver_pool = cast(AsyncConnectionPool[psycopg.AsyncConnection[DictRow]], pool)
-    return AsyncPostgresSaver(conn=saver_pool, serde=build_checkpoint_serde())
+    checkpointer = AsyncPostgresSaver(conn=saver_pool, serde=build_checkpoint_serde())
+    _wrap_saver_writes_with_nstep_interval(
+        checkpointer,
+        lambda: turn_settings.agent.checkpoint_interval,
+    )
+    return checkpointer
 
 
 def _is_running() -> bool:

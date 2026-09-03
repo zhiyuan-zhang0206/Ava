@@ -459,7 +459,7 @@ async def test_startup_repair_flushes_a_skipped_checkpoint_update() -> None:
 
     await _repair_dangling_tool_use_at_startup(graph, agent_id=167)  # type: ignore[arg-type]
 
-    flush.assert_awaited_once()
+    flush.assert_awaited_once_with("167")
 
 
 async def test_startup_repair_is_noop_when_history_valid() -> None:
