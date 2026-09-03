@@ -186,6 +186,7 @@ jobs:
           uv run pyright ops/resurrection_retry.py tests/gateway/test_agents_internals.py tests/agent/test_lifecycle_apply.py
           timeout 360 uv run pytest tests/gateway/test_agents_internals.py tests/gateway/test_operations.py tests/ops/test_agent_wake_hosted.py tests/cli/test_update_dispatch_guard.py tests/shared/test_event_contract.py -q --junitxml=proof/backend-compatibility.xml
           timeout 120 uv run pytest tests/shared/test_config.py -k 'skip_auth_alias or skip_security_scan_alias or skip_alias_test' -q --junitxml=proof/config-alias-isolation.xml
+          timeout 120 uv run pytest tests/services/test_turn_dispatcher.py -v --junitxml=proof/turn-dispatcher.xml
           uv run pyright tests/services/test_agent_host.py tests/shared/test_timing_topology.py
           timeout 240 uv run pytest tests/services/test_agent_host.py tests/shared/test_timing_topology.py tests/test_lint_event_kinds.py -q --junitxml=proof/controller-compatibility.xml
       - name: Require old routing to strand the accepted termination
