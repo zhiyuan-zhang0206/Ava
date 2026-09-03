@@ -135,19 +135,19 @@ function guides(container: HTMLElement) {
 }
 
 describe("AgentRow tree-guide rendering", () => {
-  it("keeps missing observation distinct from lifecycle running", () => {
+  it("does not show an ownership fallback when observation is missing", () => {
     render(<AgentRow {...baseProps} agent={ag(1)} depth={0} ancestorsIsLast={[]} />);
-    expect(screen.getByText("owner unknown").getAttribute("title")).toContain("runtime owner: unknown");
+    expect(screen.queryByText("owner unknown")).toBeNull();
   });
 
-  it("shows stale machine evidence without inventing runtime ownership", () => {
+  it("does not show stale observation details", () => {
     render(<AgentRow {...baseProps} agent={ag(1, { observation: {
       machine_probe_at: new Date(Date.now() - 180_000).toISOString(),
       machine_probe_valid_until: new Date(Date.now() - 60_000).toISOString(),
       runtime_lease_expires_at: new Date(Date.now() + 60_000).toISOString(),
       runtime_owner: "unknown",
     } })} depth={0} ancestorsIsLast={[]} />);
-    expect(screen.getByText("probe stale").getAttribute("title")).toContain("runtime lease: unexpired; runtime owner: unknown");
+    expect(screen.queryByText("probe stale")).toBeNull();
   });
 
   it("depth=0 (top-level): renders no guide bars", () => {
