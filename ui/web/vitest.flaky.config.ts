@@ -28,6 +28,10 @@ export default defineConfig({
     // Same global stubs + network guard as the main config (vitest.config.ts) —
     // this run gets its own process, so setupFiles isn't inherited automatically.
     setupFiles: ["./vitest.setup.ts"],
+    reporters: [
+      ["default", {}],
+      ["junit", { outputFile: "./junit-flaky.xml", addFileAttribute: true }],
+    ],
     // Serial execution for flaky tests
     pool: "forks",
     fileParallelism: false,
