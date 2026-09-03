@@ -134,8 +134,11 @@ def test_category_projection_matches_telemetry_whitelist() -> None:
     # host_stdout_log_rotated (task #2356's raw-transcript size rotation)
     # raises it to 141; host_config_rejected (Task #2344's wake-time model-config
     # fail-fast) raises it to 142; wake_degraded + wake_restored (Task #2418's
-    # RedisInboundListener wake-health episodes) raise it to 144.
-    assert len(_TELEMETRY_KINDS) == 144
+    # RedisInboundListener wake-health episodes) raise it to 144 — and the
+    # schedule_self_respawn removal takes restart_cas_lost back out, so the
+    # merged total is one below main's 144.
+    assert "restart_cas_lost" not in _TELEMETRY_KINDS
+    assert len(_TELEMETRY_KINDS) == 143
 
 
 def test_checkpoint_table_sizes_payload_and_metric_disposition() -> None:

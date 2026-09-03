@@ -906,13 +906,10 @@ class TestResurrectAgent:
         assert killed_sessions == [session_name(f"agent-{agent_id}")]
         assert _termination_row(db_conn, agent_id) == ("terminated", "user", True)
 
-    def test_child_starting_waits_for_resurrect_commit(
+    def test_child_starting_sees_committed_resurrect_authorization(
         self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """The child locks by id, waits for the uncommitted idling transition, then
-        claims it after the resurrect transaction releases the row."""
-        import threading
-
+        """Popen runs after authorization commits, without holding metadata locks."""
         from agent import _starting
 
         agent_id = _spawn_agent()
@@ -920,52 +917,30 @@ class TestResurrectAgent:
             cur.execute("UPDATE agents_meta SET status='terminated' WHERE id=%s", (agent_id,))
         db_conn.commit()
         trigger_id = shared.db.insert_inbound_message(db_conn, agent_id, "wake", source="user")
-        child_lock_attempted = threading.Event()
-        child_done = threading.Event()
-        child_failures: list[BaseException] = []
-        child_threads: list[threading.Thread] = []
-        child_backend_pid: list[int] = []
-        original_execute = cast(Callable[..., Any], psycopg.Cursor.execute)
+        admitted: list[int] = []
 
-        def _observe_child_lock(cursor: Any, query: Any, *args: Any, **kwargs: Any) -> Any:
-            if (
-                threading.current_thread().name == "resurrect-child"
-                and "SELECT machine FROM agents_meta" in str(query)
-            ):
-                child_backend_pid.append(cursor.connection.info.backend_pid)
-                child_lock_attempted.set()
-            return original_execute(cursor, query, *args, **kwargs)
-
-        monkeypatch.setattr(psycopg.Cursor, "execute", _observe_child_lock)
-
-        def _child() -> None:
-            try:
+        def _launch(_aid: int, **kwargs: object) -> None:
+            attempt = kwargs["resurrect_attempt"]
+            assert isinstance(attempt, tuple) and type(attempt[0]) is int
+            command = attempt[0]
+            # This independent connection must acquire the lock immediately;
+            # the real launcher must never run inside its authorization TX.
+            db_conn.rollback()
+            assert db_conn.execute(
+                "SELECT status,pid FROM agents_meta WHERE id=%s FOR UPDATE NOWAIT", (agent_id,)
+            ).fetchone() == ("idling", None)
+            assert db_conn.execute(
+                "SELECT status,payload->'resurrection_launch'->>'attempts' "
+                "FROM inbound_messages WHERE id=%s AND agent_id=%s",
+                (command, agent_id),
+            ).fetchone() == ("pending", "1")
+            db_conn.commit()
+            with pytest.raises(ResurrectError, match="launch identity"):
                 _starting.claim_agent_row(agent_id)
-            except BaseException as exc:
-                child_failures.append(exc)
-            finally:
-                child_done.set()
-
-        def _launch(_aid: int, **_kwargs: object) -> None:
-            import time
-
-            child = threading.Thread(target=_child, name="resurrect-child")
-            child_threads.append(child)
-            child.start()
-            assert child_lock_attempted.wait(timeout=5)
-            deadline = time.monotonic() + 2
-            while time.monotonic() < deadline:
-                with db_conn.cursor() as cur:
-                    cur.execute(
-                        "SELECT cardinality(pg_blocking_pids(%s)) > 0",
-                        (child_backend_pid[0],),
-                    )
-                    if cur.fetchone() == (True,):
-                        break
-                time.sleep(0.01)
-            else:
-                raise AssertionError("child did not wait on the uncommitted resurrect row lock")
-            assert not child_done.is_set()
+            _starting.claim_agent_row(agent_id, resurrect_command_id=command)
+            with pytest.raises(ResurrectError, match="allocation changed"):
+                _starting.claim_agent_row(agent_id, resurrect_command_id=command)
+            admitted.append(command)
 
         monkeypatch.setattr(agent_launch, "_launch_agent_process", _launch)
 
@@ -975,9 +950,7 @@ class TestResurrectAgent:
             trigger_inbound_id=trigger_id,
             trigger_inbound_kind="chat",
         )
-        child_threads[0].join(timeout=5)
-
-        assert child_done.is_set() and not child_failures
+        assert len(admitted) == 1
         with db_conn.cursor() as cur:
             cur.execute("SELECT status FROM agents_meta WHERE id=%s", (agent_id,))
             assert cur.fetchone() == ("running",)
@@ -1449,7 +1422,7 @@ class TestResurrectAgent:
 
         def tracking_execute(self: Any, query: Any, *args: Any, **kwargs: Any) -> Any:
             result = original_execute(self, query, *args, **kwargs)
-            if query == "SELECT status FROM agents_meta WHERE id = %s":
+            if query == "SELECT status FROM agents_meta WHERE id = %s FOR UPDATE":
                 status_select_cursors.add(id(self))
             return result
 
@@ -2312,7 +2285,7 @@ class TestStderrLogsDir:
         # let _wait_for_agent_claim return immediately (avoids needing real agents_meta table)
         monkeypatch.setattr(
             "ops.agent_launch._wait_for_agent_claim",
-            lambda _id: None,  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+            lambda _id, _attempt: None,  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
         )
         _fake_launch_supervisor(monkeypatch)  # don't actually start a process
         monkeypatch.setattr("ops.agent_launch.agent_spawn_env_dict", dict)
@@ -2338,7 +2311,7 @@ class TestStderrLogsDir:
         upsert_env(unit_home / ".env", {"AVA_RUNNER_DB_PASSWORD": "abc"})
         monkeypatch.setattr(
             "ops.agent_launch._wait_for_agent_claim",
-            lambda _id: None,  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+            lambda _id, _attempt: None,  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
         )
         _fake_launch_supervisor(monkeypatch)
         monkeypatch.setattr("ops.agent_launch.agent_spawn_env_dict", dict)
@@ -2930,6 +2903,7 @@ class TestRespawnResurrectColumnOverlay:
             config_overlay: dict | None = None,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
             birth_config: dict | None = None,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
             confirm: bool = True,
+            resurrect_attempt: tuple[int, int, float] | None = None,
         ) -> None:
             captured.append(config_overlay)  # pyright: ignore[reportUnknownMemberType]
 
@@ -2971,7 +2945,7 @@ class TestLaunchAgentProcessConfigOverlay:
         monkeypatch.setattr("ops.agent_launch.native_proc", lambda: _FakeSupervisor)
         monkeypatch.setattr(
             "ops.agent_launch._wait_for_agent_claim",
-            lambda _id: None,  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+            lambda _id, _attempt: None,  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
         )
         return captured
 

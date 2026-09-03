@@ -9,7 +9,7 @@ from typing import Any, cast
 import psycopg
 from psycopg.types.json import Jsonb
 
-from shared.agents import ResurrectError
+from shared.agents import AgentNotFound, MachinePaused, ResurrectAlreadyAlive, ResurrectError
 from shared.boot_timing import BOOT_REAP_GRACE_SEC
 from shared.db_transaction import write_transaction
 from shared.machine import machine_name
@@ -19,15 +19,34 @@ class ResurrectExitDeferredError(ResurrectError):
     """The old execution entity has not yet been positively observed ended."""
 
 
+class ResurrectTriggerStaleError(ResurrectError):
+    """The exact pending wake no longer qualifies; the local op returns a no-op."""
+
+
+def lock_active_home_machine(cur: psycopg.Cursor, agent_id: int) -> None:
+    """Share the pause latch before metadata/inbound locks or budget writes."""
+    cur.execute("SELECT machine FROM agents_meta WHERE id = %s", (agent_id,))
+    agent_row = cur.fetchone()
+    if agent_row is None:
+        raise AgentNotFound(f"agent {agent_id} does not exist")
+    home_machine = agent_row[0]
+    cur.execute("SELECT paused_at FROM machines WHERE name = %s FOR SHARE", (home_machine,))
+    machine_row = cur.fetchone()
+    if machine_row is not None and machine_row[0] is not None:
+        raise MachinePaused(
+            f"agent {agent_id} home machine {home_machine!r} is paused; "
+            "resume it before resurrecting"
+        )
+
+
 def validate_pending_retry(conn: psycopg.Connection, agent_id: int, inbound_id: int) -> None:
     """Recheck the spent authorization inside the actual preparation row lock."""
     row = conn.execute(
-        "SELECT payload FROM inbound_messages WHERE id=%s AND agent_id=%s "
-        "AND status='pending' FOR UPDATE",
+        "SELECT payload FROM inbound_messages WHERE id=%s AND agent_id=%s FOR UPDATE",
         (inbound_id, agent_id),
     ).fetchone()
     if row is None:
-        raise ResurrectError("resurrection trigger is no longer pending")
+        raise ResurrectTriggerStaleError("resurrection trigger is no longer pending")
     raw: object = row[0] or {}
     if not isinstance(raw, dict):
         raise TypeError("resurrection trigger payload must be an object")
@@ -66,20 +85,30 @@ def authorize_pending_retry(agent_id: int, inbound_id: int, kind: str, limit: in
     or expand the separate launch policy. Exhaustion leaves the chat pending.
     """
     with write_transaction() as conn:
+        with conn.cursor() as cur:
+            lock_active_home_machine(cur, agent_id)
         owner = conn.execute(
             "SELECT runtime_generation,runtime_owner,lifecycle_command_id,status,machine "
             "FROM agents_meta WHERE id=%s FOR UPDATE",
             (agent_id,),
         ).fetchone()
-        if owner is None or owner[3:] != ("terminated", machine_name()):
-            raise ResurrectError("pending resurrection no longer targets this local termination")
+        if owner is None:
+            raise AgentNotFound(f"agent {agent_id} does not exist")
+        if owner[:3] == (None, None, None):
+            # No owned termination/wait budget: the original preparation gate
+            # still owns placement, pause and exact pending-work diagnostics.
+            return
+        if owner[3] != "terminated":
+            raise ResurrectAlreadyAlive("pending resurrection target is no longer terminated")
+        if owner[4] != machine_name():
+            raise ResurrectTriggerStaleError("pending resurrection target is not local")
         inbound = conn.execute(
             "SELECT payload,created_at FROM inbound_messages WHERE id=%s AND agent_id=%s "
             "AND kind=%s AND status='pending' FOR UPDATE",
             (inbound_id, agent_id, kind),
         ).fetchone()
         if inbound is None:
-            raise ResurrectError("resurrection trigger is no longer pending")
+            raise ResurrectTriggerStaleError("resurrection trigger is no longer pending")
         raw: object = inbound[0] or {}
         if not isinstance(raw, dict):
             raise TypeError("resurrection trigger payload must be an object")
