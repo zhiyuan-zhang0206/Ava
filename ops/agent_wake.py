@@ -74,7 +74,12 @@ from shared.lifecycle_termination_observe import observe_applied_termination
 from shared.live_announce import publish_agent_updated_sync, publish_page_closed_sync
 from shared.log import logger
 from shared.machine import machine_name
-from shared.resurrection_launch import authorize_launch, prepare_launch
+from shared.resurrection_launch import (
+    authorize_launch,
+    pending_allocation,
+    prepare_launch,
+    require_launch,
+)
 
 
 class ResurrectClaimStaleError(ResurrectError):
@@ -235,6 +240,28 @@ def _auto_resurrect_max_attempts() -> int:
     if settings.has_domain("daemon"):
         return settings.daemon.auto_resurrect_max_attempts
     raise RuntimeError("auto-resurrect budget has no configured daemon domain")
+
+
+def _resume_pending_allocation(agent_id: int, trigger_id: int) -> _PreparedResurrect | None:
+    """The original wake may resume its committed allocation, never replace it."""
+    with write_transaction() as conn:
+        conn.execute("SELECT id FROM agents_meta WHERE id=%s FOR UPDATE", (agent_id,))
+        if not pending_allocation(conn, agent_id, trigger_id):
+            return None
+        row = conn.execute(
+            "SELECT i.id,m.status_changed_at,m.config_overlay,m.birth_config "
+            "FROM inbound_messages i JOIN agents_meta m ON m.id=i.agent_id "
+            "WHERE m.id=%s AND i.kind='resurrect' AND i.status='pending' "
+            "AND (i.payload->'resurrection_launch'->>'trigger_id')::bigint=%s "
+            "AND (i.payload->'resurrection_launch'->>'allocation_epoch')::timestamptz"
+            "=m.status_changed_at",
+            (agent_id, trigger_id),
+        ).fetchall()
+        if len(row) != 1:
+            raise ResurrectError("pending wake has ambiguous allocation evidence")
+        command_id, epoch, overlay, birth = row[0]
+        require_launch(conn, agent_id, command_id)
+        return _PreparedResurrect(epoch, overlay, birth, None, command_id=command_id)
 
 
 def _prepare_resurrect_attempt(

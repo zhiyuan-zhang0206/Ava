@@ -20,7 +20,7 @@ import asyncio
 import contextlib
 import threading
 import time
-from collections.abc import AsyncGenerator, AsyncIterator
+from collections.abc import AsyncGenerator
 from datetime import UTC, datetime, timedelta
 
 import pytest

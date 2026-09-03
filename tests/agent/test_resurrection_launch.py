@@ -2,12 +2,21 @@
 
 import psycopg
 import pytest
+from psycopg_pool import ConnectionPool
 
 from agent._starting import claim_agent_row
+from ops import agent_launch, agent_wake
+from ops.ops_lifecycle import _pending_allocation_can_resume
 from shared.agents import ResurrectError
-from shared.db import insert_inbound_message
-from shared.resurrection_launch import authorize_launch, prepare_launch
+from shared.config import settings
+from shared.db import PG_KEEPALIVE_KWARGS, insert_inbound_message
+from shared.resurrection_launch import (
+    authorize_launch,
+    pending_allocation,
+    prepare_launch,
+)
 from tests.agent.test_runtime_incarnation import _row
+
 
 def _prepare(conn: psycopg.Connection, agent_id: int, wake: int) -> int:
     conn.execute("SELECT id FROM agents_meta WHERE id=%s FOR UPDATE", (agent_id,))
@@ -24,6 +33,7 @@ def _prepare(conn: psycopg.Connection, agent_id: int, wake: int) -> int:
     prepare_launch(conn, agent_id, marker[0], epoch[0], wake)
     conn.commit()
     return marker[0]
+
 
 def test_launch_crash_and_redispatch_cannot_reset_wake_budget(db_conn: psycopg.Connection) -> None:
     agent_id = _row(db_conn)
@@ -45,6 +55,7 @@ def test_launch_crash_and_redispatch_cannot_reset_wake_budget(db_conn: psycopg.C
         (wake,),
     ).fetchone() == ("pending", 2)
     db_conn.commit()
+
 
 def test_prepared_crash_resumes_same_allocation_before_os_launch(
     db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
@@ -98,6 +109,7 @@ def test_prepared_crash_resumes_same_allocation_before_os_launch(
     assert not pending_allocation(db_conn, agent_id, wake)
     db_conn.commit()
 
+
 def test_only_authorized_actual_admission_can_win(db_conn: psycopg.Connection) -> None:
     agent_id = _row(db_conn)
     wake = insert_inbound_message(db_conn, agent_id, "wake", "user")
@@ -124,6 +136,7 @@ def test_only_authorized_actual_admission_can_win(db_conn: psycopg.Connection) -
     )
     db_conn.commit()
 
+
 @pytest.mark.parametrize("field", ["deadline", "allocation_epoch"])
 def test_delayed_attempt_refuses_without_changing_pending_work(
     db_conn: psycopg.Connection, field: str
@@ -146,6 +159,7 @@ def test_delayed_attempt_refuses_without_changing_pending_work(
         "SELECT status FROM inbound_messages WHERE id=%s", (wake,)
     ).fetchone() == ("pending",)
     db_conn.commit()
+
 
 @pytest.mark.parametrize("key", ["resurrection_launch", "resurrection_launch_attempts"])
 def test_external_producer_cannot_authorize_launch(db_conn: psycopg.Connection, key: str) -> None:

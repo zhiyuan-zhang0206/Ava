@@ -155,6 +155,10 @@ _OVERSIZE_ALLOWED: dict[str, tuple[str, int, str]] = {
     # daemon sibling has the same single-module shape). Was 798 lines on main;
     # crossed the ceiling with the OCR text tools (find_text/click_text).
     "services/computer/mcp_daemon.py": ("#405", 800, "2026-12-31"),
+    # Agent-host daemon: lifecycle settlement + wake dispatch in one
+    # process-local module; crossed 800 when the hosted lifecycle
+    # settlement commits landed (#1530). Split tracked as follow-up.
+    "services/agent_host/host.py": ("#405", 800, "2026-12-31"),
     # The EVENTS registry — one flat name→spec dict emit() consults; grows
     # one entry per event. Schema-registry shard split tracked.
     "shared/events/contract.py": ("#405", 500, "2026-12-31"),
@@ -196,8 +200,6 @@ _OVERSIZE_ALLOWED: dict[str, tuple[str, int, str]] = {
     # Kernel inbound queue + lifecycle SQL (claim / restart helpers) — one
     # cohesive kernel-DB module; the #1587 fatal-provider heartbeat throttle
     # (last_heartbeat_at + pending-wake accounting) regrew it past the ceiling
-    # after the #1500-era removal (767 < 800). Split tracked, not forgotten.
-    "agent/db.py": ("#5770", 800, "2026-12-31"),
     # Hosted boot orchestration: converge preflight, N-step checkpoint throttle
     # wrapper, startup repair paths — one cohesive boot sequence; the #1584
     # per-thread throttle + blob-persistence fix regrew it past 800 on the

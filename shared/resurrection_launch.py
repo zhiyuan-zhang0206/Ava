@@ -9,10 +9,44 @@ from datetime import datetime
 from typing import Any, cast
 
 import psycopg
+from psycopg import sql
 from psycopg.types.json import Jsonb
 
 from shared.agents import ResurrectError
 from shared.boot_timing import BOOT_REAP_GRACE_SEC
+
+# The existing delivery watchdog and gateway use the same narrow eligibility
+# predicate. Aliases match their ordinary pending-chat query; no new scanner.
+PENDING_ALLOCATION = (
+    "(agents_meta.status='idling' AND agents_meta.pid IS NULL "
+    "AND agents_meta.lifecycle_command_id IS NULL AND EXISTS ("
+    "SELECT 1 FROM inbound_messages launch WHERE launch.agent_id=agents_meta.id "
+    "AND launch.kind='resurrect' AND launch.status='pending' "
+    "AND (launch.payload->'resurrection_launch'->>'trigger_id')::bigint=m.id "
+    "AND (launch.payload->'resurrection_launch'->>'allocation_epoch')::timestamptz"
+    "=agents_meta.status_changed_at "
+    "AND (launch.payload->'resurrection_launch'->>'deadline')::timestamptz>clock_timestamp() "
+    "AND launch.payload->'resurrection_launch'->>'machine'=agents_meta.machine "
+    "AND (launch.payload->'resurrection_launch'->>'target_generation')::uuid "
+    "IS NOT DISTINCT FROM agents_meta.runtime_generation "
+    "AND (launch.payload->'resurrection_launch'->>'target_owner')::uuid "
+    "IS NOT DISTINCT FROM agents_meta.runtime_owner))"
+)
+
+
+def pending_allocation(conn: psycopg.Connection, agent_id: int, trigger_id: int) -> bool:
+    """Read-only hint; actual resume and admission each repeat the locked gate."""
+    return (
+        conn.execute(
+            sql.SQL(
+                "SELECT 1 FROM agents_meta JOIN inbound_messages m ON m.agent_id=agents_meta.id "
+                "WHERE agents_meta.id=%s AND m.id=%s AND m.kind='chat' AND m.status='pending' "
+                "AND {}"
+            ).format(sql.SQL(PENDING_ALLOCATION)),
+            (agent_id, trigger_id),
+        ).fetchone()
+        is not None
+    )
 
 
 def prepare_launch(
