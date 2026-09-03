@@ -68,6 +68,25 @@ def _wait(predicate, timeout: float = 30.0, interval: float = 0.05) -> bool:  # 
     return predicate()  # pyright: ignore[reportUnknownVariableType]
 
 
+def _proc_exited(proc_or_pid: psutil.Process | int) -> bool:
+    """True once the process can no longer execute: reaped, or a zombie
+    awaiting its parent's reap.
+
+    psutil ``is_running()`` / ``pid_exists()`` stay True through the zombie
+    window, and under CI runner oversubscription init's reap can lag well
+    past the wait budget (recordless-host flakes, Trunk test PR #1591). A
+    zombie cannot answer a socket or run code, so it is not a live pty
+    session — same terminal-state rule the crash-sweep tests apply.
+    """
+    try:
+        proc = (
+            proc_or_pid if isinstance(proc_or_pid, psutil.Process) else psutil.Process(proc_or_pid)
+        )
+        return proc.status() == psutil.STATUS_ZOMBIE
+    except psutil.NoSuchProcess:
+        return True
+
+
 @pytest.fixture
 def sessions(unit_home: Path) -> Iterator[Path]:
     """The test home; every session still alive under it is killed after.
@@ -849,8 +868,8 @@ def test_new_reaps_a_recordless_host_before_replacement(sessions: Path) -> None:
         second = _record(home, name)
         assert second is not None and second.pid != first.pid
         assert not envfile.exists(), "the replacement must consume its env handoff"
-        assert _wait(lambda: not old_host.is_running()), "recordless host survived replacement"
-        assert _wait(lambda: not old_shell.is_running()), "recordless shell survived replacement"
+        assert _wait(lambda: _proc_exited(old_host)), "recordless host survived replacement"
+        assert _wait(lambda: _proc_exited(old_shell)), "recordless shell survived replacement"
     finally:
         # The pre-fix behavior rejects the replacement and leaves the deliberately
         # recordless host outside the fixture's normal record-based teardown.
@@ -876,8 +895,8 @@ def test_kill_reaps_a_recordless_host_without_its_socket(sessions: Path) -> None
 
     try:
         _kill(home, name)
-        assert _wait(lambda: not old_host.is_running()), "recordless host survived kill"
-        assert _wait(lambda: not old_shell.is_running()), "recordless shell survived kill"
+        assert _wait(lambda: _proc_exited(old_host)), "recordless host survived kill"
+        assert _wait(lambda: _proc_exited(old_shell)), "recordless shell survived kill"
     finally:
         for proc in (old_shell, old_host):
             with contextlib.suppress(psutil.Error):
@@ -1185,8 +1204,8 @@ def test_kill_by_record_reaches_a_wedged_host(sessions: Path) -> None:
     finally:
         with contextlib.suppress(ProcessLookupError, OSError):
             os.kill(host_pid, signal.SIGCONT)
-    assert _wait(lambda: not psutil.pid_exists(rec.pid)), "shell must die"
-    assert _wait(lambda: not psutil.pid_exists(host_pid)), "host must die"
+    assert _wait(lambda: _proc_exited(rec.pid)), "shell must die"
+    assert _wait(lambda: _proc_exited(host_pid)), "host must die"
     assert not record_path(name).exists()
     assert not socket_path(name).exists()
 
