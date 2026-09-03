@@ -58,8 +58,8 @@ class _PageHandler(http.server.SimpleHTTPRequestHandler):
   <main>
     <h1>This directory is not browsable</h1>
     <p>Directory listings are disabled for ava.ui.serve pages.</p>
-    <p>Use <code>ava.ui.serve_markdown()</code> to render Markdown, or add an
-      <code>index.html</code> to the served directory.</p>
+    <p>Create an <code>index.html</code> in the served directory. For Markdown,
+      render it to a self-contained HTML page first with the ava-ui markdown widget.</p>
   </main>
 </body>
 </html>

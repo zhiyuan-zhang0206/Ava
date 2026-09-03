@@ -122,5 +122,5 @@ stopping mechanism (Phase 1); the follow-up-questions clarification.
 | Custom model fine-tuning / RL training | Out of reach for a skill; we achieve discipline through process + deterministic audit instead |
 | Closed-loop "the model decides when it's done" | We pre-register the stopping rule in the state file and check it after every wave |
 | Trusting the model's self-report of groundedness | The audit script mechanically verifies citation→source consistency; self-assessment is the weakest rung of the ladder |
-| Vendor-specific report artifacts (Google Docs export, Pages) | Ava delivers through `ava.ui.serve_markdown` — one channel, no vendor lock |
+| Vendor-specific report artifacts (Google Docs export, Pages) | Ava delivers through `ava.ui.serve` of a self-contained HTML page — one channel, no vendor lock |
 | Browser-driving automation of paid seats (web-ai/deep-research does this deliberately) | Different cost model: native uses `ava.web` API search/fetch; the browser seat is a separate skill |

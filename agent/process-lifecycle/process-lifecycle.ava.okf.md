@@ -30,7 +30,7 @@ Called in `main()` finally, derives from `sys.exc_info()`:
 - other exceptions — exception type name
 
 ## Gateway Notification (`agent/lifecycle.py:_notify_exit()`)
-Notifies gateway on exit: gateway updates agents_meta to 'terminated', closes only agent-owned `ava.ui.show()` pages, and leaves daemon-supervised `ava.ui.serve()` / `serve_markdown()` pages serving. Agent only notifies; gateway owns writes.
+Notifies gateway on exit: gateway updates agents_meta to 'terminated', closes only agent-owned `ava.ui.show()` pages, and leaves daemon-supervised `ava.ui.serve()` pages serving. Agent only notifies; gateway owns writes.
 
 ## Session Retention (shell sub-sessions only)
 Shell sub-sessions (`ava-agent-<id>-shell-<n>[-<name>]`) survive lifecycles; the **main process is a plain native process** (native supervisor) — retention rules + the session-record model live in [[sessions.ava.okf.md]]. Silent death = wedged/killed process, reaped by the restarter and crash-resurrected.

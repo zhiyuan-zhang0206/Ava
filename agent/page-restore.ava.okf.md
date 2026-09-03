@@ -14,7 +14,7 @@ Open `serve()`/`show()` pages are rows in `agent_pages`; the page-server daemon 
 Per open row:
 
 - server alive -> keep (log only)
-- server dead + `serve_dir` set (serve()/serve_markdown()) -> re-serve the recorded directory via `ava.ui.serve`; the old link works again
+- server dead + `serve_dir` set (serve()) -> re-serve the recorded directory via `ava.ui.serve`; the old link works again
 - server dead + no `serve_dir` (show() pages / pre-serve_dir rows) -> cannot be rebuilt: close the row (CAS `closed_at`, same UPDATE close_page uses) and tell the agent to re-serve with one system inbound, deduped per 6h
 
 ## Trigger points

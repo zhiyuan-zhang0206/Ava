@@ -85,7 +85,7 @@ Ava has a built-in `web-ai` skill that uses Chrome MCP to simultaneously drive t
    ```
 
 3. Collect the complete answers from the four models
-4. Use `ava.ui.serve_markdown()` to display an aggregated report, containing:
+4. Render an aggregated report to HTML and display it with `ava.ui.serve()`, containing:
    - Original question
    - Complete answer from each model
    - Comparative analysis: answer consistency, highlights from each, points of divergence
@@ -105,7 +105,7 @@ Ava has a built-in `web-ai` skill that uses Chrome MCP to simultaneously drive t
 
 ## Final: Generate Comparison Report
 
-Use `ava.ui.serve_markdown()` to display the report, containing:
+Render the report to HTML and display it with `ava.ui.serve()`, containing:
 
 1. Four scenario screenshots
 2. Operation steps and results for each scenario
@@ -126,7 +126,7 @@ Use `ava.ui.serve_markdown()` to display the report, containing:
 1. Agent sequentially executes four scenarios via Chrome MCP:
    - `navigate_page` → `take_snapshot` → `take_screenshot` → `fill`/`fill_form` → `evaluate_script`
 2. Each scenario is an independent real problem, not a demo-like toy example
-3. Four screenshots + data summary → `ava.ui.serve_markdown()` display report
+3. Four screenshots + data summary → render HTML → `ava.ui.serve()` display report
 
 ## Expected output
 
