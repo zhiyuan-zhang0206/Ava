@@ -44,6 +44,7 @@ from ops.controllers import respawn as rd
 from ops.controllers import resurrect as cr
 from ops.controllers import wedged as wd
 from ops.ops_lifecycle import _force_mark_terminated, mark_agent_exited_op
+from shared.agents import ResurrectBudgetExhausted
 from shared.config import settings
 from shared.machine import machine_name
 from shared.migrations import CodeBehindSchema
@@ -724,6 +725,59 @@ class TestResurrectClearsSource:
         assert _row(db_conn, aid) == ("idling", None)
 
 
+class TestSystemResurrectBudget:
+    def test_reads_cluster_file_budget_when_gateway_has_only_the_default(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The gateway pop must not turn an operator-set budget into the default."""
+        from shared import runtime_config
+
+        def _gateway_default(_name: str) -> int:
+            return 3
+
+        monkeypatch.setattr(agent_wake, "get_field", _gateway_default)
+        monkeypatch.setattr(
+            runtime_config,
+            "read_env_aliases",
+            lambda: {"AVA_AUTO_RESURRECT_MAX_ATTEMPTS": "5"},
+        )
+
+        assert agent_wake._auto_resurrect_max_attempts() == 5
+
+    def test_system_resurrect_stops_at_pending_budget(self, db_conn: psycopg.Connection) -> None:
+        """A failed system recovery leaves the corpse unchanged at its budget."""
+        aid = _corpse(db_conn, source="reaper")
+        for _ in range(settings.daemon.auto_resurrect_max_attempts):
+            _add_pending_resurrect_inbound(db_conn, aid)
+
+        with pytest.raises(ResurrectBudgetExhausted, match="exhausted"):
+            resurrect_agent(aid, resurrected_by="system")
+
+        assert _row(db_conn, aid) == ("terminated", "reaper")
+
+    def test_system_resurrect_allows_pending_rows_below_budget(
+        self, db_conn: psycopg.Connection
+    ) -> None:
+        """A system recovery below the limit still wakes the terminated agent."""
+        aid = _corpse(db_conn, source="reaper")
+        for _ in range(settings.daemon.auto_resurrect_max_attempts - 1):
+            _add_pending_resurrect_inbound(db_conn, aid)
+
+        resurrect_agent(aid, resurrected_by="system")
+
+        assert _row(db_conn, aid) == ("idling", None)
+
+    def test_manual_resurrect_bypasses_pending_budget(self, db_conn: psycopg.Connection) -> None:
+        """Manual recovery remains available after automatic retries are exhausted."""
+        aid = _corpse(db_conn, source="reaper")
+        for _ in range(settings.daemon.auto_resurrect_max_attempts):
+            _add_pending_resurrect_inbound(db_conn, aid)
+
+        resurrect_agent(aid, resurrected_by="user")
+
+        assert _row(db_conn, aid) == ("idling", None)
+
+
 # ── controller reconcile ─────────────────────────────────────────────────────
 
 
@@ -1027,6 +1081,41 @@ class TestBootRevivePass:
         assert _row(db_conn, aid) == ("idling", None)  # resurrected + source cleared
         assert _last_resurrect_at(db_conn, aid) is not None
         assert aid in [c.agent_id for c in launched_agents]  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+
+    def test_boot_pass_attempt_budget_stops_at_limit(
+        self,
+        db_conn: psycopg.Connection,
+        sync_pool: ConnectionPool,
+        launched_agents: list,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+    ) -> None:
+        """A daemon restart cannot bypass three failed recovery attempts."""
+        aid = _corpse(db_conn, source="reaper")
+        for _ in range(settings.daemon.auto_resurrect_max_attempts):
+            _add_pending_resurrect_inbound(db_conn, aid)
+        launched_agents.clear()
+        controller = cr.CrashResurrectController(sync_pool)
+
+        result = controller.reconcile("agent-runner")
+
+        assert result.acted is False
+        assert _row(db_conn, aid) == ("terminated", "reaper")
+        assert launched_agents == []
+
+    def test_boot_pass_attempt_budget_allows_below_limit(
+        self,
+        db_conn: psycopg.Connection,
+        sync_pool: ConnectionPool,
+    ) -> None:
+        """A corpse below the recovery budget still joins the fleet restore."""
+        aid = _corpse(db_conn, source="reaper")
+        for _ in range(settings.daemon.auto_resurrect_max_attempts - 1):
+            _add_pending_resurrect_inbound(db_conn, aid)
+        controller = cr.CrashResurrectController(sync_pool)
+
+        result = controller.reconcile("agent-runner")
+
+        assert result.acted is True
+        assert _row(db_conn, aid) == ("idling", None)
 
     def test_boot_pass_defers_until_the_host_is_serving(
         self,

@@ -296,7 +296,7 @@ class DaemonSettings(EnvSettings):
     auto_resurrect_max_attempts: int = Field(
         default=3,
         alias="AVA_AUTO_RESURRECT_MAX_ATTEMPTS",
-        description="Maximum unconsumed kind='resurrect' lifecycle inbounds before the restarter's crash-resurrect and wedged controllers stop auto-resurrecting an agent. A successful boot consumes them, so this bounds consecutive failed recovery attempts. New delivered work still resurrects through the delivery path or delivery watchdog, so nothing is permanently stranded.",
+        description="Maximum unconsumed kind='resurrect' lifecycle inbounds before system-initiated recovery from the crash/wedged controllers, delivery path, or delivery watchdog stops auto-resurrecting an agent; a successful boot consumes them, so this bounds consecutive failed recovery attempts while manual resurrect remains exempt.",
         json_schema_extra={
             "capability": "agent-runner",
             "restart_required": "all",
