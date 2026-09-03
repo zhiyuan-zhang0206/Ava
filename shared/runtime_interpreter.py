@@ -39,3 +39,14 @@ def runtime_frontend_dir() -> Path:
     if not WHEEL_RUNTIME:
         raise RuntimeError("retained frontend paths require wheel runtime")
     return runtime_venv().parent / "frontend"
+
+
+def runtime_otel_binary() -> Path:
+    """Resolve only the loaded image's collector, never mutable home storage."""
+    if not WHEEL_RUNTIME:
+        raise RuntimeError("retained collector paths require wheel runtime")
+    return (
+        runtime_venv().parent
+        / "otel"
+        / ("otelcol-contrib.exe" if IS_WINDOWS else "otelcol-contrib")
+    )

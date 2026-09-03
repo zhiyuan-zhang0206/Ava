@@ -28,7 +28,14 @@ Loaded application dependencies must resolve inside the generation; Homebrew or
 other mutable dependency paths are rejected. The receipt declares loaded-image
 paths without claiming to attest the host OS. Optional plugin/dlopen behavior,
 Windows preparation, process privilege
-separation, frontend artifacts and plugin state compatibility are not covered.
+separation and plugin state compatibility are not covered. Optional prebuilt
+frontend and pinned collector inputs are copied privately and included in the
+same generation inventory. Collector configuration and file queues stay in the
+unit home; online preparation reuses the existing version/hash-pinned downloader.
+The loaded wheel's collector path cannot fall back to that mutable home binary.
+CI validates the retained binary's config and sends an actual loopback OTLP span
+to its local file exporter with the checkout absent. This is not proof of
+Tailnet/firewall approval or every enabled production collector component.
 Same-UID chmod is accidental-write protection, not an adversarial security seal.
 
 The declared import roots are CLI, exec child, ops spec, agent-host and gateway.

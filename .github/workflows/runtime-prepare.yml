@@ -14,6 +14,10 @@ on:
       - 'agent/graph/_exec_subprocess.py'
       - 'scripts/prove_runtime_consumer.py'
       - 'scripts/prove_runtime_prepare.py'
+      - 'scripts/prepare_otel_release.py'
+      - 'scripts/prove_runtime_otel.py'
+      - 'cli/commands/_otel_collector.py'
+      - 'shared/paths.py'
       - 'scripts/prove_runtime_migration.py'
       - 'shared/runtime_migration.py'
       - 'cli/commands/_release_candidate.py'
@@ -89,6 +93,12 @@ jobs:
           recordFrontendBuildConfig(source, process.env.NEXT_PUBLIC_GATEWAY_PORT, process.env.NEXT_PUBLIC_API_BASE);
           prepareFrontend(source, node, path.join(process.env.RUNNER_TEMP, 'prepare/frontend-input'), frontendInputs(source, node));
           JS
+      - name: Download the existing pinned collector outside maintenance
+        shell: bash
+        run: uv run --locked --no-dev python scripts/prepare_otel_release.py "$RUNNER_TEMP/prepare/otel-input"
+      - name: Type-check retained collector integration
+        shell: bash
+        run: uv run --locked pyright scripts/prepare_otel_release.py scripts/prove_runtime_otel.py shared/runtime_prepare.py shared/runtime_interpreter.py shared/paths.py cli/commands/_otel_collector.py
       - name: Real offline prepare, retained interpreter and failure isolation
         shell: bash
         run: |
@@ -102,6 +112,7 @@ jobs:
           path: |
             ${{ runner.temp }}/prepare/proof.json
             ${{ runner.temp }}/prepare/migration-proof.json
+            ${{ runner.temp }}/prepare/otel-proof.json
             ${{ runner.temp }}/frontend-proof.json
           if-no-files-found: error
       - name: Stop isolated native PG
