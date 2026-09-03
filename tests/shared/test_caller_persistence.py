@@ -17,13 +17,17 @@ def _admit_future_protocol(_source: str) -> None:
     """Test-only seam: exercise storage beyond the independently tested fence."""
 
 
+def _admit_future_chat(_conn: psycopg.Connection, _agent_id: int, _source: str) -> None:
+    """Storage-only seam; the real generation gate has separate integration proof."""
+
+
 def test_chat_insert_and_reconcile_persist_same_structured_identity(
     db_conn: psycopg.Connection,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # Exercise future admitted-write storage separately from today's closed
     # rollout fence; the tests below assert the real fence rejects every write.
-    monkeypatch.setattr("shared.chat_delivery.reject_unnegotiated_caller", _admit_future_protocol)
+    monkeypatch.setattr("shared.chat_delivery.require_caller_protocol", _admit_future_chat)
     agent_id = create_agent(db_conn)
     key = str(uuid4())
     receipt = insert_chat_inbound_once(

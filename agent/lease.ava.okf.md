@@ -14,7 +14,16 @@ Process admission also stamps `agents_meta.runtime_generation`, `runtime_owner`,
 and `runtime_kind='process'`. Renewal matches that originally bound incarnation;
 a delayed old process cannot refresh its replacement's lease. Untokened legacy
 renewal only matches unknown ownership. Protocol remains zero in this foundation;
-hosted admission/renewal and an old-writer upgrade barrier remain required.
+an old-writer upgrade barrier remains required. Hosted admission and renewal
+use the same incarnation columns in `agent/hosted_ownership.py`.
+
+Hosted ownership spans normal turns, idle, and model-cache eviction. The
+existing daemon health beat renews only its boot-owner's rows. Explicit restart
+releases the exact incarnation; next admission creates a new generation. A
+fresh other owner is never admitted or settled. Same-incarnation settlement
+finishes before the existing scheduler releases single-flight; timed-out
+cancellation retains that slot until unwind. Protocol stays zero, so no new
+identity producer is activated by this lifecycle work.
 
 ## What it is
 
