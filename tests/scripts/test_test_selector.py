@@ -252,7 +252,7 @@ print(repr(_estimate_seconds(
     },
 )))
 """
-    outputs = []
+    outputs: list[str] = []
     for seed in ("1", "2", "3"):
         environment = os.environ | {"PYTHONHASHSEED": seed}
         completed = subprocess.run(  # noqa: S603 -- fixed local Python snippet
@@ -263,7 +263,8 @@ print(repr(_estimate_seconds(
             env=environment,
             text=True,
         )
-        outputs.append(completed.stdout)
+        out = completed.stdout or ""
+        outputs.append(out)
 
     assert len(set(outputs)) == 1
 
