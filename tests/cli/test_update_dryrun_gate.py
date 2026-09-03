@@ -13,6 +13,7 @@ import pytest
 
 from cli import commands as _cli
 from cli.commands import _update_dryrun as _dryrun
+from cli.commands import _update_finalize as _finalize
 from cli.commands import update as _up
 
 
@@ -55,8 +56,7 @@ def test_estimate_seeds_missing_baseline_with_conservative_first_gate(
     """An unseen cluster persists design targets but cannot claim an observed fast window."""
     monkeypatch.setattr(_dryrun, "ava_home", lambda: tmp_path)
 
-    breakdown = _dryrun.maintenance_window_breakdown()
-    assert _dryrun.estimate_maintenance_window() == pytest.approx(sum(breakdown.values()) + 25.0)  # pyright: ignore[reportUnknownMemberType]
+    assert _dryrun.estimate_maintenance_window() == pytest.approx(65.0)  # pyright: ignore[reportUnknownMemberType]
     assert _dryrun.maintenance_window_estimate_note() == "no baseline — seeded + 25s margin"
 
     baseline = json.loads((tmp_path / "update-baseline.json").read_text())
@@ -77,7 +77,7 @@ def test_explicit_estimate_does_not_seed_baseline_file(
     """A read-only dry-run may use targets but must not materialize baseline state."""
     monkeypatch.setattr(_dryrun, "ava_home", lambda: tmp_path)
 
-    assert _dryrun.estimate_maintenance_window(persist_seed=False) == pytest.approx(110.0)  # pyright: ignore[reportUnknownMemberType]
+    assert _dryrun.estimate_maintenance_window(persist_seed=False) == pytest.approx(65.0)  # pyright: ignore[reportUnknownMemberType]
     assert not (tmp_path / "update-baseline.json").exists()
 
 
@@ -105,7 +105,7 @@ def test_staging_worktree_prunes_stale_registration_before_add(
 def test_estimate_uses_stage_p95_and_baseline_writeback(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The commit estimate is the p95 sum of exactly the four maintenance stages."""
+    """The commit estimate is the p95 sum of the maintenance-window stages."""
     monkeypatch.setattr(_dryrun, "ava_home", lambda: tmp_path)
     (tmp_path / "update-baseline.json").write_text(
         json.dumps(
@@ -121,7 +121,7 @@ def test_estimate_uses_stage_p95_and_baseline_writeback(
         )
     )
 
-    assert _dryrun.estimate_maintenance_window() == pytest.approx(95.0)  # pyright: ignore[reportUnknownMemberType]
+    assert _dryrun.estimate_maintenance_window() == pytest.approx(50.0)  # pyright: ignore[reportUnknownMemberType]
     _dryrun.append_maintenance_baseline(
         {
             "stop_the_world": 6.0,
@@ -136,6 +136,29 @@ def test_estimate_uses_stage_p95_and_baseline_writeback(
     assert baseline["n"] == 3
     assert baseline["stages"]["stop_the_world"] == [4.0, 8.0, 6.0]
     assert "snapshot" not in baseline["stages"]
+
+
+def test_phase_b_excluded_from_window_estimate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Slow remote-runner convergence remains visible without enlarging maintenance."""
+    monkeypatch.setattr(_dryrun, "ava_home", lambda: tmp_path)
+    (tmp_path / "update-baseline.json").write_text(
+        json.dumps(
+            {
+                "stages": {
+                    "stop_the_world": [1.0, 2.0],
+                    "local_leg": [3.0, 4.0],
+                    "readiness": [4.0, 4.0],
+                    "phase_b": [400.0, 500.0],
+                },
+                "n": 2,
+            }
+        )
+    )
+
+    assert _dryrun.estimate_maintenance_window() == pytest.approx(10.0)  # pyright: ignore[reportUnknownMemberType]
+    assert _dryrun.maintenance_window_breakdown()["phase_b"] == pytest.approx(500.0)  # pyright: ignore[reportUnknownMemberType]
 
 
 def test_partial_rollout_keeps_seed_values_for_unmeasured_stages(
@@ -237,6 +260,66 @@ def test_excessive_estimate_refuses_before_stop_or_pin(monkeypatch: pytest.Monke
     assert _run_inner() == 1
     assert stopped == []
     assert pins == []
+
+
+def test_gate_refusal_resumes_nothing_and_skips_local_unpause(
+    monkeypatch: pytest.MonkeyPatch, local_unpauses: list[bool]
+) -> None:
+    """A prepare refusal cannot compensate for a Phase A pause that never began."""
+    _stub_prepare(monkeypatch)
+    finalized: list[tuple[list[tuple[str, str | None]], object]] = []
+    tree_unpauses: list[Path] = []
+    monkeypatch.setattr(
+        _cli,
+        "_resolve_fanout_targets",
+        lambda **_kw: [("runner-a", "http://runner-a")],  # pyright: ignore[reportUnknownArgumentType]
+    )
+    monkeypatch.setattr(_up, "dry_run_checks", lambda *_args, **_kw: [])  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_up, "estimate_maintenance_window", lambda: 130.0)
+    monkeypatch.setattr(
+        _up,
+        "_snapshot_known_good",
+        lambda **_kw: ("old", set[str](), None),  # pyright: ignore[reportUnknownArgumentType]
+    )
+    monkeypatch.setattr(
+        _up,
+        "finalize_rollout",
+        lambda hosts, *_args, **kwargs: finalized.append((hosts, kwargs["outcome"])),  # pyright: ignore[reportUnknownArgumentType]
+    )
+    monkeypatch.setattr(_finalize, "_unpause_local_via_tree", tree_unpauses.append)
+
+    assert _run_inner() == 1
+    assert finalized == [([], _up.RolloutOutcome.ABORTED)]
+    assert local_unpauses == []
+    assert tree_unpauses == []
+
+
+def test_phase_a_started_runs_tree_unpause(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A post-pause abort delegates local compensation to the deployed tree."""
+    _stub_prepare(monkeypatch)
+    tree_unpauses: list[Path] = []
+    monkeypatch.setattr(_up, "dry_run_checks", lambda *_args, **_kw: [])  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_up, "estimate_maintenance_window", lambda: 80.0)
+    monkeypatch.setattr(
+        _up,
+        "_snapshot_known_good",
+        lambda **_kw: ("old", set[str](), None),  # pyright: ignore[reportUnknownArgumentType]
+    )
+    monkeypatch.setattr(
+        _up,
+        "_stop_the_world",
+        lambda *_args, **_kw: (set[str](), True),  # pyright: ignore[reportUnknownArgumentType]
+    )
+    monkeypatch.setattr(
+        _cli,
+        "_run_gateway_local_update",
+        lambda *_args, **_kw: 2,  # pyright: ignore[reportUnknownArgumentType]
+    )
+    monkeypatch.setattr(_up, "finalize_rollout", lambda *_args, **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_finalize, "_unpause_local_via_tree", tree_unpauses.append)
+
+    assert _run_inner() == 2
+    assert tree_unpauses == [Path("/unused")]
 
 
 def test_dry_run_failure_refuses_before_stop(monkeypatch: pytest.MonkeyPatch) -> None:

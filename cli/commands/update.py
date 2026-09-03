@@ -535,6 +535,8 @@ def _run_gateway_orchestration_inner(  # noqa: PLR0915 (three-phase orchestratio
     # because the `finally` names them in the aftermath block, and the local leg
     # that fills it in is inside the try.
     local_launch_failures: list[str] = []
+    # The finalizer may compensate only after this rollout has entered Phase A.
+    phase_a_started = False
 
     # ── Phase 0: pre-flight git fetch on every agent-runner ──────────────────
     # Unreachable hosts are skipped (their watchdog converges them on return),
@@ -568,7 +570,7 @@ def _run_gateway_orchestration_inner(  # noqa: PLR0915 (three-phase orchestratio
     # down — the 2026-07-20 incident, where the resume's own Postgres read raised
     # and left every host stop-the-world + paused.
     runner_urls: dict[str, str | None] = dict(agent_runners)
-    hosts_to_resume: list[tuple[str, str | None]] = list(agent_runners)
+    hosts_to_resume: list[tuple[str, str | None]] = []
 
     if dry_run:
         gate = _build_prepare_gate(
@@ -620,7 +622,9 @@ def _run_gateway_orchestration_inner(  # noqa: PLR0915 (three-phase orchestratio
 
         # 1-1c) pause restarters (local + remote) + quiesce all agents. None = a
         #       Phase-A 5xx; abort with nothing migrated (the finally resumes).
+        hosts_to_resume = list(agent_runners)
         with _stage_telemetry("stop_the_world"):
+            phase_a_started = True
             paused_names, all_quiesced = _stop_the_world(
                 agent_runners,
                 mode=mode,
@@ -763,6 +767,7 @@ def _run_gateway_orchestration_inner(  # noqa: PLR0915 (three-phase orchestratio
     finally:
         _finalize_orchestration(
             hosts_to_resume=hosts_to_resume,
+            phase_a_started=phase_a_started,
             fan_out=_ns._fan_out,
             phase_a_timeout_s=_PHASE_A_TIMEOUT_S,
             outcome=outcome,

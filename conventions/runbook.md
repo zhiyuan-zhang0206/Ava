@@ -1044,10 +1044,12 @@ ava cluster destroy --path PATH [--drop-db]   # stop a cluster + free its regist
 non-disruptive runner fetch and prepare checks, and reports the predicted
 maintenance window. It creates no recovery snapshot, pause/stop state, pin,
 or checkout; it is the operator check before a real rollout. The estimate uses
-the p95 of the ten most recent commit windows for stop-the-world, local leg,
-readiness, and Phase B. Offsite publication of a real rollout's verified local
-snapshot runs detached only after recovery/finalization, so it is outside the
-maintenance window and cannot delay resumption.
+the p95 of the ten most recent stop-the-world, local-leg, and readiness stages.
+Phase B remains recorded and shown in the breakdown, but is excluded because it
+begins after readiness, while the gateway is serving, and measures remote-runner
+convergence rather than the maintenance window. Offsite publication of a real
+rollout's verified local snapshot runs detached only after recovery/finalization,
+so it is outside the maintenance window and cannot delay resumption.
 
 Down-failure drill: see [down-failure-drill.md](down-failure-drill.md).
 
