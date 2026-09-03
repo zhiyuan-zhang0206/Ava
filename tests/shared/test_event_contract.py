@@ -133,8 +133,9 @@ def test_category_projection_matches_telemetry_whitelist() -> None:
     # 139; host_dispatcher_scan_failed (Task #2255) raises it to 140;
     # host_stdout_log_rotated (task #2356's raw-transcript size rotation)
     # raises it to 141; host_config_rejected (Task #2344's wake-time model-config
-    # fail-fast) raises it to 142.
-    assert len(_TELEMETRY_KINDS) == 142
+    # fail-fast) raises it to 142; wake_degraded + wake_restored (Task #2418's
+    # RedisInboundListener wake-health episodes) raise it to 144.
+    assert len(_TELEMETRY_KINDS) == 144
 
 
 def test_checkpoint_table_sizes_payload_and_metric_disposition() -> None:
