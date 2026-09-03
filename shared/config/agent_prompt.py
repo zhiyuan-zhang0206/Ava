@@ -329,6 +329,24 @@ class AgentPromptSettings(EnvSettings):
         },
     )
 
+    prompt_user_tone_enabled: bool | None = Field(
+        default=None,
+        alias="AVA_SYSTEM_PROMPT_USER_TONE",
+        validation_alias=AliasChoices("AVA_SYSTEM_PROMPT_USER_TONE", "AVA_PROMPT_USER_TONE"),
+        description=(
+            "Inject the 'Communicating with the user' section: per-family tone "
+            "guidance (honest judgment over flattery; directness; no condescension); "
+            "variant is per model family, this toggle gates the whole section; unset "
+            "resolves the per-model default (shared floor: on; claude models pinned off)."
+        ),
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
     prompt_outcome_reporting_enabled: bool | None = Field(
         default=None,
         alias="AVA_SYSTEM_PROMPT_REPORTING",
