@@ -33,7 +33,8 @@ birth marker: enabling new births still requires the publication/all-writer
 boundary, never an environment flag or an installed revision.
 
 Managed exec calls reserve under the metadata lock, launch the fixed isolated
-`agent.exec_domain_owner` entry, validate its actual PID/birth and direct root,
+read-only `agent.exec_domain_owner` entry (`-I -B -X utf8`), validate its actual
+PID/birth and direct root,
 attach that allocation, and then send the exact permit. The root is gated by
 `agent.exec_owner_child`; after the permit it rechecks the reserved request
 digest and exact request/result paths. Neither child inherits the host's control write end.

@@ -183,6 +183,7 @@ async def run_owned(  # noqa: PLR0915 -- one caller retains exact allocation and
             [
                 sys.executable,
                 "-I",
+                "-B",
                 "-X",
                 "utf8",
                 "-m",

@@ -77,6 +77,7 @@ def validate_native_ready(
     if owner.pid != launcher_pid:
         arguments = [
             "-I",
+            "-B",
             "-X",
             "utf8",
             "-m",

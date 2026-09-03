@@ -394,7 +394,7 @@ async def test_real_missing_executable_is_not_an_unresolved_child(
 def test_unreadable_group_member_is_not_an_empty_domain(
     monkeypatch: pytest.MonkeyPatch, failure: type[Exception]
 ) -> None:
-    from agent.graph._exec_process import _process_group_has_live_member
+    from shared.exec_process_domain import _process_group_has_live_member
 
     process = Mock(info={"pid": 123, "status": psutil.STATUS_RUNNING})
 
@@ -406,7 +406,7 @@ def test_unreadable_group_member_is_not_an_empty_domain(
     def unreadable(pid: int) -> int:
         raise failure()
 
-    monkeypatch.setattr("agent.graph._exec_process.os.getpgid", unreadable)
+    monkeypatch.setattr("shared.exec_process_domain.os.getpgid", unreadable)
     with pytest.raises(failure):
         _process_group_has_live_member(123)
 

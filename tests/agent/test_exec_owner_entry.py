@@ -14,7 +14,7 @@ from uuid import uuid4
 import psutil
 import pytest
 
-from agent.graph._exec_protocol import write_request
+from agent.graph._exec_protocol import read_result, write_request
 from shared.exec_owner_protocol import (
     OwnerClosed,
     OwnerContext,
@@ -64,6 +64,7 @@ def _start(tmp_path: Path, context: OwnerContext) -> subprocess.Popen[bytes]:
         [
             sys.executable,
             "-I",
+            "-B",
             "-X",
             "utf8",
             "-m",
@@ -121,7 +122,13 @@ def test_eof_closes_exact_domain_before_user_code(tmp_path: Path) -> None:
 def test_completed_owner_exits_while_original_host_keeps_control_open(tmp_path: Path) -> None:
     """Normal completion must not leave a daemon holding buffered stdin at exit."""
     context = _context(tmp_path)
-    write_request(context.request_path, code="pass", agent_id=1, timeout_s=20, state=None)
+    write_request(
+        context.request_path,
+        code="import sys; assert sys.dont_write_bytecode",
+        agent_id=1,
+        timeout_s=20,
+        state=None,
+    )
     context = context.model_copy(
         update={
             "allocation": context.allocation.model_copy(
@@ -152,6 +159,7 @@ def test_completed_owner_exits_while_original_host_keeps_control_open(tmp_path: 
         assert receipt.reason == "completed"
         assert receipt.root_exit_code == 0
         assert context.result_path.exists()
+        assert read_result(context.result_path).kind == "done"
     finally:
         if proc.stdin is not None:
             proc.stdin.close()
@@ -250,6 +258,7 @@ def test_owner_import_does_not_boot_graph_sdk_or_settings(tmp_path: Path) -> Non
         [
             sys.executable,
             "-I",
+            "-B",
             "-c",
             "import sys; import agent.exec_domain_owner; "
             "assert 'agent.graph' not in sys.modules; assert 'ava' not in sys.modules; "
@@ -272,7 +281,7 @@ from shared.exec_owner_protocol import OwnerControl, OwnerReady, read_owner_cont
 path = Path(sys.argv[1])
 context = read_owner_context(path)
 owner = subprocess.Popen(
-    [sys.executable, '-I', '-X', 'utf8', '-m', 'agent.exec_domain_owner', '--context', str(path)],
+    [sys.executable, '-I', '-B', '-X', 'utf8', '-m', 'agent.exec_domain_owner', '--context', str(path)],
     stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
     close_fds=True,
 )
@@ -314,7 +323,7 @@ def test_real_host_death_closes_active_managed_child(
     publish_owner_message(path, context)
     started = time.monotonic()
     host = subprocess.Popen(  # noqa: S603 -- disposable fixed host, never a service.
-        [sys.executable, "-I", "-c", _HOST, str(path)],
+        [sys.executable, "-I", "-B", "-c", _HOST, str(path)],
         cwd=tmp_path,
         env=dict(
             os.environ,

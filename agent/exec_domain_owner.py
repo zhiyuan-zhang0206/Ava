@@ -112,6 +112,7 @@ def run(context_path: Path) -> None:  # noqa: PLR0915 -- one native owner retain
     argv = [
         sys.executable,
         "-I",
+        "-B",
         "-X",
         "utf8",
         "-m",

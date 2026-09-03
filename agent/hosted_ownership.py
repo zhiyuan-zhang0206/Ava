@@ -1,6 +1,7 @@
 """Hosted incarnation admission and settlement, replacing status-only writes."""
 
 import asyncio
+from typing import Never
 from uuid import UUID, uuid4
 
 import psutil
@@ -12,6 +13,14 @@ from shared.deploy_timing import AGENT_LEASE_TTL_S
 from shared.live_announce import publish_agent_updated
 from shared.log import logger
 from shared.runtime_incarnation import RuntimeIncarnation
+
+
+class _HostedAdmissionRefusedError(Exception):
+    """Roll back speculative resource transfer before returning a refusal."""
+
+
+def _refuse_hosted_admission() -> Never:
+    raise _HostedAdmissionRefusedError
 
 
 async def apply_hosted_lifecycle(
@@ -102,56 +111,59 @@ async def admit_hosted_runtime(
     from shared.incarnation_resources import ResourceProcess
     from shared.resource_admission import admit_resources_async
 
-    async with async_write_transaction(pool) as conn:
-        previous = await (
-            await conn.execute(
-                "SELECT runtime_generation,runtime_owner,runtime_kind FROM agents_meta WHERE id=%s FOR UPDATE",
-                (agent_id,),
+    try:
+        async with async_write_transaction(pool) as conn:
+            previous = await (
+                await conn.execute(
+                    "SELECT runtime_generation,runtime_owner,runtime_kind FROM agents_meta WHERE id=%s FOR UPDATE",
+                    (agent_id,),
+                )
+            ).fetchone()
+            if previous is None:
+                _refuse_hosted_admission()
+            generation = (
+                previous[0]
+                if previous[1:] == (owner, "hosted") and previous[0] is not None
+                else uuid4()
             )
-        ).fetchone()
-        if previous is None:
-            return None
-        generation = (
-            previous[0]
-            if previous[1:] == (owner, "hosted") and previous[0] is not None
-            else uuid4()
-        )
-        await admit_resources_async(
-            conn,
-            RuntimeIncarnation(agent_id, generation, owner),
-            ResourceProcess(pid=native.pid, birth=native.create_time()),
-        )
-        row = await (
-            await conn.execute(
-                "UPDATE agents_meta SET status = 'running', runtime_kind = 'hosted', "
-                "runtime_generation = CASE WHEN runtime_owner = %s AND runtime_kind = 'hosted' "
-                "AND runtime_generation IS NOT NULL "
-                "THEN runtime_generation ELSE %s END, runtime_owner = %s, "
-                "runtime_protocol_version = 0, "
-                "lease_expires_at = now() + make_interval(secs => %s) "
-                "WHERE id = %s AND machine = %s AND status = %s AND pid IS NULL "
-                "AND status IN ('running','idling') "
-                "AND NOT EXISTS (SELECT 1 FROM inbound_messages force "
-                "WHERE force.id=agents_meta.lifecycle_command_id AND force.kind='terminate' "
-                "AND force.status='claimed' AND force.applied_at IS NOT NULL "
-                "AND force.observed_at IS NULL) "
-                "AND (runtime_kind IS NULL OR runtime_kind = 'hosted') "
-                "AND (runtime_owner IS NULL OR runtime_owner = %s "
-                "OR lease_expires_at IS NULL OR lease_expires_at <= now()) "
-                "RETURNING runtime_generation",
-                (
-                    owner,
-                    generation,
-                    owner,
-                    AGENT_LEASE_TTL_S,
-                    agent_id,
-                    machine,
-                    expected_from,
-                    owner,
-                ),
+            await admit_resources_async(
+                conn,
+                RuntimeIncarnation(agent_id, generation, owner),
+                ResourceProcess(pid=native.pid, birth=native.create_time()),
             )
-        ).fetchone()
-        if row is not None:
+            row = await (
+                await conn.execute(
+                    "UPDATE agents_meta SET status = 'running', runtime_kind = 'hosted', "
+                    "runtime_generation = CASE WHEN runtime_owner = %s AND runtime_kind = 'hosted' "
+                    "AND runtime_generation IS NOT NULL "
+                    "THEN runtime_generation ELSE %s END, runtime_owner = %s, "
+                    "runtime_protocol_version = 0, "
+                    "lease_expires_at = now() + make_interval(secs => %s) "
+                    "WHERE id = %s AND machine = %s AND status = %s AND pid IS NULL "
+                    "AND status IN ('running','idling') "
+                    "AND NOT EXISTS (SELECT 1 FROM inbound_messages force "
+                    "WHERE force.id=agents_meta.lifecycle_command_id AND force.kind='terminate' "
+                    "AND force.status='claimed' AND force.applied_at IS NOT NULL "
+                    "AND force.observed_at IS NULL) "
+                    "AND (runtime_kind IS NULL OR runtime_kind = 'hosted') "
+                    "AND (runtime_owner IS NULL OR runtime_owner = %s "
+                    "OR lease_expires_at IS NULL OR lease_expires_at <= now()) "
+                    "RETURNING runtime_generation",
+                    (
+                        owner,
+                        generation,
+                        owner,
+                        AGENT_LEASE_TTL_S,
+                        agent_id,
+                        machine,
+                        expected_from,
+                        owner,
+                    ),
+                )
+            ).fetchone()
+            if row is None:
+                # Resource transfer and ordinary admission are one transaction.
+                _refuse_hosted_admission()
             from agent.lifecycle_observe import observe_hosted_admission
 
             await observe_hosted_admission(conn, RuntimeIncarnation(agent_id, row[0], owner))
@@ -161,10 +173,7 @@ async def admit_hosted_runtime(
                 source="system",
                 payload={"from": expected_from, "to": "running"},
             )
-        else:
-            # Resource transfer and ordinary admission are one transaction.
-            await conn.rollback()
-    if row is None:
+    except _HostedAdmissionRefusedError:
         return None
     await publish_agent_updated(pool, agent_id)
     logger.info(

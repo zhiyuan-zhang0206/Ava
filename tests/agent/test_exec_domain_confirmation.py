@@ -134,7 +134,10 @@ os._exit(0)
             assert _belongs_to_job(job, member.pid) is not late_attach
             assert member.create_time() == member_birth
         domain = _exec_process.ExecProcessDomain(root, job)
-        domain.close_confirmed(time.monotonic() + 5)
+        close_deadline = time.monotonic() + 5
+        domain.close_confirmed(close_deadline)
+        while time.monotonic() < close_deadline and not _ended(member):
+            time.sleep(0.01)
         # Late attachment closes an empty Job, not the escaped fixture child.
         # This negative demonstrates why only atomic creation supports closure.
         assert _ended(member) is not late_attach
