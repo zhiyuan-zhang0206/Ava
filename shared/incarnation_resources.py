@@ -61,6 +61,7 @@ class IncarnationResources(_StrictEvidence):
     state: Literal["admitted"] = "admitted"
     generation: UUID
     owner: UUID
+    host_process: ResourceProcess | None = None
     frozen_by: int | None = Field(default=None, gt=0)
     requests: dict[str, ExecAllocation]
 
@@ -216,3 +217,19 @@ def attach_exec(
             update={"requests": evidence.requests | {str(reserved.request): attached}}
         ),
     )
+
+
+def complete_exec(
+    conn: psycopg.Connection, target: RuntimeIncarnation, entry: ExecAllocation
+) -> None:
+    """Consume an independently validated exact terminal receipt, even after freeze.
+
+    Callers must read and validate the native owner's immutable receipt before
+    taking this lock. An unattached/ambiguous reservation cannot be discharged.
+    """
+    evidence, _, _ = _locked(conn, target)
+    if entry.owner_process is None or evidence.requests.get(str(entry.request)) != entry:
+        raise ResourceEvidenceError("terminal receipt does not match the attached allocation")
+    remaining = dict(evidence.requests)
+    del remaining[str(entry.request)]
+    _store(conn, target, evidence.model_copy(update={"requests": remaining}))

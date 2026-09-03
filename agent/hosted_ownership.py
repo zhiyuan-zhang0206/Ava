@@ -1,7 +1,9 @@
 """Hosted incarnation admission and settlement, replacing status-only writes."""
 
+import asyncio
 from uuid import UUID, uuid4
 
+import psutil
 from psycopg_pool import AsyncConnectionPool
 
 from shared.audit_events import insert_event_log_async
@@ -28,6 +30,9 @@ async def apply_hosted_lifecycle(
     if not hosted_resources_settled():
         return None
     async with async_write_transaction(pool) as conn:
+        from shared.resource_admission import require_resources_closed_async
+
+        await require_resources_closed_async(conn, incarnation.agent_id)
         cursor = await conn.execute(
             "SELECT lifecycle_command_id,lease_expires_at FROM agents_meta WHERE id=%s "
             "AND runtime_generation=%s AND runtime_owner=%s AND runtime_kind='hosted' "
@@ -90,7 +95,32 @@ async def admit_hosted_runtime(
     expected_from: str,
 ) -> RuntimeIncarnation | None:
     """Keep this owner's logical incarnation across turns; reject live others."""
+    from shared.exec_owner_recovery import recover_local_resources
+
+    await asyncio.to_thread(recover_local_resources, agent_id, machine)
+    native = psutil.Process()
+    from shared.incarnation_resources import ResourceProcess
+    from shared.resource_admission import admit_resources_async
+
     async with async_write_transaction(pool) as conn:
+        previous = await (
+            await conn.execute(
+                "SELECT runtime_generation,runtime_owner,runtime_kind FROM agents_meta WHERE id=%s FOR UPDATE",
+                (agent_id,),
+            )
+        ).fetchone()
+        if previous is None:
+            return None
+        generation = (
+            previous[0]
+            if previous[1:] == (owner, "hosted") and previous[0] is not None
+            else uuid4()
+        )
+        await admit_resources_async(
+            conn,
+            RuntimeIncarnation(agent_id, generation, owner),
+            ResourceProcess(pid=native.pid, birth=native.create_time()),
+        )
         row = await (
             await conn.execute(
                 "UPDATE agents_meta SET status = 'running', runtime_kind = 'hosted', "
@@ -109,7 +139,16 @@ async def admit_hosted_runtime(
                 "AND (runtime_owner IS NULL OR runtime_owner = %s "
                 "OR lease_expires_at IS NULL OR lease_expires_at <= now()) "
                 "RETURNING runtime_generation",
-                (owner, uuid4(), owner, AGENT_LEASE_TTL_S, agent_id, machine, expected_from, owner),
+                (
+                    owner,
+                    generation,
+                    owner,
+                    AGENT_LEASE_TTL_S,
+                    agent_id,
+                    machine,
+                    expected_from,
+                    owner,
+                ),
             )
         ).fetchone()
         if row is not None:
@@ -122,6 +161,9 @@ async def admit_hosted_runtime(
                 source="system",
                 payload={"from": expected_from, "to": "running"},
             )
+        else:
+            # Resource transfer and ordinary admission are one transaction.
+            await conn.rollback()
     if row is None:
         return None
     await publish_agent_updated(pool, agent_id)

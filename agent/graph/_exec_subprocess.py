@@ -454,6 +454,50 @@ async def _run_in_subprocess(
     birth_config: dict[str, object] | None = None,
     editable_guard: Callable[[], tuple[str, ...]] | None = None,
 ) -> tuple[_ExecResult, ResultPayload | None]:
+    """Select admitted managed ownership without changing legacy NULL semantics."""
+    guard_failure = _editable_guard_failure(editable_guard)
+    if guard_failure is not None:
+        return guard_failure, None
+    from agent.graph._exec_owned_run import managed_target, run_owned
+
+    target = await asyncio.to_thread(managed_target, agent_id)
+    if target is not None:
+        return await run_owned(
+            target,
+            code,
+            cancel_event,
+            timeout,
+            chunk_publisher,
+            state=state,
+            exec_dir=exec_dir,
+            config_overlay=config_overlay,
+            birth_config=birth_config,
+        )
+    return await _run_legacy_subprocess(
+        code,
+        agent_id,
+        cancel_event,
+        timeout,
+        chunk_publisher,
+        state=state,
+        exec_dir=exec_dir,
+        config_overlay=config_overlay,
+        birth_config=birth_config,
+    )
+
+
+async def _run_legacy_subprocess(
+    code: str,
+    agent_id: int | None,
+    cancel_event: asyncio.Event,
+    timeout: float,
+    chunk_publisher: ExecOutputChunkPublisher | None = None,
+    *,
+    state: dict[str, Any] | None = None,
+    exec_dir: Path | None = None,
+    config_overlay: dict[str, object] | None = None,
+    birth_config: dict[str, object] | None = None,
+) -> tuple[_ExecResult, ResultPayload | None]:
     """Run `code` in one disposable child process; poll every 50ms monitoring
     exit / cancel_event / deadline (same priority as the old thread loop:
     cancel > deadline > natural completion).
@@ -465,9 +509,6 @@ async def _run_in_subprocess(
     The child's outcome kinds map onto the result with the parent's flags
     authoritative.
     """
-    guard_failure = _editable_guard_failure(editable_guard)
-    if guard_failure is not None:
-        return guard_failure, None
     if exec_dir is None:
         exec_dir = exec_run_dir()
     request_path = make_request_path(exec_dir, agent_id)
