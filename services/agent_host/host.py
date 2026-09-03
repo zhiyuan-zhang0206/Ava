@@ -157,6 +157,7 @@ from shared.log import logger
 from shared.machine import machine_name
 from shared.plugin_config_view import bind_agent_plugin_config, resolve_agent_plugin_pins
 from shared.redis_client import get_async_redis
+from shared.runtime_admission import RuntimeAdmission
 from shared.runtime_incarnation import current_incarnation
 from shared.trace import turn_span
 from shared.turn_identity import bind_turn_identity
@@ -293,6 +294,7 @@ class AgentHost:
         self._graph = graph
         self._machine = machine if machine is not None else machine_name()
         self._owner = uuid4()
+        self._publication_boot: asyncio.Task[RuntimeAdmission] | None = None
         self._runtimes: OrderedDict[int, _AgentRuntime] = OrderedDict()
         # Agents with a turn in flight right now. Eviction skips them: a running
         # turn holds its own reference, so dropping the entry would not break it
@@ -380,6 +382,9 @@ class AgentHost:
         at the next turn boundary, the hosted replacement for "the process exits
         and boots with the merged config".
         """
+        if self._publication_boot is None:
+            self._publication_boot = asyncio.create_task(asyncio.to_thread(RuntimeAdmission.load))
+        publication = await asyncio.shield(self._publication_boot)
         stored = await self._read_stored_config(agent_id)
         if stored is None or not self._is_runnable(agent_id, stored):
             self.stats.wakes_skipped += 1
@@ -388,7 +393,12 @@ class AgentHost:
         async with self._turn_slots:
             self.stats.turns_started += 1
             incarnation = await admit_hosted_runtime(
-                self._pool, agent_id, self._machine, self._owner, expected_from=stored.status
+                self._pool,
+                agent_id,
+                self._machine,
+                self._owner,
+                expected_from=stored.status,
+                publication=publication,
             )
             if incarnation is None:
                 logger.info(

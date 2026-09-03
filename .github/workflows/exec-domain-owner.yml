@@ -18,6 +18,8 @@ on:
       - 'shared/winjob_spawn.py'
       - 'tests/agent/test_exec_owner_entry.py'
       - 'tests/agent/test_resource_admission.py'
+      - 'shared/runtime_admission.py'
+      - 'tests/agent/test_publication_runtime_admission.py'
 permissions:
   contents: read
 jobs:
@@ -42,7 +44,8 @@ jobs:
           mkdir -p proof
           git rev-parse HEAD > proof/head-sha.txt
           uv run pyright shared/incarnation_resources.py shared/resource_admission.py shared/exec_owner_protocol.py shared/exec_owner_recovery.py agent/graph/_exec_owned_run.py agent/exec_domain_owner.py agent/exec_owner_child.py tests/agent/test_incarnation_resources.py tests/agent/test_incarnation_resources_migration.py tests/agent/test_resource_admission.py
-          timeout 240 uv run pytest tests/agent/test_incarnation_resources.py tests/agent/test_incarnation_resources_migration.py tests/agent/test_resource_admission.py -q --junitxml=proof/resource-fences.xml
+          uv run pyright shared/runtime_admission.py tests/agent/test_publication_runtime_admission.py
+          timeout 240 uv run pytest tests/agent/test_incarnation_resources.py tests/agent/test_incarnation_resources_migration.py tests/agent/test_resource_admission.py tests/agent/test_publication_runtime_admission.py -q --junitxml=proof/resource-fences.xml
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:

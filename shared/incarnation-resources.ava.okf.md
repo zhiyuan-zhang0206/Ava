@@ -32,6 +32,15 @@ resource set plus its applied lifecycle decision. No default spawn stamps the
 birth marker: enabling new births still requires the publication/all-writer
 boundary, never an environment flag or an installed revision.
 
+Actual process admission resolves the loaded image once before the database
+transaction. Hosted admission shares one boot-resolution task and rechecks its
+cheap immutable binding without traversing the image on each turn. The existing
+publication decision locks deployment and registry before agent metadata. Pending
+publication exits a process before ownership or returns no hosted admission;
+queued inbound is not consumed. Legacy generic unowned-boot terminal cleanup is
+allowed only in the exact stable, never-enabled SQL-NULL publication state, not
+after a deferred child exits. This does not renew a command's launch deadline.
+
 Managed exec calls reserve under the metadata lock, launch the fixed isolated
 `agent.exec_domain_owner` entry, validate its actual PID/birth and direct root,
 attach that allocation, and then send the exact permit. The root is gated by

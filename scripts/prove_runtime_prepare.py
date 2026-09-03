@@ -57,6 +57,7 @@ def prove_checkout_absent(  # noqa: PLR0915 — one guarded checkout-retirement 
     plugin_proof = _copy_proof(root, checkout, "prove_runtime_plugins.py")
     inventory_proof = _copy_proof(root, checkout, "prove_release_inventory.py")
     _copy_proof(root, checkout, "prove_runtime_publication_input.py")
+    exec_owner = _copy_proof(root, checkout, "prove_exec_owner_installed.py")
     bootstrap = _copy_proof(root, checkout, "prove_ops_bootstrap.py")
     updater = _copy_proof(root, checkout, "prove_updater_bootstrap.py")
     alias = root / "runtime-entry-alias"
@@ -162,6 +163,13 @@ def prove_checkout_absent(  # noqa: PLR0915 — one guarded checkout-retirement 
                 "RUNNER_TEMP": os.environ["RUNNER_TEMP"],
             }
             schema = json.loads((release.root / "manifest.json").read_text())["schema_digest"]
+            subprocess.run(  # noqa: S603 — installed owner, absent checkout, private CI directory.
+                [str(release.interpreter), "-I", "-B", str(exec_owner), str(root / "exec-owner")],
+                cwd=root,
+                env=migration_env,
+                check=True,
+                timeout=150,
+            )
             # Prove the independent resolver before the inherited updater hop.
             # Restore exact fixture paths so native hop preparation sees no
             # synthetic sessions/jobs. A later hop failure still fails this run.
