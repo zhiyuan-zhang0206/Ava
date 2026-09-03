@@ -333,6 +333,13 @@ def wired(monkeypatch: pytest.MonkeyPatch, host_plugin: None) -> _Build:
 
     monkeypatch.setattr(host_mod, "apply_hosted_lifecycle", _apply_lifecycle)
 
+    async def _no_force(*_args: object, **_kwargs: object) -> bool:
+        # These cache/context fixtures carry no force command. Real owner/pointer
+        # settlement and refusal are covered by test_hosted_force_quiescence.
+        return False
+
+    monkeypatch.setattr("shared.hosted_force.original_host_force", _no_force)
+
     def _build(
         rows: dict[int, _Row], results: dict[int, list[dict[str, Any]]] | None = None
     ) -> tuple[AgentHost, _FakeGraph, _FakePool]:
@@ -371,7 +378,9 @@ class TestPendingInboundBackstop:
             (17, True),
             (23, False),
         ]
-        assert pool.params == (180.0, 180.0, 180.0, 180.0, "this-box")
+        assert pool.params == (180.0, 180.0, host._owner, 180.0, 180.0, "this-box")
+        assert "m.runtime_owner=%s" in pool.sql
+        assert "force.target_generation=m.runtime_generation" in pool.sql
         assert "m.status = 'idling'" in pool.sql
         assert "m.status = 'running'" in pool.sql
         assert "m.machine = %s" in pool.sql
