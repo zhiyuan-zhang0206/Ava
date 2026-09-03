@@ -31,6 +31,7 @@ class _ExecJobState:
 _exec_job_state = _ExecJobState()
 
 _JOB_OBJECT_EXTENDED_LIMIT_INFORMATION = 9
+_JOB_OBJECT_BASIC_ACCOUNTING_INFORMATION = 1
 _JOB_OBJECT_LIMIT_BREAKAWAY_OK = 0x00000800
 _JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000
 
@@ -61,6 +62,19 @@ class _BasicLimitInformation(ctypes.Structure):
         ("Affinity", _SIZE_T),
         ("PriorityClass", _DWORD),
         ("SchedulingClass", _DWORD),
+    ]
+
+
+class _BasicAccountingInformation(ctypes.Structure):
+    _fields_ = [
+        ("TotalUserTime", ctypes.c_longlong),
+        ("TotalKernelTime", ctypes.c_longlong),
+        ("ThisPeriodTotalUserTime", ctypes.c_longlong),
+        ("ThisPeriodTotalKernelTime", ctypes.c_longlong),
+        ("TotalPageFaultCount", _DWORD),
+        ("TotalProcesses", _DWORD),
+        ("ActiveProcesses", _DWORD),
+        ("TotalTerminatedProcesses", _DWORD),
     ]
 
 
@@ -95,6 +109,16 @@ def _kernel32() -> Any:
     api.AssignProcessToJobObject.restype = _BOOL
     api.CloseHandle.argtypes = [wintypes.HANDLE]
     api.CloseHandle.restype = _BOOL
+    api.TerminateJobObject.argtypes = [wintypes.HANDLE, _DWORD]
+    api.TerminateJobObject.restype = _BOOL
+    api.QueryInformationJobObject.argtypes = [
+        wintypes.HANDLE,
+        ctypes.c_int,
+        wintypes.LPVOID,
+        _DWORD,
+        wintypes.LPVOID,
+    ]
+    api.QueryInformationJobObject.restype = _BOOL
     return api
 
 
@@ -176,6 +200,47 @@ class WindowsJob:
         self._handle = None
         if not _kernel32().CloseHandle(wintypes.HANDLE(handle)):
             raise _last_error("CloseHandle")
+
+    def terminate_and_confirm(self, deadline: float) -> None:
+        """Observe zero active members before releasing the original Job handle.
+
+        ``deadline`` is the caller's existing monotonic close deadline, never
+        renewed here. This proves only non-breakaway Job membership. A failed
+        query/timeout remains unknown even when best-effort handle close kills
+        the members afterward; callers must not publish a closure receipt.
+        """
+        handle = self.handle
+        try:
+            _terminate_and_observe_job(handle, deadline)
+        except BaseException as original:
+            try:
+                self.close()
+            except BaseException as cleanup:
+                original.add_note(f"Job close after failed confirmation also failed: {cleanup}")
+            raise
+        self.close()
+
+
+def _terminate_and_observe_job(handle: int, deadline: float) -> None:
+    api = _kernel32()
+    if not api.TerminateJobObject(wintypes.HANDLE(handle), 1):
+        raise _last_error("TerminateJobObject")
+    while True:
+        accounting = _BasicAccountingInformation()
+        if not api.QueryInformationJobObject(
+            wintypes.HANDLE(handle),
+            _JOB_OBJECT_BASIC_ACCOUNTING_INFORMATION,
+            ctypes.byref(accounting),
+            ctypes.sizeof(accounting),
+            None,
+        ):
+            raise _last_error("QueryInformationJobObject")
+        if accounting.ActiveProcesses == 0:
+            return
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("exec Job still has active managed members")
+        time.sleep(min(0.01, remaining))
 
 
 def publish_parent_job_gate(gate: Path) -> None:

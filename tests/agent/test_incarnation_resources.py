@@ -10,6 +10,7 @@ import pytest
 from psycopg.types.json import Jsonb
 
 from shared.db import create_agent
+from shared.hosted_force import install_hosted_force
 from shared.incarnation_resources import (
     ExecAllocation,
     IncarnationResources,
@@ -55,9 +56,9 @@ def _entry() -> ExecAllocation:
 def _force(conn: psycopg.Connection, target: RuntimeIncarnation) -> int:
     conn.execute("SELECT id FROM agents_meta WHERE id=%s FOR UPDATE", (target.agent_id,))
     row = conn.execute(
-        "INSERT INTO inbound_messages(agent_id,kind,content,source,status,target_generation,"
-        "target_owner,applied_at) VALUES(%s,'terminate','','user','claimed',%s,%s,clock_timestamp()) RETURNING id",
-        (target.agent_id, target.generation, target.owner),
+        "INSERT INTO inbound_messages(agent_id,kind,content,source,status) "
+        "VALUES(%s,'terminate','','user','pending') RETURNING id",
+        (target.agent_id,),
     ).fetchone()
     assert row is not None
     conn.execute(
@@ -65,6 +66,7 @@ def _force(conn: psycopg.Connection, target: RuntimeIncarnation) -> int:
         "lifecycle_command_id=%s WHERE id=%s",
         (row[0], target.agent_id),
     )
+    install_hosted_force(conn, target.agent_id, row[0])
     freeze_resources(conn, target, row[0])
     return row[0]
 

@@ -56,6 +56,25 @@ class ExecProcessDomain:
     proc: subprocess.Popen[bytes]
     windows_job: WindowsJob | None
 
+    def close_confirmed(self, deadline: float) -> None:
+        """Close and observe managed members before the unreaped root pin ends.
+
+        Only the dedicated domain owner calls this, while it still directly
+        parents the unreaped root. Never use a historical numeric PGID after
+        root reap, and never treat escaped sessions as proven domain members.
+        """
+        if IS_WINDOWS:
+            if self.windows_job is None:
+                raise RuntimeError("Windows exec process has no Job Object")
+            self.windows_job.terminate_and_confirm(deadline)
+            return
+        self.close()
+        while _process_group_has_live_member(self.proc.pid):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError("exec group still has live managed members")
+            time.sleep(min(_ROOT_EXIT_POLL_S, remaining))
+
     def close(self) -> None:
         """Hard-stop all remaining domain members. Called by one owner task."""
         if IS_WINDOWS:
