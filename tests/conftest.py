@@ -692,7 +692,7 @@ def pytest_configure(config: pytest.Config) -> None:
     # frames land in the job log (QA #3242 recipe).
     import faulthandler
 
-    faulthandler.dump_traceback_later(60, exit=False)
+    faulthandler.dump_traceback_later(60, repeat=True, exit=False)
     # --- end diag ---
     message = _full_run_guard_message(
         config.rootpath, config.args, os.environ, config.invocation_params.dir
