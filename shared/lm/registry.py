@@ -172,6 +172,10 @@ class ModelSpec:
 
     provider: str  # SUPPORTED_MODELS group key == build_chat_model prefix
     spawnable: bool = False  # offered in the frontend spawn dropdown
+    unavailable_fallback: str | None = None  # temporarily withdraw this id from new selections
+    # while preserving existing configurations: build_chat_model resolves the
+    # explicitly named fallback. The target must be a registered, spawnable
+    # model; no provider error is silently retried as a fallback.
     superseded_by: str | None = None  # the model id that replaced this one in the
     # spawn picker. Purely a display fact: a superseded model stays spawnable
     # (and therefore fully config-valid — spawn/restart validation and the
@@ -404,7 +408,7 @@ MODELS: dict[str, ModelSpec] = {
     # -- gemini --
     "gemini-3.8-flash": ModelSpec(
         provider="gemini",
-        spawnable=True,
+        unavailable_fallback="gemini-3.7-flash",
         context_window=1_048_576,
         # Google does not publish a cutoff for 3.8 Flash; carries the 3.7
         # estimate forward (3.7 GA'd 2026-08-13, 3.8 GA'd 2026-09-02).
@@ -416,6 +420,15 @@ MODELS: dict[str, ModelSpec] = {
             # (decisions/2026-07-25-per-model-tuning-values.md).
             reasoning_effort="medium",
         ),
+        media_types=frozenset({"image", "pdf", "audio", "video"}),
+    ),
+    "gemini-3.7-flash": ModelSpec(
+        provider="gemini",
+        spawnable=True,
+        context_window=1_048_576,
+        knowledge_cutoff="2026-03",
+        effort_levels=("minimal", "low", "medium", "high"),
+        tuning=ModelTuning(reasoning_effort="medium"),
         media_types=frozenset({"image", "pdf", "audio", "video"}),
     ),
     "gemini-3.5-flash": ModelSpec(
@@ -1007,9 +1020,43 @@ def _validate_registry() -> None:
             seen.add(replacement_id)
             replacement_id = MODELS[replacement_id].superseded_by
 
+    # A temporary withdrawal is an explicit routing decision, not a general
+    # provider-error fallback. Keep both ends concrete so an existing config
+    # can safely resolve to the model the picker offers instead.
+    for model_id, spec in MODELS.items():
+        fallback_id = spec.unavailable_fallback
+        if fallback_id is None:
+            continue
+        if spec.spawnable:
+            raise RuntimeError(
+                f"temporarily unavailable model {model_id!r} remains spawnable — "
+                "remove it from the picker before assigning unavailable_fallback"
+            )
+        if fallback_id not in MODELS:
+            raise RuntimeError(
+                f"temporarily unavailable model {model_id!r} falls back to {fallback_id!r}, "
+                "which is not in MODELS"
+            )
+        if not MODELS[fallback_id].spawnable:
+            raise RuntimeError(
+                f"temporarily unavailable model {model_id!r} falls back to {fallback_id!r}, "
+                "which is not spawnable"
+            )
+
 
 _rebuild_derived_views()
 _validate_registry()
+
+
+def resolve_available_model(model: str) -> str:
+    """Resolve an explicitly withdrawn model id to its registered fallback.
+
+    Unknown and currently available ids pass through. Registry validation keeps
+    a fallback to one available hop, so no dynamic provider-error retry is
+    hidden behind this resolution.
+    """
+    spec = MODELS.get(model)
+    return spec.unavailable_fallback if spec and spec.unavailable_fallback else model
 
 
 # ---------------------------------------------------------------------------

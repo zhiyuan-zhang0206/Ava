@@ -8,7 +8,7 @@ description: Chooses the LLM tier and config overlay for spawned Ava workers und
 You pick a worker's model at spawn time:
 
 ```python
-ava.agents.spawn(prompt="...", config_overlay={"llm_model": "gemini-3.8-flash"})
+ava.agents.spawn(prompt="...", config_overlay={"llm_model": "gemini-3.7-flash"})
 ```
 
 Omitting the overlay is a valid choice — the child inherits the cluster default.
@@ -83,15 +83,16 @@ reaching for anything more expensive):
 
 | Tier | Model | Use for |
 |---|---|---|
-| **Judgment (main)** | `gemini-3.8-flash` | orchestration, planning, synthesis, reviewing/judging other agents' output, writing for humans |
+| **Judgment (main)** | `gemini-3.7-flash` | orchestration, planning, synthesis, reviewing/judging other agents' output, writing for humans |
 | **Mechanical** | `deepseek-v4-flash-vision-exp` | high-volume parallel workers, extraction, format transforms, checklist verification, scanning/sweeping |
 
-`gemini-3.8-flash` replaced `deepseek-v4-pro` as the standing main model (user
-ruling 2026-09-03); the mechanical tier replaced `deepseek-v4-flash` with its
-vision-exp sibling (same price, strictly smarter — see the dominance pair
-above). Claude and other models stay registered and spawnable, but they sit
-outside the default policy — use them only when the user explicitly asks for
-them.
+`gemini-3.8-flash` is temporarily unavailable because Google is intermittently
+rejecting thought signatures; use its supported predecessor, `gemini-3.7-flash`,
+until that validation failure is resolved. The mechanical tier replaced
+`deepseek-v4-flash` with its vision-exp sibling (same price, strictly smarter —
+see the dominance pair above). Claude and other models stay registered and
+spawnable, but they sit outside the default policy — use them only when the
+user explicitly asks for them.
 
 ## How to decide the tier
 
@@ -110,10 +111,10 @@ Three questions about the sub-task:
 The typical dynamic-workflow shape that falls out:
 
 ```
-gemini-3.8-flash orchestrator
+gemini-3.7-flash orchestrator
   → deepseek-v4-flash-vision-exp worker fleet
   → deepseek-v4-flash-vision-exp cross-checkers
-  → gemini-3.8-flash synthesizer
+  → gemini-3.7-flash synthesizer
 ```
 
 ## Don't

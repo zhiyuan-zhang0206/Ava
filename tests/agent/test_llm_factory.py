@@ -25,6 +25,19 @@ from shared.lm.registry import SUPPORTED_MODELS, resolve_setting
 
 
 class TestBuildChatModel:
+    def test_temporarily_unavailable_gemini_model_builds_its_fallback(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The builder—not only spawn validation—must protect restarted agents
+        whose frozen model configuration still names Gemini 3.8 Flash."""
+        monkeypatch.setattr(settings.lm, "gemini_api_key", SecretStr("sk-gemini-test"))
+        from langchain_google_genai import ChatGoogleGenerativeAI
+
+        llm = build_chat_model("gemini-3.8-flash")
+
+        assert isinstance(llm, ChatGoogleGenerativeAI)
+        assert llm.model == "gemini-3.7-flash"
+
     def test_claude_prefix_returns_chat_anthropic(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(settings.lm, "anthropic_api_key", SecretStr("sk-ant-test"))
         llm = build_chat_model("claude-opus-4-7")
@@ -1438,6 +1451,18 @@ class TestValidateModelConfig:
         result = validate_model_config(model="claude-sonnet-5")
         assert result == "claude-sonnet-5"
 
+    def test_temporarily_unavailable_model_validates_to_its_fallback(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """An existing Gemini 3.8 configuration is accepted but runs on the
+        explicitly registered Gemini 3.7 fallback."""
+        self._clear_all_keys(monkeypatch)
+        monkeypatch.setattr(settings.lm, "gemini_api_key", SecretStr("sk-test"))
+
+        result = validate_model_config(model="gemini-3.8-flash")
+
+        assert result == "gemini-3.7-flash"
+
 
 class TestThinkingDisabledAcrossRoster:
     """issue #190: `thinking={"type": "disabled"}` must be expressible — or a
@@ -1487,16 +1512,15 @@ class TestThinkingDisabledAcrossRoster:
             "gemini-2.5-flash" in r["message"] and "ignored" in r["message"] for r in loguru_records
         )
 
-    @pytest.mark.parametrize("model", ("gemini-3.8-flash", "gemini-3.1-pro-preview"))
-    def test_gemini_3_x_thinking_disabled_maps_to_lowest_declared_level(
-        self, model: str, monkeypatch: pytest.MonkeyPatch
+    def test_gemini_3_1_thinking_disabled_maps_to_lowest_declared_level(
+        self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Models that reject `minimal` map disabled thinking to their lowest
-        declared level, while retaining no thought blocks on the wire."""
+        """Gemini 3.1 rejects `minimal`, so disabled thinking maps to its
+        lowest declared level while retaining no thought blocks on the wire."""
         monkeypatch.setattr(settings.lm, "gemini_api_key", SecretStr("sk-test"))
         from langchain_google_genai import ChatGoogleGenerativeAI
 
-        llm = build_chat_model(model, thinking={"type": "disabled"})
+        llm = build_chat_model("gemini-3.1-pro-preview", thinking={"type": "disabled"})
         assert isinstance(llm, ChatGoogleGenerativeAI)
         assert llm.thinking_level == "low"
         assert llm.include_thoughts is False

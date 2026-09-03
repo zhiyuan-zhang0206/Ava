@@ -16,6 +16,7 @@ from shared.lm.registry import (
     ModelSpec,
     ModelTuning,
     explain_setting,
+    resolve_available_model,
     resolve_setting,
     tuning_field_names,
 )
@@ -85,6 +86,15 @@ def test_superseded_models_stay_spawnable() -> None:
             continue
         assert spec.spawnable, model_id
         assert spec.superseded_by in MODELS, model_id
+
+
+def test_gemini_3_8_flash_temporarily_falls_back_to_gemini_3_7_flash() -> None:
+    """The signature-rejection withdrawal hides 3.8 from new selections but
+    preserves existing configurations by resolving them to the last supported
+    Flash model."""
+    assert "gemini-3.8-flash" not in SUPPORTED_MODELS["gemini"]
+    assert "gemini-3.7-flash" in SUPPORTED_MODELS["gemini"]
+    assert resolve_available_model("gemini-3.8-flash") == "gemini-3.7-flash"
 
 
 def test_superseded_chain_validation_rejects_self_link(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -238,6 +248,7 @@ def test_image_media_types_match_the_verified_model_matrix() -> None:
         "claude-opus-4-6",
         "claude-haiku-4-5",
         "gemini-3.8-flash",
+        "gemini-3.7-flash",
         "gemini-3.5-flash",
         "gemini-3.1-pro-preview",
         "gemini-2.5-pro",
