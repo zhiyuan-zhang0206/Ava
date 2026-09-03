@@ -207,8 +207,10 @@ def _spawn(
             start_new_session=not IS_WINDOWS,
         )
     except OSError as original:
-        if windows_job is not None:
-            windows_job.close()
+        if windows_job is not None and not _attempt_spawn_cleanup(
+            original, "job_close", windows_job.close
+        ):
+            raise
         raise _ExecNeverStartedError(str(original)) from original
     except BaseException as original:
         if windows_job is not None:
@@ -246,7 +248,7 @@ def _attempt_spawn_cleanup(
     original: BaseException,
     stage: str,
     action: Callable[[], object],
-) -> None:
+) -> bool:
     """Attempt one pre-owner cleanup stage, preserving the work failure."""
     try:
         action()
@@ -255,6 +257,8 @@ def _attempt_spawn_cleanup(
             "exec spawn cleanup also failed "
             f"({stage}: {type(cleanup_error).__name__}: {cleanup_error})"
         )
+        return False
+    return True
 
 
 def _drain_output(proc: subprocess.Popen[bytes], stream: StreamingTextIO) -> None:
