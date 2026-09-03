@@ -450,9 +450,10 @@ async def _invoke_graph_with_lifecycle_logging(
                 # implementations on alternate saver objects.
                 if "_ava_nstep_flush" in checkpointer.__dict__:
                     flush = cast(
-                        Callable[[], Awaitable[None]], checkpointer.__dict__["_ava_nstep_flush"]
+                        Callable[[str], Awaitable[None]],
+                        checkpointer.__dict__["_ava_nstep_flush"],
                     )
-                    await flush()
+                    await flush(str(agent_id))
             # exit_requested is guaranteed present: this invocation's input
             # wrote the channel. [] not .get() — a missing key is a bug.
             # Flush the aggregated node_exit buffer on EVERY invocation return:

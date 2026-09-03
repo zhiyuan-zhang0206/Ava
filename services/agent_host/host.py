@@ -123,8 +123,10 @@ import hashlib
 import json
 import time
 from collections import OrderedDict
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import datetime
+from typing import cast
 from uuid import uuid4
 
 import psycopg
@@ -684,6 +686,13 @@ class AgentHost:
                     config=config,
                     context=ctx,
                 )
+            checkpointer_attrs = getattr(self._checkpointer, "__dict__", {})
+            if "_ava_nstep_flush" in checkpointer_attrs:
+                flush = cast(
+                    Callable[[str], Awaitable[None]],
+                    checkpointer_attrs["_ava_nstep_flush"],
+                )
+                await flush(str(agent_id))
             # [] not .get(): this invocation's input wrote both channels, so a
             # missing key is a bug, not a state to tolerate.
             if result["exit_requested"]:
