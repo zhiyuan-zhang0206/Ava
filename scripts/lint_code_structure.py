@@ -150,6 +150,11 @@ _OVERSIZE_ALLOWED: dict[str, tuple[str, int, str]] = {
     # IM Bridge core: envelope, command routing, per-channel state, SSE
     # subscription push, inbound outbox — one cohesive dispatch module.
     "services/im_bridge/core.py": ("#405", 500, "2026-12-31"),
+    # Computer-use MCP daemon: wire protocol + the serialized/audited tool
+    # surface, all tools sharing one coordinate-space contract (the browser
+    # daemon sibling has the same single-module shape). Was 798 lines on main;
+    # crossed the ceiling with the OCR text tools (find_text/click_text).
+    "services/computer/mcp_daemon.py": ("#405", 800, "2026-12-31"),
     # The EVENTS registry — one flat name→spec dict emit() consults; grows
     # one entry per event. Schema-registry shard split tracked.
     "shared/events/contract.py": ("#405", 500, "2026-12-31"),
