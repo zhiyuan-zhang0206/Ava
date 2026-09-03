@@ -9,6 +9,7 @@ Each helper opens its own connection, so it sees rows committed by the fixture.
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 
 import psycopg
@@ -63,6 +64,46 @@ def _inbound_rows(db_conn: psycopg.Connection, agent_id: int) -> list[tuple[str,
             (agent_id,),
         )
         return cur.fetchall()
+
+
+def test_insert_restart_completed_inbound_traces_newest_restart(
+    db_conn: psycopg.Connection,
+) -> None:
+    """The completion marker retains the restart envelope the claim will render."""
+    agent_id = _seed_agent(db_conn, "restarting")
+    payload = {"config_overlay": {"model": "gpt-5"}}
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO inbound_messages (agent_id, content, kind, source, payload) "
+            "VALUES (%s, %s, 'restart', 'self', %s::jsonb)",
+            (agent_id, "restart with a new model", json.dumps(payload)),
+        )
+        traced = db.insert_restart_completed_inbound(cur, agent_id)
+    db_conn.commit()
+
+    assert traced == ("self", "restart with a new model", payload)
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "SELECT kind, source, content, payload FROM inbound_messages "
+            "WHERE agent_id = %s ORDER BY id",
+            (agent_id,),
+        )
+        assert cur.fetchall() == [
+            ("restart", "self", "restart with a new model", payload),
+            ("restart_completed", "self", "restart with a new model", payload),
+        ]
+
+
+def test_insert_restart_completed_inbound_without_restart_returns_none(
+    db_conn: psycopg.Connection,
+) -> None:
+    """Callers decide how to handle a missing restart inbound; the helper does not insert."""
+    agent_id = _seed_agent(db_conn, "restarting")
+    with db_conn.cursor() as cur:
+        assert db.insert_restart_completed_inbound(cur, agent_id) is None
+    db_conn.commit()
+
+    assert _inbound_rows(db_conn, agent_id) == []
 
 
 def test_signal_live_agents_restart_only_live(db_conn: psycopg.Connection) -> None:

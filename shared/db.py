@@ -641,6 +641,53 @@ def insert_inbound_message(
     return new_id
 
 
+def insert_restart_completed_inbound(
+    cur: psycopg.Cursor,
+    agent_id: int,
+) -> tuple[str, str, dict[str, object] | None] | None:
+    """Trace the newest restart inbound into a restart-completed marker.
+
+    The newest row matters: an older ``system:update`` restart must not shadow
+    a newer user or self restart, or the claim node renders the wrong marker
+    wording. The payload passes through unchanged so the lifecycle marker can
+    render this restart's config diff. After claiming the marker, the new
+    process writes its full effective-config snapshot; this row guarantees the
+    original restart envelope survives until then. ``None`` means no restart
+    inbound exists; the caller owns the appropriate integrity or best-effort
+    response.
+    """
+    cur.execute(
+        "SELECT source, content, payload FROM inbound_messages "
+        "WHERE agent_id = %s AND kind = 'restart' "
+        "ORDER BY id DESC "
+        "LIMIT 1",
+        (agent_id,),
+    )
+    row = cur.fetchone()
+    if row is None:
+        return None
+    source: str = row[0]
+    content: str = row[1]
+    payload: dict[str, object] | None = row[2]
+    cur.execute("SELECT config_overlay FROM agents_meta WHERE id = %s", (agent_id,))
+    config_overlay_row = fetch_one(cur, "restart-completed: read per-agent config")
+    config_overlay: dict[str, object] | None = config_overlay_row[0]
+    cur.execute(
+        "INSERT INTO inbound_messages (agent_id, content, kind, source, payload) "
+        "VALUES (%s, %s, 'restart_completed', %s, %s::jsonb)",
+        (agent_id, content, source, json.dumps(payload) if payload else None),
+    )
+    from shared.audit_events import insert_event_log
+
+    insert_event_log(
+        event_type="restart_completed",
+        agent_id=agent_id,
+        source=source,
+        payload={"config_overlay": config_overlay} if config_overlay else {},
+    )
+    return source, content, payload
+
+
 # A "live" agent is one currently holding a process (status running/idling) —
 # the set a cluster-wide stop-the-world (quiesce before a schema migration) must
 # drain. The three helpers below all key off this same predicate; the statuses
