@@ -108,6 +108,7 @@ from shared.lm.registry import (
 )
 from shared.lm.registry import (
     MODELS,
+    resolve_available_model,
     resolve_setting,
 )
 from shared.lm.registry import (
@@ -327,6 +328,8 @@ def validate_model_config(
             "config.llm_model in the spawn request"
         )
 
+    effective_model = resolve_available_model(effective_model)
+
     # 1. Model must be registered.
     all_models: list[str] = [m for models in SUPPORTED_MODELS.values() for m in models]
     if effective_model not in all_models:
@@ -516,6 +519,13 @@ def build_chat_model(
     # builds a model loads them, including the labeler daemon and the eval
     # harness that never load plugin.py.
     ensure_provider_plugins_loaded()
+
+    requested_model = model
+    model = resolve_available_model(model)
+    if model != requested_model:
+        logger.warning(
+            f"{requested_model} is temporarily unavailable; using its registered fallback {model}"
+        )
 
     # Start from the caller's thinking dict when given; provider branches may
     # still rewrite it (claude display=summarized opt-in / haiku budget opt-in).
