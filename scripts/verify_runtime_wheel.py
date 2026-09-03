@@ -27,6 +27,11 @@ REQUIRED = (
     "shared/dotenv_boot.py",
     "cli/main.py",
     "ava_builtins/plugins/ava_code/plugin.py",
+    "ava_builtins/plugins/ava_code/ava_code.ava.okf.md",
+    "db/schema.sql",
+    "commands/compact.md",
+    "schedules/manifest.json",
+    "deploy/otel-collector/otel-collector.yaml",
 )
 
 
@@ -42,6 +47,15 @@ def verify_members(wheel: Path) -> None:
             raise ValueError(f"runtime wheel missing package: {package}")
     if any(name.endswith(".pth") for name in names):
         raise ValueError("runtime wheel contains an editable/path injection file")
+    migrations = {
+        name for name in names if name.startswith("migrations/") and name.endswith(".sql")
+    }
+    for migration in migrations:
+        if (
+            not migration.endswith(".down.sql")
+            and migration.removesuffix(".sql") + ".down.sql" not in migrations
+        ):
+            raise ValueError(f"migration rollback pair missing from wheel: {migration}")
 
 
 def verify_installed(checkout: Path) -> None:
@@ -60,7 +74,13 @@ def verify_installed(checkout: Path) -> None:
         patch("socket.socket.connect_ex", side_effect=blocked),
         patch("socket.create_connection", side_effect=blocked),
     ):
-        for name in ("cli.main", "agent.exec_child", "ops.spec"):
+        for name in (
+            "cli.main",
+            "agent.exec_child",
+            "ops.spec",
+            "services.agent_host.daemon",
+            "gateway.app",
+        ):
             module = importlib.import_module(name)
             if module.__file__ is None:
                 raise ValueError(f"{name} has no installed source file")
