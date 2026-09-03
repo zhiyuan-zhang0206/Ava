@@ -105,8 +105,9 @@ async def test_spawn_background_tasks_includes_page_reconciler() -> None:
 
     tasks = daemon_mod._spawn_background_tasks(object())  # type: ignore[arg-type]
     try:
-        assert set(tasks) == {"plugins_watch", "page_reconciler"}
+        assert set(tasks) == {"plugins_watch", "page_reconciler", "stdout_log_rotate"}
         assert isinstance(tasks["page_reconciler"], asyncio.Task)
+        assert isinstance(tasks["stdout_log_rotate"], asyncio.Task)
     finally:
         for task in tasks.values():
             task.cancel()
