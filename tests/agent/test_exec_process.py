@@ -584,6 +584,7 @@ def test_windows_popen_failure_preserves_primary_when_job_close_fails(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Job cleanup diagnostics cannot replace the original Popen failure."""
+    from agent.graph._exec_subprocess import _ExecNeverStartedError
 
     class _FailingJob:
         def close(self) -> None:
@@ -605,6 +606,7 @@ def test_windows_popen_failure_preserves_primary_when_job_close_fails(
             windows_job_gate=tmp_path / "attach.job-ready",
         )
 
+    assert not isinstance(caught.value, _ExecNeverStartedError)
     assert any(
         "job_close: OSError: close failed" in note
         for note in getattr(caught.value, "__notes__", ())
