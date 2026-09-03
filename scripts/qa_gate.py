@@ -46,8 +46,6 @@ def evaluate(pr_number: int) -> None:
 
     # Invalidate an earlier success before reads that may fail halfway.
     status("pending", "Rechecking exact-head QA evidence")
-    comments = _records(f"issues/{pr_number}/comments?per_page=100")
-    reviews = _records(f"pulls/{pr_number}/reviews?per_page=100")
     current = _api(f"pulls/{pr_number}")
     if current["head"]["sha"] != sha:
         status("failure", "HEAD changed while QA was evaluated")
@@ -62,6 +60,15 @@ def evaluate(pr_number: int) -> None:
     if {item["number"] for item in same_head} != {pr_number}:
         status("failure", "Ambiguous shared HEAD: use a unique commit per open PR")
         return
+    # Re-read the evidence IMMEDIATELY before the terminal write. A receipt
+    # comment fires several evaluator triggers at once (issue_comment +
+    # pull_request_target + workflow_run), and concurrent runs race: the last
+    # writer's snapshot used to win, so a stale failure could overwrite a
+    # fresh success and leave a red window until the next event (2026-09-04:
+    # #1631 was rejected by Trunk during exactly such a window). Re-reading
+    # makes the last writer always publish the current truth.
+    comments = _records(f"issues/{pr_number}/comments?per_page=100")
+    reviews = _records(f"pulls/{pr_number}/reviews?per_page=100")
     verdict = approved(current, comments, reviews)
     status(
         "success" if verdict else "failure",
