@@ -427,8 +427,17 @@ def test_user_tone_defaults_on_for_non_claude(monkeypatch: pytest.MonkeyPatch) -
 
 
 def test_user_tone_uses_strong_gemini_variant(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A registered gemini model gets the strong variant. The id is picked from
+    the registry rather than hardcoded: a model swap (gemini-3.7-flash ->
+    gemini-3.8-flash, #1535) must not break this contract test by drifting the
+    id out of MODELS."""
+    from shared.lm.registry import MODELS
+
+    gemini_id = next(
+        model for model, spec in MODELS.items() if spec.provider == "gemini" and spec.spawnable
+    )
     monkeypatch.setattr(settings.agent, "prompt_user_tone_enabled", None)
-    monkeypatch.setattr(settings.lm, "llm_model", "gemini-3.7-flash")
+    monkeypatch.setattr(settings.lm, "llm_model", gemini_id)
 
     from agent.graph._system_prompt import _user_tone_section
 
