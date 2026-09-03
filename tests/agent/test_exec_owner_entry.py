@@ -27,18 +27,18 @@ from shared.exec_owner_protocol import (
 from shared.incarnation_resources import ExecAllocation
 
 
-def _context(tmp_path: Path) -> OwnerContext:
+def _context(tmp_path: Path, agent_id: int = 1) -> OwnerContext:
     identity = uuid4()
     request = tmp_path / f"req-{identity.hex}.json"
     write_request(
         request,
         code="raise AssertionError('must not execute without permit')",
-        agent_id=1,
+        agent_id=agent_id,
         timeout_s=20,
         state=None,
     )
     return OwnerContext(
-        agent_id=1,
+        agent_id=agent_id,
         generation=uuid4(),
         runtime_owner=uuid4(),
         request_path=request.resolve(),
