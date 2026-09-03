@@ -55,6 +55,7 @@ from ops.rpc_schemas import SpawnAgentRequest, TerminateAgentRequest
 from shared import agent_snapshot
 from shared.agents import AvaAgentError
 from shared.audit_events import insert_event_log
+from shared.caller_identity import CallerIdentity
 from shared.checkpoint import CheckpointReadError, load_checkpoint_messages
 from shared.machine import machine_name
 
@@ -201,11 +202,16 @@ class _AuditMiddleware:
         client = _CURRENT_MCP_CLIENT.get()
         if client is None:
             raise RuntimeError("authenticated MCP client context is missing")
+        # The id comes from token lookup, never tool arguments or clientInfo.
+        # Caller display remains asserted; the authenticated credential binding
+        # is recorded separately and does not imply human/Ava agent identity.
+        caller = CallerIdentity(kind="external_agent", subject="mcp", instance=str(client["id"]))
         payload: dict[str, Any] = {
             "tool": tool,
             "client_id": client["id"],
             "client_name": client["name"],
             "args": _redact_args(args),
+            "auth_principal": {"kind": "mcp_client", "id": client["id"]},
         }
         try:
             result = await call_next(ctx)
@@ -213,7 +219,7 @@ class _AuditMiddleware:
             insert_event_log(
                 event_type="mcp_tool_call",
                 agent_id=None,
-                source="mcp",
+                source=caller.source(),
                 payload=payload
                 | {
                     "outcome": "error",
@@ -225,7 +231,7 @@ class _AuditMiddleware:
         insert_event_log(
             event_type="mcp_tool_call",
             agent_id=None,
-            source="mcp",
+            source=caller.source(),
             payload=payload
             | (
                 {"outcome": "error", "error": "tool call returned an error"}
