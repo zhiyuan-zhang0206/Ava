@@ -14,6 +14,16 @@ def _private_path_error(path: Path, reason: str) -> RuntimeError:
     return RuntimeError(f"private storage path {path} {reason}")
 
 
+def _is_foreign_owned(current: os.stat_result) -> bool:
+    """Return whether a path is not owned by this process on POSIX.
+
+    chmod honors the owner (uid) alone, not the group — a uid-ours file
+    with a foreign gid (chgrp'd leftover) is still repairable, and skipping
+    it would strand a 0o644 file as group-readable.
+    """
+    return os.name != "nt" and current.st_uid != os.geteuid()
+
+
 def ensure_private_dir(path: Path) -> Path:
     """Create `path` if needed, then require an owner-only real directory."""
     try:
@@ -57,6 +67,12 @@ def converge_private_tree(path: Path) -> Path:
     storage convention. Converge owns their durable permission repair, but it
     must never follow a symlink out of the tree while doing so.
     """
+    if _is_foreign_owned(path.lstat()):
+        # A directory owned by another account can never be chmod'd by
+        # converge — warn and leave it (and its subtree) alone instead of
+        # aborting the whole converge run (wsl 2026-09-02 boot loop).
+        logger.warning("private storage convergence skipped foreign-owned path {path}", path=path)
+        return path
     ensure_private_dir(path)
     for child in path.iterdir():
         current = child.lstat()
@@ -64,6 +80,11 @@ def converge_private_tree(path: Path) -> Path:
             # Workspace trees can link tooling outside AVA_HOME; private-tree
             # convergence must not recurse into or alter those targets.
             logger.warning("private storage convergence skipped symlink {path}", path=child)
+            continue
+        if _is_foreign_owned(current):
+            logger.warning(
+                "private storage convergence skipped foreign-owned path {path}", path=child
+            )
             continue
         if stat.S_ISDIR(current.st_mode):
             converge_private_tree(child)
