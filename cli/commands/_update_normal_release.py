@@ -90,7 +90,9 @@ def _preflight_pending_plan(plan: PreparedNormalRelease) -> None:
     previous = plan.request.previous_selector
     expected = CandidateUnitPlan(
         unit=plan.request.unit,
-        services=tuple(item.identity for item in plan.services),
+        services=tuple(
+            sorted((item.identity for item in plan.services), key=lambda item: item.session)
+        ),
         previous_selector_digest=None
         if previous is None
         else hashlib.sha256(previous.encode()).hexdigest(),
