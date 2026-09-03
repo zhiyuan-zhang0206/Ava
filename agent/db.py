@@ -17,7 +17,7 @@ unified gateway: every trigger entering an agent goes through it):
                          (vetoed — consumed no-op, agent stays alive — when a newer/unseen message waits;
                          see has_pending_inbound_after + the veto block in agent/graph/_claim.py)
     restart            — ava.self.restart() / admin restart; claim only marks RESTARTING + goto END (does not append message)
-    restart_completed  — respawn_agent INSERT; new process starts, claim appends "You have been restarted by X" marker
+    restart_completed  — respawn_agent or its self-respawn fallback INSERT; new process starts, claim appends "You have been restarted by X" marker
     resurrect          — resurrect_agent INSERT; new process starts, claim appends "You have been resurrected by X" marker
     fork               — spawn_agent INSERT on a fork; new process starts, claim appends "you are now agent N, forked from agent:M" identity marker
 
@@ -732,7 +732,6 @@ def schedule_self_respawn(agent_id: int) -> None:
         return updates
 
     def _respawn() -> None:
-        argv = list(base_argv)
         from shared.platform import (
             CREATE_NO_WINDOW,
         )  # used below, outside the try (import must not live in it)
@@ -740,12 +739,11 @@ def schedule_self_respawn(agent_id: int) -> None:
         try:
             import psycopg
 
-            from shared.db import PG_STATEMENT_TIMEOUT_KWARGS
+            from shared.db import PG_STATEMENT_TIMEOUT_KWARGS, insert_restart_completed_inbound
 
             # Poll before the fallback CAS until a fixed deadline. The restarter
-            # owns the preferred path because it records restart_completed; an
-            # early CAS would silently lose that lifecycle marker. Autocommit
-            # makes every poll observe the restarter's latest status change.
+            # owns session cleanup, wake publication, and hosted handling.
+            # Autocommit observes its latest status while CAS picks one launch winner.
             conn = psycopg.connect(
                 settings.data_plane.db_url, autocommit=True, **PG_STATEMENT_TIMEOUT_KWARGS
             )
@@ -769,6 +767,19 @@ def schedule_self_respawn(agent_id: int) -> None:
                             )
                             return
                         env.update(_config_env_updates(cur))
+                        restart_trace = insert_restart_completed_inbound(cur, agent_id)
+                        if restart_trace is None:
+                            logger.warning(
+                                "[self-respawn] agent %s: no restart inbound found; "
+                                "launching replacement anyway",
+                                agent_id,
+                            )
+                        else:
+                            logger.info(
+                                "[self-respawn] agent %s: wrote restart_completed from %s",
+                                agent_id,
+                                restart_trace[0],
+                            )
             finally:
                 conn.close()
         except Exception:
@@ -784,7 +795,7 @@ def schedule_self_respawn(agent_id: int) -> None:
             agent_id,
         )
         subprocess.Popen(  # noqa: S603 — argv is sys.executable + trusted agent_id (int)
-            argv,
+            base_argv,
             env=env,
             start_new_session=True,
             stdin=subprocess.DEVNULL,

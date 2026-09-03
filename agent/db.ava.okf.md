@@ -21,7 +21,7 @@ Ava's Postgres persistence layer—responsible for agent message history storage
   - `cancel` — Pause instruction; claim processes via `case InboundKind.CANCEL`: discards in-flight LLM generation; if no new `chat` in the same batch, returns to idle (no lifecycle marker); if a new `chat` is present in the same batch, that chat is treated as a fresh intent, directly waking to before_llm (`halted=False`) instead of idle—avoiding the situation where "message is submitted but agent never responds"
   - `terminate` — Termination instruction; claim appends lifecycle marker + goto END
   - `restart` — Claim only marks RESTARTING + goto END (no message appended)
-  - `restart_completed` — After respawn, the new process appends a "You have been restarted" marker
+  - `restart_completed` — After respawn, the new process appends a "You have been restarted" marker; `respawn_agent` and the self-respawn fallback both write it
   - `resurrect` — After resurrection, the new process appends a marker
   - `fork` — Fork identity marker
 - **In-flight interrupt (not via claim)**: `has_pending_interrupt` (`agent/db.py:306`) performs a read-only peek on an additional channel—limited to `status='pending'` and `kind ∈ {cancel, terminate}` and `source ≠ 'self'`—to allow in-flight llm/exec nodes to instantly abort the current action; **dispatch semantics remain exclusive to claim** (all 10 kinds are dispatched in claim, cancel→idle / terminate→END)

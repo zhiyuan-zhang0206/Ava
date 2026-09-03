@@ -284,7 +284,19 @@ def test_a_malformed_window_disables_that_bound_instead_of_the_agent() -> None:
     assert argv == ["python -m agent", "--agent-id", "7"]
 
 
-def test_every_agent_launch_path_arms_the_watchdog(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize(
+    ("restart_trace", "expects_marker"),
+    [
+        (("self", "", None), True),
+        (None, False),
+    ],
+    ids=["restart-trace", "missing-restart-trace"],
+)
+def test_every_agent_launch_path_arms_the_watchdog(
+    monkeypatch: pytest.MonkeyPatch,
+    restart_trace: tuple[str, str, None] | None,
+    expects_marker: bool,
+) -> None:
     """Coverage is per *launcher*: `agent/db.py:schedule_self_respawn` builds its
     own argv rather than going through `ops/agent_launch.py`, so it needs its own
     pin here instead of inheriting one.
@@ -294,6 +306,9 @@ def test_every_agent_launch_path_arms_the_watchdog(monkeypatch: pytest.MonkeyPat
     "a pid exists". This path is the worst place for that to happen: it only runs
     when the restarter is paused, i.e. mid-rollout, when boxes are at their
     busiest and a stalled boot is most likely.
+
+    The fallback must also preserve a restart marker when it has a trace, but
+    still launch if a self-initiated restart's trace is unexpectedly absent.
     """
     import atexit
     import subprocess
@@ -304,6 +319,8 @@ def test_every_agent_launch_path_arms_the_watchdog(monkeypatch: pytest.MonkeyPat
 
     from agent.db import schedule_self_respawn
 
+    executed: list[tuple[str, tuple[object, ...]]] = []
+
     class _FakeCursor:
         rowcount = 1
 
@@ -311,8 +328,11 @@ def test_every_agent_launch_path_arms_the_watchdog(monkeypatch: pytest.MonkeyPat
             self._row: tuple[object, ...] | None = None
 
         def execute(self, query: str, *_a: Any, **_kw: Any) -> None:
+            executed.append((query, _a[0] if _a else ()))
             if "SELECT status" in query:
                 self._row = ("restarting",)
+            elif "SELECT source, content, payload" in query:
+                self._row = restart_trace
             elif "SELECT config_overlay" in query:
                 self._row = (None, None)
 
@@ -366,6 +386,12 @@ def test_every_agent_launch_path_arms_the_watchdog(monkeypatch: pytest.MonkeyPat
 
     assert launched, "the self-respawn should have launched a replacement"
     argv = launched[0]
+    restart_completed_inserts = [
+        params
+        for query, params in executed
+        if "INSERT INTO inbound_messages" in query and "restart_completed" in query
+    ]
+    assert restart_completed_inserts == ([(11, "", "self", None)] if expects_marker else [])
 
     from shared.config import settings
 
@@ -400,6 +426,8 @@ def test_self_respawn_gives_the_restarter_priority_until_its_deadline(
             if "SELECT status" in query:
                 self._status_reads += 1
                 self._row = ("restarting" if self._status_reads == 1 else "idling",)
+            elif "SELECT source, content, payload" in query:
+                self._row = ("self", "", None)
             elif "SELECT config_overlay" in query:
                 self._row = (None, None)
 
