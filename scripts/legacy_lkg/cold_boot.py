@@ -64,7 +64,7 @@ def main() -> None:  # noqa: PLR0915 — actual service/DB lifetime with strict 
     (poison / "plugin.py").write_text("raise RuntimeError('mutable plugin imported')\n")
     # Exact default normal main(), without patching startup/schema/readiness.
     entry = """
-import hashlib,json,os,pathlib,psutil,sys,sysconfig
+import ctypes,hashlib,json,os,pathlib,platform,psutil,sys,sysconfig,threading,time,urllib.request
 import services.agent_ops.daemon as daemon
 from shared import paths,plugins_config
 from shared.retained_legacy import external_plugin_read_root
@@ -79,11 +79,34 @@ receipt={'pid':os.getpid(),'birth':psutil.Process().create_time(),'module':str(m
  'stdlib':sysconfig.get_path('stdlib'),'sys_path':sys.path,
  'sql_inventory_sha256':hashlib.sha256((module.parents[2]/'shared/legacy_inventory.json').read_bytes()).hexdigest()}
 pathlib.Path(os.environ['AVA_LEGACY_ENTRY_RECEIPT']).write_text(json.dumps(receipt))
+def native_after_readiness():
+    until=time.monotonic()+45
+    while time.monotonic()<until:
+        try:
+            with urllib.request.urlopen('http://127.0.0.1:'+os.environ['AVA_LEGACY_NATIVE_PORT']+'/healthz',timeout=1) as response:
+                health=json.load(response)
+            if health['pid']==os.getpid() and health['readiness']=='ok': break
+        except OSError: pass
+        time.sleep(.1)
+    else: return
+    dyld=ctypes.CDLL(None)
+    dyld._dyld_image_count.restype=ctypes.c_uint32
+    dyld._dyld_get_image_name.argtypes=[ctypes.c_uint32]
+    dyld._dyld_get_image_name.restype=ctypes.c_char_p
+    images=[os.fsdecode(dyld._dyld_get_image_name(i)) for i in range(dyld._dyld_image_count())]
+    payload={'pid':os.getpid(),'birth':psutil.Process().create_time(),'health':health,'images':images}
+    target=pathlib.Path(os.environ['AVA_LEGACY_ENTRY_RECEIPT']).with_name('normal-native.json')
+    temporary=target.with_suffix('.tmp')
+    temporary.write_text(json.dumps(payload))
+    temporary.replace(target)
+if platform.system()=='Darwin':
+    threading.Thread(target=native_after_readiness,daemon=True).start()
 daemon.main()
 """
     env = dict(os.environ)
     # Parent environment is explicit private fixture; never inherit external credentials.
     env["AVA_LEGACY_ENTRY_RECEIPT"] = str(root / "normal-entry.json")
+    env["AVA_LEGACY_NATIVE_PORT"] = str(port)
     env["PYTHONDONTWRITEBYTECODE"] = "1"
 
     def start(label: str, override: dict[str, str] | None = None) -> subprocess.Popen[bytes]:
@@ -275,17 +298,35 @@ print(json.dumps({'legacySourcesReadable':legacy,'unsupportedSources':unsupporte
                     Path(loaded["stdlib"]).resolve().is_relative_to(image / "python"),
                     "external stdlib",
                 )
-                native_images = sorted(
-                    {
-                        m.path
-                        for m in native.memory_maps(grouped=False)
-                        if m.path.startswith("/") and "x" in m.perms
-                    }
-                )
+                if platform.system() == "Darwin":
+                    snapshot = root / "normal-native.json"
+                    while not snapshot.exists() and time.monotonic() < until:
+                        require(
+                            process.poll() is None, "normal process exited before native receipt"
+                        )
+                        time.sleep(0.1)
+                    evidence = json.loads(snapshot.read_text())
+                    require(
+                        evidence["pid"] == native.pid and evidence["birth"] == native.create_time(),
+                        "native receipt is from another process",
+                    )
+                    require(
+                        evidence["health"]["readiness"] == "ok", "native receipt predates readiness"
+                    )
+                    native_images = sorted(evidence["images"])
+                else:
+                    native_images = sorted(
+                        {
+                            m.path
+                            for m in native.memory_maps(grouped=False)
+                            if m.path.startswith("/") and "x" in m.perms
+                        }
+                    )
+                require(bool(native_images), "native image observation is empty")
                 require(
                     all(
                         Path(p).is_relative_to(image)
-                        or p.startswith(("/usr/lib/", "/lib/", "/lib64/"))
+                        or p.startswith(("/usr/lib/", "/lib/", "/lib64/", "/System/Library/"))
                         for p in native_images
                     ),
                     "normal ops loaded an unretained non-OS native image",
