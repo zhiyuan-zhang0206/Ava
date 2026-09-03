@@ -72,7 +72,7 @@ class IncarnationResources(_StrictEvidence):
 
 
 ResourceState = Annotated[ResourceBirth | IncarnationResources, Field(discriminator="state")]
-_STATE = TypeAdapter(ResourceState)
+_STATE: TypeAdapter[ResourceBirth | IncarnationResources] = TypeAdapter(ResourceState)
 
 
 def decode_resources(value: object) -> ResourceBirth | IncarnationResources:

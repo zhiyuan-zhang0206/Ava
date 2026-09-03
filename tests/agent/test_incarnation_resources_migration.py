@@ -52,6 +52,21 @@ def test_resource_migration_matches_baseline_and_preserves_unknown(
         assert _shape(db_conn) == expected
 
 
+def test_resource_migration_rejects_implicit_empty_default(db_conn: psycopg.Connection) -> None:
+    with db_conn.transaction(force_rollback=True):
+        schema = sql.Identifier("resources_" + uuid4().hex)
+        db_conn.execute(sql.SQL("CREATE SCHEMA {}").format(schema))
+        db_conn.execute(sql.SQL("SET LOCAL search_path TO {},public").format(schema))
+        db_conn.execute(
+            "CREATE TABLE agents_meta(id bigint,incarnation_resources jsonb DEFAULT '{}')"
+        )
+        with (
+            pytest.raises(psycopg.errors.RaiseException, match="incompatible existing"),
+            db_conn.transaction(),
+        ):
+            db_conn.execute(_body(".sql"))
+
+
 @pytest.mark.parametrize("evidence", ["{}", '{"version":1,"requests":{}}', '"corrupt"'])
 def test_resource_down_never_discards_used_or_malformed_evidence(
     db_conn: psycopg.Connection,

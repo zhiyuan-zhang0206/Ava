@@ -1,6 +1,7 @@
 """Real metadata locking serializes complete exec registration and force freeze."""
 
 import threading
+import time
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
@@ -158,3 +159,68 @@ def test_force_lock_wins_over_concurrent_registration(db_conn: psycopg.Connectio
         thread.join(5)
         assert not thread.is_alive()
     assert len(failures) == 1 and isinstance(failures[0], ResourceEvidenceError)
+
+
+@pytest.mark.parametrize("phase", ["register", "attach"])
+def test_unchanged_locked_row_expiring_lease_never_permits_exec(
+    db_conn: psycopg.Connection,
+    phase: str,
+) -> None:
+    target = _admitted(db_conn)
+    entry = _entry()
+    with db_conn.transaction():
+        if phase == "attach":
+            register_exec(db_conn, target, entry)
+        db_conn.execute(
+            "UPDATE agents_meta SET lease_expires_at=clock_timestamp()+interval '0.3 seconds' WHERE id=%s",
+            (target.agent_id,),
+        )
+    path = db_conn.execute("SHOW search_path").fetchone()
+    assert path is not None
+    db_conn.commit()
+    errors: list[BaseException] = []
+    started = threading.Event()
+    with psycopg.connect(db_conn.info.dsn) as contender:
+        contender.execute("SELECT set_config('search_path',%s,false)", (path[0],))
+        contender.commit()
+
+        def compete() -> None:
+            try:
+                with contender.transaction():
+                    started.set()
+                    if phase == "register":
+                        register_exec(contender, target, entry)
+                    else:
+                        attach_exec(
+                            contender,
+                            target,
+                            entry,
+                            entry.model_copy(
+                                update={
+                                    "owner_process": ResourceProcess(pid=100, birth=1.0),
+                                    "root_process": ResourceProcess(pid=101, birth=2.0),
+                                }
+                            ),
+                        )
+            except BaseException as exc:
+                errors.append(exc)
+
+        with db_conn.transaction():
+            db_conn.execute("SELECT id FROM agents_meta WHERE id=%s FOR UPDATE", (target.agent_id,))
+            thread = threading.Thread(target=compete)
+            thread.start()
+            assert started.wait(2)
+            until = time.monotonic() + 5
+            while time.monotonic() < until:
+                row = db_conn.execute(
+                    "SELECT lease_expires_at<=clock_timestamp() FROM agents_meta WHERE id=%s",
+                    (target.agent_id,),
+                ).fetchone()
+                if row == (True,):
+                    break
+                time.sleep(0.01)
+            else:
+                raise AssertionError("lease did not expire while row remained locked")
+        thread.join(5)
+        assert not thread.is_alive()
+    assert len(errors) == 1 and isinstance(errors[0], ResourceEvidenceError)
