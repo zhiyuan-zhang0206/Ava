@@ -246,6 +246,8 @@ jobs:
         run: uv run python scripts/lint_clock_lattice.py
       - name: Apply migrations to fresh DB + trigger smoke
         run: uv run python scripts/migration_smoke.py
+      - name: Hardened venv survives production uv sync (write window)
+        run: bash scripts/test_uv_sync_write_window.sh
       - name: Run pyright
         run: uv run pyright
 

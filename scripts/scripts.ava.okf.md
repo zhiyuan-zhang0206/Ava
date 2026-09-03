@@ -40,7 +40,7 @@ The full linter inventory — what each one enforces and where it runs: [[script
 - `refresh_test_durations.py` — records isolated CI-shaped pytest timing shards, retries
   only a failed measurement, and atomically merges a complete artifact set into
   `.test_durations`
-- `release_cut.py`, `pre-push-check.sh`, `check_cross_branch_migrations.py`, `migration_smoke.py`, `test_migrations_apply.sh`
+- `release_cut.py`, `pre-push-check.sh`, `check_cross_branch_migrations.py`, `migration_smoke.py`, `test_migrations_apply.sh`, `test_uv_sync_write_window.sh`
 
 ### Code Generation
 - `codegen-types.sh`, `check-types-fresh.sh`, `dump_openapi.py`, `generate-ui-page.py`, `dump_event_fixtures.py`
