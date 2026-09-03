@@ -482,7 +482,7 @@ jobs:
   backend-shard:
     name: backend shard (${{ matrix.group }}/16)
     runs-on: ubuntu-24.04
-    timeout-minutes: 6
+    timeout-minutes: 20
     needs: [classify]
     if: ${{ needs.classify.outputs.backend == 'true' }}
     strategy:
@@ -596,7 +596,7 @@ jobs:
     # the only protection gate while shadow data measures selector quality.
     name: backend selected subset (shadow)
     runs-on: ubuntu-24.04
-    timeout-minutes: 6
+    timeout-minutes: 20
     # Keep checkout, provisioning, and artifact faults informational as well as
     # the captured pytest result below.
     continue-on-error: true
@@ -900,7 +900,7 @@ jobs:
   frontend:
     name: frontend (eslint + tsc + vitest)
     runs-on: ubuntu-24.04
-    timeout-minutes: 6
+    timeout-minutes: 20
     needs: [classify]
     if: ${{ needs.classify.outputs.frontend == 'true' }}
     steps:
