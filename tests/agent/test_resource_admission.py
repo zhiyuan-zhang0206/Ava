@@ -97,3 +97,59 @@ def test_malformed_never_downgrades_to_legacy(db_conn: psycopg.Connection) -> No
     db_conn.commit()
     with pytest.raises(ValueError), db_conn.transaction():
         admit_resources(db_conn, target, ResourceProcess(pid=10, birth=1.0))
+
+
+def test_actual_owner_receipt_recovers_only_exact_persisted_allocation(
+    db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from shared import exec_owner_recovery
+    from tests.agent.test_exec_owner_entry import _context, _ready, _start
+
+    target = _admitted(db_conn)
+    context = _context(tmp_path)
+    directory = tmp_path / str(target.agent_id) / "domains" / str(context.allocation.request)
+    directory.mkdir(parents=True)
+    request = directory / context.request_path.name
+    context.request_path.rename(request)
+    context = context.model_copy(
+        update={
+            "agent_id": target.agent_id,
+            "generation": target.generation,
+            "runtime_owner": target.owner,
+            "request_path": request,
+            "result_path": directory / "result.json",
+        }
+    )
+    monkeypatch.setattr(exec_owner_recovery, "exec_run_dir", lambda: tmp_path)
+    with db_conn.transaction():
+        register_exec(db_conn, target, context.allocation)
+    proc = _start(directory, context)
+    try:
+        ready = _ready(directory, proc)
+        with db_conn.transaction():
+            attach_exec(db_conn, target, context.allocation, ready.allocation)
+        assert proc.stdin is not None
+        proc.stdin.close()
+        assert proc.wait(timeout=10) == 0
+        receipt = directory / "owner.closed"
+        withheld = directory / "withheld.closed"
+        receipt.rename(withheld)
+        exec_owner_recovery.recover_local_resources(target.agent_id, "resource-test")
+        row = db_conn.execute(
+            "SELECT incarnation_resources FROM agents_meta WHERE id=%s", (target.agent_id,)
+        ).fetchone()
+        assert row is not None and str(context.allocation.request) in row[0]["requests"]
+        db_conn.commit()
+        withheld.rename(receipt)
+        exec_owner_recovery.recover_local_resources(target.agent_id, "resource-test")
+        row = db_conn.execute(
+            "SELECT incarnation_resources FROM agents_meta WHERE id=%s", (target.agent_id,)
+        ).fetchone()
+        assert row is not None and row[0]["requests"] == {}
+        # Replaying the same exact observation is a no-op, not a new admission.
+        db_conn.commit()
+        exec_owner_recovery.recover_local_resources(target.agent_id, "resource-test")
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait(timeout=5)
