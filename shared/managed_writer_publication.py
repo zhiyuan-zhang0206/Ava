@@ -29,6 +29,7 @@ from shared.managed_writer_barrier import (
     lock_rollout,
     validate_collection_for_write,
 )
+from shared.managed_writer_observation import ExpectedProcess
 
 
 @dataclass(frozen=True)
@@ -83,7 +84,7 @@ class CandidateUnitPlan(EvidenceModel):
         if not self.unit.home.startswith("/"):
             raise ValueError("normal candidate startup has no Windows platform adapter")
         for service in self.services:
-            if service.session.startswith("ava-agent-"):
+            if service.session.startswith("ava-agent-") and service.session != "ava-agent-host":
                 raise ValueError("normal service startup cannot authorize an agent session")
             for path in (service.executable, service.entrypoint):
                 if not path.startswith(root) or ".." in path.split("/"):
@@ -121,6 +122,36 @@ class PendingMigrationReceipt(EvidenceModel):
     verified_at: AwareDatetime
 
 
+class SelectorReadback(EvidenceModel):
+    unit: PublishedUnit
+    challenge: UUID
+    previous_digest: Digest | None
+    current_digest: Digest
+    observed_at: AwareDatetime
+    valid_until: AwareDatetime
+
+
+class NormalServiceReadback(EvidenceModel):
+    service: NormalService
+    supervisor: ExpectedProcess
+    child: ExpectedProcess
+    loaded_module: str | None = Field(default=None, min_length=1, max_length=4096)
+    executable: str = Field(min_length=1, max_length=4096)
+    entrypoint: str = Field(min_length=1, max_length=4096)
+    artifact_digest: Digest
+    manifest_digest: Digest
+    readiness: Literal["normal"]
+    challenge: UUID
+    observed_at: AwareDatetime
+    valid_until: AwareDatetime
+    observation_digest: Digest
+
+
+class UnitActivationReadback(EvidenceModel):
+    selector: SelectorReadback
+    services: tuple[NormalServiceReadback, ...] = Field(min_length=1)
+
+
 class CommittedPublication(EvidenceModel):
     publication_id: UUID
     operation: RolloutIdentity
@@ -139,6 +170,7 @@ class PendingPublication(EvidenceModel):
     collection: ManagedWriterCollection | None = None
     normal_start_plan: NormalStartPlan | None = None
     migration: PendingMigrationReceipt | None = None
+    unit_readbacks: tuple[UnitActivationReadback, ...] = ()
 
 
 class WriterPublication(EvidenceModel):
@@ -161,6 +193,12 @@ class WriterPublication(EvidenceModel):
             plan = self.pending.normal_start_plan
             if plan is not None and tuple(entry.unit for entry in plan.units) != self.pending.units:
                 raise ValueError("normal startup plan must cover the exact prepared units")
+            readback_units = [item.selector.unit for item in self.pending.unit_readbacks]
+            keys = [(unit.machine, unit.home) for unit in readback_units]
+            if keys != sorted(set(keys)) or any(
+                unit not in self.pending.units for unit in readback_units
+            ):
+                raise ValueError("pending readbacks must be an ordered unique prepared-unit subset")
             collection = self.pending.collection
             if collection is not None and (
                 collection.operation != self.pending.operation
@@ -204,7 +242,7 @@ def begin_pending_publication(
     A crash leaves pending in place even after lease expiry; only explicit
     verified completion/recovery may clear it. A new holder cannot overwrite it.
     """
-    if pending.collection is not None or pending.migration is not None:
+    if pending.collection is not None or pending.migration is not None or pending.unit_readbacks:
         raise ManagedWriterBarrierError("prepare cannot import a cached collection")
     lock_rollout(conn, pending.operation)
     state = _locked_publication(conn)
@@ -214,7 +252,12 @@ def begin_pending_publication(
     if {(unit.machine, unit.home) for unit in pending.units} != registered:
         raise ManagedWriterBarrierError("prepared publication omits registered units")
     if state.pending is not None:
-        if state.pending.model_copy(update={"collection": None, "migration": None}) != pending:
+        if (
+            state.pending.model_copy(
+                update={"collection": None, "migration": None, "unit_readbacks": ()}
+            )
+            != pending
+        ):
             raise ManagedWriterBarrierError(
                 "another pending publication requires explicit recovery"
             )
@@ -274,6 +317,7 @@ def recover_pending_publication(
     if (
         replacement.collection is not None
         or replacement.migration is not None
+        or replacement.unit_readbacks
         or replacement.operation == abandoned
     ):
         raise ManagedWriterBarrierError("recovery requires a new operation and fresh collection")

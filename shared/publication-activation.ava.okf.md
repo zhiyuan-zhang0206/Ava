@@ -35,6 +35,15 @@ deployment phase/lease for the existing finalizer. Ordinary admission therefore
 still defers until phase stable. Exact commit replay returns the original UUID;
 different evidence does not replace it. Database clock checks occur after locks.
 
+Detached unit updaters use `record_pending_unit_readback` to persist their exact
+native/health/selector observation in that same pending field. Equal retries do
+not update timestamps; conflicting results refuse. The original coordinator
+uses `read_pending_unit_readbacks`, which revalidates freshness but may return a
+partial tuple, then publishes only the complete exact set. No callback server,
+new registry or second completion controller is introduced. The infrastructure
+session `ava-agent-host` is allowed in the prepared roster; other `ava-agent-*`
+names remain refused, including numeric agent and attempt sessions.
+
 The trusted updater obtains process birth, supervisor/child relationship, exact
 argv/environment projection, native health and authenticated runtime identity
 outside the transaction. These typed DTOs validate bindings; constructing them
