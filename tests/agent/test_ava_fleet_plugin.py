@@ -197,6 +197,17 @@ def test_prompt_section_task_conversion_is_domain_instance_only(
     assert "flake" not in section
 
 
+def test_prompt_section_numeric_identifier_prefixes(_load_activity_plugin: None):
+    """Fleet references identify agents, tasks, and pull requests by kind."""
+    from ava_builtins.plugins.ava_fleet.plugin import _fleet_self_section
+
+    section = _fleet_self_section()
+
+    for identifier in ("Ava #<id>", "task #<id>", "PR #<id>"):
+        assert identifier in section
+    assert "A bare number is ambiguous" in section
+
+
 def test_task_conversion_absent_when_plugin_disabled():
     """Prompt copy and the task SDK reference disappear together with the
     fleet plugin."""
