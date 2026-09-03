@@ -175,6 +175,8 @@ jobs:
           uv run pyright ops/agent_wake.py services/delivery_watchdog/daemon.py tests/agent/_restart_boot_probe.py tests/agent/test_claim.py tests/agent/test_hosted_lifecycle.py tests/agent/test_lifecycle_finalizers.py tests/shared/test_winproc_kill_boundaries.py
           timeout 360 uv run pytest tests/ops/test_no_replacement_launch.py tests/ops/test_lifecycle_recovery.py tests/agent/test_restart_process_crash.py tests/agent/test_lifecycle_finalizers.py tests/ava/test_shell.py tests/shared/test_winproc_launch.py tests/shared/test_winproc_kill_boundaries.py -q --junitxml=proof/head.xml
           timeout 360 uv run pytest tests/agent/test_claim.py tests/agent/test_hosted_lifecycle.py tests/agent/test_lifecycle_apply.py tests/agent/test_resurrection_launch.py -q --junitxml=proof/claim-compatibility.xml
+          uv run pyright ops/resurrection_retry.py tests/gateway/test_agents_internals.py tests/agent/test_lifecycle_apply.py
+          timeout 360 uv run pytest tests/gateway/test_agents_internals.py tests/ops/test_agent_wake_hosted.py tests/cli/test_update_dispatch_guard.py tests/shared/test_event_contract.py -q --junitxml=proof/backend-compatibility.xml
           uv run pyright tests/services/test_agent_host.py tests/shared/test_timing_topology.py
           timeout 240 uv run pytest tests/services/test_agent_host.py tests/shared/test_timing_topology.py tests/test_lint_event_kinds.py -q --junitxml=proof/controller-compatibility.xml
       - name: Require old routing to strand the accepted termination

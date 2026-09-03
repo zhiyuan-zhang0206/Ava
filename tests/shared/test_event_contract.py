@@ -130,7 +130,9 @@ def test_category_projection_matches_telemetry_whitelist() -> None:
     # 137; restart_handoff_host_unhealthy (Task #2338's hosted restart
     # handoff failure marker) raises it to 138; host_stale_running_settled
     # (the hosted boot settle of rows a dead host left running) raises it to 139.
-    assert len(_TELEMETRY_KINDS) == 139
+    # Removing schedule_self_respawn also removes its competing-writer event.
+    assert "restart_cas_lost" not in _TELEMETRY_KINDS
+    assert len(_TELEMETRY_KINDS) == 138
 
 
 def test_checkpoint_table_sizes_payload_and_metric_disposition() -> None:

@@ -17,7 +17,7 @@ from agent.graph._nodes import END
 from agent.inbound_ownership import RuntimeOwnershipLostError
 from agent.lifecycle_apply import apply_process_lifecycle
 from ops.resurrection_retry import authorize_pending_retry, validate_pending_retry
-from shared.agents import ResurrectError
+from shared.agents import MachinePaused, ResurrectError
 from shared.context import AvaContext
 from shared.db import insert_inbound_message
 from shared.db_transaction import async_write_transaction
@@ -77,6 +77,39 @@ async def test_pending_resurrection_budget_survives_redispatch_without_ack(
     assert db_conn.execute(
         "SELECT observed_at FROM inbound_messages WHERE id=%s", (command_id,)
     ).fetchone() == (None,)
+    db_conn.commit()
+
+
+async def test_paused_owned_target_does_not_spend_pending_retry_budget(
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+) -> None:
+    agent_id = _row(db_conn)
+    claim_agent_row(agent_id)
+    command_id = _command(db_conn, agent_id, "terminate")
+    await claim_inbound_batch(aops_pool, agent_id)
+    async with async_write_transaction(aops_pool) as conn:
+        assert await apply_process_lifecycle(conn, agent_id, command_id)
+    wake = insert_inbound_message(db_conn, agent_id, "wake", "user")
+    db_conn.execute(
+        "INSERT INTO machines(name,role,paused_at) VALUES(%s,ARRAY['agent-runner'],clock_timestamp()) "
+        "ON CONFLICT(name) DO UPDATE SET paused_at=EXCLUDED.paused_at",
+        (machine_name(),),
+    )
+    db_conn.commit()
+    before = db_conn.execute(
+        "SELECT status,payload,created_at FROM inbound_messages WHERE id=%s", (wake,)
+    ).fetchone()
+    with pytest.raises(MachinePaused):
+        authorize_pending_retry(agent_id, wake, "chat", 2)
+    assert (
+        db_conn.execute(
+            "SELECT status,payload,created_at FROM inbound_messages WHERE id=%s", (wake,)
+        ).fetchone()
+        == before
+    )
+    assert db_conn.execute(
+        "SELECT lifecycle_command_id FROM agents_meta WHERE id=%s", (agent_id,)
+    ).fetchone() == (command_id,)
     db_conn.commit()
 
 
