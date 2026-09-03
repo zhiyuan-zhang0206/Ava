@@ -391,8 +391,7 @@ class TestWakeHealth:
             await listener.close()
 
         assert any(
-            "wake path degraded (getdel_timeout)" in record["message"]
-            and record["level"].no >= 30  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+            "wake path degraded (getdel_timeout)" in record["message"] and record["level"].no >= 30  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
             for record in loguru_records  # pyright: ignore[reportUnknownVariableType]
         )
         assert any(
