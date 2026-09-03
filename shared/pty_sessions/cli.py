@@ -232,15 +232,14 @@ def write_env_file(env: dict[str, str]) -> Path:
 # session listing; a dead record is swept as it is discovered).
 # ---------------------------------------------------------------------------
 
-# A pid is "the same process we launched" only if its start-time matches to
-# within this tolerance (mirrors posixproc).
+# Legacy epoch identity tolerance (mirrors posixproc).
 _CREATE_TIME_TOLERANCE_S = 2.0
 
 
 def _record_alive(rec: SessionRecord) -> bool:
     try:
         proc = psutil.Process(rec.pid)
-        if not proc.is_running():
+        if not proc.is_running() or proc.status() == psutil.STATUS_ZOMBIE:
             return False
         if rec.starttime is not None:
             return rec.identifies(rec.pid) is True
@@ -310,6 +309,8 @@ def _record_reapable(rec: SessionRecord) -> tuple[bool, str]:
         proc = psutil.Process(rec.pid)
         if not proc.is_running():
             return True, "shell pid is no longer running"
+        if proc.status() == psutil.STATUS_ZOMBIE:
+            return True, "shell exited and awaits parent reap"
     except psutil.NoSuchProcess:
         return True, "shell pid is gone"
     except (psutil.AccessDenied, OSError):

@@ -24,6 +24,7 @@ import threading
 import time
 from collections.abc import Iterator
 from pathlib import Path
+from unittest.mock import Mock
 
 import psutil
 import pytest
@@ -65,6 +66,25 @@ def _wait(predicate, timeout: float = 30.0, interval: float = 0.05) -> bool:  # 
             return True
         time.sleep(interval)
     return predicate()  # pyright: ignore[reportUnknownVariableType]
+
+
+def _proc_exited(proc_or_pid: psutil.Process | int) -> bool:
+    """True once the process can no longer execute: reaped, or a zombie
+    awaiting its parent's reap.
+
+    psutil ``is_running()`` / ``pid_exists()`` stay True through the zombie
+    window, and under CI runner oversubscription init's reap can lag well
+    past the wait budget (recordless-host flakes, Trunk test PR #1591). A
+    zombie cannot answer a socket or run code, so it is not a live pty
+    session — same terminal-state rule the crash-sweep tests apply.
+    """
+    try:
+        proc = (
+            proc_or_pid if isinstance(proc_or_pid, psutil.Process) else psutil.Process(proc_or_pid)
+        )
+        return proc.status() == psutil.STATUS_ZOMBIE
+    except psutil.NoSuchProcess:
+        return True
 
 
 @pytest.fixture
@@ -223,6 +243,47 @@ def _make_session(home: Path, name: str, *, log_cap: int = 1024) -> PtySession:
     )
 
 
+@pytest.mark.parametrize("starttime", [None, 123])
+@pytest.mark.parametrize("observer", ["cli", "host"])
+def test_zombie_is_not_a_live_pty_session(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    starttime: int | None,
+    observer: str,
+) -> None:
+    """Both epoch and Linux tick identities must reject a matching zombie."""
+    session = _make_session(tmp_path, "ava-test-zombie")
+    session.record = SessionRecord(
+        pid=session.pid,
+        create_time=0.0,
+        cmd="",
+        cwd="",
+        started_at=0.0,
+        starttime=starttime,
+    )
+    proc = Mock()
+    proc.is_running.return_value = True
+    proc.status.return_value = psutil.STATUS_ZOMBIE
+    proc.create_time.return_value = 0.0
+
+    def process(_pid: int) -> Mock:
+        return proc
+
+    def identifies(_record: SessionRecord, _pid: int) -> bool:
+        return True
+
+    monkeypatch.setattr(psutil, "Process", process)
+    monkeypatch.setattr(SessionRecord, "identifies", identifies)
+    try:
+        observed = (
+            pty_cli._record_alive(session.record) if observer == "cli" else session.pid_matches()
+        )
+        assert not observed
+    finally:
+        os.close(session.master_fd)
+        os.close(session._log_fd)
+
+
 def test_begin_finish_has_single_winner(tmp_path: Path) -> None:
     """Concurrent teardown claims must have exactly one winner: a double
     winner would double-close the master fd (the _finish race class)."""
@@ -356,10 +417,19 @@ def test_crashed_host_is_swept_lazily(sessions: Path) -> None:
     rec = _record(home, name)
     assert rec is not None
     os.kill(host_pid, signal.SIGKILL)
+
+    def shell_exited() -> bool:
+        try:
+            # A zombie cannot execute; init's reap timing is not the PTY contract.
+            return psutil.Process(rec.pid).status() == psutil.STATUS_ZOMBIE
+        except psutil.NoSuchProcess:
+            return True
+
     # 45s (2026-09-03): under 4-5 concurrent workflow runs the shared runner's
     # oversubscription outlasted the 30s budget twice in a row (test #2353).
-    assert _wait(lambda: not psutil.pid_exists(rec.pid), timeout=45.0), (
-        "shell must HUP when its host dies"
+    assert _wait(shell_exited, timeout=45.0), (
+        f"shell must exit when its host dies: pid={rec.pid}, "
+        f"status={psutil.Process(rec.pid).status()}"
     )
     assert not _has(home, name), "a dead shell reads dead regardless of the leftover record"
     assert _run_cli(home, "list").stdout.strip() == ""
@@ -798,8 +868,8 @@ def test_new_reaps_a_recordless_host_before_replacement(sessions: Path) -> None:
         second = _record(home, name)
         assert second is not None and second.pid != first.pid
         assert not envfile.exists(), "the replacement must consume its env handoff"
-        assert _wait(lambda: not old_host.is_running()), "recordless host survived replacement"
-        assert _wait(lambda: not old_shell.is_running()), "recordless shell survived replacement"
+        assert _wait(lambda: _proc_exited(old_host)), "recordless host survived replacement"
+        assert _wait(lambda: _proc_exited(old_shell)), "recordless shell survived replacement"
     finally:
         # The pre-fix behavior rejects the replacement and leaves the deliberately
         # recordless host outside the fixture's normal record-based teardown.
@@ -825,8 +895,8 @@ def test_kill_reaps_a_recordless_host_without_its_socket(sessions: Path) -> None
 
     try:
         _kill(home, name)
-        assert _wait(lambda: not old_host.is_running()), "recordless host survived kill"
-        assert _wait(lambda: not old_shell.is_running()), "recordless shell survived kill"
+        assert _wait(lambda: _proc_exited(old_host)), "recordless host survived kill"
+        assert _wait(lambda: _proc_exited(old_shell)), "recordless shell survived kill"
     finally:
         for proc in (old_shell, old_host):
             with contextlib.suppress(psutil.Error):
@@ -1134,8 +1204,8 @@ def test_kill_by_record_reaches_a_wedged_host(sessions: Path) -> None:
     finally:
         with contextlib.suppress(ProcessLookupError, OSError):
             os.kill(host_pid, signal.SIGCONT)
-    assert _wait(lambda: not psutil.pid_exists(rec.pid)), "shell must die"
-    assert _wait(lambda: not psutil.pid_exists(host_pid)), "host must die"
+    assert _wait(lambda: _proc_exited(rec.pid)), "shell must die"
+    assert _wait(lambda: _proc_exited(host_pid)), "host must die"
     assert not record_path(name).exists()
     assert not socket_path(name).exists()
 
