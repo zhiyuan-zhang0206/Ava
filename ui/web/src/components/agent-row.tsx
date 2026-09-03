@@ -44,7 +44,6 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import { api } from "@/lib/api";
-import { observationText } from "@/lib/agent-observation";
 import { useUserSettings } from "@/lib/use-user-settings";
 import type { TimeMode, DateFormat } from "@/lib/types";
 import { PRIORITY_BG, topNoticePriority } from "@/lib/notices";
@@ -174,9 +173,9 @@ export function AgentRow({
   const [resurrectOpen, setResurrectOpen] = useState(false);
   const inspectPrefetch = useInspectorPrefetch(agent.agent_id);
   // Re-render every minute so the relative-time string refreshes
-  const [observationNow, setObservationNow] = useState(() => Date.now());
+  const [, setTick] = useState(0);
   useEffect(() => {
-    const id = setInterval(() => setObservationNow(Date.now()), 60_000);
+    const id = setInterval(() => setTick((n) => n + 1), 60_000);
     return () => clearInterval(id);
   }, []);
 
@@ -337,12 +336,6 @@ const dateFormat: DateFormat = rawDateFormat === "absolute" || rawDateFormat ===
                     : STATUS_DOT[agent.status],
                 )}
               />
-            ) : null}
-            {agent.status !== "terminated" ? (
-              <span className="text-[9px] text-amber-600" title={observationText(agent.observation, observationNow)}>
-                {agent.observation?.machine_probe_valid_until &&
-                Date.parse(agent.observation.machine_probe_valid_until) <= observationNow ? "probe stale" : "owner unknown"}
-              </span>
             ) : null}
             {/* notices-awaiting-response badge — count colored by highest
                 priority; only when notification.awaiting_reply is on (a

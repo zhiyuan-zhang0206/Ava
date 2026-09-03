@@ -204,7 +204,6 @@ function liveFixture(overrides: Partial<AgentInspectLive> = {}): AgentInspectLiv
     machine: full.machine,
     liveness_state: full.liveness_state,
     last_probe_at: full.last_probe_at,
-    observation: full.observation,
     shells_available: full.shells_available,
     spawned_at: full.spawned_at,
     started_at: full.started_at,
@@ -729,6 +728,14 @@ describe("InspectorPanel", () => {
     render(<InspectorPanel agentId={1} />);
     await waitFor(() => expect(screen.getByText("None open")).toBeTruthy());
     expect(screen.getByText("Defaults — no overrides")).toBeTruthy();
+  });
+
+  it("does not render observation details", async () => {
+    getAgentInspectLive.mockResolvedValue(liveFixture());
+    render(<InspectorPanel agentId={1} />);
+    await waitFor(() => expect(screen.getByText("Birth")).toBeTruthy());
+    expect(screen.queryByText("Observation")).toBeNull();
+    expect(screen.queryByText(/Machine probe:/)).toBeNull();
   });
 
   it("does not report an unavailable shell observation as an empty set", async () => {
