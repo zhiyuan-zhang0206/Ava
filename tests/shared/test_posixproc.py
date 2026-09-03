@@ -7,11 +7,13 @@ fixture to keep records/logs under a tmp $AVA_HOME.
 from __future__ import annotations
 
 import contextlib
+import json
 import os
 import signal
 import subprocess
 import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 import psutil
@@ -20,6 +22,7 @@ import pytest
 from shared import posixproc
 from shared.platform import IS_LINUX, IS_WINDOWS
 from shared.session_record import SessionRecord, pid_starttime_ticks
+from tests.shared.process_evidence import detach_evidence, detached_to_known_reaper
 
 pytestmark = pytest.mark.skipif(IS_WINDOWS, reason="posixproc is the POSIX supervisor")
 
@@ -129,13 +132,18 @@ def test_process_is_live_treats_zombie_as_dead() -> None:
         os.waitpid(pid, 0)  # reap so the test never leaks a zombie
 
 
-def test_new_session_reparents_to_init_no_zombie(unit_home) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-    """The launched child double-forks: it reparents to init (PPID==1) immediately,
+def test_new_session_reparents_to_init_no_zombie(
+    unit_home,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    record_property: Callable[[str, object], None],
+) -> None:
+    """The launched child double-forks to init or an ancestor subreaper,
     so the spawner (this test process) accretes no zombie, and the record tracks
     the real child pid."""
     name = "ava-test-agent-1"
     spawner = psutil.Process()
     before_children = set(spawner.children())
+    ancestor_births = {(parent.pid, parent.create_time()) for parent in spawner.parents()}
+    caller_sid = os.getsid(0)
 
     assert _new(name, list(_SLEEP), unit_home) is True  # pyright: ignore[reportUnknownArgumentType]
     try:
@@ -143,6 +151,7 @@ def test_new_session_reparents_to_init_no_zombie(unit_home) -> None:  # pyright:
         assert rec is not None
         assert rec.starttime == pid_starttime_ticks(rec.pid)
         child = psutil.Process(rec.pid)
+        record_property("detach_process_evidence", json.dumps(detach_evidence(rec.pid)))
         # The record is written the instant the reparent helper reports the
         # grandchild pid, which can be microseconds BEFORE that grandchild
         # execvp's into /bin/sleep — until then psutil reads the pre-exec
@@ -151,14 +160,16 @@ def test_new_session_reparents_to_init_no_zombie(unit_home) -> None:  # pyright:
         assert _wait(lambda: child.name() == "sleep"), (
             f"child never became sleep (name={child.name()})"
         )
-        # Reparented to init — the double-fork's payoff (init reaps it on death).
+        # Init or a pre-existing ancestor subreaper adopts the detached child.
+        # PID + birth guards reject an unknown/recycled adopter; the caller and
+        # its session remain forbidden. Unreadable observations fail the test.
         # The reparent lands when the helper (the child's parent) exits, which
         # new_session's subprocess.run has already awaited; poll rather than
         # one-shot so a beat of ppid-update lag on a loaded runner can't flake it
         # (same treatment as the exec-name wait above).
-        assert _wait(lambda: child.ppid() == 1), (
-            f"child never reparented to init (ppid={child.ppid()})"
-        )
+        assert _wait(
+            lambda: detached_to_known_reaper(child.pid, spawner.pid, caller_sid, ancestor_births)
+        ), f"child never detached to a known reaper: {detach_evidence(child.pid)}"
         # Each of these is a state the OS lands asynchronously (record write vs
         # /proc visibility), so read it with a bounded poll instead of sampling
         # once — a one-shot read races the update on a loaded runner.
@@ -470,6 +481,7 @@ def test_new_session_dead_child_records_sentinel(
 def test_kill_session_group_kill_reaps_late_spawned_child(
     unit_home,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
     tmp_path: Path,
+    record_property: Callable[[str, object], None],
 ) -> None:
     """A child spawned DURING the graceful wait (an unwound finally's process,
     a bash wrapper's foreground command) shares the session's process group, so
@@ -510,8 +522,16 @@ def test_kill_session_group_kill_reaps_late_spawned_child(
         assert _wait(lambda: not psutil.pid_exists(pid)), "top process must be gone"
         assert _wait(late_file.exists), "late child never spawned"
         late_pid = int(late_file.read_text())
-        assert _wait(lambda: not psutil.pid_exists(late_pid)), (
-            "late-spawned child must die with the group"
+        record_property("late_child_evidence", json.dumps(detach_evidence(late_pid)))
+
+        def child_exited() -> bool:
+            try:
+                return psutil.Process(late_pid).status() == psutil.STATUS_ZOMBIE
+            except psutil.NoSuchProcess:
+                return True
+
+        assert _wait(child_exited), (
+            f"late-spawned child must exit with the group: {detach_evidence(late_pid)}"
         )
     finally:
         posixproc.kill_session(name, graceful=False)
