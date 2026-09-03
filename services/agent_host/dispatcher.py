@@ -72,6 +72,10 @@ _DEFAULT_SUBSCRIPTION_READ_TIMEOUT_S = 30.0
 # client's own timeout before the connection is rebuilt.
 _DEFAULT_SUBSCRIPTION_READ_SLACK_S = 1.0
 _DEFAULT_RECONNECT_DELAY_S = 1.0
+# The database scan is a durable backstop, not the subscription's liveness
+# probe. Bound its outage retries independently so a long DB outage does not
+# turn into an unbounded delay before the next reconciliation attempt.
+_DEFAULT_MAX_SCAN_BACKOFF_S = 300.0
 
 # How long a cancelled turn gets to unwind before the host stops waiting and
 # reports it as uncancellable.
@@ -378,6 +382,14 @@ class HostRestartRequiredError(RuntimeError):
     """
 
 
+@dataclass(frozen=True)
+class _ScanSchedule:
+    """The next durable-scan deadline and retry delay after one scan attempt."""
+
+    next_scan_at: float
+    scan_backoff_s: float
+
+
 class InboundWakeDispatcher:
     """One `PSUBSCRIBE` over every local agent's inbound channel.
 
@@ -389,6 +401,9 @@ class InboundWakeDispatcher:
     queue", and the claim CAS is what decides who gets the row. That keeps this
     loop free of any delivery semantics: a duplicate wake is harmless and a
     coalesced one is correct.
+
+    Subscription failures rebuild Redis. Database scan failures leave that
+    subscription in place and retry the durable backstop with bounded backoff.
     """
 
     def __init__(
@@ -399,6 +414,7 @@ class InboundWakeDispatcher:
         pending_scan: Callable[[float], Awaitable[list[PendingInboundWake]]] | None = None,
         stale_after_s: float | None = None,
         scan_interval_s: float = _DEFAULT_SUBSCRIPTION_READ_TIMEOUT_S,
+        max_scan_backoff_s: float = _DEFAULT_MAX_SCAN_BACKOFF_S,
         subscription_read_timeout_s: float = _DEFAULT_SUBSCRIPTION_READ_TIMEOUT_S,
         subscription_read_deadline_grace_s: float = _DEFAULT_SUBSCRIPTION_READ_SLACK_S,
         reconnect_delay_s: float = _DEFAULT_RECONNECT_DELAY_S,
@@ -408,6 +424,7 @@ class InboundWakeDispatcher:
         self._pending_scan = pending_scan
         self._stale_after_s = stale_after_s
         self._scan_interval_s = scan_interval_s
+        self._max_scan_backoff_s = max_scan_backoff_s
         self._subscription_read_timeout_s = subscription_read_timeout_s
         self._subscription_read_deadline_grace_s = subscription_read_deadline_grace_s
         self._reconnect_delay_s = reconnect_delay_s
@@ -415,9 +432,11 @@ class InboundWakeDispatcher:
     async def run(self) -> None:
         """Subscribe and feed wakes to the scheduler until cancelled.
 
-        Reconnects on failure with a short backoff. The periodic database scan
-        catches a wake published while this is down; unlike process mode, a
-        hosted agent has no per-agent claim loop to provide that fallback.
+        Subscription failures reconnect with a short backoff. The periodic
+        database scan catches a wake published while the subscription is down;
+        its own failures leave a healthy subscription alone and retry with
+        bounded backoff. Unlike process mode, a hosted agent has no per-agent
+        claim loop to provide that durable fallback.
         """
         from shared.cluster import redis_channel_prefix
         from shared.redis_client import open_async_redis, retry_auth_failures_async
@@ -438,11 +457,13 @@ class InboundWakeDispatcher:
                     pattern=pattern,
                 )
                 next_scan_at = 0.0
+                scan_backoff_s = self._scan_interval_s
                 while True:
                     now = time.monotonic()
                     if now >= next_scan_at:
-                        await self.scan_once()
-                        next_scan_at = time.monotonic() + self._scan_interval_s
+                        scan_schedule = await self._next_scan_schedule(scan_backoff_s)
+                        next_scan_at = scan_schedule.next_scan_at
+                        scan_backoff_s = scan_schedule.scan_backoff_s
                     until_scan_s = max(0.001, next_scan_at - time.monotonic())
                     read_timeout_s = min(self._subscription_read_timeout_s, until_scan_s)
                     message = await asyncio.wait_for(
@@ -474,6 +495,31 @@ class InboundWakeDispatcher:
                         await pubsub.aclose()  # pyright: ignore[reportUnknownMemberType]
                 with contextlib.suppress(Exception):
                     await redis.aclose()
+
+    async def _next_scan_schedule(self, scan_backoff_s: float) -> _ScanSchedule:
+        """Run the durable backstop without treating its DB failure as Redis failure."""
+        try:
+            await self.scan_once()
+        except asyncio.CancelledError:
+            raise
+        except HostRestartRequiredError:
+            raise
+        except Exception:
+            backoff_s = min(scan_backoff_s, self._max_scan_backoff_s)
+            logger.warning(
+                "hosted dispatcher pending scan failed — keeping the subscription "
+                "and retrying in {backoff_s:.3f}s",
+                event="host_dispatcher_scan_failed",
+                backoff_s=backoff_s,
+            )
+            return _ScanSchedule(
+                next_scan_at=time.monotonic() + backoff_s,
+                scan_backoff_s=min(backoff_s * 2, self._max_scan_backoff_s),
+            )
+        return _ScanSchedule(
+            next_scan_at=time.monotonic() + self._scan_interval_s,
+            scan_backoff_s=self._scan_interval_s,
+        )
 
     async def scan_once(self) -> None:
         """Schedule every locally pending agent; cancel stale active turns first.
