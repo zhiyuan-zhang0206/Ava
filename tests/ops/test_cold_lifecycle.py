@@ -228,6 +228,21 @@ def test_force_supersedes_old_restart_but_preserves_later_explicit_command(
     assert respawn_agent(agent_id)
     launched.assert_called_once()
     assert launched.call_args.kwargs["restart_attempt"][:2] == (later, 1)
+    ready = db_conn.execute(
+        "SELECT status,pid,lifecycle_command_id FROM agents_meta WHERE id=%s", (agent_id,)
+    ).fetchone()
+    assert ready == ("idling", None, later)
+    db_conn.commit()
+    late = _boot(agent_id, before[0], tmp_path, "none")
+    assert late.returncode != 0 and "EXECUTION_ALLOWED" not in late.stdout
+    assert "restart admission command" in late.stderr
+    assert (
+        db_conn.execute(
+            "SELECT status,pid,lifecycle_command_id FROM agents_meta WHERE id=%s", (agent_id,)
+        ).fetchone()
+        == ready
+    )
+    db_conn.commit()
     successor = _boot(agent_id, later, tmp_path, "none")
     assert successor.returncode == 0, successor.stderr
     assert db_conn.execute(

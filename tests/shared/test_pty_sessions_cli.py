@@ -43,7 +43,6 @@ pytestmark = pytest.mark.skipif(IS_WINDOWS, reason="pty sessions are POSIX-only"
 
 REPO = Path(__file__).resolve().parents[2]
 
-
 def _run_cli(home: Path, *args: str) -> subprocess.CompletedProcess[str]:
     """Invoke the CLI exactly as the SDK will: a subprocess, AVA_HOME pinned."""
     return subprocess.run(  # noqa: S603 — repo-internal argv; check=False, rc asserted by callers
@@ -56,7 +55,6 @@ def _run_cli(home: Path, *args: str) -> subprocess.CompletedProcess[str]:
         check=False,
     )
 
-
 def _wait(predicate, timeout: float = 30.0, interval: float = 0.05) -> bool:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
     # 30s default (2026-08-09): under CI runner CPU oversubscription a host's
     # reader thread can lag its reap well past 10s.
@@ -66,7 +64,6 @@ def _wait(predicate, timeout: float = 30.0, interval: float = 0.05) -> bool:  # 
             return True
         time.sleep(interval)
     return predicate()  # pyright: ignore[reportUnknownVariableType]
-
 
 def _proc_exited(proc_or_pid: psutil.Process | int) -> bool:
     """True once the process can no longer execute: reaped, or a zombie
@@ -86,7 +83,6 @@ def _proc_exited(proc_or_pid: psutil.Process | int) -> bool:
     except psutil.NoSuchProcess:
         return True
 
-
 @pytest.fixture
 def sessions(unit_home: Path) -> Iterator[Path]:
     """The test home; every session still alive under it is killed after.
@@ -105,7 +101,6 @@ def sessions(unit_home: Path) -> Iterator[Path]:
         except OSError:
             pty_cli._kill_by_record(name)
 
-
 def _new(
     home: Path, name: str, *, cwd: Path | None = None, env: dict[str, str] | None = None
 ) -> None:
@@ -113,7 +108,6 @@ def _new(
     result = _run_cli(home, name, "new", str(cwd or home), str(envfile))
     assert result.returncode == 0, f"new {name} failed: {result.stderr}"
     assert not envfile.exists(), "envfile must be consumed by the host"
-
 
 def _start_new(home: Path, name: str) -> tuple[subprocess.Popen[str], Path]:
     """Start one real CLI allocation without waiting for host readiness."""
@@ -136,7 +130,6 @@ def _start_new(home: Path, name: str) -> tuple[subprocess.Popen[str], Path]:
     )
     return proc, envfile
 
-
 def _send(home: Path, name: str, text: str, *, enter: bool = True) -> None:
     b64 = base64.b64encode(text.encode("utf-8")).decode("ascii")
     result = _run_cli(home, name, "send", b64)
@@ -144,11 +137,9 @@ def _send(home: Path, name: str, text: str, *, enter: bool = True) -> None:
     if enter:
         _keys(home, name, "Enter")
 
-
 def _keys(home: Path, name: str, *keys: str) -> None:
     result = _run_cli(home, name, "send_keys", *keys)
     assert result.returncode == 0, f"send_keys failed: {result.stderr}"
-
 
 def _capture(home: Path, name: str, *, lines: int = 200, scrollback: bool = True) -> str:
     args = ["capture", str(lines)]
@@ -158,14 +149,12 @@ def _capture(home: Path, name: str, *, lines: int = 200, scrollback: bool = True
     assert result.returncode == 0, f"capture failed: {result.stderr}"
     return result.stdout
 
-
 def _capture_until(home: Path, name: str, needle: str, *, scrollback: bool = True) -> str:
     def _seen() -> bool:
         return needle in _capture(home, name, scrollback=scrollback)
 
     assert _wait(_seen, timeout=10.0), f"capture never contained {needle!r}"
     return _capture(home, name, scrollback=scrollback)
-
 
 def _output_until(home: Path, name: str, word: str, *, timeout: float = 10.0) -> str:
     """Wait until a BARE output line equal to `word` appears in the capture.
@@ -182,17 +171,14 @@ def _output_until(home: Path, name: str, word: str, *, timeout: float = 10.0) ->
     assert _wait(_seen, timeout=timeout), f"output line {word!r} never appeared"
     return _capture(home, name)
 
-
 def _has(home: Path, name: str) -> bool:
     return _run_cli(home, name, "has").returncode == 0
-
 
 def _kill(home: Path, name: str, *, graceful: bool = False) -> int:
     args = ["kill"] + (["--graceful"] if graceful else [])
     result = _run_cli(home, name, *args)
     assert result.returncode == 0, f"kill failed: {result.stderr}"
     return result.returncode
-
 
 def _kill_until_no_orphans(home: Path, name: str) -> None:
     """Kill a session, allowing its detached host time to finish reaping.
@@ -218,11 +204,9 @@ def _kill_until_no_orphans(home: Path, name: str) -> None:
         result = _run_cli(home, name, *args)
     assert result.returncode == 0, f"kill failed: {result.stderr}"
 
-
 def _record(home: Path, name: str) -> SessionRecord | None:
     del home  # the record path resolver reads AVA_HOME via settings, pinned by unit_home
     return SessionRecord.read(record_path(name))
-
 
 def _make_session(home: Path, name: str, *, log_cap: int = 1024) -> PtySession:
     """A PtySession in isolation (no host process): a real fd for the master
@@ -241,7 +225,6 @@ def _make_session(home: Path, name: str, *, log_cap: int = 1024) -> PtySession:
         home / f"{name}.out.log",
         log_cap=log_cap,
     )
-
 
 @pytest.mark.parametrize("starttime", [None, 123])
 @pytest.mark.parametrize("observer", ["cli", "host"])
@@ -283,7 +266,6 @@ def test_zombie_is_not_a_live_pty_session(
         os.close(session.master_fd)
         os.close(session._log_fd)
 
-
 def test_begin_finish_has_single_winner(tmp_path: Path) -> None:
     """Concurrent teardown claims must have exactly one winner: a double
     winner would double-close the master fd (the _finish race class)."""
@@ -298,7 +280,6 @@ def test_begin_finish_has_single_winner(tmp_path: Path) -> None:
     assert s.dead
     assert not s.begin_finish(), "later claims must lose"
 
-
 def test_transcript_log_is_capped(tmp_path: Path) -> None:
     """The byte transcript stops growing at the per-session cap (the D6
     unbounded-growth guard): past the cap the host keeps the session but
@@ -312,7 +293,6 @@ def test_transcript_log_is_capped(tmp_path: Path) -> None:
     s.log_write(b"c" * 50)
     assert s._log_written == 100
     assert len(log_file.read_bytes()) == 100, "log must not grow past the cap"
-
 
 def test_host_startup_leaves_log_retention_to_the_cli(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -346,7 +326,6 @@ def test_host_startup_leaves_log_retention_to_the_cli(
     assert transcript.exists()
     assert not (logs / ".transcript-retention.stamp").exists()
 
-
 def test_parse_request_rejects_non_object() -> None:
     """A valid-JSON non-object request (list / string / op-less dict) must
     raise so the host answers `bad request` instead of dying silently."""
@@ -359,11 +338,9 @@ def test_parse_request_rejects_non_object() -> None:
     req = _parse_request(b'{"op": "ping"}')
     assert req["op"] == "ping"
 
-
 # ---------------------------------------------------------------------------
 # THE persistence invariant — the reason per-session hosts exist
 # ---------------------------------------------------------------------------
-
 
 def test_host_is_detached_to_init(sessions: Path) -> None:
     """The session host must be reparented to init (ppid 1): it is nobody's
@@ -383,7 +360,6 @@ def test_host_is_detached_to_init(sessions: Path) -> None:
     _send(home, name, "echo survived-creators")
     _output_until(home, name, "survived-creators")
 
-
 def test_session_survives_a_sigterm_storm(sessions: Path) -> None:
     """A stray SIGTERM/SIGHUP aimed at the host — the class of signal every
     infra teardown broadcasts — must not take the session down. Ending a
@@ -402,7 +378,6 @@ def test_session_survives_a_sigterm_storm(sessions: Path) -> None:
     assert _has(home, name)
     _send(home, name, "echo survived-signals")
     _output_until(home, name, "survived-signals")
-
 
 def test_crashed_host_is_swept_lazily(sessions: Path) -> None:
     """SIGKILL on a host (the one thing that ends it uncleanly) hangs up its
@@ -436,11 +411,9 @@ def test_crashed_host_is_swept_lazily(sessions: Path) -> None:
     assert not record_path(name).exists(), "list must sweep the dead record"
     assert not socket_path(name).exists(), "list must sweep the dead socket"
 
-
 # ---------------------------------------------------------------------------
 # has / list / list-started-at
 # ---------------------------------------------------------------------------
-
 
 def test_has_reflects_record_liveness(sessions: Path) -> None:
     home = sessions
@@ -450,7 +423,6 @@ def test_has_reflects_record_liveness(sessions: Path) -> None:
     assert _has(home, name)
     _kill(home, name)
     assert not _has(home, name)
-
 
 def test_list_started_at_returns_every_session_in_one_call(sessions: Path) -> None:
     """The batch op answers every live session's launch epoch in one record
@@ -471,7 +443,6 @@ def test_list_started_at_returns_every_session_in_one_call(sessions: Path) -> No
     assert result.stdout.splitlines()[0].startswith("ava-test-batch-1 ")
     assert len(result.stdout.splitlines()) == 1
 
-
 def test_list_filters_by_prefix(sessions: Path) -> None:
     home = sessions
     a = "ava-test-list-a-1"
@@ -482,7 +453,6 @@ def test_list_filters_by_prefix(sessions: Path) -> None:
     assert a in out and b in out
     only_a = _run_cli(home, "list", "ava-test-list-a-").stdout.splitlines()
     assert only_a == [a]
-
 
 def test_has_defeats_pid_reuse(sessions: Path) -> None:
     """A record whose pid was recycled onto an unrelated process must read
@@ -513,7 +483,6 @@ def test_has_defeats_pid_reuse(sessions: Path) -> None:
         live.wait(timeout=5)
         with contextlib.suppress(OSError):
             rec_path.unlink()
-
 
 @pytest.mark.skipif(not IS_LINUX, reason="Linux /proc start-time identity")
 def test_record_starttime_survives_wall_clock_drift(sessions: Path) -> None:
@@ -546,7 +515,6 @@ def test_record_starttime_survives_wall_clock_drift(sessions: Path) -> None:
             record_path(name).unlink(missing_ok=True)
             socket_path(name).unlink(missing_ok=True)
 
-
 @pytest.mark.skipif(not IS_LINUX, reason="Linux /proc start-time identity")
 def test_live_sessions_reaps_starttime_pid_reuse(sessions: Path) -> None:
     """Different clock ticks prove a live shell pid has been recycled."""
@@ -565,7 +533,6 @@ def test_live_sessions_reaps_starttime_pid_reuse(sessions: Path) -> None:
     assert pty_cli._record_alive(rec) is False
     assert pty_cli.live_sessions(prefix="ava-test-starttime-") == {}
     assert not record_path(name).exists()
-
 
 def test_live_sessions_keeps_live_legacy_record_with_clock_drift(
     sessions: Path,
@@ -588,7 +555,6 @@ def test_live_sessions_keeps_live_legacy_record_with_clock_drift(
     assert any(
         "pty retaining live session record" in str(record["message"]) for record in loguru_records
     )
-
 
 def test_retained_record_warning_is_deduped_across_scans(
     sessions: Path,
@@ -644,11 +610,9 @@ def test_retained_record_warning_is_deduped_across_scans(
     assert pty_cli_mod.live_sessions(prefix="ava-test-retain-") == {}
     assert _warn_count() == 2
 
-
 # ---------------------------------------------------------------------------
 # PtySessionBackend in-process enumeration (task #1200)
 # ---------------------------------------------------------------------------
-
 
 def test_backend_enumerates_without_subprocess_or_socket(
     sessions: Path, monkeypatch: pytest.MonkeyPatch
@@ -678,7 +642,6 @@ def test_backend_enumerates_without_subprocess_or_socket(
         assert epoch is not None and epoch > 0
     assert backend.session_started_at(names[0]) == epochs[names[0]]
 
-
 def test_backend_list_is_empty_on_a_fresh_home(
     unit_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -696,11 +659,9 @@ def test_backend_list_is_empty_on_a_fresh_home(
     assert backend.list_sessions() == []
     assert backend.session_started_ats([]) == {}
 
-
 # ---------------------------------------------------------------------------
 # new / send / capture loop
 # ---------------------------------------------------------------------------
-
 
 def test_new_send_capture_loop(sessions: Path) -> None:
     home = sessions
@@ -710,7 +671,6 @@ def test_new_send_capture_loop(sessions: Path) -> None:
     _send(home, name, "echo hello-pty")
     out = _output_until(home, name, "hello-pty")
     assert "hello-pty" in out
-
 
 def test_new_is_idempotent_for_live_session(sessions: Path) -> None:
     home = sessions
@@ -722,7 +682,6 @@ def test_new_is_idempotent_for_live_session(sessions: Path) -> None:
     assert _record(home, name) == first, "idempotent new must not relaunch"
     _send(home, name, "echo still-one-shell")
     _output_until(home, name, "still-one-shell")
-
 
 def test_freeze_ack_has_no_later_session_start_during_concurrent_allocations(
     sessions: Path,
@@ -780,7 +739,6 @@ def test_freeze_ack_has_no_later_session_start_during_concurrent_allocations(
                 proc.terminate()
                 proc.wait(timeout=10)
 
-
 def test_failed_allocation_cannot_publish_after_freeze_ack(
     sessions: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -799,7 +757,6 @@ def test_failed_allocation_cannot_publish_after_freeze_ack(
         assert not record_path(name).exists()
     finally:
         assert allocation_freeze.resume(frozen.generation)
-
 
 def test_desired_state_session_families_rebuild_once_after_resume(
     sessions: Path, monkeypatch: pytest.MonkeyPatch
@@ -841,7 +798,6 @@ def test_desired_state_session_families_rebuild_once_after_resume(
         assert backend.session_started_at(name) == started[name]
     assert set(names) <= set(backend.list_sessions())
 
-
 def test_new_reaps_a_recordless_host_before_replacement(sessions: Path) -> None:
     """A vanished record cannot leave a SIGTERM-immune host owning the name.
 
@@ -868,8 +824,19 @@ def test_new_reaps_a_recordless_host_before_replacement(sessions: Path) -> None:
         second = _record(home, name)
         assert second is not None and second.pid != first.pid
         assert not envfile.exists(), "the replacement must consume its env handoff"
-        assert _wait(lambda: _proc_exited(old_host)), "recordless host survived replacement"
-        assert _wait(lambda: _proc_exited(old_shell)), "recordless shell survived replacement"
+
+        def survivor() -> str:
+            try:
+                return repr(
+                    old_host.as_dict(attrs=["pid", "ppid", "status", "create_time", "cmdline"])
+                )
+            except psutil.Error as exc:
+                return repr(exc)
+
+        assert _wait(lambda: not old_host.is_running()), (
+            f"recordless host survived replacement: expected={identity!r}, observed={survivor()}"
+        )
+        assert _wait(lambda: not old_shell.is_running()), "recordless shell survived replacement"
     finally:
         # The pre-fix behavior rejects the replacement and leaves the deliberately
         # recordless host outside the fixture's normal record-based teardown.
@@ -878,7 +845,6 @@ def test_new_reaps_a_recordless_host_before_replacement(sessions: Path) -> None:
                 if proc.is_running():
                     proc.kill()
         envfile.unlink(missing_ok=True)
-
 
 def test_kill_reaps_a_recordless_host_without_its_socket(sessions: Path) -> None:
     """`kill` remains authoritative after both routing artifacts disappear."""
@@ -903,7 +869,6 @@ def test_kill_reaps_a_recordless_host_without_its_socket(sessions: Path) -> None
                 if proc.is_running():
                     proc.kill()
 
-
 def test_new_honors_cwd(sessions: Path) -> None:
     home = sessions
     name = "ava-test-cwd-1"
@@ -923,7 +888,6 @@ def test_new_honors_cwd(sessions: Path) -> None:
 
     assert _wait(_seen, timeout=10.0), f"capture never contained {cwd!s} (even de-wrapped)"
 
-
 def test_send_transports_tricky_text_via_base64(sessions: Path) -> None:
     home = sessions
     name = "ava-test-b64-1"
@@ -932,7 +896,6 @@ def test_send_transports_tricky_text_via_base64(sessions: Path) -> None:
     _send(home, name, tricky)
     out = _output_until(home, name, 'quote " and spaces \u4f60\u597d')
     assert 'quote " and spaces \u4f60\u597d' in out
-
 
 def test_send_without_enter_does_not_submit(sessions: Path) -> None:
     """Text and Enter are separate writes (the SDK contract); text alone
@@ -954,11 +917,9 @@ def test_send_without_enter_does_not_submit(sessions: Path) -> None:
     _keys(home, name, "Enter")
     _output_until(home, name, "not-submitted-yet")
 
-
 # ---------------------------------------------------------------------------
 # send_keys / resize / capture semantics
 # ---------------------------------------------------------------------------
-
 
 def test_send_keys_ctrl_c_interrupts_foreground(sessions: Path) -> None:
     home = sessions
@@ -971,7 +932,6 @@ def test_send_keys_ctrl_c_interrupts_foreground(sessions: Path) -> None:
     _output_until(home, name, "after-interrupt")
     assert _has(home, name)
 
-
 def test_send_keys_up_arrow_recalls_history(sessions: Path) -> None:
     home = sessions
     name = "ava-test-up-1"
@@ -982,7 +942,6 @@ def test_send_keys_up_arrow_recalls_history(sessions: Path) -> None:
     out = _output_until(home, name, "arrow-marker-77")
     assert out.count("arrow-marker-77") >= 2, out
 
-
 def test_send_keys_literal_unknown_key_types_text(sessions: Path) -> None:
     """screen semantics: an unrecognized key name is typed as literal text."""
     home = sessions
@@ -991,7 +950,6 @@ def test_send_keys_literal_unknown_key_types_text(sessions: Path) -> None:
     _keys(home, name, "echo", " ", "literal-keys-ok")
     _keys(home, name, "Enter")
     _output_until(home, name, "literal-keys-ok")
-
 
 def test_resize_is_seen_by_stty(sessions: Path) -> None:
     home = sessions
@@ -1004,7 +962,6 @@ def test_resize_is_seen_by_stty(sessions: Path) -> None:
     _send(home, name, "stty size")
     out = _capture_until(home, name, "25 100")
     assert "25 100" in out
-
 
 def test_capture_visible_screen_renders_tui_layout(sessions: Path) -> None:
     """A cursor-addressed full-screen program: the visible screen must show
@@ -1036,7 +993,6 @@ def test_capture_visible_screen_renders_tui_layout(sessions: Path) -> None:
     full = _capture(home, name)
     assert "FAKE-TOP" in full and "45" in full, "history must survive the TUI"
 
-
 def test_capture_lines_caps_output(sessions: Path) -> None:
     """lines=N caps the render at the last N rows (classic -S -N semantics)."""
     home = sessions
@@ -1055,11 +1011,9 @@ def test_capture_lines_caps_output(sessions: Path) -> None:
     wide = _capture(home, name, lines=200)
     assert "bulk-line-0" in wide
 
-
 # ---------------------------------------------------------------------------
 # envfile
 # ---------------------------------------------------------------------------
-
 
 def test_envfile_reaches_shell_and_is_consumed(sessions: Path) -> None:
     home = sessions
@@ -1073,14 +1027,12 @@ def test_envfile_reaches_shell_and_is_consumed(sessions: Path) -> None:
     _send(home, name, "echo value=$PTY_TEST_VAR")
     _output_until(home, name, "value=hello-from-envfile")
 
-
 def test_new_missing_envfile_fails(sessions: Path) -> None:
     home = sessions
     name = "ava-test-noenv-1"
     result = _run_cli(home, name, "new", str(home), str(home / "does-not-exist.env.sh"))
     assert result.returncode == 1
     assert not _has(home, name)
-
 
 def test_child_env_does_not_inherit_spawner_process_profile(sessions: Path) -> None:
     """A spawner carrying AVA_PROCESS_PROFILE (an ops-daemon-mediated create,
@@ -1110,11 +1062,9 @@ def test_child_env_does_not_inherit_spawner_process_profile(sessions: Path) -> N
     out = _capture_until(home, name, "ENVCHECK_DONE")
     assert "AVA_PROCESS_PROFILE=" not in out, f"spawner profile leaked into session child:\n{out}"
 
-
 # ---------------------------------------------------------------------------
 # kill semantics
 # ---------------------------------------------------------------------------
-
 
 def test_kill_reaps_process_tree_no_orphans(sessions: Path) -> None:
     home = sessions
@@ -1133,7 +1083,6 @@ def test_kill_reaps_process_tree_no_orphans(sessions: Path) -> None:
     assert not _has(home, name)
     assert _wait(lambda: _record(home, name) is None), "record must be unlinked on kill"
 
-
 @pytest.mark.flaky  # quarantine (flake governance C, #2245): host-exit race, 2026-09-01
 def test_kill_ends_the_host_process(sessions: Path) -> None:
     """The host exits when its session dies — no host may linger as an
@@ -1148,14 +1097,12 @@ def test_kill_ends_the_host_process(sessions: Path) -> None:
     assert _wait(lambda: not psutil.pid_exists(host_pid)), "host must exit with its session"
     assert not socket_path(name).exists(), "socket must be unlinked on session end"
 
-
 def test_kill_graceful_then_force(sessions: Path) -> None:
     home = sessions
     name = "ava-test-killg-1"
     _new(home, name)
     assert _kill(home, name, graceful=True) == 0
     assert _wait(lambda: not _has(home, name))
-
 
 @pytest.mark.filterwarnings("ignore:This process .* is multi-threaded.*:DeprecationWarning")
 def test_orphan_reaper_host_is_live_treats_zombie_as_dead() -> None:
@@ -1179,11 +1126,9 @@ def test_orphan_reaper_host_is_live_treats_zombie_as_dead() -> None:
         os.close(r)
         os.waitpid(pid, 0)  # reap so the test never leaks a zombie
 
-
 def test_kill_is_idempotent_noop_on_absent(sessions: Path) -> None:
     home = sessions
     assert _kill(home, "ava-test-absent-1") == 0
-
 
 def test_kill_by_record_reaches_a_wedged_host(sessions: Path) -> None:
     """A host that stops answering its socket (SIGSTOP here) must still be
@@ -1209,7 +1154,6 @@ def test_kill_by_record_reaches_a_wedged_host(sessions: Path) -> None:
     assert not record_path(name).exists()
     assert not socket_path(name).exists()
 
-
 def test_session_exit_cleans_up_record(sessions: Path) -> None:
     home = sessions
     name = "ava-test-exit-1"
@@ -1217,7 +1161,6 @@ def test_session_exit_cleans_up_record(sessions: Path) -> None:
     _send(home, name, "exit")
     assert _wait(lambda: not _has(home, name)), "session must die with its shell"
     assert _wait(lambda: _record(home, name) is None)
-
 
 def test_ops_after_death_report_no_such_session(sessions: Path) -> None:
     home = sessions
@@ -1229,7 +1172,6 @@ def test_ops_after_death_report_no_such_session(sessions: Path) -> None:
     b64 = base64.b64encode(b"echo x").decode("ascii")
     assert _run_cli(home, name, "send", b64).returncode == 3
     assert _run_cli(home, name, "capture").returncode == 3
-
 
 def test_record_carries_host_identity(sessions: Path) -> None:
     """The pty record is a SessionRecord (shell pid = the liveness key) plus
@@ -1257,7 +1199,6 @@ def test_record_carries_host_identity(sessions: Path) -> None:
         assert rec.starttime == pid_starttime_ticks(rec.pid)
         assert raw["host_starttime"] == pid_starttime_ticks(host_pid)
 
-
 def test_kill_then_immediate_same_name_new_is_a_real_session(sessions: Path) -> None:
     """kill x → new x with no pause: the new must either build a REAL fresh
     session or fail honestly — never adopt the dying host as its success (the
@@ -1277,17 +1218,14 @@ def test_kill_then_immediate_same_name_new_is_a_real_session(sessions: Path) -> 
     _send(home, name, "echo reborn-ok")
     _output_until(home, name, "reborn-ok")
 
-
 # ---------------------------------------------------------------------------
 # kill verdict — the TTL reaper's interrupt probe
 # ---------------------------------------------------------------------------
-
 
 def _kill_verdict(home: Path, name: str) -> str:
     result = _run_cli(home, name, "kill")
     assert result.returncode == 0, f"kill failed: {result.stderr}"
     return result.stdout.strip()
-
 
 def test_kill_idle_reports_not_interrupted(sessions: Path) -> None:
     """Killing a shell sitting at its prompt reports `idle` — the empty-shell
@@ -1300,7 +1238,6 @@ def test_kill_idle_reports_not_interrupted(sessions: Path) -> None:
     assert _kill_verdict(home, name) == "idle"
     assert not _has(home, name)
 
-
 def _wait_shell_child(home: Path, name: str) -> psutil.Process:
     """Wait until the named session's shell has a live child (the job is up)."""
     rec = _record(home, name)
@@ -1308,7 +1245,6 @@ def _wait_shell_child(home: Path, name: str) -> psutil.Process:
     shell = psutil.Process(rec.pid)
     assert _wait(shell.children), f"{name} shell never grew a child"
     return shell
-
 
 def test_kill_foreground_job_reports_interrupted(sessions: Path) -> None:
     """Killing a session with a foreground job reports `interrupted` — the
@@ -1324,7 +1260,6 @@ def test_kill_foreground_job_reports_interrupted(sessions: Path) -> None:
     assert _kill_verdict(home, name) == "interrupted"
     assert not _has(home, name)
 
-
 def test_kill_background_job_reports_interrupted(sessions: Path) -> None:
     """A background job (children of the shell, no tty) also counts as
     running work — the ruling's 'active process / background job'."""
@@ -1337,7 +1272,6 @@ def test_kill_background_job_reports_interrupted(sessions: Path) -> None:
     _wait_shell_child(home, name)
     assert _kill_verdict(home, name) == "interrupted"
     assert not _has(home, name)
-
 
 def test_kill_absent_reports_idle(sessions: Path) -> None:
     """Killing an absent session is an idempotent noop and reports `idle` —

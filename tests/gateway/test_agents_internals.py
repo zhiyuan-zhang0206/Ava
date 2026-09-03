@@ -786,7 +786,7 @@ class TestResurrectAgent:
                 force_locked.set()
                 assert release_force.wait(timeout=5)
                 return result
-            if name == "guard-waits" and "UPDATE agents_meta SET status" in sql:
+            if name == "guard-waits" and "FROM agents_meta" in sql and "FOR UPDATE" in sql:
                 guard_attempted.set()
             return original_execute(cursor, query, *args, **kwargs)
 
