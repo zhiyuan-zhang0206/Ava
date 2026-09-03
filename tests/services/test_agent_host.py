@@ -29,9 +29,11 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Awaitable, Callable, Iterator
 from typing import Any, cast
+from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
 import pytest
+from psycopg_pool import AsyncConnectionPool
 from pydantic import BaseModel, ConfigDict, Field
 
 import ava._boot
@@ -501,6 +503,28 @@ class TestConfigRebind:
 
 
 class TestTurnLoop:
+    async def test_host_builds_a_turn_scoped_nstep_saver(self) -> None:
+        """The shared host saver must install the interval wrapper at boot."""
+        from services.agent_host.daemon import _build_checkpointer
+
+        checkpointer = await _build_checkpointer(cast(AsyncConnectionPool[Any], object()))
+
+        assert "_ava_nstep_flush" in checkpointer.__dict__
+
+    async def test_completed_turn_flushes_its_own_nstep_checkpoint_tail(
+        self, wired: _Build
+    ) -> None:
+        """Hosted turns must persist a skipped tail before the task returns."""
+        host, _, _ = wired({1: _Row()})
+        flush = AsyncMock()
+        saver: Any = type("_NstepSaver", (), {})()
+        saver._ava_nstep_flush = flush
+        host._checkpointer = saver
+
+        await host.run_turn(1)
+
+        flush.assert_awaited_once_with("1")
+
     async def test_a_turn_flips_status_running_then_idling(
         self, wired: _Build, monkeypatch: pytest.MonkeyPatch
     ) -> None:

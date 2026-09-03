@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Awaitable, Callable, Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, cast
@@ -88,7 +89,42 @@ def _wrap_saver_writes_with_loud_failure(checkpointer: AsyncPostgresSaver, agent
     checkpointer.aput_writes = _logged_aput_writes  # type: ignore[method-assign]
 
 
-def _wrap_saver_writes_with_nstep_interval(checkpointer: AsyncPostgresSaver, interval: int) -> None:
+@dataclass
+class _NstepCheckpointState:
+    """One thread's retained checkpoint parent and skipped tail."""
+
+    last_aput_step: int | None = None
+    last_persisted_config: RunnableConfig | None = None
+    last_skipped_aput: (
+        tuple[RunnableConfig, Checkpoint, CheckpointMetadata, ChannelVersions] | None
+    ) = None
+
+
+def _checkpoint_thread_id(config: RunnableConfig) -> str:
+    """Return the required LangGraph checkpoint thread id."""
+    if "configurable" not in config:
+        raise KeyError("checkpoint config is missing configurable")
+    configurable = config["configurable"]
+    if "thread_id" not in configurable:
+        raise KeyError("checkpoint config is missing configurable.thread_id")
+    thread_id = configurable["thread_id"]
+    if not isinstance(thread_id, str):
+        raise TypeError(f"checkpoint thread id must be str, got {type(thread_id).__name__}")
+    return thread_id
+
+
+def _resolve_checkpoint_interval(interval: int | Callable[[], int]) -> int:
+    """Return a validated static or turn-scoped checkpoint interval."""
+    resolved = interval() if callable(interval) else interval
+    if resolved < 1:
+        raise ValueError(f"checkpoint interval must be positive, got {resolved}")
+    return resolved
+
+
+def _wrap_saver_writes_with_nstep_interval(
+    checkpointer: AsyncPostgresSaver,
+    interval: int | Callable[[], int],
+) -> None:
     """Persist super-step checkpoints every ``interval`` steps.
 
     The wrapper leaves input/fork checkpoints untouched. For skipped super-step
@@ -96,23 +132,23 @@ def _wrap_saver_writes_with_nstep_interval(checkpointer: AsyncPostgresSaver, int
     next retained step. Those writes and retained checkpoints use the last
     persisted config, so every parent and write target has a checkpoint row. A
     completed turn flushes the latest skipped update through
-    ``_ava_nstep_flush``; a crash may instead replay up to ``interval - 1``
-    super-steps.
+    ``_ava_nstep_flush(thread_id)``; a crash may instead replay up to
+    ``interval - 1`` super-steps. A callable resolves an interval in the
+    current turn context, so the hosted runner can share one saver without
+    sharing a throttle between agents.
 
     The caller installs loud-failure logging first, so these original methods
     are the logging wrappers: every throttled write that fires, including the
     final flush, still reports a checkpoint failure before re-raising.
     """
-    if interval <= 1:
+    if isinstance(interval, int) and interval < 1:
+        raise ValueError(f"checkpoint interval must be positive, got {interval}")
+    if interval == 1:
         return
 
     orig_aput = checkpointer.aput
     orig_aput_writes = checkpointer.aput_writes
-    last_aput_step: int | None = None
-    last_persisted_config: RunnableConfig | None = None
-    last_skipped_aput: (
-        tuple[RunnableConfig, Checkpoint, CheckpointMetadata, ChannelVersions] | None
-    ) = None
+    states: dict[str, _NstepCheckpointState] = {}
 
     async def _throttled_aput(
         config: RunnableConfig,
@@ -120,37 +156,41 @@ def _wrap_saver_writes_with_nstep_interval(checkpointer: AsyncPostgresSaver, int
         metadata: CheckpointMetadata,
         new_versions: ChannelVersions,
     ) -> RunnableConfig:
-        nonlocal last_aput_step, last_persisted_config, last_skipped_aput
+        current_interval = _resolve_checkpoint_interval(interval)
+        if current_interval == 1:
+            return await orig_aput(config, checkpoint, metadata, new_versions)
 
         assert "step" in metadata  # noqa: S101
         assert "source" in metadata  # noqa: S101
         step = metadata["step"]
         source = metadata["source"]
-        last_aput_step = step
+        thread_id = _checkpoint_thread_id(config)
+        state = states.setdefault(thread_id, _NstepCheckpointState())
+        state.last_aput_step = step
         # `loop` is graph.ainvoke's normal super-step path; `update` is the
         # manual state-update path. Both must use the same durability interval.
         if source not in ("loop", "update"):
             saved_config = await orig_aput(
-                last_persisted_config or config, checkpoint, metadata, new_versions
+                state.last_persisted_config or config, checkpoint, metadata, new_versions
             )
-            last_persisted_config = saved_config
+            state.last_persisted_config = saved_config
             return saved_config
 
         # AsyncPregelLoop advances its own checkpoint config without reading
         # aput's return value. Feed every retained checkpoint the last real
         # saver config explicitly, otherwise its parent points at a skipped
         # (and therefore nonexistent) checkpoint row.
-        parent_config = last_persisted_config or config
-        if step % interval == 0:
+        parent_config = state.last_persisted_config or config
+        if step % current_interval == 0:
             saved_config = await orig_aput(parent_config, checkpoint, metadata, new_versions)
-            last_persisted_config = saved_config
-            last_skipped_aput = None
+            state.last_persisted_config = saved_config
+            state.last_skipped_aput = None
             return saved_config
 
-        if last_persisted_config is None:
-            last_persisted_config = config
-        last_skipped_aput = (config, checkpoint, metadata, new_versions)
-        return last_persisted_config
+        if state.last_persisted_config is None:
+            state.last_persisted_config = config
+        state.last_skipped_aput = (config, checkpoint, metadata, new_versions)
+        return state.last_persisted_config
 
     async def _throttled_aput_writes(
         config: RunnableConfig,
@@ -158,26 +198,32 @@ def _wrap_saver_writes_with_nstep_interval(checkpointer: AsyncPostgresSaver, int
         task_id: str,
         task_path: str = "",
     ) -> None:
-        if last_aput_step is None:
+        current_interval = _resolve_checkpoint_interval(interval)
+        if current_interval == 1:
+            await orig_aput_writes(config, writes, task_id, task_path)
+            return
+        thread_id = _checkpoint_thread_id(config)
+        state = states.get(thread_id)
+        if state is None or state.last_aput_step is None:
             await orig_aput_writes(config, writes, task_id, task_path)
             return
 
         write_step = (
-            last_aput_step if any(key == PUSH for key, _value in writes) else last_aput_step + 1
+            state.last_aput_step
+            if any(key == PUSH for key, _value in writes)
+            else state.last_aput_step + 1
         )
-        if write_step % interval == 0:
-            await orig_aput_writes(last_persisted_config or config, writes, task_id, task_path)
+        if write_step % current_interval == 0:
+            await orig_aput_writes(
+                state.last_persisted_config or config, writes, task_id, task_path
+            )
 
-    async def _flush_final() -> None:
-        nonlocal last_persisted_config, last_skipped_aput
-
-        if last_skipped_aput is None:
+    async def _flush_final(thread_id: str) -> None:
+        state = states.pop(thread_id, None)
+        if state is None or state.last_skipped_aput is None:
             return
-        config, checkpoint, metadata, new_versions = last_skipped_aput
-        last_persisted_config = await orig_aput(
-            last_persisted_config or config, checkpoint, metadata, new_versions
-        )
-        last_skipped_aput = None
+        config, checkpoint, metadata, new_versions = state.last_skipped_aput
+        await orig_aput(state.last_persisted_config or config, checkpoint, metadata, new_versions)
 
     checkpointer.aput = _throttled_aput  # type: ignore[method-assign]
     checkpointer.aput_writes = _throttled_aput_writes  # type: ignore[method-assign]
@@ -257,7 +303,7 @@ async def _repair_dangling_tool_use_at_startup(
     checkpointer = cast(AsyncPostgresSaver, graph.checkpointer)  # pyright: ignore[reportUnknownMemberType]
     flush = getattr(checkpointer, "_ava_nstep_flush", None)
     if flush is not None:
-        await cast(Callable[[], Awaitable[None]], flush)()
+        await cast(Callable[[str], Awaitable[None]], flush)(str(agent_id))
     logger.warning(
         "repaired dangling tool_use/tool_result pairing from a hard-cancelled previous process",
         event="dangling_tool_pairing_repaired",
