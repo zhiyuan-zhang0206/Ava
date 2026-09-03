@@ -95,6 +95,16 @@ def test_launch_command_uses_isolated_home_without_sqlite_resume(tmp_path: Path)
     assert f"CODEX_HOME={record.state_dir}" in command
     assert "exec codex --dangerously-bypass-approvals-and-sandbox" in command
     assert "resume" not in command
+    assert "AVA_CALLER_IDENTITY" not in command
+
+
+def test_launch_command_can_explicitly_declare_external_caller(tmp_path: Path) -> None:
+    record = _owner(tmp_path)
+    command = spawn_codex._codex_command(record, Path(record.key.workspace), "run-42")
+    assert "AVA_CALLER_IDENTITY=" in command
+    assert '"kind":"external_agent"' in command
+    assert '"subject":"codex"' in command
+    assert '"instance":"run-42"' in command
 
 
 def test_fresh_launch_publishes_full_handle_and_durable_context(tmp_path: Path) -> None:

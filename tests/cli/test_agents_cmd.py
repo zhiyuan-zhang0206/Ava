@@ -209,13 +209,13 @@ def test_agents_send_skips_empty_tail(
 def test_agents_send_surfaces_error_body(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    # A 422 (e.g. illegal --source) must print the response body — it carries
-    # the legal source set — before raising.
+    # A server-side protocol fence must print its actionable response before
+    # raising. Malformed source syntax is now rejected locally before dialing.
     monkeypatch.setattr(
         httpx,
         "post",
         lambda *_a, **_k: _FakeResp({"detail": "Unrecognized inbound source"}, status_code=422),  # pyright: ignore[reportUnknownArgumentType]
     )
     with pytest.raises(httpx.HTTPStatusError):
-        _agents.cmd_agents_send(5, "msg", "not-a-source")
+        _agents.cmd_agents_send(5, "msg", "external_agent:codex")
     assert "Unrecognized inbound source" in capsys.readouterr().err
