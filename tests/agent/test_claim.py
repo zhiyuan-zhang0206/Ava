@@ -2042,7 +2042,7 @@ async def test_claim_resurrect_batch_appends_only_latest_marker(
     aredis_inbound_listener: RedisInboundListener,
 ):
     """Repeated failed recoveries are consumed together but render one marker."""
-    tid = create_agent(db_conn)
+    tid = spawn_agent()
     first = _insert_inbound_kind(db_conn, tid, "", "resurrect", source="system:retry")
     latest = _insert_inbound_kind(db_conn, tid, "", "resurrect", source="user")
 

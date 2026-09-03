@@ -37,7 +37,6 @@ from agent.hooks.compact import (
     emergency_compact_summary,
 )
 from agent.state import AgentState, CircuitState
-from shared.db import create_agent
 from shared.event_publisher import AgentEventPublisher
 from shared.redis_listener import RedisInboundListener
 from tests.agent.test_claim import (
@@ -54,6 +53,7 @@ from tests.conftest import spawn_agent
 # A summary long enough to clear COMPACT_MIN_SUMMARY_CHARS.
 _LONG_SUMMARY = "## Requests\nfollow the template. " * 60
 
+
 class _FakeProviderStatusError(Exception):
     """anthropic/openai APIStatusError shape driving the classifier."""
 
@@ -61,6 +61,7 @@ class _FakeProviderStatusError(Exception):
         super().__init__(f"HTTP {status_code}")
         self.status_code = status_code
         self.body = body  # pyright: ignore[reportUnknownMemberType]
+
 
 class _RecordingPublisher:
     """Minimal typed event sink for fatal-error live-event assertions."""
@@ -70,6 +71,7 @@ class _RecordingPublisher:
 
     def emit(self, payload: str) -> None:
         self.payloads.append(payload)
+
 
 def _overflow_state(breaker_reason: str | None = None) -> AgentState:
     """An agent state sitting past the provider's context ceiling, with the
@@ -88,12 +90,15 @@ def _overflow_state(breaker_reason: str | None = None) -> AgentState:
         circuit=circuit,
     )
 
+
 def _breaker_ctx() -> AvaContext:
     """An AvaContext for `_handle_fatal_llm_error` — no ops_pool, so the
     best-effort event-log write is skipped (unit tests have no DB)."""
     return AvaContext(ops_pool=None, llm=MagicMock(), event_publisher=MagicMock())
 
+
 # ── breaker open (runloop `_handle_fatal_llm_error`) ──
+
 
 async def test_fatal_provider_error_opens_circuit_breaker(loguru_records) -> None:
     """A permanent context-overflow rejection opens the breaker with the
@@ -118,6 +123,7 @@ async def test_fatal_provider_error_opens_circuit_breaker(loguru_records) -> Non
     assert len(records) == 1  # pyright: ignore[reportUnknownArgumentType]
     assert records[0]["extra"]["reason"] == "context_overflow"
 
+
 async def test_fatal_provider_error_billing_reason() -> None:
     """A 402 billing rejection opens the breaker too (heartbeat re-fires stop),
     but with the billing reason — no forced compact is armed for it."""
@@ -133,6 +139,7 @@ async def test_fatal_provider_error_billing_reason() -> None:
     assert isinstance(circuit, CircuitState)
     assert circuit.open is True
     assert circuit.reason == "billing"
+
 
 async def test_fatal_provider_error_emits_blocked_recovery_details() -> None:
     """The live error tells the user that a permanent rejection blocked retries.
@@ -164,6 +171,7 @@ async def test_fatal_provider_error_emits_blocked_recovery_details() -> None:
         emitted["recovery"]
         == "Choose a different model overlay or resolve the provider policy rejection, then send a new message."
     )
+
 
 async def test_permanent_provider_error_reports_metadata_to_nearest_alive_ancestor(
     db_conn: psycopg.Connection,
@@ -232,6 +240,7 @@ async def test_permanent_provider_error_reports_metadata_to_nearest_alive_ancest
     ]
     assert blocked_history not in rows[0][1]
 
+
 async def test_context_overflow_self_recovery_does_not_report_to_an_ancestor(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
@@ -263,6 +272,7 @@ async def test_context_overflow_self_recovery_does_not_report_to_an_ancestor(
         cur.execute("SELECT count(*) FROM inbound_messages WHERE agent_id = %s", (ancestor_id,))
         assert cur.fetchone() == (0,)
 
+
 async def test_fatal_llm_stream_error_does_not_open_breaker() -> None:
     """FatalLLMStreamError (retry cap) is not a permanent provider rejection —
     it only halts the turn; the breaker stays untouched."""
@@ -270,6 +280,7 @@ async def test_fatal_llm_stream_error_does_not_open_breaker() -> None:
     update = await _handle_fatal_llm_error(exc, _breaker_ctx(), agent_id=42)
 
     assert update == {"halted": True}
+
 
 async def test_fatal_provider_error_does_not_reopen_already_open_breaker() -> None:
     """A second failure while the breaker is already open for the same reason
@@ -292,7 +303,9 @@ async def test_fatal_provider_error_does_not_reopen_already_open_breaker() -> No
         "the breaker is already open — the duplicate write must be skipped"
     )
 
+
 # ── heartbeat gating (claim node) ──
+
 
 async def test_heartbeat_while_breaker_open_forces_compact(
     db_conn: psycopg.Connection,
@@ -322,6 +335,7 @@ async def test_heartbeat_while_breaker_open_forces_compact(
     assert len(tail) == 1, "forced compact tail must be the summary alone — no heartbeat note"  # pyright: ignore[reportUnknownArgumentType]
     assert tail[0].content == compose_summary_message(_LONG_SUMMARY)  # pyright: ignore[reportUnknownMemberType]
     assert cmd.update["compact"].version == 1  # pyright: ignore[reportOptionalSubscript, reportUnknownArgumentType, reportUnknownMemberType]
+
 
 async def test_heartbeat_while_breaker_open_falls_back_to_minimal_compact(
     db_conn: psycopg.Connection,
@@ -355,6 +369,7 @@ async def test_heartbeat_while_breaker_open_falls_back_to_minimal_compact(
     tail = _compact_tail(cmd.update)
     assert _EMERGENCY_COMPACT_MARKER in tail[0].content  # pyright: ignore[reportUnknownMemberType]
 
+
 async def test_heartbeat_while_breaker_open_non_overflow_parks(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
@@ -381,6 +396,7 @@ async def test_heartbeat_while_breaker_open_non_overflow_parks(
     fake_llm.bind_tools.return_value.ainvoke.assert_not_called()
     assert not cmd.update.get("messages"), "no note appended while breaker open"  # pyright: ignore[reportOptionalMemberAccess]
     assert cmd.goto == "claim"
+
 
 @pytest.mark.parametrize(
     ("first_kind", "second_kind"),
@@ -421,6 +437,7 @@ async def test_chat_cobatched_with_open_breaker_heartbeat_reaches_llm(
     assert "Heartbeat." not in messages[0].content  # pyright: ignore[reportUnknownMemberType]
     fake_llm.bind_tools.return_value.ainvoke.assert_not_called()
 
+
 async def test_claim_parks_idle_while_non_overflow_breaker_open(
     aops_pool: AsyncConnectionPool,
 ) -> None:
@@ -443,6 +460,7 @@ async def test_claim_parks_idle_while_non_overflow_breaker_open(
     assert cmd.goto == "__end__"
     assert cmd.update["turn_idle"] is True  # pyright: ignore[reportOptionalSubscript, reportUnknownMemberType]
 
+
 async def test_claim_does_not_park_while_breaker_closed(
     aops_pool: AsyncConnectionPool,
 ) -> None:
@@ -460,6 +478,7 @@ async def test_claim_does_not_park_while_breaker_closed(
     )
 
     assert cmd.goto == "before_llm"
+
 
 async def test_heartbeat_normal_when_breaker_closed(
     db_conn: psycopg.Connection,
@@ -490,7 +509,9 @@ async def test_heartbeat_normal_when_breaker_closed(
     assert "Heartbeat." in msgs[0].content  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
     assert cmd.goto == "before_llm"
 
+
 # ── emergency_compact_summary (unit) ──
+
 
 async def test_emergency_compact_summary_uses_real_summary() -> None:
     """The compaction call succeeds → its summary is used (the no-LLM fallback
@@ -498,6 +519,7 @@ async def test_emergency_compact_summary_uses_real_summary() -> None:
     msgs: list[AnyMessage] = [SystemMessage(content="<sys>"), HumanMessage(content="hi")]
     summary = await emergency_compact_summary(msgs, _fake_llm(_LONG_SUMMARY))
     assert summary == _LONG_SUMMARY
+
 
 async def test_emergency_compact_summary_falls_back_on_permanent_rejection() -> None:
     """Every compaction attempt is permanently rejected → the marker fallback
@@ -518,6 +540,7 @@ async def test_emergency_compact_summary_falls_back_on_permanent_rejection() -> 
         "a permanent rejection must not be retried — the request cannot succeed"
     )
 
+
 async def test_emergency_compact_summary_preserves_last_prior_summary() -> None:
     """The fallback embeds the last preserved compaction summary, so the
     model-less wipe keeps as much memory as possible."""
@@ -537,6 +560,7 @@ async def test_emergency_compact_summary_preserves_last_prior_summary() -> None:
     assert prior in summary
     assert _EMERGENCY_COMPACT_MARKER in summary
 
+
 async def test_emergency_compact_summary_raises_on_transient_exhaustion() -> None:
     """A transient failure (provider 502) is retried and, exhausted, raises
     CompactionFailedError — a provider blip must not silently destroy the
@@ -549,7 +573,9 @@ async def test_emergency_compact_summary_raises_on_transient_exhaustion() -> Non
         await emergency_compact_summary(msgs, llm)
     assert llm.bind_tools.return_value.ainvoke.await_count == COMPACT_MAX_ATTEMPTS
 
+
 # ── breaker close (llm node) ──
+
 
 async def test_llm_node_closes_circuit_on_success() -> None:
     """A successful LLM call is the circuit-healed signal — the breaker closes
@@ -574,6 +600,7 @@ async def test_llm_node_closes_circuit_on_success() -> None:
 
     assert cmd.update["circuit"].open is False  # pyright: ignore[reportOptionalSubscript, reportUnknownMemberType]
     assert cmd.update["circuit"].reason is None  # pyright: ignore[reportOptionalSubscript, reportUnknownMemberType]
+
 
 async def test_llm_node_cancel_does_not_close_circuit(fake_cancel_event) -> None:
     """The cancel path discards the partial generation — no stream completed,
