@@ -686,6 +686,14 @@ Do not use this override without user approval."""
 
 
 def pytest_configure(config: pytest.Config) -> None:
+    # --- diag(shard16-hang) ONLY (branch ava-5777-diag; never merge) ---
+    # pytest 9 removed the builtin faulthandler timeout option: schedule a
+    # stdlib stack dump every 60s from each xdist worker so a hung test's
+    # frames land in the job log (QA #3242 recipe).
+    import faulthandler
+
+    faulthandler.dump_traceback_later(60, exit=False)
+    # --- end diag ---
     message = _full_run_guard_message(
         config.rootpath, config.args, os.environ, config.invocation_params.dir
     )
@@ -1927,3 +1935,5 @@ def _no_stdlib_telemetry_bridge() -> Iterator[None]:
     root.handlers = [h for h in saved if not isinstance(h, _StdlibInterceptHandler)]
     yield
     root.handlers = saved
+
+

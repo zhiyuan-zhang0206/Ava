@@ -528,7 +528,7 @@ jobs:
           set +e
           set -o pipefail
           mkdir -p tmp
-          uv run pytest tests/ -q --ignore=tests/e2e -m "not flaky" -n 4 --faulthandler-timeout=60 \
+          uv run pytest tests/ -q --ignore=tests/e2e -m "not flaky" -n 4  \
             --splits 16 --group ${{ matrix.group }} \
             --splitting-algorithm least_duration \
             --cov=agent --cov=ava --cov=cli --cov=gateway --cov=shared --cov=ui \
@@ -547,7 +547,7 @@ jobs:
             # file (coverage.py appends by default) and flatten the combine;
             # drop it so the retry writes a clean per-shard file.
             rm -f "$COVERAGE_FILE"
-            uv run pytest tests/ -q --ignore=tests/e2e -m "not flaky" -n 4 --faulthandler-timeout=60 \
+            uv run pytest tests/ -q --ignore=tests/e2e -m "not flaky" -n 4  \
               --splits 16 --group ${{ matrix.group }} \
               --splitting-algorithm least_duration \
               --cov=agent --cov=ava --cov=cli --cov=gateway --cov=shared --cov=ui \
