@@ -220,9 +220,8 @@ def _payload_row(conn: psycopg.Connection, agent_id: int) -> tuple[str, dict | N
 
 class TestMultimodalMessage:
     def test_image_to_non_vision_model_422(self, db_conn: psycopg.Connection) -> None:
-        """Default model is deepseek (text-only) → an image message is gated 422
-        up front, nothing queued."""
-        tid = _seed_agent(db_conn)  # no overlay → cluster default (deepseek)
+        """An explicitly text-only model gates image input before it is queued."""
+        tid = _seed_vision_agent(db_conn, model="deepseek-v4-pro")
         with TestClient(app) as client:
             resp = client.post(
                 f"/api/agents/{tid}/messages",
@@ -283,13 +282,11 @@ class TestMultimodalMessage:
     def test_image_to_deepseek_vision_model_stores_blocks(
         self, db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """deepseek-v4-flash-vision-exp is multimodal on the deepseek branch —
-        the per-model gate must let an image through even though its prefix-mates
-        (v4-pro / v4-flash) are text-only."""
+        """The default vision model accepts image input without an overlay."""
         from pathlib import Path
 
         monkeypatch.setattr(Path, "home", lambda: tmp_path)
-        tid = _seed_vision_agent(db_conn, model="deepseek-v4-flash-vision-exp")
+        tid = _seed_agent(db_conn)
         with TestClient(app) as client:
             up = client.post(
                 f"/api/agents/{tid}/uploads?deliver=false",

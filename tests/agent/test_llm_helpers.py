@@ -1078,7 +1078,7 @@ async def test_llm_usage_event_carries_latency_ms(loguru_records) -> None:
     assert len(usage) == 1, "exactly one llm_usage record per completed call"  # pyright: ignore[reportUnknownArgumentType]
     lat = usage[0]["extra"]["latency_ms"]
     assert lat is not None and lat > 0, f"latency_ms should be a positive ms float, got {lat!r}"
-    assert usage[0]["extra"]["model"] == "deepseek-v4-pro"
+    assert usage[0]["extra"]["model"] == "deepseek-v4-flash-vision-exp"
 
 
 async def test_completed_task_turn_records_usage(monkeypatch: pytest.MonkeyPatch) -> None:
