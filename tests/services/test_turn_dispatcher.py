@@ -793,6 +793,19 @@ class TestPendingScan:
         assert scheduler.woken == []
 
 
+def _stale_age(_agent_id: int) -> float:
+    """A turn-progress clock silent well past the scan budget (task #2417)."""
+    return 3600.0
+
+
+def _fresh_age(_agent_id: int) -> float:
+    return 10.0
+
+
+def _unknown_age(_agent_id: int) -> float | None:
+    return None
+
+
 class TestTurnLevelStaleScan:
     """Task #2417: an in-flight hosted turn whose turn-progress clock is stale
     is turn-level fake-alive even when NO pending inbound exists (agent 2998:
@@ -804,7 +817,7 @@ class TestTurnLevelStaleScan:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         scheduler = _ScanScheduler({23})
-        monkeypatch.setattr(dispatcher, "turn_progress_age_s", lambda _agent: 3600.0)
+        monkeypatch.setattr(dispatcher, "turn_progress_age_s", _stale_age)
 
         async def _pending(_stale_after_s: float) -> list[dispatcher.PendingInboundWake]:
             return []
@@ -822,7 +835,7 @@ class TestTurnLevelStaleScan:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         scheduler = _ScanScheduler({23})
-        monkeypatch.setattr(dispatcher, "turn_progress_age_s", lambda _agent: 10.0)
+        monkeypatch.setattr(dispatcher, "turn_progress_age_s", _fresh_age)
 
         async def _pending(_stale_after_s: float) -> list[dispatcher.PendingInboundWake]:
             return []
@@ -843,7 +856,7 @@ class TestTurnLevelStaleScan:
         has ever marked progress", which must not cancel turns it knows nothing
         about — the same reading the uncancellable report uses for None."""
         scheduler = _ScanScheduler({23})
-        monkeypatch.setattr(dispatcher, "turn_progress_age_s", lambda _agent: None)
+        monkeypatch.setattr(dispatcher, "turn_progress_age_s", _unknown_age)
 
         async def _pending(_stale_after_s: float) -> list[dispatcher.PendingInboundWake]:
             return []
@@ -861,7 +874,7 @@ class TestTurnLevelStaleScan:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         scheduler = _ScanScheduler({23}, unwinds_on_cancel=False)
-        monkeypatch.setattr(dispatcher, "turn_progress_age_s", lambda _agent: 3600.0)
+        monkeypatch.setattr(dispatcher, "turn_progress_age_s", _stale_age)
 
         async def _pending(_stale_after_s: float) -> list[dispatcher.PendingInboundWake]:
             return []
