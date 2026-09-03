@@ -13,7 +13,7 @@ from shared.config._base import EnvSettings
 
 class LmSettings(EnvSettings):
     llm_model: str = Field(
-        default="deepseek-v4-pro",
+        default="deepseek-v4-flash-vision-exp",
         alias="AVA_MODEL",
         description=(
             "Agent model name, e.g. deepseek-v4-pro or claude-*. Per-agent "
