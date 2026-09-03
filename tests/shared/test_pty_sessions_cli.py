@@ -356,7 +356,11 @@ def test_crashed_host_is_swept_lazily(sessions: Path) -> None:
     rec = _record(home, name)
     assert rec is not None
     os.kill(host_pid, signal.SIGKILL)
-    assert _wait(lambda: not psutil.pid_exists(rec.pid)), "shell must HUP when its host dies"
+    # 45s (2026-09-03): under 4-5 concurrent workflow runs the shared runner's
+    # oversubscription outlasted the 30s budget twice in a row (test #2353).
+    assert _wait(lambda: not psutil.pid_exists(rec.pid), timeout=45.0), (
+        "shell must HUP when its host dies"
+    )
     assert not _has(home, name), "a dead shell reads dead regardless of the leftover record"
     assert _run_cli(home, "list").stdout.strip() == ""
     assert not record_path(name).exists(), "list must sweep the dead record"
