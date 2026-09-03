@@ -659,12 +659,12 @@ def get_agent_neighbors(
 ) -> NeighborsResponse:
     """The agents most strongly tied to `agent_id`, ranked by recency-weighted
     interaction strength (spawn / fork / resurrect / message, all equal weight),
-    plus `ancestors` — the spawn chain above `agent_id`, nearest ancestor first.
+    plus `ancestors` — the immutable birth chain above `agent_id`, nearest ancestor first.
 
     `depth=1` returns direct ties only; a higher `depth` follows ties outward,
     discounting each extra hop. `ancestors` ignores `depth`/`limit`: it walks
-    the directed spawn/fork chain to the top (message ties never form
-    ancestors), each row's `depth` = hops up (1 = the direct spawner).
+    the immutable born_spawner chain to the top (message ties never form
+    ancestors), each row's `depth` = hops up (1 = the direct birth parent).
     Terminated agents are included (each row carries `status`); `limit` caps
     the neighbor count, strongest first. The tie graph reads the unified event
     stream (task #180 LGTM cutover): audit edge events stitch the frozen PG
@@ -679,7 +679,10 @@ def get_agent_neighbors(
         if cur.fetchone() is None:
             raise AgentNotFound(f"agent {agent_id} does not exist")
     ranked, ancestors_ranked, archive_degraded = neighbors.compute(
-        root=agent_id, max_depth=depth, limit=limit
+        root=agent_id,
+        max_depth=depth,
+        limit=limit,
+        db_pool=request.app.state.db_pool,
     )
     ids = list({r[0] for r in ranked} | {r[0] for r in ancestors_ranked})
     label_status: dict[int, tuple[str | None, str]] = {}

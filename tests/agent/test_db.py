@@ -17,11 +17,13 @@ Semantics: compact modifies messages in-place, **does not create a new agent** â
 
 import asyncio
 import time
+from datetime import UTC, datetime
 
 import psycopg
 import pytest
 from psycopg_pool import AsyncConnectionPool
 
+from agent import db as agent_db
 from agent.db import wait_for_inbound
 from shared.config import settings
 from shared.db import agent_exists, create_agent, insert_inbound_message, list_agents
@@ -86,6 +88,57 @@ class TestThreadExists:
     def test_existing(self, db_conn: psycopg.Connection) -> None:
         tid = create_agent(db_conn)
         assert agent_exists(db_conn, tid) is True
+
+
+class TestFatalProviderReport:
+    async def test_walk_uses_born_spawner_before_folded_spawner(
+        self,
+        db_conn: psycopg.Connection,
+        aops_pool: AsyncConnectionPool,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        root = create_agent(db_conn)
+        folded_parent = create_agent(db_conn)
+        failed = create_agent(db_conn)
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO agents_meta "
+                "(id, spawner, born_spawner, status, lease_expires_at) "
+                "VALUES (%s, 'user', 'user', 'running', now() + interval '1 hour')",
+                (root,),
+            )
+            cur.execute(
+                "INSERT INTO agents_meta "
+                "(id, spawner, born_spawner, status) "
+                "VALUES (%s, %s, %s, 'terminated')",
+                (folded_parent, f"agent:{root}", f"agent:{root}"),
+            )
+            cur.execute(
+                "INSERT INTO agents_meta (id, spawner, born_spawner, status) "
+                "VALUES (%s, 'user', %s, 'running')",
+                (failed, f"agent:{folded_parent}"),
+            )
+        db_conn.commit()
+        monkeypatch.setattr(agent_db, "publish_inbound_wake", lambda *_args: None)
+
+        recipient = await agent_db.enqueue_fatal_provider_report_to_nearest_alive_ancestor(
+            aops_pool,
+            failed,
+            error_class="permanent",
+            provider="test-provider",
+            status=400,
+            reason="test-reason",
+            occurred_at=datetime.now(UTC),
+        )
+
+        assert recipient == root
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "SELECT agent_id, kind, source FROM inbound_messages "
+                "WHERE kind = 'system_note'"
+            )
+            row = cur.fetchone()
+        assert row == (root, "system_note", "system")
 
 
 class TestWaitForInbound:

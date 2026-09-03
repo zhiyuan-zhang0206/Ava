@@ -115,6 +115,11 @@ CREATE TABLE agents (
 --                             triggered the fork; the executor stays traceable via the fork
 --                             event's `source` and the fork prompt inbound's source (user
 --                             ruling 2026-08-28, task #1879)
+--   born_spawner              birth-time original spawner; immutable audit lineage that
+--                             folding must never rewrite. Forks record their source as
+--                             "agent:<fork_source_agent_id>"; backfilled legacy rows are
+--                             the best-known source from fork provenance, a timely agent
+--                             chat, or the current spawner.
 --   fork_source_agent_id      source agent of a fork; NULL for non-fork spawns
 --   fork_source_checkpoint_id exact checkpoint id of the source agent (filled when forking);
 --                             LangGraph's checkpoints are append-only, so a fork must
@@ -123,6 +128,7 @@ CREATE TABLE agents (
 CREATE TABLE agents_meta (
     id                         BIGINT PRIMARY KEY REFERENCES agents(id),
     spawner                    TEXT NOT NULL DEFAULT 'user',
+    born_spawner               TEXT,
     fork_source_agent_id       BIGINT REFERENCES agents(id),
     fork_source_checkpoint_id  TEXT,
     status                     TEXT NOT NULL CHECK (status IN ('running', 'idling', 'restarting', 'terminated')),
@@ -155,6 +161,11 @@ CREATE TABLE agents_meta (
     CONSTRAINT agents_meta_fork_pair_check
         CHECK ((fork_source_agent_id IS NULL) = (fork_source_checkpoint_id IS NULL))
 );
+
+COMMENT ON COLUMN agents_meta.born_spawner IS
+    'Birth-time original spawner. Immutable and never rewritten by folding; '
+    'forks use agent:<fork_source>, plain spawns use the birth trigger, and '
+    'backfilled rows are best-known.';
 
 COMMENT ON COLUMN agents_meta.last_force_terminate_inbound_id IS
     'Monotonic inbound id fence written by every explicit force termination. '
@@ -661,6 +672,17 @@ CREATE TRIGGER agents_meta_status_changed_at
     FOR EACH ROW
     WHEN (OLD.status IS DISTINCT FROM NEW.status)
     EXECUTE FUNCTION set_agents_meta_status_changed_at();
+
+CREATE OR REPLACE FUNCTION reject_agents_meta_born_spawner_update() RETURNS TRIGGER AS $$
+BEGIN
+    RAISE EXCEPTION 'agents_meta.born_spawner is append-only';
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER agents_meta_born_spawner_append_only
+    BEFORE UPDATE OF born_spawner ON agents_meta
+    FOR EACH ROW
+    EXECUTE FUNCTION reject_agents_meta_born_spawner_update();
 
 -- ─────────────── events archive (DROPPED — Loki archive stream) ───────────────
 -- The frozen PG `events` archive was dropped with the task #1281/#1823 cleanup
@@ -1266,3 +1288,8 @@ INSERT INTO schema_migrations (name) VALUES ('20260901T065353_add-last-claim-loo
 -- it, while existing DBs without this applied marker still run the migration and
 -- fail loudly if the column was added outside migration tracking.
 INSERT INTO schema_migrations (name) VALUES ('20260903T080634_add-last-heartbeat-at');
+
+-- This strict ADD COLUMN is already represented above. Fresh DBs must not replay
+-- it, while existing DBs without this applied marker still run the migration and
+-- fail loudly if the column was added outside migration tracking.
+INSERT INTO schema_migrations (name) VALUES ('20260903T175722_add-born-spawner');
