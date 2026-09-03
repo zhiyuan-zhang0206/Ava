@@ -59,11 +59,53 @@ class PublishedUnit(ManagedUnit):
     manifest_digest: Digest
 
 
+class NormalService(EvidenceModel):
+    session: str = Field(min_length=1, max_length=256)
+    module: str = Field(min_length=1, max_length=512)
+    command_digest: Digest
+
+
+class CandidateUnitPlan(EvidenceModel):
+    unit: PublishedUnit
+    services: tuple[NormalService, ...] = Field(min_length=1)
+    previous_selector_digest: Digest | None
+    selector_digest: Digest
+
+    @model_validator(mode="after")
+    def ordered_services(self) -> Self:
+        names = [service.session for service in self.services]
+        if names != sorted(set(names)):
+            raise ValueError("normal services must be unique and sorted")
+        return self
+
+
+class NormalStartPlan(EvidenceModel):
+    schema_digest: Digest
+    applied_names: tuple[str, ...]
+    units: tuple[CandidateUnitPlan, ...] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def ordered_inventory(self) -> Self:
+        keys = [(entry.unit.machine, entry.unit.home) for entry in self.units]
+        if keys != sorted(set(keys)) or list(self.applied_names) != sorted(set(self.applied_names)):
+            raise ValueError("normal startup inventory and migration names must be sorted sets")
+        return self
+
+
+class PendingMigrationReceipt(EvidenceModel):
+    operation: RolloutIdentity
+    challenge: UUID
+    schema_digest: Digest
+    applied_names: tuple[str, ...]
+    verified_at: AwareDatetime
+
+
 class CommittedPublication(EvidenceModel):
     publication_id: UUID
     operation: RolloutIdentity
     committed_at: AwareDatetime
     units: tuple[PublishedUnit, ...] = Field(min_length=1)
+    activation_digest: Digest | None = None
 
 
 class PendingPublication(EvidenceModel):
@@ -73,6 +115,8 @@ class PendingPublication(EvidenceModel):
     challenge: UUID
     units: tuple[PublishedUnit, ...] = Field(min_length=1)
     collection: ManagedWriterCollection | None = None
+    normal_start_plan: NormalStartPlan | None = None
+    migration: PendingMigrationReceipt | None = None
 
 
 class WriterPublication(EvidenceModel):
@@ -92,6 +136,9 @@ class WriterPublication(EvidenceModel):
             predecessor = self.current.publication_id if self.current is not None else None
             if self.pending.predecessor != predecessor:
                 raise ValueError("pending publication has a different predecessor")
+            plan = self.pending.normal_start_plan
+            if plan is not None and tuple(entry.unit for entry in plan.units) != self.pending.units:
+                raise ValueError("normal startup plan must cover the exact prepared units")
             collection = self.pending.collection
             if collection is not None and (
                 collection.operation != self.pending.operation
@@ -135,7 +182,7 @@ def begin_pending_publication(
     A crash leaves pending in place even after lease expiry; only explicit
     verified completion/recovery may clear it. A new holder cannot overwrite it.
     """
-    if pending.collection is not None:
+    if pending.collection is not None or pending.migration is not None:
         raise ManagedWriterBarrierError("prepare cannot import a cached collection")
     lock_rollout(conn, pending.operation)
     state = _locked_publication(conn)
@@ -145,7 +192,7 @@ def begin_pending_publication(
     if {(unit.machine, unit.home) for unit in pending.units} != registered:
         raise ManagedWriterBarrierError("prepared publication omits registered units")
     if state.pending is not None:
-        if state.pending.model_copy(update={"collection": None}) != pending:
+        if state.pending.model_copy(update={"collection": None, "migration": None}) != pending:
             raise ManagedWriterBarrierError(
                 "another pending publication requires explicit recovery"
             )
@@ -202,7 +249,11 @@ def recover_pending_publication(
     and positively establish its exit before acquiring its replacement lease.
     Recovery preserves current and keeps births frozen; it does not publish.
     """
-    if replacement.collection is not None or replacement.operation == abandoned:
+    if (
+        replacement.collection is not None
+        or replacement.migration is not None
+        or replacement.operation == abandoned
+    ):
         raise ManagedWriterBarrierError("recovery requires a new operation and fresh collection")
     lock_rollout(conn, replacement.operation)
     state = _locked_publication(conn)
