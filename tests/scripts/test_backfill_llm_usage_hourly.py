@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -129,17 +128,6 @@ def test_read_rows_skips_blank_lines(tmp_path: Path) -> None:
     assert list(backfill.read_rows(path)) == [{"ts": "2026-06-01T04:00:00+00:00", "attributes": {}}]
 
 
-@pytest.fixture
-def _empty_llm_usage_hourly() -> Iterator[None]:
-    """`llm_usage_hourly` is outside the per-test TRUNCATE list — clean it here."""
-    with psycopg.connect(settings.data_plane.db_url) as conn:
-        conn.execute("TRUNCATE llm_usage_hourly")
-    yield
-    with psycopg.connect(settings.data_plane.db_url) as conn:
-        conn.execute("TRUNCATE llm_usage_hourly")
-
-
-@pytest.mark.usefixtures("_empty_llm_usage_hourly")
 def test_upsert_is_rerunnable_and_overwrites_derived_costs() -> None:
     """A second run over a corrected extract replaces the row, never accumulates."""
     hour = datetime(2026, 6, 1, 4, tzinfo=UTC)
