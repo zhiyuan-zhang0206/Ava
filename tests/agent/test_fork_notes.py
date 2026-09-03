@@ -32,8 +32,8 @@ from agent.graph._claim_dispatch import (
 )
 from agent.messages import NoteTag
 from agent.state import AgentState
-from shared.db import create_agent
 from shared.redis_listener import RedisInboundListener
+from tests.conftest import spawn_agent
 
 from .test_claim import _config, _insert_inbound_kind, _make_runtime  # reuse the claim harness
 
@@ -106,7 +106,7 @@ async def test_fork_end_to_end_single_copy_each_note(
     cluster index; after the claim exactly one of each of the first three
     remains (the grafted, new-agent copies), and the cluster index survives
     exactly once — no second copy grafted."""
-    tid = create_agent(db_conn)
+    tid = spawn_agent()
     _insert_inbound_kind(db_conn, tid, "", "fork", source="agent:7")
 
     def _tagged(tag: NoteTag, content: str, id: str) -> HumanMessage:  # pyright: ignore[reportShadowedBuiltins]

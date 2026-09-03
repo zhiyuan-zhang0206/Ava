@@ -45,6 +45,7 @@ from typing import Any, NamedTuple, TypeVar, cast
 import psycopg
 from psycopg_pool import AsyncConnectionPool, PoolTimeout
 
+from agent.inbound_ownership import lock_inbound_owner
 from shared.agents import AgentStatus
 from shared.config import settings
 from shared.db import ALIVE_STATUSES, InboundRow, publish_inbound_wake
@@ -220,6 +221,7 @@ async def claim_inbound_batch(
     read-write transaction commits the batch when its context exits.
     """
     async with async_write_transaction(pool) as conn, conn.cursor() as cur:
+        await lock_inbound_owner(conn, agent_id)
         # CASE-on-kind in a single UPDATE keeps the batch grab atomic — chat
         # and non-chat rows in the same batch all commit together. RETURNING
         # order for UPDATE … WHERE id IN (subquery) is heap-scan order, not
@@ -308,9 +310,10 @@ async def reconcile_claimed_inbounds(
         # one reset path. (Common shape: brand-new process, no prior
         # in-flight work; the SELECT below will likely return 0 rows.)
         async with async_write_transaction(pool) as conn, conn.cursor() as cur:
+            await lock_inbound_owner(conn, agent_id)
             await cur.execute(
                 "UPDATE inbound_messages SET status = 'done' "
-                "WHERE status = 'claimed' AND agent_id = %s "
+                "WHERE status = 'claimed' AND kind = 'chat' AND agent_id = %s "
                 "  AND COALESCE(claimed_at, created_at) "
                 "      < now() - make_interval(secs => %s)",
                 (agent_id, stale_cutoff_s),
@@ -318,7 +321,7 @@ async def reconcile_claimed_inbounds(
             dead_lettered = cur.rowcount
             await cur.execute(
                 "UPDATE inbound_messages SET status = 'pending' "
-                "WHERE status = 'claimed' AND agent_id = %s",
+                "WHERE status = 'claimed' AND kind = 'chat' AND agent_id = %s",
                 (agent_id,),
             )
             return (0, cur.rowcount, dead_lettered)
@@ -329,15 +332,16 @@ async def reconcile_claimed_inbounds(
     # is autocommit=True; `conn.transaction()` opens an explicit BEGIN.
     async with pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
         await conn.execute("SET TRANSACTION READ WRITE")
+        await lock_inbound_owner(conn, agent_id)
         await cur.execute(
             "UPDATE inbound_messages SET status = 'done' "
-            "WHERE status = 'claimed' AND agent_id = %s AND id = ANY(%s)",
+            "WHERE status = 'claimed' AND kind = 'chat' AND agent_id = %s AND id = ANY(%s)",
             (agent_id, sorted(committed_inbound_ids)),
         )
         committed = cur.rowcount
         await cur.execute(
             "UPDATE inbound_messages SET status = 'done' "
-            "WHERE status = 'claimed' AND agent_id = %s "
+            "WHERE status = 'claimed' AND kind = 'chat' AND agent_id = %s "
             "  AND COALESCE(claimed_at, created_at) "
             "      < now() - make_interval(secs => %s)",
             (agent_id, stale_cutoff_s),
@@ -345,7 +349,7 @@ async def reconcile_claimed_inbounds(
         dead_lettered = cur.rowcount
         await cur.execute(
             "UPDATE inbound_messages SET status = 'pending' "
-            "WHERE status = 'claimed' AND agent_id = %s",
+            "WHERE status = 'claimed' AND kind = 'chat' AND agent_id = %s",
             (agent_id,),
         )
         reset = cur.rowcount
@@ -379,9 +383,10 @@ async def finalize_claimed_inbounds(pool: AsyncConnectionPool | None, agent_id: 
     if pool is None:
         return 0
     async with async_write_transaction(pool) as conn, conn.cursor() as cur:
+        await lock_inbound_owner(conn, agent_id)
         await cur.execute(
             "UPDATE inbound_messages SET status = 'done' "
-            "WHERE status = 'claimed' AND agent_id = %s",
+            "WHERE status = 'claimed' AND kind = 'chat' AND agent_id = %s",
             (agent_id,),
         )
         return cur.rowcount
@@ -461,6 +466,7 @@ async def mark_agent_status(
     state machine; the schema CHECK constraint additionally rejects illegal status values.
     """
     async with async_write_transaction(pool) as conn, conn.cursor() as cur:
+        await lock_inbound_owner(conn, agent_id)
         await cur.execute(
             "UPDATE agents_meta SET status = %s WHERE id = %s AND status = %s",
             (status, agent_id, expected_from),

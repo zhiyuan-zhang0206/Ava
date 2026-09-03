@@ -32,6 +32,7 @@ from agent.db import (
     wait_for_inbound,
 )
 from agent.graph._context import AvaContext
+from agent.inbound_ownership import RuntimeOwnershipLostError, lock_inbound_owner
 from shared.agents import AgentStatus
 from shared.db_transaction import async_write_transaction
 from shared.log import logger
@@ -84,6 +85,8 @@ async def _wait_for_batch(
             while not batch:
                 await wait_for_inbound(pool, listener, agent_id=agent_id)
                 batch = await claim_inbound_batch(pool, agent_id)
+    except RuntimeOwnershipLostError as exc:
+        raise LifecycleCasLostError(str(exc)) from exc
     except BaseException:
         with suppress(Exception):
             await mark_agent_status(
@@ -145,8 +148,9 @@ async def _defer_chats_to_pending(
     if pool is None or not chat_ids:
         return
     async with async_write_transaction(pool) as conn, conn.cursor() as cur:
+        await lock_inbound_owner(conn, agent_id)
         await cur.execute(
             "UPDATE inbound_messages SET status = 'pending', claimed_at = NULL "
-            "WHERE id = ANY(%s) AND agent_id = %s",
+            "WHERE id = ANY(%s) AND agent_id = %s AND kind = 'chat' AND status = 'claimed'",
             (chat_ids, agent_id),
         )

@@ -26,6 +26,7 @@ from agent.db import wait_for_inbound
 from shared.config import settings
 from shared.db import agent_exists, create_agent, insert_inbound_message, list_agents
 from shared.redis_listener import RedisInboundListener
+from tests.conftest import spawn_agent
 
 # Redis pub/sub wake-latency discrimination, used by the tests that prove a wake
 # rode a real publish, not the defensive SELECT-recheck fallback. `wait_one`
@@ -598,7 +599,7 @@ class TestReconcileClaimedInbounds:
     ) -> None:
         from agent.db import reconcile_claimed_inbounds
 
-        tid = create_agent(db_conn)
+        tid = spawn_agent()
         # Manually create a 'claimed' row to mirror what the previous
         # process's claim_inbound_batch would have left behind
         with db_conn.cursor() as cur:
@@ -623,7 +624,7 @@ class TestReconcileClaimedInbounds:
     ) -> None:
         from agent.db import reconcile_claimed_inbounds
 
-        tid = create_agent(db_conn)
+        tid = spawn_agent()
         with db_conn.cursor() as cur:
             cur.execute(
                 "INSERT INTO inbound_messages (agent_id, content, kind, source, status) "
@@ -650,7 +651,7 @@ class TestReconcileClaimedInbounds:
         second → pending."""
         from agent.db import reconcile_claimed_inbounds
 
-        tid = create_agent(db_conn)
+        tid = spawn_agent()
         with db_conn.cursor() as cur:
             cur.execute(
                 "INSERT INTO inbound_messages (agent_id, content, kind, source, status) "
@@ -684,7 +685,7 @@ class TestReconcileClaimedInbounds:
         """Common boot path: no prior process left claimed rows behind."""
         from agent.db import reconcile_claimed_inbounds
 
-        tid = create_agent(db_conn)
+        tid = spawn_agent()
         committed, reset, dead_lettered = await reconcile_claimed_inbounds(
             aops_pool, tid, committed_inbound_ids={42, 43}
         )
@@ -697,8 +698,8 @@ class TestReconcileClaimedInbounds:
         only reconciles its own agent_id."""
         from agent.db import reconcile_claimed_inbounds
 
-        mine = create_agent(db_conn)
-        other = create_agent(db_conn)
+        mine = spawn_agent()
+        other = spawn_agent()
         with db_conn.cursor() as cur:
             cur.execute(
                 "INSERT INTO inbound_messages (agent_id, content, kind, source, status) "
@@ -724,7 +725,7 @@ class TestReconcileClaimedInbounds:
         must not re-deliver ancient mail as fresh messages (Task #654)."""
         from agent.db import reconcile_claimed_inbounds
 
-        tid = create_agent(db_conn)
+        tid = spawn_agent()
         with db_conn.cursor() as cur:
             cur.execute(
                 "INSERT INTO inbound_messages "
@@ -751,7 +752,7 @@ class TestReconcileClaimedInbounds:
         transit (crash mid-handling) is re-delivered on the next boot."""
         from agent.db import reconcile_claimed_inbounds
 
-        tid = create_agent(db_conn)
+        tid = spawn_agent()
         with db_conn.cursor() as cur:
             cur.execute(
                 "INSERT INTO inbound_messages "
@@ -778,7 +779,7 @@ class TestReconcileClaimedInbounds:
         stale rows dead-letter — young ones still reset to pending."""
         from agent.db import reconcile_claimed_inbounds
 
-        tid = create_agent(db_conn)
+        tid = spawn_agent()
         with db_conn.cursor() as cur:
             cur.execute(
                 "INSERT INTO inbound_messages "
@@ -829,7 +830,7 @@ class TestReconcileClaimedInbounds:
         stale by now — dead-letter them instead of re-delivering."""
         from agent.db import reconcile_claimed_inbounds
 
-        tid = create_agent(db_conn)
+        tid = spawn_agent()
         with db_conn.cursor() as cur:
             cur.execute(
                 "INSERT INTO inbound_messages "
