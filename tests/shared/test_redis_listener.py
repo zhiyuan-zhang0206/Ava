@@ -24,7 +24,7 @@ from redis.exceptions import NoPermissionError
 
 from shared.cluster import inbound_channel, redis_channel_prefix
 from shared.config import settings
-from shared.redis_listener import RedisInboundListener
+from shared.redis_listener import RedisInboundListener, WakeFailure, WakeState
 
 
 async def _publish_inbound(agent_id: int, inbound_id: int = 42) -> None:
@@ -308,6 +308,162 @@ class TestWaitOneBudgetAndCancel:
             )
         finally:
             await listener.close()
+
+
+class TestWakeHealth:
+    """Wake-path health episodes across abandon, breadcrumb, and recovery paths."""
+
+    async def _set_wake_key(self, agent_id: int, payload: str = "42") -> None:
+        from shared.cluster import WAKE_KEY_TTL_S, wake_key
+        from shared.redis_client import sync_redis
+
+        r = sync_redis()
+        try:
+            r.set(wake_key(agent_id), payload, ex=WAKE_KEY_TTL_S)
+        finally:
+            r.close()
+
+    async def test_clean_idle_timeout_stays_healthy(
+        self,
+        loguru_records: list[dict],  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+    ) -> None:
+        """An ordinary idle timeout does not start a wake-degradation episode.
+
+        Removing the clean-consume distinction would mark every quiet wait as
+        degraded and emit needless wake-health events.
+        """
+        listener = RedisInboundListener(settings.data_plane.redis_url, agent_id=6988)
+        try:
+            await listener.wait_one(timeout=0.3)
+            assert listener.wake_state is WakeState.HEALTHY
+            assert listener.wake_degrade_reason is None
+            assert listener.wake_degraded_s is None
+        finally:
+            await listener.close()
+        assert not any(
+            "wake path degraded" in record["message"]
+            for record in loguru_records  # pyright: ignore[reportUnknownVariableType]
+        )
+
+    async def test_getdel_timeout_degrades_drops_and_recovers(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        loguru_records: list[dict],  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+    ) -> None:
+        """A stuck GETDEL drops stale handles, re-delivers the wake key, and recovers.
+
+        Without the close, the next wait reuses the black-holed command socket;
+        without the clean-consume transition, recovery stays falsely degraded.
+        """
+        agent_id = 6987
+        listener = RedisInboundListener(settings.data_plane.redis_url, agent_id=agent_id)
+
+        async def _hung_getdel(*args: object, **kwargs: object) -> object:
+            await asyncio.sleep(3600)
+            raise AssertionError("unreachable")
+
+        try:
+            await listener.ensure_listening()
+            await self._set_wake_key(agent_id)
+            redis = listener._redis
+            assert redis is not None
+            monkeypatch.setattr(redis, "getdel", _hung_getdel)
+
+            started = time.monotonic()
+            await listener.wait_one(timeout=0.5)
+            assert time.monotonic() - started < 2.0
+            assert listener.wake_state is WakeState.DEGRADED
+            assert listener.wake_degrade_reason == WakeFailure.GETDEL_TIMEOUT.value
+            assert listener.wake_degraded_s is not None
+            assert listener._redis is None
+            assert listener._pubsub is None
+
+            # A fresh client consumes the breadcrumb left by the abandoned
+            # GETDEL, so the caller's SELECT recheck runs without the full wait.
+            started = time.monotonic()
+            await listener.wait_one(timeout=10.0)
+            assert time.monotonic() - started < 3.0
+            await listener.wait_one(timeout=0.5)
+            assert listener.wake_state is WakeState.HEALTHY
+            assert listener.wake_degrade_reason is None
+            assert listener.wake_degraded_s is None
+        finally:
+            await listener.close()
+
+        assert any(
+            "wake path degraded (getdel_timeout)" in record["message"]
+            and record["level"].no >= 30  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+            for record in loguru_records  # pyright: ignore[reportUnknownVariableType]
+        )
+        assert any(
+            "wake path recovered" in record["message"]
+            for record in loguru_records  # pyright: ignore[reportUnknownVariableType]
+        )
+
+    async def test_consume_abandon_degrades_and_drops_connection(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """An unreadable pubsub socket is closed so the next wait reconnects.
+
+        Keeping the old socket makes each wait burn its full budget even when
+        ping succeeds, leaving instant wake unavailable indefinitely.
+        """
+        agent_id = 6986
+        listener = RedisInboundListener(settings.data_plane.redis_url, agent_id=agent_id)
+
+        async def _hung_consume(pubsub: object, timeout: float) -> None:
+            await asyncio.sleep(3600)
+
+        try:
+            await listener.ensure_listening()
+            with monkeypatch.context() as patch:
+                patch.setattr(listener, "_consume_one", _hung_consume)
+                started = time.monotonic()
+                await listener.wait_one(timeout=0.3)
+                assert time.monotonic() - started < 5.0
+
+            assert listener.wake_state is WakeState.DEGRADED
+            assert listener.wake_degrade_reason == WakeFailure.CONSUME_ABANDON.value
+            assert listener._redis is None
+            assert listener._pubsub is None
+
+            await listener.ensure_listening()
+            wait_task = asyncio.create_task(listener.wait_one(timeout=10.0))
+            await _publish_inbound(agent_id)
+            await asyncio.wait_for(wait_task, timeout=5.0)
+            assert listener.wake_state is WakeState.HEALTHY
+        finally:
+            await listener.close()
+
+    async def test_open_abandon_marks_degraded(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """An open attempt that exceeds the wait budget marks wake degraded.
+
+        Omitting this transition leaves the caller healthy-looking while the
+        subscription cannot be established.
+        """
+        listener = RedisInboundListener("redis://unused@127.0.0.1:1/0", agent_id=6985)
+        started = asyncio.Event()
+
+        async def _wedged_open() -> object:
+            started.set()
+            await asyncio.sleep(3600)
+            raise AssertionError("unreachable")
+
+        monkeypatch.setattr(listener, "_ensure_subscribed", _wedged_open)
+        try:
+            started_at = time.monotonic()
+            await listener.wait_one(timeout=0.3)
+            assert time.monotonic() - started_at < 2.0
+            assert started.is_set()
+            assert listener.wake_state is WakeState.DEGRADED
+            assert listener.wake_degrade_reason == WakeFailure.OPEN_ABANDON.value
+        finally:
+            await listener.close()
+        await asyncio.sleep(0)
 
 
 class TestInboundChannelPrefix:

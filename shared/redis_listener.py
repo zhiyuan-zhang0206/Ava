@@ -20,11 +20,18 @@ ACL degradation: if `subscribe` is rejected by the redis ACL
 does not crash the idle-wait. It logs once and degrades to the SELECT recheck in
 `wait_for_inbound` (wake still works, just at the recheck cadence, not instant),
 recovering automatically if the ACL is later fixed.
+
+Wake health is latched as HEALTHY or DEGRADED so wake-path failures cannot look
+healthy to callers. A clean consume restores HEALTHY; a consume abandonment
+closes both handles because a black-holed pubsub socket can answer ping while
+its `get_message` remains stuck forever.
 """
 
 from __future__ import annotations
 
 import asyncio
+import time
+from enum import StrEnum
 from typing import Any, cast
 
 import redis.asyncio as aredis
@@ -62,13 +69,29 @@ _PROBE_TIMEOUT_S = 5.0
 _KEEPALIVE_OPTIONS: dict[int, int] = keepalive_options()
 
 
+class WakeState(StrEnum):
+    """Whether the listener can currently provide instant pub/sub wake-ups."""
+
+    HEALTHY = "healthy"
+    DEGRADED = "degraded"
+
+
+class WakeFailure(StrEnum):
+    """First failure recorded for the current wake-degradation episode."""
+
+    OPEN_ABANDON = "open_abandon"
+    GETDEL_TIMEOUT = "getdel_timeout"
+    GETDEL_ERROR = "getdel_error"
+    CONSUME_ABANDON = "consume_abandon"
+
+
 class RedisInboundListener:
     """Per-agent Redis pub/sub listener for inbound message wake-ups.
 
     Subscribes to the cluster-scoped `<prefix>:inbound:{agent_id}`
     (`shared.cluster.inbound_channel`) and exposes `wait_one(timeout)` /
-    `ensure_listening()` / `close()` — the interface `wait_for_inbound` and
-    `subscribe_interrupt` rely on.
+    `ensure_listening()` / `close()` — the interface `wait_for_inbound` relies
+    on.
 
     Auto-reconnects on connection loss: if the Redis connection dies
     (network blip, Redis restart), the next `wait_one` or `ensure_listening`
@@ -86,15 +109,73 @@ class RedisInboundListener:
         self._redis: aredis.Redis | None = None
         self._pubsub: _RedisPubSub | None = None
         self._lock = asyncio.Lock()
-        # Serialize wait_one() so the claim-node idle-wait and the interrupt
-        # watcher (which share this listener's single pubsub connection) never
-        # run two _consume_one -> pubsub.get_message() reads on the same asyncio
+        # Serialize concurrent wait_one() calls so they never run two
+        # _consume_one -> pubsub.get_message() reads on the same asyncio
         # StreamReader at once — that trips "readuntil() called while another
         # coroutine is already waiting for incoming data".
         self._wait_lock = asyncio.Lock()
         # Latch so an ACL subscribe rejection is logged once per episode (this
         # method is retried every wait_one) and its recovery is logged too.
         self._acl_denied_logged = False
+        self._wake_degraded = False
+        self._wake_degrade_reason: str | None = None
+        self._wake_degraded_at: float | None = None
+
+    @property
+    def wake_state(self) -> WakeState:
+        """Current wake-path state for the caller's idle-wake observability."""
+        return WakeState.DEGRADED if self._wake_degraded else WakeState.HEALTHY
+
+    @property
+    def wake_degrade_reason(self) -> str | None:
+        """First failure reason in the current degraded episode, if any."""
+        return self._wake_degrade_reason
+
+    @property
+    def wake_degraded_s(self) -> float | None:
+        """Seconds elapsed in the current degraded episode, if any."""
+        if self._wake_degraded_at is None:
+            return None
+        return time.monotonic() - self._wake_degraded_at
+
+    def _mark_wake_degraded(self, reason: WakeFailure) -> None:
+        """Start one wake-degradation episode and log its first failure."""
+        if self._wake_degraded:
+            return
+        self._wake_degraded = True
+        self._wake_degrade_reason = reason.value
+        self._wake_degraded_at = time.monotonic()
+        logger.warning(
+            "RedisInboundListener[agent={a}]: wake path degraded ({r}) — instant pub/sub wake off; "
+            "wake now rides the wake-key/SELECT recheck until a clean consume proves the channel readable",
+            a=self._agent_id,
+            r=reason.value,
+            event="wake_degraded",
+            wake_reason=reason.value,
+        )
+
+    def _mark_wake_healthy(self) -> None:
+        """End the current wake-degradation episode after a clean consume."""
+        if not self._wake_degraded:
+            return
+        reason = self._wake_degrade_reason
+        degraded_s = (
+            time.monotonic() - self._wake_degraded_at
+            if self._wake_degraded_at is not None
+            else None
+        )
+        self._wake_degraded = False
+        self._wake_degrade_reason = None
+        self._wake_degraded_at = None
+        logger.info(
+            "RedisInboundListener[agent={a}]: wake path recovered ({r} degraded {s:.1f}s) — "
+            "instant pub/sub wake restored",
+            a=self._agent_id,
+            r=reason,
+            s=degraded_s or 0.0,
+            event="wake_restored",
+            wake_reason=reason or "",
+        )
 
     async def _open_and_subscribe(self) -> _RedisPubSub:
         """Open a fresh Redis connection, subscribe to the agent's channel.
@@ -245,6 +326,7 @@ class RedisInboundListener:
                 await asyncio.wait_for(redis.getdel(wake_key(self._agent_id)), timeout=timeout)
             )
         except TimeoutError:
+            self._mark_wake_degraded(WakeFailure.GETDEL_TIMEOUT)
             logger.warning(
                 "RedisInboundListener[agent={a}]: wake-key GETDEL did not complete "
                 "within {t:.1f}s budget — discarding Redis connections before SELECT recheck",
@@ -254,7 +336,14 @@ class RedisInboundListener:
             async with self._lock:
                 await self._close_inner()
             return False
-        except Exception:
+        except Exception as exc:
+            self._mark_wake_degraded(WakeFailure.GETDEL_ERROR)
+            logger.debug(
+                "RedisInboundListener[agent={a}]: wake-key GETDEL failed; "
+                "falling back to pub/sub/SELECT recheck: {exc!r}",
+                a=self._agent_id,
+                exc=exc,
+            )
             return False
 
     async def _consume_one(self, pubsub: _RedisPubSub, timeout: float) -> None:
@@ -289,12 +378,16 @@ class RedisInboundListener:
         across reconnect attempts share that budget with backoff so a
         persistently-down Redis does not spin in a tight loop.
 
-        Serialised by `_wait_lock`: the claim-node idle-wait and the interrupt
-        watcher share one listener (hence one pubsub connection), so two
-        `wait_one` calls could otherwise each drive `_consume_one` ->
-        `pubsub.get_message()` on the same asyncio StreamReader concurrently,
-        tripping its "readuntil() called while another coroutine is already
-        waiting for incoming data" guard. The lock keeps the pubsub connection
+        Wake-path failures latch `wake_state` to DEGRADED until a clean consume
+        restores HEALTHY. `wait_for_inbound` reads that state in its idle-wake
+        log, so a functioning SELECT recheck cannot make failed instant wake
+        appear healthy.
+
+        Serialised by `_wait_lock`: concurrent `wait_one` calls share one
+        pubsub connection, so they could otherwise each drive `_consume_one` ->
+        `pubsub.get_message()` on the same asyncio StreamReader, tripping its
+        "readuntil() called while another coroutine is already waiting for
+        incoming data" guard. The lock keeps the pubsub connection
         single-consumer.
         """
         async with self._wait_lock:
@@ -318,6 +411,7 @@ class RedisInboundListener:
                 open_task = asyncio.ensure_future(self._ensure_subscribed())
                 done, _ = await asyncio.wait({open_task}, timeout=remaining)
                 if not done:
+                    self._mark_wake_degraded(WakeFailure.OPEN_ABANDON)
                     open_task.cancel()
                     logger.warning(
                         "RedisInboundListener[agent={a}]: open/subscribe did not "
@@ -351,6 +445,7 @@ class RedisInboundListener:
                     if not consume_task.done():
                         consume_task.cancel()
                 if not done:
+                    self._mark_wake_degraded(WakeFailure.CONSUME_ABANDON)
                     logger.warning(
                         "RedisInboundListener[agent={a}]: consume never started "
                         "its timer within {r:.1f}s budget + {g:.1f}s grace — "
@@ -359,6 +454,8 @@ class RedisInboundListener:
                         r=remaining,
                         g=_CONSUME_ABANDON_GRACE,
                     )
+                    async with self._lock:
+                        await self._close_inner()
                     return
                 consume_task.result()
                 # Reaching a clean consume (message or timeout, no error) proves
@@ -366,6 +463,7 @@ class RedisInboundListener:
                 # signal, since `subscribe` returns without surfacing a redis-side
                 # NoPermissionError (it lands on the first get_message below).
                 self._clear_subscribe_denied()
+                self._mark_wake_healthy()
                 return
             except aredis.ResponseError as exc:
                 # A command-level rejection — almost always NoPermissionError:
