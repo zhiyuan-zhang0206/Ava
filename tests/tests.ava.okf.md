@@ -39,6 +39,12 @@ tags:
 - `tests/plugins/` — plugin tests (`test_ava_memory_lint.py` / `test_ava_memory_notes.py` for the ava_memory plugin, `ava_fleet/` subtree)
 - `tests/fixtures/` + `tests/factories/` — test fixture data and data factories
 
+- `tests/scripts/test_test_selector.py` — synthetic-checkout contracts for
+  the static PR test selector, including queue, blind-file, duration, and
+  process-determinism escapes
+- `tests/scripts/test_ci_test_selection.py` — workflow contracts keeping shadow
+  selection non-gating and comparing the matching non-flaky pytest population
+
 ### Global fixture (`conftest.py`, ~70KB)
 - **Per xdist worker / session** a pair of throwaway pg/redis + per-session databases; per-test isolation via autouse TRUNCATE + checkpoint re-setup (**not** a full instance per test)
 - A killed run (Ctrl-C, SIGKILL, an agent dying mid-run) leaks its throwaway **Postgres**, because the detached postmaster outlives an owner that ran no finalizer. It is bounded not by teardown but by a **sweep at the start of the next spin-up**: `shared.pg_tools.sweep_orphaned_throwaway_clusters` reaps the instances whose owner is provably gone, proof being an exclusive `flock` the owner held for the instance's whole life on an `owner.lock` inside that instance's own dir (so the proof shares the cluster's exact lifetime, and two UNIX users on one `/dev/shm` never contend for a shared registry). The throwaway **redis** leaks the same way and is not swept (a redis orphan costs RAM, not the System V segment that wedges the box)
