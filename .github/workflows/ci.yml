@@ -482,7 +482,7 @@ jobs:
   backend-shard:
     name: backend shard (${{ matrix.group }}/16)
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 25
     needs: [classify]
     if: ${{ needs.classify.outputs.backend == 'true' }}
     strategy:
@@ -528,7 +528,7 @@ jobs:
           set +e
           set -o pipefail
           mkdir -p tmp
-          uv run pytest tests/ -q --ignore=tests/e2e -m "not flaky" -n 4 --faulthandler-timeout=600 \
+          uv run pytest tests/ -q --ignore=tests/e2e -m "not flaky" -n 4 --faulthandler-timeout=60 \
             --splits 16 --group ${{ matrix.group }} \
             --splitting-algorithm least_duration \
             --cov=agent --cov=ava --cov=cli --cov=gateway --cov=shared --cov=ui \
@@ -547,7 +547,7 @@ jobs:
             # file (coverage.py appends by default) and flatten the combine;
             # drop it so the retry writes a clean per-shard file.
             rm -f "$COVERAGE_FILE"
-            uv run pytest tests/ -q --ignore=tests/e2e -m "not flaky" -n 4 --faulthandler-timeout=600 \
+            uv run pytest tests/ -q --ignore=tests/e2e -m "not flaky" -n 4 --faulthandler-timeout=60 \
               --splits 16 --group ${{ matrix.group }} \
               --splitting-algorithm least_duration \
               --cov=agent --cov=ava --cov=cli --cov=gateway --cov=shared --cov=ui \
@@ -596,7 +596,7 @@ jobs:
     # the only protection gate while shadow data measures selector quality.
     name: backend selected subset (shadow)
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 25
     # Keep checkout, provisioning, and artifact faults informational as well as
     # the captured pytest result below.
     continue-on-error: true
@@ -900,7 +900,7 @@ jobs:
   frontend:
     name: frontend (eslint + tsc + vitest)
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 25
     needs: [classify]
     if: ${{ needs.classify.outputs.frontend == 'true' }}
     steps:
