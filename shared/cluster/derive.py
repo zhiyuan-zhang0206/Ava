@@ -242,15 +242,31 @@ def runner_db_url_projection(db_url: str) -> str:
     """Project ``db_url`` onto the least-privilege runner identity.
 
     Agent processes and agent-profile daemons receive the runner credential
-    inside their database URL, never as a standalone secret. Keep an already
-    projected URL byte-for-byte: it may have arrived from a remote gateway and
-    carries the runner role's current password.
+    inside their database URL, never as a standalone secret. A gateway-local
+    launcher reads URL and password from one current file snapshot, not a cached
+    URL combined with a newly rotated password. A remote runner preserves its
+    authenticated bootstrap projection and never guesses local credentials.
     """
+    from shared.bootstrap import config_source_is_local
     from shared.config.data_plane import _is_runner_db_url
+    from shared.runtime_config import read_env_aliases
 
-    if _is_runner_db_url(db_url):
-        return db_url
-    runner_password = cluster.runner_password_from_env()
+    if not config_source_is_local():
+        if _is_runner_db_url(db_url):
+            return db_url
+        raise RuntimeError(
+            "a remote agent launcher requires an ava_runner URL from authenticated bootstrap; "
+            "refusing to combine an owner URL with local credentials"
+        )
+    aliases = read_env_aliases()
+    snapshot_url = aliases.get("AVA_DB_URL")
+    if not snapshot_url:
+        raise RuntimeError("AVA_DB_URL is missing from the gateway config snapshot")
+    return project_runner_db_url(snapshot_url, aliases.get(RUNNER_DB_PASSWORD_ENV) or "")
+
+
+def project_runner_db_url(db_url: str, runner_password: str) -> str:
+    """Pure credential projection; both inputs must belong to one config snapshot."""
     if not runner_password:
         raise RuntimeError(
             "AVA_RUNNER_DB_PASSWORD is not set in the gateway's .env — run "

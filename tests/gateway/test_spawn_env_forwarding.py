@@ -20,7 +20,10 @@ from ops import agent_launch
 
 def test_agent_spawn_drops_secrets_and_fetch_skip(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setitem(os.environ, "DEEPSEEK_API_KEY", "fake-deepseek-test-value")
-    monkeypatch.setitem(os.environ, "AVA_DB_URL", "postgresql://x/y")
+    # A remote launcher receives an already projected URL from bootstrap.
+    projected_url = "postgresql://ava_runner:bootstrap-password@x/y"
+    monkeypatch.setitem(os.environ, "AVA_DB_URL", projected_url)
+    monkeypatch.setattr("shared.bootstrap.config_source_is_local", lambda: False)
     monkeypatch.setitem(os.environ, "AVA_GATEWAY_URL", "http://gw:9000")
     monkeypatch.setitem(os.environ, "AVA_LLM_OVERRIDE", "mod:factory")
     # A maintenance verb set the lite opt-out in this process's env; the spawned
@@ -32,7 +35,7 @@ def test_agent_spawn_drops_secrets_and_fetch_skip(monkeypatch: pytest.MonkeyPatc
     assert "DEEPSEEK_API_KEY" not in env
     # bootstrap/identity guide keys ARE forwarded (the child needs them to reach the
     # gateway + its data plane before Settings exists)
-    assert env["AVA_DB_URL"] == "postgresql://ava_runner:test-runner-db-password@x/y"
+    assert env["AVA_DB_URL"] == projected_url
     assert env["AVA_GATEWAY_URL"] == "http://gw:9000"
     # a host/agent-scope debug knob (not in the bootstrap payload) is still forwarded
     assert env["AVA_LLM_OVERRIDE"] == "mod:factory"
