@@ -1,0 +1,61 @@
+name: Runtime wheel
+
+on:
+  pull_request:
+    paths:
+      - 'pyproject.toml'
+      - 'uv.lock'
+      - 'scripts/verify_runtime_wheel.py'
+      - '.github/workflows/runtime-wheel.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  hermetic-wheel:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d
+        with:
+          python-version: '3.12'
+      - name: Build complete application wheel
+        run: uv build --wheel --out-dir "$RUNNER_TEMP/wheels"
+      - name: Install locked dependencies and non-editable wheel outside checkout
+        run: |
+          uv export --locked --no-dev --no-emit-project --format requirements-txt --output-file "$RUNNER_TEMP/runtime-requirements.txt"
+          uv venv "$RUNNER_TEMP/runtime-venv" --python 3.12
+          uv pip install --python "$RUNNER_TEMP/runtime-venv/bin/python" --require-hashes -r "$RUNNER_TEMP/runtime-requirements.txt"
+          uv pip install --python "$RUNNER_TEMP/runtime-venv/bin/python" --no-deps "$RUNNER_TEMP"/wheels/*.whl
+      - name: Prove missing exec child fails the same gate
+        run: |
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          import subprocess
+          import zipfile
+          root = Path(os.environ['RUNNER_TEMP'])
+          wheel, = (root / 'wheels').glob('*.whl')
+          broken = root / 'missing-exec-child.whl'
+          with zipfile.ZipFile(wheel) as source, zipfile.ZipFile(broken, 'w') as target:
+              for member in source.infolist():
+                  if member.filename != 'agent/exec_child.py':
+                      target.writestr(member, source.read(member))
+          result = subprocess.run(['python3', 'scripts/verify_runtime_wheel.py', str(broken)], capture_output=True, text=True)
+          assert result.returncode != 0, result.stdout
+          assert "runtime wheel missing members: ['agent/exec_child.py']" in result.stderr, result.stderr
+          print('negative control rejected missing exec child')
+          PY
+      - name: Isolated imports without checkout or reachable data plane
+        env:
+          AVA_CONFIG_FETCH: skip
+          AVA_TIMEZONE: UTC
+          AVA_DB_URL: postgresql://wheel@127.0.0.1:1/wheel
+          AVA_REDIS_URL: redis://127.0.0.1:1/0
+        run: |
+          export AVA_HOME="$RUNNER_TEMP/wheel-home"
+          cd "$RUNNER_TEMP"
+          "$RUNNER_TEMP/runtime-venv/bin/python" -I "$GITHUB_WORKSPACE/scripts/verify_runtime_wheel.py" "$RUNNER_TEMP"/wheels/*.whl --checkout "$GITHUB_WORKSPACE"
+          "$RUNNER_TEMP/runtime-venv/bin/ava" --help
