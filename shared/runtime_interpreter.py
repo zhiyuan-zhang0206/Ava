@@ -32,3 +32,10 @@ def runtime_venv(*, checkout: Path | None = None) -> Path:
 def runtime_python() -> Path:
     """Absolute Python path anchored to the loaded wheel or development checkout."""
     return runtime_venv() / ("Scripts/python.exe" if IS_WINDOWS else "bin/python")
+
+
+def runtime_frontend_dir() -> Path:
+    """Bind the frontend to the same loaded generation; admission verifies assets."""
+    if not WHEEL_RUNTIME:
+        raise RuntimeError("retained frontend paths require wheel runtime")
+    return runtime_venv().parent / "frontend"

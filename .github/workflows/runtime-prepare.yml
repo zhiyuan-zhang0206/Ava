@@ -5,6 +5,7 @@ on:
       - 'shared/runtime_prepare.py'
       - 'shared/runtime_release.py'
       - 'shared/runtime_interpreter.py'
+      - 'scripts/runtime-node-version'
       - 'shared/dotenv_boot.py'
       - 'shared/platform_backend.py'
       - 'shared/session_env.py'
@@ -35,6 +36,9 @@ jobs:
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d
         with:
           python-version: '3.12'
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version-file: scripts/runtime-node-version
       - uses: ./.github/actions/install-pg-redis
         if: runner.os == 'Linux'
       - name: Start isolated native PG for wheel admission proof
@@ -66,6 +70,25 @@ jobs:
               locked.append(f"{package['Name']}=={package['Version']} --hash=sha256:{hashlib.sha256(wheel.read_bytes()).hexdigest()}")
           (root / 'requirements.txt').write_text('\n'.join(locked) + '\n')
           PY
+      - name: Prepare standalone frontend outside maintenance
+        shell: bash
+        env:
+          AVA_FRONTEND_RELEASE: '1'
+          NEXT_TELEMETRY_DISABLED: '1'
+          NEXT_PUBLIC_GATEWAY_PORT: '8000'
+          NEXT_PUBLIC_API_BASE: ''
+        run: |
+          npm --prefix ui/web ci
+          npm --prefix ui/web run build
+          node --input-type=module - <<'JS'
+          import fs from 'node:fs';
+          import path from 'node:path';
+          import { frontendInputs, prepareFrontend, recordFrontendBuildConfig } from './scripts/prepare_frontend_release.mjs';
+          const source = path.resolve('ui/web');
+          const node = fs.realpathSync(process.execPath);
+          recordFrontendBuildConfig(source, process.env.NEXT_PUBLIC_GATEWAY_PORT, process.env.NEXT_PUBLIC_API_BASE);
+          prepareFrontend(source, node, path.join(process.env.RUNNER_TEMP, 'prepare/frontend-input'), frontendInputs(source, node));
+          JS
       - name: Real offline prepare, retained interpreter and failure isolation
         shell: bash
         run: |
@@ -79,6 +102,7 @@ jobs:
           path: |
             ${{ runner.temp }}/prepare/proof.json
             ${{ runner.temp }}/prepare/migration-proof.json
+            ${{ runner.temp }}/frontend-proof.json
           if-no-files-found: error
       - name: Stop isolated native PG
         if: always() && runner.os == 'Linux'
