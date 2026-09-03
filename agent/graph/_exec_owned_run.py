@@ -28,6 +28,7 @@ from shared.exec_owner_protocol import (
     OwnerReady,
     publish_owner_message,
     read_owner_bytes,
+    validate_native_ready,
 )
 from shared.incarnation_resources import (
     ExecAllocation,
@@ -160,7 +161,7 @@ async def run_owned(  # noqa: PLR0915 -- one caller retains exact allocation and
     cancelled = False
     settled = False
     attached = False
-    bound = time.monotonic() + timeout + KILL_GRACE_S
+    bound = time.monotonic() + max(0, (deadline - datetime.now(UTC)).total_seconds()) + KILL_GRACE_S
 
     def send(action: Literal["permit", "cancel"]) -> None:
         if proc is None or proc.stdin is None or proc.stdin.closed:
@@ -204,12 +205,7 @@ async def run_owned(  # noqa: PLR0915 -- one caller retains exact allocation and
                 ready = OwnerReady.model_validate_json(
                     read_owner_bytes(context_path.with_suffix(".ready"))
                 )
-                owner, root = ready.allocation.owner_process, ready.allocation.root_process
-                if owner is None or root is None or (owner.pid, owner.birth) != (proc.pid, birth):
-                    raise ResourceEvidenceError("ready receipt does not identify the actual owner")  # noqa: TRY301 -- retain allocation and close the control pipe.
-                child = psutil.Process(root.pid)
-                if child.create_time() != root.birth or child.ppid() != proc.pid:
-                    raise ResourceEvidenceError("ready root is not the owner's exact child")  # noqa: TRY301 -- retain allocation and close the control pipe.
+                validate_native_ready(ready, proc.pid, birth, context_path)
                 await asyncio.to_thread(_attach, context, ready)
                 attached = True
                 if scope is not None:
