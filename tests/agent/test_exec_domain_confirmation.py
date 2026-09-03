@@ -17,7 +17,13 @@ from shared.winjob import WindowsJob
 
 def _ended(identity: psutil.Process) -> bool:
     try:
+        if IS_WINDOWS:
+            # Windows status() is not a native process-handle termination wait.
+            identity.wait(timeout=0)
+            return True
         return identity.status() in {psutil.STATUS_ZOMBIE, psutil.STATUS_DEAD}
+    except psutil.TimeoutExpired:
+        return False
     except psutil.NoSuchProcess:
         return True
 
