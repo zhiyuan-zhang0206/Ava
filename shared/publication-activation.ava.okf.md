@@ -1,3 +1,9 @@
+---
+type: doc
+title: Pending service activation
+description: Existing rollout authority fences migrations, selector CAS, normal service startup and all-unit publication.
+---
+
 # Pending service activation
 
 `managed_writer_activation.py` is the existing updater's short-transaction
@@ -43,3 +49,5 @@ not be selected as rollback runtimes; resource-state/schema compatibility is a
 preparation gate, never forced deletion or a hard-coded historical release.
 No production migration, normal service activation or protocol advertisement
 is performed by importing or testing these helpers.
+
+Parent: [[shared/shared.ava.okf.md|shared libraries]].
