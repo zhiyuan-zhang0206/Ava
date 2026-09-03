@@ -404,6 +404,11 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/merged-tree"
+          # Hosted runners ship without a git identity, and merge --no-commit
+          # still insists on one — pin the GitHub Actions bot identity locally
+          # (this checkout is ephemeral).
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           # Real 3-way merge with NO commit: --no-commit stages the merged tree
           # in the index / working tree, --no-ff forces it even when main is a
           # merge-base match. A conflict exits non-zero — recorded and skipped
