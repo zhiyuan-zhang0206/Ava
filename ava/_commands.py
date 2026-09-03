@@ -75,7 +75,8 @@ from ava import skills
 from shared.config import settings
 from shared.frontmatter import FrontmatterError, parse_frontmatter
 from shared.log import logger
-from shared.paths import ava_home, plugins_dir, repo_plugins_dir, repo_root
+from shared.paths import ava_home, repo_plugins_dir, repo_root
+from shared.runtime_interpreter import external_plugin_read_root
 from shared.skill_names import display_name, match_key
 
 
@@ -136,7 +137,7 @@ def _command_dirs() -> list[tuple[Path, tuple[str, ...]]]:
         (repo_root() / "commands", ()),
         (ava_home() / "commands", ()),
     ]
-    for base in (repo_plugins_dir(), plugins_dir()):
+    for base in (repo_plugins_dir(), external_plugin_read_root()):
         if base.is_dir():
             dirs.extend(
                 (p / "commands", (p.name,))

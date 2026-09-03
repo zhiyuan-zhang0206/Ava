@@ -243,7 +243,9 @@ def _plugins_fingerprint() -> str:
     any other file under the dir does not. The directory itself missing is a
     valid state (no plugins) — the fingerprint is then empty, not an error.
     """
-    root = paths.plugins_dir()
+    from shared.runtime_interpreter import external_plugin_read_root
+
+    root = external_plugin_read_root()
     if not root.exists():
         return ""
     parts: list[str] = []

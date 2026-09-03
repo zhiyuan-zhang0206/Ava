@@ -32,9 +32,10 @@ import json
 from pathlib import Path
 from typing import Any, TypedDict
 
-from shared.paths import ava_home, mcps_dir, plugins_dir, repo_root
+from shared.paths import ava_home, mcps_dir, repo_root
 from shared.platform import IS_WINDOWS
 from shared.platform_probes import display_available, unix_sockets_available
+from shared.runtime_interpreter import external_plugin_read_root
 
 
 class MCPError(Exception):
@@ -310,12 +311,13 @@ def _plugin_config_paths() -> list[Path]:
     """Plugin-bundled `.mcp.json` files, in apply order.
 
     Built-in plugins (`<repo>/ava_builtins/plugins/*/.mcp.json`) first, then installed ones
-    (`$AVA_HOME/plugins/*/.mcp.json`); each group sorted by plugin name so the
-    order is deterministic.
+    (retained generation in wheel mode, `$AVA_HOME/plugins` in source mode);
+    each group is sorted by plugin name. Release preparation separately refuses
+    an undeclared MCP executable closure rather than treating config as proof.
     """
     paths: list[Path] = []
     repo_plugins = Path(__file__).resolve().parent.parent / "ava_builtins" / "plugins"
-    for root in (repo_plugins, plugins_dir()):
+    for root in (repo_plugins, external_plugin_read_root()):
         if not root.is_dir():
             continue
         for plugin_dir in sorted(root.iterdir()):

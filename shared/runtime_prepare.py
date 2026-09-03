@@ -14,6 +14,7 @@ import platform
 import shutil
 import stat
 import subprocess
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
@@ -209,6 +210,15 @@ class CollectorInput:
 
 
 @dataclass(frozen=True)
+class PluginInput:
+    """Approved complete external package trees and unit-required names."""
+
+    root: Path
+    digest: str
+    required: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class PrepareInputs:
     """Trusted build receipt; all paths are local, verified inputs."""
 
@@ -223,6 +233,7 @@ class PrepareInputs:
     uv: Path
     frontend: FrontendInput | None = None
     otel: CollectorInput | None = None
+    plugins: PluginInput | None = None
 
 
 def _optional_stdlib_receipt(source: Path, root: Path, interpreter: Path) -> None:
@@ -300,6 +311,62 @@ def _copy_collector(
         raise ReleaseRejectedError("retained collector differs from trusted input inventory")
 
 
+def _plugin_input_inventory(plugins: PluginInput | None) -> dict[str, str] | None:
+    if plugins is None:
+        return None
+    from shared.runtime_plugins import declared_plugins
+
+    files = tree_inventory(plugins.root)
+    if inventory_digest(files) != plugins.digest:
+        raise ReleaseRejectedError("plugin input hash mismatch")
+    if not set(plugins.required) <= set(declared_plugins(plugins.root)):
+        raise ReleaseRejectedError("required plugin missing from prepared input")
+    return files
+
+
+def _copy_plugins(plugins: PluginInput | None, root: Path, expected: dict[str, str] | None) -> None:
+    if plugins is None:
+        return
+    shutil.copytree(plugins.root, root / "plugins", symlinks=False)
+    if tree_inventory(root / "plugins") != expected:
+        raise ReleaseRejectedError("retained plugin differs from trusted input inventory")
+
+
+def _verify_plugins(plugins: PluginInput | None, root: Path) -> None:
+    if plugins is None:
+        return
+    # Plugin disk config is a disposable unit home, never an image member.
+    with tempfile.TemporaryDirectory(prefix="plugin-closure-", dir=root.parent) as scratch:
+        _run(
+            [
+                str(root / "venv/bin/python"),
+                "-I",
+                "-B",
+                "-c",
+                "import sys,json;from pathlib import Path;"
+                "from shared.runtime_plugins import verify_plugin_dependencies;"
+                "from cli.commands._release_plugin_probe import prove_plugin_registration;"
+                "root=Path(sys.argv[1]);names=tuple(json.loads(sys.argv[2]));"
+                "verify_plugin_dependencies(root,names);prove_plugin_registration(root,names)",
+                str(root / "plugins"),
+                json.dumps(plugins.required),
+            ],
+            Path(scratch),
+        )
+
+
+def _copy_assets(
+    inputs: PrepareInputs,
+    root: Path,
+    frontend_files: dict[str, str] | None,
+    otel_files: dict[str, str] | None,
+    plugin_files: dict[str, str] | None,
+) -> None:
+    _copy_frontend(inputs.frontend, root, frontend_files)
+    _copy_collector(inputs.otel, root, otel_files)
+    _copy_plugins(inputs.plugins, root, plugin_files)
+
+
 def prepare_release(store: Path, inputs: PrepareInputs) -> VerifiedRelease:
     """Create one final inactive generation or fail without touching serving state.
 
@@ -322,9 +389,10 @@ def prepare_release(store: Path, inputs: PrepareInputs) -> VerifiedRelease:
         raise ReleaseRejectedError("Python input hash mismatch")
     if file_sha256(inputs.requirements) != inputs.requirements_digest:
         raise ReleaseRejectedError("requirements hash mismatch")
-    frontend_files, otel_files = (
+    frontend_files, otel_files, plugin_files = (
         _frontend_input_inventory(inputs.frontend),
         _collector_input_inventory(inputs.otel),
+        _plugin_input_inventory(inputs.plugins),
     )
     requirements = inputs.requirements.read_text(encoding="utf-8")
     if (
@@ -353,12 +421,15 @@ def prepare_release(store: Path, inputs: PrepareInputs) -> VerifiedRelease:
             "platform": platform.platform(),
             "frontend": "absent" if inputs.frontend is None else inputs.frontend.digest,
             "otel": "absent" if inputs.otel is None else inputs.otel.digest,
+            "plugins": "absent" if inputs.plugins is None else inputs.plugins.digest,
+            "required_plugins": "[]"
+            if inputs.plugins is None
+            else json.dumps(inputs.plugins.required),
         }
     )
     root = store / identity
     root.mkdir(mode=0o700)  # Never reuse a partial or previously sealed generation.
-    _copy_frontend(inputs.frontend, root, frontend_files)
-    _copy_collector(inputs.otel, root, otel_files)
+    _copy_assets(inputs, root, frontend_files, otel_files, plugin_files)
     _retain_startup_wheel(wheels, root)
     _copy_verified_python(source, root / "python", python_files)
     python = root / "python/bin/python3"
@@ -391,6 +462,7 @@ def prepare_release(store: Path, inputs: PrepareInputs) -> VerifiedRelease:
             timeout=600,
         )
     _materialize_venv_links(root / "venv")
+    _verify_plugins(inputs.plugins, root)
     _optional_stdlib_receipt(source, root, interpreter)
     # Ensure the retained interpreter/stdlib, not a mutable Homebrew/system Python,
     # supplies base_prefix. Prove real service imports with all sockets denied.
