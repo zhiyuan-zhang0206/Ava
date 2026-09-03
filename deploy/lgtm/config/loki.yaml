@@ -108,6 +108,23 @@ limits_config:
     - selector: '{stream="archive"}'
       priority: 1
       period: 8760h
+    # Lineage class -> permanent (user ruling 2026-09-02). spawn/fork/resurrect
+    # plus the ops-mirror names of the same facts cannot be reconstructed from
+    # any current state — agents_meta.spawner is folded on terminate — so once
+    # these rows expire, "who spawned whom" is gone (2026-08-20: the
+    # pre-cutover archive, carrying the spawn rows of 52% of today's agents,
+    # expired in the global bucket before per-stream overrides existed). At
+    # ~412 rows/day, 0.11% of the stream, permanence costs ~100MB/year.
+    # 876000h = 100y is how "permanent" is spelled here: a period is a
+    # duration, with no infinity and a 24h floor.
+    # The names are DERIVED from the event registry's retention_class="lineage"
+    # declarations and pinned by loki_index_labels.validate_loki_deploy_config,
+    # so a lineage name added there fails validation, not production. Disjoint
+    # from the archive selector above (archive rows carry no event_name index
+    # label), so the equal priority never has to arbitrate.
+    - selector: '{event_name=~"spawn|fork|resurrect|agent_spawned|agent_resurrected"}'
+      priority: 1
+      period: 876000h
   reject_old_samples_max_age: 336h
   # The archive spans ~83 days (05-23 -> 08-12); Loki's default
   # max_query_length (30d1h) would reject any whole-span parity/read query.

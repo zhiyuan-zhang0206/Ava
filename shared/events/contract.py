@@ -10,8 +10,9 @@ constants (a hand-written ``attributes->>'...'`` literal elsewhere fails the
 SQL-key lint); shared/events/registry.md is generated from this module.
 
 Derived views live here and nowhere else: ``category_for_kind``,
-``telemetry_events``, ``family_events``, ``payload_keys``, event tiers, plus
-the folded ``_LLM_ERROR_EVENTS`` family and the ops grid constants.
+``telemetry_events``, ``lineage_event_names``, ``family_events``,
+``payload_keys``, event tiers, plus the folded ``_LLM_ERROR_EVENTS`` family
+and the ops grid constants.
 """
 
 from __future__ import annotations
@@ -22,6 +23,28 @@ from typing import Any, Literal, LiteralString, NotRequired, TypedDict, get_type
 
 Category = Literal["audit", "telemetry", "log"]
 EventTier = Literal["business", "anomaly", "observation", "noise"]
+RetentionClass = Literal["lineage", "audit", "lifecycle", "telemetry", "log"]
+
+# Retention class is the third, independent dimension (design 2026-09-02,
+# user ruling): `category` decides access semantics, `tier` decides display
+# priority, and neither can say "this row must never be deleted" — lineage is
+# 5 of the 17 audit names. It answers one question: after this row is gone,
+# can the fact still be reconstructed?
+#
+# - lineage: no. Who spawned whom is not derivable from any current state
+#   (`agents_meta.spawner` is folded on terminate), and the class is tiny
+#   (~412 rows/day, 0.11% of the stream), so it is retained permanently and
+#   append-only — a 100-year Loki per-stream period plus its own JSONL mirror.
+# - audit / lifecycle / telemetry / log: reconstructable, approximable, or
+#   aggregated. Their windows are not declared here yet (this change ships the
+#   lineage class only); the names exist so the vocabulary is fixed and a later
+#   declaration is one field, not a new dimension.
+#
+# Declaring a class here is half a change: the deployed Loki `retention_stream`
+# rule is derived from `lineage_event_names()` and pinned by
+# `shared/loki_index_labels.validate_loki_deploy_config`, because the
+# 2026-08-20 archive loss shipped as exactly that half — the per-stream
+# override landed nine days after the global 168h bucket had deleted the data.
 
 # Event tiers control the human-facing event stream, independently from the
 # category that controls event-class access semantics:
@@ -805,6 +828,10 @@ class EventSpec:
     ``"file"`` (log-file only, e.g. ``node_enter`` after PR #1758's sink
     filter). ``family`` groups events the ops panels / rollups treat as one
     family (e.g. LLM_ERROR). ``doc`` is the one-line registry.md description.
+
+    ``retention_class``: how long this name's rows must survive (see the
+    ``RetentionClass`` note above). ``None`` = undeclared, which means the
+    global Loki retention applies; only ``"lineage"`` is declared today.
     """
 
     name: str
@@ -815,12 +842,25 @@ class EventSpec:
     destination: Literal["events", "file"] = "events"
     family: str | None = None
     doc: str = ""
+    retention_class: RetentionClass | None = None
 
 
 def _audit(
-    name: str, doc: str, *, payload: Any | None = None, tier: EventTier = "business"
+    name: str,
+    doc: str,
+    *,
+    payload: Any | None = None,
+    tier: EventTier = "business",
+    retention_class: RetentionClass | None = None,
 ) -> EventSpec:
-    return EventSpec(name=name, category="audit", tier=tier, payload=payload, doc=doc)
+    return EventSpec(
+        name=name,
+        category="audit",
+        tier=tier,
+        payload=payload,
+        doc=doc,
+        retention_class=retention_class,
+    )
 
 
 def _telemetry_audit(name: str, doc: str, *, payload: Any | None = None) -> EventSpec:
@@ -844,6 +884,7 @@ def _telemetry(
     family: str | None = None,
     destination: Literal["events", "file"] = "events",
     tier: EventTier = "observation",
+    retention_class: RetentionClass | None = None,
 ) -> EventSpec:
     return EventSpec(
         name=name,
@@ -853,18 +894,24 @@ def _telemetry(
         family=family,
         destination=destination,
         doc=doc,
+        retention_class=retention_class,
     )
 
 
 EVENTS: dict[str, EventSpec] = {
     # ── audit (category=audit, 17) — registry.md §2, append-only operations ──
-    "spawn": _audit("spawn", "new agent born", payload=Spawn),
-    "fork": _audit("fork", "agent forked from another"),
+    # The lineage class (retention_class="lineage"): spawn/fork/resurrect plus
+    # the ops-mirror names of the same two facts (agent_spawned /
+    # agent_resurrected, emitted telemetry-side). The mirrors are bundled
+    # deliberately — a reader that only kept one spelling would lose half the
+    # rows for the same event.
+    "spawn": _audit("spawn", "new agent born", payload=Spawn, retention_class="lineage"),
+    "fork": _audit("fork", "agent forked from another", retention_class="lineage"),
     "send_message": _audit("send_message", "message sent to an agent"),
     "terminate": _audit("terminate", "agent terminated"),
     "restart": _audit("restart", "agent restart initiated"),
     "cancel": _audit("cancel", "in-flight turn cancelled"),
-    "resurrect": _audit("resurrect", "terminated agent woken"),
+    "resurrect": _audit("resurrect", "terminated agent woken", retention_class="lineage"),
     "restart_completed": _audit("restart_completed", "restart finished"),
     "compact": _audit("compact", "agent context compacted"),
     "circuit_breaker": _audit(
@@ -1135,8 +1182,15 @@ EVENTS: dict[str, EventSpec] = {
     "dangling_tool_pairing_repaired": _telemetry(
         "dangling_tool_pairing_repaired", "dangling tool pairing repaired", tier="anomaly"
     ),
-    "agent_spawned": _telemetry("agent_spawned", "agent process started", payload=AgentSpawned),
-    "agent_resurrected": _telemetry("agent_resurrected", "agent resurrected"),
+    "agent_spawned": _telemetry(
+        "agent_spawned",
+        "agent process started",
+        payload=AgentSpawned,
+        retention_class="lineage",
+    ),
+    "agent_resurrected": _telemetry(
+        "agent_resurrected", "agent resurrected", retention_class="lineage"
+    ),
     "agent_terminated": _telemetry("agent_terminated", "agent terminated"),
     "agent_revived": _telemetry("agent_revived", "agent revived", tier="noise"),
     "respawn_phase1": _telemetry("respawn_phase1", "restart phase 1", tier="noise"),
@@ -1549,6 +1603,15 @@ def category_for_kind(event_name: str) -> Category:
 def telemetry_events() -> frozenset[str]:
     """Every telemetry-category event name — replaces ``_TELEMETRY_KINDS``."""
     return frozenset(name for name, spec in EVENTS.items() if spec.category == "telemetry")
+
+
+def lineage_event_names() -> frozenset[str]:
+    """Every event name declared ``retention_class="lineage"``.
+
+    The single source for both permanent copies: the Loki ``retention_stream``
+    selector (validated by ``shared.loki_index_labels``) and the lineage JSONL
+    mirror (``shared.telemetry``). A name added here reaches both."""
+    return frozenset(name for name, spec in EVENTS.items() if spec.retention_class == "lineage")
 
 
 def family_events(family: str) -> tuple[str, ...]:

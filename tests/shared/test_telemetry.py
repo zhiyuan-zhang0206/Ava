@@ -30,6 +30,7 @@ from opentelemetry.trace import NonRecordingSpan, SpanContext
 
 from shared import observability, telemetry
 from shared.config import settings
+from shared.events.contract import lineage_event_names
 
 _AGENT = 8901
 
@@ -248,19 +249,90 @@ def test_jsonl_rollup_mirror_holds_only_rollup_source_events(
     assert [row["event_name"] for row in rollup_rows] == event_names[:-1]
 
 
-def test_jsonl_mirror_prunes_full_and_rollup_retention_independently(
+def test_jsonl_lineage_mirror_holds_only_the_permanent_lineage_class(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
+    """The lineage mirror carries the registry's lineage class and nothing else.
+
+    It is the copy whose failure domain is this box's disk rather than Loki's
+    config, so its filter is derived from `retention_class="lineage"` instead of
+    a second hand-kept list — a name added to the registry lands in both
+    permanent copies with no further wiring.
+    """
+    monkeypatch.setattr(telemetry, "logs_dir", lambda: tmp_path)
+    now = datetime.now(UTC)
+    day = now.strftime("%Y%m%d")
+    lineage_path = tmp_path / f"events-{day}.lineage.jsonl"
+
+    def batch(event_names: list[str]) -> list[telemetry.Event]:
+        return [
+            telemetry.Event(
+                ts=now,
+                trace_id=None,
+                span_id=None,
+                agent_id=_AGENT,
+                machine="test-machine",
+                cluster="test-cluster",
+                process="test-proc",
+                category=telemetry.category_for_kind(event_name),
+                event_name=event_name,
+                level="info",
+                source="system",
+                target_agent_id=None,
+            )
+            for event_name in event_names
+        ]
+
+    # A batch with no lineage row must not even create the file.
+    telemetry._append_jsonl(batch(["llm_usage", "send_message", "terminate", "log"]))
+    assert (tmp_path / f"events-{day}.jsonl").exists()
+    assert not lineage_path.exists()
+
+    lineage = sorted(lineage_event_names())
+    assert lineage == ["agent_resurrected", "agent_spawned", "fork", "resurrect", "spawn"]
+    telemetry._append_jsonl(batch([*lineage, "llm_usage", "terminate"]))
+
+    rows = [json.loads(line) for line in lineage_path.read_text().splitlines()]
+    assert [row["event_name"] for row in rows] == lineage
+    # The lineage copy is the full line, not a projection: a reader recovering
+    # from this file must see the same row the full mirror and Loki carry.
+    full_rows = [
+        json.loads(line) for line in (tmp_path / f"events-{day}.jsonl").read_text().splitlines()
+    ]
+    by_id = {row["id"]: row for row in full_rows}
+    assert all(by_id[row["id"]] == row for row in rows)
+
+
+def test_jsonl_mirror_prunes_full_rollup_and_lineage_retention_independently(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Each tier expires on its own clock — the filtered copies are the point.
+
+    The full mirror's 7 days is what the filtered tiers exist to outlive, so a
+    glob that swept a `.rollup`/`.lineage` file into the full tier's cutoff
+    would silently collapse all three into the shortest one.
+    """
     monkeypatch.setattr(telemetry, "logs_dir", lambda: tmp_path)
     monkeypatch.setattr(telemetry, "_JSONL_RETENTION_DAYS", 2)
     monkeypatch.setattr(settings.daemon, "events_jsonl_rollup_retention_days", 4)
+    monkeypatch.setattr(telemetry, "_JSONL_LINEAGE_RETENTION_DAYS", 6)
     today = datetime.now(UTC)
     full_old = tmp_path / f"events-{today - timedelta(days=3):%Y%m%d}.jsonl"
     full_kept = tmp_path / f"events-{today - timedelta(days=2):%Y%m%d}.jsonl"
     rollup_old = tmp_path / f"events-{today - timedelta(days=5):%Y%m%d}.rollup.jsonl"
     rollup_kept = tmp_path / f"events-{today - timedelta(days=4):%Y%m%d}.rollup.jsonl"
+    lineage_old = tmp_path / f"events-{today - timedelta(days=7):%Y%m%d}.lineage.jsonl"
+    lineage_kept = tmp_path / f"events-{today - timedelta(days=6):%Y%m%d}.lineage.jsonl"
     malformed = tmp_path / "events-0000000x.jsonl"
-    for path in (full_old, full_kept, rollup_old, rollup_kept, malformed):
+    for path in (
+        full_old,
+        full_kept,
+        rollup_old,
+        rollup_kept,
+        lineage_old,
+        lineage_kept,
+        malformed,
+    ):
         path.write_text("{}\n", encoding="utf-8")
 
     telemetry._prune_jsonl_mirror()
@@ -269,6 +341,8 @@ def test_jsonl_mirror_prunes_full_and_rollup_retention_independently(
     assert full_kept.exists()
     assert not rollup_old.exists()
     assert rollup_kept.exists()
+    assert not lineage_old.exists()
+    assert lineage_kept.exists()
     assert malformed.exists()
 
 
