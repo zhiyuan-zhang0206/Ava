@@ -38,6 +38,7 @@ from services.agent_host.dispatcher import TurnScheduler
 from services.agent_host.host import AgentHost, _config_fingerprint
 from shared.config.turn_view import turn_settings
 from shared.context import AvaContext
+from shared.lm.factory import validate_model_config
 from shared.plugin_config_registry import _PLUGIN_CONFIG_CLASSES, _PLUGIN_CONFIGS
 from shared.plugin_config_view import turn_plugin_config
 
@@ -257,8 +258,8 @@ _Build = Callable[..., "tuple[AgentHost, _FakeGraph, _FakePool]"]
 def wired(monkeypatch: pytest.MonkeyPatch, host_plugin: None) -> _Build:
     """An `AgentHost` over fakes, with the per-agent build stubbed.
 
-    The three stubbed calls are the ones that need a live database or a provider
-    key. `boot_agent_scope` is replaced by a build that reads
+    The per-agent build is stubbed because it needs a live key.
+    `boot_agent_scope` is replaced by a build that reads
     `turn_settings.lm.llm_model` exactly as the real one does, so a test can
     still tell whether the config bind was in effect when the model was built.
     """
@@ -274,6 +275,11 @@ def wired(monkeypatch: pytest.MonkeyPatch, host_plugin: None) -> _Build:
         return _Model(turn_settings.lm.llm_model)
 
     monkeypatch.setattr(host_mod, "boot_agent_scope", _fake_boot_agent_scope)
+
+    def _allow_model_config(*, model: str | None = None) -> None:
+        """Keep fake host tests independent of installed provider credentials."""
+
+    monkeypatch.setattr(host_mod, "validate_model_config", _allow_model_config)
 
     def _fake_redis() -> object:
         """The publisher below never touches it; the host only passes it through."""
@@ -692,6 +698,102 @@ class TestRunnability:
         host, _, _ = wired({1: _Row(machine="elsewhere")})
         await asyncio.wait_for(host.run_turn(1), 2)
         assert host._runtimes == {}
+
+
+class TestRejectedModelConfig:
+    async def test_an_unknown_model_is_rejected_before_the_runtime_build(
+        self, wired: _Build, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The real registry rejects an unknown model without a provider key."""
+        import services.agent_host.host as host_mod
+
+        monkeypatch.setattr(host_mod, "validate_model_config", validate_model_config)
+        boot_calls: list[int] = []
+        error_events: list[str] = []
+
+        async def _record_boot(agent_id: int) -> _Model:
+            boot_calls.append(agent_id)
+            return _Model(turn_settings.lm.llm_model)
+
+        def _record_error(_message: str, *, event: str, **_details: object) -> None:
+            error_events.append(event)
+
+        monkeypatch.setattr(host_mod, "boot_agent_scope", _record_boot)
+        monkeypatch.setattr(host_mod.logger, "error", _record_error)
+        host, graph, _ = wired({1: _Row(overlay={"llm_model": "fable"})})
+
+        await asyncio.wait_for(host.run_turn(1), 2)
+
+        assert boot_calls == []
+        assert graph.observations == []
+        assert host.stats.config_rejected == 1
+        assert host.stats.as_payload()["config_rejected"] == 1
+        assert host.stats.turns_started == 0
+        assert error_events == ["host_config_rejected"]
+
+    async def test_a_fixed_model_config_builds_on_the_next_wake(
+        self, wired: _Build, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A valid replacement clears the rejection note and resumes the turn."""
+        import services.agent_host.host as host_mod
+
+        boot_calls: list[int] = []
+        validated_models: list[str] = []
+
+        def _validate_model(*, model: str) -> None:
+            validated_models.append(model)
+            if model == "fable":
+                raise ValueError("unknown model 'fable'")
+
+        async def _record_boot(agent_id: int) -> _Model:
+            boot_calls.append(agent_id)
+            return _Model(turn_settings.lm.llm_model)
+
+        monkeypatch.setattr(host_mod, "validate_model_config", _validate_model)
+        monkeypatch.setattr(host_mod, "boot_agent_scope", _record_boot)
+        rows = {1: _Row(overlay={"llm_model": "fable"})}
+        host, graph, _ = wired(rows)
+
+        await asyncio.wait_for(host.run_turn(1), 2)
+        assert boot_calls == []
+        assert host._rejected_configs
+
+        rows[1] = _Row(overlay={"llm_model": "gpt-5.6-sol"})
+        await asyncio.wait_for(host.run_turn(1), 2)
+
+        assert boot_calls == [1]
+        assert len(graph.observations) == 1
+        assert host.stats.turns_started == 1
+        assert host.stats.config_rejected == 1
+        assert host._rejected_configs == {}
+        assert validated_models == ["fable", "gpt-5.6-sol"]
+
+    async def test_the_same_rejected_config_logs_once_per_config_state(
+        self, wired: _Build, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Repeated pending wakes stay quiet until the stored config changes."""
+        import services.agent_host.host as host_mod
+
+        error_events: list[str] = []
+
+        def _reject_model(*, model: str) -> None:
+            raise ValueError(f"unknown model '{model}'")
+
+        def _record_error(_message: str, *, event: str, **_details: object) -> None:
+            error_events.append(event)
+
+        monkeypatch.setattr(host_mod, "validate_model_config", _reject_model)
+        monkeypatch.setattr(host_mod.logger, "error", _record_error)
+        rows = {1: _Row(overlay={"llm_model": "fable"})}
+        host, _, _ = wired(rows)
+
+        await asyncio.wait_for(host.run_turn(1), 2)
+        await asyncio.wait_for(host.run_turn(1), 2)
+        rows[1] = _Row(overlay={"llm_model": "fable-2"})
+        await asyncio.wait_for(host.run_turn(1), 2)
+
+        assert host.stats.config_rejected == 3
+        assert error_events == ["host_config_rejected", "host_config_rejected"]
 
 
 # ── 5. the bounds ────────────────────────────────────────────────────────────
