@@ -34,6 +34,14 @@ wrong-home refusal and wrong applied-set/SQL-tamper refusal. Mutable plugin pois
 must not enter discovery. After normal graceful stop, image byte inventory must
 be unchanged. All config/log/queue writes remain under the private home.
 
+The installed old envelope reader also exercises legacy sources and rejects the
+exact persisted `external_agent:codex:run-42` fixture from identity revision
+`d39ca01c155305f1e8ae504cf9f5ed1a0e0e8cc1`, plus `unknown:cli`. This records a
+real readability incompatibility, not a rollback admission implementation.
+Any retained inbound/checkpoint replay using that format must block old-version
+rollback until a separately reviewed compatibility/retirement path exists;
+rewriting the source label to make the old reader accept it is not that path.
+
 This first CI lane is Linux x86_64. It is not macOS arm64/Windows normal-service
 proof, full enabled-service closure, a selector commit or a production update.
 Successful cold boot is not complete LKG recovery: actual down-migration safety,

@@ -183,6 +183,31 @@ print(json.dumps(blocked))
                 )
                 refused_writes = json.loads(write_probe.stdout)
                 require(len(refused_writes) == 3, "not all packaged migration writes refused")
+                reader_probe = """
+import json
+from shared.envelope import wrap_inbound
+# Exact source fixture from caller persistence at d39ca01c155305f1e8ae504cf9f5ed1a0e0e8cc1.
+legacy=('user','agent:405','system:update','shell:123')
+for source in legacy:
+    assert 'compatibility probe' in wrap_inbound('compatibility probe',source)
+unsupported=('external_agent:codex:run-42','unknown:cli')
+for source in unsupported:
+    try: wrap_inbound('compatibility probe',source)
+    except ValueError as exc:
+        if 'Unrecognized inbound source' not in str(exc): raise
+    else: raise AssertionError('old reader unexpectedly accepts new source format')
+print(json.dumps({'legacySourcesReadable':legacy,'unsupportedSources':unsupported,'rollbackAdmissionProved':False}))
+"""
+                reader = subprocess.run(  # noqa: S603 — actual installed old reader, no format rewriting.
+                    [sys.executable, "-I", "-B", "-c", reader_probe],
+                    cwd=root,
+                    env=env,
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                    timeout=30,
+                )
+                reader_compatibility = json.loads(reader.stdout)
                 baseline = package / "db/schema.sql"
                 original = baseline.read_bytes()
                 baseline.chmod(0o600)
@@ -297,6 +322,7 @@ print(json.dumps(blocked))
                     "extraSQLRefused": True,
                     "missingSQLRefused": True,
                     "migrationWritesRefusedBeforeDBAccess": refused_writes,
+                    "persistedSourceReaderCompatibility": reader_compatibility,
                     "processShaUnknownPreserved": True,
                     "fullRollbackProved": False,
                     "mutablePluginDiscoveryIgnored": True,
