@@ -889,13 +889,18 @@ CREATE TABLE deployment_state (
     target_sha   TEXT,
     observed_by  TEXT,
     log_path     TEXT,
-    pin_advanced BOOLEAN NOT NULL DEFAULT FALSE
+    pin_advanced BOOLEAN NOT NULL DEFAULT FALSE,
+    -- Operation-bound typed evidence, not an independent registry. NULL refuses.
+    managed_writer_evidence JSONB
 );
 
 INSERT INTO deployment_state (id) VALUES (1) ON CONFLICT (id) DO NOTHING;
 
 COMMENT ON TABLE deployment_state IS
     'Cluster-level deployment state: phase/kind + the deploy lease + last outcome — the single authority for "is a deploy running, of what kind" (replaces cluster_update_lock + session probing; R1 wave, Task #1021).';
+
+COMMENT ON COLUMN deployment_state.managed_writer_evidence IS
+    'Versioned operation-bound managed-writer closure evidence; NULL is unknown, never permission.';
 
 -- ─────────────── host_deploy_state (R1 — Task #1021) ───────────────
 -- Host-level deploy posture + updater lease, one row per machine (replaces the
