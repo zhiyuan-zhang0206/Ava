@@ -119,7 +119,11 @@ class TestFatalProviderReport:
                 (failed, f"agent:{folded_parent}"),
             )
         db_conn.commit()
-        monkeypatch.setattr(agent_db, "publish_inbound_wake", lambda *_args: None)
+
+        def _no_wake(*_args: object) -> None:
+            return None
+
+        monkeypatch.setattr(agent_db, "publish_inbound_wake", _no_wake)
 
         recipient = await agent_db.enqueue_fatal_provider_report_to_nearest_alive_ancestor(
             aops_pool,
