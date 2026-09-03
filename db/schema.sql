@@ -146,6 +146,10 @@ CREATE TABLE agents_meta (
     liveness_state             TEXT NOT NULL DEFAULT 'unknown' CHECK (liveness_state IN ('online', 'offline', 'unknown')),  -- gateway-owned derived liveness projection (Task #1174): 'online' = machine reachable AND (process lease alive where one is held); 'offline' = machine unreachable (2 consecutive failed status_probe) or lease expired; 'unknown' = not yet judged (fresh rows / unregistered machine). Written ONLY by the gateway heartbeat daemon's liveness pass — status stays lifecycle intent (R1 invariant #1); the frontend renders offline distinctly. 'terminated' rows are never judged.
     last_probe_at             TIMESTAMPTZ,              -- when the gateway liveness pass last judged this row (Task #1174).
     last_compact_at            TIMESTAMPTZ,              -- R1 (Task #1021): synchronous compact stamp — written by agent/hooks/compact.py at each compact, replacing the events-table OFFSET-1 read-your-own-write hack (the anchor for "last compact" without scanning events). NULL = never compacted.
+    runtime_generation UUID,
+    runtime_kind TEXT CHECK (runtime_kind IN ('process', 'hosted')),
+    runtime_owner UUID,
+    runtime_protocol_version INTEGER NOT NULL DEFAULT 0 CHECK (runtime_protocol_version >= 0),
     -- fork fields exist in pairs or not at all (constraint explicitly named to align with the ALTER in 0002 migration)
     CONSTRAINT agents_meta_fork_pair_check
         CHECK ((fork_source_agent_id IS NULL) = (fork_source_checkpoint_id IS NULL))
