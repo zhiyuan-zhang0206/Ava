@@ -3,8 +3,9 @@
 turn 1: the fake raises FatalProviderError (a provider rejection class that is
         EXCLUDED from the llm node retry policy — agent/graph/_build.py
         `_should_retry` returns False for it). The agent loop aborts the turn,
-        emits one SSE `error` event ("The turn was aborted; the agent is still
-        alive and idling..."), and halts idling for the next inbound.
+        emits one SSE `error` event (the blocked-provider copy: "The agent is
+        blocked; heartbeat check-ins will not re-run this request..."), and
+        halts idling for the next inbound.
 turn 2: normal reply — proves the agent recovered without a restart.
 
 The frontend renders the SSE error event as an ephemeral `[error] ...` marker

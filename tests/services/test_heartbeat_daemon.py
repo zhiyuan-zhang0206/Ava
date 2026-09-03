@@ -407,6 +407,46 @@ class TestSendHeartbeatCheckin:
         assert ev[1] == "info"
         assert int(ev[2]) == 7
 
+    def test_consumed_heartbeat_defers_the_next_checkin(
+        self, pool: ConnectionPool, db_conn: psycopg.Connection
+    ) -> None:
+        """A completed check-in must start a durable reminder interval.
+
+        Regression for #5759: a permanent provider rejection leaves
+        ``last_active_at`` unchanged. Once its heartbeat inbound is consumed,
+        the pending-inbound guard no longer applies, so the daemon must still
+        hold the agent until the configured heartbeat interval has elapsed.
+        """
+        aid = _make_idle(db_conn, status_changed_s_ago=400)
+        _send_heartbeat_checkin(pool, aid, 7.0)
+        with db_conn.cursor() as cur:
+            cur.execute("UPDATE inbound_messages SET status = 'done' WHERE agent_id = %s", (aid,))
+        db_conn.commit()
+
+        assert aid not in _selected(pool)
+
+    def test_reminder_uses_heartbeat_interval_not_dispatch_step(
+        self, pool: ConnectionPool, db_conn: psycopg.Connection
+    ) -> None:
+        """The 15-second dispatcher step must not become the reminder cadence."""
+        aid = _make_idle(db_conn, status_changed_s_ago=400)
+        _send_heartbeat_checkin(pool, aid, 7.0)
+        with db_conn.cursor() as cur:
+            cur.execute("UPDATE inbound_messages SET status = 'done' WHERE agent_id = %s", (aid,))
+            cur.execute(
+                "UPDATE agents_meta SET last_heartbeat_at = now() - interval '20 seconds' "
+                "WHERE id = %s",
+                (aid,),
+            )
+        db_conn.commit()
+
+        assert aid not in dict(
+            _select_idle_agents_needing_heartbeat(pool, _THRESHOLD_S, heartbeat_interval_s=300.0)
+        )
+        assert aid in dict(
+            _select_idle_agents_needing_heartbeat(pool, _THRESHOLD_S, heartbeat_interval_s=15.0)
+        )
+
     async def test_publishes_redis_wake_to_target(
         self, pool: ConnectionPool, db_conn: psycopg.Connection
     ) -> None:

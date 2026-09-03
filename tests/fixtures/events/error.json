@@ -1,5 +1,11 @@
 {
   "agent_id": 7,
   "role": "error",
-  "content": "something broke"
+  "content": "provider rejected the request",
+  "error_class": "permanent",
+  "provider": "deepseek",
+  "status": 400,
+  "reason": "bad_request",
+  "blocked": true,
+  "recovery": "Choose a different model overlay, then send a new message."
 }

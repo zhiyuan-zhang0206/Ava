@@ -1302,6 +1302,24 @@ describe("applySystemEvent — case label + template literal reinforcement", () 
     expect(result[0].item_id.startsWith("_marker.")).toBe(true);
     expect(result[0].item_id).not.toBe("");
   });
+
+  it("renders a permanent provider rejection as a blocked state with its recovery path", () => {
+    const result = applySystemEvent([], {
+      role: "error",
+      agent_id: 1,
+      content: "Content Exists Risk",
+      error_class: "permanent",
+      reason: "bad_request",
+      blocked: true,
+      recovery: "Choose a different model overlay or resolve the provider policy rejection, then send a new message.",
+    } as unknown as SystemEvent);
+
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({
+      kind: "system_marker",
+      payload: "error:Provider permanently rejected the request (classification: permanent; reason: bad_request). The agent is blocked and automated heartbeat retries are stopped. Recovery: Choose a different model overlay or resolve the provider policy rejection, then send a new message. Details: Content Exists Risk",
+    });
+  });
 });
 
 // ═══════════════════════════════════════════════════════

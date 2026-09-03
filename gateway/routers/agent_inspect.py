@@ -532,6 +532,7 @@ async def get_agent_inspect_live(agent_id: int, request: Request) -> AgentInspec
         heartbeat=project_heartbeat(
             status=db.status,
             last_active_at=db.last_active_at,
+            last_heartbeat_at=db.last_heartbeat_at,
             paused_until=db.paused_until,
             agent_id=agent_id,
             pending_inbound=db.pending_inbound,
@@ -638,6 +639,7 @@ async def get_agent_inspect(
         heartbeat=project_heartbeat(
             status=db.status,
             last_active_at=db.last_active_at,
+            last_heartbeat_at=db.last_heartbeat_at,
             paused_until=db.paused_until,
             agent_id=agent_id,
             pending_inbound=db.pending_inbound,

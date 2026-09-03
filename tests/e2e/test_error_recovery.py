@@ -44,9 +44,10 @@ def test_llm_error_renders_error_marker_and_agent_recovers(e2e_env: E2EEnv) -> N
     page.fill('[data-testid="composer-input"]', "\u7b2c\u4e00\u8f6e\u4f1a\u5931\u8d25")
     page.click('[data-testid="composer-send"]')
     wait_for_status(agent_id, AgentStatus.IDLING.value)
-    # The error marker body carries the abort copy + the exception message.
+    # The error marker body carries the blocked copy + the exception message.
     page.wait_for_selector(f"text={ERROR_MSG}", timeout=15_000)
-    page.wait_for_selector("text=The turn was aborted", timeout=15_000)
+    page.wait_for_selector("text=The agent is blocked", timeout=15_000)
+    page.wait_for_selector("text=heartbeat check-ins will not re-run this request", timeout=15_000)
 
     # Error is VISIBLE — and it is the error path, not the unrecognized alarm.
     assert page.get_by_test_id("marker-error").count() > 0, "error marker must render"

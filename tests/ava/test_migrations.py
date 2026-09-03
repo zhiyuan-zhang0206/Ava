@@ -60,6 +60,24 @@ from shared.migrations import (
 )
 
 _SCHEMA_SQL = Path(__file__).resolve().parents[2] / "db" / "schema.sql"
+
+
+def _schema_sql_stamped_migration_names() -> list[str]:
+    """The applied-set stamps db/schema.sql seeds, in file order.
+
+    A folded strict migration keeps its stamp row so a fresh DB does not replay
+    it. Reading the stamps from the file (rather than hard-coding a
+    baseline+folded list) keeps this exact; the next folded migration cannot
+    silently strand the fixture.
+    """
+    import re
+
+    return re.findall(
+        r"INSERT INTO schema_migrations \(name\) VALUES \('([^']+)'\)",
+        _SCHEMA_SQL.read_text(),
+    )
+
+
 _FORCE_FENCE_MIGRATION = (
     Path(__file__).resolve().parents[2]
     / "migrations"
@@ -155,9 +173,18 @@ def _reset_schema_migrations_state() -> Iterator[None]:
         with psycopg.connect(settings.data_plane.db_url, autocommit=True) as conn:
             _set_table_to(conn, "set", names)
 
+    # Captured at setup, not at teardown: a test's monkeypatch of MIGRATIONS_DIR
+    # is still active when this autouse fixture tears down, and the after-state
+    # must be the real checkout's canonical applied set.
+    _canonical_applied = sorted(required_migration_set())
     _reseed([_BASELINE_NAME])
     yield
-    _reseed([_BASELINE_NAME, _LAST_CLAIM_LOOP_MIGRATION_NAME])
+    # Restore the canonical fully-applied state (baseline + every migration file),
+    # NOT a hard-coded prefix list: a freshly folded strict migration must stay
+    # in the canonical applied set, or a later cmd_migrations_apply in the same
+    # worker re-runs it against an already-current schema and fails loudly
+    # (DuplicateColumn — the class that hit PR #1587's migration).
+    _reseed(_canonical_applied)
 
 
 # ─── required / applied set ───────────────────────────────────────────────────
@@ -287,11 +314,9 @@ def test_fresh_schema_sql_bootstrap_is_baselined() -> None:
     try:
         with psycopg.connect(url, autocommit=True) as conn:
             conn.execute(schema)  # type: ignore[arg-type]  # trusted multi-statement schema
+            expected_stamped = {(name,) for name in _schema_sql_stamped_migration_names()}
             row = conn.execute("SELECT name FROM schema_migrations").fetchall()
-            assert set(row) == {
-                (_BASELINE_NAME,),
-                (_LAST_CLAIM_LOOP_MIGRATION_NAME,),
-            }
+            assert set(row) == expected_stamped
             presets = conn.execute("SELECT name FROM agent_presets").fetchall()
             assert {r[0] for r in presets} == {
                 "coder",
@@ -308,10 +333,9 @@ def test_fresh_schema_sql_bootstrap_is_baselined() -> None:
         # ALTER skip a fresh schema that already carries the column; all other
         # post-baseline migrations replay cleanly, then a second apply is a no-op.
         with psycopg.connect(url) as conn:
-            assert set(apply_pending_migrations(conn)) == required_migration_set() - {
-                _BASELINE_NAME,
-                _LAST_CLAIM_LOOP_MIGRATION_NAME,
-            }
+            assert set(apply_pending_migrations(conn)) == required_migration_set() - set(
+                _schema_sql_stamped_migration_names()
+            )
         with psycopg.connect(url) as conn:
             assert apply_pending_migrations(conn) == []
     finally:

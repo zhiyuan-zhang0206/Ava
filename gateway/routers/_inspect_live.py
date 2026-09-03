@@ -27,6 +27,7 @@ class InspectDbRows(NamedTuple):
     machine: str
     status: Any
     last_active_at: Any
+    last_heartbeat_at: Any
     spawned_at: Any
     started_at: Any
     paused_until: Any
@@ -41,7 +42,7 @@ def db_rows_blocking(pool: ConnectionPool[Any], agent_id: int) -> InspectDbRows:
     """Read agents_meta and the fresh pending-inbound flag in one DB borrow."""
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
-            "SELECT config_overlay, machine, status, last_active_at, "
+            "SELECT config_overlay, machine, status, last_active_at, last_heartbeat_at, "
             "       spawned_at, started_at, "
             "       CASE WHEN heartbeat_paused_until > now() THEN heartbeat_paused_until END, "
             "       liveness_state, last_probe_at, lease_expires_at, "
@@ -65,17 +66,18 @@ def db_rows_blocking(pool: ConnectionPool[Any], agent_id: int) -> InspectDbRows:
             machine=row[1],
             status=row[2],
             last_active_at=row[3],
-            spawned_at=row[4],
-            started_at=row[5],
-            paused_until=row[6],
+            last_heartbeat_at=row[4],
+            spawned_at=row[5],
+            started_at=row[6],
+            paused_until=row[7],
             pending_inbound=bool(pending_row[0]),
             config_overlay=row[0] if row[0] is not None else {},
             liveness_state=cast(
                 Literal["online", "offline", "unknown"],
-                row[7] if row[7] is not None else "unknown",
+                row[8] if row[8] is not None else "unknown",
             ),
-            last_probe_at=row[8],
-            observation=observation(row[10], row[9]),
+            last_probe_at=row[9],
+            observation=observation(row[11], row[10]),
         )
 
 
@@ -107,6 +109,7 @@ def notice_blocking(pool: ConnectionPool[Any], agent_id: int) -> OpenNotice | No
 def project_heartbeat(
     status: str,
     last_active_at: datetime,
+    last_heartbeat_at: datetime | None,
     paused_until: datetime | None,
     *,
     agent_id: int,
@@ -123,9 +126,10 @@ def project_heartbeat(
     - idle-family (idling / restarting), paused → `paused_until`.
     - idle-family, not paused, a wake already queued → `heartbeat_pending`.
     - idle-family, not paused, nothing queued → `next_at` (the daemon's projected
-      check-in due time — idle clock plus the per-agent jitter; the daemon
-      dispatches at its first poll tick at/after that, at most one 15s dispatch
-      step later. The frontend renders an overdue one as "due").
+      check-in due time — the later of the idle clock plus its per-agent jitter
+      and the durable last-reminder cadence floor; the daemon dispatches at its
+      first poll tick at/after that, at most one 15s dispatch step later. The
+      frontend renders an overdue one as "due").
     - running or terminated → all off (never checked in on).
 
     `heartbeat_pending` mirrors the daemon's `NOT EXISTS (pending inbound)` guard
@@ -137,19 +141,17 @@ def project_heartbeat(
     instead of projecting `next_at` off a stale clock — is what keeps a stuck
     agent (an unconsumed check-in it never woke to process) from rendering a
     nonsensical past "next heartbeat" time. When no inbound is pending, any
-    earlier check-in was already consumed (its turn bumped `last_active_at` past
-    it), so `last_active_at` alone is the correct projection basis — no
-    `heartbeat_nudged`-event floor is needed.
+    earlier check-in was already consumed, `last_heartbeat_at` remains the
+    durable cadence floor even when its turn did not produce any LLM work.
 
     `last_pause` is the cached event-history aggregate. Every other input is
     from the request's fresh agents_meta read, so a status/heartbeat change is
     visible immediately even while the historical Loki fan-out rides its TTL.
     """
-    # The daemon projects the next check-in from last_active_at + idle_threshold_s
-    # (plus per-agent jitter). Use idle_threshold_s, not heartbeat_interval_seconds
-    # (the poll cadence), so the inspector matches the daemon's contract.
-    # heartbeat_interval_seconds is kept for the return value — the frontend badge
-    # ("every 5m") uses it as the configured check-in cadence.
+    # The daemon's due predicate takes the later of `last_active_at` plus the
+    # idle threshold/jitter and `last_heartbeat_at` plus the configured interval.
+    # The dispatcher runs every <=15 seconds only to notice due work; it is not
+    # the per-agent reminder cadence.
     idle_threshold_s = int(settings.daemon.heartbeat_idle_threshold_seconds)
     interval_s = int(settings.daemon.heartbeat_interval_seconds)
 
@@ -168,14 +170,21 @@ def project_heartbeat(
             heartbeat_pending = True
         else:
             # Overdue (daemon skips restarting agents) → frontend shows "due".
-            # Match the daemon's due-time exactly: idle clock + per-agent jitter
-            # (id mod JITTER_SPAN_S) — the actual dispatch happens at the first
-            # daemon tick at/after this, so next_at never overstates it.
+            # Match the daemon's due-time exactly: the later of the idle clock
+            # plus per-agent jitter and the durable reminder floor. The actual
+            # dispatch happens at the first daemon tick at/after this, so
+            # next_at never overstates it.
             # JITTER_SPAN_S is int-typed (whole seconds) so this matches the
             # daemon's `NULLIF(span, 0)::int` cast exactly; the `0` guard mirrors
             # the daemon's disabled-jitter collapse (mod never divides by zero).
             jitter_s = agent_id % JITTER_SPAN_S if JITTER_SPAN_S else 0
-            next_at = last_active_at + timedelta(seconds=idle_threshold_s + jitter_s)
+            idle_due_at = last_active_at + timedelta(seconds=idle_threshold_s + jitter_s)
+            reminder_due_at = (
+                last_heartbeat_at + timedelta(seconds=interval_s)
+                if last_heartbeat_at is not None
+                else idle_due_at
+            )
+            next_at = max(idle_due_at, reminder_due_at)
     return HeartbeatInfo(
         interval_s=interval_s,
         next_at=next_at,

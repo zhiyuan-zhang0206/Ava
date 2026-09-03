@@ -422,14 +422,27 @@ export function applySystemEvent(
       // The timeline reload triggered by useTimeline still fires; only the
       // visible marker is suppressed.
       return items;
-    case "error":
+    case "error": {
+      const blockedError =
+        ev.blocked === true &&
+        ev.error_class !== null &&
+        ev.error_class !== undefined &&
+        ev.reason !== null &&
+        ev.reason !== undefined &&
+        ev.recovery !== null &&
+        ev.recovery !== undefined
+          ? "Provider permanently rejected the request " +
+            `(classification: ${ev.error_class}; reason: ${ev.reason}). ` +
+            "The agent is blocked and automated heartbeat retries are stopped. " +
+            `Recovery: ${ev.recovery} Details: ${ev.content}`
+          : ev.content;
       return [
         ...items,
         {
           item_id: `_marker.${now}`,
           kind: "system_marker",
           source: null,
-          payload: `error:${ev.content}`,
+          payload: `error:${blockedError}`,
           created_at: now,
           inbound_id: null,
           // Rendered by the ephemeral error path, which ignores the flag; true
@@ -437,6 +450,7 @@ export function applySystemEvent(
           show_timestamp: true,
         },
       ];
+    }
     case "cancelled":
       // Stop button. The in-flight streaming bubble is dropped by the store's
       // processSseEvent, which owns msg_count — the signal for "uncommitted"
