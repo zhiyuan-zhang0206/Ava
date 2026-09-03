@@ -113,6 +113,47 @@ async def test_paused_owned_target_does_not_spend_pending_retry_budget(
     db_conn.commit()
 
 
+async def test_placement_change_after_pause_latch_cannot_spend_budget(
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from ops import resurrection_retry
+
+    agent_id = _row(db_conn)
+    claim_agent_row(agent_id)
+    command = _command(db_conn, agent_id, "terminate")
+    await claim_inbound_batch(aops_pool, agent_id)
+    async with async_write_transaction(aops_pool) as conn:
+        assert await apply_process_lifecycle(conn, agent_id, command)
+    wake = insert_inbound_message(db_conn, agent_id, "wake", "user")
+    db_conn.execute(
+        "INSERT INTO machines(name,role,paused_at) VALUES(%s,ARRAY['agent-runner'],clock_timestamp()) "
+        "ON CONFLICT(name) DO UPDATE SET paused_at=EXCLUDED.paused_at",
+        (machine_name(),),
+    )
+    db_conn.execute(
+        "INSERT INTO machines(name,role) VALUES('pre-latch-home',ARRAY['agent-runner'])"
+    )
+    db_conn.execute("UPDATE agents_meta SET machine='pre-latch-home' WHERE id=%s", (agent_id,))
+    db_conn.commit()
+    original = resurrection_retry.lock_active_home_machine
+
+    def move_after_latch(cursor: psycopg.Cursor, target: int) -> str:
+        home = original(cursor, target)
+        # Independent connection changes placement while only the former home
+        # is latched. The subsequent metadata lock must reject that mismatch.
+        db_conn.execute("UPDATE agents_meta SET machine=%s WHERE id=%s", (machine_name(), target))
+        db_conn.commit()
+        return home
+
+    monkeypatch.setattr(resurrection_retry, "lock_active_home_machine", move_after_latch)
+    with pytest.raises(resurrection_retry.ResurrectTriggerStaleError, match="placement changed"):
+        authorize_pending_retry(agent_id, wake, "chat", 2)
+    assert db_conn.execute(
+        "SELECT status,payload ? 'resurrection_retry' FROM inbound_messages WHERE id=%s", (wake,)
+    ).fetchone() == ("pending", None)
+    db_conn.commit()
+
+
 async def test_process_identity_is_reserved_fixed_and_not_an_exit_receipt(
     db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
 ) -> None:

@@ -251,11 +251,13 @@ def _prepare_resurrect_attempt(
 
     reject_unnegotiated_caller(resurrected_by)
     with write_transaction() as conn, conn.cursor() as cur:
-        _lock_active_home_machine(cur, agent_id)
-        cur.execute("SELECT status FROM agents_meta WHERE id = %s FOR UPDATE", (agent_id,))
+        latched_machine = _lock_active_home_machine(cur, agent_id)
+        cur.execute("SELECT status,machine FROM agents_meta WHERE id = %s FOR UPDATE", (agent_id,))
         row = cur.fetchone()
         if row is None:
             raise AgentNotFound(f"agent {agent_id} does not exist")
+        if row[1] != latched_machine:
+            raise ResurrectTriggerStaleError("resurrection placement changed after pause latch")
         current = AgentStatus(row[0])
         if current is not AgentStatus.TERMINATED:
             raise ResurrectAlreadyAlive(
@@ -335,9 +337,9 @@ def _retry_resurrect_session(agent_id: int, prepared: _PreparedResurrect) -> str
     if prepared.command_id is None:
         raise ResurrectError("resurrection allocation lacks a durable launch identity")
     with write_transaction() as conn, conn.cursor() as cur:
-        _lock_active_home_machine(cur, agent_id)
+        latched_machine = _lock_active_home_machine(cur, agent_id)
         cur.execute(
-            "SELECT status, status_changed_at, pid FROM agents_meta WHERE id = %s FOR UPDATE",
+            "SELECT status, status_changed_at, pid, machine FROM agents_meta WHERE id = %s FOR UPDATE",
             (agent_id,),
         )
         row = cur.fetchone()
@@ -346,6 +348,7 @@ def _retry_resurrect_session(agent_id: int, prepared: _PreparedResurrect) -> str
             or row[0] != AgentStatus.IDLING.value
             or row[1] != prepared.allocation_epoch
             or row[2] is not None
+            or row[3] != latched_machine
         ):
             return None
         attempt_number, remaining = authorize_launch(
