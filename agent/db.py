@@ -418,9 +418,13 @@ async def has_pending_interrupt(pool: AsyncConnectionPool, agent_id: int) -> boo
     """
     async with pool.connection() as conn, conn.cursor() as cur:
         await cur.execute(
-            "SELECT 1 FROM inbound_messages "
-            "WHERE status = 'pending' AND agent_id = %s AND kind IN ('cancel', 'terminate') "
-            "AND source <> 'self' "
+            "SELECT 1 FROM inbound_messages i WHERE i.agent_id=%s "
+            "AND i.kind IN ('cancel','terminate') AND i.source <> 'self' "
+            "AND (i.status='pending' OR (i.status='claimed' AND i.kind='terminate' "
+            "AND i.applied_at IS NOT NULL AND i.observed_at IS NULL AND EXISTS ("
+            "SELECT 1 FROM agents_meta m WHERE m.id=i.agent_id "
+            "AND m.lifecycle_command_id=i.id AND m.runtime_kind='hosted' "
+            "AND m.runtime_generation=i.target_generation AND m.runtime_owner=i.target_owner))) "
             "LIMIT 1",
             (agent_id,),
         )

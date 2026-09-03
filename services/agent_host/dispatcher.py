@@ -172,37 +172,47 @@ class TurnScheduler:
         self._tasks[agent_id] = task
 
     async def _pump(self, agent_id: int) -> None:
-        """Run turns for one agent until no wake is outstanding.
+        """One Task owns one actual turn; a queued successor gets a new Task.
 
-        The loop body, not the caller, consumes the flag: it is cleared BEFORE
-        the turn runs, so a wake arriving *during* the turn is preserved and
-        causes another pass. Clearing it after would swallow exactly the wake
-        the turn could not have seen.
+        Reusing a Task across incarnations would let delayed cancellation of
+        the captured old Task interrupt its successor. Wake handoff and registry
+        replacement have no intervening await, preserving single-flight.
         """
+        completed = False
         try:
-            while True:
-                self._pending.discard(agent_id)
-                try:
-                    await self._run_turn(agent_id)
-                except asyncio.CancelledError:
-                    raise
-                except Exception:
-                    # One agent's failed turn must not take the host down or
-                    # wedge that agent: log it, drop the task, and let the next
-                    # wake start a fresh one. The turn's own state is
-                    # checkpointed, so the retry resumes rather than restarts.
-                    logger.exception(
-                        "hosted turn crashed — dropping the task; the next wake retries",
-                        event="host_turn_crashed",
-                        agent_id=agent_id,
-                    )
-                    return
-                # No await between this check and the `finally` below, so a
-                # wake cannot land in the gap (see the module docstring).
-                if agent_id not in self._pending:
-                    return
+            self._pending.discard(agent_id)
+            await self._run_turn(agent_id)
+            completed = True
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception(
+                "hosted turn crashed — dropping the task; the next wake retries",
+                event="host_turn_crashed",
+                agent_id=agent_id,
+            )
         finally:
-            self._tasks.pop(agent_id, None)
+            if self._tasks.get(agent_id) is asyncio.current_task():
+                self._tasks.pop(agent_id)
+                if completed and not self._closed and agent_id in self._pending:
+                    self._start(agent_id)
+
+    async def cancel_exact_force(
+        self, agent_id: int, command_id: int, validate: Callable[[int, int], Awaitable[bool]]
+    ) -> bool:
+        """Capture a Task before validating force; a later Task is never cancelled."""
+        task = self._tasks.get(agent_id)
+        if not await validate(agent_id, command_id):
+            return False
+        if task is None:
+            # Only the original host's normal serialized pump can prove idle.
+            self.wake(agent_id)
+            return False
+        if self._tasks.get(agent_id) is not task:
+            return False
+        task.cancel()
+        await self._await_unwind({agent_id: task})
+        return task.done()
 
     async def cancel_agent(self, agent_id: int) -> bool:
         """Cancel ONE agent's turn task, with the same bounded unwind as `aclose`.
@@ -214,17 +224,15 @@ class TurnScheduler:
         staying in the registry, so a later wake for that agent does not
         double-schedule (the turn it is stuck in is still the turn it owns).
 
-        Returns True when a task existed for `agent_id` (it was cancelled, or
-        finished on its own before the cancel landed), False when no task was
-        running — the ops caller treats False as "nothing to accelerate", never
-        as an error.
+        Returns True only after the captured task ended; stragglers stay false.
+        External force uses ``cancel_exact_force`` instead of this watchdog path.
         """
         task = self._tasks.get(agent_id)
         if task is None:
             return False
         task.cancel()
         await self._await_unwind({agent_id: task})
-        return True
+        return task.done()
 
     async def aclose(self) -> None:
         """Cancel every turn task and wait, BOUNDED, for them to unwind.

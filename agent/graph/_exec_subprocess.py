@@ -47,6 +47,7 @@ from shared import editable_install
 from shared.env_registry import AGENT_BIRTH_CONFIG_ENV, AGENT_CONFIG_OVERLAY_ENV
 from shared.paths import exec_run_dir
 from shared.platform import CREATE_NO_WINDOW, IS_WINDOWS
+from shared.turn_identity import current_hosted_resources
 from shared.winjob import EXEC_JOB_GATE_ENV, WindowsJob, publish_parent_job_gate
 
 from . import _exec_process
@@ -338,10 +339,10 @@ async def _finish_failed_run(
     domain_close: _exec_process.DomainCloseOwner | None,
     reader_join_task: asyncio.Task[None] | None,
     reader: threading.Thread | None,
-) -> None:
+) -> bool:
     """Settle an interrupted run without replacing its primary failure."""
     if root_exit_task is None or reap_task is None or domain_close is None:
-        return
+        return False
     if domain_close.interrupted:
         failures = _exec_process.settle_cancelled_owners(domain_close, reader)
     else:
@@ -349,6 +350,31 @@ async def _finish_failed_run(
             root_exit_task, reap_task, domain_close, reader_join_task
         )
     _exec_process.annotate_original_failure(original, failures)
+    return not failures
+
+
+def _write_request_failure(
+    path: Path, code: str, agent_id: int | None, timeout: float, state: dict[str, Any] | None
+) -> _ExecCrashed | None:
+    try:
+        write_request(path, code=code, agent_id=agent_id, timeout_s=timeout, state=state)
+    except BaseException as exc:
+        return _ExecCrashed(output=f"exec subprocess request could not be written: {exc}", exc=exc)
+    return None
+
+
+def _finish_request_evidence(
+    request_path: Path, result_path: Path, gate: Path | None, *, settled: bool
+) -> None:
+    scope = current_hosted_resources()
+    if scope is not None:
+        if not settled:
+            return
+        scope.unresolved.pop(request_path)
+    for path in (request_path, result_path, gate):
+        if path is not None:
+            with contextlib.suppress(FileNotFoundError):
+                path.unlink()
 
 
 async def _run_in_subprocess(
@@ -384,31 +410,23 @@ async def _run_in_subprocess(
     result_path = make_result_path(exec_dir, agent_id)
     windows_job_gate = request_path.with_suffix(".job-ready.json") if IS_WINDOWS else None
 
-    try:
-        write_request(
-            request_path,
-            code=code,
-            agent_id=agent_id,
-            timeout_s=timeout,
-            state=state,
-        )
-    except BaseException as exc:
-        # State snapshot not serializable (a plugin field type the codec
-        # rejects) — fail fast with the channel-level detail, no silent skip.
-        return _ExecCrashed(
-            output=f"exec subprocess request could not be written: {exc}",
-            exc=exc,
-        ), None
+    request_error = _write_request_failure(request_path, code, agent_id, timeout, state)
+    if request_error is not None:
+        return request_error, None
 
     stream = StreamingTextIO()
-    cancelled = False
-    timed_out = False
+    cancelled = timed_out = False
     proc: subprocess.Popen[bytes] | None = None
     reader: threading.Thread | None = None
     root_exit_task: asyncio.Task[None] | None = None
     reap_task: asyncio.Task[int] | None = None
     domain_close: _exec_process.DomainCloseOwner | None = None
     reader_join_task: asyncio.Task[None] | None = None
+    resource_scope = current_hosted_resources()
+    if resource_scope is not None:
+        # Register before user code can start, not after the first await.
+        resource_scope.unresolved[request_path] = None
+    resources_settled = False
     try:
         try:
             proc, domain = _spawn(
@@ -419,6 +437,8 @@ async def _run_in_subprocess(
                 birth_config=birth_config,
                 windows_job_gate=windows_job_gate,
             )
+            if resource_scope is not None:
+                resource_scope.unresolved[request_path] = domain
         except OSError as exc:
             return _ExecCrashed(
                 output=f"exec subprocess could not be spawned: {exc}",
@@ -459,6 +479,7 @@ async def _run_in_subprocess(
             domain_close=domain_close,
             reader_join_task=reader_join_task,
         )
+        resources_settled = True
 
         payload, envelope_error = _read_result_envelope(result_path, proc.returncode)
         result = _result_from_payload(
@@ -474,7 +495,7 @@ async def _run_in_subprocess(
         # The exec node's outer shield (asyncio.wait_for) cancels this task on
         # node timeout. Cancellation is not complete until every owned resource
         # is settled; otherwise the next exec inherits a zombie/thread leak.
-        await _finish_failed_run(
+        resources_settled = await _finish_failed_run(
             original, root_exit_task, reap_task, domain_close, reader_join_task, reader
         )
         raise
@@ -493,16 +514,14 @@ async def _run_in_subprocess(
             None,
         )
     except Exception as original:
-        await _finish_failed_run(
+        resources_settled = await _finish_failed_run(
             original, root_exit_task, reap_task, domain_close, reader_join_task, reader
         )
         raise
     finally:
-        for path in (request_path, result_path, windows_job_gate):
-            if path is None:
-                continue
-            with contextlib.suppress(FileNotFoundError):
-                path.unlink()
+        _finish_request_evidence(
+            request_path, result_path, windows_job_gate, settled=resources_settled
+        )
 
 
 def _read_result_envelope(
