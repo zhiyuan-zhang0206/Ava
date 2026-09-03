@@ -211,9 +211,12 @@ describe("useAgents activeId / store sync", () => {
     expect(useStore.getState().activeId).toBe(2);
   });
 
-  it("fetches terminated history only when the persistent setting explicitly enables it", async () => {
+  it("always fetches and merges the terminated roster, no show-terminated setting required", async () => {
+    // The terminated scope is part of the roster unconditionally: its rows
+    // are the lineage joints the spawn tree walks (#312 regression — an
+    // alive child of a terminated parent needs that parent row to re-parent
+    // under the nearest visible ancestor).
     const terminated = { ...MOCK_AGENTS[0], agent_id: 9, status: "terminated" as const };
-    _qc.setQueryData(SETTINGS_QUERY_KEY, { "display.show_terminated": true });
     vi.mocked(api.listAgents).mockImplementation((scope = "live") =>
       Promise.resolve(scope === "terminated" ? [terminated] : MOCK_AGENTS),
     );
@@ -226,6 +229,31 @@ describe("useAgents activeId / store sync", () => {
     expect(vi.mocked(api.listAgents)).toHaveBeenCalledWith("live");
     expect(vi.mocked(api.listAgents)).toHaveBeenCalledWith("terminated");
     expect(_qc.getQueryData(TERMINATED_AGENTS_QUERY_KEY)).toEqual([terminated]);
+  });
+
+  it("keeps the terminated parent row in the merged roster while the setting is off (#312 shape)", async () => {
+    // 228 (alive) -> 240 (terminated) -> 312 (alive, raw spawner agent:240).
+    // With the show-terminated setting OFF, the combined roster must still
+    // carry 240: only then can the tree builder mount 312 under 228 instead
+    // of surfacing 312 as an orphan root.
+    const a228 = { ...MOCK_AGENTS[0], agent_id: 228, label: "root", status: "idling" as const };
+    const a312 = { ...MOCK_AGENTS[0], agent_id: 312, label: "monitor", status: "idling" as const, spawner: "agent:240" };
+    const a240 = { ...MOCK_AGENTS[0], agent_id: 240, label: "parent", status: "terminated" as const, spawner: "agent:228" };
+    vi.mocked(api.listAgents).mockImplementation((scope = "live") =>
+      Promise.resolve(scope === "terminated" ? [a240] : [a228, a312]),
+    );
+
+    const { result } = renderHook(() => useAgents(noop), { wrapper });
+
+    await waitFor(() => {
+      const ids = result.current.agents.map((agent) => agent.agent_id);
+      expect(ids).toEqual([228, 240, 312]);
+    });
+    const merged240 = result.current.agents.find((a) => a.agent_id === 240);
+    expect(merged240?.status).toBe("terminated");
+    expect(merged240?.spawner).toBe("agent:228");
+    // The live child keeps its RAW spawner — lineage truth, not a payload rewrite.
+    expect(result.current.agents.find((a) => a.agent_id === 312)?.spawner).toBe("agent:240");
   });
 
   it("replays a termination SSE over an older first history snapshot", async () => {
@@ -1217,7 +1245,11 @@ describe("useAgents SSE merge (regression)", () => {
     expect(vi.mocked(api.listAgents).mock.calls.length).toBe(fetchesBefore);
   });
 
-  it("AgentUpdated termination removes the row from the live cache without a refetch", async () => {
+  it("AgentUpdated termination moves the row live→terminated without a refetch", async () => {
+    // The terminated scope is always seeded, so the fold moves the row
+    // across caches: it leaves the live roster and lands in the terminated
+    // roster. The combined agents list still carries it (status=terminated)
+    // — that row is the lineage joint that keeps its live children mounted.
     const { result } = renderHook(() => useAgents(noop), { wrapper });
     await waitFor(() => {
       expect(result.current.agents).toEqual(MOCK_AGENTS);
@@ -1235,7 +1267,10 @@ describe("useAgents SSE merge (regression)", () => {
     });
 
     await waitFor(() => {
-      expect(result.current.agents.find((a) => a.agent_id === 1)).toBeUndefined();
+      expect(result.current.agents.find((a) => a.agent_id === 1)?.status).toBe(
+        "terminated",
+      );
+      expect(_qc.getQueryData(TERMINATED_AGENTS_QUERY_KEY)).toContainEqual(updated);
     });
     // The second row stays exactly as it was — the merge is by id, not
     // a full-list replacement (which would race with concurrent updates).

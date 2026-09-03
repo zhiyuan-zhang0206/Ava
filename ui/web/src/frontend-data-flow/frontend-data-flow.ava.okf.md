@@ -15,7 +15,7 @@ Server data enters UI via React Query cache, kept live by SSE while visible; hid
 
 | Provider / hook | Endpoint | Content | Subscribers |
 |---|---|---|---|
-| `EventStreamProvider` / `useEventStream` | `/api/system` | **Global broadcast**: cross-agent low-frequency lifecycle (spawn/update/label, page open/close, notice/task changes, `cluster_update_started`) | **Fold owner** reconciles `["agents","live"]` + opt-in `["agents","terminated"]`, notices, pages, tasks, and fleet graph; reconnect repair is scoped and throttled |
+| `EventStreamProvider` / `useEventStream` | `/api/system` | **Global broadcast**: cross-agent low-frequency lifecycle (spawn/update/label, page open/close, notice/task changes, `cluster_update_started`) | **Fold owner** reconciles `["agents","live"]` + `["agents","terminated"]` (both always seeded — terminated rows are the spawn-tree lineage joints), notices, pages, tasks, and fleet graph; reconnect repair is scoped and throttled |
 | `AgentEventStreamProvider` / `useAgentEventStream` | `/api/system/all?agents=<active>,<parked…>` | **Active-agent throttled stream**: selected agents plus `agent_id=0` system events, batched (`data: [{...}]`), throttled ≤10 push/s | `useTimeline`, `useTokenUsage`, `usePendingMessages` |
 
 The agent stream is connected while authenticated and visible; `activeId` re-keys its URL (null → unfiltered endpoint). Hidden tabs: the provider passes `null` to `useSseConnection` (closes EventSource) and emits `ConnectionEvent {type: "poll"}` every 7s; the three subscribers invalidate `timeline`/`token-usage`/`pending` for the active agent. Visible again: interval cleared, SSE reopens, the `open` event reconciles REST state. `isEventForThread` remains a defensive gate. Multiple hooks share one EventSource; `withCredentials` carries the session cookie through gateway auth.
@@ -31,7 +31,7 @@ The agent stream is connected while authenticated and visible; `activeId` re-key
 
 | hook | data |
 |---|---|
-| `useAgents` | SQL-bounded live roster + opt-in terminated history; fold/SSE keeps both caches live |
+| `useAgents` | SQL-bounded live roster + always-fetched terminated history (merged roster = raw lineage for the spawn tree; show-terminated is render-only); fold/SSE keeps both caches live |
 | `useFleetAgents` | `/fleet` read-only agents (pure-read shares `AGENTS_QUERY_KEY` cache) |
 | `useFleetGraph` | Fleet relationship graph (GraphView data source); SSE invalidation + 30s reconciliation poll, served from the backend's 60s whole-response cache |
 | `useTasks` | [[ui/web/src/frontend-data-flow/task-list.ava.okf.md|Task list data flow]] |

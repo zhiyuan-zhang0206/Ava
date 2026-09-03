@@ -888,6 +888,36 @@ describe("terminated toggle", () => {
   });
 });
 
+describe("agent tree: live child of a terminated parent mounts on the nearest visible ancestor (#312 regression)", () => {
+  // Real roster shape behind the #312 orphan report: 228 (alive, user) ->
+  // 240 (terminated) -> 312 (alive, spawned by 240). The roster prop always
+  // carries the terminated 240 row (lineage joint), so with terminated
+  // hidden 312 must nest under 228 — never surface as a depth-0 orphan root.
+  const lineageRoster = () => [
+    makeAgent({ agent_id: 228, spawner: "user", status: "idling" }),
+    makeAgent({ agent_id: 240, spawner: "agent:228", status: "terminated" }),
+    makeAgent({ agent_id: 312, spawner: "agent:240", status: "idling" }),
+  ];
+
+  it("terminated hidden (default): 312 nests under 228, no orphan root, 240 row hidden", () => {
+    state.showTerminated = false;
+    state.agents = lineageRoster();
+    wrap(<AgentSidebar {...handlers} />);
+    expect(screen.getByTestId("row-228").getAttribute("data-depth")).toBe("0");
+    expect(screen.getByTestId("row-312").getAttribute("data-depth")).toBe("1");
+    expect(screen.queryByTestId("row-240")).toBeNull();
+  });
+
+  it("terminated shown: 312 keeps its true lineage position under 240", () => {
+    state.showTerminated = true;
+    state.agents = lineageRoster();
+    wrap(<AgentSidebar {...handlers} />);
+    expect(screen.getByTestId("row-228").getAttribute("data-depth")).toBe("0");
+    expect(screen.getByTestId("row-240").getAttribute("data-depth")).toBe("1");
+    expect(screen.getByTestId("row-312").getAttribute("data-depth")).toBe("2");
+  });
+});
+
 // The legacy localStorage → DB migration for display.show_terminated (and every
 // other preference key) now lives in one place — lib/settings-migration.ts —
 // and is covered by settings-migration.test.ts, not here.

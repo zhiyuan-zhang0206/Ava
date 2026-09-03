@@ -1,12 +1,17 @@
 // useAgents — agent list + lifecycle actions, all driven by server truth.
 //
 // Reads the SQL-bounded live roster through TanStack Query
-// (`AGENTS_QUERY_KEY`). Terminated history has a separate cache and is fetched
-// only when the persistent show-terminated setting opts in. EventStreamProvider
-// folds lifecycle events into both seeded scopes (lib/fold/agents.ts).
-// useAgents itself does not subscribe — it reads and combines those caches and
-// drives lifecycle mutations. No polling, no optimistic writes: each scoped
-// cache mirrors server truth.
+// (`AGENTS_QUERY_KEY`) plus the terminated roster (`TERMINATED_AGENTS_QUERY_KEY`).
+// The terminated scope is ALWAYS fetched and merged, not gated on the
+// show-terminated setting: the spawn tree is built from the combined roster,
+// so an alive agent whose true parent terminated (e.g. #312 -> #240 ->
+// #228) must see that parent row to re-parent under the nearest visible
+// ancestor. The show-terminated setting is a pure RENDER filter on top
+// (agent-sidebar/body.tsx). EventStreamProvider folds lifecycle events into
+// both seeded scopes (lib/fold/agents.ts). useAgents itself does not
+// subscribe — it reads and combines those caches and drives lifecycle
+// mutations. No polling, no optimistic writes: each scoped cache mirrors
+// server truth.
 //
 // Lifecycle mutations (spawn / fork / terminate / restart / resurrect)
 // flip `isPending` only; the sidebar shows a spinner on the affected row
@@ -130,8 +135,7 @@ export interface UseAgentsResult {
 
 export function useAgents(showError: (msg: string) => void): UseAgentsResult {
   const queryClient = useQueryClient();
-  const { settings, isLoading: settingsLoading } = useUserSettings();
-  const showTerminated = settings["display.show_terminated"] === true;
+  const { isLoading: settingsLoading } = useUserSettings();
   const { data: liveAgents = [], error: agentsError, isLoading: liveLoading } = useQuery({
     queryKey: AGENTS_QUERY_KEY,
     queryFn: () => fetchAgentRoster(queryClient, "live"),
@@ -149,17 +153,20 @@ export function useAgents(showError: (msg: string) => void): UseAgentsResult {
   } = useQuery({
     queryKey: TERMINATED_AGENTS_QUERY_KEY,
     queryFn: () => fetchAgentRoster(queryClient, "terminated"),
-    enabled: showTerminated,
-    // Historical rows are also kept current by the global lifecycle fold once
-    // this explicit cache has been seeded.
+    // Always fetched (not gated on display.show_terminated): the combined
+    // roster is the tree builder's lineage input — terminated parent rows
+    // must be present so live children re-parent under the nearest visible
+    // ancestor instead of surfacing as orphans (#312 case). Rows are kept
+    // current by the global lifecycle fold once this cache is seeded.
     staleTime: Infinity,
   });
-  const rosterLoading =
-    settingsLoading || liveLoading || (showTerminated && terminatedLoading);
+  const rosterLoading = settingsLoading || liveLoading || terminatedLoading;
   const agents = useMemo(() => {
-    if (!showTerminated) return liveAgents;
+    // Raw spawner truth from both scopes, id-ascending. Consumers decide
+    // visibility: the sidebar filters terminated rows out for flat/list
+    // rendering, and buildAgentTree re-parents when they are hidden.
     return [...liveAgents, ...terminatedAgents].sort((a, b) => a.agent_id - b.agent_id);
-  }, [liveAgents, showTerminated, terminatedAgents]);
+  }, [liveAgents, terminatedAgents]);
 
   // Lifecycle actions live in use-agent-actions.ts (R4 layer-1 line budget);
   // this hook keeps the reader half + the activeId handling.
