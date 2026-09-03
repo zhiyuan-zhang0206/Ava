@@ -322,8 +322,9 @@ def scan_and_load(
     level — side-effect driven registration; importing here triggers it.
 
     Args:
-        plugin_dir: scan root. `None` uses `paths.plugins_dir()` (respects
-            AVA_HOME). String with `~` is auto-expanded to user home.
+        plugin_dir: scan root. `None` uses the loaded generation in wheel mode
+            or the per-home installation root in source mode. String with `~`
+            is auto-expanded to user home.
         enabled: explicit set of enabled names. Empty set = load none
             (distinct from `None`); `None` (default) loads all valid plugins
             under plugin_dir (legacy behavior, for tests; production passes a
@@ -334,10 +335,9 @@ def scan_and_load(
     see the stack trace and fix.
     """
     if plugin_dir is None:
-        # lazy import to avoid top-level cycle (shared.paths indirectly imports shared.config)
-        from shared import paths
+        from shared.runtime_interpreter import external_plugin_read_root
 
-        root = paths.plugins_dir()
+        root = external_plugin_read_root()
     else:
         root = Path(plugin_dir).expanduser()
     if not root.exists():

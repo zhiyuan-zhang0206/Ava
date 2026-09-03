@@ -41,6 +41,22 @@ def runtime_frontend_dir() -> Path:
     return runtime_venv().parent / "frontend"
 
 
+def runtime_plugins_dir() -> Path:
+    """Read-only external plugin root of the already loaded generation."""
+    if not WHEEL_RUNTIME:
+        raise RuntimeError("retained plugin paths require wheel runtime")
+    return runtime_venv().parent / "plugins"
+
+
+def external_plugin_read_root() -> Path:
+    """Shared discovery source; never use this as an installer destination."""
+    if WHEEL_RUNTIME:
+        return runtime_plugins_dir()
+    from shared.paths import plugins_dir
+
+    return plugins_dir()
+
+
 def runtime_otel_binary() -> Path:
     """Resolve only the loaded image's collector, never mutable home storage."""
     if not WHEEL_RUNTIME:
