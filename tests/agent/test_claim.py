@@ -2208,8 +2208,8 @@ async def test_claim_auto_resurrect_chat_batch_wakes_and_keeps_chat(
 
     with monkeypatch.context() as patch:
         patch.setattr("shared.lifecycle_termination_observe.target_process_ended", observed_exit)
-        assert observe_applied_termination(db_conn, tid, machine_name())
-        db_conn.commit()
+        with db_conn.transaction():
+            assert observe_applied_termination(db_conn, tid, machine_name())
     assert db_conn.execute(
         "SELECT status,observed_at IS NOT NULL FROM inbound_messages WHERE id=%s", (stop,)
     ).fetchone() == ("done", True)
