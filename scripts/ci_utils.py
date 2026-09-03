@@ -722,6 +722,11 @@ def _trunk_post(
         ) as response:
             status = response.status
             body = response.read()
+    except urllib.error.HTTPError as error:
+        # urllib raises HTTPError (a URLError subclass) instead of returning
+        # the response for 4xx/5xx, and its str() is "HTTP Error 409: ..." —
+        # normalize to "HTTP <code>" so callers can match statuses exactly.
+        return None, f"HTTP {error.code}"
     except (urllib.error.URLError, OSError, TimeoutError) as error:
         return None, str(error)
     if status != 200:
@@ -782,7 +787,13 @@ def _watch_trunk_enqueue(
     timeout: int,
     token: str,
 ) -> int:
-    """Poll Trunk's submitted-PR state until it merges, fails, or times out."""
+    """Poll Trunk's submitted-PR state until it merges, fails, or times out.
+
+    Terminal states: "merged", "failed", "cancelled". Everything else —
+    including "pending" (waiting for a batch), "not_ready" (required statuses
+    not yet green), and "testing" (merge-tree test run in progress, observed
+    live 2026-09-03) — is non-terminal: keep polling.
+    """
     payload = _trunk_pr_payload(pr, repo)
     consecutive_errors = 0
     while True:

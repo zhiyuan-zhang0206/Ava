@@ -391,6 +391,85 @@ def test_trunk_flow_submits_when_qa_approved_label_is_present(
     assert len(requests) == 2
 
 
+def test_trunk_submit_resumes_watch_on_real_http_409_error(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Real urllib raises HTTPError for a 409 (its str() is "HTTP Error 409:
+    Conflict ..."), so the submit must treat THAT shape — not the literal
+    string "HTTP 409" — as "already in the queue" (2026-09-04: duplicate
+    submissions were retried twice and exited 4 instead of resuming watch)."""
+    label_calls: list[list[str]] = []
+    requests: list[urllib.request.Request] = []
+    monkeypatch.setattr(ci_utils, "_queue_cooldown_seconds", _no_cooldown)
+    monkeypatch.setattr(ci_utils, "check_ci", _all_green)
+    monkeypatch.setattr(ci_utils.subprocess, "run", _labels_runner(["qa-approved"], label_calls))
+    responses: list[_TrunkResponse | urllib.error.URLError] = [
+        urllib.error.HTTPError(
+            "https://api.trunk.io/v1/submitPullRequest",
+            409,
+            "Conflict",
+            cast(Any, {}),
+            None,
+        ),
+        _TrunkResponse({"state": "merged"}),
+    ]
+    monkeypatch.setattr(
+        ci_utils.urllib.request,
+        "urlopen",
+        _urlopen_sequence(responses, requests),
+    )
+    monkeypatch.setattr(ci_utils.time, "sleep", _no_sleep)
+
+    assert (
+        ci_utils._trunk_merge_flow(
+            "42",
+            "zhiyuan-zhang0206/Ava",
+            "medium",
+            every=1,
+            timeout=0,
+            token="trunk-token",  # noqa: S106 — test fixture
+        )
+        == 0
+    )
+    # one submit request + one queue poll — no retry/backoff round
+    assert len(requests) == 2
+    assert "PR #42 already in the Trunk merge queue — resuming watch" in capsys.readouterr().err
+
+
+def test_trunk_watch_keeps_polling_through_testing_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The queue reports "testing" while the merge tree is being tested; it is
+    non-terminal (observed live 2026-09-03) — the watcher must keep polling."""
+    requests: list[urllib.request.Request] = []
+    monkeypatch.setattr(
+        ci_utils.urllib.request,
+        "urlopen",
+        _urlopen_sequence(
+            [
+                _TrunkResponse({"state": "pending"}),
+                _TrunkResponse({"state": "testing"}),
+                _TrunkResponse({"state": "merged"}),
+            ],
+            requests,
+        ),
+    )
+    monkeypatch.setattr(ci_utils.time, "sleep", _no_sleep)
+
+    assert (
+        ci_utils._watch_trunk_enqueue(
+            "42",
+            "zhiyuan-zhang0206/Ava",
+            every=1,
+            deadline=None,
+            timeout=0,
+            token="trunk-token",  # noqa: S106 — test fixture
+        )
+        == 0
+    )
+    assert len(requests) == 3
+
+
 def test_trunk_flow_resumes_watch_when_submit_reports_already_queued(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
