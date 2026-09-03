@@ -56,7 +56,9 @@ permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
+  # Reruns retain the original ref/SHA. Isolate immutable heads so a stale
+  # retry cannot evict a newer running OR pending run, even after a guard race.
+  group: ci-${{ github.ref }}-${{ github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
