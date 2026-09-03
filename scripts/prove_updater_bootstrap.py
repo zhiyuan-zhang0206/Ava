@@ -6,6 +6,7 @@ verified preparation inputs. This is NOT a source-version migration/LKG proof.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import platform
@@ -148,17 +149,35 @@ def fault_worker(mode: str, request: Path) -> int:  # noqa: PLR0915 — scoped r
         return updater_main(["--bootstrap-hop", str(request)])
 
 
-def wait_endpoint(context: PreparedObservation, projection: ObserverProjection) -> None:
+def wait_endpoint(context: PreparedObservation, projection: ObserverProjection) -> str:
     deadline = time.monotonic() + challenge_budget(context.challenge.valid_until) / 2
     last_error = "no observation attempted"
     while time.monotonic() < deadline:
         try:
-            hop.probe_bootstrap(context, projection)
-            return
+            return hop.probe_bootstrap(context, projection)
         except (OSError, ValueError, RuntimeError) as exc:
             last_error = f"{type(exc).__name__}: {exc}"
             time.sleep(0.05)
     raise AssertionError("actual restricted endpoint did not become available: " + last_error)
+
+
+def selector_bytes(home: Path) -> bytes | None:
+    path = home / "releases/current-release"
+    try:
+        return hop._regular_bytes(path)
+    except FileNotFoundError:
+        return None
+
+
+def unchanged_selector(home: Path, before: bytes | None) -> dict[str, object]:
+    after = selector_bytes(home)
+    require(after == before, "restricted hop changed the selector")
+    return {
+        "unchanged": True,
+        "present": after is not None,
+        "sha256": None if after is None else hashlib.sha256(after).hexdigest(),
+        "publication_proved": False,
+    }
 
 
 def verify_probe_reuse(
@@ -301,13 +320,6 @@ def main() -> None:  # noqa: PLR0915 — isolated CI native lifetimes, always re
                 "ops_port": port,
             }
         )
-        old_path = home / "run/hop-recovery.json"
-        old_command = hop.bootstrap_command(old_image, old_path)
-        cron = (
-            "@reboot "
-            + shlex.join([f"AVA_HOME={home}", *old_command])
-            + " # ava-restricted-proof\n"
-        ).encode()
 
         def install_cron(value: bytes) -> None:
             subprocess.run(["/usr/bin/crontab", "-"], input=value, check=True, timeout=5)
@@ -327,6 +339,14 @@ def main() -> None:  # noqa: PLR0915 — isolated CI native lifetimes, always re
                 "expire-after-stop",
                 "holder-change-after-stop",
             ):
+                selector_before = selector_bytes(home)
+                old_path = home / f"run/hop-recovery-{mode}.json"
+                old_command = hop.bootstrap_command(old_image, old_path)
+                cron = (
+                    "@reboot "
+                    + shlex.join([f"AVA_HOME={home}", *old_command])
+                    + " # ava-restricted-proof\n"
+                ).encode()
                 # Independent cases own independent operations. A case's failure,
                 # compensation and crash-resume never reset its absolute deadline.
                 until = datetime.now(UTC) + timedelta(minutes=10)
@@ -365,7 +385,33 @@ def main() -> None:  # noqa: PLR0915 — isolated CI native lifetimes, always re
                     ),
                     "A native session launch refused",
                 )
-                wait_endpoint(old_context, projection)
+                try:
+                    wait_endpoint(old_context, projection)
+                except (OSError, ValueError, RuntimeError, AssertionError) as exc:
+                    lease = conn.execute(
+                        "SELECT holder,acquired_at,expires_at,clock_timestamp() "
+                        "FROM deployment_state"
+                    ).fetchone()
+                    record = json.loads((sessions / "ava-ops.json").read_bytes())
+                    process = hop.ExpectedProcess.model_validate(
+                        {key: record[key] for key in ("pid", "create_time", "starttime")}
+                    )
+                    (home.parent / f"hop-observation-{mode}-initial-failure.json").write_text(
+                        json.dumps(
+                            {
+                                "error": type(exc).__name__,
+                                "detail": str(exc),
+                                "observed_at": datetime.now(UTC).isoformat(),
+                                "deadline": until.isoformat(),
+                                "endpoint_port": projection.ops_port,
+                                "lease_holder_acquired_expires_db_clock": [str(v) for v in lease]
+                                if lease
+                                else None,
+                                "native": json.loads(failure_snapshot(home, process)),
+                            }
+                        )
+                    )
+                    raise
                 if mode == "success":
                     verify_probe_reuse(old_context, projection, old_image, image)
                 with psycopg.connect(env["AVA_DB_URL"]) as inventory_conn:
@@ -576,6 +622,7 @@ def main() -> None:  # noqa: PLR0915 — isolated CI native lifetimes, always re
                                 "native_session_starts": effects["native_session_starts"],
                                 "cron_empty": True,
                                 "journal_retained": True,
+                                "selector": unchanged_selector(home, selector_before),
                                 "native": json.loads(
                                     failure_snapshot(home, expected.sessions[0].process)
                                 ),
@@ -587,7 +634,8 @@ def main() -> None:  # noqa: PLR0915 — isolated CI native lifetimes, always re
                     updater_handoff.state_path().unlink()
                     (sessions / "ava-ops.json").unlink()
                     continue
-                wait_endpoint(candidate if mode == "success" else old_context, projection)
+                final_context = candidate if mode == "success" else old_context
+                observer_instance = wait_endpoint(final_context, projection)
                 require(
                     read_crontab(until) == (b"" if mode == "success" else cron),
                     "native quiesce/recovery readback differed",
@@ -599,6 +647,12 @@ def main() -> None:  # noqa: PLR0915 — isolated CI native lifetimes, always re
                             "operation": operation.model_dump(mode="json"),
                             "deadline": until.isoformat(),
                             "independent_endpoint": True,
+                            "authenticated_observer_instance": observer_instance,
+                            "verified_endpoint_image": {
+                                "artifact": final_context.expected.artifact_digest,
+                                "manifest": final_context.expected.manifest_digest,
+                            },
+                            "selector": unchanged_selector(home, selector_before),
                             "native_cron": True,
                             "terminal_handoff_cleared": True,
                             "native": json.loads(
