@@ -581,6 +581,8 @@ def insert_inbound_message(
         publish an `inbound_arrived` event for the web UI to show in
         real time (spec §5).
     """
+    if payload is not None and "lifecycle_result" in payload:
+        raise ValueError("lifecycle_result is reserved for verified command settlement")
     from shared.caller_identity import caller_payload
     from shared.envelope import reject_unnegotiated_caller
 
