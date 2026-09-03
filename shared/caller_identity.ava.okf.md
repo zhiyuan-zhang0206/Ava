@@ -27,13 +27,14 @@ the same way as insertion, so retries compare the same immutable payload.
 
 ## Rollout boundary
 
-This reader foundation does not enable any producer. HTTP/RPC source validators
-and initiating chat/lifecycle write helpers reject new formats actionably before
-enqueueing, including manual and internal/plugin supplied sources. Storage tests
-exercise the future admitted path with the fence explicitly replaced in that
-test only; independent real-write tests prove today's fence inserts zero rows.
-Older binaries reject new formats, so writers must remain fenced until an
-explicit target-runtime protocol and consumer-convergence gate is deployed.
+Chat writes use the same-transaction generation/owner/fresh-lease gate in
+`caller_protocol.py`, including manual and direct internal callers. Lifecycle
+and bootstrap writes remain blanket-fenced until their durable admission
+handoff exists. Production admission still advertises protocol 0, so this does
+not activate new-format producers. Storage-only tests replace the gate explicitly;
+the separate integration proof uses real hosted admission and claim helpers.
+Older binaries reject new formats, so protocol activation additionally requires
+the independently verified old-writer upgrade barrier.
 Never wrap external provenance in
 `system:*` or `agent:*` to bypass an old validator. A caller field accepted by an
 HTTP schema but discarded before persistence is not structured audit storage.

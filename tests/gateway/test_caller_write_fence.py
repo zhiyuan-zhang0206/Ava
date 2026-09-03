@@ -4,7 +4,6 @@ import pytest
 from pydantic import BaseModel, ValidationError
 
 from ops.rpc_schemas import (
-    AgentMessageIn,
     LaunchAgentRequest,
     RestartAgentRequest,
     ResurrectAgentRequest,
@@ -17,7 +16,6 @@ from ops.rpc_schemas import (
 @pytest.mark.parametrize(
     ("schema", "field", "other"),
     [
-        (AgentMessageIn, "source", {"content": "hello"}),
         (SpawnAgentRequest, "prompt_source", {"prompt": "hello"}),
         (LaunchAgentRequest, "prompt_source", {"agent_id": 42, "prompt": "hello"}),
         (ResurrectAgentRequest, "resurrected_by", {}),

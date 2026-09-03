@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import threading
 import time
 from datetime import UTC, datetime, timedelta
 
@@ -568,6 +569,46 @@ class TestCancelAgent:
 
         await turn.release()
         await _settle()
+
+
+async def test_same_incarnation_settlement_precedes_next_turn_after_cancel_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The existing single-flight slot survives a delayed to_thread unwind."""
+    monkeypatch.setattr(dispatcher, "CANCEL_UNWIND_TIMEOUT_S", 0.01)
+    entered, next_turn = asyncio.Event(), asyncio.Event()
+    release = threading.Event()
+    events: list[str] = []
+
+    async def run(_agent_id: int) -> None:
+        if not events:
+            events.append("turn1")
+            entered.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                assert await asyncio.to_thread(release.wait, 2)
+            finally:
+                events.append("settled1")
+        else:
+            events.append("turn2")
+            next_turn.set()
+
+    scheduler = TurnScheduler(run)
+    try:
+        scheduler.wake(1)
+        await asyncio.wait_for(entered.wait(), 2)
+        await scheduler.cancel_agent(1)
+        scheduler.wake(1)
+        await asyncio.sleep(0)
+        assert events == ["turn1"]
+        assert scheduler.active_agents == frozenset({1})
+        release.set()
+        await asyncio.wait_for(next_turn.wait(), 2)
+        assert events == ["turn1", "settled1", "turn2"]
+    finally:
+        release.set()
+        await scheduler.aclose()
 
 
 class TestChannelParsing:
