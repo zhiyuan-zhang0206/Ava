@@ -14,11 +14,13 @@ from collections.abc import Callable, Coroutine
 from typing import Any, NamedTuple
 
 import psycopg
+from fastapi import HTTPException
 from psycopg_pool import ConnectionPool
 
 from ops import ops_lifecycle as _ops
 from ops.agents import get_agent_status
 from shared.agents import AgentStatus
+from shared.caller_protocol import CallerProtocolUnavailableError
 from shared.chat_delivery import (
     ChatInboundReceipt,
     insert_chat_inbound_once,
@@ -82,9 +84,12 @@ async def deliver_chat_inbound(
     full content is carried in the event and a large message body used to
     add publish latency before this was made non-blocking.
     """
-    inbound: tuple[int, str, bool, bool] | None = await asyncio.to_thread(
-        _deliver_blocking, pool, agent_id, prepare, source, payload, client_message_id
-    )
+    try:
+        inbound: tuple[int, str, bool, bool] | None = await asyncio.to_thread(
+            _deliver_blocking, pool, agent_id, prepare, source, payload, client_message_id
+        )
+    except CallerProtocolUnavailableError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     # The connection block commits on exit. Publish the badge refresh only AFTER
     # that commit, on a fresh connection: keeping it inside the block coupled a
     # redis outage to a rollback of the user's inbound INSERT (a publish raising

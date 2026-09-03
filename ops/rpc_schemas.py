@@ -19,7 +19,7 @@ from pydantic import (
     model_validator,
 )
 
-from shared.envelope import reject_unnegotiated_caller, validate_writable_source
+from shared.envelope import reject_unnegotiated_caller, validate_source, validate_writable_source
 
 _MAX_CONTENT_CHARS = 1_000_000
 """Prompt/reply content needs a memory-abuse guardrail, not a 64 KiB wire contract.
@@ -269,7 +269,9 @@ class AgentMessageIn(BaseModel):
     @field_validator("source")
     @classmethod
     def _check_envelope_source(cls, v: str) -> str:
-        validate_writable_source(v)
+        # Chat admission locks the actual target runtime in its INSERT transaction.
+        # Lifecycle/bootstrap sources remain blanket-fenced until their handoff exists.
+        validate_source(v)
         return v
 
     @model_validator(mode="after")
