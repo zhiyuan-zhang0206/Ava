@@ -438,6 +438,10 @@ def _confirm_launch_or_force_terminated(agent_id: int, attempt_session: str | No
             event="launch_confirm_failed",
         )
     with write_transaction() as conn, conn.cursor() as cur:
+        from shared.runtime_admission import legacy_boot_terminal_allowed
+
+        if not legacy_boot_terminal_allowed(conn):
+            return False
         # Capture cascade-closable show() page names BEFORE the status flip.
         # Daemon-supervised serve() pages stay open across termination.
         # An unclaimed 'idling' row can hold open pages (resurrect's cascade_open
@@ -545,6 +549,10 @@ def _launch_or_force_terminated(
                     event="launch_force_terminated",
                 )
                 with write_transaction() as conn, conn.cursor() as cur:
+                    from shared.runtime_admission import legacy_boot_terminal_allowed
+
+                    if not legacy_boot_terminal_allowed(conn):
+                        raise
                     # Capture cascade-closable show() page names BEFORE the
                     # status flip. Daemon-supervised serve() pages stay open;
                     # resurrect reopens only show() rows the cascade closed.
