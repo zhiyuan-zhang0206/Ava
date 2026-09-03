@@ -26,6 +26,8 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import timedelta
+from uuid import uuid4
 
 import psycopg
 
@@ -36,6 +38,31 @@ from shared.birth_config import resolve_birth_config
 from shared.db import fetch_one, insert_inbound_message
 from shared.live_announce import publish_agent_spawned_sync
 from shared.log import logger
+from shared.managed_writer_publication import AdmissionDecision, CurrentAdmission
+
+
+def _birth_resources(
+    conn: psycopg.Connection, decision: AdmissionDecision, machine: str
+) -> str | None:
+    from ops.agent_launch import _LAUNCH_MAX_RETRIES
+    from shared.boot_timing import BOOT_BUDGET_SEC
+    from shared.incarnation_resources import ResourceBirth
+
+    if not isinstance(decision, CurrentAdmission):
+        return None
+    if (
+        conn.execute("SELECT 1 FROM machine_units WHERE machine_name=%s", (machine,)).fetchone()
+        is None
+    ):
+        raise ValueError("managed birth target is not a registered unit")
+    clock = conn.execute("SELECT clock_timestamp()").fetchone()
+    if clock is None:
+        raise RuntimeError("birth database clock unavailable")
+    return ResourceBirth(
+        birth=uuid4(),
+        launch_deadline=clock[0] + timedelta(seconds=BOOT_BUDGET_SEC),
+        launch_limit=_LAUNCH_MAX_RETRIES + 1,
+    ).model_dump_json()
 
 
 def latest_checkpoint_id(cur: psycopg.Cursor, agent_id: int) -> str | None:
@@ -255,9 +282,13 @@ def create_agent_row(
     # as ava_runner and cannot INSERT agents); the launch op re-checks the
     # agent-runner capability on the target itself.
     target_machine = machine
+    from shared.runtime_admission import process_runtime_admission
+
+    publication = process_runtime_admission()
 
     with shared.db.connect() as conn, conn.cursor() as cur:
         conn.execute("SET TRANSACTION READ WRITE")
+        resources = _birth_resources(conn, publication.decide(conn), target_machine)
         # label: when the spawner assigns one, store it sticky (label_user_set=TRUE)
         # so the labeler's CAS (WHERE label IS NULL AND NOT label_user_set) skips it.
         # Otherwise leave NULL — the labeler generates a short name via LLM CAS when
@@ -289,8 +320,8 @@ def create_agent_row(
         lineage_spawner = f"agent:{fork_from}" if fork_from is not None else spawner
         cur.execute(
             "INSERT INTO agents_meta (id, spawner, fork_source_agent_id, "
-            "fork_source_checkpoint_id, status, machine, config_overlay, birth_config) "
-            "VALUES (%s, %s, %s, %s, 'idling', %s, %s::jsonb, %s::jsonb)",
+            "fork_source_checkpoint_id, status, machine, config_overlay, birth_config, incarnation_resources) "
+            "VALUES (%s, %s, %s, %s, 'idling', %s, %s::jsonb, %s::jsonb, %s::jsonb)",
             (
                 new_id,
                 lineage_spawner,
@@ -299,6 +330,7 @@ def create_agent_row(
                 target_machine,
                 json.dumps(config) if config else None,
                 json.dumps(birth_config, sort_keys=True),
+                resources,
             ),
         )
         if fork_from is not None and fork_checkpoint is not None:

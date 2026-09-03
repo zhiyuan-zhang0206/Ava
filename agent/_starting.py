@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import os
 import sys
+from uuid import UUID
 
 from agent import _boot_timing
 from shared.agents import AgentStatus
@@ -29,7 +30,11 @@ from shared.runtime_incarnation import bind_process_incarnation, new_process_inc
 
 
 def claim_agent_row_or_die_on_stale_schema(
-    agent_id: int, *, restart_command_id: int | None = None, resurrect_command_id: int | None = None
+    agent_id: int,
+    *,
+    restart_command_id: int | None = None,
+    resurrect_command_id: int | None = None,
+    resource_birth: tuple[UUID, int] | None = None,
 ) -> None:
     """Schema-gate, then claim this process's row in one early boot step.
 
@@ -49,7 +54,10 @@ def claim_agent_row_or_die_on_stale_schema(
         raise
     _boot_timing.mark("schema_check")
     claim_agent_row(
-        agent_id, restart_command_id=restart_command_id, resurrect_command_id=resurrect_command_id
+        agent_id,
+        restart_command_id=restart_command_id,
+        resurrect_command_id=resurrect_command_id,
+        resource_birth=resource_birth,
     )
 
 
@@ -85,7 +93,11 @@ def _mark_preclaim_terminated(agent_id: int) -> None:
 
 
 def claim_agent_row(
-    agent_id: int, *, restart_command_id: int | None = None, resurrect_command_id: int | None = None
+    agent_id: int,
+    *,
+    restart_command_id: int | None = None,
+    resurrect_command_id: int | None = None,
+    resource_birth: tuple[UUID, int] | None = None,
 ) -> None:
     """Atomically claim an unowned row as running and grant its first lease.
 
@@ -144,6 +156,9 @@ def claim_agent_row(
         from shared.resurrection_launch import require_admission
 
         require_admission(conn, agent_id, resurrect_command_id)
+        from shared.resource_birth import require_birth_token
+
+        require_birth_token(conn, agent_id, resource_birth)
         from shared.resource_admission import admit_resources
 
         admit_resources(conn, incarnation, host_identity)
