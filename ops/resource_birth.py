@@ -44,7 +44,7 @@ def _previous_ended(agent_id: int, birth: ResourceBirth) -> bool:
         return False
 
 
-def launch_birth(agent_id: int) -> str | None:
+def launch_birth(agent_id: int, *, confirm: bool = False) -> str | None:
     """None means legacy/successor, never a deferred managed birth."""
     with shared.db.connect() as conn:
         snapshot = conn.execute(
@@ -88,13 +88,16 @@ def launch_birth(agent_id: int) -> str | None:
         config, birth_config = row[7:]
     from ops import agent_launch
 
-    return agent_launch._launch_agent_process(
+    attempt = agent_launch._launch_agent_process(
         agent_id,
         config_overlay=config,
         birth_config=birth_config,
         confirm=False,
         resource_attempt=(state.birth, allocated.launch_attempts, remaining),
     )
+    if confirm:
+        agent_launch._wait_for_agent_claim(agent_id, attempt)
+    return attempt
 
 
 def resume_births(pool: ConnectionPool, machine: str, limit: int) -> list[int]:
