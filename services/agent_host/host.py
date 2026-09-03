@@ -109,6 +109,10 @@ The lease renewer and the lease-zombie reaper remain process-mode machinery
 (gated off a hosted cluster with the restarter); the hibernation chain
 (controller, status, SIGUSR1 path, endpoint, config keys) was deleted
 (2026-08, Task #1976).
+
+Before the runtime build, each wake validates its bound model configuration. A
+rejected configuration leaves the durable inbound pending, so correcting the
+overlay lets the next scan serve it without a crash-and-retry loop.
 """
 
 from __future__ import annotations
@@ -143,6 +147,7 @@ from shared.config.turn_view import bind_agent_config, resolve_agent_config_pins
 from shared.context import AvaContext
 from shared.db import PG_KEEPALIVE_KWARGS
 from shared.event_publisher import AgentEventPublisher
+from shared.lm.factory import validate_model_config
 from shared.log import logger
 from shared.machine import machine_name
 from shared.plugin_config_view import bind_agent_plugin_config, resolve_agent_plugin_pins
@@ -221,12 +226,15 @@ class HostStats:
     `wakes_skipped` is the one to read on a multi-runner cluster: the dispatcher
     pattern is cluster-wide, so every runner sees every agent's wake and each
     skips the ones it does not own.
+
+    `config_rejected` counts wakes whose bound model configuration cannot build.
     """
 
     cache_hits: int = 0
     cache_misses: int = 0
     turns_started: int = 0
     wakes_skipped: int = 0
+    config_rejected: int = 0
 
     def as_payload(self) -> dict[str, int]:
         return {
@@ -234,6 +242,7 @@ class HostStats:
             "cache_misses": self.cache_misses,
             "turns_started": self.turns_started,
             "wakes_skipped": self.wakes_skipped,
+            "config_rejected": self.config_rejected,
         }
 
 
@@ -285,6 +294,7 @@ class AgentHost:
         self._graph = graph
         self._machine = machine if machine is not None else machine_name()
         self._runtimes: OrderedDict[int, _AgentRuntime] = OrderedDict()
+        self._rejected_configs: dict[int, str] = {}
         # Agents with a turn in flight right now. Eviction skips them: a running
         # turn holds its own reference, so dropping the entry would not break it
         # — it would just throw the work away and make that agent's NEXT turn
@@ -310,6 +320,35 @@ class AgentHost:
             return
 
         async with self._turn_slots:
+            pins = resolve_agent_config_pins(stored.config_overlay, stored.birth_config)
+            plugin_pins = resolve_agent_plugin_pins(stored.config_overlay)
+            # Fail fast before ANY turn work — the status flip included: an
+            # overlay naming a model the registry does not know would otherwise
+            # explode inside build_chat_model on every wake (dispatcher drops the
+            # task, the pending scan re-wakes the still-pending inbound, and the
+            # host loops on crash tracebacks — incident #2344). The effective
+            # model resolves exactly as the turn view does (overlay > birth >
+            # cluster default). The wake is consumed without raising: the durable
+            # inbound stays pending, and a fixed overlay is served on the next
+            # scan.
+            model = pins.get("llm_model") or settings.lm.llm_model
+            try:
+                validate_model_config(model=model)
+            except ValueError as exc:
+                self.stats.config_rejected += 1
+                if self._rejected_configs.get(agent_id) != stored.fingerprint:
+                    self._rejected_configs[agent_id] = stored.fingerprint
+                    logger.error(
+                        "hosted wake for agent {agent_id} rejected before turn — "
+                        "its model config cannot build: {reason}. Fix the agent's "
+                        "llm_model (restart(config_overlay=...) or the spawn "
+                        "overlay) and the next wake serves normally.",
+                        event="host_config_rejected",
+                        agent_id=agent_id,
+                        reason=str(exc),
+                    )
+                return
+            self._rejected_configs.pop(agent_id, None)
             self.stats.turns_started += 1
             running = await flip_hosted_status(
                 self._pool, agent_id, "running", expected_from=stored.status
@@ -323,8 +362,6 @@ class AgentHost:
                 )
                 return
             exited = False
-            pins = resolve_agent_config_pins(stored.config_overlay, stored.birth_config)
-            plugin_pins = resolve_agent_plugin_pins(stored.config_overlay)
             # All three binds wrap the whole turn, so every node task copies
             # them (the exec child gets the agent config via the re-emitted
             # overlay env instead — see the module docstring). The

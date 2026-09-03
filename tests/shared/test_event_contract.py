@@ -132,8 +132,9 @@ def test_category_projection_matches_telemetry_whitelist() -> None:
     # (the hosted boot settle of rows a dead host left running) raises it to
     # 139; host_dispatcher_scan_failed (Task #2255) raises it to 140;
     # host_stdout_log_rotated (task #2356's raw-transcript size rotation)
-    # raises it to 141.
-    assert len(_TELEMETRY_KINDS) == 141
+    # raises it to 141; host_config_rejected (Task #2344's wake-time model-config
+    # fail-fast) raises it to 142.
+    assert len(_TELEMETRY_KINDS) == 142
 
 
 def test_checkpoint_table_sizes_payload_and_metric_disposition() -> None:

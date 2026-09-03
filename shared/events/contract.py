@@ -1034,6 +1034,14 @@ EVENTS: dict[str, EventSpec] = {
         "hosted dispatcher ignored a wake whose channel name carried no agent id",
         tier="anomaly",
     ),
+    "host_config_rejected": _telemetry(
+        "host_config_rejected",
+        "a hosted wake was consumed without a turn because the agent's stored model "
+        "config cannot build (unknown model or missing provider key) — logged once per "
+        "stored config state (fingerprint); the pending inbound is kept until the "
+        "overlay is fixed",
+        tier="anomaly",
+    ),
     "host_turn_crashed": _telemetry(
         "host_turn_crashed",
         "a hosted turn task raised — the task is dropped and the next wake retries "
