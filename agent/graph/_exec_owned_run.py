@@ -218,6 +218,7 @@ async def run_owned(  # noqa: PLR0915 -- one caller retains exact allocation and
                 raise ResourceEvidenceError("owner did not settle within the original exec bound")  # noqa: TRY301 -- uncertainty remains durable.
             await asyncio.sleep(0.05)
         if ready is None or proc.returncode != 0:
+            await asyncio.to_thread(reader.join, max(0, bound - time.monotonic()))
             raise ResourceEvidenceError("owner exited without a successful exact close receipt")  # noqa: TRY301 -- uncertainty remains durable.
         receipt = validate_closed(context, ready.allocation, context_path.with_suffix(".closed"))
         await asyncio.to_thread(reader.join, max(0, bound - time.monotonic()))
