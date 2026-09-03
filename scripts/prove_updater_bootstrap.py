@@ -282,15 +282,10 @@ def main() -> None:  # noqa: PLR0915 — isolated CI native lifetimes, always re
             "CREATE TABLE deployment_state(id int,phase text,kind text,note text,holder text,"
             "acquired_at timestamptz,expires_at timestamptz,target_sha text)"
         )
-        row = conn.execute(
-            "INSERT INTO deployment_state VALUES (1,'updating','rollout',NULL,'hop',"
-            "clock_timestamp(),clock_timestamp()+interval '10 minutes',%s) "
-            "RETURNING acquired_at",
+        conn.execute(
+            "INSERT INTO deployment_state(id,phase,kind,target_sha) VALUES (1,'updating','rollout',%s)",
             ("d" * 40,),
-        ).fetchone()
-        if row is None:
-            raise AssertionError("operation fixture missing")
-        operation = RolloutIdentity(holder="hop", acquired_at=row[0], target_sha="d" * 40)
+        )
         with socket.socket() as free:
             free.bind(("127.0.0.1", 0))
             port = free.getsockname()[1]
@@ -306,22 +301,7 @@ def main() -> None:  # noqa: PLR0915 — isolated CI native lifetimes, always re
                 "ops_port": port,
             }
         )
-        old_context = PreparedObservation(
-            expected=ExpectedUnitWriters(
-                machine="runtime-proof",
-                home=str(home),
-                artifact_digest=old_artifact,
-                manifest_digest=old_manifest,
-                processes=(),
-                sessions=(),
-                launchers=(),
-            ),
-            operation=operation,
-            challenge=ObservationChallenge(challenge=uuid4(), valid_until=until),
-            schema_digest=schema_digest,
-        )
         old_path = home / "run/hop-recovery.json"
-        private_json(old_path, old_context.model_dump_json())
         old_command = hop.bootstrap_command(old_image, old_path)
         cron = (
             "@reboot "
@@ -347,6 +327,33 @@ def main() -> None:  # noqa: PLR0915 — isolated CI native lifetimes, always re
                 "expire-after-stop",
                 "holder-change-after-stop",
             ):
+                # Independent cases own independent operations. A case's failure,
+                # compensation and crash-resume never reset its absolute deadline.
+                until = datetime.now(UTC) + timedelta(minutes=10)
+                holder = "hop-" + mode
+                row = conn.execute(
+                    "UPDATE deployment_state SET holder=%s,acquired_at=clock_timestamp(),"
+                    "expires_at=%s RETURNING acquired_at",
+                    (holder, until),
+                ).fetchone()
+                if row is None:
+                    raise AssertionError("operation fixture missing")
+                operation = RolloutIdentity(holder=holder, acquired_at=row[0], target_sha="d" * 40)
+                old_context = PreparedObservation(
+                    expected=ExpectedUnitWriters(
+                        machine="runtime-proof",
+                        home=str(home),
+                        artifact_digest=old_artifact,
+                        manifest_digest=old_manifest,
+                        processes=(),
+                        sessions=(),
+                        launchers=(),
+                    ),
+                    operation=operation,
+                    challenge=ObservationChallenge(challenge=uuid4(), valid_until=until),
+                    schema_digest=schema_digest,
+                )
+                private_json(old_path, old_context.model_dump_json())
                 install_cron(cron)
                 require(
                     get_backend().new_session(
@@ -507,6 +514,7 @@ def main() -> None:  # noqa: PLR0915 — isolated CI native lifetimes, always re
                         == "old_stopped",
                         "crash discarded compensating inputs",
                     )
+                    resume_started = time.monotonic()
                     resumed = subprocess.run(  # noqa: S603 — same verified updater and retained request.
                         normal,
                         cwd=home,
@@ -514,6 +522,14 @@ def main() -> None:  # noqa: PLR0915 — isolated CI native lifetimes, always re
                         capture_output=True,
                         timeout=challenge_budget(until),
                         check=False,
+                    )
+                    record_hop_observation(
+                        home,
+                        mode + "-resume",
+                        expected.sessions[0].process,
+                        resume_started,
+                        resumed.returncode,
+                        resumed.stderr,
                     )
                     require(resumed.returncode == 1, "dead-owner resume did not restore A")
                 if mode == "candidate-bind-failure":
@@ -552,11 +568,22 @@ def main() -> None:  # noqa: PLR0915 — isolated CI native lifetimes, always re
                     require(
                         updater_handoff.state_path().exists(), "failure discarded recovery record"
                     )
-                    # Reset only this isolated fixture for the next independent case;
-                    # production cannot revive an expired operation this way.
-                    conn.execute(
-                        "UPDATE deployment_state SET holder='hop',expires_at=clock_timestamp()+interval '10 minutes'"
+                    (home.parent / f"hop-observation-{mode}-verified.json").write_text(
+                        json.dumps(
+                            {
+                                "operation": operation.model_dump(mode="json"),
+                                "deadline": until.isoformat(),
+                                "native_session_starts": effects["native_session_starts"],
+                                "cron_empty": True,
+                                "journal_retained": True,
+                                "native": json.loads(
+                                    failure_snapshot(home, expected.sessions[0].process)
+                                ),
+                            }
+                        )
                     )
+                    # Retire this isolated failed case; the next case obtains a
+                    # different holder/acquisition, never revives this authority.
                     updater_handoff.state_path().unlink()
                     (sessions / "ava-ops.json").unlink()
                     continue
@@ -566,6 +593,20 @@ def main() -> None:  # noqa: PLR0915 — isolated CI native lifetimes, always re
                     "native quiesce/recovery readback differed",
                 )
                 require(updater_handoff.read().status == "inactive", "terminal handoff not cleared")
+                (home.parent / f"hop-observation-{mode}-verified.json").write_text(
+                    json.dumps(
+                        {
+                            "operation": operation.model_dump(mode="json"),
+                            "deadline": until.isoformat(),
+                            "independent_endpoint": True,
+                            "native_cron": True,
+                            "terminal_handoff_cleared": True,
+                            "native": json.loads(
+                                failure_snapshot(home, expected.sessions[0].process)
+                            ),
+                        }
+                    )
+                )
                 stop_session()
                 (sessions / "ava-ops.json").unlink(missing_ok=True)
             (home.parent / "updater-bootstrap-proof.json").write_text(
