@@ -185,8 +185,13 @@ def begin(
             raise UpdaterHandoffActive(
                 f"updater handoff {current.generation!r} is already active or unreadable"
             )
-        if path.exists() and json.loads(path.read_text()).get("bootstrap_hop") is not None:
-            raise UpdaterHandoffActive("restricted bootstrap handoff requires checked recovery")
+        if path.exists():
+            retained = json.loads(path.read_text())
+            if (
+                retained.get("bootstrap_hop") is not None
+                or retained.get("normal_release") is not None
+            ):
+                raise UpdaterHandoffActive("release handoff requires checked recovery")
         now = dt.datetime.now(dt.UTC)
         payload: dict[str, object] = {
             "phase": "pending",
@@ -271,8 +276,12 @@ def clear(generation: str) -> bool:
         current = _read_unlocked(path)
         if current.generation != generation:
             return False
-        bootstrap = json.loads(path.read_text()).get("bootstrap_hop")
+        payload = json.loads(path.read_text())
+        bootstrap = payload.get("bootstrap_hop")
         if bootstrap is not None and bootstrap["stage"] not in {"candidate_ready", "recovered"}:
+            return False
+        normal = payload.get("normal_release")
+        if normal is not None and normal["stage"] != "committed":
             return False
         path.unlink(missing_ok=True)
         with contextlib.suppress(OSError):
@@ -288,8 +297,13 @@ def force_clear() -> bool:
         if _read_unlocked(path).status == "invalid":
             # An unreadable record may contain unfinished compensating inputs.
             return False
-        if existed and json.loads(path.read_text()).get("bootstrap_hop") is not None:
-            return False
+        if existed:
+            retained = json.loads(path.read_text())
+            if (
+                retained.get("bootstrap_hop") is not None
+                or retained.get("normal_release") is not None
+            ):
+                return False
         path.unlink(missing_ok=True)
         if existed:
             with contextlib.suppress(OSError):

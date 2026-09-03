@@ -66,6 +66,35 @@ def test_unreadable_handoff_is_not_force_discarded() -> None:
     assert path.read_text() == "{unfinished recovery record"
 
 
+@pytest.mark.parametrize(
+    "stage", ["waiting", "selected", "bootstrap_stopped", "starting", "observed"]
+)
+def test_normal_release_retains_exact_recovery_record(
+    stage: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _retained_bootstrap("candidate_ready")
+    path = handoff.state_path()
+    raw = json.loads(path.read_text())
+    raw["normal_release"] = {"stage": stage, "previous_selector": "exact original bytes"}
+    path.write_text(json.dumps(raw))
+    before = path.read_bytes()
+    assert not handoff.clear("bootstrap")
+    assert not handoff.force_clear()
+    monkeypatch.setattr(handoff, "owner_is_live", lambda _: False)
+    with pytest.raises(handoff.UpdaterHandoffActive):
+        handoff.begin(expected_session="replacement")
+    assert path.read_bytes() == before
+
+
+def test_only_committed_normal_release_can_clear() -> None:
+    _retained_bootstrap("candidate_ready")
+    path = handoff.state_path()
+    raw = json.loads(path.read_text())
+    raw["normal_release"] = {"stage": "committed"}
+    path.write_text(json.dumps(raw))
+    assert handoff.clear("bootstrap")
+
+
 @pytest.fixture(autouse=True)
 def _isolated(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(handoff, "state_path", lambda: tmp_path / "handoff.json")

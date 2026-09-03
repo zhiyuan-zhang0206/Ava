@@ -571,6 +571,11 @@ def main(argv: list[str] | None = None) -> int:
         help="internal verified restricted-ops transition; never normal activation",
     )
     parser.add_argument(
+        "--normal-release",
+        type=Path,
+        help="internal pending-authorized normal continuation; no source fallback",
+    )
+    parser.add_argument(
         "--target-sha",
         default=None,
         help="pinned rollout commit (default: resolve the track ref itself)",
@@ -607,6 +612,21 @@ def main(argv: list[str] | None = None) -> int:
         help="revision to restore if the checked-out tree fails migration-layout validation",
     )
     args = parser.parse_args(argv)
+    if args.normal_release is not None:
+        if (
+            args.bootstrap_hop
+            or args.target_sha
+            or args.restart_only
+            or args.force_reap
+            or args.handoff_generation
+            or args.post_checkout
+            or args.from_sha
+            or args.mode != "smooth"
+        ):
+            parser.error("--normal-release cannot use source/bootstrap update flags")
+        from cli.commands._update_normal_release import run_normal_release
+
+        return run_normal_release(args.normal_release)
     if args.bootstrap_hop is not None:
         if args.mode != "smooth":
             parser.error("--bootstrap-hop cannot use a source drain policy")
