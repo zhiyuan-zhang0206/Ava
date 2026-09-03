@@ -29,3 +29,17 @@ clearing or legacy rollback permission.
 The schema foundation alone neither closes process domains nor completes
 dead-host force recovery. Runtime registration, closure receipts and their
 consumers must be verified together before that claim is made.
+
+The dedicated owner's `ExecProcessDomain.close_confirmed` operation retains the
+POSIX unreaped root while observing that no live managed group members remain.
+It is distinct from successful signal submission. On Windows,
+`WindowsJob.terminate_and_confirm` retains the original Job handle through
+termination and a zero `ActiveProcesses` readback, then closes it. Query failure
+or timeout remains unknown even if fallback close subsequently kills members.
+Neither operation covers unregistered POSIX session escapes or Windows breakaway.
+These stronger operations are not yet wired into the runtime owner entry.
+
+Windows accounting follows the native
+[QueryInformationJobObject](https://learn.microsoft.com/en-us/windows/win32/api/jobapi2/nf-jobapi2-queryinformationjobobject)
+and [basic accounting](https://learn.microsoft.com/en-us/windows/win32/api/winnt/ns-winnt-jobobject_basic_accounting_information)
+contracts; real native CI, not simulated handle close, must establish support.
