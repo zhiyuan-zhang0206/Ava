@@ -141,7 +141,11 @@ def test_prepared_services_pin_dependency_order_before_mutable_roster_changes(
         )
         for name in ("z-dependency", "a-consumer", "disabled")
     ]
-    roster = [(specs[0], None), (specs[1], None), (specs[2], "disabled")]
+    roster: list[tuple[ServiceSpec, str | None]] = [
+        (specs[0], None),
+        (specs[1], None),
+        (specs[2], "disabled"),
+    ]
     receipt = Mock(
         services=tuple(
             sorted(

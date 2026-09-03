@@ -13,7 +13,7 @@ import json
 import os
 import platform
 import tempfile
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
@@ -30,7 +30,9 @@ from shared.verified_file import regular_bytes
 
 
 @contextmanager
-def pending_transaction(conn: psycopg.Connection, context: PreparedObservation) -> Iterator[None]:
+def pending_transaction(
+    conn: psycopg.Connection, context: PreparedObservation
+) -> Generator[None, None, None]:
     """Bound each lock/query by the same absolute operation challenge."""
     with conn.transaction():
         remaining = int((context.challenge.valid_until - datetime.now(UTC)).total_seconds() * 1000)

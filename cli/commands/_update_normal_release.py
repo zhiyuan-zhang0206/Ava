@@ -41,6 +41,7 @@ from services.agent_ops.bootstrap import (
 from shared import updater_handoff
 from shared.host_deploy_state import release_updater_lock, try_acquire_updater_lock
 from shared.managed_writer_activation import (
+    NormalServiceReadback,
     SelectorReadback,
     UnitActivationReadback,
     pending_stage,
@@ -330,7 +331,7 @@ def execute_normal_release(plan: PreparedNormalRelease, generation: str) -> int:
         _stop_bootstrap(conn, plan, selector)
         state = state.model_copy(update={"stage": "bootstrap_stopped"})
         _journal(generation, state)
-        results = []
+        results: list[NormalServiceReadback] = []
         # Never rediscover mutable gates after stop: preparation pinned this order.
         for service in plan.services:
             state = state.model_copy(
