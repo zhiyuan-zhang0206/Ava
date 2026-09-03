@@ -851,7 +851,13 @@ def test_new_reaps_a_recordless_host_before_replacement(sessions: Path) -> None:
         def survivor() -> str:
             try:
                 return repr(
-                    old_host.as_dict(attrs=["pid", "ppid", "status", "create_time", "cmdline"])
+                    {
+                        "pid": old_host.pid,
+                        "ppid": old_host.ppid(),
+                        "status": old_host.status(),
+                        "create_time": old_host.create_time(),
+                        "cmdline": old_host.cmdline(),
+                    }
                 )
             except psutil.Error as exc:
                 return repr(exc)
