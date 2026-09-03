@@ -411,12 +411,6 @@ RETIRED_MODEL_PRICING: dict[str, tuple[float, float, float]] = {
     # commit 06c593a45). Final standard rate $1.50 / $7.50 per 1M, cache read
     # 0.1x input ($0.15) — the 3.7 entry carries the same post-intro rate.
     "gemini-3.6-flash": (1.5, 0.15, 7.5),
-    # gemini-3.7-flash — retired 2026-09-03 by the swap to gemini-3.8-flash
-    # (GA 2026-09-02); final standard rate $1.50 / $7.50 per 1M, cache read
-    # $0.15 (0.1x input) — same post-intro rate as 3.8. Google keeps 3.7 fully
-    # supported, but Ava's registry re-keys the current flash (fail-fast on
-    # residual references).
-    "gemini-3.7-flash": (1.5, 0.15, 7.5),
     # kimi-k2.7-code — removed from the registry 2026-08-04 (revert #850,
     # commits 630fe6b65/bc60f0151). Official ¥6.50 / ¥1.30 / ¥27.00 per 1M
     # converted at ~6.77 CNY/USD (the price the registry entry carried).

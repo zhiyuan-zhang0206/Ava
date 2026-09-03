@@ -1,7 +1,7 @@
 ---
 type: doc
 title: "Shared Libraries"
-description: "`shared/` is the foundational library layer shared by all subsystems in the Ava project. It defines cross-process data contracts, a unified abstraction for LLM providers, cluster management primitives, structured logging, and system-level metrics. According to import-linter's layer constraints, `shared` is the bottom layer—agent, gateway, cli can all import it, but it does not import any upper-layer modules."
+description: "Foundational cross-process libraries: contracts, LLM providers, cluster primitives, logging, and metrics."
 tags:
 - shared
 - library
@@ -16,7 +16,7 @@ tags:
 
 ## Core responsibilities
 
-- **LLM provider abstraction** (`shared/lm/`): unifies model construction, token billing, inference content normalization, and stop reason classification for eight providers — Anthropic / DeepSeek / Google / OpenAI / Xiaomi / Moonshot / Zhipu / Alibaba. Also performs model/key validation at spawn boundaries.
+- **LLM provider abstraction** (`shared/lm/`): model construction, billing, content normalization, and stop classification for Anthropic / DeepSeek / Google / OpenAI / Xiaomi / Moonshot / Zhipu / Alibaba. Validates model/key configuration and resolves explicit temporary withdrawals at spawn boundaries.
 - **Agent cross-process contract** (`shared/agents.py`): AgentStatus enum, exception hierarchy, wire error protocol (HTTP error transmission between gateway ↔ agent SDK).
 - **Message-level contract** (`shared/message_kwargs.py`): supplements the above — `AvaMsgType`/`AvaMessageKwargs` (strongly-typed view of `ava_*` metadata in `additional_kwargs`).
 - **Structured logging + metrics** (`shared/log.py`, `shared/metrics.py`): one loguru singleton over stderr / JSONL file / the unified event pipeline, plus the metrics core (`shared/metrics_aggregate.py`) — the digest behind `/api/metrics` reads Loki aggregates via `gateway.loki_events` since the LGTM cutover (task #1197; the PG read path was retired). The unified emitter (`shared/telemetry.py`) writes every event to the local JSONL mirror and, while enabled, dual-writes to OTLP ([[shared/telemetry-otlp/telemetry-otlp.ava.okf.md|OTLP exporter]] — Loki logs + Prometheus metrics); the PG `events` table is a read-only archive. `shared/audit_events.py` is the audit entry point.
