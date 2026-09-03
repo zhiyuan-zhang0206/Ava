@@ -108,6 +108,7 @@ def _select_idle_agents_needing_heartbeat(
     pool: ConnectionPool,
     idle_threshold_s: float,
     *,
+    heartbeat_interval_s: float | None = None,
     jitter_span_s: float = 0.0,
     limit: int | None = None,
     backoff_until: dict[int, float] | None = None,
@@ -127,14 +128,15 @@ def _select_idle_agents_needing_heartbeat(
     An agent is due when it is `idling`, has no pending inbound already queued
     to wake it (one about to wake on a real message does not also need a
     check-in), and `now()` has reached its next check-in time. Its next
-    check-in is the later of the pause window and the idle clock:
-    `GREATEST(heartbeat_paused_until, last_active_at + idle_threshold_s +
-    jitter)`. The pause window is a floor; while it dominates, no check-in
-    can arrive before its end. A real turn during that window starts a new
-    normal idle clock, so after the window expires the check-in still waits
-    `last_active_at + idle_threshold_s + jitter`. PostgreSQL `GREATEST`
-    ignores a NULL pause window, which leaves the unpaused idle-clock
-    behavior unchanged.
+    check-in is the later of the pause window, idle clock, and durable reminder
+    clock: `GREATEST(heartbeat_paused_until, last_active_at +
+    idle_threshold_s + jitter, last_heartbeat_at + heartbeat_interval_s)`. The
+    reminder floor starts in the same transaction as the inbound insert, so a
+    check-in that is consumed without producing an LLM turn cannot be re-added
+    every dispatch step. The pause window is a floor; while it dominates, no
+    check-in can arrive before its end. PostgreSQL `GREATEST` ignores a NULL
+    pause or reminder timestamp, preserving the existing behavior for agents
+    never reminded and pre-migration rows.
 
     `jitter_span_s` de-phases the idle-clock term by a deterministic per-agent
     offset `id mod jitter_span_s` seconds, spreading a fleet that went idle
@@ -165,6 +167,10 @@ def _select_idle_agents_needing_heartbeat(
     """
     from ops.runner_mode import runner_mode
 
+    # Direct callers that inspect the raw idle predicate retain its historic
+    # threshold cadence; the daemon supplies its configured check-in interval.
+    reminder_interval_s = idle_threshold_s if heartbeat_interval_s is None else heartbeat_interval_s
+
     # The mode picks BETWEEN two fully-static statements (never text spliced
     # into one): the hosted clause drops the R1 lease guard because a hosted
     # idle row has no lease concept, while the process clause keeps it.
@@ -176,7 +182,8 @@ def _select_idle_agents_needing_heartbeat(
             "AND now() >= GREATEST("
             "  heartbeat_paused_until, "
             "  last_active_at "
-            "  + make_interval(secs => %s + COALESCE(mod(id, NULLIF(%s, 0)::int), 0))"
+            "  + make_interval(secs => %s + COALESCE(mod(id, NULLIF(%s, 0)::int), 0)), "
+            "  last_heartbeat_at + make_interval(secs => %s)"
             ") "
             "AND NOT EXISTS ("
             "  SELECT 1 FROM inbound_messages im "
@@ -193,7 +200,8 @@ def _select_idle_agents_needing_heartbeat(
             "AND now() >= GREATEST("
             "  heartbeat_paused_until, "
             "  last_active_at "
-            "  + make_interval(secs => %s + COALESCE(mod(id, NULLIF(%s, 0)::int), 0))"
+            "  + make_interval(secs => %s + COALESCE(mod(id, NULLIF(%s, 0)::int), 0)), "
+            "  last_heartbeat_at + make_interval(secs => %s)"
             ") "
             "AND NOT EXISTS ("
             "  SELECT 1 FROM inbound_messages im "
@@ -202,7 +210,12 @@ def _select_idle_agents_needing_heartbeat(
             ") "
             "ORDER BY last_active_at ASC"
         )
-    params: list[object] = [idle_threshold_s, jitter_span_s, STALE_PENDING_S]
+    params: list[object] = [
+        idle_threshold_s,
+        jitter_span_s,
+        reminder_interval_s,
+        STALE_PENDING_S,
+    ]
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(sql, params)
         rows = cur.fetchall()
@@ -232,6 +245,10 @@ def _send_heartbeat_checkin(pool: ConnectionPool, agent_id: int, idle_minutes: f
             "VALUES (%s, %s, 'heartbeat', 'system')",
             (agent_id, content),
         )
+        # This must share the inbound transaction: once the inbound is
+        # committed, a consumed no-LLM heartbeat still has a durable cadence
+        # floor even after a daemon restart loses its in-memory backoff state.
+        cur.execute("UPDATE agents_meta SET last_heartbeat_at = now() WHERE id = %s", (agent_id,))
         # The event name 'heartbeat_nudged' is stored row data in the events
         # table — renaming it would strand the existing history. Emit through
         # the unified pipeline (the events table).
@@ -360,8 +377,8 @@ async def _sleep_with_liveness(liveness: Liveness, total_s: float) -> None:
 
 
 async def _dispatch_loop(pool: ConnectionPool, liveness: Liveness) -> None:
-    """Main loop: every interval, send a check-in to idle agents that have not
-    paused.
+    """Main loop: on bounded dispatch steps, send a check-in to due idle agents
+    that have not paused.
 
     Idle agents that ignore the check-in keep getting one each cycle — it is the
     safety net; an agent that is truly waiting opts out with
@@ -375,6 +392,7 @@ async def _dispatch_loop(pool: ConnectionPool, liveness: Liveness) -> None:
     see the module-level "Wakeup-storm flattening" note.
     """
     idle_threshold = settings.daemon.heartbeat_idle_threshold_seconds
+    heartbeat_interval = settings.daemon.heartbeat_interval_seconds
     step = min(settings.daemon.heartbeat_interval_seconds, _DISPATCH_STEP_S)
     _log.info(
         "[heartbeat] daemon started, pid=%s, step=%.0fs, idle_threshold=%.0fs, "
@@ -403,6 +421,7 @@ async def _dispatch_loop(pool: ConnectionPool, liveness: Liveness) -> None:
             rows = _select_idle_agents_needing_heartbeat(
                 pool,
                 idle_threshold,
+                heartbeat_interval_s=heartbeat_interval,
                 jitter_span_s=JITTER_SPAN_S,
                 limit=_MAX_CHECKINS_PER_STEP,
                 backoff_until=_backoff_deadlines(failure_streak, idle_threshold),

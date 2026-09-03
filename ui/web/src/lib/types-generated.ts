@@ -5061,8 +5061,9 @@ export interface components {
          *
          *     - idle-family (idling / restarting — the statuses the fleet view
          *       projects to "Idle") & not paused & no fresh wake queued: `next_at` is
-         *       set — the daemon's projected check-in due time,
-         *       `last_active_at + idle_threshold + (id mod JITTER_SPAN_S)`. The daemon
+         *       set — the daemon's projected check-in due time: the later of
+         *       `last_active_at + idle_threshold + (id mod JITTER_SPAN_S)` and
+         *       `last_heartbeat_at + interval_s` when a prior check-in exists. The daemon
          *       dispatches the actual check-in at its first poll tick at/after that (at
          *       most one 15s dispatch step later), so `next_at` is the earliest possible
          *       check-in, and never later than what the daemon does. An overdue

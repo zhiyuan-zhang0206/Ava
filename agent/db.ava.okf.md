@@ -13,8 +13,9 @@ Ava's Postgres persistence layer—responsible for agent message history storage
 
 ## Core Responsibilities
 
-- **Inbound message queue**: The `inbound_messages` table is the unified agent wake-up entry point, with 10 `kind` types:
+- **Inbound message queue**: The `inbound_messages` table is the unified agent wake-up entry point, with 11 `kind` types:
   - `chat` — User/peer agent chat messages (the only kind that goes through two-stage `claimed`, initiating multi-step LLM+exec)
+  - `system_note` — Framework message rendered as a tagged system marker; a permanently blocked descendant reports only classifier metadata to its nearest alive `spawner` ancestor through this path
   - `compact_summary` — Written by agent `ava.self.compact()`, claim directly replaces messages
   - `compact_request` — Triggered by UI `/compact`, claim runs backend LLM to generate summary and replace
   - `heartbeat` — Heartbeat daemon check-in for idle agents

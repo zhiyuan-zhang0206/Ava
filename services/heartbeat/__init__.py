@@ -10,12 +10,13 @@ guess.
 
 Cluster-wide, not machine-scoped: it only INSERTs inbound rows; the target
 agent — on whatever machine it runs on — picks them up on its next SELECT
-recheck in the claim loop (`wait_for_inbound`). Heartbeat is not latency-
-critical (interval is minutes), so it rides that recheck rather than publishing
-a Redis wake. Runs once per cluster, on the gateway.
+recheck in the claim loop (`wait_for_inbound`), and a best-effort Redis wake
+normally delivers the check-in immediately. Runs once per cluster, on the
+gateway.
 
 Provides:
-- `daemon.py` — main loop, polls every `AVA_HEARTBEAT_INTERVAL_SECONDS` (default 5 min)
+- `daemon.py` — bounded dispatch loop; `AVA_HEARTBEAT_INTERVAL_SECONDS`
+  (default 5 min) is each agent's durable minimum reminder cadence
 - `services/healthchecks/heartbeat.py` — watchdog keepalive (re-spawn on death)
 """
 

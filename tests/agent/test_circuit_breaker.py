@@ -15,7 +15,9 @@ heartbeat cycles against a permanent context-overflow 400, no self-rescue):
    the first successful LLM call (`llm_node`).
 """
 
-from typing import Any
+import json
+from datetime import UTC, datetime
+from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock
 
 import psycopg
@@ -36,6 +38,7 @@ from agent.hooks.compact import (
 )
 from agent.state import AgentState, CircuitState
 from shared.db import create_agent
+from shared.event_publisher import AgentEventPublisher
 from shared.redis_listener import RedisInboundListener
 from tests.agent.test_claim import (
     _compact_tail,
@@ -46,6 +49,7 @@ from tests.agent.test_claim import (
 )
 from tests.agent.test_llm_helpers import _CONFIG as _LLM_CONFIG
 from tests.agent.test_llm_helpers import _make_runtime as _llm_make_runtime
+from tests.conftest import spawn_agent
 
 # A summary long enough to clear COMPACT_MIN_SUMMARY_CHARS.
 _LONG_SUMMARY = "## Requests\nfollow the template. " * 60
@@ -58,6 +62,16 @@ class _FakeProviderStatusError(Exception):
         super().__init__(f"HTTP {status_code}")
         self.status_code = status_code
         self.body = body  # pyright: ignore[reportUnknownMemberType]
+
+
+class _RecordingPublisher:
+    """Minimal typed event sink for fatal-error live-event assertions."""
+
+    def __init__(self) -> None:
+        self.payloads: list[str] = []
+
+    def emit(self, payload: str) -> None:
+        self.payloads.append(payload)
 
 
 def _overflow_state(breaker_reason: str | None = None) -> AgentState:
@@ -126,6 +140,138 @@ async def test_fatal_provider_error_billing_reason() -> None:
     assert isinstance(circuit, CircuitState)
     assert circuit.open is True
     assert circuit.reason == "billing"
+
+
+async def test_fatal_provider_error_emits_blocked_recovery_details() -> None:
+    """The live error tells the user that a permanent rejection blocked retries.
+
+    Regression for #5759: an opaque error plus an ``idling`` status made a
+    permanent provider rejection look like an ordinary runnable idle state.
+    """
+    publisher = _RecordingPublisher()
+    ctx = AvaContext(
+        ops_pool=None,
+        llm=MagicMock(),
+        event_publisher=cast(AgentEventPublisher, publisher),
+    )
+    exc = FatalProviderError(
+        "provider permanently rejected (HTTP 400): Content Exists Risk",
+        error_class="permanent",
+        provider="anthropic",
+        status=400,
+    )
+
+    await _handle_fatal_llm_error(exc, ctx, agent_id=42)
+
+    emitted = json.loads(publisher.payloads[-1])
+    assert emitted["role"] == "error"
+    assert emitted["error_class"] == "permanent"
+    assert emitted["reason"] == "bad_request"
+    assert emitted["blocked"] is True
+    assert (
+        emitted["recovery"]
+        == "Choose a different model overlay or resolve the provider policy rejection, then send a new message."
+    )
+
+
+async def test_permanent_provider_error_reports_metadata_to_nearest_alive_ancestor(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+) -> None:
+    """A blocked descendant reports only metadata through immutable SPAWN lineage.
+
+    The immediate parent is terminated, so the report must skip it and reach
+    the nearest live ancestor. The rejected provider body is deliberately
+    distinctive: no history or error body may be replayed into the ancestor's
+    prompt.
+    """
+    ancestor_id = spawn_agent(spawner="user")
+    terminated_parent_id = spawn_agent(spawner=f"agent:{ancestor_id}")
+    child_id = spawn_agent(spawner=f"agent:{terminated_parent_id}")
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "UPDATE agents_meta SET spawner = 'user', status = 'idling', "
+            "lease_expires_at = now() + interval '10 minutes' WHERE id = %s",
+            (ancestor_id,),
+        )
+        cur.execute(
+            "UPDATE agents_meta SET spawner = %s, status = 'terminated' WHERE id = %s",
+            (f"agent:{ancestor_id}", terminated_parent_id),
+        )
+        cur.execute(
+            "UPDATE agents_meta SET spawner = %s WHERE id = %s",
+            (f"agent:{terminated_parent_id}", child_id),
+        )
+    db_conn.commit()
+
+    blocked_history = "Content Exists Risk: do not replay this rejected history"
+    exc = FatalProviderError(
+        blocked_history,
+        error_class="permanent",
+        provider="deepseek",
+        status=400,
+    )
+    occurred_at = datetime(2026, 9, 3, 8, 0, tzinfo=UTC)
+    await _handle_fatal_llm_error(
+        exc,
+        AvaContext(ops_pool=aops_pool, llm=MagicMock(), event_publisher=MagicMock()),
+        agent_id=child_id,
+        occurred_at=occurred_at,
+    )
+
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "SELECT agent_id, content, kind, source, payload FROM inbound_messages "
+            "WHERE kind = 'system_note' ORDER BY id"
+        )
+        rows = cur.fetchall()
+
+    assert rows == [
+        (
+            ancestor_id,
+            "Descendant agent "
+            f"{child_id} is blocked after a permanent provider rejection. "
+            "error_class=permanent provider=deepseek status=400 reason=bad_request "
+            "timestamp=2026-09-03T08:00:00+00:00 "
+            "where=agent._runloop._handle_fatal_llm_error",
+            "system_note",
+            "system",
+            {"note_tag": "agent_reply"},
+        )
+    ]
+    assert blocked_history not in rows[0][1]
+
+
+async def test_context_overflow_self_recovery_does_not_report_to_an_ancestor(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+) -> None:
+    """Forced compaction is a healthy recovery path, not an ancestor escalation."""
+    ancestor_id = spawn_agent(spawner="user")
+    child_id = spawn_agent(spawner=f"agent:{ancestor_id}")
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "UPDATE agents_meta SET status = 'idling', "
+            "lease_expires_at = now() + interval '10 minutes' WHERE id = %s",
+            (ancestor_id,),
+        )
+    db_conn.commit()
+
+    await _handle_fatal_llm_error(
+        FatalProviderError(
+            "provider context window exceeded",
+            error_class="permanent",
+            provider="deepseek",
+            status=400,
+            context_overflow=True,
+        ),
+        AvaContext(ops_pool=aops_pool, llm=MagicMock(), event_publisher=MagicMock()),
+        agent_id=child_id,
+    )
+
+    with db_conn.cursor() as cur:
+        cur.execute("SELECT count(*) FROM inbound_messages WHERE agent_id = %s", (ancestor_id,))
+        assert cur.fetchone() == (0,)
 
 
 async def test_fatal_llm_stream_error_does_not_open_breaker() -> None:
