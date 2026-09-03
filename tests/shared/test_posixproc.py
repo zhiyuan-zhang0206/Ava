@@ -39,7 +39,11 @@ def _pid(name: str) -> int:
     return rec.pid
 
 
-def _wait(predicate, timeout: float = 5.0, interval: float = 0.05) -> bool:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def _wait(predicate, timeout: float = 30.0, interval: float = 0.05) -> bool:
+    # 30s default (2026-09-03): process-lifetime waits (group kill reaping a
+    # late-spawned child, posixproc task #2249 regression test) tripped their
+    # old 5s budget under CI runner oversubscription — same failure mode the
+    # pty-sessions suite already sized for on 2026-08-09.  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if predicate():
