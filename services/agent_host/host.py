@@ -138,8 +138,8 @@ from langgraph.graph.state import CompiledStateGraph
 from psycopg_pool import AsyncConnectionPool
 
 from agent._process_boot import boot_agent_scope
-from agent._turn_progress import reset_turn_progress
 from agent._runloop import _graph_config
+from agent._turn_progress import reset_turn_progress
 from agent.db import LoggingConnectionPool
 from agent.hosted_ownership import (
     admit_hosted_runtime,
