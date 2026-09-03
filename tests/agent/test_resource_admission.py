@@ -106,7 +106,7 @@ def test_actual_owner_receipt_recovers_only_exact_persisted_allocation(
     from tests.agent.test_exec_owner_entry import _context, _ready, _start
 
     target = _admitted(db_conn)
-    context = _context(tmp_path)
+    context = _context(tmp_path, target.agent_id)
     directory = tmp_path / str(target.agent_id) / "domains" / str(context.allocation.request)
     directory.mkdir(parents=True)
     request = directory / context.request_path.name
