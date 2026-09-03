@@ -44,6 +44,7 @@ The full linter inventory — what each one enforces and where it runs: [[script
   static direct test imports, preserves conservative full-suite escapes, and
   emits the shadow-run JSON consumed by `ci.yml`
 - `release_cut.py`, `pre-push-check.sh`, `check_cross_branch_migrations.py`, `migration_smoke.py`, `test_migrations_apply.sh`, `test_uv_sync_write_window.sh`
+- `backfill_llm_usage_hourly.py` — operator-run one-shot that folds the frozen 2026-08-28 cold-archive `llm_usage` JSONL extract into (UTC hour x model) totals and upserts them into `llm_usage_hourly`, the restored historical LLM usage/cost curve for the window Loki's 7d retention lost; re-runnable, and never called by the migration that creates the table
 
 ### Code Generation
 - `codegen-types.sh`, `check-types-fresh.sh`, `dump_openapi.py`, `generate-ui-page.py`, `dump_event_fixtures.py`
