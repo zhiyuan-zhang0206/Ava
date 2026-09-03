@@ -450,6 +450,57 @@ class TestDeadLetterStaleClaimed:
             assert dict(cur.fetchall()) == {old: "done", fresh: "claimed"}
 
 
+def _insert_pending_resurrect_row(
+    db: psycopg.Connection,
+    agent_id: int,
+    *,
+    age_s: float,
+    status: str = "pending",
+    kind: str = "resurrect",
+) -> int:
+    with db.cursor() as cur:
+        cur.execute(
+            "INSERT INTO inbound_messages (agent_id, content, kind, source, status, created_at) "
+            "VALUES (%s, '', %s, 'system', %s, "
+            "now() - make_interval(secs => %s::double precision)) RETURNING id",
+            (agent_id, kind, status, age_s),
+        )
+        inbound_id = cur.fetchone()[0]  # type: ignore[index]
+    db.commit()
+    return inbound_id  # pyright: ignore[reportUnknownVariableType]
+
+
+class TestDeadLetterStalePendingResurrects:
+    def test_only_old_pending_resurrects_are_dead_lettered(
+        self, db_conn: psycopg.Connection, pool: ConnectionPool
+    ) -> None:
+        from services.delivery_watchdog.daemon import dead_letter_stale_pending_resurrects
+
+        aid = _make_idling_agent(db_conn)
+        old = _insert_pending_resurrect_row(db_conn, aid, age_s=2 * 86400)
+        fresh = _insert_pending_resurrect_row(db_conn, aid, age_s=60)
+        claimed = _insert_pending_resurrect_row(db_conn, aid, age_s=2 * 86400, status="claimed")
+        done = _insert_pending_resurrect_row(db_conn, aid, age_s=2 * 86400, status="done")
+        old_non_resurrect = _insert_pending_resurrect_row(
+            db_conn, aid, age_s=2 * 86400, kind="chat"
+        )
+
+        assert dead_letter_stale_pending_resurrects(pool, 86400.0) == 1
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "SELECT id, status, claimed_at IS NOT NULL FROM inbound_messages "
+                "WHERE id = ANY(%s)",
+                ([old, fresh, claimed, done, old_non_resurrect],),
+            )
+            rows = {row[0]: row[1:] for row in cur.fetchall()}
+
+        assert rows[old] == ("done", True)
+        assert rows[fresh] == ("pending", False)
+        assert rows[old_non_resurrect] == ("pending", False)
+        assert rows[claimed] == ("claimed", False)
+        assert rows[done] == ("done", False)
+
+
 class TestSelectTerminatedOwnersWithPending:
     def test_force_fence_excludes_older_chat_but_accepts_newer_chat(
         self, db_conn: psycopg.Connection, pool: ConnectionPool

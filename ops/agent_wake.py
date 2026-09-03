@@ -65,11 +65,12 @@ from shared.agents import (
     AgentStatus,
     MachinePaused,
     ResurrectAlreadyAlive,
+    ResurrectBudgetExhausted,
     ResurrectError,
     TerminationSource,
 )
 from shared.audit_events import insert_event_log
-from shared.config import settings
+from shared.config import field_alias, get_field, settings
 from shared.daemon_health import health_port, probe_daemon
 from shared.db import fetch_one, insert_restart_completed_inbound, publish_inbound_wake
 from shared.db_transaction import write_transaction
@@ -241,6 +242,26 @@ def _resurrect_event_target(resurrected_by: str) -> int | None:
         return None
 
 
+def _auto_resurrect_max_attempts() -> int:
+    """Read the recovery budget after the gateway's runner-alias projection.
+
+    Gateway processes omit runner-only aliases from their environment, while
+    local hosted resurrection still runs this transaction in-process. The
+    cluster `.env` remains the configuration authority in that profile.
+    """
+    from shared.runtime_config import read_env_aliases
+
+    raw = read_env_aliases().get(field_alias("auto_resurrect_max_attempts"))
+    if raw is not None:
+        return int(raw)
+    budget = get_field("auto_resurrect_max_attempts")
+    if budget is not None:
+        return int(budget)
+    if settings.has_domain("daemon"):
+        return settings.daemon.auto_resurrect_max_attempts
+    raise RuntimeError("auto-resurrect budget has no configured daemon domain")
+
+
 def _prepare_resurrect_attempt(
     agent_id: int,
     *,
@@ -265,6 +286,17 @@ def _prepare_resurrect_attempt(
             raise ResurrectAlreadyAlive(
                 f"agent {agent_id} is in {current.value!r} state, not 'terminated'"
             )
+        if resurrected_by == "system":
+            cur.execute(
+                "SELECT count(*) FROM inbound_messages "
+                "WHERE agent_id = %s AND kind = 'resurrect' AND status = 'pending'",
+                (agent_id,),
+            )
+            pending_resurrects = int(fetch_one(cur, "resurrect: count pending lifecycle rows")[0])
+            if pending_resurrects >= _auto_resurrect_max_attempts():
+                raise ResurrectBudgetExhausted(
+                    f"agent {agent_id} has exhausted its auto-resurrect budget"
+                )
         allocation_epoch = _transition_terminated_to_unclaimed_idling(
             cur,
             agent_id,
@@ -489,6 +521,10 @@ def resurrect_agent(
             no-op.
         ResurrectClaimStaleError: `auto_claim` no longer owns the terminated
             row. The controller treats this as a benign stale no-op.
+        ResurrectBudgetExhausted: a system-initiated resurrect reached the
+            configured limit of pending lifecycle rows. Manual resurrects are
+            exempt so an operator can recover the agent after correcting its
+            underlying failure.
     """
     if (trigger_inbound_id is None) != (trigger_inbound_kind is None):
         raise ValueError("trigger inbound id and kind must be provided together")

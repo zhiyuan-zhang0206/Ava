@@ -209,6 +209,9 @@ class AgentNotFound(ResurrectError, AvaAgentError):  # noqa: N818 — style cons
 class ResurrectAlreadyAlive(ResurrectError): ...  # noqa: N818
 
 
+class ResurrectBudgetExhausted(ResurrectError): ...  # noqa: N818
+
+
 class ForkSourceEmpty(ForkError, AvaAgentError):  # noqa: N818 — style consistent with ENOENT
     """Source agent has no checkpoint — cannot fork.
 

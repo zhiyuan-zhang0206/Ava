@@ -240,6 +240,23 @@ def dead_letter_stale_claimed(pool: ConnectionPool, threshold_s: float) -> int:
         return cur.rowcount
 
 
+def dead_letter_stale_pending_resurrects(pool: ConnectionPool, threshold_s: float) -> int:
+    """Dead-letter pending resurrect rows whose consumer never reached claim.
+
+    A stale lifecycle row records an abandoned wake. Retaining it cannot
+    recover the turn and later floods the agent with redundant markers, so age
+    alone decides cleanup regardless of the current agent lifecycle state.
+    """
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            "UPDATE inbound_messages m SET status = 'done', claimed_at = now() "
+            "WHERE m.status = 'pending' AND m.kind = 'resurrect' "
+            "  AND m.created_at < now() - make_interval(secs => %s)",
+            (threshold_s,),
+        )
+        return cur.rowcount
+
+
 def select_pending_ids(pool: ConnectionPool) -> set[int]:
     """Every currently-pending inbound id — used to prune the alert set so a
     row that left `pending` stops being remembered (and re-alerts if it ever
@@ -492,11 +509,11 @@ def _maybe_sweep_stale_claimed(
     threshold_s: float,
     last_sweep_at: float,
 ) -> float:
-    """Run the stale-claimed dead-letter sweep when `_CLAIMED_SWEEP_INTERVAL_S`
-    has elapsed since `last_sweep_at`; return the new last-sweep timestamp
-    (monotonic). Best-effort: a sweep failure is logged, never raised — the
-    next gate window retries, and the reconcile-side cutoff still protects
-    boots in between."""
+    """Run stale-inbound dead-letter sweeps on the configured cadence.
+
+    Return the new monotonic sweep timestamp. Both sweeps are best-effort: a
+    failure is logged, never raised, and the next gate window retries.
+    """
     now_mono = time.monotonic()
     if now_mono - last_sweep_at < _CLAIMED_SWEEP_INTERVAL_S:
         return last_sweep_at
@@ -507,8 +524,14 @@ def _maybe_sweep_stale_claimed(
                 "[delivery] dead-lettered %s stale claimed row(s) of terminated owner(s)",
                 dead_lettered,
             )
+        stale_resurrects = dead_letter_stale_pending_resurrects(pool, threshold_s)
+        if stale_resurrects:
+            _log.info(
+                "[delivery] dead-lettered %s stale pending resurrect row(s)",
+                stale_resurrects,
+            )
     except Exception:
-        _log.exception("[delivery] stale-claimed dead-letter sweep failed")
+        _log.exception("[delivery] stale-inbound dead-letter sweep failed")
     return now_mono
 
 
