@@ -182,7 +182,9 @@ async def test_list_tools_and_ping() -> None:
     assert names == {
         "release_control",
         "snapshot",
+        "find_text",
         "click",
+        "click_text",
         "type_text",
         "key",
         "scroll",
@@ -370,6 +372,343 @@ async def test_snapshot_without_include_ocr_skips_ocr(
     result = await _ok_result(d, "snapshot", {})
     assert called == []
     assert "ocr" not in result
+
+
+# ── OCR text tools: find_text / click_text ─────────────────────────────────
+
+
+class FakeOcr:
+    """Scriptable ocr_image stand-in: yields canned boxes, counts runs, and
+    can be switched to raise OcrError (strictness probe)."""
+
+    def __init__(self, boxes: list[dict[str, float | str]]) -> None:
+        self.boxes = boxes
+        self.calls = 0
+        self.error: str | None = None
+
+    def __call__(self, path: str) -> list[dict[str, float | str]]:  # pyright: ignore[reportUnknownParameterType]
+        self.calls += 1
+        if self.error is not None:
+            raise daemon_mod.ocr_mod.OcrError(self.error)
+        return self.boxes
+
+
+# Physical-pixel OCR boxes over the default fake 1512x982pt @2x screen
+# (3024x1964px capture): reading order is top-to-bottom, left-to-right.
+_OCR_BOXES: list[dict[str, float | str]] = [
+    {"text": "Hello", "x": 10.0, "y": 20.0, "w": 60.0, "h": 20.0},
+    {"text": "Search", "x": 500.0, "y": 100.0, "w": 80.0, "h": 24.0},
+    {"text": "search", "x": 100.0, "y": 200.0, "w": 80.0, "h": 24.0},
+    {"text": "\u4f60\u597d", "x": 300.0, "y": 400.0, "w": 60.0, "h": 30.0},
+    {"text": "\u4f60\u597d\u4e16\u754c", "x": 50.0, "y": 50.0, "w": 100.0, "h": 30.0},
+]
+
+
+@pytest.fixture
+def fake_ocr(monkeypatch: pytest.MonkeyPatch) -> FakeOcr:
+    stub = FakeOcr(_OCR_BOXES)
+    monkeypatch.setattr(daemon_mod.ocr_mod, "ocr_image", stub)  # pyright: ignore[reportUnknownArgumentType]
+    return stub
+
+
+def _capture_count(fh: FakeHelper) -> int:
+    """How many full-screen captures reached the helper."""
+    return sum(1 for c in fh.calls if c[0] == "screencapture_region")
+
+
+def test_match_ocr_boxes_contains_is_casefold_and_reading_order() -> None:
+    """contains is a case-insensitive substring test; results come in reading
+    order (top-to-bottom, then left-to-right) with a center and an index."""
+    matches = daemon_mod._match_ocr_boxes(_OCR_BOXES, "search", "contains")
+    assert [m["text"] for m in matches] == ["Search", "search"]
+    assert [m["index"] for m in matches] == [0, 1]
+    # "Search" box: x=500 y=100 w=80 h=24 → center (540, 112)
+    assert matches[0]["cx"] == 540.0
+    assert matches[0]["cy"] == 112.0
+    assert matches[0]["x"] == 500.0 and matches[0]["w"] == 80.0
+    # "search" box (y=200) is second
+    assert matches[1]["cx"] == 140.0
+    assert matches[1]["cy"] == 212.0
+
+
+def test_match_ocr_boxes_exact_is_full_text_casefold() -> None:
+    """exact must equal the WHOLE box text (case-insensitively) — a box that
+    merely contains the query does not match."""
+    needle = "\u4f60\u597d"  # "hello" in CJK
+    exact = daemon_mod._match_ocr_boxes(_OCR_BOXES, needle, "exact")
+    assert [m["text"] for m in exact] == [needle]
+    contains = daemon_mod._match_ocr_boxes(_OCR_BOXES, needle, "contains")
+    # reading order: the longer "hello world" box (y=50) precedes "hello" (y=400)
+    assert [m["text"] for m in contains] == ["\u4f60\u597d\u4e16\u754c", needle]
+    # exact is case-insensitive too: "hello" matches both "Hello" and "hello"
+    casefolded = daemon_mod._match_ocr_boxes(_OCR_BOXES, "hello", "exact")
+    assert [m["text"] for m in casefolded] == ["Hello"]
+
+
+def test_validate_text_query_rejects_blank_and_unknown_mode() -> None:
+    with pytest.raises(daemon_mod.ComputerUseError, match="non-empty"):
+        daemon_mod._validate_text_query("   ", "contains")
+    with pytest.raises(daemon_mod.ComputerUseError, match="'contains' or 'exact'"):
+        daemon_mod._validate_text_query("x", "regex")
+
+
+async def test_find_text_returns_matching_boxes(
+    fake_helper: FakeHelper,
+    audit_log: list,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+    fake_ocr: FakeOcr,
+    monkeypatch: pytest.MonkeyPatch,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+) -> None:
+    """find_text captures once, OCRs, and reports every match with
+    physical-pixel geometry (the click space, no scale conversion)."""
+    monkeypatch.setattr(
+        daemon_mod,
+        "_snapshot_path",
+        lambda _agent_id: "/tmp/find-text.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    )
+    d = _daemon()
+    result = await _ok_result(d, "find_text", {"text": "search"})
+    assert result["query"] == "search"
+    assert result["match"] == "contains"
+    assert result["fresh"] is True
+    assert result["count"] == 2
+    assert [m["text"] for m in result["matches"]] == ["Search", "search"]
+    assert fake_ocr.calls == 1
+    assert _capture_count(fake_helper) == 1
+
+
+async def test_find_text_reuses_last_ocr_when_asked(
+    fake_helper: FakeHelper,
+    audit_log: list,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+    fake_ocr: FakeOcr,
+    monkeypatch: pytest.MonkeyPatch,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+) -> None:
+    """snapshot_fresh=false searches the OCR the snapshot include_ocr just
+    produced — no second capture, and the result says fresh:false."""
+    monkeypatch.setattr(
+        daemon_mod,
+        "_snapshot_path",
+        lambda _agent_id: "/tmp/find-text.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    )
+    d = _daemon()
+    snap = await _ok_result(d, "snapshot", {"include_ocr": True})
+    assert len(snap["ocr"]) == 5  # pyright: ignore[reportUnknownArgumentType]
+    result = await _ok_result(d, "find_text", {"text": "hello", "snapshot_fresh": False})
+    assert result["fresh"] is False
+    assert result["count"] == 1
+    assert [m["text"] for m in result["matches"]] == ["Hello"]
+    assert fake_ocr.calls == 1
+    assert _capture_count(fake_helper) == 1
+
+
+async def test_find_text_fresh_then_stale_share_one_capture(
+    fake_helper: FakeHelper,
+    audit_log: list,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+    fake_ocr: FakeOcr,
+    monkeypatch: pytest.MonkeyPatch,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+) -> None:
+    """A fresh find_text fills the cache; the next snapshot_fresh=false call
+    searches that same screen (fresh:false) without a new capture."""
+    monkeypatch.setattr(
+        daemon_mod,
+        "_snapshot_path",
+        lambda _agent_id: "/tmp/find-text.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    )
+    d = _daemon()
+    first = await _ok_result(d, "find_text", {"text": "search"})
+    assert first["fresh"] is True
+    second = await _ok_result(d, "find_text", {"text": "search", "snapshot_fresh": False})
+    assert second["fresh"] is False
+    assert second["count"] == 2
+    assert fake_ocr.calls == 1
+    assert _capture_count(fake_helper) == 1
+
+
+async def test_find_text_stale_with_empty_cache_captures(
+    fake_helper: FakeHelper,
+    audit_log: list,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+    fake_ocr: FakeOcr,
+    monkeypatch: pytest.MonkeyPatch,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+) -> None:
+    """snapshot_fresh=false before any OCR ran has nothing to reuse — it
+    falls back to a fresh capture (and reports fresh:true)."""
+    monkeypatch.setattr(
+        daemon_mod,
+        "_snapshot_path",
+        lambda _agent_id: "/tmp/find-text.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    )
+    d = _daemon()
+    result = await _ok_result(d, "find_text", {"text": "search", "snapshot_fresh": False})
+    assert result["fresh"] is True
+    assert result["count"] == 2
+    assert fake_ocr.calls == 1
+    assert _capture_count(fake_helper) == 1
+
+
+async def test_find_text_ocr_failure_is_an_error(
+    fake_helper: FakeHelper,
+    audit_log: list,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+    fake_ocr: FakeOcr,
+    monkeypatch: pytest.MonkeyPatch,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+) -> None:
+    """find_text is strict where snapshot is soft: a failed OCR is an error,
+    never a silent empty list."""
+    monkeypatch.setattr(
+        daemon_mod,
+        "_snapshot_path",
+        lambda _agent_id: "/tmp/find-text.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    )
+    fake_ocr.error = "swiftc missing"
+    d = _daemon()
+    resp = await _call(d, "find_text", {"text": "search"})
+    assert resp["ok"] is False
+    assert "ocr failed" in resp["error"]  # pyright: ignore[reportUnknownArgumentType]
+    assert audit_log[0]["payload"]["outcome"] == "error"  # pyright: ignore[reportUnknownIndexType]
+
+
+async def test_find_text_requires_text_argument(
+    fake_helper: FakeHelper,
+    audit_log: list,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+) -> None:
+    d = _daemon()
+    resp = await _call(d, "find_text", {})
+    assert resp["ok"] is False
+    assert "find_text requires argument 'text'" in resp["error"]  # pyright: ignore[reportUnknownArgumentType]
+    resp2 = await _call(d, "find_text", {"text": "  "})
+    assert resp2["ok"] is False
+    assert "non-empty" in resp2["error"]  # pyright: ignore[reportUnknownArgumentType]
+
+
+async def test_click_text_ocrs_locates_and_clicks(
+    fake_helper: FakeHelper,
+    audit_log: list,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+    fake_ocr: FakeOcr,
+    monkeypatch: pytest.MonkeyPatch,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+) -> None:
+    """click_text = fresh capture + OCR + one click at the best match's center
+    (physical pixels converted by the capture's measured 2x scale)."""
+    monkeypatch.setattr(
+        daemon_mod,
+        "_snapshot_path",
+        lambda _agent_id: "/tmp/click-text.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    )
+    d = _daemon()
+    result = await _ok_result(d, "click_text", {"text": "search"})
+    # topmost "Search" box (y=100): center (540, 112) physical → (270, 56) logical
+    assert result["text"] == "Search"
+    assert result["x"] == 540.0 and result["y"] == 112.0
+    assert result["scale"] == 2.0
+    assert ("click", {"x": 270.0, "y": 56.0, "double": False}) in fake_helper.calls
+    assert fake_ocr.calls == 1
+    assert _capture_count(fake_helper) == 1
+
+
+async def test_click_text_index_selects_among_matches(
+    fake_helper: FakeHelper,
+    audit_log: list,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+    fake_ocr: FakeOcr,
+    monkeypatch: pytest.MonkeyPatch,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+) -> None:
+    monkeypatch.setattr(
+        daemon_mod,
+        "_snapshot_path",
+        lambda _agent_id: "/tmp/click-text.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    )
+    d = _daemon()
+    # index 1 = the lower "search" box (y=200): center (140, 212) → (70, 106)
+    result = await _ok_result(d, "click_text", {"text": "search", "index": 1})
+    assert result["text"] == "search"
+    assert ("click", {"x": 70.0, "y": 106.0, "double": False}) in fake_helper.calls
+    # exact mode narrows to the full-text CJK box
+    cjk = await _ok_result(d, "click_text", {"text": "\u4f60\u597d", "match": "exact"})
+    assert cjk["text"] == "\u4f60\u597d"
+    assert ("click", {"x": 165.0, "y": 207.5, "double": False}) in fake_helper.calls
+
+
+async def test_click_text_failures_are_readable_and_never_click(
+    fake_helper: FakeHelper,
+    audit_log: list,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+    fake_ocr: FakeOcr,
+    monkeypatch: pytest.MonkeyPatch,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+) -> None:
+    monkeypatch.setattr(
+        daemon_mod,
+        "_snapshot_path",
+        lambda _agent_id: "/tmp/click-text.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    )
+    d = _daemon()
+    resp = await _call(d, "click_text", {"text": "zzz"})
+    assert resp["ok"] is False
+    assert "no on-screen text matching 'zzz'" in resp["error"]  # pyright: ignore[reportUnknownArgumentType]
+    resp2 = await _call(d, "click_text", {"text": "search", "index": 5})
+    assert resp2["ok"] is False
+    assert "out of range" in resp2["error"]  # pyright: ignore[reportUnknownArgumentType]
+    resp3 = await _call(d, "click_text", {"text": "search", "index": -1})
+    assert resp3["ok"] is False
+    assert "index must be >= 0" in resp3["error"]  # pyright: ignore[reportUnknownArgumentType]
+    resp4 = await _call(d, "click_text", {"text": "search", "match": "regex"})
+    assert resp4["ok"] is False
+    assert "match must be 'contains' or 'exact'" in resp4["error"]  # pyright: ignore[reportUnknownArgumentType]
+    # none of the failures reached the helper's click
+    assert not any(c[0] == "click" for c in fake_helper.calls)
+
+
+async def test_click_text_audits_the_clicked_center(
+    fake_helper: FakeHelper,
+    audit_log: list,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+    fake_ocr: FakeOcr,
+    monkeypatch: pytest.MonkeyPatch,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+) -> None:
+    monkeypatch.setattr(
+        daemon_mod,
+        "_snapshot_path",
+        lambda _agent_id: "/tmp/click-text.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    )
+    d = _daemon()
+    await _call(d, "click_text", {"text": "search"})
+    actions = [ev for ev in audit_log if ev["event_type"] == "computer_action"]  # pyright: ignore[reportUnknownVariableType]
+    assert len(actions) == 1  # pyright: ignore[reportUnknownArgumentType]
+    ev = actions[0]  # pyright: ignore[reportUnknownVariableType]
+    assert ev["payload"]["action"] == "click_text"
+    assert ev["payload"]["outcome"] == "ok"
+    # the audited coordinate is the resolved click center, physical pixels
+    assert ev["payload"]["coords"] == "540.0,112.0"
+    # a failed click_text audits the error with the action name, no coords
+    await _call(d, "click_text", {"text": "zzz"})
+    failed = [ev for ev in audit_log if ev["event_type"] == "computer_action"]  # pyright: ignore[reportUnknownVariableType]
+    assert failed[1]["payload"]["action"] == "click_text"  # pyright: ignore[reportUnknownIndexType]
+    assert failed[1]["payload"]["outcome"] == "error"  # pyright: ignore[reportUnknownIndexType]
+    assert failed[1]["payload"]["coords"] is None  # pyright: ignore[reportUnknownIndexType]
+
+
+async def test_click_text_measures_scale_and_tracks_pointer(
+    fake_helper: FakeHelper,
+    audit_log: list,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+    fake_ocr: FakeOcr,
+    monkeypatch: pytest.MonkeyPatch,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+) -> None:
+    """The stale-helper regression, applied to click_text: a capture on a 1x
+    display (helper claims 2x) must pass click coordinates through UNCHANGED,
+    and a later click must convert with the scale click_text measured."""
+    fh = fake_helper
+    fh.screen = {"x": 0.0, "y": 0.0, "w": 1920.0, "h": 1080.0, "scale": 2.0}  # stale claim
+    fh.png_size = (1920, 1080)  # the truth: 1x
+    monkeypatch.setattr(
+        daemon_mod,
+        "_snapshot_path",
+        lambda _agent_id: "/tmp/click-text.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    )
+    d = _daemon()
+    result = await _ok_result(d, "click_text", {"text": "search"})
+    assert result["scale"] == 1.0
+    assert ("click", {"x": 540.0, "y": 112.0, "double": False}) in fh.calls
+    # scroll without coordinates follows the click_text pointer (physical
+    # 540,112 → logical 540,112 on the 1x display)
+    await _ok_result(d, "scroll", {"dy": -10})
+    assert ("scroll", {"x": 540.0, "y": 112.0, "dy": -10}) in fh.calls
+    # a plain click converts with the 1x scale click_text measured, not the
+    # helper's stale 2x claim
+    await _call(d, "click", {"x": 81, "y": 15})
+    assert ("click", {"x": 81.0, "y": 15.0, "double": False}) in fh.calls
 
 
 async def test_type_key_scroll_window_session(fake_helper: FakeHelper, audit_log: list) -> None:  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
