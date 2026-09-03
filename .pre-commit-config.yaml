@@ -10,7 +10,9 @@ repos:
     rev: v5.0.0
     hooks:
       - id: trailing-whitespace
+        exclude: ^scripts/legacy_lkg/compatibility\.patch$  # hash-pinned diff context whitespace is data
       - id: end-of-file-fixer
+        exclude: ^scripts/legacy_lkg/compatibility\.patch$  # fixed artifact bytes are bound by manifest.json
       - id: check-yaml
         # deploy/otel-collector/otel-collector.yaml is a string.Template
         # SOURCE, not YAML: $DATA_PLANE_RECEIVERS stands where a whole receiver

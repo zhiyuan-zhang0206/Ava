@@ -1,0 +1,6 @@
+{
+  "base_sha": "612326d130fdc5322e40cb8e688e8ba623d9bc5d",
+  "patch_sha256": "6fd4411fe49222422b454d3e7a0138a60522a3203513773e75cf503b4867bf16",
+  "build_tree": "b239d23ced7e08dde5a7d4215040b099af3604c7",
+  "preparation_tools_sha": "202bd127f8506ecb0fa489ca390f732ec8c548a5"
+}
