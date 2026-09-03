@@ -39,6 +39,7 @@ def test_deepseek_shape_logs(loguru_records):
     # model goes into extra (not the message string) → PostgresSink writes payload->>'model',
     # dashboard 24h cost groups/prices by it. If the field name drifts, this test goes red.
     assert loguru_records[0]["extra"]["model"] == "deepseek-v4-pro"
+    assert loguru_records[0]["extra"]["usage_kind"] == "agent"
 
 
 def test_anthropic_shape_logs(loguru_records):

@@ -413,6 +413,7 @@ def _answer(
         retry_delay_seconds=settings.lm.llm_invoke_retry_delay_seconds,
         retry_max_delay_seconds=settings.lm.llm_invoke_retry_max_delay_seconds,
         timeout=settings.lm.llm_invoke_timeout_seconds,
+        usage_source="web.fetch",
     )
 
 

@@ -306,3 +306,36 @@ class TestGenerateLabelRejectsNonLabels:
             == "\u9a8c\u8bc1\u9884\u89c8\u96c6\u7fa4\u65f6\u533a\u7edf\u4e00\u5e76\u6d4b\u8bd5SDK"
         )
         assert len(_no_publish) == 1
+
+
+@pytest.mark.asyncio
+async def test_label_generation_logs_batch_usage_for_the_target_agent(
+    db_conn: psycopg.Connection,
+    monkeypatch: pytest.MonkeyPatch,
+    _no_publish: list[str],
+    loguru_records: list[dict[str, Any]],
+) -> None:
+    """A labeler's daemon record must charge the label's agent, not the daemon."""
+    agent_id = create_agent(db_conn)
+
+    class _UsageLLM:
+        async def ainvoke(self, _messages: list[Any]) -> AIMessage:
+            return AIMessage(
+                content="Review deployment readiness",
+                usage_metadata={
+                    "input_tokens": 50,
+                    "output_tokens": 8,
+                    "total_tokens": 58,
+                },
+            )
+
+    def _build_usage_llm(_model: str, **_kwargs: object) -> _UsageLLM:
+        return _UsageLLM()
+
+    monkeypatch.setattr(labeler_module, "build_chat_model", _build_usage_llm)
+
+    assert await generate_label_async(agent_id, "a long agent brief", "deepseek-v4-flash") is True
+
+    [record] = [record for record in loguru_records if record["extra"].get("event") == "llm_usage"]
+    assert record["extra"]["agent_id"] == agent_id
+    assert record["extra"]["usage_kind"] == "batch"

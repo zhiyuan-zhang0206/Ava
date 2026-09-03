@@ -87,6 +87,8 @@ class LlmUsage(TypedDict):
     price_out: float | None
     unpriced: int | None
     task_id: NotRequired[int]
+    usage_kind: str
+    source: NotRequired[str]
 
 
 class TurnEnd(TypedDict):

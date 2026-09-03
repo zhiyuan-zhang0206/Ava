@@ -103,7 +103,7 @@ consumers: see the comments at each emit point.
 |------|------|------|-----------------|----|------|
 | `status_change` | agent status transition — both telemetry (loguru) and audit (audit_events) sides emit this name | noise | from, to | — | events |
 | `frontend_interaction` | tracked frontend interaction (click / page view / settings change) | noise | page, element, session_id, key, value | — | events |
-| `llm_usage` | LLM call metering | observation | model, calls, in_total, out_total, cache_read, reasoning, latency_ms, decode_ms, cost_usd, price_miss, price_hit, price_out, unpriced, task_id | — | events |
+| `llm_usage` | LLM call metering | observation | model, calls, in_total, out_total, cache_read, reasoning, latency_ms, decode_ms, cost_usd, price_miss, price_hit, price_out, unpriced, task_id, usage_kind, source | — | events |
 | `turn_end` | one turn finished | observation | ok, duration_seconds | — | events |
 | `llm_turn_aborted` | turn aborted after retries | anomaly | — | LLM_ERROR | events |
 | `compact_turn_aborted` | turn aborted because compaction failed | anomaly | — | — | events |
