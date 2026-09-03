@@ -272,6 +272,9 @@ def _prepare_resurrect_attempt(
     auto_claim: AutoResurrectClaim | None,
 ) -> _PreparedResurrect:
     """Transition, persist lifecycle rows, and create the session under one row lock."""
+    from shared.envelope import reject_unnegotiated_caller
+
+    reject_unnegotiated_caller(resurrected_by)
     with write_transaction() as conn, conn.cursor() as cur:
         _lock_active_home_machine(cur, agent_id)
         cur.execute("SELECT status FROM agents_meta WHERE id = %s", (agent_id,))
