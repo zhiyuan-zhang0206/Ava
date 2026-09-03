@@ -16,6 +16,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from shared.runtime_prepare import (
+    CollectorInput,
     FrontendInput,
     PrepareInputs,
     _copy_python,
@@ -43,6 +44,8 @@ def prove_checkout_absent(
     shutil.copy2(checkout / "scripts/prove_runtime_consumer.py", consumer)
     migration = root / "prove_runtime_migration.py"
     shutil.copy2(checkout / "scripts/prove_runtime_migration.py", migration)
+    collector = root / "prove_runtime_otel.py"
+    shutil.copy2(checkout / "scripts/prove_runtime_otel.py", collector)
     alias = root / "runtime-entry-alias"
     alias.symlink_to(release.root / "venv", target_is_directory=True)
     if (
@@ -66,6 +69,14 @@ def prove_checkout_absent(
     }
     checkout.rename(retired_checkout)
     try:
+        if (release.root / "otel").is_dir():
+            subprocess.run(  # noqa: S603 — retained interpreter and copied CI-only proof.
+                [str(release.interpreter), "-I", "-B", str(collector)],
+                cwd=root,
+                env=child_env | {"GITHUB_ACTIONS": "true"},
+                check=True,
+                timeout=90,
+            )
         subprocess.run(  # noqa: S603 — copied proof with the installed generation only.
             [str(alias / "bin/python"), "-I", "-B", str(consumer), str(root), str(alias)],
             cwd=root,
@@ -272,6 +283,14 @@ def main() -> None:
                 root / "frontend-input", inventory_digest(tree_inventory(root / "frontend-input"))
             )
             if (root / "frontend-input").is_dir()
+            else None
+        ),
+        otel=(
+            CollectorInput(
+                root / "otel-input",
+                json.loads((root / "otel-input.json").read_text())["digest"],
+            )
+            if (root / "otel-input").is_dir()
             else None
         ),
     )

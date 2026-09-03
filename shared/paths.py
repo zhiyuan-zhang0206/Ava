@@ -164,6 +164,10 @@ def otel_collector_dir() -> Path:
 def otel_collector_binary() -> Path:
     """Path of the pinned otelcol-contrib binary (platform-appropriate name)."""
     from shared.platform import IS_WINDOWS
+    from shared.runtime_interpreter import WHEEL_RUNTIME, runtime_otel_binary
+
+    if WHEEL_RUNTIME:
+        return runtime_otel_binary()
 
     return otel_collector_dir() / ("otelcol-contrib.exe" if IS_WINDOWS else "otelcol-contrib")
 

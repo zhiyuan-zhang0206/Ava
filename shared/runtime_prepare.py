@@ -201,6 +201,14 @@ class FrontendInput:
 
 
 @dataclass(frozen=True)
+class CollectorInput:
+    """Pinned collector download result; config and durable queues are excluded."""
+
+    root: Path
+    digest: str
+
+
+@dataclass(frozen=True)
 class PrepareInputs:
     """Trusted build receipt; all paths are local, verified inputs."""
 
@@ -214,6 +222,7 @@ class PrepareInputs:
     schema_digest: str
     uv: Path
     frontend: FrontendInput | None = None
+    otel: CollectorInput | None = None
 
 
 def _optional_stdlib_receipt(source: Path, root: Path, interpreter: Path) -> None:
@@ -272,6 +281,25 @@ def _copy_frontend(
         raise ReleaseRejectedError("retained frontend differs from trusted input inventory")
 
 
+def _collector_input_inventory(collector: CollectorInput | None) -> dict[str, str] | None:
+    if collector is None:
+        return None
+    files = tree_inventory(collector.root)
+    if inventory_digest(files) != collector.digest:
+        raise ReleaseRejectedError("collector input hash mismatch")
+    return files
+
+
+def _copy_collector(
+    collector: CollectorInput | None, root: Path, expected: dict[str, str] | None
+) -> None:
+    if collector is None:
+        return
+    shutil.copytree(collector.root, root / "otel", symlinks=False)
+    if tree_inventory(root / "otel") != expected:
+        raise ReleaseRejectedError("retained collector differs from trusted input inventory")
+
+
 def prepare_release(store: Path, inputs: PrepareInputs) -> VerifiedRelease:
     """Create one final inactive generation or fail without touching serving state.
 
@@ -294,7 +322,10 @@ def prepare_release(store: Path, inputs: PrepareInputs) -> VerifiedRelease:
         raise ReleaseRejectedError("Python input hash mismatch")
     if file_sha256(inputs.requirements) != inputs.requirements_digest:
         raise ReleaseRejectedError("requirements hash mismatch")
-    frontend_files = _frontend_input_inventory(inputs.frontend)
+    frontend_files, otel_files = (
+        _frontend_input_inventory(inputs.frontend),
+        _collector_input_inventory(inputs.otel),
+    )
     requirements = inputs.requirements.read_text(encoding="utf-8")
     if (
         "://" in requirements
@@ -321,11 +352,13 @@ def prepare_release(store: Path, inputs: PrepareInputs) -> VerifiedRelease:
             "application": inputs.application_wheel,
             "platform": platform.platform(),
             "frontend": "absent" if inputs.frontend is None else inputs.frontend.digest,
+            "otel": "absent" if inputs.otel is None else inputs.otel.digest,
         }
     )
     root = store / identity
     root.mkdir(mode=0o700)  # Never reuse a partial or previously sealed generation.
     _copy_frontend(inputs.frontend, root, frontend_files)
+    _copy_collector(inputs.otel, root, otel_files)
     _retain_startup_wheel(wheels, root)
     _copy_verified_python(source, root / "python", python_files)
     python = root / "python/bin/python3"
