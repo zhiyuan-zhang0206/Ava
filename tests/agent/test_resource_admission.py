@@ -36,7 +36,7 @@ async def test_real_exec_dispatch_uses_owner_and_discharges_exact_map(
     result, payload = await _run_in_subprocess(
         "print('owned-runtime-proof')", target.agent_id, asyncio.Event(), 30, exec_dir=tmp_path
     )
-    assert isinstance(result, _ExecDone), result
+    assert isinstance(result, _ExecDone), result.output
     assert payload is not None and payload.kind == "done"
     row = db_conn.execute(
         "SELECT incarnation_resources FROM agents_meta WHERE id=%s", (target.agent_id,)
