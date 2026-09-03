@@ -151,12 +151,8 @@ def prepare_normal_services(unit: PublishedUnit, schema_digest: str) -> tuple[Pr
     )
     if actual != [item.model_dump() for item in receipt.services]:
         raise ReleaseRejectedError("normal service roster changed since preparation")
-    prepared = tuple(
-        sorted(
-            (_command(spec, image) for spec, gate in roster if gate is None),
-            key=lambda item: item.identity.session,
-        )
-    )
+    # Pin the authored dependency order while all discovery is still pre-stop.
+    prepared = tuple(_command(spec, image) for spec, gate in roster if gate is None)
     if not prepared:
         raise ReleaseRejectedError("empty normal service roster")
     return prepared

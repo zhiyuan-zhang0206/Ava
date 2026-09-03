@@ -116,3 +116,79 @@ def test_continuation_requires_same_actual_ready_handoff(
         normal.continue_after_bootstrap(
             Mock(spec=PreparedBootstrapHop), Mock(spec=normal.PreparedNormalRelease), "expected"
         )
+
+
+def test_prepared_services_pin_dependency_order_before_mutable_roster_changes(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from unittest.mock import Mock
+
+    from cli.commands import _release_services as services
+    from shared.runtime_publication_input import PreparedService as ReceiptService
+
+    root = tmp_path / "releases" / ("a" * 64)
+    image = VerifiedRelease("a" * 64, "b" * 64, root, root / "python", root)
+    unit = PublishedUnit(
+        machine="test",
+        home=str(tmp_path),
+        artifact_digest="a" * 64,
+        manifest_digest="b" * 64,
+        inventory_digest="c" * 64,
+    )
+    specs = [
+        ServiceSpec(
+            session=name, cmd="unused", capabilities=frozenset({"gateway"}), requires_db=False
+        )
+        for name in ("z-dependency", "a-consumer", "disabled")
+    ]
+    roster = [(specs[0], None), (specs[1], None), (specs[2], "disabled")]
+    receipt = Mock(
+        services=tuple(
+            sorted(
+                (
+                    ReceiptService(session=spec.session, requires_db=False, gate=gate)
+                    for spec, gate in roster
+                ),
+                key=lambda item: item.session,
+            )
+        )
+    )
+
+    def verified(_unit: PublishedUnit, _schema: str) -> VerifiedRelease:
+        return image
+
+    def prefix() -> Path:
+        return root / "venv"
+
+    def read(_path: Path) -> bytes:
+        return b"receipt parsed by boundary fake"
+
+    def parsed(_body: bytes) -> object:
+        return receipt
+
+    def discover(_roles: object) -> list[tuple[ServiceSpec, str | None]]:
+        return roster
+
+    def roles() -> frozenset[str]:
+        return frozenset({"gateway"})
+
+    def command(spec: ServiceSpec, _image: VerifiedRelease) -> services.PreparedService:
+        identity = NormalService(
+            session=f"ava-{spec.session}",
+            module=None,
+            executable=str(root / "binary"),
+            entrypoint=str(root / "binary"),
+            command_digest="d" * 64,
+        )
+        return services.PreparedService(identity, spec, ("unused",), root, {})
+
+    monkeypatch.setattr(services, "verify_unit_image", verified)
+    monkeypatch.setattr(services, "runtime_venv", prefix)
+    monkeypatch.setattr(services, "regular_bytes", read)
+    monkeypatch.setattr(services.PreparationReceipt, "model_validate_json", parsed)
+    monkeypatch.setattr(services, "services_for_capabilities_annotated", discover)
+    monkeypatch.setattr(services, "machine_role", roles)
+    monkeypatch.setattr(services, "_command", command)
+    prepared = services.prepare_normal_services(unit, "e" * 64)
+    roster.clear()
+    assert [item.identity.session for item in prepared] == ["ava-z-dependency", "ava-a-consumer"]

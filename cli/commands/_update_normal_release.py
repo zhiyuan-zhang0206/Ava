@@ -89,7 +89,9 @@ def _preflight_pending_plan(plan: PreparedNormalRelease) -> None:
     previous = plan.request.previous_selector
     expected = CandidateUnitPlan(
         unit=plan.request.unit,
-        services=tuple(item.identity for item in plan.services),
+        services=tuple(
+            sorted((item.identity for item in plan.services), key=lambda item: item.session)
+        ),
         previous_selector_digest=None
         if previous is None
         else hashlib.sha256(previous.encode()).hexdigest(),
@@ -329,15 +331,8 @@ def execute_normal_release(plan: PreparedNormalRelease, generation: str) -> int:
         state = state.model_copy(update={"stage": "bootstrap_stopped"})
         _journal(generation, state)
         results = []
-        # Preserve the existing service dependency order, not alphabetical order.
-        from ops.spec import services_for_capabilities_annotated
-        from shared.machine import machine_role
-
-        by_name = {item.identity.session: item for item in plan.services}
-        for spec, gate in services_for_capabilities_annotated(machine_role()):
-            if gate is not None:
-                continue
-            service = by_name[f"ava-{spec.session}"]
+        # Never rediscover mutable gates after stop: preparation pinned this order.
+        for service in plan.services:
             state = state.model_copy(
                 update={"stage": "starting", "starting_session": service.identity.session}
             )
