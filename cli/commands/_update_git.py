@@ -24,6 +24,7 @@ from cli.commands._repo import _repo_root
 from shared.config import settings
 from shared.gitenv import git_env
 from shared.proc import run_bounded
+from shared.runtime_migration import ReleaseMigrationContext
 
 _REPO_ROOT_FOR_GIT = _repo_root()
 
@@ -384,7 +385,7 @@ def git_checkout_sha(sha: str) -> str:
     return from_sha
 
 
-def apply_pending_migrations() -> list[str]:
+def apply_pending_migrations(*, release: ReleaseMigrationContext | None = None) -> list[str]:
     """Run all pending DB migrations; return the list of applied migration names
     (empty = no pending).
 
@@ -405,7 +406,9 @@ def apply_pending_migrations() -> list[str]:
     # transaction pooling; see cli/commands/migrations.py). unbounded=True:
     # migration DDL may exceed the 60s statement ceiling.
     with shared.db.connect(direct=True, unbounded=True) as conn:
-        return _mig.apply_pending_migrations(conn)
+        if release is None:
+            return _mig.apply_pending_migrations(conn)
+        return _mig.apply_pending_migrations(conn, release=release)
 
 
 def _vet_rollout_target(target_sha: str) -> int | None:

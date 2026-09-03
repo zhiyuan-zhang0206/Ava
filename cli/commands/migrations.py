@@ -8,8 +8,10 @@ their own entry points.
 
 from __future__ import annotations
 
+from shared.runtime_migration import ReleaseMigrationContext
 
-def cmd_migrations_apply() -> list[str]:
+
+def cmd_migrations_apply(*, release: ReleaseMigrationContext | None = None) -> list[str]:
     """Apply Ava migrations and verify checkpoint schema; `ava start` step 2.5.
 
     Ava SQL files run on every host (a runner normally has nothing pending and
@@ -49,7 +51,10 @@ def cmd_migrations_apply() -> list[str]:
     # ceiling (large-table rebuilds, partition backfills); the applier must
     # stay unbounded (shared/db.py PG_STATEMENT_TIMEOUT_*).
     with shared.db.connect(direct=True, unbounded=True) as conn:
-        done = apply_pending_migrations(conn)
+        if release is None:
+            done = apply_pending_migrations(conn)
+        else:
+            done = apply_pending_migrations(conn, release=release)
     cluster.assert_checkpoint_schema_current(shared.db.direct_db_url())
     print(f"applied {len(done)} migration(s): {done}")
     return done

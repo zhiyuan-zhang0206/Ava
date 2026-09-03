@@ -10,6 +10,13 @@ tags:
 
 # Schema Migrations (baseline + deltas)
 
+The internal verified-release argument on the real `cmd_start` entry validates
+the operation receipt before setup, source repair, or converge. A migration
+receipt alone cannot authorize service cutover: start currently refuses until
+prepared service closure, bootable LKG and the all-writer barrier are implemented.
+The existing start migration helper accepts the same typed context and preserves
+checkpoint dependency/schema checks. No public CLI activation option is exposed.
+
 ## Two places, one schema
 
 - **`db/schema.sql`** — the squashed **baseline**: the full current schema a
@@ -57,6 +64,27 @@ ordinary `ava start` — which calls this and applies nothing — is unaffected.
 empty `machine_units` means a fresh birth (step 2.5 migrates before step 3
 registers the unit) and is allowed.
 
+An explicit verified-release transition context is stricter: it requires the
+current non-settling rollout lease identity, canonical unit-owned generation,
+manifest-bound packaged SQL inventory, and a nonempty matching gateway roster
+before any legacy conversion or migration. It does not obtain authority from an
+environment override. Ordinary checkout enumeration remains Git-bound. Legacy
+integer-history conversion also checks gateway authority before its first write.
+
+Installed wheel startup can compare schema versions without Git using the loaded
+distribution's hash-declared SQL members. The distribution must correspond to the
+loaded module, must not be editable, and changed or undeclared SQL is rejected.
+This RECORD check is package integrity for read-only comparison, not deployment
+authority: an ordinary unanchored wheel still cannot migrate the database.
+
+The existing CLI transition helper records one secret-free candidate receipt per
+lease acquisition under the unit's `run/` directory. It validates operation,
+gateway ownership and the complete image before atomically writing a 0600
+receipt. Re-recording identical evidence is idempotent; a different candidate
+for that acquisition is refused. Loading revalidates the current lease, target,
+platform, image and gateway tuple. This journal neither selects an image nor
+authorizes service activation independently of the deployment operation.
+
 Rationale and the rejected alternatives:
 [2026-07-31-migrations-are-gateway-only](../decisions/2026-07-31-migrations-are-gateway-only.md).
 
@@ -90,14 +118,11 @@ Every long-running process (gateway / agent / restarter / labeler) calls
 | DB applied > code required | `CodeBehindSchema` | this host missed a rollout — local **code** is stale |
 
 `CodeBehindSchema` is what makes an offline runner self-heal: the watchdog sees
-it and spawns an `ava update`, which takes the self-update branch on a runner.
+it and spawns an `ava cluster update`, which takes the self-update branch on a runner.
 
-Because this is the **first** thing a daemon does at boot, its connection carries
-`shared.db.PG_KEEPALIVE_KWARGS` — most importantly the 5s `connect_timeout`. A
-database that black-holes packets (dropped traffic, not `ECONNREFUSED`) would
-otherwise park the whole boot on the OS TCP-retransmit timeout, and the daemon
-would read as "failed to start" while it is really blocked on a socket. Bounded,
-boot raises the socket error and the supervisor's report matches reality.
+Startup schema connections use `shared.db.PG_KEEPALIVE_KWARGS`, including a 5s
+`connect_timeout`, so dropped packets raise a bounded connection failure rather
+than leaving startup blocked on the OS TCP retransmission timeout.
 
 ## Notes
 
@@ -117,4 +142,4 @@ boot raises the socket error and the supervisor's report matches reality.
 ## Key Dependencies
 
 - [[shared.ava.okf.md]] — the shared-layer overview
-- [[../cli/cli.ava.okf.md]] — `ava start` / `ava update`, which apply and roll back
+- [[../cli/cli.ava.okf.md]] — `ava start` / `ava cluster update`, which apply and roll back
