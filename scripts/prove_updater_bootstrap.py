@@ -6,6 +6,7 @@ verified preparation inputs. This is NOT a source-version migration/LKG proof.
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import json
 import os
@@ -58,6 +59,62 @@ def challenge_budget(until: datetime) -> float:
     return remaining
 
 
+def port_owners(port: int) -> list[dict[str, object]]:
+    result: list[dict[str, object]] = []
+    for entry in psutil.net_connections(kind="tcp"):
+        if not entry.laddr or entry.laddr.port != port:
+            continue
+        item: dict[str, object] = {"state": entry.status, "pid": entry.pid}
+        if entry.pid is not None:
+            try:
+                process = psutil.Process(entry.pid)
+                item.update(
+                    birth=process.create_time(), executable=process.exe(), parent=process.ppid()
+                )
+            except psutil.Error as exc:
+                item["identity_error"] = type(exc).__name__
+        result.append(item)
+        require(len(result) <= 32, "CI endpoint inventory exceeded its bounded evidence size")
+    return result
+
+
+def occupy_endpoint(plan: hop.PreparedBootstrapHop, evidence: dict[str, object]) -> socket.socket:
+    """Acquire the CI fault listener; never classify or terminate another owner."""
+    deadline = time.monotonic() + challenge_budget(plan.candidate.challenge.valid_until) / 2
+    attempts = 0
+    while time.monotonic() < deadline:
+        require(observe_process(plan.old_session.process) == "exited", "A is not proven exited")
+        hop.validate_operation(plan.candidate, plan.projection)
+        occupied = socket.socket()
+        try:
+            occupied.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            evidence["stage"] = "occupier_bind"
+            occupied.bind(("127.0.0.1", plan.projection.ops_port))
+            evidence["stage"] = "occupier_listen"
+            occupied.listen()
+            evidence["bind_attempts"] = attempts + 1
+            return occupied
+        except OSError as exc:
+            occupied.close()
+            if exc.errno != errno.EADDRINUSE:
+                raise
+            attempts += 1
+            evidence["bind_attempts"] = attempts
+            evidence["last_conflict_at"] = datetime.now(UTC).isoformat()
+            owners = port_owners(plan.projection.ops_port)
+            evidence["port_states"] = owners
+            require(
+                bool(owners)
+                and all(
+                    owner["state"] == psutil.CONN_TIME_WAIT and owner["pid"] is None
+                    for owner in owners
+                ),
+                "occupied endpoint is not exclusively ownerless TIME_WAIT; no fixture retry",
+            )
+            time.sleep(0.05)
+    raise AssertionError("CI fault listener remained unavailable within the original challenge")
+
+
 def fault_worker(mode: str, request: Path) -> int:  # noqa: PLR0915 — scoped real-updater fault interposition and evidence.
     """Test-only interposition around the actual existing updater entry."""
     from cli.commands._update_agent_runner import main as updater_main
@@ -99,21 +156,20 @@ def fault_worker(mode: str, request: Path) -> int:  # noqa: PLR0915 — scoped r
     if mode != "candidate-bind-failure":
         raise AssertionError("unknown CI fault mode")
     real_start = hop._start_observer
+    fault_evidence: dict[str, object] = {}
 
     def blocked_candidate(
         plan: hop.PreparedBootstrapHop, image: hop.VerifiedRelease, context_path: str
     ) -> None:
         if image.digest != plan.image.digest:
+            fault_evidence["stage"] = "restore_A"
             real_start(plan, image, context_path)
             return
-        with socket.socket() as occupied:
-            # A has exited, but its accepted connections can remain in TIME_WAIT.
-            # Reuse that address without SO_REUSEPORT: an existing live listener
-            # still refuses, and B must actually fail against this occupied one.
-            occupied.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            occupied.bind(("127.0.0.1", plan.projection.ops_port))
-            occupied.listen()
+        fault_evidence["stage"] = "occupier_preflight"
+        with occupy_endpoint(plan, fault_evidence):
+            fault_evidence["stage"] = "start_B"
             real_start(plan, image, context_path)
+            fault_evidence["stage"] = "observe_B"
             deadline = time.monotonic() + challenge_budget(plan.candidate.challenge.valid_until) / 2
             while time.monotonic() < deadline:
                 try:
@@ -123,6 +179,8 @@ def fault_worker(mode: str, request: Path) -> int:  # noqa: PLR0915 — scoped r
                     continue
                 require(kind == "B", "failure fixture did not launch actual B")
                 if observe_process(process) == "exited":
+                    fault_evidence["stage"] = "B_exited_while_occupied"
+                    fault_evidence["B_exit_identity"] = process.model_dump()
                     (request.parent / "occupied-candidate-exit.json").write_text(
                         json.dumps(
                             {"identity": process.model_dump(), "exited_while_occupied": True}
@@ -140,10 +198,17 @@ def fault_worker(mode: str, request: Path) -> int:  # noqa: PLR0915 — scoped r
         except Exception as exc:
             # The updater may legitimately catch this failure for compensation.
             # Preserve fixture versus native-launch attribution without secret text.
+            fault_evidence["error_stage"] = fault_evidence["stage"]
+            fault_evidence["exception"] = type(exc).__name__
+            fault_evidence["errno"] = getattr(exc, "errno", None)
             (request.parent / "occupied-candidate-error.json").write_text(
                 json.dumps({"exception": type(exc).__name__, "errno": getattr(exc, "errno", None)})
             )
             raise
+        finally:
+            (request.parent.parent.parent / "hop-observation-bind-fixture.json").write_text(
+                json.dumps(fault_evidence)
+            )
 
     with patch.object(hop, "_start_observer", side_effect=recorded_candidate):
         return updater_main(["--bootstrap-hop", str(request)])
@@ -327,9 +392,16 @@ def main() -> None:  # noqa: PLR0915 — isolated CI native lifetimes, always re
 
         def stop_session() -> None:
             backend = get_backend()
+            record_path = sessions / "ava-ops.json"
+            record = json.loads(record_path.read_bytes()) if record_path.exists() else None
             if backend.has_session("ava-ops"):
                 stopped, detail = backend.kill_session("ava-ops", graceful=True, timeout=10)
                 require(stopped, "CI exact native cleanup failed: " + detail)
+            if record is not None:
+                process = hop.ExpectedProcess.model_validate(
+                    {key: record[key] for key in ("pid", "create_time", "starttime")}
+                )
+                require(observe_process(process) == "exited", "previous case retained its process")
 
         try:
             for mode in (
@@ -578,6 +650,7 @@ def main() -> None:  # noqa: PLR0915 — isolated CI native lifetimes, always re
                         resumed.stderr,
                     )
                     require(resumed.returncode == 1, "dead-owner resume did not restore A")
+                bind_exit: object = None
                 if mode == "candidate-bind-failure":
                     evidence = home / "run/occupied-candidate-exit.json"
                     if not evidence.exists():
@@ -595,6 +668,7 @@ def main() -> None:  # noqa: PLR0915 — isolated CI native lifetimes, always re
                         failure["exited_while_occupied"] is True,
                         "compensation swallowed a failed native bind fault fixture",
                     )
+                    bind_exit = failure
                 if mode in {"expire-after-stop", "holder-change-after-stop"}:
                     effects = json.loads((home / f"run/effect-count-{mode}.json").read_text())
                     require(
@@ -647,6 +721,7 @@ def main() -> None:  # noqa: PLR0915 — isolated CI native lifetimes, always re
                             "operation": operation.model_dump(mode="json"),
                             "deadline": until.isoformat(),
                             "independent_endpoint": True,
+                            "candidate_bind_exit": bind_exit,
                             "authenticated_observer_instance": observer_instance,
                             "verified_endpoint_image": {
                                 "artifact": final_context.expected.artifact_digest,
