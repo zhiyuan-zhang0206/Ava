@@ -79,6 +79,21 @@ jobs:
           uv run pyright --pythonplatform Linux shared/winjob.py shared/exec_process_domain.py agent/graph/_exec_process.py tests/agent/test_exec_domain_confirmation.py
           uv run pyright --pythonplatform Windows shared/winjob.py shared/winjob_pipes.py shared/exec_owner_protocol.py
           uv run pytest --confcutdir=tests/agent tests/agent/test_exec_domain_confirmation.py tests/agent/test_exec_owner_entry.py -q --junitxml=proof/native-domain.xml
+      - name: Original buffered-control regression must fail on Linux
+        if: matrix.os == 'ubuntu-24.04'
+        shell: bash
+        run: |
+          git fetch --no-tags --depth=1 origin 4faff03726be6135b9a43c8b1e555c15182c6155
+          cp agent/exec_domain_owner.py proof/current-owner.py
+          trap 'cp proof/current-owner.py agent/exec_domain_owner.py' EXIT
+          git show 4faff03726be6135b9a43c8b1e555c15182c6155:agent/exec_domain_owner.py > agent/exec_domain_owner.py
+          set +e
+          uv run pytest --confcutdir=tests/agent tests/agent/test_exec_owner_entry.py::test_completed_owner_exits_while_original_host_keeps_control_open -q > proof/old-buffered-control.txt 2>&1
+          status=$?
+          set -e
+          test "$status" = 1
+          grep -F '_enter_buffered_busy' proof/old-buffered-control.txt
+          grep -F 'FAILED tests/agent/test_exec_owner_entry.py::test_completed_owner_exits_while_original_host_keeps_control_open' proof/old-buffered-control.txt
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
