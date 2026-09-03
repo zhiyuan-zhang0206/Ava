@@ -29,6 +29,10 @@ export default defineConfig({
     environment: "happy-dom",
     globals: false,
     setupFiles: ["./vitest.setup.ts"],
+    reporters: [
+      ["default", {}],
+      ["junit", { outputFile: "./junit.xml", addFileAttribute: true }],
+    ],
     // Pin the timezone: timestamp-rendering tests (timeline.test.tsx) assert
     // on formatted output, and `Intl` renders "GMT+8"-style zone names on
     // non-UTC dev machines that the assertions (written against CI's UTC)
