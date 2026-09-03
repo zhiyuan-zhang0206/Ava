@@ -191,9 +191,9 @@ def _build_boot(script_path: _pl.Path, watchdog_secs: float | None, agent_id: in
     explicit import — this is the public contract of ``launch()``.
 
     runpy is wrapped in try/finally — no except anywhere: an exception still
-    propagates, Python prints the traceback to stderr (redirected into the
-    watcher's log file) and exits non-zero, and the shell-level completion
-    notice reports that exit code and carries the tail of the log. A
+    propagates, Python prints the traceback to stderr (teed to the watcher's
+    log file and session capture) and exits non-zero, and the shell-level
+    completion notice reports that exit code and carries the tail of the log. A
     ``SystemExit(n)`` likewise becomes exit code n. The finally block only
     deletes the generated script + bootstrap files: a watcher reads them
     exactly once at launch, so removing them on exit keeps the watchers dir
@@ -276,12 +276,14 @@ def _build_boot(script_path: _pl.Path, watchdog_secs: float | None, agent_id: in
         "    while True:\n"
         "        time.sleep(5)\n"
         "        if os.getppid() != _parent_pid:\n"
-        "            print(\n"
-        "                '[watcher] session gone (pty host died) — exiting (orphan guard)',\n"
-        "                file=sys.stderr,\n"
-        "                flush=True,\n"
-        "            )\n"
-        "            os._exit(125)\n"
+        "            try:\n"
+        "                print(\n"
+        "                    '[watcher] session gone (pty host died) — exiting (orphan guard)',\n"
+        "                    file=sys.stderr,\n"
+        "                    flush=True,\n"
+        "                )\n"
+        "            finally:\n"
+        "                os._exit(125)\n"
         "\n"
         "_orphan_thread = threading.Thread(target=_orphan_guard, daemon=True)\n"
         "_orphan_thread.start()\n"
@@ -348,13 +350,13 @@ def _spawn(
     watchdog and runs the script via runpy — so the command line typed into
     the session stays short and readable. Identity is inlined because the
     session env allowlist does not forward ``AVA_AGENT_ID`` (Task #856 /
-    #964; see ``_build_boot``). Output is
-    redirected to a per-agent log file and a completion notice (exit code +
-    log path + output tail) is delivered from the shell level when the child
-    exits, on every exit path — a crashed or hard-killed child cannot skip
-    it. The session closes itself after the notice is delivered (the log file
-    preserves the output); a notice that fails to send leaves the session open
-    as the post-mortem site.
+    #964; see ``_build_boot``). Output is teed to a per-agent log file and
+    session capture, and a completion notice (exit code + log path + output
+    tail) is delivered from the shell level when the child exits, on every
+    exit path — a crashed or hard-killed child cannot skip it. The session
+    closes itself after the notice is delivered (the log file preserves the
+    output); a notice that fails to send leaves the session open as the
+    post-mortem site.
     """
     import shlex
     import sys

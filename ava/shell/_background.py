@@ -1,10 +1,16 @@
 """Shared plumbing for background commands that report back on completion.
 
 `ava.shell.run_background` and `ava.watcher._spawn` share one shape: run a
-command inside a persistent session with its output redirected to a per-agent
-log file, then deliver a completion notice through the `ava agents send` CLI
-(exit code + log path + output tail). This module builds that command line and
-allocates the log files; the session mechanics stay in `sessions.py`.
+command inside a persistent session with its output teed to a per-agent log
+file and the session capture, then deliver a completion notice through the
+`ava agents send` CLI (exit code + log path + output tail). This module builds
+that command line and allocates the log files; the session mechanics stay in
+`sessions.py`.
+
+The session shell is Bash, so the generated pipeline captures the command's
+exit status from `PIPESTATUS[0]` immediately after `tee`. `pipefail` would
+both let a failed `tee` replace the command status and mutate a kept
+interactive shell's state.
 
 The notice is sent from the shell level (not from inside the command's own
 process) so it fires on every exit path — including a SIGKILL'd or OOM'd child
@@ -23,13 +29,14 @@ from pathlib import Path
 import ava._boot
 from shared.paths import workspace_dir
 
-# Background command output is redirected to `.shell_logs/` inside the agent's
-# workspace so it survives session close and scrollback limits — and lives at a
-# predictable spot: the workspace is the default base of the agent's file and
-# shell tools, so `.shell_logs/<sid>_<name>.log` is readable by relative path,
-# and the path is reconstructable from the session id alone. Sibling of
-# `.exec_output/` (oversized exec-output overflow), with its own ring so the
-# two cannot evict each other.
+# Background command output is teed to `.shell_logs/` inside the agent's
+# workspace and the session capture. The log survives session close and
+# scrollback limits — and lives at a predictable spot: the workspace is the
+# default base of the agent's file and shell tools, so
+# `.shell_logs/<sid>_<name>.log` is readable by relative path, and the path is
+# reconstructable from the session id alone. Sibling of `.exec_output/`
+# (oversized exec-output overflow), with its own ring so the two cannot evict
+# each other.
 _OUTPUT_DIRNAME = ".shell_logs"
 # Ring: keep the most recent N logs per workspace, prune older ones so the dir
 # does not grow unbounded across a long-lived agent.
@@ -96,16 +103,18 @@ def notified_line(
     output_path: Path,
     keep: bool,
 ) -> str:
-    """Build the shell line: run `cmd` (subshell, output redirected to
-    `output_path`), then deliver the completion notice, then close the session
-    unless `keep`.
+    """Build the shell line: run `cmd` in a subshell, tee stdout+stderr to
+    `output_path` and the session capture, then deliver the completion notice,
+    then close the session unless `keep`.
 
     `cmd` must be a single line: the line is typed into the session's shell,
     so an embedded newline would submit a partial command. The subshell makes
-    the redirect cover a compound `cmd` (`a; b`) as one unit; `_ec=$?` pins the
-    exit code before anything else runs. `label` and `source` are
-    caller-controlled literals (no user text), and the double-quoted notice only
-    expands `${_ec}`.
+    the pipeline cover a compound `cmd` (`a; b`) as one unit;
+    `${PIPESTATUS[0]}` captures the subshell's exit code immediately before any
+    other command can reset it. `pipefail` is unsuitable because a failed
+    `tee` could replace that exit code and it would mutate a kept interactive
+    shell's state. `label` and `source` are caller-controlled literals (no user
+    text), and the double-quoted notice only expands `${_ec}`.
     """
     if "\n" in cmd or "\r" in cmd:
         raise ValueError(
@@ -122,7 +131,7 @@ def notified_line(
     q_path = shlex.quote(str(output_path))
     notice = f"{label} exited with code ${{_ec}}. Full output at {output_path}."
     line = (
-        f"( {cmd} ) > {q_path} 2>&1; _ec=$?; "
+        f"( {cmd} ) 2>&1 | tee {q_path}; _ec=${{PIPESTATUS[0]}}; "
         f'{shlex.quote(str(cli_path()))} agents send {agent_id} "{notice}" '
         f"--source {source} --tail-file {q_path}"
     )

@@ -164,10 +164,11 @@ def run_background(
     """You get a message when it finishes — no polling.
 
     The command runs in a fresh persistent session, stdout+stderr streaming to
-    `output_path` (`.shell_logs/<session_id>_<name>.log` in your workspace) —
-    read it any time to check progress. The completion message carries the
-    exit code, the log path, and the output tail; the session then closes
-    itself unless `keep=True`. While running it is an ordinary session.
+    `output_path` (`.shell_logs/<session_id>_<name>.log` in your workspace)
+    and visible live in the session capture — read either to check progress.
+    The completion message carries the exit code, the log path, and the output
+    tail; the session then closes itself unless `keep=True`. While running it
+    is an ordinary session.
 
     Use this for one-shot long tasks; interactive programs belong in
     `sessions.new` + `send`.

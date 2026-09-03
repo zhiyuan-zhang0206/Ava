@@ -34,9 +34,9 @@ def test_notified_line_structure(tmp_path: Path) -> None:
         output_path=log,
         keep=False,
     )
-    # Subshell so the redirect covers a compound cmd; exit code pinned before
-    # anything else runs; CLI notice with source + tail; close after delivery.
-    assert line.startswith(f"( make build ) > {log} 2>&1; _ec=$?; ")
+    # Subshell so the pipeline covers a compound cmd; command exit code pinned
+    # before anything else runs; CLI notice with source + tail; close after delivery.
+    assert line.startswith(f"( make build ) 2>&1 | tee {log}; _ec=${{PIPESTATUS[0]}}; ")
     assert "agents send 5" in line
     assert "Background command 'build' exited with code ${_ec}" in line
     assert "--source shell:3" in line
@@ -159,6 +159,8 @@ def test_run_background_line_and_handle(monkeypatch: pytest.MonkeyPatch, tmp_pat
     assert Path(handle.output_path).exists()  # tailable immediately
     cmd = captured["cmd"]
     assert "( echo hi )" in cmd
+    assert "2>&1 | tee" in cmd
+    assert "_ec=${PIPESTATUS[0]}" in cmd
     assert "--source shell:7" in cmd
     assert cmd.endswith("; exit $_ec")
 
