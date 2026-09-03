@@ -436,18 +436,20 @@ class TestSendMessage:
 
 
 class TestLifecycle:
+    @pytest.mark.parametrize("wire_status", ["enqueued", "already_terminated", "force_killed"])
     @patch("ava._gateway_client._client")
-    def test_terminate_returns_status(self, mock_client: MagicMock):
+    def test_terminate_returns_status(self, mock_client: MagicMock, wire_status: str):
         from ava._gateway_client import terminate
 
         mock_resp = MagicMock(spec=httpx.Response)
         mock_resp.status_code = 200
         mock_resp.is_success = True
-        mock_resp.json.return_value = {"status": "terminated"}
+        mock_resp.json.return_value = {"status": wire_status}
         mock_client.post.return_value = mock_resp
 
-        status = terminate(42, source="agent:1")
-        assert status == "terminated"
+        status = terminate(42, source="agent:1", force=True)
+        assert status == wire_status
+        assert mock_client.post.call_args.kwargs["json"]["force"] is True
 
     @patch("ava._gateway_client._client")
     def test_restart_returns_status(self, mock_client: MagicMock):

@@ -28,7 +28,7 @@ Overview of the Agent subsystem.
   the **initial prompt template** used at spawn: there is no mode field in the graph. Adding a new agent type = writing a
   new initial prompt, no framework change.
 - **Lifecycle verbs** (state enumeration / wire format see [[shared/agents-contract.ava.okf.md|cross-process contract]],
-  inbound kind see [[agent/db.ava.okf.md|database layer]], implementation in `ops/agent_spawn.py` + `ops/agent_wake.py`) — the distinction is
+  inbound kind see [[agent/db/db.ava.okf.md|database layer]], implementation in `ops/agent_spawn.py` + `ops/agent_wake.py`) — the distinction is
   "whether the new process needs to be told what it went through":
   - **spawn** — create new agent, **no inbound message delivered** (from nothing, no "why was I called" issue).
   - **resurrect** — bring a `terminated` agent back (history preserved), deliver a `kind='resurrect'` marker
@@ -45,7 +45,7 @@ Overview of the Agent subsystem.
 
 - [[agent/agent-runtime.ava.okf.md|Agent Runtime]]
 - [[agent/cross-cutting.ava.okf.md|Cross Cutting]]
-- [[agent/db.ava.okf.md|Db]]
+- [[agent/db/db.ava.okf.md|Db]]
 - [[agent/env-vars.ava.okf.md|Env Vars]]
 - [[agent/infra.ava.okf.md|Infra]]
 - [[agent/lease.ava.okf.md|Lease]]
@@ -56,7 +56,7 @@ Overview of the Agent subsystem.
 - [[agent/messages.ava.okf.md|Messages]]
 - [[agent/observe.ava.okf.md|Observe]]
 - [[agent/process-lifecycle/process-lifecycle.ava.okf.md|Process Lifecycle]]
-- [[agent/startup.ava.okf.md|Startup]]
+- [[agent/startup/startup.ava.okf.md|Startup]]
 - [[agent/state.ava.okf.md|State]]
 - [[agent/sessions.ava.okf.md|Sessions]]
 - [[agent/graph/graph.ava.okf.md|Agent Graph]]

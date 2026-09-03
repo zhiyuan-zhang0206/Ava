@@ -318,11 +318,11 @@ class TerminateAgentRequest(BaseModel):
 class TerminateAgentResponse(BaseModel):
     """POST /api/agents/{id}/terminate response.
 
-    `enqueued`: terminate inbound INSERTed; agent exits after processing
-    the current turn.
+    `enqueued`: termination accepted, including hosted force. Actual work may
+        still be draining; this result does not prove exit.
     `already_terminated`: agent was already dead. Graceful termination is a
-        no-op; force preserves this response while recording a newer kill-intent
-        fence and cleaning the exact supervisor session.
+        no-op. Hosted force instead returns enqueued until its exact original
+        host can prove quiescence; metadata status alone is not exit evidence.
     `force_killed`: force=true killed the agent's detached process + force
         marked terminated — agent may have been stuck and never took
         the graceful path.

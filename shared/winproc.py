@@ -1,51 +1,9 @@
-"""Windows process supervisor — the native-Windows session surface.
-detached-session model (issue: Phase-2 native Windows agent-runner).
+"""Native Windows sessions with private hidden consoles and explicit log handles.
 
-The session surface gives Ava three things: a *named* handle to a long-running
-detached process, a liveness check by that name, and a kill by that name. There
-is no POSIX process supervisor on Windows, so this module reproduces that surface with plain Win32
-process primitives:
-
-- a "session" is a named, detached child process that survives the parent
-  ``ava start`` exiting and owns its own process group (for Ctrl-Break);
-  ``_plan_launch`` decides whether cmd.exe is in the middle (see below);
-- its identity (pid + process start-time, to defeat pid recycling) is recorded
-  as JSON under ``$AVA_HOME/run/sessions/<name>.json``;
-- stdout/stderr are redirected to ``$AVA_HOME/logs/<name>.out.log`` (the session
-  pane analog) so a crash's last words survive the session ending;
-- liveness = the record's pid is alive *and* its start-time matches the record;
-- kill walks the process tree (cmd -> uv -> python, npm -> node, …) and
-  terminates it, graceful-first via Ctrl-Break when asked — but the walk stops at
-  another session's process, see `_spared_pids`.
-
-The public surface mirrors the POSIX session helpers in ``cli/commands/_session_lifecycle.py`` so the
-dispatch there is a thin ``if IS_WINDOWS`` fork. This module is import-safe on
-every platform (it only touches ``ctypes``/``psutil`` lazily inside Windows
-branches), but its functions are only ever *called* on Windows.
-
-**Why the launch is not simply ``cmd /c``.** cmd.exe started with
-``DETACHED_PROCESS`` finds itself without a console and allocates one, then hands
-*its children* that console's handles — overriding both the log-file handles it
-inherited and any ``>>`` redirect it was asked to perform. Measured on the fleet
-Windows box: a child under ``cmd /c`` gets stdout/stderr of ``FILE_TYPE_CHAR``
-(the throwaway console), the same child launched directly gets ``FILE_TYPE_DISK``
-(the log). So a daemon that dies at startup under ``cmd /c`` leaves NO trace on
-disk — its last words go to a console nobody is attached to, which dies with it.
-``_plan_launch`` is the fix: a command that needs no shell is launched as a plain
-argv with no cmd.exe in the middle, and a command that genuinely needs cmd (a
-``&&`` chain, ``set VAR=val``) gets ``CREATE_NO_WINDOW`` instead of
-``DETACHED_PROCESS`` so cmd starts *with* a console and never allocates one,
-leaving the inherited log-file handles in place for its children.
-
-**Why a kill stops at session boundaries.** Neither ``DETACHED_PROCESS`` nor
-``CREATE_NEW_PROCESS_GROUP`` reparents a child on Windows — there is no
-``setsid``, no double fork, and no init to inherit orphans, so a session spawned
-*by a daemon* stays that daemon's child in the process table for its whole life.
-A daemon on this box is therefore an ancestor of everything it ever started, and
-a naive ``children(recursive=True)`` tree kill of one session reaches straight
-into unrelated ones. POSIX gets that isolation from the launch side (the
-supervisor owns the children; ``shared.posixproc`` double-forks agents to init), so
-the same invariant is reproduced here from the *kill* side by `_spared_pids`.
+Each new session records private-console-v1. A bounded isolated helper verifies
+PID/birth and console membership before Ctrl-Break; no daemon changes its own
+console. Legacy records cannot authorize graceful delivery. Tree force-stop
+still preserves unrelated recorded sessions and the caller ancestry.
 """
 
 from __future__ import annotations
@@ -54,6 +12,7 @@ import contextlib
 import os
 import shlex
 import subprocess
+import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -65,6 +24,7 @@ from shared.paths import logs_dir, run_dir
 from shared.platform import IS_WINDOWS
 from shared.session_record import SessionRecord
 from shared.winjob import in_attached_exec_job
+from shared.winjob_spawn import run_job_process
 
 # psutil exceptions that mean "the process is already gone / not ours to touch" —
 # benign during a teardown race.
@@ -76,22 +36,13 @@ _GONE = (psutil.NoSuchProcess, psutil.AccessDenied, OSError)
 # defect that is only ever unit-tested on macOS is how this class of bug
 # survives — a 0 fallback makes both branches indistinguishable in a test.)
 #
-# Own process group, so we can deliver Ctrl-Break to it (and only it).
-_NEW_GROUP = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
 # A persistent session spawned by a one-shot exec must leave that exec's Job
 # Object. The flag is added only in the explicit exec-job context; outside it,
 # an unrelated outer Job may forbid breakaway and reject the launch.
 _BREAKAWAY = getattr(subprocess, "CREATE_BREAKAWAY_FROM_JOB", 0x01000000)
-# No console at all — correct for a process we launch ourselves and whose
-# stdout/stderr handles we own.
-_DETACHED_FLAGS = getattr(subprocess, "DETACHED_PROCESS", 0x00000008) | _NEW_GROUP
-# A console that has no window. Used only when cmd.exe is the child: cmd
-# allocates a console when it has none and then gives its own children that
-# console's handles, swallowing everything they print (see the module docstring).
-# Handing it a windowless console up front stops the allocation, so the log-file
-# handles we passed reach the commands cmd runs. Verified to survive the
-# launching process — and the ssh session that started it — exiting.
-_CMD_FLAGS = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000) | _NEW_GROUP
+# NEW_CONSOLE ignores NEW_PROCESS_GROUP. Control is private-console scoped,
+# never a group inferred from the PID. STARTUPINFO hides its window.
+_PRIVATE_CONSOLE_FLAGS = getattr(subprocess, "CREATE_NEW_CONSOLE", 0x00000010)
 
 # cmd.exe operators that give a command line a shape CreateProcess cannot
 # reproduce on its own: `&&` / `||` / `&` chaining, pipes, redirects, `%VAR%`
@@ -143,8 +94,8 @@ class _Launch:
 
     `command` is either an argv (launched directly, no shell) or a fully formed
     command line string (``cmd /s /c "…"``, passed verbatim so no quoting layer
-    sits between the caller's cmd.exe syntax and cmd.exe). `creationflags` follows
-    from that choice — see `_DETACHED_FLAGS` / `_CMD_FLAGS`.
+    sits between the caller's cmd.exe syntax and cmd.exe). Both shapes use a
+    private hidden console and preserve the explicit log-file handles.
     """
 
     command: str | list[str]
@@ -204,11 +155,15 @@ def _plan_launch(cmd: str | list[str], cwd: Path) -> _Launch:
         # cannot exist (the '.venv' is not recognized class — see the shell
         # branch's history). Absolute interpreter paths pass through untouched.
         python = _windows_python(cwd)
-        return _Launch([python if t == _POSIX_VENV_PYTHON else t for t in cmd], _DETACHED_FLAGS)
+        return _Launch(
+            [python if t == _POSIX_VENV_PYTHON else t for t in cmd], _PRIVATE_CONSOLE_FLAGS
+        )
     argv = None if _CMD_OPERATORS & set(cmd) else _split_argv(cmd)
     if argv is not None:
         python = _windows_python(cwd)
-        return _Launch([python if t == _POSIX_VENV_PYTHON else t for t in argv], _DETACHED_FLAGS)
+        return _Launch(
+            [python if t == _POSIX_VENV_PYTHON else t for t in argv], _PRIVATE_CONSOLE_FLAGS
+        )
     # Shell semantics are genuinely wanted. `/s` makes cmd strip exactly the
     # outer quote pair and take the rest literally — the one documented way to
     # pass a command line containing its own quotes (`set "VAR=val" && …`)
@@ -217,7 +172,7 @@ def _plan_launch(cmd: str | list[str], cwd: Path) -> _Launch:
     # backslash plus a quote toggle.
     python = _windows_python(cwd)
     shell_cmd = cmd.replace(_POSIX_VENV_PYTHON, f'"{python}"' if " " in python else python)
-    return _Launch(f'cmd /s /c "{shell_cmd}"', _CMD_FLAGS)
+    return _Launch(f'cmd /s /c "{shell_cmd}"', _PRIVATE_CONSOLE_FLAGS)
 
 
 def _process_for_record(rec: SessionRecord) -> psutil.Process | None:
@@ -292,6 +247,11 @@ def new_session(
     if in_attached_exec_job():
         creationflags |= _BREAKAWAY
     out = session_log_path(name).open("ab")
+    startup = None
+    if sys.platform == "win32":  # narrows Windows-only stdlib types for static checking
+        startup = subprocess.STARTUPINFO()
+        startup.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        startup.wShowWindow = subprocess.SW_HIDE
     try:
         err = stderr_append.open("ab") if stderr_append is not None else out
         try:
@@ -303,6 +263,7 @@ def new_session(
                 stdout=out,
                 stderr=err,
                 creationflags=creationflags,
+                startupinfo=startup,
                 close_fds=True,
             )
         finally:
@@ -327,31 +288,47 @@ def new_session(
         cmd=launch.display,
         cwd=str(cwd),
         started_at=time.time(),
+        control_mode="private-console-v1",
     ).write(_record_path(name))
     return True
 
 
 def graceful_signal(name: str) -> bool:
-    """Send the graceful-stop signal (Ctrl-Break) to the session's process group
-    without waiting or force-killing.
+    """Request Ctrl-Break in a verified private console without force-killing.
 
     The Windows analog of posixproc.graceful_signal: the agent maps Ctrl-Break to
-    its shutdown path (runs finally). Returns True if a live process was signaled.
+    its shutdown path (runs finally). True means Windows accepted delivery, not
+    that Python dispatched its handler or the process exited. Helper failure
+    and timeout propagate; legacy control provenance is refused.
     `ava stop`'s reap uses this to signal every agent, then wait on all of them
     under one shared deadline before force-killing stragglers.
     """
-    import signal
-
     rec = _read_record(name)
     if rec is None:
         return False
     proc = _process_for_record(rec)
     if proc is None:
         return False
-    with contextlib.suppress(*_GONE):
-        proc.send_signal(signal.CTRL_BREAK_EVENT)  # type: ignore[attr-defined]  # Windows-only signal; called only on Windows
-        return True
-    return False
+    if rec.control_mode != "private-console-v1":
+        raise RuntimeError("graceful delivery requires a verified private-console session")
+    helper = Path(__file__).resolve().with_name("windows_console_signal.py")
+    result = run_job_process(
+        [
+            sys.executable,
+            "-I",
+            str(helper),
+            str(_record_path(name)),
+            str(rec.pid),
+            str(rec.create_time),
+            str(time.monotonic() + 5),
+        ],
+        timeout=5,
+    )
+    if result.returncode:
+        raise RuntimeError(
+            f"private console delivery failed (exit {result.returncode}): {result.stderr.strip()}"
+        )
+    return True
 
 
 def _live_session_pids(exclude: str) -> set[int]:
@@ -447,8 +424,13 @@ def _descendants(proc: psutil.Process, *, spare: frozenset[int]) -> list[psutil.
 
 
 def _terminate_tree(
-    proc: psutil.Process, *, graceful: bool, timeout: float, spare: frozenset[int] = frozenset()
-) -> None:
+    proc: psutil.Process,
+    *,
+    session: str,
+    graceful: bool,
+    timeout: float,
+    spare: frozenset[int] = frozenset(),
+) -> str:
     """Terminate `proc` and its descendants (cmd -> uv -> python, …), except the
     subtrees rooted at a pid in `spare` (see `_spared_pids`).
 
@@ -459,19 +441,20 @@ def _terminate_tree(
     """
     children = _descendants(proc, spare=spare)
     if graceful:
-        import signal
-
-        with contextlib.suppress(*_GONE):
-            proc.send_signal(signal.CTRL_BREAK_EVENT)  # type: ignore[attr-defined]  # Windows-only signal; this branch only runs on Windows
+        graceful_signal(session)
         _gone, alive = psutil.wait_procs([proc, *children], timeout=timeout)
         if not alive:
-            return
+            return "graceful"
     # Hard kill: the session's own process last, so it cannot respawn one of the
     # children already taken down.
     for p in [*children, proc]:
         with contextlib.suppress(*_GONE):
             p.kill()
-    psutil.wait_procs([proc, *children], timeout=5)
+    _gone, alive = psutil.wait_procs([proc, *children], timeout=5)
+    survivors = [p.pid for p in alive if p.is_running()]
+    if survivors:
+        raise RuntimeError(f"native session processes survived force cleanup: {survivors}")
+    return "forced"
 
 
 def kill_session(name: str, *, graceful: bool = False, timeout: float = 15.0) -> tuple[bool, str]:
@@ -499,11 +482,18 @@ def kill_session(name: str, *, graceful: bool = False, timeout: float = 15.0) ->
     if proc is None:
         _record_path(name).unlink(missing_ok=True)
         return True, "noop"
-    try:
-        _terminate_tree(proc, graceful=graceful, timeout=timeout, spare=_spared_pids(name, proc))
-    except Exception as exc:
-        logger.warning("winproc kill {name} hit {exc}", name=name, exc=exc)
     mode = "graceful" if graceful else "forced"
+    try:
+        mode = _terminate_tree(
+            proc,
+            session=name,
+            graceful=graceful,
+            timeout=timeout,
+            spare=_spared_pids(name, proc),
+        )
+    except Exception as exc:
+        logger.error("winproc kill {name} hit {exc}", name=name, exc=exc)
+        return False, mode
     if proc.is_running():
         logger.error(
             "winproc kill {name}: pid {pid} is still running after the kill — leaving its "

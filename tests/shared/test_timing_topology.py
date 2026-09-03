@@ -36,25 +36,20 @@ def test_default_lattice_holds() -> None:
     assert failures == [], "lattice violated:\n  " + "\n  ".join(failures)
 
 
-def test_self_respawn_grace_allows_three_restarter_polls() -> None:
-    """The fallback starts after the third restarter poll, never on its deadline."""
-    poll = CLOCKS["RESTARTER_POLL_INTERVAL_S"].get()
-    grace = CLOCKS["SELF_RESPAWN_RESTARTER_GRACE_S"].get()
-    margin = CLOCKS["SELF_RESPAWN_RESTARTER_SCHEDULING_MARGIN_S"].get()
-    assert grace == 3 * poll + margin, (
-        f"self-respawn grace ({grace}s) must include the {margin}s scheduling margin after "
-        f"three restarter polls ({poll}s each)"
-    )
-    assert 3 * poll < grace
+def test_removed_self_respawn_has_no_competing_grace_clock() -> None:
+    """Only the controller's bounded boot clocks remain; no atexit fallback timer."""
+    assert "SELF_RESPAWN_RESTARTER_GRACE_S" not in CLOCKS
+    assert "SELF_RESPAWN_RESTARTER_SCHEDULING_MARGIN_S" not in CLOCKS
 
 
-def test_self_respawn_grace_tracks_the_restarter_poll_override(
+def test_restarter_poll_override_preserves_remaining_lattice(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Changing the restarter cadence keeps the fallback after three polls."""
+    """Changing the controller cadence must not recreate the deleted launcher."""
     monkeypatch.setattr(settings.daemon, "restarter_poll_interval_seconds", 2.0)
 
-    assert CLOCKS["SELF_RESPAWN_RESTARTER_GRACE_S"].get() == 6.1
+    assert CLOCKS["RESTARTER_POLL_INTERVAL_S"].get() == 2.0
+    assert "SELF_RESPAWN_RESTARTER_GRACE_S" not in CLOCKS
     assert validate_clock_lattice() == []
 
 

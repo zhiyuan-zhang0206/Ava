@@ -30,6 +30,9 @@ import asyncio
 import json
 import os
 import time
+from uuid import uuid4
+
+import psutil
 
 import shared.db
 from ops.agent_identity import AGENT_ID_FLAG, AGENT_MODULE_ARGV
@@ -46,9 +49,10 @@ from shared.db_transaction import write_transaction
 from shared.env_registry import AGENT_BIRTH_CONFIG_ENV, AGENT_CONFIG_OVERLAY_ENV
 from shared.live_announce import publish_agent_updated_sync, publish_page_closed_sync
 from shared.log import logger
-from shared.paths import logs_dir, repo_root
+from shared.paths import logs_dir, repo_root, run_dir
 from shared.platform import IS_WINDOWS
 from shared.session_backend import native_proc
+from shared.session_record import SessionRecord
 
 # After the child is spawned, `_launch_agent_process` polls `agents_meta.pid`
 # to wait for the child python process to actually claim its row. A successful spawn means "the process was
@@ -85,11 +89,11 @@ _LAUNCH_RETRY_BASE_BACKOFF_SEC = (
 )
 
 
-def _launched_process_alive(agent_id: int) -> bool:
+def _launched_process_alive(agent_id: int, attempt_session: str | None = None) -> bool:
     """True if the process this launch started is still running.
 
-    The session record the supervisor wrote at spawn (`$AVA_HOME/run/sessions/
-    ava-agent-<id>.json`) carries the child's pid + start time, so this answers
+    The exact attempt record returned at spawn carries the child's pid + start
+    time, so this answers
     "is the thing I launched still there" WITHOUT the DB — which is the whole
     point: during the pre-claim segment the row still says unclaimed 'idling' and carries
     no pid, so the DB cannot distinguish a slow boot from a dead one. Indirected
@@ -104,10 +108,17 @@ def _launched_process_alive(agent_id: int) -> bool:
     (`AVA_AGENT_BOOT_STALL_SECONDS=0`) and this call silently reverts to the
     proxy it used to be.
     """
-    return native_proc().has_session(session_name(f"agent-{agent_id}"))
+    # Compatibility callers lacking the exact attempt cannot establish early
+    # death. Retain the existing hard deadline instead of guessing canonical:
+    # canonical publication happens only after admission.
+    if attempt_session is None:
+        return True
+    if not attempt_session.startswith(session_name(f"boot-{agent_id}-")):
+        raise ValueError("launch confirmation attempt belongs to another agent")
+    return native_proc().has_session(attempt_session)
 
 
-def _wait_for_agent_claim(agent_id: int) -> None:
+def _wait_for_agent_claim(agent_id: int, attempt_session: str | None = None) -> None:
     """Wait for a non-NULL pid that proves the child won the row claim.
 
     A terminal row without a pid failed before claim and remains a launch
@@ -147,7 +158,12 @@ def _wait_for_agent_claim(agent_id: int) -> None:
                 return
         if time.monotonic() - probed_alive_at >= _LIVENESS_PROBE_INTERVAL_SEC:
             probed_alive_at = time.monotonic()
-            if not _launched_process_alive(agent_id):
+            alive = (
+                _launched_process_alive(agent_id, attempt_session)
+                if attempt_session is not None
+                else _launched_process_alive(agent_id)
+            )
+            if not alive:
                 # Collapse the deadline instead of raising here: the next
                 # iteration re-reads the row before the failure branch runs, so a
                 # child that claimed and exited between this loop's read and this
@@ -158,7 +174,12 @@ def _wait_for_agent_claim(agent_id: int) -> None:
             # One extension for a live child: `deadline` becomes the hard bound,
             # so this branch cannot be taken twice.
             hard_deadline = started + BOOT_REAP_GRACE_SEC
-            if deadline < hard_deadline and _launched_process_alive(agent_id):
+            alive = (
+                _launched_process_alive(agent_id, attempt_session)
+                if attempt_session is not None
+                else _launched_process_alive(agent_id)
+            )
+            if deadline < hard_deadline and alive:
                 logger.warning(
                     "agent {id} is still unclaimed after {dt:.1f}s but its process is alive — "
                     "extending the launch confirm to {max:.0f}s (slow pre-flip boot; "
@@ -260,14 +281,17 @@ def _launch_agent_process(
     *,
     birth_config: dict[str, object] | None = None,
     confirm: bool = True,
-) -> None:
+    restart_attempt: tuple[int, int, float] | None = None,
+    resurrect_attempt: tuple[int, int, float] | None = None,
+) -> str:
     """Spawn a new detached agent process via the native supervisor.
     Raises RuntimeError if the spawn itself fails; does **not** clean up DB on
     failure.
 
-    Session name `ava-agent-{id}` — the same name the on-disk session
-    record is keyed by (`$AVA_HOME/run/sessions/`), so ops can enumerate live
-    agents via `native_proc().list_sessions()`. The child is
+    Each parent launch writes a unique `ava-boot-{id}-...` attempt record.
+    Only the child admitted by PostgreSQL publishes `ava-agent-{id}`; a late
+    parent or rejected boot cannot overwrite its successor's canonical record.
+    The child is
     double-forked (POSIX) / detached (Windows) so it reparents to init and no
     zombie accretes in the long-lived gateway / ops daemon that spawned it.
 
@@ -295,10 +319,19 @@ def _launch_agent_process(
     window.
     """
     supervisor = native_proc()
-    agent_session = session_name(f"agent-{agent_id}")
-    # Kill any stale same-named session before relaunch (resurrect/respawn race).
-    # Spawn's agent_id is a fresh autoincrement, so this is a noop there.
-    supervisor.kill_session(agent_session, graceful=False)
+    _require_released_agent_session(agent_id)
+    if restart_attempt is not None and resurrect_attempt is not None:
+        raise ValueError("one launch cannot belong to two lifecycle commands")
+    bound_attempt = restart_attempt if restart_attempt is not None else resurrect_attempt
+    if bound_attempt is None:
+        agent_session = session_name(f"boot-{agent_id}-{uuid4().hex}")
+    else:
+        command_id, attempt_number, remaining_budget = bound_attempt
+        if command_id <= 0 or attempt_number <= 0 or remaining_budget <= 0 or confirm:
+            raise ValueError("invalid command-bound asynchronous restart attempt")
+        # Parent publication can only touch this exact attempt, never the
+        # canonical record published by the child that wins admission.
+        agent_session = session_name(f"boot-{agent_id}-{command_id}-{attempt_number}")
 
     agent_python, venv_dir, venv_bin = _agent_interpreter()
     # The two boot windows ride argv rather than the env dict below, unlike every
@@ -325,6 +358,12 @@ def _launch_agent_process(
         "--boot-budget-seconds",
         str(BOOT_BUDGET_SEC),
     ]
+    if restart_attempt is not None:
+        argv[-1] = str(min(BOOT_BUDGET_SEC, restart_attempt[2]))
+        argv.extend(["--restart-command-id", str(restart_attempt[0])])
+    if resurrect_attempt is not None:
+        argv[-1] = str(min(BOOT_BUDGET_SEC, resurrect_attempt[2]))
+        argv.extend(["--resurrect-command-id", str(resurrect_attempt[0])])
 
     env = agent_spawn_env_dict()
     env["PYTHONMALLOC"] = "malloc"
@@ -366,7 +405,8 @@ def _launch_agent_process(
     if not ok:
         raise RuntimeError(f"native supervisor failed to launch agent session {agent_session}")
     if confirm:
-        _wait_for_agent_claim(agent_id)
+        _wait_for_agent_claim(agent_id, agent_session)
+    return agent_session
 
 
 # ── Off-path launch confirm (spawn) ──────────────────────────────────────────
@@ -380,12 +420,15 @@ def _launch_agent_process(
 _pending_launch_confirms: set[asyncio.Task[bool]] = set()
 
 
-def _confirm_launch_or_force_terminated(agent_id: int) -> bool:
+def _confirm_launch_or_force_terminated(agent_id: int, attempt_session: str | None = None) -> bool:
     """Confirm a spawned child claimed its row; if it never did, force the row
     'terminated'. Runs in a worker thread (synchronous poll + DB). Returns
     whether the launch confirmed."""
     try:
-        _wait_for_agent_claim(agent_id)
+        if attempt_session is None:
+            _wait_for_agent_claim(agent_id)
+        else:
+            _wait_for_agent_claim(agent_id, attempt_session)
         return True
     except Exception:
         logger.warning(
@@ -407,7 +450,9 @@ def _confirm_launch_or_force_terminated(agent_id: int) -> bool:
         # eligible (a re-launch attempt, spaced by the resurrect backoff).
         cur.execute(
             "UPDATE agents_meta SET status = 'terminated', termination_source = 'launch-confirm' "
-            "WHERE id = %s AND status = 'idling' AND pid IS NULL",
+            "WHERE id = %s AND status = 'idling' AND pid IS NULL "
+            "AND runtime_generation IS NULL AND runtime_owner IS NULL AND runtime_kind IS NULL "
+            "AND lifecycle_command_id IS NULL",
             (agent_id,),
         )
         if cur.rowcount == 1:
@@ -426,12 +471,14 @@ def _on_confirm_done(task: asyncio.Task[bool]) -> None:
         )
 
 
-def schedule_launch_confirm(agent_id: int) -> None:
+def schedule_launch_confirm(agent_id: int, attempt_session: str | None = None) -> None:
     """Run the launch-confirm off the spawn response path. Must be called from a
     running event loop (the ops dispatch loop): it schedules a background task
     that polls in a worker thread and forces 'terminated' if the child never
     claims."""
-    task = asyncio.create_task(asyncio.to_thread(_confirm_launch_or_force_terminated, agent_id))
+    task = asyncio.create_task(
+        asyncio.to_thread(_confirm_launch_or_force_terminated, agent_id, attempt_session)
+    )
     _pending_launch_confirms.add(task)
     task.add_done_callback(_on_confirm_done)
 
@@ -515,7 +562,9 @@ def _launch_or_force_terminated(
                         # a duplicate launch manufactured by the cleanup itself.
                         "UPDATE agents_meta SET status = 'terminated', "
                         "termination_source = 'launch-confirm' "
-                        "WHERE id = %s AND status = 'idling' AND pid IS NULL",
+                        "WHERE id = %s AND status = 'idling' AND pid IS NULL "
+                        "AND runtime_generation IS NULL AND runtime_owner IS NULL AND runtime_kind IS NULL "
+                        "AND lifecycle_command_id IS NULL",
                         (agent_id,),
                     )
                     if cur.rowcount == 1:
@@ -536,7 +585,7 @@ def _launch_or_force_terminated(
             backoff = _LAUNCH_RETRY_BASE_BACKOFF_SEC * 2**attempt
             logger.warning(
                 "agent {id} launch attempt {n}/{total} failed ({exc}); "
-                "killing stale session + retrying in {backoff:.0f}s",
+                "requiring released session before retrying in {backoff:.0f}s",
                 id=agent_id,
                 n=attempt + 1,
                 total=_LAUNCH_MAX_RETRIES + 1,
@@ -544,27 +593,38 @@ def _launch_or_force_terminated(
                 backoff=backoff,
                 event="launch_retry",
             )
-            _kill_stale_session(agent_id)
+            _require_released_agent_session(agent_id)
             time.sleep(backoff)
 
 
-def _kill_stale_session(agent_id: int) -> None:
-    """Clean up any leftover agent PROCESS session before resurrect / respawn.
+def _require_released_agent_session(agent_id: int) -> None:
+    """Refuse live/unknown canonical observations; never signal by session name.
 
-    A previous agent process with the same agent_id ran here; after a normal
-    graceful exit the process is gone, but there's a race: a few ms between the
-    process's death and its session record being reaped. Killing before relaunch
-    stops the supervisor's idempotent "session already live" guard from skipping
-    the launch (and hard-kills a genuinely-still-alive stale process).
-
-    Keyed by the EXACT process-session name (`ava-agent-<id>`). The
-    agent's persistent shells/watchers live on the shell backend under a longer name and are
-    NOT the native supervisor's records, so there is no prefix-match hazard —
-    only the agent's own process session can match. `kill_session` is idempotent
-    (a noop when no record exists).
-
-    The spawn path does not call this function: agent_id is a freshly
-    allocated autoincrement, the session name is unique.
+    This preflight is not ownership or a reservation. A later competitor cannot
+    be overwritten: parent records use unique attempt names and only the DB
+    admission winner may publish canonical observation under its bounded lock.
     """
-    agent_session = session_name(f"agent-{agent_id}")
-    native_proc().kill_session(agent_session, graceful=False)
+    path = run_dir() / "sessions" / f"{session_name(f'agent-{agent_id}')}.json"
+    record = SessionRecord.read(path)
+    if record is None:
+        if path.exists():
+            raise RuntimeError("canonical agent session record is unreadable")
+        return
+    try:
+        process = psutil.Process(record.pid)
+        if process.status() == psutil.STATUS_ZOMBIE:
+            return
+        identity = record.identifies(record.pid)
+        if identity is False:
+            return
+        if identity is None and record.starttime is not None:
+            raise RuntimeError("canonical agent session identity is unreadable")
+        if (
+            identity is None
+            and record.create_time > 0
+            and process.create_time() != record.create_time
+        ):
+            return
+    except psutil.NoSuchProcess:
+        return
+    raise RuntimeError("canonical agent session is still live or its birth identity is unknown")

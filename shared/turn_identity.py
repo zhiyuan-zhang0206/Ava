@@ -31,10 +31,13 @@ time, for sinks that are handed a value once and format it per record —
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import os
 from collections.abc import Generator
 from contextvars import ContextVar
+from dataclasses import dataclass, field
+from pathlib import Path
 
 from shared.runtime_incarnation import RuntimeIncarnation
 
@@ -42,6 +45,47 @@ _TURN_AGENT_ID: ContextVar[int | None] = ContextVar("ava_turn_agent_id", default
 _TURN_INCARNATION: ContextVar[RuntimeIncarnation | None] = ContextVar(
     "ava_turn_incarnation", default=None
 )
+
+
+@dataclass
+class HostedTurnResources:
+    """Actual unresolved domains held by one turn Task, never by the model cache."""
+
+    unresolved: dict[Path, object | None] = field(default_factory=dict[Path, object | None])
+    changed: asyncio.Event = field(default_factory=asyncio.Event)
+    completions: set[asyncio.Task[None]] = field(default_factory=set[asyncio.Task[None]])
+
+    def complete(self, request: Path, expected: object | None) -> bool:
+        """Only the original resource owner may discharge its exact entry."""
+        if request not in self.unresolved or self.unresolved[request] is not expected:
+            return False
+        del self.unresolved[request]
+        self.changed.set()
+        return True
+
+
+_TURN_RESOURCES: ContextVar[HostedTurnResources | None] = ContextVar(
+    "ava_turn_resources", default=None
+)
+
+
+@contextlib.contextmanager
+def bind_hosted_resources(scope: HostedTurnResources) -> Generator[None, None, None]:
+    """Share actual resource ownership across this turn's copied node contexts."""
+    token = _TURN_RESOURCES.set(scope)
+    try:
+        yield
+    finally:
+        _TURN_RESOURCES.reset(token)
+
+
+def current_hosted_resources() -> HostedTurnResources | None:
+    return _TURN_RESOURCES.get()
+
+
+def hosted_resources_settled() -> bool:
+    scope = _TURN_RESOURCES.get()
+    return scope is None or not scope.unresolved
 
 
 @contextlib.contextmanager

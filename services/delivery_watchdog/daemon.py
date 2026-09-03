@@ -62,6 +62,7 @@ import sys
 import time
 
 import psycopg
+from psycopg import sql
 from psycopg_pool import ConnectionPool
 
 import shared.db
@@ -190,17 +191,22 @@ def select_terminated_owners_with_pending(pool: ConnectionPool) -> list[tuple[in
     restart) must not resurrect a dead agent against the caller's intent. A
     pile of 250 dead letters for one agent still means one attempt, not 250.
     """
+    from shared.lifecycle_acceptance import FAILED_RESTART_FOR_CURRENT_TARGET
+    from shared.resurrection_launch import PENDING_ALLOCATION
+
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
-            "SELECT m.agent_id, MIN(m.id) "
-            "FROM inbound_messages m "
-            "JOIN agents_meta am ON am.id = m.agent_id "
-            "WHERE m.status = 'pending' AND m.kind = 'chat' "
-            "  AND am.status = 'terminated' "
-            "  AND m.created_at > am.status_changed_at "
-            "  AND m.id > COALESCE(am.last_force_terminate_inbound_id, 0) "
-            "GROUP BY m.agent_id "
-            "ORDER BY m.agent_id"
+            sql.SQL(
+                "SELECT m.agent_id, MIN(m.id) "
+                "FROM inbound_messages m "
+                "JOIN agents_meta ON agents_meta.id = m.agent_id "
+                "WHERE m.status = 'pending' AND m.kind = 'chat' "
+                "  AND ((agents_meta.status = 'terminated' AND NOT {} "
+                " AND m.created_at > agents_meta.status_changed_at) OR {}) "
+                "  AND m.id > COALESCE(agents_meta.last_force_terminate_inbound_id, 0) "
+                "GROUP BY m.agent_id "
+                "ORDER BY m.agent_id"
+            ).format(sql.SQL(FAILED_RESTART_FOR_CURRENT_TARGET), sql.SQL(PENDING_ALLOCATION))
         )
         return [(r[0], r[1]) for r in cur.fetchall()]
 
@@ -232,7 +238,7 @@ def dead_letter_stale_claimed(pool: ConnectionPool, threshold_s: float) -> int:
             "FROM agents_meta am "
             "WHERE m.agent_id = am.id "
             "  AND am.status = 'terminated' "
-            "  AND m.status = 'claimed' "
+            "  AND m.status = 'claimed' AND m.kind = 'chat' "
             "  AND COALESCE(m.claimed_at, m.created_at) "
             "      < now() - make_interval(secs => %s)",
             (threshold_s,),

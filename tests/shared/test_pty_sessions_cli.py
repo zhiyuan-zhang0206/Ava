@@ -87,6 +87,29 @@ def _proc_exited(proc_or_pid: psutil.Process | int) -> bool:
         return True
 
 
+def _process_exited(process: psutil.Process) -> bool:
+    """Execution ended; adoption/reaping timing does not keep a zombie alive."""
+    try:
+        return not process.is_running() or process.status() == psutil.STATUS_ZOMBIE
+    except psutil.NoSuchProcess:
+        return True
+    except psutil.AccessDenied:
+        return False
+
+
+@pytest.mark.parametrize(
+    "status,expected", [("zombie", True), ("running", False), ("unknown", False)]
+)
+def test_terminal_observation_never_accepts_live_or_unreadable(status: str, expected: bool) -> None:
+    process = Mock(spec=psutil.Process)
+    process.is_running.return_value = True
+    if status == "unknown":
+        process.status.side_effect = psutil.AccessDenied(123)
+    else:
+        process.status.return_value = status
+    assert _process_exited(process) is expected
+
+
 @pytest.fixture
 def sessions(unit_home: Path) -> Iterator[Path]:
     """The test home; every session still alive under it is killed after.
@@ -858,6 +881,8 @@ def test_new_reaps_a_recordless_host_before_replacement(sessions: Path) -> None:
     assert first is not None and identity is not None
     old_shell = psutil.Process(first.pid)
     old_host = psutil.Process(identity[0])
+    assert old_host.create_time() == identity[1]
+    assert old_shell.create_time() == first.create_time
     record_path(name).unlink()
     assert not _has(home, name), "the missing record must make the session unlisted"
 
@@ -868,8 +893,25 @@ def test_new_reaps_a_recordless_host_before_replacement(sessions: Path) -> None:
         second = _record(home, name)
         assert second is not None and second.pid != first.pid
         assert not envfile.exists(), "the replacement must consume its env handoff"
-        assert _wait(lambda: _proc_exited(old_host)), "recordless host survived replacement"
-        assert _wait(lambda: _proc_exited(old_shell)), "recordless shell survived replacement"
+
+        def survivor() -> str:
+            try:
+                return repr(
+                    {
+                        "pid": old_host.pid,
+                        "ppid": old_host.ppid(),
+                        "status": old_host.status(),
+                        "create_time": old_host.create_time(),
+                        "cmdline": old_host.cmdline(),
+                    }
+                )
+            except psutil.Error as exc:
+                return repr(exc)
+
+        assert _wait(lambda: _process_exited(old_host)), (
+            f"recordless host survived replacement: expected={identity!r}, observed={survivor()}"
+        )
+        assert _wait(lambda: _process_exited(old_shell)), "recordless shell survived replacement"
     finally:
         # The pre-fix behavior rejects the replacement and leaves the deliberately
         # recordless host outside the fixture's normal record-based teardown.

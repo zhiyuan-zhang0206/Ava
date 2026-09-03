@@ -108,10 +108,9 @@ async def post_agent_terminate(
     source=body.source inbound; after processing the current turn, when
     claim runs, dispatch goto END and the process exits.
 
-    With `force=true`, skip the inbound path and directly kill the agent's
-    detached process + force UPDATE status='terminated' — for the case
-    where the agent is stuck (hung LLM call etc.) and the graceful path
-    will never take effect.
+    With `force=true`, request interruption. Hosted force returns `enqueued`
+    while the original host drains actual work; acceptance and metadata status
+    are not proof of exit. Detached process force returns `force_killed`.
 
     Smart liveness detection: if the process corresponding to
     agents_meta.pid is gone (zombie row, commonly from early-stage

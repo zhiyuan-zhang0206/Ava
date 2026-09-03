@@ -21,12 +21,9 @@ gateway spawn → unclaimed 'idling' → claim 'running' → heavy import → ru
 ```
 
 ### Stage 1: Schema Gate (`agent/_starting.py:claim_agent_row_or_die_on_stale_schema()`)
-- **Before claiming 'running'**, validates that DB schema matches the local code.
-- **Two mismatch types have the same runtime behavior**: both set 'terminated' + raise to exit, no catch-up in process
-- `CodeBehindSchema` (local code behind) — host layer can self-heal afterwards: update checkout to match cluster then resurrect
-- `SchemaVersionMismatch` (code ahead, checkout carries a migration unseen by DB) — host layer cannot self-heal (the code itself is the problem): must revert checkout to `main`
-- On failure: stay unclaimed 'idling' → directly set 'terminated', do not claim.
-- Both boot-rejection writes go through `_mark_preclaim_terminated`, stamping `termination_source='launch-confirm'` in the same guarded statement — the write IS what makes the launcher's confirm poll fail (NULL pid), and it makes the corpse crash-auto-resurrect-eligible, so the boot retries (backoff-spaced) once the schema or placement condition clears instead of stranding the agent's queued inbound forever. An unstamped terminated-write is permanently unresurrectable; `scripts/lint_termination_source.py` enforces the stamp.
+Validate schema before claiming running. Rejected owned attempts cannot settle
+another runtime or durable command. Exact rejection and launch-record contracts:
+[[admission.ava.okf.md]].
 
 ### Stage 0: Arm the boot watchdog (`agent/__main__.py` → `_boot_deadline.arm()`)
 - Runs before the `_starting` import, so it covers the import chain itself — which is why the window arrives on argv (`--boot-stall-seconds`, from `settings.gateway.agent_boot_stall_seconds` via `ops/agent_launch.py`) and not from `shared.config`: importing that module is part of what needs watching
@@ -38,8 +35,10 @@ gateway spawn → unclaimed 'idling' → claim 'running' → heavy import → ru
 ### Stage 2: Claim (`agent/_starting.py:claim_agent_row()`)
 - Flip an unclaimed agents_meta row from 'idling' to 'running'
 - Record pid, publish `agent_updated` event
-- **Write the liveness lease** (`lease_expires_at = now() + TTL`) in the same UPDATE — the claim is the lease's birth; the run loop renews it ([[lease.ava.okf.md|Agent Liveness Lease]])
+- **Write the liveness lease** (`lease_expires_at = now() + TTL`) in the same UPDATE — the claim is the lease's birth; the run loop renews it ([[../lease.ava.okf.md|Agent Liveness Lease]])
 - **Do not import any langgraph/langchain** — minimize delay to claim the row
+- Durable command identity, fixed deadline/attempt budget, canonical publication
+  and explicit cold acceptance: [[admission.ava.okf.md]].
 
 ### Stage 3: Boot Stage
 - This stage is between '_starting' and run loop
@@ -51,17 +50,17 @@ gateway spawn → unclaimed 'idling' → claim 'running' → heavy import → ru
   - `_repair_dangling_tool_use_at_startup()` — repair crash-left tool pairing: synthesize an interrupted result for an unpaired use or drop an orphan result
   - `_apply_per_agent_framework_config()` — apply this agent's two stored config maps onto the settings singleton, birth stamp first and explicit overlay on top, so the effective order is `config_overlay > birth_config > current config`. Runs before `build_chat_model` so a per-agent model reaches the LLM client this process actually builds. Both maps arrive via child-process env (`$AVA_AGENT_CONFIG_OVERLAY` / `$AVA_AGENT_BIRTH_CONFIG`), **never argv** — argv is world-readable via `ps` and can carry a provider api_key (issue #974); launcher reads them off `agents_meta`; `birth_config` is the frozen-lifecycle set stamped at spawn (see the `shared/config` module docstring for the axis and `shared/birth_config.py` for the mechanics)
   - `_write_effective_config_to_restart_completed()` — record the post-apply config snapshot
-  - `_notify_desktop_permissions_at_startup()` — renders whichever desktop-permission axis converge recorded as unavailable (Screen Recording or Accessibility; both → one combined notice), each state carrying its own headline and fix
-  - [[page-restore.ava.okf.md]] — page restore
+  - `_notify_screen_capture_at_startup()` — renders whichever OS-level screen-capture fault the converge preflight recorded (permissions helper holds no Screen Recording grant / never answered, so the grant is unknown); each state carries its own headline and fix
+  - [[../page-restore.ava.okf.md]] — page restore
 
 ### Stage 4: Run Loop
 - Enter `agent/loop.py` main loop; no second status transition is needed
 
 ## Key Dependencies
 
-- [[env-vars.ava.okf.md]] — read environment variables at startup
-- [[loop.ava.okf.md]] — run loop entry point
-- [[db.ava.okf.md]] — agents_meta table, schema version table
+- [[../env-vars.ava.okf.md]] — read environment variables at startup
+- [[../loop.ava.okf.md]] — run loop entry point
+- [[../db.ava.okf.md]] — agents_meta table, schema version table
 
 ## Entry Points
 

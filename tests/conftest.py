@@ -1370,7 +1370,9 @@ def _refuse_spawn(name: str, effect: str = "spawn a real long-running process"):
 
 
 @pytest.fixture(autouse=True)
-def _guard_agent_launch(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
+def _guard_agent_launch(
+    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     """Autouse safety net: every test runs with `gateway._agent_launch._launch_agent_process`
     replaced by a recording no-op spy, so a spawn-touching test that forgets to stub
     never forks a real agent process.
@@ -1379,6 +1381,11 @@ def _guard_agent_launch(request: pytest.FixtureRequest, monkeypatch: pytest.Monk
     launch (backend confirm / logs-dir / env-forward / config-overlay argv paths)."""
     if request.node.get_closest_marker("real_agent_launch"):
         return
+
+    # Unit admission deliberately uses this pytest PID. Its canonical record
+    # must not make a later CLI test appear hosted by that synthetic agent.
+    # Real subprocess suites opt out above and keep their actual session tree.
+    monkeypatch.setattr("agent.session_admission.run_dir", lambda: tmp_path / "admission-run")
 
     calls: list[LaunchCall] = []
 
@@ -1398,12 +1405,12 @@ def _guard_agent_launch(request: pytest.FixtureRequest, monkeypatch: pytest.Monk
     # `schedule_launch_confirm` would otherwise detach a background DB-polling
     # task per spawn (spawn's off-path launch confirm).
     monkeypatch.setattr("ops.agent_launch._launch_agent_process", _spy)
-    # Resurrect now creates the detached session under its DB row lock and
-    # confirms only after commit. The launch spy never advances the row, so its
+    # Resurrect authorizes and commits before detached launch. The launch spy
+    # never advances the row, so its
     # matching confirm must be a no-op too. Tests of the real wait opt out with
     # `real_agent_launch`.
-    monkeypatch.setattr("ops.agent_launch._wait_for_agent_claim", lambda _id: None)
-    monkeypatch.setattr("ops.agent_launch.schedule_launch_confirm", lambda _id: None)
+    monkeypatch.setattr("ops.agent_launch._wait_for_agent_claim", lambda _id, _attempt=None: None)
+    monkeypatch.setattr("ops.agent_launch.schedule_launch_confirm", lambda _id, _attempt=None: None)
     request.node.stash[_LAUNCH_RECORDER] = calls
 
 

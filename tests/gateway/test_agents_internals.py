@@ -725,8 +725,9 @@ class TestResurrectAgent:
         def _synchronize_guarded_updates(cursor: Any, query: Any, *args: Any, **kwargs: Any) -> Any:
             if (
                 threading.current_thread().name.startswith("resurrect-cas")
-                and "UPDATE agents_meta SET status" in str(query)
-                and "AND EXISTS (" in str(query)
+                and "FROM agents_meta" in str(query)
+                and "FOR UPDATE" in str(query)
+                and threading.current_thread().name not in barrier_hits
             ):
                 barrier_hits.append(threading.current_thread().name)
                 update_barrier.wait(timeout=5)
@@ -752,13 +753,22 @@ class TestResurrectAgent:
         with ThreadPoolExecutor(max_workers=2, thread_name_prefix="resurrect-cas") as executor:
             results = list(executor.map(_attempt_ignoring_index, range(2)))
 
-        assert sorted(results) == ["ResurrectTriggerStaleError", "spawned"]
+        assert results.count("spawned") == 1
+        assert next(result for result in results if result != "spawned") in {
+            "ResurrectTriggerStaleError",
+            "ResurrectAlreadyAlive",
+        }
         assert len(barrier_hits) == 2
         assert launched == [agent_id]
         assert _inbound_rows(db_conn, agent_id) == [
             ("one wake", "chat", "user"),
             ("", "resurrect", "system"),
         ]
+        assert db_conn.execute(
+            "SELECT payload->'resurrection_launch'->'attempts' FROM inbound_messages "
+            "WHERE agent_id=%s AND kind='resurrect'",
+            (agent_id,),
+        ).fetchall() == [(1,)]
 
     def test_force_row_lock_first_makes_guarded_resurrect_stale(
         self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
@@ -786,7 +796,7 @@ class TestResurrectAgent:
                 force_locked.set()
                 assert release_force.wait(timeout=5)
                 return result
-            if name == "guard-waits" and "UPDATE agents_meta SET status" in sql:
+            if name == "guard-waits" and "FROM agents_meta" in sql and "FOR UPDATE" in sql:
                 guard_attempted.set()
             return original_execute(cursor, query, *args, **kwargs)
 
@@ -906,13 +916,10 @@ class TestResurrectAgent:
         assert killed_sessions == [session_name(f"agent-{agent_id}")]
         assert _termination_row(db_conn, agent_id) == ("terminated", "user", True)
 
-    def test_child_starting_waits_for_resurrect_commit(
+    def test_child_starting_sees_committed_resurrect_authorization(
         self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """The child locks by id, waits for the uncommitted idling transition, then
-        claims it after the resurrect transaction releases the row."""
-        import threading
-
+        """Popen runs after authorization commits, without holding metadata locks."""
         from agent import _starting
 
         agent_id = _spawn_agent()
@@ -920,52 +927,31 @@ class TestResurrectAgent:
             cur.execute("UPDATE agents_meta SET status='terminated' WHERE id=%s", (agent_id,))
         db_conn.commit()
         trigger_id = shared.db.insert_inbound_message(db_conn, agent_id, "wake", source="user")
-        child_lock_attempted = threading.Event()
-        child_done = threading.Event()
-        child_failures: list[BaseException] = []
-        child_threads: list[threading.Thread] = []
-        child_backend_pid: list[int] = []
-        original_execute = cast(Callable[..., Any], psycopg.Cursor.execute)
+        admitted: list[int] = []
 
-        def _observe_child_lock(cursor: Any, query: Any, *args: Any, **kwargs: Any) -> Any:
-            if (
-                threading.current_thread().name == "resurrect-child"
-                and "SELECT machine FROM agents_meta" in str(query)
-            ):
-                child_backend_pid.append(cursor.connection.info.backend_pid)
-                child_lock_attempted.set()
-            return original_execute(cursor, query, *args, **kwargs)
-
-        monkeypatch.setattr(psycopg.Cursor, "execute", _observe_child_lock)
-
-        def _child() -> None:
-            try:
+        def _launch(_aid: int, **kwargs: object) -> None:
+            attempt = kwargs["resurrect_attempt"]
+            assert isinstance(attempt, tuple)
+            command: object = cast(tuple[object, ...], attempt)[0]
+            assert type(command) is int
+            # This independent connection must acquire the lock immediately;
+            # the real launcher must never run inside its authorization TX.
+            db_conn.rollback()
+            assert db_conn.execute(
+                "SELECT status,pid FROM agents_meta WHERE id=%s FOR UPDATE NOWAIT", (agent_id,)
+            ).fetchone() == ("idling", None)
+            assert db_conn.execute(
+                "SELECT status,payload->'resurrection_launch'->>'attempts' "
+                "FROM inbound_messages WHERE id=%s AND agent_id=%s",
+                (command, agent_id),
+            ).fetchone() == ("pending", "1")
+            db_conn.commit()
+            with pytest.raises(ResurrectError, match="launch identity"):
                 _starting.claim_agent_row(agent_id)
-            except BaseException as exc:
-                child_failures.append(exc)
-            finally:
-                child_done.set()
-
-        def _launch(_aid: int, **_kwargs: object) -> None:
-            import time
-
-            child = threading.Thread(target=_child, name="resurrect-child")
-            child_threads.append(child)
-            child.start()
-            assert child_lock_attempted.wait(timeout=5)
-            deadline = time.monotonic() + 2
-            while time.monotonic() < deadline:
-                with db_conn.cursor() as cur:
-                    cur.execute(
-                        "SELECT cardinality(pg_blocking_pids(%s)) > 0",
-                        (child_backend_pid[0],),
-                    )
-                    if cur.fetchone() == (True,):
-                        break
-                time.sleep(0.01)
-            else:
-                raise AssertionError("child did not wait on the uncommitted resurrect row lock")
-            assert not child_done.is_set()
+            _starting.claim_agent_row(agent_id, resurrect_command_id=command)
+            with pytest.raises(ResurrectError, match="allocation changed"):
+                _starting.claim_agent_row(agent_id, resurrect_command_id=command)
+            admitted.append(command)
 
         monkeypatch.setattr(agent_launch, "_launch_agent_process", _launch)
 
@@ -975,9 +961,7 @@ class TestResurrectAgent:
             trigger_inbound_id=trigger_id,
             trigger_inbound_kind="chat",
         )
-        child_threads[0].join(timeout=5)
-
-        assert child_done.is_set() and not child_failures
+        assert len(admitted) == 1
         with db_conn.cursor() as cur:
             cur.execute("SELECT status FROM agents_meta WHERE id=%s", (agent_id,))
             assert cur.fetchone() == ("running",)
@@ -1077,8 +1061,9 @@ class TestResurrectAgent:
         failures: list[BaseException] = []
         retry_barrier_hits: list[str] = []
 
-        def _launch(aid: int, **_kwargs: object) -> None:
+        def _launch(aid: int, **_kwargs: object) -> str:
             launches.append(aid)
+            return f"test-resurrect-attempt-{aid}"
 
         class _Supervisor:
             @staticmethod
@@ -1087,7 +1072,7 @@ class TestResurrectAgent:
                 killed_sessions.append(name)
                 return True, "killed"
 
-        def _never_confirms(_aid: int) -> None:
+        def _never_confirms(_aid: int, _attempt: str | None = None) -> None:
             confirm_failed.set()
             raise RuntimeError("child did not claim")
 
@@ -1131,6 +1116,15 @@ class TestResurrectAgent:
         assert len(failures) == 1 and isinstance(failures[0], MachinePaused)
         assert retry_barrier_hits == ["retry-machine-lock"]
         assert launches == [agent_id]
+        assert db_conn.execute(
+            "SELECT payload->'resurrection_launch_attempts' FROM inbound_messages WHERE id=%s",
+            (trigger_id,),
+        ).fetchone() == (1,)
+        assert db_conn.execute(
+            "SELECT payload->'resurrection_launch'->'attempts' FROM inbound_messages "
+            "WHERE agent_id=%s AND kind='resurrect'",
+            (agent_id,),
+        ).fetchall() == [(1,)]
         assert killed_sessions == [session_name(f"agent-{agent_id}")]
         assert _termination_row(db_conn, agent_id) == ("terminated", "user", True)
 
@@ -1449,14 +1443,14 @@ class TestResurrectAgent:
 
         def tracking_execute(self: Any, query: Any, *args: Any, **kwargs: Any) -> Any:
             result = original_execute(self, query, *args, **kwargs)
-            if query == "SELECT status FROM agents_meta WHERE id = %s":
+            if query == "SELECT status,machine FROM agents_meta WHERE id = %s FOR UPDATE":
                 status_select_cursors.add(id(self))
             return result
 
         def lying_fetchone(self: Any) -> Any:
             if id(self) in status_select_cursors:
                 status_select_cursors.remove(id(self))
-                return ("terminated",)  # target status SELECT lies to enter UPDATE branch
+                return ("terminated", machine_name())  # enter UPDATE while preserving placement
             return original_fetchone(self)  # pyright: ignore[reportUnknownArgumentType]
 
         monkeypatch.setattr(psycopg.Cursor, "execute", tracking_execute)  # pyright: ignore[reportUnknownArgumentType]
@@ -1526,7 +1520,7 @@ class TestResurrectAgent:
             raise RuntimeError("launch \u6545\u610f\u6302")
 
         # disable retries: this test only verifies the "permanent failure -> force-terminate + re-raise" contract,
-        # the retry path is covered separately by TestLaunchRetry (otherwise it would sleep + repeatedly _kill_stale_session).
+        # the retry path is covered separately by TestLaunchRetry (otherwise it would sleep + repeatedly _require_released_agent_session).
         monkeypatch.setattr("ops.agent_launch._LAUNCH_MAX_RETRIES", 0)
         monkeypatch.setattr("ops.agent_launch._launch_agent_process", boom)
 
@@ -1745,7 +1739,7 @@ class TestLaunchConfirm:
     def _fake_launch_success(monkeypatch: pytest.MonkeyPatch) -> None:
         """Make the native supervisor's `new_session` return True without starting any real process —
         simulating "process spawn succeeded but child python immediately crashed". `kill_session`
-        (kill-stale) is also stubbed as noop (resurrect/respawn first call _kill_stale_session).
+        (kill-stale) is also stubbed as noop (resurrect/respawn first call _require_released_agent_session).
 
         `has_session` answers False, which is what the simulated failure means: the
         launched child is gone, so the confirm gets no deadline extension and fails
@@ -1784,7 +1778,7 @@ class TestLaunchConfirm:
         Also disables launch retries (`_LAUNCH_MAX_RETRIES=0`): the confirm-timeout
         tests assert the single-attempt force-terminate outcome; retrying a
         permanently-non-claiming child would only multiply the confirm wait and
-        shell out to `_kill_stale_session`. The retry path is covered by
+        shell out to `_require_released_agent_session`. The retry path is covered by
         TestLaunchRetry."""
         monkeypatch.setattr("ops.agent_launch.LAUNCH_CONFIRM_TIMEOUT_SEC", timeout_sec)
         monkeypatch.setattr("ops.agent_launch._LAUNCH_CONFIRM_POLL_INTERVAL_SEC", 0.02)
@@ -2144,7 +2138,7 @@ class TestLaunchRetry:
     """`_launch_or_force_terminated` retries transient launch failures, only force-terminating when exhausted.
     Covers the root-cause fix after ava.self.update() where an agent would become terminated:
     a single launch jitter no longer kills the agent outright.
-    `_launch_agent_process` / `_kill_stale_session` are monkeypatched in this class (no real process),
+    `_launch_agent_process` / `_require_released_agent_session` are monkeypatched in this class (no real process),
     and the backoff base is patched to 0 for speed."""
 
     def test_retry_then_succeed_does_not_terminate(
@@ -2164,7 +2158,7 @@ class TestLaunchRetry:
         monkeypatch.setattr("ops.agent_launch._LAUNCH_RETRY_BASE_BACKOFF_SEC", 0.0)
         monkeypatch.setattr("ops.agent_launch._launch_agent_process", flaky)
         monkeypatch.setattr(
-            "ops.agent_launch._kill_stale_session",
+            "ops.agent_launch._require_released_agent_session",
             lambda _id: kills.__setitem__("n", kills["n"] + 1),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
         )
 
@@ -2189,7 +2183,7 @@ class TestLaunchRetry:
         monkeypatch.setattr("ops.agent_launch._LAUNCH_RETRY_BASE_BACKOFF_SEC", 0.0)
         monkeypatch.setattr("ops.agent_launch._LAUNCH_MAX_RETRIES", 3)
         monkeypatch.setattr("ops.agent_launch._launch_agent_process", always_boom)
-        monkeypatch.setattr("ops.agent_launch._kill_stale_session", lambda _id: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        monkeypatch.setattr("ops.agent_launch._require_released_agent_session", lambda _id: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
 
         with pytest.raises(RuntimeError, match="permanent launch fail"):
             _launch_or_force_terminated(agent_id)
@@ -2232,7 +2226,7 @@ class TestLaunchRetry:
                 )
             db_conn.commit()
 
-        monkeypatch.setattr("ops.agent_launch._kill_stale_session", _claim_then_note)
+        monkeypatch.setattr("ops.agent_launch._require_released_agent_session", _claim_then_note)
 
         with pytest.raises(RuntimeError, match="confirm timed out"):
             _launch_or_force_terminated(agent_id)
@@ -2257,7 +2251,7 @@ class TestLaunchRetry:
 
         monkeypatch.setattr("ops.agent_launch._LAUNCH_RETRY_BASE_BACKOFF_SEC", 0.0)
         monkeypatch.setattr("ops.agent_launch._launch_agent_process", boom_value)
-        monkeypatch.setattr("ops.agent_launch._kill_stale_session", lambda _id: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        monkeypatch.setattr("ops.agent_launch._require_released_agent_session", lambda _id: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
 
         with pytest.raises(ValueError, match="unexpected bug"):
             _launch_or_force_terminated(agent_id)
@@ -2312,7 +2306,7 @@ class TestStderrLogsDir:
         # let _wait_for_agent_claim return immediately (avoids needing real agents_meta table)
         monkeypatch.setattr(
             "ops.agent_launch._wait_for_agent_claim",
-            lambda _id: None,  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+            lambda _id, _attempt: None,  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
         )
         _fake_launch_supervisor(monkeypatch)  # don't actually start a process
         monkeypatch.setattr("ops.agent_launch.agent_spawn_env_dict", dict)
@@ -2338,7 +2332,7 @@ class TestStderrLogsDir:
         upsert_env(unit_home / ".env", {"AVA_RUNNER_DB_PASSWORD": "abc"})
         monkeypatch.setattr(
             "ops.agent_launch._wait_for_agent_claim",
-            lambda _id: None,  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+            lambda _id, _attempt: None,  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
         )
         _fake_launch_supervisor(monkeypatch)
         monkeypatch.setattr("ops.agent_launch.agent_spawn_env_dict", dict)
@@ -2898,7 +2892,7 @@ class TestRespawnResurrectColumnOverlay:
             captured.append(config_overlay)  # pyright: ignore[reportUnknownMemberType]
 
         monkeypatch.setattr("ops.agent_launch._launch_or_force_terminated", fake_launch)  # pyright: ignore[reportUnknownArgumentType]
-        monkeypatch.setattr("ops.agent_launch._kill_stale_session", lambda _id: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        monkeypatch.setattr("ops.agent_launch._require_released_agent_session", lambda _id: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
 
         result = respawn_agent(agent_id)
 
@@ -2930,11 +2924,12 @@ class TestRespawnResurrectColumnOverlay:
             config_overlay: dict | None = None,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
             birth_config: dict | None = None,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
             confirm: bool = True,
+            resurrect_attempt: tuple[int, int, float] | None = None,
         ) -> None:
             captured.append(config_overlay)  # pyright: ignore[reportUnknownMemberType]
 
         monkeypatch.setattr("ops.agent_launch._launch_agent_process", fake_launch)  # pyright: ignore[reportUnknownArgumentType]
-        monkeypatch.setattr("ops.agent_launch._kill_stale_session", lambda _id: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        monkeypatch.setattr("ops.agent_launch._require_released_agent_session", lambda _id: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
 
         resurrect_agent(agent_id, resurrected_by="user", prompt="test")
 
@@ -2971,7 +2966,7 @@ class TestLaunchAgentProcessConfigOverlay:
         monkeypatch.setattr("ops.agent_launch.native_proc", lambda: _FakeSupervisor)
         monkeypatch.setattr(
             "ops.agent_launch._wait_for_agent_claim",
-            lambda _id: None,  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+            lambda _id, _attempt: None,  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
         )
         return captured
 

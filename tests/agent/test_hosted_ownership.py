@@ -7,9 +7,15 @@ import psycopg
 import pytest
 from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
-from agent.hosted_ownership import admit_hosted_runtime, renew_hosted_owner, settle_hosted_runtime
+from agent.db import claim_inbound_batch
+from agent.hosted_ownership import (
+    admit_hosted_runtime,
+    apply_hosted_lifecycle,
+    renew_hosted_owner,
+    settle_hosted_runtime,
+)
 from shared.config import settings
-from shared.db import PG_KEEPALIVE_KWARGS, create_agent
+from shared.db import PG_KEEPALIVE_KWARGS, create_agent, insert_inbound_message
 from shared.runtime_incarnation import RuntimeIncarnation, current_incarnation
 from shared.turn_identity import bind_turn_identity
 
@@ -50,7 +56,10 @@ async def test_hosted_restart_releases_before_new_incarnation(
         aops_pool, agent_id, "host-test", owner, expected_from="idling"
     )
     assert first is not None
-    assert await settle_hosted_runtime(aops_pool, first, release=True)
+    insert_inbound_message(db_conn, agent_id, "", "user", "restart")
+    with bind_turn_identity(agent_id, incarnation=first):
+        await claim_inbound_batch(aops_pool, agent_id)
+        assert await apply_hosted_lifecycle(aops_pool, first) == "restart"
     second = await admit_hosted_runtime(
         aops_pool, agent_id, "host-test", owner, expected_from="idling"
     )

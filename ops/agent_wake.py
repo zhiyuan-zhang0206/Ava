@@ -1,40 +1,24 @@
 """Agent wake: an EXISTING agents_meta row back into a running process.
 
-The other lifecycle half from `ops/agent_spawn.py` (which creates new rows);
-both are reached through `ops/agents.py`. Two wake paths here, one shape: a CAS
-on `agents_meta.status` into unclaimed 'idling' (clearing pid / started_at), a
-lifecycle inbound, then a relaunch attached to the same `agent_id` —
-LangGraph's checkpointer restores the message history, so the process resumes
-rather than starts over. Resurrection creates the detached session while its
-machine and agent row locks are held; the child cannot claim the row or process
-the inbound until that transaction commits. `resurrect_agent` comes from
-'terminated', `respawn_agent` from 'restarting'; the no-inbound wake path
-(`revive_agent` from a dead pid) lives in `ops/agent_revive.py` (Task #1999
-split, re-exported here). The *mechanics* of launching the child live in
-`ops/agent_launch.py`, reached via module-qualified access
-(`agent_launch._launch_or_force_terminated`).
+Unlike `ops/agent_spawn.py`, this module resumes existing rows and checkpoints.
+Resurrection commits allocation and OS authorization before detached launch
+outside database locks. Early child admission checks the exact allocation and
+deadline. The original pending wake can resume a prepared allocation without
+resetting its durable budget. Native mechanics live in `ops/agent_launch.py`;
+the no-inbound revive path lives in `ops/agent_revive.py` (re-exported here).
 
 Hosted mode (`AVA_RUNNER_MODE=hosted`): the CAS and the inbound rows are the
 whole op — no process to launch. The hosted branches commit, publish the Redis
 wake (the inbound INSERTs here are raw SQL and do not publish), and skip the
 launch + pid-confirm machinery entirely.
 
-- **resurrect_agent(...)** — a 'terminated' row -> unclaimed 'idling' + launch.
-  INSERTs a kind='resurrect' inbound so the LLM sees why it resumed; an
-  optional `prompt` adds a chat in the same transaction. The child cannot claim
-  or process either inbound
-  before the transaction commits, eliminating the race "prompt has not arrived
-  yet but agent has already started running". Pending-work auto-resurrect also
-  carries the exact inbound id and expected kind (`chat` or `compact_request`):
-  the final UPDATE accepts it only while that row is pending, newer than the
-  current termination, and above the latest force-terminate inbound fence. A
-  later kill therefore wins without a marker or launch. Crash and wedged
-  recovery instead carry an exact controller claim for the current death;
-  explicit manual resurrection has neither automatic-work guard.
-- **respawn_agent(agent_id)** — 'restarting' -> unclaimed 'idling' + launch process,
-  same pattern as resurrect. **Automatically INSERTs one
-  kind='restart_completed' inbound** (source taken from the original 'restart'
-  inbound, empty content), used by the restarter daemon, race-safe.
+- `resurrect_agent`: terminated -> unclaimed idling, with a resurrect marker and
+  optional prompt committed together. Pending-work callers carry the exact
+  still-pending post-death inbound above the force-intent fence. Crash/wedged
+  recovery carries its exact death claim; explicit manual resurrection does not.
+- `respawn_agent`: owned runtimes use the existing durable command controller;
+  actual successor admission, not launch, records completion. Legacy unowned
+  compatibility is separately bounded and cannot replace an owned runtime.
 
 `resurrected_by` is required (no default) — the caller must consciously decide
 who triggered the resurrect: SDK path `f"agent:{ava.self.AGENT_ID}"`, gateway HTTP
@@ -52,6 +36,7 @@ from datetime import datetime
 from typing import Literal
 
 import psycopg
+from psycopg import sql
 
 from ops import agent_launch, runner_mode
 
@@ -60,6 +45,17 @@ from ops import agent_launch, runner_mode
 # split: `revive_agent` now lives in `ops/agent_revive.py`.
 from ops.agent_revive import revive_agent as revive_agent
 from ops.pages import list_open_page_names
+from ops.resurrection_retry import (
+    ResurrectExitDeferredError,
+    authorize_pending_retry,
+    validate_pending_retry,
+)
+from ops.resurrection_retry import (
+    ResurrectTriggerStaleError as ResurrectTriggerStaleError,
+)
+from ops.resurrection_retry import (
+    lock_active_home_machine as _lock_active_home_machine,
+)
 from shared.agents import (
     AgentNotFound,
     AgentStatus,
@@ -74,16 +70,16 @@ from shared.config import field_alias, get_field, settings
 from shared.daemon_health import health_port, probe_daemon
 from shared.db import fetch_one, insert_restart_completed_inbound, publish_inbound_wake
 from shared.db_transaction import write_transaction
+from shared.lifecycle_termination_observe import observe_applied_termination
 from shared.live_announce import publish_agent_updated_sync, publish_page_closed_sync
 from shared.log import logger
-
-
-class ResurrectTriggerStaleError(ResurrectError):
-    """An auto-resurrect trigger no longer qualifies for the current death.
-
-    Internal and non-wire: the lifecycle op turns it into an idempotent no-op.
-    Unlike `ResurrectAlreadyAlive`, the agent can still be terminated.
-    """
+from shared.machine import machine_name
+from shared.resurrection_launch import (
+    authorize_launch,
+    pending_allocation,
+    prepare_launch,
+    require_launch,
+)
 
 
 class ResurrectClaimStaleError(ResurrectError):
@@ -107,6 +103,8 @@ class _PreparedResurrect:
     config_overlay: dict[str, object] | None
     birth_config: dict[str, object] | None
     event_target: int | None
+    attempt_session: str | None = None
+    command_id: int | None = None
 
 
 class _ResurrectSessionStartError(RuntimeError):
@@ -122,28 +120,6 @@ def _hosted_agent_host_healthy() -> bool:
     ).alive
 
 
-def _lock_active_home_machine(cur: psycopg.Cursor, agent_id: int) -> None:
-    """Lock the home-machine admission row before locking the agent row.
-
-    Machine pause takes the inverse side of this same lock first, commits the
-    latch, then sweeps agents. A resurrection that wins the share lock may
-    finish and is swept; one that loses observes ``paused_at`` and cannot
-    transition. The global lock order is therefore machine -> agent.
-    """
-    cur.execute("SELECT machine FROM agents_meta WHERE id = %s", (agent_id,))
-    agent_row = cur.fetchone()
-    if agent_row is None:
-        raise AgentNotFound(f"agent {agent_id} does not exist")
-    home_machine = agent_row[0]
-    cur.execute("SELECT paused_at FROM machines WHERE name = %s FOR SHARE", (home_machine,))
-    machine_row = cur.fetchone()
-    if machine_row is not None and machine_row[0] is not None:
-        raise MachinePaused(
-            f"agent {agent_id} home machine {home_machine!r} is paused; "
-            "resume it before resurrecting"
-        )
-
-
 def _transition_terminated_to_unclaimed_idling(
     cur: psycopg.Cursor,
     agent_id: int,
@@ -155,18 +131,22 @@ def _transition_terminated_to_unclaimed_idling(
     """Run the one final resurrection CAS with a fully static SQL shape."""
     base_params = (AgentStatus.IDLING, agent_id, AgentStatus.TERMINATED)
     if trigger_inbound_id is not None:
+        from shared.lifecycle_acceptance import FAILED_RESTART_FOR_CURRENT_TARGET
+
         assert trigger_inbound_kind is not None  # validated at public helper boundary  # noqa: S101
         cur.execute(
-            "UPDATE agents_meta SET status = %s, pid = NULL, started_at = NULL, "
-            "termination_source = NULL, lease_expires_at = NULL "
-            "WHERE id = %s AND status = %s "
-            "AND EXISTS ("
-            "  SELECT 1 FROM inbound_messages m "
-            "  WHERE m.id = %s AND m.agent_id = agents_meta.id "
-            "    AND m.status = 'pending' AND m.kind = %s "
-            "    AND m.created_at > agents_meta.status_changed_at "
-            "    AND m.id > COALESCE(agents_meta.last_force_terminate_inbound_id, 0)"
-            ") RETURNING status_changed_at",
+            sql.SQL(
+                "UPDATE agents_meta SET status = %s, pid = NULL, started_at = NULL, "
+                "termination_source = NULL, lease_expires_at = NULL "
+                "WHERE id = %s AND status = %s "
+                "AND NOT {} AND EXISTS ("
+                "  SELECT 1 FROM inbound_messages m "
+                "  WHERE m.id = %s AND m.agent_id = agents_meta.id "
+                "    AND m.status = 'pending' AND m.kind = %s "
+                "    AND m.created_at > agents_meta.status_changed_at "
+                "    AND m.id > COALESCE(agents_meta.last_force_terminate_inbound_id, 0)"
+                ") RETURNING status_changed_at"
+            ).format(sql.SQL(FAILED_RESTART_FOR_CURRENT_TARGET)),
             (*base_params, trigger_inbound_id, trigger_inbound_kind),
         )
     elif auto_claim is not None and auto_claim.claim_kind == "crash":
@@ -262,6 +242,28 @@ def _auto_resurrect_max_attempts() -> int:
     raise RuntimeError("auto-resurrect budget has no configured daemon domain")
 
 
+def _resume_pending_allocation(agent_id: int, trigger_id: int) -> _PreparedResurrect | None:
+    """The original wake may resume its committed allocation, never replace it."""
+    with write_transaction() as conn:
+        conn.execute("SELECT id FROM agents_meta WHERE id=%s FOR UPDATE", (agent_id,))
+        if not pending_allocation(conn, agent_id, trigger_id):
+            return None
+        row = conn.execute(
+            "SELECT i.id,m.status_changed_at,m.config_overlay,m.birth_config "
+            "FROM inbound_messages i JOIN agents_meta m ON m.id=i.agent_id "
+            "WHERE m.id=%s AND i.kind='resurrect' AND i.status='pending' "
+            "AND (i.payload->'resurrection_launch'->>'trigger_id')::bigint=%s "
+            "AND (i.payload->'resurrection_launch'->>'allocation_epoch')::timestamptz"
+            "=m.status_changed_at",
+            (agent_id, trigger_id),
+        ).fetchall()
+        if len(row) != 1:
+            raise ResurrectError("pending wake has ambiguous allocation evidence")
+        command_id, epoch, overlay, birth = row[0]
+        require_launch(conn, agent_id, command_id)
+        return _PreparedResurrect(epoch, overlay, birth, None, command_id=command_id)
+
+
 def _prepare_resurrect_attempt(
     agent_id: int,
     *,
@@ -271,16 +273,18 @@ def _prepare_resurrect_attempt(
     trigger_inbound_kind: Literal["chat", "compact_request", "system_note"] | None,
     auto_claim: AutoResurrectClaim | None,
 ) -> _PreparedResurrect:
-    """Transition, persist lifecycle rows, and create the session under one row lock."""
+    """Commit the allocation and its launch identity; never wait for OS work here."""
     from shared.envelope import reject_unnegotiated_caller
 
     reject_unnegotiated_caller(resurrected_by)
     with write_transaction() as conn, conn.cursor() as cur:
-        _lock_active_home_machine(cur, agent_id)
-        cur.execute("SELECT status FROM agents_meta WHERE id = %s", (agent_id,))
+        latched_machine = _lock_active_home_machine(cur, agent_id)
+        cur.execute("SELECT status,machine FROM agents_meta WHERE id = %s FOR UPDATE", (agent_id,))
         row = cur.fetchone()
         if row is None:
             raise AgentNotFound(f"agent {agent_id} does not exist")
+        if row[1] != latched_machine:
+            raise ResurrectTriggerStaleError("resurrection placement changed after pause latch")
         current = AgentStatus(row[0])
         if current is not AgentStatus.TERMINATED:
             raise ResurrectAlreadyAlive(
@@ -297,6 +301,12 @@ def _prepare_resurrect_attempt(
                 raise ResurrectBudgetExhausted(
                     f"agent {agent_id} has exhausted its auto-resurrect budget"
                 )
+        if trigger_inbound_id is not None:
+            validate_pending_retry(conn, agent_id, trigger_inbound_id)
+        if not observe_applied_termination(conn, agent_id, machine_name()):
+            raise ResurrectExitDeferredError(
+                "outstanding lifecycle target has not been observed ended"
+            )
         allocation_epoch = _transition_terminated_to_unclaimed_idling(
             cur,
             agent_id,
@@ -306,9 +316,10 @@ def _prepare_resurrect_attempt(
         )
         cur.execute(
             "INSERT INTO inbound_messages (agent_id, content, kind, source) "
-            "VALUES (%s, '', 'resurrect', %s)",
+            "VALUES (%s, '', 'resurrect', %s) RETURNING id",
             (agent_id, resurrected_by),
         )
+        command_id = fetch_one(cur, "resurrect: persist launch identity")[0]
         if prompt is not None:
             cur.execute(
                 "INSERT INTO inbound_messages (agent_id, content, kind, source) "
@@ -336,15 +347,7 @@ def _prepare_resurrect_attempt(
                 birth_config=birth_config,
                 event_target=_resurrect_event_target(resurrected_by),
             )
-        try:
-            agent_launch._launch_agent_process(
-                agent_id,
-                config_overlay=config_overlay,
-                birth_config=birth_config,
-                confirm=False,
-            )
-        except RuntimeError as exc:
-            raise _ResurrectSessionStartError(str(exc)) from exc
+        prepare_launch(conn, agent_id, command_id, allocation_epoch, trigger_inbound_id)
         conn.commit()
         publish_agent_updated_sync(conn, agent_id)
     return _PreparedResurrect(
@@ -352,15 +355,18 @@ def _prepare_resurrect_attempt(
         config_overlay=config_overlay,
         birth_config=birth_config,
         event_target=_resurrect_event_target(resurrected_by),
+        command_id=command_id,
     )
 
 
-def _retry_resurrect_session(agent_id: int, prepared: _PreparedResurrect) -> bool:
-    """Create another session only while the same active allocation still owns the row."""
+def _retry_resurrect_session(agent_id: int, prepared: _PreparedResurrect) -> str | None:
+    """Commit one bounded authorization before creating its exact OS attempt."""
+    if prepared.command_id is None:
+        raise ResurrectError("resurrection allocation lacks a durable launch identity")
     with write_transaction() as conn, conn.cursor() as cur:
-        _lock_active_home_machine(cur, agent_id)
+        latched_machine = _lock_active_home_machine(cur, agent_id)
         cur.execute(
-            "SELECT status, status_changed_at, pid FROM agents_meta WHERE id = %s FOR UPDATE",
+            "SELECT status, status_changed_at, pid, machine FROM agents_meta WHERE id = %s FOR UPDATE",
             (agent_id,),
         )
         row = cur.fetchone()
@@ -369,15 +375,21 @@ def _retry_resurrect_session(agent_id: int, prepared: _PreparedResurrect) -> boo
             or row[0] != AgentStatus.IDLING.value
             or row[1] != prepared.allocation_epoch
             or row[2] is not None
+            or row[3] != latched_machine
         ):
-            return False
-        agent_launch._launch_agent_process(
-            agent_id,
-            config_overlay=prepared.config_overlay,
-            birth_config=prepared.birth_config,
-            confirm=False,
+            return None
+        attempt_number, remaining = authorize_launch(
+            conn, agent_id, prepared.command_id, agent_launch._LAUNCH_MAX_RETRIES + 1
         )
-    return True
+    # A failure or crash here consumes the authorization. Admission independently
+    # refuses a delayed attempt after the allocation changes or deadline passes.
+    return agent_launch._launch_agent_process(
+        agent_id,
+        config_overlay=prepared.config_overlay,
+        birth_config=prepared.birth_config,
+        confirm=False,
+        resurrect_attempt=(prepared.command_id, attempt_number, remaining),
+    )
 
 
 def _mark_resurrect_launch_failed(agent_id: int, prepared: _PreparedResurrect) -> None:
@@ -392,7 +404,7 @@ def _mark_resurrect_launch_failed(agent_id: int, prepared: _PreparedResurrect) -
         row = cur.fetchone()
         if row == (AgentStatus.IDLING.value, prepared.allocation_epoch, None):
             page_names = list_open_page_names(conn, agent_id)
-            agent_launch._kill_stale_session(agent_id)
+            agent_launch._require_released_agent_session(agent_id)
             cur.execute(
                 "UPDATE agents_meta SET status = 'terminated', "
                 "termination_source = 'launch-confirm' "
@@ -413,9 +425,14 @@ def _confirm_resurrect_with_retries(
 ) -> bool:
     """Confirm one incarnation, retrying sessions without reopening an old death."""
     attempt = first_attempt
+    attempt_session = prepared.attempt_session
     while True:
         try:
-            agent_launch._wait_for_agent_claim(agent_id)
+            if attempt_session is None:
+                attempt_session = _retry_resurrect_session(agent_id, prepared)
+                if attempt_session is None:
+                    return False
+            agent_launch._wait_for_agent_claim(agent_id, attempt_session)
             return True
         except RuntimeError as exc:
             if attempt >= agent_launch._LAUNCH_MAX_RETRIES:
@@ -434,9 +451,11 @@ def _confirm_resurrect_with_retries(
             time.sleep(backoff)
             attempt += 1
             try:
-                if not _retry_resurrect_session(agent_id, prepared):
+                attempt_session = _retry_resurrect_session(agent_id, prepared)
+                if attempt_session is None:
                     return False
             except RuntimeError:
+                attempt_session = None
                 if attempt >= agent_launch._LAUNCH_MAX_RETRIES:
                     _mark_resurrect_launch_failed(agent_id, prepared)
                     raise
@@ -465,10 +484,10 @@ def resurrect_agent(
 
     `prompt` is optional. When given, INSERT one 'chat' inbound in **the same
     transaction** as the lifecycle 'resurrect' inbound (kind='chat',
-    content=prompt, source=resurrected_by). The detached session is created
-    before commit while the machine and agent locks are held, but its child
-    blocks on the agent row and cannot claim or process either inbound until
-    commit. When the agent wakes and SELECTs the batch, both rows are visible, with
+    content=prompt, source=resurrected_by). Allocation and a bounded launch
+    authorization commit before the detached session is created outside locks.
+    Early child admission validates that exact allocation and original deadline.
+    When the agent wakes and SELECTs the batch, both rows are visible, with
     ordering guaranteed by inbound_messages.id (BIGSERIAL monotonic) so
     lifecycle is before chat. When no prompt is given (the UI resurrect
     event), only the lifecycle inbound is written.
@@ -490,7 +509,7 @@ def resurrect_agent(
             an out-of-whitelist value kills the resurrected process on its
             first claim (envelope wrap ValueError).
         prompt: optional follow-up message — when given, delivered as a 'chat'
-            inbound committed in the same transaction as the lifecycle
+    inbound committed in the same transaction as the lifecycle
             'resurrect' inbound, so the agent knows why it was resurrected and
             what to do. None (the UI event path) delivers only the marker.
         trigger_inbound_id: optional pending-work auto-resurrect guard. When
@@ -537,6 +556,15 @@ def resurrect_agent(
     prepared: _PreparedResurrect | None = None
     first_attempt = 0
     for first_attempt in range(agent_launch._LAUNCH_MAX_RETRIES + 1):
+        if trigger_inbound_id is not None:
+            if trigger_inbound_kind is None:
+                raise ValueError("pending resurrection trigger kind is required")
+            authorize_pending_retry(
+                agent_id,
+                trigger_inbound_id,
+                trigger_inbound_kind,
+                agent_launch._LAUNCH_MAX_RETRIES + 1,
+            )
         try:
             prepared = _prepare_resurrect_attempt(
                 agent_id,
@@ -547,7 +575,7 @@ def resurrect_agent(
                 auto_claim=auto_claim,
             )
             break
-        except _ResurrectSessionStartError:
+        except (_ResurrectSessionStartError, ResurrectExitDeferredError):
             if first_attempt >= agent_launch._LAUNCH_MAX_RETRIES:
                 raise
             backoff = agent_launch._LAUNCH_RETRY_BASE_BACKOFF_SEC * 2**first_attempt
@@ -606,6 +634,11 @@ def respawn_agent(agent_id: int) -> bool:
         False: another dispatcher won / status changed, noop (does not raise —
             dispatcher should keep polling).
     """
+    from ops.lifecycle_recovery import recover_lifecycle_command
+
+    recovered = recover_lifecycle_command(agent_id)
+    if recovered is not None:
+        return recovered
     hosted = runner_mode.is_hosted()
     if hosted and not _hosted_agent_host_healthy():
         logger.error(
@@ -707,7 +740,7 @@ def respawn_agent(agent_id: int) -> bool:
             origin=original_source,
         )
         return True
-    agent_launch._kill_stale_session(agent_id)
+    agent_launch._require_released_agent_session(agent_id)
     logger.info(
         "agent {agent_id} respawn phase 2: launching new process",
         event="respawn_phase2_launch",

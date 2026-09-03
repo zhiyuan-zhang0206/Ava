@@ -54,6 +54,47 @@ async def _admit(pool: AsyncConnectionPool, agent_id: int) -> RuntimeIncarnation
     return owner
 
 
+@pytest.mark.parametrize("kind", ["restart", "terminate"])
+async def test_unowned_lifecycle_refuses_before_acknowledging_any_batch(
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, kind: str
+) -> None:
+    agent_id = _agent(db_conn)
+    chat = _insert(db_conn, agent_id)
+    command = db_conn.execute(
+        "INSERT INTO inbound_messages(agent_id,content,kind,source) "
+        "VALUES(%s,'',%s,'user') RETURNING id",
+        (agent_id, kind),
+    ).fetchone()
+    assert command is not None
+    db_conn.commit()
+    with pytest.raises(RuntimeError, match="lifecycle claim requires an admitted"):
+        await claim_inbound_batch(aops_pool, agent_id)
+    assert db_conn.execute(
+        "SELECT id,status,claimed_at FROM inbound_messages WHERE agent_id=%s ORDER BY id",
+        (agent_id,),
+    ).fetchall() == [(chat, "pending", None), (command[0], "pending", None)]
+
+
+async def test_unowned_ordinary_batch_remains_compatible(
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+) -> None:
+    agent_id = _agent(db_conn)
+    _insert(db_conn, agent_id)
+    db_conn.execute(
+        "INSERT INTO inbound_messages(agent_id,content,kind,source) "
+        "VALUES(%s,'summary','compact_summary','user')",
+        (agent_id,),
+    )
+    db_conn.commit()
+    assert [item.kind for item in await claim_inbound_batch(aops_pool, agent_id)] == [
+        "chat",
+        "compact_summary",
+    ]
+    assert db_conn.execute(
+        "SELECT kind,status FROM inbound_messages WHERE agent_id=%s ORDER BY id", (agent_id,)
+    ).fetchall() == [("chat", "claimed"), ("compact_summary", "done")]
+
+
 @pytest.mark.parametrize("missing", [False, True])
 async def test_stale_or_missing_owner_cannot_claim(
     db_conn: psycopg.Connection,

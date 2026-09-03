@@ -1,27 +1,27 @@
-"""ava.self.restart lifecycle scenario for process and hosted runners.
+"""ava.self.restart — agent self-restart + restarter spawns new process lifecycle scenario.
 
-Build two SCRIPT segments, distinguished by a durable restart record in the
-inbound_messages table:
+Cross-process script selection uses a persisted consumed self-restart request.
+It is deliberately independent from successful successor completion evidence.
 
   first process (before restart):
-    ↓ build() sees no 'restart_completed' in DB → returns RESTART_SCRIPT
+    ↓ build() sees no consumed self-restart request → returns RESTART_SCRIPT
     llm 1 (RESTART_SCRIPT[0]): ava.self.restart() + tool_call → exec raises AgentRestart
                               → claim marks agents.status='restarting' + END → process exits
     ↓ restarter daemon (1s poll) sees status='restarting' → respawn_agent
     ↓   INSERT 'restart_completed' inbound row
     ↓   session spawn starts fresh process
-  post-restart runtime (new process in process mode; cold runtime in hosted
-  mode, same agent_id):
-    ↓ build() sees the consumed 'restart' or 'restart_completed' record → returns IDLE_SCRIPT
+  post-restart process (new PID, same agent_id):
+    ↓ build() sees the prior claimed/done self-restart request → returns IDLE_SCRIPT
     ↓ claim processes 'restart_completed' inbound, writes "[system ts] You have been restarted"
     ↓ marker enters messages → idle, waiting for next inbound (fake is not called at this stage)
     llm 1 (IDLE_SCRIPT[0]): short chat halt, only called if the user sends another message after idle
 
-Why inbound_messages rather than agent events / messages: process mode has the
-restarter-written 'restart_completed' marker; hosted mode retains the consumed
-'restart' inbound after rendering the marker inline. Both records survive claim
-consumption. The truncated_db fixture truncates before each test so the first
-runtime sees a DB free of prior test residue.
+The legacy self-respawn fallback does not write restart_completed. Using that
+missing marker to select the script made a fresh fake model request another
+restart, obscuring the actual missing-completion defect. The E2E test separately
+requires completion evidence; this selector neither writes nor fabricates it.
+The fixture truncates before each test. A pending request is not consumed and
+must not select the post-request script.
 """
 
 from __future__ import annotations
@@ -51,36 +51,23 @@ RESTART_SCRIPT: tuple[AIMessage, ...] = (
 
 IDLE_SCRIPT: tuple[AIMessage, ...] = (
     AIMessage(content="\u6211\u5df2\u91cd\u542f\u5b8c\u6210\u3002", usage_metadata=_USAGE),
+    AIMessage(content="Follow-up processed by successor.", usage_metadata=_USAGE),
 )
 
 
-def _is_post_restart_runtime() -> bool:
-    """Whether this runtime follows a restart for its agent.
-
-    Process mode: the restarter has INSERTed a 'restart_completed' inbound,
-    which only exists after a full restart cycle — the fresh process is
-    post-restart. Hosted mode: no restarter exists, so 'restart_completed'
-    never appears; the SDK's own 'restart' inbound row marks the first
-    restart instead. The fake must switch to the idle script after the first
-    restart in both modes, or a hosted agent would keep calling
-    ``ava.self.restart()`` forever.
-    """
+def _has_consumed_self_restart() -> bool:
+    """A prior self request was consumed, not a claim that restart succeeded."""
     with psycopg.connect(settings.data_plane.db_url) as conn, conn.cursor() as cur:
         cur.execute(
-            "SELECT 1 FROM inbound_messages WHERE agent_id = %s AND kind = 'restart' LIMIT 1",
-            (ava.self.AGENT_ID,),
-        )
-        if cur.fetchone() is not None:
-            return True
-        cur.execute(
             "SELECT 1 FROM inbound_messages "
-            "WHERE agent_id = %s AND kind = 'restart_completed' LIMIT 1",
+            "WHERE agent_id = %s AND kind = 'restart' AND source = 'self' "
+            "AND status IN ('claimed','done') LIMIT 1",
             (ava.self.AGENT_ID,),
         )
         return cur.fetchone() is not None
 
 
 def build(model: str) -> ScriptedFakeChatModel:
-    if _is_post_restart_runtime():
+    if _has_consumed_self_restart():
         return ScriptedFakeChatModel(script=IDLE_SCRIPT)
     return ScriptedFakeChatModel(script=RESTART_SCRIPT)

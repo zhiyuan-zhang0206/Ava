@@ -37,11 +37,14 @@ def _process_group_has_live_member(pgid: int) -> bool:
     """
     for process in psutil.process_iter(["pid", "status"]):
         try:
+            if os.getpgid(process.info["pid"]) != pgid:
+                continue
             if process.info["status"] in {psutil.STATUS_DEAD, psutil.STATUS_ZOMBIE}:
                 continue
-            if os.getpgid(process.info["pid"]) == pgid:
-                return True
-        except (PermissionError, ProcessLookupError, psutil.Error):
+            if process.info["status"] is None:
+                raise psutil.AccessDenied(process.info["pid"])
+            return True
+        except (ProcessLookupError, psutil.NoSuchProcess):
             continue
     return False
 

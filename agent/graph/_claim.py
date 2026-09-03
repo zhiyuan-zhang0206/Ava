@@ -72,7 +72,6 @@ from shared.log import logger
 # here so existing `from agent.graph._claim import ...` call sites (tests) keep
 # working unchanged. New code should import from the submodule that owns them.
 from ._claim_dispatch import _by_who as _by_who
-from ._claim_dispatch import _flip_to_restarting as _flip_to_restarting
 from ._claim_dispatch import _handle_heartbeat as _handle_heartbeat
 from ._claim_dispatch import _render_restart_completed_marker as _render_restart_completed_marker
 

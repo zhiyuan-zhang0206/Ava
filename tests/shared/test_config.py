@@ -1216,6 +1216,7 @@ def test_skip_auth_alias_inverts_value(monkeypatch: pytest.MonkeyPatch) -> None:
     from shared.dotenv_boot import _translate_legacy_skip_aliases
 
     monkeypatch.setitem(os.environ, "AVA_SKIP_AUTH", "true")
+    monkeypatch.setitem(os.environ, "AVA_AUTH_MIDDLEWARE_ENABLED", "true")
     monkeypatch.delitem(os.environ, "AVA_AUTH_MIDDLEWARE_ENABLED", raising=False)
     _translate_legacy_skip_aliases()
     assert GatewaySettings().auth_middleware_enabled is False
@@ -1235,6 +1236,7 @@ def test_skip_security_scan_alias_inverts_value(monkeypatch: pytest.MonkeyPatch)
     from shared.dotenv_boot import _translate_legacy_skip_aliases
 
     monkeypatch.setitem(os.environ, "AVA_SKIP_SECURITY_SCAN", "true")
+    monkeypatch.setitem(os.environ, "AVA_SECURITY_SCAN_ENABLED", "true")
     monkeypatch.delitem(os.environ, "AVA_SECURITY_SCAN_ENABLED", raising=False)
     _translate_legacy_skip_aliases()
     assert AgentEvalSettings().security_scan_enabled is False
@@ -1243,6 +1245,25 @@ def test_skip_security_scan_alias_inverts_value(monkeypatch: pytest.MonkeyPatch)
     monkeypatch.delitem(os.environ, "AVA_SECURITY_SCAN_ENABLED", raising=False)
     _translate_legacy_skip_aliases()
     assert AgentEvalSettings().security_scan_enabled is True
+
+
+@pytest.mark.parametrize("initial", [None, "true"])
+@pytest.mark.parametrize("family", ["auth", "scan"])
+def test_skip_alias_test_restores_canonical_environment(
+    monkeypatch: pytest.MonkeyPatch, initial: str | None, family: str
+) -> None:
+    """A translator's direct env writes must not escape either test phase."""
+    key = "AVA_AUTH_MIDDLEWARE_ENABLED" if family == "auth" else "AVA_SECURITY_SCAN_ENABLED"
+    if initial is None:
+        monkeypatch.delenv(key, raising=False)
+    else:
+        monkeypatch.setenv(key, initial)
+    with pytest.MonkeyPatch.context() as isolated:
+        if family == "auth":
+            test_skip_auth_alias_inverts_value(isolated)
+        else:
+            test_skip_security_scan_alias_inverts_value(isolated)
+    assert os.environ.get(key) == initial
 
 
 def test_eval_isolation_env_aliases_parse(tmp_path: Path) -> None:

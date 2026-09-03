@@ -877,9 +877,9 @@ describe("useAgents.terminate", () => {
     expect(useStore.getState().toast).toBe("Force killed");
   });
 
-  it("onSuccess shows 'Terminated' toast — instant feedback after the backend actually accepts terminate", async () => {
+  it("accepted termination reports request, not completed exit", async () => {
     // Placed in onSuccess rather than onMutate to avoid contradictory
-    // "Terminated" + "Terminate failed" coexistence when the backend
+    // "Termination requested" + "Terminate failed" coexistence when the backend
     // rejects. The toast auto-clears after 3s (built into store.showToast).
     vi.mocked(api.terminateAgent).mockResolvedValue({ status: "enqueued" });
     const { result } = renderHook(() => useAgents(noop), { wrapper });
@@ -891,7 +891,21 @@ describe("useAgents.terminate", () => {
     await act(async () => {
       await result.current.terminate(1);
     });
-    expect(useStore.getState().toast).toBe("Terminated");
+    expect(useStore.getState().toast).toBe("Termination requested");
+  });
+
+  it("hosted force accepted is not reported killed and does not rewrite lifecycle cache", async () => {
+    vi.mocked(api.terminateAgent).mockResolvedValue({ status: "enqueued" });
+    const { result } = renderHook(() => useAgents(noop), { wrapper });
+    await waitFor(() => {
+      expect(result.current.agents).toEqual(MOCK_AGENTS);
+    });
+    await act(async () => {
+      await result.current.terminate(1, true);
+    });
+    expect(api.terminateAgent).toHaveBeenCalledWith(1, true);
+    expect(useStore.getState().toast).toBe("Termination requested");
+    expect(result.current.agents).toEqual(MOCK_AGENTS);
   });
 
   it("onError does not show 'Terminated' toast — only showError on backend reject", async () => {

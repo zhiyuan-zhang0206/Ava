@@ -20,6 +20,7 @@ import asyncio
 import contextlib
 import threading
 import time
+from collections.abc import AsyncGenerator
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -304,6 +305,16 @@ async def _aclose_without_hanging(sched: TurnScheduler, stuck: _StuckTurn) -> bo
             await closing
 
 
+@contextlib.asynccontextmanager
+async def _releasing_stuck_turn() -> AsyncGenerator[_StuckTurn, None]:
+    """Release the cancellation-resistant fixture even when an assertion fails."""
+    turn = _StuckTurn()
+    try:
+        yield turn
+    finally:
+        await turn.release()
+
+
 class TestUncancellableTurn:
     """`aclose` must be BOUNDED, and must name what would not unwind.
 
@@ -557,18 +568,41 @@ class TestCancelAgent:
             records.append(kw)
 
         monkeypatch.setattr(dispatcher.logger, "error", _capture)
-        turn = _StuckTurn()
-        sched = TurnScheduler(turn)
-        sched.wake(5)
-        await asyncio.wait_for(turn.entered.wait(), 2)
+        async with _releasing_stuck_turn() as turn:
+            sched = TurnScheduler(turn)
+            sched.wake(5)
+            await asyncio.wait_for(turn.entered.wait(), 2)
 
-        assert await asyncio.wait_for(sched.cancel_agent(5), 2) is True
-        report = next(r for r in records if r.get("event") == "host_turn_uncancellable")
-        assert report["agent_id"] == 5
-        assert 5 in sched.active_agents, "a wedged turn still owns its registry slot"
+            assert await asyncio.wait_for(sched.cancel_agent(5), 2) is False
+            report = next(r for r in records if r.get("event") == "host_turn_uncancellable")
+            assert report["agent_id"] == 5
+            assert 5 in sched.active_agents, "a wedged turn still owns its registry slot"
+            original_task = turn._task
+            sched.wake(5)
+            await _settle()
+            assert turn._task is original_task, "another wake must not replace the live task"
+        assert 5 not in sched.active_agents, "only actual unwind releases the slot"
 
-        await turn.release()
-        await _settle()
+
+async def test_stuck_fixture_releases_after_failed_assertion() -> None:
+    """A useful failure must not strand an unkillable task in pytest teardown."""
+    turn: _StuckTurn | None = None
+    sched: TurnScheduler | None = None
+    try:
+        with pytest.raises(AssertionError, match="injected assertion failure"):
+            async with _releasing_stuck_turn() as turn:
+                sched = TurnScheduler(turn)
+                sched.wake(5)
+                await asyncio.wait_for(turn.entered.wait(), 2)
+                raise AssertionError("injected assertion failure")
+        assert turn is not None
+        assert sched is not None
+        assert turn._task is not None and turn._task.done()
+        assert 5 not in sched.active_agents
+    finally:
+        # Independent rescue keeps a broken context-manager regression bounded.
+        if turn is not None:
+            await turn.release()
 
 
 async def test_same_incarnation_settlement_precedes_next_turn_after_cancel_timeout(

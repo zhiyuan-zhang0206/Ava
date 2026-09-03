@@ -94,10 +94,11 @@ This module runs turns. The rest of the agent lifecycle is hosted-aware:
   `restart_requested` channel; this host drops the runtime and ends the task
   without an exit-notify, so the row stays runnable and the next wake starts
   clean with a rebinded config view.
-- **terminate** — graceful terminate is the durable terminate inbound, claimed
-  by the running turn (or the next wake of a still-runnable row); force
-  terminate marks the row dead without a kill and best-effort cancels the turn
-  task through this host's `/cancel-turn` route (`ops/ops_lifecycle.py`).
+- **terminate** — force fixes the original command/target as an active pointer.
+  `/cancel-turn` validates that command against this boot owner before cancelling
+  the captured Task. Actual work is shielded until its resources settle; only
+  the original serialized pump can observe completion. Force returns accepted,
+  not a claim that the continuation or its child processes have already exited.
 - **cluster update** — the hosted-aware quiesce skips the per-agent drain
   because hosted turns are checkpointer tasks rather than per-agent processes.
   The host maintains each row's `running` / `idling` status around those turns;
@@ -141,11 +142,11 @@ from agent._runloop import _graph_config
 from agent.db import LoggingConnectionPool
 from agent.hosted_ownership import (
     admit_hosted_runtime,
+    apply_hosted_lifecycle,
     release_hosted_owner,
     renew_hosted_owner,
     settle_hosted_runtime,
 )
-from agent.lifecycle import _notify_exit
 from agent.startup import (
     _reconcile_claimed_inbounds_at_startup,
     _repair_dangling_tool_use_at_startup,
@@ -316,6 +317,73 @@ class AgentHost:
     # ── the scheduler's entry point ──────────────────────────────────────────
 
     async def run_turn(self, agent_id: int) -> None:
+        """Retain the scheduler slot until real work, including threads, settles.
+
+        Cancelling an await of ``to_thread`` does not stop the thread. Shield the
+        whole owned turn (including boot and cleanup), not only graph return.
+        Durable interrupts still stop cooperative LLM/exec work. Repeated outer
+        cancellation must not release this agent to a concurrent successor.
+        """
+        from shared.turn_identity import HostedTurnResources, bind_hosted_resources
+
+        resources = HostedTurnResources()
+        with bind_hosted_resources(resources):
+            work = asyncio.create_task(self._run_turn(agent_id))
+        cancelled = False
+        try:
+            while not work.done():
+                try:
+                    await asyncio.shield(work)
+                except asyncio.CancelledError:
+                    cancelled = True
+            work.result()
+        finally:
+            from shared.hosted_force import original_host_force
+
+            if resources.unresolved:
+                # Keep the actual domains and scheduler registration alive.
+                # No timer/cache reset can turn a failed close into quiescence.
+                self._in_flight.add(agent_id)
+                logger.error(
+                    "hosted resources unresolved; force remains unobserved, "
+                    "exact resource inspection required: {requests}",
+                    agent_id=agent_id,
+                    requests=[str(path) for path in resources.unresolved],
+                )
+                while resources.unresolved:
+                    resources.changed.clear()
+                    try:
+                        await resources.changed.wait()
+                    except asyncio.CancelledError:
+                        cancelled = True
+                self._in_flight.discard(agent_id)
+            # Still inside the existing scheduler's exclusive per-agent pump.
+            # No-task wakes also take this path without admitting a runtime.
+            if cancelled:
+                self.drop_agent(agent_id)
+            settlement = asyncio.create_task(
+                original_host_force(
+                    self._pool, agent_id, self._owner, self._machine, quiescent=True
+                )
+            )
+            while not settlement.done():
+                try:
+                    await asyncio.shield(settlement)
+                except asyncio.CancelledError:
+                    cancelled = True
+            settlement.result()
+        if cancelled:
+            raise asyncio.CancelledError
+
+    async def accepts_force(self, agent_id: int, command_id: int) -> bool:
+        """Authenticate cancellation against this live host's actual boot owner."""
+        from shared.hosted_force import original_host_force
+
+        return await original_host_force(
+            self._pool, agent_id, self._owner, self._machine, command_id=command_id
+        )
+
+    async def _run_turn(self, agent_id: int) -> None:
         """Run `agent_id` until it has nothing left to claim, then return.
 
         One read decides everything: whether this agent is ours to run, and what
@@ -578,6 +646,14 @@ class AgentHost:
                     "FROM agents_meta m "
                     "WHERE ("
                     "    m.status = 'idling' "
+                    "    OR (m.status='terminated' AND m.runtime_kind='hosted' "
+                    "        AND m.runtime_owner=%s AND EXISTS ("
+                    "          SELECT 1 FROM inbound_messages force "
+                    "          WHERE force.id=m.lifecycle_command_id AND force.agent_id=m.id "
+                    "          AND force.target_generation=m.runtime_generation "
+                    "          AND force.target_owner=m.runtime_owner AND force.kind='terminate' "
+                    "          AND force.status='claimed' AND force.applied_at IS NOT NULL "
+                    "          AND force.observed_at IS NULL)) "
                     "    OR (m.status = 'running' "
                     "        AND (m.last_active_at IS NULL "
                     "             OR m.last_active_at < now() - make_interval(secs => %s)) "
@@ -589,13 +665,14 @@ class AgentHost:
                     "    )"
                     "  ) "
                     "  AND m.machine = %s "
-                    "  AND EXISTS ("
+                    "  AND (m.lifecycle_command_id IS NOT NULL OR EXISTS ("
                     "    SELECT 1 FROM inbound_messages pending "
                     "    WHERE pending.agent_id = m.id AND pending.status = 'pending'"
-                    "  )",
+                    "  ))",
                     (
                         stale_after_s,
                         stale_after_s,
+                        self._owner,
                         stale_after_s,
                         stale_after_s,
                         self._machine,
@@ -695,30 +772,21 @@ class AgentHost:
                 await flush(str(agent_id))
             # [] not .get(): this invocation's input wrote both channels, so a
             # missing key is a bug, not a state to tolerate.
-            if result["exit_requested"]:
-                logger.info(
-                    "hosted agent {agent_id} requested exit after {turns} turn(s) — "
-                    "ending its turn task",
-                    agent_id=agent_id,
-                    turns=turn,
-                )
-                self.drop_agent(agent_id)
-                _notify_exit(agent_id)
-                return True
-            if result["restart_requested"]:
-                logger.info(
-                    "hosted agent {agent_id} requested a restart after {turns} turn(s) — "
-                    "dropping its runtime and ending the turn task; the next wake "
-                    "starts clean (no exit-notify: the row stays runnable)",
-                    agent_id=agent_id,
-                    turns=turn,
-                )
-                self.drop_agent(agent_id)
+            if result["exit_requested"] or result["restart_requested"]:
                 incarnation = current_incarnation(agent_id)
                 if incarnation is None:
-                    raise RuntimeError("hosted restart has no admitted incarnation")
-                await settle_hosted_runtime(self._pool, incarnation, release=True)
-                return False
+                    raise RuntimeError("hosted lifecycle return has no admitted incarnation")
+                # The graph continuation has returned under existing single-flight.
+                # Cache loss is a consequence of the durable command, not its identity.
+                self.drop_agent(agent_id)
+                kind = await apply_hosted_lifecycle(self._pool, incarnation)
+                logger.info(
+                    "hosted lifecycle return settled",
+                    agent_id=agent_id,
+                    generation=str(incarnation.generation),
+                    command_kind=kind,
+                )
+                return kind == "terminate"
             if result["turn_idle"]:
                 return False
             # Turn boundary: go round again on the same checkpointer thread.

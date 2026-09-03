@@ -117,7 +117,6 @@ PG_STATEMENT_TIMEOUT_KWARGS: dict[str, Any] = {
     "options": PG_STATEMENT_TIMEOUT_OPTIONS,
 }
 
-
 # The session-level scrub that makes a pooled backend safe to borrow. RESET ALL
 # clears every session GUC another borrower may have left behind (the 2026-09-02
 # P0: a polluter's `SET default_transaction_read_only = on` on a pooled
@@ -583,6 +582,16 @@ def insert_inbound_message(
     """
     if payload is not None and "lifecycle_result" in payload:
         raise ValueError("lifecycle_result is reserved for verified command settlement")
+    if payload is not None and "launch_attempts" in payload:
+        raise ValueError("launch_attempts is reserved for controller authorization")
+    if payload is not None and "target_process_identity" in payload:
+        raise ValueError("target_process_identity is reserved for admitted lifecycle application")
+    if payload is not None and "resurrection_retry" in payload:
+        raise ValueError("resurrection_retry is reserved for the pending resurrection owner")
+    if payload is not None and (
+        {"resurrection_launch", "resurrection_launch_attempts"} & payload.keys()
+    ):
+        raise ValueError("resurrection launch evidence is reserved for the lifecycle owner")
     from shared.caller_identity import caller_payload
     from shared.envelope import reject_unnegotiated_caller
 

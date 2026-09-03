@@ -133,29 +133,23 @@ async def terminate_agent_op(
     """Local-target graceful or force terminate. Caller handles cross-machine."""
     if body.force:
         hosted = runner_mode.is_hosted()
-        old_status, pid, killed_page_names = await asyncio.to_thread(
+        old_status, pid, killed_page_names, command_id = await asyncio.to_thread(
             _terminate_force_blocking, agent_id, body, db_pool, kill_process=not hosted
         )
-        if old_status is AgentStatus.TERMINATED:
+        if old_status is AgentStatus.TERMINATED and not hosted:
             return TerminateAgentResponse(status="already_terminated")
         if hosted:
-            # No process to SIGKILL — the row is terminated and the durable
-            # terminate inbound (inserted inside the force transaction) is the
-            # correctness mechanism: a running turn claims it and exits. This
-            # call only ACCELERATES a turn wedged inside a long await, and it
-            # is best-effort by construction: a host that is down or
-            # restarting means the turn is already gone (checkpointed, and no
-            # wake will resurrect a terminated row).
-            await _cancel_hosted_turn_best_effort(agent_id)
+            await _cancel_hosted_turn_best_effort(agent_id, command_id)
         for page_name in killed_page_names:
             await publish_page_closed(agent_id, page_name)
         _log.info(
-            "[gateway] agent %s force-killed by %s (pid=%s)",
+            "[gateway] agent %s force requested by %s (pid=%s)",
             agent_id,
             body.source,
             pid,
         )
-        return TerminateAgentResponse(status="force_killed")
+        # Neither HTTP delivery nor Task.cancel proves resource quiescence.
+        return TerminateAgentResponse(status="enqueued" if hosted else "force_killed")
 
     s = await asyncio.to_thread(get_agent_status, agent_id)
     if s is AgentStatus.TERMINATED:
@@ -173,16 +167,14 @@ async def terminate_agent_op(
     return TerminateAgentResponse(status="enqueued")
 
 
-async def _cancel_hosted_turn_best_effort(agent_id: int) -> None:
+async def _cancel_hosted_turn_best_effort(agent_id: int, command_id: int) -> None:
     """Accelerate a hosted force-terminate by cancelling the agent's turn task.
 
     Dials the local agent-host's loopback health port (`POST /cancel-turn`);
     the host cancels the turn with its bounded unwind and reports a
     C-call-blocked straggler instead of hanging. Every failure is swallowed at
-    INFO with the exception — the durable terminate inbound already inserted by
-    the force transaction is what makes the row dead; this hop only shortens
-    the window for a turn stuck inside a long await, and a host that is down /
-    restarting means the turn is already gone.
+    INFO with the exception. The durable force pointer stays unobserved until
+    the original host actually settles; a dead host is not child-exit proof.
     """
     import httpx
 
@@ -192,13 +184,13 @@ async def _cancel_hosted_turn_best_effort(agent_id: int) -> None:
         async with httpx.AsyncClient(timeout=httpx.Timeout(2.0)) as client:
             resp = await client.post(
                 f"http://127.0.0.1:{health_port('agent_host')}/cancel-turn",
-                json={"agent_id": agent_id},
+                json={"agent_id": agent_id, "command_id": command_id},
             )
             resp.raise_for_status()
     except Exception:
         _log.info(
             "hosted turn-cancel call for agent %s failed (non-fatal; the durable "
-            "terminate inbound already finalized the row)",
+            "force command remains accepted; quiescence is not confirmed)",
             agent_id,
             exc_info=True,
         )
@@ -210,7 +202,7 @@ def _terminate_force_blocking(
     db_pool: ConnectionPool,
     *,
     kill_process: bool,
-) -> tuple[AgentStatus, int | None, list[str]]:
+) -> tuple[AgentStatus, int | None, list[str], int]:
     """Sync force-kill section — via to_thread: session kill + SIGKILL + status
     flip + AgentUpdated + terminate inbound. Returns (old status, pid, page names).
 
@@ -227,7 +219,7 @@ def _terminate_force_blocking(
     _publish_force_terminate_inbound(agent_id, inbound_id, body.source)
     with db_pool.connection() as conn:
         publish_agent_updated_sync(conn, agent_id)
-    return old_status, pid, killed_page_names
+    return old_status, pid, killed_page_names, inbound_id
 
 
 def _terminate_graceful_blocking(
@@ -251,6 +243,16 @@ def _terminate_graceful_blocking(
     return "enqueued", iid, []
 
 
+def _pending_allocation_can_resume(agent_id: int, trigger_inbound_id: int | None) -> bool:
+    from shared.db import connect
+    from shared.resurrection_launch import pending_allocation
+
+    if trigger_inbound_id is None:
+        return False
+    with connect() as conn:
+        return pending_allocation(conn, agent_id, trigger_inbound_id)
+
+
 async def resurrect_agent_op(
     agent_id: int,
     body: ResurrectAgentRequest,
@@ -264,7 +266,10 @@ async def resurrect_agent_op(
     runner; manual resurrects omit it and retain their unconditional contract.
     """
     s = await asyncio.to_thread(get_agent_status, agent_id)
-    if s is not AgentStatus.TERMINATED:
+    if s is not AgentStatus.TERMINATED and (
+        s is not AgentStatus.IDLING
+        or not await asyncio.to_thread(_pending_allocation_can_resume, agent_id, trigger_inbound_id)
+    ):
         return ResurrectAgentResponse(status="already_alive")
     try:
         # resurrect_agent synchronously launches the agent and polls up to
@@ -330,7 +335,10 @@ async def resurrect_if_terminated(
     TERMINATED instead.
     """
     status = await asyncio.to_thread(get_agent_status, agent_id)
-    if status is not AgentStatus.TERMINATED:
+    if status is not AgentStatus.TERMINATED and (
+        status is not AgentStatus.IDLING
+        or not await asyncio.to_thread(_pending_allocation_can_resume, agent_id, trigger_inbound_id)
+    ):
         return status
     body = ResurrectAgentRequest(resurrected_by="system")
     try:
@@ -387,9 +395,22 @@ def _restart_blocking(
 ) -> int | None:
     """Sync restart section — via to_thread. Returns the inbound id, or None
     when the agent is already terminated."""
-    if get_agent_status(agent_id) is AgentStatus.TERMINATED:
-        return None
-    with db_pool.connection() as conn:
+    from psycopg import sql
+
+    from shared.db_transaction import write_transaction
+    from shared.lifecycle_acceptance import FAILED_RESTART_FOR_CURRENT_TARGET
+
+    with write_transaction(db_pool) as conn:
+        row = conn.execute(
+            sql.SQL("SELECT status,{} FROM agents_meta WHERE id=%s FOR UPDATE").format(
+                sql.SQL(FAILED_RESTART_FOR_CURRENT_TARGET)
+            ),
+            (agent_id,),
+        ).fetchone()
+        if row is None:
+            raise RuntimeError(f"agent {agent_id} does not exist")
+        if row[0] == "terminated" and row[1] is not True:
+            return None
         payload: dict[str, object] | None = None
         if body.config_overlay:
             # This overlay write must not depend on borrowed-backend session
@@ -398,7 +419,6 @@ def _restart_blocking(
             # emergency channel (provider-outage model switch) is exactly when
             # the pool is most likely poisoned. Declare the transaction
             # writable before the DML (same posture as #1428/#1436).
-            conn.execute("SET TRANSACTION READ WRITE")
             conn.execute(
                 "UPDATE agents_meta "
                 "SET config_overlay = COALESCE(config_overlay, '{}'::jsonb) || %s::jsonb "
