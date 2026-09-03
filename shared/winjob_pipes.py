@@ -40,6 +40,8 @@ class PipedJobChild:
             self._handle, 0xFFFFFFFF if timeout is None else max(0, int(timeout * 1000))
         )
         if waited == 0x102:
+            if timeout is None:
+                raise RuntimeError("native infinite wait unexpectedly timed out")
             raise subprocess.TimeoutExpired("owned exec root", timeout)
         if waited != 0:
             raise _last_error("wait owned Job root")
