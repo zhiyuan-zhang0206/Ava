@@ -225,6 +225,17 @@ daemon.main()
                     Path(loaded["stdlib"]).resolve().is_relative_to(image / "python"),
                     "external stdlib",
                 )
+                native_images = sorted(
+                    {m.path for m in native.memory_maps() if m.path.startswith("/")}
+                )
+                require(
+                    all(
+                        Path(p).is_relative_to(image)
+                        or p.startswith(("/usr/lib/", "/lib/", "/lib64/"))
+                        for p in native_images
+                    ),
+                    "normal ops loaded an unretained non-OS native image",
+                )
                 require(
                     all(
                         not Path(p).is_relative_to(root / "source-hidden")
@@ -248,6 +259,7 @@ daemon.main()
                     "normalReadiness": True,
                     "nativeRegistration": True,
                     "loaded": loaded,
+                    "loadedNativeImages": native_images,
                     "health": health,
                     "wrongHomeRefusedBeforeEffects": True,
                     "extraAppliedRefused": True,
