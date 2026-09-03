@@ -10,7 +10,7 @@
         "display": true,
         "unix_socket": true
       },
-      "description": "drive the shared desktop through the signed permissions helper: snapshots, clicks, typing, keys, scrolling, window/session info. Actions are serialized machine-wide and audited as computer_action events",
+      "description": "drive the shared desktop through the signed permissions helper: snapshots (include_ocr=true adds recognized text with physical-pixel boxes), clicks, typing, keys, scrolling, window/session info, plus OCR text tools: find_text (locate on-screen text, get its click-space box) and click_text (OCR -> locate -> click in one action). Actions are serialized machine-wide and audited as computer_action events",
       "shared": "computer_use"
     }
   }
