@@ -4,7 +4,7 @@ Historical failures prove absence only; they never trigger resurrection. The
 caller holds the exact agent row lock and supplies positive OS absence evidence.
 """
 
-from typing import Any
+from typing import Any, cast
 
 import psycopg
 from psycopg.types.json import Jsonb
@@ -74,7 +74,7 @@ def accept_cold_command(conn: psycopg.Connection, owner: dict[str, Any]) -> int 
         owner["machine"] != machine_name()
         or evidence is None
         or not isinstance(evidence[0], dict)
-        or not target_process_ended(evidence[0], machine_name())
+        or not target_process_ended(cast(dict[str, Any], evidence[0]), machine_name())
     ):
         return None
     target = RuntimeIncarnation(owner["id"], owner["runtime_generation"], owner["runtime_owner"])

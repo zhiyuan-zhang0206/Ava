@@ -847,7 +847,18 @@ def test_new_reaps_a_recordless_host_before_replacement(sessions: Path) -> None:
         second = _record(home, name)
         assert second is not None and second.pid != first.pid
         assert not envfile.exists(), "the replacement must consume its env handoff"
-        assert _wait(lambda: not old_host.is_running()), "recordless host survived replacement"
+
+        def survivor() -> str:
+            try:
+                return repr(
+                    old_host.as_dict(attrs=["pid", "ppid", "status", "create_time", "cmdline"])
+                )
+            except psutil.Error as exc:
+                return repr(exc)
+
+        assert _wait(lambda: not old_host.is_running()), (
+            f"recordless host survived replacement: expected={identity!r}, observed={survivor()}"
+        )
         assert _wait(lambda: not old_shell.is_running()), "recordless shell survived replacement"
     finally:
         # The pre-fix behavior rejects the replacement and leaves the deliberately

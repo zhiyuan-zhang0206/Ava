@@ -320,16 +320,14 @@ async def test_claim_subsequent_entry_does_not_disturb_running(
 
 
 async def test_claim_inbound_batch_stamps_claimed_at(
+    running_agent: Callable[[], int],
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
 ):
-    """claim_inbound_batch stamps claimed_at = now() on every grabbed row
-    (chat -> claimed, lifecycle kinds -> done), so the gateway can compute
-    creation -> pickup latency (claimed_at - created_at) after the fact. A row
-    nobody claimed keeps claimed_at NULL."""
+    """Only the accepted command gets pickup time; queued chat stays unclaimed."""
     from agent.db import claim_inbound_batch
 
-    tid = spawn_agent()
+    tid = running_agent()
     chat_id = insert_inbound_message(db_conn, tid, "hello", source="user")
     with db_conn.cursor() as cur:
         cur.execute(
@@ -344,9 +342,7 @@ async def test_claim_inbound_batch_stamps_claimed_at(
 
     rows = await claim_inbound_batch(aops_pool, tid)
     by_id = {r.id: r for r in rows}
-    assert set(by_id) == {chat_id, term_id}
-    # RETURNING carries claimed_at for both kinds (chat + lifecycle).
-    assert by_id[chat_id].claimed_at is not None
+    assert set(by_id) == {term_id}
     assert by_id[term_id].claimed_at is not None
 
     with db_conn.cursor() as cur:
@@ -355,8 +351,8 @@ async def test_claim_inbound_batch_stamps_claimed_at(
             ([chat_id, term_id],),
         )
         state = cur.fetchall()
-    assert [(r[0], r[1]) for r in state] == [(chat_id, "claimed"), (term_id, "done")]
-    assert all(r[2] is not None for r in state)
+    assert [(r[0], r[1]) for r in state] == [(chat_id, "pending"), (term_id, "claimed")]
+    assert state[0][2] is None and state[1][2] is not None
 
     # A fresh unclaimed row keeps claimed_at NULL.
     fresh_id = insert_inbound_message(db_conn, tid, "later", source="user")
@@ -1163,19 +1159,14 @@ async def test_claim_terminate_self_renders_by_yourself(
     assert "Termination was accepted from yourself" in lifecycle.content  # pyright: ignore[reportUnknownMemberType]
 
 
-async def test_claim_self_terminate_with_chat_cobatch_abandons_terminate(
+async def test_claim_self_terminate_retains_peer_chat_for_successor(
+    running_agent: Callable[[], int],
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     aredis_inbound_listener: RedisInboundListener,
 ):
-    """The terminate race: an agent calls ava.self.terminate() while a peer
-    message arrives at the same moment; both land pending and are claimed in one
-    batch. The chat arrived during the very turn the agent terminated in — the
-    agent never saw it (its LLM context only holds messages claimed at the turn's
-    start), so the death decision must be abandoned: the chat is committed and
-    drives a wake (goto before_llm), the terminate is a consumed no-op (no
-    marker, no END), the agent stays alive to process the message."""
-    tid = spawn_agent()
+    """Accepting self termination never acknowledges an unseen peer message."""
+    tid = running_agent()
     insert_inbound_message(db_conn, tid, "peer message during suicide", source="agent:1")
     terminate_id = _insert_inbound_kind(db_conn, tid, "", "terminate", source="self")
     await _await_inbound_visible(aops_pool, terminate_id)
@@ -1186,28 +1177,24 @@ async def test_claim_self_terminate_with_chat_cobatch_abandons_terminate(
         _config(tid),
     )
 
-    assert cmd.goto == "before_llm"  # wake to process the chat, not END
-    assert cmd.goto != END
-    assert cmd.update["halted"] is False  # type: ignore[index]
+    assert cmd.goto == END
     msgs = cmd.update["messages"]  # type: ignore[index]
     assert len(msgs) == 1  # pyright: ignore[reportUnknownArgumentType]
     assert isinstance(msgs[0], HumanMessage)
-    assert "peer message during suicide" in msgs[0].content  # pyright: ignore[reportUnknownMemberType]
-    # no terminate lifecycle marker — the death was abandoned
-    assert not any("Termination was accepted" in m.content for m in msgs)  # pyright: ignore[reportUnknownMemberType]
+    assert "Termination was accepted" in msgs[0].content  # pyright: ignore[reportUnknownMemberType]
+    assert db_conn.execute(
+        "SELECT status,content FROM inbound_messages WHERE agent_id=%s AND kind='chat'", (tid,)
+    ).fetchone() == ("pending", "peer message during suicide")
 
 
-async def test_claim_self_terminate_with_older_chat_cobatch_abandons_terminate(
+async def test_claim_self_terminate_retains_older_user_chat(
+    running_agent: Callable[[], int],
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     aredis_inbound_listener: RedisInboundListener,
 ):
-    """Order-independence half of the self-terminate race: the chat can arrive
-    just BEFORE the agent calls ava.self.terminate() (sitting pending during the
-    terminating turn). It is still unseen by the agent, so it vetoes the death
-    just the same — a co-batched chat is by construction not in the LLM context
-    (only chats claimed in an earlier batch are)."""
-    tid = spawn_agent()
+    """An older user chat remains durable without vetoing the accepted command."""
+    tid = running_agent()
     chat_id = insert_inbound_message(db_conn, tid, "queued before the suicide", source="user")
     await _await_inbound_visible(aops_pool, chat_id)
     _insert_inbound_kind(db_conn, tid, "", "terminate", source="self")
@@ -1218,22 +1205,22 @@ async def test_claim_self_terminate_with_older_chat_cobatch_abandons_terminate(
         _config(tid),
     )
 
-    assert cmd.goto == "before_llm"
+    assert cmd.goto == END
     msgs = cmd.update["messages"]  # type: ignore[index]
-    assert any("queued before the suicide" in m.content for m in msgs)  # pyright: ignore[reportUnknownMemberType]
-    assert not any("Termination was accepted" in m.content for m in msgs)  # pyright: ignore[reportUnknownMemberType]
+    assert any("Termination was accepted" in m.content for m in msgs)  # pyright: ignore[reportUnknownMemberType]
+    assert db_conn.execute(
+        "SELECT status,content FROM inbound_messages WHERE id=%s", (chat_id,)
+    ).fetchone() == ("pending", "queued before the suicide")
 
 
-async def test_claim_external_terminate_with_newer_chat_abandons_terminate(
+async def test_claim_external_terminate_retains_newer_chat(
+    running_agent: Callable[[], int],
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     aredis_inbound_listener: RedisInboundListener,
 ):
-    """External terminate (user/admin/peer) with a chat that arrived AFTER it:
-    the chat is the most recent genuine intent — same recency rule as the
-    resurrect veto — so the terminate is abandoned (consumed no-op, no marker)
-    and the agent wakes to process the chat."""
-    tid = spawn_agent()
+    """Newer chat does not replace an accepted lifecycle command or get lost."""
+    tid = running_agent()
     _insert_inbound_kind(db_conn, tid, "", "terminate", source="user")
     chat_id = insert_inbound_message(db_conn, tid, "message after the kill", source="user")
     await _await_inbound_visible(aops_pool, chat_id)
@@ -1244,11 +1231,12 @@ async def test_claim_external_terminate_with_newer_chat_abandons_terminate(
         _config(tid),
     )
 
-    assert cmd.goto == "before_llm"
-    assert cmd.goto != END
+    assert cmd.goto == END
     msgs = cmd.update["messages"]  # type: ignore[index]
-    assert any("message after the kill" in m.content for m in msgs)  # pyright: ignore[reportUnknownMemberType]
-    assert not any("Termination was accepted" in m.content for m in msgs)  # pyright: ignore[reportUnknownMemberType]
+    assert any("Termination was accepted" in m.content for m in msgs)  # pyright: ignore[reportUnknownMemberType]
+    assert db_conn.execute(
+        "SELECT status,content FROM inbound_messages WHERE id=%s", (chat_id,)
+    ).fetchone() == ("pending", "message after the kill")
 
 
 async def test_claim_external_terminate_with_older_chat_still_dies(
@@ -1499,16 +1487,22 @@ async def test_claim_restart_kind_hosted_ends_turn_and_stays_runnable(
     no 'restarting' flip (there is no restarter to pick the row up — it must
     stay runnable), and the lifecycle marker renders inline (nothing else will:
     the restarter is what writes restart_completed in process mode)."""
-    tid = spawn_agent()
-    _set_agent_status(db_conn, tid, "running")
+    from shared.turn_identity import bind_turn_identity
+    from tests.agent.test_inbound_ownership import _admit, _agent
+
+    tid = _agent(db_conn)
+    owner = await _admit(aops_pool, tid)
     restart_id = _insert_inbound_kind(db_conn, tid, "", "restart", source="user")
     await _await_inbound_visible(aops_pool, restart_id)
 
-    cmd = await claim_node(
-        AgentState(messages=[SystemMessage(content="sys")]),
-        _make_runtime(ops_pool=aops_pool, inbound_listener=aredis_inbound_listener, hosted=True),
-        _config(tid),
-    )
+    with bind_turn_identity(tid, incarnation=owner):
+        cmd = await claim_node(
+            AgentState(messages=[SystemMessage(content="sys")]),
+            _make_runtime(
+                ops_pool=aops_pool, inbound_listener=aredis_inbound_listener, hosted=True
+            ),
+            _config(tid),
+        )
 
     assert cmd.goto == END
     assert cmd.update["restart_requested"] is True  # type: ignore[index]
@@ -1518,6 +1512,9 @@ async def test_claim_restart_kind_hosted_ends_turn_and_stays_runnable(
     assert "Restart was accepted from user" in msgs[0].content  # pyright: ignore[reportUnknownMemberType]
     # the row never left a runnable status — no restarter will come for it
     await _await_status(aops_pool, tid, "running")
+    assert db_conn.execute(
+        "SELECT status,applied_at,observed_at FROM inbound_messages WHERE id=%s", (restart_id,)
+    ).fetchone() == ("claimed", None, None)
 
 
 async def test_claim_restart_kind_hosted_self_arms_no_process_respawn(
@@ -1529,18 +1526,24 @@ async def test_claim_restart_kind_hosted_self_arms_no_process_respawn(
     """A hosted self-restart must not arm the atexit self-respawn fallback —
     that fallback forks a replacement PROCESS, which hosted mode has no use
     for and which would double-claim with the dispatcher's turn task."""
+    from shared.turn_identity import bind_turn_identity
+    from tests.agent.test_inbound_ownership import _admit, _agent
+
     scheduled: list[int] = []
     monkeypatch.setattr("atexit.register", scheduled.append)
-    tid = spawn_agent()
-    _set_agent_status(db_conn, tid, "running")
+    tid = _agent(db_conn)
+    owner = await _admit(aops_pool, tid)
     restart_id = _insert_inbound_kind(db_conn, tid, "", "restart", source="self")
     await _await_inbound_visible(aops_pool, restart_id)
 
-    cmd = await claim_node(
-        AgentState(messages=[SystemMessage(content="sys")]),
-        _make_runtime(ops_pool=aops_pool, inbound_listener=aredis_inbound_listener, hosted=True),
-        _config(tid),
-    )
+    with bind_turn_identity(tid, incarnation=owner):
+        cmd = await claim_node(
+            AgentState(messages=[SystemMessage(content="sys")]),
+            _make_runtime(
+                ops_pool=aops_pool, inbound_listener=aredis_inbound_listener, hosted=True
+            ),
+            _config(tid),
+        )
 
     assert cmd.goto == END
     assert cmd.update["restart_requested"] is True  # type: ignore[index]
@@ -2060,23 +2063,17 @@ async def test_claim_resurrect_kind_appends_marker_and_continues(
 
 
 # ────────────────────────────────────────────────────────────────────────
-# Lifecycle routing by recency: when a claim batch carries several conflicting
-# intents (only happens after the agent was stuck / down long enough for them to
-# pile up), the LATEST one by row id wins — not a fixed kind precedence. This is
-# what stops a stale terminate from a prior life killing an agent a newer
-# resurrect just brought back (production agent 716).
+# Lifecycle commands bind to an admitted incarnation and dispatch serially.
+# A notification's recency cannot stand in for completed termination or actual
+# successor admission. Unaccepted work survives for the correct consumer.
 
 
-async def test_claim_stale_terminate_loses_to_newer_resurrect(
+async def test_unowned_resurrect_notification_cannot_cancel_pending_terminate(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     aredis_inbound_listener: RedisInboundListener,
 ):
-    """The production stuck-agent recovery batch [cancel, cancel, terminate,
-    resurrect]: the resurrect (newest id) brought the process up and is the user's
-    latest intent → the agent wakes (goto before_llm), the stale prior-life
-    terminate is the consumed loser (no terminate marker, no END). Without recency
-    the terminate would kill the freshly-resurrected process on its first claim."""
+    """A newer notification is not admission or proof that prior intent completed."""
     tid = spawn_agent()
     # id == insertion order: terminate older than the resurrect that follows it
     _insert_inbound_kind(db_conn, tid, "", "cancel", source="user")
@@ -2084,17 +2081,17 @@ async def test_claim_stale_terminate_loses_to_newer_resurrect(
     _insert_inbound_kind(db_conn, tid, "", "terminate", source="user")
     _insert_inbound_kind(db_conn, tid, "", "resurrect", source="user")
 
-    cmd = await claim_node(
-        AgentState(messages=[SystemMessage(content="sys")]),
-        _make_runtime(ops_pool=aops_pool, inbound_listener=aredis_inbound_listener),
-        _config(tid),
-    )
-
-    assert cmd.goto == "before_llm"  # wakes, not END — the kill was vetoed
-    assert cmd.update["halted"] is False  # type: ignore[index]
-    contents = [m.content for m in cmd.update["messages"]]  # type: ignore[index]
-    assert any("You have been resurrected by user" in c for c in contents)
-    assert not any("Termination was accepted" in c for c in contents)  # stale terminate dropped
+    with pytest.raises(RuntimeError, match="lifecycle claim requires an admitted"):
+        await claim_node(
+            AgentState(messages=[SystemMessage(content="sys")]),
+            _make_runtime(ops_pool=aops_pool, inbound_listener=aredis_inbound_listener),
+            _config(tid),
+        )
+    assert db_conn.execute(
+        "SELECT kind,status,claimed_at FROM inbound_messages WHERE agent_id=%s ORDER BY id", (tid,)
+    ).fetchall() == [
+        (kind, "pending", None) for kind in ["cancel", "cancel", "terminate", "resurrect"]
+    ]
 
 
 async def test_claim_resurrect_then_terminate_still_dies(
@@ -2103,13 +2100,9 @@ async def test_claim_resurrect_then_terminate_still_dies(
     aops_pool: AsyncConnectionPool,
     aredis_inbound_listener: RedisInboundListener,
 ):
-    """Mirror case: the user resurrects an agent, then terminates the fresh
-    process before its first claim. The terminate is the newer intent → the agent
-    dies (goto END + terminate marker); the resurrect is the consumed loser (no
-    'resurrected' marker). Fixed `resurrect > terminate` priority would wrongly
-    keep alive an agent the user just killed; recency resolves it correctly."""
+    """An owned terminate dispatches alone; an older notification is not lost."""
     tid = running_agent()
-    _insert_inbound_kind(db_conn, tid, "", "resurrect", source="user")
+    notice = _insert_inbound_kind(db_conn, tid, "", "resurrect", source="user")
     _insert_inbound_kind(db_conn, tid, "", "terminate", source="user")
 
     cmd = await claim_node(
@@ -2121,7 +2114,10 @@ async def test_claim_resurrect_then_terminate_still_dies(
     assert cmd.goto == END
     contents = [m.content for m in cmd.update["messages"]]  # type: ignore[index]
     assert any("Termination was accepted from user" in c for c in contents)
-    assert not any("resurrected" in c for c in contents)  # superseded revive dropped
+    assert not any("resurrected" in c for c in contents)
+    assert db_conn.execute(
+        "SELECT status,claimed_at FROM inbound_messages WHERE id=%s", (notice,)
+    ).fetchone() == ("pending", None)
 
 
 @pytest.mark.flaky  # poll _await_status for claim_node status transition
@@ -2157,19 +2153,51 @@ async def test_claim_terminate_then_restart_preserves_serial_order(
 
 
 async def test_claim_auto_resurrect_chat_batch_wakes_and_keeps_chat(
+    running_agent: Callable[[], int],
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     aredis_inbound_listener: RedisInboundListener,
+    monkeypatch: pytest.MonkeyPatch,
 ):
-    """Auto-resurrect-on-chat path: a chat delivered to a terminated agent inserts
-    the chat then a resurrect, so a stale prior-life terminate is co-batched as
-    [terminate, chat, resurrect]. The resurrect (newest) wins → the agent wakes and
-    the chat survives to be answered; the stale terminate is vetoed. Without recency
-    the auto-resurrected agent would die before reading the message."""
-    tid = spawn_agent()
-    _insert_inbound_kind(db_conn, tid, "", "terminate", source="user")
+    """A settled prior command, not marker recency, protects the real successor."""
+    from agent._starting import claim_agent_row
+    from ops.agent_wake import resurrect_agent
+    from shared.lifecycle_termination_observe import observe_applied_termination
+    from shared.machine import machine_name
+
+    tid = running_agent()
+    stop = _insert_inbound_kind(db_conn, tid, "", "terminate", source="user")
+    assert (
+        await claim_node(
+            AgentState(messages=[SystemMessage(content="sys")]),
+            _make_runtime(ops_pool=aops_pool, inbound_listener=aredis_inbound_listener),
+            _config(tid),
+        )
+    ).goto == END
+
+    # This PG test supplies an explicit exit observation; actual process exit
+    # and automatic user-wake ownership are separately exercised by E2E.
+    def observed_exit(_payload: object, _machine: str) -> bool:
+        return True
+
+    with monkeypatch.context() as patch:
+        patch.setattr("shared.lifecycle_termination_observe.target_process_ended", observed_exit)
+        assert observe_applied_termination(db_conn, tid, machine_name())
+        db_conn.commit()
+    assert db_conn.execute(
+        "SELECT status,observed_at IS NOT NULL FROM inbound_messages WHERE id=%s", (stop,)
+    ).fetchone() == ("done", True)
+    db_conn.commit()
     insert_inbound_message(db_conn, tid, "are you there?", source="user")
-    _insert_inbound_kind(db_conn, tid, "", "resurrect", source="user")
+    resurrect_agent(tid, resurrected_by="user")
+    launch = db_conn.execute(
+        "SELECT id FROM inbound_messages WHERE agent_id=%s AND kind='resurrect' "
+        "AND status='pending'",
+        (tid,),
+    ).fetchone()
+    assert launch is not None
+    db_conn.commit()
+    claim_agent_row(tid, resurrect_command_id=launch[0])
 
     cmd = await claim_node(
         AgentState(messages=[SystemMessage(content="sys")]),
