@@ -725,8 +725,9 @@ class TestResurrectAgent:
         def _synchronize_guarded_updates(cursor: Any, query: Any, *args: Any, **kwargs: Any) -> Any:
             if (
                 threading.current_thread().name.startswith("resurrect-cas")
-                and "UPDATE agents_meta SET status" in str(query)
-                and "AND EXISTS (" in str(query)
+                and "FROM agents_meta" in str(query)
+                and "FOR UPDATE" in str(query)
+                and threading.current_thread().name not in barrier_hits
             ):
                 barrier_hits.append(threading.current_thread().name)
                 update_barrier.wait(timeout=5)
@@ -1051,8 +1052,9 @@ class TestResurrectAgent:
         failures: list[BaseException] = []
         retry_barrier_hits: list[str] = []
 
-        def _launch(aid: int, **_kwargs: object) -> None:
+        def _launch(aid: int, **_kwargs: object) -> str:
             launches.append(aid)
+            return f"test-resurrect-attempt-{aid}"
 
         class _Supervisor:
             @staticmethod
@@ -1061,7 +1063,7 @@ class TestResurrectAgent:
                 killed_sessions.append(name)
                 return True, "killed"
 
-        def _never_confirms(_aid: int) -> None:
+        def _never_confirms(_aid: int, _attempt: str | None = None) -> None:
             confirm_failed.set()
             raise RuntimeError("child did not claim")
 
@@ -1105,6 +1107,15 @@ class TestResurrectAgent:
         assert len(failures) == 1 and isinstance(failures[0], MachinePaused)
         assert retry_barrier_hits == ["retry-machine-lock"]
         assert launches == [agent_id]
+        assert db_conn.execute(
+            "SELECT payload->'resurrection_launch_attempts' FROM inbound_messages WHERE id=%s",
+            (trigger_id,),
+        ).fetchone() == (1,)
+        assert db_conn.execute(
+            "SELECT payload->'resurrection_launch'->'attempts' FROM inbound_messages "
+            "WHERE agent_id=%s AND kind='resurrect'",
+            (agent_id,),
+        ).fetchall() == [(1,)]
         assert killed_sessions == [session_name(f"agent-{agent_id}")]
         assert _termination_row(db_conn, agent_id) == ("terminated", "user", True)
 

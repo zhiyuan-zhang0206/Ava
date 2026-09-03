@@ -689,17 +689,18 @@ class TestTurnLoop:
         await asyncio.wait_for(host.run_turn(1), 2)
         assert 1 not in host._runtimes
 
-    async def test_restart_requested_applies_before_dropping_runtime(
+    async def test_restart_requested_applies_after_continuation_and_cache_release(
         self, wired: _Build, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Restart applies through the same owner-fenced path before cache removal."""
+        """A returned graph releases its cache before the owner-fenced application."""
         import services.agent_host.host as host_mod
         from shared.runtime_incarnation import RuntimeIncarnation
 
         notified: list[int] = []
 
         async def apply(_pool: object, incarnation: RuntimeIncarnation) -> str:
-            assert incarnation.agent_id in host._runtimes
+            assert incarnation.agent_id not in host._runtimes
+            assert len(graph.observations) == 1
             notified.append(incarnation.agent_id)
             return "restart"
 
