@@ -33,7 +33,7 @@ import contextlib
 import logging
 import sys
 import time
-from typing import Any, NamedTuple, cast
+from typing import Any, NamedTuple
 
 from cli.commands._gateway_ready import (
     GatewayReadiness,
@@ -44,6 +44,7 @@ from cli.commands._update_fanout import (
     ClusterOpPayload,
     _print_fan_out_results,
 )
+from cli.commands._update_phase_b_capture import capture_host_stages as _capture_host_stages
 from cli.commands._update_recover import RolloutOutcome
 from shared.deploy_timing import (
     CONVERGING_POLL_TIMEOUT_S,
@@ -119,30 +120,6 @@ POLL_NO_PROGRESS = "no_progress"  # updater alive, but its stage evidence has st
 # the same too-eager verdict this rewrite exists to remove — one interval apart it
 # costs `_POLL_INTERVAL_S`, not a rollout.
 _STALL_CONFIRMATIONS = 2
-
-
-def _capture_host_stages(
-    host_outcomes: dict[str, dict[str, float]] | None,
-    name: str,
-    result: object,
-) -> None:
-    """Copy `result`'s updater stage times into `host_outcomes[name]` when it has
-    any, keeping the LAST non-empty reading (a mid-run probe catches the growing
-    partial breakdown; a converged host's fresh-idle probe carries the completed
-    one — see `ops.updater_outcome.last_updater_outcome`)."""
-    if host_outcomes is None or not isinstance(result, dict):
-        return
-    raw: object | None = cast(dict[str, object], result).get("last_updater_outcome")
-    if isinstance(raw, dict):
-        stages: object | None = cast(dict[str, object], raw).get("stages")
-        if isinstance(stages, dict):
-            parsed = {
-                str(k): round(float(v), 1)
-                for k, v in cast(dict[str, object], stages).items()
-                if isinstance(v, (int, float))
-            }
-            if parsed:
-                host_outcomes[name] = parsed
 
 
 class PollVerdict(NamedTuple):
@@ -303,7 +280,7 @@ async def _probe_one_until_unpaused(
     name: str,
     deadline: float,
     ops_url: str | None = None,
-    host_outcomes: dict[str, dict[str, float]] | None = None,
+    host_outcomes: dict[str, dict[str, object]] | None = None,
 ) -> tuple[str, PollVerdict]:
     """Repeatedly POST status_probe to one agent-runner's ops server until it
     converges, provably stops, the shared deadline expires — or, for a host that
@@ -503,7 +480,7 @@ async def _renew_lease_while_polling(holder: str) -> None:
 
 def _poll_until_unpaused(
     agent_runners: list[tuple[str, str | None]],
-    host_outcomes: dict[str, dict[str, float]] | None = None,
+    host_outcomes: dict[str, dict[str, object]] | None = None,
 ) -> dict[str, PollVerdict]:
     """Poll each agent-runner's paused state via direct status_probe POSTs to its
     ops server until it converges, provably stops, `_POLL_TIMEOUT_S` elapses, or
@@ -632,7 +609,7 @@ def _phase_b_and_poll(
     restart_only: bool,
     force_reap: bool = False,
     mode: str = "smooth",
-    host_outcomes: dict[str, dict[str, float]] | None = None,
+    host_outcomes: dict[str, dict[str, object]] | None = None,
 ) -> dict[str, PollVerdict]:
     """Phase B + poll: fan out each agent-runner's self-update (or restart-only
     bounce), then poll each back to healthy; return name -> terminal poll state
@@ -642,9 +619,8 @@ def _phase_b_and_poll(
     still reports non-'ok'. No abort on a Phase-B 5xx (already migrated); a failed
     host is only marked degraded.
 
-    `host_outcomes` is filled per host with the updater stage times the poll
-    captured (Task #1820) — the per-host `checkout`/`uv`/`stop`/`start` breakdown
-    the rollout log's telemetry summary carries.
+    `host_outcomes` is filled per host with the updater-stage breakdown plus its
+    terminal wall time and outcome, when the poll captured them.
 
     `target_sha` (the pinned rollout commit) rides each host's `cluster_update`
     payload so every agent-runner force-checks-out the *same* commit the gateway
@@ -731,7 +707,7 @@ def _phase_b_outcome(
     runner_urls: dict[str, str | None],
     unconverged: list[str] | None,
     force_reap: bool = False,
-    host_outcomes: dict[str, dict[str, float]] | None = None,
+    host_outcomes: dict[str, dict[str, object]] | None = None,
 ) -> tuple[int, RolloutOutcome, list[tuple[str, str | None]]]:
     """Phase B + poll, then the verdict.
 

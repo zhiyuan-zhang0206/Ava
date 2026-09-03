@@ -136,6 +136,25 @@ def _parse_stages(tail: str) -> dict[str, float]:
     return stages
 
 
+def _parse_total_s(tail: str) -> float | None:
+    """Wall time from an authoritative updater-run boundary to its endpoint."""
+    started: float | None = None
+    finished: float | None = None
+    for match in _STAGE_LINE_RE.finditer(tail):
+        name, stamped = match.group(1), match.group(3)
+        if stamped is None:
+            continue
+        timestamp = float(stamped)
+        if name == "run":
+            started = timestamp
+            finished = None
+        elif name == "final" and started is not None:
+            finished = timestamp
+    if started is None or finished is None:
+        return None
+    return round(finished - started, 1)
+
+
 def _parse_stage_evidence(tail: str) -> tuple[str | None, float | None]:
     """The stage named by `tail`'s LAST `t=` marker and how long it has been in
     flight, or (None, None) when the tail's last stage line is a `dur=` (that stage
@@ -149,11 +168,10 @@ def _parse_stage_evidence(tail: str) -> tuple[str | None, float | None]:
     on the same host, that stamped the marker (the updater wrote it, the ops server
     reads it), so the subtraction is sound across the two processes that bookend it.
 
-    The ONE boundary where a lingering `t=` tail does not mean "in flight" is the
-    final `done` marker, which the ladder prints after the restart has already
-    converged the host — a reader that acts on it must gate on posture first (the
-    Phase-B poll checks idle before any stage evidence; the host reaper refuses
-    stage judgments on an idle host).
+    The terminal `final` and `done` markers can linger as the last `t=` line after
+    the restart has already converged the host. A reader that acts on either must
+    gate on posture first (the Phase-B poll checks idle before any stage evidence;
+    the host reaper refuses stage judgments on an idle host).
     """
     last_marker: tuple[str, float] | None = None
     for match in _STAGE_LINE_RE.finditer(tail):
@@ -209,6 +227,11 @@ class UpdaterOutcome(BaseModel):
     # observational data — it rides the status probe, so a missing or partial
     # dict is a gap in the report, never a reason to refuse one.
     stages: dict[str, float] = Field(default_factory=dict)
+    # Full host self-update wall time, from its authoritative `run` boundary
+    # through the terminal `final` marker. None for a pre-telemetry run, a bounded
+    # tail missing that boundary, or a run that died before its endpoint; never
+    # inferred from a partial stage sum.
+    total_s: float | None = None
     # The stage the updater is inside RIGHT NOW, and how long it has been there:
     # the tail's last `t=` marker and its age against this process's monotonic
     # clock at read time (see `_parse_stage_evidence`). None when the last stage
@@ -432,6 +455,7 @@ def _classify(tail: str, log: Path) -> UpdaterOutcome:
         detail=tail_detail,
         log=log.name,
         stages=_parse_stages(tail),
+        total_s=_parse_total_s(tail),
         current_stage=current_stage,
         current_stage_s=current_stage_s,
     )

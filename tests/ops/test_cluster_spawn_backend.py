@@ -495,16 +495,23 @@ def test_the_native_updater_command_opens_with_this_runs_start_marker(
 
 
 @pytest.mark.real_cluster_spawn
-def test_the_posix_updater_command_carries_no_marker(
+@pytest.mark.parametrize("restart_only", [False, True], ids=["update", "restart-only"])
+def test_the_posix_updater_command_marks_the_authoritative_wall_time_boundary(
     posix_native_host: _FakeSessionBackend,
+    restart_only: bool,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The POSIX command is left byte-identical to the legacy shape. It gets a
-    fresh `updater-<epoch>.log` per spawn, so its log already holds exactly one
-    run — a marker there would be a line in an operator-read log that separates
-    nothing."""
-    cluster_mod.spawn_update(restart_only=True)
+    """A fresh POSIX log still needs a durable endpoint-paired wall-time start."""
+    monkeypatch.setattr("shared.migrations.validate_migrations_at_ref", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType]
+    cluster_mod.spawn_update(restart_only=restart_only)
 
-    assert uo._RUN_MARKER not in posix_native_host.spawned[0][1]
+    cmd = posix_native_host.spawned[0][1]
+    run = "cli.commands._updater_stage run"
+    final = "cli.commands._updater_stage final"
+    assert run in cmd
+    assert final in cmd
+    assert cmd.index(run) < cmd.index("if cd")
+    assert cmd.index(final) > cmd.index("fi;")
 
 
 @pytest.mark.real_cluster_spawn
@@ -529,7 +536,9 @@ def test_the_native_updater_ladder_carries_per_stage_markers(
 
     cmd = native_host.spawned[0][1]
     expected = (
-        ["fetch", "checkout", "uv", "restart", "done"] if not restart_only else ["restart", "done"]
+        ["run", "fetch", "checkout", "uv", "restart", "done", "final"]
+        if not restart_only
+        else ["run", "restart", "done", "final"]
     )
     for stage in expected:
         assert f"cli.commands._updater_stage {stage}" in cmd, f"missing {stage} marker"
@@ -645,6 +654,7 @@ def test_the_native_abort_branch_clears_the_lease_before_it_exits_cmd(
 
     cmd = native_host.spawned[0][1]
     abort = cmd[cmd.index("checkout/sync or tree verification FAILED") :]
+    assert "cli.commands._updater_stage final" not in abort
     clear = abort.index("cli.commands._updater_lease clear")
     assert clear < abort.index("exit /b 1"), "the abort exits cmd.exe before clearing the lease"
 

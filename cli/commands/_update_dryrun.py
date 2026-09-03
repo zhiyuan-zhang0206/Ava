@@ -20,7 +20,7 @@ from cli.commands import _update_uv_sync
 from shared.gitenv import git_env
 from shared.paths import ava_home
 from shared.proc import run_bounded
-from shared.rollout_telemetry import RolloutTelemetry, record_bytes, stage
+from shared.rollout_telemetry import RolloutTelemetry, record_bytes, record_detail, stage
 
 _BASELINE_FILE = "update-baseline.json"
 _BASELINE_WINDOW = 10
@@ -358,23 +358,42 @@ def _import_candidate_modules(staging: Path) -> list[str]:
     return failures
 
 
+@contextmanager
+def _prepare_check_timing(name: str) -> Generator[None, None, None]:
+    """Record one prepare-check duration without changing its gate behavior."""
+    started = time.monotonic()
+    try:
+        yield
+    finally:
+        record_detail("prepare_checks", f"{name}_s", time.monotonic() - started)
+
+
 def dry_run_checks(repo: Path, target_sha: str, *, staging_dir: Path) -> list[str]:
     """Run all blocking prepare checks and return their failure descriptions."""
-    failures = _runner_reachability_failures()
+    with _prepare_check_timing("runner_reachability"):
+        failures = _runner_reachability_failures()
     print(f"  [{'pass' if not failures else 'fail'}] runner reachability")
-    offsite = _offsite_probe_message()
+    with _prepare_check_timing("offsite_probe"):
+        offsite = _offsite_probe_message()
     if offsite is not None:
         print(f"  · {offsite} (informational)")
     try:
-        with _staging_worktree(repo, target_sha, staging_dir) as staging:
-            for label, failure in (
-                ("target uv sync", _warm_staging_uv(staging)),
-                ("target Settings", _validate_target_settings(staging)),
-            ):
-                print(f"  [{'pass' if failure is None else 'fail'}] {label}")
-                if failure is not None:
-                    failures.append(failure)
-            import_failures = _import_candidate_modules(staging)
+        with (
+            _prepare_check_timing("staging_worktree"),
+            _staging_worktree(repo, target_sha, staging_dir) as staging,
+        ):
+            with _prepare_check_timing("staging_venv"):
+                uv_failure = _warm_staging_uv(staging)
+            print(f"  [{'pass' if uv_failure is None else 'fail'}] target uv sync")
+            if uv_failure is not None:
+                failures.append(uv_failure)
+            with _prepare_check_timing("settings"):
+                settings_failure = _validate_target_settings(staging)
+            print(f"  [{'pass' if settings_failure is None else 'fail'}] target Settings")
+            if settings_failure is not None:
+                failures.append(settings_failure)
+            with _prepare_check_timing("daemon_imports"):
+                import_failures = _import_candidate_modules(staging)
             print(f"  [{'pass' if not import_failures else 'fail'}] target daemon imports")
             failures.extend(import_failures)
     except (OSError, RuntimeError, subprocess.TimeoutExpired) as exc:

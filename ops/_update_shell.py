@@ -72,6 +72,10 @@ def _restart_recovery_cmd(
         flags += f" --quiesce --mode {mode}"
     if force_reap:
         flags += " --force-reap"
+    final_marker = "(python -m cli.commands._updater_stage final || ver>nul)"
+    recovery_start = (
+        "(python -m cli.commands._updater_stage start || ver>nul) & ava start --persist-services"
+    )
     # The recovery `ava start` arms run as an INTERNAL child start
     # (`--persist-services`), never as an operator start: a Phase-B updater
     # runs under the cluster-wide executing deploy lease, and an operator start
@@ -85,10 +89,10 @@ def _restart_recovery_cmd(
     # durable --disable-service marker across the restart.
     return (
         f"ava restart{flags}"
-        f" & if errorlevel {RESTART_DECLINED_EXIT_CODE + 1} (ava start --persist-services & {native_exit_line(1)})"
+        f" & if errorlevel {RESTART_DECLINED_EXIT_CODE + 1} ({recovery_start} & {final_marker} & {native_exit_line(1)})"
         f" else if errorlevel {RESTART_DECLINED_EXIT_CODE} ("
         f"echo [updater] restart DECLINED by its own preflight -- host still serving, not starting over it"
-        f" & {native_exit_line(RESTART_DECLINED_EXIT_CODE)})"
-        f" else if errorlevel 1 (ava start --persist-services & {native_exit_line(1)})"
-        f" else ({native_exit_line(0)})"
+        f" & {final_marker} & {native_exit_line(RESTART_DECLINED_EXIT_CODE)})"
+        f" else if errorlevel 1 ({recovery_start} & {final_marker} & {native_exit_line(1)})"
+        f" else ({final_marker} & {native_exit_line(0)})"
     )
