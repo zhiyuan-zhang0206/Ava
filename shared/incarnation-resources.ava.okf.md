@@ -43,6 +43,11 @@ Request files live in exact domain subdirectories outside legacy age pruning.
 Missing/partial receipts and owner death without a receipt retain uncertainty.
 The native domain and close-grace constant live in `shared.exec_process_domain`;
 the owner never imports `agent.graph` or its eager SDK/plugin initialization.
+Control is read nonblockingly by the owner loop itself, without a buffered-stdin
+daemon that could hold an interpreter shutdown lock. Partial/oversized records
+refuse; the original deadline still bounds reads. Windows roots enter the Job
+atomically at creation, including venv redirectors; attaching a redirector after
+its interpreter exists does not retroactively adopt that interpreter's children.
 
 Existing local wake and admission paths recover only entries selected by the
 complete DB map. They verify the exact immutable context, request digest,
