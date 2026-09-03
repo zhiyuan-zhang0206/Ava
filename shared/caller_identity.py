@@ -13,6 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 _PART = r"^[a-zA-Z0-9][a-zA-Z0-9_.-]*$"
 PREFIXES = ("external_agent:", "unknown:")
+SUPPORTED_CALLER_PROTOCOL = 1
 
 
 class CallerIdentity(BaseModel):

@@ -14,6 +14,7 @@ from shared.log import logger
 from shared.runtime_admission import (
     PublicationAdmissionDeferredError,
     RuntimeAdmission,
+    admitted_caller_protocol,
     require_current_for_managed,
 )
 from shared.runtime_incarnation import RuntimeIncarnation
@@ -145,7 +146,7 @@ async def admit_hosted_runtime(
                 "runtime_generation = CASE WHEN runtime_owner = %s AND runtime_kind = 'hosted' "
                 "AND runtime_generation IS NOT NULL "
                 "THEN runtime_generation ELSE %s END, runtime_owner = %s, "
-                "runtime_protocol_version = 0, "
+                "runtime_protocol_version = %s, "
                 "lease_expires_at = now() + make_interval(secs => %s) "
                 "WHERE id = %s AND machine = %s AND status = %s AND pid IS NULL "
                 "AND status IN ('running','idling') "
@@ -161,6 +162,7 @@ async def admit_hosted_runtime(
                     owner,
                     generation,
                     owner,
+                    admitted_caller_protocol(publication_decision),
                     AGENT_LEASE_TTL_S,
                     agent_id,
                     machine,
@@ -202,8 +204,7 @@ async def settle_hosted_runtime(
         return False
     async with async_write_transaction(pool) as conn:
         cur = await conn.execute(
-            "UPDATE agents_meta SET status = 'idling', "
-            "runtime_protocol_version = 0 "
+            "UPDATE agents_meta SET status = 'idling' "
             "WHERE id = %s AND status = 'running' AND runtime_kind = 'hosted' "
             "AND runtime_generation = %s AND runtime_owner = %s",
             (

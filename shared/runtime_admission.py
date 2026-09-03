@@ -93,6 +93,13 @@ def require_current_for_managed(decision: AdmissionDecision, resource_value: obj
         )
 
 
+def admitted_caller_protocol(decision: AdmissionDecision) -> int:
+    """Only call after the same transaction admitted a complete resource set."""
+    from shared.caller_identity import SUPPORTED_CALLER_PROTOCOL
+
+    return SUPPORTED_CALLER_PROTOCOL if isinstance(decision, CurrentAdmission) else 0
+
+
 def legacy_boot_terminal_allowed(conn: psycopg.Connection) -> bool:
     """Negative-only gate for old unowned boot cleanup, before metadata locks.
 

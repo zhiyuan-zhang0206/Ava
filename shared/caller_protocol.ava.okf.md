@@ -28,11 +28,13 @@ persisted `caller_identity` sidecar is asserted provenance, never authority.
 The actual hosted claim/envelope path reads it without representing an external
 tool as the human or system. Legacy source traffic keeps its existing path.
 
-All production admission helpers still advertise protocol 0. Activation requires
-independent proof that old unconditional writers/consumers have been stopped or
-upgraded. Column presence and a deployed source tree are not that proof. CI
-models a completed barrier only in an isolated fixture, after actual hosted
-admission; there is no production activation flag or endpoint in this slice.
+Actual process and hosted admission can advertise the compiled reader's protocol
+only after the same transaction validates activated current publication against
+the loaded image/selector/full receipt and admits the complete resource set.
+Legacy remains protocol 0; pending defers, unknown resources refuse. Ordinary
+same-owner hosted settlement preserves its advertisement. Column presence, an
+environment flag and a deployed source tree are not barrier proof. No deployment
+or production activation is performed by this code change.
 
 New/dead targets cannot receive a v1 bootstrap prompt: lifecycle ingress remains
 blanket-fenced until a reviewed durable intent -> actual consumer admission ->

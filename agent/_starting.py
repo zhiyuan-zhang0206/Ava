@@ -107,7 +107,11 @@ def claim_agent_row(
     """
     local_machine = machine_name()
     incarnation = new_process_incarnation(agent_id)
-    from shared.runtime_admission import RuntimeAdmission, require_current_for_managed
+    from shared.runtime_admission import (
+        RuntimeAdmission,
+        admitted_caller_protocol,
+        require_current_for_managed,
+    )
 
     publication = RuntimeAdmission.load()
     publication.revalidate()
@@ -166,7 +170,7 @@ def claim_agent_row(
             "UPDATE agents_meta SET status = %s, pid = %s, started_at = now(), "
             "lease_expires_at = now() + make_interval(secs => %s), "
             "runtime_generation = %s, runtime_owner = %s, runtime_kind = 'process', "
-            "runtime_protocol_version = 0 "
+            "runtime_protocol_version = %s "
             "WHERE id = %s AND status = %s AND pid IS NULL "
             "AND (runtime_kind IS NULL OR runtime_kind = 'process')",
             (
@@ -175,6 +179,7 @@ def claim_agent_row(
                 AGENT_LEASE_TTL_S,
                 incarnation.generation,
                 incarnation.owner,
+                admitted_caller_protocol(publication_decision),
                 agent_id,
                 AgentStatus.IDLING,
             ),
