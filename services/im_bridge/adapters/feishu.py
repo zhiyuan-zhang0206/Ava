@@ -460,6 +460,19 @@ class FeishuAdapter(IMAdapter):
             seed_item = next((item for item in reversed(items) if item.message_id), None)
             if seed_item is not None:
                 self._poll_cursor[chat_id] = seed_item.message_id
+            # After a daemon restart the in-memory owner open id is gone;
+            # restore it from the newest user message in the window so
+            # outbound notifications do not fail until the user's next
+            # message (send_to_owner has no chat-id bootstrap path).
+            if not self._last_open_id:
+                for item in reversed(items):
+                    sender = getattr(item, "sender", None)
+                    if sender is None or getattr(sender, "sender_type", "") != "user":
+                        continue
+                    open_id = self._sender_open_id(sender)
+                    if open_id:
+                        self._last_open_id = open_id
+                        break
             return True
         cursor = self._poll_cursor.get(chat_id)
         # Process everything after the cursor (ascending order); when the
@@ -524,6 +537,17 @@ class FeishuAdapter(IMAdapter):
             last = item.message_id
         return last
 
+    @staticmethod
+    def _sender_open_id(sender: Any) -> str:
+        """Extract the sender's open id from either response shape: the WS
+        event shape (``sender.sender_id.open_id``) or the ListMessage API
+        shape (open id on ``sender.id`` with ``id_type=open_id``)."""
+        sender_id = getattr(sender, "sender_id", None)
+        open_id = getattr(sender_id, "open_id", "") if sender_id is not None else ""
+        if not open_id and getattr(sender, "id_type", "") == "open_id":
+            open_id = getattr(sender, "id", "")
+        return open_id
+
     def _normalize_poll_item(self, item: Any) -> InboundMessage | None:
         """Map one listed message to an InboundMessage (same contract as the
         WS event path: p2p text from a user, never our own sends).
@@ -555,12 +579,7 @@ class FeishuAdapter(IMAdapter):
             return None
         if not content:
             return None
-        sender_id = getattr(sender, "sender_id", None)
-        open_id = getattr(sender_id, "open_id", "") if sender_id is not None else ""
-        if not open_id and getattr(sender, "id_type", "") == "open_id":
-            # ListMessage's Sender has no sender_id sub-object; the open id
-            # rides directly on sender.id.
-            open_id = getattr(sender, "id", "")
+        open_id = self._sender_open_id(sender)
         if not open_id:
             return None
         self._last_open_id = open_id
