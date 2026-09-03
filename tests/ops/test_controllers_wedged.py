@@ -78,6 +78,22 @@ def _add_stale_pending_chat(db_conn: psycopg.Connection, aid: int, *, age_s: flo
     db_conn.commit()  # pyright: ignore[reportUnknownMemberType]
 
 
+def _set_turn_timestamps(
+    db_conn: psycopg.Connection,
+    aid: int,
+    *,
+    status_age_s: float,
+    last_active_age_s: float,
+) -> None:
+    with db_conn.cursor() as cur:  # pyright: ignore[reportUnknownMemberType]
+        cur.execute(
+            "UPDATE agents_meta SET status_changed_at = now() - make_interval(secs => %s), "
+            "last_active_at = now() - make_interval(secs => %s) WHERE id = %s",
+            (status_age_s, last_active_age_s, aid),
+        )
+    db_conn.commit()  # pyright: ignore[reportUnknownMemberType]
+
+
 def _add_pending_lifecycle_inbound(db_conn: psycopg.Connection, aid: int, *, kind: str) -> None:
     with db_conn.cursor() as cur:  # pyright: ignore[reportUnknownMemberType]
         cur.execute(
@@ -251,6 +267,54 @@ class TestGuards:
 
 
 class TestRecovery:
+    def test_running_stale_turn_without_pending_is_recovered(
+        self,
+        db_conn: psycopg.Connection,
+        sync_pool: ConnectionPool,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        killed, resurrected = _capture_recovery_with_real_claim(monkeypatch)
+        aid = _park_wedged(db_conn)
+        _set_turn_timestamps(db_conn, aid, status_age_s=120.0, last_active_age_s=120.0)
+
+        result = _fresh_controller(sync_pool).reconcile("agent-runner")
+
+        assert result.acted is True
+        assert killed == [1234]
+        assert resurrected == [aid]
+
+    def test_running_stale_turn_with_recent_round_is_not_reaped(
+        self,
+        db_conn: psycopg.Connection,
+        sync_pool: ConnectionPool,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        killed, resurrected = _capture_recovery_with_real_claim(monkeypatch)
+        aid = _park_wedged(db_conn)
+        _set_turn_timestamps(db_conn, aid, status_age_s=120.0, last_active_age_s=30.0)
+
+        result = _fresh_controller(sync_pool).reconcile("agent-runner")
+
+        assert result.acted is False
+        assert killed == []
+        assert resurrected == []
+
+    def test_running_fresh_turn_is_not_reaped(
+        self,
+        db_conn: psycopg.Connection,
+        sync_pool: ConnectionPool,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        killed, resurrected = _capture_recovery_with_real_claim(monkeypatch)
+        aid = _park_wedged(db_conn)
+        _set_turn_timestamps(db_conn, aid, status_age_s=30.0, last_active_age_s=120.0)
+
+        result = _fresh_controller(sync_pool).reconcile("agent-runner")
+
+        assert result.acted is False
+        assert killed == []
+        assert resurrected == []
+
     def test_idling_stale_claim_loop_is_recovered_without_pending_inbound(
         self,
         db_conn: psycopg.Connection,
@@ -666,6 +730,9 @@ class TestClaimSQL:
         assert "now() - last_wedged_check_at" in src
         assert "lc.kind = 'resurrect'" in src
         assert "lc.status = 'pending'" in src
+        assert "agents_meta.status_changed_at" in src
+        assert "agents_meta.last_active_at" in src
+        assert "COALESCE(" in src
 
 
 class TestTerminatedZombieEvidence:

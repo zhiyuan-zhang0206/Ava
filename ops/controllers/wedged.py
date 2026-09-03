@@ -9,6 +9,12 @@ exactly this pattern: a check-in inbound is delivered, the agent ignores it
 from the sleep/wake diagnosis), and the row stays ``running``/``idling`` with a
 pending inbound forever — permanent limbo, invisible to every other detector.
 
+A running agent can also wedge after claiming a turn, leaving no pending inbound:
+chat rows remain ``claimed`` until the next boot and one-step kinds are already
+``done``. The controller instead detects a running state that outlives the turn
+budget without a completed LLM round. Claimed-row age alone is not a signal,
+because a healthy long-lived agent legitimately retains claimed chat rows.
+
 A separate terminated zombie shape retains a live lease, pid, and pending
 ``terminate`` inbound after the user has already terminated the agent. It is
 identity-checked and reaped without resurrection, preserving that user intent.
@@ -95,8 +101,9 @@ def _claim_wedged_candidates(
     rows for the caller to re-check under lock and recover.
 
     Selects ``running``/``idling`` rows on this host with a recorded pid. A
-    running row needs an unconsumed ``pending`` inbound older than the long
-    threshold. An idling row must have remained idling past the short threshold
+    running row needs either an unconsumed ``pending`` inbound older than the
+    long threshold or a turn older than that threshold with no completed LLM
+    round. An idling row must have remained idling past the short threshold
     and needs either a pending inbound past that threshold or a non-NULL stale
     claim-loop marker. The idling-duration guard prevents an already-old inbound
     from falsely reaping a healthy turn in its running→idling→first-claim window.
@@ -124,6 +131,13 @@ def _claim_wedged_candidates(
             "      AND im.status = 'pending' "
             "      AND im.created_at < now() - make_interval(secs => %s)"
             "  )) "
+            "  OR (agents_meta.status = 'running' "
+            "      AND agents_meta.status_changed_at "
+            "          < now() - make_interval(secs => %s) "
+            "      AND COALESCE(agents_meta.last_active_at, agents_meta.started_at, "
+            "                   agents_meta.status_changed_at) "
+            "          < now() - make_interval(secs => %s)"
+            "  ) "
             "  OR (agents_meta.status = 'idling' "
             "      AND agents_meta.status_changed_at "
             "          < now() - make_interval(secs => %s) "
@@ -145,6 +159,8 @@ def _claim_wedged_candidates(
                 local_machine,
                 backoff_s,
                 settings.daemon.auto_resurrect_max_attempts,
+                running_age_s,
+                running_age_s,
                 running_age_s,
                 idling_age_s,
                 idling_age_s,
@@ -265,8 +281,8 @@ def _recover_wedged_candidate(
         return False
 
     _log.warning(
-        "[ops.wedged] agent %s (recorded pid %s) has stale pending "
-        "inbound beyond its status-aware threshold (running %.0fs, idling %.0fs) "
+        "[ops.wedged] agent %s (recorded pid %s) has a stale work signal "
+        "beyond its status-aware threshold (running %.0fs, idling %.0fs) "
         "— reconciling process identity",
         agent_id,
         pid,
@@ -353,8 +369,8 @@ def _recover_wedged_candidate(
             agent_id,
             resurrected_by="system",
             prompt=(
-                "You were restarted by the wedged-agent detector after an "
-                "unconsumed pending inbound stopped making progress. "
+                "You were restarted by the wedged-agent detector after a "
+                "stale work signal showed no progress. "
                 "Continue from where you left off."
             ),
             auto_claim=AutoResurrectClaim(

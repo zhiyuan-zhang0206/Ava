@@ -323,7 +323,7 @@ class DaemonSettings(EnvSettings):
     wedged_agent_inbound_age_seconds: float = Field(
         default=2400.0,
         alias="AVA_WEDGED_AGENT_INBOUND_AGE_SECONDS",
-        description="Minimum age (seconds) of an unconsumed pending inbound before a running agent is considered wedged. Default 2400s (40 min) — exec_node_timeout_seconds (1200s) + LLM retry budget plus margin. Raise for agents doing long-running work; lower for tighter detection.",
+        description="Minimum age (seconds) of an unconsumed pending inbound or no-progress running turn before a running agent is considered wedged; the turn check uses the status_changed_at and last_active_at window. Default 2400s (40 min) — exec_node_timeout_seconds (1200s) + LLM retry budget plus margin. Raise for agents doing long-running work; lower for tighter detection.",
         json_schema_extra={
             "capability": "agent-runner",
             "restart_required": "all",
