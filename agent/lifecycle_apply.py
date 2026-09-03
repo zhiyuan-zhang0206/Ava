@@ -41,6 +41,9 @@ async def apply_process_lifecycle(
         return False
     if command[1] is not None:
         return True
+    from shared.resource_admission import require_resources_closed_async
+
+    await require_resources_closed_async(conn, agent_id)
     if row[4] not in ("running", "idling") or row[5] is None:
         return False
     cursor = await conn.execute("SELECT %s > clock_timestamp()", (row[5],))

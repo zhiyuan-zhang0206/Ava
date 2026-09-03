@@ -8,7 +8,7 @@ description: Nullable server-owned resource evidence and conservative schema ret
 
 `agents_meta.incarnation_resources` is separate from configuration. NULL means
 unknown, not an empty resource set. The additive migration does not initialize
-historical owners or grant resource admission. A future actual admission must
+historical owners or grant resource admission. Actual admission must
 establish ownership and positive retirement of its predecessor before creating
 a complete empty set; a dead PID, expired lease or absent file is insufficient.
 
@@ -26,9 +26,28 @@ not write again. Used-state rollback therefore requires a separately verified
 all-writer retirement operation; this slice provides no automatic evidence
 clearing or legacy rollback permission.
 
-The schema foundation alone neither closes process domains nor completes
-dead-host force recovery. Runtime registration, closure receipts and their
-consumers must be verified together before that claim is made.
+Process and hosted admission preserve legacy NULL/protocol zero and refuse
+malformed evidence. A managed successor requires a closed exact predecessor
+resource set plus its applied lifecycle decision. No default spawn stamps the
+birth marker: enabling new births still requires the publication/all-writer
+boundary, never an environment flag or an installed revision.
+
+Managed exec calls reserve under the metadata lock, launch the fixed isolated
+`agent.exec_domain_owner` entry, validate its actual PID/birth and direct root,
+attach that allocation, and then send the exact permit. The root is gated by
+`agent.exec_owner_child`; neither child inherits the host's control write end.
+The owner remains alive after host EOF, closes the managed domain, reaps its
+root, joins the output reader and exclusively publishes the terminal receipt.
+Request files live in exact domain subdirectories outside legacy age pruning.
+Missing/partial receipts and owner death without a receipt retain uncertainty.
+
+Existing local wake and admission paths recover only entries selected by the
+complete DB map. They verify the exact immutable context, request digest,
+owner/root receipt and ended owner before CAS discharge. Dead-host force
+completion additionally requires the admission-captured host PID/birth to have
+ended and the entire frozen set to be discharged. Same-user arbitrary code is
+not sandboxed; the guarantee is registered managed-domain closure, not every
+possible detached or breakaway process. Persistent sessions remain independent.
 
 The dedicated owner's `ExecProcessDomain.close_confirmed` operation retains the
 POSIX unreaped root while observing that no live managed group members remain.
@@ -37,7 +56,8 @@ It is distinct from successful signal submission. On Windows,
 termination and a zero `ActiveProcesses` readback, then closes it. Query failure
 or timeout remains unknown even if fallback close subsequently kills members.
 Neither operation covers unregistered POSIX session escapes or Windows breakaway.
-These stronger operations are not yet wired into the runtime owner entry.
+These stronger operations are used by the independent owner, never by a
+historical numeric PGID after its direct-child pin has been released.
 
 Windows accounting follows the native
 [QueryInformationJobObject](https://learn.microsoft.com/en-us/windows/win32/api/jobapi2/nf-jobapi2-queryinformationjobobject)
