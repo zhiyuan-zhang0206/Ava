@@ -398,6 +398,7 @@ def test_crashed_host_is_swept_lazily(sessions: Path) -> None:
     rec = _record(home, name)
     assert rec is not None
     os.kill(host_pid, signal.SIGKILL)
+
     def shell_exited() -> bool:
         try:
             # A zombie cannot execute; init's reap timing is not the PTY contract.
@@ -410,7 +411,6 @@ def test_crashed_host_is_swept_lazily(sessions: Path) -> None:
     assert _wait(shell_exited, timeout=45.0), (
         f"shell must exit when its host dies: pid={rec.pid}, "
         f"status={psutil.Process(rec.pid).status()}"
-    )
     )
     assert not _has(home, name), "a dead shell reads dead regardless of the leftover record"
     assert _run_cli(home, "list").stdout.strip() == ""
