@@ -30,16 +30,19 @@ ensuring multiple local e2e sessions (dev agents + CI runner) truly run concurre
 from __future__ import annotations
 
 import contextlib
+import json
 import os
 import shutil
 import socket
 import subprocess
+import sys
 import time
 from collections.abc import Generator, Iterator
 from pathlib import Path
 from typing import Any, cast
 
 import httpx
+import psutil
 import psycopg
 import pytest
 from _pytest.reports import TestReport
@@ -50,12 +53,20 @@ from psycopg import sql
 from shared.agents import AgentStatus
 from shared.config import settings
 from tests.e2e._env import E2EEnv
-from tests.e2e._ports import FRONTEND_PORT, FRONTEND_URL, GATEWAY_PORT, GATEWAY_URL
-from tests.e2e._proc import managed_proc, proc_log_tail, sweep_stale_e2e_processes, wait_for_port
+from tests.e2e._ports import FRONTEND_PORT, FRONTEND_URL, GATEWAY_PORT, GATEWAY_SOCKET, GATEWAY_URL
+from tests.e2e._proc import (
+    listener_evidence,
+    managed_proc,
+    proc_log_tail,
+    require_native_listener,
+    sweep_stale_e2e_processes,
+    wait_for_port,
+)
 
 # ---- module-level overrides (run after top-level conftest) ---------------------
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+_PREVIOUS_GATEWAY: subprocess.Popen[str] | None = None
 
 
 def pytest_collection_modifyitems(
@@ -512,28 +523,42 @@ def gateway_proc(scenario_env: None, monkeypatch: pytest.MonkeyPatch) -> Iterato
     """
     from shared import start_serving
 
+    global _PREVIOUS_GATEWAY  # noqa: PLW0603 — retain the exact prior fixture child, not just its PID.
+    if _PREVIOUS_GATEWAY is not None and _PREVIOUS_GATEWAY.poll() is None:
+        raise RuntimeError("previous exact gateway fixture has not exited")
+
     # The pytest process imported Settings before this package redirected
     # AVA_HOME. Keep its marker writes in the exact home inherited by the
     # gateway, restarter, and agent-host subprocesses.
     monkeypatch.setattr(settings.general, "ava_home", _AVA_HOME)
     generation = start_serving.begin_start()
     cmd = [
-        "uv",
-        "run",
+        sys.executable,
+        "-m",
         "uvicorn",
         "gateway.app:app",
         "--host",
         "127.0.0.1",
-        "--port",
-        str(GATEWAY_PORT),
+        "--fd",
+        str(GATEWAY_SOCKET.fileno()),
     ]
     log_path = _LOG_DIR / f"gateway-{_E2E_SUFFIX}.log"
     env = os.environ.copy()
     # Disable the auth middleware in e2e — the auth layer is tested by its
     # dedicated suite; e2e tests exercise business logic without auth overhead.
     env["AVA_AUTH_MIDDLEWARE_ENABLED"] = "false"
-    with managed_proc(cmd, env=env, label="gateway", log_path=str(log_path)):
-        wait_for_port("127.0.0.1", GATEWAY_PORT, timeout=30.0, label="gateway")
+    evidence_path = log_path.with_suffix(".listeners.json")
+    evidence_path.write_text(json.dumps(listener_evidence(GATEWAY_PORT, "reserved-before-start")))
+    with managed_proc(
+        cmd,
+        env=env,
+        label="gateway",
+        log_path=str(log_path),
+        pass_fds=(GATEWAY_SOCKET.fileno(),),
+    ) as gateway:
+        _PREVIOUS_GATEWAY = gateway
+        gateway_birth = psutil.Process(gateway.pid).create_time()
+        # The retained listener alone is not readiness: require normal HTTP lifespan.
         # /api/agents returns 200 = app is up (lifespan has started db_pool/redis pool)
         last_status: int | None = None
         last_err: Exception | None = None
@@ -547,11 +572,16 @@ def gateway_proc(scenario_env: None, monkeypatch: pytest.MonkeyPatch) -> Iterato
                 last_err = e
             time.sleep(0.5)
         else:
+            evidence_path.write_text(
+                json.dumps(listener_evidence(GATEWAY_PORT, "http-readiness-failed"))
+            )
             raise RuntimeError(
                 f"gateway /api/agents not ready within 30s: "
                 f"last_status={last_status} last_err={last_err!r}; see {log_path}"
             )
         try:
+            require_native_listener(gateway.pid, gateway_birth, GATEWAY_PORT)
+            evidence_path.write_text(json.dumps(listener_evidence(GATEWAY_PORT, "http-ready")))
             yield generation
         finally:
             start_serving.clear_serving()
