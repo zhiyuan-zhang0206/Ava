@@ -5,6 +5,7 @@ neither that handle nor the original host's control writer. EOF is refusal.
 """
 
 import argparse
+import hashlib
 import os
 import runpy
 import sys
@@ -13,7 +14,12 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 
-from shared.exec_owner_protocol import MAX_OWNER_MESSAGE, OwnerControl, read_owner_context
+from shared.exec_owner_protocol import (
+    MAX_OWNER_MESSAGE,
+    OwnerControl,
+    read_owner_bytes,
+    read_owner_context,
+)
 
 
 def main() -> None:
@@ -42,6 +48,15 @@ def main() -> None:
         raise RuntimeError("exec owner permit differs from the exact allocation")
     if datetime.now(UTC) >= context.allocation.deadline:
         raise RuntimeError("exec deadline expired while waiting for owner permit")
+    if (
+        Path(os.environ["AVA_EXEC_REQUEST_FILE"]) != context.request_path
+        or Path(os.environ["AVA_EXEC_RESULT_FILE"]) != context.result_path
+        or hashlib.sha256(
+            read_owner_bytes(context.request_path, limit=64 * 1024 * 1024)
+        ).hexdigest()
+        != context.allocation.request_digest
+    ):
+        raise RuntimeError("exec payload paths or bytes changed after allocation")
     with Path(os.devnull).open("rb") as empty:
         os.dup2(empty.fileno(), 0)
     # The actual old child entry, not a second execution engine. Its request
