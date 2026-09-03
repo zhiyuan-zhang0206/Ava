@@ -15,6 +15,7 @@ from typing import Any, Literal, LiteralString, cast
 import psycopg
 from pydantic import BaseModel, Field
 
+from shared.agent_observation import AgentObservation, observation
 from shared.agents import AgentStatus
 from shared.config import settings
 from shared.lm.factory import model_supports_vision
@@ -62,7 +63,7 @@ _FULL_COLS = (
     # no-interpolation preference); keep the '30' in sync with
     # shared.db.NOTICE_FYI_TTL_DAYS — the C1 tests lock the coupling.
     "AND n.created_at > now() - interval '30 days') AS unread_notice_count"
-    ", a.config_overlay"
+    ", a.config_overlay, mp.last_probe_at, a.lease_expires_at"
 )
 # The list summary deliberately has its own SELECT, rather than serializing a
 # full snapshot and dropping keys afterwards. `effective_model` is the one
@@ -84,11 +85,12 @@ _SUMMARY_COLS = (
     "(SELECT count(*) FROM agent_notices n "
     "WHERE n.agent_id = a.id AND NOT n.require_response AND n.resolved_at IS NULL "
     "AND n.created_at > now() - interval '30 days') AS unread_notice_count, "
-    "a.config_overlay ->> 'llm_model' AS effective_model"
+    "a.config_overlay ->> 'llm_model' AS effective_model, mp.last_probe_at, a.lease_expires_at"
 )
 _FROM = (
     "FROM agents_meta a "
     "JOIN agents t ON t.id = a.id "
+    "LEFT JOIN machine_probe mp ON mp.machine_name = a.machine "
     # last_active_at via LATERAL MAX, not a full LEFT JOIN: the plain join
     # multiplied every agent by its inbound row count (50K intermediate rows at
     # 2.7K agents) and forced a GROUP BY on the whole product (audit P1-1). One
@@ -213,6 +215,7 @@ class AgentListSummary(BaseModel):
     machine: str
     supports_vision: bool
     liveness_state: Literal["online", "offline", "unknown"]
+    observation: AgentObservation | None = None
     notices_awaiting_response: list[OpenNotice]
     unread_notice_count: int
     heartbeat_paused_until: datetime | None
@@ -270,11 +273,12 @@ class AgentSnapshot(BaseModel):
     # reachable AND (for running/idling) the process lease is alive; 'offline'
     # = machine unreachable (2 consecutive failed status_probe) or lease
     # expired; 'unknown' = the gateway has not judged this row (fresh row /
-    # unregistered machine) — rendered conservatively as online. Written only
+    # unregistered machine), never evidence of a healthy owner. Written only
     # by the gateway heartbeat daemon's liveness pass; `status` stays lifecycle
-    # intent. `last_probe_at` = when that pass last judged this row.
+    # intent. `last_probe_at` preserves the actual machine observation time.
     liveness_state: Literal["online", "offline", "unknown"]
     last_probe_at: datetime | None
+    observation: AgentObservation | None = None
     notices_awaiting_response: list[OpenNotice]
     unread_notice_count: int
     heartbeat_paused_until: datetime | None
@@ -309,6 +313,7 @@ def _row_to_snapshot(row: tuple[Any, ...]) -> AgentSnapshot:
             "notices_awaiting_response": row[15],
             "unread_notice_count": row[16],
             "supports_vision": model_supports_vision(effective_model),
+            "observation": observation(row[18], row[19]),
         }
     )
 
@@ -333,6 +338,7 @@ def _row_to_summary(row: tuple[Any, ...]) -> AgentListSummary:
             "notices_awaiting_response": row[13],
             "unread_notice_count": row[14],
             "supports_vision": model_supports_vision(effective_model),
+            "observation": observation(row[16], row[17]),
         }
     )
 

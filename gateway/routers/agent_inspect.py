@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import time as time_mod
 from concurrent.futures import Future, ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeoutError
@@ -11,6 +12,7 @@ from typing import Annotated, Any, NamedTuple
 
 import httpx
 from fastapi import APIRouter, HTTPException, Query, Request
+from opentelemetry import metrics
 from psycopg_pool import ConnectionPool
 
 from gateway import loki_events, loki_query_budget, neighbors
@@ -35,6 +37,10 @@ from ops.rpc_schemas import ShellInfo
 from shared.agents import AgentNotFound
 
 router = APIRouter()
+_log = logging.getLogger(__name__)
+_shell_probe_failures = metrics.get_meter(__name__).create_counter(
+    "ava.inspect.shell_probe.failures", unit="{failure}"
+)
 
 # The compact-halt event name (payload key `body` mentions "compact") —
 # mirrors `HALT_KEYS` in shared/events/contract.py.
@@ -252,7 +258,9 @@ def _shell_ttls_blocking(pool: ConnectionPool, agent_id: int) -> dict[int, datet
         return {row[0]: row[1] for row in cur.fetchall()}
 
 
-async def _probe_agent_shells(agent_id: int, machine: str, pool: ConnectionPool) -> list[ShellInfo]:
+async def _probe_agent_shells(
+    agent_id: int, machine: str, pool: ConnectionPool
+) -> tuple[list[ShellInfo], bool]:
     """The agent's live persistent shells, probed on the machine it runs on.
 
     One uniform path for every machine — the gateway never probes sessions itself.
@@ -267,25 +275,27 @@ async def _probe_agent_shells(agent_id: int, machine: str, pool: ConnectionPool)
     gateway-owned half of the row; see `_shell_ttls_blocking`) — sessions
     without a row keep `expires_at=None` (no TTL).
 
-    Degrades to an empty list on any probe failure (unreachable machine,
-    unregistered name, version-skewed runner that does not know the op): the
-    shell section reads "None open" instead of the whole inspector 503ing on a
-    machine problem that the roster already surfaces.
+    Known RPC failures return an unavailable observation, not a successful
+    empty set. Malformed successful responses fail rather than invent data.
     """
     try:
         result = await _cluster_rpc.dispatch_to_machine(
             machine, "shell_probe", {"agent_id": agent_id}, timeout_s=_SHELL_PROBE_TIMEOUT_S
         )
-    except (_cluster_rpc.ClusterOpUnreachable, _cluster_rpc.ClusterOpFailed):
-        return []
-    shells = [ShellInfo.model_validate(s) for s in result.get("shells", [])]
+    except (_cluster_rpc.ClusterOpUnreachable, _cluster_rpc.ClusterOpFailed) as exc:
+        _shell_probe_failures.add(1, {"reason": type(exc).__name__})
+        _log.warning(
+            "shell observation unavailable agent_id=%s reason=%s", agent_id, type(exc).__name__
+        )
+        return [], False
+    shells = [ShellInfo.model_validate(s) for s in result["shells"]]
     if shells:
         ttls = await asyncio.to_thread(_shell_ttls_blocking, pool, agent_id)
         shells = [
             s.model_copy(update={"expires_at": ttls.get(s.id)}) if s.id in ttls else s
             for s in shells
         ]
-    return shells
+    return shells, True
 
 
 class _InspectAggregates(NamedTuple):
@@ -496,7 +506,7 @@ async def get_agent_inspect_live(agent_id: int, request: Request) -> AgentInspec
     Reads the agent projection and open notice from Postgres, probes shells on
     the owning runner, and performs only one bounded best-effort Loki lookup for
     the heartbeat's recent-pause hint. Unknown agents return 404. Shell probe
-    failures degrade to an empty list and Loki failures degrade
+    failures set shells_available=False and Loki failures degrade
     `heartbeat.last_pause` to None, keeping this endpoint useful as the panel's
     fast skeleton source. No part of this response is cached.
     """
@@ -514,7 +524,9 @@ async def get_agent_inspect_live(agent_id: int, request: Request) -> AgentInspec
         last_probe_at=db.last_probe_at,
         spawned_at=db.spawned_at,
         started_at=db.started_at,
-        shells=shells,
+        shells=shells[0],
+        shells_available=shells[1],
+        observation=db.observation,
         config_overlay=db.config_overlay,
         notice=notice,
         heartbeat=project_heartbeat(
@@ -564,7 +576,8 @@ async def get_agent_inspect(
     `shell_probe` cluster op (the gateway never runs sessions itself; every
     machine — its own included — is dialed at its registered ops URL), so a
     split deployment reflects each agent's runner and an unreachable machine
-    degrades to an empty list rather than failing the panel. `heartbeat` is the agent's idle check-in state: the
+    sets shells_available=False rather than claiming no shells exist.
+    `heartbeat` is the agent's idle check-in state: the
     projected next check-in due time when idle (or the active pause / running
     suppression) plus its most recent pause from history.
 
@@ -605,6 +618,7 @@ async def get_agent_inspect(
     # panel's reply surface must clear the moment a notice resolves, and the
     # SELECT is cheap. The shell probe is equally cheap and always live.
     notice = await asyncio.to_thread(notice_blocking, pool, agent_id)
+    shells, shells_available = await _probe_agent_shells(agent_id, db.machine, pool)
     return AgentInspect(
         agent_id=agent_id,
         machine=db.machine,
@@ -612,7 +626,9 @@ async def get_agent_inspect(
         started_at=db.started_at,
         window_hours=None if since_compact else hours,
         since_compact=since_compact,
-        shells=await _probe_agent_shells(agent_id, db.machine, pool),
+        shells=shells,
+        shells_available=shells_available,
+        observation=db.observation,
         config_overlay=db.config_overlay,
         notice=notice,
         cost=aggregates.cost,

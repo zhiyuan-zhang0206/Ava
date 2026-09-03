@@ -139,6 +139,7 @@ function fixture(overrides: Partial<AgentInspect> = {}): AgentInspect {
     machine: "test-host",
     liveness_state: "online",
     last_probe_at: null,
+    shells_available: true,
     window_hours: 24,
     since_compact: false,
     shells: [
@@ -203,6 +204,8 @@ function liveFixture(overrides: Partial<AgentInspectLive> = {}): AgentInspectLiv
     machine: full.machine,
     liveness_state: full.liveness_state,
     last_probe_at: full.last_probe_at,
+    observation: full.observation,
+    shells_available: full.shells_available,
     spawned_at: full.spawned_at,
     started_at: full.started_at,
     shells: full.shells,
@@ -726,6 +729,13 @@ describe("InspectorPanel", () => {
     render(<InspectorPanel agentId={1} />);
     await waitFor(() => expect(screen.getByText("None open")).toBeTruthy());
     expect(screen.getByText("Defaults — no overrides")).toBeTruthy();
+  });
+
+  it("does not report an unavailable shell observation as an empty set", async () => {
+    getAgentInspectLive.mockResolvedValue(liveFixture({ shells: [], shells_available: false }));
+    render(<InspectorPanel agentId={1} />);
+    await waitFor(() => expect(screen.getByText("Shell observation unavailable")).toBeTruthy());
+    expect(screen.queryByText("None open")).toBeNull();
   });
 
   it("renders skill-list config keys in canonical dash spelling (display_name)", async () => {

@@ -83,6 +83,7 @@ export function projectAgentStatus(row: WireAgentSummary): AgentRow {
     machine: row.machine,
     supports_vision: row.supports_vision,
     liveness_state: row.liveness_state,
+    observation: row.observation,
     notices_awaiting_response: row.notices_awaiting_response,
     unread_notice_count: row.unread_notice_count,
     heartbeat_paused_until: row.heartbeat_paused_until,

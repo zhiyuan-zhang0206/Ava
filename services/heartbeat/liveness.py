@@ -33,7 +33,8 @@ Per-agent merge (`liveness_state`):
 - everything else on a reachable machine -> 'online'
 - 'terminated' rows are never judged; rows whose machine is not in the
   machines table (or that the gateway has not judged yet) stay 'unknown',
-  which the frontend renders conservatively as online.
+  with no invented successful observation timestamp. The frontend exposes
+  observation freshness separately from lifecycle intent.
 
 `status` stays lifecycle intent — the pass never transitions it (R1 invariant
 #1). A machine coming back is self-healing: its restarter revives the rows
@@ -60,6 +61,7 @@ from psycopg_pool import ConnectionPool
 
 from ops import cluster_rpc
 from shared import cluster_lock, host_deploy_state
+from shared.agent_observation import LIVENESS_PASS_INTERVAL_S, MACHINE_OFFLINE_AFTER_FAILURES
 from shared.config import settings
 from shared.db_transaction import write_transaction
 from shared.live_announce import publish_agent_updated_sync
@@ -79,10 +81,10 @@ _log = logging.getLogger("services.heartbeat.liveness")
 # Consecutive failed probes before a machine is judged offline. The pass runs
 # once per minute, so this is a ~2-minute anti-jitter window (a single dropped
 # packet or a mid-restart runner is not "offline").
-_OFFLINE_AFTER_FAILURES = 2
+_OFFLINE_AFTER_FAILURES = MACHINE_OFFLINE_AFTER_FAILURES
 
 # How often the pass runs. Independent of the check-in dispatch step (15s).
-_PASS_INTERVAL_S = 60.0
+_PASS_INTERVAL_S = LIVENESS_PASS_INTERVAL_S
 
 
 async def _probe_machine(
@@ -290,26 +292,27 @@ def _merge_liveness(pool: ConnectionPool) -> list[int]:
         cur.execute(
             "WITH probe AS ("
             "  SELECT m.name AS machine_name,"
-            "         COALESCE(mp.consecutive_failures, 0) AS cf"
+            "         mp.consecutive_failures AS cf, mp.last_probe_at AS observed_at"
             "  FROM machines m"
             "  LEFT JOIN machine_probe mp ON mp.machine_name = m.name"
             "), desired AS ("
             "  SELECT a.id, a.liveness_state AS old_liveness_state,"
             "    CASE "
+            "      WHEN p.observed_at IS NULL THEN 'unknown' "
             "      WHEN a.status = 'idling' AND a.started_at IS NULL THEN 'unknown' "
             "      WHEN p.cf >= %s THEN 'offline' "
             "      WHEN a.status IN ('running', 'idling') AND a.started_at IS NOT NULL "
             "           AND (a.lease_expires_at IS NULL OR a.lease_expires_at <= now()) "
             "        THEN 'offline' "
             "      ELSE 'online' "
-            "    END AS new_liveness_state "
+            "    END AS new_liveness_state, p.observed_at "
             "  FROM agents_meta a "
             "  JOIN probe p ON a.machine = p.machine_name "
             "  WHERE a.status != 'terminated'"
             ") "
             "UPDATE agents_meta a "
             "SET liveness_state = d.new_liveness_state, "
-            "    last_probe_at = now() "
+            "    last_probe_at = d.observed_at "
             "FROM desired d "
             "WHERE a.id = d.id "
             "RETURNING a.id, d.old_liveness_state, d.new_liveness_state",
