@@ -180,9 +180,13 @@ def test_born_spawner_is_append_only(db_conn: psycopg.Connection) -> None:
     assert _born_spawner(db_conn, 1) == "user"
 
 
-def test_born_spawner_migration_backfills_fork_then_timed_agent_chat_then_spawner(
+def test_born_spawner_migration_backfills_fork_then_post_ruling_spawner_then_timed_chat(
     db_conn: psycopg.Connection,
 ) -> None:
+    """Backfill order: fork source, then the spawner of any agent born after the
+    2026-08-28 ruling made it the true lineage, then the timed agent chat
+    heuristic that only reconstructs lineage for older rows.
+    """
     schema = "born_spawner_" + uuid4().hex
     migration = sql.SQL(cast(LiteralString, _BORN_SPAWNER_MIGRATION.read_text()))
     with db_conn.transaction(force_rollback=True):
@@ -205,16 +209,24 @@ def test_born_spawner_migration_backfills_fork_then_timed_agent_chat_then_spawne
             "(1, 'agent:999', 71, '2026-09-03 00:00:00+00'), "
             "(2, 'agent:999', NULL, '2026-09-03 00:00:00+00'), "
             "(3, 'user', NULL, '2026-09-03 00:00:00+00'), "
-            "(4, 'cron', NULL, '2026-09-03 00:00:00+00')"
+            "(4, 'cron', NULL, '2026-09-03 00:00:00+00'), "
+            "(5, 'agent:999', NULL, '2026-08-10 00:00:00+00')"
         )
         db_conn.execute(
             "INSERT INTO inbound_messages (id, agent_id, kind, source, created_at) VALUES "
             "(1, 2, 'chat', 'agent:22', '2026-09-03 00:09:00+00'), "
             "(2, 2, 'chat', 'agent:23', '2026-09-03 00:01:00+00'), "
             "(3, 3, 'chat', 'agent:33', '2026-09-03 00:10:01+00'), "
-            "(4, 4, 'restart', 'agent:44', '2026-09-03 00:01:00+00')"
+            "(4, 4, 'restart', 'agent:44', '2026-09-03 00:01:00+00'), "
+            "(5, 5, 'chat', 'agent:55', '2026-08-10 00:09:00+00')"
         )
         db_conn.execute(migration)
 
         rows = db_conn.execute("SELECT id, born_spawner FROM agents_meta ORDER BY id").fetchall()
-        assert rows == [(1, "agent:71"), (2, "agent:22"), (3, "user"), (4, "cron")]
+        assert rows == [
+            (1, "agent:71"),
+            (2, "agent:999"),
+            (3, "user"),
+            (4, "cron"),
+            (5, "agent:55"),
+        ]

@@ -124,10 +124,12 @@ CREATE TABLE inbound_messages (
 INSERT INTO agents_meta (id, spawner, fork_source_agent_id, spawned_at) VALUES
     (991101, 'agent:405', 2524, '2026-09-03 00:00:00+00'),
     (991102, 'agent:405', NULL, '2026-09-03 00:00:00+00'),
-    (991103, 'user', NULL, '2026-09-03 00:00:00+00');
+    (991103, 'user', NULL, '2026-09-03 00:00:00+00'),
+    (991104, 'user', NULL, '2026-08-10 00:00:00+00');
 INSERT INTO inbound_messages (id, agent_id, kind, source, created_at) VALUES
     (1, 991102, 'chat', 'agent:2524', '2026-09-03 00:00:01+00'),
-    (2, 991103, 'chat', 'agent:565', '2026-09-03 00:10:01+00');
+    (2, 991103, 'chat', 'agent:565', '2026-09-03 00:10:01+00'),
+    (3, 991104, 'chat', 'agent:565', '2026-08-10 00:01:00+00');
 SQL
 psql -d "$BORN_SPAWNER_DB" -v ON_ERROR_STOP=1 -f migrations/20260903T175722_add-born-spawner.sql
 psql -d "$BORN_SPAWNER_DB" -v ON_ERROR_STOP=1 <<'SQL'
@@ -137,11 +139,14 @@ BEGIN
     IF (SELECT born_spawner FROM agents_meta WHERE id = 991101) <> 'agent:2524' THEN
         RAISE EXCEPTION 'fork born_spawner backfill failed';
     END IF;
-    IF (SELECT born_spawner FROM agents_meta WHERE id = 991102) <> 'agent:2524' THEN
-        RAISE EXCEPTION 'timed agent chat born_spawner backfill failed';
+    IF (SELECT born_spawner FROM agents_meta WHERE id = 991102) <> 'agent:405' THEN
+        RAISE EXCEPTION 'post-ruling spawner must outrank the timed agent chat';
     END IF;
     IF (SELECT born_spawner FROM agents_meta WHERE id = 991103) <> 'user' THEN
         RAISE EXCEPTION 'late agent chat must leave spawner fallback';
+    END IF;
+    IF (SELECT born_spawner FROM agents_meta WHERE id = 991104) <> 'agent:565' THEN
+        RAISE EXCEPTION 'pre-ruling timed agent chat born_spawner backfill failed';
     END IF;
 
     BEGIN

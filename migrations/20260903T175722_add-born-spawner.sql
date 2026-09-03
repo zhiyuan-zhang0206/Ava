@@ -7,6 +7,11 @@ UPDATE agents_meta AS agent
 SET born_spawner = CASE
     WHEN agent.fork_source_agent_id IS NOT NULL
         THEN 'agent:' || agent.fork_source_agent_id::TEXT
+    -- Since the 2026-08-28 ruling the data-layer spawner IS the immutable true
+    -- lineage, so it wins outright; the chat heuristic below only reconstructs
+    -- lineage for older rows born before that guarantee existed.
+    WHEN agent.spawned_at >= '2026-08-28T00:00:00+00'
+        THEN agent.spawner
     ELSE COALESCE(
         (
             SELECT inbound.source
