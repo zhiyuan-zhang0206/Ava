@@ -1,16 +1,36 @@
-# QA approval label gate: runs on all PRs, including drafts, so label changes flip this check.
-# Trunk test PRs are exempt by head-ref prefix; P0 is not branch-protection required until P2.
+# QA approval gate — two eras share one file.
+# Transition (this PR not yet on main): the plain `pull_request` trigger runs
+# from the merge ref, so the required branch-protection check exists and the
+# label (still the authority until the receipt infra lands) gates the PR.
+# Steady state (file on main): the label job stays pull_request-only, the
+# receipt evaluator reacts to pull_request_target / workflow_run /
+# issue_comment from the default-branch copy — never executing PR code.
+# Concurrency is job-scoped so the two event paths never cancel each other.
+# Trunk test PRs are exempt by head-ref prefix.
 name: QA Approved Gate
 
 on:
   pull_request:
     types: [opened, synchronize, reopened, labeled, unlabeled, ready_for_review]
+  pull_request_target:
+    types: [opened, synchronize, reopened, labeled, unlabeled, ready_for_review]
+  workflow_run:
+    workflows: [QA Review Signal]
+    types: [completed]
+  issue_comment:
+    types: [created, edited, deleted]
 
 permissions:
   contents: read
+  pull-requests: read
+  issues: read
+  statuses: write
 
 jobs:
+  # Transition label gate — required-check presence while the receipt
+  # evaluator's script is not yet on the default branch.
   qa-approved-gate:
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -31,3 +51,23 @@ jobs:
 
           echo "The PR needs the qa-approved label before it can merge."
           exit 1
+
+  # Receipt evaluator — steady-state authority, base-file runs only.
+  evaluate-qa-evidence:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    concurrency:
+      group: qa-evidence-${{ github.event.pull_request.number || github.event.issue.number || github.event.workflow_run.pull_requests[0].number }}
+      cancel-in-progress: true
+    steps:
+      # Never execute a PR's evaluator with a write token.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - name: Publish target-head QA result
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number || github.event.workflow_run.pull_requests[0].number }}
+        run: python scripts/qa_gate.py "$PR_NUMBER"
