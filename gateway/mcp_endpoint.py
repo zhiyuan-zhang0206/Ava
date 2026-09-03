@@ -324,6 +324,62 @@ def _register_read_tools(server: MCPServer, pool: Any) -> None:
         return snapshot.model_dump(mode="json")
 
 
+async def _mcp_deliver_send_message(
+    pool: Any,
+    agent_id: int,
+    content: str,
+    *,
+    caller_protocol: Literal["v1"] | None,
+    idempotency_key: str | None,
+) -> dict[str, Any]:
+    """Deliver an MCP `send_message` call: caller provenance when opted into
+    v1, principal-scoped idempotency when a key is supplied.
+
+    Kept out of `_register_fleet_tools` so the tool registration function
+    stays under the PLR0915 statement budget; behavior is identical to an
+    inline body.
+    """
+    source = _MESSAGE_SOURCE
+    if caller_protocol == "v1":
+        client = _CURRENT_MCP_CLIENT.get()
+        if client is None:
+            raise ToolError("authenticated MCP client context is missing")
+        source = CallerIdentity(
+            kind="external_agent", subject="mcp", instance=str(client["id"])
+        ).source()
+    stored_key = None
+    if idempotency_key is not None:
+        client = _CURRENT_MCP_CLIENT.get()
+        if client is None:
+            raise ToolError("authenticated MCP client context is missing")
+        try:
+            stored_key = principal_key(
+                AuthPrincipal("mcp_client", str(client["id"])),
+                "POST",
+                f"/api/agents/{agent_id}/messages",
+                idempotency_key,
+            )
+        except PrincipalScopeError as exc:
+            raise ToolError(str(exc)) from exc
+    # Existence check first (raises AgentNotFound, like the REST route);
+    # deliver_chat_inbound then auto-resurrects a terminated target.
+    try:
+        await asyncio.to_thread(get_agent_status, agent_id)
+        delivery = await deliver_chat_inbound(
+            pool,
+            agent_id,
+            prepare=lambda _conn: content,
+            source=source,
+            payload=None,
+            client_message_id=stored_key,
+        )
+    except (AvaAgentError, ClientMessageConflictError) as exc:
+        raise ToolError(str(exc)) from exc
+    except HTTPException as exc:
+        raise ToolError(str(exc.detail)) from exc
+    return {"status": delivery.status, "inbound_id": delivery.inbound_id}
+
+
 def _register_fleet_tools(server: MCPServer, pool: Any) -> None:
     """Fleet-mutating tools: spawn / message / terminate.
 
@@ -401,45 +457,13 @@ def _register_fleet_tools(server: MCPServer, pool: Any) -> None:
         another token client using the same key cannot retrieve your receipt.
         """
         _require_write_scope("send_message")
-        source = _MESSAGE_SOURCE
-        if caller_protocol == "v1":
-            client = _CURRENT_MCP_CLIENT.get()
-            if client is None:
-                raise ToolError("authenticated MCP client context is missing")
-            source = CallerIdentity(
-                kind="external_agent", subject="mcp", instance=str(client["id"])
-            ).source()
-        stored_key = None
-        if idempotency_key is not None:
-            client = _CURRENT_MCP_CLIENT.get()
-            if client is None:
-                raise ToolError("authenticated MCP client context is missing")
-            try:
-                stored_key = principal_key(
-                    AuthPrincipal("mcp_client", str(client["id"])),
-                    "POST",
-                    f"/api/agents/{agent_id}/messages",
-                    idempotency_key,
-                )
-            except PrincipalScopeError as exc:
-                raise ToolError(str(exc)) from exc
-        # Existence check first (raises AgentNotFound, like the REST route);
-        # deliver_chat_inbound then auto-resurrects a terminated target.
-        try:
-            await asyncio.to_thread(get_agent_status, agent_id)
-            delivery = await deliver_chat_inbound(
-                pool,
-                agent_id,
-                prepare=lambda _conn: content,
-                source=source,
-                payload=None,
-                client_message_id=stored_key,
-            )
-        except (AvaAgentError, ClientMessageConflictError) as exc:
-            raise ToolError(str(exc)) from exc
-        except HTTPException as exc:
-            raise ToolError(str(exc.detail)) from exc
-        return {"status": delivery.status, "inbound_id": delivery.inbound_id}
+        return await _mcp_deliver_send_message(
+            pool,
+            agent_id,
+            content,
+            caller_protocol=caller_protocol,
+            idempotency_key=idempotency_key,
+        )
 
     @server.tool()
     async def get_messages(agent_id: int, limit: int = _DEFAULT_MESSAGE_LIMIT) -> dict[str, Any]:
