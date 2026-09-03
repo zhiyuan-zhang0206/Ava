@@ -327,6 +327,12 @@ export interface ExecOutputEvent extends BaseEvent {
 export interface ErrorEvent extends BaseEvent {
   readonly role: "error";
   readonly content: string;
+  readonly error_class?: string | null;
+  readonly provider?: string | null;
+  readonly status?: number | null;
+  readonly reason?: string | null;
+  readonly blocked?: boolean;
+  readonly recovery?: string | null;
 }
 export interface CancelledEvent extends BaseEvent {
   readonly role: "cancelled";

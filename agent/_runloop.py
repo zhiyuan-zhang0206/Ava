@@ -130,7 +130,18 @@ async def _wait_for_db_recovery(agent_id: int) -> None:
         backoff = min(backoff * 2, _DB_RECOVERY_BACKOFF_CAP_S)
 
 
-def _emit_error_event(ctx: AvaContext, agent_id: int, content: str) -> None:
+def _emit_error_event(
+    ctx: AvaContext,
+    agent_id: int,
+    content: str,
+    *,
+    error_class: str | None = None,
+    provider: str | None = None,
+    status: int | None = None,
+    reason: str | None = None,
+    blocked: bool = False,
+    recovery: str | None = None,
+) -> None:
     """Best-effort single Error event to the frontend SSE channel.
 
     emit() is a non-blocking best-effort enqueue; the suppress guards the
@@ -138,7 +149,18 @@ def _emit_error_event(ctx: AvaContext, agent_id: int, content: str) -> None:
     """
     with suppress(Exception):
         assert ctx.event_publisher is not None  # noqa: S101
-        ctx.event_publisher.emit(Error(agent_id=agent_id, content=content).model_dump_json())
+        ctx.event_publisher.emit(
+            Error(
+                agent_id=agent_id,
+                content=content,
+                error_class=error_class,
+                provider=provider,
+                status=status,
+                reason=reason,
+                blocked=blocked,
+                recovery=recovery,
+            ).model_dump_json()
+        )
 
 
 def _circuit_reason(exc: FatalProviderError) -> str:
@@ -164,11 +186,26 @@ def _circuit_reason(exc: FatalProviderError) -> str:
     }.get(status, CIRCUIT_REASON_PERMANENT)
 
 
+def _provider_recovery(reason: str) -> str:
+    """Return the user action for a blocked permanent provider rejection."""
+    if reason == CIRCUIT_REASON_CONTEXT_OVERFLOW:
+        return "Compact the conversation, then send a new message."
+    if reason in (CIRCUIT_REASON_AUTH, CIRCUIT_REASON_BILLING, CIRCUIT_REASON_FORBIDDEN):
+        return "Resolve the provider credentials or billing issue, then send a new message."
+    if reason == CIRCUIT_REASON_MODEL_NOT_FOUND:
+        return "Choose a different model overlay, then send a new message."
+    if reason == CIRCUIT_REASON_SCHEMA:
+        return "Correct the request or model configuration, then send a new message."
+    return "Choose a different model overlay or resolve the provider policy rejection, then send a new message."
+
+
 async def _handle_fatal_llm_error(
     exc: FatalLLMStreamError | FatalProviderError,
     ctx: AvaContext,
     agent_id: int,
     circuit_reader: Callable[[], Awaitable[CircuitState | None]] | None = None,
+    *,
+    occurred_at: datetime | None = None,
 ) -> dict[str, object]:
     """Fatal LLM turn abort: log + one Error event, return the fresh-run input.
 
@@ -176,8 +213,8 @@ async def _handle_fatal_llm_error(
     (402/401/403) — abort this turn but keep the agent alive. One Error event
     to the frontend, traceback into the file sink, then re-invoke with a fresh
     run: claim node idles for the next inbound so the user can see the error
-    and the agent recovers on its next wake-up once the cause clears (e.g.
-    balance topped up) without a manual revive.
+    and the agent can recover on a later user-directed wake once the cause
+    clears (e.g. balance topped up) without a manual revive.
 
     A `FatalProviderError` additionally OPENS the heartbeat circuit breaker:
     the next heartbeat nudge would re-fire the same doomed call (the 3962
@@ -186,6 +223,9 @@ async def _handle_fatal_llm_error(
     is open the claim consumes heartbeat check-ins without routing to the
     LLM, and for the `context_overflow` reason routes any wake into a forced
     compaction instead. It closes on the first successful LLM call (llm_node).
+    A non-overflow permanent rejection additionally sends a metadata-only
+    report to the nearest alive immutable-SPAWN ancestor; it never replays the
+    rejected provider text or conversation history.
     """
     logger.opt(exception=True).error(
         "LLM turn aborted (retry cap exhausted or provider rejected) — "
@@ -199,12 +239,30 @@ async def _handle_fatal_llm_error(
         status=getattr(exc, "status", None),
         context_overflow=getattr(exc, "context_overflow", None),
     )
+    reason = _circuit_reason(exc) if isinstance(exc, FatalProviderError) else None
+    is_blocked_provider_failure = (
+        isinstance(exc, FatalProviderError)
+        and exc.error_class == "permanent"
+        and reason != CIRCUIT_REASON_CONTEXT_OVERFLOW
+    )
+    content = (
+        f"{type(exc).__name__}: {exc} The agent is blocked; heartbeat check-ins "
+        "will not re-run this request. Resolve the cause, then send a new message."
+        if is_blocked_provider_failure
+        else f"{type(exc).__name__}: {exc} The turn was aborted; the agent "
+        "is still alive and idling. It retries on the next message or "
+        "wake-up once the underlying cause is resolved."
+    )
     _emit_error_event(
         ctx,
         agent_id,
-        f"{type(exc).__name__}: {exc} The turn was aborted; the agent "
-        "is still alive and idling. It retries on the next message or "
-        "wake-up once the underlying cause is resolved.",
+        content,
+        error_class=getattr(exc, "error_class", None),
+        provider=getattr(exc, "provider", None),
+        status=getattr(exc, "status", None),
+        reason=reason,
+        blocked=is_blocked_provider_failure,
+        recovery=_provider_recovery(reason) if reason is not None else None,
     )
     # halted=True so the claim node actually waits for the next inbound
     # instead of re-entering the LLM with the same messages and hitting the
@@ -212,7 +270,7 @@ async def _handle_fatal_llm_error(
     # stream stall with 616 messages).
     input_update: dict[str, object] = {"halted": True}
     if isinstance(exc, FatalProviderError):
-        reason = _circuit_reason(exc)
+        assert reason is not None  # noqa: S101
         already_open = False
         if circuit_reader is not None:
             try:
@@ -266,6 +324,26 @@ async def _handle_fatal_llm_error(
                     "failed to record circuit_breaker event: {exc!r}",
                     agent_id=agent_id,
                     exc=exc_log,
+                )
+        if ctx.ops_pool is not None and is_blocked_provider_failure:
+            from agent.db import enqueue_fatal_provider_report_to_nearest_alive_ancestor
+
+            assert exc.error_class is not None  # noqa: S101
+            try:
+                await enqueue_fatal_provider_report_to_nearest_alive_ancestor(
+                    ctx.ops_pool,
+                    agent_id,
+                    error_class=exc.error_class,
+                    provider=exc.provider,
+                    status=exc.status,
+                    reason=reason,
+                    occurred_at=occurred_at if occurred_at is not None else datetime.now(UTC),
+                )
+            except Exception as exc_report:
+                logger.warning(
+                    "failed to enqueue fatal provider report to an ancestor: {exc!r}",
+                    agent_id=agent_id,
+                    exc=exc_report,
                 )
     return input_update
 

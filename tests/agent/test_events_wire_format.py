@@ -57,7 +57,19 @@ FROZEN_WIRE: list[tuple[type, str, dict[str, Any]]] = [
     (ReasoningDelta, "reasoning_delta", {"item_id": "5.0", "content": "thinking"}),
     (ExecStart, "exec_start", {"item_id": "5.0"}),
     (ExecOutput, "exec_output", {"item_id": "6.0", "content": "stdout:\nok"}),
-    (Error, "error", {"content": "agent processing error: Foo"}),
+    (
+        Error,
+        "error",
+        {
+            "content": "agent processing error: Foo",
+            "error_class": "permanent",
+            "provider": "deepseek",
+            "status": 400,
+            "reason": "bad_request",
+            "blocked": True,
+            "recovery": "Choose a different model overlay, then send a new message.",
+        },
+    ),
     (Cancelled, "cancelled", {}),
     (
         InboundArrived,

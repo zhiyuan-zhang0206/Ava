@@ -2193,6 +2193,29 @@ def test_inspect_heartbeat_no_pending_projects_from_last_active(
     assert _seconds_from_now(hb["next_at"]) == pytest.approx(expected, abs=5)  # pyright: ignore[reportUnknownMemberType]
 
 
+def test_inspect_heartbeat_consumed_checkin_uses_durable_reminder_floor(
+    db_conn: psycopg.Connection,
+) -> None:
+    """A consumed no-turn heartbeat must defer the inspector's next check-in too."""
+    aid = _insert_agent(db_conn, status="idling", status_changed_s_ago=600)
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "UPDATE agents_meta SET last_heartbeat_at = now() - interval '120 seconds' "
+            "WHERE id = %s",
+            (aid,),
+        )
+    db_conn.commit()
+
+    with TestClient(app) as client:
+        hb = client.get(f"/api/agents/{aid}/inspect").json()["heartbeat"]
+
+    assert hb["heartbeat_pending"] is False
+    assert hb["paused_until"] is None
+    assert hb["next_at"] is not None
+    expected = settings.daemon.heartbeat_interval_seconds - 120
+    assert _seconds_from_now(hb["next_at"]) == pytest.approx(expected, abs=5)  # pyright: ignore[reportUnknownMemberType]
+
+
 def test_inspect_heartbeat_stuck_after_expired_pause_no_past_next_at(
     db_conn: psycopg.Connection,
 ) -> None:
@@ -3027,7 +3050,7 @@ def test_inspect_releases_live_db_borrow_before_cached_loki_fanout(
     class TrackingCursor:
         def __init__(self) -> None:
             self.rows: list[tuple[Any, ...]] = [
-                ({}, "runner", "running", now, now, now, None, "online", now, None, now),
+                ({}, "runner", "running", now, None, now, now, None, "online", now, None, now),
                 (False,),
             ]
 

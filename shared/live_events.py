@@ -195,10 +195,18 @@ class ExecOutput(_Base):
 class Error(_Base):
     """User-perceivable failure (graph.ainvoke raised, Compaction
     LLM failed, chat persistence FK collision etc.). The UI should
-    show content and reset streaming state."""
+    show content and reset streaming state. A permanent provider rejection
+    additionally carries the classifier fields and an explicit recovery action,
+    so an idling blocked agent is not presented as ordinarily runnable."""
 
     role: Literal["error"] = "error"
     content: str
+    error_class: str | None = None
+    provider: str | None = None
+    status: int | None = None
+    reason: str | None = None
+    blocked: bool = False
+    recovery: str | None = None
 
 
 class Cancelled(_Base):

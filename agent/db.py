@@ -36,16 +36,18 @@ connection and resubscribes after transient failures.
 timeout is a defensive SELECT recheck for the fire-and-forget channel.
 """
 
+import asyncio
+import json
 import time
 from datetime import datetime
-from typing import Any, NamedTuple, TypeVar
+from typing import Any, NamedTuple, TypeVar, cast
 
 import psycopg
 from psycopg_pool import AsyncConnectionPool, PoolTimeout
 
 from shared.agents import AgentStatus
 from shared.config import settings
-from shared.db import InboundRow
+from shared.db import ALIVE_STATUSES, InboundRow, publish_inbound_wake
 from shared.db_transaction import async_write_transaction
 from shared.live_announce import publish_agent_updated
 from shared.log import logger
@@ -128,6 +130,73 @@ class ClaimedInbound(NamedTuple):
     def from_row(cls, row: tuple[Any, ...]) -> "ClaimedInbound":
         id_, tid, content, kind, source, payload, created_at, claimed_at = row[:8]
         return cls(id_, tid, content, kind, source, payload, created_at, claimed_at)
+
+
+_MAX_SPAWNER_ANCESTOR_DEPTH = 32
+_FATAL_PROVIDER_REPORT_LOCATION = "agent._runloop._handle_fatal_llm_error"
+
+
+async def enqueue_fatal_provider_report_to_nearest_alive_ancestor(
+    pool: AsyncConnectionPool,
+    failed_agent_id: int,
+    *,
+    error_class: str,
+    provider: str | None,
+    status: int | None,
+    reason: str,
+    occurred_at: datetime,
+) -> int | None:
+    """Deliver a metadata-only permanent-provider report to the nearest live parent.
+
+    The recursive walk follows only the immutable ``agents_meta.spawner``
+    ``agent:<id>`` edge. It deliberately ignores fleet-view relationships and
+    stops when no ancestor has the canonical live status-and-lease predicate.
+    The note text is assembled from structured classifier fields; it never
+    receives the provider exception or agent history, which might contain the
+    content that the provider rejected.
+
+    Returns the notified ancestor id, or ``None`` when no live SPAWN ancestor
+    exists. The inbound transaction commits before its best-effort Redis wake.
+    """
+    content = (
+        f"Descendant agent {failed_agent_id} is blocked after a permanent provider rejection. "
+        f"error_class={error_class} provider={provider} status={status} reason={reason} "
+        f"timestamp={occurred_at.isoformat()} where={_FATAL_PROVIDER_REPORT_LOCATION}"
+    )
+    async with async_write_transaction(pool) as conn, conn.cursor() as cur:
+        await cur.execute(
+            "WITH RECURSIVE spawner_walk(agent_id, spawner, status, lease_expires_at, path, depth) "
+            "AS ("
+            "  SELECT id, spawner, status, lease_expires_at, ARRAY[id], 0 "
+            "  FROM agents_meta WHERE id = %s "
+            "  UNION ALL "
+            "  SELECT parent.id, parent.spawner, parent.status, parent.lease_expires_at, "
+            "         walk.path || parent.id, walk.depth + 1 "
+            "  FROM spawner_walk walk "
+            "  JOIN agents_meta parent "
+            "    ON parent.id = substring(walk.spawner FROM '^agent:([0-9]+)$')::bigint "
+            "  WHERE walk.depth < %s AND NOT parent.id = ANY(walk.path)"
+            ") "
+            "SELECT agent_id FROM spawner_walk "
+            "WHERE depth > 0 AND status = ANY(%s) AND lease_expires_at > now() "
+            "ORDER BY depth ASC LIMIT 1",
+            (failed_agent_id, _MAX_SPAWNER_ANCESTOR_DEPTH, list(ALIVE_STATUSES)),
+        )
+        row = await cur.fetchone()
+        if row is None:
+            return None
+        ancestor_id = cast(int, row[0])
+        await cur.execute(
+            "INSERT INTO inbound_messages (agent_id, content, kind, source, payload) "
+            "VALUES (%s, %s, 'system_note', 'system', %s::jsonb) RETURNING id",
+            (ancestor_id, content, json.dumps({"note_tag": "agent_reply"})),
+        )
+        inbound_row = await cur.fetchone()
+        if inbound_row is None:
+            raise RuntimeError("expected inbound row after fatal provider ancestor report insert")
+        inbound_id = cast(int, inbound_row[0])
+    await asyncio.to_thread(publish_inbound_wake, ancestor_id, str(inbound_id))
+    return ancestor_id
 
 
 async def claim_inbound_batch(
