@@ -309,17 +309,37 @@ def _collect_local_lease_zombies(pool: ConnectionPool, local_machine: str) -> li
     """
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
-            "SELECT id, pid FROM agents_meta "
-            "WHERE status IN ('running', 'idling') AND machine = %s "
+            "SELECT id, pid, started_at FROM agents_meta "
+            "WHERE status IN ('running', 'idling') AND machine = %s AND pid IS NOT NULL "
             "AND (lease_expires_at IS NULL OR lease_expires_at <= now())",
             (local_machine,),
         )
         rows = cur.fetchall()
     zombies: list[int] = []
-    for agent_id, pid in rows:
-        if pid is not None and _process_still_resident(agent_id, pid):
-            force_kill(pid)
-        zombies.append(agent_id)
+    for agent_id, pid, started_at in rows:
+        if probe_agent_process(pid, agent_id) is AgentProcessIdentity.UNREADABLE:
+            _log.warning(
+                "[ops.respawn] agent %s pid %s identity unreadable; deferring", agent_id, pid
+            )
+            continue
+        # The scan is only a candidate snapshot. A heartbeat or replacement may
+        # win before this lock; neither licenses killing the now-current owner.
+        with write_transaction(pool) as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT id FROM agents_meta WHERE id = %s AND machine = %s "
+                "AND pid = %s AND started_at IS NOT DISTINCT FROM %s "
+                "AND status IN ('running', 'idling') "
+                "AND (lease_expires_at IS NULL OR lease_expires_at <= now()) FOR UPDATE",
+                (agent_id, local_machine, pid, started_at),
+            )
+            if cur.fetchone() is None:
+                continue
+            identity = probe_agent_process(pid, agent_id)
+            if identity is AgentProcessIdentity.UNREADABLE:
+                continue
+            if identity is AgentProcessIdentity.OWNED:
+                force_kill(pid)
+            zombies.append(agent_id)
     return zombies
 
 
