@@ -11,9 +11,9 @@ from shared.config._base import EnvSettings
 
 class AgentRuntimeSettings(EnvSettings):
     checkpoint_interval: int = Field(
-        default=1,
+        default=4,
         alias="AVA_CHECKPOINT_INTERVAL",
-        description="Persist a LangGraph checkpoint only every Nth super-step (1 = every step, current behavior). Crash recovery replays up to N-1 super-steps. Per-agent canary flag; OFF by default.",
+        description="Persist a LangGraph checkpoint every Nth super-step (4 by default; 1 restores every-step persistence). Crash recovery replays up to N-1 super-steps. Per-agent override, restart required.",
         gt=0,
         json_schema_extra={
             "restart_required": "agent",
