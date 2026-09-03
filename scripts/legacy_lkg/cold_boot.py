@@ -86,7 +86,7 @@ daemon.main()
     env["AVA_LEGACY_ENTRY_RECEIPT"] = str(root / "normal-entry.json")
     env["PYTHONDONTWRITEBYTECODE"] = "1"
 
-    def start(label: str, override: dict[str, str] | None = None) -> subprocess.Popen:
+    def start(label: str, override: dict[str, str] | None = None) -> subprocess.Popen[bytes]:
         log = (root / f"normal-{label}.log").open("w")
         try:
             return subprocess.Popen(  # noqa: S603 — exact retained Python/private CI unit.
@@ -99,7 +99,7 @@ daemon.main()
         finally:
             log.close()
 
-    def stopped(process: subprocess.Popen) -> None:
+    def stopped(process: subprocess.Popen[bytes]) -> None:
         if process.poll() is None:
             process.send_signal(signal.SIGTERM)
             try:
@@ -157,6 +157,32 @@ daemon.main()
                 conn.execute(
                     "INSERT INTO schema_migrations(name) VALUES('00000000T000000_baseline')"
                 )
+                no_write = """
+import json
+from shared.migrations import apply_pending_migrations,apply_down,rollback_to
+class NoDatabaseAccess:
+    def __getattr__(self,name): raise AssertionError('database touched before refusal: '+name)
+connection=NoDatabaseAccess()
+blocked=[]
+for function,args in ((apply_pending_migrations,(connection,)),(apply_down,(connection,'unused')),(rollback_to,(connection,set()))):
+    try: function(*args)
+    except RuntimeError as exc:
+        if 'no migration-write authority' not in str(exc): raise
+        blocked.append(function.__name__)
+    else: raise AssertionError('packaged migration write permitted')
+print(json.dumps(blocked))
+"""
+                write_probe = subprocess.run(  # noqa: S603 — installed old code, sentinel refuses any DB access.
+                    [sys.executable, "-I", "-B", "-c", no_write],
+                    cwd=root,
+                    env=env,
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                    timeout=30,
+                )
+                refused_writes = json.loads(write_probe.stdout)
+                require(len(refused_writes) == 3, "not all packaged migration writes refused")
                 baseline = package / "db/schema.sql"
                 original = baseline.read_bytes()
                 baseline.chmod(0o600)
@@ -201,9 +227,8 @@ daemon.main()
                     except urllib.error.URLError:
                         pass
                     time.sleep(0.1)
-                require(
-                    health is not None and health["readiness"] == "ok", "normal readiness absent"
-                )
+                if health is None or health["readiness"] != "ok":
+                    raise AssertionError("normal readiness absent")
                 require(
                     health["pid"] == process.pid and health["home"] == str(home),
                     "wrong normal responder",
@@ -226,7 +251,11 @@ daemon.main()
                     "external stdlib",
                 )
                 native_images = sorted(
-                    {m.path for m in native.memory_maps() if m.path.startswith("/")}
+                    {
+                        m.path
+                        for m in native.memory_maps(grouped=False)
+                        if m.path.startswith("/") and "x" in m.perms
+                    }
                 )
                 require(
                     all(
@@ -267,6 +296,7 @@ daemon.main()
                     "tamperedSQLRefused": True,
                     "extraSQLRefused": True,
                     "missingSQLRefused": True,
+                    "migrationWritesRefusedBeforeDBAccess": refused_writes,
                     "processShaUnknownPreserved": True,
                     "fullRollbackProved": False,
                     "mutablePluginDiscoveryIgnored": True,

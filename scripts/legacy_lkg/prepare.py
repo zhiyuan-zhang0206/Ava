@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import email
 import hashlib
+import importlib
 import json
 import os
 import shutil
@@ -12,12 +13,29 @@ import subprocess
 import sys
 import zipfile
 from pathlib import Path
+from typing import Protocol, cast
+
+
+class _PreparationHelpers(Protocol):
+    def _python_input_inventory(self, source: Path) -> dict[str, str]: ...
+    def _copy_verified_python(
+        self, source: Path, target: Path, expected: dict[str, str]
+    ) -> None: ...
+    def _materialize_venv_links(self, root: Path) -> None: ...
+    def tree_inventory(self, root: Path) -> dict[str, str]: ...
 
 
 def run(argv: list[str], cwd: Path, *, timeout: int = 600) -> str:
-    return subprocess.run(  # noqa: S603 — explicit CI commands, no shell or production home.
-        argv, cwd=cwd, check=True, capture_output=True, text=True, timeout=timeout
-    ).stdout
+    result = subprocess.run(  # noqa: S603 — explicit CI commands, no shell or production home.
+        argv, cwd=cwd, check=False, capture_output=True, text=True, timeout=timeout
+    )
+    if result.returncode:
+        # These are build/git argv only; no DB URL, credentials or runtime env.
+        raise RuntimeError(
+            f"legacy build command failed ({result.returncode}): {argv[0]}\n"
+            + result.stderr[-12000:]
+        )
+    return result.stdout
 
 
 def sha(path: Path) -> str:
@@ -118,24 +136,20 @@ def main() -> None:  # noqa: PLR0915 — ordered CI build, immutable input and c
             locked.append(f"{package['Name']}=={package['Version']} --hash=sha256:{sha(wheel)}")
     if application is None:
         raise AssertionError("legacy application wheel absent")
+    wheel_inventory = {p.name: sha(p) for p in wheels.glob("*.whl")}
     offline = root / "offline-requirements.txt"
     offline.write_text("\n".join(locked) + "\n")
 
     # Reuse reviewed private Python copy/verification, not another packaging engine.
     sys.path.insert(0, str(tools))
-    from shared.runtime_prepare import (
-        _copy_verified_python,
-        _materialize_venv_links,
-        _python_input_inventory,
-        tree_inventory,
-    )
+    helpers = cast(_PreparationHelpers, importlib.import_module("shared.runtime_prepare"))
 
     home = root / "unit"
     image = home / "releases" / sha(application)
     image.mkdir(parents=True)
     original_python = args.python.resolve().parent.parent
-    python_inventory = _python_input_inventory(original_python)
-    _copy_verified_python(original_python, image / "python", python_inventory)
+    python_inventory = helpers._python_input_inventory(original_python)
+    helpers._copy_verified_python(original_python, image / "python", python_inventory)
     retained = image / "python/bin/python3"
     run(
         [str(retained), "-I", "-B", "-m", "venv", "--copies", "--without-pip", str(image / "venv")],
@@ -161,7 +175,9 @@ def main() -> None:  # noqa: PLR0915 — ordered CI build, immutable input and c
             ],
             root,
         )
-    _materialize_venv_links(image / "venv")
+    helpers._materialize_venv_links(image / "venv")
+    if {p.name: sha(p) for p in wheels.glob("*.whl")} != wheel_inventory:
+        raise AssertionError("locked wheel inputs changed during installation")
     (image / "plugins").mkdir()
     proof = root / "cold_boot.py"
     shutil.copy2(files / "cold_boot.py", proof)
@@ -170,13 +186,13 @@ def main() -> None:  # noqa: PLR0915 — ordered CI build, immutable input and c
         "sql_inventory_sha256": sha(source / "shared/legacy_inventory.json"),
         "source_lock_sha256": sha(source / "uv.lock"),
         "source_requirements_sha256": sha(requirements),
-        "installed_wheels": {p.name: sha(p) for p in wheels.glob("*.whl")},
+        "installed_wheels": wheel_inventory,
         "python_input_inventory_sha256": hashlib.sha256(
             json.dumps(python_inventory, sort_keys=True).encode()
         ).hexdigest(),
     }
     write_json(root / "provenance.json", provenance)
-    before = tree_inventory(image)
+    before = helpers.tree_inventory(image)
     # Pin retained inputs read-only; all runtime writes must remain under home.
     for path in image.rglob("*"):
         path.chmod(0o500 if path.is_dir() or os.access(path, os.X_OK) else 0o400)
@@ -199,7 +215,7 @@ def main() -> None:  # noqa: PLR0915 — ordered CI build, immutable input and c
         subprocess.run(  # noqa: S603 — actual private retained runtime, copied proof script.
             [str(python), "-I", "-B", str(proof)], cwd=root, env=env, check=True, timeout=300
         )
-        if tree_inventory(image) != before:
+        if helpers.tree_inventory(image) != before:
             raise AssertionError("normal legacy ops mutated its sealed image")
         write_json(
             root / "image-proof.json",
