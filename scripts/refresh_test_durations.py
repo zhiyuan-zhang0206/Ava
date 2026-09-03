@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Refresh .test_durations for pytest-split duration-balanced sharding.
 
-CI fans the backend pytest suite over 12 shards and tests/e2e over 4 shards;
+CI fans the backend pytest suite over 16 shards (see ci.yml backend-shard matrix)
+and tests/e2e over 4 shards;
 pytest-split uses its least_duration (LPT) algorithm to balance them by per-test
 durations loaded from the repo-root `.test_durations`. That file goes stale as
 the suite grows (new tests are costed at the average), which is what produced
