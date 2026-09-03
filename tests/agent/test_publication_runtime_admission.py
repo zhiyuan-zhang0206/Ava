@@ -1,6 +1,6 @@
 """Actual birth boundaries preserve pending work during publication maintenance."""
 
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
@@ -37,7 +37,7 @@ def test_process_pending_does_not_claim_or_terminate(
     db_conn.commit()
 
     @contextmanager
-    def transaction() -> Iterator[psycopg.Connection]:
+    def transaction() -> Generator[psycopg.Connection]:
         with db_conn.transaction():
             yield db_conn
 
