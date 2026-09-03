@@ -32,6 +32,17 @@ class ResourceBirth(_StrictEvidence):
     version: Literal[1] = 1
     state: Literal["unadmitted"] = "unadmitted"
     birth: UUID
+    launch_deadline: datetime | None = None
+    launch_attempts: int = Field(default=0, ge=0)
+    launch_limit: int = Field(default=3, gt=0)
+
+    @model_validator(mode="after")
+    def bounded_launch(self) -> "ResourceBirth":
+        if self.launch_deadline is not None and self.launch_deadline.tzinfo is None:
+            raise ValueError("birth deadline must be timezone-aware")
+        if self.launch_attempts > self.launch_limit:
+            raise ValueError("birth attempt count exceeds its original limit")
+        return self
 
 
 class ResourceProcess(_StrictEvidence):

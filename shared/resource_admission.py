@@ -4,6 +4,7 @@ NULL stays legacy protocol zero, not a known empty set. No producer in this
 module creates a birth marker or enables managed mode on an existing row.
 """
 
+from datetime import datetime
 from typing import Any
 
 import psycopg
@@ -29,6 +30,7 @@ def _next(
     host: ResourceProcess,
     *,
     predecessor: bool,
+    now: datetime,
     exited_predecessor: ResourceProcess | None = None,
 ) -> IncarnationResources | None:
     if row[0] is None:
@@ -37,6 +39,8 @@ def _next(
         return None
     state = decode_resources(row[0])
     if isinstance(state, ResourceBirth):
+        if state.launch_deadline is not None and now >= state.launch_deadline:
+            raise ResourceEvidenceError("original birth launch deadline expired")
         if any(value is not None for value in row[1:6]):
             raise ResourceEvidenceError("birth marker is not a never-admitted runtime")
     else:
@@ -77,7 +81,10 @@ def admit_resources(
                 ).fetchone()
                 is not None
             )
-    value = _next(row, target, host, predecessor=predecessor)
+    clock = conn.execute("SELECT clock_timestamp()").fetchone()
+    if clock is None:
+        raise ResourceEvidenceError("database clock is unavailable")
+    value = _next(row, target, host, predecessor=predecessor, now=clock[0])
     if value is not None:
         conn.execute(_STORE, (Jsonb(value.model_dump(mode="json")), target.agent_id))
 
@@ -104,11 +111,15 @@ async def admit_resources_async(
                 ).fetchone()
                 is not None
             )
+    clock = await (await conn.execute("SELECT clock_timestamp()")).fetchone()
+    if clock is None:
+        raise ResourceEvidenceError("database clock is unavailable")
     value = _next(
         row,
         target,
         host,
         predecessor=predecessor,
+        now=clock[0],
         exited_predecessor=exited_predecessor,
     )
     if value is not None:

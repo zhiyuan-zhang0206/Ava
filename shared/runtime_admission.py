@@ -1,6 +1,8 @@
 """Loaded-runtime input plus the existing locked publication admission decision."""
 
+import os
 from dataclasses import dataclass
+from functools import lru_cache
 
 import psycopg
 
@@ -50,6 +52,8 @@ class RuntimeAdmission:
             raise PublicationAdmissionDeferredError(
                 "runtime birth deferred by publication maintenance"
             )
+        if isinstance(decision, CurrentAdmission):
+            require_activation(conn, decision)
         return decision
 
     async def decide_async(self, conn: psycopg.AsyncConnection) -> AdmissionDecision:
@@ -64,11 +68,25 @@ class RuntimeAdmission:
             raise PublicationAdmissionDeferredError(
                 "runtime birth deferred by publication maintenance"
             )
+        if isinstance(decision, CurrentAdmission):
+            row = await (await conn.execute(_ADMISSION_ROW)).fetchone()
+            _require_activation_state(_admission_state(row), decision)
         return decision
 
 
 def require_current_for_managed(decision: AdmissionDecision, resource_value: object) -> None:
     """A marker cannot activate managed resources while legacy writers may exist."""
+    from shared.incarnation_resources import ResourceBirth, ResourceEvidenceError, decode_resources
+
+    if resource_value is None:
+        if isinstance(decision, CurrentAdmission):
+            raise ResourceEvidenceError(
+                "published runtime cannot infer closure of legacy resources"
+            )
+        return
+    state = decode_resources(resource_value)
+    if isinstance(state, ResourceBirth) and state.launch_deadline is None:
+        raise ResourceEvidenceError("birth marker has no original bounded launch authority")
     if resource_value is not None and not isinstance(decision, CurrentAdmission):
         raise PublicationAdmissionDeferredError(
             "managed resource admission requires committed publication"
@@ -88,3 +106,37 @@ def legacy_boot_terminal_allowed(conn: psycopg.Connection) -> bool:
     if conn.info.transaction_status != TransactionStatus.INTRANS:
         raise RuntimeError("boot terminal guard requires the caller transaction")
     return isinstance(_admission_state(conn.execute(_ADMISSION_ROW).fetchone()), LegacyProtocolZero)
+
+
+@lru_cache(maxsize=1)
+def _process_boot(pid: int) -> RuntimeAdmission:
+    if pid != os.getpid():
+        raise RuntimeError("runtime input must belong to this actual process")
+    return RuntimeAdmission.load()
+
+
+def process_runtime_admission() -> RuntimeAdmission:
+    """A fork has a different key; no inherited verified object grants admission."""
+    value = _process_boot(os.getpid())
+    value.revalidate()
+    return value
+
+
+def require_activation(conn: psycopg.Connection, decision: AdmissionDecision) -> None:
+    """Foundation v2 current records are not positive all-writer publication."""
+    _require_activation_state(_admission_state(conn.execute(_ADMISSION_ROW).fetchone()), decision)
+
+
+def _require_activation_state(state: object, decision: AdmissionDecision) -> None:
+    from shared.managed_writer_publication import WriterPublication
+
+    if not isinstance(decision, CurrentAdmission):
+        raise PublicationAdmissionDeferredError("managed birth requires current publication")
+    if (
+        not isinstance(state, WriterPublication)
+        or state.current is None
+        or state.current.publication_id != decision.publication_id
+        or state.current.activation_digest is None
+        or state.current.activation_challenge is None
+    ):
+        raise PublicationAdmissionDeferredError("current publication lacks verified activation")
