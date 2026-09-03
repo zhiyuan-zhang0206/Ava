@@ -37,6 +37,7 @@ def test_launches_on_agent_runner(monkeypatch: pytest.MonkeyPatch, tmp_path: Pat
             recorded.append((argv, kw))  # pyright: ignore[reportUnknownMemberType]
 
     monkeypatch.setattr(_warmup.subprocess, "Popen", _FakePopen)
+    monkeypatch.setattr("ops.agent_launch.agent_spawn_env_dict", dict)
     monkeypatch.setattr(_warmup, "logs_dir", lambda: tmp_path)
 
     _warmup._launch_agent_warmup(frozenset({"gateway", "agent-runner"}), tmp_path)
@@ -58,6 +59,7 @@ def test_launch_failure_is_best_effort(
         raise OSError("uv not found")
 
     monkeypatch.setattr(_warmup.subprocess, "Popen", _boom)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("ops.agent_launch.agent_spawn_env_dict", dict)
     monkeypatch.setattr(_warmup, "logs_dir", lambda: tmp_path)
 
     _warmup._launch_agent_warmup(frozenset({"agent-runner"}), tmp_path)  # must not raise

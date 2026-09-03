@@ -115,6 +115,25 @@ Runner scope requires a restart of every enrolled runner after success. The
 PgBouncer reload updates new database connections but cannot replace an already
 cached runner URL; restarting makes the runner fetch the current projection.
 
+Gateway-local agent and agent-host launchers project the runner database URL
+from one fresh gateway `.env` snapshot: both the endpoint/database and runner
+password in that projection belong to that snapshot. Neither a cached owner
+URL nor an old runner URL is combined with a newly read password. A missing
+snapshot URL fails before launch instead of falling back to boot-time Settings.
+Enrolled remote runners are different: their authenticated bootstrap URL is
+authoritative and passes through unchanged; they never consult a local gateway
+runner password or synthesize a runner identity from an owner URL. The bootstrap
+response and local launcher share the same pure credential projection function.
+Bootstrap likewise requires its database URL from that same file snapshot;
+it cannot substitute a cached Settings URL when the file omits it. Noncredential
+defaults retain the existing Settings resolution. Connection pools bind the
+complete configuration captured at process startup and are closed at shutdown;
+configuration changes take effect through the existing restart boundary, not
+a hot pool swap or a new credential-generation protocol.
+This is per-call consistency, not a credential rotation protocol or proof that
+the database's live verifier has already been changed. Connection credentials
+must not be included in logs or manifests.
+
 The gateway process must also restart after any data-plane rotation. Its
 in-memory connection URLs and admin passwords remain stale until it reloads
 `.env`, so new DB connections and Redis reconnects fail; for runner scope, its
