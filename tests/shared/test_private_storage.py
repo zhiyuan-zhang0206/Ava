@@ -7,6 +7,7 @@ import re
 import stat
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import pytest
 
@@ -39,6 +40,61 @@ def test_private_dir_rejects_foreign_owner(monkeypatch: pytest.MonkeyPatch, tmp_
         RuntimeError, match=rf"{re.escape(str(target))}.*not owned by the current user"
     ):
         private_storage.ensure_private_dir(target)
+
+
+def test_converge_skips_foreign_nodes(tmp_path: Path) -> None:
+    """Foreign-owned nodes are warned about and left unchanged; the run does not abort."""
+    target = tmp_path / "tree"
+    ours_dir = target / "ours"
+    ours_dir.mkdir(parents=True)
+    foreign_file = ours_dir / "secret"
+    foreign_file.write_bytes(b"secret")
+    foreign_file.chmod(0o400)  # marker: reads as foreign
+    foreign_dir = target / "foreign"
+    foreign_dir.mkdir()
+    foreign_dir.chmod(0o500)  # marker: reads as foreign
+    warnings: list[tuple[str, dict[str, object]]] = []
+
+    def _warning(message: str, **kwargs: object) -> None:
+        warnings.append((message, kwargs))
+
+    def _foreign(stat_result: os.stat_result) -> bool:
+        return stat_result.st_mode & 0o777 in (0o400, 0o500)
+
+    with (
+        patch.object(private_storage, "logger", SimpleNamespace(warning=_warning)),
+        patch.object(private_storage, "_is_foreign_owned", side_effect=_foreign),
+    ):
+        private_storage.converge_private_tree(target)
+
+    # foreign nodes left untouched, ours dir converged to owner-only mode
+    assert _mode(foreign_file) == 0o400
+    assert _mode(foreign_dir) == 0o500
+    assert _mode(ours_dir) == 0o700
+    assert (
+        "private storage convergence skipped foreign-owned path {path}",
+        {"path": foreign_file},
+    ) in warnings
+    assert (
+        "private storage convergence skipped foreign-owned path {path}",
+        {"path": foreign_dir},
+    ) in warnings
+
+
+def test_is_foreign_owned_is_uid_only(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ownership follows the uid alone; a foreign gid does not make a path foreign."""
+
+    def _stat(uid: int, gid: int) -> os.stat_result:
+        return os.stat_result((0o100644, 0, 0, 1, uid, gid, 0, 0, 0, 0))
+
+    ours = _stat(os.geteuid(), os.geteuid() + 1)
+    assert private_storage._is_foreign_owned(ours) is False
+
+    theirs = _stat(os.geteuid() + 1, os.geteuid())
+    assert private_storage._is_foreign_owned(theirs) is True
+
+    monkeypatch.setattr(private_storage.os, "name", "nt")
+    assert private_storage._is_foreign_owned(theirs) is False
 
 
 def test_private_dir_repairs_mode_drift(tmp_path: Path) -> None:
