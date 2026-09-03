@@ -8,7 +8,11 @@ permissions:
   contents: read
 jobs:
   real-normal-ops:
-    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-14]
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -22,6 +26,13 @@ jobs:
         with:
           python-version: '3.12'
       - uses: ./.github/actions/install-pg-redis
+        if: runner.os == 'Linux'
+      - name: Install native PostgreSQL 17 on macOS
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          brew install postgresql@17
+          echo "$(brew --prefix postgresql@17)/bin" >> "$GITHUB_PATH"
       - name: Start isolated native PG
         shell: bash
         run: |
@@ -33,6 +44,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          if [[ "$RUNNER_OS" == 'macOS' ]]; then test "$(uname -m)" = arm64; fi
           uv python install 3.12
           python3 scripts/legacy_lkg/prepare.py --root "$RUNNER_TEMP/legacy-lkg" --tools "$GITHUB_WORKSPACE/.legacy-preparation-tools" --python "$(uv python find --managed-python 3.12)" --uv "$(command -v uv)"
           test -s "$RUNNER_TEMP/legacy-lkg/cold-boot-proof.json"
@@ -50,11 +62,12 @@ jobs:
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
-          name: legacy-normal-ops-${{ github.event.pull_request.head.sha }}
+          name: legacy-normal-ops-${{ matrix.os }}-${{ github.event.pull_request.head.sha }}
           path: |
             ${{ runner.temp }}/legacy-lkg/provenance.json
             ${{ runner.temp }}/legacy-lkg/cold-boot-proof.json
             ${{ runner.temp }}/legacy-lkg/image-proof.json
             ${{ runner.temp }}/legacy-lkg/normal-*.log
+            ${{ runner.temp }}/legacy-lkg/normal-native.json
             ${{ runner.temp }}/legacy-pg.log
           if-no-files-found: error
