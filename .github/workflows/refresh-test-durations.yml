@@ -60,13 +60,13 @@ jobs:
   measure-backend:
     needs: check-recent-success
     if: needs.check-recent-success.outputs.should-refresh == 'true'
-    name: Measure backend durations (${{ matrix.group }}/12)
+    name: Measure backend durations (${{ matrix.group }}/16)
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
-        group: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+        group: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
     env:
       # Sentinel data planes: the suite must provision its own throwaway
       # cluster; a sentinel turns a leaked real-data-plane access into a
