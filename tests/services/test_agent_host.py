@@ -827,7 +827,7 @@ class TestTurnStallGuard:
     async def test_a_stalled_turn_is_aborted_and_its_error_lands(
         self, wired: _Build, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        import services.agent_host.host as host_mod
+        import services.agent_host.stall_guard as guard_mod
         from services.agent_host.dispatcher import TurnStallTimeoutError
 
         await self._stall_settings(monkeypatch)
@@ -839,7 +839,7 @@ class TestTurnStallGuard:
         def _record_error(_ctx: object, _agent_id: int, content: str) -> None:
             errors.append(content)
 
-        monkeypatch.setattr(host_mod, "_emit_error_event", _record_error)
+        monkeypatch.setattr(guard_mod, "_emit_error_event", _record_error)
 
         with pytest.raises(TurnStallTimeoutError):
             await asyncio.wait_for(host.run_turn(11), timeout=2.0)
@@ -852,7 +852,7 @@ class TestTurnStallGuard:
     async def test_a_turn_that_keeps_marking_progress_is_never_aborted(
         self, wired: _Build, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        import services.agent_host.host as host_mod
+        import services.agent_host.stall_guard as guard_mod
         from agent._turn_progress import mark_turn_progress
 
         await self._stall_settings(monkeypatch)
@@ -864,7 +864,7 @@ class TestTurnStallGuard:
         def _record_error(_ctx: object, _agent_id: int, content: str) -> None:
             errors.append(content)
 
-        monkeypatch.setattr(host_mod, "_emit_error_event", _record_error)
+        monkeypatch.setattr(guard_mod, "_emit_error_event", _record_error)
 
         async def _keep_stepping() -> None:
             while not graph.release.is_set():
@@ -904,11 +904,12 @@ class TestTurnStallGuard:
     async def test_a_turn_that_refuses_to_unwind_escalates_to_a_host_restart(
         self, wired: _Build, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        import services.agent_host.host as host_mod
         from services.agent_host.dispatcher import HostRestartRequiredError
 
         await self._stall_settings(monkeypatch)
-        monkeypatch.setattr(host_mod, "CANCEL_UNWIND_TIMEOUT_S", 0.05)
+        import services.agent_host.stall_guard as guard_mod
+
+        monkeypatch.setattr(guard_mod, "CANCEL_UNWIND_TIMEOUT_S", 0.05)
         host, _, _ = wired({11: _Row(overlay={"llm_model": "model-for-11"})})
         graph = _GatedGraph(refuse_cancel=True)
         host._graph = graph  # type: ignore[assignment]
