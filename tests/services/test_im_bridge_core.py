@@ -151,7 +151,7 @@ def test_cmd_list_renders_agent_id() -> None:
     assert "405  Ava \u8d1f\u8d23\u4eba  [idling]" in text
     assert f"228  {copy.UNNAMED_LABEL}  [running]" in text
     assert "999" not in text
-    assert copy.LIVE_AGENTS_TITLE_BUTTONS in text
+    assert copy.LIVE_AGENTS_TITLE in text
     assert out.buttons is None
 
 
