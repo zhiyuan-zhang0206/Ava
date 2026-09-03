@@ -377,6 +377,103 @@ jobs:
       - name: Run pre-commit structural gates (--all-files)
         run: uv run pre-commit run --all-files
 
+  merged-tree-structure:
+    # #1584 caught a file-size violation only after the Trunk Merge Queue
+    # combined main and a PR. This previews that merged tree at PR time.
+    # Informational during its observation phase: findings do not block the
+    # workflow or become a required status; the queue remains authoritative.
+    name: merged tree structure (informational)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    needs: [classify]
+    if: ${{ github.event_name == 'pull_request' && (needs.classify.outputs.frontend == 'true' || needs.classify.outputs.backend == 'true') }}
+    env:
+      AVA_DB_URL: postgresql://unused@127.0.0.1:1/unused
+      AVA_REDIS_URL: redis://127.0.0.1:1/0
+      # Same command set as backend-structure: hooks already covered by other
+      # jobs are skipped here too.
+      SKIP: ruff,ruff-format,pyright,lint-migrations,lint-clock-lattice,frontend-tsc,frontend-eslint,frontend-vitest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+
+      - name: Materialize merged tree (origin/main into head, no commit)
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/merged-tree"
+          # Real 3-way merge with NO commit: --no-commit stages the merged tree
+          # in the index / working tree, --no-ff forces it even when main is a
+          # merge-base match. A conflict exits non-zero — recorded and skipped
+          # (the queue surfaces it anyway). The restore step below always resets
+          # index + worktree and clears the in-progress merge state, so nothing
+          # leaks from this job.
+          if git merge --no-commit --no-ff origin/main > "$RUNNER_TEMP/merged-tree/merge.out" 2>&1; then
+            echo "STATUS=merged" >> "$GITHUB_ENV"
+          else
+            git diff --name-only --diff-filter=U > "$RUNNER_TEMP/merged-tree/conflicts.txt" 2>&1 || true
+            echo "::warning::Merged-tree lint skipped — origin/main does not merge cleanly into the PR head"
+            echo "STATUS=conflict" >> "$GITHUB_ENV"
+          fi
+
+      - name: Install uv
+        if: ${{ env.STATUS == 'merged' }}
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: 0.10.2
+          enable-cache: true
+
+      - name: Install Python deps
+        if: ${{ env.STATUS == 'merged' }}
+        run: uv sync --frozen
+
+      - name: Install Node
+        if: ${{ env.STATUS == 'merged' }}
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ui/web/package-lock.json
+
+      - name: Install frontend deps (codegen freshness)
+        if: ${{ env.STATUS == 'merged' }}
+        working-directory: ui/web
+        run: npm ci
+
+      - name: Run pre-commit structural gates on merged tree (--all-files)
+        if: ${{ env.STATUS == 'merged' }}
+        continue-on-error: true
+        # The real index holds the staged merged tree — --all-files enumerates it.
+        run: uv run pre-commit run --all-files 2>&1 | tee "$RUNNER_TEMP/merged-tree/pre-commit.log"
+
+      - name: Restore head state (no leftover merge state)
+        if: ${{ always() }}
+        run: |
+          git reset --hard HEAD
+          git clean -fd
+
+      - name: Upload merged-tree lint report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: merged-tree-structure
+          path: ${{ runner.temp }}/merged-tree/
+          if-no-files-found: ignore
+
+      - name: Write job summary (informational)
+        if: ${{ always() }}
+        run: |
+          {
+            echo "### merged tree structure (informational)"
+            case "${STATUS:-none}" in
+              merged)   echo "Merged-tree lint completed — full log in artifact \`merged-tree-structure\`." ;;
+              conflict) echo "Skipped: origin/main does not merge cleanly into the PR head." ;;
+              *)        echo "Skipped: merged tree was not materialized." ;;
+            esac
+          } >> "$GITHUB_STEP_SUMMARY"
+
   backend-shard:
     name: backend shard (${{ matrix.group }}/16)
     runs-on: ubuntu-24.04
