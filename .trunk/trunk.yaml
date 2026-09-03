@@ -1,9 +1,9 @@
 version: 0.1
 
 # Trunk Merge Queue waits on these statuses while testing a queued PR. This overrides the
-# branch-protection default. The 16 matrix job names (backend shard (N/12), e2e shard (N/4))
+# branch-protection default. The 16 matrix job names (backend shard (N/16), e2e shard (N/4))
 # are deliberately NOT listed: when a matrix is fully skipped (docs-only PR), GitHub reports a
-# single check with the raw template name "backend shard (${{ matrix.group }}/12)" — the
+# single check with the raw template name "backend shard (${{ matrix.group }}/16)" — the
 # evaluated names never appear, so a queue waiting on them could stall forever. The aggregator
 # jobs below already fan in the shards (their success requires every shard green), so the full
 # suite stays enforced. All 13 names report on every PR (success or skipped, which counts as

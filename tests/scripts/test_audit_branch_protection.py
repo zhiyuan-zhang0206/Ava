@@ -46,7 +46,7 @@ version: 0.1
 merge:
   required_statuses:
     - backend (pytest + pyright)
-    - backend shard (${{ matrix.group }}/12)
+    - backend shard (${{ matrix.group }}/16)
     - qa-approved-gate
 """
 
@@ -127,7 +127,7 @@ def test_trunk_gate_findings_reject_matrix_template_names() -> None:
     findings = audit.trunk_gate_findings(_TRUNK_BAD_FIXTURE)
     assert (
         "trunk.yaml required_statuses contains a matrix template name: "
-        "backend shard (${{ matrix.group }}/12)"
+        "backend shard (${{ matrix.group }}/16)"
     ) in findings
 
 
