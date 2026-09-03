@@ -468,7 +468,7 @@ def _run_agent_runner_self_update_inner(  # noqa: PLR0915 — the self-update's 
     try:
         with updater_stage("start"):
             return subprocess.run(
-                [str(ava_bin), "start", "--persist-services"],
+                [str(ava_bin), "start", "--persist-services", "--updater-telemetry"],
                 cwd=repo,
                 env=start_env,
                 check=False,

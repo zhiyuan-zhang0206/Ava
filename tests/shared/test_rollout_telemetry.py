@@ -89,6 +89,23 @@ def test_bytes_and_hosts_land_in_the_summary() -> None:
     assert summary["hosts"] == {"win": {"uv": 40.1, "stop": 2.3}}
 
 
+def test_summary_reports_prepare_details_and_observed_gateway_downtime() -> None:
+    """The final JSON preserves its existing stage map while exposing the two
+    user-visible rollout windows and additive prepare-check timings."""
+    collector = rt.activate()
+    try:
+        collector.record("stop_the_world", 8.0)
+        collector.record("local_leg", 30.0)
+        collector.record("readiness", 2.0)
+        rt.record_detail("prepare_checks", "staging_venv_s", 44.44)
+    finally:
+        rt.deactivate()
+
+    summary = collector.summary()
+    assert summary["gateway_downtime_s"] == 40.0
+    assert summary["details"] == {"prepare_checks": {"staging_venv_s": 44.4}}
+
+
 def test_record_host_ignores_empty_stages() -> None:
     collector = rt.activate()
     try:

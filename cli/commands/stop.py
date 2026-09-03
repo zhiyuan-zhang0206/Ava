@@ -597,7 +597,9 @@ def _release_self_heal_pause() -> None:
     print("  · unpaused this host (no cluster update owns the pause; nothing was stopped)")
 
 
-def cmd_restart(*, quiesce: bool = False, mode: str = "smooth", force_reap: bool = False) -> int:
+def _cmd_restart_body(
+    *, quiesce: bool = False, mode: str = "smooth", force_reap: bool = False
+) -> int:
     """Stop then start without a stdin confirmation prompt.
 
     Designed for the detached updater session, where interactive confirmation
@@ -699,4 +701,10 @@ def cmd_restart(*, quiesce: bool = False, mode: str = "smooth", force_reap: bool
     # Internal restart: preserve the operator's durable --disable-service marker
     # (a no-flag operator start would rewrite it to empty and re-enable everything).
     with updater_stage("start"):
-        return _ns._cmd_start_body(persist_services=False)
+        return _ns._cmd_start_body(persist_services=False, updater_telemetry=True)
+
+
+def cmd_restart(*, quiesce: bool = False, mode: str = "smooth", force_reap: bool = False) -> int:
+    """Stop then start without a confirmation prompt, timing the full restart."""
+    with updater_stage("restart"):
+        return _cmd_restart_body(quiesce=quiesce, mode=mode, force_reap=force_reap)

@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import subprocess
 import time
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -241,6 +242,26 @@ def test_ready_start_marks_its_serving_generation(
     assert start_serving.is_serving() is True
 
 
+def test_updater_start_records_migration_and_readiness_stages(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A restart's start leg splits its migration and readiness tail without
+    changing the normal `ava start` control path."""
+    seen: list[str] = []
+
+    @contextmanager
+    def _stage(name: str):
+        seen.append(name)
+        yield
+
+    monkeypatch.setattr(_start_mod, "updater_stage", _stage)
+    _roster(monkeypatch, (("gateway", None),))
+    _probes(monkeypatch, ready={"gateway"})
+
+    assert _start_mod._cmd_start_body(persist_services=False, updater_telemetry=True) == 0
+    assert seen == ["migration", "readiness"]
+
+
 def test_unready_service_code_is_not_the_declined_code(monkeypatch: pytest.MonkeyPatch) -> None:
     """The readiness code must not collide with `RESTART_DECLINED_EXIT_CODE`.
 
@@ -259,7 +280,10 @@ def test_unready_service_code_is_not_the_declined_code(monkeypatch: pytest.Monke
     from ops.cluster_deploy import _restart_recovery_cmd
 
     cmd = _restart_recovery_cmd()
-    assert f"if errorlevel {RESTART_DECLINED_EXIT_CODE + 1} (ava start" in cmd
+    assert (
+        f"if errorlevel {RESTART_DECLINED_EXIT_CODE + 1} "
+        "((python -m cli.commands._updater_stage start"
+    ) in cmd
     assert SERVICES_NOT_READY_EXIT_CODE >= RESTART_DECLINED_EXIT_CODE + 1
 
 
@@ -569,10 +593,22 @@ def test_healthy_start_never_asks_about_the_lease(monkeypatch: pytest.MonkeyPatc
 
 
 def test_cli_flag_reaches_cmd_start(monkeypatch: pytest.MonkeyPatch) -> None:
-    """`ava start --no-readiness-gate` turns the gate off, and a bare `ava start`
-    leaves it on — argparse's default must not silently invert."""
-    seen: list[bool] = []
-    monkeypatch.setattr(_cli, "cmd_start", lambda **kw: seen.append(kw["readiness_gate"]) or 0)  # pyright: ignore[reportUnknownArgumentType]
+    """Public and updater-private start flags reach the start seam unchanged."""
+    seen: list[tuple[bool, bool]] = []
+
+    def _start(**kwargs: object) -> int:
+        readiness_gate = kwargs["readiness_gate"]
+        updater_telemetry = kwargs["updater_telemetry"]
+        assert isinstance(readiness_gate, bool)
+        assert isinstance(updater_telemetry, bool)
+        seen.append((readiness_gate, updater_telemetry))
+        return 0
+
+    monkeypatch.setattr(
+        _cli,
+        "cmd_start",
+        _start,
+    )  # pyright: ignore[reportUnknownArgumentType]
 
     from cli.main import _build_parser
 
@@ -581,8 +617,9 @@ def test_cli_flag_reaches_cmd_start(monkeypatch: pytest.MonkeyPatch) -> None:
 
     _h_start(parser.parse_args(["start"]))
     _h_start(parser.parse_args(["start", "--no-readiness-gate"]))
+    _h_start(parser.parse_args(["start", "--updater-telemetry"]))
 
-    assert seen == [True, False]
+    assert seen == [(True, False), (False, False), (True, True)]
 
 
 # ─── the boot path, whose retry has no cap, never sees the readiness code ──────

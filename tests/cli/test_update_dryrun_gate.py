@@ -219,6 +219,45 @@ def test_dry_run_checks_reports_blocking_checks_but_not_offsite_probe(
     assert staged == [tmp_path / "stage"]
 
 
+def test_dry_run_checks_records_each_prepare_substep_in_telemetry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Prepare timing is additive JSON detail: it observes every blocking check
+    without changing the gate's failures or control flow."""
+    from shared import rollout_telemetry as telemetry_mod
+
+    @contextmanager
+    def _staging(_repo: Path, _target_sha: str, _staging_dir: Path):
+        yield tmp_path / "stage"
+
+    monkeypatch.setattr(_dryrun, "_staging_worktree", _staging)
+    monkeypatch.setattr(_dryrun, "_runner_reachability_failures", list)
+    monkeypatch.setattr(_dryrun, "_offsite_probe_message", lambda: None)
+    monkeypatch.setattr(_dryrun, "_warm_staging_uv", lambda _staging: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_dryrun, "_validate_target_settings", lambda _staging: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_dryrun, "_import_candidate_modules", lambda _staging: [])  # pyright: ignore[reportUnknownArgumentType]
+    collector = telemetry_mod.activate()
+    try:
+        assert (
+            _dryrun.dry_run_checks(Path("/repo"), "target-sha", staging_dir=tmp_path / "stage")
+            == []
+        )
+    finally:
+        telemetry_mod.deactivate()
+
+    details = cast(dict[str, dict[str, float]], collector.summary()["details"])
+    assert set(details) == {"prepare_checks"}
+    assert set(details["prepare_checks"]) == {
+        "runner_reachability_s",
+        "offsite_probe_s",
+        "staging_worktree_s",
+        "staging_venv_s",
+        "settings_s",
+        "daemon_imports_s",
+    }
+    assert all(duration >= 0.0 for duration in details["prepare_checks"].values())
+
+
 def test_offsite_probe_performs_a_read_only_remote_stat(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

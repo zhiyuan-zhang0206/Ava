@@ -17,8 +17,10 @@ Two line shapes, both parseable by grep and by a reader:
 - one aggregate JSON line at the end of the gateway orchestration:
 
       [rollout-telemetry] {"bytes": {"snapshot": 4567030217},
-                           "hosts": {"win": {"uv": 40.1, "stop": 2.3}},
+                           "details": {"prepare_checks": {"staging_venv_s": 44.0}},
+                           "hosts": {"win": {"uv": 40.1, "total_s": 75.8}},
                            "stages": {"phase0_fetch": 69.2, ...},
+                           "gateway_downtime_s": 40.0,
                            "total_s": 368.1}
 
 The per-stage lines are unconditional — `stage()` prints whether or not a
@@ -64,14 +66,15 @@ class RolloutTelemetry:
 
     Durations are recorded as elapsed wall time around each phase (`stage`).
     Byte counts are recorded explicitly by the phases that move data (the
-    pre-update data snapshot). `print_summary` emits the aggregate JSON line
-    the rollout log ends with.
+    pre-update data snapshot), and detail groups hold finer-grained timings.
+    `print_summary` emits the aggregate JSON line the rollout log ends with.
     """
 
     def __init__(self) -> None:
         self._stages: dict[str, float] = {}
         self._bytes: dict[str, int] = {}
-        self._hosts: dict[str, dict[str, float]] = {}
+        self._details: dict[str, dict[str, float]] = {}
+        self._hosts: dict[str, dict[str, object]] = {}
         self._started = time.monotonic()
 
     def record(self, name: str, dur_s: float) -> None:
@@ -80,7 +83,10 @@ class RolloutTelemetry:
     def record_bytes(self, name: str, n: int) -> None:
         self._bytes[name] = n
 
-    def record_host(self, host: str, stages: dict[str, float]) -> None:
+    def record_detail(self, group: str, name: str, value: float) -> None:
+        self._details.setdefault(group, {})[name] = round(value, 1)
+
+    def record_host(self, host: str, stages: dict[str, object]) -> None:
         """Per-host updater stage times, as reported by that host's status probe
         during the Phase-B poll (best-effort: a host that converged before its
         next probe answered reports nothing)."""
@@ -90,11 +96,21 @@ class RolloutTelemetry:
     def total_s(self) -> float:
         return round(time.monotonic() - self._started, 1)
 
+    def gateway_downtime_s(self) -> float:
+        return round(
+            sum(
+                self._stages.get(name, 0.0) for name in ("stop_the_world", "local_leg", "readiness")
+            ),
+            1,
+        )
+
     def summary(self) -> dict[str, object]:
         return {
             "stages": self._stages,
             "bytes": self._bytes,
+            "details": self._details,
             "hosts": self._hosts,
+            "gateway_downtime_s": self.gateway_downtime_s(),
             "total_s": self.total_s(),
         }
 
@@ -125,7 +141,13 @@ def record_bytes(name: str, n: int) -> None:
         _active.value.record_bytes(name, n)
 
 
-def record_host(host: str, stages: dict[str, float]) -> None:
+def record_detail(group: str, name: str, value: float) -> None:
+    """Record an additive named detail into the ambient collector."""
+    if _active.value is not None:
+        _active.value.record_detail(group, name, value)
+
+
+def record_host(host: str, stages: dict[str, object]) -> None:
     """Record one host's updater stage times into the ambient collector."""
     if _active.value is not None:
         _active.value.record_host(host, stages)

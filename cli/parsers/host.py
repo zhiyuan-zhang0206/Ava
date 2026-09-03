@@ -29,6 +29,7 @@ def _h_start(args: argparse.Namespace) -> int:
         disabled_services=tuple(args.disable_service),
         persist_services=args.persist_services,
         readiness_gate=not args.no_readiness_gate,
+        updater_telemetry=args.updater_telemetry,
     )
 
 
@@ -158,6 +159,14 @@ def _add_start_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) 
         "--persist-services",
         action="store_false",
         default=True,
+        help=argparse.SUPPRESS,
+    )
+    start_p.add_argument(
+        # Internal: a detached updater asks the fresh `ava start` process to emit
+        # migration/readiness timing without changing normal start behavior.
+        "--updater-telemetry",
+        action="store_true",
+        default=False,
         help=argparse.SUPPRESS,
     )
     start_p.add_argument(

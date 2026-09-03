@@ -209,6 +209,7 @@ def test_native_updater_ladder_recovers_a_failed_restart_but_not_a_declined_one(
         cmd.index(f"errorlevel {RESTART_DECLINED_EXIT_CODE}")
     )
     assert cmd.index(f"errorlevel {RESTART_DECLINED_EXIT_CODE}") < (cmd.index("errorlevel 1"))
+    assert cmd.count("cli.commands._updater_stage final") == 4
 
 
 def test_native_ladder_recovery_starts_run_as_internal_child() -> None:

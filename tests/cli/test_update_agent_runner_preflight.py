@@ -200,6 +200,7 @@ class TestLauncherGate:
             str(repo / ".venv" / "bin" / "ava"),
             "start",
             "--persist-services",
+            "--updater-telemetry",
         ]
 
     def test_windows_resolves_scripts_ava_exe(

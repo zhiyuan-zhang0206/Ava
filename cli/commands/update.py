@@ -742,7 +742,7 @@ def _run_gateway_orchestration_inner(  # noqa: PLR0915 (three-phase orchestratio
         # re-probed once (the fresh-idle read in `ops.updater_outcome` serves
         # its completed breakdown, `start` included). Land in the telemetry
         # summary so one rollout log shows every host's checkout/uv/stop/start.
-        host_outcomes: dict[str, dict[str, float]] = {}
+        host_outcomes: dict[str, dict[str, object]] = {}
         with _stage_telemetry("phase_b"):
             rc, outcome, hosts_to_resume = _phase_b_outcome(
                 fanout_targets,
