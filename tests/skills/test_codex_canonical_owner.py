@@ -182,6 +182,9 @@ def test_failed_publish_kills_unpublished_codex_session(
     def _ready(_session_id: int) -> None:
         return None
 
+    def _verified(_sid: int, _codex_home: Path) -> None:
+        return None
+
     def _publish(
         _key: coding_session_owner.CodingSessionKey,
         _generation: str,
@@ -212,6 +215,7 @@ def test_failed_publish_kills_unpublished_codex_session(
     monkeypatch.setattr(spawn_codex.ava.shell.sessions, "new", _new)
     monkeypatch.setattr(spawn_codex.ava.shell.sessions, "send", _send)
     monkeypatch.setattr(spawn_codex, "_wait_for_ready", _ready)
+    monkeypatch.setattr(spawn_codex, "_verify_submitted", _verified)
     monkeypatch.setattr(spawn_codex.coding_session_owner, "publish_active", _publish)
     monkeypatch.setattr(spawn_codex.ava.shell.sessions, "kill", _kill)
     monkeypatch.setattr(spawn_codex.coding_session_owner, "terminate_generation", _terminate)
