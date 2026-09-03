@@ -1,8 +1,8 @@
 """ava.watcher unit tests — launch writes the agent's script verbatim plus a
 generated bootstrap file (identity + watchdog + runpy), and runs them in a
-PTY session whose command line redirects output to a log file and ends with
-the CLI completion notice (`ava agents send ... --source watcher:N`); cron/at
-build a script then spawn.
+PTY session whose command line tees output to a log file and session capture,
+then ends with the CLI completion notice (`ava agents send ... --source
+watcher:N`); cron/at build a script then spawn.
 
 The `_pty_sessions_env` fixture (session-scoped, tests/ava/conftest.py) runs the
 real supervisor daemon under the tmp test home; the session tests are
@@ -532,14 +532,13 @@ def test_launch_writes_script_verbatim_and_runs_via_runpy(
 # -- Completion notice (shell-level, fires on every exit path) -----------------
 
 
-def test_spawn_line_redirects_and_notifies(
-    _agent_row: int, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    # The command line must redirect the child's output to the per-agent log
-    # file and end with the CLI completion notice + session close: the notice
-    # is sent from the shell level so a crashed or hard-killed child cannot
-    # skip it, and `; exit $_ec` closes the session even when delivery fails —
-    # a lingering shell is what reconcile reads as alive (Task #1115 bug B).
+def test_spawn_line_tees_and_notifies(_agent_row: int, monkeypatch: pytest.MonkeyPatch) -> None:
+    # The command line must tee the child's output to the per-agent log file
+    # and session capture, then end with the CLI completion notice + session
+    # close: the notice is sent from the shell level so a crashed or
+    # hard-killed child cannot skip it, and `; exit $_ec` closes the session
+    # even when delivery fails — a lingering shell is what reconcile reads as
+    # alive (Task #1115 bug B).
     from ava.shell import sessions as _sessions
 
     captured: dict[str, Any] = {}
@@ -547,8 +546,9 @@ def test_spawn_line_redirects_and_notifies(
     wid = watcher.launch("import ava\n", timeout="1h", name="test-notice")
 
     cmd = captured["cmd"]
-    assert ".shell_logs" in cmd  # output redirected to the workspace log dir
-    assert "2>&1; _ec=$?;" in cmd
+    assert ".shell_logs" in cmd  # output is teed to the workspace log dir
+    assert "2>&1 | tee" in cmd
+    assert "_ec=${PIPESTATUS[0]}" in cmd
     assert "agents send" in cmd
     assert f"--source watcher:{wid}" in cmd
     assert "exited with code ${_ec}" in cmd
