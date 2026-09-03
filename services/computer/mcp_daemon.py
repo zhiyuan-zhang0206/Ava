@@ -22,6 +22,10 @@ desktop:
   `snapshot(include_ocr=true)` adds Vision OCR text boxes
   (`services/computer/ocr.py`); task_id calls get a computer_session_start/end
   envelope (`services/computer/task_sessions.py`).
+- OCR text tools (task #2401): `find_text` locates recognized text and
+  returns its physical-pixel boxes; `click_text` OCRs, locates, and clicks in
+  one serialized action — the same Vision OCR `snapshot(include_ocr=true)`
+  exposes, wrapped so callers act on what they read on screen.
 
 Wire protocol (JSON line per request, mirrors `services/browser/protocol`):
   Request:  {"id": 1, "method": "ping"}
@@ -132,6 +136,23 @@ def _snapshot_path(agent_id: int | None) -> Path:
     return directory / f"agent-{agent_id or 0}-{stamp}.png"
 
 
+def _capture_screen(agent_id: int) -> tuple[Path, helper.ScreenSize, float, tuple[int, int]]:
+    """One full-screen capture: (PNG path, helper screen report, measured
+    scale, physical pixel size).
+
+    The capture shared by snapshot and the OCR text tools — screencapture -R
+    takes logical points and clips to the display; the PNG comes out at
+    physical resolution (Retina 2x), reported via IHDR. Measure, don't trust:
+    the PNG is the ground truth callers click against; the helper's reported
+    scale can be stale (see _pixel_scale).
+    """
+    path = _snapshot_path(agent_id)
+    size = helper.screen_size()
+    helper.screencapture_region(0, 0, int(size["w"]), int(size["h"]), str(path))
+    pw, ph = _png_size(path)
+    return path, size, _pixel_scale(pw, size["w"]), (pw, ph)
+
+
 # Required arguments per tool. The MCP input schemas declare them; the daemon
 # enforces them too, so a missing argument fails with a readable message
 # instead of a bare KeyError leaking out of the helper call.
@@ -139,6 +160,8 @@ _REQUIRED_ARGS: dict[str, tuple[str, ...]] = {
     "click": ("x", "y"),
     "type_text": ("text",),
     "scroll": ("dy",),
+    "find_text": ("text",),
+    "click_text": ("text",),
 }
 
 
@@ -154,6 +177,71 @@ def _require(tool: str, args: dict[str, Any]) -> None:
     for key in _REQUIRED_ARGS.get(tool, ()):
         if key not in args:
             raise ComputerUseError(f"{tool} requires argument {key!r}")
+
+
+def _ocr_screen(path: Path, ocr_cache: dict[str, Any] | None) -> list[dict[str, Any]]:
+    """Recognize text in a fresh capture and record it in the OCR cache.
+
+    Strict where the snapshot tool is soft: find_text/click_text exist to act
+    on recognized text, so an OCR failure here is an error, never a silent
+    empty list. The cache entry (also written by snapshot include_ocr) serves
+    find_text(snapshot_fresh=false), so a caller can search the exact screen
+    it just saw without paying for a second capture.
+    """
+    try:
+        items = ocr_mod.ocr_image(path)
+    except ocr_mod.OcrError as e:
+        raise ComputerUseError(f"ocr failed: {e}") from e
+    if ocr_cache is not None:
+        ocr_cache["items"] = items
+    return items
+
+
+def _validate_text_query(query: str, mode: str) -> None:
+    """Shared argument validation for the OCR text tools.
+
+    A blank query or an unknown match mode is a caller bug — fail fast with a
+    readable error (same stance as the daemon's required-argument check).
+    """
+    if not query.strip():
+        raise ComputerUseError("text must be a non-empty string")
+    if mode not in ("contains", "exact"):
+        raise ComputerUseError(f"match must be 'contains' or 'exact', got {mode!r}")
+
+
+def _match_ocr_boxes(items: list[dict[str, Any]], query: str, mode: str) -> list[dict[str, Any]]:
+    """OCR boxes matching ``query``, in reading order (top-to-bottom, then
+    left-to-right).
+
+    Both modes are case-insensitive — Vision echoes title case a caller may
+    have typed lower, and CJK has no case to lose. Each match keeps its
+    physical-pixel box and gains the center (cx/cy, the click target) and its
+    0-based position in the returned ordering (the index click_text acts on).
+    """
+    needle = query.casefold()
+    matches: list[dict[str, Any]] = []
+    for item in items:
+        text = str(item.get("text") or "")
+        folded = text.casefold()
+        hit = folded == needle if mode == "exact" else needle in folded
+        if not hit:
+            continue
+        x, y, w, h = (float(item[k]) for k in ("x", "y", "w", "h"))
+        matches.append(
+            {
+                "text": text,
+                "x": x,
+                "y": y,
+                "w": w,
+                "h": h,
+                "cx": x + w / 2,
+                "cy": y + h / 2,
+            }
+        )
+    matches.sort(key=lambda m: (m["y"], m["x"]))
+    for position, match in enumerate(matches):
+        match["index"] = position
+    return matches
 
 
 # macOS virtual keycodes for the key tool's name/character vocabulary. LLM
@@ -257,29 +345,97 @@ def _mcp_result(result: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _find_text_tool(
+    args: dict[str, Any], agent_id: int, ocr_cache: dict[str, Any] | None
+) -> dict[str, Any]:
+    """find_text: OCR the screen and return the boxes matching ``text``.
+
+    Fresh capture by default. snapshot_fresh=false searches the last OCR
+    result instead (the screen a snapshot include_ocr / find_text / click_text
+    most recently read) — the result reports fresh:false so the caller knows
+    it answers an older screen. OCR failure is an error, never an empty list:
+    this tool exists to act on text.
+    """
+    query = str(args.get("text") or "")
+    mode = str(args.get("match") or "contains")
+    _validate_text_query(query, mode)
+    cached_items = ocr_cache.get("items") if ocr_cache is not None else None
+    if not args.get("snapshot_fresh", True) and cached_items:
+        items: list[dict[str, Any]] = cached_items  # the screen the caller last saw
+        fresh = False
+    else:
+        path, _size, _scale, _pixels = _capture_screen(agent_id)
+        items = _ocr_screen(path, ocr_cache)
+        fresh = True
+    matches = _match_ocr_boxes(items, query, mode)
+    return {
+        "query": query,
+        "match": mode,
+        "fresh": fresh,
+        "count": len(matches),
+        "matches": matches,
+    }
+
+
+def _click_text_tool(
+    args: dict[str, Any], agent_id: int, ocr_cache: dict[str, Any] | None
+) -> dict[str, Any]:
+    """click_text: OCR -> locate -> click, one audited action.
+
+    Always reads the screen fresh: the click must land on what is there NOW,
+    not on a cached capture the screen may have moved past. The capture also
+    measures the scale this click converts with. index picks among multiple
+    matches in the same reading order find_text returns; a missing match or
+    an out-of-range index is a readable error — the tool never clicks blind.
+    """
+    query = str(args.get("text") or "")
+    mode = str(args.get("match") or "contains")
+    index = int(args.get("index", 0))
+    _validate_text_query(query, mode)
+    if index < 0:
+        raise ComputerUseError("index must be >= 0")
+    path, _size, scale, _pixels = _capture_screen(agent_id)
+    matches = _match_ocr_boxes(_ocr_screen(path, ocr_cache), query, mode)
+    if not matches:
+        raise ComputerUseError(f"no on-screen text matching {query!r} (match={mode})")
+    if index >= len(matches):
+        raise ComputerUseError(
+            f"{query!r} matched {len(matches)} box(es); index {index} is out of range"
+        )
+    box = matches[index]
+    clicked = helper.click(
+        _to_logical(box["cx"], scale),
+        _to_logical(box["cy"], scale),
+        double=False,
+    )
+    return {
+        "clicked": clicked["clicked"],
+        "double": clicked["double"],
+        "text": box["text"],
+        "x": box["cx"],
+        "y": box["cy"],
+        "scale": scale,
+    }
+
+
 def _execute(
     tool: str,
     args: dict[str, Any],
     agent_id: int,
     pointer: tuple[float, float] | None = None,
     scale: float | None = None,
+    ocr_cache: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Run one tool against the permissions helper. Raises on failure.
 
     `pointer` is the tracked cursor position in PHYSICAL pixels (last
     click/scroll), the scroll fallback without explicit x/y; `scale` is the
-    last measured physical->logical scale, falling back to the helper report."""
+    last measured physical->logical scale, falling back to the helper report.
+    `ocr_cache` carries the last OCR text boxes (snapshot include_ocr /
+    find_text / click_text), reused by find_text(snapshot_fresh=false)."""
     _require(tool, args)
     if tool == "snapshot":
-        path = _snapshot_path(agent_id)
-        size = helper.screen_size()
-        # screencapture -R takes logical points and clips to the display; the
-        # PNG comes out at physical resolution (Retina 2x), reported via IHDR.
-        helper.screencapture_region(0, 0, int(size["w"]), int(size["h"]), str(path))
-        pw, ph = _png_size(path)
-        # Measure, don't trust: the PNG is the ground truth callers click
-        # against; the helper's reported scale can be stale (see _pixel_scale).
-        scale = _pixel_scale(pw, size["w"])
+        path, size, scale, (pw, ph) = _capture_screen(agent_id)
         result: dict[str, Any] = {
             "path": str(path),
             "screen": {"width": size["w"], "height": size["h"], "scale": scale},
@@ -301,10 +457,14 @@ def _execute(
             # Soft failure: snapshot stays usable without text recognition.
             try:
                 result["ocr"] = ocr_mod.ocr_image(path)
+                if ocr_cache is not None:
+                    ocr_cache["items"] = result["ocr"]
             except ocr_mod.OcrError as e:
                 result["ocr"] = []
                 result["ocr_error"] = str(e)
         return result
+    if tool == "find_text":
+        return _find_text_tool(args, agent_id, ocr_cache)
     if tool == "click":
         scale = _current_scale(scale)
         clicked = helper.click(
@@ -313,6 +473,8 @@ def _execute(
             double=bool(args.get("double", False)),
         )
         return {"clicked": clicked["clicked"], "double": clicked["double"]}
+    if tool == "click_text":
+        return _click_text_tool(args, agent_id, ocr_cache)
     if tool == "type_text":
         return {"typed": helper.type_text(str(args["text"]))["typed"]}
     if tool == "key":
@@ -394,6 +556,30 @@ _TOOLS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "find_text",
+        "description": (
+            "OCR the screen and find text, returning every matching box with "
+            "physical-pixel geometry (x/y/w/h + center cx/cy — the click space). "
+            "match=contains (substring) or exact, both case-insensitive; matches "
+            "come top-to-bottom then left-to-right, each carrying its index for "
+            "click_text. Fresh capture by default; snapshot_fresh=false searches "
+            "the last OCR result instead (from a snapshot include_ocr or a prior "
+            "find_text — result says fresh:false when reused). Errors (never an "
+            "empty list) when OCR itself fails."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "text": {"type": "string"},
+                "match": {"type": "string", "enum": ["contains", "exact"], "default": "contains"},
+                "snapshot_fresh": {"type": "boolean", "default": True},
+                "task_id": {"type": "integer"},
+                "priority": {"type": "string", "enum": ["normal", "high"], "default": "normal"},
+            },
+            "required": ["text"],
+        },
+    },
+    {
         "name": "click",
         "description": (
             "Click the left mouse button at physical-pixel screen coordinates "
@@ -410,6 +596,29 @@ _TOOLS: list[dict[str, Any]] = [
                 "priority": {"type": "string", "enum": ["normal", "high"], "default": "normal"},
             },
             "required": ["x", "y"],
+        },
+    },
+    {
+        "name": "click_text",
+        "description": (
+            "OCR the screen and click the center of the text box matching "
+            "`text` (match=contains or exact, case-insensitive) — one action "
+            "for the OCR -> locate -> click path. index picks among multiple "
+            "matches in the same top-to-bottom, left-to-right order find_text "
+            "returns. Always reads the screen fresh right before the click. "
+            "Fails with a readable error when nothing matches or index is out "
+            "of range — never clicks blind."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "text": {"type": "string"},
+                "match": {"type": "string", "enum": ["contains", "exact"], "default": "contains"},
+                "index": {"type": "integer", "default": 0},
+                "task_id": {"type": "integer"},
+                "priority": {"type": "string", "enum": ["normal", "high"], "default": "normal"},
+            },
+            "required": ["text"],
         },
     },
     {
@@ -516,6 +725,11 @@ class ComputerMcpDaemon:
         # Last measured physical->logical scale (snapshot PNG vs logical size).
         # None until the first snapshot; click/scroll use it via _current_scale.
         self._scale: float | None = None
+        # Last OCR text boxes ({items: [...]}) — refreshed by every OCR the
+        # daemon runs (snapshot include_ocr, find_text, click_text) so a later
+        # find_text with snapshot_fresh=false searches the screen the caller
+        # last saw instead of capturing again.
+        self._ocr_cache: dict[str, Any] = {"items": []}
         # One lock around execute: a single desktop op at a time machine-wide,
         # and a snapshot's multi-step capture never interleaves with another
         # agent's click (same serial choice as browser-mcp).
@@ -593,11 +807,22 @@ class ComputerMcpDaemon:
             error: str | None = None
             try:
                 result = _execute(
-                    tool, args, agent_id or 0, pointer=self._pointer, scale=self._scale
+                    tool,
+                    args,
+                    agent_id or 0,
+                    pointer=self._pointer,
+                    scale=self._scale,
+                    ocr_cache=self._ocr_cache,
                 )
                 if tool == "snapshot":
                     # click/scroll convert with the scale the caller saw.
                     self._scale = float(result["screen"]["scale"])
+                elif tool == "click_text":
+                    # The click landed where OCR found the text; record the
+                    # pointer AND the scale its capture measured, so later
+                    # click/scroll convert like this call did.
+                    self._scale = float(result["scale"])
+                    self._pointer = (float(result["x"]), float(result["y"]))
                 if tool == "click" or (tool == "scroll" and "x" in args and "y" in args):
                     self._pointer = (float(args["x"]), float(args["y"]))
             except (PermissionsHelperError, KeyError, TypeError, ValueError, OSError) as e:
@@ -668,6 +893,10 @@ class ComputerMcpDaemon:
         coords: str | None = None
         if tool == "click" and "x" in args:
             coords = f"{args['x']},{args['y']}"
+        elif tool == "click_text" and result is not None:
+            # click_text resolves its own target via OCR: audit the center it
+            # clicked (physical pixels), not an argument coordinate.
+            coords = f"{result.get('x')},{result.get('y')}"
         elif tool == "scroll":
             coords = f"{args.get('x')},{args.get('y')},{args.get('dy')}"
         elif tool == "key":
