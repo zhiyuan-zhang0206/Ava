@@ -54,10 +54,14 @@ multi-chunk.
 
 - **CI runs e2e serially (`-n 1`, dedicated `ava-ci-e2e` box)** — only one full stack runs per machine at a time,
   for resource determinism (a stack gets exclusive CPU, timing-sensitive lifecycle waits are not preempted
-  by sibling stacks on the same machine). Not a port constraint: gateway/frontend ports are dynamically
-  allocated by the kernel (`_ports.py`); Postgres/Redis use tests/_containers.py to start independent
-  temporary native clusters per worker (random ports). So concurrent e2e runs are actually isolated from
-  each other, they just consume resources — running them concurrently locally is also fine.
+  by sibling stacks on the same machine). The gateway owns one bound socket from module import through
+  frontend build and per-test restarts. POSIX `pass_fds` transfers it directly to the existing
+  `python -m uvicorn --fd` entry; normal gateway lifespan is unchanged. Each previous fixture process
+  must exit before replacement; readiness requires HTTP plus the new PID/birth's native listener.
+  Fixed-port listener diagnostics retain native identities and unknown visibility on failure.
+  Next's frontend port still uses a released kernel allocation and has a separate reservation gap;
+  dynamic allocation alone is not a zero-collision guarantee. Postgres/Redis use tests/_containers.py
+  for independent native clusters per worker. This gateway FD path targets the existing POSIX E2E CI.
 - **dev and e2e can run simultaneously** — ports/databases/channels are all separate
   (see `_ports.py` + `conftest.py` env override section).
 - **gateway is function-scoped** — restarts per test with fresh `AVA_LLM_OVERRIDE`

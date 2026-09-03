@@ -15,6 +15,36 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
+import psutil
+
+
+def listener_evidence(port: int, phase: str) -> dict[str, object]:
+    """Native identities at one port; unreadable visibility is not absence proof."""
+    rows: list[dict[str, object]] = []
+    try:
+        for connection in psutil.net_connections(kind="tcp"):
+            if not connection.laddr or connection.laddr.port != port:
+                continue
+            birth: float | None = None
+            if connection.pid is not None:
+                with contextlib.suppress(psutil.NoSuchProcess, psutil.AccessDenied):
+                    birth = psutil.Process(connection.pid).create_time()
+            rows.append({"pid": connection.pid, "birth": birth, "status": connection.status})
+    except psutil.AccessDenied:
+        return {"phase": phase, "port": port, "visibility": "unknown", "connections": rows}
+    return {"phase": phase, "port": port, "visibility": "observed", "connections": rows}
+
+
+def require_native_listener(pid: int, birth: float, port: int) -> None:
+    """HTTP success must belong to the new exact fixture process, not its predecessor."""
+    process = psutil.Process(pid)
+    if process.create_time() != birth or not any(
+        row.laddr and row.laddr.port == port and row.status == psutil.CONN_LISTEN
+        for row in process.net_connections(kind="tcp")
+    ):
+        raise RuntimeError("new gateway fixture does not own the expected listener")
+
+
 # Servers currently running under `managed_proc`, label -> (proc, log_path).
 # `pytest_runtest_makereport` in conftest.py reads this on failure so a server
 # that should have been up but wasn't (issue #213) leaves its exit code and log
@@ -80,6 +110,7 @@ def managed_proc(
     stop_signal: int = signal.SIGTERM,
     stop_timeout: float = 10.0,
     log_path: str | None = None,
+    pass_fds: tuple[int, ...] = (),
 ) -> Generator[subprocess.Popen[str]]:
     """Start subprocess + clean teardown kill.
 
@@ -108,6 +139,7 @@ def managed_proc(
             stderr=stderr,
             text=True,
             start_new_session=True,
+            pass_fds=pass_fds,
         )
     except Exception:
         # Popen failure (ENOENT etc.) must immediately close log_file to prevent
