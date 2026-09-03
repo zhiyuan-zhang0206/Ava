@@ -62,10 +62,18 @@ def _seed_codex_home(
     source = source_home or (Path.home() / ".codex")
     codex_home.mkdir(parents=True, exist_ok=False)
     codex_home.chmod(0o700)
+    # Symlink auth.json rather than snapshot it: tokens the user adds after
+    # spawn (e.g. a fresh MCP OAuth login) must be visible to this session
+    # immediately. A spawn-time copy silently freezes them (empirical 2026-09-04:
+    # real auth.json updated at 00:13, private-home copy still the 23:34 snapshot).
+    # config.toml stays a copy below because it is rewritten per project.
     auth_source = source / "auth.json"
     if auth_source.is_file():
         auth_target = codex_home / "auth.json"
-        shutil.copyfile(auth_source, auth_target)
+        try:
+            auth_target.symlink_to(auth_source)
+        except OSError:
+            shutil.copyfile(auth_source, auth_target)
         auth_target.chmod(0o600)
 
     config_source = source / "config.toml"
@@ -86,18 +94,74 @@ def _watcher_path() -> Path:
     return Path(__file__).resolve().parent / "watch_work.py"
 
 
-def _wait_for_ready(sid: int, timeout: float = 30.0) -> None:
-    """Wait until Codex renders; the owner remains ``launching`` meanwhile."""
-    print(f"waiting for session {sid} to be ready (polling capture)...")
+def _wait_for_ready(sid: int, timeout: float = 90.0) -> None:
+    """Wait until Codex has finished MCP startup; the owner remains
+    ``launching`` meanwhile.
+
+    len(output) > 50 alone is a FALSE ready signal: the TUI renders its frame
+    during "Starting MCP servers (0/2)", and a message sent then has its Enter
+    swallowed — the text parks in the composer and the session looks alive but
+    never works (empirical 2026-08-26 #3438, 2026-09-02 #5655, 2026-09-03
+    #5779). Treat "Starting MCP" as not-ready until it disappears.
+    """
+    print(f"waiting for session {sid} to be ready (MCP startup + render)...")
     deadline = time.time() + timeout
+    rendered = False
     while time.time() < deadline:
         output = ava.shell.sessions.capture(sid, scrollback=False)
         if len(output) > 50:
+            rendered = True
+            if "Starting MCP" in output:
+                time.sleep(2)
+                continue
             time.sleep(2)
-            print("  -> ready")
+            print("  -> ready (MCP startup finished)")
             return
         time.sleep(1)
-    print(f"  -> timeout after {timeout:.0f} s, sending anyway")
+    print(
+        f"  -> timeout after {timeout:.0f} s "
+        f"({'rendered, still starting MCP' if rendered else 'never rendered'}), sending anyway"
+    )
+
+
+def _verify_submitted(sid: int, codex_home: Path, timeout: float = 60.0) -> None:
+    """The bootstrap message must actually submit, not park in the composer.
+
+    Submission signal = capture shows "Working" (Codex's busy state line) OR a
+    new sessions jsonl appears under codex_home. If neither within ``timeout``,
+    send one Enter (Enter submits a single-line queued message; the historical
+    "Tab submits" note is wrong — 2026-09-03 #5779 re-test) and re-check.
+    """
+    print("verifying the bootstrap message was submitted...")
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        output = ava.shell.sessions.capture(sid, scrollback=False)
+        if "Working" in output:
+            print("  -> submitted (Working visible)")
+            return
+        sessions_dir = codex_home / "sessions"
+        if sessions_dir.is_dir():
+            now = time.time()
+            recent = any(
+                p.is_file() and now - p.stat().st_mtime < 30
+                for p in sessions_dir.rglob("*.jsonl")
+            )
+            if recent:
+                print("  -> submitted (fresh session jsonl)")
+                return
+        time.sleep(3)
+    print("  -> not submitted within window; sending Enter once")
+    ava.shell.sessions.send_keys(sid, "Enter")
+    time.sleep(5)
+    output = ava.shell.sessions.capture(sid, scrollback=False)
+    if "Working" in output:
+        print("  -> submitted after Enter retry")
+    else:
+        print(
+            "  -> WARNING: still no Working signal. The contract message may be "
+            "parked in the composer ('tab to queue message'). Check the session "
+            "and press Enter manually; see codex-tui-first-message trap in memory."
+        )
 
 
 def _owner_terminated(agent_id: int) -> bool:
@@ -309,6 +373,7 @@ def _launch(
         ava.shell.sessions.send(sid, _codex_command(owner, workspace, caller_instance))
         _wait_for_ready(sid)
         ava.shell.sessions.send(sid, _bootstrap_message(workspace, tasks_file, work_file))
+        _verify_submitted(sid, owner.state_dir)
         active = coding_session_owner.publish_active(
             key,
             generation,
