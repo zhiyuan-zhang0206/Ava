@@ -17,23 +17,23 @@ from shared.config.agent_runtime import AgentRuntimeSettings
 class _StubSaver:
     """Duck-typed saver that records the write calls made by the wrapper."""
 
-    _ava_nstep_flush: Callable[[], Awaitable[None]]
+    _ava_nstep_flush: Callable[[str], Awaitable[None]]
 
     def __init__(self) -> None:
         self.aput_calls: list[
-            tuple[dict[str, int], dict[str, str], dict[str, object], dict[str, int]]
+            tuple[dict[str, object], dict[str, object], dict[str, object], dict[str, object]]
         ] = []
         self.aput_writes_calls: list[
-            tuple[dict[str, int], list[tuple[str, object]], str, str | None]
+            tuple[dict[str, object], list[tuple[str, object]], str, str | None]
         ] = []
 
     async def aput(
         self,
-        config: dict[str, int],
-        checkpoint: dict[str, str],
+        config: dict[str, object],
+        checkpoint: dict[str, object],
         metadata: dict[str, object],
-        new_versions: dict[str, int],
-    ) -> dict[str, int]:
+        new_versions: dict[str, object],
+    ) -> dict[str, object]:
         self.aput_calls.append((config, checkpoint, metadata, new_versions))
         step = metadata["step"]
         assert isinstance(step, int)
@@ -41,7 +41,7 @@ class _StubSaver:
 
     async def aput_writes(
         self,
-        config: dict[str, int],
+        config: dict[str, object],
         writes: list[tuple[str, object]],
         task_id: str,
         task_path: str | None = None,
@@ -55,14 +55,20 @@ class _GraphState(TypedDict):
     count: int
 
 
-def _wrap(saver: _StubSaver, interval: int) -> None:
+def _wrap(saver: _StubSaver, interval: int | Callable[[], int]) -> None:
     _wrap_saver_writes_with_nstep_interval(cast(AsyncPostgresSaver, saver), interval)
 
 
-async def _aput(saver: _StubSaver, step: int, source: str = "update") -> dict[str, int]:
+def _stored_thread_ids(saver: _StubSaver) -> list[str]:
+    return [cast(dict[str, str], call[0]["configurable"])["thread_id"] for call in saver.aput_calls]
+
+
+async def _aput(
+    saver: _StubSaver, step: int, source: str = "update", thread_id: str = "default"
+) -> dict[str, object]:
     return await saver.aput(
-        {"input_step": step},
-        {"checkpoint_id": str(step)},
+        {"configurable": {"thread_id": thread_id}, "input_step": step},
+        {"checkpoint_id": str(step), "channel_versions": {"messages": f"v{step}"}},
         {"source": source, "step": step},
         {"channel": step},
     )
@@ -93,13 +99,25 @@ async def test_interval_keeps_channel_and_push_writes_in_checkpoint_lockstep() -
     _wrap(saver, interval=4)
 
     await _aput(saver, 0, source="loop")
-    await saver.aput_writes({"config": 1}, [("channel-skipped", "value")], "task-skipped")
+    await saver.aput_writes(
+        {"configurable": {"thread_id": "default"}, "config": 1},
+        [("channel-skipped", "value")],
+        "task-skipped",
+    )
     await _aput(saver, 1, source="loop")
     await _aput(saver, 2, source="loop")
     await _aput(saver, 3, source="loop")
-    await saver.aput_writes({"config": 4}, [("channel-written", "value")], "task-written")
+    await saver.aput_writes(
+        {"configurable": {"thread_id": "default"}, "config": 4},
+        [("channel-written", "value")],
+        "task-written",
+    )
     await _aput(saver, 4)
-    await saver.aput_writes({"config": 4}, [(PUSH, "value")], "task-push")
+    await saver.aput_writes(
+        {"configurable": {"thread_id": "default"}, "config": 4},
+        [(PUSH, "value")],
+        "task-push",
+    )
 
     assert [call[1] for call in saver.aput_writes_calls] == [
         [("channel-written", "value")],
@@ -111,7 +129,11 @@ async def test_writes_without_a_seen_checkpoint_fail_open() -> None:
     saver = _StubSaver()
     _wrap(saver, interval=4)
 
-    await saver.aput_writes({"config": 1}, [("channel", "value")], "task")
+    await saver.aput_writes(
+        {"configurable": {"thread_id": "default"}, "config": 1},
+        [("channel", "value")],
+        "task",
+    )
 
     assert [call[1] for call in saver.aput_writes_calls] == [[("channel", "value")]]
 
@@ -142,7 +164,7 @@ async def test_interval_keeps_real_graph_parents_and_write_targets_persisted() -
     await compiled.ainvoke(  # pyright: ignore[reportUnknownMemberType]
         {"count": 0}, {"configurable": {"thread_id": "nstep-chain"}}
     )
-    await cast(_StubSaver, saver)._ava_nstep_flush()
+    await cast(_StubSaver, saver)._ava_nstep_flush("nstep-chain")
 
     checkpoints = saver.storage["nstep-chain"][""]
     checkpoint_ids = set(checkpoints)
@@ -164,9 +186,17 @@ async def test_interval_one_is_pure_passthrough() -> None:
     _wrap(saver, interval=1)
 
     first_result = await _aput(saver, 1)
-    await saver.aput_writes({"config": 1}, [("channel", "first")], "task-1")
+    await saver.aput_writes(
+        {"configurable": {"thread_id": "default"}, "config": 1},
+        [("channel", "first")],
+        "task-1",
+    )
     second_result = await _aput(saver, 2)
-    await saver.aput_writes({"config": 2}, [(PUSH, "second")], "task-2")
+    await saver.aput_writes(
+        {"configurable": {"thread_id": "default"}, "config": 2},
+        [(PUSH, "second")],
+        "task-2",
+    )
 
     assert first_result == {"stored_step": 1}
     assert second_result == {"stored_step": 2}
@@ -195,8 +225,8 @@ async def test_input_after_a_skipped_superstep_uses_the_last_persisted_parent() 
     await _aput(saver, 0, source="loop")
     await _aput(saver, 1, source="loop")
     await saver.aput(
-        {"skipped_parent": 1},
-        {"checkpoint_id": "input"},
+        {"configurable": {"thread_id": "default"}, "skipped_parent": 1},
+        {"checkpoint_id": "input", "channel_versions": {}},
         {"source": "input", "step": 2},
         {"channel": 2},
     )
@@ -211,8 +241,8 @@ async def test_final_flush_persists_only_the_last_skipped_checkpoint_once() -> N
     await _aput(saver, 1)
     await _aput(saver, 2)
     await _aput(saver, 3)
-    await saver._ava_nstep_flush()
-    await saver._ava_nstep_flush()
+    await saver._ava_nstep_flush("default")
+    await saver._ava_nstep_flush("default")
 
     assert [call[2]["step"] for call in saver.aput_calls] == [3]
 
@@ -223,28 +253,101 @@ async def test_written_checkpoint_clears_skipped_tail_and_skipped_aput_returns_i
     saver = _StubSaver()
     _wrap(saver, interval=4)
 
-    input_config = {"input_step": 1}
+    input_config: dict[str, object] = {
+        "configurable": {"thread_id": "default"},
+        "input_step": 1,
+    }
     skipped_result = await saver.aput(
         input_config,
-        {"checkpoint_id": "1"},
+        {"checkpoint_id": "1", "channel_versions": {"messages": "v1"}},
         {"source": "update", "step": 1},
         {"channel": 1},
     )
     await _aput(saver, 4)
-    await saver._ava_nstep_flush()
+    await saver._ava_nstep_flush("default")
 
     assert skipped_result is input_config
     assert [call[2]["step"] for call in saver.aput_calls] == [4]
 
 
-def test_checkpoint_interval_config_is_per_agent_and_defaults_to_one() -> None:
+async def test_interval_keeps_skipped_tails_isolated_by_thread() -> None:
+    """A shared hosted saver must never flush one agent's tail for another."""
+    saver = _StubSaver()
+    _wrap(saver, interval=4)
+
+    await _aput(saver, 1, thread_id="agent-a")
+    await _aput(saver, 1, thread_id="agent-b")
+    await saver._ava_nstep_flush("agent-a")
+
+    assert _stored_thread_ids(saver) == ["agent-a"]
+
+    await saver._ava_nstep_flush("agent-b")
+
+    assert _stored_thread_ids(saver) == ["agent-a", "agent-b"]
+
+
+async def test_callable_interval_uses_the_current_turn_config() -> None:
+    """A shared saver resolves each hosted agent's own interval."""
+    current_interval = [4]
+    saver = _StubSaver()
+    _wrap(saver, lambda: current_interval[0])
+
+    await _aput(saver, 1, thread_id="agent-a")
+    current_interval[0] = 1
+    await _aput(saver, 1, thread_id="agent-b")
+
+    assert _stored_thread_ids(saver) == ["agent-b"]
+
+    await saver._ava_nstep_flush("agent-a")
+
+    assert _stored_thread_ids(saver) == ["agent-b", "agent-a"]
+
+
+def test_checkpoint_interval_config_is_per_agent_and_defaults_to_four() -> None:
     field = AgentRuntimeSettings.model_fields["checkpoint_interval"]
     extra = field.json_schema_extra
 
     assert field.alias == "AVA_CHECKPOINT_INTERVAL"
-    assert field.default == 1
+    assert field.default == 4
     assert isinstance(extra, dict)
     assert extra["per_agent"] is True
     assert (
         AgentRuntimeSettings.model_validate({"AVA_CHECKPOINT_INTERVAL": 4}).checkpoint_interval == 4
     )
+
+
+async def test_retained_checkpoint_persists_blobs_for_current_channel_versions() -> None:
+    """A retained aput must request blobs for EVERY current channel version.
+
+    Versions born on skipped super-steps have no blob row of their own; the
+    retained checkpoint still references them, so the wrapper merges the full
+    channel_versions map into new_versions — otherwise the saver writes no
+    blob for those channels and readers (timeline cold load, recovery) see
+    the messages channel missing.
+    """
+    saver = _StubSaver()
+    _wrap(saver, interval=4)
+
+    await _aput(saver, 1, source="loop")
+    await _aput(saver, 2, source="loop")
+    await _aput(saver, 3, source="loop")
+    await _aput(saver, 4, source="loop")
+
+    assert [call[2]["step"] for call in saver.aput_calls] == [4]
+    retained_versions = saver.aput_calls[-1][3]
+    assert "messages" in retained_versions
+    assert retained_versions["messages"] == "v4"
+
+
+async def test_final_flush_persists_blobs_for_current_channel_versions() -> None:
+    """The turn-end flush requests blobs for every current channel version."""
+    saver = _StubSaver()
+    _wrap(saver, interval=4)
+
+    await _aput(saver, 1, source="loop")
+    await saver._ava_nstep_flush("default")
+
+    assert [call[2]["step"] for call in saver.aput_calls] == [1]
+    flush_versions = saver.aput_calls[-1][3]
+    assert "messages" in flush_versions
+    assert flush_versions["messages"] == "v1"

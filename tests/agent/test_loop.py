@@ -452,7 +452,7 @@ class TestInvokeGraphLifecycleLogging:
 
         await _invoke_graph_with_lifecycle_logging(graph, agent_id=42, ctx=_fake_ctx())
 
-        flush.assert_awaited_once()
+        flush.assert_awaited_once_with("42")
 
     async def test_ainvoke_input_is_empty_state_update(self) -> None:
         """ainvoke's input is a state update (semantically same as a Command update
