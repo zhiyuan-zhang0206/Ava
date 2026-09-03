@@ -84,6 +84,7 @@ class ModelTuning:
     llm_stream_inter_chunk_timeout_seconds: float | None = None
     # -- prompt behavior --
     agent_communication_style: str | None = None
+    prompt_user_tone_enabled: bool | None = None
     prompt_prefer_sdk_enabled: bool | None = None
     prompt_keep_it_simple_enabled: bool | None = None
     prompt_output_conciseness_enabled: bool | None = None
@@ -133,6 +134,8 @@ DEFAULT_TUNING = ModelTuning(
     # User ruling (2026-08-22): narration guidance is off by default for every
     # model; the section is omitted unless an explicit value opts in.
     agent_communication_style="off",
+    # User decision (2026-09-03): tone guidance is on by default; Claude models opt out.
+    prompt_user_tone_enabled=True,
     prompt_prefer_sdk_enabled=True,
     prompt_keep_it_simple_enabled=True,
     prompt_output_conciseness_enabled=True,
@@ -305,6 +308,8 @@ MODELS: dict[str, ModelSpec] = {
             # tuning-values.md Decision 4; "" is exactly equivalent to omitting
             # the parameter, whose default is high). NOT the ladder floor.
             reasoning_effort="high",
+            # User decision (2026-09-03): Claude family defaults this section off.
+            prompt_user_tone_enabled=False,
         ),
         media_types=frozenset({"image", "pdf"}),
     ),
@@ -322,6 +327,8 @@ MODELS: dict[str, ModelSpec] = {
             # Manual extended thinking defaults OFF on this model (budget_tokens
             # default 0) — the honest concrete default is the off rung.
             reasoning_effort="none",
+            # User decision (2026-09-03): Claude family defaults this section off.
+            prompt_user_tone_enabled=False,
         ),
         media_types=frozenset({"image", "pdf"}),
     ),
@@ -336,6 +343,8 @@ MODELS: dict[str, ModelSpec] = {
             # Pinned 2026-08-01 (task #568): Anthropic documents `high` as the
             # family default (see claude-sonnet-5).
             reasoning_effort="high",
+            # User decision (2026-09-03): Claude family defaults this section off.
+            prompt_user_tone_enabled=False,
         ),
         media_types=frozenset({"image", "pdf"}),
     ),
@@ -351,6 +360,8 @@ MODELS: dict[str, ModelSpec] = {
             # Pinned 2026-08-01 (task #568): Anthropic documents `high` as the
             # family default (see claude-sonnet-5).
             reasoning_effort="high",
+            # User decision (2026-09-03): Claude family defaults this section off.
+            prompt_user_tone_enabled=False,
             # Fable 5.x shares one combined rate pool across Fable 5.1 and 5:
             # 25-40% of every other model's ITPM/OTPM at every tier, plus 2.5x
             # fewer RPM above the Start tier, while costing 2x Opus and running
@@ -375,6 +386,8 @@ MODELS: dict[str, ModelSpec] = {
             # Pinned 2026-08-01 (task #568): Anthropic documents `high` as the
             # family default (see claude-sonnet-5).
             reasoning_effort="high",
+            # User decision (2026-09-03): Claude family defaults this section off.
+            prompt_user_tone_enabled=False,
             # Fable 5.x shares one combined rate pool across Fable 5.1 and 5:
             # 25-40% of every other model's ITPM/OTPM at every tier, plus 2.5x
             # fewer RPM above the Start tier, while costing 2x Opus and running
@@ -717,6 +730,10 @@ MODELS: dict[str, ModelSpec] = {
         max_output_tokens=128_000,
         knowledge_cutoff="2026-01",
         effort_levels=_CLAUDE_ADAPTIVE_EFFORT,
+        tuning=ModelTuning(
+            # User decision (2026-09-03): Claude family defaults this section off.
+            prompt_user_tone_enabled=False,
+        ),
         media_types=frozenset({"image", "pdf"}),
     ),
     "claude-sonnet-4-6": ModelSpec(
@@ -725,16 +742,28 @@ MODELS: dict[str, ModelSpec] = {
         max_output_tokens=128_000,
         knowledge_cutoff="2025-08",
         effort_levels=("low", "medium", "high", "max"),  # xhigh arrived with opus-4-7
+        tuning=ModelTuning(
+            # User decision (2026-09-03): Claude family defaults this section off.
+            prompt_user_tone_enabled=False,
+        ),
         media_types=frozenset({"image", "pdf"}),
     ),
     "claude-opus-4-7": ModelSpec(
         provider="claude",
         max_output_tokens=128_000,
         effort_levels=_CLAUDE_ADAPTIVE_EFFORT,
+        tuning=ModelTuning(
+            # User decision (2026-09-03): Claude family defaults this section off.
+            prompt_user_tone_enabled=False,
+        ),
         media_types=frozenset({"image", "pdf"}),
     ),
     "claude-opus-4-6": ModelSpec(
         provider="claude",
+        tuning=ModelTuning(
+            # User decision (2026-09-03): Claude family defaults this section off.
+            prompt_user_tone_enabled=False,
+        ),
         media_types=frozenset({"image", "pdf"}),
     ),
     # Bare alias of the dated snapshot above, kept for old agent configs.
@@ -744,6 +773,10 @@ MODELS: dict[str, ModelSpec] = {
     "claude-haiku-4-5": ModelSpec(
         provider="claude",
         extended_thinking_only=True,
+        tuning=ModelTuning(
+            # User decision (2026-09-03): Claude family defaults this section off.
+            prompt_user_tone_enabled=False,
+        ),
         media_types=frozenset({"image", "pdf"}),
     ),
     "gemini-2.5-pro": ModelSpec(
