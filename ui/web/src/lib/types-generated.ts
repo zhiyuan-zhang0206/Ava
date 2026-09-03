@@ -3728,6 +3728,16 @@ export interface components {
             items: components["schemas"]["AgentEventRow"][];
         };
         /**
+         * AgentExitedRequest
+         * @description The actual admitted runtime reporting exit, never a freshly read token.
+         */
+        AgentExitedRequest: {
+            /** Generation */
+            generation?: string | null;
+            /** Owner */
+            owner?: string | null;
+        };
+        /**
          * AgentInspect
          * @description GET /api/agents/{id}/inspect response — the per-agent inspector panel.
          *
@@ -8189,7 +8199,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["AgentExitedRequest"] | null;
+            };
+        };
         responses: {
             /** @description Successful Response */
             204: {

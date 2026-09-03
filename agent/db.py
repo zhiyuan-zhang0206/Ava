@@ -139,28 +139,12 @@ async def claim_inbound_batch(
     flips straight to `'done'`. Returns the rows so the claim node can
     dispatch.
 
-    Why kinds differ:
-
-    - **chat** kicks off multi-step LLM+exec processing, with the message
-      eventually landing in `state.messages` only after LangGraph saver
-      commits — the same long-tail commit window that lost agent 57's
-      5h of checkpoints (PR #535). The two-phase path
-      (`pending → claimed → done|pending`) plus startup reconcile
-      (`reconcile_claimed_inbounds`) auto-recovers from silent commit
-      failures.
-
-    - **lifecycle** kinds (terminate / restart / restart_completed /
-      resurrect / fork) and **compact** kinds (compact_summary / compact_request)
-      cannot be reconciled by scanning `state.messages` for an
-      `ava_inbound_id`: `restart` never appends a message at all, and the
-      lifecycle / compact messages claim appends carry no inbound id
-      (different helper). If they took the two-phase path, the next
-      startup's reconcile would see them as orphans and re-deliver — a
-      resurrect after a terminate would loop forever on the same terminate
-      row, etc. So they keep the legacy one-step semantics: claim marks
-      `done` atomically with the grab; a process crash mid-handling means
-      the lifecycle effect is lost (matches the pre-2026-05-27 behavior
-      the original design accepted as worth the simplicity).
+    Chat uses pending → claimed → done|pending, reconciled against committed
+    checkpoint ava_inbound_id anchors. Lifecycle/compact records lack those
+    anchors (restart adds no message); naive replay could repeat termination
+    after resurrection. They still mark done at claim: crash-before-effect
+    loss is an unresolved durable acknowledgement gap, not an exactly-once
+    guarantee. See db.ava.okf.md for the queue contract.
 
     All kinds claimed together (no kind filter on the SELECT) — dispatch
     happens inside the claim Node, not at the SQL layer. The explicit
@@ -629,12 +613,24 @@ async def renew_agent_lease(
     """
     from shared.db import ALIVE_STATUSES
     from shared.deploy_timing import AGENT_LEASE_TTL_S
+    from shared.runtime_incarnation import current_incarnation
+
+    incarnation = current_incarnation(agent_id)
 
     async with async_write_transaction(pool) as conn, conn.cursor() as cur:
         await cur.execute(
             "UPDATE agents_meta SET lease_expires_at = now() + make_interval(secs => %s) "
-            "WHERE id = %s AND status = ANY(%s)",
-            (ttl_s if ttl_s is not None else AGENT_LEASE_TTL_S, agent_id, list(ALIVE_STATUSES)),
+            "WHERE id = %s AND status = ANY(%s) "
+            "AND runtime_generation IS NOT DISTINCT FROM %s "
+            "AND runtime_owner IS NOT DISTINCT FROM %s "
+            "AND (runtime_kind IS NULL OR (runtime_kind = 'process' AND pid IS NOT NULL))",
+            (
+                ttl_s if ttl_s is not None else AGENT_LEASE_TTL_S,
+                agent_id,
+                list(ALIVE_STATUSES),
+                incarnation.generation if incarnation else None,
+                incarnation.owner if incarnation else None,
+            ),
         )
 
 

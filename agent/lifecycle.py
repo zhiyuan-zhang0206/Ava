@@ -92,8 +92,9 @@ def _notify_exit(agent_id: int) -> None:
     serve() pages stay open in their persistent page sessions.
 
     The gateway owns agents_meta and the pages table; the agent only notifies
-    (`POST /api/agents/{id}/exited`). The finalize is guarded server-side so a
-    concurrent restart leaves status 'restarting' untouched for the restarter.
+    (`POST /api/agents/{id}/exited`). The client sends its original admission
+    token; the server matches generation and owner so a delayed exit cannot
+    finalize the replacement. Legacy hosted callers remain unknown/protocol0.
 
     Best-effort: any failure (gateway unreachable during a silent death etc.)
     is logged and swallowed, not raised — the same non-fatal treatment as the
