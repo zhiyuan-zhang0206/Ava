@@ -41,6 +41,7 @@ os.environ keys; repeated calls have no side effects.
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 
 from dotenv import dotenv_values, load_dotenv
@@ -242,6 +243,9 @@ def resolve_ava_home() -> tuple[Path, bool]:
     daemon, a fresh clone) resolves exactly as before.
     """
     env = os.environ.get("AVA_HOME")
+    installed = Path(__file__).resolve().is_relative_to(Path(sys.prefix).resolve())
+    if installed and (not env or not Path(env).is_absolute()):
+        raise RuntimeError("installed Ava requires an explicit absolute AVA_HOME")
     if env:
         home = Path(env).expanduser()
         _assert_env_agrees_with_checkout(home)

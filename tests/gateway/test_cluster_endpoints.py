@@ -1221,7 +1221,7 @@ class TestSpawnSessionsResolveAvaFromVenv:
         """
         import subprocess as _sp
 
-        import shared.session_env as session_env_mod
+        import shared.runtime_interpreter as runtime_interpreter_mod
 
         real_run = _sp.run
 
@@ -1231,7 +1231,7 @@ class TestSpawnSessionsResolveAvaFromVenv:
         stub = fake_bin / "ava"
         stub.write_text('#!/bin/sh\necho "STUB-AVA $*"\n')
         stub.chmod(0o755)
-        monkeypatch.setattr(session_env_mod, "repo_root", lambda: fake_repo)
+        monkeypatch.setattr(runtime_interpreter_mod, "runtime_venv", lambda: fake_repo / ".venv")
         monkeypatch.setattr("shared.paths.ava_home", lambda: tmp_path)
         _patch_update_check_behind(monkeypatch, behind=2)
 
