@@ -734,6 +734,12 @@ class TestTurnLoop:
         await asyncio.wait_for(graph.arrival(11).wait(), 2)
         assert 11 in host._runtimes
         task.cancel()
+        # The turn-level runner SHIELDS its in-flight invocation, so an outer
+        # cancel waits for the turn to settle before it raises: the uncancellable
+        # turn contract (Task #2436) keeps the owned resources from being torn
+        # down under a live invocation. Release the gate so the faked invocation
+        # returns like a bounded real one would, then the wrapper can unwind.
+        graph.gate(11).set()
         with pytest.raises(asyncio.CancelledError):
             await task
         assert 11 not in host._runtimes
