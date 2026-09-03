@@ -25,10 +25,12 @@ from shared.managed_writer_barrier import (
     lock_rollout,
     validate_collection_for_write,
 )
+from shared.managed_writer_observation import ExpectedProcess
 from shared.managed_writer_publication import (
     CandidateUnitPlan,
     CommittedPublication,
     NormalService,
+    NormalStartPlan,
     PendingMigrationReceipt,
     PendingPublication,
     PublishedUnit,
@@ -36,12 +38,6 @@ from shared.managed_writer_publication import (
     _locked_publication,
     _store,
 )
-
-
-class NativeProcess(EvidenceModel):
-    pid: int = Field(gt=0)
-    create_time: float = Field(gt=0, allow_inf_nan=False)
-    starttime: int | None = Field(default=None, gt=0)
 
 
 class SelectorReadback(EvidenceModel):
@@ -55,12 +51,17 @@ class SelectorReadback(EvidenceModel):
 
 class NormalServiceReadback(EvidenceModel):
     service: NormalService
-    supervisor: NativeProcess
-    child: NativeProcess
-    loaded_module: str = Field(min_length=1, max_length=4096)
+    supervisor: ExpectedProcess
+    child: ExpectedProcess
+    loaded_module: str | None = Field(default=None, min_length=1, max_length=4096)
+    executable: str = Field(min_length=1, max_length=4096)
+    entrypoint: str = Field(min_length=1, max_length=4096)
     artifact_digest: Digest
     manifest_digest: Digest
     readiness: Literal["normal"]
+    challenge: UUID
+    observed_at: AwareDatetime
+    valid_until: AwareDatetime
     # Digest of actual authenticated response plus native/session verification.
     observation_digest: Digest
 
@@ -68,6 +69,46 @@ class NormalServiceReadback(EvidenceModel):
 class UnitActivationReadback(EvidenceModel):
     selector: SelectorReadback
     services: tuple[NormalServiceReadback, ...] = Field(min_length=1)
+
+
+def pending_stage(
+    conn: psycopg.Connection, operation: RolloutIdentity, challenge: UUID
+) -> Literal["waiting_collection", "waiting_migration", "selector_allowed", "committed"]:
+    """Bounded updater wait hint, not permission to perform an OS effect."""
+    state = _locked_publication(conn)
+    if state.pending is None:
+        if (
+            state.current is not None
+            and state.current.operation == operation
+            and state.current.activation_challenge == challenge
+        ):
+            return "committed"
+        raise ManagedWriterBarrierError("operation has no matching publication")
+    lock_rollout(conn, operation)
+    pending = state.pending
+    if pending.operation != operation or pending.challenge != challenge:
+        raise ManagedWriterBarrierError("pending stage belongs to another operation")
+    if pending.collection is None:
+        return "waiting_collection"
+    if pending.migration is None:
+        return "waiting_migration"
+    return "selector_allowed"
+
+
+def require_pending_selector_change(
+    conn: psycopg.Connection, operation: RolloutIdentity, challenge: UUID, unit: PublishedUnit
+) -> CandidateUnitPlan:
+    """Fresh service-only selector authorization before the existing local CAS."""
+    _, pending, _ = _pending(conn, operation, challenge)
+    _require_migration(conn, pending)
+    _pending(conn, operation, challenge)
+    plan = pending.normal_start_plan
+    if plan is None:
+        raise ManagedWriterBarrierError("normal startup plan is absent")
+    for entry in plan.units:
+        if entry.unit == unit:
+            return entry
+    raise ManagedWriterBarrierError("selector unit differs from full prepared inventory")
 
 
 def _pending(
@@ -105,6 +146,16 @@ def _migration_names(conn: psycopg.Connection) -> tuple[str, ...]:
     return tuple(row[0] for row in conn.execute("SELECT name FROM schema_migrations ORDER BY name"))
 
 
+def require_pending_migration(
+    conn: psycopg.Connection, operation: RolloutIdentity, challenge: UUID
+) -> NormalStartPlan:
+    """Authorize the existing migration runner after exact all-unit old-writer closure."""
+    _, pending, _ = _pending(conn, operation, challenge)
+    if pending.normal_start_plan is None:
+        raise ManagedWriterBarrierError("normal startup plan is absent")
+    return pending.normal_start_plan
+
+
 def record_pending_migration(
     conn: psycopg.Connection, operation: RolloutIdentity, challenge: UUID
 ) -> PendingMigrationReceipt:
@@ -119,7 +170,7 @@ def record_pending_migration(
         raise ManagedWriterBarrierError("normal startup plan is absent")
     if _migration_names(conn) != plan.applied_names:
         raise ManagedWriterBarrierError("actual migrations differ from the prepared schema SET")
-    now = lock_rollout(conn, operation)
+    _, _, now = _pending(conn, operation, challenge)
     if pending.migration is not None:
         _require_migration(conn, pending)
         return pending.migration
@@ -189,7 +240,7 @@ def require_pending_candidate_start(
     """
     _, pending, _ = _pending(conn, operation, challenge)
     _require_migration(conn, pending)
-    now = lock_rollout(conn, operation)
+    _, _, now = _pending(conn, operation, challenge)
     expected = _selector(pending, selector, now)
     if service not in expected.services:
         raise ManagedWriterBarrierError("service is not in the prepared normal startup roster")
@@ -208,9 +259,24 @@ def commit_current(
     marks phase stable, ordinary admission still refuses. Missing or unsupported
     evidence never falls back to legacy mode or to a hard-coded old release.
     """
+    digest = hashlib.sha256(
+        "".join(item.model_dump_json() for item in readbacks).encode()
+    ).hexdigest()
+    state = _locked_publication(conn)
+    if state.pending is None and state.current is not None:
+        current = state.current
+        if (
+            current.operation == operation
+            and current.activation_challenge == challenge
+            and current.activation_digest == digest
+        ):
+            return current.publication_id
+        raise ManagedWriterBarrierError(
+            "publication completion replay differs from committed evidence"
+        )
     _, pending, _ = _pending(conn, operation, challenge)
     _require_migration(conn, pending)
-    now = lock_rollout(conn, operation)
+    _, _, now = _pending(conn, operation, challenge)
     if tuple(item.selector.unit for item in readbacks) != pending.units:
         raise ManagedWriterBarrierError("publication needs exact ordered all-unit readbacks")
     for item in readbacks:
@@ -218,6 +284,14 @@ def commit_current(
         if tuple(entry.service for entry in item.services) != expected.services:
             raise ManagedWriterBarrierError("normal service readbacks omit or duplicate a service")
         for entry in item.services:
+            if (
+                entry.readiness != "normal"
+                or entry.challenge != challenge
+                or not operation.acquired_at <= entry.observed_at <= now < entry.valid_until
+            ):
+                raise ManagedWriterBarrierError(
+                    "normal service observation is stale or bootstrap-only"
+                )
             if (entry.artifact_digest, entry.manifest_digest) != (
                 expected.unit.artifact_digest,
                 expected.unit.manifest_digest,
@@ -225,19 +299,26 @@ def commit_current(
                 raise ManagedWriterBarrierError("running service belongs to another image")
             # The actual observer resolves symlinks and validates native loaded
             # identity. This lexical fence also rejects mutable source/bootstrap.
-            root = expected.unit.home + "/releases/" + expected.unit.artifact_digest + "/venv/"
-            if not entry.loaded_module.startswith(root) or ".." in entry.loaded_module.split("/"):
+            root = expected.unit.home + "/releases/" + expected.unit.artifact_digest + "/"
+            paths = [entry.executable, entry.entrypoint]
+            if entry.service.module is not None:
+                if entry.loaded_module is None:
+                    raise ManagedWriterBarrierError("Python service has no loaded-module evidence")
+                paths.append(entry.loaded_module)
+            if (
+                entry.executable != entry.service.executable
+                or entry.entrypoint != entry.service.entrypoint
+                or any(not path.startswith(root) or ".." in path.split("/") for path in paths)
+            ):
                 raise ManagedWriterBarrierError("normal service module is outside the loaded image")
     publication_id = uuid4()
-    digest = hashlib.sha256(
-        "".join(item.model_dump_json() for item in readbacks).encode()
-    ).hexdigest()
     current = CommittedPublication(
         publication_id=publication_id,
         operation=operation,
         committed_at=now,
         units=pending.units,
         activation_digest=digest,
+        activation_challenge=challenge,
     )
     _store(conn, WriterPublication(current=current))
     return publication_id
