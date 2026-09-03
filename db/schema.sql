@@ -157,6 +157,7 @@ CREATE TABLE agents_meta (
     runtime_kind TEXT CHECK (runtime_kind IN ('process', 'hosted')),
     runtime_owner UUID,
     runtime_protocol_version INTEGER NOT NULL DEFAULT 0 CHECK (runtime_protocol_version >= 0),
+    incarnation_resources JSONB, -- server-owned versioned resource evidence; NULL is unknown, never an empty-set proof
     -- fork fields exist in pairs or not at all (constraint explicitly named to align with the ALTER in 0002 migration)
     CONSTRAINT agents_meta_fork_pair_check
         CHECK ((fork_source_agent_id IS NULL) = (fork_source_checkpoint_id IS NULL))
