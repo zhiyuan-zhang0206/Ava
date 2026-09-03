@@ -198,6 +198,11 @@ _OVERSIZE_ALLOWED: dict[str, tuple[str, int, str]] = {
     # (last_heartbeat_at + pending-wake accounting) regrew it past the ceiling
     # after the #1500-era removal (767 < 800). Split tracked, not forgotten.
     "agent/db.py": ("#5770", 800, "2026-12-31"),
+    # Hosted boot orchestration: converge preflight, N-step checkpoint throttle
+    # wrapper, startup repair paths — one cohesive boot sequence; the #1584
+    # per-thread throttle + blob-persistence fix regrew it past 800 on the
+    # merged tree (main-side notify evolution included). Split tracked.
+    "agent/startup.py": ("#5770", 800, "2026-12-31"),
 }
 
 
