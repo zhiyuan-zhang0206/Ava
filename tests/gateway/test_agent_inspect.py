@@ -12,7 +12,7 @@ handling stay real. The LogQL building / aggregation math is covered by
 `shells` is probed via the `shell_probe` cluster op dispatched to the agent's
 machine (uniform path — the gateway never runs sessions itself). The test
 environment has no registered machines, so an agent with machine='unknown'
-degrades to an empty list; the dispatch contract itself (remote shells
+returns an unavailable observation; the dispatch contract itself (remote shells
 surfaced, unreachable machine degraded) is covered below.
 """
 
@@ -596,6 +596,8 @@ def test_inspect_live_returns_only_window_independent_fields(
         "machine",
         "liveness_state",
         "last_probe_at",
+        "observation",
+        "shells_available",
         "spawned_at",
         "started_at",
         "shells",
@@ -605,6 +607,8 @@ def test_inspect_live_returns_only_window_independent_fields(
     }
     assert body["agent_id"] == aid
     assert body["machine"] == "wsl"
+    assert body["shells_available"] is True
+    assert body["observation"]["runtime_owner"] == "unknown"
     assert body["config_overlay"] == {"llm_model": "claude-opus-4-8"}
     assert body["shells"] == [
         {
@@ -626,7 +630,7 @@ def test_inspect_live_unknown_agent_404(db_conn: psycopg.Connection) -> None:
     assert response.status_code == 404
 
 
-def test_inspect_live_probe_failure_degrades_to_empty_shells(
+def test_inspect_live_probe_failure_is_unavailable_not_empty_success(
     db_conn: psycopg.Connection,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -641,6 +645,29 @@ def test_inspect_live_probe_failure_degrades_to_empty_shells(
         response = client.get(f"/api/agents/{aid}/inspect/live")
     assert response.status_code == 200
     assert response.json()["shells"] == []
+    assert response.json()["shells_available"] is False
+
+
+@pytest.mark.parametrize("malformed", [False, True])
+def test_inspect_live_distinguishes_valid_empty_from_missing_shell_data(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, malformed: bool
+) -> None:
+    aid = _insert_agent(db_conn)
+    db_conn.commit()
+
+    async def probe(*args: object, **kwargs: object) -> dict[str, object]:
+        return {} if malformed else {"shells": []}
+
+    monkeypatch.setattr(agent_inspect._cluster_rpc, "dispatch_to_machine", probe)
+    with TestClient(app) as client:
+        if malformed:
+            with pytest.raises(KeyError, match="shells"):
+                client.get(f"/api/agents/{aid}/inspect/live")
+        else:
+            response = client.get(f"/api/agents/{aid}/inspect/live")
+            assert response.status_code == 200
+            assert response.json()["shells"] == []
+            assert response.json()["shells_available"] is True
 
 
 @pytest.mark.parametrize(
@@ -3000,7 +3027,7 @@ def test_inspect_releases_live_db_borrow_before_cached_loki_fanout(
     class TrackingCursor:
         def __init__(self) -> None:
             self.rows: list[tuple[Any, ...]] = [
-                ({}, "runner", "running", now, now, now, None, "online", now),
+                ({}, "runner", "running", now, now, now, None, "online", now, None, now),
                 (False,),
             ]
 

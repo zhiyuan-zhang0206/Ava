@@ -23,6 +23,7 @@ import { OpenNoticeDetail } from "@/components/open-notice-detail";
 import { WindowSelect } from "@/components/window-select";
 import { api } from "@/lib/api";
 import { useNow } from "@/lib/use-now";
+import { observationText } from "@/lib/agent-observation";
 import { useBreakpoint } from "@/lib/breakpoint";
 import { useAgentPages } from "@/lib/use-agent-pages";
 import { useInspectorHours, useInspectorOpen } from "@/lib/inspector-panel-store";
@@ -523,9 +524,11 @@ function ShellsSection({ inspect }: { inspect: AgentInspectLive }) {
     <Section
       icon={<Terminal className="size-3" />}
       title={t("sectionShells")}
-      badge={String(shells.length)}
+      badge={inspect.shells_available === true ? String(shells.length) : "?"}
     >
-      {shells.length === 0 ? (
+      {inspect.shells_available !== true ? (
+        <p className="font-mono text-[11px] text-muted-foreground">Shell observation unavailable</p>
+      ) : shells.length === 0 ? (
         <p className="font-mono text-[11px] text-muted-foreground/70">{t("noShellsOpen")}</p>
       ) : (
         <ul className="space-y-1">
@@ -705,6 +708,7 @@ function ActivitySection({ inspect }: { inspect: AgentInspect }) {
  * old "Last judged" cell remain omitted.
  */
 function LivenessSection({ inspect }: { inspect: AgentInspectLive }) {
+  const now = useNow(60_000);
   const { liveness_state: state, heartbeat, spawned_at } = inspect;
   const offline = state === "offline";
   const t = useTranslations("inspector");
@@ -716,6 +720,7 @@ function LivenessSection({ inspect }: { inspect: AgentInspectLive }) {
   return (
     <Section icon={<HeartPulse className={cn("size-3", offline && "text-destructive")} />} title={t("sectionLiveness")}>
       <div className="grid grid-cols-2 gap-1">
+        <Metric className="col-span-2" label="Observation" value={observationText(inspect.observation, now.getTime())} />
         <Metric
           className="col-span-2"
           label={t("metricBirth")}

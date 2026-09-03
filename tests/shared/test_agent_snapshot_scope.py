@@ -100,7 +100,8 @@ def test_all_scope_preserves_the_unfiltered_compatibility_query() -> None:
 
 
 def test_summary_projection_omits_detail_only_columns_in_sql() -> None:
-    """The list summary must not transfer fields that only detail/SSE readers use."""
+    """The list summary carries observation clocks (sidebar stale badge) but no
+    other detail/SSE-only fields."""
     conn = _RecordingConnection()
     select_all(cast(psycopg.Connection[Any], conn), scope="live", fields="summary")
     query = conn.recording_cursor.query
@@ -122,13 +123,16 @@ def test_summary_projection_omits_detail_only_columns_in_sql() -> None:
         "(SELECT count(*) FROM agent_notices n "
         "WHERE n.agent_id = a.id AND NOT n.require_response AND n.resolved_at IS NULL "
         "AND n.created_at > now() - interval '30 days') AS unread_notice_count, "
-        "a.config_overlay ->> 'llm_model' AS effective_model"
+        "a.config_overlay ->> 'llm_model' AS effective_model, "
+        "mp.last_probe_at, a.lease_expires_at"
     )
 
     assert "WHERE a.status <> 'terminated'" in query
     assert "a.fork_source_agent_id" in query  # frontend fork-tree lineage
     assert "fork_source_checkpoint_id" not in query
-    assert "last_probe_at" not in query
+    assert "mp.last_probe_at" in query
+    assert "a.last_probe_at" not in query  # agent activity is not machine reachability
+    assert "a.lease_expires_at" in query
     assert "a.config_overlay," not in query
     assert "a.config_overlay ->> 'llm_model' AS effective_model" in query
 

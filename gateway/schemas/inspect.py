@@ -16,6 +16,7 @@ from pydantic import (
 
 from gateway.schemas.stats import StatsWindowHours
 from ops.rpc_schemas import ShellInfo
+from shared.agent_observation import AgentObservation
 from shared.agent_snapshot import OpenNotice
 
 
@@ -182,6 +183,8 @@ class AgentInspectLive(BaseModel):
     machine: str
     liveness_state: Literal["online", "offline", "unknown"]
     last_probe_at: datetime | None = None
+    observation: AgentObservation | None = None
+    shells_available: bool | None = None
     spawned_at: datetime
     started_at: datetime | None = None
     shells: list[ShellInfo]
@@ -220,6 +223,8 @@ class AgentInspect(BaseModel):
     # machine unreachable or lease expired; 'unknown' = not yet judged.
     liveness_state: Literal["online", "offline", "unknown"]
     last_probe_at: datetime | None = None
+    observation: AgentObservation | None = None
+    shells_available: bool | None = None
     spawned_at: datetime
     started_at: datetime | None = None
     window_hours: StatsWindowHours | None = None
