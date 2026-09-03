@@ -60,6 +60,7 @@ pollute the agent context.
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import datetime
 import itertools
@@ -703,6 +704,7 @@ def init_agent_process(*, agent_id: int) -> None:
     global _init_done  # noqa: PLW0603 — process-level singleton
     if _init_done:
         return
+    _configure_windows_event_loop_policy()
     set_process_agent_id(agent_id)
     logger.configure(extra={"agent_id": TURN_SCOPED_AGENT_ID})
     logger.add(sys.stderr, format=_HUMAN_FORMAT, level="INFO", colorize=True)
@@ -730,12 +732,33 @@ def init_subprocess_logger(*, agent_id: int) -> None:
     global _init_done  # noqa: PLW0603
     if _init_done:
         return
+    _configure_windows_event_loop_policy()
     from shared.paths import logs_dir
 
     logger.configure(extra={"agent_id": str(agent_id), "process_role": "subprocess"})
     _add_file_sink(logs_dir() / f"agent-{agent_id}.log")
     _install_stdlib_intercept()
     _init_done = True
+
+
+def _configure_windows_event_loop_policy() -> None:
+    """Windows-only: make the default event loop psycopg-async compatible.
+
+    Windows' ProactorEventLoop (the asyncio default there) rejects psycopg
+    async sockets: every pool connect fails with "Psycopg cannot use the
+    'ProactorEventLoop' to run in async mode", which the pool retries until
+    its acquire timeout — the hosted agent-host on Windows shows a
+    db_pool_acquire_timeout storm (task #2338 follow-up). The Selector policy
+    is the psycopg-documented Windows posture. Every process-boot seam here
+    (init_gateway_process / init_agent_process / init_subprocess_logger /
+    init_cli_process) calls this before any `asyncio.run`, so every asyncio +
+    psycopg entry point on Windows is covered in one place. No-op elsewhere.
+    """
+    if sys.platform != "win32":
+        return
+    policy_cls = getattr(asyncio, "WindowsSelectorEventLoopPolicy", None)
+    if policy_cls is not None:
+        asyncio.set_event_loop_policy(policy_cls())
 
 
 def init_gateway_process(name: str = "gateway") -> None:
@@ -761,6 +784,7 @@ def init_gateway_process(name: str = "gateway") -> None:
     global _init_done  # noqa: PLW0603
     if _init_done:
         return
+    _configure_windows_event_loop_policy()
     from shared.paths import logs_dir
 
     # Bind the deferred agent id explicitly rather than inheriting the
@@ -821,6 +845,7 @@ def init_cli_process(*, name: str) -> None:
     global _init_done  # noqa: PLW0603
     if _init_done:
         return
+    _configure_windows_event_loop_policy()
     from shared.paths import logs_dir
 
     logger.add(sys.stderr, format=_HUMAN_FORMAT, level="INFO", colorize=True)
