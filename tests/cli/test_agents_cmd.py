@@ -136,16 +136,19 @@ def test_agents_terminate_is_graceful(
     assert "terminate" in capsys.readouterr().out
 
 
+@pytest.mark.parametrize("status", ["force_killed", "enqueued"])
 def test_agents_kill_forces(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], status: str
 ) -> None:
     # kill is terminate with force=True, same route
-    seen = _patch_post(monkeypatch, {"status": "force_killed"})
+    seen = _patch_post(monkeypatch, {"status": status})
     assert _agents.cmd_agents_kill(7) == 0
     assert seen["url"] == "http://gw:8000/api/agents/7/terminate"
     assert seen["json"] == {"force": True}
     out = capsys.readouterr().out
-    assert "kill" in out and "force_killed" in out
+    assert "kill" in out and status in out
+    if status == "enqueued":
+        assert "force_killed" not in out
 
 
 def test_agents_send_posts_content_and_source(

@@ -294,8 +294,8 @@ def _spawn_impl(
 
 
 def terminate(agent_id: int, *, force: bool = False) -> TerminateResult:
-    """The agent finishes its current turn, then exits; `force=True` kills
-    its process immediately instead."""
+    """Request termination. `force=True` interrupts work; an `enqueued` result
+    confirms acceptance, not that the agent or its active work has exited."""
     agent_id = coerce_typed(agent_id, "agent_id", int)
     force = coerce_typed(force, "force", bool)
     return TerminateResult(_client.terminate(agent_id, force=force))

@@ -379,10 +379,9 @@ export interface paths {
          *     source=body.source inbound; after processing the current turn, when
          *     claim runs, dispatch goto END and the process exits.
          *
-         *     With `force=true`, skip the inbound path and directly kill the agent's
-         *     detached process + force UPDATE status='terminated' — for the case
-         *     where the agent is stuck (hung LLM call etc.) and the graceful path
-         *     will never take effect.
+         *     With `force=true`, request interruption. Hosted force returns `enqueued`
+         *     while the original host drains actual work; acceptance and metadata status
+         *     are not proof of exit. Detached process force returns `force_killed`.
          *
          *     Smart liveness detection: if the process corresponding to
          *     agents_meta.pid is gone (zombie row, commonly from early-stage
@@ -7384,11 +7383,11 @@ export interface components {
          * TerminateAgentResponse
          * @description POST /api/agents/{id}/terminate response.
          *
-         *     `enqueued`: terminate inbound INSERTed; agent exits after processing
-         *     the current turn.
+         *     `enqueued`: termination accepted, including hosted force. Actual work may
+         *         still be draining; this result does not prove exit.
          *     `already_terminated`: agent was already dead. Graceful termination is a
-         *         no-op; force preserves this response while recording a newer kill-intent
-         *         fence and cleaning the exact supervisor session.
+         *         no-op. Hosted force instead returns enqueued until its exact original
+         *         host can prove quiescence; metadata status alone is not exit evidence.
          *     `force_killed`: force=true killed the agent's detached process + force
          *         marked terminated — agent may have been stuck and never took
          *         the graceful path.

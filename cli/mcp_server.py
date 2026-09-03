@@ -323,9 +323,9 @@ def build_server() -> MCPServer:
         """DESTRUCTIVE. End an agent: it stops working and its process exits.
 
         The agent finishes its current step first, so work in flight is not cut
-        off mid-way. `force=True` kills the process immediately instead, losing
-        whatever the current step was doing — use it only for an agent that is
-        wedged and will never reach a clean stop.
+        off mid-way. `force=True` requests interruption instead; an `enqueued`
+        result means accepted, not that the agent or its owned work has exited.
+        Use force only when a clean stop cannot progress.
 
         The agent's history survives either way, and `send_message` revives it,
         so this is reversible; it is destructive in that it stops running work.

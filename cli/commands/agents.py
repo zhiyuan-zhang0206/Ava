@@ -248,7 +248,7 @@ def cmd_agents_terminate(agent_id: int, *, source: str | None = None) -> int:
 
 
 def cmd_agents_kill(agent_id: int, *, source: str | None = None) -> int:
-    """`ava agents kill <id>` — hard stop: kills the OS process + marks terminated
-    directly, for an agent stuck mid-turn that a graceful `terminate` cannot
-    reach. The forceful sibling of `terminate`."""
+    """`ava agents kill <id>` — request forceful interruption. Hosted work may
+    return enqueued while it drains; this is acceptance, not observed exit.
+    Detached process force retains its force_killed result."""
     return _terminate(agent_id, force=True, source=source)

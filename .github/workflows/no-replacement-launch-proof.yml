@@ -27,6 +27,12 @@ jobs:
       - run: uv sync --frozen
       - run: npm ci
         working-directory: ui/web
+      - name: Verify termination acceptance consumers
+        run: |
+          mkdir -p proof
+          timeout 180 uv run pytest tests/cli/test_agents_cmd.py tests/ava/test_gateway_client.py -v --junitxml=proof/termination-consumers.xml
+          cd ui/web
+          timeout 180 npx vitest run src/lib/use-agents.test.ts --reporter=default --reporter=junit --outputFile=../../proof/termination-ui.xml
       - run: uv run playwright install --with-deps chromium
         timeout-minutes: 10
       - name: Prove actual successor completion and next message

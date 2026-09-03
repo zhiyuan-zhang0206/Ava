@@ -103,10 +103,14 @@ export function useAgentActions(
   const terminateMutation = useMutation({
     mutationFn: ({ id, force }: { id: number; force: boolean }) =>
       api.terminateAgent(id, force),
-    onSuccess: (_data, { force }) => {
-      // Toast only when backend actually accepts the terminate — the
-      // row will flip to 'terminated' when AgentUpdated arrives over SSE.
-      useStore.getState().showToast(force ? "Force killed" : "Terminated");
+    onSuccess: (data) => {
+      // Acceptance is not observed exit; lifecycle rows remain SSE-owned.
+      const messages = {
+        enqueued: "Termination requested",
+        already_terminated: "Already terminated",
+        force_killed: "Force killed",
+      };
+      useStore.getState().showToast(messages[data.status]);
       track("terminate");
     },
     onError: (e: unknown) => showError(`Terminate failed: ${errMsg(e)}`),
