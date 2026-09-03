@@ -39,11 +39,13 @@ Ava's Postgres persistence layer—responsible for agent message history storage
 
 - `agent/db.py:wait_for_inbound(pool, listener, agent_id, timeout_s)` — Blocking wait for inbound: first a SELECT, then `listener.wait_one` blocks until Redis publish or timeout
 - `shared/redis_listener.py:RedisInboundListener.wait_one(timeout)` — Subscribes to `<prefix>:inbound:<agent_id>` (`shared.cluster.inbound_channel`) and waits for a publish (auto-reconnect + re-subscribe); timeout only **silently returns**; fallback SELECT recheck for publish-loss is in the `wait_for_inbound` loop (`agent/db.py:_has_pending_inbound`), not inside `wait_one`
-- `agent/db.py:claim_inbound_batch(...)` — Atomically claims a batch via a single UPDATE (chat → `claimed`, others → `done`)
+- `agent/db.py:claim_inbound_batch(...)` — Locks `agents_meta` before inbound rows in one write transaction. `agent/inbound_ownership.py` checks the admitted generation/owner and a fresh lease after the lock wait; stale or missing ownership tokens cannot claim owned rows. Unknown legacy rows retain compatibility. Chat → `claimed`, others → `done`.
 - `agent/db.py:renew_agent_lease(pool, agent_id)` — re-arms the agent's liveness lease (`lease_expires_at = now() + TTL`, scoped to the alive statuses); driven by the run loop's renewal task ([[lease.ava.okf.md|Agent Liveness Lease]])
 
 ## Notes
 
+- Claim, startup reconcile, compaction finalization and co-batch deferral use the same owner lock. Reconcile/finalization/deferral only mutate chat rows, never acknowledge lifecycle work using missing checkpoint anchors. The caller must retain existing single-flight ordering around checkpoint reads and compaction.
+- This ownership fence is not lifecycle effect acknowledgement: non-chat rows still become done at claim, so crash-before-effect recovery remains unresolved. Old binaries issuing unconditional SQL need a verified shutdown/upgrade barrier; new columns alone cannot fence them.
 - Connection budget: **2 PG connections per agent in steady state** (pool 2; the inbound listener uses Redis, not PG). Boot adds short-lived sync connections (schema gate, `assert_schema_current`, restart-completed write, atexit self-respawn) — PgBouncer absorbs these bursts, so the 2-conn budget describes steady state only
 - `RedisInboundListener` auto-reconnects and re-subscribes on disconnect to prevent publish loss
 - The timeout is a safety net for publish loss (Redis restart/network glitches may drop publishes; if ACL denies subscription, falls back to pure SELECT recheck)

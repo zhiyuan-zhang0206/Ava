@@ -37,7 +37,6 @@ from agent.hooks.compact import (
     emergency_compact_summary,
 )
 from agent.state import AgentState, CircuitState
-from shared.db import create_agent
 from shared.event_publisher import AgentEventPublisher
 from shared.redis_listener import RedisInboundListener
 from tests.agent.test_claim import (
@@ -316,7 +315,7 @@ async def test_heartbeat_while_breaker_open_forces_compact(
     """Breaker open with context_overflow + heartbeat wake → the check-in note
     is NOT appended (no doomed call), and the wake routes into a compaction
     whose tail is the generated summary — the overflow self-rescue."""
-    tid = create_agent(db_conn)
+    tid = spawn_agent()
     _insert_inbound_kind(db_conn, tid, "Heartbeat.", "heartbeat")
 
     state = _overflow_state(breaker_reason="context_overflow")
@@ -346,7 +345,7 @@ async def test_heartbeat_while_breaker_open_falls_back_to_minimal_compact(
     """The 3962 shape: the compaction request itself is rejected (context over
     the effective input ceiling) — the wake must still be rescued by the
     no-LLM minimal compact instead of looping forever."""
-    tid = create_agent(db_conn)
+    tid = spawn_agent()
     _insert_inbound_kind(db_conn, tid, "Heartbeat.", "heartbeat")
 
     state = _overflow_state(breaker_reason="context_overflow")
@@ -379,7 +378,7 @@ async def test_heartbeat_while_breaker_open_non_overflow_parks(
     """Breaker open with a non-overflow reason (billing): the heartbeat is
     consumed without a note and parks at claim — no LLM call, no compact, no
     doomed re-fire."""
-    tid = create_agent(db_conn)
+    tid = spawn_agent()
     _insert_inbound_kind(db_conn, tid, "Heartbeat.", "heartbeat")
 
     state = _overflow_state(breaker_reason="billing")
@@ -411,7 +410,7 @@ async def test_chat_cobatched_with_open_breaker_heartbeat_reaches_llm(
     aredis_inbound_listener: RedisInboundListener,
 ) -> None:
     """A parked heartbeat must not bury a same-batch chat in either FIFO order."""
-    tid = create_agent(db_conn)
+    tid = spawn_agent()
     inbound_ids: dict[str, int] = {}
     for kind in (first_kind, second_kind):
         content = "real user work" if kind == "chat" else "Heartbeat."
@@ -446,6 +445,7 @@ async def test_claim_parks_idle_while_non_overflow_breaker_open(
     self-initiated continue-loop (the next graph invocation after the turn
     boundary) must not re-fire the doomed call. Hosted mode surfaces the park
     as END+turn_idle without blocking on the inbound wait."""
+    tid = spawn_agent()
     state = AgentState(
         messages=[SystemMessage(content="<sys>"), HumanMessage(content="hi")],
         halted=False,
@@ -454,7 +454,7 @@ async def test_claim_parks_idle_while_non_overflow_breaker_open(
     cmd = await claim_node(
         state,
         _make_runtime(ops_pool=aops_pool, hosted=True),
-        _config(1),
+        _config(tid),
     )
 
     assert cmd.goto == "__end__"
@@ -466,6 +466,7 @@ async def test_claim_does_not_park_while_breaker_closed(
 ) -> None:
     """Control: with the breaker closed the same no-batch state routes to the
     LLM as before (the continue-working path)."""
+    tid = spawn_agent()
     state = AgentState(
         messages=[SystemMessage(content="<sys>"), HumanMessage(content="hi")],
         halted=False,
@@ -473,7 +474,7 @@ async def test_claim_does_not_park_while_breaker_closed(
     cmd = await claim_node(
         state,
         _make_runtime(ops_pool=aops_pool, hosted=True),
-        _config(1),
+        _config(tid),
     )
 
     assert cmd.goto == "before_llm"
@@ -487,7 +488,7 @@ async def test_heartbeat_normal_when_breaker_closed(
     """Breaker closed: the heartbeat check-in note is appended and the wake
     routes to the LLM as before — the gate only exists while the breaker is
     open."""
-    tid = create_agent(db_conn)
+    tid = spawn_agent()
     _insert_inbound_kind(db_conn, tid, "Heartbeat.", "heartbeat")
 
     state = _overflow_state()  # breaker closed

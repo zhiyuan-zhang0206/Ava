@@ -64,6 +64,7 @@ from agent.graph._claim_routing import ClaimGoto, resolve_routing
 from agent.graph._context import AvaContext, agent_id_from_config
 from agent.graph._node_log import flush_node_exit_aggregate, node_lifecycle
 from agent.graph._nodes import BEFORE_LLM, CLAIM, END
+from agent.inbound_ownership import RuntimeOwnershipLostError
 from agent.messages import has_conversation
 from shared.log import logger
 
@@ -97,7 +98,10 @@ async def _claim_node_impl(
     agent_id = agent_id_from_config(config)
 
     # ── First SELECT: try uncontended claim before pub/sub wait ──
-    batch = await claim_inbound_batch(ctx.ops_pool, agent_id)
+    try:
+        batch = await claim_inbound_batch(ctx.ops_pool, agent_id)
+    except RuntimeOwnershipLostError:
+        return Command[ClaimGoto](update={"exit_requested": True}, goto=END)
     if not batch:
         # The breaker parks the agent too: an open non-overflow breaker means
         # the last LLM call was permanently rejected (billing / auth / ...) —

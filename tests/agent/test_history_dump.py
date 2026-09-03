@@ -42,9 +42,9 @@ from agent.hooks.compact import auto_compact_before_llm, compose_summary_message
 from agent.messages import NoteTag, system_note_message
 from agent.state import AgentState
 from shared.config import settings
-from shared.db import create_agent
 from shared.lm.context_budget import ContextBudget
 from shared.redis_listener import RedisInboundListener
+from tests.conftest import spawn_agent
 
 # ── helpers ──
 
@@ -369,7 +369,7 @@ async def test_claim_compact_summary_parks_dump_note_after_summary(
     no note, no AIMessage — nothing that could sit between a tool_use and its
     tool_result on the wire."""
     _patch_dump_enabled(monkeypatch, tmp_path)
-    tid = create_agent(db_conn)
+    tid = spawn_agent()
     _insert_inbound_kind(db_conn, tid, "agent-written summary", "compact_summary")
     state = AgentState(
         messages=[
@@ -411,7 +411,7 @@ async def test_claim_compact_summary_no_note_when_disabled(
 ):
     """Config off → claim-path compact tail is exactly today's (summary only)."""
     _patch_dump_enabled(monkeypatch, tmp_path, enabled=False)
-    tid = create_agent(db_conn)
+    tid = spawn_agent()
     _insert_inbound_kind(db_conn, tid, "agent-written summary", "compact_summary")
     state = AgentState(
         messages=[SystemMessage(content="<sys>"), HumanMessage(content="old")],
