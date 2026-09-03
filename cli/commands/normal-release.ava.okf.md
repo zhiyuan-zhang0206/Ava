@@ -7,7 +7,10 @@ description: Exact selector and service effects in the existing per-unit updater
 # Pending normal release continuation
 
 `_update_agent_runner --normal-release` is an internal continuation, not a second
-release controller. It consumes a private request, the existing completed
+release controller. A bootstrap request may alternatively reference this normal
+request before its first stop: the same updater prepares both stages, completes
+the restricted hop, then continues under the original flock/operation/deadline.
+No mutation endpoint is added to bootstrap. Standalone continuation consumes a private request, the existing completed
 restricted-bootstrap handoff, the exact exited predecessor, a fully verified
 image and complete preparation receipt. Unsupported normal readiness transports
 refuse in preparation while bootstrap still serves. Source update flags and
