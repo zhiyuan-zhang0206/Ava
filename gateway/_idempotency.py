@@ -42,6 +42,7 @@ from fastapi.responses import JSONResponse
 from psycopg_pool import ConnectionPool
 
 from gateway.error_envelope import error_response
+from gateway.request_principal import PrincipalScopeError, request_key
 from shared import contracts
 from shared.contracts import Idempotency
 from shared.db_transaction import write_transaction
@@ -212,6 +213,10 @@ async def idempotency_middleware(
         # keys; behavior for key-less callers is today's behavior.
         return await call_next(request)
 
+    try:
+        key = request_key(request, key, method=request.method, path=request.url.path)
+    except PrincipalScopeError as exc:
+        return JSONResponse(status_code=422, content={"detail": str(exc)})
     pool = request.app.state.db_pool
     if not await asyncio.to_thread(_claim, pool, key, request.method, request.url.path):
         # Another request owns the key (or already completed). Poll for the
