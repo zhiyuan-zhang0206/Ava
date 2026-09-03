@@ -83,3 +83,38 @@ def test_mutable_executable_rejected_before_probe(tmp_path: Path) -> None:
     )
     with pytest.raises(ReleaseRejectedError, match="outside"):
         _command(spec, image)
+
+
+@pytest.mark.parametrize(
+    ("generation", "stage"),
+    [
+        ("replacement", "candidate_ready"),
+        ("expected", "recovered"),
+        ("expected", "candidate_started"),
+    ],
+)
+def test_continuation_requires_same_actual_ready_handoff(
+    monkeypatch: pytest.MonkeyPatch, generation: str, stage: str
+) -> None:
+    import json
+    from unittest.mock import Mock
+
+    from cli.commands import _update_normal_release as normal
+    from cli.commands._update_bootstrap import PreparedBootstrapHop
+
+    payload = json.dumps({"generation": generation, "bootstrap_hop": {"stage": stage}}).encode()
+
+    def read_payload(_path: Path) -> bytes:
+        return payload
+
+    monkeypatch.setattr(normal, "regular_bytes", read_payload)
+
+    def forbidden(*_args: object, **_kwargs: object) -> None:
+        pytest.fail("exit code alone must not authorize normal probing or service effects")
+
+    monkeypatch.setattr(normal, "probe_bootstrap", forbidden)
+    monkeypatch.setattr(normal, "execute_normal_release", forbidden)
+    with pytest.raises(ReleaseRejectedError, match="actual candidate-ready handoff"):
+        normal.continue_after_bootstrap(
+            Mock(spec=PreparedBootstrapHop), Mock(spec=normal.PreparedNormalRelease), "expected"
+        )
