@@ -118,6 +118,82 @@ def test_eof_closes_exact_domain_before_user_code(tmp_path: Path) -> None:
             proc.wait(timeout=5)
 
 
+def test_completed_owner_exits_while_original_host_keeps_control_open(tmp_path: Path) -> None:
+    """Normal completion must not leave a daemon holding buffered stdin at exit."""
+    context = _context(tmp_path)
+    write_request(context.request_path, code="pass", agent_id=1, timeout_s=20, state=None)
+    context = context.model_copy(
+        update={
+            "allocation": context.allocation.model_copy(
+                update={
+                    "request_digest": hashlib.sha256(context.request_path.read_bytes()).hexdigest(),
+                }
+            )
+        }
+    )
+    proc = _start(tmp_path, context)
+    try:
+        ready = _ready(tmp_path, proc)
+        assert proc.stdin is not None
+        permit = OwnerControl(
+            request=ready.allocation.request, domain=ready.allocation.domain, action="permit"
+        )
+        proc.stdin.write(permit.model_dump_json().encode() + b"\n")
+        proc.stdin.flush()
+        # Do not close/communicate stdin: the production host keeps it until exit.
+        code = proc.wait(timeout=15)
+        assert not proc.stdin.closed
+        assert proc.stdout is not None
+        output = proc.stdout.read()
+        assert code == 0, output.decode(errors="replace")
+        assert b"Fatal Python error" not in output
+        receipt = OwnerClosed.model_validate_json((tmp_path / "owner.closed").read_bytes())
+        assert receipt.allocation == ready.allocation
+        assert receipt.reason == "completed"
+        assert receipt.root_exit_code == 0
+        assert context.result_path.exists()
+    finally:
+        if proc.stdin is not None:
+            proc.stdin.close()
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait(timeout=5)
+
+
+@pytest.mark.parametrize("ending", ["record", "partial_eof", "oversize"])
+def test_control_pipe_is_bounded_and_owned_by_calling_loop(ending: str) -> None:
+    from agent.exec_domain_owner import ControlPipe
+    from shared.exec_owner_protocol import MAX_OWNER_MESSAGE
+
+    source, destination = os.pipe()
+    try:
+        control = ControlPipe(source)
+        assert control.read() is None
+        os.write(destination, b"part")
+        assert control.read() is None
+        if ending == "record":
+            os.write(destination, b"ial\nnext\n")
+            assert control.read() == b"partial\n"
+            assert control.read() == b"next\n"
+        elif ending == "partial_eof":
+            os.close(destination)
+            destination = -1
+            with pytest.raises(RuntimeError, match="partial record"):
+                control.read()
+        else:
+            # Feed small chunks: the test itself must not fill and block its pipe.
+            for _ in range(MAX_OWNER_MESSAGE // 4 - 1):
+                os.write(destination, b"more")
+                assert control.read() is None
+            os.write(destination, b"!")
+            with pytest.raises(RuntimeError, match="exceeds"):
+                control.read()
+    finally:
+        os.close(source)
+        if destination >= 0:
+            os.close(destination)
+
+
 def test_wrong_permit_never_publishes_success(tmp_path: Path) -> None:
     context = _context(tmp_path)
     proc = _start(tmp_path, context)
