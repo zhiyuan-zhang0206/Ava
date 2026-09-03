@@ -240,7 +240,7 @@ _CREATE_TIME_TOLERANCE_S = 2.0
 def _record_alive(rec: SessionRecord) -> bool:
     try:
         proc = psutil.Process(rec.pid)
-        if not proc.is_running():
+        if not proc.is_running() or proc.status() == psutil.STATUS_ZOMBIE:
             return False
         if rec.starttime is not None:
             return rec.identifies(rec.pid) is True

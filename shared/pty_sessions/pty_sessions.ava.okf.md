@@ -12,6 +12,8 @@ tags:
 
 ## What it is
 
+[[liveness.ava.okf.md|Liveness]] excludes matching but unreaped zombie PIDs.
+
 `shared/pty_sessions/` hosts every agent interactive shell — **one detached
 host process per session**, no supervisor daemon. The SDK keeps its
 named-session surface (`ava.shell.sessions`, watchers, schedules) unchanged.
