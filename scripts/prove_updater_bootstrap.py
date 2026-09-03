@@ -121,16 +121,38 @@ def fault_worker(mode: str, request: Path) -> int:  # noqa: PLR0915 — scoped r
 
     if mode in {"expire-after-stop", "holder-change-after-stop"}:
         real_wait = hop._wait_exited
+        injection: dict[str, object] = {"applied": False}
 
         def turnover(plan: hop.PreparedBootstrapHop, process: hop.ExpectedProcess) -> None:
             real_wait(plan, process)
-            with psycopg.connect(os.environ["AVA_DB_URL"], autocommit=True) as conn:
+            operation = plan.candidate.operation
+            key = (operation.holder, operation.acquired_at, operation.target_sha)
+            with psycopg.connect(
+                plan.projection.db_url.get_secret_value(), autocommit=True
+            ) as conn:
                 if mode == "expire-after-stop":
-                    conn.execute(
-                        "UPDATE deployment_state SET expires_at=clock_timestamp()-interval '1 second'"
-                    )
+                    row = conn.execute(
+                        "UPDATE deployment_state SET expires_at=clock_timestamp()-interval '1 second' "
+                        "WHERE id=1 AND holder=%s AND acquired_at=%s AND target_sha=%s "
+                        "RETURNING holder,acquired_at,expires_at,clock_timestamp()",
+                        key,
+                    ).fetchone()
                 else:
-                    conn.execute("UPDATE deployment_state SET holder='another-operation'")
+                    row = conn.execute(
+                        "UPDATE deployment_state SET holder='another-operation' "
+                        "WHERE id=1 AND holder=%s AND acquired_at=%s AND target_sha=%s "
+                        "RETURNING holder,acquired_at,expires_at,clock_timestamp()",
+                        key,
+                    ).fetchone()
+                if row is None:
+                    raise AssertionError("fault injection did not update the exact operation")
+                require(
+                    row[2] < row[3]
+                    if mode == "expire-after-stop"
+                    else row[0] == "another-operation",
+                    "fault injection did not establish its intended authority change",
+                )
+                injection.update(applied=True, operation_readback=[str(value) for value in row])
 
         backend = get_backend()
         with (
@@ -140,9 +162,11 @@ def fault_worker(mode: str, request: Path) -> int:  # noqa: PLR0915 — scoped r
             try:
                 return updater_main(["--bootstrap-hop", str(request)])
             finally:
-                (request.parent / f"effect-count-{mode}.json").write_text(
-                    json.dumps({"native_session_starts": starts.call_count})
-                )
+                injection["native_session_starts"] = starts.call_count
+                (request.parent / f"effect-count-{mode}.json").write_text(json.dumps(injection))
+                (
+                    request.parent.parent.parent / f"hop-observation-injection-{mode}.json"
+                ).write_text(json.dumps(injection))
     if mode == "crash-after-stop":
         real_journal = hop._journal
 
@@ -671,6 +695,9 @@ def main() -> None:  # noqa: PLR0915 — isolated CI native lifetimes, always re
                     bind_exit = failure
                 if mode in {"expire-after-stop", "holder-change-after-stop"}:
                     effects = json.loads((home / f"run/effect-count-{mode}.json").read_text())
+                    require(
+                        effects["applied"] is True, "actual authority turnover was not injected"
+                    )
                     require(
                         effects["native_session_starts"] == 0,
                         "stale operation attempted even an unrecorded native spawn",
