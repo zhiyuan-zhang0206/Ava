@@ -617,6 +617,7 @@ async def wait_for_inbound(
                     ),
                     event="idle_wake",
                     degraded=degraded,
+                    wake_state=listener.wake_state.value,
                     elapsed_s=round(elapsed, 3),
                     rounds=rounds,
                     timeout_s=timeout_s,

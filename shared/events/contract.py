@@ -273,6 +273,7 @@ class IdleWake(TypedDict):
     elapsed_s: float
     rounds: int
     timeout_s: float
+    wake_state: str
 
 
 class ComputerAction(TypedDict):
@@ -1262,6 +1263,16 @@ EVENTS: dict[str, EventSpec] = {
     "trace": _telemetry("trace", "otel span export", tier="noise"),
     # agent lifecycle / state
     "idle_wake": _telemetry("idle_wake", "agent woken from idle", payload=IdleWake, tier="noise"),
+    "wake_degraded": _telemetry(
+        "wake_degraded",
+        "RedisInboundListener wake path degraded (instant pub/sub wake off)",
+        tier="anomaly",
+    ),
+    "wake_restored": _telemetry(
+        "wake_restored",
+        "RedisInboundListener wake path recovered (clean consume restored instant wake)",
+        tier="noise",
+    ),
     # compact / checkpoint / memory housekeeping
     "compact_request": _telemetry("compact_request", "compact requested", tier="noise"),
     "auto_compact": _telemetry("auto_compact", "auto-compact", tier="noise"),

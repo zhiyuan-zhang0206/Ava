@@ -24,7 +24,7 @@ generated from it and never hand-synced. event_names that violate the naming rul
 | mechanism | table/channel | registered event_names | destination |
 |------|------|-------------|------|
 | audit (category=audit) | `events` | 23 | events table |
-| telemetry (category=telemetry) | `events` | 142 | events table |
+| telemetry (category=telemetry) | `events` | 144 | events table |
 | log (category=log) | `events` | 9 | events table |
 | file-only (destination=file) | file log | 1 | file only (not the events table) |
 | SSE live | Redis → frontend (not persisted) | 28 role | live projection |
@@ -90,7 +90,7 @@ Emit sites and consumers: see the comments at each emit point.
 | `computer_session_end` | computer-use task session closed (idle timeout) | business | task_id, action_count, first_action_at, last_action_at, outcome | events |
 | `mcp_tool_call` | MCP tool invoked through the gateway /mcp endpoint (client-scoped, args redacted) | business | — | events |
 
-## 3. Telemetry events (category=telemetry, 142)
+## 3. Telemetry events (category=telemetry, 144)
 
 Telemetry-side event name resolution (`shared/log.py`): **explicit `event=` →
 `label=` fallback → default `"log"`**. Payload = logger extra fields + `msg`
@@ -204,7 +204,9 @@ consumers: see the comments at each emit point.
 | `label_generate_rejected` | label generation rejected as not a label | noise | — | — | events |
 | `label_generate_retired` | label generation given up on after repeated failures | noise | — | — | events |
 | `trace` | otel span export | noise | — | — | events |
-| `idle_wake` | agent woken from idle | noise | degraded, elapsed_s, rounds, timeout_s | — | events |
+| `idle_wake` | agent woken from idle | noise | degraded, elapsed_s, rounds, timeout_s, wake_state | — | events |
+| `wake_degraded` | RedisInboundListener wake path degraded (instant pub/sub wake off) | anomaly | — | — | events |
+| `wake_restored` | RedisInboundListener wake path recovered (clean consume restored instant wake) | noise | — | — | events |
 | `compact_request` | compact requested | noise | — | — | events |
 | `auto_compact` | auto-compact | noise | — | — | events |
 | `compact_reminder` | compact reminder | noise | — | — | events |
