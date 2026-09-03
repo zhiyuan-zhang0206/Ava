@@ -51,6 +51,12 @@ from ops.resurrection_retry import (
     authorize_pending_retry,
     validate_pending_retry,
 )
+from ops.resurrection_retry import (
+    ResurrectTriggerStaleError as ResurrectTriggerStaleError,
+)
+from ops.resurrection_retry import (
+    lock_active_home_machine as _lock_active_home_machine,
+)
 from shared.agents import (
     AgentNotFound,
     AgentStatus,
@@ -74,14 +80,6 @@ from shared.resurrection_launch import (
     prepare_launch,
     require_launch,
 )
-
-
-class ResurrectTriggerStaleError(ResurrectError):
-    """An auto-resurrect trigger no longer qualifies for the current death.
-
-    Internal and non-wire: the lifecycle op turns it into an idempotent no-op.
-    Unlike `ResurrectAlreadyAlive`, the agent can still be terminated.
-    """
 
 
 class ResurrectClaimStaleError(ResurrectError):
@@ -142,28 +140,6 @@ def _hosted_agent_host_healthy() -> bool:
         f"http://localhost:{health_port('agent_host')}/healthz",
         pidfile=settings.services.agent_host_pidfile,
     ).alive
-
-
-def _lock_active_home_machine(cur: psycopg.Cursor, agent_id: int) -> None:
-    """Lock the home-machine admission row before locking the agent row.
-
-    Machine pause takes the inverse side of this same lock first, commits the
-    latch, then sweeps agents. A resurrection that wins the share lock may
-    finish and is swept; one that loses observes ``paused_at`` and cannot
-    transition. The global lock order is therefore machine -> agent.
-    """
-    cur.execute("SELECT machine FROM agents_meta WHERE id = %s", (agent_id,))
-    agent_row = cur.fetchone()
-    if agent_row is None:
-        raise AgentNotFound(f"agent {agent_id} does not exist")
-    home_machine = agent_row[0]
-    cur.execute("SELECT paused_at FROM machines WHERE name = %s FOR SHARE", (home_machine,))
-    machine_row = cur.fetchone()
-    if machine_row is not None and machine_row[0] is not None:
-        raise MachinePaused(
-            f"agent {agent_id} home machine {home_machine!r} is paused; "
-            "resume it before resurrecting"
-        )
 
 
 def _transition_terminated_to_unclaimed_idling(
