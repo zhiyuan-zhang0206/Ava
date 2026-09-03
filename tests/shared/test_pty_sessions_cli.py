@@ -68,6 +68,29 @@ def _wait(predicate, timeout: float = 30.0, interval: float = 0.05) -> bool:  # 
     return predicate()  # pyright: ignore[reportUnknownVariableType]
 
 
+def _process_exited(process: psutil.Process) -> bool:
+    """Execution ended; adoption/reaping timing does not keep a zombie alive."""
+    try:
+        return not process.is_running() or process.status() == psutil.STATUS_ZOMBIE
+    except psutil.NoSuchProcess:
+        return True
+    except psutil.AccessDenied:
+        return False
+
+
+@pytest.mark.parametrize(
+    "status,expected", [("zombie", True), ("running", False), ("unknown", False)]
+)
+def test_terminal_observation_never_accepts_live_or_unreadable(status: str, expected: bool) -> None:
+    process = Mock(spec=psutil.Process)
+    process.is_running.return_value = True
+    if status == "unknown":
+        process.status.side_effect = psutil.AccessDenied(123)
+    else:
+        process.status.return_value = status
+    assert _process_exited(process) is expected
+
+
 @pytest.fixture
 def sessions(unit_home: Path) -> Iterator[Path]:
     """The test home; every session still alive under it is killed after.
@@ -862,10 +885,10 @@ def test_new_reaps_a_recordless_host_before_replacement(sessions: Path) -> None:
             except psutil.Error as exc:
                 return repr(exc)
 
-        assert _wait(lambda: not old_host.is_running()), (
+        assert _wait(lambda: _process_exited(old_host)), (
             f"recordless host survived replacement: expected={identity!r}, observed={survivor()}"
         )
-        assert _wait(lambda: not old_shell.is_running()), "recordless shell survived replacement"
+        assert _wait(lambda: _process_exited(old_shell)), "recordless shell survived replacement"
     finally:
         # The pre-fix behavior rejects the replacement and leaves the deliberately
         # recordless host outside the fixture's normal record-based teardown.
