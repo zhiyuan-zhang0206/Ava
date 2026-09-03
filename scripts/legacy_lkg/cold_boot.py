@@ -318,7 +318,7 @@ print(json.dumps({'legacySourcesReadable':legacy,'unsupportedSources':unsupporte
                     native_images = sorted(
                         {
                             m.path
-                            for m in native.memory_maps(grouped=False)
+                            for m in native.memory_maps(grouped=False)  # pyright: ignore[reportAttributeAccessIssue] -- psutil exposes it at runtime; its installed stub omits it.
                             if m.path.startswith("/") and "x" in m.perms
                         }
                     )
