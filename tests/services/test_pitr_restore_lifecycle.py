@@ -4,12 +4,13 @@ import json
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
+from subprocess import TimeoutExpired
 
 import psutil
 import pytest
 from pytest import MonkeyPatch
 
-from services.pitr import restore_manifest, restore_proof
+from services.pitr import restore_manifest, restore_postgres, restore_proof
 from services.pitr.base_manifest import BaseObject, CandidateManifest, WalRange
 from services.pitr.checksums import CRC32C, ObjectChecksum
 from services.pitr.object_store import RemoteObjectAck
@@ -18,6 +19,7 @@ from services.pitr.restore_postgres import (
     _append_recovery_config,
     _live_identity,
     _run,
+    _start_sandbox_postgres,
     _write_sandbox_config,
 )
 from services.pitr.restore_proof import (
@@ -391,3 +393,102 @@ def test_run_error_tail_is_bounded() -> None:
     message = str(excinfo.value)
     assert len(message) < 4500
     assert message.endswith("x" * 500)
+
+
+def test_start_sandbox_postgres_passes_log_and_timeout_bound(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    """Activation #8/#9 hang: pg_ctl -w start without -l leaves the sandbox
+    postmaster holding pg_ctl's stdout pipe, so a capture_output wait never
+    sees EOF (pg_ctl had already printed "server started"). The start must
+    pass -l (postmaster output -> log file, pg_ctl exits on readiness) and an
+    explicit -t bound mirroring the executor timeout."""
+    calls: list[list[str]] = []
+    log_path = tmp_path / "sandbox-postgres.log"
+    pgdata = tmp_path / "data"
+
+    def fake_run(command: list[str], *, timeout: float) -> None:
+        calls.append(command)
+        assert timeout == 900
+
+    monkeypatch.setattr(restore_postgres, "_run", fake_run)
+    _start_sandbox_postgres(
+        Path("/pg_ctl"),
+        pgdata,
+        "-c config_file=/x/sandbox-postgresql.conf",
+        log_path,
+        900,
+    )
+
+    assert calls == [
+        [
+            "/pg_ctl",
+            "-D",
+            str(pgdata),
+            "-l",
+            str(log_path),
+            "-t",
+            "900",
+            "-o",
+            "-c config_file=/x/sandbox-postgresql.conf",
+            "-w",
+            "start",
+        ]
+    ]
+
+
+def test_start_sandbox_postgres_attaches_log_tail_on_failure(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    """pg_ctl -l points at the log for the real cause (its stderr only says
+    "Examine the log output"); the run root is cleaned on failure, so the
+    tail must ride with the raised error."""
+
+    def fake_run(command: list[str], *, timeout: float) -> None:
+        raise RestoreProofError("restore command exited 1: pg_ctl: could not start server")
+
+    monkeypatch.setattr(restore_postgres, "_run", fake_run)
+    log_path = tmp_path / "sandbox-postgres.log"
+    log_path.write_text(
+        "2026-09-03 LOG:  starting PostgreSQL\n"
+        '2026-09-03 FATAL:  lock file "postmaster.pid" already exists\n'
+    )
+
+    with pytest.raises(RestoreProofError, match="already exists"):
+        _start_sandbox_postgres(
+            Path("/pg_ctl"), tmp_path / "data", "-c config_file=/x", log_path, 900
+        )
+
+
+def test_start_sandbox_postgres_reports_timeout_with_log_tail(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    def fake_run(command: list[str], *, timeout: float) -> None:
+        raise TimeoutExpired(command, timeout)
+
+    monkeypatch.setattr(restore_postgres, "_run", fake_run)
+    log_path = tmp_path / "sandbox-postgres.log"
+    log_path.write_text("recovery still in progress\n")
+
+    with pytest.raises(RestoreProofError, match="recovery still in progress"):
+        _start_sandbox_postgres(
+            Path("/pg_ctl"), tmp_path / "data", "-c config_file=/x", log_path, 900
+        )
+
+
+def test_start_sandbox_postgres_no_log_file_keeps_original_error(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    def fake_run(command: list[str], *, timeout: float) -> None:
+        raise RestoreProofError("restore command exited 1: pg_ctl: boom")
+
+    monkeypatch.setattr(restore_postgres, "_run", fake_run)
+
+    with pytest.raises(RestoreProofError, match="boom"):
+        _start_sandbox_postgres(
+            Path("/pg_ctl"),
+            tmp_path / "data",
+            "-c config_file=/x",
+            tmp_path / "absent.log",
+            900,
+        )
