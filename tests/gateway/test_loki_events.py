@@ -327,8 +327,16 @@ class TestGlobalQueryBudget:
         shape, one deploy variant later.
         """
         repo = Path(__file__).parents[2]
-        expected = lineage_event_names()
-        assert expected == {"spawn", "fork", "resurrect", "agent_spawned", "agent_resurrected"}
+        # `set(...)` at the source: `_selector_event_names` yields `set[str]`, and
+        # comparing that against a bare frozenset is a static no-overlap error.
+        expected = set(lineage_event_names())
+        assert expected == {
+            "spawn",
+            "fork",
+            "resurrect",
+            "agent_spawned",
+            "agent_resurrected",
+        }
         for path in ("deploy/lgtm/config/loki.yaml", "deploy/lgtm/native/config/loki.yaml"):
             limits = yaml.safe_load((repo / path).read_text())["limits_config"]
             rules = limits["retention_stream"]
@@ -405,12 +413,16 @@ class TestGlobalQueryBudget:
             }
 
         names = sorted(lineage_event_names())
-        lineage_rule = {
+        lineage_rule: dict[str, object] = {
             "selector": f'{{event_name=~"{"|".join(names)}"}}',
             "priority": 1,
             "period": LINEAGE_RETENTION_PERIOD,
         }
-        archive_rule = {"selector": '{stream="archive"}', "priority": 1, "period": "8760h"}
+        archive_rule: dict[str, object] = {
+            "selector": '{stream="archive"}',
+            "priority": 1,
+            "period": "8760h",
+        }
         validate_loki_deploy_config(config([archive_rule, lineage_rule]))
 
         # The rule is missing entirely — the shape the archive loss shipped in.
@@ -425,7 +437,10 @@ class TestGlobalQueryBudget:
         with pytest.raises(ValueError, match="lineage retention_stream period"):
             validate_loki_deploy_config(config([{**lineage_rule, "period": "8760h"}]))
         # Selector order is not drift: Loki's label regex is anchored, not ordered.
-        reversed_rule = {**lineage_rule, "selector": f'{{event_name=~"{"|".join(names[::-1])}"}}'}
+        reversed_rule: dict[str, object] = {
+            **lineage_rule,
+            "selector": f'{{event_name=~"{"|".join(names[::-1])}"}}',
+        }
         validate_loki_deploy_config(config([reversed_rule]))
 
     def test_loki_preserves_default_resource_labels_and_indexes_event_dimensions(self) -> None:
