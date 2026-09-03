@@ -21,7 +21,7 @@ class _StubSaver:
 
     def __init__(self) -> None:
         self.aput_calls: list[
-            tuple[dict[str, object], dict[str, object], dict[str, object], dict[str, int]]
+            tuple[dict[str, object], dict[str, object], dict[str, object], dict[str, object]]
         ] = []
         self.aput_writes_calls: list[
             tuple[dict[str, object], list[tuple[str, object]], str, str | None]
@@ -32,7 +32,7 @@ class _StubSaver:
         config: dict[str, object],
         checkpoint: dict[str, object],
         metadata: dict[str, object],
-        new_versions: dict[str, int],
+        new_versions: dict[str, object],
     ) -> dict[str, object]:
         self.aput_calls.append((config, checkpoint, metadata, new_versions))
         step = metadata["step"]
@@ -68,7 +68,7 @@ async def _aput(
 ) -> dict[str, object]:
     return await saver.aput(
         {"configurable": {"thread_id": thread_id}, "input_step": step},
-        {"checkpoint_id": str(step)},
+        {"checkpoint_id": str(step), "channel_versions": {"messages": f"v{step}"}},
         {"source": source, "step": step},
         {"channel": step},
     )
@@ -226,7 +226,7 @@ async def test_input_after_a_skipped_superstep_uses_the_last_persisted_parent() 
     await _aput(saver, 1, source="loop")
     await saver.aput(
         {"configurable": {"thread_id": "default"}, "skipped_parent": 1},
-        {"checkpoint_id": "input"},
+        {"checkpoint_id": "input", "channel_versions": {}},
         {"source": "input", "step": 2},
         {"channel": 2},
     )
@@ -259,7 +259,7 @@ async def test_written_checkpoint_clears_skipped_tail_and_skipped_aput_returns_i
     }
     skipped_result = await saver.aput(
         input_config,
-        {"checkpoint_id": "1"},
+        {"checkpoint_id": "1", "channel_versions": {"messages": "v1"}},
         {"source": "update", "step": 1},
         {"channel": 1},
     )
@@ -314,3 +314,40 @@ def test_checkpoint_interval_config_is_per_agent_and_defaults_to_four() -> None:
     assert (
         AgentRuntimeSettings.model_validate({"AVA_CHECKPOINT_INTERVAL": 4}).checkpoint_interval == 4
     )
+
+
+async def test_retained_checkpoint_persists_blobs_for_current_channel_versions() -> None:
+    """A retained aput must request blobs for EVERY current channel version.
+
+    Versions born on skipped super-steps have no blob row of their own; the
+    retained checkpoint still references them, so the wrapper merges the full
+    channel_versions map into new_versions — otherwise the saver writes no
+    blob for those channels and readers (timeline cold load, recovery) see
+    the messages channel missing.
+    """
+    saver = _StubSaver()
+    _wrap(saver, interval=4)
+
+    await _aput(saver, 1, source="loop")
+    await _aput(saver, 2, source="loop")
+    await _aput(saver, 3, source="loop")
+    await _aput(saver, 4, source="loop")
+
+    assert [call[2]["step"] for call in saver.aput_calls] == [4]
+    retained_versions = saver.aput_calls[-1][3]
+    assert "messages" in retained_versions
+    assert retained_versions["messages"] == "v4"
+
+
+async def test_final_flush_persists_blobs_for_current_channel_versions() -> None:
+    """The turn-end flush requests blobs for every current channel version."""
+    saver = _StubSaver()
+    _wrap(saver, interval=4)
+
+    await _aput(saver, 1, source="loop")
+    await saver._ava_nstep_flush("default")
+
+    assert [call[2]["step"] for call in saver.aput_calls] == [1]
+    flush_versions = saver.aput_calls[-1][3]
+    assert "messages" in flush_versions
+    assert flush_versions["messages"] == "v1"
