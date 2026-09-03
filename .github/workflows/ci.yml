@@ -446,6 +446,7 @@ jobs:
 
       - name: Run flaky pytest bucket serially
         run: >
+          mkdir -p tmp &&
           uv run pytest tests/ -m flaky --ignore=tests/e2e -q
           --cov=agent --cov=ava --cov=cli --cov=gateway --cov=shared --cov=ui
           --cov=ops --cov=services --cov=ava_builtins
