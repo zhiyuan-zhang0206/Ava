@@ -52,13 +52,7 @@ The agent's sole tool—`execute_code(code: str)`—executes Python code in a di
 
 ## Notes
 
-- Hosted turns retain actual disposable exec domains and request evidence until
-  all cleanup stages succeed. A formatted teardown error does not establish
-  quiescence: the original scheduler Task stays occupied and force remains
-  accepted/unobserved. Unknown POSIX group members are errors, not an empty group.
-- This live-host barrier does not solve hard host death with active exec:
-  independent POSIX children may survive, and a host PID/lease is not a resource
-  completion receipt. Persistent shell sessions keep their separate ownership.
+- Hosted resource completion: [[hosted-quiescence.ava.okf.md]].
 - The single-tool design principle: like a person with one pair of hands but can pick up any tool
 - Avoids the heavy escaping issues of JSON mode
 - Long-running operations should not go through `execute_code`: one-time long commands use `ava.shell.run_background` (auto-reports on completion), interactive/long-lived processes use `ava.shell.sessions` persistent sessions
