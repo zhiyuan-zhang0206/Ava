@@ -59,7 +59,8 @@ class PipedJobChild:
             return None
 
     def kill(self) -> None:
-        if self.returncode is not None:
+        # Poll before TerminateProcess: an exited handle rejects it with ERROR_ACCESS_DENIED.
+        if self.returncode is not None or self.poll() is not None:
             return
         api = _process_api()
         api.TerminateProcess.argtypes = [wintypes.HANDLE, ctypes.c_uint32]
