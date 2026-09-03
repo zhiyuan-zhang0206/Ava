@@ -22,6 +22,7 @@ import psutil
 from shared.log import logger
 from shared.platform import IS_WINDOWS
 from shared.winjob import WindowsJob
+from shared.winjob_pipes import PipedJobChild
 
 _READER_JOIN_TIMEOUT_S = 5.0
 _EMERGENCY_SETTLE_TIMEOUT_S = 5.0
@@ -53,7 +54,7 @@ def _process_group_has_live_member(pgid: int) -> bool:
 class ExecProcessDomain:
     """The root-independent ownership handle for one exec process tree."""
 
-    proc: subprocess.Popen[bytes]
+    proc: subprocess.Popen[bytes] | PipedJobChild
     windows_job: WindowsJob | None
 
     def close_confirmed(self, deadline: float) -> None:

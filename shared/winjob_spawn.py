@@ -105,7 +105,8 @@ def _start_in_job(
     with contextlib.ExitStack() as attributes:
         attributes.callback(api.DeleteProcThreadAttributeList, buffer)
         jobs = (wintypes.HANDLE * 1)(job.handle)
-        inherited = (wintypes.HANDLE * len(handles))(*handles)
+        unique_handles = list(dict.fromkeys(handles))
+        inherited = (wintypes.HANDLE * len(unique_handles))(*unique_handles)
         for attribute, values in ((0x2000D, jobs), (0x20002, inherited)):
             if not api.UpdateProcThreadAttribute(
                 buffer, 0, attribute, values, ctypes.sizeof(values), None, None
