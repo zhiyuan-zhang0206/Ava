@@ -30,6 +30,12 @@
 # Flaky-marked backend tests run in their own serial job; the parallel shards
 # exclude them with `-m "not flaky"`, mirroring the frontend flaky isolation.
 #
+# TEST-SELECTION SHADOW MODE: real PRs retain that full backend net and also
+# run one direct-import-selected backend subset for measurement only. The
+# selector never runs for enforcement, and Trunk merge-tree branches always
+# choose the full suite, so branch protection and batched-tree safety are
+# unchanged while false-greens are measured.
+#
 # AVA_DB_URL / AVA_REDIS_URL are pointed at unreachable sentinel ports on
 # purpose. The suite must provision its own throwaway cluster; a sentinel turns
 # "a test quietly reached a real data plane" into a connection error rather than
@@ -54,6 +60,13 @@ on:
 
 permissions:
   contents: read
+
+env:
+  # Test-selection mode for PR CI. shadow (current): PRs run the selected
+  # subset (informational) side by side with the full backend suite; nothing
+  # gates on the subset. Switch to "enforce" only when the shadow report's
+  # false-green rate is measurably ~0 — see conventions/test-selection.md.
+  TEST_SELECTION_MODE: "shadow"
 
 concurrency:
   # Reruns retain the original ref/SHA. Isolate immutable heads so a stale
@@ -105,6 +118,65 @@ jobs:
           print(f"backend={str(backend).lower()}")
           EOF
           cat "$GITHUB_OUTPUT"
+
+  test-select:
+    # Shadow mode needs an auditable selected subset for real PRs, while the
+    # existing backend fan-out remains the branch-protection gate. Queue test
+    # branches are allowed through only to record their forced FULL decision.
+    name: test selection
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    # Any setup or selector failure is shadow telemetry, never a merge gate.
+    continue-on-error: true
+    needs: [classify]
+    if: ${{ github.event_name == 'pull_request' && (github.event.pull_request.draft == false || startsWith(github.head_ref, 'mergify/merge-queue') || startsWith(github.head_ref, 'trunk-merge/') || startsWith(github.head_ref, 'trunk-temp/')) && needs.classify.outputs.backend == 'true' }}
+    outputs:
+      decision: ${{ steps.selector.outputs.decision }}
+      tests: ${{ steps.selector.outputs.tests }}
+      count: ${{ steps.selector.outputs.count }}
+      est_seconds: ${{ steps.selector.outputs.est_seconds }}
+      full_est_seconds: ${{ steps.selector.outputs.full_est_seconds }}
+      reason: ${{ steps.selector.outputs.reason }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: List changed PR paths
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: git diff --name-only "$(git merge-base "$BASE_SHA" HEAD)"...HEAD > /tmp/changed.txt
+
+      - name: Select direct-import test subset
+        id: selector
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          echo "test-selection mode=$TEST_SELECTION_MODE"
+          python3 scripts/test_selector.py \
+            --changed-files /tmp/changed.txt \
+            --head-ref "$HEAD_REF" \
+            --event "$EVENT" \
+            --json | tee /tmp/selector-output.json
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          selection = json.loads(Path("/tmp/selector-output.json").read_text())
+          lines = [
+              f"decision={selection['decision']}",
+              f"count={selection['count']}",
+              f"est_seconds={selection['est_seconds']}",
+              f"full_est_seconds={selection['full_est_seconds']}",
+              f"reason={selection['reason']}",
+          ]
+          if selection["decision"] == "SELECTED":
+              lines.append(f"tests={' '.join(selection['tests'])}")
+          with Path(os.environ["GITHUB_OUTPUT"]).open("a") as output:
+              output.write("\n".join(lines) + "\n")
+          PY
   repo-language:
     # The no-CJK gate must fire on EVERY PR, including docs-only and
     # skills-only diffs: classify skips everything for docs-only changes and
@@ -402,6 +474,73 @@ jobs:
           if-no-files-found: ignore
           path: tmp/pg-fixture-logs/
 
+  backend-selected-shadow:
+    # This is deliberately an informational second run. It never contributes
+    # coverage artifacts or a backend aggregator dependency: full shards remain
+    # the only protection gate while shadow data measures selector quality.
+    name: backend selected subset (shadow)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    # Keep checkout, provisioning, and artifact faults informational as well as
+    # the captured pytest result below.
+    continue-on-error: true
+    needs: [classify, test-select]
+    if: ${{ github.event_name == 'pull_request' && needs.classify.outputs.backend == 'true' && needs.test-select.outputs.decision == 'SELECTED' }}
+    outputs:
+      subset_status: ${{ steps.run-subset.outputs.subset_status }}
+      subset_duration_secs: ${{ steps.run-subset.outputs.subset_duration_secs }}
+    env:
+      AVA_DB_URL: postgresql://unused@127.0.0.1:1/unused
+      AVA_REDIS_URL: redis://127.0.0.1:1/0
+      AVA_RUNNER_MODE: process
+      TESTS: ${{ needs.test-select.outputs.tests }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: 0.10.2
+          enable-cache: true
+
+      - name: Install Postgres 17 + Redis (server binaries on PATH)
+        uses: ./.github/actions/install-pg-redis
+
+      - name: Install Python deps
+        run: uv sync --frozen
+
+      - name: Run selected pytest subset without gating
+        id: run-subset
+        shell: bash
+        run: |
+          mkdir -p tmp
+          started=$(date +%s)
+          if [ -n "$TESTS" ]; then
+            mapfile -t selected_tests < <(tr ' ' '\n' <<< "$TESTS")
+            set +e
+            set -o pipefail
+            uv run pytest "${selected_tests[@]}" -q -m "not flaky" -n 4 \
+              2>&1 | tee tmp/test-selection-subset.log
+            status=$?
+          else
+            status=5
+            echo "pytest was not invoked because no selected tests were supplied" \
+              | tee tmp/test-selection-subset.log
+          fi
+          finished=$(date +%s)
+          echo "subset_status=$status" >> "$GITHUB_OUTPUT"
+          echo "subset_duration_secs=$((finished - started))" >> "$GITHUB_OUTPUT"
+          # Shadow failures belong in the report, never in this check result.
+          exit 0
+
+      - name: Upload selected-subset log
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: test-selection-subset-log
+          path: tmp/test-selection-subset.log
+          if-no-files-found: ignore
+
   backend-serial:
     name: backend serial (flaky)
     runs-on: ubuntu-24.04
@@ -541,6 +680,95 @@ jobs:
           uv run coverage combine coverage-data-*
           uv run coverage json -o coverage.json
           uv run python scripts/coverage_gates.py coverage.json
+
+  test-selection-shadow-report:
+    # The report is the shadow-mode measurement point. It observes the existing
+    # full backend result and the informational subset, then records divergence
+    # without becoming a required check or changing either result.
+    name: test selection shadow report
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    # The report compares against backend-shard, the complete non-flaky pytest
+    # population. The backend aggregator remains recorded separately because it
+    # also includes static, coverage, flaky, and pgvector gates.
+    continue-on-error: true
+    needs: [classify, backend, backend-shard, backend-selected-shadow, test-select]
+    if: ${{ always() && needs.classify.outputs.backend == 'true' }}
+    steps:
+      - name: Compare full and selected subset outcomes
+        continue-on-error: false
+        shell: bash
+        env:
+          FULL_BACKEND_RESULT: ${{ needs.backend.result }}
+          FULL_PYTEST_RESULT: ${{ needs.backend-shard.result }}
+          SUBSET_STATUS: ${{ needs.backend-selected-shadow.outputs.subset_status }}
+          DECISION: ${{ needs.test-select.outputs.decision }}
+          REASON: ${{ needs.test-select.outputs.reason }}
+          EST_SECONDS: ${{ needs.test-select.outputs.est_seconds }}
+          FULL_EST_SECONDS: ${{ needs.test-select.outputs.full_est_seconds }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set +e
+          mkdir -p tmp
+          false_green=0
+          if [ "$DECISION" != "SELECTED" ]; then
+            echo "no comparison this run (decision=$DECISION)"
+          elif [ -z "$SUBSET_STATUS" ] || [ "$SUBSET_STATUS" = "5" ]; then
+            echo "no comparison this run (selected subset did not complete)"
+          elif [ "$FULL_PYTEST_RESULT" != "success" ] && [ "$FULL_PYTEST_RESULT" != "failure" ]; then
+            echo "no comparison this run (full non-flaky pytest=$FULL_PYTEST_RESULT)"
+          elif [ "$SUBSET_STATUS" = "0" ] && [ "$FULL_PYTEST_RESULT" = "success" ]; then
+            echo "consistent (green/green)"
+          elif [ "$SUBSET_STATUS" = "0" ] && [ "$FULL_PYTEST_RESULT" = "failure" ]; then
+            echo "::error::FALSE GREEN: selected subset passed but full non-flaky pytest failed."
+            false_green=1
+          elif [ "$FULL_PYTEST_RESULT" = "success" ]; then
+            echo "subset false-negative"
+          else
+            echo "both red (subset != full is indicative)"
+          fi
+          export FALSE_GREEN="$false_green"
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          def optional_float(name: str) -> float | None:
+              value = os.environ[name]
+              return float(value) if value else None
+
+          def optional_int(name: str) -> int | None:
+              value = os.environ[name]
+              return int(value) if value else None
+
+          report = {
+              "pr_number": optional_int("PR_NUMBER"),
+              "head_sha": os.environ["HEAD_SHA"],
+              "decision": os.environ["DECISION"],
+              "reason": os.environ["REASON"],
+              "est_seconds": optional_float("EST_SECONDS"),
+              "full_est_seconds": optional_float("FULL_EST_SECONDS"),
+              "subset_status": optional_int("SUBSET_STATUS"),
+              "full_backend_result": os.environ["FULL_BACKEND_RESULT"],
+              "full_pytest_result": os.environ["FULL_PYTEST_RESULT"],
+              "false_green": os.environ["FALSE_GREEN"] == "1",
+              "subset_log": "test-selection-subset-log",
+          }
+          Path("tmp/test-selection-shadow-report.json").write_text(
+              json.dumps(report, sort_keys=True) + "\n"
+          )
+          PY
+          echo "test-selection shadow: decision=$DECISION backend=$FULL_BACKEND_RESULT pytest=$FULL_PYTEST_RESULT subset=$SUBSET_STATUS false_green=$false_green"
+          exit 0
+
+      - name: Upload shadow comparison report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: test-selection-shadow-report
+          path: tmp/test-selection-shadow-report.json
+          if-no-files-found: ignore
 
   frontend:
     name: frontend (eslint + tsc + vitest)

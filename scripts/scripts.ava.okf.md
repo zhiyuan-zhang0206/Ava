@@ -40,6 +40,9 @@ The full linter inventory — what each one enforces and where it runs: [[script
 - `refresh_test_durations.py` — records isolated CI-shaped pytest timing shards, retries
   only a failed measurement, and atomically merges a complete artifact set into
   `.test_durations`
+- `test_selector.py` — stdlib-only, read-only PR selector that reverse-maps
+  static direct test imports, preserves conservative full-suite escapes, and
+  emits the shadow-run JSON consumed by `ci.yml`
 - `release_cut.py`, `pre-push-check.sh`, `check_cross_branch_migrations.py`, `migration_smoke.py`, `test_migrations_apply.sh`, `test_uv_sync_write_window.sh`
 
 ### Code Generation
