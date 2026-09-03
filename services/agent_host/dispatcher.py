@@ -566,9 +566,7 @@ class InboundWakeDispatcher:
                 continue
             await self._scheduler.cancel_agent(agent_id)
             if agent_id in self._scheduler.active_agents:
-                raise HostRestartRequiredError(
-                    f"hosted turn for agent {agent_id} did not unwind"
-                )
+                raise HostRestartRequiredError(f"hosted turn for agent {agent_id} did not unwind")
             logger.warning(
                 "hosted turn for agent {agent_id} showed no progress for "
                 "{no_progress_s:.0f}s (turn-level fake-alive) — turn task "
