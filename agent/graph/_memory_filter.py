@@ -181,8 +181,8 @@ async def filter_candidates(query: str, candidates: list[Candidate]) -> list[str
     import asyncio
 
     from shared.lm._effort import ReasoningEffort
-    from shared.lm.billing import emit_billing_from_message
     from shared.lm.factory import build_chat_model
+    from shared.lm.usage import log_usage_from_message
 
     prompt = _INSTRUCTION.format(inject_k=inject_k, query=query, candidates=_render(candidates))
     # A judge that cannot answer must not fail the turn: LLM replies are
@@ -209,7 +209,7 @@ async def filter_candidates(query: str, candidates: list[Candidate]) -> list[str
                 model.ainvoke([HumanMessage(content=prompt)]),
                 timeout=turn_settings.agent.memory_recall_filter_timeout_seconds,
             )
-            emit_billing_from_message(
+            log_usage_from_message(
                 reply,
                 model=turn_settings.agent.memory_recall_filter_model,
                 usage_kind="chat",

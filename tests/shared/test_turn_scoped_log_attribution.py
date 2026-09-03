@@ -82,6 +82,22 @@ class TestResolution:
         with bind_turn_identity(42):
             assert _agent_id_of({"agent_id": "99", "event": "log"}) == 99
 
+    def test_transport_source_preserves_a_usage_payload_source(self) -> None:
+        """`llm_usage.source` is an accounting dimension, not event provenance."""
+        _ts, _agent_id, _level, _event, payload, source = _message_to_params(
+            _FakeMessage(  # pyright: ignore[reportArgumentType]
+                {
+                    "agent_id": "-",
+                    "event": "llm_usage",
+                    "source": "web.fetch",
+                    "transport_source": "system",
+                }
+            )
+        )
+
+        assert source == "system"
+        assert payload["source"] == "web.fetch"
+
 
 class TestDefaultBinding:
     def test_init_gateway_process_binds_the_deferred_object(

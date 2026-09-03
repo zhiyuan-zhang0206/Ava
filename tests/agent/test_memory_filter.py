@@ -185,7 +185,10 @@ async def test_does_not_log_a_filter_exception_echo(
     assert query not in "\n".join(logged)
 
 
-async def test_successful_filter_call_emits_chat_billing(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_successful_filter_call_emits_chat_billing(
+    monkeypatch: pytest.MonkeyPatch,
+    loguru_records: list[dict[str, Any]],
+) -> None:
     """A completed recall-filter judge call is routed to the shared ledger emitter.
 
     The regression this catches is a successful background LLM call that is
@@ -193,7 +196,6 @@ async def test_successful_filter_call_emits_chat_billing(monkeypatch: pytest.Mon
     """
     from shared.config import settings
 
-    emitted: list[tuple[AIMessage, dict[str, object]]] = []
     response = AIMessage(
         content='["a.md"]',
         usage_metadata={"input_tokens": 10, "output_tokens": 2, "total_tokens": 12},
@@ -201,22 +203,12 @@ async def test_successful_filter_call_emits_chat_billing(monkeypatch: pytest.Mon
     model = MagicMock()
     model.ainvoke = AsyncMock(return_value=response)
 
-    def _emit(message: AIMessage, **kwargs: object) -> None:
-        emitted.append((message, kwargs))
-
     monkeypatch.setattr("shared.lm.factory.build_chat_model", lambda _name, **_kw: model)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr("shared.lm.billing.emit_billing_from_message", _emit)
 
     assert await filter_candidates("q", _candidates("a.md")) == ["a.md"]
-    assert emitted == [
-        (
-            response,
-            {
-                "model": settings.agent.memory_recall_filter_model,
-                "usage_kind": "chat",
-            },
-        )
-    ]
+    [record] = [record for record in loguru_records if record["extra"].get("event") == "llm_usage"]
+    assert record["extra"]["model"] == settings.agent.memory_recall_filter_model
+    assert record["extra"]["usage_kind"] == "chat"
 
 
 async def test_filter_model_is_built_with_reasoning_pinned_off(

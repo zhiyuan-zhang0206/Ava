@@ -246,9 +246,9 @@ async def generate_summary(
     response = await ainvoke_with_cache_retry(llm, compaction_input)
     model = getattr(llm, "model_name", None) or turn_settings.lm.llm_model
     if isinstance(model, str) and model:
-        from shared.lm.billing import emit_billing_from_message
+        from shared.lm.usage import log_usage_from_message
 
-        emit_billing_from_message(response, model=model, usage_kind="agent")
+        log_usage_from_message(response, model=model, usage_kind="agent")
     summary = response.text
     if not summary.strip():
         raise RuntimeError(

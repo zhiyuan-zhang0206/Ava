@@ -378,6 +378,7 @@ def _call_text(content: list[Any], *, effort: str | ReasoningEffort) -> str:
         retry_max_delay_seconds=settings.lm.llm_invoke_retry_max_delay_seconds,
         provider=provider_key_of_model(model),
         model=model,
+        usage_source="understand",
     )
 
 
@@ -446,6 +447,7 @@ def _call_media(content: list[Any], *, mime: str, effort: str | ReasoningEffort)
         retry_max_delay_seconds=settings.lm.llm_invoke_retry_max_delay_seconds,
         provider=provider_key_of_model(model),
         model=model,
+        usage_source="understand.media",
     )
 
 

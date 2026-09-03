@@ -150,6 +150,7 @@ async def test_generate_summary_returns_summary():
 
 async def test_generate_summary_emits_agent_billing_span(
     monkeypatch: pytest.MonkeyPatch,
+    loguru_records: list[dict[str, Any]],
 ) -> None:
     """A completed compaction call records its provider usage in the ledger.
 
@@ -209,6 +210,8 @@ async def test_generate_summary_emits_agent_billing_span(
     assert span.attributes["ava.billing.tokens_in"] == 1_000
     assert span.attributes["ava.billing.tokens_out"] == 100
     assert span.attributes["ava.billing.cache_read_tokens"] == 800
+    [record] = [record for record in loguru_records if record["extra"].get("event") == "llm_usage"]
+    assert record["extra"]["usage_kind"] == "agent"
 
 
 async def test_generate_summary_includes_whole_conversation():

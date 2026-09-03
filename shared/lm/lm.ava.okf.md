@@ -48,6 +48,8 @@ LangChain types `AIMessage(Chunk).content` weakly as `str | list[str | dict[str,
 - `billing.py` records one `ava.billing.call` span for each completed provider call. Its v1 attributes use the `ava.billing.*` ledger schema and deliberately carry no task dimension; task budgets instead consume explicit `task_id` on `llm_usage` events. Core/provider-plugin manufacturer resolution, catalog pricing, and tracing guards are centralized so call sites only provide the response and usage kind.
 - A reviewed, network-free JSON catalog with official-source provenance is the sole volatile price source; `quote()` returns the selected rates and the cost atomically. Selection rules, the CNY-conversion and tier-boundary traps, and region sensitivity live in the child node.
 
+### durable usage — [[usage.ava.okf.md]]
+
 ### outbound concurrency — [[outbound-concurrency.ava.okf.md]]
 
 ### context budget (`context_budget.py`)

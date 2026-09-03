@@ -67,6 +67,7 @@ def invoke_text(
     retry_max_delay_seconds: float = 30.0,
     provider: str | None = None,
     model: str | None = None,
+    usage_source: str | None = None,
 ) -> str:
     """Invoke `llm` on a single HumanMessage of `content`, return flattened text.
 
@@ -98,7 +99,8 @@ def invoke_text(
     `provider` is the `shared/lm/factory.py` provider key (`deepseek` /
     `claude` / …) for the outbound concurrency limiter
     (`shared/lm/_concurrency.py`, DeepSeek capped by default); `None` skips
-    the limiter entirely.
+    the limiter entirely. `usage_source`, when supplied, is persisted with
+    the completed `llm_usage` event as an auxiliary-path discriminator.
     """
     from langchain_core.messages import HumanMessage
 
@@ -107,13 +109,13 @@ def invoke_text(
     retry_attempts = max(0, retry_attempts)  # a negative budget must not empty the loop
     retry_max_delay_seconds = max(retry_delay_seconds, retry_max_delay_seconds)
     response: Any | None = None
-    start_time_ns: int | None = None
+    latency_ms: float | None = None
     for attempt in range(retry_attempts + 1):
         try:
             with _limiter_sync(provider):
                 started = time.monotonic()
                 response = llm.invoke([HumanMessage(content=content)])
-            start_time_ns = time.time_ns() - int((time.monotonic() - started) * 1_000_000_000)
+            latency_ms = (time.monotonic() - started) * 1_000
             break
         except Exception as e:
             resolved_model = model or getattr(llm, "model_name", None)
@@ -140,13 +142,14 @@ def invoke_text(
         raise error_type(f"Model call ({desc}) failed: no attempt produced a response")
     resolved_model = model or getattr(llm, "model_name", None)
     if isinstance(resolved_model, str) and resolved_model:
-        from shared.lm.billing import emit_billing_from_message
+        from shared.lm.usage import log_usage_from_message
 
-        emit_billing_from_message(
+        log_usage_from_message(
             response,
             model=resolved_model,
             usage_kind="chat",
-            start_time_ns=start_time_ns,
+            latency_ms=latency_ms,
+            source=usage_source,
         )
     text = extract_text(response)
     if not text:
@@ -170,6 +173,7 @@ def answer_text(
     retry_delay_seconds: float = 2.0,
     retry_max_delay_seconds: float = 30.0,
     timeout: float | None = None,
+    usage_source: str | None = None,
 ) -> str:
     """Build `model` at `effort` and answer `prompt` against `material`.
 
@@ -182,7 +186,7 @@ def answer_text(
     transient-failure retry; `timeout` is the provider-client request timeout
     (None = provider SDK default). `provider` is derived from `model` for the
     concurrency limiter (None when the model prefix is unregistered — the
-    limiter then passes through).
+    limiter then passes through). `usage_source` forwards to `invoke_text`.
     """
     from shared.lm.factory import build_chat_model
 
@@ -207,4 +211,5 @@ def answer_text(
         retry_max_delay_seconds=retry_max_delay_seconds,
         provider=provider_key_of_model(model),
         model=model,
+        usage_source=usage_source,
     )
