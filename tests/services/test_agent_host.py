@@ -723,6 +723,37 @@ class TestTurnLoop:
         assert notified == [1]
         assert 1 not in host._runtimes
 
+    async def test_a_cancelled_turn_drops_the_cached_runtime(self, wired: _Build) -> None:
+        """A cancelled turn must not keep its runtime: the abandoned turn left
+        claimed inbounds behind, and the next wake's runtime build re-runs the
+        startup reconcile — the hosted equivalent of a fresh process's boot.
+        The dispatcher's stale-turn scan depends on exactly this drop."""
+        host, graph, _ = wired({11: _Row(overlay={"llm_model": "model-for-11"})})
+        graph.gate(11)
+        task = asyncio.create_task(host.run_turn(11))
+        await asyncio.wait_for(graph.arrival(11).wait(), 2)
+        assert 11 in host._runtimes
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert 11 not in host._runtimes
+
+    async def test_a_turn_starts_a_fresh_progress_window(self, wired: _Build) -> None:
+        """`run_turn` must reset the per-agent turn-progress clock on entry:
+        otherwise a long-idle agent's stale entry reads as "stalled" during the
+        next turn's cold build and the dispatcher's turn-level scan cancels the
+        recovery turn it just scheduled."""
+        import time as _time
+
+        from agent._turn_progress import _PROGRESS, turn_progress_age_s
+
+        host, _, _ = wired({11: _Row(overlay={"llm_model": "model-for-11"})})
+        # A stale entry as a long-ago turn would leave behind...
+        _PROGRESS[11] = _time.monotonic() - 99999.0
+        await asyncio.wait_for(host.run_turn(11), 2)
+        age = turn_progress_age_s(11)
+        assert age is not None and age < 5.0, f"clock not reset, age={age}"
+
     async def test_a_crashing_turn_drops_the_runtime(self, wired: _Build) -> None:
         """A crash is the hosted equivalent of a process dying mid-turn, and a
         respawn re-runs the startup reconcile. Keeping the cached runtime would

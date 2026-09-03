@@ -1083,6 +1083,17 @@ EVENTS: dict[str, EventSpec] = {
         "SIGKILL always lands",
         tier="anomaly",
     ),
+    "host_turn_stall_detected": _telemetry(
+        "host_turn_stall_detected",
+        "the hosted dispatcher's durable scan found an in-flight turn whose "
+        "turn-progress clock (agent/_turn_progress.py: node enters + completed "
+        "LLM steps) has been silent past the wedged budget while NO pending "
+        "inbound exists — the turn-level fake-alive shape (process alive, turn "
+        "dead) that pending-row and pid-based detectors cannot see. The turn "
+        "task is cancelled and the agent rescheduled; a turn that refuses to "
+        "unwind instead escalates to a daemon restart",
+        tier="anomaly",
+    ),
     # node / process lifecycle
     "node_enter": _telemetry(
         "node_enter",

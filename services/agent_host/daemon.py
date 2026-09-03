@@ -60,6 +60,7 @@ from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from psycopg.rows import DictRow
 from psycopg_pool import AsyncConnectionPool
 
+from agent._turn_progress import turn_progress_age_s
 from services._pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 from services.agent_host.dispatcher import InboundWakeDispatcher, TurnScheduler
 from services.agent_host.host import AgentHost, build_shared_pool, settle_stale_running_rows
@@ -657,9 +658,20 @@ def _stats_route(host: AgentHost, scheduler: TurnScheduler):  # noqa: ANN202 —
     import json
 
     async def handler(_body: bytes) -> tuple[int, bytes, str]:
+        # Per-agent turn-progress age: the health signal that separates
+        # "the host process is alive" from "this turn is alive". A busy agent
+        # (progress every couple of minutes) reads small; an agent whose
+        # invocation has been silent for the wedged budget reads large — the
+        # turn-level fake-alive state a heartbeat probe alone cannot see.
+        active_progress: dict[int, float] = {}
+        for agent_id in sorted(scheduler.active_agents):
+            age = turn_progress_age_s(agent_id)
+            if age is not None:
+                active_progress[agent_id] = round(age, 1)
         payload = {
             **host.stats.as_payload(),
             "active_agents": sorted(scheduler.active_agents),
+            "active_progress": active_progress,
         }
         return 200, json.dumps(payload).encode(), "application/json"
 
