@@ -150,14 +150,15 @@ async def enqueue_fatal_provider_report_to_nearest_alive_ancestor(
 ) -> int | None:
     """Deliver a metadata-only permanent-provider report to the nearest live parent.
 
-    The recursive walk follows only the immutable ``agents_meta.spawner``
-    ``agent:<id>`` edge. It deliberately ignores fleet-view relationships and
-    stops when no ancestor has the canonical live status-and-lease predicate.
+    The recursive walk follows only the immutable ``agents_meta.born_spawner``
+    ``agent:<id>`` edge, falling back to ``spawner`` for pre-migration rows.
+    It deliberately ignores fleet-view relationships and stops when no
+    ancestor has the canonical live status-and-lease predicate.
     The note text is assembled from structured classifier fields; it never
     receives the provider exception or agent history, which might contain the
     content that the provider rejected.
 
-    Returns the notified ancestor id, or ``None`` when no live SPAWN ancestor
+    Returns the notified ancestor id, or ``None`` when no live birth ancestor
     exists. The inbound transaction commits before its best-effort Redis wake.
     """
     content = (
@@ -169,10 +170,10 @@ async def enqueue_fatal_provider_report_to_nearest_alive_ancestor(
         await cur.execute(
             "WITH RECURSIVE spawner_walk(agent_id, spawner, status, lease_expires_at, path, depth) "
             "AS ("
-            "  SELECT id, spawner, status, lease_expires_at, ARRAY[id], 0 "
+            "  SELECT id, COALESCE(born_spawner, spawner), status, lease_expires_at, ARRAY[id], 0 "
             "  FROM agents_meta WHERE id = %s "
             "  UNION ALL "
-            "  SELECT parent.id, parent.spawner, parent.status, parent.lease_expires_at, "
+            "  SELECT parent.id, COALESCE(parent.born_spawner, parent.spawner), parent.status, parent.lease_expires_at, "
             "         walk.path || parent.id, walk.depth + 1 "
             "  FROM spawner_walk walk "
             "  JOIN agents_meta parent "

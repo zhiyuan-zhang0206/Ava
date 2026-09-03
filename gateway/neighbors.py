@@ -15,16 +15,12 @@ path walk in Python (the SQL recursive CTE had no Loki equivalent):
 `max_depth` bounds the hop count, each extra hop discounts the score by
 `gamma`, and a node's result is its shallowest arrival with the best score.
 
-Ancestors: the read also returns the queried agent's spawn chain — the
-agents that spawned it, walked upward over DIRECTED spawn/fork edges. The
-event stream writes those rows as agent_id = the new agent, target_agent_id
-= its lineage parent (the spawner for a spawn, the fork source for a fork —
-fork-lineage ruling 2026-08-28), so the upward walk follows
-agent_id -> target_agent_id.
-Only creation events carry parentage: send_message is a peer tie and
-resurrect wakes an existing agent, so neither forms an ancestor. Spawn
-chains form a forest, so the upward walk is a simple linked-list traversal
-to the top (a visited set guards against malformed cycles — no depth cap).
+Ancestors: the read also returns the queried agent's birth chain — the agents
+that spawned it, walked upward over immutable agents_meta.born_spawner edges.
+The DB chain does not depend on retained event history. Send_message and
+resurrect remain peer ties only; they never form an ancestor. Spawn chains
+form a forest, so the upward walk is a simple linked-list traversal to the
+top (a visited set guards against malformed cycles — no depth cap).
 
 Performance (task #1958): the archive stream is immutable — it froze at the
 cutover and no new rows enter it — yet every request re-scanned its ~24k
@@ -54,10 +50,6 @@ from shared.redis_client import sync_redis
 # Audit event names that form ties (same family as fleet_graph._EDGE_EVENT_NAMES).
 _LINEAGE_EVENT_NAMES = ("spawn", "fork", "resurrect")
 _EDGE_EVENT_NAMES = ("send_message", *_LINEAGE_EVENT_NAMES)
-
-# The lineage subset that creates parentage. Resurrect wakes an EXISTING
-# agent, so it ties but never parents.
-_ANCESTOR_EVENT_NAMES = ("spawn", "fork")
 
 # Loki fetch cap for the edge stream. Audit events are low-volume since the
 # cutover; the cap is a guardrail, not an expectation (mirrors fleet_graph).
@@ -336,38 +328,48 @@ def _merge_weights(
     return weights
 
 
-def _merge_lineage_parents(
-    archive_rows: list[dict[str, Any]],
-    loki_rows: list[dict[str, Any]],
-) -> dict[int, dict[int, float]]:
-    """Directed spawn/fork parent edges: child -> {parent: lineage weight}.
+def _fetch_born_spawner_parents(pool: Any, *, root: int) -> dict[int, dict[int, float]]:
+    """The immutable birth chain above ``root`` as child -> parent edges.
 
-    Weight per directed pair = LN(1 + combined spawn/fork count), the same
-    lineage weight the undirected neighbor tie uses — the merge sums both
-    sources before the LN, exactly like `_merge_weights`."""
-    counts: dict[tuple[int, int], int] = {}
-    for r in [*archive_rows, *loki_rows]:
-        name = r.get("event_name")
-        child = r.get("agent_id")
-        parent = r.get("target_agent_id")
-        if name not in _ANCESTOR_EVENT_NAMES or child is None or parent is None:
-            continue
-        key = (int(child), int(parent))
-        counts[key] = counts.get(key, 0) + 1
-    parents: dict[int, dict[int, float]] = {}
-    for (child, parent), cnt in counts.items():
-        parents.setdefault(child, {})[parent] = math.log1p(cnt)
-    return parents
+    Each child has at most one born_spawner parent, so every edge carries the
+    fixed single-birth weight LN(1 + 1). The recursive query follows only
+    canonical agent identifiers and prevents malformed cycles from revisiting
+    a row before `_walk_ancestors` applies its own defensive guard.
+    """
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            WITH RECURSIVE spawner_walk(child_id, parent_id, path) AS (
+                SELECT id,
+                       substring(born_spawner FROM '^agent:([0-9]+)$')::BIGINT,
+                       ARRAY[id]
+                FROM agents_meta
+                WHERE id = %s AND born_spawner ~ '^agent:[0-9]+$'
+                UNION ALL
+                SELECT parent.id,
+                       substring(parent.born_spawner FROM '^agent:([0-9]+)$')::BIGINT,
+                       walk.path || parent.id
+                FROM spawner_walk AS walk
+                JOIN agents_meta AS parent ON parent.id = walk.parent_id
+                WHERE parent.born_spawner ~ '^agent:[0-9]+$'
+                  AND NOT parent.id = ANY(walk.path)
+            )
+            SELECT child_id, parent_id FROM spawner_walk
+            """,
+            (root,),
+        )
+        rows = cur.fetchall()
+    return {child: {parent: math.log1p(1)} for child, parent in rows}
 
 
 def _walk_ancestors(
     parents: dict[int, dict[int, float]], *, root: int, gamma: float
 ) -> list[tuple[int, int, float]]:
-    """Walk the spawn/fork parent chain upward from `root` to the top —
+    """Walk the immutable birth-parent chain upward from `root` to the top —
     (agent_id, depth, score) rows, nearest ancestor first.
 
-    depth = hops up (1 = the agent that directly spawned the queried agent);
-    score = that edge's lineage weight discounted by `gamma` per hop, the
+    depth = hops up (1 = the direct birth parent of the queried agent);
+    score = that edge's fixed birth weight discounted by `gamma` per hop, the
     same convention `_walk` uses. Chains are a forest, so the traversal is a
     simple upward walk with a visited set against malformed cycles — no
     depth cap (a chain is at most as long as agents have spawned agents)."""
@@ -441,21 +443,21 @@ def compute(
     root: int,
     max_depth: int,
     limit: int,
+    db_pool: Any,
     k: float = 0.5,
     gamma: float = 0.5,
 ) -> tuple[list[tuple[int, int, float]], list[tuple[int, int, float]], bool]:
     """(neighbors, ancestors, archive_degraded) for `root` — the first two
     are lists of (agent_id, depth, score) rows; neighbors strongest first,
     ancestors nearest first. `archive_degraded` is True when the frozen
-    archive read degraded this request (the tie/lineage set is live-only —
-    the response carries the same flag). The Python counterpart of the
-    retired agent_neighbors() SQL function, plus the spawn-chain read it
-    never had."""
+    archive read degraded this request; it affects ties only, never the DB
+    birth chain. The Python counterpart of the retired agent_neighbors() SQL
+    function, plus the immutable spawn-chain read it never had."""
     now = datetime.now(UTC)
     archive_rows, archive_degraded = _fetch_archive_rows()
     loki_rows = _fetch_loki_edges(now=now)
     weights = _merge_weights(archive_rows, loki_rows, k=k, now=now)
-    parents = _merge_lineage_parents(archive_rows, loki_rows)
+    parents = _fetch_born_spawner_parents(db_pool, root=root)
     return (
         _walk(weights, root=root, max_depth=max_depth, gamma=gamma, limit=limit),
         _walk_ancestors(parents, root=root, gamma=gamma),

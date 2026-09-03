@@ -72,15 +72,20 @@ def frozen_cache(monkeypatch: pytest.MonkeyPatch) -> _FakeRedis:
     return fake
 
 
-def _seed_agent(db_conn: psycopg.Connection, *, status: str = "running") -> int:
+def _seed_agent(
+    db_conn: psycopg.Connection,
+    *,
+    status: str = "running",
+    born_spawner: str | None = None,
+) -> int:
     with db_conn.cursor() as cur:
         cur.execute("INSERT INTO agents DEFAULT VALUES RETURNING id")
         row = cur.fetchone()
         assert row is not None
         new_id = row[0]
         cur.execute(
-            "INSERT INTO agents_meta (id, spawner, status) VALUES (%s, 'test', %s)",
-            (new_id, status),
+            "INSERT INTO agents_meta (id, spawner, born_spawner, status) VALUES (%s, 'test', %s, %s)",
+            (new_id, born_spawner, status),
         )
     db_conn.commit()
     return new_id
@@ -343,7 +348,7 @@ def test_archive_lineage_alone_forms_a_tie(
     assert rows[0]["score"] == pytest.approx(math.log1p(1), abs=1e-3)  # pyright: ignore[reportUnknownMemberType]
 
 
-# ── ancestors: the directed spawn/fork chain above the queried agent ──────
+# ── ancestors: the immutable birth chain above the queried agent ─────────
 
 
 def _ancestors(client: TestClient, agent_id: int, **params: int) -> list[dict]:  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
@@ -352,21 +357,15 @@ def _ancestors(client: TestClient, agent_id: int, **params: int) -> list[dict]: 
     return resp.json()["ancestors"]
 
 
-def test_ancestors_spawn_chain_nearest_first_walks_to_top(
-    db_conn: psycopg.Connection, fake_loki: FakeLoki
-) -> None:
-    """a spawns b, b spawns c: c's ancestors are [b, a] — nearest first, walked
-    to the top. The event direction is the child's row: agent_id = the NEW
-    agent, target_agent_id = its spawner, so b's row points at a."""
+def test_ancestors_spawn_chain_nearest_first_walks_to_top(db_conn: psycopg.Connection) -> None:
+    """a births b, b births c: c's ancestors are [b, a], nearest first."""
     a = _seed_agent(db_conn)
-    b = _seed_agent(db_conn)
-    c = _seed_agent(db_conn)
-    _event(fake_loki, event_type="spawn", agent_id=b, target=a)
-    _event(fake_loki, event_type="spawn", agent_id=c, target=b)
+    b = _seed_agent(db_conn, born_spawner=f"agent:{a}")
+    c = _seed_agent(db_conn, born_spawner=f"agent:{b}")
 
     with TestClient(app) as client:
         rows = _ancestors(client, c)  # pyright: ignore[reportUnknownVariableType]
-        # the parent is not an ancestor of itself — direction is read correctly
+        # the parent is not an ancestor of itself — the chain is read correctly
         rows_b = _ancestors(client, b)  # pyright: ignore[reportUnknownVariableType]
 
     assert [r["agent_id"] for r in rows] == [b, a]  # pyright: ignore[reportUnknownVariableType]
@@ -377,16 +376,12 @@ def test_ancestors_spawn_chain_nearest_first_walks_to_top(
     assert [r["agent_id"] for r in rows_b] == [a]  # pyright: ignore[reportUnknownVariableType]
 
 
-def test_ancestors_ignore_neighbor_depth_param(
-    db_conn: psycopg.Connection, fake_loki: FakeLoki
-) -> None:
+def test_ancestors_ignore_neighbor_depth_param(db_conn: psycopg.Connection) -> None:
     """`depth` bounds the neighbor walk only; the ancestor chain always walks
     to the top — responsibility attribution needs the whole chain."""
     a = _seed_agent(db_conn)
-    b = _seed_agent(db_conn)
-    c = _seed_agent(db_conn)
-    _event(fake_loki, event_type="spawn", agent_id=b, target=a)
-    _event(fake_loki, event_type="spawn", agent_id=c, target=b)
+    b = _seed_agent(db_conn, born_spawner=f"agent:{a}")
+    c = _seed_agent(db_conn, born_spawner=f"agent:{b}")
 
     with TestClient(app) as client:
         rows = _ancestors(client, c, depth=1)  # pyright: ignore[reportUnknownVariableType]
@@ -394,10 +389,9 @@ def test_ancestors_ignore_neighbor_depth_param(
     assert [r["agent_id"] for r in rows] == [b, a]  # pyright: ignore[reportUnknownVariableType]
 
 
-def test_ancestors_fork_forms_a_parent(db_conn: psycopg.Connection, fake_loki: FakeLoki) -> None:
+def test_ancestors_fork_forms_a_parent(db_conn: psycopg.Connection) -> None:
     a = _seed_agent(db_conn)
-    b = _seed_agent(db_conn)
-    _event(fake_loki, event_type="fork", agent_id=b, target=a)
+    b = _seed_agent(db_conn, born_spawner=f"agent:{a}")
 
     with TestClient(app) as client:
         rows = _ancestors(client, b)  # pyright: ignore[reportUnknownVariableType]
@@ -408,8 +402,7 @@ def test_ancestors_fork_forms_a_parent(db_conn: psycopg.Connection, fake_loki: F
 def test_ancestors_message_ties_and_resurrect_never_parent(
     db_conn: psycopg.Connection, fake_loki: FakeLoki
 ) -> None:
-    """Only creation events carry parentage: a message is a peer tie and a
-    resurrect wakes an existing agent — neither makes the other an ancestor."""
+    """Message and resurrect ties do not form ancestors without born_spawner."""
     a = _seed_agent(db_conn)
     b = _seed_agent(db_conn)
     _event(fake_loki, event_type="send_message", agent_id=b, target=a)
@@ -419,22 +412,17 @@ def test_ancestors_message_ties_and_resurrect_never_parent(
         assert _ancestors(client, a) == []
 
 
-def test_ancestors_no_spawner_returns_empty(
-    db_conn: psycopg.Connection, fake_loki: FakeLoki
-) -> None:
+def test_ancestors_no_spawner_returns_empty(db_conn: psycopg.Connection) -> None:
     a = _seed_agent(db_conn)
     with TestClient(app) as client:
         assert _ancestors(client, a) == []
 
 
-def test_ancestors_terminated_ancestor_included_with_status(
-    db_conn: psycopg.Connection, fake_loki: FakeLoki
-) -> None:
+def test_ancestors_terminated_ancestor_included_with_status(db_conn: psycopg.Connection) -> None:
     """A terminated parent stays in the chain (same inclusion rule as
     neighbors) and carries its status."""
     a = _seed_agent(db_conn, status="terminated")
-    b = _seed_agent(db_conn)
-    _event(fake_loki, event_type="spawn", agent_id=b, target=a)
+    b = _seed_agent(db_conn, born_spawner=f"agent:{a}")
 
     with TestClient(app) as client:
         rows = _ancestors(client, b)  # pyright: ignore[reportUnknownVariableType]
@@ -444,15 +432,17 @@ def test_ancestors_terminated_ancestor_included_with_status(
     assert rows[0]["status"] == "terminated"
 
 
-def test_ancestors_archive_lineage_read_directionally(
+def test_ancestors_read_born_spawner_not_loki_parentage(
     db_conn: psycopg.Connection, fake_loki: FakeLoki
 ) -> None:
-    """A pre-cutover spawn row lives in the frozen archive only. The ancestor
-    walk reads it directionally (child = agent_id, parent = target) — the
-    neighbor merge's LEAST/GREATEST grouping deliberately discards that."""
+    """Ancestor lineage is independent of both live and archived Loki rows."""
     a = _seed_agent(db_conn)
-    b = _seed_agent(db_conn)
-    _archive_event(fake_loki, event_type="spawn", agent_id=b, target=a, age_hours=2.0)
+    stale_event_parent = _seed_agent(db_conn)
+    b = _seed_agent(db_conn, born_spawner=f"agent:{a}")
+    _archive_event(
+        fake_loki, event_type="spawn", agent_id=b, target=stale_event_parent, age_hours=2.0
+    )
+    _event(fake_loki, event_type="spawn", agent_id=b, target=stale_event_parent)
 
     with TestClient(app) as client:
         rows = _ancestors(client, b)  # pyright: ignore[reportUnknownVariableType]
@@ -461,21 +451,16 @@ def test_ancestors_archive_lineage_read_directionally(
     assert rows[0]["score"] == pytest.approx(math.log1p(1), abs=1e-3)  # pyright: ignore[reportUnknownMemberType]
 
 
-def test_ancestors_archive_and_loki_merge_counts(
-    db_conn: psycopg.Connection, fake_loki: FakeLoki
-) -> None:
-    """One archive spawn + one live spawn on the same directed pair weigh
-    LN(1+2), exactly like the neighbor merge (counts add before the LN)."""
+def test_ancestors_use_one_constant_weight_per_birth_edge(db_conn: psycopg.Connection) -> None:
+    """born_spawner has one parent per child, independent of event counts."""
     a = _seed_agent(db_conn)
-    b = _seed_agent(db_conn)
-    _archive_event(fake_loki, event_type="spawn", agent_id=b, target=a, age_hours=1.0)
-    _event(fake_loki, event_type="spawn", agent_id=b, target=a, days_ago=0.0)
+    b = _seed_agent(db_conn, born_spawner=f"agent:{a}")
 
     with TestClient(app) as client:
         rows = _ancestors(client, b)  # pyright: ignore[reportUnknownVariableType]
 
     assert [r["agent_id"] for r in rows] == [a]  # pyright: ignore[reportUnknownVariableType]
-    assert rows[0]["score"] == pytest.approx(math.log1p(2), abs=1e-3)  # pyright: ignore[reportUnknownMemberType]
+    assert rows[0]["score"] == pytest.approx(math.log1p(1), abs=1e-3)  # pyright: ignore[reportUnknownMemberType]
 
 
 # ── frozen archive cache: the immutable Loki archive is read once a day ──
@@ -672,7 +657,7 @@ def test_corrupt_archive_cache_entry_refetches_from_loki(
 
 
 def test_live_tail_read_is_bounded_and_cached_parts_never_requery(
-    fake_loki: FakeLoki, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection, fake_loki: FakeLoki, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The live read is the only per-request Loki query and carries the 8s
     bound (the fleet graph's telemetry-read bound) instead of the shared
@@ -686,12 +671,16 @@ def test_live_tail_read_is_bounded_and_cached_parts_never_requery(
         return original(**kwargs)
 
     monkeypatch.setattr(loki_events, "query_events", counting_query)
-    neighbors.compute(root=1, max_depth=1, limit=20)
+    with TestClient(app) as _client:
+        neighbors.compute(root=1, max_depth=1, limit=20, db_pool=app.state.db_pool)
 
     assert len(live_calls) == 1
     call = live_calls[0]
     assert call["timeout_s"] == neighbors._LIVE_READ_TIMEOUT_S
-    assert call["from_"] == ARCHIVE_FREEZE_AT
+    # `from_` is the bare ARCHIVE_FREEZE_AT constant (gateway/neighbors.py
+    # `_fetch_loki_edges`), never folded against now — only `to=now` moves. The
+    # TestClient above just starts the app lifespan for `db_pool`; no request.
+    assert call["from_"] == ARCHIVE_FREEZE_AT  # time-bomb-ok: constant floor, no clock fold
 
 
 # ── migration round-trip: the down migration must actually execute ────────

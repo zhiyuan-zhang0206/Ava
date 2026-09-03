@@ -288,11 +288,12 @@ def create_agent_row(
         # prompt inbound's source; it is not what the spawner column means.
         lineage_spawner = f"agent:{fork_from}" if fork_from is not None else spawner
         cur.execute(
-            "INSERT INTO agents_meta (id, spawner, fork_source_agent_id, "
+            "INSERT INTO agents_meta (id, spawner, born_spawner, fork_source_agent_id, "
             "fork_source_checkpoint_id, status, machine, config_overlay, birth_config) "
-            "VALUES (%s, %s, %s, %s, 'idling', %s, %s::jsonb, %s::jsonb)",
+            "VALUES (%s, %s, %s, %s, %s, 'idling', %s, %s::jsonb, %s::jsonb)",
             (
                 new_id,
+                lineage_spawner,
                 lineage_spawner,
                 fork_from,
                 fork_checkpoint,
