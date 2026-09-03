@@ -94,7 +94,7 @@ def register_page(
     publishing the PageOpened event.
 
     `serve_dir` is the directory the page server serves, recorded by
-    ava.ui.serve()/serve_markdown() so agent boot can re-serve a dead page
+    ava.ui.serve() so agent boot can re-serve a dead page
     server after resurrect/restart; NULL for ava.ui.show() pages (the agent
     manages those servers itself).
     """

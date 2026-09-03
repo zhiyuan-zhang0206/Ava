@@ -439,7 +439,7 @@ Write to {hf(7, f"review_{suffix}")}. Message no one.
 
     publisher_prompt = """You are the Publisher.
 
-Read both reviews, merge changes, and display using ava.ui.serve_markdown().
+Read both reviews, merge changes, render to self-contained HTML, and serve it with ava.ui.serve().
 Title: "Ava Codebase Sweep Report"
 Message no one — the file IS the handoff.
 """

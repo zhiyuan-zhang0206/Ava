@@ -26,20 +26,19 @@ garbled to the user.
 > rendered page. Always render Markdown to HTML before serving.
 
 A served directory without `index.html` shows a placeholder page instead of a
-directory listing. When using `serve()`, include an `index.html`; for Markdown,
-use `serve_markdown()`.
+directory listing. Always include an `index.html`.
 
-**To serve Markdown as a rendered page**, use `ava.ui.serve_markdown()` —
-the one-call path that handles the whole widget dance for you:
+**To serve Markdown as a rendered page**, render it to self-contained HTML
+with the [markdown widget](widgets/markdown/README.md):
 
-```python
-page = ava.ui.serve_markdown(md_string, "my-report", 8765)
-```
+1. Copy `widgets/markdown/md.html` and its `vendor/` directory into a page
+   directory, saving `md.html` as `index.html`.
+2. Replace the `{{MARKDOWN_CONTENT}}` slot with the Markdown after escaping
+   its script terminator: `md_safe = md_string.replace('</script>', '<\\/script>')`.
+3. Serve the directory: `page = ava.ui.serve(page_dir, "my-report", 8765)`.
 
-If you need more control (multiple pages, custom HTML wrapper), use the
-[markdown widget](widgets/markdown/README.md) directly — paste your
-content into `md.html`'s `{{MARKDOWN_CONTENT}}` slot, save it as `index.html`, copy
-the widget's `vendor/` alongside — then `serve()` that directory.
+The widget renders client-side with vendored marked.js, DOMPurify, KaTeX, and
+highlight.js; no CDN or server-side Markdown renderer is involved.
 
 `ava.ui.show(name, port=None)` is the underlying transport: you start an HTTP server
 yourself (bound on `0.0.0.0`) and register it with the gateway (`port` defaults to

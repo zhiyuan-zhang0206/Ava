@@ -68,7 +68,7 @@ reflector_id = ava.agents.spawn(
 ```
 
 Final output:
-Use `ava.ui.serve_markdown()` to present:
+Render the final output to HTML and use `ava.ui.serve()` to present:
 - The task and plan
 - The code produced
 - Review and check results
@@ -88,7 +88,7 @@ Requirements:
 3. **Phase 2**: Spawns 2-3 deepseek-v4-flash workers in parallel → each implements one file
 4. **Phase 3**: Spawns claude-sonnet-4-6 reviewer + deepseek-v4-flash checker in parallel
 5. **Phase 4**: Spawns claude-opus-4-8 reflector → architecture-level reflection
-6. Renders the full pipeline output via `serve_markdown`
+6. Renders the full pipeline output to HTML and serves it with `ava.ui.serve`
 
 ## Expected output
 

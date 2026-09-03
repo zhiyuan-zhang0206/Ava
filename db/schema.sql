@@ -555,7 +555,7 @@ CREATE UNIQUE INDEX event_dismissals_one_active_class_idx
 
 -- ─────────────── agent_pages ───────────────
 -- HTML UI server registry. ava.ui.show(name, port) registers an agent-owned
--- server, while ava.ui.serve()/serve_markdown() rows are supervised by the
+-- server, while ava.ui.serve() rows are supervised by the
 -- page-server daemon in persistent sessions that outlive the agent process.
 CREATE TABLE agent_pages (
     id         BIGSERIAL PRIMARY KEY,
@@ -564,7 +564,7 @@ CREATE TABLE agent_pages (
     port       INTEGER NOT NULL CHECK (port > 0 AND port < 65536),
     host       TEXT,
     title      TEXT,
-    serve_dir  TEXT,  -- set by ava.ui.serve()/serve_markdown(); NULL for ava.ui.show().
+    serve_dir  TEXT,  -- set by ava.ui.serve(); NULL for ava.ui.show().
     server_token TEXT, -- durable per-page /health identity, minted by the page-server daemon.
     session_name TEXT, -- daemon-owned persistent shell; NULL for show() and pre-session rows.
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -574,7 +574,7 @@ CREATE TABLE agent_pages (
 );
 
 COMMENT ON COLUMN agent_pages.serve_dir IS
-    'Directory the page server serves, set by ava.ui.serve()/serve_markdown(); NULL for ava.ui.show().';
+    'Directory the page server serves, set by ava.ui.serve(); NULL for ava.ui.show().';
 
 CREATE UNIQUE INDEX agent_pages_unique_open
     ON agent_pages (agent_id, name)

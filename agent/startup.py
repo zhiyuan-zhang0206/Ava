@@ -413,7 +413,7 @@ async def reconcile_open_pages(
 
     Per open page row:
     - server alive -> keep (log only)
-    - server dead + serve_dir set (serve()/serve_markdown()) -> re-serve the
+    - server dead + serve_dir set (serve()) -> re-serve the
       recorded directory, the old link works again
     - server dead + serve_dir NULL (ava.ui.show() pages, or rows created
       before serve_dir existed) -> the page cannot be rebuilt; close the row

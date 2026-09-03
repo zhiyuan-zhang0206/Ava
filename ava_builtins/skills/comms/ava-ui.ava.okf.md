@@ -13,7 +13,7 @@ tags:
 Provides the agent with **frontend scaffolding** to launch a page for the user (`ava_builtins/skills/ava-ui/`). The key tradeoff it embodies: **no Python, no Python API** — it's all HTML/JS/TSX/starter projects; the agent uses file tools `read`/`cp` to fetch templates, assemble and edit them, then start a server. This way the agent can generate arbitrary rich pages without the framework having to carry an SDK function for every display form.
 
 ## Entry Points
-- `ava.ui.serve(dir, name, port)` is a one-step static file path (start server + poll + register page); it's a **static file server**, `.md` files will be opened as **raw markdown source** (garbled) — so **never directly serve `.md`**, first run `ava.ui.serve_markdown()` or render to HTML with a markdown widget.
+- `ava.ui.serve(dir, name, port)` is a one-step static file path (start server + poll + register page); it's a **static file server**, `.md` files will be opened as **raw markdown source** (garbled) — so **never directly serve `.md`**. Render Markdown to HTML yourself with the [markdown widget](../ava-ui/widgets/markdown/README.md), then serve that directory.
 - Interaction panels (choice/confirm/form/compare) relay the user's choice back to the agent — "ask the user via a page," not just "display."
 
 ## Sub-skills
@@ -21,5 +21,5 @@ Provides the agent with **frontend scaffolding** to launch a page for the user (
 
 ## Key Dependencies
 - [[ava_builtins/skills/comms/comms.ava.okf.md|Communication & User Interaction Skills]] — parent functional group
-- [[ava/ui.ava.okf.md|ava.ui]] — `serve` / `serve_markdown` / `notify` / `show` / `close` SDK itself
+- [[ava/ui.ava.okf.md|ava.ui]] — `serve` / `notify` / `show` / `close` SDK itself
 - [[ava_builtins/plugins/ava_fleet/notify.ava.okf.md|Notify]] — queue semantics of `ava.ui.notify` (human-side channel)

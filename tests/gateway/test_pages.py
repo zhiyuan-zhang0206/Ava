@@ -409,7 +409,7 @@ def test_list_open_page_names_returns_open_only(db_conn: psycopg.Connection) -> 
 
 
 def test_register_page_with_serve_dir(db_conn: psycopg.Connection) -> None:
-    """serve_dir\uff08serve()/serve_markdown() \u8bb0\u5f55\u7684\u670d\u52a1\u76ee\u5f55\uff09\u968f\u6ce8\u518c\u900f\u4f20\u5230\u884c + \u54cd\u5e94\u3002"""
+    """serve_dir (the directory serve() records) passes through registration to row and response."""
     aid = create_agent(db_conn)
     with TestClient(app) as client:
         resp = client.post(

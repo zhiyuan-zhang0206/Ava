@@ -181,11 +181,15 @@ outbound = min(results["flights"]["outbound"], key=lambda f: f["price_usd"])
 hotel = min(results["hotels"], key=lambda h: h["price_per_night_usd"])
 total = outbound["price_usd"] + hotel["price_per_night_usd"] * 5
 
-ava.ui.serve_markdown(
-    f"# Itinerary\n- {outbound['airline']}: ${outbound['price_usd']}\n"
-    f"- {hotel['name']}: ${hotel['price_per_night_usd']}/night\n- Total: ${total}",
-    name="travel-itinerary",
+page_dir = handoff / "travel-itinerary-page"
+page_dir.mkdir(exist_ok=True)
+(page_dir / "index.html").write_text(
+    f"<!doctype html><html><body><h1>Itinerary</h1><ul>"
+    f"<li>{outbound['airline']}: ${outbound['price_usd']}</li>"
+    f"<li>{hotel['name']}: ${hotel['price_per_night_usd']}/night</li>"
+    f"</ul><p>Total: ${total}</p></body></html>"
 )
+ava.ui.serve(str(page_dir), name="travel-itinerary")
 ```
 
 ### 5. Clean up

@@ -106,8 +106,9 @@ scrollbar, mild misalignment). `nit`: preference (spacing you'd tighten). Only
   sweep; do not re-list standing known-and-accepted items.
 - **Group and rank**: `block` first, then `warn`, then `nit`; dedupe repeats of
   the same class across pages into one entry with the page list.
-- **Render the report** with `ava.ui.serve_markdown(report, "qa-sweep-<date>", port)`
-  so the user reads it as a page, and open a task only for `block` findings.
+- **Render the report** to self-contained HTML with a rendered page or the
+  ava-ui markdown widget, then serve its directory with `ava.ui.serve()` so
+  the user reads it as a page; open a task only for `block` findings.
 - Low-confidence perceptual calls: list them under a "worth a human glance"
   tail, do not escalate them to tasks.
 
