@@ -10,6 +10,7 @@ fails loudly, and an unknown role value is refused.
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import Mock
 from urllib.parse import urlsplit
 
 import pytest
@@ -73,6 +74,52 @@ def test_runner_role_projects_ava_runner_url(
     assert parts.hostname == "127.0.0.1"
     assert parts.port == 5433
     assert parts.path == "/ava"
+
+
+@pytest.mark.parametrize("role", [None, "runner"])
+@pytest.mark.parametrize("missing_url", [None, ""])
+def test_missing_url_refuses_new_password_before_boot_time_fallback(
+    monkeypatch: pytest.MonkeyPatch, role: str | None, missing_url: str | None
+) -> None:
+    snapshot = {"AVA_RUNNER_DB_PASSWORD": "new-private-password"}
+    if missing_url is not None:
+        snapshot["AVA_DB_URL"] = missing_url
+    read = Mock(return_value=snapshot)
+    fallback = Mock(side_effect=AssertionError("must not read a stale Settings URL"))
+    warning = Mock()
+    monkeypatch.setattr(rt, "read_env_aliases", read)
+    monkeypatch.setattr("shared.config.service_read._service_field_value", fallback)
+    monkeypatch.setattr("shared.log.logger.warning", warning)
+    with pytest.raises(ValueError, match="AVA_DB_URL is missing") as caught:
+        config.bootstrap_config_values(role=role)
+    read.assert_called_once_with()
+    fallback.assert_not_called()
+    warning.assert_not_called()
+    assert "new-private-password" not in str(caught.value)
+
+
+@pytest.mark.parametrize("role", [None, "runner"])
+def test_snapshot_projection_preserves_reachable_host_and_new_credential(
+    monkeypatch: pytest.MonkeyPatch, role: str | None
+) -> None:
+    read = Mock(
+        return_value={
+            "AVA_DB_URL": _DB_URL,
+            "AVA_RUNNER_DB_PASSWORD": "new-private-password",
+        }
+    )
+    monkeypatch.setattr(rt, "read_env_aliases", read)
+    monkeypatch.setattr(config, "_self_machine_host", lambda: "gateway.example")
+    values = config.bootstrap_config_values(role=role)
+    parts = urlsplit(values["AVA_DB_URL"])
+    assert (parts.username, parts.password, parts.hostname, parts.port, parts.path) == (
+        "ava_runner",
+        "new-private-password",
+        "gateway.example",
+        5433,
+        "/ava",
+    )
+    read.assert_called_once_with()
 
 
 def test_runner_password_never_served_as_standalone_key(

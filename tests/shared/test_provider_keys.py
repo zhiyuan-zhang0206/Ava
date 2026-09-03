@@ -28,8 +28,12 @@ def plugin_env() -> Generator[Path, None, None]:
 
 def _write_bootstrap_env(path: Path, contents: str) -> None:
     """Write a plugin fixture with the runner credential bootstrap requires."""
+    from shared import config
+
     path.write_text(contents)
     upsert_env(path, {"AVA_RUNNER_DB_PASSWORD": "abc"})
+    if "AVA_DB_URL=" not in contents:
+        upsert_env(path, {"AVA_DB_URL": str(config.settings.data_plane.db_url)})
 
 
 def test_bootstrap_serves_an_enabled_plugin_key_from_the_env_file(
