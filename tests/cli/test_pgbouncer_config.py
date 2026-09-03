@@ -46,19 +46,30 @@ def test_render_ini_is_transaction_scram_and_socket_server() -> None:
     # the client's `options` startup parameter — the connect_query SET is the
     # one pooler-side delivery path; see shared.db.PG_STATEMENT_TIMEOUT_SET_SQL).
     assert "connect_query='SET statement_timeout = 60000'" in ini
-    # Every backend is scrubbed back to its connect_query-fresh state on EVERY
-    # return to the pool: a session-level GUC (e.g. a polluter's
-    # SET default_transaction_read_only = on) must never reach the next borrower
-    # of a pooled backend. always=1 is the load-bearing half — the pgbouncer
-    # default (0) resets only on client disconnect, and pooled clients here are
-    # long-lived daemons (2026-09-02 P0 incident).
-    assert "server_reset_query = 'DISCARD ALL; SET statement_timeout = 60000'" in ini
-    assert "server_reset_query_always = 1" in ini
-    # DISCARD ALL clears the birth-time statement ceiling (connect_query runs once
-    # per backend creation), so the re-apply must ride IN the same reset string —
-    # never split the two halves.
+    # A backend whose client vanished mid-transaction is scrubbed back to its
+    # connect_query-fresh state by the release reset: a session-level GUC (e.g.
+    # a polluter's SET default_transaction_read_only = on) must never reach the
+    # next borrower of a pooled backend. always=0 (explicit) keeps the reset to
+    # that SV_ACTIVE window — always=1 fires after every transaction and its
+    # DISCARD ALL wiped the client's own dial/borrow-time SETs (the statement
+    # ceiling; measured 2026-09-03, 405 ruling option B). Between-transaction
+    # pollution is defended client-side by shared/db.py's baseline restore
+    # (2026-09-02 P0 incident).
+    assert "server_reset_query = DISCARD ALL" in ini
+    # The reset is one statement and unquoted: pgbouncer 1.25.2 runs
+    # server_reset_query verbatim, so a quoted value reaches Postgres as a
+    # syntax error (2026-09-02 P0, ~18M errors), and a multi-statement value is
+    # wrapped in an implicit transaction by transaction pooling — "DISCARD ALL
+    # cannot run inside a transaction block" (measured 2026-09-02 02:21).
+    assert "server_reset_query = DISCARD ALL; SET" not in ini
+    assert "server_reset_query_always = 0" in ini
+    # The reset does NOT re-apply the statement ceiling: DISCARD ALL clears the
+    # birth-time connect_query SET, and the reset would need a second statement
+    # to re-apply it — a shape transaction pooling rejects. The ceiling is
+    # delivered by connect_query (every backend at birth) and by shared/db.py's
+    # client-side SET on every pooled use.
     reset_line = next(ln for ln in ini.splitlines() if ln.startswith("server_reset_query ="))
-    assert "DISCARD ALL; SET statement_timeout = 60000" in reset_line
+    assert reset_line == "server_reset_query = DISCARD ALL"
     assert "log_connections = 0" in ini.splitlines()
     assert "log_disconnections = 0" in ini.splitlines()
     # admin/stats console is the cluster role.

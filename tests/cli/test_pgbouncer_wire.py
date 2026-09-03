@@ -97,11 +97,19 @@ def _pgbouncer_in_front(
                 "auth_type = scram-sha-256",
                 f"auth_file = {userlist}",
                 "pool_mode = transaction",
-                # Mirrors _render_ini's load-bearing reset contract: scrub the
-                # backend to connect_query-fresh state on EVERY return to the
-                # pool (always=1), not only on client disconnect.
-                "server_reset_query = 'DISCARD ALL; SET statement_timeout = 60000'",
-                "server_reset_query_always = 1",
+                # Mirrors _render_ini's reset contract (option B, 2026-09-03
+                # ruling): one statement, unquoted — pgbouncer 1.25.2 runs
+                # server_reset_query verbatim (a quoted value is a syntax error,
+                # 2026-09-02 P0) and transaction pooling wraps a multi-statement
+                # reset in an implicit transaction ("DISCARD ALL cannot run
+                # inside a transaction block"). always=0: the reset runs only in
+                # the SV_ACTIVE window, so clean releases/disconnects keep the
+                # backend's session (birth connect_query ceiling and a client's
+                # own SETs survive — measured 2026-09-03); between-transaction
+                # pollution is defended client-side by shared/db.py's baseline
+                # restore on every pooled dial and borrow.
+                "server_reset_query = DISCARD ALL",
+                "server_reset_query_always = 0",
                 "max_client_conn = 100",
                 f"default_pool_size = {pool_size}",  # tiny, so transactions genuinely reuse backends
                 "ignore_startup_parameters = extra_float_digits,options",
@@ -375,11 +383,20 @@ def test_plain_autocommit_write_still_fails_on_poisoned_backend(
     from shared import config
     from shared.db import connect
 
-    with postgres() as pg_url, _pgbouncer_in_front(pg_url) as pooled:
+    with postgres() as pg_url, _pgbouncer_in_front(pg_url, pool_size=1) as pooled:
         monkeypatch.setattr(config.settings.data_plane, "db_url", pooled)
-        _poison_pooled_backends(pooled)
-        with connect(autocommit=True) as conn, pytest.raises(psycopg.errors.ReadOnlySqlTransaction):
-            conn.execute("UPDATE deployment_state SET phase = phase WHERE id = 1")
+        # The dial-time baseline restore (RESET ALL + ceiling) just ran on the
+        # single backend, so the poison must arrive AFTER it, while the poisoner
+        # HOLDS its frontend connection (option B: a clean disconnect would not
+        # scrub, but holding pins the backend and makes the poisoned state
+        # deterministic for the write below).
+        with (
+            connect(autocommit=True) as conn,
+            psycopg.connect(pooled, autocommit=True, prepare_threshold=None) as poisoner,
+        ):
+            poisoner.execute("SET default_transaction_read_only = on")
+            with pytest.raises(psycopg.errors.ReadOnlySqlTransaction):
+                conn.execute("UPDATE deployment_state SET phase = phase WHERE id = 1")
 
 
 def _statement_timeout(conn: psycopg.Connection) -> str:
@@ -498,7 +515,8 @@ def test_admin_probe_reaches_the_bound_address_only() -> None:
 #
 # pgbouncer transaction pooling hands any backend to any client transaction and
 # does NOT reset backend session state on the ordinary release path (measured on
-# 1.25.2: server_reset_query_always=1 is inert there). A polluter's session-level
+# 1.25.2 with always=0: the reset runs only in the SV_ACTIVE window). A
+# polluter's session-level
 # `SET default_transaction_read_only = on` therefore leaks onto shared backends
 # and the next borrower's writes fail with ReadOnlySqlTransaction — the
 # 2026-09-02 P0 that 500'd the agent message / schedule-stop APIs. The client
