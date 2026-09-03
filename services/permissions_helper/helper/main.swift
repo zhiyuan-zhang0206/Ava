@@ -8,6 +8,11 @@
 // own identity; signed with a stable certificate that identity survives every
 // rebuild, so the operator grants permission exactly once.
 //
+// Synthetic HID events and accessibility-tree reads require this process's
+// Accessibility grant. macOS silently drops synthetic events without it, so
+// dispatch refuses those calls explicitly instead of reporting a success for
+// work that never reached the desktop.
+//
 // It serves a line-delimited JSON request/response protocol over a Unix socket,
 // mirroring the shared-daemon pattern used elsewhere in the system. Calls are
 // served serially (one connection fully handled before the next is accepted):
@@ -182,8 +187,34 @@ func numericDouble(_ v: Any?) -> Double? {
     return nil
 }
 
+// Accessibility grant gate. Synthetic HID events posted to .cghidEventTap are
+// silently dropped by macOS unless this process holds the Accessibility grant,
+// so the helper refuses those calls loudly instead of returning a success that
+// never happened. The authorization prompt can only be answered by a human in
+// System Settings (and is not shown at all in a launchd background session),
+// so the helper never waits on it: ask at most once per window, fail the call.
+var lastAXPromptAt = Date.distantPast
+let axPromptMinInterval: TimeInterval = 30.0
+let axGrantError = "Accessibility grant missing (ax_trusted=false): macOS drops synthetic " +
+    "click/type/key events from a process without this grant, so the action did not run. " +
+    "The authorization prompt was triggered; enable AvaPermissionsHelper in System Settings " +
+    "> Privacy & Security > Accessibility, then retry. Rebuilding or re-signing the helper " +
+    "resets this grant once."
+
+func axTrustedOrPrompt() -> Bool {
+    if AXIsProcessTrusted() { return true }
+    let now = Date()
+    if now.timeIntervalSince(lastAXPromptAt) >= axPromptMinInterval {
+        let opts = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
+        _ = AXIsProcessTrustedWithOptions(opts)
+        lastAXPromptAt = now
+    }
+    return false
+}
+
 /// Post a synthetic mouse click at a global screen coordinate (move + down + up).
-/// Pass "double": true for a second click. Requires the Accessibility grant.
+/// Pass "double": true for a second click. Dispatch refuses it without the
+/// Accessibility grant instead of posting events macOS would silently drop.
 func click(_ req: [String: Any]) throws -> [String: Any] {
     guard let x = numericDouble(req["x"]), let y = numericDouble(req["y"])
     else { throw OpError.bad("click needs numeric x,y") }
@@ -204,7 +235,8 @@ func click(_ req: [String: Any]) throws -> [String: Any] {
 
 /// Post a single key down/up by virtual keycode, optionally with Command held.
 /// Flags are set explicitly (0 when no modifier) so a plain key after a Cmd+key
-/// event cannot inherit a stale Command flag. Requires the Accessibility grant.
+/// event cannot inherit a stale Command flag. Dispatch refuses it without the
+/// Accessibility grant instead of posting events macOS would silently drop.
 func key(_ req: [String: Any]) throws -> [String: Any] {
     guard let code = req["code"] as? Int else { throw OpError.bad("key needs int code") }
     let cmd = (req["cmd"] as? Bool) ?? false
@@ -220,7 +252,8 @@ func key(_ req: [String: Any]) throws -> [String: Any] {
 }
 
 /// Move the cursor to (x, y) then post a vertical scroll of `dy` pixels (negative
-/// scrolls toward older content). Requires the Accessibility grant.
+/// scrolls toward older content). Dispatch refuses it without the Accessibility
+/// grant instead of posting events macOS would silently drop.
 func scroll(_ req: [String: Any]) throws -> [String: Any] {
     guard let x = numericDouble(req["x"]), let y = numericDouble(req["y"]),
           let dy = req["dy"] as? Int
@@ -300,8 +333,9 @@ func frontmostApp() -> [String: Any] {
     return ["app": app?.localizedName ?? ""]
 }
 
-/// Type a UTF-8 string as synthetic keyboard input. Requires the Accessibility
-/// grant. Sends the text as a unicode payload on a single key down/up pair (handles CJK).
+/// Type a UTF-8 string as synthetic keyboard input. Dispatch refuses it without
+/// the Accessibility grant instead of posting events macOS would silently drop.
+/// Sends the text as a Unicode payload on a single key down/up pair.
 func typeText(_ req: [String: Any]) throws -> [String: Any] {
     guard let text = req["text"] as? String else { throw OpError.bad("type needs string text") }
     let units = Array(text.utf16)
@@ -316,7 +350,8 @@ func typeText(_ req: [String: Any]) throws -> [String: Any] {
 }
 
 /// Report the on-screen geometry of an application's frontmost window via the
-/// accessibility tree. Requires the Accessibility grant.
+/// accessibility tree. Dispatch refuses it without the Accessibility grant
+/// instead of making an accessibility-tree request that macOS would deny.
 func axWindowInfo(_ req: [String: Any]) throws -> [String: Any] {
     guard let appName = req["app"] as? String else { throw OpError.bad("ax_window_info needs string app") }
     let running = NSWorkspace.shared.runningApplications.first {
@@ -350,6 +385,10 @@ func axWindowInfo(_ req: [String: Any]) throws -> [String: Any] {
 func dispatch(_ req: [String: Any]) -> [String: Any] {
     let id = req["id"]
     let method = req["method"] as? String ?? ""
+    let axGatedMethods: Set<String> = ["click", "type", "key", "scroll", "ax_window_info"]
+    if axGatedMethods.contains(method) && !axTrustedOrPrompt() {
+        return ["id": id as Any, "ok": false, "error": axGrantError]
+    }
     do {
         let result: Any
         switch method {

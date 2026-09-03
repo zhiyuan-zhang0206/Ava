@@ -1365,6 +1365,106 @@ def test_screen_capture_step_skips_hosts_with_no_helper(
     assert read_status() is None
 
 
+def _accessibility_env(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    *,
+    enabled: bool = True,
+    incapability: str | None = None,
+) -> None:
+    from shared.config import settings
+
+    monkeypatch.setattr("shared.accessibility.ava_home", lambda: tmp_path)
+    monkeypatch.setattr(settings.services, "permissions_helper_enabled", enabled)
+    monkeypatch.setattr(
+        "shared.platform_probes.permissions_helper_incapability", lambda: incapability
+    )
+
+
+def test_accessibility_step_records_the_helpers_answer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+):
+    from shared.accessibility import AccessibilityState, AccessibilityStatus, read_status
+
+    _accessibility_env(monkeypatch, tmp_path)
+    status = AccessibilityStatus(
+        state=AccessibilityState.HELPER_UNREACHABLE, diagnostic="socket did not answer"
+    )
+    monkeypatch.setattr("services.permissions_helper.client.check_accessibility", lambda: status)
+
+    _converge._ensure_accessibility(_ctx(tmp_path, tmp_path))
+
+    written = read_status()
+    assert written is not None
+    assert written.state is AccessibilityState.HELPER_UNREACHABLE
+    assert "socket did not answer" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
+
+
+def test_accessibility_step_clears_a_stale_file_when_the_grant_is_back(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    from shared.accessibility import (
+        AccessibilityState,
+        AccessibilityStatus,
+        read_status,
+        write_status,
+    )
+
+    _accessibility_env(monkeypatch, tmp_path)
+    write_status(AccessibilityStatus(state=AccessibilityState.NOT_GRANTED, diagnostic="stale"))
+    monkeypatch.setattr(
+        "services.permissions_helper.client.check_accessibility",
+        lambda: AccessibilityStatus(state=AccessibilityState.GRANTED),
+    )
+
+    _converge._ensure_accessibility(_ctx(tmp_path, tmp_path))
+    assert read_status() is None
+
+
+@pytest.mark.parametrize(
+    ("enabled", "incapability"),
+    [(False, None), (True, "macOS only (permissions helper drives the macOS desktop)")],
+    ids=["disabled", "incapable_host"],
+)
+def test_accessibility_step_skips_hosts_with_no_helper(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    enabled: bool,
+    incapability: str | None,
+):
+    from shared.accessibility import (
+        AccessibilityState,
+        AccessibilityStatus,
+        read_status,
+        write_status,
+    )
+
+    _accessibility_env(monkeypatch, tmp_path, enabled=enabled, incapability=incapability)  # pyright: ignore[reportUnknownArgumentType]
+    write_status(AccessibilityStatus(state=AccessibilityState.NOT_GRANTED, diagnostic="stale"))
+
+    def boom():
+        raise AssertionError("must not probe a host that cannot run a helper")
+
+    monkeypatch.setattr("services.permissions_helper.client.check_accessibility", boom)
+
+    _converge._ensure_accessibility(_ctx(tmp_path, tmp_path))
+    assert read_status() is None
+
+
+def test_accessibility_step_follows_the_screen_capture_step():
+    steps = list(_converge.CONVERGE_STEPS)
+    screen_index = next(
+        i for i, step in enumerate(steps) if step.name == "screen capture availability"
+    )
+    screen_step = steps[screen_index]
+    accessibility_step = steps[screen_index + 1]
+
+    assert accessibility_step.name == "accessibility availability"
+    assert accessibility_step.apply is _converge._ensure_accessibility
+    assert accessibility_step.roles == screen_step.roles
+    assert accessibility_step.requires_unit_config == screen_step.requires_unit_config
+
+
 class TestWarnUntrackedMigrations:
     """The converge step that surfaces untracked migrations/ files to the operator."""
 

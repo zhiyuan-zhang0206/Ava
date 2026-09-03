@@ -73,7 +73,7 @@ from .lifecycle import (
 )
 from .mcp_daemon import _MCP_SOCKET_DIR, _mcp_socket_path, _MCPDaemon
 from .startup import (
-    _notify_screen_capture_at_startup,
+    _notify_desktop_permissions_at_startup,
     _reconcile_claimed_inbounds_at_startup,
     _repair_dangling_tool_use_at_startup,
     _wrap_saver_writes_with_loud_failure,
@@ -83,12 +83,13 @@ from .startup import (
 )
 
 # Re-exports for tests + external callers — tests/agent/test_loop.py and
-# tests/agent/test_loop_main.py import/`monkeypatch.setattr` every private
-# helper by name from this module, so the boot/run-loop split keeps the same
-# public surface via re-import. Note: monkeypatches on a name whose CALLER
-# also moved (e.g. `_wait_for_db_recovery` inside `_recover_from_db_outage`)
-# must target the defining module (`agent._runloop.*`) — a re-export only
-# covers direct callers in THIS module.
+# tests/agent/test_loop_main.py import/`monkeypatch.setattr` private helpers by
+# name from this module, so boot-facing aliases such as
+# `_notify_desktop_permissions_at_startup` remain part of the same public
+# surface after the boot/run-loop split. Note: monkeypatches on a name whose
+# CALLER also moved (e.g. `_wait_for_db_recovery` inside
+# `_recover_from_db_outage`) must target the defining module
+# (`agent._runloop.*`) — a re-export only covers direct callers in THIS module.
 __all__ = [
     "_MCP_SOCKET_DIR",
     "_MCPDaemon",
@@ -97,8 +98,8 @@ __all__ = [
     "_install_lifecycle_signal_handlers",
     "_invoke_graph_with_lifecycle_logging",
     "_mcp_socket_path",
+    "_notify_desktop_permissions_at_startup",
     "_notify_exit",
-    "_notify_screen_capture_at_startup",
     "_probe_db_reachable",
     "_reconcile_claimed_inbounds_at_startup",
     "_repair_dangling_tool_use_at_startup",

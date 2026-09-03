@@ -46,14 +46,14 @@ at daemon boot and the agent half per agent.
   see each function's docstring. The middle one is process scope for a different
   reason: it writes the machine's skills directory, which every agent on the box
   shares, so per-agent repetition would be pure cost.
-- `boot_agent_scope` — **agent** scope: the workspace pre-create, the
-  screen-capture notice, and the chat model, which is built from
+- `boot_agent_scope` — **agent** scope: the workspace pre-create, the desktop
+  permissions notice, and the chat model, which is built from
   `turn_settings.lm.llm_model` and therefore differs per agent whenever an
   overlay pins a model.
 
 Splitting them moved `workspace_dir` from just before the plugin load to just
 after it (the agent half must follow the process half, because
-`_notify_screen_capture_at_startup` needs the SDK loaded). It is an idempotent
+`_notify_desktop_permissions_at_startup` needs the SDK loaded). It is an idempotent
 mkdir and no plugin touches the workspace at import time, so the two orders are
 equivalent.
 """
@@ -86,7 +86,7 @@ from .graph import build_graph
 from .graph._context import AvaContext
 from .mcp_daemon import _MCPDaemon
 from .startup import (
-    _notify_screen_capture_at_startup,
+    _notify_desktop_permissions_at_startup,
     _reconcile_claimed_inbounds_at_startup,
     _repair_dangling_tool_use_at_startup,
     _wrap_saver_writes_with_loud_failure,
@@ -293,10 +293,10 @@ async def boot_agent_scope(agent_id: int) -> BaseChatModel:
         This agent's chat model.
     """
     workspace_dir(agent_id)
-    # When the converge step detected no screen capture permission, an agent
-    # notifies the user once (idempotent — clears the status file after). Must
-    # run after the SDK/plugin load so ava.ui.notify is available.
-    await _notify_screen_capture_at_startup()
+    # When converge detected an unavailable desktop permission, notify once
+    # (idempotent -- clears claimed status files after). Must run after the
+    # SDK/plugin load so ava.ui.notify is available.
+    await _notify_desktop_permissions_at_startup()
     return build_chat_model(turn_settings.lm.llm_model)
 
 
