@@ -23,6 +23,7 @@ from gateway.routers.agents_forward import _forward_to_home_machine
 from gateway.schemas import CancelRequest, CompactEnqueued
 from ops import ops_lifecycle as _ops
 from ops.rpc_schemas import (
+    AgentExitedRequest,
     CancelRequested,
     RestartAgentRequest,
     RestartAgentResponse,
@@ -140,7 +141,9 @@ async def post_agent_terminate(
 
 
 @router.post("/api/agents/{agent_id}/exited", status_code=204)
-async def post_agent_exited(agent_id: int, request: Request) -> Response:
+async def post_agent_exited(
+    agent_id: int, request: Request, body: AgentExitedRequest | None = None
+) -> Response:
     """An agent process reports it has reached its own exit finally block —
     finalize its status to 'terminated', close its agent-owned show() pages,
     and keep daemon-supervised serve() pages open.
@@ -157,7 +160,12 @@ async def post_agent_exited(agent_id: int, request: Request) -> Response:
     both against the shared DB / events channel, so it runs on whichever
     gateway receives it.
     """
-    await _ops.mark_agent_exited_op(agent_id, request.app.state.db_pool)
+    await _ops.mark_agent_exited_op(
+        agent_id,
+        request.app.state.db_pool,
+        generation=body.generation if body else None,
+        owner=body.owner if body else None,
+    )
     return Response(status_code=204)
 
 

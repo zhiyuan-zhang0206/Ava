@@ -46,6 +46,16 @@ import psycopg
 import pytest
 import pytest_asyncio
 import redis
+
+
+@pytest.fixture(autouse=True)
+def isolate_runtime_incarnation(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A test's process admission must not become another test's exit identity."""
+    from shared import runtime_incarnation
+
+    monkeypatch.setattr(runtime_incarnation, "_current", None)
+
+
 from fastapi.testclient import TestClient
 from langgraph.checkpoint.postgres import PostgresSaver
 
