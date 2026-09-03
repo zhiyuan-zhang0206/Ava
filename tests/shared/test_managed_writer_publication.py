@@ -144,6 +144,108 @@ def activation_readback(conn: psycopg.Connection, proposal: PendingPublication):
     )
 
 
+@pytest.mark.parametrize(
+    "session,allowed",
+    [
+        ("ava-agent-host", True),
+        ("ava-agent-1", False),
+        ("ava-agent-1-attempt-deadbeef", False),
+        ("ava-agent-other", False),
+    ],
+)
+def test_normal_plan_allows_only_known_agent_host_service(
+    publication_db: psycopg.Connection, session: str, allowed: bool
+) -> None:
+    from shared.managed_writer_publication import CandidateUnitPlan
+
+    proposal = activation_plan(publication_db)
+    assert proposal.normal_start_plan is not None
+    value = proposal.normal_start_plan.units[0].model_dump(mode="json")
+    value["services"][0]["session"] = session
+    if allowed:
+        assert (
+            CandidateUnitPlan.model_validate_json(json.dumps(value)).services[0].session == session
+        )
+    else:
+        with pytest.raises(ValidationError, match="agent session"):
+            CandidateUnitPlan.model_validate_json(json.dumps(value))
+
+
+def test_pending_readback_transport_is_immutable_and_consumed(
+    publication_db: psycopg.Connection,
+) -> None:
+    from shared.managed_writer_activation import (
+        commit_current,
+        read_pending_unit_readbacks,
+        record_pending_migration,
+        record_pending_unit_readback,
+    )
+
+    conn = publication_db
+    proposal = activation_plan(conn)
+    args = (conn, proposal.operation, proposal.challenge)
+    adopt_pending_collection(conn, closure(conn, proposal))
+    conn.execute("INSERT INTO schema_migrations(name) VALUES('baseline')")
+    record_pending_migration(*args)
+    assert read_pending_unit_readbacks(*args) == ()
+    readback = activation_readback(conn, proposal)
+    record_pending_unit_readback(*args, readback)
+    before = conn.execute("SELECT managed_writer_evidence FROM deployment_state").fetchone()
+    record_pending_unit_readback(*args, readback)
+    begin_pending_publication(conn, proposal)
+    assert conn.execute("SELECT managed_writer_evidence FROM deployment_state").fetchone() == before
+    changed = readback.model_copy(
+        update={
+            "services": (readback.services[0].model_copy(update={"observation_digest": "4" * 64}),)
+        }
+    )
+    with pytest.raises(ManagedWriterBarrierError, match="silently replaced"):
+        record_pending_unit_readback(*args, changed)
+    with pytest.raises(ManagedWriterBarrierError, match="recorded"):
+        commit_current(*args, (changed,))
+    assert conn.execute("SELECT managed_writer_evidence FROM deployment_state").fetchone() == before
+    collected = read_pending_unit_readbacks(*args)
+    assert collected == (readback,)
+    assert commit_current(*args, collected)
+
+
+@pytest.mark.parametrize("change", ["challenge", "expiry", "service", "unit"])
+def test_invalid_unit_readback_does_not_enter_pending(
+    publication_db: psycopg.Connection, change: str
+) -> None:
+    from shared.managed_writer_activation import (
+        record_pending_migration,
+        record_pending_unit_readback,
+    )
+
+    conn = publication_db
+    proposal = activation_plan(conn)
+    args = (conn, proposal.operation, proposal.challenge)
+    adopt_pending_collection(conn, closure(conn, proposal))
+    conn.execute("INSERT INTO schema_migrations(name) VALUES('baseline')")
+    record_pending_migration(*args)
+    readback = activation_readback(conn, proposal)
+    if change == "service":
+        readback = readback.model_copy(update={"services": ()})
+    else:
+        updates = (
+            {"challenge": uuid4()}
+            if change == "challenge"
+            else (
+                {"valid_until": readback.selector.observed_at}
+                if change == "expiry"
+                else {"unit": unit().model_copy(update={"home": "/other"})}
+            )
+        )
+        readback = readback.model_copy(
+            update={"selector": readback.selector.model_copy(update=updates)}
+        )
+    before = conn.execute("SELECT managed_writer_evidence FROM deployment_state").fetchone()
+    with pytest.raises(ManagedWriterBarrierError):
+        record_pending_unit_readback(*args, readback)
+    assert conn.execute("SELECT managed_writer_evidence FROM deployment_state").fetchone() == before
+
+
 def test_actual_migration_and_service_publication_chain(publication_db: psycopg.Connection) -> None:
     from shared.managed_writer_activation import (
         commit_current,

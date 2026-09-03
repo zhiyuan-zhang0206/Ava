@@ -14,18 +14,14 @@ from typing import Literal
 from uuid import UUID, uuid4
 
 import psycopg
-from pydantic import AwareDatetime, Field
 
 from shared.managed_writer_barrier import (
-    Digest,
-    EvidenceModel,
     ManagedUnit,
     ManagedWriterBarrierError,
     RolloutIdentity,
     lock_rollout,
     validate_collection_for_write,
 )
-from shared.managed_writer_observation import ExpectedProcess
 from shared.managed_writer_publication import (
     CandidateUnitPlan,
     CommittedPublication,
@@ -38,37 +34,15 @@ from shared.managed_writer_publication import (
     _locked_publication,
     _store,
 )
-
-
-class SelectorReadback(EvidenceModel):
-    unit: PublishedUnit
-    challenge: UUID
-    previous_digest: Digest | None
-    current_digest: Digest
-    observed_at: AwareDatetime
-    valid_until: AwareDatetime
-
-
-class NormalServiceReadback(EvidenceModel):
-    service: NormalService
-    supervisor: ExpectedProcess
-    child: ExpectedProcess
-    loaded_module: str | None = Field(default=None, min_length=1, max_length=4096)
-    executable: str = Field(min_length=1, max_length=4096)
-    entrypoint: str = Field(min_length=1, max_length=4096)
-    artifact_digest: Digest
-    manifest_digest: Digest
-    readiness: Literal["normal"]
-    challenge: UUID
-    observed_at: AwareDatetime
-    valid_until: AwareDatetime
-    # Digest of actual authenticated response plus native/session verification.
-    observation_digest: Digest
-
-
-class UnitActivationReadback(EvidenceModel):
-    selector: SelectorReadback
-    services: tuple[NormalServiceReadback, ...] = Field(min_length=1)
+from shared.managed_writer_publication import (
+    NormalServiceReadback as NormalServiceReadback,
+)
+from shared.managed_writer_publication import (
+    SelectorReadback as SelectorReadback,
+)
+from shared.managed_writer_publication import (
+    UnitActivationReadback as UnitActivationReadback,
+)
 
 
 def pending_stage(
@@ -247,6 +221,88 @@ def require_pending_candidate_start(
     return service
 
 
+def _validate_unit_readback(
+    pending: PendingPublication, item: UnitActivationReadback, now: datetime
+) -> None:
+    expected = _selector(pending, item.selector, now)
+    if tuple(entry.service for entry in item.services) != expected.services:
+        raise ManagedWriterBarrierError("normal service readbacks omit or duplicate a service")
+    for entry in item.services:
+        if (
+            entry.readiness != "normal"
+            or entry.challenge != pending.challenge
+            or not pending.operation.acquired_at <= entry.observed_at <= now < entry.valid_until
+        ):
+            raise ManagedWriterBarrierError("normal service observation is stale or bootstrap-only")
+        if (entry.artifact_digest, entry.manifest_digest) != (
+            expected.unit.artifact_digest,
+            expected.unit.manifest_digest,
+        ):
+            raise ManagedWriterBarrierError("running service belongs to another image")
+        root = expected.unit.home + "/releases/" + expected.unit.artifact_digest + "/"
+        paths = [entry.executable, entry.entrypoint]
+        if entry.service.module is not None:
+            if entry.loaded_module is None:
+                raise ManagedWriterBarrierError("Python service has no loaded-module evidence")
+            paths.append(entry.loaded_module)
+        if (
+            entry.executable != entry.service.executable
+            or entry.entrypoint != entry.service.entrypoint
+            or any(not path.startswith(root) or ".." in path.split("/") for path in paths)
+        ):
+            raise ManagedWriterBarrierError("normal service module is outside the loaded image")
+
+
+def record_pending_unit_readback(
+    conn: psycopg.Connection,
+    operation: RolloutIdentity,
+    challenge: UUID,
+    readback: UnitActivationReadback,
+) -> None:
+    """Persist one trusted updater observation in the existing pending journal.
+
+    Exact retries are idempotent; changed observations require explicit recovery,
+    not overwriting an immutable result. Stored observations never gain freshness
+    from being read back, and are revalidated before publication.
+    """
+    state, pending, _ = _pending(conn, operation, challenge)
+    _require_migration(conn, pending)
+    _, _, now = _pending(conn, operation, challenge)
+    _validate_unit_readback(pending, readback, now)
+    key = (readback.selector.unit.machine, readback.selector.unit.home)
+    for previous in pending.unit_readbacks:
+        if (previous.selector.unit.machine, previous.selector.unit.home) == key:
+            if previous != readback:
+                raise ManagedWriterBarrierError("pending unit readback cannot be silently replaced")
+            return
+    readbacks = tuple(
+        sorted(
+            (*pending.unit_readbacks, readback),
+            key=lambda item: (item.selector.unit.machine, item.selector.unit.home),
+        )
+    )
+    _store(
+        conn,
+        WriterPublication(
+            current=state.current, pending=pending.model_copy(update={"unit_readbacks": readbacks})
+        ),
+    )
+
+
+def read_pending_unit_readbacks(
+    conn: psycopg.Connection,
+    operation: RolloutIdentity,
+    challenge: UUID,
+) -> tuple[UnitActivationReadback, ...]:
+    """Return freshly checked immutable progress; partial results are not ready."""
+    _, pending, _ = _pending(conn, operation, challenge)
+    _require_migration(conn, pending)
+    _, _, now = _pending(conn, operation, challenge)
+    for item in pending.unit_readbacks:
+        _validate_unit_readback(pending, item, now)
+    return pending.unit_readbacks
+
+
 def commit_current(
     conn: psycopg.Connection,
     operation: RolloutIdentity,
@@ -279,38 +335,10 @@ def commit_current(
     _, _, now = _pending(conn, operation, challenge)
     if tuple(item.selector.unit for item in readbacks) != pending.units:
         raise ManagedWriterBarrierError("publication needs exact ordered all-unit readbacks")
+    if pending.unit_readbacks and pending.unit_readbacks != readbacks:
+        raise ManagedWriterBarrierError("publication differs from the recorded unit readbacks")
     for item in readbacks:
-        expected = _selector(pending, item.selector, now)
-        if tuple(entry.service for entry in item.services) != expected.services:
-            raise ManagedWriterBarrierError("normal service readbacks omit or duplicate a service")
-        for entry in item.services:
-            if (
-                entry.readiness != "normal"
-                or entry.challenge != challenge
-                or not operation.acquired_at <= entry.observed_at <= now < entry.valid_until
-            ):
-                raise ManagedWriterBarrierError(
-                    "normal service observation is stale or bootstrap-only"
-                )
-            if (entry.artifact_digest, entry.manifest_digest) != (
-                expected.unit.artifact_digest,
-                expected.unit.manifest_digest,
-            ):
-                raise ManagedWriterBarrierError("running service belongs to another image")
-            # The actual observer resolves symlinks and validates native loaded
-            # identity. This lexical fence also rejects mutable source/bootstrap.
-            root = expected.unit.home + "/releases/" + expected.unit.artifact_digest + "/"
-            paths = [entry.executable, entry.entrypoint]
-            if entry.service.module is not None:
-                if entry.loaded_module is None:
-                    raise ManagedWriterBarrierError("Python service has no loaded-module evidence")
-                paths.append(entry.loaded_module)
-            if (
-                entry.executable != entry.service.executable
-                or entry.entrypoint != entry.service.entrypoint
-                or any(not path.startswith(root) or ".." in path.split("/") for path in paths)
-            ):
-                raise ManagedWriterBarrierError("normal service module is outside the loaded image")
+        _validate_unit_readback(pending, item, now)
     publication_id = uuid4()
     current = CommittedPublication(
         publication_id=publication_id,
