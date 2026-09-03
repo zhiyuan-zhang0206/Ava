@@ -169,6 +169,26 @@ def test_context_unknown_fields_and_symlink_refuse(tmp_path: Path) -> None:
         read_owner_context(alias)
 
 
+def test_owner_import_does_not_boot_graph_sdk_or_settings(tmp_path: Path) -> None:
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-I",
+            "-c",
+            "import sys; import agent.exec_domain_owner; "
+            "assert 'agent.graph' not in sys.modules; assert 'ava' not in sys.modules; "
+            "assert 'shared.config' not in sys.modules",
+        ],
+        cwd=tmp_path,
+        env=dict(os.environ, AVA_AGENT_ID="1", AVA_PROCESS_PROFILE="agent"),
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+
+
 _HOST = """
 import os, subprocess, sys, time
 from pathlib import Path

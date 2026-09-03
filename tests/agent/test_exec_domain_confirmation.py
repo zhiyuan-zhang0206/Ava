@@ -89,7 +89,7 @@ def test_live_group_after_signal_is_not_closed(monkeypatch: pytest.MonkeyPatch) 
     def signal_submitted(_pid: int, _sig: int) -> None:
         pass
 
-    monkeypatch.setattr(_exec_process, "_process_group_has_live_member", live_group)
+    monkeypatch.setattr("shared.exec_process_domain._process_group_has_live_member", live_group)
     monkeypatch.setattr(os, "killpg", signal_submitted)
     domain = _exec_process.ExecProcessDomain(cast(subprocess.Popen[bytes], Root()), None)
     with pytest.raises(TimeoutError, match="live managed members"):

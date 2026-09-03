@@ -44,6 +44,7 @@ from typing import Any, Literal, cast
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 
 from agent.state import checkpoint_msgpack_allowlist
+from shared.exec_process_domain import KILL_GRACE_S as KILL_GRACE_S
 from shared.log import logger
 
 # Envelope schema versions — bumped only on a breaking shape change.
@@ -58,7 +59,6 @@ RESULT_KINDS: frozenset[str] = frozenset({"done", "cancelled", "timed_out", "lif
 
 # How long the parent waits for the child to exit after SIGINT/SIGTERM before
 # escalating to SIGKILL. Shared here so the child's watchdog can sit beyond it.
-KILL_GRACE_S = 2.0
 
 # Envelope size ceiling — a state snapshot cannot legitimately approach this;
 # anything larger means an agent stuffed a giant object into the delta.

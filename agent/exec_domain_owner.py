@@ -18,8 +18,6 @@ from typing import Literal
 
 import psutil
 
-from agent.graph._exec_process import ExecProcessDomain
-from agent.graph._exec_protocol import KILL_GRACE_S
 from shared.exec_owner_protocol import (
     MAX_OWNER_MESSAGE,
     OwnerClosed,
@@ -29,6 +27,7 @@ from shared.exec_owner_protocol import (
     read_owner_bytes,
     read_owner_context,
 )
+from shared.exec_process_domain import KILL_GRACE_S, ExecProcessDomain
 from shared.incarnation_resources import ResourceProcess
 from shared.platform import CREATE_NO_WINDOW, IS_WINDOWS
 from shared.winjob import WindowsJob
