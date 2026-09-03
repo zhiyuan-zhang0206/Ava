@@ -31,7 +31,7 @@ class PageRegisterRequest(BaseModel):
     `title`: optional human-readable title shown in the frontend
         tab/header; falls back to name when not given.
     `serve_dir`: directory the page server serves, recorded by
-        ava.ui.serve()/serve_markdown() so agent boot can re-serve a dead
+        ava.ui.serve() so agent boot can re-serve a dead
         page server after resurrect/restart; absent for ava.ui.show()
         pages (the agent manages those servers itself).
     """

@@ -11570,7 +11570,7 @@
           "port"
         ],
         "title": "PageRegisterRequest",
-        "description": "POST /api/agents/{aid}/pages request body — SDK ava.ui.show / .serve call.\n\n`host`: the agent-runner's reachable address (the agent self-reports\n    it) — where the gateway's reverse proxy dials the page server\n    (loopback on a single box). Never appears in any URL.\n`port`: port that the agent process's HTTP server is listening on\n    (bound on the runner's reachable host, never 0.0.0.0). 1-65535.\n`title`: optional human-readable title shown in the frontend\n    tab/header; falls back to name when not given.\n`serve_dir`: directory the page server serves, recorded by\n    ava.ui.serve()/serve_markdown() so agent boot can re-serve a dead\n    page server after resurrect/restart; absent for ava.ui.show()\n    pages (the agent manages those servers itself)."
+        "description": "POST /api/agents/{aid}/pages request body — SDK ava.ui.show / .serve call.\n\n`host`: the agent-runner's reachable address (the agent self-reports\n    it) — where the gateway's reverse proxy dials the page server\n    (loopback on a single box). Never appears in any URL.\n`port`: port that the agent process's HTTP server is listening on\n    (bound on the runner's reachable host, never 0.0.0.0). 1-65535.\n`title`: optional human-readable title shown in the frontend\n    tab/header; falls back to name when not given.\n`serve_dir`: directory the page server serves, recorded by\n    ava.ui.serve() so agent boot can re-serve a dead\n    page server after resurrect/restart; absent for ava.ui.show()\n    pages (the agent manages those servers itself)."
       },
       "PageRow": {
         "properties": {

@@ -19,7 +19,7 @@ You only need to execute it. The script will:
 - Wave 4: 5 adversarial agents to find vulnerabilities
 - Wave 5: Feedback fed back to Wave 1+2 original agents for correction
 - Wave 6: Final draft
-- Wave 7: 2 review + 1 publish via ava.ui.serve_markdown
+- Wave 7: 2 review + 1 publish by rendering to HTML and serving with ava.ui.serve
 
 Workers end silently: each writes its JSON to the handoff directory and terminates —
 none of them messages the orchestrator. The orchestrator arms one checkpoint per wave
@@ -34,7 +34,7 @@ W1 Explore (5) ──→ W2 Deep-dive (1→10) ──→ W3 Reduce (1)
     ↓                                              ↓
 W4 Adversarial (5) ──→ W5 Feedback (15) ──→ W6 Reduce (1)
     ↓
-W7 Publish (3) ──→ ava.ui.serve_markdown()
+W7 Publish (3) ──→ render HTML → ava.ui.serve()
 ```
 
 ## Completion protocol: silent workers, per-wave checkpoints

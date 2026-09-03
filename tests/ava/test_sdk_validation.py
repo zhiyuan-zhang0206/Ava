@@ -430,11 +430,6 @@ class TestUiEntries:
                 "dir must be a string",
                 id="serve-multi",  # pyright: ignore[reportArgumentType]
             ),  # pyright: ignore[reportArgumentType]
-            pytest.param(
-                lambda: _ui.serve_markdown(("a", "b"), "n"),  # pyright: ignore[reportArgumentType]
-                "content must be a string",
-                id="markdown-multi",
-            ),  # pyright: ignore[reportArgumentType]
         ],
     )
     def test_multi_element_type_errors(self, call: Any, match: str) -> None:

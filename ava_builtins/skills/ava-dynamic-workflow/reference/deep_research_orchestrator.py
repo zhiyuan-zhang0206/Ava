@@ -441,7 +441,7 @@ Write to {hf(7, f"review_{suffix}")}. Message no one.
     # 1 publisher
     publisher_prompt = f"""You are Publisher.
 Read the two reviews ({hf(7, "review_a")} and {hf(7, "review_b")}),
-merge revision suggestions, generate final Markdown, and display using ava.ui.serve_markdown().
+merge revision suggestions, generate final Markdown, render it to self-contained HTML, and serve it with ava.ui.serve().
 Title: "AI Coding Agent 2026 Competitive Landscape"
 Message no one — publishing IS the handoff.
 """
@@ -481,6 +481,6 @@ if __name__ == "__main__":
     #   ↓
     # wave6()
     #   ↓
-    # wave7()  ← ava.ui.serve_markdown()
+    # wave7()  ← render to self-contained HTML and serve with ava.ui.serve()
 
     log("Wave 1 spawned. Orchestrator going idle, watcher will wake me.")

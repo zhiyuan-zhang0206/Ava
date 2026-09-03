@@ -31,7 +31,7 @@ Your task: Use config_overlay to demonstrate Ava's multi-model switching capabil
    - Style differences
    - Presence of hallucination or errors
 
-4. Use `ava.ui.serve_markdown()` to display the comparison report, including:
+4. Render the comparison report to HTML and display it with `ava.ui.serve()`, including:
    - The original question
    - The full answers from the three models
    - Your comparative analysis

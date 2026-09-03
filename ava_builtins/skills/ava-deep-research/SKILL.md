@@ -190,8 +190,9 @@ citation-sourcing holes, not semantic truth; say so in the report's limitations.
 1. Write the report **from the state file**, never from memory.
 2. Every significant claim carries an inline numbered citation `[n]` resolving
    to the source list (format: `references/citation-discipline.md`).
-3. Deliver with `ava.ui.serve_markdown(report, name="<slug>")` — the
-   user-facing channel (HTML-rendered page). **Offer format choice in the
+3. Deliver by rendering the report to a self-contained HTML page with the
+   ava-ui markdown widget and serving it with `ava.ui.serve(<directory>, name="<slug>")`.
+   **Offer format choice in the
    delivery message**: A. the served HTML page link (default), B. the Markdown
    source path, C. any other format the user names (user ruling 2026-08-09:
    reports must offer format choice; HTML serve is the default channel). Report

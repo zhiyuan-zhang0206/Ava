@@ -13,18 +13,15 @@ directly.
 
 from __future__ import annotations
 
-__all_for_ava__ = ["Page", "close", "serve", "serve_markdown", "show"]
+__all_for_ava__ = ["Page", "close", "serve", "show"]
 
-import functools as _functools
 import math as _math
 import os as _os
 import re as _re
-import shutil as _shutil
 import time as _time
 import urllib.request as _urlopen
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 import ava
 import ava._boot
@@ -44,11 +41,6 @@ _PAGE_BASE_PORT = 10000
 # under load — long enough to cover the slowest observed pass (~30s,
 # 2026-08-28) while still failing loudly when the daemon is genuinely down.
 _SERVE_READY_TIMEOUT_S = 60.0
-
-# Temp dirs created by serve_markdown(), keyed by page name so close() can
-# clean them up. Lost on restart (in-process cache) — the daemon keeps serving
-# the disk content; the leftover dir under /tmp is reclaimed by the OS.
-_markdown_dirs: dict[str, str] = {}
 
 
 class PageError(Exception):
@@ -75,49 +67,6 @@ class Page:
 def _agent_page_port() -> int:
     """Return this agent's default page port."""
     return _PAGE_BASE_PORT + ava._boot.agent_id()
-
-
-def _markdown_widget_dir() -> Path:
-    """Directory of the markdown widget shipped alongside the SDK.
-
-    Lives under ``ava_builtins/skills/`` like every built-in skill asset, not
-    repo-root ``skills/`` — the ava_builtins move (Ava-2200) is what broke the
-    old relative path for serve_markdown.
-    """
-    return (
-        Path(__file__).resolve().parent.parent
-        / "ava_builtins"
-        / "skills"
-        / "ava-ui"
-        / "widgets"
-        / "markdown"
-    )
-
-
-@_functools.lru_cache(maxsize=1)
-def _markdown_parser() -> Any:
-    """The CommonMark + GFM parser shared by every serve_markdown page.
-
-    Built once and reused; markdown-it-py is a CommonMark-compliant parser
-    (unlike Python's `markdown`, whose fenced_code extension misses fenced
-    blocks nested inside list items and whose default underscore rules
-    treated intraword underscores as emphasis).
-    """
-    from markdown_it import MarkdownIt
-    from mdit_py_plugins.gfm import gfm_plugin
-
-    parser = MarkdownIt("commonmark", {"html": True, "linkify": True})
-    parser.use(gfm_plugin)
-    return parser
-
-
-def _render_markdown(content: str) -> str:
-    """Render CommonMark/GFM markdown to HTML for serve_markdown pages.
-
-    LaTeX ``$...$``/``$$...$$`` is left untouched — KaTeX auto-render on
-    the client does the math.
-    """
-    return _markdown_parser().render(content)
 
 
 def _row_to_page(row: dict) -> Page:
@@ -176,7 +125,7 @@ def _register_page(
 
     Closes any existing page first (one agent, one page), then writes the
     new row. `serve_dir` is the served directory the page_server daemon
-    reads — only serve()/serve_markdown() set it.
+    reads — only serve() sets it.
     """
     _validate_name(name)
     _close_existing()
@@ -247,8 +196,9 @@ def serve(
 
     Calling again auto-closes any existing page.
     A directory without `index.html` is not browsable: requests show a
-    placeholder because directory listings are disabled. Use
-    `ava.ui.serve_markdown()` for Markdown or include an `index.html`.
+    placeholder because directory listings are disabled. An `index.html` is
+    required; for Markdown, render it to self-contained HTML first with
+    the ava-ui markdown widget, then serve that directory.
 
     Args:
         dir: the directory to serve. A relative path is resolved against
@@ -285,56 +235,6 @@ def serve(
     return page
 
 
-def serve_markdown(
-    content: str,
-    name: str,
-    port: int | None = None,
-    title: str | None = None,
-    *,
-    ttl: float | None = None,
-) -> Page:
-    """Serve Markdown as a rendered HTML page (LaTeX math, code highlighting,
-    GFM tables) — same behavior as `serve`, including the port rules.
-    """
-    content = coerce_str(content, "content")
-    name = coerce_str(name, "name")
-    port = coerce_typed(port, "port", int, allow_none=True)
-    title = coerce_str(title, "title", allow_none=True)
-    ttl = coerce_typed(ttl, "ttl", (int, float), allow_none=True)
-    ttl = _validate_ttl(ttl)
-    _validate_name(name)
-
-    # Locate the Markdown widget shipped alongside the SDK
-    widget_dir = _markdown_widget_dir()
-    template = (widget_dir / "md.html").read_text()
-
-    # Build a temporary directory with the widget assets
-    import tempfile as _tempfile
-
-    tmpdir = Path(_tempfile.mkdtemp(prefix="ava_md_"))
-    _shutil.copytree(widget_dir / "vendor", tmpdir / "vendor")
-
-    # Server-side markdown -> HTML conversion (CommonMark-compliant)
-    rendered = _render_markdown(content)
-    # Also keep raw content (script-escaped) inside a hidden element for
-    # KaTeX auto-render; the pre-rendered HTML already contains the math
-    # delimiters, so the raw markdown is preserved for future use.
-    safe = _re.sub(r"</(script)", r"<\/\1", content, flags=_re.I)
-    html = template.replace("{{MARKDOWN_CONTENT}}", safe).replace("{{RENDERED_HTML}}", rendered)
-    (tmpdir / "index.html").write_text(html)
-
-    # Remove old dir for same name first (a re-serve replaces the old page)
-    if name in _markdown_dirs:
-        _shutil.rmtree(_markdown_dirs.pop(name), ignore_errors=True)
-
-    # Defer tracking the new dir until after serve() succeeds, so that
-    # _close_existing() -> close() does not delete the new tmpdir when
-    # the page name is reused.
-    result = serve(str(tmpdir), name, port, title, ttl=ttl)
-    _markdown_dirs[name] = str(tmpdir)
-    return result
-
-
 def _close_existing() -> None:
     """Close the agent's currently active page, if any.
 
@@ -360,10 +260,6 @@ def close(name: str) -> None:
     """Unregister the page (the platform stops its server)."""
     name = coerce_str(name, "name")
     _validate_name(name)
-
-    # Clean up any markdown temp dir created by serve_markdown()
-    if name in _markdown_dirs:
-        _shutil.rmtree(_markdown_dirs.pop(name), ignore_errors=True)
 
     try:
         _gateway_client.close_page(ava._boot.agent_id(), name)

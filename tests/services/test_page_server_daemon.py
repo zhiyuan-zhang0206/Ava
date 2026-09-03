@@ -7,7 +7,6 @@ import secrets
 import socket
 import subprocess
 import sys
-import tempfile
 import time
 from collections.abc import Iterator
 from pathlib import Path
@@ -523,15 +522,9 @@ def test_session_rolled_back_when_row_expires_during_create(
     """A row that expires in the window between the liveness re-check and the
     session_name write is rolled back too — the UPDATE's liveness condition
     matches the re-check, so an expired row never keeps a ghost session."""
-    fake_tmp = tmp_path / "os-tmp"
-    fake_tmp.mkdir()
-    monkeypatch.setattr(tempfile, "gettempdir", lambda: str(fake_tmp))
-    md_dir = fake_tmp / "ava_md_expired"
-    md_dir.mkdir()
-    (md_dir / "index.html").write_text("x")
     agent_id = spawn_agent()
     key = (agent_id, "mid-create-expire")
-    _insert_page_row(db_conn, agent_id, key[1], 12024, md_dir)
+    _insert_page_row(db_conn, agent_id, key[1], 12024, tmp_path)
     stale = psd._open_rows(sync_pool, _HOST)[0]
     with db_conn.cursor() as cur:
         cur.execute(
@@ -549,7 +542,6 @@ def test_session_rolled_back_when_row_expires_during_create(
 
     assert len(backend.new_calls) == 1
     assert backend.killed == [backend.new_calls[0][0]]
-    assert not md_dir.exists()
     assert managed == {}
     assert backoff[key] > time.monotonic()
 
@@ -817,57 +809,3 @@ def test_server_module_still_serves_a_tokenized_health_endpoint(tmp_path: Path) 
     finally:
         proc.terminate()
         proc.wait(timeout=2.0)
-
-
-# ── serve_markdown tmpdir cleanup (QA nit on PR #682) ────────────────────────
-
-
-def test_cleanup_markdown_tmpdir_removes_md_dir(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A serve_markdown temp dir (ava_md_ prefix under the OS temp dir) is
-    removed once its page is terminal — the daemon is the one party that
-    reaches the TTL-expiry path, where the agent's in-process cleanup never
-    runs."""
-    from services.page_server.daemon import _cleanup_markdown_tmpdir
-
-    fake_tmp = tmp_path / "os-tmp"
-    fake_tmp.mkdir()
-    monkeypatch.setattr(tempfile, "gettempdir", lambda: str(fake_tmp))
-    md_dir = fake_tmp / "ava_md_abcd1234"
-    md_dir.mkdir()
-    (md_dir / "index.html").write_text("x")
-    _cleanup_markdown_tmpdir(str(md_dir))
-    assert not md_dir.exists()
-
-
-def test_cleanup_markdown_tmpdir_never_touches_user_dir(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A real serve(dir) directory — no ava_md_ prefix — is never removed."""
-    from services.page_server.daemon import _cleanup_markdown_tmpdir
-
-    fake_tmp = tmp_path / "os-tmp"
-    fake_tmp.mkdir()
-    monkeypatch.setattr(tempfile, "gettempdir", lambda: str(fake_tmp))
-    user_dir = tmp_path / "reports"
-    user_dir.mkdir()
-    (user_dir / "index.html").write_text("x")
-    _cleanup_markdown_tmpdir(str(user_dir))
-    assert user_dir.exists()
-
-
-def test_cleanup_markdown_tmpdir_requires_os_tmp(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """An ava_md_-prefixed dir OUTSIDE the OS temp dir is not a serve_markdown
-    tmpdir (the prefix alone is not proof) — leave it alone."""
-    from services.page_server.daemon import _cleanup_markdown_tmpdir
-
-    fake_tmp = tmp_path / "os-tmp"
-    fake_tmp.mkdir()
-    monkeypatch.setattr(tempfile, "gettempdir", lambda: str(fake_tmp))
-    outside = tmp_path / "ava_md_looks-suspicious"
-    outside.mkdir()
-    _cleanup_markdown_tmpdir(str(outside))
-    assert outside.exists()

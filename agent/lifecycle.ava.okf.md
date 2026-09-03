@@ -19,7 +19,7 @@ Agent process lifecycle management—runs in the `finally` block of `main()` and
   - Exception → `"exception:<TypeName>"`
   - No exception → `"normal"` (terminate inbound go to END)
 - **Signal handlers** (`_install_lifecycle_signal_handlers`): SIGHUP / SIGTERM → `SystemExit("signal:NAME")`, ensuring the finally block runs.
-- **Exit notification**: `_notify_exit` → `POST /api/agents/{id}/exited` (gateway sets `terminated`, closes only agent-owned `ava.ui.show()` pages, and retains daemon-supervised `ava.ui.serve()` / `serve_markdown()` pages). `agent/loop.py:_route_process_end_notify` keeps the finally block within its statement budget.
+- **Exit notification**: `_notify_exit` → `POST /api/agents/{id}/exited` (gateway sets `terminated`, closes only agent-owned `ava.ui.show()` pages, and retains daemon-supervised `ava.ui.serve()` pages). `agent/loop.py:_route_process_end_notify` keeps the finally block within its statement budget.
 
 ## Key Dependencies
 

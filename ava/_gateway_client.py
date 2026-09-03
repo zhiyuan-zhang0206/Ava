@@ -789,7 +789,7 @@ def register_page(
 
     `serve_dir`: directory the page server serves — recorded so agent boot
     can re-serve a dead page server after resurrect/restart. Only
-    serve()/serve_markdown() set it; show() leaves it None.
+    serve() sets it; show() leaves it None.
     """
     body: dict = {"name": name, "port": port, "host": host}
     if title is not None:

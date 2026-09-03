@@ -7,9 +7,9 @@
 <!--
   Markdown widget (vanilla HTML version).
 
-  The page body is pre-rendered server-side via markdown-it-py
-  (CommonMark + GFM: tables / strikethrough / task lists) and placed into
-  #md-output directly. Client-side JS then enhances:
+  The page renders Markdown client-side with vendored marked.js + DOMPurify,
+  then enhances it with KaTeX + highlight.js. The {{MARKDOWN_CONTENT}} slot
+  holds raw Markdown inside #md-source. Client-side JS renders:
   - LaTeX inline `$...$` and display `$$...$$` (via KaTeX auto-render;
     delimiters are `$`/`$$` only — `\(`/`\)` is NOT used because this
     auto-render build's delimiter escaping matches a bare `(`/`)`, turning
@@ -18,9 +18,8 @@
     prefers-color-scheme; KaTeX auto-render ignores <pre>/<code> by default,
     so code blocks never get mangled as math)
 
-  Dependencies vendored locally in vendor/ (~750KB): KaTeX + highlight.js.
-  No CDN required.  marked.js + DOMPurify are still vendored but no longer
-  loaded — HTML is pre-rendered server-side.
+  Dependencies vendored locally in vendor/ (~750KB): marked.js + DOMPurify +
+  KaTeX + highlight.js. No CDN required.
 -->
 
 <link rel="stylesheet" href="vendor/katex.min.css">
@@ -64,9 +63,11 @@
 </head>
 <body>
 
-<div id="md-output">{{RENDERED_HTML}}</div>
+<div id="md-output"></div>
 <script type="text/markdown" id="md-source" hidden>{{MARKDOWN_CONTENT}}</script>
 
+<script src="vendor/marked.min.js"></script>
+<script src="vendor/purify.min.js"></script>
 <script src="vendor/katex.min.js"></script>
 <script src="vendor/auto-render.min.js"></script>
 <script src="vendor/highlight.min.js"></script>
@@ -74,9 +75,12 @@
 <script>
   function enhanceContent() {
     const out = document.getElementById('md-output');
-    if (!out) return;
+    const source = document.getElementById('md-source');
+    if (!out || !source) return;
 
-    // KaTeX math rendering — scans the pre-rendered HTML for $...$ and $$...$$
+    out.innerHTML = DOMPurify.sanitize(marked.parse(source.textContent));
+
+    // KaTeX math rendering — scans rendered HTML for $...$ and $$...$$
     if (typeof renderMathInElement !== 'undefined') {
       renderMathInElement(out, {
         delimiters: [
