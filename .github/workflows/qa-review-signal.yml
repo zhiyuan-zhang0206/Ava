@@ -1,0 +1,14 @@
+# Review events can select PR code. This signal has no write permission and
+# supplies no verdict; its completion triggers the default-branch evaluator,
+# which fetches all authoritative GitHub records itself.
+name: QA Review Signal
+on:
+  pull_request_review:
+    types: [submitted, edited, dismissed]
+permissions: {}
+jobs:
+  review-changed:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 1
+    steps:
+      - run: 'true'
