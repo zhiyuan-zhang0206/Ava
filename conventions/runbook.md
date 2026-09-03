@@ -1010,7 +1010,7 @@ turning into a memory wall at fleet scale:
   subscription per agent, with pgbouncer transaction pooling in front of the
   cluster's Postgres so the connection count does not scale 1:1 with fleet
   size (and hosted mode collapses both to one runner-shared pool).
-  [`agent/db.ava.okf.md`](../agent/db.ava.okf.md).
+  [`agent/db/db.ava.okf.md`](../agent/db/db.ava.okf.md).
 
 None of this claims memory stops mattering — it is the honest current floor.
 The next walls once memory is handled: the heartbeat's
