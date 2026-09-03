@@ -11,7 +11,7 @@ import hashlib
 import json
 import os
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
@@ -24,13 +24,14 @@ from cli.commands._release_selector import (
     pending_transaction,
     read_selector,
     select_pending_release,
+    selector_bytes,
 )
 from cli.commands._release_services import (
     PreparedService,
     prepare_normal_services,
     start_normal_service,
 )
-from cli.commands._update_bootstrap import _private_reference, probe_bootstrap
+from cli.commands._update_bootstrap import PreparedBootstrapHop, _private_reference, probe_bootstrap
 from services.agent_ops.bootstrap import (
     ObserverProjection,
     PreparedObservation,
@@ -45,9 +46,9 @@ from shared.managed_writer_activation import (
     pending_stage,
     require_pending_candidate_start,
 )
-from shared.managed_writer_barrier import EvidenceModel
+from shared.managed_writer_barrier import EvidenceModel, lock_rollout
 from shared.managed_writer_observation import ExpectedProcess, observe_process
-from shared.managed_writer_publication import PublishedUnit
+from shared.managed_writer_publication import CandidateUnitPlan, PublishedUnit, _locked_publication
 from shared.platform import file_lock
 from shared.runtime_release import ReleaseRejectedError
 from shared.session_backend import get_backend
@@ -81,6 +82,89 @@ class PreparedNormalRelease:
     services: tuple[PreparedService, ...]
     bootstrap: SessionRecord
     resume_generation: str
+
+
+def _preflight_pending_plan(plan: PreparedNormalRelease) -> None:
+    context = plan.context
+    previous = plan.request.previous_selector
+    expected = CandidateUnitPlan(
+        unit=plan.request.unit,
+        services=tuple(item.identity for item in plan.services),
+        previous_selector_digest=None
+        if previous is None
+        else hashlib.sha256(previous.encode()).hexdigest(),
+        selector_digest=hashlib.sha256(selector_bytes(plan.request.unit)).hexdigest(),
+    )
+    remaining = int((context.challenge.valid_until - datetime.now(UTC)).total_seconds())
+    if remaining < 2:
+        raise ReleaseRejectedError("normal plan has no pre-stop connection budget")
+    with (
+        psycopg.connect(
+            plan.projection.db_url.get_secret_value(),
+            autocommit=True,
+            connect_timeout=min(5, remaining),
+        ) as conn,
+        pending_transaction(conn, context),
+    ):
+        lock_rollout(conn, context.operation)
+        pending = _locked_publication(conn).pending
+        if (
+            pending is None
+            or pending.operation != context.operation
+            or pending.challenge != context.challenge.challenge
+            or pending.normal_start_plan is None
+            or expected not in pending.normal_start_plan.units
+        ):
+            raise ReleaseRejectedError(
+                "complete normal command/selector plan is absent before stop"
+            )
+        lock_rollout(conn, context.operation)
+
+
+def prepare_after_bootstrap(hop: PreparedBootstrapHop) -> PreparedNormalRelease:
+    """Prepare the optional normal continuation BEFORE the same updater stops A."""
+    reference = hop.request.normal_release_path
+    if reference is None:
+        raise ReleaseRejectedError("normal continuation reference is absent")
+    path = _private_reference(reference, Path(hop.candidate.expected.home))
+    request = NormalReleaseRequest.model_validate_json(regular_bytes(path))
+    context = read_prepared_context(
+        _private_reference(request.context_path, Path(request.unit.home))
+    )
+    if context != hop.candidate or request.predecessor != hop.request.predecessor:
+        raise ReleaseRejectedError("normal continuation belongs to a different bootstrap operation")
+    services = prepare_normal_services(request.unit, context.schema_digest)
+    if not any(service.identity.session == "ava-ops" for service in services):
+        raise ReleaseRejectedError("normal continuation lacks same-endpoint ops")
+    previous = request.previous_selector.encode() if request.previous_selector is not None else None
+    if read_selector(Path(request.unit.home)) != previous:
+        raise ReleaseRejectedError("normal selector predecessor differs before bootstrap stop")
+    record = SessionRecord(
+        **json.loads(regular_bytes(Path(request.unit.home) / "run/sessions/ava-ops.json"))
+    )
+    prepared = PreparedNormalRelease(path, request, context, hop.projection, services, record, "")
+    _preflight_pending_plan(prepared)
+    return prepared
+
+
+def continue_after_bootstrap(
+    hop: PreparedBootstrapHop, plan: PreparedNormalRelease, generation: str
+) -> int:
+    """Same process/flock/operation: no second dispatcher or bootstrap write route."""
+    retained = json.loads(regular_bytes(updater_handoff.state_path()))
+    if (
+        retained["generation"] != generation
+        or retained["bootstrap_hop"]["stage"] != "candidate_ready"
+    ):
+        raise ReleaseRejectedError(
+            "normal continuation requires the actual candidate-ready handoff"
+        )
+    probe_bootstrap(plan.context, plan.projection, verified_image=hop.image)
+    path = Path(plan.request.unit.home) / "run/sessions/ava-ops.json"
+    record = SessionRecord(**json.loads(regular_bytes(path)))
+    return execute_normal_release(
+        replace(plan, bootstrap=record, resume_generation=generation), generation
+    )
 
 
 def prepare_normal_release(path: Path) -> PreparedNormalRelease:
@@ -143,9 +227,11 @@ def prepare_normal_release(path: Path) -> PreparedNormalRelease:
         != "alive"
     ):
         raise ReleaseRejectedError("verified bootstrap process disappeared")
-    return PreparedNormalRelease(
+    prepared = PreparedNormalRelease(
         path, request, context, projection, services, bootstrap, handoff.generation
     )
+    _preflight_pending_plan(prepared)
+    return prepared
 
 
 def _journal(generation: str, value: NormalReleaseJournal) -> None:

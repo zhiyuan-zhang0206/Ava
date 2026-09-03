@@ -62,6 +62,7 @@ class BootstrapHopRequest(EvidenceModel):
     recovery_context: str
     inventory_receipt: str
     predecessor: ExpectedProcess
+    normal_release_path: str | None = None
 
 
 class BootstrapPhase(EvidenceModel):

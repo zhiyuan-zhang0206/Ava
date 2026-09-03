@@ -84,7 +84,10 @@ class CandidateUnitPlan(EvidenceModel):
         if not self.unit.home.startswith("/"):
             raise ValueError("normal candidate startup has no Windows platform adapter")
         for service in self.services:
-            if service.session.startswith("ava-agent-") and service.session != "ava-agent-host":
+            if service.session.startswith("ava-agent-") and service.session not in {
+                "ava-agent-host",
+                "ava-agent-runner-watchdog",
+            }:
                 raise ValueError("normal service startup cannot authorize an agent session")
             for path in (service.executable, service.entrypoint):
                 if not path.startswith(root) or ".." in path.split("/"):

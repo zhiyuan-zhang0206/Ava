@@ -68,6 +68,7 @@ def _run_agent_runner_self_update(  # noqa: PLR0915 — one existing lock/handof
     detached pane so a mid-flow `ava stop` does not take itself out.
     """
     prepared = None
+    normal_continuation = None
     if bootstrap_request is not None:
         from cli.commands._update_bootstrap import prepare_bootstrap_hop
 
@@ -81,6 +82,10 @@ def _run_agent_runner_self_update(  # noqa: PLR0915 — one existing lock/handof
         ):
             raise ValueError("prepared bootstrap hop cannot use source-update flags")
         prepared = prepare_bootstrap_hop(bootstrap_request)
+        if prepared.request.normal_release_path is not None:
+            from cli.commands._update_normal_release import prepare_after_bootstrap
+
+            normal_continuation = prepare_after_bootstrap(prepared)
 
     from shared import ui_update_state, updater_handoff
     from shared.host_deploy_state import (
@@ -175,7 +180,12 @@ def _run_agent_runner_self_update(  # noqa: PLR0915 — one existing lock/handof
 
                 if owned_generation is None:
                     raise RuntimeError("bootstrap updater has no owned handoff generation")
-                return execute_bootstrap_hop(prepared, owned_generation)
+                result = execute_bootstrap_hop(prepared, owned_generation)
+                if normal_continuation is not None and result == RESTART_DECLINED_EXIT_CODE:
+                    from cli.commands._update_normal_release import continue_after_bootstrap
+
+                    return continue_after_bootstrap(prepared, normal_continuation, owned_generation)
+                return result
             return _run_agent_runner_self_update_inner(
                 repo,
                 target_sha=target_sha,
