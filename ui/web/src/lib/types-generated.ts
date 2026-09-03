@@ -248,8 +248,12 @@ export interface paths {
          *
          *     ``all`` is the compatibility default for SDK / ops callers.
          *     Frontend fleet/sidebar readers request ``live`` so Postgres excludes
-         *     terminated history before evaluating the per-agent snapshot lookups.
-         *     The sidebar's explicit history toggle requests ``terminated`` separately.
+         *     terminated history before evaluating the per-agent snapshot lookups, and
+         *     request ``terminated`` alongside it: the sidebar's spawn tree needs the
+         *     terminated rows as lineage joints (an alive child of a terminated parent
+         *     re-parents under the nearest visible ancestor — #312 orphan regression).
+         *     Every scope returns raw spawner / fork-source truth; the show-terminated
+         *     UI toggle only controls rendering, never the fetch.
          *
          *     ``fields=full`` preserves the historical response. ``fields=summary`` is
          *     the reduced SQL projection used by roster consumers; ``fields=compact``
