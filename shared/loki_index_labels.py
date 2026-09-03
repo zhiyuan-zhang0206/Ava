@@ -10,11 +10,14 @@ stream row can lack the indexed labels.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
 from enum import StrEnum
 from typing import cast
+
+from shared.events.contract import lineage_event_names
 
 EVENT_STREAM_SERVICE_NAME = "unknown_service"
 
@@ -52,6 +55,17 @@ WAL_DISK_FULL_THRESHOLD = 0.95
 # fleet growth while still blocking pathological ad-hoc fan-outs (the
 # upstream default is 500).
 LOKI_MAX_QUERY_SERIES = 20000
+# Lineage per-stream retention (design 2026-09-02 §3B, user ruling: lineage
+# events are retained permanently). 876000h = 100 years is how "permanent" is
+# spelled on the Loki plane — `retention_stream` periods take a duration, with
+# no infinity and a 24h floor. The deployed rule is derived from the registry's
+# `retention_class="lineage"` declarations, not hand-listed, and pinned by
+# `validate_loki_deploy_config` below.
+LINEAGE_RETENTION_PERIOD = "876000h"
+# The one selector shape this module recognizes as the lineage rule: a bare
+# `event_name` alternation over registry names (charset `[a-z0-9_]` per the
+# registry naming rules, so no LogQL regex metacharacter can appear inside).
+_LINEAGE_RETENTION_SELECTOR = re.compile(r'^\{event_name=~"([a-z0-9_|]+)"\}$')
 LEGACY_READ_MARGIN = timedelta(minutes=10)
 LEGACY_READ_EXPIRES_AT = INDEX_LABEL_CUTOVER_AT + EVENT_STREAM_RETENTION + LEGACY_READ_MARGIN
 _LOGQL_REGEX_META = frozenset(".\\*+?()|[]{}^$")
@@ -117,8 +131,57 @@ def _retention_period_str() -> str:
     return f"{int(EVENT_STREAM_RETENTION.total_seconds() // 3600)}h"
 
 
+def _validate_lineage_retention(limits_config: Mapping[str, object]) -> None:
+    """Reject a deployed config whose lineage retention rule drifted.
+
+    The lineage class is permanent by ruling, and this per-stream override is
+    the only thing keeping it out of the global 168h bucket. The 2026-08-20
+    archive loss is exactly what an unpinned override costs: the rule landed
+    nine days after the global retention had already deleted the data. So the
+    rule's presence, its event set (derived from the registry), and its period
+    are all checked rather than trusted to review.
+
+    The selector's alternation is compared as a SET: Loki's label regex is
+    fully anchored, so the order the operator wrote the names in carries no
+    meaning and must not be a source of false drift.
+    """
+
+    raw_streams = limits_config["retention_stream"]
+    if not isinstance(raw_streams, Sequence) or isinstance(raw_streams, str):
+        raise TypeError("Loki limits_config.retention_stream must be a sequence of rules")
+    expected = lineage_event_names()
+    for raw_rule in cast(Sequence[object], raw_streams):
+        if not isinstance(raw_rule, Mapping):
+            raise TypeError("Loki limits_config.retention_stream entries must be mappings")
+        rule = cast(Mapping[str, object], raw_rule)
+        selector = _LINEAGE_RETENTION_SELECTOR.match(str(rule["selector"]))
+        if selector is None:
+            continue
+        declared = frozenset(selector.group(1).split("|"))
+        if declared != expected:
+            raise ValueError(
+                "Loki lineage retention_stream selector must match the registry's "
+                f"retention_class='lineage' names {sorted(expected)}, got {sorted(declared)}"
+            )
+        period = rule["period"]
+        if period != LINEAGE_RETENTION_PERIOD:
+            raise ValueError(
+                "Loki lineage retention_stream period must be "
+                f"{LINEAGE_RETENTION_PERIOD!r}, got {period!r}"
+            )
+        return
+    raise ValueError(
+        "Loki limits_config.retention_stream must carry the lineage rule "
+        f'{{event_name=~"..."}} over {sorted(expected)} at {LINEAGE_RETENTION_PERIOD}'
+    )
+
+
 def validate_loki_deploy_config(config: Mapping[str, object]) -> None:
-    """Reject rendered Loki retention, query-capacity, or WAL-throttle drift."""
+    """Reject rendered Loki retention, query-capacity, or WAL-throttle drift.
+
+    Covers the global retention period, the per-stream lineage override, query
+    capacity, and the WAL throttle. Every rendered native config passes through
+    here at converge time (`cli/commands/_lgtm_native.py`)."""
 
     raw_limits_config = config["limits_config"]
     raw_querier = config["querier"]
@@ -160,6 +223,7 @@ def validate_loki_deploy_config(config: Mapping[str, object]) -> None:
             "Loki ingester.wal.disk_full_threshold must be "
             f"{WAL_DISK_FULL_THRESHOLD!r}, got {threshold!r}"
         )
+    _validate_lineage_retention(limits_config)
 
 
 def escape_logql_label(value: object) -> str:
