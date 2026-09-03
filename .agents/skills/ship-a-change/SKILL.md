@@ -52,29 +52,31 @@ for your own feature branch:
 git push --force-with-lease
 ```
 
-**Why not `--squash`?** Squash-merging discards the individual commit
-structure on the branch. Rebase-merging preserves it while still producing
-a linear history.
+**Merge method is squash.** The Trunk queue squashes each PR into one
+commit on `main` (user ruling: keep squash). The branch keeps its own commit
+structure for review; `main` gets one commit per PR.
 
 ### Merge queue (mandatory)
 
-PRs merge through the **Mergify** merge queue (`.mergify.yml`) — not by
-direct merge. **QA gate:** the queue's merge conditions require the
+PRs merge through the **Trunk** merge queue — not by direct merge.
+(Historical: Mergify was retired 2026-09-02; `.mergify.yml` has no queue
+rules and `@mergifyio queue` immediately dequeues.) **QA gate:** the queue's merge conditions require the
 `qa-approved` label — a PR without it is never merged, even with green CI
 and an enqueued position (it waits in the queue until QA labels it). The
 label is applied by QA / the maintainers only, and only on a final PASS /
 PASS-with-nits conclusion; BLOCK / CONDITIONAL never carry it and a later
 BLOCK removes it immediately. Authors never self-apply the label; any new
 commit after a PASS still requires a delta re-review before the label is
-(re)applied. Enqueuing is commenting `@mergifyio queue` on the PR (or
-`.venv/bin/python scripts/ci_utils.py <PR#> --wait --merge`, which posts that
-comment for you once CI is green). Mergify batches queued PRs into one
-speculative draft verification: a `mergify/merge-queue/*` branch carrying the
-combined tree, CI running on it via the normal `pull_request` event (ci.yml's
-draft-skip exempts that branch prefix). On green every PR in the batch lands
-as a rebase merge (linear history); a red batch auto-bisects to evict the
-culprit. **You no longer rebase-and-repoll when `main` moves**: the queue
-verifies the combined tree that actually lands.
+(re)applied. Submitting is
+`.venv/bin/python scripts/ci_utils.py <PR#> --wait --merge` (requires
+`~/.trunk/api-token`; ci_utils polls to green, submits, then waits for the
+queue to land the PR). Trunk batches queued PRs into one test draft
+verification: a `trunk-merge/pr-<n>/...` branch carrying the combined tree,
+CI running on it via the normal `pull_request` event (ci.yml's draft-skip
+exempts that branch prefix). On green every PR in the batch lands (squash
+merge); a red batch auto-bisects to evict the culprit. **You no longer
+rebase-and-repoll when `main` moves**: the queue verifies the combined tree
+that actually lands.
 
 Still on you:
 - **Conflicts** — the queue cannot rebase a conflicting PR. Resolve locally
@@ -123,13 +125,13 @@ Still on you:
    fires on red and the PR can sit failed until the watcher times out.
    `check_ci()` (and the reference watcher) report FAILED as an explicit
    verdict instead.
-7. **Enqueue** — `.venv/bin/python scripts/ci_utils.py <PR#> --wait --merge`
-   (polls to green, enqueues, then waits for Mergify to land the PR), or
-   manually comment `@mergifyio queue` on the PR once CI is green. No
-   merge-base check and no rebase-and-repoll loop: Mergify rebases onto the
-   latest `main` and re-runs CI on the rebased head before landing it.
-   A PR Mergify cannot rebase (conflict) is bounced back — `git fetch
-   origin main && git rebase origin/main`, force-push, re-enqueue.
+7. **Submit** — `.venv/bin/python scripts/ci_utils.py <PR#> --wait --merge`
+   (polls to green, submits to the Trunk queue, then waits for it to land).
+   No merge-base check and no rebase-and-repoll loop: the queue tests the
+   combined tree on the latest `main`. A conflicting PR is bounced — `git
+   fetch origin main && git rebase origin/main`, force-push, resubmit. A
+   failed queue attempt on the same head SHA is not retried by Trunk
+   (instant-fail): change the SHA (rebase) before resubmitting.
 8. Verify it landed (when not using `--merge`): `gh pr view <PR#>` →
    state `MERGED`; the queue may take 10-30 min. Before removing the
    worktree, run `python scripts/check_worktree_remove.py <path>` from the
@@ -139,7 +141,7 @@ Still on you:
    issue #194) dies silently when the worktree's `.venv` disappears, and
    the schedule's DB row keeps claiming `running`. Then `git worktree
    remove <path>` and delete the remote branch (`git push origin --delete
-   <branch>`) to clean up — Mergify does not auto-delete branches.
+   <branch>`) to clean up — Trunk does not always auto-delete branches.
 
 Exception: skip PR only when the user explicitly says "push directly".
 
