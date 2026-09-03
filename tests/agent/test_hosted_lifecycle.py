@@ -212,10 +212,10 @@ async def test_hosted_force_cannot_be_undone_by_prior_restart(
     ).fetchone() == ("done", applied, None, "force_terminate")
     assert db_conn.execute(
         "SELECT id,status FROM inbound_messages WHERE id IN (%s,%s) ORDER BY id", (force, later)
-    ).fetchall() == [(force, "pending"), (later, "pending")]
+    ).fetchall() == [(force, "pending" if applied else "claimed"), (later, "pending")]
     assert db_conn.execute(
         "SELECT status,lifecycle_command_id FROM agents_meta WHERE id=%s", (agent_id,)
-    ).fetchone() == ("terminated", None)
+    ).fetchone() == ("terminated", None if applied else force)
 
 
 async def test_stale_unapplied_pointer_closes_without_retargeting(

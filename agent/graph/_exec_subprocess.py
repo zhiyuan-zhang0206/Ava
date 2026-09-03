@@ -379,13 +379,19 @@ def _write_request_failure(
 
 
 def _finish_request_evidence(
-    request_path: Path, result_path: Path, gate: Path | None, *, settled: bool
+    request_path: Path,
+    result_path: Path,
+    gate: Path | None,
+    expected: object | None,
+    *,
+    settled: bool,
 ) -> None:
     scope = current_hosted_resources()
     if scope is not None:
         if not settled:
             return
-        scope.complete(request_path, scope.unresolved[request_path])
+        if not scope.complete(request_path, expected):
+            return
     for path in (request_path, result_path, gate):
         if path is not None:
             with contextlib.suppress(FileNotFoundError):
@@ -469,7 +475,7 @@ async def _run_in_subprocess(
         return request_error, None
 
     stream = StreamingTextIO()
-    proc: subprocess.Popen[bytes] | None = None
+    domain: _exec_process.ExecProcessDomain | None = None
     reader: threading.Thread | None = None
     root_exit_task: asyncio.Task[None] | None = None
     reap_task: asyncio.Task[int] | None = None
@@ -589,7 +595,7 @@ async def _run_in_subprocess(
         raise
     finally:
         _finish_request_evidence(
-            request_path, result_path, windows_job_gate, settled=resources_settled
+            request_path, result_path, windows_job_gate, domain, settled=resources_settled
         )
 
 

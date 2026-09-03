@@ -51,9 +51,9 @@ _TURN_INCARNATION: ContextVar[RuntimeIncarnation | None] = ContextVar(
 class HostedTurnResources:
     """Actual unresolved domains held by one turn Task, never by the model cache."""
 
-    unresolved: dict[Path, object | None] = field(default_factory=dict)
+    unresolved: dict[Path, object | None] = field(default_factory=dict[Path, object | None])
     changed: asyncio.Event = field(default_factory=asyncio.Event)
-    completions: set[asyncio.Task[None]] = field(default_factory=set)
+    completions: set[asyncio.Task[None]] = field(default_factory=set[asyncio.Task[None]])
 
     def complete(self, request: Path, expected: object | None) -> bool:
         """Only the original resource owner may discharge its exact entry."""
