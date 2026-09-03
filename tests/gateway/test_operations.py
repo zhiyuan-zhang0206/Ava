@@ -11,8 +11,9 @@ endpoint smoke tests live in tests/gateway/test_cluster_endpoints.py.
 from __future__ import annotations
 
 import re
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
+import psycopg
 import pytest
 from pydantic import ValidationError
 
@@ -253,17 +254,25 @@ class TestSpawnPrechecksBlocking:
 
 
 async def test_restart_agent_op_terminated_short_circuits(
-    monkeypatch: pytest.MonkeyPatch, stub_pool: object
+    monkeypatch: pytest.MonkeyPatch, db_conn: psycopg.Connection
 ) -> None:
-    from shared.agents import AgentStatus
+    from tests.conftest import spawn_agent
+    from tests.gateway.test_agents_internals import _test_pool
 
-    monkeypatch.setattr(ops_lifecycle, "get_agent_status", lambda _aid: AgentStatus.TERMINATED)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-    resp = await ops_lifecycle.restart_agent_op(
-        9,
-        RestartAgentRequest(source="user"),
-        stub_pool,  # type: ignore[arg-type]
-    )
+    agent_id = spawn_agent()
+    db_conn.execute("UPDATE agents_meta SET status='terminated' WHERE id=%s", (agent_id,))
+    db_conn.commit()
+    wake = AsyncMock()
+    monkeypatch.setattr(ops_lifecycle, "publish_inbound_arrived", wake)
+    with _test_pool() as pool:
+        resp = await ops_lifecycle.restart_agent_op(
+            agent_id, RestartAgentRequest(source="user"), pool
+        )
     assert resp.status == "already_terminated"
+    wake.assert_not_awaited()
+    assert db_conn.execute(
+        "SELECT count(*) FROM inbound_messages WHERE agent_id=%s AND kind='restart'", (agent_id,)
+    ).fetchone() == (0,)
 
 
 @pytest.mark.asyncio
