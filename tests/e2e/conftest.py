@@ -241,6 +241,7 @@ def _e2e_process_env(  # noqa: PLR0915 -- one cohesive env-layering + restore se
     # raises.
     (_AVA_HOME / "machine_name").write_text(f"e2e-{_E2E_SUFFIX}")
     (_AVA_HOME / "machine_serve_agent_runner").write_text("true")
+    (_AVA_HOME / "machine_serve_gateway").write_text("true")
     # Set the identity env explicitly: the host operator's real ~/.ava/.env may
     # have exported AVA_MACHINE_NAME / AVA_MACHINE_SERVE_* (and `_resolve_*` reads
     # env before the file), which would leak the host's identity (e.g. name=test-host)
@@ -248,17 +249,13 @@ def _e2e_process_env(  # noqa: PLR0915 -- one cohesive env-layering + restore se
     # the host's name instead of the e2e machine registered below.
     os.environ["AVA_MACHINE_NAME"] = f"e2e-{_E2E_SUFFIX}"
     os.environ["AVA_MACHINE_SERVE_AGENT_RUNNER"] = "true"
-    os.environ.pop("AVA_MACHINE_SERVE_GATEWAY", None)
-    # The e2e gateway process is agent-runner-only (serve_gateway deliberately
-    # off so agent spawns stay local), so its Settings build would fetch from
-    # itself before it is up. The suite's cluster-scoped values are pinned in
-    # the env + the e2e home .env below — skip the fetch for every e2e process
-    # (gateway, ops, daemons). Spawned AGENTS do not inherit this: cli.main only
-    # sets it for maintenance verbs and shared.session_env drops it from agent envs,
-    # so an e2e agent still exercises the runner fetch path against the live
-    # e2e gateway.
+    os.environ["AVA_MACHINE_SERVE_GATEWAY"] = "true"
+    # This home owns both the gateway config and its local runner, like the
+    # production single-box shape. Calling it a pure runner while handing ops
+    # an owner URL would bypass the authenticated runner projection contract.
+    # Keep the maintenance fetch opt-out for the fixture's subprocess setup.
     os.environ["AVA_CONFIG_FETCH"] = "skip"
-    # agent subprocesses reach the e2e gateway via gateway_api_base() (agent-runner).
+    # Agent subprocesses reach the e2e gateway via gateway_api_base().
     os.environ["AVA_GATEWAY_URL"] = GATEWAY_URL
     # The restarter daemon (services/restarter/daemon.py) gates respawn on
     # `_gateway_healthy()` which probes settings.services.gateway_health_url. Default is

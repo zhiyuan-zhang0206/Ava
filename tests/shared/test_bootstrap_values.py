@@ -10,7 +10,13 @@ from shared.envfile import upsert_env
 
 
 def _write_runner_password(home: Path) -> None:
-    upsert_env(home / ".env", {"AVA_RUNNER_DB_PASSWORD": "runner-password"})
+    upsert_env(
+        home / ".env",
+        {
+            "AVA_DB_URL": str(config.settings.data_plane.db_url),
+            "AVA_RUNNER_DB_PASSWORD": "runner-password",
+        },
+    )
 
 
 def test_bootstrap_values_use_env_aliases_and_skip_unset() -> None:
@@ -191,6 +197,7 @@ def test_bootstrap_keeps_existing_reachable_url_host(
     # parts-built, scanner-safe (same convention as tests/cli/test_converge.py)
     host_url = f"postgresql://ava_main:{'sek'}@10.0.0.2:5433/ava_main"
     monkeypatch.setattr(dp, "db_url", host_url)
+    upsert_env(tmp_path / ".env", {"AVA_DB_URL": host_url})
 
     vals = config.bootstrap_config_values()
     served, owner = urlsplit(vals["AVA_DB_URL"]), urlsplit(host_url)
