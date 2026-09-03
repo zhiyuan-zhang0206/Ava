@@ -178,6 +178,55 @@ class SandboxPostgresIdentity:
     data_directory: str
 
 
+def _log_tail(path: Path, limit: int = 4000) -> str:
+    """Bounded tail of a postmaster log, to ride with an error before cleanup."""
+    try:
+        tail = path.read_text(errors="replace").strip()
+    except OSError:
+        return ""
+    if len(tail) > limit:
+        tail = f"\u2026{tail[-limit:]}"
+    return tail
+
+
+def _start_sandbox_postgres(
+    pg_ctl: Path, pgdata: Path, options: str, log_path: Path, timeout: int
+) -> None:
+    """pg_ctl -w start with -l and an explicit -t bound.
+
+    -l is required, not cosmetic: the sandbox postmaster inherits pg_ctl's
+    stdout, so a capture_output wait never sees EOF while the sandbox lives —
+    activation #8/#9 hung the full 900 s on a postmaster that was already
+    ready (pg_ctl had printed "server started"). -l redirects the postmaster
+    to the log file, so pg_ctl exits on readiness; the log also keeps the
+    postmaster's own output for failure diagnostics after the run root is
+    cleaned. -t mirrors the executor's own timeout so a slow recovery is
+    reported by pg_ctl (rc 1 + log tail) instead of a blind kill.
+    """
+    try:
+        _run(
+            [
+                str(pg_ctl),
+                "-D",
+                str(pgdata),
+                "-l",
+                str(log_path),
+                "-t",
+                str(timeout),
+                "-o",
+                options,
+                "-w",
+                "start",
+            ],
+            timeout=timeout,
+        )
+    except Exception as exc:
+        detail = _log_tail(log_path)
+        if detail:
+            raise RestoreProofError(f"{exc}; sandbox postmaster log tail: {detail}") from exc
+        raise
+
+
 def _sandbox_identity(pgdata: Path) -> SandboxPostgresIdentity:
     pid_path = pgdata / "postmaster.pid"
     try:
@@ -295,17 +344,12 @@ class IsolatedPostgresRestoreExecutor:
                 sandbox_pgdata=str(pgdata.resolve()),
                 expected_sandbox_pgid=os.getpgrp(),
             )
-            _run(
-                [
-                    str(self._pg_ctl),
-                    "-D",
-                    str(pgdata),
-                    "-o",
-                    options,
-                    "-w",
-                    "start",
-                ],
-                timeout=self._timeout,
+            _start_sandbox_postgres(
+                self._pg_ctl,
+                pgdata,
+                options,
+                run_root / "sandbox-postgres.log",
+                self._timeout,
             )
             sandbox = _sandbox_identity(pgdata)
             if sandbox.pgid != os.getpgrp():
