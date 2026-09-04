@@ -11,7 +11,8 @@ tags:
 
 ## What it is
 The executor layer of the computer-use capability (task #1101). One
-per-machine daemon (`services/computer/mcp_daemon.py`, ServiceSpec session
+per-machine daemon (the `services/computer` module family: `mcp_daemon.py`,
+`execute.py`, `ocr_text.py`, `screen.py`, and `errors.py`; ServiceSpec session
 `computer-mcp`) sits between agents and the desktop:
 
 - every action executes through the signed permissions helper
@@ -56,7 +57,8 @@ agent execute_code
   -> ava.mcps.computer_use.<tool>        [ava/mcps.py — generic client]
   -> mcp-daemon                          [ava/_mcps_daemon.py, shared="computer_use"]
   -> ava/_mcp_computer.py (direct dial, per-connection socket)
-  -> services/computer/mcp_daemon.py     [serialize + audit + execute]
+  -> services/computer/{mcp_daemon,execute,ocr_text,screen,errors}.py
+                                         [serialize + audit + execute]
   -> services/permissions_helper.client  [the one TCC grant-holder]
 ```
 `agent_id` rides the request envelope (`ava/mcps.py` stamps it from

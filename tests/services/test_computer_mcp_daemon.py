@@ -18,8 +18,12 @@ from typing import Any
 import pytest
 
 import services.computer.mcp_daemon as daemon_mod
+import services.computer.ocr_text as ocr_text_mod
+import services.computer.screen as screen_mod
+from services.computer.errors import ComputerUseError
 from services.computer.mcp_daemon import ComputerMcpDaemon
 from services.computer.protocol import Request, Response
+from services.permissions_helper.client import PermissionsHelperError
 
 
 def _daemon() -> ComputerMcpDaemon:
@@ -212,7 +216,7 @@ async def test_click_executes_and_converts_coordinates(
     audit_log: list,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
     monkeypatch: pytest.MonkeyPatch,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
 ) -> None:
-    monkeypatch.setattr(daemon_mod, "_snapshot_path", lambda _agent_id: "/tmp/x.png")  # noqa: S108  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(screen_mod, "_snapshot_path", lambda _agent_id: "/tmp/x.png")  # noqa: S108  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     d = _daemon()
     resp = await _call(d, "click", {"x": 100, "y": 200})
     assert resp["ok"] is True
@@ -226,7 +230,7 @@ async def test_snapshot_returns_path_and_geometry(
     monkeypatch: pytest.MonkeyPatch,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
 ) -> None:
     monkeypatch.setattr(
-        daemon_mod,
+        screen_mod,
         "_snapshot_path",
         lambda _agent_id: "/tmp/snap-test.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     )
@@ -254,7 +258,7 @@ async def test_snapshot_and_click_measure_scale_not_helper_claim(
     fh.screen = {"x": 0.0, "y": 0.0, "w": 1920.0, "h": 1080.0, "scale": 2.0}  # stale claim
     fh.png_size = (1920, 1080)
     monkeypatch.setattr(
-        daemon_mod,
+        screen_mod,
         "_snapshot_path",
         lambda _agent_id: "/tmp/snap-1x.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     )
@@ -282,7 +286,7 @@ async def test_snapshot_measures_scale_on_2x_and_converts_ax(
     ax geometry into physical pixels (the click space)."""
     fh = fake_helper
     monkeypatch.setattr(
-        daemon_mod,
+        screen_mod,
         "_snapshot_path",
         lambda _agent_id: "/tmp/snap-2x.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     )
@@ -315,7 +319,7 @@ async def test_snapshot_include_ocr_adds_text_boxes(
     monkeypatch: pytest.MonkeyPatch,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
 ) -> None:
     monkeypatch.setattr(
-        daemon_mod,
+        screen_mod,
         "_snapshot_path",
         lambda _agent_id: "/tmp/snap-ocr-test.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     )
@@ -336,7 +340,7 @@ async def test_snapshot_include_ocr_failure_degrades(
     monkeypatch: pytest.MonkeyPatch,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
 ) -> None:
     monkeypatch.setattr(
-        daemon_mod,
+        screen_mod,
         "_snapshot_path",
         lambda _agent_id: "/tmp/snap-ocr-fail.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     )
@@ -357,7 +361,7 @@ async def test_snapshot_without_include_ocr_skips_ocr(
     monkeypatch: pytest.MonkeyPatch,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
 ) -> None:
     monkeypatch.setattr(
-        daemon_mod,
+        screen_mod,
         "_snapshot_path",
         lambda _agent_id: "/tmp/snap-plain.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     )
@@ -419,7 +423,7 @@ def _capture_count(fh: FakeHelper) -> int:
 def test_match_ocr_boxes_contains_is_casefold_and_reading_order() -> None:
     """contains is a case-insensitive substring test; results come in reading
     order (top-to-bottom, then left-to-right) with a center and an index."""
-    matches = daemon_mod._match_ocr_boxes(_OCR_BOXES, "search", "contains")
+    matches = ocr_text_mod._match_ocr_boxes(_OCR_BOXES, "search", "contains")
     assert [m["text"] for m in matches] == ["Search", "search"]
     assert [m["index"] for m in matches] == [0, 1]
     # "Search" box: x=500 y=100 w=80 h=24 → center (540, 112)
@@ -435,21 +439,21 @@ def test_match_ocr_boxes_exact_is_full_text_casefold() -> None:
     """exact must equal the WHOLE box text (case-insensitively) — a box that
     merely contains the query does not match."""
     needle = "\u4f60\u597d"  # "hello" in CJK
-    exact = daemon_mod._match_ocr_boxes(_OCR_BOXES, needle, "exact")
+    exact = ocr_text_mod._match_ocr_boxes(_OCR_BOXES, needle, "exact")
     assert [m["text"] for m in exact] == [needle]
-    contains = daemon_mod._match_ocr_boxes(_OCR_BOXES, needle, "contains")
+    contains = ocr_text_mod._match_ocr_boxes(_OCR_BOXES, needle, "contains")
     # reading order: the longer "hello world" box (y=50) precedes "hello" (y=400)
     assert [m["text"] for m in contains] == ["\u4f60\u597d\u4e16\u754c", needle]
     # exact is case-insensitive too: "hello" matches both "Hello" and "hello"
-    casefolded = daemon_mod._match_ocr_boxes(_OCR_BOXES, "hello", "exact")
+    casefolded = ocr_text_mod._match_ocr_boxes(_OCR_BOXES, "hello", "exact")
     assert [m["text"] for m in casefolded] == ["Hello"]
 
 
 def test_validate_text_query_rejects_blank_and_unknown_mode() -> None:
-    with pytest.raises(daemon_mod.ComputerUseError, match="non-empty"):
-        daemon_mod._validate_text_query("   ", "contains")
-    with pytest.raises(daemon_mod.ComputerUseError, match="'contains' or 'exact'"):
-        daemon_mod._validate_text_query("x", "regex")
+    with pytest.raises(ComputerUseError, match="non-empty"):
+        ocr_text_mod._validate_text_query("   ", "contains")
+    with pytest.raises(ComputerUseError, match="'contains' or 'exact'"):
+        ocr_text_mod._validate_text_query("x", "regex")
 
 
 async def test_find_text_returns_matching_boxes(
@@ -461,7 +465,7 @@ async def test_find_text_returns_matching_boxes(
     """find_text captures once, OCRs, and reports every match with
     physical-pixel geometry (the click space, no scale conversion)."""
     monkeypatch.setattr(
-        daemon_mod,
+        screen_mod,
         "_snapshot_path",
         lambda _agent_id: "/tmp/find-text.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     )
@@ -485,7 +489,7 @@ async def test_find_text_reuses_last_ocr_when_asked(
     """snapshot_fresh=false searches the OCR the snapshot include_ocr just
     produced — no second capture, and the result says fresh:false."""
     monkeypatch.setattr(
-        daemon_mod,
+        screen_mod,
         "_snapshot_path",
         lambda _agent_id: "/tmp/find-text.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     )
@@ -509,7 +513,7 @@ async def test_find_text_fresh_then_stale_share_one_capture(
     """A fresh find_text fills the cache; the next snapshot_fresh=false call
     searches that same screen (fresh:false) without a new capture."""
     monkeypatch.setattr(
-        daemon_mod,
+        screen_mod,
         "_snapshot_path",
         lambda _agent_id: "/tmp/find-text.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     )
@@ -532,7 +536,7 @@ async def test_find_text_stale_with_empty_cache_captures(
     """snapshot_fresh=false before any OCR ran has nothing to reuse — it
     falls back to a fresh capture (and reports fresh:true)."""
     monkeypatch.setattr(
-        daemon_mod,
+        screen_mod,
         "_snapshot_path",
         lambda _agent_id: "/tmp/find-text.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     )
@@ -553,7 +557,7 @@ async def test_find_text_ocr_failure_is_an_error(
     """find_text is strict where snapshot is soft: a failed OCR is an error,
     never a silent empty list."""
     monkeypatch.setattr(
-        daemon_mod,
+        screen_mod,
         "_snapshot_path",
         lambda _agent_id: "/tmp/find-text.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     )
@@ -587,7 +591,7 @@ async def test_click_text_ocrs_locates_and_clicks(
     """click_text = fresh capture + OCR + one click at the best match's center
     (physical pixels converted by the capture's measured 2x scale)."""
     monkeypatch.setattr(
-        daemon_mod,
+        screen_mod,
         "_snapshot_path",
         lambda _agent_id: "/tmp/click-text.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     )
@@ -609,7 +613,7 @@ async def test_click_text_index_selects_among_matches(
     monkeypatch: pytest.MonkeyPatch,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
 ) -> None:
     monkeypatch.setattr(
-        daemon_mod,
+        screen_mod,
         "_snapshot_path",
         lambda _agent_id: "/tmp/click-text.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     )
@@ -631,7 +635,7 @@ async def test_click_text_failures_are_readable_and_never_click(
     monkeypatch: pytest.MonkeyPatch,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
 ) -> None:
     monkeypatch.setattr(
-        daemon_mod,
+        screen_mod,
         "_snapshot_path",
         lambda _agent_id: "/tmp/click-text.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     )
@@ -659,7 +663,7 @@ async def test_click_text_audits_the_clicked_center(
     monkeypatch: pytest.MonkeyPatch,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
 ) -> None:
     monkeypatch.setattr(
-        daemon_mod,
+        screen_mod,
         "_snapshot_path",
         lambda _agent_id: "/tmp/click-text.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     )
@@ -693,7 +697,7 @@ async def test_click_text_measures_scale_and_tracks_pointer(
     fh.screen = {"x": 0.0, "y": 0.0, "w": 1920.0, "h": 1080.0, "scale": 2.0}  # stale claim
     fh.png_size = (1920, 1080)  # the truth: 1x
     monkeypatch.setattr(
-        daemon_mod,
+        screen_mod,
         "_snapshot_path",
         lambda _agent_id: "/tmp/click-text.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     )
@@ -726,7 +730,7 @@ async def test_helper_failure_surfaces_as_error(
     monkeypatch: pytest.MonkeyPatch,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
 ) -> None:
     def _boom(*args: Any, **kw: Any) -> Any:
-        raise daemon_mod.PermissionsHelperError("helper down")
+        raise PermissionsHelperError("helper down")
 
     monkeypatch.setattr(daemon_mod.helper, "click", _boom)
     d = _daemon()
@@ -872,7 +876,7 @@ async def test_audit_emitted_on_success(
     audit_log: list,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
     monkeypatch: pytest.MonkeyPatch,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
 ) -> None:
-    monkeypatch.setattr(daemon_mod, "_snapshot_path", lambda _agent_id: "/tmp/x.png")  # noqa: S108  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(screen_mod, "_snapshot_path", lambda _agent_id: "/tmp/x.png")  # noqa: S108  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     d = _daemon()
     await _call(d, "click", {"x": 100, "y": 200, "task_id": 42})
     # the computer_action row + the task-session envelope start
@@ -917,7 +921,7 @@ async def test_concurrent_calls_are_safe(
     both audited. Execution is synchronous and wrapped in the machine-wide
     action lock — the lock is the guard for future async points inside a call
     (e.g. Phase 2's queue), and the sync body already prevents interleaving."""
-    monkeypatch.setattr(daemon_mod, "_snapshot_path", lambda _a: "/tmp/x.png")  # noqa: S108  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(screen_mod, "_snapshot_path", lambda _a: "/tmp/x.png")  # noqa: S108  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     d = _daemon()
     t1 = asyncio.create_task(_call(d, "click", {"x": 1, "y": 2}))
     t2 = asyncio.create_task(_call(d, "snapshot"))
@@ -1163,7 +1167,7 @@ async def test_snapshot_audit_carries_png_path(
     """A snapshot's computer_action row carries the PNG path — the trace
     replay needs it (Phase 3, task #1101)."""
     monkeypatch.setattr(
-        daemon_mod,
+        screen_mod,
         "_snapshot_path",
         lambda _agent_id: "/tmp/snap-trace.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     )
