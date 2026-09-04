@@ -1070,6 +1070,30 @@ def _short_sock_dir() -> tuple[Path, Path, Any]:
     return d, d / "computer-mcp.sock", shutil.rmtree
 
 
+async def test_run_raises_stream_limit_for_large_snapshots(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    d, sock, cleanup = _short_sock_dir()
+    server_options: dict[str, Any] = {}
+
+    async def socket_not_in_use(_path: Path) -> bool:
+        return False
+
+    async def capture_server_options(*_args: Any, **kwargs: Any) -> None:
+        server_options.update(kwargs)
+        raise RuntimeError("server options captured")
+
+    monkeypatch.setattr(daemon_mod, "_socket_in_use", socket_not_in_use)
+    monkeypatch.setattr(daemon_mod.asyncio, "start_unix_server", capture_server_options)
+
+    try:
+        with pytest.raises(RuntimeError, match="server options captured"):
+            await daemon_mod.run(sock=str(sock))
+        assert server_options["limit"] == 64 * 1024 * 1024
+    finally:
+        cleanup(d)
+
+
 async def test_socket_in_use_false_when_nobody_listens() -> None:
     """A stale (or absent) socket is not "in use" — the daemon may unlink it."""
     d, sock, cleanup = _short_sock_dir()
