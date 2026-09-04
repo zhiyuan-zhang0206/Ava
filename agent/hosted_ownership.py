@@ -124,7 +124,6 @@ async def admit_hosted_runtime(
             )
     if row is None:
         return None
-    await publish_agent_updated(pool, agent_id)
     logger.info(
         "hosted runtime admitted", agent_id=agent_id, generation=str(row[0]), owner=str(owner)
     )
