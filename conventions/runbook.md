@@ -375,7 +375,9 @@ external agents: when `~/.codex` and/or `~/.claude` already exists, it copies on
 `.agents/skills/operating-ava-cluster` into that client's global `skills/` root. Missing
 client homes are not created. A private per-client ledger under `$AVA_HOME/configs/`
 binds the installed generation to its in-target marker and a digest of names, kinds,
-bytes, and modes. A per-target process lock serializes claim-and-verify updates;
+bytes, and modes. The ledger also records each generation's expected path manifest,
+so interrupted staging and partially completed cleanup remain named and safely
+resumable. A per-target process lock serializes claim-and-verify updates;
 unmanaged or changed copies and unsafe linked paths are preserved with a client-labelled
 warning. External-client failures do not abort core converge. Dev worktrees skip this
 host-global step. Converge also applies a gateway-host guard that fails

@@ -35,6 +35,9 @@ does not create absent client homes and does not distribute the rest of
 The copy's marker must match a private per-client ownership ledger under the
 prod cluster home. Its digest includes names, kinds, bytes, and modes. A
 per-target process lock serializes claim-and-verify updates and crash recovery.
+The ledger keeps an expected manifest for every transaction-owned generation;
+cleanup accepts already-removed expected entries but never unknown or modified
+ones, so an interrupted deletion can resume without losing its ownership pointer.
 An unmanaged target, modified managed copy, unsafe linked path, or cleanup
 residue that no longer matches its ledger is preserved and reported as a
 client-labelled conflict. Client integration failures are warning-only for core

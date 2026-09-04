@@ -174,12 +174,20 @@ def test_late_edit_between_check_and_claim_is_restored_not_overwritten(
 
     def edit_after_check(
         source_path: Path,
+        source_manifest: list[dict[str, Any]],
         skills_root: Path,
         ledger_path: Path,
         ledger: dict[str, Any],
         source_digest: str,
     ) -> Path:
-        staged = original_stage(source_path, skills_root, ledger_path, ledger, source_digest)
+        staged = original_stage(
+            source_path,
+            source_manifest,
+            skills_root,
+            ledger_path,
+            ledger,
+            source_digest,
+        )
         (target / "SKILL.md").write_text("late user edit\n")
         return staged
 
@@ -331,12 +339,19 @@ def test_source_modes_are_materialized_and_recorded(tmp_path: Path) -> None:
     references.chmod(0o555)
     recovery.chmod(0o444)
     client = _client_home(tmp_path)
+    context = _context(repo, tmp_path)
 
-    bridge.converge_external_agent_skill(_context(repo, tmp_path), host_home=client.parent)
+    bridge.converge_external_agent_skill(context, host_home=client.parent)
 
     target = _target(client, tmp_path)
     assert stat.S_IMODE((target / "references").stat().st_mode) == 0o555
     assert stat.S_IMODE((target / "references" / "recovery.md").stat().st_mode) == 0o444
+    (source / "SKILL.md").write_text("operator v2\n")
+
+    bridge.converge_external_agent_skill(context, host_home=client.parent)
+
+    assert (target / "SKILL.md").read_text() == "operator v2\n"
+    assert list(target.parent.glob(f".{SKILL}.ava-*")) == []
 
 
 def test_external_filesystem_failure_is_label_only_and_fail_soft(
@@ -351,6 +366,7 @@ def test_external_filesystem_failure_is_label_only_and_fail_soft(
 
     def inaccessible(
         source: Path,
+        source_manifest: list[dict[str, Any]],
         skills_root: Path,
         ledger_path: Path,
         ledger: dict[str, Any],
@@ -358,7 +374,9 @@ def test_external_filesystem_failure_is_label_only_and_fail_soft(
     ) -> Path:
         if skills_root.parent.name == ".codex":
             raise PermissionError("/secret/absolute/client/path")
-        return original_stage(source, skills_root, ledger_path, ledger, source_digest)
+        return original_stage(
+            source, source_manifest, skills_root, ledger_path, ledger, source_digest
+        )
 
     monkeypatch.setattr(bridge, "_stage_copy", inaccessible)
 
@@ -384,14 +402,12 @@ def test_cleanup_failure_after_activation_is_retried_without_rollback(
     original_remove = bridge._remove_owned_tree
     failed = False
 
-    def fail_previous_once(
-        path: Path, installation_id: str, generation_id: str, digest: str
-    ) -> None:
+    def fail_previous_once(path: Path, manifest: list[dict[str, Any]]) -> None:
         nonlocal failed
         if f".{SKILL}.ava-previous-" in path.name and not failed:
             failed = True
             raise PermissionError("cleanup denied")
-        return original_remove(path, installation_id, generation_id, digest)
+        return original_remove(path, manifest)
 
     monkeypatch.setattr(bridge, "_remove_owned_tree", fail_previous_once)
     bridge.converge_external_agent_skill(context, host_home=client.parent)
@@ -434,6 +450,102 @@ def test_interrupted_post_activation_commit_recovers_deterministically(
     assert (target / "SKILL.md").read_text() == "operator v2\n"
 
     monkeypatch.setattr(bridge, "_commit_activation", original_commit)
+    bridge.converge_external_agent_skill(context, host_home=client.parent)
+
+    assert (target / "SKILL.md").read_text() == "operator v2\n"
+    assert list(target.parent.glob(f".{SKILL}.ava-*")) == []
+
+
+def test_partial_stage_copy_remains_tracked_until_cleanup_finishes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = tmp_path / "repo"
+    _source(repo)
+    client = _client_home(tmp_path)
+    context = _context(repo, tmp_path)
+    original_copy = bridge._copy_source_contents
+    failed = False
+
+    def fail_after_one_entry(source: Path, destination: Path) -> None:
+        nonlocal failed
+        if not failed:
+            failed = True
+            (destination / "SKILL.md").write_bytes((source / "SKILL.md").read_bytes())
+            raise PermissionError("copy interrupted")
+        original_copy(source, destination)
+
+    monkeypatch.setattr(bridge, "_copy_source_contents", fail_after_one_entry)
+    bridge.converge_external_agent_skill(context, host_home=client.parent)
+    monkeypatch.setattr(bridge, "_copy_source_contents", original_copy)
+
+    bridge.converge_external_agent_skill(context, host_home=client.parent)
+    bridge.converge_external_agent_skill(context, host_home=client.parent)
+
+    assert _target(client, tmp_path).is_dir()
+    assert list((client / "skills").glob(f".{SKILL}.ava-*")) == []
+
+
+def test_late_target_keeps_stage_and_previous_tracked_until_reclaimed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = tmp_path / "repo"
+    source = _source(repo)
+    client = _client_home(tmp_path)
+    context = _context(repo, tmp_path)
+    bridge.converge_external_agent_skill(context, host_home=client.parent)
+    target = _target(client, tmp_path)
+    (source / "SKILL.md").write_text("operator v2\n")
+    outside = tmp_path / "late-owned-by-user"
+    outside.mkdir()
+    (outside / "SKILL.md").write_text("user target\n")
+    original_rename = bridge._rename_no_replace
+
+    def insert_target(stage: Path, destination: Path) -> None:
+        destination.symlink_to(outside, target_is_directory=True)
+        original_rename(stage, destination)
+
+    monkeypatch.setattr(bridge, "_rename_no_replace", insert_target)
+    bridge.converge_external_agent_skill(context, host_home=client.parent)
+    monkeypatch.setattr(bridge, "_rename_no_replace", original_rename)
+
+    bridge.converge_external_agent_skill(context, host_home=client.parent)
+
+    assert target.is_symlink()
+    assert (outside / "SKILL.md").read_text() == "user target\n"
+    assert list(target.parent.glob(f".{SKILL}.ava-*")) == []
+
+
+def test_cleanup_resumes_after_one_child_was_already_deleted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = tmp_path / "repo"
+    source = _source(repo)
+    client = _client_home(tmp_path)
+    context = _context(repo, tmp_path)
+    bridge.converge_external_agent_skill(context, host_home=client.parent)
+    target = _target(client, tmp_path)
+    (source / "SKILL.md").write_text("operator v2\n")
+    original_unlink = Path.unlink
+    deleted = 0
+
+    def fail_after_one_delete(path: Path, missing_ok: bool = False) -> None:
+        nonlocal deleted
+        if f".{SKILL}.ava-previous-" in str(path):
+            if deleted == 1:
+                raise PermissionError("mid-cleanup interruption")
+            deleted += 1
+        original_unlink(path, missing_ok=missing_ok)
+
+    monkeypatch.setattr(Path, "unlink", fail_after_one_delete)
+    bridge.converge_external_agent_skill(context, host_home=client.parent)
+    monkeypatch.setattr(Path, "unlink", original_unlink)
+    assert deleted == 1
+    ledger = json.loads(
+        (context.ava_home / "configs" / "external-agent-skills" / "codex.json").read_text()
+    )
+    assert ledger["transaction"] is None
+    assert [item["kind"] for item in ledger["garbage"]] == ["previous"]
+
     bridge.converge_external_agent_skill(context, host_home=client.parent)
 
     assert (target / "SKILL.md").read_text() == "operator v2\n"

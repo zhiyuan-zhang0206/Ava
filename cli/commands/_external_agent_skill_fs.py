@@ -5,10 +5,12 @@ from __future__ import annotations
 import ctypes
 import errno
 import hashlib
+import json
 import os
 import stat
 import sys
 from pathlib import Path
+from typing import Any
 
 _MARKER_NAME = ".ava-managed.json"
 
@@ -88,20 +90,29 @@ def _read_regular(path: Path, *, source: bool) -> tuple[bytes, int]:
 def _tree_digest(
     root: Path, *, source: bool = False, ignore_root_names: frozenset[str] = frozenset()
 ) -> str:
-    """Hash names, kinds, bytes, and modes without following filesystem links."""
+    """Hash the validated manifest without following filesystem links."""
+    return _manifest_digest(
+        _tree_manifest(root, source=source, ignore_root_names=ignore_root_names)
+    )
+
+
+def _manifest_digest(manifest: list[dict[str, Any]]) -> str:
+    encoded = json.dumps(manifest, separators=(",", ":"), sort_keys=True).encode()
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _tree_manifest(
+    root: Path, *, source: bool = False, ignore_root_names: frozenset[str] = frozenset()
+) -> list[dict[str, Any]]:
+    """Describe each path Ava may later verify or reclaim."""
     inspect = _source_lstat if source else _lstat
     error = _SourceIntegrityError if source else _ClientConflictError
     root_before = inspect(root)
     if not stat.S_ISDIR(root_before.st_mode):
         raise error("operator skill tree root is not a directory")
-    digest = hashlib.sha256()
-
-    def field(value: bytes) -> None:
-        digest.update(len(value).to_bytes(8, "big"))
-        digest.update(value)
-
-    digest.update(b"root")
-    field(f"{stat.S_IMODE(root_before.st_mode):04o}".encode())
+    manifest: list[dict[str, Any]] = [
+        {"kind": "directory", "mode": stat.S_IMODE(root_before.st_mode), "path": "."}
+    ]
 
     def visit(directory: Path) -> None:
         before = inspect(directory)
@@ -113,18 +124,26 @@ def _tree_digest(
             if directory == root and child.name in ignore_root_names:
                 continue
             current = inspect(child)
-            relative = child.relative_to(root).as_posix().encode()
+            relative = child.relative_to(root).as_posix()
             if stat.S_ISDIR(current.st_mode):
-                digest.update(b"directory")
-                field(relative)
-                field(f"{stat.S_IMODE(current.st_mode):04o}".encode())
+                manifest.append(
+                    {
+                        "kind": "directory",
+                        "mode": stat.S_IMODE(current.st_mode),
+                        "path": relative,
+                    }
+                )
                 visit(child)
             elif stat.S_ISREG(current.st_mode):
                 data, mode = _read_regular(child, source=source)
-                digest.update(b"file")
-                field(relative)
-                field(f"{mode:04o}".encode())
-                field(data)
+                manifest.append(
+                    {
+                        "kind": "file",
+                        "mode": mode,
+                        "path": relative,
+                        "sha256": hashlib.sha256(data).hexdigest(),
+                    }
+                )
             else:
                 raise error("operator skill tree contains an unsupported entry")
         after = inspect(directory)
@@ -135,7 +154,55 @@ def _tree_digest(
     after = inspect(root)
     if _signature(after) != _signature(root_before):
         raise error("operator skill tree changed while being inspected")
-    return digest.hexdigest()
+    return sorted(manifest, key=lambda item: str(item["path"]))
+
+
+def _remove_manifest_subset(root: Path, expected: list[dict[str, Any]]) -> None:
+    """Remove an Ava-owned tree, accepting paths deleted by an earlier attempt."""
+    expected_by_path = {str(item["path"]): item for item in expected}
+    current = _tree_manifest(root)
+    for item in current:
+        path = str(item["path"])
+        wanted = expected_by_path.get(path)
+        if wanted is None or item["kind"] != wanted["kind"]:
+            raise _ClientConflictError("transaction residue contains an unexpected entry")
+        expected_mode = int(wanted["mode"])
+        cleanup_mode = expected_mode | stat.S_IRWXU
+        allowed_modes = {expected_mode, cleanup_mode}
+        if item["kind"] == "directory":
+            allowed_modes.add(stat.S_IRWXU)
+        if int(item["mode"]) not in allowed_modes:
+            raise _ClientConflictError("transaction residue metadata was modified")
+        if item["kind"] == "file" and item["sha256"] != wanted["sha256"]:
+            raise _ClientConflictError("transaction residue content was modified")
+
+    directories = sorted(
+        (item for item in current if item["kind"] == "directory"),
+        key=lambda item: str(item["path"]).count("/"),
+    )
+    for item in directories:
+        path = root / str(item["path"])
+        current_stat = _lstat(path)
+        if not stat.S_ISDIR(current_stat.st_mode):
+            raise _ClientConflictError("transaction residue changed during cleanup")
+        path.chmod(int(item["mode"]) | stat.S_IRWXU)
+
+    files = (item for item in current if item["kind"] == "file")
+    for item in files:
+        path = root / str(item["path"])
+        data, _ = _read_regular(path, source=False)
+        if hashlib.sha256(data).hexdigest() != item["sha256"]:
+            raise _ClientConflictError("transaction residue changed during cleanup")
+        path.chmod(int(item["mode"]) | stat.S_IRWXU)
+        path.unlink()
+
+    for item in reversed(directories):
+        if item["path"] == ".":
+            continue
+        path = root / str(item["path"])
+        _lstat(path)
+        path.rmdir()
+    root.rmdir()
 
 
 def _write_new(path: Path, data: bytes, mode: int) -> None:

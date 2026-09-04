@@ -50,3 +50,10 @@ remains fatal because it indicates Ava cannot prove what it is publishing.
 Supersedes the ownership and replacement protocol in
 [`2026-09-04-project-one-operator-skill-to-external-agents.md`](2026-09-04-project-one-operator-skill-to-external-agents.md),
 not that decision's distribution boundary.
+
+Update 2026-09-04: cleanup records now carry the complete expected path
+manifest, not only the generation's whole-tree digest. The ledger moves all
+remaining stage and prior-copy pointers into cleanup state before clearing a
+transaction. Cleanup validates that the current residue is an unmodified subset
+of that manifest, allowing a later converge to resume after some expected paths
+were already removed while still preserving any unexpected or modified path.

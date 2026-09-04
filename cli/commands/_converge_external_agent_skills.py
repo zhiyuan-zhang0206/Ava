@@ -7,8 +7,8 @@ named skill target (plus transaction siblings bearing an Ava generation ID).
 
 from __future__ import annotations
 
+import hashlib
 import json
-import re
 import stat
 import sys
 import uuid
@@ -21,22 +21,27 @@ from cli.commands._external_agent_skill_fs import (
     _copy_source_contents,
     _exists,
     _lstat,
-    _read_regular,
+    _manifest_digest,
+    _remove_manifest_subset,
     _rename_no_replace,
     _source_lstat,
     _SourceIntegrityError,
     _tree_digest,
+    _tree_manifest,
     _write_new,
 )
+from cli.commands._external_agent_skill_ledger import (
+    _FORMAT,
+    _load_ledger,
+    _parse_record,
+    _write_ledger,
+)
 from shared.platform import LockTimeoutError, file_lock
-from shared.private_storage import ensure_private_dir, write_private_bytes
+from shared.private_storage import ensure_private_dir
 
 _SKILL_NAME = "operating-ava-cluster"
 _MARKER_NAME = ".ava-managed.json"
-_FORMAT = 2
 _CLIENTS = (("Codex", ".codex", "codex"), ("Claude Code", ".claude", "claude"))
-_HEX = re.compile(r"^[0-9a-f]{64}$")
-_ID = re.compile(r"^[0-9a-f]{32}$")
 
 
 def _marker(installation_id: str, generation_id: str, source_digest: str) -> bytes:
@@ -57,90 +62,19 @@ def _marker(installation_id: str, generation_id: str, source_digest: str) -> byt
     ).encode()
 
 
-def _parse_record(path: Path) -> dict[str, Any] | None:
-    if not _exists(path):
-        return None
-    data, _ = _read_regular(path, source=False)
-    try:
-        value: object = json.loads(data)
-    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-        raise _ClientConflictError("Ava ownership ledger is invalid") from exc
-    if not isinstance(value, dict):
-        raise _ClientConflictError("Ava ownership ledger is invalid")
-    return cast(dict[str, Any], value)
-
-
-def _valid_id(value: object) -> bool:
-    return isinstance(value, str) and _ID.fullmatch(value) is not None
-
-
-def _valid_digest(value: object) -> bool:
-    return isinstance(value, str) and _HEX.fullmatch(value) is not None
-
-
-def _load_ledger(path: Path, client_key: str) -> dict[str, Any] | None:
-    record = _parse_record(path)
-    if record is None:
-        return None
-    required = {
-        "client",
-        "format",
-        "installation_id",
-        "installed",
-        "transaction",
-        "garbage",
-    }
-    if set(record) != required or record["client"] != client_key or record["format"] != _FORMAT:
-        raise _ClientConflictError("Ava ownership ledger is invalid")
-    if not _valid_id(record["installation_id"]):
-        raise _ClientConflictError("Ava ownership ledger is invalid")
-    installed_value: object = record["installed"]
-    if installed_value is not None:
-        if not isinstance(installed_value, dict):
-            raise _ClientConflictError("Ava ownership ledger is invalid")
-        installed = cast(dict[str, Any], installed_value)
-        if (
-            set(installed) != {"digest", "generation_id", "source_digest"}
-            or not all(_valid_digest(installed[key]) for key in ("digest", "source_digest"))
-            or not _valid_id(installed["generation_id"])
-        ):
-            raise _ClientConflictError("Ava ownership ledger is invalid")
-    transaction_value: object = record["transaction"]
-    if transaction_value is not None:
-        if not isinstance(transaction_value, dict):
-            raise _ClientConflictError("Ava ownership ledger is invalid")
-        transaction = cast(dict[str, Any], transaction_value)
-        if (
-            set(transaction)
-            != {"generation_id", "initial_digest", "source_digest", "staged_digest"}
-            or not _valid_id(transaction["generation_id"])
-            or not _valid_digest(transaction["source_digest"])
-            or any(
-                value is not None and not _valid_digest(value)
-                for value in (transaction["initial_digest"], transaction["staged_digest"])
-            )
-        ):
-            raise _ClientConflictError("Ava ownership ledger is invalid")
-    garbage_value: object = record["garbage"]
-    if not isinstance(garbage_value, list):
-        raise _ClientConflictError("Ava ownership ledger is invalid")
-    for item_value in cast(list[object], garbage_value):
-        if not isinstance(item_value, dict):
-            raise _ClientConflictError("Ava ownership ledger is invalid")
-        item = cast(dict[str, Any], item_value)
-        if (
-            set(item) != {"digest", "kind", "marker_generation_id", "path_generation_id"}
-            or item["kind"] not in {"stage", "previous"}
-            or not _valid_digest(item["digest"])
-            or not _valid_id(item["marker_generation_id"])
-            or not _valid_id(item["path_generation_id"])
-        ):
-            raise _ClientConflictError("Ava ownership ledger is invalid")
-    return record
-
-
-def _write_ledger(path: Path, ledger: dict[str, Any]) -> None:
-    write_private_bytes(path, (json.dumps(ledger, indent=2, sort_keys=True) + "\n").encode())
+def _stage_manifest(source_manifest: list[dict[str, Any]], marker: bytes) -> list[dict[str, Any]]:
+    return sorted(
+        [
+            *source_manifest,
+            {
+                "kind": "file",
+                "mode": 0o600,
+                "path": _MARKER_NAME,
+                "sha256": hashlib.sha256(marker).hexdigest(),
+            },
+        ],
+        key=lambda item: str(item["path"]),
+    )
 
 
 def _transaction_path(skills_root: Path, kind: str, generation_id: str) -> Path:
@@ -174,24 +108,8 @@ def _validate_directory(path: Path, reason: str) -> None:
         raise _ClientConflictError(reason)
 
 
-def _remove_owned_tree(root: Path, installation_id: str, generation_id: str, digest: str) -> None:
-    _verify_marker(root, installation_id, generation_id)
-    if _tree_digest(root) != digest:
-        raise _ClientConflictError("transaction residue was modified and was preserved")
-
-    def remove(directory: Path) -> None:
-        _lstat(directory)
-        for child in list(directory.iterdir()):
-            current = _lstat(child)
-            if stat.S_ISDIR(current.st_mode):
-                remove(child)
-            elif stat.S_ISREG(current.st_mode):
-                child.unlink()
-            else:
-                raise _ClientConflictError("transaction residue contains an unsafe entry")
-        directory.rmdir()
-
-    remove(root)
+def _remove_owned_tree(root: Path, manifest: list[dict[str, Any]]) -> None:
+    _remove_manifest_subset(root, manifest)
 
 
 def _warn(label: str, reason: str) -> None:
@@ -207,9 +125,7 @@ def _cleanup_garbage(
         if not _exists(path):
             continue
         try:
-            _remove_owned_tree(
-                path, ledger["installation_id"], item["marker_generation_id"], item["digest"]
-            )
+            _remove_owned_tree(path, item["manifest"])
         except (OSError, _ClientConflictError) as exc:
             remaining.append(item)
             _warn(label, f"transaction cleanup conflict ({type(exc).__name__})")
@@ -220,50 +136,89 @@ def _cleanup_garbage(
 
 def _stage_copy(
     source: Path,
+    source_manifest: list[dict[str, Any]],
     skills_root: Path,
     ledger_path: Path,
     ledger: dict[str, Any],
     source_digest: str,
 ) -> Path:
     generation_id = uuid.uuid4().hex
+    marker = _marker(ledger["installation_id"], generation_id, source_digest)
+    expected_manifest = _stage_manifest(source_manifest, marker)
     transaction = {
+        "copy_complete": False,
+        "expected_digest": _manifest_digest(expected_manifest),
+        "expected_manifest": expected_manifest,
         "generation_id": generation_id,
-        "initial_digest": None,
         "source_digest": source_digest,
-        "staged_digest": None,
     }
     ledger["transaction"] = transaction
     _write_ledger(ledger_path, ledger)
     stage = _transaction_path(skills_root, "stage", generation_id)
     stage.mkdir(mode=0o700)
-    marker = _marker(ledger["installation_id"], generation_id, source_digest)
     _write_new(stage / _MARKER_NAME, marker, 0o600)
-    transaction["initial_digest"] = _tree_digest(stage)
-    _write_ledger(ledger_path, ledger)
     _copy_source_contents(source, stage)
-    if _tree_digest(stage, ignore_root_names=frozenset({_MARKER_NAME})) != source_digest:
+    if _tree_manifest(stage) != expected_manifest:
         raise _SourceIntegrityError("operator skill source copy did not verify")
-    transaction["staged_digest"] = _tree_digest(stage)
+    transaction["copy_complete"] = True
     _write_ledger(ledger_path, ledger)
     return stage
 
 
-def _abandon_stage(ledger_path: Path, ledger: dict[str, Any], skills_root: Path) -> None:
-    transaction = ledger["transaction"]
+def _queue_garbage(
+    ledger: dict[str, Any],
+    *,
+    kind: str,
+    path_generation_id: str,
+    manifest: list[dict[str, Any]],
+) -> None:
+    record = {
+        "kind": kind,
+        "manifest": manifest,
+        "path_generation_id": path_generation_id,
+    }
+    if record not in ledger["garbage"]:
+        ledger["garbage"].append(record)
+
+
+def _abandon_transaction(
+    ledger_path: Path,
+    ledger: dict[str, Any],
+    skills_root: Path,
+    target: Path,
+) -> bool:
+    """Move every remaining residue pointer to durable cleanup state."""
+    transaction = cast(dict[str, Any] | None, ledger["transaction"])
     if transaction is None:
-        return
-    stage = _transaction_path(skills_root, "stage", transaction["generation_id"])
-    if _exists(stage) and transaction["staged_digest"] is not None:
-        ledger["garbage"].append(
-            {
-                "digest": transaction["staged_digest"],
-                "kind": "stage",
-                "marker_generation_id": transaction["generation_id"],
-                "path_generation_id": transaction["generation_id"],
-            }
+        return True
+    generation_id = transaction["generation_id"]
+    stage = _transaction_path(skills_root, "stage", generation_id)
+    previous = _transaction_path(skills_root, "previous", generation_id)
+    if _exists(previous) and not _exists(target):
+        return False
+    if _exists(stage):
+        _queue_garbage(
+            ledger,
+            kind="stage",
+            path_generation_id=generation_id,
+            manifest=transaction["expected_manifest"],
         )
+    if _exists(previous):
+        installed = ledger["installed"]
+        if installed is None:
+            return False
+        _queue_garbage(
+            ledger,
+            kind="previous",
+            path_generation_id=generation_id,
+            manifest=installed["manifest"],
+        )
+        # A late user target now owns the canonical name. The old generation is
+        # cleanup residue, not an installed target Ava may update later.
+        ledger["installed"] = None
     ledger["transaction"] = None
     _write_ledger(ledger_path, ledger)
+    return True
 
 
 def _commit_activation(
@@ -274,19 +229,18 @@ def _commit_activation(
 ) -> None:
     old = ledger["installed"]
     ledger["installed"] = {
-        "digest": transaction["staged_digest"],
+        "digest": transaction["expected_digest"],
         "generation_id": transaction["generation_id"],
+        "manifest": transaction["expected_manifest"],
         "source_digest": transaction["source_digest"],
     }
     ledger["transaction"] = None
     if _exists(previous) and old is not None:
-        ledger["garbage"].append(
-            {
-                "digest": old["digest"],
-                "kind": "previous",
-                "marker_generation_id": old["generation_id"],
-                "path_generation_id": transaction["generation_id"],
-            }
+        _queue_garbage(
+            ledger,
+            kind="previous",
+            path_generation_id=transaction["generation_id"],
+            manifest=old["manifest"],
         )
     _write_ledger(ledger_path, ledger)
 
@@ -301,10 +255,10 @@ def _activate(
     generation_id = transaction["generation_id"]
     stage = _transaction_path(skills_root, "stage", generation_id)
     previous = _transaction_path(skills_root, "previous", generation_id)
-    if transaction["staged_digest"] is None or not _exists(stage):
+    if not transaction["copy_complete"] or not _exists(stage):
         raise _ClientConflictError("incomplete Ava transaction was preserved")
     _verify_marker(stage, ledger["installation_id"], generation_id)
-    if _tree_digest(stage) != transaction["staged_digest"]:
+    if _tree_manifest(stage) != transaction["expected_manifest"]:
         raise _ClientConflictError("staged Ava transaction was modified")
     old = ledger["installed"]
     action = "installed" if old is None else "updated"
@@ -332,7 +286,7 @@ def _activate(
             previous.replace(target)
         raise
     _verify_marker(target, ledger["installation_id"], generation_id)
-    if _tree_digest(target) != transaction["staged_digest"]:
+    if _tree_digest(target) != transaction["expected_digest"]:
         raise _ClientConflictError("activated Ava target failed verification")
     _commit_activation(ledger_path, ledger, transaction, previous)
     return action
@@ -348,32 +302,20 @@ def _recover(
     if transaction is None:
         return None
     stage = _transaction_path(skills_root, "stage", transaction["generation_id"])
-    if transaction["staged_digest"] is not None and _exists(target) and not _exists(stage):
+    if transaction["copy_complete"] and _exists(target) and not _exists(stage):
         _verify_marker(target, ledger["installation_id"], transaction["generation_id"])
-        _require_digest(target, transaction["staged_digest"], "activated transaction was modified")
+        _require_digest(
+            target, transaction["expected_digest"], "activated transaction was modified"
+        )
         previous = _transaction_path(skills_root, "previous", transaction["generation_id"])
         action = "installed" if ledger["installed"] is None else "updated"
         _commit_activation(ledger_path, ledger, transaction, previous)
         return action
-    if transaction["staged_digest"] is not None and _exists(stage):
+    if transaction["copy_complete"] and _exists(stage):
         return _activate(ledger_path, ledger, skills_root, target)
-    if _exists(stage) and transaction["initial_digest"] is not None:
-        initial_stage_is_unchanged = True
-        try:
-            _require_digest(stage, transaction["initial_digest"], "incomplete stage changed")
-        except _ClientConflictError:
-            initial_stage_is_unchanged = False
-        if initial_stage_is_unchanged:
-            ledger["garbage"].append(
-                {
-                    "digest": transaction["initial_digest"],
-                    "kind": "stage",
-                    "marker_generation_id": transaction["generation_id"],
-                    "path_generation_id": transaction["generation_id"],
-                }
-            )
-    _abandon_stage(ledger_path, ledger, skills_root)
-    raise _ClientConflictError("incomplete Ava transaction was preserved")
+    if _abandon_transaction(ledger_path, ledger, skills_root, target):
+        return None
+    raise _ClientConflictError("incomplete Ava transaction still owns a claimed target")
 
 
 def _validate_source_path(repo: Path, source: Path) -> None:
@@ -399,6 +341,7 @@ def _ensure_ledger_root(ctx: ConvergeCtx) -> Path:
 
 def _converge_locked(
     source: Path,
+    source_manifest: list[dict[str, Any]],
     source_digest: str,
     client_home: Path,
     client_key: str,
@@ -436,6 +379,7 @@ def _converge_locked(
         print(f"  · {label} external operator skill {recovered}: skills/{_SKILL_NAME}")
         _cleanup_garbage(ledger_path, ledger, skills_root, label)
         return
+    _cleanup_garbage(ledger_path, ledger, skills_root, label)
     installed = ledger["installed"]
     if installed is not None:
         if not _exists(target):
@@ -447,14 +391,17 @@ def _converge_locked(
             return
     elif _exists(target):
         raise _ClientConflictError("unmanaged target was preserved")
-    _stage_copy(source, skills_root, ledger_path, ledger, source_digest)
+    try:
+        _stage_copy(source, source_manifest, skills_root, ledger_path, ledger, source_digest)
+    except (OSError, _SourceIntegrityError):
+        if _abandon_transaction(ledger_path, ledger, skills_root, target):
+            _cleanup_garbage(ledger_path, ledger, skills_root, label)
+        raise
     try:
         action = _activate(ledger_path, ledger, skills_root, target)
     except (OSError, _ClientConflictError):
-        transaction = cast(dict[str, Any], ledger["transaction"])
-        stage = _transaction_path(skills_root, "stage", transaction["generation_id"])
-        if _exists(stage):
-            _abandon_stage(ledger_path, ledger, skills_root)
+        if _abandon_transaction(ledger_path, ledger, skills_root, target):
+            _cleanup_garbage(ledger_path, ledger, skills_root, label)
         raise
     print(f"  · {label} external operator skill {action}: skills/{_SKILL_NAME}")
     _cleanup_garbage(ledger_path, ledger, skills_root, label)
@@ -474,7 +421,8 @@ def converge_external_agent_skill(ctx: ConvergeCtx, *, host_home: Path | None = 
         return
     source = ctx.repo / ".agents" / "skills" / _SKILL_NAME
     _validate_source_path(ctx.repo, source)
-    source_digest = _tree_digest(source, source=True)
+    source_manifest = _tree_manifest(source, source=True)
+    source_digest = _manifest_digest(source_manifest)
     try:
         ledger_root = _ensure_ledger_root(ctx)
     except (OSError, RuntimeError) as exc:
@@ -488,7 +436,13 @@ def converge_external_agent_skill(ctx: ConvergeCtx, *, host_home: Path | None = 
             _validate_lock(lock_path)
             with file_lock(lock_path, timeout_s=2):
                 _converge_locked(
-                    source, source_digest, home / home_name, client_key, label, ledger_path
+                    source,
+                    source_manifest,
+                    source_digest,
+                    home / home_name,
+                    client_key,
+                    label,
+                    ledger_path,
                 )
         except _ClientConflictError as exc:
             _warn(label, str(exc))

@@ -44,3 +44,9 @@ integrity failures remained fatal.
 
 Follow-up decision:
 [`decisions/2026-09-04-bind-external-skill-ownership-outside-target.md`](../../../decisions/2026-09-04-bind-external-skill-ownership-outside-target.md).
+
+The recovery protocol was subsequently tightened so partial staging, a prior
+copy displaced by a late user target, and partially deleted cleanup trees all
+retain durable ledger pointers. Cleanup records carry an expected manifest and
+accept missing expected entries on retry; unknown or modified entries still
+stop deletion and remain visible as conflicts.

@@ -25,14 +25,20 @@ beside that target. A private per-client ledger under
 installed generation and digest, active transaction, and exact cleanup records;
 the target's `.ava-managed.json` marker must match that external authority. The
 digest covers relative paths, entry kinds, file bytes, and file and directory
-modes.
+modes. Each transaction, installed generation, and cleanup record also carries
+the expected path manifest. Moving a residue from transaction state to cleanup
+state is one atomic ledger write, so no live stage or prior copy loses its
+durable pointer.
 
 A per-target cross-process lock serializes convergence. A source change stages
 a complete no-follow copy, atomically claims the current target, and verifies
 the claimed directory before activation. A mismatch is restored without
 overwriting a path that appeared late. Activation is recorded before cleanup,
 so a cleanup failure leaves the new copy authoritative and is retried later.
-The ledger recovers interrupted staged, claimed, and activated generations;
+Cleanup validates the remaining tree as an unmodified subset of the manifest;
+paths removed by an earlier attempt stay safely reclaimable, while unexpected
+or modified paths are preserved. The ledger recovers interrupted staged,
+claimed, and activated generations;
 temporary and prior directories remain scoped to this exact target.
 
 An existing target without the matching external ledger is unmanaged and is
