@@ -68,7 +68,7 @@ same point are a regression until disproved.
 **Signature.** A merge-queue or CI run is red and someone proposes another
 rerun without comparing its failure location with the preceding attempt.
 
-**Evidence.** In PR #928, a speculative Mergify attempt failed once and the
+**Evidence.** In PR #928, a speculative merge-queue attempt failed once and the
 next attempt was green, so it auto-requeued without human action. In PR #1303,
 CI shard 8 failed twice at the `_FakeProc` `status()` `AttributeError`; that
 repeat correctly identified a real probe-contract break.

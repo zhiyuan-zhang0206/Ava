@@ -32,9 +32,9 @@ The full linter inventory — what each one enforces and where it runs: [[script
 - `install.sh --mirror cn` — route pip/npm/brew through CN mirrors (loads `mirrors/cn.env`, copies mirror config to `~/.ava/mirror.env` for every subsequent `ava` command)
 
 ### CI / Release / Migration
-- `ci_utils.py` — polls PR CI status + merge conflict detection; separates workflow-produced checks from GitHub App ones so a suite that never ran cannot read as green (`NO_WORKFLOW_RUNS`), and hardens merge-queue commands with a head-update cooldown plus one retry when Mergify rejects or drops a command
+- `ci_utils.py` — polls PR CI status + merge conflict detection; separates workflow-produced checks from GitHub App ones so a suite that never ran cannot read as green (`NO_WORKFLOW_RUNS`), and submits green, labeled PRs through Trunk with a head-update cooldown, one retry, and terminal-state polling
 - `coverage_gates.py` — backend CI coverage gates: the combined 85% line-rate over the core domains (agent/ava/cli/gateway/shared/ui) plus per-risk-domain minimum line floors for ops/services/ava_builtins, read from the combined shard `coverage.json`
-- `audit_branch_protection.py` — read-only comparison of live GitHub branch protection / workflow activation against the required checks declared in `.mergify.yml`; exit status distinguishes verified drift from an API/tool failure
+- `audit_branch_protection.py` — read-only comparison of live GitHub branch protection / workflow activation against the required checks declared in `.trunk/trunk.yaml`; exit status distinguishes verified drift from an API/tool failure
 - `build_app_update_manifest.py` — turns signed Tauri desktop archives into the app's static `latest.json`; unsigned release runs get an empty platform map
 - `update_model_pricing.py` — fail-closed official price checks that propose reviewed catalog PRs
 - `refresh_test_durations.py` — records isolated CI-shaped pytest timing shards, retries

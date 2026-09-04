@@ -71,7 +71,8 @@ def test_queue_resolution_prefers_flag_then_environment_then_trunk_default(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("CI_QUEUE", "trunk")
-    assert ci_utils._resolve_queue("mergify") == "mergify"
+    with pytest.raises(ValueError, match="unknown CI queue"):
+        ci_utils._resolve_queue("retired")
     assert ci_utils._resolve_queue(None) == "trunk"
 
     monkeypatch.delenv("CI_QUEUE")

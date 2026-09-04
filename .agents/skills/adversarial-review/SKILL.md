@@ -232,11 +232,11 @@ APPROVE / REQUEST CHANGES — <one sentence: change + overall risk>
 ## Process integration
 
 In `ship-a-change` terms: **CI genuinely green → adversarial review → P0/P1
-resolved (or user waiver) → enqueue → Mergify lands it.**
+resolved (or user waiver) → enqueue → Trunk lands it.**
 
 - **Who**: the repo steward, or a dedicated reviewer agent the delegator
   names. Never the PR author — reviewing your own diff is self-confirmation.
-- **When**: PR open + CI green, before `@mergifyio queue` /
+- **When**: PR open + CI green, before
   `ci_utils.py --wait --merge`. Never enqueue a PR without an adversarial
   pass or an explicit user waiver.
 - **Loop**: findings → author fixes or rebuts with evidence → reviewer
