@@ -8,7 +8,7 @@ tags: []
 # Permissions Helper — macOS Desktop Automation Daemon
 
 ## What is it
-A macOS permissions helper on agent-runner — a signed Swift `.app` launched by **launchd** (not session/watchdog), holding the machine's Screen Recording / Accessibility permissions. All skills that need to drive the desktop (screenshot, click, type, window geometry) or read user-protected files call it via Unix socket, rather than each shelling out `screencapture` / sending CGEvent / opening those files — privileged, authorized actions are centralized in this single process.
+A macOS permissions helper on agent-runner — a signed Swift `.app` owned by **launchd**, outside the session roster, holding Screen Recording / Accessibility permissions. The agent-runner watchdog pings its real protocol and can reload its launchd job. Desktop-driving and protected-file skills call it via Unix socket, centralizing privileged actions in this process.
 
 **Role affiliation**: agent-runner side (macOS only) — launched by launchd, not in the session service roster (`build_services`), with capability probe `permissions_helper_incapability` gating.
 
@@ -43,8 +43,9 @@ TCC keys grants on the helper's code identity. A stable certificate plus fixed b
 - `services/permissions_helper/lifecycle.py` — bring-up called by converge
 - `services/permissions_helper/client.py` — Python-side call entry
 - `services/permissions_helper/helper/main.swift` — Swift daemon
+- `scripts/tcc-preauth.sh` — read-only helper/TCC diagnostics and manual grant list
 
 ## Notes
 - macOS + Windows; configuration gate `AVA_PERMISSIONS_HELPER_ENABLED`, capability probe `shared.platform_probes.permissions_helper_incapability` (macOS: swift/codesign/display; Windows: csc.exe — the helper's session capability is checked at runtime, converge runs in Session 0).
 - Windows: C# helper (`services/permissions_helper/windows/helper.cs`, built with the .NET Framework csc.exe every Windows install ships; DPI-aware via SetProcessDPIAware so click coordinates are physical pixels), served over the named pipe `\\.\pipe\ava-permissions-helper`, registered as the logon scheduled task `AvaPermissionsHelper` (`/IT` so it starts in the user's interactive session). Client dials the pipe automatically (`_IS_WINDOWS` transport switch in `client.py`).
-- Not in the session/watchdog service roster — launchd handles keepalive, a different layer from other background services.
+- Outside `ServiceSpec`: launchd owns keepalive; the agent-runner watchdog adds a DB-free protocol check, one ERROR/episode, repair at failure three, and next-round verification.

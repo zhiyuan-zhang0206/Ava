@@ -53,12 +53,19 @@ def ran(monkeypatch: pytest.MonkeyPatch) -> list[str]:
         return _run
 
     monkeypatch.setattr(wd, "_resolve_healthcheck", _fake_resolve)
+    monkeypatch.setattr(
+        wd,
+        "permissions_helper_healthcheck",
+        lambda: calls.append("permissions_helper"),
+    )
     monkeypatch.setattr(wd, "read_skipped", set)
     # The browser pair is config/capability-gated; force it in so this is about
     # block scope, not about gating.
     monkeypatch.setattr(wd.settings.services, "browser_enabled", True)
+    monkeypatch.setattr(wd.settings.services, "permissions_helper_enabled", True)
     monkeypatch.setattr("ops.spec.browser_incapability", lambda: None)
     monkeypatch.setattr("ops.spec.browser_mcp_incapability", lambda: None)
+    monkeypatch.setattr("ops.spec.runner_mode", lambda: "process")
     return calls
 
 
@@ -82,7 +89,13 @@ async def test_db_outage_still_revives_the_browser_pair(
 
     await wd._tick("agent-runner")
 
-    assert ran == ["browser", "browser_mcp", "mcp_daemon", "otel_collector"], (
+    assert ran == [
+        "permissions_helper",
+        "browser",
+        "browser_mcp",
+        "mcp_daemon",
+        "otel_collector",
+    ], (
         "the DB-free services must keep being revived through a DB outage; "
         "the DB-dependent restarter/ops must not"
     )
@@ -110,6 +123,7 @@ async def test_healthy_db_revives_the_whole_agent_runner_roster(
     await wd._tick("agent-runner")
 
     assert ran == [
+        "permissions_helper",
         "restarter",
         "page_server",
         "ops",
@@ -170,11 +184,19 @@ def test_every_db_dependent_healthcheck_pays_a_verify_deadline() -> None:
 def test_db_scoped_block_holds_back_exactly_the_dbs_users(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(wd, "read_skipped", set)
     monkeypatch.setattr(wd.settings.services, "browser_enabled", True)
+    monkeypatch.setattr(wd.settings.services, "permissions_helper_enabled", True)
     monkeypatch.setattr("ops.spec.browser_incapability", lambda: None)
     monkeypatch.setattr("ops.spec.browser_mcp_incapability", lambda: None)
 
     kept = {c.name for c in wd._checks_for_round("agent-runner", BlockScope.DB_DEPENDENT)}
-    assert kept == {"brew-pin", "browser", "browser-mcp", "mcp-daemon", "otel-collector"}
+    assert kept == {
+        "brew-pin",
+        "permissions-helper",
+        "browser",
+        "browser-mcp",
+        "mcp-daemon",
+        "otel-collector",
+    }
 
 
 def test_db_scoped_block_keeps_db_free_pseudo_checks_and_drops_pg_backup(

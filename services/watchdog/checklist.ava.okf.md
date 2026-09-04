@@ -20,17 +20,19 @@ the `services_for_capabilities_annotated` view used by `ava start`, so a service
 that start gates out is not resurrected; the reason is logged at debug and
 surfaced by `ava status`.
 
-Four pseudo-checks have no ServiceSpec. `brew-pin` runs for both capabilities;
-gateway watchdogs prepend `redis-acl` and `pgbouncer`, then append marker-gated
-`lgtm`. `pg-backup` is a regular service healthcheck. `--disable-service X`
-also removes pseudo-checks.
+Six pseudo-checks have no ServiceSpec. `brew-pin` runs for both capabilities;
+enabled agent-runners add `permissions-helper`; gateway watchdogs prepend
+`redis-acl` and `pgbouncer`, then append marker-gated `lgtm` and the remote
+`station-probe`. A station-capable runner also appends `lgtm`. `pg-backup` is a
+regular service healthcheck. `--disable-service X` also removes pseudo-checks.
 
 ## Gateway order
 
 `redis-acl` → `pgbouncer` → `brew-pin` → `gateway` → `im-bridge` → `labeler` →
 `heartbeat` → `delivery-watchdog` →
-`events-maintenance` → `milvus` → `frontend` → `pg-backup` →
-`otel-collector` → `task-maintenance` → `memory-indexer` → `lgtm`.
+`events-maintenance` → `milvus` or `memory-search` → `frontend` → `pg-backup` →
+`pitr-uploader` → `pitr-base-candidate` → `otel-collector` → plugin services →
+`lgtm` → `station-probe`. Plugin registration determines the plugin segment.
 
 The Redis ACL repair runs first because services depend on Redis authentication.
 The middle follows `build_services()` registration order, including Milvus
@@ -40,8 +42,10 @@ its own schedule and the watchdog only probes its last-success health
 
 ## Agent-runner order
 
-`brew-pin` → `restarter` → `ops`, conditionally followed by `browser` and
-`browser-mcp` when browser service configuration and host capability allow them.
-The derived segment follows `build_services()` registration order.
+`brew-pin` → enabled `permissions-helper` → the derived agent-runner services in
+`build_services()` order (`restarter` in process mode or `agent-host` in hosted
+mode, `page-server`, `ops`, the gated browser/computer services, `mcp-daemon`,
+then `otel-collector` and plugin services). A station-capable runner appends
+`lgtm`.
 
 Parent: [[services/watchdog/watchdog.ava.okf.md|watchdog]].

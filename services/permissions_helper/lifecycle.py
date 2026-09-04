@@ -626,6 +626,17 @@ def _retire_stale_jobs() -> None:
     )
 
 
+def repair_unresponsive_helper() -> bool:
+    """Reload the current launchd job once and return whether it answers ping.
+
+    Bootout is best-effort because an unresponsive job may already be absent;
+    bootstrap remains strict so a malformed or missing plist fails visibly.
+    """
+    _probe(["launchctl", "bootout", f"{_domain()}/{_label()}"])
+    _run(["launchctl", "bootstrap", _domain(), str(_plist_path())])
+    return _helper_answers_ping()
+
+
 def install_and_load(app: Path, *, rebuilt: bool) -> None:
     """Write the LaunchAgent plist and ensure launchd is running this binary.
 
@@ -667,9 +678,7 @@ def install_and_load(app: Path, *, rebuilt: bool) -> None:
 
     if healthy or _helper_answers_ping():
         return
-    _probe(["launchctl", "bootout", f"{_domain()}/{_label()}"])
-    _run(["launchctl", "bootstrap", _domain(), str(path)])
-    if not _helper_answers_ping():
+    if not repair_unresponsive_helper():
         raise PermissionsHelperBuildError(
             "permissions helper did not answer after one launchd bootout/bootstrap repair; "
             "the job may be stuck in the LWCR/EX_CONFIG spawn-failed state"
