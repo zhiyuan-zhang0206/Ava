@@ -1,6 +1,10 @@
 ---
-summary: Prepared unit inventory binds retained service discovery and residual session/job facts without granting maintenance permission.
-read_when: Connecting verified release preparation to managed-writer observation.
+type: doc
+title: Prepared unit inventory
+description: 'Verified-image producer binds the retained service roster plus residual session/launcher facts into an immutable receipt for managed-writer observation; read-only, no maintenance permission.'
+tags:
+- runtime
+- release
 ---
 
 # Prepared unit inventory
