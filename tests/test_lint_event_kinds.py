@@ -57,6 +57,9 @@ _SQL_OR_DYNAMIC_KINDS = frozenset(
         # module constant, like sdk_call), so the literal scan cannot see it.
         "plugin_activation",
         "gateway_latency",  # gateway/_latency.py:emit_bucket telemetry.emit("telemetry", ...)
+        "sse",  # gateway/_runtime_metrics.py:sse_opened/sse_closed positional emit
+        "gateway_process",  # gateway/_runtime_metrics.py:_emit_snapshot positional emit
+        "gateway_event_loop",  # gateway/_runtime_metrics.py:_emit_snapshot positional emit
         "auth401_rejected",  # gateway/_auth401_log.py:emit_auth401_count telemetry.emit("telemetry", ...)
         "agent_registry",  # gateway/_agent_max_id.py:emit_max_agent_id telemetry.emit("telemetry", ...)
         "memory_search_stats",  # services/memory_search/app.py:emit_memory_search_stats (positional emit)

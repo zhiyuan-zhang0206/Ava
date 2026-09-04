@@ -48,6 +48,7 @@ Agent process ──▶ Redis pub/sub (ava:events)
 - **Heartbeat**: every 15 seconds without events, sends `data: {"role":"heartbeat"}` (drives client watchdog); otherwise sends `: hb` comment (keeps TCP/proxy alive but invisible to browser `onmessage`).
 - **Subscribe-before-yield**: `pubsub.subscribe()` executed before first frame; failure results in 500 (EventSource `onerror` fires, rather than a zombie state of "connected but no events").
 - **Disconnect detection**: polls `request.is_disconnected()` (`AVA_SSE_DISCONNECT_POLL_SECONDS`, default 1s).
+- **Lifecycle metrics**: successful subscriptions increment the per-mode `ava_sse_active_connections` gauge and `ava_sse_opened_total`; generator teardown decrements active depth and increments `ava_sse_closed_total`. Gateway startup publishes zero depth for both modes.
 
 ## Fault Tolerance
 

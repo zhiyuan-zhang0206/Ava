@@ -194,12 +194,38 @@ _METRIC_DISPOSITION: dict[tuple[str, str], str | None] = {
     ("checkpoint_table_sizes", "blobs_live"): "gauge",
     ("checkpoint_table_sizes", "checkpoints_live"): "gauge",
     ("checkpoint_table_sizes", "writes_live"): "gauge",
+    # Gateway process resources and SSE connection depth are absolute state.
+    # Repeated samples replace the old value rather than accumulating it.
+    ("sse", "active_connections"): "gauge",
+    ("gateway_process", "cpu_percent"): "gauge",
+    ("gateway_process", "rss_bytes"): "gauge",
+    ("gateway_process", "fd_count"): "gauge",
 }
 
 # Histogram bucket boundaries for LLM-scale latencies (ms). The OTel defaults
 # top out at 10000 — every call slower than 10s fell into +Inf and clipped
 # p95/p50 at exactly 10s on the ops panels.
 _LLM_LATENCY_BUCKETS_MS = (250, 500, 1000, 2000, 4000, 8000, 15000, 30000, 60000, 120000, 300000)
+
+# A recovered event loop reports the whole stall on its next tick. Preserve
+# minute-scale freezes instead of folding every delay above 10s into +Inf.
+_EVENT_LOOP_LAG_BUCKETS_MS = (
+    1,
+    5,
+    10,
+    25,
+    50,
+    100,
+    250,
+    500,
+    1000,
+    5000,
+    10000,
+    30000,
+    60000,
+    120000,
+    300000,
+)
 
 # Loguru extra key marking the OTLP side's own diagnostics, so they reach the
 # stderr/file sinks and never re-enter the event pipeline (same contract as
@@ -760,22 +786,32 @@ def _strip_unit_suffix(field: str) -> str:
 
 
 def _metric_views() -> list[Any]:
-    """Views shaping the LLM latency histograms: explicit LLM-scale buckets
-    (the OTel defaults clip at 10s) and no `agent_id` attribute — latency
-    percentiles are read per model/fleet, never per agent, and dropping the
-    key removes the per-(agent, model) histogram fan-out (17 series each).
-    Views match the INSTRUMENT name (unit suffix already stripped)."""
+    """Shape long LLM latencies and recovered gateway event-loop stalls.
+
+    LLM percentiles are read per model/fleet, never per agent, so dropping
+    `agent_id` removes the per-(agent, model) histogram fan-out. Event-loop
+    lag retains minute-scale stalls that the OTel 10s default clips. Views
+    match the INSTRUMENT name (unit suffix already stripped).
+    """
     from opentelemetry.sdk.metrics.view import ExplicitBucketHistogramAggregation, View
 
-    aggregation = ExplicitBucketHistogramAggregation(list(_LLM_LATENCY_BUCKETS_MS))
-    return [
+    llm_aggregation = ExplicitBucketHistogramAggregation(list(_LLM_LATENCY_BUCKETS_MS))
+    views = [
         View(
             instrument_name=name,
-            aggregation=aggregation,
+            aggregation=llm_aggregation,
             attribute_keys={"machine", "process", "model"},
         )
         for name in ("ava_llm_usage_latency", "ava_llm_usage_decode")
     ]
+    views.append(
+        View(
+            instrument_name="ava_gateway_event_loop_lag",
+            aggregation=ExplicitBucketHistogramAggregation(list(_EVENT_LOOP_LAG_BUCKETS_MS)),
+            attribute_keys={"machine", "process"},
+        )
+    )
+    return views
 
 
 def _metrics_resource() -> Any:

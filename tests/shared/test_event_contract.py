@@ -138,9 +138,34 @@ def test_category_projection_matches_telemetry_whitelist() -> None:
     # host_turn_stall_detected / _timeout / _uncancellable / _aborted (task
     # #2417's turn-level fake-alive detection + stall guard) raise it to 147;
     # and the schedule_self_respawn removal takes restart_cas_lost back out,
-    # which the guard below keeps asserted.
+    # which the guard below keeps asserted. Gateway SSE lifecycle, process,
+    # and event-loop metrics bring the current total to 150.
     assert "restart_cas_lost" not in _TELEMETRY_KINDS
-    assert len(_TELEMETRY_KINDS) == 147
+    assert len(_TELEMETRY_KINDS) == 150
+
+
+def test_gateway_observability_payloads_and_gauge_dispositions() -> None:
+    """Gateway absolute state is gauged; interval counts remain counters."""
+    from shared.events.contract import payload_keys
+    from shared.telemetry_otlp import _METRIC_DISPOSITION
+
+    assert payload_keys("sse") == ("mode", "active_connections", "opened", "closed")
+    assert payload_keys("gateway_process") == ("cpu_percent", "rss_bytes", "fd_count")
+    assert payload_keys("gateway_event_loop") == ("lag_ms", "slow_ticks")
+    assert {
+        key: _METRIC_DISPOSITION[key]
+        for key in (
+            ("sse", "active_connections"),
+            ("gateway_process", "cpu_percent"),
+            ("gateway_process", "rss_bytes"),
+            ("gateway_process", "fd_count"),
+        )
+    } == {
+        ("sse", "active_connections"): "gauge",
+        ("gateway_process", "cpu_percent"): "gauge",
+        ("gateway_process", "rss_bytes"): "gauge",
+        ("gateway_process", "fd_count"): "gauge",
+    }
 
 
 def test_checkpoint_table_sizes_payload_and_metric_disposition() -> None:

@@ -72,6 +72,7 @@ from gateway import (
     _idempotency,
     _latency,
     _pause_policy,
+    _runtime_metrics,
     alert_reconciliation,
     loki_events,
     loki_query_budget,
@@ -352,10 +353,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     # phase before the gateway process starts, so by the time this Settings is
     # built the .env is already complete; nothing to do at lifespan startup.
 
-    # Periodic telemetry flushers (latency / auth-401 / agent max-id): each
+    # Periodic telemetry emitters (latency / auth-401 / agent max-id / runtime): each
     # drains its accumulator or DB sample once per 60s and emits ONE bounded
-    # event; owned as app.state tasks so the lifespan teardown cancels them.
+    # event; the lifespan owns and stops every task or scheduled callback.
     _start_periodic_flushers(app)
+    app.state.runtime_metrics = _runtime_metrics.start_runtime_monitor()
 
     # /mcp endpoint (design task #1212 step 1): flag-gated, built fresh per
     # lifespan — StreamableHTTPSessionManager.run() can only be entered once
@@ -374,6 +376,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
             yield
     finally:
         app.state.mcp_manager = None
+        app.state.runtime_metrics.stop()
         await ttl_reaper.stop_ttl_reaper(app.state.ttl_reaper)
         await alert_reconciliation.stop_grafana_alert_reconciler(app.state.alert_reconciler)
         await app.state.grafana_client.aclose()

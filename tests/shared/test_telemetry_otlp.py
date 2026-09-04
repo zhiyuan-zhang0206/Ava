@@ -434,6 +434,65 @@ def test_metric_views_shape_latency_histograms() -> None:
     assert _attrs_of(dp)["model"] == "m"
 
 
+def test_metric_views_shape_gateway_event_loop_lag_histogram() -> None:
+    """Loop stalls beyond the OTel 10s default retain useful upper buckets."""
+    from opentelemetry.sdk.metrics import MeterProvider
+    from opentelemetry.sdk.metrics.export import InMemoryMetricReader
+
+    reader = InMemoryMetricReader()
+    provider = MeterProvider(metric_readers=[reader], views=telemetry_otlp._metric_views())
+    meter = provider.get_meter("ava.telemetry")
+    hist = meter.create_histogram("ava_gateway_event_loop_lag", unit="ms")
+    hist.record(45000.0, {"machine": "x", "process": "gateway"})
+
+    dp = _metrics(reader)["ava_gateway_event_loop_lag"].data.data_points[0]
+    assert list(dp.explicit_bounds) == list(telemetry_otlp._EVENT_LOOP_LAG_BUCKETS_MS)
+
+
+def test_gateway_runtime_and_sse_absolute_metrics_use_gauges(otlp_backend) -> None:
+    """Absolute resources and connection depth replace rather than accrue."""
+    backend, _, metric_reader = otlp_backend
+    backend.export_batch(  # pyright: ignore[reportUnknownMemberType]
+        [
+            _event(
+                event_name="sse",
+                attributes={"mode": "filtered", "active_connections": 2, "opened": 1},
+            ),
+            _event(
+                event_name="sse",
+                attributes={"mode": "filtered", "active_connections": 1, "closed": 1},
+            ),
+            _event(
+                event_name="gateway_process",
+                attributes={
+                    "cpu_percent": 12.5,
+                    "rss_bytes": 268_435_456,
+                    "fd_count": 23,
+                },
+            ),
+            _event(
+                event_name="gateway_event_loop",
+                attributes={"lag_ms": 250.0, "slow_ticks": 1},
+            ),
+        ]
+    )
+    backend.flush()  # pyright: ignore[reportUnknownMemberType]
+
+    metrics = _metrics(metric_reader)
+    active = metrics["ava_sse_active_connections"].data.data_points[0]
+    assert active.value == 1.0
+    assert _attrs_of(active)["mode"] == "filtered"
+    assert metrics["ava_sse_opened"].data.data_points[0].value == 1
+    assert metrics["ava_sse_closed"].data.data_points[0].value == 1
+    assert metrics["ava_gateway_process_cpu_percent"].data.data_points[0].value == 12.5
+    assert metrics["ava_gateway_process_rss_bytes"].data.data_points[0].value == 268_435_456
+    assert metrics["ava_gateway_process_fd_count"].data.data_points[0].value == 23
+    lag = metrics["ava_gateway_event_loop_lag"].data.data_points[0]
+    assert lag.count == 1
+    assert lag.sum == 250.0
+    assert metrics["ava_gateway_event_loop_slow_ticks"].data.data_points[0].value == 1
+
+
 def test_metric_mapping_skips_long_string_attributes(otlp_backend) -> None:
     """Strings over the attribute length cap are dropped (cardinality guard)."""
     backend, _, metric_reader = otlp_backend

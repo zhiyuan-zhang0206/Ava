@@ -21,6 +21,7 @@ Ava cluster HTTP API gateway—FastAPI service running on **port 8000** (loopbac
 - **Agent lifecycle management**: unified handling of spawn, send_message, terminate, resurrect, restart via `/api/agents/*`
 - **Eval result boundary**: artifact-read endpoints reject eval-isolated callers from their stored per-agent configuration, so bypassing the SDK cannot expose another run's transcript, activity, events, memory search, or task results
 - **SSE event push**: Redis pub/sub → SSE bridge, pushing agent events to the browser in real time
+- **Runtime observability**: process CPU/RSS/file descriptors, event-loop lag/slow ticks, and SSE connection depth/open/close rates flow through the unified OTLP emitter
 - **Alert truth reconciliation**: startup + five-minute reads of Grafana's active Alertmanager instances repair stored alert resolutions whose one-shot webhook was lost
 - **Schedule keep-alive**: built-in ScheduleManager, keeping schedule resident processes alive in their own sessions (not a timer trigger — timing logic is inside the script, the manager only ensures stay-up)
 - **Cluster ops API**: cluster, config, inventory, metrics, system and other management endpoints
@@ -50,6 +51,7 @@ Browser (frontend:3000) ──HTTP──▶ Gateway (:8000) ──▶ Postgres /
 - [[sse.ava.okf.md]] — Redis → SSE event stream
 - [[gateway/routers/ops-monitor.ava.okf.md]] — `GET /api/ops/monitor` ops panel series
 - [[telemetry-staleness.ava.okf.md]] — Loki/Prometheus heartbeat guard for stale telemetry reads
+- [[runtime-metrics.ava.okf.md]] — process resources, event-loop responsiveness, and SSE lifecycle metrics
 - [[mcp_endpoint.ava.okf.md]] — MCP boundary details
 - [[scheduler.ava.okf.md]] — ScheduleManager + ScheduleRunner
 - [[db.ava.okf.md]] — Postgres connection pool

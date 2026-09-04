@@ -34,6 +34,7 @@ from fastapi import Request
 from pydantic import ValidationError
 from redis.exceptions import AuthenticationError, NoPermissionError
 
+from gateway import _runtime_metrics
 from shared.config import settings
 from shared.live_events import EVENT_ADAPTER, Error
 from shared.redis_client import open_async_redis, retry_auth_failures_async
@@ -148,9 +149,12 @@ async def event_stream(
     # from a healthy long-lived one.
     opened = time.monotonic()
     data_frames = 0
+    metrics_opened = False
     _log.info("sse attach: agent_id=%s channel=%s broadcast=%s", agent_id, _channel, broadcast)
     try:
         await retry_auth_failures_async(lambda: pubsub.subscribe(_channel))
+        _runtime_metrics.sse_opened("filtered")
+        metrics_opened = True
 
         yield b": stream open\n\n"
 
@@ -206,6 +210,8 @@ async def event_stream(
             if frame is not None:
                 yield frame
     finally:
+        if metrics_opened:
+            _runtime_metrics.sse_closed("filtered")
         _log.info(
             "sse detach: agent_id=%s duration=%.1fs data_frames=%d",
             agent_id,
@@ -317,6 +323,7 @@ async def throttled_event_stream(
     opened = time.monotonic()
     data_frames = 0
     total_events = 0
+    metrics_opened = False
     flush_interval = 1.0 / throttle_rate
     _log.info(
         "sse throttle attach: channel=%s throttle_rate=%.1f/s",
@@ -325,6 +332,8 @@ async def throttled_event_stream(
     )
     try:
         await retry_auth_failures_async(lambda: pubsub.subscribe(_channel))
+        _runtime_metrics.sse_opened("throttled")
+        metrics_opened = True
 
         yield b": stream open\n\n"
 
@@ -365,6 +374,8 @@ async def throttled_event_stream(
             else:
                 yield b": hb\n\n"
     finally:
+        if metrics_opened:
+            _runtime_metrics.sse_closed("throttled")
         _log.info(
             "sse throttle detach: duration=%.1fs data_frames=%d total_events=%d",
             time.monotonic() - opened,
