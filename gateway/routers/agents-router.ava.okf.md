@@ -26,9 +26,11 @@ and `/api/agents/{id}/exited` finalizes an agent exit.
 for SDK and operations callers. Roster consumers request the SQL-projected
 `fields=summary` shape with live or terminated scope; it retains roster state
 and response-required notices while omitting checkpoint and probe internals and
-raw configuration. `ava agents ls` requests `fields=compact`, the exact
-three-field `{agent_id, status, label}` shape. `GET /api/agents/{id}` remains
-the full on-demand detail surface.
+raw configuration. `ava agents ls` requests that authenticated summary projection
+and renders only `agent_id`, `status`, `machine`, and `label`; runner-local
+workspace paths do not cross this boundary. `fields=compact` remains an available
+legacy narrow projection. `GET /api/agents/{id}` remains the full on-demand detail
+surface.
 
 ## Per-agent observability
 

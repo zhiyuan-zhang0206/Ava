@@ -102,7 +102,7 @@ def _add_agents_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser])
     agents_sub = agents_p.add_subparsers(dest="agents_cmd", required=True)
 
     agents_ls_p = agents_sub.add_parser(
-        "ls", help="list all agents (id / status / label) via GET /api/agents"
+        "ls", help="list all agents (id / status / machine / label) via GET /api/agents"
     )
     agents_ls_p.set_defaults(func=_h_agents_ls)
 

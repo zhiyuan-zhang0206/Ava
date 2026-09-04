@@ -5,7 +5,7 @@ the gateway or opening the web UI. Each verb forwards to an existing gateway rou
 (the gateway owns the effect; the CLI adds only rendering + arg parsing) and fails
 fast (`raise_for_status()`) on any HTTP error. Ordered by escalating force:
 
-  ls              GET  /api/agents                       list id / status / label
+  ls              GET  /api/agents?fields=summary        list id / status / machine / label
   send <id> <txt> POST /api/agents/{id}/messages         deliver a chat inbound (source required)
   cancel <id>     POST /api/cancel                       halt the current action -> idle, stays alive
   restart <id>    POST /api/agents/{id}/restart          bounce the process, state preserved
@@ -39,18 +39,19 @@ class _AgentListItem(BaseModel):
 
     agent_id: int
     status: str
+    machine: str
     label: str | None
 
 
 def cmd_agents_ls() -> int:
-    """`ava agents ls` — list every agent (id / status / label) via GET /api/agents.
+    """List every agent's id, status, machine, and label via the summary projection.
 
     Terminated agents are listed too (the gateway returns the full set); the
     status column is the live lifecycle state."""
     from shared.http_dial import get as dial_get
     from shared.machine import gateway_api_base, gateway_auth_headers
 
-    url = f"{gateway_api_base()}/api/agents?fields=compact"
+    url = f"{gateway_api_base()}/api/agents?fields=summary"
     resp = dial_get(url, timeout=_TIMEOUT_S, headers=gateway_auth_headers())
     resp.raise_for_status()
     rows = [_AgentListItem.model_validate(r) for r in resp.json()]
@@ -61,10 +62,14 @@ def cmd_agents_ls() -> int:
 
     id_w = max(len("id"), *(len(str(r.agent_id)) for r in rows))
     status_w = max(len("status"), *(len(str(r.status)) for r in rows))
-    print(f"{'id'.rjust(id_w)}  {'status'.ljust(status_w)}  label")
+    machine_w = max(len("machine"), *(len(r.machine) for r in rows))
+    print(f"{'id'.rjust(id_w)}  {'status'.ljust(status_w)}  {'machine'.ljust(machine_w)}  label")
     for r in rows:
         label = r.label or ""
-        print(f"{str(r.agent_id).rjust(id_w)}  {str(r.status).ljust(status_w)}  {label}")
+        print(
+            f"{str(r.agent_id).rjust(id_w)}  {str(r.status).ljust(status_w)}  "
+            f"{r.machine.ljust(machine_w)}  {label}"
+        )
     return 0
 
 
