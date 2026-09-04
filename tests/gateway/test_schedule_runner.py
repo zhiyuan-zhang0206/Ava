@@ -178,6 +178,31 @@ def test_run_records_py_sys_exit_nonzero(db_conn: psycopg.Connection, unit_home:
     assert _runs(db_conn, sid) == [(False, "script exited 3")]
 
 
+def test_agent_status_guard_failure_is_visible_in_schedule_records(
+    db_conn: psycopg.Connection, unit_home: Path
+) -> None:
+    script = """
+from schedules.agent_status_guard import ensure_agent_status_members
+
+class DriftedAgentStatus:
+    RUNNING = "running"
+
+ensure_agent_status_members(
+    DriftedAgentStatus,
+    {"IDLING", "RUNNING"},
+    schedule_name="drift-probe",
+)
+"""
+    sid = _insert_schedule(db_conn, script=script, name="drift-probe")
+
+    assert run(sid) == 1
+    status, last_error = _status_and_error(db_conn, sid)
+    expected = "schedule 'drift-probe' is missing AgentStatus members: IDLING"
+    assert status != "completed"
+    assert last_error is not None and expected in last_error
+    assert _runs(db_conn, sid) == [(False, f"script exited 1: {expected}")]
+
+
 @pytest.mark.parametrize(
     ("exit_expr", "expected_note"),
     [

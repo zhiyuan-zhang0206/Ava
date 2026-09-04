@@ -13,8 +13,15 @@ from pathlib import Path
 
 import ava
 from ava.agents import AgentStatus as S
+from schedules.agent_status_guard import ensure_agent_status_members
 from shared.config import settings
 from shared.watcher import next_fire
+
+ensure_agent_status_members(
+    S,
+    {"IDLING", "RESTARTING", "RUNNING", "TERMINATED"},
+    schedule_name="self-evolution-weekly",
+)
 
 # ── Configuration ──────────────────────────────────────────────────────────
 

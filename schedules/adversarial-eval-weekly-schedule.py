@@ -30,7 +30,13 @@ from schedules.adversarial_eval_cases import (
     select_case_ids,
     write_scenario,
 )
+from schedules.agent_status_guard import ensure_agent_status_members
 
+ensure_agent_status_members(
+    S,
+    {"IDLING", "TERMINATED"},
+    schedule_name="adversarial-eval-weekly",
+)
 
 TIMEZONE = settings.general.timezone
 CRON = "0 4 * * 3"
