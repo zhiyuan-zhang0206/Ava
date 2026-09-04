@@ -16,6 +16,8 @@ backend.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 import httpx
 import numpy as np
 
@@ -89,6 +91,30 @@ class NumPyBackend:
                 "chunk_idx": int(chunk_idx),
                 "vector": embedding.astype(np.float32).tolist(),
             },
+        )
+        resp.raise_for_status()
+
+    def upsert_many(self, rows: Sequence[tuple[str, float, str, np.ndarray, str, int]]) -> None:
+        """Write chunk rows in one service request and one npz save."""
+        self._require_writable()
+        if not rows:
+            return
+        resp = self._require_client().post(
+            "/upsert_batch",
+            json={
+                "rows": [
+                    {
+                        "path": path,
+                        "mtime": float(mtime),
+                        "content_hash": content_hash,
+                        "kind": kind,
+                        "chunk_idx": int(chunk_idx),
+                        "vector": embedding.astype(np.float32).tolist(),
+                    }
+                    for path, mtime, content_hash, embedding, kind, chunk_idx in rows
+                ]
+            },
+            timeout=300.0,
         )
         resp.raise_for_status()
 

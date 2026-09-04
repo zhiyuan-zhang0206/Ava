@@ -35,7 +35,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Generator
+from collections.abc import Generator, Sequence
 from contextlib import contextmanager
 
 import numpy as np
@@ -114,6 +114,28 @@ def _vector_text(embedding: np.ndarray) -> str:
     dependency is needed.
     """
     return "[" + ",".join(str(float(v)) for v in embedding.astype(np.float32)) + "]"
+
+
+def _upsert_params(
+    path: str,
+    mtime: float,
+    content_hash: str,
+    embedding: np.ndarray,
+    kind: str,
+    chunk_idx: int,
+    fingerprint: str,
+) -> tuple[object, ...]:
+    """Bound parameters shared by the single and batch write paths."""
+    return (
+        pk_of(path, kind, chunk_idx),
+        path,
+        kind,
+        int(chunk_idx),
+        float(mtime),
+        content_hash,
+        fingerprint,
+        _vector_text(embedding),
+    )
 
 
 def _dim_of(client: psycopg.Connection) -> int | None:
@@ -299,17 +321,28 @@ class PGVectorBackend:
         with self._write_conn() as conn:
             conn.execute(
                 _UPSERT_SQL,
-                (
-                    pk_of(path, kind, chunk_idx),
+                _upsert_params(
                     path,
-                    kind,
-                    int(chunk_idx),
-                    float(mtime),
+                    mtime,
                     content_hash,
+                    embedding,
+                    kind,
+                    chunk_idx,
                     self._fingerprint,
-                    _vector_text(embedding),
                 ),
             )
+
+    def upsert_many(self, rows: Sequence[tuple[str, float, str, np.ndarray, str, int]]) -> None:
+        """Write chunk rows through one transaction and one executemany."""
+        self._require_writable()
+        if not rows:
+            return
+        params = [
+            _upsert_params(path, mtime, hash_, embedding, kind, chunk_idx, self._fingerprint)
+            for path, mtime, hash_, embedding, kind, chunk_idx in rows
+        ]
+        with self._write_conn() as conn, conn.cursor() as cursor:
+            cursor.executemany(_UPSERT_SQL, params)
 
     def delete(self, path: str) -> None:
         """Delete every chunk row of `path`. No-ops when the path has no rows.

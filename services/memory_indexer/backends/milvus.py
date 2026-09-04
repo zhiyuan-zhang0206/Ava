@@ -48,6 +48,7 @@ Milvus COSINE returns "distance" = 1 - cosine_similarity, ascending (0
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from contextlib import suppress
 from typing import Any, cast
 
@@ -216,6 +217,23 @@ def _path_filter(path: str) -> str | None:
     return f'path == "{path}"'
 
 
+def _upsert_row(
+    row: tuple[str, float, str, np.ndarray, str, int], fingerprint: str
+) -> dict[str, object]:
+    """One Milvus row shared by the single and batch write paths."""
+    path, mtime, hash_, embedding, kind, chunk_idx = row
+    return {
+        "pk": pk_of(path, kind, chunk_idx),
+        "path": path,
+        "kind": kind,
+        "chunk_idx": int(chunk_idx),
+        "mtime": float(mtime),
+        "content_hash": hash_,
+        "embedder": fingerprint,
+        "vector": embedding.astype(np.float32).tolist(),
+    }
+
+
 def _upsert(
     client: MilvusClient,
     path: str,
@@ -229,26 +247,12 @@ def _upsert(
 ) -> None:
     """Write / update one chunk row, keyed by (path, kind, chunk_idx).
 
-    `kind` is KIND_DESC (the frontmatter description, chunk_idx=0) or
-    KIND_BODY (a body chunk). Re-upserting the same triple overwrites in
-    place via the folded pk. `fingerprint` is the embedding provider's
-    semantic-space id, stamped on the row for the reconcile diff.
+    Repeated keys overwrite in place; `fingerprint` records the vector space.
     """
     # pymilvus client.upsert types its **kwargs as Unknown; the call args are fully typed.
     client.upsert(  # pyright: ignore[reportUnknownMemberType]
         collection_name=_COLLECTION,
-        data=[
-            {
-                "pk": pk_of(path, kind, chunk_idx),
-                "path": path,
-                "kind": kind,
-                "chunk_idx": int(chunk_idx),
-                "mtime": float(mtime),
-                "content_hash": hash_,
-                "embedder": fingerprint,
-                "vector": embedding.astype(np.float32).tolist(),
-            }
-        ],
+        data=[_upsert_row((path, mtime, hash_, embedding, kind, chunk_idx), fingerprint)],
     )
 
 
@@ -450,6 +454,16 @@ class MilvusBackend:
             kind=kind,
             chunk_idx=chunk_idx,
             fingerprint=self._fingerprint,
+        )
+
+    def upsert_many(self, rows: Sequence[tuple[str, float, str, np.ndarray, str, int]]) -> None:
+        """Write chunk rows through one Milvus upsert call."""
+        self._require_writable()
+        if not rows:
+            return
+        data = [_upsert_row(row, self._fingerprint) for row in rows]
+        self._require_client().upsert(  # pyright: ignore[reportUnknownMemberType]
+            collection_name=_COLLECTION, data=data
         )
 
     def delete(self, path: str) -> None:

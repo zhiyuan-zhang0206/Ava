@@ -1,7 +1,7 @@
 """The memory search HTTP API — FastAPI over the in-process MemoryStore.
 
-Endpoints mirror the backend protocol one-to-one (upsert / delete / meta /
-search), so `backends.numpy.NumPyBackend` is a thin HTTP client and the
+Endpoints mirror the backend protocol one-to-one (upsert / upsert_batch /
+delete / meta / search), so `backends.numpy.NumPyBackend` is a thin HTTP client and the
 indexer daemon + gateway treat this service exactly like the milvus
 daemon. Every mutation persists the npz before responding, so a kill
 -after-ack never loses a row.
@@ -42,6 +42,7 @@ _log = logging.getLogger("services.memory_search.app")
 # allocates. The store keeps its own exact-dim check as the last gate.
 _EMBED_DIM = get_provider().dim
 _MAX_K = 1000
+_MAX_BATCH_ROWS = 65536
 
 # One stats sample per minute — bounded row rate, same cadence as the
 # gateway's gauge flushers (agent_registry / auth401 / latency). A 60s
@@ -56,6 +57,10 @@ class UpsertBody(BaseModel):
     kind: str
     chunk_idx: int
     vector: list[float] = Field(max_length=_EMBED_DIM)
+
+
+class UpsertBatchBody(BaseModel):
+    rows: list[UpsertBody] = Field(min_length=1, max_length=_MAX_BATCH_ROWS)
 
 
 class DeleteBody(BaseModel):
@@ -153,6 +158,29 @@ def build_app(store: MemoryStore) -> FastAPI:
                     kind=body.kind,
                     chunk_idx=body.chunk_idx,
                 )
+                await asyncio.to_thread(store.save)
+        except ValueError as exc:
+            from fastapi import HTTPException
+
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        return {"status": "ok"}
+
+    @app.post("/upsert_batch")
+    async def upsert_batch(body: UpsertBatchBody) -> dict[str, str]:
+        rows = [
+            (
+                row.path,
+                row.mtime,
+                row.content_hash,
+                np.asarray(row.vector, dtype=np.float32),
+                row.kind,
+                row.chunk_idx,
+            )
+            for row in body.rows
+        ]
+        try:
+            async with lock:
+                store.upsert_many(rows)
                 await asyncio.to_thread(store.save)
         except ValueError as exc:
             from fastapi import HTTPException
