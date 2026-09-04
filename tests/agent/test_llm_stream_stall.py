@@ -16,17 +16,20 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator
+from typing import cast
 from unittest.mock import MagicMock
 
 import pytest
-from langchain_core.messages import AIMessageChunk, HumanMessage
+from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 
 from agent.graph import llm_node
 from agent.graph._context import AvaContext
 from agent.graph._llm import LLMStreamStallTimeoutError
+from agent.graph._llm_stream import _consume_llm, _consume_stream_with_stall_timeout
 from agent.state import AgentState
+from shared.config import settings
 from tests.agent._fakes import make_fake_ops_pool
 
 _CONFIG: RunnableConfig = {"configurable": {"thread_id": "7"}}
@@ -136,3 +139,103 @@ async def test_normal_stream_completes_no_stall_timeout(
     # killed by stall timeout"
     result = await llm_node(state, _make_runtime(fake_llm), _CONFIG)
     assert result is not None
+
+
+async def test_total_timeout_falls_back_while_chunks_keep_arriving(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A drip-fed stream cannot evade the per-attempt total-duration ceiling."""
+    import agent.graph._llm_stream as stream_module
+
+    clock = [0.0]
+    fallback_called = False
+    streamed_chunks = 0
+
+    def fake_monotonic() -> float:
+        return clock[0]
+
+    async def _dripping_stream() -> AsyncIterator[AIMessageChunk]:
+        nonlocal streamed_chunks
+        while not fallback_called:
+            streamed_chunks += 1
+            if streamed_chunks > 20:
+                pytest.fail("stream total timeout never stopped the condition-driven fake")
+            clock[0] += 0.4
+            yield AIMessageChunk(content="drip")
+
+    async def _fallback(*args: object, **kwargs: object) -> AIMessage:
+        nonlocal fallback_called
+        fallback_called = True
+        return AIMessage(content="fallback")
+
+    monkeypatch.setattr(stream_module.time, "monotonic", fake_monotonic)
+    monkeypatch.setattr(settings.lm, "llm_stream_total_timeout_seconds", 1.0)
+    monkeypatch.setattr(settings.lm, "llm_stream_ttft_timeout_seconds", 10.0)
+    monkeypatch.setattr(settings.lm, "llm_stream_inter_chunk_timeout_seconds", 10.0)
+    fake_llm = MagicMock()
+    fake_llm.astream.return_value = _dripping_stream()
+    fake_llm.ainvoke = _fallback
+    chunks: list[AIMessageChunk] = []
+
+    await _consume_llm(fake_llm, [], chunks=chunks, handler=MagicMock())
+
+    assert fallback_called
+    assert streamed_chunks <= 20
+    assert [cast(str, chunk.content) for chunk in chunks] == [  # pyright: ignore[reportUnknownMemberType]
+        "fallback"
+    ]
+
+
+async def test_stream_below_total_timeout_is_unchanged(monkeypatch: pytest.MonkeyPatch) -> None:
+    import agent.graph._llm_stream as stream_module
+
+    clock = [0.0]
+
+    async def _stream() -> AsyncIterator[AIMessageChunk]:
+        for content in ("a", "b"):
+            clock[0] += 0.4
+            yield AIMessageChunk(content=content)
+
+    monkeypatch.setattr(stream_module.time, "monotonic", lambda: clock[0])
+    chunks: list[AIMessageChunk] = []
+
+    await _consume_stream_with_stall_timeout(
+        _stream(),
+        chunks=chunks,
+        handler=MagicMock(),
+        ttft_timeout=10.0,
+        inter_chunk_timeout=10.0,
+        total_timeout=1.0,
+    )
+
+    assert [cast(str, chunk.content) for chunk in chunks] == [  # pyright: ignore[reportUnknownMemberType]
+        "a",
+        "b",
+    ]
+
+
+async def test_none_disables_stream_total_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The helper's None contract permits an intentionally unbounded caller."""
+    import agent.graph._llm_stream as stream_module
+
+    clock = [0.0]
+
+    async def _long_stream() -> AsyncIterator[AIMessageChunk]:
+        while clock[0] <= 3600.0:
+            clock[0] += 1000.0
+            yield AIMessageChunk(content="still alive")
+
+    monkeypatch.setattr(stream_module.time, "monotonic", lambda: clock[0])
+    chunks: list[AIMessageChunk] = []
+
+    await _consume_stream_with_stall_timeout(
+        _long_stream(),
+        chunks=chunks,
+        handler=MagicMock(),
+        ttft_timeout=10.0,
+        inter_chunk_timeout=10.0,
+        total_timeout=None,
+    )
+
+    assert clock[0] > 3600.0
+    assert len(chunks) == 4
