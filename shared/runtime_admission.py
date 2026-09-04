@@ -7,6 +7,7 @@ from functools import lru_cache
 import psycopg
 
 from shared.managed_writer_publication import (
+    _ADMISSION_LOCK,
     _ADMISSION_ROW,
     AdmissionDecision,
     CurrentAdmission,
@@ -105,6 +106,7 @@ def legacy_boot_terminal_allowed(conn: psycopg.Connection) -> bool:
 
     if conn.info.transaction_status != TransactionStatus.INTRANS:
         raise RuntimeError("boot terminal guard requires the caller transaction")
+    conn.execute(_ADMISSION_LOCK)
     return isinstance(_admission_state(conn.execute(_ADMISSION_ROW).fetchone()), LegacyProtocolZero)
 
 
@@ -124,6 +126,7 @@ def process_runtime_admission() -> RuntimeAdmission:
 
 def require_activation(conn: psycopg.Connection, decision: AdmissionDecision) -> None:
     """Foundation v2 current records are not positive all-writer publication."""
+    conn.execute(_ADMISSION_LOCK)
     _require_activation_state(_admission_state(conn.execute(_ADMISSION_ROW).fetchone()), decision)
 
 

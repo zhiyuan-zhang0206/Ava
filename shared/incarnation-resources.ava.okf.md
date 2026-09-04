@@ -54,6 +54,11 @@ Incomplete historical v2 publication without activation hash/challenge is not
 new-mode permission. Historical NULL resource rows remain unknown under current
 publication and cannot become empty through admission.
 
+Process runtimes keep the least-privilege `ava_runner` database identity. They
+take the publication row lock through the fixed security-definer
+`lock_runtime_publication_admission()` operation, which exposes no rollout
+mutation surface; publication columns remain ordinary read-only facts.
+
 Managed exec launches the fixed isolated read-only `agent.exec_domain_owner`
 entry (`-I -B -X utf8`) behind a permit gate, validates its actual PID/birth and
 direct root, and then registers and attaches the allocation atomically under the
