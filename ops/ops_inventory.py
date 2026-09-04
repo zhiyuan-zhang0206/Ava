@@ -15,7 +15,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from ava._mcp_config import load_mcp_config, server_capability
 from ops.rpc_schemas import (
     FieldWriteResult,
     InventoryReadItem,
@@ -72,6 +71,8 @@ def inventory_read_op() -> InventoryReadResult:
         and a read-time capability verdict (can_enable/reason) for the `requires`
         precondition
     """
+    from ava._mcp_config import load_mcp_config, server_capability
+
     _assert_agent_runner()
     discovered = plugins_config._discover_plugins()
     cfg = plugins_config.load_for_runtime(set(discovered))
@@ -123,6 +124,8 @@ def inventory_write_op(
     an `applied` flag. No restart_required field — plugin/MCP toggles take
     effect on the next agent step / next connect, no restart.
     """
+    from ava._mcp_config import load_mcp_config, server_capability
+
     _assert_agent_runner()
     discovered = set(plugins_config._discover_plugins())
     plugin_results: dict[str, FieldWriteResult] = {}
