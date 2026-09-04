@@ -187,8 +187,9 @@ class CIResult:
     # Trunk's queue-state check is likewise not a CI result and must not turn
     # an otherwise green PR into a perpetual PENDING verdict.
     trunk_checks: list[dict] = field(default_factory=list)
-    # The QA gate is required by Trunk and checked before its submission, not by
-    # this CI verdict. Keep it separate so it cannot enter the verdict buckets.
+    # The QA gate and evidence evaluator are required by Trunk and checked before
+    # its submission, not by this CI verdict. Keep them separate so they cannot
+    # enter the verdict buckets.
     gate_checks: list[dict] = field(default_factory=list)
     mergeable: str = ""  # MERGEABLE / CONFLICTING / UNKNOWN
     error_detail: str = ""
@@ -230,9 +231,12 @@ def _repo_has_workflows() -> bool:
 
 
 TRUNK_MERGE_QUEUE_CHECK_NAME = "Trunk Merge Queue"
-# Must match the job name in .github/workflows/qa-approved-gate.yml — the check is
-# required by Trunk and checked before submission, never part of the CI verdict.
 QA_APPROVED_GATE_CHECK_NAME = "qa-approved-gate"
+QA_EVIDENCE_CHECK_NAME = "evaluate-qa-evidence"
+# Both are QA evidence produced by the qa-approved-gate workflow and enforced by
+# the queue before submission — never CI conclusions, so they never enter the
+# verdict buckets.
+QA_GATE_CHECK_NAMES = frozenset({QA_APPROVED_GATE_CHECK_NAME, QA_EVIDENCE_CHECK_NAME})
 
 
 def _latest_completed_per_name(checks: list[dict]) -> list[dict]:
@@ -281,9 +285,10 @@ def _partition_checks(checks: list[dict], result: CIResult) -> None:
     so is a COMPLETED one whose conclusion is unrecognized — guessing there is
     how a false "all green" gets reported.
 
-    Trunk checks report queue state rather than CI results, while
-    `qa-approved-gate` is required by Trunk and checked before submission. Both
-    are routed to dedicated buckets so they never enter the verdict fields.
+    Trunk checks report queue state rather than CI results, while the
+    `qa-approved-gate` and `evaluate-qa-evidence` checks are required by Trunk
+    and checked before submission. All are routed to dedicated buckets so they
+    never enter the verdict fields.
     """
     for c in checks:
         if c.get("__typename") == "StatusContext":
@@ -294,7 +299,7 @@ def _partition_checks(checks: list[dict], result: CIResult) -> None:
             # (2026-09-04: five PRs stalled with all real checks green).
             context = c.get("context", "?")
             state = c.get("state", "")
-            if context == QA_APPROVED_GATE_CHECK_NAME:
+            if context in QA_GATE_CHECK_NAMES:
                 result.gate_checks.append(c)
                 continue
             if state == "SUCCESS":
@@ -313,7 +318,7 @@ def _partition_checks(checks: list[dict], result: CIResult) -> None:
         if name.startswith(TRUNK_MERGE_QUEUE_CHECK_NAME):
             result.trunk_checks.append(c)
             continue
-        if name == QA_APPROVED_GATE_CHECK_NAME:
+        if name in QA_GATE_CHECK_NAMES:
             result.gate_checks.append(c)
             continue
 
@@ -432,7 +437,7 @@ def check_ci(pr_number: str | int, *, repo: str | None = None) -> CIResult:
         result.checks = checks
         for c in checks:
             name = c.get("name", "?")
-            if name == QA_APPROVED_GATE_CHECK_NAME:
+            if name in QA_GATE_CHECK_NAMES:
                 result.gate_checks.append(c)
                 continue
             status = c.get("status", "")
