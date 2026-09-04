@@ -12,6 +12,7 @@ import time
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
+from typing import cast
 
 import psutil
 import psycopg
@@ -189,42 +190,61 @@ def _log_tail(path: Path, limit: int = 4000) -> str:
     return tail
 
 
-def _start_sandbox_postgres(
-    pg_ctl: Path, pgdata: Path, options: str, log_path: Path, timeout: int
-) -> None:
-    """pg_ctl -w start with -l and an explicit -t bound.
+def _spawn_sandbox_postgres(
+    postgres: Path, pgdata: Path, config_file: Path, log_path: Path
+) -> subprocess.Popen[str]:
+    """Start the sandbox postmaster as our direct child, never via pg_ctl.
 
-    -l is required, not cosmetic: the sandbox postmaster inherits pg_ctl's
-    stdout, so a capture_output wait never sees EOF while the sandbox lives —
-    activation #8/#9 hung the full 900 s on a postmaster that was already
-    ready (pg_ctl had printed "server started"). -l redirects the postmaster
-    to the log file, so pg_ctl exits on readiness; the log also keeps the
-    postmaster's own output for failure diagnostics after the run root is
-    cleaned. -t mirrors the executor's own timeout so a slow recovery is
-    reported by pg_ctl (rc 1 + log tail) instead of a blind kill.
+    pg_ctl detaches the postmaster with setsid() into its own session and
+    process group, but the whole restore design reaps a run — restricted
+    worker, sandbox postmaster and all — by signalling the worker's process
+    group (worker_bootstrap setsid + killpg in worker_process.py /
+    restore_proof.py). A pg_ctl-detached postmaster would survive the
+    worker's crash unreachable by any group signal, so the sandbox must stay
+    in OUR group: exec postgres directly with its output in the run-root log
+    (activation #10 first surfaced the group-escape tripwire; #8/#9 hung
+    earlier on pg_ctl's capture pipe for the same daemonization reason).
     """
-    try:
-        _run(
-            [
-                str(pg_ctl),
-                "-D",
-                str(pgdata),
-                "-l",
-                str(log_path),
-                "-t",
-                str(timeout),
-                "-o",
-                options,
-                "-w",
-                "start",
-            ],
-            timeout=timeout,
+    with log_path.open("ab", buffering=0) as log:
+        return cast(
+            "subprocess.Popen[str]",
+            subprocess.Popen(  # noqa: S603 — resolved pg binary + static argv
+                [
+                    str(postgres),
+                    "-D",
+                    str(pgdata),
+                    "-c",
+                    f"config_file={config_file}",
+                ],
+                stdin=subprocess.DEVNULL,
+                stdout=log.fileno(),
+                stderr=log.fileno(),
+            ),
         )
-    except Exception as exc:
-        detail = _log_tail(log_path)
-        if detail:
-            raise RestoreProofError(f"{exc}; sandbox postmaster log tail: {detail}") from exc
-        raise
+
+
+def _wait_for_sandbox_identity(
+    process: subprocess.Popen[str],
+    pgdata: Path,
+    log_path: Path,
+    timeout: int,
+) -> SandboxPostgresIdentity:
+    """Wait until the sandbox postmaster owns its pid file (or crashed)."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if process.poll() is not None:
+            detail = _log_tail(log_path)
+            raise RestoreProofError(
+                f"sandbox postmaster exited {process.returncode}"
+                + (f": {detail}" if detail else "")
+            )
+        if (pgdata / "postmaster.pid").exists():
+            return _sandbox_identity(pgdata)
+        time.sleep(0.1)
+    detail = _log_tail(log_path)
+    raise RestoreProofError(
+        "sandbox postmaster never wrote its pid file" + (f": {detail}" if detail else "")
+    )
 
 
 def _sandbox_identity(pgdata: Path) -> SandboxPostgresIdentity:
@@ -303,6 +323,7 @@ class IsolatedPostgresRestoreExecutor:
         self._live_db_url = live_db_url
         self._data_directory = data_directory
         self._pg_ctl = pg_ctl
+        self._postgres = pg_ctl.parent / "postgres"
         self._pg_verifybackup = pg_verifybackup
         self._timeout = timeout_seconds
 
@@ -334,7 +355,7 @@ class IsolatedPostgresRestoreExecutor:
         port = _free_port()
         _append_recovery_config(pgdata, wal_dir, socket_dir, candidate.end_lsn, run_root)
         sandbox_config = _write_sandbox_config(pgdata, socket_dir, port, run_root)
-        options = f"-c config_file={shlex.quote(str(sandbox_config))}"
+        sandbox_log = run_root / "sandbox-postgres.log"
         replay_started = time.monotonic()
         sandbox: SandboxPostgresIdentity | None = None
         try:
@@ -344,14 +365,12 @@ class IsolatedPostgresRestoreExecutor:
                 sandbox_pgdata=str(pgdata.resolve()),
                 expected_sandbox_pgid=os.getpgrp(),
             )
-            _start_sandbox_postgres(
-                self._pg_ctl,
-                pgdata,
-                options,
-                run_root / "sandbox-postgres.log",
-                self._timeout,
+            sandbox_process = _spawn_sandbox_postgres(
+                self._postgres, pgdata, sandbox_config, sandbox_log
             )
-            sandbox = _sandbox_identity(pgdata)
+            sandbox = _wait_for_sandbox_identity(
+                sandbox_process, pgdata, sandbox_log, self._timeout
+            )
             if sandbox.pgid != os.getpgrp():
                 raise RestoreProofError("sandbox PostgreSQL escaped the restore process group")
             update_restore_owner(
@@ -362,7 +381,9 @@ class IsolatedPostgresRestoreExecutor:
                 sandbox_pgid=sandbox.pgid,
                 sandbox_pgdata=sandbox.data_directory,
             )
-            achieved = self._wait_for_promotion(socket_dir, port, candidate)
+            achieved = self._wait_for_promotion(
+                socket_dir, port, candidate, sandbox_process, sandbox_log
+            )
             replay_seconds = time.monotonic() - replay_started
             smoke_started = time.monotonic()
             restored_fingerprint = self._smoke(socket_dir, port, candidate)
@@ -391,11 +412,24 @@ class IsolatedPostgresRestoreExecutor:
                 self._stop(pgdata, sandbox)
                 update_restore_owner(owner_path, state="postgres_stopped")
 
-    def _wait_for_promotion(self, socket_dir: Path, port: int, candidate: CandidateManifest) -> str:
+    def _wait_for_promotion(
+        self,
+        socket_dir: Path,
+        port: int,
+        candidate: CandidateManifest,
+        process: subprocess.Popen[str] | None = None,
+        log_path: Path | None = None,
+    ) -> str:
         deadline = time.monotonic() + self._timeout
         db_url = f"postgresql://?host={socket_dir}&port={port}&dbname=postgres"
         last_error: Exception | None = None
         while time.monotonic() < deadline:
+            if process is not None and process.poll() is not None:
+                detail = _log_tail(log_path) if log_path is not None else ""
+                raise RestoreProofError(
+                    f"sandbox postmaster exited {process.returncode} before promotion"
+                    + (f": {detail}" if detail else "")
+                ) from last_error
             try:
                 with psycopg.connect(db_url, connect_timeout=2) as conn, conn.cursor() as cur:
                     cur.execute("SELECT pg_is_in_recovery(), pg_last_wal_replay_lsn()::text")
