@@ -21,13 +21,15 @@ from cli.commands._external_agent_skill_cleanup import (
 )
 from cli.commands._external_agent_skill_fs import (
     _ClientConflictError,
-    _copy_source_contents,
     _exists,
     _lstat,
     _manifest_digest,
+    _materialize_source_snapshot,
     _rename_no_replace,
     _source_lstat,
+    _source_snapshot,
     _SourceIntegrityError,
+    _SourceSnapshot,
     _tree_digest,
     _tree_manifest,
     _write_new,
@@ -90,7 +92,7 @@ def _cleanup_garbage(
 
 
 def _stage_copy(
-    source: Path,
+    snapshot: _SourceSnapshot,
     source_manifest: list[dict[str, Any]],
     skills_root: Path,
     ledger_path: Path,
@@ -113,7 +115,7 @@ def _stage_copy(
     prepared = _prepared_stage_path(ledger_path, generation_id)
     prepared.mkdir(mode=0o700)
     _write_new(prepared / _MARKER_NAME, marker, 0o600)
-    _copy_source_contents(source, prepared)
+    _materialize_source_snapshot(snapshot, prepared)
     if _tree_manifest(prepared) != expected_manifest:
         raise _SourceIntegrityError("operator skill source copy did not verify")
     transaction["stage_state"] = "publishing"
@@ -369,7 +371,7 @@ def _ensure_ledger_root(ctx: ConvergeCtx) -> Path:
 
 
 def _converge_locked(
-    source: Path,
+    snapshot: _SourceSnapshot,
     source_manifest: list[dict[str, Any]],
     source_digest: str,
     client_home: Path,
@@ -422,7 +424,7 @@ def _converge_locked(
     elif _exists(target):
         raise _ClientConflictError("unmanaged target was preserved")
     try:
-        _stage_copy(source, source_manifest, skills_root, ledger_path, ledger, source_digest)
+        _stage_copy(snapshot, source_manifest, skills_root, ledger_path, ledger, source_digest)
     except (OSError, _SourceIntegrityError):
         if _abandon_transaction(ledger_path, ledger, skills_root):
             _cleanup_garbage(ledger_path, ledger, skills_root, label)
@@ -451,7 +453,8 @@ def converge_external_agent_skill(ctx: ConvergeCtx, *, host_home: Path | None = 
         return
     source = ctx.repo / ".agents" / "skills" / _SKILL_NAME
     _validate_source_path(ctx.repo, source)
-    source_manifest = _tree_manifest(source, source=True)
+    snapshot = _source_snapshot(source)
+    source_manifest = snapshot.manifest()
     source_digest = _manifest_digest(source_manifest)
     try:
         ledger_root = _ensure_ledger_root(ctx)
@@ -466,7 +469,7 @@ def converge_external_agent_skill(ctx: ConvergeCtx, *, host_home: Path | None = 
             _validate_lock(lock_path)
             with file_lock(lock_path, timeout_s=2):
                 _converge_locked(
-                    source,
+                    snapshot,
                     source_manifest,
                     source_digest,
                     home / home_name,

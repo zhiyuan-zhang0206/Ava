@@ -9,6 +9,7 @@ import json
 import os
 import stat
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +22,41 @@ class _SourceIntegrityError(RuntimeError):
 
 class _ClientConflictError(RuntimeError):
     """A user-owned client path cannot safely be changed."""
+
+
+@dataclass(frozen=True, slots=True)
+class _SourceFile:
+    path: str
+    mode: int
+    data: bytes
+
+
+@dataclass(frozen=True, slots=True)
+class _SourceSnapshot:
+    """One immutable read of the operator skill source tree."""
+
+    directories: tuple[tuple[str, int], ...]
+    files: tuple[_SourceFile, ...]
+
+    def manifest(self) -> list[dict[str, Any]]:
+        return sorted(
+            [
+                *(
+                    {"kind": "directory", "mode": mode, "path": path}
+                    for path, mode in self.directories
+                ),
+                *(
+                    {
+                        "kind": "file",
+                        "mode": item.mode,
+                        "path": item.path,
+                        "sha256": hashlib.sha256(item.data).hexdigest(),
+                    }
+                    for item in self.files
+                ),
+            ],
+            key=lambda item: str(item["path"]),
+        )
 
 
 def _attributes_reparse(current: os.stat_result) -> bool:
@@ -66,6 +102,17 @@ def _signature(current: os.stat_result) -> tuple[int, int, int, int, int, int, i
     )
 
 
+def _same_identity(left: os.stat_result, right: os.stat_result) -> bool:
+    """Compare only the identity fields shared by pathname and handle stats."""
+    # CPython 3.12's Windows pathname stat keeps legacy st_ctime = birthtime,
+    # while fstat reports the handle's metadata-change time.  Compare the two
+    # API families only on identity; each family gets its own full before/after
+    # stability check in _read_regular.
+    left_identity = (left.st_dev, left.st_ino)
+    right_identity = (right.st_dev, right.st_ino)
+    return left_identity != (0, 0) and left_identity == right_identity
+
+
 def _read_regular(path: Path, *, source: bool) -> tuple[bytes, int]:
     inspect = _source_lstat if source else _lstat
     before = inspect(path)
@@ -78,18 +125,63 @@ def _read_regular(path: Path, *, source: bool) -> tuple[bytes, int]:
     try:
         fd = os.open(path, flags)
         with os.fdopen(fd, "rb") as stream:
-            opened = os.fstat(stream.fileno())
-            if _signature(opened) != _signature(before):
+            opened_before = os.fstat(stream.fileno())
+            if not _same_identity(opened_before, before):
                 raise error("operator skill tree changed while being read")
-            if opened.st_nlink != 1:
+            if opened_before.st_nlink not in {0, 1}:
                 raise error("operator skill tree contains a multi-link file")
             data = stream.read()
+            opened_after = os.fstat(stream.fileno())
+            if _signature(opened_after) != _signature(opened_before):
+                raise error("operator skill tree changed while being read")
     except OSError as exc:
         raise error("operator skill tree cannot be read safely") from exc
     after = inspect(path)
-    if _signature(after) != _signature(before):
+    if _signature(after) != _signature(before) or not _same_identity(after, opened_after):
         raise error("operator skill tree changed while being read")
     return data, stat.S_IMODE(before.st_mode)
+
+
+def _source_snapshot(root: Path) -> _SourceSnapshot:
+    """Capture validated source bytes once so publication never re-reads live Git files."""
+    root_before = _source_lstat(root)
+    if not stat.S_ISDIR(root_before.st_mode):
+        raise _SourceIntegrityError("operator skill tree root is not a directory")
+    directories: list[tuple[str, int]] = [(".", stat.S_IMODE(root_before.st_mode))]
+    files: list[_SourceFile] = []
+    source_stats: dict[str, os.stat_result] = {".": root_before}
+
+    def visit(directory: Path) -> None:
+        relative_directory = directory.relative_to(root).as_posix() or "."
+        before = _source_lstat(directory)
+        try:
+            children = sorted(directory.iterdir(), key=lambda item: item.name)
+        except OSError as exc:
+            raise _SourceIntegrityError("operator skill tree cannot be enumerated safely") from exc
+        for child in children:
+            if directory == root and child.name == _MARKER_NAME:
+                raise _SourceIntegrityError("operator skill source reserves its ownership marker")
+            current = _source_lstat(child)
+            relative = child.relative_to(root).as_posix()
+            source_stats[relative] = current
+            if stat.S_ISDIR(current.st_mode):
+                directories.append((relative, stat.S_IMODE(current.st_mode)))
+                visit(child)
+            elif stat.S_ISREG(current.st_mode):
+                data, mode = _read_regular(child, source=True)
+                files.append(_SourceFile(path=relative, mode=mode, data=data))
+            else:
+                raise _SourceIntegrityError("operator skill source contains an unsupported entry")
+        if _signature(_source_lstat(directory)) != _signature(before):
+            raise _SourceIntegrityError("operator skill source changed while being copied")
+        source_stats[relative_directory] = before
+
+    visit(root)
+    for relative, expected in source_stats.items():
+        current = _source_lstat(root if relative == "." else root / relative)
+        if _signature(current) != _signature(expected):
+            raise _SourceIntegrityError("operator skill source changed while being copied")
+    return _SourceSnapshot(directories=tuple(directories), files=tuple(files))
 
 
 def _tree_digest(
@@ -243,29 +335,18 @@ def _rename_no_replace(source: Path, destination: Path) -> None:
         raise OSError(error_number, os.strerror(error_number))
 
 
-def _copy_source_contents(source: Path, destination: Path) -> None:
-    def copy_directory(source_dir: Path, destination_dir: Path) -> None:
-        source_stat = _source_lstat(source_dir)
-        if not stat.S_ISDIR(source_stat.st_mode):
-            raise _SourceIntegrityError("operator skill source directory is invalid")
-        for source_child in sorted(source_dir.iterdir(), key=lambda item: item.name):
-            if source_dir == source and source_child.name == _MARKER_NAME:
-                raise _SourceIntegrityError("operator skill source reserves its ownership marker")
-            current = _source_lstat(source_child)
-            destination_child = destination_dir / source_child.name
-            if stat.S_ISDIR(current.st_mode):
-                # Keep the directory writable until its complete contents are
-                # present, then apply the source mode as the final metadata.
-                destination_child.mkdir(mode=0o700)
-                copy_directory(source_child, destination_child)
-                destination_child.chmod(stat.S_IMODE(current.st_mode))
-            elif stat.S_ISREG(current.st_mode):
-                data, mode = _read_regular(source_child, source=True)
-                _write_new(destination_child, data, mode)
-            else:
-                raise _SourceIntegrityError("operator skill source contains an unsupported entry")
-        if _signature(_source_lstat(source_dir)) != _signature(source_stat):
-            raise _SourceIntegrityError("operator skill source changed while being copied")
-
-    copy_directory(source, destination)
-    destination.chmod(stat.S_IMODE(_source_lstat(source).st_mode))
+def _materialize_source_snapshot(snapshot: _SourceSnapshot, destination: Path) -> None:
+    """Write one captured source generation without consulting the live checkout."""
+    for relative, _mode in sorted(
+        (item for item in snapshot.directories if item[0] != "."),
+        key=lambda item: len(Path(item[0]).parts),
+    ):
+        (destination / relative).mkdir(mode=0o700)
+    for item in snapshot.files:
+        _write_new(destination / item.path, item.data, item.mode)
+    for relative, mode in sorted(
+        snapshot.directories,
+        key=lambda item: len(Path(item[0]).parts),
+        reverse=True,
+    ):
+        (destination if relative == "." else destination / relative).chmod(mode)

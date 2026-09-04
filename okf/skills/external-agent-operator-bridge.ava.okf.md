@@ -20,7 +20,13 @@ checkout and skips both `.worktrees/` and `.claude/worktrees/` checkouts.
 
 For each present client, the target is
 `<client-home>/skills/operating-ava-cluster`. Ava creates a complete staged copy
-beside that target. A private per-client ledger under
+beside that target. One validated in-memory source snapshot supplies the
+manifest, digest, and staged bytes for every present client, so publication
+never re-reads a moving Git checkout or mixes source generations. Pathname and
+opened-handle metadata are compared by stable file identity across those API
+families, while full before/after signatures remain local to each family; this
+avoids Windows metadata-representation mismatches without weakening mutation
+detection. A private per-client ledger under
 `$AVA_HOME/configs/external-agent-skills/` records an installation identity,
 installed generation and digest, active transaction, exact cleanup records,
 and terminal private-retention records;
