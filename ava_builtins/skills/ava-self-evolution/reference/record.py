@@ -253,7 +253,11 @@ def build_record(
 
     task_prompt = user_messages[0] if user_messages else ""
     if not task_prompt.strip() and spawner.startswith("agent:"):
-        spawner_messages = [message for message in agent_messages if message["source"] == spawner]
+        spawner_messages = [
+            message
+            for message in agent_messages
+            if message["source"] == spawner and message["is_in_collection_window"]
+        ]
         if spawner_messages:
             task_prompt = spawner_messages[0]["content"]
     if not task_prompt.strip():

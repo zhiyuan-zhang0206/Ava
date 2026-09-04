@@ -88,6 +88,64 @@ def test_old_history_collapses_to_task_prompt(
     assert [m["content"] for m in out[2]] == ["task prompt 2"]
 
 
+def test_quiet_resident_does_not_reuse_ancient_spawner_prompt(
+    collect_mod: Any, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A historical spawn brief is not the prompt for a quiet collection window."""
+
+    def _empty_transcript(_agent_id: int) -> list[dict[str, str]]:
+        return []
+
+    monkeypatch.setattr(collect_mod, "_transcript", _empty_transcript)
+    with db_conn.cursor() as cur:
+        _insert_agent(cur, 8)
+        _insert_inbound(cur, 8, "agent:1", "ancient spawn brief", "10 days")
+    db_conn.commit()
+
+    with db_conn.cursor() as cur:
+        inbounds = _fetch(collect_mod, cur, [8])
+
+    rec = collect_mod.build_record(
+        agent_id=8,
+        week="2026-08-30",
+        events=[],
+        log_events=[],
+        inbounds=inbounds[8],
+        meta=("agent:1", "completed", "delivered"),
+    )
+
+    assert rec["task_prompt"] == ""
+
+
+def test_fresh_worker_uses_in_window_spawner_prompt(
+    collect_mod: Any, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A worker's recent spawn brief is its only task prompt."""
+
+    def _empty_transcript(_agent_id: int) -> list[dict[str, str]]:
+        return []
+
+    monkeypatch.setattr(collect_mod, "_transcript", _empty_transcript)
+    with db_conn.cursor() as cur:
+        _insert_agent(cur, 9)
+        _insert_inbound(cur, 9, "agent:1", "fresh spawn brief", "2 hours")
+    db_conn.commit()
+
+    with db_conn.cursor() as cur:
+        inbounds = _fetch(collect_mod, cur, [9])
+
+    rec = collect_mod.build_record(
+        agent_id=9,
+        week="2026-08-30",
+        events=[],
+        log_events=[],
+        inbounds=inbounds[9],
+        meta=("agent:1", "completed", "delivered"),
+    )
+
+    assert rec["task_prompt"] == "fresh spawn brief"
+
+
 def test_first_ever_inside_window_not_duplicated(
     collect_mod: Any, db_conn: psycopg.Connection
 ) -> None:
