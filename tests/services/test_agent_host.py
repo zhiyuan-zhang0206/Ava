@@ -887,6 +887,17 @@ class TestTurnStallGuard:
     async def test_an_external_cancel_still_unwinds_through_the_guard(
         self, wired: _Build, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        """An external cancel must not block the guard's bounded unwind.
+
+        The turn-level runner SHIELDS its invocation (the durable-command
+        contract, Task #2436), so an outer cancellation flags the turn and
+        waits for it to settle rather than interrupting the graph directly.
+        For a no-progress turn the guard is what actually stops the work; the
+        external cancel must not wedge that abort — the still-unwinds outcome
+        is the stall abort (TurnStallTimeoutError), never a stuck task.
+        """
+        from services.agent_host.dispatcher import TurnStallTimeoutError
+
         await self._stall_settings(monkeypatch)
         host, _, _ = wired({11: _Row(overlay={"llm_model": "model-for-11"})})
         graph = _GatedGraph()
@@ -895,7 +906,7 @@ class TestTurnStallGuard:
         task = asyncio.create_task(host.run_turn(11))
         await asyncio.wait_for(graph.entered.wait(), timeout=1.0)
         task.cancel()
-        with pytest.raises(asyncio.CancelledError):
+        with pytest.raises(TurnStallTimeoutError):
             await asyncio.wait_for(task, timeout=2.0)
 
         assert graph.cancel_seen

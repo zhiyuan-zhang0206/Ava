@@ -804,7 +804,6 @@ class TestPendingScan:
         assert scheduler.woken == []
 
 
-
 class TestStallRestartEscalation:
     """Task #2417, half 2: a stalled turn that refuses its bounded unwind must
     not be rescheduled beside itself — the turn task raises the escalation out

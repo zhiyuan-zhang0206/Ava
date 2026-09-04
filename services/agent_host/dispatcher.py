@@ -191,7 +191,6 @@ class TurnScheduler:
         """
         completed = False
         try:
-
             while True:
                 self._pending.discard(agent_id)
                 try:
