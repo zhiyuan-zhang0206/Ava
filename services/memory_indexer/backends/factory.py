@@ -11,6 +11,10 @@ Each call returns a fresh, unconnected backend; the caller owns connect /
 close (the daemon holds one for its lifetime; the gateway's async search
 connects and closes per request).
 
+Backend implementations are imported only when selected. Importing this
+factory therefore stays independent of optional backend dependency trees and
+keeps the daemon's cold-import path cheap.
+
 The embedding vector space is injected at construction: callers pass the
 provider's `dim` (schema width) and `fingerprint` (semantic-space
 identifier stored per row) — a backend never imports a provider constant,
@@ -22,31 +26,40 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from services.memory_indexer.backends.base import MemorySearchBackend
-from services.memory_indexer.backends.milvus import MilvusBackend
-from services.memory_indexer.backends.numpy import NumPyBackend
-from services.memory_indexer.backends.pgvector import PGVectorBackend
 from shared.config import settings
 
 
-def _numpy_backend(dim: int, fingerprint: str, *, readonly: bool = False) -> NumPyBackend:
+def _milvus_backend(dim: int, fingerprint: str, *, readonly: bool = False) -> MemorySearchBackend:
+    from services.memory_indexer.backends.milvus import MilvusBackend
+
+    return MilvusBackend(dim=dim, fingerprint=fingerprint, readonly=readonly)
+
+
+def _numpy_backend(dim: int, fingerprint: str, *, readonly: bool = False) -> MemorySearchBackend:
     """NumPyBackend is a thin HTTP client — the vector space lives in the
     memory_search service process, so dim/fingerprint are accepted for the
     uniform factory signature only and deliberately not used."""
+    from services.memory_indexer.backends.numpy import NumPyBackend
+
     del dim, fingerprint
     return NumPyBackend(readonly=readonly)
 
 
-# Uniform constructor shape `(dim: int, fingerprint: str, readonly: bool)`; numpy's backend
-# is wrapped above instead of taking dead parameters.
+def _pgvector_backend(dim: int, fingerprint: str, *, readonly: bool = False) -> MemorySearchBackend:
+    from services.memory_indexer.backends.pgvector import PGVectorBackend
+
+    return PGVectorBackend(dim=dim, fingerprint=fingerprint, readonly=readonly)
+
+
+# Uniform constructor shape `(dim: int, fingerprint: str, readonly: bool)`; NumPy's backend
+# is wrapped instead of taking dead parameters.
 _BACKENDS: dict[str, Callable[[int, str, bool], MemorySearchBackend]] = {
-    MilvusBackend.name: lambda dim, fingerprint, readonly: MilvusBackend(
-        dim=dim, fingerprint=fingerprint, readonly=readonly
-    ),
-    NumPyBackend.name: lambda dim, fingerprint, readonly: _numpy_backend(
+    "milvus": lambda dim, fingerprint, readonly: _milvus_backend(
         dim, fingerprint, readonly=readonly
     ),
-    PGVectorBackend.name: lambda dim, fingerprint, readonly: PGVectorBackend(
-        dim=dim, fingerprint=fingerprint, readonly=readonly
+    "numpy": lambda dim, fingerprint, readonly: _numpy_backend(dim, fingerprint, readonly=readonly),
+    "pgvector": lambda dim, fingerprint, readonly: _pgvector_backend(
+        dim, fingerprint, readonly=readonly
     ),
 }
 
