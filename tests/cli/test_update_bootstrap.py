@@ -269,7 +269,15 @@ def test_launch_exception_before_record_never_starts_recovery(
             "recovery_context_digest": "d" * 64,
             "stage": stage,
             "cron": "",
-            "phases": [],
+            "phases": [
+                {
+                    "stage": "candidate_starting",
+                    "observed_at": "2026-09-04T00:00:00+00:00",
+                    "monotonic_s": 0.0,
+                    "pid": 1,
+                    "elapsed_s": None,
+                }
+            ],
         }
         return {"version": 1, "generation": "g", "journal": journal}
 
