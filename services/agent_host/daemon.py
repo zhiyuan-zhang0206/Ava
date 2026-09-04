@@ -78,6 +78,7 @@ from shared import paths
 from shared.config import settings
 from shared.daemon_health import Liveness, health_port, start_health_server, stop_health_server
 from shared.daemon_shutdown import install_graceful_shutdown
+from shared.helper_chain_guard import parent_chain_intact
 from shared.hosted_force import recover_orphaned_hosted_forces
 from shared.log import init_gateway_process, logger
 from shared.machine import machine_name
@@ -210,8 +211,7 @@ def _stop_stray_mode_gated_services() -> None:
             pid = int(spec.pidfile.read_text().strip())
         except (OSError, ValueError):
             _log.warning(
-                "[agent-host] roster reconcile: %s looks running but its pidfile is unreadable",
-                spec.session,
+                "[agent-host] roster reconcile: %s running but pidfile unreadable", spec.session
             )
             continue
         _log.warning(
@@ -332,6 +332,7 @@ async def _beat_forever(
     idle host as a wedged one.
     """
     while True:
+        _require_helper_parent_chain()
         await host.renew_ownership()
         liveness.beat()
         await _publish_turn_progress_heartbeat(machine, scheduler.active_agents)
@@ -698,6 +699,16 @@ async def run() -> None:
         _log.info("[agent-host] daemon stopped")
 
 
+def _require_helper_parent_chain() -> None:
+    """Exit a helper-spawned host whose direct-parent chain was broken."""
+    if parent_chain_intact():
+        return
+    _log.warning(
+        "[agent-host] permissions helper parent chain broken, self-terminating for helper respawn"
+    )
+    os._exit(70)
+
+
 def _cancel_turn_route(scheduler: TurnScheduler, host: AgentHost):  # noqa: ANN202
     """A `POST /cancel-turn` handler — the hosted force-terminate / wedged
     recovery primitive.
@@ -773,6 +784,7 @@ def main() -> None:
     """Entry point: schema gate, logging, graceful shutdown, then the loop."""
     from shared.migrations import assert_schema_current
 
+    _require_helper_parent_chain()
     assert_schema_current(settings.data_plane.db_url)
     init_gateway_process(name="agent_host")
     install_graceful_shutdown("agent_host")

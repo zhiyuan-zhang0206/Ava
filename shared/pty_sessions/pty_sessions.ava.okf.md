@@ -1,7 +1,7 @@
 ---
 type: doc
 title: "PTY sessions — one detached host process per agent interactive shell"
-description: "Each agent shell/watcher session runs in its own detached host process: a pty.fork() bash -l -i, a pyte screen model + raw byte ring buffer for captures, and a per-session unix-socket JSON protocol the SDK's PtySessionBackend consumes. No supervisor daemon — sessions structurally survive every service stop, cluster update, and respawn."
+description: "Each agent shell/watcher owns a pty host, screen model, capture buffer, and unix-socket protocol. Opted-in macOS hosts are direct permissions-helper children; others reparent to init."
 tags:
 - shared
 - pty
@@ -37,9 +37,11 @@ Four modules:
 
 ## Why per-session hosts (the load-bearing shape)
 
-A host is spawned through `shared._reparent` and **reparents to init at
-birth**: it is nobody's child, appears in no service roster, and is probed by
-no watchdog. Every mass-teardown channel that used to kill shells —
+A host is absent from the service roster and is probed by no watchdog. It
+normally reparents to init through `shared._reparent`. On macOS, enabling both
+helper switches makes it a direct signed-helper child with stable TCC
+responsibility; its pty record—not the volatile helper table—remains lifecycle
+truth. Every mass-teardown channel that used to kill shells —
 `ava cluster update`'s service stop, `ava stop`'s tree kill, a healthcheck
 `respawn_and_verify` — reaches processes by service identity or process
 tree, and a session host has neither. That is what makes the SDK's promise
@@ -87,8 +89,9 @@ subtree.
 
 - **create** — CLI `new`: under the host allocation lock, reap name-specific
   orphans, return success for an already-live same-name session, refuse an
-  absent session when the marker is frozen or invalid, otherwise `_reparent`
-  → `host.py <name> <cwd> <envfile> <generation> [cmd_b64]`. The lock stays held until the
+  absent session when the marker is frozen or invalid, otherwise helper direct
+  spawn on enabled macOS or `_reparent` on every other route → `host.py <name>
+  <cwd> <envfile> <generation> [cmd_b64]`. The lock stays held until the
   host answers ready, so a completed `ava pty freeze` is an exact boundary:
   every earlier allocation is visible and every later allocation is refused.
   A host that misses its ready deadline is terminated with its process tree
