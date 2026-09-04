@@ -1,21 +1,27 @@
 """Hosted owner authority outlives turns but not explicit release/replacement."""
 
+import subprocess
+import sys
 from unittest.mock import Mock
 from uuid import uuid4
 
+import psutil
 import psycopg
 import pytest
+from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
 from agent.db import claim_inbound_batch
 from agent.hosted_ownership import (
     admit_hosted_runtime,
     apply_hosted_lifecycle,
+    release_hosted_owner,
     renew_hosted_owner,
     settle_hosted_runtime,
 )
 from shared.config import settings
 from shared.db import PG_KEEPALIVE_KWARGS, create_agent, insert_inbound_message
+from shared.incarnation_resources import IncarnationResources, ResourceProcess, decode_resources
 from shared.runtime_incarnation import RuntimeIncarnation, current_incarnation
 from shared.turn_identity import bind_turn_identity
 
@@ -102,6 +108,67 @@ async def test_expired_owner_replacement_fences_old_settlement(
     )
     assert new is not None and new.generation != old.generation
     assert not await settle_hosted_runtime(aops_pool, old)
+
+
+async def test_new_host_owner_requires_exact_old_host_exit_for_managed_set(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+) -> None:
+    """A normal agent-host restart transfers only an empty set whose host died."""
+    agent_id = _agent(db_conn)
+    old = RuntimeIncarnation(agent_id, uuid4(), uuid4())
+    old_host = subprocess.Popen(
+        [sys.executable, "-I", "-c", "import time; time.sleep(60)"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    try:
+        native = psutil.Process(old_host.pid)
+        evidence = IncarnationResources(
+            generation=old.generation,
+            owner=old.owner,
+            host_process=ResourceProcess(pid=native.pid, birth=native.create_time()),
+            requests={},
+        )
+        db_conn.execute(
+            "UPDATE agents_meta SET status='idling',runtime_generation=%s,runtime_owner=%s,"
+            "runtime_kind='hosted',lease_expires_at=clock_timestamp()+interval '1 minute',"
+            "incarnation_resources=%s WHERE id=%s",
+            (old.generation, old.owner, Jsonb(evidence.model_dump(mode="json")), agent_id),
+        )
+        db_conn.commit()
+        await release_hosted_owner(aops_pool, "host-test", old.owner, set())
+
+        assert (
+            await admit_hosted_runtime(
+                aops_pool, agent_id, "host-test", uuid4(), expected_from="idling"
+            )
+            is None
+        )
+        old_host.terminate()
+        old_host.wait(timeout=5)
+
+        successor = await admit_hosted_runtime(
+            aops_pool, agent_id, "host-test", uuid4(), expected_from="idling"
+        )
+        assert successor is not None and successor.generation != old.generation
+        stored = db_conn.execute(
+            "SELECT incarnation_resources FROM agents_meta WHERE id=%s", (agent_id,)
+        ).fetchone()
+        assert stored is not None
+        transferred = decode_resources(stored[0])
+        assert isinstance(transferred, IncarnationResources)
+        assert (transferred.generation, transferred.owner) == (
+            successor.generation,
+            successor.owner,
+        )
+        assert transferred.requests == {}
+        assert transferred.host_process is not None
+        assert transferred.host_process.pid == psutil.Process().pid
+    finally:
+        if old_host.poll() is None:
+            old_host.kill()
+            old_host.wait(timeout=5)
 
 
 async def test_owner_beat_renews_idle_but_not_other_owner(

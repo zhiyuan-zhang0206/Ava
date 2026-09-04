@@ -37,6 +37,14 @@ def install_hosted_force(conn: psycopg.Connection, agent_id: int, command_id: in
         "UPDATE agents_meta SET lifecycle_command_id=%s WHERE id=%s",
         (command_id, agent_id),
     )
+    from shared.incarnation_resources import freeze_resources
+    from shared.runtime_incarnation import RuntimeIncarnation
+
+    resources = conn.execute(
+        "SELECT incarnation_resources FROM agents_meta WHERE id=%s", (agent_id,)
+    ).fetchone()
+    if resources is not None and resources[0] is not None:
+        freeze_resources(conn, RuntimeIncarnation(agent_id, row[0], row[1]), command_id)
 
 
 async def original_host_force(
@@ -79,6 +87,9 @@ async def original_host_force(
         if command is None:
             return False
         if quiescent:
+            from shared.resource_admission import require_resources_closed_async
+
+            await require_resources_closed_async(conn, agent_id)
             await conn.execute(
                 "UPDATE inbound_messages SET observed_at=clock_timestamp(),status='done' "
                 "WHERE id=%s",

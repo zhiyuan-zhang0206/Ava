@@ -150,7 +150,7 @@ _INDEPENDENT_CLOCKS: dict[tuple[str, str], str] = {
         "_STALL_GUARD_EXEMPT",
     ): "frozenset of exempt node kinds, not a clock",
     (
-        "agent/graph/_exec_protocol.py",
+        "shared/exec_process_domain.py",
         "KILL_GRACE_S",
     ): "independent: SIGINT/SIGTERM -> SIGKILL grace ladder for the exec child, no lattice neighbour",
     (
