@@ -40,6 +40,12 @@ and deregistered, so runtime agents' indexes lose the L4 noise. They reach
 agents only through the project-local mount — see
 [[okf/skills/project-local.ava.okf.md]].
 
+The external-agent operator bridge is outside this load-directory contract. A
+prod host-global converge step projects exactly `operating-ava-cluster` into an
+already-present Codex or Claude Code home; it neither registers that copy in
+Ava's install registry nor restores `.agents/skills/` as an Ava runtime source.
+See [[okf/skills/external-agent-operator-bridge.ava.okf.md]].
+
 General methodology and user-service skills — `ava-serious-engineering`,
 `ava-serious-research`, `ava-deep-research`, `ava-corp`, and
 `telegram-send-file` — are repo built-ins, so this first source lands them in

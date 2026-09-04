@@ -370,7 +370,12 @@ The converge phase (`cli/commands/_converge.py:converge_host`) is idempotent —
 by `cmd_start`, so `ava cluster update` re-applies it on every upgrade. One gateway
 `ava cluster update` converges the whole fleet through the Phase B fan-out. Run it standalone
 with `ava converge`. It covers the `ava` symlink (re-ensuring install.sh's bootstrap),
-`~/.local/bin` on PATH, the `$AVA_HOME` dir skeleton, a gateway-host guard that fails
+`~/.local/bin` on PATH, the `$AVA_HOME` dir skeleton, and one prod-host integration for
+external agents: when `~/.codex` and/or `~/.claude` already exists, it copies only
+`.agents/skills/operating-ava-cluster` into that client's global `skills/` root. Missing
+client homes are not created; a marker and content digest permit updates only while the
+copy remains Ava-owned and unmodified, and conflicts are preserved with a warning. Dev
+worktrees skip this host-global step. Converge also applies a gateway-host guard that fails
 loud on frontend build-time env overrides (`ui/web/.env{,.local,.production,.production.local}`
 bake `NEXT_PUBLIC_*` into the bundle and silently beat the runtime gateway inference —
 the 2026-06-09 outage), plugin config images, and the pre-rename disabled-services marker

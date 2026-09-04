@@ -26,6 +26,22 @@ CLI verb (see `conventions/runbook.md`); for the CLI verbs see
   reference), **transient** (self-resolved, no action), or **action needed**
   (investigate now).
 
+## Cross-agent context and workspaces
+
+Start with `ava agents ls`: its ID, status, machine, and label columns map the
+sibling agent to its execution context. For an agent owned by this host, its
+workspace is `<cluster-home>/workspaces/<id>`. Resolve the cluster home through
+`ava cluster ls` and the checkout-anchored `ava` CLI; the default production
+home is `~/.ava`. A remote agent's workspace lives on its owning machine — never
+infer it by joining the ID to the gateway's home.
+
+Inside a workspace, read `memory/MEMORY.md` first and follow only the entries it
+links when reconstructing durable context. After the sibling CLI PR lands, use
+`ava memory search <query>` to find shared cluster memory rather than
+guessing from one agent's files. These are read-only discovery steps; rollout
+and destructive-action approval boundaries remain the ones in **Response
+discipline** below.
+
 ## Alert review workflow
 
 1. **Classify by attribution first** — pull the alert list for the window,

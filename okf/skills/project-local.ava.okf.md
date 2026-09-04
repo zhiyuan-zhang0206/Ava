@@ -18,7 +18,11 @@ For Ava's own repo, this mount is the **only** distribution path for the 11
 real repo-development workflow and Ava-cluster-operations skills since
 2026-08-21 (issue #146): converge stopped syncing `.agents/skills/`
 fleet-wide, so those skills load exactly when the agent works inside the
-checkout (`ava.cwd` under the repo) and never on a runtime machine elsewhere.
+checkout (`ava.cwd` under the repo) and never enter Ava's fleet-wide runtime
+skill load directory. One deliberately narrower host integration copies only
+`operating-ava-cluster` into already-present Codex and Claude Code global skill
+roots; it is an external-client projection, not an Ava runtime skill source —
+see [[okf/skills/external-agent-operator-bridge.ava.okf.md]].
 The five general skills mirrored alongside them — `ava-serious-engineering`,
 `ava-serious-research`, `ava-deep-research`, `ava-corp`, and
 `telegram-send-file` — are instead built-ins converged into `~/.ava/skills/`;

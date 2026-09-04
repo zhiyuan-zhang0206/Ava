@@ -18,6 +18,7 @@ import sys
 from pathlib import Path
 
 from cli.commands._converge_brew_pin import ensure_brew_pin
+from cli.commands._converge_external_agent_skills import converge_external_agent_skill
 from cli.commands._converge_firewall import ensure_firewall_allowlist
 from cli.commands._converge_frontend_env import ensure_no_frontend_env_overrides
 from cli.commands._converge_gate import ensure_gate
@@ -673,6 +674,13 @@ CONVERGE_STEPS: tuple[ConvergeStep, ...] = (
     ConvergeStep("prod editable exec gate", _ensure_prod_editable_exec_gate, host_global=True),
     ConvergeStep("ava symlink on PATH", _ensure_ava_symlink, host_global=True),
     ConvergeStep("~/.local/bin on PATH", _ensure_local_bin_on_path, host_global=True),
+    # Codex and Claude Code own their global homes. This prod-only host step
+    # contributes exactly the Ava operator skill when those homes already exist.
+    ConvergeStep(
+        "external agent operator skill",
+        converge_external_agent_skill,
+        host_global=True,
+    ),
     ConvergeStep("$AVA_HOME dir skeleton", _ensure_ava_home_dirs),
     # Warning-only port preflight: bind-check the cluster's port block + this
     # unit's health ports before anything is launched; foreign occupants are

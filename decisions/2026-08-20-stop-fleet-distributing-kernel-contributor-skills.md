@@ -72,3 +72,7 @@ repo-development workflow and Ava-cluster-operations skills. The prior
 classification was too broad for five general skills that happened to be in
 `.agents/skills/`; see
 [`2026-08-22-reclassify-general-skills-as-builtins.md`](2026-08-22-reclassify-general-skills-as-builtins.md).
+
+Update 2026-09-04: narrowly superseded for one external-client projection only;
+see
+[`2026-09-04-project-one-operator-skill-to-external-agents.md`](2026-09-04-project-one-operator-skill-to-external-agents.md).

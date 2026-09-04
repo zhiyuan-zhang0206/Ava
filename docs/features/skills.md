@@ -24,8 +24,22 @@ Installed skills mount as a namespace mirroring the folder shape; the
 `# Capabilities` index in the system prompt lists name + one-line description,
 and a drift check names newly installed skills before the next LLM call.
 
+## External operator context
+
+Production host convergence exposes one repo skill to already-installed Codex
+and Claude Code clients: `operating-ava-cluster`. If `~/.codex` or `~/.claude`
+exists, Ava copies that package to the client's global `skills/` directory. It
+does not create absent client homes and does not distribute the rest of
+`.agents/skills/`.
+
+The copy carries an Ava ownership marker and a digest of its last written
+content. Converge updates only a matching, unmodified managed copy. An existing
+unmanaged target or a modified managed copy is left byte-for-byte intact and
+reported as a conflict.
+
 ## Design decisions
 
 - [Skill system](../../okf/skills/skills.ava.okf.md)
+- [External-agent operator bridge](../../okf/skills/external-agent-operator-bridge.ava.okf.md)
 - [Skills and MCP](../../decisions/2026-05-05-skills-and-mcp.md)
 - [Skills single load dir](../../decisions/2026-07-14-skills-single-load-dir.md)
