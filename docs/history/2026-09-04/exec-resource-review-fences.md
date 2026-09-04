@@ -23,3 +23,18 @@ alone remains insufficient, and unresolved or frozen sets still fail closed. The
 managed exec loop now drains pending stream increments and emits silent keepalives
 on the same cadence as the legacy path, with only the unpublished tail flushed at
 completion.
+
+## Update: process-mode cancellation ownership
+
+A later cancellation audit found that the process-mode caller could propagate task
+cancellation immediately after closing the owner's control input. The independent
+owner still published an exact terminal receipt, but no hosted turn scope existed to
+consume it and discharge the attached database allocation. Cancellation could also
+interrupt the await around the registration thread while that transaction continued
+and committed after the caller returned.
+
+The caller now retains both the registration and exact-completion tasks across
+cancellation. It resolves an in-flight registration outcome, closes the owner, and
+consumes the matching terminal receipt before cancellation propagates. Reusing one
+completion task also prevents cancellation at a commit boundary from replaying the
+discharge transaction.

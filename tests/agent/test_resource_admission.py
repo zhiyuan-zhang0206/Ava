@@ -13,7 +13,7 @@ import pytest
 from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
-from shared.exec_owner_protocol import OwnerReady
+from shared.exec_owner_protocol import OwnerClosed, OwnerContext, OwnerReady
 from shared.incarnation_resources import (
     IncarnationResources,
     ResourceEvidenceError,
@@ -203,6 +203,121 @@ async def test_managed_exec_streams_output_and_keepalive_before_completion(
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await task
+
+
+async def test_process_mode_cancellation_consumes_exact_owner_receipt(
+    db_conn: psycopg.Connection,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Cancellation returns only after the attached allocation is discharged."""
+    from agent.graph import _exec_owned_run
+    from agent.graph._exec_subprocess import _run_in_subprocess
+
+    target = _admitted(db_conn)
+
+    def admitted(_agent_id: int) -> RuntimeIncarnation:
+        return target
+
+    monkeypatch.setattr(_exec_owned_run, "current_incarnation", admitted)
+    task = asyncio.create_task(
+        _run_in_subprocess(
+            "import time; print('managed-started', flush=True); time.sleep(60)",
+            target.agent_id,
+            asyncio.Event(),
+            30,
+            exec_dir=tmp_path,
+        )
+    )
+    deadline = asyncio.get_running_loop().time() + 10
+    while True:
+        row = db_conn.execute(
+            "SELECT incarnation_resources FROM agents_meta WHERE id=%s", (target.agent_id,)
+        ).fetchone()
+        assert row is not None
+        resources = decode_resources(row[0])
+        if (
+            isinstance(resources, IncarnationResources)
+            and len(resources.requests) == 1
+            and next(iter(resources.requests.values())).owner_process is not None
+        ):
+            break
+        assert asyncio.get_running_loop().time() < deadline
+        await asyncio.sleep(0.02)
+
+    assert not task.done()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    receipts = list((tmp_path / str(target.agent_id) / "domains").glob("*/owner.closed"))
+    assert len(receipts) == 1
+    receipt = OwnerClosed.model_validate_json(receipts[0].read_bytes())
+    assert receipt.reason == "host_eof"
+    row = db_conn.execute(
+        "SELECT incarnation_resources FROM agents_meta WHERE id=%s", (target.agent_id,)
+    ).fetchone()
+    assert row is not None
+    resources = decode_resources(row[0])
+    assert isinstance(resources, IncarnationResources)
+    assert resources.requests == {}
+
+
+async def test_process_mode_cancellation_waits_for_inflight_registration(
+    db_conn: psycopg.Connection,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A cancelled to_thread caller cannot orphan a later registration commit."""
+    from agent.graph import _exec_owned_run
+    from agent.graph._exec_subprocess import _run_in_subprocess
+
+    target = _admitted(db_conn)
+
+    def admitted(_agent_id: int) -> RuntimeIncarnation:
+        return target
+
+    monkeypatch.setattr(_exec_owned_run, "current_incarnation", admitted)
+    original_register = _exec_owned_run._register_attached
+    entered = threading.Event()
+    release = threading.Event()
+
+    def delayed_register(context: OwnerContext, ready: OwnerReady) -> None:
+        entered.set()
+        assert release.wait(10)
+        original_register(context, ready)
+
+    monkeypatch.setattr(_exec_owned_run, "_register_attached", delayed_register)
+    task = asyncio.create_task(
+        _run_in_subprocess(
+            "raise AssertionError('host cancellation must win before user code')",
+            target.agent_id,
+            asyncio.Event(),
+            30,
+            exec_dir=tmp_path,
+        )
+    )
+    assert await asyncio.to_thread(entered.wait, 10)
+    task.cancel()
+    release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    deadline = asyncio.get_running_loop().time() + 10
+    receipts: list[Path] = []
+    while not receipts:
+        receipts = list((tmp_path / str(target.agent_id) / "domains").glob("*/owner.closed"))
+        assert asyncio.get_running_loop().time() < deadline
+        await asyncio.sleep(0.02)
+    receipt = OwnerClosed.model_validate_json(receipts[0].read_bytes())
+    assert receipt.reason == "host_eof"
+    row = db_conn.execute(
+        "SELECT incarnation_resources FROM agents_meta WHERE id=%s", (target.agent_id,)
+    ).fetchone()
+    assert row is not None
+    resources = decode_resources(row[0])
+    assert isinstance(resources, IncarnationResources)
+    assert resources.requests == {}
 
 
 def test_successor_cannot_reset_unknown_or_unresolved_set(db_conn: psycopg.Connection) -> None:

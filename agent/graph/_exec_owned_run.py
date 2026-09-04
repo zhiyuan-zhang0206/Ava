@@ -155,6 +155,8 @@ async def run_owned(  # noqa: PLR0915 -- one caller retains exact allocation and
     cancelled = False
     settled = False
     attached = False
+    registration: asyncio.Task[None] | None = None
+    completion: asyncio.Task[OwnerClosed] | None = None
     bound = time.monotonic() + max(0, (deadline - datetime.now(UTC)).total_seconds()) + KILL_GRACE_S
 
     def send(action: Literal["permit", "cancel"]) -> None:
@@ -179,6 +181,45 @@ async def run_owned(  # noqa: PLR0915 -- one caller retains exact allocation and
         await asyncio.to_thread(reader.join, max(0, bound - time.monotonic()))
         if reader.is_alive():
             raise ResourceEvidenceError("unpermitted owner output remains unresolved")
+
+    async def settle_attached_owner() -> OwnerClosed:
+        """Consume one exact owner receipt before releasing durable allocation."""
+        if proc is None or ready is None or reader is None or not attached:
+            raise ResourceEvidenceError("attached owner lacks exact local completion evidence")
+        code = await asyncio.to_thread(proc.wait, max(0.001, bound - time.monotonic()))
+        if code != 0:
+            raise ResourceEvidenceError("attached owner did not close successfully")
+        receipt = await asyncio.to_thread(
+            validate_closed,
+            context,
+            ready.allocation,
+            context_path.with_suffix(".closed"),
+        )
+        await asyncio.to_thread(reader.join, max(0, bound - time.monotonic()))
+        if reader.is_alive():
+            raise ResourceEvidenceError("owner output reader remains unresolved")
+        await asyncio.to_thread(_complete, context, ready.allocation)
+        if scope is not None:
+            scope.complete(request, ready)
+        return receipt
+
+    def attached_completion() -> asyncio.Task[OwnerClosed]:
+        """Keep one completion task alive across cancellation/commit boundaries."""
+        nonlocal completion
+        if completion is None:
+            completion = asyncio.create_task(
+                settle_attached_owner(), name=f"exec-owner-complete-{request_id}"
+            )
+        return completion
+
+    async def finish_despite_cancellation(task: asyncio.Task[Any]) -> Any:
+        """Wait for one retained owner task even if cancellation repeats."""
+        while not task.done():
+            try:
+                await asyncio.shield(task)
+            except asyncio.CancelledError:
+                continue
+        return task.result()
 
     try:
         env = _build_child_env(
@@ -216,7 +257,11 @@ async def run_owned(  # noqa: PLR0915 -- one caller retains exact allocation and
                     read_owner_bytes(context_path.with_suffix(".ready"))
                 )
                 validate_native_ready(ready, proc.pid, birth, context_path)
-                await asyncio.to_thread(_register_attached, context, ready)
+                registration = asyncio.create_task(
+                    asyncio.to_thread(_register_attached, context, ready),
+                    name=f"exec-owner-register-{request_id}",
+                )
+                await asyncio.shield(registration)
                 attached = True
                 if scope is not None:
                     scope.unresolved[request] = ready
@@ -233,14 +278,8 @@ async def run_owned(  # noqa: PLR0915 -- one caller retains exact allocation and
         if ready is None or proc.returncode != 0:
             await asyncio.to_thread(reader.join, max(0, bound - time.monotonic()))
             raise ResourceEvidenceError("owner exited without a successful exact close receipt")  # noqa: TRY301 -- uncertainty remains durable.
-        receipt = validate_closed(context, ready.allocation, context_path.with_suffix(".closed"))
-        await asyncio.to_thread(reader.join, max(0, bound - time.monotonic()))
-        if reader.is_alive():
-            raise ResourceEvidenceError("owner output reader remains unresolved")  # noqa: TRY301 -- do not clear allocation.
-        await asyncio.to_thread(_complete, context, ready.allocation)
+        receipt = await asyncio.shield(attached_completion())
         settled = True
-        if scope is not None:
-            scope.complete(request, ready)
         if chunk_publisher is not None:
             chunk_publisher.publish(stream.take_pending())
         payload, error = _read_result_envelope(result, receipt.root_exit_code)
@@ -252,10 +291,47 @@ async def run_owned(  # noqa: PLR0915 -- one caller retains exact allocation and
             envelope_error=error,
             stream_cap=stream.cap(),
         ), payload
-    except asyncio.CancelledError:
-        # EOF closes the independently owned domain; it does not clear evidence.
+    except asyncio.CancelledError as original:
+        # EOF asks the independent owner to close. Process mode has no hosted
+        # resource scope to retain a later consumer, so cancellation cannot
+        # propagate until this task consumes the exact terminal receipt itself.
         if proc is not None and proc.stdin is not None:
             proc.stdin.close()
+        if registration is not None and not attached:
+            try:
+                await finish_despite_cancellation(registration)
+            except ResourceEvidenceError:
+                try:
+                    await settle_unpermitted_owner()
+                except Exception as cleanup:
+                    original.add_note(
+                        "unpermitted owner cancellation cleanup remains unresolved: "
+                        f"{type(cleanup).__name__}: {cleanup}"
+                    )
+                else:
+                    settled = True
+                    if scope is not None:
+                        scope.complete(request, None)
+            except Exception as cleanup:
+                original.add_note(
+                    "exec registration outcome remains ambiguous after cancellation: "
+                    f"{type(cleanup).__name__}: {cleanup}"
+                )
+            else:
+                attached = True
+                if scope is not None:
+                    scope.unresolved[request] = ready
+        if attached:
+            owner_completion = attached_completion()
+            try:
+                await finish_despite_cancellation(owner_completion)
+            except Exception as cleanup:
+                original.add_note(
+                    "attached owner cancellation cleanup remains unresolved: "
+                    f"{type(cleanup).__name__}: {cleanup}"
+                )
+            else:
+                settled = True
         raise
     except ResourceEvidenceError as exc:
         if proc is None and scope is not None:
@@ -295,20 +371,7 @@ async def run_owned(  # noqa: PLR0915 -- one caller retains exact allocation and
             # cancellation does not mean the independent owner already closed.
             async def finish_owner() -> None:
                 try:
-                    code = await asyncio.to_thread(proc.wait, max(0.001, bound - time.monotonic()))
-                    if code != 0:
-                        return
-                    await asyncio.to_thread(
-                        validate_closed,
-                        context,
-                        ready.allocation,
-                        context_path.with_suffix(".closed"),
-                    )
-                    await asyncio.to_thread(reader.join, max(0, bound - time.monotonic()))
-                    if reader.is_alive():
-                        return
-                    await asyncio.to_thread(_complete, context, ready.allocation)
-                    scope.complete(request, ready)
+                    await asyncio.shield(attached_completion())
                 except Exception as exc:
                     from shared.log import logger
 

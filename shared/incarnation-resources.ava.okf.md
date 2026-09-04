@@ -47,7 +47,11 @@ scope. An ambiguous commit remains unresolved. The root is gated by
 and exact request/result paths. Neither child inherits the host's control write
 end. The managed host poll loop publishes pending output incrementally and sends
 keepalives while the owner remains live; completion flushes only the unpublished
-tail.
+tail. Task cancellation closes the owner's control input but does not abandon an
+in-flight registration transaction or an attached allocation. The caller retains
+those tasks and consumes the exact terminal receipt before propagating cancellation;
+this is required in process mode, which has no hosted turn scope to retain a later
+consumer.
 The owner remains alive after host EOF, closes the managed domain, reaps its
 root, joins the output reader and exclusively publishes the terminal receipt.
 Request files live in exact domain subdirectories outside legacy age pruning.
