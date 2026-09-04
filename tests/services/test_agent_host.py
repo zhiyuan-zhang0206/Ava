@@ -39,6 +39,7 @@ from pydantic import BaseModel, ConfigDict, Field
 import ava._boot
 from services.agent_host.dispatcher import TurnScheduler
 from services.agent_host.host import AgentHost, _config_fingerprint
+from shared.config import settings
 from shared.config.turn_view import turn_settings
 from shared.context import AvaContext
 from shared.lm.factory import validate_model_config
@@ -199,12 +200,14 @@ class _Observation:
         plugin_marker: str,
         llm: _Model,
         publisher: _Publisher,
+        ops_pool: object,
     ) -> None:
         self.agent_id = agent_id
         self.model = model
         self.plugin_marker = plugin_marker
         self.llm = llm
         self.publisher = publisher
+        self.ops_pool = ops_pool
 
 
 class _FakeGraph:
@@ -236,6 +239,7 @@ class _FakeGraph:
             plugin_marker=plugin_cfg.marker,
             llm=cast(_Model, context.llm),
             publisher=cast(_Publisher, context.event_publisher),
+            ops_pool=context.ops_pool,
         )
 
     async def ainvoke(
@@ -412,6 +416,93 @@ class TestPendingInboundBackstop:
         assert "m.status = 'running'" in pool.sql
         assert "m.machine = %s" in pool.sql
         assert "pending.status = 'pending'" in pool.sql
+
+    async def test_scan_uses_the_reserved_control_pool(self) -> None:
+        """Turn-query saturation must not starve the durable recovery scan."""
+
+        class _ForbiddenTurnPool:
+            def connection(self) -> object:
+                raise AssertionError("pending scan borrowed from the turn pool")
+
+        control_pool = _PendingScanPool([(17, True)])
+        host = AgentHost(
+            pool=cast(AsyncConnectionPool[Any], _ForbiddenTurnPool()),
+            control_pool=cast(AsyncConnectionPool[Any], control_pool),
+            checkpointer=object(),  # pyright: ignore[reportArgumentType]
+            graph=object(),  # pyright: ignore[reportArgumentType]
+            machine="this-box",
+        )
+
+        candidates = await host.pending_inbound_wakes(180.0)
+
+        assert [candidate.agent_id for candidate in candidates] == [17]
+
+
+class TestPoolIsolation:
+    def test_control_pool_has_reserved_capacity(self) -> None:
+        """The control boundary is a distinct fixed-capacity client pool."""
+        from services.agent_host.host import build_control_pool, build_shared_pool
+
+        workload_pool = build_shared_pool("postgresql://unused")
+        control_pool = build_control_pool("postgresql://unused")
+
+        assert workload_pool is not control_pool
+        assert workload_pool.max_size == settings.daemon.host_max_concurrent_turns + 4
+        assert control_pool.max_size == 4
+
+    async def test_turn_work_and_lifecycle_control_use_separate_pools(
+        self, wired: _Build, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A busy turn may use the work pool without consuming control capacity."""
+        import services.agent_host.host as host_mod
+        from shared.runtime_incarnation import RuntimeIncarnation
+
+        rows = {11: _Row(status="idling")}
+        original, graph, turn_pool = wired(rows)
+        control_pool = _FakePool(rows)
+        calls: list[tuple[str, object]] = []
+
+        async def admit(
+            pool: object,
+            agent_id: int,
+            _machine: str,
+            owner: UUID,
+            *,
+            expected_from: str,
+        ) -> RuntimeIncarnation:
+            assert expected_from == "idling"
+            calls.append(("admit", pool))
+            return RuntimeIncarnation(agent_id, uuid4(), owner)
+
+        async def settle(pool: object, incarnation: RuntimeIncarnation) -> bool:
+            calls.append(("settle", pool))
+            return True
+
+        async def force(pool: object, *_args: object, **_kwargs: object) -> bool:
+            calls.append(("force", pool))
+            return False
+
+        monkeypatch.setattr(host_mod, "admit_hosted_runtime", admit)
+        monkeypatch.setattr(host_mod, "settle_hosted_runtime", settle)
+        monkeypatch.setattr("shared.hosted_force.original_host_force", force)
+        host = AgentHost(
+            pool=cast(AsyncConnectionPool[Any], turn_pool),
+            control_pool=cast(AsyncConnectionPool[Any], control_pool),
+            checkpointer=original._checkpointer,
+            graph=graph,  # pyright: ignore[reportArgumentType]
+            machine="this-box",
+        )
+
+        await host.run_turn(11)
+
+        assert turn_pool.reads == 0
+        assert control_pool.reads == 1
+        assert graph.observations[-1].ops_pool is turn_pool
+        assert calls == [
+            ("admit", control_pool),
+            ("settle", control_pool),
+            ("force", control_pool),
+        ]
 
 
 class TestConcurrentAgentIsolation:
