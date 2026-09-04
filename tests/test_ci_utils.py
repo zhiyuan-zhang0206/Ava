@@ -225,12 +225,13 @@ def test_merge_conflict_keeps_qa_approved_gate_out_of_completed(
     gh: Any, has_workflows: Any
 ) -> None:
     gate = _check("qa-approved-gate", "FAILURE", workflow="QA approved gate")
-    gh([_check("backend", "SUCCESS"), gate], mergeable="CONFLICTING")
+    evidence = _check("evaluate-qa-evidence", "FAILURE", workflow="QA approved gate")
+    gh([_check("backend", "SUCCESS"), gate, evidence], mergeable="CONFLICTING")
     has_workflows(True)
     r = ci_utils.check_ci("1")
     assert r.verdict is CIStatus.MERGE_CONFLICT
     assert r.completed == ["backend"]
-    assert r.gate_checks == [gate]
+    assert r.gate_checks == [gate, evidence]
 
 
 def test_status_context_gate_success_is_not_a_pending_check(gh: Any, has_workflows: Any) -> None:
@@ -299,7 +300,8 @@ def test_stale_cancelled_run_loses_to_newer_success_of_same_name(
 ) -> None:
     """cancel-in-progress on the QA evaluator leaves a CANCELLED run and a
     SUCCESS run of the same name on one SHA; GitHub treats them as one
-    logical check whose state is the newest run's (2026-09-04 #1636)."""
+    logical check whose state is the newest run's. The survivor is QA evidence,
+    not a verdict check (2026-09-04 #1636)."""
     stale = _check(
         "evaluate-qa-evidence",
         "CANCELLED",
@@ -322,26 +324,29 @@ def test_stale_cancelled_run_loses_to_newer_success_of_same_name(
     has_workflows(True)
     r = ci_utils.check_ci("1")
     assert r.verdict is CIStatus.ALL_PASSED
-    assert r.completed.count("evaluate-qa-evidence") == 1
+    assert r.gate_checks == [fresh]
+    assert "evaluate-qa-evidence" not in r.completed
 
 
-def test_cancelled_check_is_failing_without_a_newer_success(gh: Any, has_workflows: Any) -> None:
-    """A CANCELLED run that no newer run supersedes still means not green."""
+def test_cancelled_qa_evidence_run_stays_out_of_ci_verdict(gh: Any, has_workflows: Any) -> None:
+    """The queue's own gate evaluates QA evidence; the CI verdict must not block on it."""
+    cancelled = _check(
+        "evaluate-qa-evidence",
+        "CANCELLED",
+        workflow="QA Approved Gate",
+        completed_at="2026-09-03T17:25:42Z",
+    )
     gh(
         [
             _check("backend (pytest + pyright)", "SUCCESS"),
-            _check(
-                "evaluate-qa-evidence",
-                "CANCELLED",
-                workflow="QA Approved Gate",
-                completed_at="2026-09-03T17:25:42Z",
-            ),
+            cancelled,
         ]
     )
     has_workflows(True)
     r = ci_utils.check_ci("1")
-    assert r.verdict is CIStatus.FAILED
-    assert [f["name"] for f in r.failed] == ["evaluate-qa-evidence"]
+    assert r.verdict is CIStatus.ALL_PASSED
+    assert r.failed == []
+    assert r.gate_checks == [cancelled]
 
 
 def test_empty_rollup(gh: Any, has_workflows: Any) -> None:
@@ -470,6 +475,18 @@ def test_qa_approved_gate_failure_is_excluded_from_ci_verdict(gh: Any, has_workf
     assert "qa-approved-gate" not in r.failed
     assert "qa-approved-gate" not in r.workflow_checks
     assert r.gate_checks == [_QA_APPROVED_GATE_FAILURE]
+
+
+def test_qa_evidence_failure_is_excluded_from_ci_verdict(gh: Any, has_workflows: Any) -> None:
+    """The QA evidence evaluator is enforced by the queue, not the CI verdict."""
+    evidence = _check("evaluate-qa-evidence", "FAILURE", workflow="QA approved gate")
+    gh([_check("backend (pytest + pyright)", "SUCCESS"), evidence])
+    has_workflows(True)
+    r = ci_utils.check_ci("57")
+    assert r.verdict is CIStatus.ALL_PASSED
+    assert "evaluate-qa-evidence" not in r.failed
+    assert "evaluate-qa-evidence" not in r.workflow_checks
+    assert r.gate_checks == [evidence]
 
 
 def _completed(stdout: str = "", returncode: int = 0) -> Any:
