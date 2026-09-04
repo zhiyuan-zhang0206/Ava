@@ -106,7 +106,11 @@ def _pending(
         candidate_digest=pending.candidate_digest,
         expected_challenge=challenge,
         prepared_units=tuple(
-            ManagedUnit(machine=u.machine, home=u.home, inventory_digest=u.inventory_digest)
+            ManagedUnit(
+                machine=u.machine,
+                home=u.home,
+                inventory_digest=u.prepared_receipt_digest,
+            )
             for u in pending.units
         ),
     )
