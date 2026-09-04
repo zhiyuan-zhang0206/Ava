@@ -91,7 +91,7 @@ def _h_memory_search(args: argparse.Namespace) -> int:
 
 
 def _nonempty_memory_query(value: str) -> str:
-    if not value:
+    if not value.strip():
         raise argparse.ArgumentTypeError("query must be nonempty")
     return value
 

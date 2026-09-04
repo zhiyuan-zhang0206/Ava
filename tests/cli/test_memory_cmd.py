@@ -153,12 +153,13 @@ def test_memory_search_parser_defaults_and_forwards_flags(
     monkeypatch.setattr(_memory, "cmd_memory_search", search)
 
     assert _main.main(["memory", "search", "alpha"]) == 0
-    assert _main.main(["memory", "search", "beta", "--limit", "9", "--json"]) == 0
-    assert calls == [("alpha", 5, False), ("beta", 9, True)]
+    exact_query = "  beta\tgamma  "
+    assert _main.main(["memory", "search", exact_query, "--limit", "9", "--json"]) == 0
+    assert calls == [("alpha", 5, False), (exact_query, 9, True)]
 
 
-@pytest.mark.parametrize("query", [""])
-def test_memory_search_parser_rejects_empty_query(query: str) -> None:
+@pytest.mark.parametrize("query", ["", "   ", "\t", "\n"])
+def test_memory_search_parser_rejects_empty_or_whitespace_query(query: str) -> None:
     with pytest.raises(SystemExit) as exited:
         _main._build_parser().parse_args(["memory", "search", query])
 
