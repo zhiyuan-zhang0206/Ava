@@ -145,6 +145,60 @@ def test_source_path_component_link_is_fatal_before_copy(tmp_path: Path) -> None
     assert not _target(client, tmp_path).exists()
 
 
+def test_source_change_after_snapshot_does_not_mix_generations(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = tmp_path / "repo"
+    source = _source(repo)
+    client = _client_home(tmp_path)
+    second_client = client.parent / ".claude"
+    second_client.mkdir()
+    original_stage = bridge._stage_copy
+    changed = False
+
+    def change_source_then_stage(*args: Any, **kwargs: Any) -> Path:
+        nonlocal changed
+        if not changed:
+            changed = True
+            (source / "SKILL.md").write_text("operator v2\n")
+        return original_stage(*args, **kwargs)
+
+    monkeypatch.setattr(bridge, "_stage_copy", change_source_then_stage)
+
+    bridge.converge_external_agent_skill(_context(repo, tmp_path), host_home=client.parent)
+
+    assert (source / "SKILL.md").read_text() == "operator v2\n"
+    assert (_target(client, tmp_path) / "SKILL.md").read_text() == "operator v1\n"
+    assert (_target(second_client, tmp_path) / "SKILL.md").read_text() == "operator v1\n"
+
+
+def test_path_and_open_handle_metadata_variants_are_not_a_source_change(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source_file = tmp_path / "SKILL.md"
+    source_file.write_text("operator\n")
+    real_fstat = bridge_fs.os.fstat
+
+    def fstat_with_platform_metadata(fd: int) -> SimpleNamespace:
+        current = real_fstat(fd)
+        return SimpleNamespace(
+            st_ctime_ns=current.st_ctime_ns + 1,
+            st_dev=current.st_dev,
+            st_ino=current.st_ino,
+            st_mode=current.st_mode,
+            st_mtime_ns=current.st_mtime_ns,
+            st_nlink=current.st_nlink,
+            st_size=current.st_size,
+        )
+
+    monkeypatch.setattr(bridge_fs.os, "fstat", fstat_with_platform_metadata)
+
+    data, mode = bridge_fs._read_regular(source_file, source=True)
+
+    assert data == b"operator\n"
+    assert mode == stat.S_IMODE(source_file.stat().st_mode)
+
+
 def test_linked_target_is_preserved_without_following(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -183,7 +237,7 @@ def test_late_edit_between_check_and_claim_is_restored_not_overwritten(
     original_stage = bridge._stage_copy
 
     def edit_after_check(
-        source_path: Path,
+        snapshot: Any,
         source_manifest: list[dict[str, Any]],
         skills_root: Path,
         ledger_path: Path,
@@ -191,7 +245,7 @@ def test_late_edit_between_check_and_claim_is_restored_not_overwritten(
         source_digest: str,
     ) -> Path:
         staged = original_stage(
-            source_path,
+            snapshot,
             source_manifest,
             skills_root,
             ledger_path,
@@ -514,7 +568,7 @@ def test_external_filesystem_failure_is_label_only_and_fail_soft(
     original_stage = bridge._stage_copy
 
     def inaccessible(
-        source: Path,
+        snapshot: Any,
         source_manifest: list[dict[str, Any]],
         skills_root: Path,
         ledger_path: Path,
@@ -524,7 +578,7 @@ def test_external_filesystem_failure_is_label_only_and_fail_soft(
         if skills_root.parent.name == ".codex":
             raise PermissionError("/secret/absolute/client/path")
         return original_stage(
-            source, source_manifest, skills_root, ledger_path, ledger, source_digest
+            snapshot, source_manifest, skills_root, ledger_path, ledger, source_digest
         )
 
     monkeypatch.setattr(bridge, "_stage_copy", inaccessible)
@@ -612,20 +666,21 @@ def test_partial_stage_copy_remains_tracked_until_cleanup_finishes(
     _source(repo)
     client = _client_home(tmp_path)
     context = _context(repo, tmp_path)
-    original_copy = bridge._copy_source_contents
+    original_materialize = bridge._materialize_source_snapshot
     failed = False
 
-    def fail_after_one_entry(source: Path, destination: Path) -> None:
+    def fail_after_one_entry(snapshot: Any, destination: Path) -> None:
         nonlocal failed
         if not failed:
             failed = True
-            (destination / "SKILL.md").write_bytes((source / "SKILL.md").read_bytes())
+            first = snapshot.files[0]
+            bridge._write_new(destination / first.path, first.data, first.mode)
             raise PermissionError("copy interrupted")
-        original_copy(source, destination)
+        original_materialize(snapshot, destination)
 
-    monkeypatch.setattr(bridge, "_copy_source_contents", fail_after_one_entry)
+    monkeypatch.setattr(bridge, "_materialize_source_snapshot", fail_after_one_entry)
     bridge.converge_external_agent_skill(context, host_home=client.parent)
-    monkeypatch.setattr(bridge, "_copy_source_contents", original_copy)
+    monkeypatch.setattr(bridge, "_materialize_source_snapshot", original_materialize)
 
     bridge.converge_external_agent_skill(context, host_home=client.parent)
     bridge.converge_external_agent_skill(context, host_home=client.parent)

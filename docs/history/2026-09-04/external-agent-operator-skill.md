@@ -75,3 +75,21 @@ quarantine, and retained states are durable. Interrupted claims never infer
 ownership from a generated name or matching content. The small isolated tree
 is terminally retained without chmod or pathname unlink, so cleanup cannot
 touch a late user replacement and does not block the active external skill.
+
+## Windows source snapshot correction
+
+The first fleet rollout exposed a Windows-only false source-race verdict. The
+bridge compared a pathname `lstat` result with an opened handle's `fstat`
+result using one complete signature. CPython 3.12 preserves legacy Windows
+pathname `st_ctime` as file birth time, while the handle path reports metadata
+change time. An ordinary unchanged file could therefore produce `operator
+skill tree changed while being read`, aborting runner convergence.
+
+The source-to-stage boundary now captures one validated in-memory snapshot.
+Path and handle observations cross-check only stable file identity, and each
+API family separately checks its complete before/after signature. The
+snapshot's exact bytes generate the manifest and digest and materialize every
+client stage, so a Git-tree change after capture cannot mix generations. The
+external target's ledger, digest verification, and no-replace activation are
+unchanged; local user edits still stop publication instead of being
+overwritten.
