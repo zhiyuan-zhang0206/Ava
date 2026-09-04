@@ -10,6 +10,14 @@ during an update. Pending collection adoption and explicit abandoned-operation
 recovery both require a fresh, complete closure under the currently live
 rollout lease; lease expiry alone never clears or promotes evidence.
 
+The prepared-inventory producer has two intentionally different digests.
+`inventory_digest` identifies the narrower `ExpectedUnitWriters` tuple consumed
+by the unit observer. `prepared_receipt_digest` binds the whole sealed receipt,
+including service-only roster declarations. Publication records retain both;
+collection adoption compares the full receipt digest after the trusted producer
+has checked the observer tuple. The narrower observer digest cannot alias a
+receipt whose service roster changed.
+
 Synchronous and asynchronous admission use the same SQL lock order and pure
 classification contract. Stable SQL `NULL` retains the never-enabled legacy
 behavior, a transition defers admission without discarding agent state or

@@ -58,11 +58,12 @@ def publication_db(db_conn: psycopg.Connection) -> Iterator[psycopg.Connection]:
         db_conn.commit()
 
 
-def unit() -> PublishedUnit:
+def unit(*, prepared_receipt_digest: str = "d" * 64) -> PublishedUnit:
     return PublishedUnit(
         machine="runner",
         home="/ava",
         inventory_digest="a" * 64,
+        prepared_receipt_digest=prepared_receipt_digest,
         artifact_digest="b" * 64,
         manifest_digest="c" * 64,
     )
@@ -110,7 +111,12 @@ def require(conn: psycopg.Connection) -> None:
     )
 
 
-def closure(conn: psycopg.Connection, proposal: PendingPublication) -> ManagedWriterCollection:
+def closure(
+    conn: psycopg.Connection,
+    proposal: PendingPublication,
+    *,
+    use_observer_digest: bool = False,
+) -> ManagedWriterCollection:
     row = conn.execute("SELECT clock_timestamp()").fetchone()
     assert row is not None
     return ManagedWriterCollection(
@@ -122,7 +128,13 @@ def closure(conn: psycopg.Connection, proposal: PendingPublication) -> ManagedWr
         units=tuple(
             ManagedUnitClosure(
                 unit=ManagedUnit(
-                    machine=entry.machine, home=entry.home, inventory_digest=entry.inventory_digest
+                    machine=entry.machine,
+                    home=entry.home,
+                    inventory_digest=(
+                        entry.inventory_digest
+                        if use_observer_digest
+                        else entry.prepared_receipt_digest
+                    ),
                 ),
                 boot_id=uuid4(),
                 observer_instance=uuid4(),
@@ -149,6 +161,32 @@ def test_adopted_stop_evidence_is_not_current_permission(
     assert row[0]["pending"]["collection"] == collected.model_dump(mode="json")
     with pytest.raises(ManagedWriterBarrierError, match="transitioning"):
         require(publication_db)
+
+
+def test_pending_retry_cannot_alias_a_changed_full_prepare_receipt(
+    publication_db: psycopg.Connection,
+) -> None:
+    current = seed_current(publication_db)
+    proposal = pending(publication_db, current)
+    begin_pending_publication(publication_db, proposal)
+    changed_receipt = proposal.model_copy(
+        update={"units": (unit(prepared_receipt_digest="0" * 64),)}
+    )
+    with pytest.raises(ManagedWriterBarrierError, match="another pending publication"):
+        begin_pending_publication(publication_db, changed_receipt)
+
+
+def test_adoption_rejects_observer_digest_in_place_of_full_prepare_receipt(
+    publication_db: psycopg.Connection,
+) -> None:
+    current = seed_current(publication_db)
+    proposal = pending(publication_db, current)
+    begin_pending_publication(publication_db, proposal)
+    with pytest.raises(ManagedWriterBarrierError, match="inventory differs"):
+        adopt_pending_collection(
+            publication_db,
+            closure(publication_db, proposal, use_observer_digest=True),
+        )
 
 
 @pytest.mark.parametrize("change", ["challenge", "expired", "inventory"])
@@ -246,7 +284,7 @@ def test_invalid_begin_leaves_previous_publication(
     assert row[0] == WriterPublication(current=current).model_dump(mode="json")
 
 
-@pytest.mark.parametrize("change", ["new_unit", "selector", "bare_operation", "legacy"])
+@pytest.mark.parametrize("change", ["new_unit", "selector", "receipt", "bare_operation", "legacy"])
 def test_unproven_admission_refuses(publication_db: psycopg.Connection, change: str) -> None:
     current = seed_current(publication_db)
     if change == "new_unit":
@@ -260,7 +298,7 @@ def test_unproven_admission_refuses(publication_db: psycopg.Connection, change: 
     with pytest.raises((ManagedWriterBarrierError, ValidationError)):
         require_current_publication(
             publication_db,
-            unit(),
+            unit(prepared_receipt_digest="0" * 64) if change == "receipt" else unit(),
             selector_artifact_digest="0" * 64 if change == "selector" else "b" * 64,
             selector_manifest_digest="c" * 64,
         )

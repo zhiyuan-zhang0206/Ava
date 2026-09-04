@@ -12,8 +12,13 @@ tags:
 `managed_writer_publication.py` defines the version-2 envelope in this SAME field:
 `current` is a committed exact all-unit release tuple; `pending` preserves that
 predecessor while freezing ordinary births. Each unit binds machine, canonical
-home, artifact/manifest digests and the complete prepared inventory receipt digest
-(including service-only declarations). Beginning pending requires the current live
+home, artifact/manifest digests, the observer's `ExpectedUnitWriters` digest, and
+the separate complete prepared receipt digest (including service-only
+declarations). The receipt filename digest from the verified inventory producer
+is the latter; its narrower `expected.unit().inventory_digest` cannot substitute
+for it. Collection adoption validates the full receipt digest after the trusted
+producer has checked the observer tuple; it never accepts the narrower observer
+digest in that slot. Beginning pending requires the current live
 rollout, predecessor match and every registered unit, including stopped machines.
 Expiry or crash never silently clears pending/current. Ordinary admission checks
 deployment -> registry before any agent row lock, refuses unsettled deployment,

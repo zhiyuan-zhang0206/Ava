@@ -53,8 +53,14 @@ _MACHINES = "SELECT name FROM machines"
 
 
 class PublishedUnit(ManagedUnit):
-    """inventory_digest is the FULL prepared receipt, including service roster."""
+    """Bind observer expectations and the full prepared receipt separately.
 
+    ``inventory_digest`` identifies the narrower ``ExpectedUnitWriters`` tuple
+    returned by the unit observer. ``prepared_receipt_digest`` binds the sealed
+    receipt that also retains service-only roster declarations.
+    """
+
+    prepared_receipt_digest: Digest
     artifact_digest: Digest
     manifest_digest: Digest
 
@@ -168,7 +174,11 @@ def adopt_pending_collection(conn: psycopg.Connection, collection: ManagedWriter
     if pending is None:
         raise ManagedWriterBarrierError("no prepared pending operation exists")
     prepared = tuple(
-        ManagedUnit(machine=unit.machine, home=unit.home, inventory_digest=unit.inventory_digest)
+        ManagedUnit(
+            machine=unit.machine,
+            home=unit.home,
+            inventory_digest=unit.prepared_receipt_digest,
+        )
         for unit in pending.units
     )
     validate_collection_for_write(
@@ -211,7 +221,11 @@ def recover_pending_publication(
     if replacement.challenge == state.pending.challenge:
         raise ManagedWriterBarrierError("recovery must issue a new observation challenge")
     prepared = tuple(
-        ManagedUnit(machine=unit.machine, home=unit.home, inventory_digest=unit.inventory_digest)
+        ManagedUnit(
+            machine=unit.machine,
+            home=unit.home,
+            inventory_digest=unit.prepared_receipt_digest,
+        )
         for unit in replacement.units
     )
     validate_collection_for_write(
