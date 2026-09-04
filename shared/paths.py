@@ -135,6 +135,15 @@ def permissions_helper_socket() -> Path:
     return run_dir() / f"permissions-helper.{settings.services.permissions_helper_port}.sock"
 
 
+def permissions_helper_app_dir() -> Path:
+    """Stable install directory for the macOS permissions-helper app.
+
+    The app lives outside the source checkout so a release checkout cannot
+    replace it or change its freshness metadata beneath a running helper.
+    """
+    return ava_home() / "helper"
+
+
 def traces_dir() -> Path:
     """Per-unit trace mirror directory ($AVA_HOME/traces); create if missing.
 
