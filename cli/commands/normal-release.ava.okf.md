@@ -1,60 +1,62 @@
 ---
 type: doc
-title: Pending normal release continuation
-description: Exact selector and service effects in the existing per-unit updater.
+title: Pending normal release planning
+description: Pre-stop normal plan validation with activation deliberately disabled.
 ---
 
-# Pending normal release continuation
+# Pending normal release planning
 
-`_update_agent_runner --normal-release` is an internal continuation, not a second
-release controller. A bootstrap request may alternatively reference this normal
-request before its first stop: the same updater prepares both stages, completes
-the restricted hop, then continues under the original flock, operation and
-deadline. No mutation endpoint is added to bootstrap. Standalone continuation
-consumes a private request, the existing completed restricted-bootstrap handoff,
-the exact exited predecessor, a fully verified image and complete preparation
-receipt. Unsupported normal readiness transports refuse in preparation while
-bootstrap still serves. Source update flags and git/uv/converge fallbacks are
-unavailable in this mode.
+The normal release module currently builds and validates a sealed per-unit plan;
+it does not activate that plan. A bootstrap request may reference a private
+normal request before its first stop, and standalone preparation can consume an
+existing candidate-ready bootstrap handoff. Both paths bind the exact exited
+predecessor, operation, challenge, verified image, complete preparation receipt,
+selector predecessor and pending all-unit plan. Unsupported readiness transports
+refuse during preparation while bootstrap still serves. Source update flags and
+git/uv/converge fallbacks are unavailable in this mode.
 
-The same local updater flock and handoff generation survive the bounded wait for
-the existing deployment pending record. Normal phases are nested inside the
-versioned bootstrap recovery envelope, preserving its generation and exact
-candidate-ready proof; ordinary spawn ownership never carries compensation
-evidence. An unfinished normal phase prevents generic clear or replacement, and
-only `committed` permits both retained files to clear. A complete adopted
-collection and an actual schema migration receipt authorize selector CAS. Only
-then can the exact prepared normal service set start.
+Every execution entry point fails before updater ownership, selector writes,
+bootstrap stop or service spawn. Activation remains disabled until each durable
+phase has checked forward or reverse recovery and service start returns an exact
+PID/birth spawn receipt that closes the post-fork/pre-SessionRecord ambiguity.
+The preparation models and identity adapters are retained as inputs to that
+future recovery-aware activation path.
+
+The versioned bootstrap envelope records whether a normal continuation was
+planned before any normal write. Planned-but-absent, malformed, or unfinished
+normal evidence prevents generic clear and both manual and automatic unpause.
+Once present, the nested journal cannot be discarded by a bootstrap rewrite;
+normal writes retain their request/operation/unit/selector identity and follow a
+monotonic phase graph. Only a fully validated `committed` journal permits both
+retained files to clear. These journal contracts do not themselves authorize
+activation or recovery.
 
 The selector and receipt path bind `prepared_receipt_digest`, the SHA-256 of the
 complete sealed preparation receipt. Its internal `inventory_digest` remains the
 narrower `ExpectedUnitWriters` tuple digest and must equal the planned unit
-digest. The producer pins dependency order before bootstrap stop, then checks
-each native session and listening child PID/birth, actual executable/command,
-and existing service health response. Python normal services report their
-actually loaded module and image; development responses remain unchanged.
-Native frontend/collector probes also require native listener ownership, not
-just an HTTP success.
+digest. The producer pins dependency order during preparation. Identity adapters
+model native sessions, listener child PID/birth, executable/command, and service
+health responses. Python normal services report their loaded module and image;
+development responses remain unchanged. Native frontend/collector probes also
+require native listener ownership, not just an HTTP success.
 
-Every permission read has the original challenge budget. No retry renews it.
-Each effect gets fresh pending authorization. PostgreSQL and OS/filesystem
-effects are not one atomic transaction; losing authority stops further effects
-and retains the journal. A failed start is not force-cleared. Restoration needs
-a newly authorized reverse plan, not an expired previous permission.
-
-Per-unit readbacks are recorded in the same pending evidence for the all-unit
-coordinator. Current publication, not a local successful launch, is the terminal
-condition. This service permission does not authorize ordinary agent admission.
+Every preparation read has the original challenge budget; no retry renews it.
+Future per-unit readbacks belong in the same pending evidence for the all-unit
+coordinator. Current publication, not a local successful launch, remains the
+terminal condition. This planning permission does not authorize ordinary agent
+admission or service effects.
 
 ## Incomplete callers and support
 
-This continuation does not yet implement normal/source first handoff, complete
-non-session/job quiesce, all-unit collection/migration orchestration, or checked
-normal recovery. The preparation receipt's unknown closure is not promoted to a
-positive permit. Unix-only/native services without a verified readiness adapter
-remain pre-stop refusals. These are implementation gaps, not claims awaiting CI.
+This planner does not yet implement normal/source first handoff, complete
+non-session/job quiesce, all-unit collection/migration orchestration, checked
+normal recovery, or exact spawn receipts. The preparation receipt's unknown
+closure is not promoted to a positive permit. Unix-only/native services without
+a verified readiness adapter remain pre-stop refusals. These are implementation
+gaps, not claims awaiting CI.
 
 Tests cover exact selector serialization, separate receipt/inventory digests,
 unsupported or mutable commands, CLI source isolation, pinned service order,
-and retained unfinished recovery. Actual normal full-roster cold launch and the
-complete distributed transition remain required evidence.
+retained unfinished recovery, strict journal transitions, and the pre-effect
+activation fence. Actual normal full-roster cold launch and the complete
+distributed transition remain required evidence.

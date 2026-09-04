@@ -32,6 +32,11 @@ import psutil
 import shared.paths
 from shared.deploy_timing import NO_PROGRESS_TIMEOUT_S
 from shared.platform import file_lock
+from shared.updater_recovery import (
+    BootstrapRecoveryJournal,
+    NormalReleaseRecoveryJournal,
+    validate_normal_recovery_transition,
+)
 
 _LOCK_TIMEOUT_S = 5.0
 _BOOTSTRAP_RECOVERY_VERSION = 1
@@ -45,6 +50,24 @@ class UpdaterHandoffActive(RuntimeError):  # noqa: N818 — active state verdict
 
 class BootstrapRecoveryInvalidError(RuntimeError):
     """Retained compensating evidence is present but cannot be authenticated."""
+
+
+def _parse_bootstrap_journal(value: object) -> BootstrapRecoveryJournal:
+    try:
+        return BootstrapRecoveryJournal.model_validate_json(
+            json.dumps(value, separators=(",", ":"))
+        )
+    except (TypeError, ValueError) as exc:
+        raise BootstrapRecoveryInvalidError("bootstrap recovery journal is malformed") from exc
+
+
+def _parse_normal_journal(value: object) -> NormalReleaseRecoveryJournal:
+    try:
+        return NormalReleaseRecoveryJournal.model_validate_json(
+            json.dumps(value, separators=(",", ":"))
+        )
+    except (TypeError, ValueError) as exc:
+        raise BootstrapRecoveryInvalidError("normal recovery journal is malformed") from exc
 
 
 @dataclass(frozen=True)
@@ -218,6 +241,8 @@ def _read_bootstrap_unlocked() -> dict[str, object] | None:
             raise BootstrapRecoveryInvalidError("bootstrap recovery generation is malformed")
         if not isinstance(envelope["journal"], dict):
             raise BootstrapRecoveryInvalidError("bootstrap recovery journal is malformed")
+        journal = _parse_bootstrap_journal(cast("dict[str, object]", envelope["journal"]))
+        envelope["journal"] = journal.model_dump(mode="json")
         return envelope
     except FileNotFoundError:
         return None
@@ -230,11 +255,25 @@ def read_bootstrap_recovery() -> dict[str, object] | None:
     return _read_bootstrap_unlocked()
 
 
-def _write_bootstrap_unlocked(generation: str, journal: dict[str, object]) -> None:
-    payload: dict[str, object] = {
+def _require_bootstrap_budget(generation: str, journal: dict[str, object]) -> None:
+    raw_payload: dict[str, object] = {
         "version": _BOOTSTRAP_RECOVERY_VERSION,
         "generation": generation,
         "journal": journal,
+    }
+    if len(json.dumps(raw_payload, separators=(",", ":"), sort_keys=True).encode()) > (
+        _MAX_BOOTSTRAP_RECOVERY_BYTES
+    ):
+        raise BootstrapRecoveryInvalidError("bootstrap recovery exceeds its evidence budget")
+
+
+def _write_bootstrap_unlocked(generation: str, journal: dict[str, object]) -> None:
+    _require_bootstrap_budget(generation, journal)
+    validated = _parse_bootstrap_journal(journal)
+    payload: dict[str, object] = {
+        "version": _BOOTSTRAP_RECOVERY_VERSION,
+        "generation": generation,
+        "journal": validated.model_dump(mode="json"),
     }
     encoded = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode()
     if len(encoded) > _MAX_BOOTSTRAP_RECOVERY_BYTES:
@@ -257,7 +296,40 @@ def write_bootstrap_recovery(generation: str, journal: dict[str, object]) -> Non
         existing = _read_bootstrap_unlocked()
         if existing is not None and existing["generation"] != generation:
             raise BootstrapRecoveryInvalidError("bootstrap recovery generation changed")
-        _write_bootstrap_unlocked(generation, journal)
+        _require_bootstrap_budget(generation, journal)
+        candidate = _parse_bootstrap_journal(journal)
+        if existing is not None:
+            retained = _parse_bootstrap_journal(existing["journal"])
+            if retained.normal_release is not None:
+                raise BootstrapRecoveryInvalidError(
+                    "bootstrap writer cannot replace retained normal recovery"
+                )
+            if (
+                candidate.request,
+                candidate.request_digest,
+                candidate.inventory_digest,
+                candidate.candidate_context_digest,
+                candidate.recovery_context_digest,
+                candidate.normal_release_planned,
+                candidate.cron,
+            ) != (
+                retained.request,
+                retained.request_digest,
+                retained.inventory_digest,
+                retained.candidate_context_digest,
+                retained.recovery_context_digest,
+                retained.normal_release_planned,
+                retained.cron,
+            ):
+                raise BootstrapRecoveryInvalidError("bootstrap recovery identity changed")
+            if (
+                len(candidate.phases) != len(retained.phases) + 1
+                or candidate.phases[:-1] != retained.phases
+            ):
+                raise BootstrapRecoveryInvalidError(
+                    "bootstrap recovery phases must append exactly one observation"
+                )
+        _write_bootstrap_unlocked(generation, candidate.model_dump(mode="json"))
 
 
 def write_normal_release_recovery(generation: str, journal: dict[str, object]) -> None:
@@ -275,15 +347,20 @@ def write_normal_release_recovery(generation: str, journal: dict[str, object]) -
         recovery = _read_bootstrap_unlocked()
         if recovery is None or recovery["generation"] != generation:
             raise BootstrapRecoveryInvalidError("normal writer has no exact bootstrap recovery")
-        bootstrap = cast("dict[str, object]", recovery["journal"])
-        if bootstrap.get("stage") != "candidate_ready":
+        bootstrap = _parse_bootstrap_journal(recovery["journal"])
+        if bootstrap.stage != "candidate_ready":
             raise BootstrapRecoveryInvalidError("normal writer has no candidate-ready bootstrap")
-        existing = bootstrap.get("normal_release")
-        if existing is not None and not isinstance(existing, dict):
-            raise BootstrapRecoveryInvalidError("normal recovery journal is malformed")
-        retained = dict(bootstrap)
-        retained["normal_release"] = journal
-        _write_bootstrap_unlocked(generation, retained)
+        if not bootstrap.normal_release_planned:
+            raise BootstrapRecoveryInvalidError("bootstrap did not plan a normal continuation")
+        normal = _parse_normal_journal(journal)
+        try:
+            validate_normal_recovery_transition(bootstrap.normal_release, normal)
+        except ValueError as exc:
+            raise BootstrapRecoveryInvalidError(str(exc)) from exc
+        _write_bootstrap_unlocked(
+            generation,
+            bootstrap.model_copy(update={"normal_release": normal}).model_dump(mode="json"),
+        )
 
 
 def begin(
@@ -422,6 +499,34 @@ def owner_is_live(snapshot: UpdaterHandoffSnapshot) -> bool:
     return abs(actual - snapshot.owner_create_time) <= 2.0
 
 
+def _bootstrap_clearable_unlocked(generation: str) -> bool:
+    try:
+        bootstrap = _read_bootstrap_unlocked()
+    except BootstrapRecoveryInvalidError:
+        return False
+    if bootstrap is None:
+        return True
+    journal = _parse_bootstrap_journal(bootstrap["journal"])
+    if bootstrap["generation"] != generation or journal.stage not in {
+        "candidate_ready",
+        "recovered",
+    }:
+        return False
+    if journal.normal_release is None:
+        return journal.stage == "recovered" or not journal.normal_release_planned
+    return journal.normal_release.stage == "committed"
+
+
+def allows_generic_recovery(snapshot: UpdaterHandoffSnapshot) -> bool:
+    """Whether generic unpause may safely discard this exact dead handoff."""
+    with file_lock(lock_path(), timeout_s=_LOCK_TIMEOUT_S):
+        if _read_unlocked(state_path()) != snapshot:
+            return False
+        if snapshot.generation is None:
+            return not bootstrap_state_path().exists()
+        return _bootstrap_clearable_unlocked(snapshot.generation)
+
+
 def clear(generation: str) -> bool:
     """CAS-clear only the handoff generation the caller owns."""
     path = state_path()
@@ -429,24 +534,9 @@ def clear(generation: str) -> bool:
         current = _read_unlocked(path)
         if current.generation != generation:
             return False
-        try:
-            bootstrap = _read_bootstrap_unlocked()
-        except BootstrapRecoveryInvalidError:
+        if not _bootstrap_clearable_unlocked(generation):
             return False
-        if bootstrap is not None:
-            journal = cast("dict[str, object]", bootstrap["journal"])
-            if bootstrap["generation"] != generation or journal.get("stage") not in {
-                "candidate_ready",
-                "recovered",
-            }:
-                return False
-            normal = journal.get("normal_release")
-            if normal is not None:
-                if not isinstance(normal, dict):
-                    return False
-                normal = cast("dict[str, object]", normal)
-                if normal.get("stage") != "committed":
-                    return False
+        if bootstrap_state_path().exists():
             bootstrap_state_path().unlink(missing_ok=True)
         path.unlink(missing_ok=True)
         with contextlib.suppress(OSError):

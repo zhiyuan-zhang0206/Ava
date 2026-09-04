@@ -1,20 +1,18 @@
-"""Normal candidate continuation of the existing per-unit updater.
+"""Sealed normal candidate planning with activation deliberately disabled.
 
-The detached updater keeps its existing local flock and handoff journal while
-waiting on the one deployment record. Bootstrap remains read-only. A lost lease
-leaves recovery evidence, not permission to restore a selector or start a process.
+The planner binds the existing per-unit updater, bootstrap evidence, publication
+plan and service identities. Execution refuses before updater ownership or
+effects until checked phase recovery and exact spawn receipts are implemented.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
-import os
-import time
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Literal, cast
+from typing import Never
 
 import psycopg
 from pydantic import Field
@@ -22,15 +20,18 @@ from pydantic import Field
 from cli.commands._release_selector import (
     pending_transaction,
     read_selector,
-    select_pending_release,
     selector_bytes,
 )
 from cli.commands._release_services import (
     PreparedService,
     prepare_normal_services,
-    start_normal_service,
 )
-from cli.commands._update_bootstrap import PreparedBootstrapHop, _private_reference, probe_bootstrap
+from cli.commands._update_bootstrap import (
+    BootstrapHopRequest,
+    PreparedBootstrapHop,
+    _private_reference,
+    probe_bootstrap,
+)
 from services.agent_ops.bootstrap import (
     ObserverProjection,
     PreparedObservation,
@@ -38,20 +39,12 @@ from services.agent_ops.bootstrap import (
     validate_operation,
 )
 from shared import updater_handoff
-from shared.host_deploy_state import release_updater_lock, try_acquire_updater_lock
-from shared.managed_writer_activation import (
-    NormalServiceReadback,
-    SelectorReadback,
-    UnitActivationReadback,
-    pending_stage,
-    require_pending_candidate_start,
-)
 from shared.managed_writer_barrier import EvidenceModel, lock_rollout
 from shared.managed_writer_observation import ExpectedProcess, observe_process
 from shared.managed_writer_publication import CandidateUnitPlan, PublishedUnit, _locked_publication
 from shared.runtime_release import ReleaseRejectedError
-from shared.session_backend import get_backend
 from shared.session_record import SessionRecord
+from shared.updater_recovery import BootstrapRecoveryJournal
 from shared.verified_file import regular_bytes
 
 
@@ -60,16 +53,6 @@ class NormalReleaseRequest(EvidenceModel):
     unit: PublishedUnit
     previous_selector: str | None = Field(max_length=65536)
     predecessor: ExpectedProcess
-
-
-class NormalReleaseJournal(EvidenceModel):
-    request_path: str
-    operation_context: PreparedObservation
-    unit: PublishedUnit
-    previous_selector: str | None
-    stage: Literal["waiting", "selected", "bootstrap_stopped", "starting", "observed", "committed"]
-    starting_session: str | None = None
-    readback: UnitActivationReadback | None = None
 
 
 @dataclass(frozen=True)
@@ -81,6 +64,13 @@ class PreparedNormalRelease:
     services: tuple[PreparedService, ...]
     bootstrap: SessionRecord
     resume_generation: str
+
+
+def require_checked_normal_activation() -> Never:
+    """Refuse effects until exact spawn receipts and stage recovery are implemented."""
+    raise ReleaseRejectedError(
+        "normal activation requires checked crash recovery and exact spawn receipts"
+    )
 
 
 def _preflight_pending_plan(plan: PreparedNormalRelease) -> None:
@@ -148,35 +138,48 @@ def prepare_after_bootstrap(hop: PreparedBootstrapHop) -> PreparedNormalRelease:
     return prepared
 
 
-def continue_after_bootstrap(
-    hop: PreparedBootstrapHop, plan: PreparedNormalRelease, generation: str
-) -> int:
-    """Same process/flock/operation: no second dispatcher or bootstrap write route."""
+def _candidate_ready_recovery(generation: str) -> BootstrapRecoveryJournal:
     try:
         retained = updater_handoff.read_bootstrap_recovery()
-    except updater_handoff.BootstrapRecoveryInvalidError as exc:
+        journal = (
+            BootstrapRecoveryJournal.model_validate_json(json.dumps(retained["journal"]))
+            if retained is not None
+            else None
+        )
+    except (KeyError, TypeError, ValueError, updater_handoff.BootstrapRecoveryInvalidError) as exc:
         raise ReleaseRejectedError("normal continuation recovery is malformed") from exc
-    journal = (
-        cast("dict[str, object]", retained["journal"])
-        if retained is not None and isinstance(retained.get("journal"), dict)
-        else None
-    )
     if (
         retained is None
         or retained["generation"] != generation
         or journal is None
-        or journal.get("stage") != "candidate_ready"
-        or "normal_release" in journal
+        or journal.stage != "candidate_ready"
+        or not journal.normal_release_planned
+        or journal.normal_release is not None
     ):
         raise ReleaseRejectedError(
             "normal continuation requires the actual candidate-ready handoff"
         )
-    probe_bootstrap(plan.context, plan.projection, verified_image=hop.image)
-    path = Path(plan.request.unit.home) / "run/sessions/ava-ops.json"
-    record = SessionRecord(**json.loads(regular_bytes(path)))
-    return execute_normal_release(
-        replace(plan, bootstrap=record, resume_generation=generation), generation
-    )
+    return journal
+
+
+def continue_after_bootstrap(
+    hop: PreparedBootstrapHop, plan: PreparedNormalRelease, generation: str
+) -> Never:
+    """Validate retained identity, then refuse the disabled activation route."""
+    journal = _candidate_ready_recovery(generation)
+    if (
+        journal.request != str(hop.request_path)
+        or journal.request_digest != hashlib.sha256(regular_bytes(hop.request_path)).hexdigest()
+        or journal.inventory_digest
+        != hashlib.sha256(regular_bytes(Path(hop.request.inventory_receipt))).hexdigest()
+        or journal.candidate_context_digest
+        != hashlib.sha256(regular_bytes(Path(hop.request.candidate_context))).hexdigest()
+        or journal.recovery_context_digest
+        != hashlib.sha256(regular_bytes(Path(hop.request.recovery_context))).hexdigest()
+        or hop.request.normal_release_path != str(plan.request_path)
+    ):
+        raise ReleaseRejectedError("normal continuation differs from its retained bootstrap")
+    require_checked_normal_activation()
 
 
 def prepare_normal_release(path: Path) -> PreparedNormalRelease:
@@ -208,23 +211,24 @@ def prepare_normal_release(path: Path) -> PreparedNormalRelease:
         or updater_handoff.owner_is_live(handoff)
     ):
         raise ReleaseRejectedError("existing handoff does not identify the exited orchestrator")
-    try:
-        retained = updater_handoff.read_bootstrap_recovery()
-    except updater_handoff.BootstrapRecoveryInvalidError as exc:
-        raise ReleaseRejectedError("normal continuation recovery is malformed") from exc
-    journal = (
-        cast("dict[str, object]", retained["journal"])
-        if retained is not None and isinstance(retained.get("journal"), dict)
-        else None
-    )
-    if retained is None or retained["generation"] != handoff.generation or journal is None:
-        raise ReleaseRejectedError("normal continuation has no exact bootstrap recovery")
-    if "normal_release" in journal:
-        raise ReleaseRejectedError("unfinished normal release requires explicit checked recovery")
+    journal = _candidate_ready_recovery(handoff.generation)
+    bootstrap_path = _private_reference(journal.request, home)
+    bootstrap_request = BootstrapHopRequest.model_validate_json(regular_bytes(bootstrap_path))
     if (
-        journal.get("stage") != "candidate_ready"
-        or journal.get("candidate_context_digest")
+        journal.request_digest != hashlib.sha256(regular_bytes(bootstrap_path)).hexdigest()
+        or bootstrap_request.normal_release_path != str(path)
+        or bootstrap_request.predecessor != request.predecessor
+        or bootstrap_request.candidate_context != request.context_path
+        or journal.inventory_digest
+        != hashlib.sha256(
+            regular_bytes(_private_reference(bootstrap_request.inventory_receipt, home))
+        ).hexdigest()
+        or journal.candidate_context_digest
         != hashlib.sha256(regular_bytes(Path(request.context_path))).hexdigest()
+        or journal.recovery_context_digest
+        != hashlib.sha256(
+            regular_bytes(_private_reference(bootstrap_request.recovery_context, home))
+        ).hexdigest()
     ):
         raise ReleaseRejectedError("normal continuation has no exact completed bootstrap handoff")
     services = prepare_normal_services(request.unit, context.schema_digest)
@@ -255,134 +259,11 @@ def prepare_normal_release(path: Path) -> PreparedNormalRelease:
     return prepared
 
 
-def _journal(generation: str, value: NormalReleaseJournal) -> None:
-    try:
-        updater_handoff.write_normal_release_recovery(generation, value.model_dump(mode="json"))
-    except updater_handoff.BootstrapRecoveryInvalidError as exc:
-        raise ReleaseRejectedError("normal updater lost exact retained recovery") from exc
+def execute_normal_release(_plan: PreparedNormalRelease, _generation: str) -> Never:
+    """Defensive fence for callers that already hold a prepared plan."""
+    require_checked_normal_activation()
 
 
-def _wait_stage(conn: psycopg.Connection, plan: PreparedNormalRelease, expected: str) -> None:
-    context = plan.context
-    while datetime.now(UTC) < context.challenge.valid_until:
-        with pending_transaction(conn, context):
-            stage = pending_stage(conn, context.operation, context.challenge.challenge)
-        if stage == expected:
-            return
-        if stage == "committed":
-            raise ReleaseRejectedError("unexpected publication transition")
-        time.sleep(
-            min(0.2, max(0, (context.challenge.valid_until - datetime.now(UTC)).total_seconds()))
-        )
-    raise ReleaseRejectedError("normal continuation exhausted its original challenge")
-
-
-def _stop_bootstrap(
-    conn: psycopg.Connection, plan: PreparedNormalRelease, selector: SelectorReadback
-) -> None:
-    context = plan.context
-    ops = next(service for service in plan.services if service.identity.session == "ava-ops")
-    with pending_transaction(conn, context):
-        require_pending_candidate_start(
-            conn, context.operation, context.challenge.challenge, selector, ops.identity
-        )
-    validate_operation(context, plan.projection)
-    probe_bootstrap(context, plan.projection)
-    path = Path(plan.request.unit.home) / "run/sessions/ava-ops.json"
-    if SessionRecord(**json.loads(regular_bytes(path))) != plan.bootstrap:
-        raise ReleaseRejectedError("bootstrap session changed before normal transition")
-    with pending_transaction(conn, context):
-        require_pending_candidate_start(
-            conn, context.operation, context.challenge.challenge, selector, ops.identity
-        )
-    if not get_backend().graceful_signal("ava-ops", expected=plan.bootstrap):
-        raise ReleaseRejectedError("exact bootstrap stop failed")
-    process = ExpectedProcess(
-        pid=plan.bootstrap.pid,
-        create_time=plan.bootstrap.create_time,
-        starttime=plan.bootstrap.starttime,
-    )
-    while datetime.now(UTC) < context.challenge.valid_until:
-        validate_operation(context, plan.projection)
-        verdict = observe_process(process)
-        if verdict == "exited":
-            return
-        if verdict != "alive":
-            raise ReleaseRejectedError("bootstrap exit identity is unknown")
-        time.sleep(0.05)
-    raise ReleaseRejectedError("bootstrap did not stop within the original challenge")
-
-
-def execute_normal_release(plan: PreparedNormalRelease, generation: str) -> int:
-    """Actual selector/start path, only after adopted barrier and real migration."""
-    context = plan.context
-    state = NormalReleaseJournal(
-        request_path=str(plan.request_path),
-        operation_context=context,
-        unit=plan.request.unit,
-        previous_selector=plan.request.previous_selector,
-        stage="waiting",
-    )
-    _journal(generation, state)
-    remaining = int((context.challenge.valid_until - datetime.now(UTC)).total_seconds())
-    if remaining < 2:
-        raise ReleaseRejectedError("normal continuation has no connection budget")
-    with psycopg.connect(
-        plan.projection.db_url.get_secret_value(),
-        autocommit=True,
-        connect_timeout=min(5, remaining),
-    ) as conn:
-        _wait_stage(conn, plan, "selector_allowed")
-        previous = state.previous_selector.encode() if state.previous_selector is not None else None
-        selector = select_pending_release(conn, context, plan.request.unit, previous)
-        state = state.model_copy(update={"stage": "selected"})
-        _journal(generation, state)
-        _stop_bootstrap(conn, plan, selector)
-        state = state.model_copy(update={"stage": "bootstrap_stopped"})
-        _journal(generation, state)
-        results: list[NormalServiceReadback] = []
-        # Never rediscover mutable gates after stop: preparation pinned this order.
-        for service in plan.services:
-            state = state.model_copy(
-                update={"stage": "starting", "starting_session": service.identity.session}
-            )
-            _journal(generation, state)
-            results.append(start_normal_service(conn, context, selector, service))
-        readback = UnitActivationReadback(
-            selector=selector,
-            services=tuple(sorted(results, key=lambda item: item.service.session)),
-        )
-        state = state.model_copy(
-            update={"stage": "observed", "starting_session": None, "readback": readback}
-        )
-        _journal(generation, state)
-        # The all-unit coordinator consumes this same pending field. No bootstrap
-        # mutation RPC, new listener, or unauthenticated callback is introduced.
-        from shared.managed_writer_activation import record_pending_unit_readback
-
-        with pending_transaction(conn, context):
-            record_pending_unit_readback(
-                conn, context.operation, context.challenge.challenge, readback
-            )
-        _wait_stage(conn, plan, "committed")
-        _journal(generation, state.model_copy(update={"stage": "committed"}))
-    return 0
-
-
-def run_normal_release(path: Path) -> int:
-    plan = prepare_normal_release(path)
-    if not try_acquire_updater_lock():
-        raise ReleaseRejectedError("another updater holds this unit")
-    generation: str | None = None
-    claimed = False
-    try:
-        expected = f"direct-updater:pid{os.getpid()}"
-        generation = plan.resume_generation
-        if not updater_handoff.resume_bootstrap(generation, expected_session=expected):
-            raise ReleaseRejectedError("normal updater could not claim its existing handoff")
-        claimed = True
-        return execute_normal_release(plan, generation)
-    finally:
-        if generation is not None and claimed:
-            updater_handoff.clear(generation)
-        release_updater_lock()
+def run_normal_release(path: Path) -> Never:
+    prepare_normal_release(path)
+    require_checked_normal_activation()

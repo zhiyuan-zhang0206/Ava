@@ -183,6 +183,7 @@ def test_journal_round_trips_the_strict_phase_tuple_as_json(
             inventory_receipt=str(receipt),
             candidate_context=str(candidate),
             recovery_context=str(recovery),
+            normal_release_path=str(tmp_path / "normal.json"),
         ),
         validation_seconds=0.0,
     )
@@ -203,6 +204,7 @@ def test_journal_round_trips_the_strict_phase_tuple_as_json(
 
     assert envelope is not None
     journal = cast("dict[str, object]", envelope["journal"])
+    assert journal["normal_release_planned"] is True
     phases = cast("list[dict[str, object]]", journal["phases"])
     assert [phase["stage"] for phase in phases] == ["prepared", "cron_quiesced"]
 
