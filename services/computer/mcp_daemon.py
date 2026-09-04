@@ -362,7 +362,7 @@ async def run(sock: str | None = None) -> None:
     with suppress(OSError):
         path.unlink()
     server = await asyncio.start_unix_server(
-        lambda r, w: _tracked_client(daemon, r, w), path=str(path)
+        lambda r, w: _tracked_client(daemon, r, w), path=str(path), limit=_LINE_LIMIT
     )
     logger.info(f"[computer-mcp] listening on {path}")
     stop = asyncio.Event()
