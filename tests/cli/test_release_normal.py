@@ -151,7 +151,15 @@ def test_continuation_requires_same_actual_ready_handoff(
                 "normal_release_planned": True,
                 "stage": stage,
                 "cron": "",
-                "phases": [],
+                "phases": [
+                    {
+                        "stage": stage,
+                        "observed_at": "2026-09-04T00:00:00+00:00",
+                        "monotonic_s": 0.0,
+                        "pid": 1,
+                        "elapsed_s": None,
+                    }
+                ],
                 "normal_release": None,
             },
         },

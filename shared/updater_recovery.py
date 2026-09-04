@@ -11,9 +11,20 @@ from shared.managed_writer_barrier import Digest, EvidenceModel, RolloutIdentity
 from shared.managed_writer_observation import ExpectedUnitWriters, ObservationChallenge
 from shared.managed_writer_publication import PublishedUnit, UnitActivationReadback
 
+BootstrapRecoveryStage = Literal[
+    "prepared",
+    "cron_quiesced",
+    "old_stopped",
+    "candidate_starting",
+    "candidate_started",
+    "candidate_ready",
+    "recovering",
+    "recovered",
+]
+
 
 class BootstrapRecoveryPhase(EvidenceModel):
-    stage: str
+    stage: BootstrapRecoveryStage
     observed_at: dt.datetime
     monotonic_s: float
     pid: int
@@ -93,16 +104,19 @@ class BootstrapRecoveryJournal(EvidenceModel):
     candidate_context_digest: Digest
     recovery_context_digest: Digest
     normal_release_planned: bool = False
-    stage: Literal[
-        "prepared",
-        "cron_quiesced",
-        "old_stopped",
-        "candidate_starting",
-        "candidate_started",
-        "candidate_ready",
-        "recovering",
-        "recovered",
-    ]
+    stage: BootstrapRecoveryStage
     cron: str = Field(max_length=65536)
-    phases: tuple[BootstrapRecoveryPhase, ...] = Field(default=(), max_length=64)
+    phases: tuple[BootstrapRecoveryPhase, ...] = Field(min_length=1, max_length=64)
     normal_release: NormalReleaseRecoveryJournal | None = None
+
+    @model_validator(mode="after")
+    def coherent_terminal_evidence(self) -> Self:
+        if self.phases[-1].stage != self.stage:
+            raise ValueError("bootstrap recovery stage requires a matching last phase")
+        if self.normal_release is not None and (
+            not self.normal_release_planned or self.stage != "candidate_ready"
+        ):
+            raise ValueError(
+                "nested normal recovery requires its planned candidate-ready bootstrap"
+            )
+        return self
