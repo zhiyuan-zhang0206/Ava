@@ -1,7 +1,8 @@
 """Computer-use MCP service — the desktop automation layer (task #1101).
 
-One per-machine daemon (`services/computer/mcp_daemon.py`) executes every
-desktop action through the signed permissions helper — the single TCC
+One per-machine daemon (`services/computer/mcp_daemon.py`), backed by focused
+screen, OCR, execution, and error modules, executes every desktop action
+through the signed permissions helper — the single TCC
 grant-holder — serializing actions machine-wide, coordinating screen
 ownership (lease + FIFO queue + release_control), and auditing every action
 as a `computer_action` event. There is no code-enforced governance: per-agent
