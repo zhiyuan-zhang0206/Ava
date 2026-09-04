@@ -44,8 +44,6 @@ from typing import Any, cast
 
 from langchain_core.messages import BaseMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
-from langgraph.checkpoint.postgres import PostgresSaver
-from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from psycopg import Connection
 from psycopg.rows import DictRow, dict_row
 
@@ -87,6 +85,8 @@ def load_checkpoint_messages(agent_id: int) -> list[BaseMessage]:
             (DB disconnect, msgpack error). The caller decides tolerance
             (see module docstring).
     """
+    from langgraph.checkpoint.postgres import PostgresSaver
+    from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 
     config: RunnableConfig = {"configurable": {"thread_id": str(agent_id)}}
     # Explicit serde allowlist — same types as the agent runner registers
@@ -215,6 +215,9 @@ def load_checkpoint_messages_segment(agent_id: int, checkpoint_id: str) -> list[
         CheckpointReadError: the boundary blob exists but could not be read or
             deserialized.
     """
+    from langgraph.checkpoint.postgres import PostgresSaver
+    from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
+
     config: RunnableConfig = {"configurable": {"thread_id": str(agent_id)}}
     serde = JsonPlusSerializer(allowed_msgpack_modules=STATIC_CHECKPOINT_MSGPACK_TYPES)
     try:
@@ -263,6 +266,9 @@ def load_checkpoint_messages_full(agent_id: int) -> list[BaseMessage]:
     Raises:
         CheckpointReadError: the store read or blob deserialize failed.
     """
+    from langgraph.checkpoint.postgres import PostgresSaver
+    from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
+
     config: RunnableConfig = {"configurable": {"thread_id": str(agent_id)}}
     serde = JsonPlusSerializer(allowed_msgpack_modules=STATIC_CHECKPOINT_MSGPACK_TYPES)
     try:
@@ -340,6 +346,9 @@ def load_checkpoint_messages_by_trace(
         CheckpointReadError: store read or blob deserialize failed — same
             contract as load_checkpoint_messages.
     """
+    from langgraph.checkpoint.postgres import PostgresSaver
+    from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
+
     config: RunnableConfig = {"configurable": {"thread_id": str(agent_id)}}
     # Explicit serde allowlist, same as load_checkpoint_messages — without it
     # the permissive default warns on every read.
