@@ -66,6 +66,32 @@ class DaemonSettings(EnvSettings):
         },
     )
 
+    host_turn_no_progress_timeout_seconds: float = Field(
+        default=2400.0,
+        alias="AVA_HOST_TURN_NO_PROGRESS_TIMEOUT_SECONDS",
+        description="Hosted agent-runner: a graph invocation whose per-agent turn clock has shown no activity (a LangGraph node enter, a completed LLM step) for this long is treated as turn-level fake-alive and aborted: the invocation is cancelled with the bounded unwind, the row settles to idling, one Error event is emitted, and the next wake resumes from the checkpoint. The default covers exec_node_timeout (1200s) plus the LLM retry budget plus margin, matching AVA_WEDGED_AGENT_INBOUND_AGE_SECONDS. A days-long turn that keeps stepping is never aborted — only no-progress counts.",
+        json_schema_extra={
+            "capability": "agent-runner",
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    host_turn_progress_scan_interval_seconds: float = Field(
+        default=30.0,
+        alias="AVA_HOST_TURN_PROGRESS_SCAN_INTERVAL_SECONDS",
+        description="Hosted agent-runner: how often the no-progress stall guard polls the per-agent turn clock while a graph.ainvoke is running. Poll cadence only — it changes detection latency, never the abort threshold (AVA_HOST_TURN_NO_PROGRESS_TIMEOUT_SECONDS).",
+        json_schema_extra={
+            "capability": "agent-runner",
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
     restarter_poll_interval_seconds: float = Field(
         default=1.0,
         alias="AVA_RESTARTER_POLL_INTERVAL_SECONDS",

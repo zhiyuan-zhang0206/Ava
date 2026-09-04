@@ -148,12 +148,22 @@ class TurnScheduler:
         # see the module docstring.
         self._pending: set[int] = set()
         self._closed = False
+        # Set by a turn task that refuses its bounded unwind: the dispatcher
+        # loop checks it each iteration and raises HostRestartRequiredError so
+        # the daemon exits and the supervisor restarts from the checkpoint.
+        self._restart_required = False
 
     @property
     def active_agents(self) -> frozenset[int]:
         """Agents with a turn task right now — the in-process answer to "who is
         running"; the host also mirrors that state in the database row."""
         return frozenset(self._tasks)
+
+    @property
+    def restart_required(self) -> bool:
+        """True when a turn refused its bounded cancellation and this daemon
+        must exit. The dispatcher loop picks it up at the next iteration."""
+        return self._restart_required
 
     def wake(self, agent_id: int) -> None:
         """Record a wake for `agent_id` and make sure a turn will follow.
@@ -186,7 +196,36 @@ class TurnScheduler:
             completed = True
         except asyncio.CancelledError:
             raise
+        except HostRestartRequiredError:
+            # A turn refused its bounded cancellation and still owns the task
+            # slot; rescheduling beside it would violate one-turn-per-agent.
+            # Escalate to the dispatcher loop, which exits the daemon; the
+            # supervisor restarts it from the durable checkpoint (the same
+            # recovery the pending scan's stale-turn branch uses).
+            logger.error(
+                "hosted turn for agent {agent_id} refused its bounded "
+                "cancellation after a stall — requesting host restart",
+                event="host_turn_stall_uncancellable",
+                agent_id=agent_id,
+            )
+            self._restart_required = True
+        except TurnStallTimeoutError:
+            # The no-progress stall guard aborted the invocation cleanly (it
+            # DID unwind): the task ends, the runtime was dropped by run_turn,
+            # and the next wake resumes from the checkpoint after re-running
+            # the startup reconcile.
+            logger.error(
+                "hosted turn for agent {agent_id} aborted after a "
+                "no-progress stall — dropping the task; the next wake "
+                "resumes from the checkpoint",
+                event="host_turn_stall_aborted",
+                agent_id=agent_id,
+            )
         except Exception:
+            # One agent's failed turn must not take the host down or wedge
+            # that agent: log it, drop the task, and let the next wake start a
+            # fresh one. The turn's own state is checkpointed, so the retry
+            # resumes rather than restarts.
             logger.exception(
                 "hosted turn crashed — dropping the task; the next wake retries",
                 event="host_turn_crashed",
@@ -377,6 +416,9 @@ class _WakeScheduler(Protocol):
     @property
     def active_agents(self) -> frozenset[int]: ...
 
+    @property
+    def restart_required(self) -> bool: ...
+
     def wake(self, agent_id: int) -> None: ...
 
     async def cancel_agent(self, agent_id: int) -> bool: ...
@@ -388,6 +430,18 @@ class HostRestartRequiredError(RuntimeError):
     Rescheduling beside it would violate one-turn-per-agent. Letting the daemon
     exit hands recovery to its supervisor, which restarts from the durable
     checkpoint instead.
+    """
+
+
+class TurnStallTimeoutError(RuntimeError):
+    """A hosted turn was aborted by the no-progress stall guard (host.py).
+
+    Its ``graph.ainvoke`` made no progress for
+    ``AVA_HOST_TURN_NO_PROGRESS_TIMEOUT_SECONDS`` and was cancelled; the turn
+    task ends (the task DID unwind — that is the whole point of the bounded
+    abort) and the next wake resumes from the checkpoint. Distinct from
+    ``HostRestartRequiredError``, which is raised when the cancel refuses to
+    unwind: the daemon there must exit, here it must not.
     """
 
 
@@ -438,6 +492,19 @@ class InboundWakeDispatcher:
         self._subscription_read_deadline_grace_s = subscription_read_deadline_grace_s
         self._reconnect_delay_s = reconnect_delay_s
 
+    def _raise_if_restart_required(self) -> None:
+        """Escalate a turn task's refused-bounded-unwind to a daemon exit.
+
+        A plain raise inline trips TRY301 inside the subscription loop's
+        broad except; the escalation is the same one `scan_once` raises
+        directly for a stale pending turn that will not unwind.
+        """
+        if self._scheduler.restart_required:
+            raise HostRestartRequiredError(
+                "a hosted turn refused its bounded cancellation after "
+                "a stall; exiting for supervisor recovery"
+            )
+
     async def run(self) -> None:
         """Subscribe and feed wakes to the scheduler until cancelled.
 
@@ -468,6 +535,7 @@ class InboundWakeDispatcher:
                 next_scan_at = 0.0
                 scan_backoff_s = self._scan_interval_s
                 while True:
+                    self._raise_if_restart_required()
                     now = time.monotonic()
                     if now >= next_scan_at:
                         scan_schedule = await self._next_scan_schedule(scan_backoff_s)

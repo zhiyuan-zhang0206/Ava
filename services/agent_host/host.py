@@ -154,6 +154,7 @@ from agent.startup import (
 )
 from agent.state import BaseAgentState
 from services.agent_host.dispatcher import PendingInboundWake
+from services.agent_host.stall_guard import run_invocation_with_stall_guard
 from shared.config import settings
 from shared.config.turn_view import bind_agent_config, resolve_agent_config_pins
 from shared.context import AvaContext
@@ -771,15 +772,17 @@ class AgentHost:
         while True:
             turn += 1
             with turn_span(name=f"ava-agent-{agent_id}", session_id=str(agent_id), turn=turn):
-                result: dict[str, object] = await self._graph.ainvoke(  # pyright: ignore[reportUnknownMemberType, reportAssignmentType]
+                result: dict[str, object] = await run_invocation_with_stall_guard(
+                    self._graph,
+                    agent_id,
+                    ctx,
+                    config,
                     {  # pyright: ignore[reportArgumentType, reportUnknownMemberType]
                         "turn_active": False,
                         "exit_requested": False,
                         "turn_idle": False,
                         "restart_requested": False,
                     },
-                    config=config,
-                    context=ctx,
                 )
             checkpointer_attrs = getattr(self._checkpointer, "__dict__", {})
             if "_ava_nstep_flush" in checkpointer_attrs:

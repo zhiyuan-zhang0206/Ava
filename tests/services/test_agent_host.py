@@ -254,6 +254,33 @@ class _FakeGraph:
         return {"exit_requested": False, "turn_idle": True, "restart_requested": False}
 
 
+class _GatedGraph:
+    """`ainvoke` that blocks on an event, optionally swallowing its own
+    cancellation (the C-call-blocked shape the bounded unwind cannot interrupt).
+    """
+
+    def __init__(self, *, refuse_cancel: bool = False) -> None:
+        self.entered = asyncio.Event()
+        self.release = asyncio.Event()
+        self.refuse_cancel = refuse_cancel
+        self.cancel_seen = False
+
+    async def ainvoke(
+        self, _input: dict[str, Any], *, config: dict[str, Any], context: AvaContext
+    ) -> dict[str, Any]:
+        self.entered.set()
+        try:
+            await self.release.wait()
+        except asyncio.CancelledError:
+            self.cancel_seen = True
+            if self.refuse_cancel:
+                # Model the blocked-in-a-C-call shape: the cancellation lands
+                # but the task cannot honour it.
+                await self.release.wait()
+            raise
+        return {"exit_requested": False, "turn_idle": True, "restart_requested": False}
+
+
 _Build = Callable[..., "tuple[AgentHost, _FakeGraph, _FakePool]"]
 
 
@@ -778,6 +805,133 @@ class TestTurnLoop:
 
 
 # ── 4. runnability ───────────────────────────────────────────────────────────
+
+
+class TestTurnStallGuard:
+    """Task #2417, half 2: the no-progress stall guard around graph.ainvoke.
+
+    A turn that stops making ANY progress (no node enter, no completed LLM
+    step) past ``AVA_HOST_TURN_NO_PROGRESS_TIMEOUT_SECONDS`` is aborted, the
+    error lands (one Error event), and the turn task ends; a turn that keeps
+    stepping — the days-long autonomous loop the design allows — is never
+    touched. All timing is shrunk: the tests run tiny intervals and let the
+    guard's own poll do the work.
+    """
+
+    async def _stall_settings(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from shared.config import settings
+
+        monkeypatch.setattr(settings.daemon, "host_turn_progress_scan_interval_seconds", 0.01)
+        monkeypatch.setattr(settings.daemon, "host_turn_no_progress_timeout_seconds", 0.05)
+
+    async def test_a_stalled_turn_is_aborted_and_its_error_lands(
+        self, wired: _Build, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import services.agent_host.stall_guard as guard_mod
+        from services.agent_host.dispatcher import TurnStallTimeoutError
+
+        await self._stall_settings(monkeypatch)
+        host, _, _ = wired({11: _Row(overlay={"llm_model": "model-for-11"})})
+        graph = _GatedGraph()
+        host._graph = graph  # type: ignore[assignment]
+        errors: list[str] = []
+
+        def _record_error(_ctx: object, _agent_id: int, content: str) -> None:
+            errors.append(content)
+
+        monkeypatch.setattr(guard_mod, "_emit_error_event", _record_error)
+
+        with pytest.raises(TurnStallTimeoutError):
+            await asyncio.wait_for(host.run_turn(11), timeout=2.0)
+
+        assert graph.cancel_seen
+        assert 11 not in host._runtimes, "the runtime must be dropped for the reconcile"
+        assert len(errors) == 1
+        assert "no progress" in errors[0]
+
+    async def test_a_turn_that_keeps_marking_progress_is_never_aborted(
+        self, wired: _Build, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import services.agent_host.stall_guard as guard_mod
+        from agent._turn_progress import mark_turn_progress
+
+        await self._stall_settings(monkeypatch)
+        host, _, _ = wired({11: _Row(overlay={"llm_model": "model-for-11"})})
+        graph = _GatedGraph()
+        host._graph = graph  # type: ignore[assignment]
+        errors: list[str] = []
+
+        def _record_error(_ctx: object, _agent_id: int, content: str) -> None:
+            errors.append(content)
+
+        monkeypatch.setattr(guard_mod, "_emit_error_event", _record_error)
+
+        async def _keep_stepping() -> None:
+            while not graph.release.is_set():
+                mark_turn_progress(11)
+                await asyncio.sleep(0.004)
+
+        keeper = asyncio.create_task(_keep_stepping())
+        task = asyncio.create_task(host.run_turn(11))
+        await asyncio.wait_for(graph.entered.wait(), timeout=1.0)
+        # Let the timeout pass several times over; the steady marks must keep
+        # the turn alive.
+        await asyncio.sleep(0.2)
+        assert not task.done(), "a progressing turn must not be aborted"
+        graph.release.set()
+        await asyncio.wait_for(task, timeout=1.0)
+        keeper.cancel()
+        assert errors == []
+        assert 11 in host._runtimes
+
+    async def test_an_external_cancel_still_unwinds_through_the_guard(
+        self, wired: _Build, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """An external cancel must not block the guard's bounded unwind.
+
+        The turn-level runner SHIELDS its invocation (the durable-command
+        contract, Task #2436), so an outer cancellation flags the turn and
+        waits for it to settle rather than interrupting the graph directly.
+        For a no-progress turn the guard is what actually stops the work; the
+        external cancel must not wedge that abort — the still-unwinds outcome
+        is the stall abort (TurnStallTimeoutError), never a stuck task.
+        """
+        from services.agent_host.dispatcher import TurnStallTimeoutError
+
+        await self._stall_settings(monkeypatch)
+        host, _, _ = wired({11: _Row(overlay={"llm_model": "model-for-11"})})
+        graph = _GatedGraph()
+        host._graph = graph  # type: ignore[assignment]
+
+        task = asyncio.create_task(host.run_turn(11))
+        await asyncio.wait_for(graph.entered.wait(), timeout=1.0)
+        task.cancel()
+        with pytest.raises(TurnStallTimeoutError):
+            await asyncio.wait_for(task, timeout=2.0)
+
+        assert graph.cancel_seen
+        assert 11 not in host._runtimes, "the runtime must be dropped for the reconcile"
+
+    async def test_a_turn_that_refuses_to_unwind_escalates_to_a_host_restart(
+        self, wired: _Build, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from services.agent_host.dispatcher import HostRestartRequiredError
+
+        await self._stall_settings(monkeypatch)
+        import services.agent_host.stall_guard as guard_mod
+
+        monkeypatch.setattr(guard_mod, "CANCEL_UNWIND_TIMEOUT_S", 0.05)
+        host, _, _ = wired({11: _Row(overlay={"llm_model": "model-for-11"})})
+        graph = _GatedGraph(refuse_cancel=True)
+        host._graph = graph  # type: ignore[assignment]
+
+        with pytest.raises(HostRestartRequiredError, match="did not unwind"):
+            await asyncio.wait_for(host.run_turn(11), timeout=2.0)
+
+        assert graph.cancel_seen
+        # Release the stuck invocation so the event loop is not left with a
+        # pending task at teardown.
+        graph.release.set()
 
 
 class TestRunnability:

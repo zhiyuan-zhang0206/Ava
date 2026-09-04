@@ -714,9 +714,16 @@ class TestDispatcherMessageHandling:
 class _ScanScheduler:
     """Small scheduler double for the dispatcher's recovery boundary."""
 
-    def __init__(self, active: set[int] | None = None, *, unwinds_on_cancel: bool = True) -> None:
+    def __init__(
+        self,
+        active: set[int] | None = None,
+        *,
+        unwinds_on_cancel: bool = True,
+        restart_required: bool = False,
+    ) -> None:
         self._active = active or set()
         self._unwinds_on_cancel = unwinds_on_cancel
+        self._restart_required = restart_required
         self.woken: list[int] = []
         self.cancelled: list[int] = []
         self.woken_event = asyncio.Event()
@@ -724,6 +731,10 @@ class _ScanScheduler:
     @property
     def active_agents(self) -> frozenset[int]:
         return frozenset(self._active)
+
+    @property
+    def restart_required(self) -> bool:
+        return self._restart_required
 
     def wake(self, agent_id: int) -> None:
         self.woken.append(agent_id)
@@ -791,6 +802,54 @@ class TestPendingScan:
 
         assert scheduler.cancelled == [23]
         assert scheduler.woken == []
+
+
+class TestStallRestartEscalation:
+    """Task #2417, half 2: a stalled turn that refuses its bounded unwind must
+    not be rescheduled beside itself — the turn task raises the escalation out
+    of the pump, the scheduler flags it, and the dispatcher loop exits."""
+
+    async def test_a_refused_unwind_marks_the_scheduler_for_restart(self) -> None:
+        class _RefusingTurn:
+            async def __call__(self, _agent_id: int) -> None:
+                raise dispatcher.HostRestartRequiredError("refused")
+
+        sched = TurnScheduler(_RefusingTurn())
+        sched.wake(23)
+        await _settle()
+        assert sched.restart_required is True
+
+    async def test_a_clean_stall_abort_does_not_request_a_restart(self) -> None:
+        class _CleanAbort:
+            async def __call__(self, _agent_id: int) -> None:
+                raise dispatcher.TurnStallTimeoutError(23)
+
+        sched = TurnScheduler(_CleanAbort())
+        sched.wake(23)
+        await _settle()
+        assert sched.restart_required is False
+
+    async def test_the_dispatcher_loop_exits_when_restart_is_required(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        pubsub = _QueueingPubSub()
+        _patch_redis(monkeypatch, pubsub)
+        scheduler = _ScanScheduler(restart_required=True)
+
+        async def _pending(_stale_after_s: float) -> list[dispatcher.PendingInboundWake]:
+            return []
+
+        disp = InboundWakeDispatcher(
+            "redis://unused",
+            scheduler,
+            pending_scan=_pending,
+            stale_after_s=180.0,
+            scan_interval_s=0.005,
+            subscription_read_timeout_s=0.005,
+            reconnect_delay_s=0.0,
+        )  # pyright: ignore[reportArgumentType]
+        with pytest.raises(dispatcher.HostRestartRequiredError, match="supervisor recovery"):
+            await asyncio.wait_for(disp.run(), timeout=2.0)
 
 
 def _stale_age(_agent_id: int) -> float:
