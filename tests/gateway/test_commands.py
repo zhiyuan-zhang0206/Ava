@@ -7,6 +7,7 @@ import pytest
 from fastapi import Request
 from fastapi.testclient import TestClient
 
+from ava import _commands as ava_commands
 from gateway.app import app
 from gateway.routers import commands as commands_router
 
@@ -31,7 +32,7 @@ def test_endpoint_returns_command_metadata(monkeypatch: pytest.MonkeyPatch):
     # discover_commands yields full Commands (with body); the endpoint must
     # strip the body and serve only what the dropdown needs.
     monkeypatch.setattr(
-        commands_router,
+        ava_commands,
         "discover_commands",
         lambda: [{"name": "recap", "description": "d", "instruction_hint": "h", "body": "b"}],
     )
@@ -82,7 +83,7 @@ def test_endpoint_agent_view_unavailable_falls_back_locally(
     """A down or version-skewed runner leaves autocomplete usable from the local list."""
     monkeypatch.setattr(commands_router, "_agent_machine", _runner_a)
     monkeypatch.setattr(
-        commands_router,
+        ava_commands,
         "discover_commands",
         lambda: [{"name": "local", "description": "d", "instruction_hint": "h", "body": "b"}],
     )
@@ -101,7 +102,7 @@ def test_endpoint_agent_view_missing_agent_falls_back_locally(monkeypatch: pytes
     """A missing agents_meta row takes the same backward-compatible fallback."""
     monkeypatch.setattr(commands_router, "_agent_machine", _missing_agent)
     monkeypatch.setattr(
-        commands_router,
+        ava_commands,
         "discover_commands",
         lambda: [{"name": "local", "description": "d", "instruction_hint": "h", "body": "b"}],
     )

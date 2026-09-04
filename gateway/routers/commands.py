@@ -14,7 +14,6 @@ import logging
 
 from fastapi import APIRouter, Request
 
-from ava._commands import discover_commands
 from gateway.schemas import CommandItem
 from ops import cluster_rpc as _cluster_rpc
 
@@ -25,6 +24,8 @@ _AGENT_SKILL_VIEW_TIMEOUT_S = 3.0
 
 def _local_commands() -> list[CommandItem]:
     """The gateway-local fallback and backwards-compatible no-agent view."""
+    from ava._commands import discover_commands
+
     return [
         CommandItem(
             name=c["name"],
