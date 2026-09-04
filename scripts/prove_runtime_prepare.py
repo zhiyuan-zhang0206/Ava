@@ -8,6 +8,7 @@ import os
 import shutil
 import subprocess
 import sys
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
@@ -41,8 +42,12 @@ def _copy_proof(root: Path, checkout: Path, name: str) -> Path:
     return target
 
 
-def prove_checkout_absent(
-    root: Path, checkout: Path, application_name: str, release: VerifiedRelease
+def prove_checkout_absent(  # noqa: PLR0915 — one guarded checkout-retirement lifetime across real consumers.
+    root: Path,
+    checkout: Path,
+    application_name: str,
+    release: VerifiedRelease,
+    recovery: VerifiedRelease | None = None,
 ) -> None:
     """Run the existing CLI with no source checkout at its original path."""
     verifier = _copy_proof(root, checkout, "verify_runtime_wheel.py")
@@ -52,6 +57,7 @@ def prove_checkout_absent(
     plugin_proof = _copy_proof(root, checkout, "prove_runtime_plugins.py")
     inventory_proof = _copy_proof(root, checkout, "prove_release_inventory.py")
     bootstrap = _copy_proof(root, checkout, "prove_ops_bootstrap.py")
+    updater = _copy_proof(root, checkout, "prove_updater_bootstrap.py")
     alias = root / "runtime-entry-alias"
     alias.symlink_to(release.root / "venv", target_is_directory=True)
     if (
@@ -177,21 +183,28 @@ def prove_checkout_absent(
                 check=True,
                 timeout=600,
             )
-            subprocess.run(  # noqa: S603 — real retained ops entry, isolated old-schema CI database.
-                [
-                    str(release.interpreter),
-                    "-I",
-                    "-B",
-                    str(bootstrap),
-                    release.digest,
-                    release.manifest_digest,
-                    schema,
-                ],
-                cwd=root,
-                env=migration_env,
-                check=True,
-                timeout=600,
-            )
+            if recovery is not None:
+                subprocess.run(  # noqa: S603 — two verified generations, isolated CI unit only.
+                    [
+                        str(release.interpreter),
+                        "-I",
+                        "-B",
+                        str(updater),
+                        release.digest,
+                        release.manifest_digest,
+                        recovery.digest,
+                        recovery.manifest_digest,
+                        schema,
+                    ],
+                    cwd=root,
+                    env=migration_env,
+                    check=True,
+                    # Five isolated cases each repeat full image verification and
+                    # own a separate absolute operation deadline. This bounded
+                    # suite watchdog must not truncate their final evidence write;
+                    # it does not extend any operation's authority.
+                    timeout=1800,
+                )
             result = subprocess.run(  # noqa: S603 — CI-only native PG at the prepared image boundary.
                 [
                     str(release.interpreter),
@@ -337,7 +350,7 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def main() -> None:
+def main() -> None:  # noqa: PLR0915 — ordered prepare/retire/failure evidence with one input lifetime.
     args = parse_args()
     root = args.root.resolve()
     source = Path(
@@ -396,6 +409,20 @@ def main() -> None:
         ),
     )
     release = prepare_with_diagnostics(store, inputs)
+    recovery = None
+    if "AVA_RUNTIME_PROOF_PG" in os.environ:
+        # Distinct real sealed generations; same application revision deliberately.
+        # This proves the restricted image hop, not old source-version compatibility.
+        recovery_requirements = root / "recovery-requirements.txt"
+        recovery_requirements.write_bytes(requirements.read_bytes() + b"\n# retained A input\n")
+        recovery = prepare_with_diagnostics(
+            store,
+            replace(
+                inputs,
+                requirements=recovery_requirements,
+                requirements_digest=file_sha256(recovery_requirements),
+            ),
+        )
     prove_half_plugin_refusal(store, inputs)
     if serving.read_bytes() != original:
         raise AssertionError("successful preparation changed serving pointer")
@@ -403,7 +430,7 @@ def main() -> None:
     # prepared generation does not depend on input wheels or base Python paths.
     private_python.rename(root / "retired-python-input")
     wheels.rename(root / "retired-wheels")
-    prove_checkout_absent(root, checkout, application.name, release)
+    prove_checkout_absent(root, checkout, application.name, release, recovery)
     prove_prepared_frontend(inputs, release, checkout, root)
     verify_loaded_images(release)
     import platform
@@ -420,8 +447,6 @@ def main() -> None:
     (root / "retired-python-input").rename(private_python)
     (root / "retired-wheels").rename(wheels)
     requirements.write_text(requirements.read_text() + "\n# failure-injection input\n")
-    from dataclasses import replace
-
     failed_inputs = replace(inputs, requirements_digest=file_sha256(requirements))
     with patch(
         "shared.runtime_prepare._run",

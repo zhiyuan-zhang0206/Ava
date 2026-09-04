@@ -46,6 +46,7 @@ from shared.paths import logs_dir, run_dir
 from shared.platform import (
     IS_WINDOWS,
 )
+from shared.session_record import SessionRecord
 
 _log = logging.getLogger(__name__)
 
@@ -131,7 +132,7 @@ class SessionBackend(abc.ABC):
         """
         ...
 
-    def graceful_signal(self, name: str) -> bool:
+    def graceful_signal(self, name: str, *, expected: SessionRecord | None = None) -> bool:
         """Send the backend's graceful-stop signal without waiting.
 
         Service backends override this for batch stop. Terminal-oriented
@@ -301,10 +302,12 @@ class PosixProcSessionBackend(SessionBackend):
 
         return posixproc.kill_session(name, graceful=graceful, timeout=timeout)
 
-    def graceful_signal(self, name: str) -> bool:
+    def graceful_signal(self, name: str, *, expected: SessionRecord | None = None) -> bool:
         from shared import posixproc
 
-        return posixproc.graceful_signal(name)
+        if expected is None:
+            return posixproc.graceful_signal(name)
+        return posixproc.graceful_signal(name, expected=expected)
 
     def list_sessions(self, prefix: str = "") -> list[str]:
         from shared import posixproc
@@ -549,7 +552,9 @@ class WinprocSessionBackend(SessionBackend):
 
         return winproc.kill_session(name, graceful=graceful, timeout=timeout)
 
-    def graceful_signal(self, name: str) -> bool:
+    def graceful_signal(self, name: str, *, expected: SessionRecord | None = None) -> bool:
+        if expected is not None:
+            raise NotImplementedError("Windows expected-record stop has no verified contract")
         from shared import winproc
 
         return winproc.graceful_signal(name)

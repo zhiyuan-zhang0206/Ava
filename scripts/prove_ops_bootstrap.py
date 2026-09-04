@@ -237,6 +237,18 @@ def main() -> None:  # noqa: PLR0915 — one bounded CI process/DB lifetime with
                     status == 200 and observed["processes"] == ["alive"], "real process unobserved"
                 )
                 require(observed["closure"] == "unknown", "incomplete inventory asserted closure")
+                runtime = observed["runtime"]
+                require(
+                    runtime["process"]["pid"] == child.pid
+                    and runtime["process"]["create_time"] == psutil.Process(child.pid).create_time()
+                    and runtime["home"] == str(home)
+                    and runtime["artifact_digest"] == artifact
+                    and runtime["manifest_digest"] == manifest
+                    and Path(runtime["module"])
+                    .resolve()
+                    .is_relative_to(home / "releases" / artifact / "venv"),
+                    "authenticated readback did not identify the actual loaded child",
+                )
                 conn.execute(
                     "UPDATE deployment_state SET expires_at=clock_timestamp()-interval '1 second'"
                 )
@@ -254,6 +266,7 @@ def main() -> None:  # noqa: PLR0915 — one bounded CI process/DB lifetime with
                             "negativeHomeImageHolder": True,
                             "bootstrapOnly": True,
                             "realPidObserved": True,
+                            "actualResponderIdentity": True,
                             "expiredOperationRefused": True,
                             "noOrdinaryPidEffects": True,
                             "lockWaitDeadline": True,
