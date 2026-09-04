@@ -404,6 +404,10 @@ class WedgedAgentController:
         self._last_scan: float = 0.0
 
     def reconcile(self, role: MachineRole) -> ReconcileResult:
+        from ops import runner_mode
+
+        if runner_mode.is_hosted():
+            return ReconcileResult(dimension=self.name, blocks=BlockScope.NONE)
         if role != "agent-runner":
             return ReconcileResult(dimension=self.name, blocks=BlockScope.NONE)
 
