@@ -94,6 +94,9 @@ def claim_agent_row(
     from agent.session_admission import wait_for_launch_record
 
     wait_for_launch_record(agent_id)
+    from shared.exec_owner_recovery import recover_local_resources
+
+    recover_local_resources(agent_id, local_machine)
     with write_transaction() as conn, conn.cursor() as cur:
         # A guarded auto-resurrect transaction may still be committing the row
         # when its child starts. Lock first so this process validates that final
@@ -125,6 +128,15 @@ def claim_agent_row(
         from shared.resurrection_launch import require_admission
 
         require_admission(conn, agent_id, resurrect_command_id)
+        import psutil
+
+        from shared.incarnation_resources import ResourceProcess
+        from shared.resource_admission import admit_resources
+
+        native = psutil.Process()
+        admit_resources(
+            conn, incarnation, ResourceProcess(pid=native.pid, birth=native.create_time())
+        )
         cur.execute(
             "UPDATE agents_meta SET status = %s, pid = %s, started_at = now(), "
             "lease_expires_at = now() + make_interval(secs => %s), "

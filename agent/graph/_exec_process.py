@@ -10,7 +10,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
-import signal
 import subprocess
 import threading
 import time
@@ -19,76 +18,13 @@ from typing import Any, Literal
 
 import psutil
 
+from shared.exec_process_domain import ExecProcessDomain as ExecProcessDomain
 from shared.log import logger
 from shared.platform import IS_WINDOWS
-from shared.winjob import WindowsJob
 
 _READER_JOIN_TIMEOUT_S = 5.0
 _EMERGENCY_SETTLE_TIMEOUT_S = 5.0
 _ROOT_EXIT_POLL_S = 0.05
-
-
-def _process_group_has_live_member(pgid: int) -> bool:
-    """Whether the pinned POSIX group still contains a signalable process.
-
-    macOS returns EPERM for ``killpg`` when a group contains only zombies. The
-    unreaped root still pins the numeric pgid during this scan, so an empty-live
-    answer cannot race a newly reused unrelated group.
-    """
-    for process in psutil.process_iter(["pid", "status"]):
-        try:
-            if os.getpgid(process.info["pid"]) != pgid:
-                continue
-            if process.info["status"] in {psutil.STATUS_DEAD, psutil.STATUS_ZOMBIE}:
-                continue
-            if process.info["status"] is None:
-                raise psutil.AccessDenied(process.info["pid"])
-            return True
-        except (ProcessLookupError, psutil.NoSuchProcess):
-            continue
-    return False
-
-
-@dataclass
-class ExecProcessDomain:
-    """The root-independent ownership handle for one exec process tree."""
-
-    proc: subprocess.Popen[bytes]
-    windows_job: WindowsJob | None
-
-    def close(self) -> None:
-        """Hard-stop all remaining domain members. Called by one owner task."""
-        if IS_WINDOWS:
-            if self.windows_job is None:
-                raise RuntimeError("Windows exec process has no Job Object")
-            try:
-                self.windows_job.close()
-            except BaseException:
-                # A failed Job close must not strand the direct root and make
-                # the sole reap task wait forever. Descendant ownership is no
-                # longer provable, so the original close error still wins.
-                with contextlib.suppress(OSError):
-                    self.proc.kill()
-                raise
-            return
-        try:
-            if _process_group_has_live_member(self.proc.pid):
-                os.killpg(self.proc.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            return
-        except PermissionError:
-            # Members can all exit after the pre-scan; macOS then reports
-            # EPERM for the zombie-only group. The pinned zombie prevents pgid
-            # reuse, so a second no-live result makes this a successful no-op.
-            if not _process_group_has_live_member(self.proc.pid):
-                return
-            with contextlib.suppress(OSError):
-                self.proc.kill()
-            raise
-        except BaseException:
-            with contextlib.suppress(OSError):
-                self.proc.kill()
-            raise
 
 
 TeardownStage = Literal["domain_close", "root_exit", "reap", "reader_join"]
