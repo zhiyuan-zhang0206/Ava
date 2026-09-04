@@ -65,20 +65,14 @@ def managed_target(agent_id: int | None) -> RuntimeIncarnation | None:
         return target
 
 
-def _reserve(context: OwnerContext) -> None:
+def _register_attached(context: OwnerContext, ready: OwnerReady) -> None:
+    """Publish only an attached allocation; force can win before this transaction."""
     with write_transaction() as conn:
-        register_exec(
-            conn,
-            RuntimeIncarnation(context.agent_id, context.generation, context.runtime_owner),
-            context.allocation,
-        )
-
-
-def _attach(context: OwnerContext, ready: OwnerReady) -> None:
-    with write_transaction() as conn:
+        target = RuntimeIncarnation(context.agent_id, context.generation, context.runtime_owner)
+        register_exec(conn, target, context.allocation)
         attach_exec(
             conn,
-            RuntimeIncarnation(context.agent_id, context.generation, context.runtime_owner),
+            target,
             context.allocation,
             ready.allocation,
         )
@@ -170,8 +164,23 @@ async def run_owned(  # noqa: PLR0915 -- one caller retains exact allocation and
         proc.stdin.write(message.model_dump_json().encode() + b"\n")
         proc.stdin.flush()
 
+    async def settle_unpermitted_owner() -> None:
+        """Prove a gated owner closed without permission before forgetting its scope."""
+        if proc is None or ready is None or reader is None:
+            raise ResourceEvidenceError("unpermitted owner lacks exact ready evidence")
+        if proc.stdin is not None and not proc.stdin.closed:
+            proc.stdin.close()
+        code = await asyncio.to_thread(proc.wait, max(0.001, bound - time.monotonic()))
+        if code != 0:
+            raise ResourceEvidenceError("unpermitted owner did not close successfully")
+        receipt = validate_closed(context, ready.allocation, context_path.with_suffix(".closed"))
+        if receipt.reason != "host_eof":
+            raise ResourceEvidenceError("unpermitted owner closed for an unexpected reason")
+        await asyncio.to_thread(reader.join, max(0, bound - time.monotonic()))
+        if reader.is_alive():
+            raise ResourceEvidenceError("unpermitted owner output remains unresolved")
+
     try:
-        await asyncio.to_thread(_reserve, context)
         env = _build_child_env(
             target.agent_id,
             request,
@@ -207,7 +216,7 @@ async def run_owned(  # noqa: PLR0915 -- one caller retains exact allocation and
                     read_owner_bytes(context_path.with_suffix(".ready"))
                 )
                 validate_native_ready(ready, proc.pid, birth, context_path)
-                await asyncio.to_thread(_attach, context, ready)
+                await asyncio.to_thread(_register_attached, context, ready)
                 attached = True
                 if scope is not None:
                     scope.unresolved[request] = ready
@@ -217,6 +226,9 @@ async def run_owned(  # noqa: PLR0915 -- one caller retains exact allocation and
                 send("cancel")
             if time.monotonic() >= bound:
                 raise ResourceEvidenceError("owner did not settle within the original exec bound")  # noqa: TRY301 -- uncertainty remains durable.
+            if chunk_publisher is not None:
+                chunk_publisher.publish(stream.take_pending())
+                chunk_publisher.maybe_keepalive()
             await asyncio.sleep(0.05)
         if ready is None or proc.returncode != 0:
             await asyncio.to_thread(reader.join, max(0, bound - time.monotonic()))
@@ -230,7 +242,7 @@ async def run_owned(  # noqa: PLR0915 -- one caller retains exact allocation and
         if scope is not None:
             scope.complete(request, ready)
         if chunk_publisher is not None:
-            chunk_publisher.publish(stream.getvalue())
+            chunk_publisher.publish(stream.take_pending())
         payload, error = _read_result_envelope(result, receipt.root_exit_code)
         return _result_from_payload(
             stream.getvalue(),
@@ -250,6 +262,17 @@ async def run_owned(  # noqa: PLR0915 -- one caller retains exact allocation and
             # A synchronous validation refusal rolled back before Popen. This
             # does not cover connection/commit ambiguity, which stays sticky.
             scope.complete(request, None)
+        elif ready is not None and not attached:
+            try:
+                await settle_unpermitted_owner()
+            except Exception as cleanup:
+                exc.add_note(
+                    "unpermitted owner closure remains unresolved: "
+                    f"{type(cleanup).__name__}: {cleanup}"
+                )
+            else:
+                if scope is not None:
+                    scope.complete(request, None)
         return _ExecCrashed(
             output=f"managed exec refused: {exc}\n{stream.getvalue()}", exc=exc
         ), None

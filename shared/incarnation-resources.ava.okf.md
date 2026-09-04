@@ -28,16 +28,26 @@ clearing or legacy rollback permission.
 
 Process and hosted admission preserve legacy NULL/protocol zero and refuse
 malformed evidence. A managed successor requires a closed exact predecessor
-resource set plus its applied lifecycle decision. No default spawn stamps the
-birth marker: enabling new births still requires the publication/all-writer
-boundary, never an environment flag or an installed revision.
+resource set plus its applied lifecycle decision. A same-machine hosted process
+restart is the narrow exception: while holding the metadata lock, it may transfer
+an empty, unfrozen set only after the admission-captured host PID/birth is proven
+ended. A live exact host, an expired lease, a missing host identity, a frozen set,
+or any request refuses that handoff. No default spawn stamps the birth marker:
+enabling new births still requires the publication/all-writer boundary, never an
+environment flag or an installed revision.
 
-Managed exec calls reserve under the metadata lock, launch the fixed isolated
-read-only `agent.exec_domain_owner` entry (`-I -B -X utf8`), validate its actual
-PID/birth and direct root,
-attach that allocation, and then send the exact permit. The root is gated by
-`agent.exec_owner_child`; after the permit it rechecks the reserved request
-digest and exact request/result paths. Neither child inherits the host's control write end.
+Managed exec launches the fixed isolated read-only `agent.exec_domain_owner`
+entry (`-I -B -X utf8`) behind a permit gate, validates its actual PID/birth and
+direct root, and then registers and attaches the allocation atomically under the
+metadata lock. Only that committed transaction permits user code. Force winning
+before the transaction leaves no database allocation; the host closes the gated
+owner and requires its exact `host_eof` receipt before clearing the in-process
+scope. An ambiguous commit remains unresolved. The root is gated by
+`agent.exec_owner_child`; after the permit it rechecks the reserved request digest
+and exact request/result paths. Neither child inherits the host's control write
+end. The managed host poll loop publishes pending output incrementally and sends
+keepalives while the owner remains live; completion flushes only the unpublished
+tail.
 The owner remains alive after host EOF, closes the managed domain, reaps its
 root, joins the output reader and exclusively publishes the terminal receipt.
 Request files live in exact domain subdirectories outside legacy age pruning.

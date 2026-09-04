@@ -24,7 +24,12 @@ _STORE = "UPDATE agents_meta SET incarnation_resources=%s WHERE id=%s"
 
 
 def _next(
-    row: tuple[Any, ...], target: RuntimeIncarnation, host: ResourceProcess, *, predecessor: bool
+    row: tuple[Any, ...],
+    target: RuntimeIncarnation,
+    host: ResourceProcess,
+    *,
+    predecessor: bool,
+    exited_predecessor: ResourceProcess | None = None,
 ) -> IncarnationResources | None:
     if row[0] is None:
         if row[6] != 0:
@@ -41,7 +46,13 @@ def _next(
             if state.host_process != host:
                 raise ResourceEvidenceError("same owner changed its actual host process")
             return state
-        if state.requests or not predecessor:
+        dead_empty_host = (
+            not state.requests
+            and state.frozen_by is None
+            and state.host_process is not None
+            and state.host_process == exited_predecessor
+        )
+        if state.requests or not (predecessor or dead_empty_host):
             raise ResourceEvidenceError(
                 "successor lacks complete predecessor resource/lifecycle closure"
             )
@@ -72,7 +83,11 @@ def admit_resources(
 
 
 async def admit_resources_async(
-    conn: psycopg.AsyncConnection, target: RuntimeIncarnation, host: ResourceProcess
+    conn: psycopg.AsyncConnection,
+    target: RuntimeIncarnation,
+    host: ResourceProcess,
+    *,
+    exited_predecessor: ResourceProcess | None = None,
 ) -> None:
     row = await (await conn.execute(_LOCK, (target.agent_id,))).fetchone()
     if row is None:
@@ -89,7 +104,13 @@ async def admit_resources_async(
                 ).fetchone()
                 is not None
             )
-    value = _next(row, target, host, predecessor=predecessor)
+    value = _next(
+        row,
+        target,
+        host,
+        predecessor=predecessor,
+        exited_predecessor=exited_predecessor,
+    )
     if value is not None:
         await conn.execute(_STORE, (Jsonb(value.model_dump(mode="json")), target.agent_id))
 

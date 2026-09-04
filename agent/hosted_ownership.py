@@ -108,14 +108,20 @@ async def admit_hosted_runtime(
 
     await asyncio.to_thread(recover_local_resources, agent_id, machine)
     native = psutil.Process()
-    from shared.incarnation_resources import ResourceProcess
+    from shared.exec_owner_recovery import process_ended
+    from shared.incarnation_resources import (
+        IncarnationResources,
+        ResourceProcess,
+        decode_resources,
+    )
     from shared.resource_admission import admit_resources_async
 
     try:
         async with async_write_transaction(pool) as conn:
             previous = await (
                 await conn.execute(
-                    "SELECT runtime_generation,runtime_owner,runtime_kind FROM agents_meta WHERE id=%s FOR UPDATE",
+                    "SELECT runtime_generation,runtime_owner,runtime_kind,machine,"
+                    "incarnation_resources FROM agents_meta WHERE id=%s FOR UPDATE",
                     (agent_id,),
                 )
             ).fetchone()
@@ -123,13 +129,28 @@ async def admit_hosted_runtime(
                 _refuse_hosted_admission()
             generation = (
                 previous[0]
-                if previous[1:] == (owner, "hosted") and previous[0] is not None
+                if previous[1:3] == (owner, "hosted") and previous[0] is not None
                 else uuid4()
             )
+            exited_predecessor = None
+            if previous[1] != owner and previous[3] == machine and previous[4] is not None:
+                prior_resources = decode_resources(previous[4])
+                if (
+                    isinstance(prior_resources, IncarnationResources)
+                    and not prior_resources.requests
+                    and prior_resources.frozen_by is None
+                    and prior_resources.host_process is not None
+                ):
+                    # The row lock binds this monotonic exact-process observation
+                    # to the resource transfer in the same transaction.
+                    if not await asyncio.to_thread(process_ended, prior_resources.host_process):
+                        _refuse_hosted_admission()
+                    exited_predecessor = prior_resources.host_process
             await admit_resources_async(
                 conn,
                 RuntimeIncarnation(agent_id, generation, owner),
                 ResourceProcess(pid=native.pid, birth=native.create_time()),
+                exited_predecessor=exited_predecessor,
             )
             row = await (
                 await conn.execute(
