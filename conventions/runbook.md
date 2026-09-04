@@ -76,7 +76,8 @@ A machine carries a **capability set** — `gateway`, `agent-runner`, or both:
 
 - **gateway** capability: owns the HTTP gateway + the data plane (Postgres /
   Redis / Milvus) + the gateway daemons for its cluster.
-- **agent-runner** capability: hosts agents + the ops server + restarter; its
+- **agent-runner** capability: hosts agents and the ops server, using agent-host
+  in hosted mode or the process supervisor/restarter in process mode; its
   DB/Redis/Milvus URLs point at a gateway node when the host carries no
   `gateway` capability of its own.
 
@@ -131,11 +132,10 @@ sockets under `$AVA_HOME/run/pty/` (agent shells / watchers), so the home
 already scopes every session). Every cluster produces e.g.
 `ava-gateway`; two clusters are two homes, never one namespace.
 
-**CI is a separate hosting surface.** The CI image (`Dockerfile`) installs
-its own session tooling inside runner images — an isolated surface that has
-nothing to do with the cluster runtime described here. Changes to the
-cluster's session handling never touch it, and its tooling never reaches a
-cluster home.
+**CI is a separate hosting surface.** The workflows provision isolated native
+test infrastructure; see [CI](#ci-continuous-integration). Neither tests nor
+build tooling may target a production cluster home. Container assets elsewhere
+in the repository do not establish a cluster runtime dependency.
 
 **Migration note (session rename)**: this naming dropped the machine segment and
 added the `ava-` prefix (old convention was `<cluster>-<machine>-<service>`). After
@@ -451,13 +451,14 @@ roster's DB-dependent services down, means the pinned commit does not carry migr
 the DB has applied. The watchdog deliberately stops here rather than self-healing: its
 `ava cluster update` would move HEAD forward and the pin controller would force it straight
 back, and nothing advances the pin because advancing it is a step of a *successful*
-update. Two ways out, both a human decision — advance the pin to a commit that carries
-them (`shared.cluster_pin.set_cluster_target_sha`; a completed backend rollout stages
-its known-good promotion for observation), or roll
-the schema back to what the pin carries (`shared.migrations.rollback_to`). Then `ava
-cluster recover` if the paused posture is still set, and `ava start`. Advancing
-the pin immediately after any manual `git reset` is mandatory for the same reason — the
-pin controller undoes an un-pinned recovery within 60 s.
+update. Preserve the target, applied migration set, lease/holder, and failure
+evidence before choosing an authorized forward recovery or schema-compatible
+rollback through the installed `ava cluster` CLI. Check that version's help and
+recovery-point requirements first. Do not reset the production checkout, call
+internal pin setters, or mutate migration state to make these facts appear aligned.
+If the installed CLI cannot recover the mismatch, stop and report that exact
+blocker; a manual source/pin change is not a substitute for a verified rollout.
+Only recover a stranded pause after proving no live orchestrator owns it.
 ([decision](../decisions/2026-07-31-two-healers-must-not-own-the-same-checkout.md))
 
 A paused posture with no owner — no *executing* update lease anywhere and no
@@ -548,17 +549,21 @@ session's own socket at `$AVA_HOME/run/pty/<name>.sock`; hosts reparent to
 init at creation, so they are in no service roster and survive every stop /
 update / respawn — a session ends only via its own kill, its shell exiting,
 or a machine reboot).
-A host runs the **union** of its capabilities' sessions: a host carrying only
-`agent-runner` runs just the 3 marked with `★`; a `gateway` host runs the rest; a single-box
-(`gateway,agent-runner`) host runs all of them.
+A host runs the enabled service specs for its capabilities and runner mode,
+not every row in this reference table. In particular, hosted mode must not
+launch the process-mode restarter, including during update unpause or recovery.
+Verify the actual process/session inventory as well as the desired roster.
 
-The **agent process** itself (`agent-{N}` below) is the same detached native shape (a non-interactive agent
+In **process mode**, the agent (`agent-{N}` below) is a detached native process (a non-interactive agent
 talks over DB + Redis and logs to a file, so a PTY only cost the per-box `kern.tty.ptmx_max` ceiling that
 used to bound agent count). It is spawned double-forked onto init by the native process supervisor
 (`shared/posixproc.py` on POSIX, `shared/winproc.py` on Windows), tracked by `agents_meta.pid` + a session
 record under `$AVA_HOME/run/sessions/`, and is **not** a shell pane. The agent's own persistent
 shells (`ava.shell`, `…-agent-{N}-shell-{n}`) each run in their own detached pty host
 (`shared/pty_sessions/`).
+In hosted mode, a null per-agent PID is expected; verify agent-host membership,
+claim progress, and turn events instead. A process reaper must not interpret
+that null PID as a dead hosted agent.
 
 Session names follow the pattern `ava-<service>` (composed by
 `shared/cluster/derive.py:session_name()`; neither machine nor cluster is encoded —
@@ -967,11 +972,10 @@ sides derive the CDP port + socket path from `settings.browser_cdp_port`
 
 ### Deployment footprint & memory
 
-Ava's dependencies are deliberately heavy — a full Postgres 17 + Redis 8.2, a
-LangGraph checkpoint per agent, a Next.js frontend, and (macOS has no
-fork-zygote) one real OS process per spawned agent. The framework does not
-pretend otherwise; several independent layers instead keep that weight from
-turning into a memory wall at fleet scale:
+Ava retains a native Postgres/Redis data plane, LangGraph checkpoints, and a
+Next.js frontend. Agent memory accounting depends on the configured runner mode:
+process mode has a separate agent process; hosted mode shares an agent-host
+runtime and does not require a per-agent PID. Several layers bound the footprint:
 
 - **Hosted runner (the flagship layer)** — the end state the fleet is moving
   to: one `agent-host` daemon runs every local agent's turns as asyncio tasks,
@@ -1025,7 +1029,8 @@ Day-to-day ops **only uses the `ava` CLI** — one line to bring up the full set
 
 ```bash
 ava start [--machine-name X --serve-gateway --serve-agent-runner --memory-remote URL --gateway-url URL]
-             # THE bring-up — the only one. On first run for a cluster it BIRTHS it (allocates ports/db, brings up the cluster's own pg/redis instance, provisions the db, writes the cluster .env), then brings up the union of the host's capabilities' services: gateway capability -> this cluster's own native pg/redis (pg_ctl + redis-server under $AVA_HOME) + its service sessions; agent-runner capability -> 3 service sessions (ops/restarter/agent-runner-watchdog); a single-box host runs both (and BOTH per-capability watchdogs). Each capability is its own --serve-* flag.
+             # Bring up an already installed/enrolled home; start does not birth it.
+             # Enabled services depend on capabilities and runner mode, not a fixed count.
              # Pure bring-up: the home comes from the checkout-anchored boot (never the cwd, never a flag — identity is the path). An uninstalled home fails fast pointing at install.sh / install.sh --worktree / ava enroll by role. First run on a fresh install still takes --machine-name (+ --gateway-url if the install didn't write it); serve flags come from the install's --role via .env. idempotent
 ava memory init
              # After a new install, explicitly create the memory checkout and seed its template. A split agent-runner bootstraps from its running gateway. Start, update, and rollback never initialize or validate the memory repository.
@@ -1156,8 +1161,11 @@ Differences between `ava cluster update` and `ava stop && ava start`:
   sessions; every service session is native), the daemon runs its cleanup
   (close DB pool / remove pidfile / flush log / drain HTTP); only on timeout does it fall back to hard
   kill (tree SIGKILL). `ava stop` defaults to hard kill, losing in-flight data.
-- **one-shot pipeline** — git pull + uv sync + apply pending migrations all run automatically; miss one step and
-  you hit SchemaVersionMismatch (a prod upgrade stepped on this 2026-05-13). Manual 4-step equivalent = `ava cluster update` one line.
+- **coordinated pipeline** — use the installed `ava cluster update` implementation,
+  its dry-run, recovery-point gates, and target-specific verification. Its internal
+  checkout, dependency, migration, and service stages are not a manual operator
+  recipe. A merged PR does not replace an already imported orchestrator; verify
+  the running implementation before relying on a newly added safety gate.
 - **No stdin confirmation** — runs through automatically, no prompt blocking. `ava stop` still asks for confirmation (ops needs to be explicit
   about "I want it stopped now" before taking the hard-kill path).
 
@@ -1461,9 +1469,9 @@ The launcher (`deploy/lgtm/start.sh`) runs that verification against the
 rendered config on every invocation and **refuses to start Loki when it
 fails** — a bad field name otherwise crash-loops the launchd job (the
 2026-08-25 `ingester.wal_disk_full_threshold` incident, ~3min of Loki-backed
-read downtime). The compose rollback asset (`deploy/lgtm/config/loki.yaml`)
-is a manual operator path — the launcher never starts it, so verifying it is
-the operator's own `-verify-config` step, not the gate's. The Python-side
+read downtime). Legacy compose assets are not a supported production rollback
+procedure. Use the native lifecycle and its rendered configuration; do not
+introduce a container backend to recover this deployment. The Python-side
 pin (`shared/loki_index_labels.validate_loki_deploy_config`) still guards
 converge-time re-renders; the binary verify is the zero-cost last line
 before any restart, including the gateway watchdog's.

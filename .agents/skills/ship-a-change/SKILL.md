@@ -64,9 +64,9 @@ PRs merge through the **Trunk** merge queue — not by direct merge.
 and an enqueued position (it waits in the queue until QA labels it). The
 label is applied by QA / the maintainers only, and only on a final PASS /
 PASS-with-nits conclusion; BLOCK / CONDITIONAL never carry it and a later
-BLOCK removes it immediately. Authors never self-apply the label; any new
-commit after a PASS still requires a delta re-review before the label is
-(re)applied. Submitting is
+BLOCK removes it immediately. Authors never self-apply the label; review and
+QA evidence must match the exact head SHA, and any new commit after a PASS
+still requires a delta re-review before the label is (re)applied. Submitting is
 `.venv/bin/python scripts/ci_utils.py <PR#> --wait --merge` (requires
 `~/.trunk/api-token`; ci_utils polls to green, submits, then waits for the
 queue to land the PR). Trunk batches queued PRs into one test draft
@@ -90,7 +90,9 @@ Still on you:
 2. Develop and commit in the new worktree (run `bash scripts/setup-worktree.sh`
    on first use)
 3. Rebase onto latest main: `git fetch origin main && git rebase origin/main`
-4. Run local tests before pushing — see [`.agents/skills/run-local-tests/SKILL.md`](../run-local-tests/SKILL.md)
+4. Run local tests before pushing — see [`.agents/skills/run-local-tests/SKILL.md`](../run-local-tests/SKILL.md).
+   An explicit user CI-only constraint overrides local execution; record the
+   skipped local gates and confirm that the corresponding CI checks actually run.
 5. Push branch → `gh pr create --base main`
 6. Wait for CI all-green: `.venv/bin/python scripts/ci_utils.py <PR#>`
    Also detects merge conflicts — if your PR has conflicts, CI won't start.
@@ -178,6 +180,11 @@ If a hook fails for a reason that is *not* the sandbox (a real lint error), fix
 the error. Skipping is only for a hook this machine cannot execute at all.
 
 ## Post-merge
+
+Merge proves repository integration, not production health. Deployment is a
+separate, explicitly authorized operation by one designated operator; follow
+`ava-self-development` for rollout and recovery verification. Contributors and
+QA agents do not launch competing updates or production fixes.
 
 Before merge, mandatory: `grep -rn "<old-name>" conventions/ future/ AGENTS.md`
 to zero out references. Docs go in the same PR as code — **don't** leave a
