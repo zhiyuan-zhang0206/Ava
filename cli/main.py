@@ -367,6 +367,15 @@ def main(argv: list[str] | None = None) -> int:
     # Settings()). It lives in a settings-free module that does not import
     # shared.config. (Host provisioning is `scripts/install.sh`, not a CLI verb.)
     args_in = sys.argv[1:] if argv is None else argv
+    if args_in[:2] == ["cluster", "update"]:
+        # A verified wheel has no checkout anchor. Parse the SAME public tree,
+        # then verify the loaded image/home before importing settings-full ops.
+        # Parse first instead of scanning raw tokens so argparse abbreviations
+        # cannot make a prepared entry fall through to ordinary source dispatch.
+        args = _build_parser().parse_args(args_in)
+        if getattr(args, "prepared", None) is not None:
+            return args.func(args)
+
     _init_detached_cli_logging()
     if args_in and args_in[0] == "enroll":
         from cli.enroll import run_enroll
