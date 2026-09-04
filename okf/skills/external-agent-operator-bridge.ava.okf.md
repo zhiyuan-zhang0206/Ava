@@ -28,12 +28,15 @@ digest covers relative paths, entry kinds, file bytes, and file and directory
 modes. Each transaction, installed generation, and cleanup record also carries
 the expected path manifest. Moving a residue from transaction state to cleanup
 state is one atomic ledger write, so no live stage or prior copy loses its
-durable pointer.
+durable pointer. Separate transaction facts record successful exclusive stage
+creation and successful prior-target claim; a merely colliding path with the
+same generation-shaped name never becomes Ava-owned.
 
 A per-target cross-process lock serializes convergence. A source change stages
 a complete no-follow copy, atomically claims the current target, and verifies
 the claimed directory before activation. A mismatch is restored without
-overwriting a path that appeared late. Activation is recorded before cleanup,
+overwriting a path that appeared late: claim, activation, and restoration all
+use atomic no-replace renames. Activation is recorded before cleanup,
 so a cleanup failure leaves the new copy authoritative and is retried later.
 Cleanup validates the remaining tree as an unmodified subset of the manifest;
 paths removed by an earlier attempt stay safely reclaimable, while unexpected
@@ -45,7 +48,9 @@ An existing target without the matching external ledger is unmanaged and is
 preserved, even if it contains a copied or fabricated marker. Content or
 permission changes are user modifications and are also preserved. Source and
 external trees reject symbolic links, junctions, reparse points, and
-non-regular entries. The copy model uses ordinary directories and files, so the
+non-regular or multi-link entries. Cleanup changes directory permissions only;
+it never changes a regular file's mode before unlink. The copy model uses
+ordinary directories and files, so the
 ownership contract does not require symlink support on Windows. Per-client
 path, lock, and rename failures are labelled warnings and do not abort core
 converge; source-integrity failures remain fatal.

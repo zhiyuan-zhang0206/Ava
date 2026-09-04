@@ -15,7 +15,7 @@ from cli.commands._external_agent_skill_fs import (
 )
 from shared.private_storage import write_private_bytes
 
-_FORMAT = 3
+_FORMAT = 4
 _HEX = re.compile(r"^[0-9a-f]{64}$")
 _ID = re.compile(r"^[0-9a-f]{32}$")
 
@@ -118,7 +118,9 @@ def _load_ledger(path: Path, client_key: str) -> dict[str, Any] | None:
                 "expected_digest",
                 "expected_manifest",
                 "generation_id",
+                "previous_claimed",
                 "source_digest",
+                "stage_created",
             }
             or not _valid_id(transaction["generation_id"])
             or not _valid_digest(transaction["source_digest"])
@@ -126,6 +128,10 @@ def _load_ledger(path: Path, client_key: str) -> dict[str, Any] | None:
             or not _valid_manifest(transaction["expected_manifest"])
             or _manifest_digest(transaction["expected_manifest"]) != transaction["expected_digest"]
             or not isinstance(transaction["copy_complete"], bool)
+            or not isinstance(transaction["stage_created"], bool)
+            or not isinstance(transaction["previous_claimed"], bool)
+            or (transaction["copy_complete"] and not transaction["stage_created"])
+            or (transaction["previous_claimed"] and not transaction["copy_complete"])
         ):
             raise _ClientConflictError("Ava ownership ledger is invalid")
     garbage_value: object = record["garbage"]

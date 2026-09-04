@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import stat
 import threading
 from pathlib import Path
@@ -43,6 +44,15 @@ def _target(client: Path, tmp_path: Path) -> Path:
     target = client / "skills" / SKILL
     assert target.resolve(strict=False).is_relative_to(tmp_path.resolve())
     return target
+
+
+def _ledger(context: _converge.ConvergeCtx) -> dict[str, Any]:
+    return cast(
+        dict[str, Any],
+        json.loads(
+            (context.ava_home / "configs" / "external-agent-skills" / "codex.json").read_text()
+        ),
+    )
 
 
 def test_explicit_home_seam_never_calls_platform_home(
@@ -214,9 +224,10 @@ def test_target_appearing_after_claim_is_not_replaced(
     (outside / "SKILL.md").write_text("late user target\n")
     original_rename = bridge._rename_no_replace
 
-    def insert_target_then_rename(stage: Path, destination: Path) -> None:
-        destination.symlink_to(outside, target_is_directory=True)
-        original_rename(stage, destination)
+    def insert_target_then_rename(source_path: Path, destination: Path) -> None:
+        if ".ava-stage-" in source_path.name and destination == target:
+            destination.symlink_to(outside, target_is_directory=True)
+        original_rename(source_path, destination)
 
     monkeypatch.setattr(bridge, "_rename_no_replace", insert_target_then_rename)
 
@@ -225,6 +236,145 @@ def test_target_appearing_after_claim_is_not_replaced(
     assert target.is_symlink()
     assert (outside / "SKILL.md").read_text() == "late user target\n"
     assert "conflict" in capsys.readouterr().err
+
+
+def test_late_previous_destination_during_claim_is_not_replaced_or_owned(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = tmp_path / "repo"
+    source = _source(repo)
+    client = _client_home(tmp_path)
+    context = _context(repo, tmp_path)
+    bridge.converge_external_agent_skill(context, host_home=client.parent)
+    target = _target(client, tmp_path)
+    installed_before = _ledger(context)["installed"]
+    (source / "SKILL.md").write_text("operator v2\n")
+    original_rename = bridge._rename_no_replace
+    collision: Path | None = None
+
+    def collide_with_claim(source_path: Path, destination: Path) -> None:
+        nonlocal collision
+        if source_path == target:
+            collision = destination
+            destination.mkdir()
+            (destination / "user.txt").write_text("not Ava owned\n")
+        original_rename(source_path, destination)
+
+    monkeypatch.setattr(bridge, "_rename_no_replace", collide_with_claim)
+
+    bridge.converge_external_agent_skill(context, host_home=client.parent)
+
+    assert collision is not None
+    assert (collision / "user.txt").read_text() == "not Ava owned\n"
+    assert (target / "SKILL.md").read_text() == "operator v1\n"
+    ledger = _ledger(context)
+    assert ledger["installed"] == installed_before
+    assert ledger["transaction"] is None
+    assert ledger["garbage"] == []
+
+
+def test_late_target_during_verification_restore_is_not_replaced_or_disowned(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = tmp_path / "repo"
+    source = _source(repo)
+    client = _client_home(tmp_path)
+    context = _context(repo, tmp_path)
+    bridge.converge_external_agent_skill(context, host_home=client.parent)
+    target = _target(client, tmp_path)
+    installed_before = _ledger(context)["installed"]
+    (source / "SKILL.md").write_text("operator v2\n")
+    original_verify = bridge._verify_marker
+    original_rename = bridge._rename_no_replace
+    late_target = False
+
+    def reject_claimed_previous(root: Path, installation_id: str, generation_id: str) -> None:
+        if ".ava-previous-" in root.name:
+            raise bridge._ClientConflictError("claimed copy changed")
+        original_verify(root, installation_id, generation_id)
+
+    def collide_with_restore(source_path: Path, destination: Path) -> None:
+        nonlocal late_target
+        if ".ava-previous-" in source_path.name and destination == target:
+            late_target = True
+            destination.mkdir()
+            (destination / "user.txt").write_text("late user target\n")
+        original_rename(source_path, destination)
+
+    monkeypatch.setattr(bridge, "_verify_marker", reject_claimed_previous)
+    monkeypatch.setattr(bridge, "_rename_no_replace", collide_with_restore)
+
+    bridge.converge_external_agent_skill(context, host_home=client.parent)
+
+    assert late_target
+    assert (target / "user.txt").read_text() == "late user target\n"
+    ledger = _ledger(context)
+    assert ledger["installed"] == installed_before
+    assert ledger["transaction"]["previous_claimed"] is True
+    assert ledger["garbage"] == []
+
+
+def test_late_target_during_activation_restore_is_not_replaced_or_disowned(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = tmp_path / "repo"
+    source = _source(repo)
+    client = _client_home(tmp_path)
+    context = _context(repo, tmp_path)
+    bridge.converge_external_agent_skill(context, host_home=client.parent)
+    target = _target(client, tmp_path)
+    installed_before = _ledger(context)["installed"]
+    (source / "SKILL.md").write_text("operator v2\n")
+    original_rename = bridge._rename_no_replace
+    late_target = False
+
+    def fail_activation_then_collide_with_restore(source_path: Path, destination: Path) -> None:
+        nonlocal late_target
+        if ".ava-stage-" in source_path.name and destination == target:
+            raise OSError("activation interrupted")
+        if ".ava-previous-" in source_path.name and destination == target:
+            late_target = True
+            destination.mkdir()
+            (destination / "user.txt").write_text("late user target\n")
+        original_rename(source_path, destination)
+
+    monkeypatch.setattr(bridge, "_rename_no_replace", fail_activation_then_collide_with_restore)
+
+    bridge.converge_external_agent_skill(context, host_home=client.parent)
+
+    assert late_target
+    assert (target / "user.txt").read_text() == "late user target\n"
+    ledger = _ledger(context)
+    assert ledger["installed"] == installed_before
+    assert ledger["transaction"]["previous_claimed"] is True
+    assert ledger["garbage"] == []
+
+
+def test_preexisting_generation_sibling_is_preserved_without_false_ownership(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = tmp_path / "repo"
+    source = _source(repo)
+    client = _client_home(tmp_path)
+    context = _context(repo, tmp_path)
+    bridge.converge_external_agent_skill(context, host_home=client.parent)
+    target = _target(client, tmp_path)
+    installed_before = _ledger(context)["installed"]
+    (source / "SKILL.md").write_text("operator v2\n")
+    generation_id = "a" * 32
+    sibling = target.parent / f".{SKILL}.ava-stage-{generation_id}"
+    sibling.mkdir()
+    (sibling / "user.txt").write_text("not Ava owned\n")
+    monkeypatch.setattr(bridge.uuid, "uuid4", lambda: SimpleNamespace(hex=generation_id))
+
+    bridge.converge_external_agent_skill(context, host_home=client.parent)
+
+    assert (sibling / "user.txt").read_text() == "not Ava owned\n"
+    assert (target / "SKILL.md").read_text() == "operator v1\n"
+    ledger = _ledger(context)
+    assert ledger["installed"] == installed_before
+    assert ledger["transaction"] is None
+    assert ledger["garbage"] == []
 
 
 def test_concurrent_converges_serialize_transaction_owned_absence(
@@ -240,11 +390,11 @@ def test_concurrent_converges_serialize_transaction_owned_absence(
     claimed = threading.Event()
     release = threading.Event()
     second_activated_during_claim = threading.Event()
-    original_replace = Path.replace
+    original_rename = bridge._rename_no_replace
     first_thread_id: int | None = None
 
-    def pause_after_claim(path: Path, destination: Path):
-        result = original_replace(path, destination)
+    def pause_after_claim(path: Path, destination: Path) -> None:
+        original_rename(path, destination)
         if path == target and not claimed.is_set():
             claimed.set()
             assert release.wait(5)
@@ -254,9 +404,8 @@ def test_concurrent_converges_serialize_transaction_owned_absence(
             and threading.get_ident() != first_thread_id
         ):
             second_activated_during_claim.set()
-        return result
 
-    monkeypatch.setattr(Path, "replace", pause_after_claim)
+    monkeypatch.setattr(bridge, "_rename_no_replace", pause_after_claim)
     errors: list[BaseException] = []
 
     def run() -> None:
@@ -485,7 +634,7 @@ def test_partial_stage_copy_remains_tracked_until_cleanup_finishes(
     assert list((client / "skills").glob(f".{SKILL}.ava-*")) == []
 
 
-def test_late_target_keeps_stage_and_previous_tracked_until_reclaimed(
+def test_late_target_keeps_stage_and_previous_in_transaction_state(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     repo = tmp_path / "repo"
@@ -500,9 +649,10 @@ def test_late_target_keeps_stage_and_previous_tracked_until_reclaimed(
     (outside / "SKILL.md").write_text("user target\n")
     original_rename = bridge._rename_no_replace
 
-    def insert_target(stage: Path, destination: Path) -> None:
-        destination.symlink_to(outside, target_is_directory=True)
-        original_rename(stage, destination)
+    def insert_target(source_path: Path, destination: Path) -> None:
+        if ".ava-stage-" in source_path.name and destination == target:
+            destination.symlink_to(outside, target_is_directory=True)
+        original_rename(source_path, destination)
 
     monkeypatch.setattr(bridge, "_rename_no_replace", insert_target)
     bridge.converge_external_agent_skill(context, host_home=client.parent)
@@ -512,7 +662,15 @@ def test_late_target_keeps_stage_and_previous_tracked_until_reclaimed(
 
     assert target.is_symlink()
     assert (outside / "SKILL.md").read_text() == "user target\n"
-    assert list(target.parent.glob(f".{SKILL}.ava-*")) == []
+    ledger = _ledger(context)
+    assert ledger["transaction"]["previous_claimed"] is True
+    assert ledger["garbage"] == []
+    assert {
+        path.name.split(".ava-")[1].split("-")[0] for path in target.parent.glob(f".{SKILL}.ava-*")
+    } == {
+        "previous",
+        "stage",
+    }
 
 
 def test_cleanup_resumes_after_one_child_was_already_deleted(
@@ -550,3 +708,28 @@ def test_cleanup_resumes_after_one_child_was_already_deleted(
 
     assert (target / "SKILL.md").read_text() == "operator v2\n"
     assert list(target.parent.glob(f".{SKILL}.ava-*")) == []
+
+
+def test_cleanup_rejects_same_content_hard_link_without_changing_outside_inode(
+    tmp_path: Path,
+) -> None:
+    residue = tmp_path / "residue"
+    residue.mkdir()
+    residue_file = residue / "SKILL.md"
+    residue_file.write_text("operator\n")
+    residue_file.chmod(0o444)
+    manifest = bridge_fs._tree_manifest(residue)
+    residue_file.unlink()
+    outside = tmp_path / "outside.md"
+    outside.write_text("operator\n")
+    outside.chmod(0o444)
+    os.link(outside, residue_file)
+    outside_before = outside.stat()
+
+    with pytest.raises(bridge_fs._ClientConflictError, match="link"):
+        bridge_fs._remove_manifest_subset(residue, manifest)
+
+    assert residue_file.exists()
+    assert outside.exists()
+    assert residue_file.stat().st_ino == outside_before.st_ino
+    assert stat.S_IMODE(outside.stat().st_mode) == stat.S_IMODE(outside_before.st_mode)

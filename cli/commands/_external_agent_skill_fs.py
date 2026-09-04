@@ -54,11 +54,12 @@ def _exists(path: Path) -> bool:
     return True
 
 
-def _signature(current: os.stat_result) -> tuple[int, int, int, int, int, int]:
+def _signature(current: os.stat_result) -> tuple[int, int, int, int, int, int, int]:
     return (
         current.st_dev,
         current.st_ino,
         current.st_mode,
+        current.st_nlink,
         current.st_size,
         current.st_mtime_ns,
         current.st_ctime_ns,
@@ -71,6 +72,8 @@ def _read_regular(path: Path, *, source: bool) -> tuple[bytes, int]:
     error = _SourceIntegrityError if source else _ClientConflictError
     if not stat.S_ISREG(before.st_mode):
         raise error("operator skill tree contains a non-regular file")
+    if before.st_nlink != 1:
+        raise error("operator skill tree contains a multi-link file")
     flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
     try:
         fd = os.open(path, flags)
@@ -78,6 +81,8 @@ def _read_regular(path: Path, *, source: bool) -> tuple[bytes, int]:
             opened = os.fstat(stream.fileno())
             if _signature(opened) != _signature(before):
                 raise error("operator skill tree changed while being read")
+            if opened.st_nlink != 1:
+                raise error("operator skill tree contains a multi-link file")
             data = stream.read()
     except OSError as exc:
         raise error("operator skill tree cannot be read safely") from exc
@@ -190,10 +195,19 @@ def _remove_manifest_subset(root: Path, expected: list[dict[str, Any]]) -> None:
     files = (item for item in current if item["kind"] == "file")
     for item in files:
         path = root / str(item["path"])
+        before = _lstat(path)
         data, _ = _read_regular(path, source=False)
-        if hashlib.sha256(data).hexdigest() != item["sha256"]:
+        after = _lstat(path)
+        if (
+            _signature(after) != _signature(before)
+            or hashlib.sha256(data).hexdigest() != item["sha256"]
+        ):
             raise _ClientConflictError("transaction residue changed during cleanup")
-        path.chmod(int(item["mode"]) | stat.S_IRWXU)
+        # Directory write permission is sufficient for unlink. Never chmod a
+        # regular file: it could acquire another link after enumeration and
+        # leak that metadata mutation outside the residue tree.
+        if _signature(_lstat(path)) != _signature(after):
+            raise _ClientConflictError("transaction residue changed during cleanup")
         path.unlink()
 
     for item in reversed(directories):

@@ -57,3 +57,11 @@ remaining stage and prior-copy pointers into cleanup state before clearing a
 transaction. Cleanup validates that the current residue is an unmodified subset
 of that manifest, allowing a later converge to resume after some expected paths
 were already removed while still preserving any unexpected or modified path.
+
+Update 2026-09-04: the active transaction now records successful exclusive
+stage creation and successful prior-target claim as separate durable facts.
+Generation-shaped paths that merely collide with those planned names remain
+unmanaged. Claim and every restoration use atomic no-replace renames, so a late
+destination is preserved together with the still-tracked claimed copy. Cleanup
+rejects multi-link regular files and never changes regular-file modes; only
+directory permissions needed for unlink are widened.

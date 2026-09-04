@@ -50,3 +50,11 @@ copy displaced by a late user target, and partially deleted cleanup trees all
 retain durable ledger pointers. Cleanup records carry an expected manifest and
 accept missing expected entries on retry; unknown or modified entries still
 stop deletion and remain visible as conflicts.
+
+A later hardening pass separated planned transaction paths from paths Ava had
+successfully created or claimed. Exclusive-stage and prior-path collisions no
+longer acquire cleanup authority from their names. Claim and both restoration
+paths use atomic no-replace renames, leaving a late user destination untouched
+and retaining the prior installed authority. Residue cleanup also rejects
+multi-link files and avoids chmod on regular files, preventing a hard-linked
+outside inode from receiving a metadata change.

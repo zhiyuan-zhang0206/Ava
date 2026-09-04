@@ -38,6 +38,10 @@ per-target process lock serializes claim-and-verify updates and crash recovery.
 The ledger keeps an expected manifest for every transaction-owned generation;
 cleanup accepts already-removed expected entries but never unknown or modified
 ones, so an interrupted deletion can resume without losing its ownership pointer.
+It records successful stage creation and prior-target claim separately, so a
+generation-shaped collision never grants cleanup authority. Claims and restores
+use atomic no-replace renames. Cleanup rejects multi-link files and changes only
+directory permissions needed to unlink entries.
 An unmanaged target, modified managed copy, unsafe linked path, or cleanup
 residue that no longer matches its ledger is preserved and reported as a
 client-labelled conflict. Client integration failures are warning-only for core
