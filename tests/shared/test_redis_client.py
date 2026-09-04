@@ -75,6 +75,24 @@ class _EventuallyAsyncPublisher:
         return 3
 
 
+class _HalfOpenHealthCheckPublisher:
+    """PUBLISH parked in redis-py's pre-command health-check response read."""
+
+    def __init__(self) -> None:
+        self.read_started = asyncio.Event()
+        self.release = asyncio.Event()
+        self.cancelled = False
+
+    async def publish(self, _channel: str, _payload: str) -> int:
+        self.read_started.set()
+        try:
+            await self.release.wait()
+        except asyncio.CancelledError:
+            self.cancelled = True
+            raise
+        return 3
+
+
 class _EventuallySyncPublisher:
     """Synchronous equivalent used to lock the one-off client contract."""
 
@@ -149,6 +167,34 @@ async def test_publish_does_not_retry_connection_errors(
     assert await mod.publish_best_effort("ava:events", "payload") is None
     assert publisher.attempts == 1
     assert delays == []
+
+
+async def test_best_effort_publish_bounds_a_half_open_health_check_read(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A reused connection can accept the PUBLISH write and then park forever
+    reading its health-check PONG. The best-effort command owns a short attempt
+    bound even though the shared socket timeout stays None for pub/sub.
+
+    ``asyncio.wait`` observes the regression without cancelling it; if the
+    production bound is removed, the release lets the test finish and fail
+    instead of hanging alongside the bug.
+    """
+    publisher = _HalfOpenHealthCheckPublisher()
+    monkeypatch.setattr(mod, "get_async_redis", lambda: publisher)
+    monkeypatch.setattr(mod, "_BEST_EFFORT_PUBLISH_ATTEMPT_TIMEOUT_S", 0.01, raising=False)
+
+    task = asyncio.create_task(mod.publish_best_effort("ava:events", "payload"))
+    await asyncio.wait_for(publisher.read_started.wait(), timeout=1.0)
+    done, _ = await asyncio.wait({task}, timeout=0.5)
+    finished_within_bound = bool(done)
+    if not finished_within_bound:
+        publisher.release.set()
+        await task
+
+    assert finished_within_bound, "a half-open PUBLISH escaped its operation-level bound"
+    assert task.result() is None
+    assert publisher.cancelled
 
 
 def test_sync_publish_retries_auth_failures_with_bounded_exponential_delays(
