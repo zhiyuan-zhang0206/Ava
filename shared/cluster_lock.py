@@ -258,7 +258,8 @@ def acquire_update_lock(
 ) -> bool:
     """Take the single cluster update lock for `holder`. Returns True if acquired
     (the row was free, or a previous holder's TTL had expired), False if a *live*
-    holder still holds it. The conditional UPDATE is the atomic compare-and-set.
+    holder still holds it or a durable pending publication requires its own exact
+    recovery. The conditional UPDATE is the atomic compare-and-set.
 
     `kind` names what kind of orchestration is starting (rollout / restart /
     update) — the explicit-model replacement for session-name probing. The
@@ -280,7 +281,8 @@ def acquire_update_lock(
             "SET holder = %s, acquired_at = now(), expires_at = now() + make_interval(secs => %s), "
             "    note = NULL, settle_hosts = NULL, settle_note = NULL, settle_started_at = NULL, "
             "    phase = 'updating', kind = %s "
-            "WHERE id = 1 AND (holder IS NULL OR expires_at < now())",
+            "WHERE id = 1 AND (holder IS NULL OR expires_at < now()) "
+            "AND COALESCE(managed_writer_evidence->'pending','null'::jsonb) = 'null'::jsonb",
             (holder, ttl_s, kind),
         )
         acquired = cur.rowcount == 1
@@ -400,12 +402,14 @@ def claim_recovery_lock(
 ) -> RecoveryClaim:
     """CAS-claim the deploy row for one short recovery critical section.
 
-    ``observed=None`` may claim only a still-free/expired row. A dead live
-    lease may be replaced only while both its holder and ``acquired_at`` still
-    match the snapshot whose process liveness the caller proved. Therefore a
-    new rollout that lands after the proof wins the race and recovery refuses;
-    it is never unconditionally deleted by a stale observation from another
-    machine.
+    ``observed=None`` may claim only a still-free/expired row with no durable
+    pending publication. A pending publication has an independent exact
+    predecessor/closure recovery protocol and outlives lease expiry; generic
+    recovery must not strand it by replacing its holder. A dead live lease may
+    be replaced only while both its holder and ``acquired_at`` still match the
+    snapshot whose process liveness the caller proved. Therefore a new rollout
+    that lands after the proof wins the race and recovery refuses; it is never
+    unconditionally deleted by a stale observation from another machine.
     """
     observed_holder = observed.holder if observed is not None else None
     observed_acquired_at = observed.acquired_at if observed is not None else None
@@ -417,7 +421,8 @@ def claim_recovery_lock(
     with write_transaction() as conn, conn.cursor() as cur:
         cur.execute(
             "WITH prev AS MATERIALIZED ("
-            "  SELECT holder FROM deployment_state WHERE id = 1 AND ("
+            "  SELECT holder FROM deployment_state WHERE id = 1 "
+            "  AND COALESCE(managed_writer_evidence->'pending','null'::jsonb) = 'null'::jsonb AND ("
             "    (%s::text IS NULL AND (holder IS NULL OR expires_at < now())) OR "
             "    (%s::text IS NOT NULL AND holder = %s AND acquired_at = %s)"
             "  ) FOR UPDATE"
