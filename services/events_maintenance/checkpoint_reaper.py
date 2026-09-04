@@ -1,33 +1,16 @@
-"""Checkpoint retention — the events-maintenance daemon's checkpoint slice.
+"""Bound every checkpoint thread to its newest three versions.
 
-LangGraph's PostgresSaver keeps every checkpoint of a thread forever (one per
-super-step under the default durability): over weeks of operation the
-checkpoints / checkpoint_writes / checkpoint_blobs tables grow without bound
-(the 2026-08-08 disk crisis: 21GB of blobs from ~12h of terminated-agent
-accumulation). The agent process never deletes checkpoints (retention is a
-gateway-side concern); this daemon slice is the single owner of checkpoint
-retention, in two rules (Task #1125, user ruling):
+LangGraph's PostgresSaver appends one checkpoint per super-step under Ava's
+default durability. The gateway-owned events-maintenance daemon therefore
+scans the checkpoint table every minute and prunes every thread above the
+fixed keep-three budget, independent of agent status or liveness. This makes
+the scan and retained storage O(thread count).
 
-- Rule B — stale threads (`reap_stale_checkpoints`, hourly): agents whose
-  status is 'terminated', or live agents inactive for `_INACTIVE_HOURS`, are
-  trimmed to keep=1. A terminated agent cannot resume; an inactive one is
-  either dead-weight or (on waking) fully restorable from the single newest
-  checkpoint. The status is re-checked immediately before each trim so a
-  resurrect racing the pass is skipped, not reaped.
-- Rule A — overgrown live threads (`trim_overgrown_threads`, fast loop):
-  active threads past `_LIVE_TRIM_THRESHOLD` checkpoints are trimmed to
-  keep=`_LIVE_KEEP`, replacing the removed agent-side idle trim (which only
-  fired when an agent actually idled — continuously working agents grew
-  without bound; the service bounds every thread regardless of liveness).
-
-Both rules share the trim's safety invariant (every channel stores a full
-snapshot; `messages` is a plain add_messages accumulator), so the surviving
-latest checkpoint restores the full conversation; and both always keep
-compaction-boundary checkpoints (metadata `compact_boundary: true`), so each
-past compaction segment stays recoverable as one full snapshot.
-
-The reaper is a slow, defensive pass: it logs totals and per-thread trims, and
-a pass that finds nothing logs nothing (same convention as the rollup).
+Compaction-boundary metadata remains useful to timeline segment reads while a
+row is retained, but boundaries age out outside the newest-three window like
+every other checkpoint. The shared trim protects each candidate against an
+in-progress messages write and retains blobs by the channel-version references
+of surviving checkpoints.
 """
 
 from __future__ import annotations
@@ -41,25 +24,17 @@ from psycopg_pool import ConnectionPool
 from shared.checkpoint_cleanup import trim_checkpoints_sync
 from shared.log import logger
 
-# Rule B: stale threads keep the latest 1 checkpoint — the minimum that still
-# lets a resurrect restore the full conversation.
-_KEEP = 1
-# Rule B: a live agent is "inactive" (a retention candidate) after this many
-# hours without a completed turn (last_active_at is updated on every LLM turn,
-# never by heartbeats, so idling-but-alive agents are not misclassified).
-_INACTIVE_HOURS = 24
-# Rule A: an active thread is trimmed once it holds more than this many
-# checkpoints. Keep the latest checkpoint plus one immediate rollback step;
-# compaction boundaries always survive separately. In the production-heavy
-# thread simulation, keep=2 cut blob references by ~65% versus keep=5, while
-# boundary-dominated histories were unchanged.
-_LIVE_TRIM_THRESHOLD = 20
-_LIVE_KEEP = 2
+_KEEP = 3
+_MAX_THREADS_PER_PASS = 64
 
 
 @dataclass(frozen=True)
 class ReapCounts:
-    """One reaper pass's totals."""
+    """One pruning pass's totals.
+
+    `agents` is retained for the existing telemetry contract; it counts
+    productive checkpoint threads, including threads without an agent row.
+    """
 
     agents: int
     checkpoints: int
@@ -68,171 +43,88 @@ class ReapCounts:
 
 
 def _thread_counts(pool: ConnectionPool) -> dict[str, int]:
-    """thread_id -> checkpoint row count, for every thread with a row."""
+    """Return the checkpoint row count for every stored thread."""
     with pool.connection() as conn, conn.cursor() as cur:
         try:
             cur.execute(
                 """
                 SELECT thread_id, count(*) AS n
                 FROM checkpoints
-                WHERE NOT COALESCE((metadata ->> 'compact_boundary')::boolean, false)
                 GROUP BY thread_id
                 """
             )
             return {row[0]: row[1] for row in cur.fetchall()}
         except psycopg.errors.UndefinedTable:
-            # A fresh cluster before the PostgresSaver has created its tables,
-            # or a throwaway test DB without them: a defensive pass — nothing
-            # to reap reads as an empty pass, not a crash. `agents_meta` is
-            # baseline schema, so only the saver's table is guarded.
+            # The saver creates its tables lazily. A fresh cluster has no
+            # checkpoint retention work yet.
             logger.info("[checkpoint-reaper] checkpoints table not present; skipping pass")
             return {}
 
 
-def _stale_agents(pool: ConnectionPool, counts: dict[str, int]) -> list[int]:
-    """Rule B candidates: terminated, or inactive for `_INACTIVE_HOURS`, and
-    still holding more than `_KEEP` checkpoints.
-
-    The `> _KEEP` filter makes the pass idempotent under a per-pass candidate
-    cap: an already-trimmed thread (at keep=1) is not a candidate, so a capped
-    pass that could not reach it this round does not re-trim it next round
-    instead of the ones still waiting.
-    """
-    if not counts:
-        return []
+def _still_above_keep(pool: ConnectionPool, thread_id: str) -> bool:
+    """Re-check eligibility immediately before pruning one candidate."""
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
-            """
-            SELECT id FROM agents_meta
-            WHERE id::text = ANY(%s)
-              AND (status = 'terminated'
-                   OR last_active_at < now() - make_interval(hours => %s))
-              AND (SELECT count(*) FROM checkpoints c
-                   WHERE c.thread_id = agents_meta.id::text
-                     AND NOT COALESCE((c.metadata ->> 'compact_boundary')::boolean, false)
-                  ) > %s
-            ORDER BY id
-            """,
-            (list(counts.keys()), _INACTIVE_HOURS, _KEEP),
-        )
-        return [row[0] for row in cur.fetchall()]
-
-
-def _overgrown_active(pool: ConnectionPool, counts: dict[str, int]) -> list[int]:
-    """Rule A candidates: active threads holding more than `_LIVE_TRIM_THRESHOLD`
-    checkpoints. `_stale_agents` is consulted first (by the caller) so a stale
-    thread is handled by Rule B's tighter keep, never by Rule A."""
-    if not counts:
-        return []
-    with pool.connection() as conn, conn.cursor() as cur:
-        cur.execute(
-            """
-            SELECT id FROM agents_meta
-            WHERE id::text = ANY(%s)
-              AND status <> 'terminated'
-              AND last_active_at >= now() - make_interval(hours => %s)
-            ORDER BY id
-            """,
-            (list(counts.keys()), _INACTIVE_HOURS),
-        )
-        live = [row[0] for row in cur.fetchall()]
-    return [aid for aid in live if counts.get(str(aid), 0) > _LIVE_TRIM_THRESHOLD]
-
-
-def _still_stale(pool: ConnectionPool, agent_id: int) -> bool:
-    """Re-check the candidate right before the trim: a resurrect racing the
-    pass (status flipped, or last_active_at refreshed after the candidate
-    scan) must not have its fresh checkpoints reaped."""
-    with pool.connection() as conn, conn.cursor() as cur:
-        cur.execute(
-            "SELECT (status = 'terminated'"
-            "        OR last_active_at < now() - make_interval(hours => %s))"
-            " FROM agents_meta WHERE id = %s",
-            (_INACTIVE_HOURS, agent_id),
-        )
-        row = cur.fetchone()
-    return bool(row) and row[0] is True
-
-
-def _still_overgrown(pool: ConnectionPool, agent_id: int, threshold: int) -> bool:
-    """Re-check a Rule A candidate right before the trim: the thread must still
-    hold more than `threshold` checkpoints (the agent may have been trimmed by
-    another pass, or compacted in between)."""
-    with pool.connection() as conn, conn.cursor() as cur:
-        cur.execute(
-            "SELECT count(*) FROM checkpoints WHERE thread_id = %s"
-            " AND NOT COALESCE((metadata ->> 'compact_boundary')::boolean, false)",
-            (str(agent_id),),
+            "SELECT count(*) FROM checkpoints WHERE thread_id = %s",
+            (thread_id,),
         )
         row = cur.fetchone()
     assert row is not None, "count(*) always returns one row"  # noqa: S101
-    return row[0] > threshold
-
-
-_MAX_AGENTS_PER_PASS = 8
-_STALE_MAX_AGENTS_PER_PASS = 64
-"""Caps on candidate threads trimmed in one pass.
-
-Rule A runs every minute and keeps its work bounded to 8 productive threads.
-Rule B can face an incident backlog on its hourly loop, so its larger cap of 64
-clears that backlog within a few passes without monopolizing the maintenance
-daemon's single worker thread by trimming every candidate at once."""
+    return row[0] > _KEEP
 
 
 def _rotate_candidates(
-    candidates: list[int],
+    candidates: list[str],
     *,
-    max_agents: int = _MAX_AGENTS_PER_PASS,
+    max_threads: int = _MAX_THREADS_PER_PASS,
     now_seconds: float | None = None,
-) -> list[int]:
+) -> list[str]:
     """Rotate the candidate window by the pass size, restart-safe.
 
-    The offset is wall-clock derived (never a daemon cursor — a process restart
-    cannot park the window at the head of the list), and each pass advances it
-    by `max_agents`, so a candidate list longer than the cap is fully covered
-    within ceil(len/cap) passes instead of re-trimming the head forever
-    (2026-08-24: threads 3340/3341/3343, 774/542/186 checkpoints, were never
-    reached while the id-ascending list was consumed from the front)."""
-    n = len(candidates)
-    if n == 0:
+    The wall-clock-derived offset advances by `max_threads` each minute. A
+    repeatedly over-budget thread at the sorted head therefore cannot starve
+    the rest of a candidate set larger than the per-pass cap.
+    """
+    candidate_count = len(candidates)
+    if candidate_count == 0:
         return []
     minute = int(time.time() // 60) if now_seconds is None else int(now_seconds // 60)
-    start = (minute * max_agents) % n
+    start = (minute * max_threads) % candidate_count
     return candidates[start:] + candidates[:start]
 
 
 def _reap(
     pool: ConnectionPool,
-    agent_ids: list[int],
-    keep: int,
-    label: str,
+    thread_ids: list[str],
     *,
-    max_agents: int = _MAX_AGENTS_PER_PASS,
+    max_threads: int = _MAX_THREADS_PER_PASS,
 ) -> ReapCounts:
-    """Trim up to `max_agents` PRODUCTIVE threads to `keep`, re-checking
-    eligibility per thread. The cap counts only trims that actually deleted
-    checkpoints: a no-op candidate (already at keep, or only compaction
-    boundaries left) does not consume a slot, so a burst of no-op threads can
-    never starve the ones still holding doomed rows. The rest stay candidates
-    for the next pass (idempotent)."""
+    """Prune up to `max_threads` productive candidates to `_KEEP`.
+
+    Eligibility is re-checked immediately before each trim. A candidate whose
+    row count changed, or whose trim is blocked by the in-flight write guard,
+    does not consume a productive slot.
+    """
     total = ReapCounts(agents=0, checkpoints=0, writes=0, blobs=0)
     productive = 0
-    for agent_id in agent_ids:
-        if productive >= max_agents:
+    for thread_id in thread_ids:
+        if productive >= max_threads:
             break
-        counts = trim_checkpoints_sync(pool, str(agent_id), keep=keep)
-        if counts.checkpoints:
-            productive += 1
-            total = ReapCounts(
-                agents=total.agents + 1,
-                checkpoints=total.checkpoints + counts.checkpoints,
-                writes=total.writes + counts.writes,
-                blobs=total.blobs + counts.blobs,
-            )
+        if not _still_above_keep(pool, thread_id):
+            continue
+        counts = trim_checkpoints_sync(pool, thread_id, keep=_KEEP)
+        if not counts.checkpoints:
+            continue
+        productive += 1
+        total = ReapCounts(
+            agents=total.agents + 1,
+            checkpoints=total.checkpoints + counts.checkpoints,
+            writes=total.writes + counts.writes,
+            blobs=total.blobs + counts.blobs,
+        )
     if total.agents:
         logger.info(
-            "[checkpoint-reaper] {} reaped {} agent(s): checkpoints={} writes={} blobs={}",
-            label,
+            "[checkpoint-reaper] pruned {} thread(s): checkpoints={} writes={} blobs={}",
             total.agents,
             total.checkpoints,
             total.writes,
@@ -241,45 +133,15 @@ def _reap(
     return total
 
 
-def reap_stale_checkpoints(pool: ConnectionPool) -> ReapCounts:
-    """One Rule B pass: trim every stale thread (terminated, or inactive for
-    `_INACTIVE_HOURS`) to `_KEEP` checkpoints.
+def prune_threads(pool: ConnectionPool) -> ReapCounts:
+    """Prune every thread above three checkpoints on the daemon's fast loop.
 
-    Returns the aggregate counts (0/0/0/0 when nothing to reap). Idempotent —
-    a thread already at keep=1 is not a candidate, so re-running is a no-op.
+    The initial table-wide grouping is O(thread count), candidates are rotated
+    for fair coverage, and one pass performs at most 64 productive trims.
+    Re-running is idempotent because threads at the keep-three budget are no
+    longer candidates.
     """
     counts = _thread_counts(pool)
-    candidates = _stale_agents(pool, counts)
-    eligible = [aid for aid in candidates if _still_stale(pool, aid)]
-    rotated = _rotate_candidates(eligible, max_agents=_STALE_MAX_AGENTS_PER_PASS)
-    return _reap(
-        pool,
-        rotated,
-        _KEEP,
-        "stale",
-        max_agents=_STALE_MAX_AGENTS_PER_PASS,
-    )
-
-
-def trim_overgrown_threads(pool: ConnectionPool) -> ReapCounts:
-    """One Rule A pass: trim active threads past `_LIVE_TRIM_THRESHOLD`
-    checkpoints down to `_LIVE_KEEP` (compaction boundaries always kept).
-
-    Replaces the removed agent-side idle trim: bounds every thread regardless
-    of whether the agent ever idles. Runs on the daemon's fast loop.
-    """
-    counts = _thread_counts(pool)
-    stale = set(_stale_agents(pool, counts))
-    candidates = [
-        aid
-        for aid in _overgrown_active(pool, counts)
-        if aid not in stale and _still_overgrown(pool, aid, _LIVE_TRIM_THRESHOLD)
-    ]
-    rotated = _rotate_candidates(candidates, max_agents=_MAX_AGENTS_PER_PASS)
-    return _reap(
-        pool,
-        rotated,
-        _LIVE_KEEP,
-        "overgrown",
-        max_agents=_MAX_AGENTS_PER_PASS,
-    )
+    candidates = sorted(thread_id for thread_id, count in counts.items() if count > _KEEP)
+    rotated = _rotate_candidates(candidates)
+    return _reap(pool, rotated)

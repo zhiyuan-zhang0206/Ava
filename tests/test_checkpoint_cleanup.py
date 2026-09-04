@@ -113,6 +113,18 @@ async def _surviving_ids(pool: AsyncConnectionPool, thread_id: str) -> set[str]:
         return {r[0] for r in await cur.fetchall()}
 
 
+async def _newest_messages_version(pool: AsyncConnectionPool, thread_id: str) -> str:
+    async with pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute(
+            "SELECT checkpoint -> 'channel_versions' ->> 'messages' FROM checkpoints"
+            " WHERE thread_id = %s ORDER BY checkpoint_id DESC LIMIT 1",
+            (thread_id,),
+        )
+        row = await cur.fetchone()
+    assert row is not None and row[0] is not None
+    return row[0]
+
+
 async def test_count_checkpoints(aops_pool: AsyncConnectionPool) -> None:
     assert await count_checkpoints(aops_pool, "1") == 0
     await _put_turns(aops_pool, "1", 4)
@@ -231,12 +243,10 @@ async def test_mark_compact_boundary_stamps_newest(aops_pool: AsyncConnectionPoo
     assert stamped == [ids[-1]]  # exactly the newest, stamped once
 
 
-async def test_trim_keeps_compaction_boundary(aops_pool: AsyncConnectionPool) -> None:
-    """A stamped boundary survives a trim regardless of age — each past
-    compaction segment stays recoverable as one full snapshot (Task #1125)."""
+async def test_trim_prunes_old_compaction_boundary(aops_pool: AsyncConnectionPool) -> None:
+    """A boundary outside the newest keep window ages out like any row."""
     ids = await _put_turns(aops_pool, "1", 8)
-    # Stamp an OLD checkpoint as the boundary of an earlier compaction segment,
-    # then trim to keep=2 as if a compaction had just happened.
+    # Stamp an old checkpoint as the boundary of an earlier compaction segment.
     async with aops_pool.connection() as conn, conn.cursor() as cur:
         await cur.execute(
             "UPDATE checkpoints SET metadata = metadata || jsonb_build_object('compact_boundary', true)"
@@ -244,23 +254,57 @@ async def test_trim_keeps_compaction_boundary(aops_pool: AsyncConnectionPool) ->
             ("1", ids[1]),
         )
 
-    counts = await trim_checkpoints(aops_pool, "1", keep=2)
+    counts = await trim_checkpoints(aops_pool, "1", keep=3)
 
-    assert counts.checkpoints == 5  # 8 - (2 newest + 1 boundary) = 5 doomed
-    async with aops_pool.connection() as conn, conn.cursor() as cur:
-        await cur.execute(
-            "SELECT checkpoint_id FROM checkpoints WHERE thread_id = %s ORDER BY checkpoint_id",
-            ("1",),
-        )
-        survivors = {r[0] for r in await cur.fetchall()}
-    assert ids[1] in survivors  # the old boundary survives
-    assert len(survivors) == 3  # 2 newest + 1 boundary
-    # The boundary's messages blob stays (still referenced) — the messages
-    # channel had a fresh version per turn, so the boundary's version is kept.
+    assert counts.checkpoints == 5
+    assert await _surviving_ids(aops_pool, "1") == set(ids[-3:])
+    assert ids[1] not in await _surviving_ids(aops_pool, "1")
     async with aops_pool.connection() as conn, conn.cursor() as cur:
         await cur.execute(
             "SELECT count(*) FROM checkpoint_blobs WHERE thread_id = %s",
             ("1",),
         )
         row = await cur.fetchone()
-        assert row is not None and row[0] >= 3
+        assert row is not None and row[0] == 3
+
+
+async def test_trim_noop_when_newest_messages_blob_is_missing(
+    aops_pool: AsyncConnectionPool,
+) -> None:
+    ids = await _put_turns(aops_pool, "1", 4)
+    newest_version = await _newest_messages_version(aops_pool, "1")
+    async with aops_pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute(
+            "DELETE FROM checkpoint_blobs"
+            " WHERE thread_id = %s AND channel = 'messages' AND version = %s",
+            ("1", newest_version),
+        )
+
+    counts = await trim_checkpoints(aops_pool, "1", keep=3)
+
+    assert counts == (0, 0, 0)
+    assert await _surviving_ids(aops_pool, "1") == set(ids)
+    assert len(await _blob_versions(aops_pool, "1", "messages")) == 3
+
+
+async def test_trim_noop_while_newer_messages_blob_is_in_flight(
+    aops_pool: AsyncConnectionPool,
+) -> None:
+    ids = await _put_turns(aops_pool, "1", 4)
+    newest_version = await _newest_messages_version(aops_pool, "1")
+    in_flight_version = _saver(aops_pool).get_next_version(newest_version, None)
+    async with aops_pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute(
+            "INSERT INTO checkpoint_blobs"
+            " (thread_id, checkpoint_ns, channel, version, type, blob)"
+            " VALUES (%s, '', 'messages', %s, 'json', %s)",
+            ("1", in_flight_version, b'"in-flight"'),
+        )
+
+    counts = await trim_checkpoints(aops_pool, "1", keep=3)
+
+    assert counts == (0, 0, 0)
+    assert await _surviving_ids(aops_pool, "1") == set(ids)
+    versions = await _blob_versions(aops_pool, "1", "messages")
+    assert len(versions) == 5
+    assert in_flight_version in versions

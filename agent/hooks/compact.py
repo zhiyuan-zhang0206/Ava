@@ -143,14 +143,14 @@ async def trim_checkpoints_after_compact(pool: AsyncConnectionPool | None, agent
 
     Best-effort, in two steps: first `mark_compact_boundary` stamps the newest
     pre-compact checkpoint (the full-snapshot record of this compaction segment)
-    so every later trim keeps it — the user's retention rule: each past
-    compaction segment stays recoverable (Task #1125). Then the keep=1 trim
-    drops the rest of the now-frozen pre-compact history; the stamped survivor
-    holds the complete segment. Storage cleanup must never abort the agent's
-    turn (it runs inside the graph), so a failure is logged and swallowed —
-    the next trim trigger retries. `pool is None` (container / eval mode) is a
-    no-op. Shared by the auto-compact hook here and the agent-/user-triggered
-    compact paths in the claim node.
+    for timeline segment reads while retained. The keep=1 trim drops the rest
+    of the now-frozen pre-compact history; the stamped survivor holds the
+    complete segment, but is not prune-exempt once it ages beyond a later keep
+    window. Storage cleanup must never abort the agent's turn (it runs inside
+    the graph), so a failure is logged and swallowed — the next trim trigger
+    retries. `pool is None` (container / eval mode) is a no-op. Shared by the
+    auto-compact hook here and the agent-/user-triggered compact paths in the
+    claim node.
     """
     if pool is None:
         return
