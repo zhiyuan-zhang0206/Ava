@@ -1140,9 +1140,9 @@ class TestTimelineFailLoud:
             raise OSError("simulated DB connection lost")
             yield  # type: ignore[unreachable]
 
-        # shared.checkpoint binds PostgresSaver at the module top-level, so patch
-        # the name there (where load_checkpoint_messages resolves it).
-        import shared.checkpoint as ckpt_mod
+        # load_checkpoint_messages imports PostgresSaver inside the function
+        # from langgraph.checkpoint.postgres, so patch the source module.
+        import langgraph.checkpoint.postgres as ckpt_mod
 
         class FakeSaver:
             from_conn_string = staticmethod(fake_saver)  # pyright: ignore[reportUnknownArgumentType, reportUnknownVariableType]
