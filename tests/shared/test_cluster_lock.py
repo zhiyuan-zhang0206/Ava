@@ -103,6 +103,40 @@ def test_expired_lock_is_reclaimable() -> None:
     assert acquire_update_lock("B") is True  # reclaimed
 
 
+def test_expired_lock_with_pending_publication_requires_publication_recovery(
+    db_conn: psycopg.Connection,
+) -> None:
+    """A durable pending publication outlives its lease.
+
+    Ordinary rollout acquisition and generic cluster recovery cannot replace the
+    expired holder while the publication protocol still requires an exact
+    predecessor CAS and fresh writer closure.
+    """
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "UPDATE deployment_state SET holder='prepared:gateway:pid123', "
+            "acquired_at=now()-interval '2 minutes', expires_at=now()-interval '1 minute', "
+            "phase='updating', managed_writer_evidence="
+            '\'{"version":2,"current":null,"pending":{"request":"retained"}}\'::jsonb '
+            "WHERE id=1"
+        )
+    db_conn.commit()
+
+    try:
+        assert read_update_lease() is None
+        assert acquire_update_lock("ordinary-rollout") is False
+        assert claim_recovery_lock("ordinary-recovery", observed=None).acquired is False
+        row = db_conn.execute("SELECT holder, phase FROM deployment_state WHERE id=1").fetchone()
+        assert row == ("prepared:gateway:pid123", "updating")
+    finally:
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "UPDATE deployment_state SET holder=NULL, acquired_at=NULL, expires_at=NULL, "
+                "phase='stable', kind=NULL, managed_writer_evidence=NULL WHERE id=1"
+            )
+        db_conn.commit()
+
+
 def test_recovery_claim_loses_if_a_new_rollout_acquires_after_its_free_read() -> None:
     observed = read_update_lease()
     assert observed is None
