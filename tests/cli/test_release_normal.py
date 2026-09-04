@@ -86,6 +86,41 @@ def test_mutable_executable_rejected_before_probe(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize(
+    ("session", "command", "message"),
+    [
+        ("gateway", "{executable} -m", "module is absent"),
+        ("frontend", "{executable}", "entry point is absent"),
+    ],
+)
+def test_malformed_service_commands_are_controlled_refusals(
+    tmp_path: Path, session: str, command: str, message: str
+) -> None:
+    root = tmp_path / "image"
+    root.mkdir()
+    executable = root / "python"
+    executable.write_bytes(b"not executed")
+    image = VerifiedRelease("a" * 64, "b" * 64, root, executable, root)
+    spec = ServiceSpec(
+        session=session,
+        cmd=command.format(executable=executable),
+        capabilities=frozenset({"gateway"}),
+        requires_db=False,
+        curl_url="http://127.0.0.1:12345/healthz",
+    )
+    with pytest.raises(ReleaseRejectedError, match=message):
+        _command(spec, image)
+
+
+def test_normal_activation_is_disabled_before_any_recovery_write() -> None:
+    from unittest.mock import Mock
+
+    from cli.commands import _update_normal_release as normal
+
+    with pytest.raises(ReleaseRejectedError, match="checked crash recovery"):
+        normal.execute_normal_release(Mock(spec=normal.PreparedNormalRelease), "generation")
+
+
+@pytest.mark.parametrize(
     ("generation", "stage"),
     [
         ("replacement", "candidate_ready"),
@@ -107,7 +142,18 @@ def test_continuation_requires_same_actual_ready_handoff(
         lambda: {
             "version": 1,
             "generation": generation,
-            "journal": {"stage": stage},
+            "journal": {
+                "request": "/unit/run/bootstrap.json",
+                "request_digest": "a" * 64,
+                "inventory_digest": "b" * 64,
+                "candidate_context_digest": "c" * 64,
+                "recovery_context_digest": "d" * 64,
+                "normal_release_planned": True,
+                "stage": stage,
+                "cron": "",
+                "phases": [],
+                "normal_release": None,
+            },
         },
     )
 

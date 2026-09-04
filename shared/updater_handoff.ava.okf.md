@@ -35,7 +35,9 @@ separate `$AVA_HOME/run/updater-bootstrap-recovery.json` envelope. Version 1
 binds the handoff generation, private request, context and complete inventory
 receipt hashes, the exact known cron definition, transition stage, and at most
 64 phase observations within a 256 KiB file budget. No database URL or secret
-is recorded. The separate envelope makes malformed bootstrap evidence auditable
+is recorded. `shared/updater_recovery.py` owns the strict typed journal schemas;
+partial terminal-looking dictionaries are malformed evidence, not permission
+to clear. The separate envelope makes malformed bootstrap evidence auditable
 without making an unrelated malformed ordinary spawn marker permanently
 unrecoverable.
 
@@ -50,8 +52,16 @@ a normal continuation allows the generation-CAS clear of both files.
 
 An admitted normal continuation nests its phase journal inside the same
 versioned bootstrap envelope only after exact `candidate_ready` evidence and
-same-process handoff ownership. This preserves the bootstrap proof while keeping
-ordinary spawn ownership separate. Any unfinished or malformed normal journal
-blocks generic clear, replacement and force-clear; only a `committed` normal
-phase permits the generation-CAS clear of both files. Retained evidence is not
+same-process handoff ownership. The bootstrap writer records
+`normal_release_planned` before the first normal-journal write, so even failure
+of that first write remains non-clearable. Once nested evidence exists,
+bootstrap writes cannot discard it; normal writes preserve request, operation,
+unit and selector identity and follow legal monotonic phases. Bootstrap phase
+writes also preserve their bound request/digests/plan/cron and append exactly one
+phase observation. This preserves the
+bootstrap proof while keeping ordinary spawn ownership separate. Any planned,
+unfinished or malformed normal journal blocks generic clear, replacement and
+force-clear; only a fully validated `committed` normal journal permits the
+generation-CAS clear of both files. Manual and stranded-pause recovery consult
+this exact retained-envelope verdict before unpausing. Retained evidence is not
 automatic rollback permission.

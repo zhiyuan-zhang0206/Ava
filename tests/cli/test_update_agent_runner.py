@@ -153,3 +153,38 @@ def test_normal_preflight_refusal_precedes_updater_lock_and_stop(
         updater._run_agent_runner_self_update(
             tmp_path, bootstrap_request=tmp_path / "bootstrap.json"
         )
+
+
+def test_disabled_normal_activation_precedes_updater_lock_and_bootstrap_stop(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from unittest.mock import Mock
+
+    from cli.commands import _update_bootstrap as bootstrap
+    from cli.commands import _update_normal_release as normal
+    from shared import host_deploy_state
+    from shared.runtime_release import ReleaseRejectedError
+
+    prepared = Mock(spec=bootstrap.PreparedBootstrapHop)
+    prepared.request = Mock(normal_release_path=str(tmp_path / "normal.json"))
+
+    def prepare_hop(_path: Path) -> bootstrap.PreparedBootstrapHop:
+        return prepared
+
+    def prepare_normal(
+        _prepared: bootstrap.PreparedBootstrapHop,
+    ) -> normal.PreparedNormalRelease:
+        return Mock(spec=normal.PreparedNormalRelease)
+
+    monkeypatch.setattr(bootstrap, "prepare_bootstrap_hop", prepare_hop)
+    monkeypatch.setattr(normal, "prepare_after_bootstrap", prepare_normal)
+
+    def forbidden(*_args: object, **_kwargs: object) -> None:
+        pytest.fail("disabled normal activation must precede updater ownership and effects")
+
+    monkeypatch.setattr(host_deploy_state, "try_acquire_updater_lock", forbidden)
+    monkeypatch.setattr(bootstrap, "execute_bootstrap_hop", forbidden)
+    with pytest.raises(ReleaseRejectedError, match="checked crash recovery"):
+        updater._run_agent_runner_self_update(
+            tmp_path, bootstrap_request=tmp_path / "bootstrap.json"
+        )

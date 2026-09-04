@@ -27,3 +27,20 @@ Normal/source first handoff, complete non-session launcher quiesce, checked
 normal rollback, distributed coordination, and unsupported native readiness
 adapters remain outside this reconstruction. They require new explicit evidence;
 an expired operation or retained journal does not authorize compensation.
+
+## Safety review update
+
+Adversarial review found that the planned activation could crash after selector,
+stop, or spawn effects without checked forward recovery. Service spawn also has
+an ambiguous interval after fork and before the session record exists. The
+reconstruction therefore keeps plan construction and evidence schemas but
+disables every activation entry point before updater ownership or service
+effects. Activation requires a later design with stage-specific recovery and an
+exact durable spawn receipt.
+
+The retained envelope was tightened independently: bootstrap records a planned
+normal continuation before its first journal write; bootstrap rewrites cannot
+discard nested normal evidence; normal writes preserve identity and advance only
+through legal phases; and generic manual or automatic recovery refuses any
+planned, malformed, or unfinished normal evidence. This is a retention fence,
+not recovery authority.
