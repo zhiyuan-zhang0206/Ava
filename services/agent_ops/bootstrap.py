@@ -16,17 +16,20 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
+import psutil
 import psycopg
 from pydantic import Field, SecretStr, field_validator
 
 from shared.daemon_http import start_daemon_http
 from shared.managed_writer_barrier import Digest, EvidenceModel, RolloutIdentity, lock_rollout
 from shared.managed_writer_observation import (
+    ExpectedProcess,
     ExpectedUnitWriters,
     ObservationChallenge,
     UnitObserver,
 )
 from shared.runtime_release import ReleaseRejectedError, VerifiedRelease, verify_release
+from shared.session_record import pid_starttime_ticks
 from shared.transport_encryption import verify_transport_encryption_declaration
 
 
@@ -35,6 +38,31 @@ class PreparedObservation(EvidenceModel):
     operation: RolloutIdentity
     challenge: ObservationChallenge
     schema_digest: Digest
+
+
+class BootstrapRuntimeIdentity(EvidenceModel):
+    """Actual restricted responder, never a normal-service readiness receipt."""
+
+    process: ExpectedProcess
+    module: str
+    home: str
+    artifact_digest: Digest
+    manifest_digest: Digest
+
+
+def runtime_identity(context: PreparedObservation) -> BootstrapRuntimeIdentity:
+    process = psutil.Process()
+    return BootstrapRuntimeIdentity(
+        process=ExpectedProcess(
+            pid=process.pid,
+            create_time=process.create_time(),
+            starttime=pid_starttime_ticks(process.pid),
+        ),
+        module=str(Path(__file__).resolve(strict=True)),
+        home=context.expected.home,
+        artifact_digest=context.expected.artifact_digest,
+        manifest_digest=context.expected.manifest_digest,
+    )
 
 
 class ObserverProjection(EvidenceModel):
@@ -143,6 +171,9 @@ async def observe_response(
             # OS observation cannot hold a database lock. Revalidate afterward;
             # adoption still needs its own fresh, locked operation check.
             await asyncio.to_thread(validate_operation, context, projection)
+            payload = json.loads(result[1])
+            payload["runtime"] = runtime_identity(context).model_dump(mode="json")
+            return result[0], json.dumps(payload).encode(), result[2]
         return result
     except (psycopg.Error, RuntimeError, ValueError):
         return (409, b'{"error":"bootstrap operation is unavailable or stale"}', "application/json")

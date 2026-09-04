@@ -92,6 +92,7 @@ _ALLOWED_FILES = frozenset(
         "scripts/prove_runtime_plugins.py",  # CI-only private home and CI guard, not runtime plugin settings.
         "scripts/prove_ops_bootstrap.py",  # CI-only scratch/DB guards and sanitized pre-Settings child projection.
         "scripts/prove_release_inventory.py",  # CI-only native PG and private unit projection for source-absent proof.
+        "scripts/prove_updater_bootstrap.py",  # CI-only native unit guard and explicit private child projection; never runtime configuration.
         "scripts/check_model_updates.py",  # tracker selects provider API-key aliases dynamically and must prefer the live process env before its `.env` fallback
         "scripts/lint_fixture_scope.py",  # same reason: it MATCHES the string "os.environ" against a test module's AST to find env mutation in a fixture body
         "shared/session_env.py",  # forward_env_dict builds the child env from the LIVE env (incl. AVA_* vars Settings does not model); that is exactly what must be forwarded

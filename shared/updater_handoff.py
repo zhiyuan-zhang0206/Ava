@@ -20,6 +20,7 @@ import datetime as dt
 import json
 import logging
 import os
+import stat
 import tempfile
 import uuid
 from dataclasses import dataclass
@@ -33,11 +34,17 @@ from shared.deploy_timing import NO_PROGRESS_TIMEOUT_S
 from shared.platform import file_lock
 
 _LOCK_TIMEOUT_S = 5.0
+_BOOTSTRAP_RECOVERY_VERSION = 1
+_MAX_BOOTSTRAP_RECOVERY_BYTES = 256 * 1024
 _log = logging.getLogger("shared.updater_handoff")
 
 
 class UpdaterHandoffActive(RuntimeError):  # noqa: N818 — active state verdict
     """A fresh or unreadable handoff already owns the spawn gap."""
+
+
+class BootstrapRecoveryInvalidError(RuntimeError):
+    """Retained compensating evidence is present but cannot be authenticated."""
 
 
 @dataclass(frozen=True)
@@ -63,6 +70,11 @@ def new_generation() -> str:
 
 def state_path() -> Path:
     return shared.paths.run_dir() / "updater-handoff.json"
+
+
+def bootstrap_state_path() -> Path:
+    """Versioned compensating evidence, separate from ordinary spawn ownership."""
+    return shared.paths.run_dir() / "updater-bootstrap-recovery.json"
 
 
 def lock_path() -> Path:
@@ -163,6 +175,91 @@ def _write_atomic(path: Path, payload: dict[str, object]) -> None:
         _log.warning("[updater-handoff] directory fsync failed after commit", exc_info=True)
 
 
+def _bounded_bytes(path: Path, *, limit: int) -> bytes:
+    """Read one identity-stable regular file without following a substituted link."""
+    before = path.lstat()
+    if not stat.S_ISREG(before.st_mode) or before.st_size > limit:
+        raise BootstrapRecoveryInvalidError("bootstrap recovery is not a bounded regular file")
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+    try:
+        with os.fdopen(os.open(path, flags), "rb") as stream:
+            opened = os.fstat(stream.fileno())
+            if not stat.S_ISREG(opened.st_mode) or (opened.st_dev, opened.st_ino) != (
+                before.st_dev,
+                before.st_ino,
+            ):
+                raise BootstrapRecoveryInvalidError("bootstrap recovery changed while opening")
+            body = stream.read(limit + 1)
+            after = os.fstat(stream.fileno())
+        current = path.lstat()
+    except (OSError, ValueError) as exc:
+        raise BootstrapRecoveryInvalidError("bootstrap recovery cannot be read safely") from exc
+    if (
+        len(body) > limit
+        or (opened.st_size, opened.st_mtime_ns) != (after.st_size, after.st_mtime_ns)
+        or (current.st_dev, current.st_ino) != (opened.st_dev, opened.st_ino)
+    ):
+        raise BootstrapRecoveryInvalidError("bootstrap recovery changed while reading")
+    return body
+
+
+def _read_bootstrap_unlocked() -> dict[str, object] | None:
+    path = bootstrap_state_path()
+    try:
+        raw: object = json.loads(_bounded_bytes(path, limit=_MAX_BOOTSTRAP_RECOVERY_BYTES))
+        if not isinstance(raw, dict):
+            raise BootstrapRecoveryInvalidError("bootstrap recovery envelope is malformed")
+        envelope = cast("dict[str, object]", raw)
+        if set(envelope) != {"version", "generation", "journal"}:
+            raise BootstrapRecoveryInvalidError("bootstrap recovery envelope is malformed")
+        if envelope["version"] != _BOOTSTRAP_RECOVERY_VERSION:
+            raise BootstrapRecoveryInvalidError("bootstrap recovery version is unsupported")
+        if not isinstance(envelope["generation"], str) or not envelope["generation"]:
+            raise BootstrapRecoveryInvalidError("bootstrap recovery generation is malformed")
+        if not isinstance(envelope["journal"], dict):
+            raise BootstrapRecoveryInvalidError("bootstrap recovery journal is malformed")
+        return envelope
+    except FileNotFoundError:
+        return None
+    except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise BootstrapRecoveryInvalidError("bootstrap recovery envelope is malformed") from exc
+
+
+def read_bootstrap_recovery() -> dict[str, object] | None:
+    """Read the bounded, versioned compensation envelope without discarding errors."""
+    return _read_bootstrap_unlocked()
+
+
+def _write_bootstrap_unlocked(generation: str, journal: dict[str, object]) -> None:
+    payload: dict[str, object] = {
+        "version": _BOOTSTRAP_RECOVERY_VERSION,
+        "generation": generation,
+        "journal": journal,
+    }
+    encoded = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode()
+    if len(encoded) > _MAX_BOOTSTRAP_RECOVERY_BYTES:
+        raise BootstrapRecoveryInvalidError("bootstrap recovery exceeds its evidence budget")
+    _write_atomic(bootstrap_state_path(), payload)
+
+
+def write_bootstrap_recovery(generation: str, journal: dict[str, object]) -> None:
+    """Replace compensation evidence only for this process's exact running claim."""
+    with file_lock(lock_path(), timeout_s=_LOCK_TIMEOUT_S):
+        current = _read_unlocked(state_path())
+        process = psutil.Process()
+        if (
+            current.status != "running"
+            or current.generation != generation
+            or current.owner_pid != process.pid
+            or current.owner_create_time != process.create_time()
+        ):
+            raise BootstrapRecoveryInvalidError("bootstrap writer lost exact handoff ownership")
+        existing = _read_bootstrap_unlocked()
+        if existing is not None and existing["generation"] != generation:
+            raise BootstrapRecoveryInvalidError("bootstrap recovery generation changed")
+        _write_bootstrap_unlocked(generation, journal)
+
+
 def begin(
     *,
     expected_session: str,
@@ -175,6 +272,8 @@ def begin(
         raise ValueError("generation and expected_session must be non-empty")
     path = state_path()
     with file_lock(lock_path(), timeout_s=_LOCK_TIMEOUT_S):
+        if bootstrap_state_path().exists():
+            raise UpdaterHandoffActive("restricted bootstrap recovery requires checked resume")
         current = _read_unlocked(path)
         reclaimable = (current.status == "pending" and current.expired) or (
             current.status == "running" and not owner_is_live(current)
@@ -194,6 +293,41 @@ def begin(
             "expires_at": (now + dt.timedelta(seconds=ttl_s)).isoformat(),
         }
         _write_atomic(path, payload)
+        return _read_unlocked(path, now=now)
+
+
+def begin_bootstrap_after_dead_owner(
+    predecessor: UpdaterHandoffSnapshot,
+    *,
+    expected_session: str,
+) -> UpdaterHandoffSnapshot | None:
+    """Atomically replace the exact dead predecessor with this bootstrap updater."""
+    if not expected_session:
+        raise ValueError("expected_session must be non-empty")
+    path = state_path()
+    with file_lock(lock_path(), timeout_s=_LOCK_TIMEOUT_S):
+        current = _read_unlocked(path)
+        if (
+            current != predecessor
+            or current.status != "running"
+            or owner_is_live(current)
+            or bootstrap_state_path().exists()
+        ):
+            return None
+        now = dt.datetime.now(dt.UTC)
+        process = psutil.Process()
+        _write_atomic(
+            path,
+            {
+                "phase": "running",
+                "generation": new_generation(),
+                "expected_session": expected_session,
+                "created_at": now.isoformat(),
+                "expires_at": (now + dt.timedelta(seconds=NO_PROGRESS_TIMEOUT_S)).isoformat(),
+                "owner_pid": process.pid,
+                "owner_create_time": process.create_time(),
+            },
+        )
         return _read_unlocked(path, now=now)
 
 
@@ -269,6 +403,18 @@ def clear(generation: str) -> bool:
         current = _read_unlocked(path)
         if current.generation != generation:
             return False
+        try:
+            bootstrap = _read_bootstrap_unlocked()
+        except BootstrapRecoveryInvalidError:
+            return False
+        if bootstrap is not None:
+            journal = cast("dict[str, object]", bootstrap["journal"])
+            if bootstrap["generation"] != generation or journal.get("stage") not in {
+                "candidate_ready",
+                "recovered",
+            }:
+                return False
+            bootstrap_state_path().unlink(missing_ok=True)
         path.unlink(missing_ok=True)
         with contextlib.suppress(OSError):
             _fsync_parent(path)
@@ -279,9 +425,42 @@ def force_clear() -> bool:
     """Clear stale/invalid state after recovery's no-live-owner proof."""
     path = state_path()
     with file_lock(lock_path(), timeout_s=_LOCK_TIMEOUT_S):
+        if bootstrap_state_path().exists():
+            return False
         existed = path.exists()
         path.unlink(missing_ok=True)
         if existed:
             with contextlib.suppress(OSError):
                 _fsync_parent(path)
         return existed
+
+
+def resume_bootstrap(generation: str, *, expected_session: str) -> bool:
+    """Reclaim this same retained handoff only after exact owner death evidence.
+
+    The updater first validates the persisted request, operation and image
+    references. This changes local process ownership, not release authority.
+    """
+    with file_lock(lock_path(), timeout_s=_LOCK_TIMEOUT_S):
+        path = state_path()
+        current = _read_unlocked(path)
+        if (
+            current.generation != generation
+            or current.status != "running"
+            or owner_is_live(current)
+        ):
+            return False
+        try:
+            recovery = _read_bootstrap_unlocked()
+        except BootstrapRecoveryInvalidError:
+            return False
+        if recovery is None or recovery["generation"] != generation:
+            return False
+        payload = json.loads(path.read_text())
+        payload.update(
+            expected_session=expected_session,
+            owner_pid=os.getpid(),
+            owner_create_time=psutil.Process().create_time(),
+        )
+        _write_atomic(path, payload)
+        return True

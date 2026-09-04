@@ -4,6 +4,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 import os
+from dataclasses import replace
 from pathlib import Path
 
 import psutil
@@ -12,9 +13,101 @@ import pytest
 from shared import updater_handoff as handoff
 
 
+def _retained_bootstrap(stage: str) -> None:
+    handoff.begin(expected_session="ava-updater", generation="bootstrap")
+    assert handoff.claim_running("bootstrap", expected_session="ava-updater")
+    handoff.write_bootstrap_recovery("bootstrap", {"stage": stage, "private_reference": "retained"})
+
+
+def test_unfinished_bootstrap_cannot_be_cleared_or_replaced(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _retained_bootstrap("old_stopped")
+    before = handoff.bootstrap_state_path().read_bytes()
+    assert not handoff.clear("bootstrap")
+    assert not handoff.force_clear()
+    monkeypatch.setattr(handoff, "owner_is_live", lambda _: False)
+    with pytest.raises(handoff.UpdaterHandoffActive):
+        handoff.begin(expected_session="another-updater")
+    assert handoff.bootstrap_state_path().read_bytes() == before
+
+
+def test_bootstrap_resume_requires_dead_owner_and_preserves_compensation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _retained_bootstrap("candidate_starting")
+    assert not handoff.resume_bootstrap("bootstrap", expected_session="recovery")
+    monkeypatch.setattr(handoff, "owner_is_live", lambda _: False)
+    assert not handoff.resume_bootstrap("other-generation", expected_session="recovery")
+    assert handoff.resume_bootstrap("bootstrap", expected_session="recovery")
+    raw = handoff.read_bootstrap_recovery()
+    assert raw is not None
+    assert raw["journal"] == {
+        "stage": "candidate_starting",
+        "private_reference": "retained",
+    }
+    snapshot = handoff.read()
+    assert snapshot.owner_pid == os.getpid()
+    assert snapshot.owner_create_time == psutil.Process().create_time()
+    assert snapshot.expected_session == "recovery"
+
+
+@pytest.mark.parametrize("stage", ["candidate_ready", "recovered"])
+def test_only_terminal_bootstrap_can_complete(stage: str) -> None:
+    _retained_bootstrap(stage)
+    assert handoff.clear("bootstrap")
+    assert handoff.read().status == "inactive"
+
+
+def test_unreadable_ordinary_handoff_is_recoverable_without_bootstrap_evidence() -> None:
+    path = handoff.state_path()
+    path.write_text("{unfinished recovery record")
+    assert handoff.force_clear()
+    assert not path.exists()
+
+
+def test_malformed_versioned_bootstrap_evidence_is_retained() -> None:
+    _retained_bootstrap("old_stopped")
+    path = handoff.bootstrap_state_path()
+    path.write_text('{"version":2,"generation":"bootstrap"}')
+    assert not handoff.force_clear()
+    assert path.read_text() == '{"version":2,"generation":"bootstrap"}'
+    with pytest.raises(handoff.UpdaterHandoffActive):
+        handoff.begin(expected_session="another-updater")
+
+
+def test_bootstrap_evidence_has_a_hard_encoded_budget() -> None:
+    handoff.begin(expected_session="ava-updater", generation="bootstrap")
+    assert handoff.claim_running("bootstrap", expected_session="ava-updater")
+    with pytest.raises(handoff.BootstrapRecoveryInvalidError, match="evidence budget"):
+        handoff.write_bootstrap_recovery(
+            "bootstrap", {"stage": "old_stopped", "padding": "x" * (300 * 1024)}
+        )
+    assert not handoff.bootstrap_state_path().exists()
+
+
+def test_bootstrap_takeover_is_exact_dead_predecessor_cas(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    handoff.begin(expected_session="old", generation="old")
+    assert handoff.claim_running("old", expected_session="old")
+    predecessor = handoff.read()
+    monkeypatch.setattr(handoff, "owner_is_live", lambda _: False)
+
+    mismatched = replace(predecessor, generation="replacement")
+    assert handoff.begin_bootstrap_after_dead_owner(mismatched, expected_session="new") is None
+    claimed = handoff.begin_bootstrap_after_dead_owner(predecessor, expected_session="new")
+    assert claimed is not None
+    assert claimed.status == "running"
+    assert claimed.owner_pid == os.getpid()
+
+
 @pytest.fixture(autouse=True)
 def _isolated(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(handoff, "state_path", lambda: tmp_path / "handoff.json")
+    monkeypatch.setattr(
+        handoff, "bootstrap_state_path", lambda: tmp_path / "bootstrap-recovery.json"
+    )
     monkeypatch.setattr(handoff, "lock_path", lambda: tmp_path / "handoff.lock")
 
 

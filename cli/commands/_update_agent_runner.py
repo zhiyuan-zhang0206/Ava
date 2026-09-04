@@ -26,7 +26,7 @@ from shared.platform_backend import get_backend as platform_backend
 from shared.rollout_telemetry import updater_stage
 
 
-def _run_agent_runner_self_update(
+def _run_agent_runner_self_update(  # noqa: PLR0915 — one existing lock/handoff lifetime for both updater modes.
     repo: Path,
     *,
     target_sha: str | None = None,
@@ -36,6 +36,7 @@ def _run_agent_runner_self_update(
     handoff_generation: str | None = None,
     post_checkout: bool = False,
     from_sha: str | None = None,
+    bootstrap_request: Path | None = None,
 ) -> int:
     """`ava cluster update` implementation on an agent-runner — local self-update.
 
@@ -66,6 +67,21 @@ def _run_agent_runner_self_update(
     ava-updater session (spawned by spawn_update()), this function runs in a
     detached pane so a mid-flow `ava stop` does not take itself out.
     """
+    prepared = None
+    if bootstrap_request is not None:
+        from cli.commands._update_bootstrap import prepare_bootstrap_hop
+
+        if (
+            target_sha
+            or restart_only
+            or force_reap
+            or handoff_generation
+            or post_checkout
+            or from_sha
+        ):
+            raise ValueError("prepared bootstrap hop cannot use source-update flags")
+        prepared = prepare_bootstrap_hop(bootstrap_request)
+
     from shared import ui_update_state, updater_handoff
     from shared.host_deploy_state import (
         clear_updater_lease,
@@ -74,7 +90,7 @@ def _run_agent_runner_self_update(
         try_acquire_updater_lock,
     )
 
-    owned_generation = handoff_generation
+    owned_generation = prepared.resume_generation if prepared is not None else handoff_generation
     if post_checkout:
         # The pre-checkout image's flock must have survived the POSIX exec:
         # acquiring the lock here would mean it did not, and running the
@@ -115,17 +131,34 @@ def _run_agent_runner_self_update(
                 else f"direct-updater:pid{os.getpid()}"
             )
             with ui_update_state.lifecycle_lock():
-                if owned_generation is None:
-                    try:
-                        owned_generation = updater_handoff.begin(
-                            expected_session=expected_session
-                        ).generation
-                    except updater_handoff.UpdaterHandoffActive:
-                        owned_generation = None
-                claimed = owned_generation is not None and updater_handoff.claim_running(
-                    owned_generation,
-                    expected_session=expected_session,
-                )
+                if prepared is not None and prepared.resume_generation is not None:
+                    claimed = updater_handoff.resume_bootstrap(
+                        prepared.resume_generation,
+                        expected_session=expected_session,
+                    )
+                elif prepared is not None:
+                    takeover = (
+                        updater_handoff.begin_bootstrap_after_dead_owner(
+                            prepared.predecessor_handoff,
+                            expected_session=expected_session,
+                        )
+                        if prepared.predecessor_handoff is not None
+                        else None
+                    )
+                    owned_generation = takeover.generation if takeover is not None else None
+                    claimed = owned_generation is not None
+                else:
+                    if owned_generation is None:
+                        try:
+                            owned_generation = updater_handoff.begin(
+                                expected_session=expected_session
+                            ).generation
+                        except updater_handoff.UpdaterHandoffActive:
+                            owned_generation = None
+                    claimed = owned_generation is not None and updater_handoff.claim_running(
+                        owned_generation,
+                        expected_session=expected_session,
+                    )
             if not claimed or owned_generation is None:
                 if owned_generation is not None:
                     with contextlib.suppress(Exception):
@@ -143,10 +176,17 @@ def _run_agent_runner_self_update(
         # one successful touch would reopen the same liveness gap when that lease later
         # expires. The post-checkout image touches the same lease without trying to
         # re-acquire its inherited flock or re-claim its already-running handoff.
-        with contextlib.suppress(Exception):
-            touch_updater_lease()
+        if prepared is None:
+            with contextlib.suppress(Exception):
+                touch_updater_lease()
 
         try:
+            if prepared is not None:
+                from cli.commands._update_bootstrap import execute_bootstrap_hop
+
+                if owned_generation is None:
+                    raise RuntimeError("bootstrap updater has no owned handoff generation")
+                return execute_bootstrap_hop(prepared, owned_generation)
             return _run_agent_runner_self_update_inner(
                 repo,
                 target_sha=target_sha,
@@ -158,8 +198,9 @@ def _run_agent_runner_self_update(
                 handoff_generation=owned_generation,
             )
         finally:
-            with contextlib.suppress(Exception):
-                clear_updater_lease()
+            if prepared is None:
+                with contextlib.suppress(Exception):
+                    clear_updater_lease()
             if owned_generation is not None:
                 with contextlib.suppress(Exception):
                     updater_handoff.clear(owned_generation)
@@ -524,19 +565,21 @@ def main(argv: list[str] | None = None) -> int:
     # path this process exists for (gateway mid-restart) — so tolerate that:
     # the stderr + file sinks attach before it, and stderr is captured into the
     # updater log by the spawn wrapper, so the details still land somewhere.
-    import shared.log as _log
-
     # Silence is deliberate: the stderr + file sinks attach before the postgres
     # sink, so an init failure still leaves the stderr sink live (captured into
     # the updater log by the spawn wrapper) — nothing diagnosable is lost.
-    with contextlib.suppress(Exception):
-        _log.init_cli_process(name="updater")
-
     import argparse
+
+    import shared.log as _log
 
     parser = argparse.ArgumentParser(
         prog="python -m cli.commands._update_agent_runner",
         description="In-process agent-runner self-update, invoked by the detached ava-updater session.",
+    )
+    parser.add_argument(
+        "--bootstrap-hop",
+        type=Path,
+        help="internal verified restricted-ops transition; never normal activation",
     )
     parser.add_argument(
         "--target-sha",
@@ -575,6 +618,23 @@ def main(argv: list[str] | None = None) -> int:
         help="revision to restore if the checked-out tree fails migration-layout validation",
     )
     args = parser.parse_args(argv)
+    if args.bootstrap_hop is not None:
+        if args.mode != "smooth":
+            parser.error("--bootstrap-hop cannot use a source drain policy")
+        # No source resolution, logging/file sinks, data-plane mutation or
+        # converge is allowed before the verified request establishes authority.
+        return _run_agent_runner_self_update(
+            Path(__file__).resolve().parent,
+            bootstrap_request=args.bootstrap_hop,
+            target_sha=args.target_sha,
+            restart_only=args.restart_only,
+            force_reap=args.force_reap,
+            handoff_generation=args.handoff_generation,
+            post_checkout=args.post_checkout,
+            from_sha=args.from_sha,
+        )
+    with contextlib.suppress(Exception):
+        _log.init_cli_process(name="updater")
     if args.post_checkout:
         if args.target_sha is None:
             parser.error("--post-checkout requires --target-sha")

@@ -9,20 +9,21 @@ detail behind "watchdog-probe registration failed on Windows for agent-runner"
 (#885 / #1117) was invisible, leaving a failed Windows self-update with no
 diagnosable cause in its own log.
 
-The assertion runs `main()` with `--help`, which exits before any update work —
-the sink attachment happens at the top of `main()`, so this pins exactly the
-lines that make failures visible without exercising the update flow.
+The normal dispatch is intercepted before any update work. Help and prepared
+bootstrap dispatch must not initialize ordinary file/database logging sinks.
 """
 
 from __future__ import annotations
+
+from pathlib import Path
 
 import pytest
 
 from cli.commands import _update_agent_runner as updater
 
 
-def test_main_attaches_cli_sinks(monkeypatch: pytest.MonkeyPatch) -> None:
-    """main() calls init_cli_process(name="updater") before doing anything else."""
+def test_main_attaches_cli_sinks(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Normal dispatch attaches logging before entering actual update work."""
     from shared import log
 
     calls: list[dict[str, object]] = []
@@ -31,23 +32,64 @@ def test_main_attaches_cli_sinks(monkeypatch: pytest.MonkeyPatch) -> None:
         calls.append(kw)
 
     monkeypatch.setattr(log, "init_cli_process", _fake_init)
+    monkeypatch.setattr(updater, "_repo_root", lambda: tmp_path)
+
+    def dispatch(*_args: object, **_kwargs: object) -> int:
+        assert calls == [{"name": "updater"}]
+        return 17
+
+    monkeypatch.setattr(updater, "_run_agent_runner_self_update", dispatch)
+    assert updater.main([]) == 17
+    assert calls == [{"name": "updater"}]
+
+
+def test_help_does_not_attach_cli_sinks(monkeypatch: pytest.MonkeyPatch) -> None:
+    from shared import log
+
+    def forbidden(**_kwargs: object) -> None:
+        pytest.fail("help must not initialize file/database logging")
+
+    monkeypatch.setattr(log, "init_cli_process", forbidden)
 
     with pytest.raises(SystemExit) as exc_info:
         updater.main(["--help"])
     assert exc_info.value.code == 0
-    assert calls == [{"name": "updater"}]
 
 
-def test_main_survives_log_init_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_main_survives_log_init_failure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """A DB-unreachable postgres sink (real on the recovery path) must not
     abort the updater — stderr/file sinks attach before the postgres sink."""
     from shared import log
 
+    attempted: list[bool] = []
+
     def boom(**kw: object) -> None:
+        attempted.append(True)
         raise RuntimeError("db unreachable")
 
     monkeypatch.setattr(log, "init_cli_process", boom)
+    monkeypatch.setattr(updater, "_repo_root", lambda: tmp_path)
 
-    with pytest.raises(SystemExit) as exc_info:
-        updater.main(["--help"])
-    assert exc_info.value.code == 0
+    def dispatch(*_args: object, **_kwargs: object) -> int:
+        return 17
+
+    monkeypatch.setattr(updater, "_run_agent_runner_self_update", dispatch)
+    assert updater.main([]) == 17
+    assert attempted == [True]
+
+
+def test_bootstrap_dispatch_does_not_attach_normal_sinks(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from shared import log
+
+    def forbidden(**_kwargs: object) -> None:
+        pytest.fail("prepared bootstrap must not initialize ordinary logging")
+
+    def dispatch(*_args: object, **kwargs: object) -> int:
+        assert kwargs["bootstrap_request"] == tmp_path / "request.json"
+        return 3
+
+    monkeypatch.setattr(log, "init_cli_process", forbidden)
+    monkeypatch.setattr(updater, "_run_agent_runner_self_update", dispatch)
+    assert updater.main(["--bootstrap-hop", str(tmp_path / "request.json")]) == 3

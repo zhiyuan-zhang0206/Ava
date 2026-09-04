@@ -13,9 +13,10 @@ import os
 import platform
 import plistlib
 import stat
-import subprocess
 import sys
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import cast
 
 import psycopg
 
@@ -24,6 +25,11 @@ from shared.managed_writer_observation import (
     ExpectedProcess,
     ExpectedSession,
     ExpectedUnitWriters,
+)
+from shared.native_job_observation import (
+    read_crontab,
+    read_launchd_definition,
+    read_launchd_labels,
 )
 from shared.private_storage import write_private_bytes
 from shared.runtime_release import ReleaseRejectedError, VerifiedRelease, verify_release
@@ -82,13 +88,6 @@ def _sessions(home: Path) -> tuple[ExpectedSession, ...]:
     return tuple(result)
 
 
-def _read_command(argv: list[str]) -> str:
-    result = subprocess.run(argv, capture_output=True, text=True, timeout=10, check=False)
-    if result.returncode:
-        raise ReleaseRejectedError("OS registration inventory is unavailable")
-    return result.stdout
-
-
 def _launchd(home: Path) -> tuple[ExpectedLauncher, ...]:
     directory = Path.home() / "Library/LaunchAgents"
     if directory.resolve(strict=True) != directory:
@@ -102,6 +101,8 @@ def _launchd(home: Path) -> tuple[ExpectedLauncher, ...]:
             raise ReleaseRejectedError("invalid launchd label")
         if not label.startswith("com.ava."):
             continue
+        if path.name != f"{label}.plist" or read_launchd_definition(label) != encoded:
+            raise ReleaseRejectedError("launchd definition identity changed")
         environment = raw.get("EnvironmentVariables", {})
         # Legacy labels with no explicit home cannot be silently classified as
         # another unit. Their ownership requires an explicit migration first.
@@ -112,11 +113,12 @@ def _launchd(home: Path) -> tuple[ExpectedLauncher, ...]:
                 kind="launchd", name=label, definition_digest=hashlib.sha256(encoded).hexdigest()
             )
         )
-    loaded = {
-        line.split()[-1]
-        for line in _read_command(["/bin/launchctl", "list"]).splitlines()
-        if line.split() and line.split()[-1].startswith("com.ava.")
-    }
+    deadline = datetime.now(UTC) + timedelta(seconds=10)
+    before = read_launchd_labels(deadline)
+    after = read_launchd_labels(deadline)
+    if before != after:
+        raise ReleaseRejectedError("loaded launcher inventory changed")
+    loaded = {label for label in after if label.startswith("com.ava.")}
     if not loaded <= {item.name for item in result}:
         raise ReleaseRejectedError("loaded Ava job has no inventoried definition")
     return tuple(result)
@@ -127,7 +129,7 @@ def _launchers(home: Path) -> tuple[ExpectedLauncher, ...]:
         return _launchd(home)
     if sys.platform != "linux":
         raise ReleaseRejectedError("unit launcher inventory platform is unsupported")
-    body = _read_command(["/usr/bin/crontab", "-l"])
+    body = read_crontab(datetime.now(UTC) + timedelta(seconds=10)).decode("utf-8")
     result: list[ExpectedLauncher] = []
     for line in body.splitlines():
         if not line.strip() or line.lstrip().startswith("#"):
@@ -285,6 +287,61 @@ def revalidate_prepared_inventory(
     if encoded != _canonical(current):
         raise ReleaseRejectedError("prepared unit inventory no longer matches actual facts")
     return ExpectedUnitWriters.model_validate_json(_canonical(current["expected"]))
+
+
+def revalidate_bootstrap_inventory(
+    conn: psycopg.Connection,
+    release: VerifiedRelease,
+    home: Path,
+    machine: str,
+    path: Path,
+    *,
+    current_session: ExpectedSession,
+    schema_digest: str,
+) -> ExpectedUnitWriters:
+    """Revalidate a retained receipt while allowing one proved A/B PID turnover.
+
+    The restricted hop intentionally replaces the sole ``ava-ops`` process, so
+    byte-for-byte revalidation would reject every legitimate recovery. All
+    non-process facts still come from the real producer and must remain exact;
+    the one changing session is supplied only after its native record, command,
+    process identity, and verified A/B image have been checked by the caller.
+    """
+    if path.parent != home / "run" or path.resolve(strict=True) != path:
+        raise ReleaseRejectedError("inventory receipt is outside this unit")
+    encoded = _regular_bytes(path)
+    if path.name != f"release-inventory-{hashlib.sha256(encoded).hexdigest()}.json":
+        raise ReleaseRejectedError("inventory receipt digest mismatch")
+    try:
+        prepared_raw: object = json.loads(encoded)
+    except (TypeError, ValueError) as exc:
+        raise ReleaseRejectedError("prepared unit inventory is malformed") from exc
+    if not isinstance(prepared_raw, dict):
+        raise ReleaseRejectedError("prepared unit inventory is malformed")
+    prepared = cast("dict[str, object]", prepared_raw)
+    try:
+        prepared_inventory_digest = prepared["inventory_digest"]
+        prepared_expected = ExpectedUnitWriters.model_validate_json(
+            _canonical(prepared["expected"])
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ReleaseRejectedError("prepared unit inventory is malformed") from exc
+    current = collect_inventory(conn, release, home, machine, schema_digest=schema_digest)
+    current_expected = ExpectedUnitWriters.model_validate_json(_canonical(current["expected"]))
+    if (
+        current_session.name != "ava-ops"
+        or current_expected.sessions != (current_session,)
+        or current_expected.processes != (current_session.process,)
+        or current_expected.model_copy(update={"sessions": (), "processes": ()})
+        != prepared_expected.model_copy(update={"sessions": (), "processes": ()})
+    ):
+        raise ReleaseRejectedError("prepared unit inventory observer substitution changed")
+    normalized = dict(current)
+    normalized["expected"] = prepared["expected"]
+    normalized["inventory_digest"] = prepared_inventory_digest
+    if _canonical(normalized) != encoded:
+        raise ReleaseRejectedError("prepared unit inventory static facts changed")
+    return prepared_expected
 
 
 def assert_inventory_can_enter_maintenance(path: Path) -> None:

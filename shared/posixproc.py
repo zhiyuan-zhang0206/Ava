@@ -218,7 +218,7 @@ def new_session(
     return True
 
 
-def graceful_signal(name: str) -> bool:
+def graceful_signal(name: str, *, expected: SessionRecord | None = None) -> bool:
     """Send the graceful-stop signal (SIGTERM) to the session's process without
     waiting or force-killing.
 
@@ -229,12 +229,18 @@ def graceful_signal(name: str) -> bool:
     — so the teardown is O(slowest agent), not O(sum of agents).
     """
     rec = _read_record(name)
-    if rec is None:
+    if rec is None or (expected is not None and rec != expected):
         return False
     proc = _process_for_record(rec)
     if proc is None:
         return False
     with contextlib.suppress(*_GONE):
+        if expected is not None and (
+            proc.create_time() != expected.create_time or _read_record(name) != expected
+        ):
+            return False
+        # Signal only this captured process object, never resolve the name a
+        # second time into a replacement target. psutil also guards PID reuse.
         proc.terminate()  # SIGTERM to the agent only; its finally closes its children
         return True
     return False
