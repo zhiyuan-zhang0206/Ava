@@ -35,23 +35,23 @@ from shared.runtime_release import (
 )
 
 
+def _copy_proof(root: Path, checkout: Path, name: str) -> Path:
+    target = root / name
+    shutil.copy2(checkout / "scripts" / name, target)
+    return target
+
+
 def prove_checkout_absent(
     root: Path, checkout: Path, application_name: str, release: VerifiedRelease
 ) -> None:
     """Run the existing CLI with no source checkout at its original path."""
-    proofs = {
-        name: root / name
-        for name in (
-            "verify_runtime_wheel.py",
-            "prove_runtime_consumer.py",
-            "prove_runtime_migration.py",
-            "prove_runtime_otel.py",
-            "prove_runtime_plugins.py",
-            "prove_ops_bootstrap.py",
-        )
-    }
-    for name, target in proofs.items():
-        shutil.copy2(checkout / f"scripts/{name}", target)
+    verifier = _copy_proof(root, checkout, "verify_runtime_wheel.py")
+    consumer = _copy_proof(root, checkout, "prove_runtime_consumer.py")
+    migration = _copy_proof(root, checkout, "prove_runtime_migration.py")
+    collector = _copy_proof(root, checkout, "prove_runtime_otel.py")
+    plugin_proof = _copy_proof(root, checkout, "prove_runtime_plugins.py")
+    inventory_proof = _copy_proof(root, checkout, "prove_release_inventory.py")
+    bootstrap = _copy_proof(root, checkout, "prove_ops_bootstrap.py")
     alias = root / "runtime-entry-alias"
     alias.symlink_to(release.root / "venv", target_is_directory=True)
     if (
@@ -77,7 +77,7 @@ def prove_checkout_absent(
     try:
         if (release.root / "plugins").is_dir():
             subprocess.run(  # noqa: S603 — installed image, private CI home only.
-                [str(release.interpreter), "-I", "-B", str(proofs["prove_runtime_plugins.py"])],
+                [str(release.interpreter), "-I", "-B", str(plugin_proof)],
                 cwd=root,
                 env=child_env | {"GITHUB_ACTIONS": "true"},
                 check=True,
@@ -85,7 +85,7 @@ def prove_checkout_absent(
             )
         if (release.root / "otel").is_dir():
             subprocess.run(  # noqa: S603 — retained interpreter and copied CI-only proof.
-                [str(release.interpreter), "-I", "-B", str(proofs["prove_runtime_otel.py"])],
+                [str(release.interpreter), "-I", "-B", str(collector)],
                 cwd=root,
                 env=child_env | {"GITHUB_ACTIONS": "true"},
                 check=True,
@@ -96,7 +96,7 @@ def prove_checkout_absent(
                 str(alias / "bin/python"),
                 "-I",
                 "-B",
-                str(proofs["prove_runtime_consumer.py"]),
+                str(consumer),
                 str(root),
                 str(alias),
             ],
@@ -110,7 +110,7 @@ def prove_checkout_absent(
                 str(release.interpreter),
                 "-I",
                 "-B",
-                str(proofs["verify_runtime_wheel.py"]),
+                str(verifier),
                 str(root / "retired-wheels" / application_name),
                 "--checkout",
                 str(checkout),
@@ -167,7 +167,22 @@ def prove_checkout_absent(
                     str(release.interpreter),
                     "-I",
                     "-B",
-                    str(proofs["prove_ops_bootstrap.py"]),
+                    str(bootstrap),
+                    release.digest,
+                    release.manifest_digest,
+                    schema,
+                ],
+                cwd=root,
+                env=migration_env,
+                check=True,
+                timeout=600,
+            )
+            subprocess.run(  # noqa: S603 — real retained ops entry, isolated old-schema CI database.
+                [
+                    str(release.interpreter),
+                    "-I",
+                    "-B",
+                    str(bootstrap),
                     release.digest,
                     release.manifest_digest,
                     schema,
@@ -182,7 +197,7 @@ def prove_checkout_absent(
                     str(release.interpreter),
                     "-I",
                     "-B",
-                    str(proofs["prove_runtime_migration.py"]),
+                    str(migration),
                     release.digest,
                     release.manifest_digest,
                     schema,
@@ -199,6 +214,21 @@ def prove_checkout_absent(
                 # runner's ambient environment. Retain the actual admission error.
                 raise AssertionError(f"wheel/PG admission failed:\n{result.stderr[-8000:]}")
             (root / "migration-proof.json").write_text(result.stdout)
+            subprocess.run(  # noqa: S603 — actual retained wheel, native CI PG, private unit.
+                [
+                    str(release.interpreter),
+                    "-I",
+                    "-B",
+                    str(inventory_proof),
+                    release.digest,
+                    release.manifest_digest,
+                    schema,
+                ],
+                cwd=root,
+                env=migration_env,
+                check=True,
+                timeout=180,
+            )
     finally:
         retired_checkout.rename(checkout)
 
