@@ -167,12 +167,14 @@ def test_checkpoint_read_failure_returns_zero(
 ) -> None:
     """A checkpoint store read failure is tolerated to 0/0 — the SSE token_usage
     push refreshes the counter later (contrast the /messages data endpoint's
-    503). Patch shared.checkpoint's PostgresSaver name to raise.
+    503). Patch langgraph.checkpoint.postgres's PostgresSaver name to raise
+    (load_checkpoint_messages resolves it via a function-local import).
     max_input_tokens still reflects the cluster default model (read from
     config_overlay before the checkpoint access)."""
     from contextlib import contextmanager
 
-    import shared.checkpoint as ckpt_mod
+    import langgraph.checkpoint.postgres as ckpt_mod
+
     from shared.config import settings
 
     # Through resolve_context_budget, not by re-deriving fraction * window here:

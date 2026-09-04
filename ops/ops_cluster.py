@@ -17,8 +17,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, cast
 
-from langgraph.checkpoint.postgres import PostgresSaver
-
 from ops import cluster_session
 from ops.cluster import (
     ClusterStatus,
@@ -556,6 +554,7 @@ def _agent_skill_view_inputs(pool: Any, agent_id: int) -> tuple[Path | None, lis
     no checkpoint has no project-local roots; an old row with no frozen/overlay
     value falls through to the normal unfiltered (``["*"]``) command view.
     """
+    from langgraph.checkpoint.postgres import PostgresSaver
     from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 
     with pool.connection() as conn, conn.cursor() as cur:

@@ -310,13 +310,13 @@ def test_checkpoint_read_failure_returns_503(
     endpoint does not disguise an IO failure as an empty history (contrast the
     timeline GET, which tolerates the same failure to an empty view + 200).
 
-    Mirrors test_timeline.TestTimelineFailLoud: patch shared.checkpoint's
-    PostgresSaver name (where load_checkpoint_messages resolves it) so
-    from_conn_string raises, exercising the CheckpointReadError -> 503 path.
+    Mirrors test_timeline.TestTimelineFailLoud: patch langgraph.checkpoint.postgres's
+    PostgresSaver name (where load_checkpoint_messages' function-local import
+    resolves it) so from_conn_string raises, exercising the CheckpointReadError -> 503 path.
     """
     from contextlib import contextmanager
 
-    import shared.checkpoint as ckpt_mod
+    import langgraph.checkpoint.postgres as ckpt_mod
 
     tid = create_agent(db_conn)
 
