@@ -61,6 +61,7 @@ from typing import Any, TextIO
 from langchain_core.messages import BaseMessage
 from psycopg_pool import AsyncConnectionPool
 
+from agent._turn_progress import mark_turn_progress
 from agent.db import list_chat_inbound_anchors
 from shared.config import settings
 from shared.event_publisher import AgentEventPublisher
@@ -257,6 +258,10 @@ async def node_lifecycle(
     advances to `len(messages)` either way, so a subsequent incremental
     snapshot picks up exactly the next commits.
     """
+    # A node enter is turn activity, full stop: the hosted stall guard and the
+    # dispatcher's turn-level stale scan both read this clock, and a turn
+    # blocked inside one node is exactly what they must be able to see.
+    mark_turn_progress(agent_id)
     # The guard spans the pre-enter ops_pool query AND the node body (the
     # `yield`), so a hang in either lands a stack dump naming the blocked frame.
     with _stall_dump_guard(node_name):

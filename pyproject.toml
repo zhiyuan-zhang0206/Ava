@@ -203,6 +203,11 @@ forbidden_modules = ["agent"]
 # direction, and its diff is the review signal.
 ignore_imports = [
     "services.agent_host.* -> agent._process_boot",
+    # agent/_turn_progress.py is a dependency-free leaf: the hosted runner's
+    # stall guard (host.py) and its scan (dispatcher.py) both read the same
+    # per-agent monotonic clock, and the graph kernel marks it (the same
+    # one-way direction: agent -> nothing).
+    "services.agent_host.* -> agent._turn_progress",
     "services.agent_host.* -> agent._runloop",
     "services.agent_host.* -> agent.db",
     "services.agent_host.* -> agent.graph",

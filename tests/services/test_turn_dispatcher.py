@@ -793,6 +793,103 @@ class TestPendingScan:
         assert scheduler.woken == []
 
 
+def _stale_age(_agent_id: int) -> float:
+    """A turn-progress clock silent well past the scan budget (task #2417)."""
+    return 3600.0
+
+
+def _fresh_age(_agent_id: int) -> float:
+    return 10.0
+
+
+def _unknown_age(_agent_id: int) -> float | None:
+    return None
+
+
+class TestTurnLevelStaleScan:
+    """Task #2417: an in-flight hosted turn whose turn-progress clock is stale
+    is turn-level fake-alive even when NO pending inbound exists (agent 2998:
+    claimed its whole queue, then hung inside graph.ainvoke for 3.5h). Pending
+    rows and pids cannot see that shape; the in-flight set + the progress clock
+    can."""
+
+    async def test_stale_in_flight_turn_is_cancelled_and_rescheduled(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        scheduler = _ScanScheduler({23})
+        monkeypatch.setattr(dispatcher, "turn_progress_age_s", _stale_age)
+
+        async def _pending(_stale_after_s: float) -> list[dispatcher.PendingInboundWake]:
+            return []
+
+        disp = InboundWakeDispatcher(
+            "redis://unused", scheduler, pending_scan=_pending, stale_after_s=180.0
+        )  # pyright: ignore[reportArgumentType]
+
+        await disp.scan_once()
+
+        assert scheduler.cancelled == [23]
+        assert scheduler.woken == [23]
+
+    async def test_a_fresh_in_flight_turn_is_left_alone(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        scheduler = _ScanScheduler({23})
+        monkeypatch.setattr(dispatcher, "turn_progress_age_s", _fresh_age)
+
+        async def _pending(_stale_after_s: float) -> list[dispatcher.PendingInboundWake]:
+            return []
+
+        disp = InboundWakeDispatcher(
+            "redis://unused", scheduler, pending_scan=_pending, stale_after_s=180.0
+        )  # pyright: ignore[reportArgumentType]
+
+        await disp.scan_once()
+
+        assert scheduler.cancelled == []
+        assert scheduler.woken == []
+
+    async def test_an_unknown_progress_clock_is_never_stale(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A fresh host has no clock entry for anyone: nothing means "no turn
+        has ever marked progress", which must not cancel turns it knows nothing
+        about — the same reading the uncancellable report uses for None."""
+        scheduler = _ScanScheduler({23})
+        monkeypatch.setattr(dispatcher, "turn_progress_age_s", _unknown_age)
+
+        async def _pending(_stale_after_s: float) -> list[dispatcher.PendingInboundWake]:
+            return []
+
+        disp = InboundWakeDispatcher(
+            "redis://unused", scheduler, pending_scan=_pending, stale_after_s=180.0
+        )  # pyright: ignore[reportArgumentType]
+
+        await disp.scan_once()
+
+        assert scheduler.cancelled == []
+        assert scheduler.woken == []
+
+    async def test_stale_turn_that_will_not_unwind_requires_a_host_restart(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        scheduler = _ScanScheduler({23}, unwinds_on_cancel=False)
+        monkeypatch.setattr(dispatcher, "turn_progress_age_s", _stale_age)
+
+        async def _pending(_stale_after_s: float) -> list[dispatcher.PendingInboundWake]:
+            return []
+
+        disp = InboundWakeDispatcher(
+            "redis://unused", scheduler, pending_scan=_pending, stale_after_s=180.0
+        )  # pyright: ignore[reportArgumentType]
+
+        with pytest.raises(dispatcher.HostRestartRequiredError, match="did not unwind"):
+            await disp.scan_once()
+
+        assert scheduler.cancelled == [23]
+        assert scheduler.woken == []
+
+
 class _QueueingPubSub:
     """Subscription fake that stays live while tests inject wake frames."""
 
