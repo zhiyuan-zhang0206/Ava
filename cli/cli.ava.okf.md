@@ -35,7 +35,9 @@ Verbs that act on a cluster rather than on this host's services, addressed by
 `watchdog-probe`. Enumerated in [[cli/cluster.ava.okf.md]].
 
 ### Agent & Ops
-`ava agents ls/send/cancel/restart/resurrect/terminate/kill` · [[cli/config.ava.okf.md|`ava config get/set/unset`]] · `ava pty freeze/status/resume` (host-wide PTY allocation gate) · `ava logs retention` (local, non-recursive managed-log cleanup; legacy global 14-day fallback or explicit family tiers; open handles excluded) · `ava pitr retention inspect` (read-only latest local dry-run plan; no delete surface) · `ava mcp ...` (isolated venvs at `$AVA_HOME/mcps/`; plus `ava mcp serve`, which runs the other way and exposes this cluster's control plane as an MCP server — [[ava/mcps.ava.okf.md|MCP]]) · `ava memory init` (explicit memory pool checkout and template provisioning; branch validation never runs during converge or start) / `refresh` (trigger the gateway index refresh; pool consolidation runs on the gateway schedule — `schedules/memory-steward-schedule.py` → `ava_builtins/plugins/ava_memory/skills/scripts/{steward,arbiter_merge}.py`) · `ava plugins ...` · `ava skill install/update/upgrade/enable/disable/register/scan/trust` · `ava presets ls/get/create/update/delete` · `ava schedules ls/get/create/update/delete/provision/start/stop/restart/logs/runs` (provision = create the built-in schedules from `schedules/manifest.json`; runs at gateway boot too) · `ava trace ship` · `ava lgtm on/off/status` (observability-stack toggle on this host — marker + native lifecycle)
+
+Agent lifecycle, context reads, local operations, and package-management command
+groups are enumerated in [[cli/operator-surfaces.ava.okf.md]].
 
 ## Install-Time Birth (`cli/install_cluster.py`)
 

@@ -131,8 +131,8 @@ def _select_all_sql(columns: str) -> dict[AgentListScope, LiteralString]:
 _SELECT_ALL_SQL: dict[AgentListFields, dict[AgentListScope, LiteralString]] = {
     "full": _select_all_sql(_FULL_COLS),
     "summary": _select_all_sql(_SUMMARY_COLS),
-    # This deliberately does not reuse `_FROM`: the CLI needs only three
-    # columns, so its query must avoid the roster's LATERAL and notice lookups.
+    # This legacy narrow projection deliberately does not reuse `_FROM`, so it
+    # avoids the roster's LATERAL and notice lookups.
     "compact": {
         "all": (
             "SELECT a.id, a.status, t.label FROM agents_meta a JOIN agents t ON t.id = a.id "
@@ -201,7 +201,7 @@ class AgentListSummary(BaseModel):
 
 
 class AgentListCompact(BaseModel):
-    """The three fields rendered by ``ava agents ls``."""
+    """The legacy narrow list projection."""
 
     agent_id: int
     status: AgentStatus
@@ -362,7 +362,7 @@ def select_all(
     scope: AgentListScope = "all",
     fields: AgentListFields = "full",
 ) -> list[AgentSnapshot] | list[AgentListSummary] | list[AgentListCompact]:
-    """List full snapshots, roster summaries, or compact CLI rows for ``scope``.
+    """List full snapshots, roster summaries, or compact legacy rows for ``scope``.
 
     ``all`` preserves the historical SDK / ops contract.  Frontend roster
     readers request ``live`` so terminated history is excluded by Postgres
@@ -373,8 +373,7 @@ def select_all(
     fork-source — the immutable lineage truth; attaching a row to its
     nearest visible/live ancestor is a view-layer derivation (user ruling
     2026-08-28 -> 09-02), never a payload rewrite.  ``summary`` does not
-    select full-only values; ``compact`` avoids every roster-only lookup
-    for the CLI's three columns.
+    select full-only values; ``compact`` avoids every roster-only lookup.
     """
     with conn.cursor() as cur:
         cur.execute(_SELECT_ALL_SQL[fields][scope])

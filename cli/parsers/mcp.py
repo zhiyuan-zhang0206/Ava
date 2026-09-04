@@ -1,4 +1,4 @@
-"""`ava mcp` + `ava memory` — MCP server management and memory-pool refresh.
+"""`ava mcp` + `ava memory` — MCP server management and memory-pool operations.
 
 Builders plus their `_h_*` handlers. Handlers lazy-import their `cmd_*`
 implementation from ``cli.commands`` / ``cli.mcp_server`` (which pulls in the
@@ -82,6 +82,28 @@ def _h_memory_init(_args: argparse.Namespace) -> int:
     from cli.commands.memory import cmd_memory_init
 
     return cmd_memory_init()
+
+
+def _h_memory_search(args: argparse.Namespace) -> int:
+    from cli.commands.memory import cmd_memory_search
+
+    return cmd_memory_search(args.query, limit=args.limit, json_output=args.json)
+
+
+def _nonempty_memory_query(value: str) -> str:
+    if not value:
+        raise argparse.ArgumentTypeError("query must be nonempty")
+    return value
+
+
+def _memory_search_limit(value: str) -> int:
+    try:
+        limit = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("limit must be an integer from 1 to 100") from exc
+    if not 1 <= limit <= 100:
+        raise argparse.ArgumentTypeError("limit must be from 1 to 100")
+    return limit
 
 
 def _add_mcp_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
@@ -183,13 +205,14 @@ def _add_mcp_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) ->
 
 
 def _add_memory_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
-    from cli.main import _h_memory_init, _h_memory_refresh
-
     """`ava memory` — memory pool operations.
 
     init          Initialize the memory pool and plugin-owned templates
     refresh       Trigger gateway memory index refresh
+    search        Search indexed memory with relative-path results
     """
+    from cli.main import _h_memory_init, _h_memory_refresh, _h_memory_search
+
     memory_p = sub.add_parser("memory", help="memory pool operations")
     memory_sub = memory_p.add_subparsers(dest="memory_cmd", required=True)
 
@@ -198,3 +221,19 @@ def _add_memory_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser])
 
     refresh_p = memory_sub.add_parser("refresh", help="trigger gateway memory index refresh")
     refresh_p.set_defaults(func=_h_memory_refresh)
+
+    search_p = memory_sub.add_parser("search", help="search indexed memory")
+    search_p.add_argument("query", type=_nonempty_memory_query, help="nonempty search query")
+    search_p.add_argument(
+        "--limit",
+        type=_memory_search_limit,
+        default=5,
+        metavar="K",
+        help="maximum result count from 1 to 100 (default: 5)",
+    )
+    search_p.add_argument(
+        "--json",
+        action="store_true",
+        help="emit the gateway results list as JSON",
+    )
+    search_p.set_defaults(func=_h_memory_search)

@@ -29,11 +29,12 @@ class _FakeResp:
         return self._payload
 
 
-def _agent_row(agent_id: int, status: str, label: str | None) -> dict[str, object]:
-    """A compact /api/agents row; `cmd_agents_ls` needs only three fields."""
+def _agent_row(agent_id: int, status: str, machine: str, label: str | None) -> dict[str, object]:
+    """The fields `cmd_agents_ls` reads from an /api/agents summary row."""
     return {
         "agent_id": agent_id,
         "status": status,
+        "machine": machine,
         "label": label,
     }
 
@@ -41,6 +42,9 @@ def _agent_row(agent_id: int, status: str, label: str | None) -> dict[str, objec
 @pytest.fixture(autouse=True)
 def _gateway_base(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("shared.machine.gateway_api_base", lambda: "http://gw:8000")
+    monkeypatch.setattr(
+        "shared.machine.gateway_auth_headers", lambda: {"Authorization": "Bearer secret"}
+    )
 
 
 def _patch_post(monkeypatch: pytest.MonkeyPatch, payload: object) -> dict[str, object]:
@@ -61,21 +65,32 @@ def test_agents_ls_renders_rows(
 ) -> None:
     seen: dict[str, object] = {}
 
-    def fake_get(url: str, **_kwargs: object) -> _FakeResp:
+    def fake_get(url: str, **kwargs: object) -> _FakeResp:
         seen["url"] = url
+        seen["headers"] = kwargs.get("headers")
         return _FakeResp(
             [
-                _agent_row(1, "idling", "alpha"),
-                _agent_row(22, "terminated", None),
+                {
+                    **_agent_row(1, "idling", "runner-a", "alpha"),
+                    "workspace": "/runner/local/workspaces/agent-1",
+                },
+                _agent_row(22, "terminated", "runner-long", None),
             ]
         )
 
     monkeypatch.setattr(httpx, "get", fake_get)
     assert _agents.cmd_agents_ls() == 0
-    assert seen["url"] == "http://gw:8000/api/agents?fields=compact"
+    assert seen == {
+        "url": "http://gw:8000/api/agents?fields=summary",
+        "headers": {"Authorization": "Bearer secret"},
+    }
     out = capsys.readouterr().out
-    assert "idling" in out and "alpha" in out
-    assert "22" in out and "terminated" in out
+    assert out.splitlines() == [
+        "id  status      machine      label",
+        " 1  idling      runner-a     alpha",
+        "22  terminated  runner-long  ",
+    ]
+    assert "/runner/local/workspaces" not in out
 
 
 def test_agents_ls_empty(
@@ -84,6 +99,16 @@ def test_agents_ls_empty(
     monkeypatch.setattr(httpx, "get", lambda *_a, **_k: _FakeResp([]))  # pyright: ignore[reportUnknownArgumentType]
     assert _agents.cmd_agents_ls() == 0
     assert "(no agents)" in capsys.readouterr().out
+
+
+def test_agents_ls_preserves_http_error_behavior(monkeypatch: pytest.MonkeyPatch) -> None:
+    def unauthorized(_url: str, **_kwargs: object) -> _FakeResp:
+        return _FakeResp({"detail": "Unauthorized"}, status_code=401)
+
+    monkeypatch.setattr(httpx, "get", unauthorized)
+
+    with pytest.raises(httpx.HTTPStatusError):
+        _agents.cmd_agents_ls()
 
 
 def test_agents_cancel_posts_to_cancel_route(
