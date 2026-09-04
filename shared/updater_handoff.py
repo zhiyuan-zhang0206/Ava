@@ -414,6 +414,13 @@ def clear(generation: str) -> bool:
                 "recovered",
             }:
                 return False
+            normal = journal.get("normal_release")
+            if normal is not None:
+                if not isinstance(normal, dict):
+                    return False
+                normal = cast("dict[str, object]", normal)
+                if normal.get("stage") != "committed":
+                    return False
             bootstrap_state_path().unlink(missing_ok=True)
         path.unlink(missing_ok=True)
         with contextlib.suppress(OSError):

@@ -14,6 +14,7 @@ from shared import process_sha
 from shared.health_schema import DEGRADED, OK, component, render
 from shared.machine import machine_name
 from shared.paths import ava_home
+from shared.runtime_service_identity import normal_runtime_identity
 
 _STARTED_AT = time.time()
 
@@ -51,6 +52,9 @@ def get_health(request: Request) -> dict[str, object] | JSONResponse:
         "sha": process_sha.get(),
         "liveness": OK,
     }
+    runtime = normal_runtime_identity(str(ava_home()))
+    if runtime is not None:
+        identity["runtime"] = runtime
     components = [component("http", OK, progress="serving")]
     try:
         with request.app.state.control_db_pool.connection() as conn, conn.cursor() as cur:
