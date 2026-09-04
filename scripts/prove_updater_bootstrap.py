@@ -748,8 +748,17 @@ def main() -> None:  # noqa: PLR0915 — isolated CI native lifetimes, always re
                     )
                     # Retire this isolated failed case; the next case obtains a
                     # different holder/acquisition, never revives this authority.
+                    # Production correctly retains the nonterminal sidecar; this
+                    # CI-only scratch proof has copied its evidence above and must
+                    # explicitly remove both files before constructing a new case.
+                    updater_handoff.bootstrap_state_path().unlink()
                     updater_handoff.state_path().unlink()
                     (sessions / "ava-ops.json").unlink()
+                    require(
+                        updater_handoff.read_bootstrap_recovery() is None
+                        and updater_handoff.read().status == "inactive",
+                        "isolated failed-case handoff evidence was not retired",
+                    )
                     continue
                 final_context = candidate if mode == "success" else old_context
                 observer_instance = wait_endpoint(final_context, projection)
