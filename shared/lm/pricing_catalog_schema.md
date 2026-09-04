@@ -34,7 +34,7 @@ implementation for this cross-line schema.
 | `effective_time_note` | optional string | Legacy note when a provider does not publish an exact effective time. |
 | `periods` | non-empty array | Effective pricing periods. Every period carries `effective_from` and `effective_until` as ISO-8601 UTC timestamps or `null`, plus `tiers`. |
 | `periods[].tiers` | non-empty array | Gapless input-token tiers with `input_tokens_min`, `input_tokens_max`, and `rates`. |
-| `periods[].tiers[].rates` | object | String numbers `input`, `cache_read`, and `output`, in USD per 1M tokens. |
+| `periods[].tiers[].rates` | object | Required string numbers `input`, `cache_read`, and `output`, in USD per 1M tokens. Additional optional per-vendor dimension keys are allowed; for example, `image_input` is USD per 1M image tokens for multimodal models. The Ava billing consumer currently prices only the three required keys. |
 | `periods[].tiers[].utc_daily_overrides` | array | Optional UTC windows with `start` and `end` as `HH:MM:SS`, and replacement `rates`. |
 
 ## Model-key and vendor convention

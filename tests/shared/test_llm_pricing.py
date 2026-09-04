@@ -93,6 +93,15 @@ def test_model_vendor_returns_catalog_vendor_or_none() -> None:
     assert model_vendor("no-such-model") is None
 
 
+def test_gemini_embedding_2_pricing() -> None:
+    assert rates_at("gemini-embedding-2", datetime.now(UTC), 100) == Rates(0.20, 0.0, 0.0)
+    assert quote("gemini-embedding-2", _M, 0, 0) == CostQuote(
+        cost_usd=0.20,
+        rates=Rates(0.20, 0.0, 0.0),
+    )
+    assert model_vendor("gemini-embedding-2") == "google"
+
+
 @pytest.mark.parametrize("vendor", [None, "", "   "])
 def test_parse_catalog_v2_rejects_missing_or_empty_vendor(vendor: str | None) -> None:
     raw = copy.deepcopy(_pricing_catalog_raw())
