@@ -22,6 +22,7 @@ from cli.commands._external_agent_skill_fs import (
     _exists,
     _lstat,
     _read_regular,
+    _rename_no_replace,
     _source_lstat,
     _SourceIntegrityError,
     _tree_digest,
@@ -325,7 +326,7 @@ def _activate(
     if _exists(target):
         raise _ClientConflictError("a target appeared after the managed copy was claimed")
     try:
-        stage.replace(target)
+        _rename_no_replace(stage, target)
     except OSError:
         if _exists(previous) and not _exists(target):
             previous.replace(target)

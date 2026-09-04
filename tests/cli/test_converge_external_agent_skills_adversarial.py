@@ -191,6 +191,34 @@ def test_late_edit_between_check_and_claim_is_restored_not_overwritten(
     assert "conflict" in capsys.readouterr().err
 
 
+def test_target_appearing_after_claim_is_not_replaced(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    repo = tmp_path / "repo"
+    source = _source(repo)
+    client = _client_home(tmp_path)
+    context = _context(repo, tmp_path)
+    bridge.converge_external_agent_skill(context, host_home=client.parent)
+    target = _target(client, tmp_path)
+    (source / "SKILL.md").write_text("operator v2\n")
+    outside = tmp_path / "late-target"
+    outside.mkdir()
+    (outside / "SKILL.md").write_text("late user target\n")
+    original_rename = bridge._rename_no_replace
+
+    def insert_target_then_rename(stage: Path, destination: Path) -> None:
+        destination.symlink_to(outside, target_is_directory=True)
+        original_rename(stage, destination)
+
+    monkeypatch.setattr(bridge, "_rename_no_replace", insert_target_then_rename)
+
+    bridge.converge_external_agent_skill(context, host_home=client.parent)
+
+    assert target.is_symlink()
+    assert (outside / "SKILL.md").read_text() == "late user target\n"
+    assert "conflict" in capsys.readouterr().err
+
+
 def test_concurrent_converges_serialize_transaction_owned_absence(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

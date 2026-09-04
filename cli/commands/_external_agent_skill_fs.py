@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import ctypes
+import errno
 import hashlib
 import os
 import stat
+import sys
 from pathlib import Path
 
 _MARKER_NAME = ".ava-managed.json"
@@ -146,6 +149,38 @@ def _write_new(path: Path, data: bytes, mode: int) -> None:
     finally:
         if fd != -1:
             os.close(fd)
+
+
+def _rename_no_replace(source: Path, destination: Path) -> None:
+    """Atomically rename a directory only when the destination is absent."""
+    if os.name == "nt":
+        source.rename(destination)
+        return
+    library = ctypes.CDLL(None, use_errno=True)
+    source_bytes = os.fsencode(source)
+    destination_bytes = os.fsencode(destination)
+    if sys.platform == "darwin":
+        rename_exclusive = 0x00000004
+        result = library.renamex_np(source_bytes, destination_bytes, rename_exclusive)
+    elif sys.platform.startswith("linux"):
+        at_current_working_directory = -100
+        rename_no_replace = 1
+        try:
+            renameat2 = library.renameat2
+        except AttributeError as exc:
+            raise OSError(errno.ENOTSUP, "atomic no-replace rename is unavailable") from exc
+        result = renameat2(
+            at_current_working_directory,
+            source_bytes,
+            at_current_working_directory,
+            destination_bytes,
+            rename_no_replace,
+        )
+    else:
+        raise OSError(errno.ENOTSUP, "atomic no-replace rename is unavailable")
+    if result != 0:
+        error_number = ctypes.get_errno()
+        raise OSError(error_number, os.strerror(error_number))
 
 
 def _copy_source_contents(source: Path, destination: Path) -> None:

@@ -203,24 +203,20 @@ def test_failed_update_restores_previous_copy_and_cleans_only_its_staging_dir(
     unrelated.mkdir()
     (unrelated / "keep").write_text("untouched\n")
     (source / "SKILL.md").write_text("operator v2\n")
-    original_replace = Path.replace
+    original_rename = module._rename_no_replace
 
-    def fail_staged_activation(path: Path, destination: Path):
-        if (
-            path.name.startswith(f".{SKILL_NAME}.ava-stage-")
-            and not path.name.endswith(".previous")
-            and Path(destination) == target
-        ):
+    def fail_staged_activation(path: Path, destination: Path) -> None:
+        if path.name.startswith(f".{SKILL_NAME}.ava-stage-") and destination == target:
             raise OSError("injected activation failure")
-        return original_replace(path, destination)
+        original_rename(path, destination)
 
-    monkeypatch.setattr(Path, "replace", fail_staged_activation)
+    monkeypatch.setattr(module, "_rename_no_replace", fail_staged_activation)
 
     module.converge_external_agent_skill(_ctx(repo, home), host_home=home)
 
     assert _tree_snapshot(target) == before
     assert (unrelated / "keep").read_text() == "untouched\n"
-    monkeypatch.setattr(Path, "replace", original_replace)
+    monkeypatch.setattr(module, "_rename_no_replace", original_rename)
     module.converge_external_agent_skill(_ctx(repo, home), host_home=home)
     assert (target / "SKILL.md").read_text() == "operator v2\n"
     assert _temp_entries(client_home / "skills") == []
