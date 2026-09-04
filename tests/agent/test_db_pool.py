@@ -85,11 +85,27 @@ async def test_pool_timeout_errors_and_propagates(
 
     monkeypatch.setattr(AsyncConnectionPool, "getconn", _timeout)  # pyright: ignore[reportUnknownArgumentType]
 
+    pool = _pool()
+    monkeypatch.setattr(
+        pool,
+        "get_stats",
+        lambda: {
+            "pool_size": 2,
+            "pool_available": 0,
+            "requests_waiting": 3,
+            "connections_errors": 0,
+        },
+    )
+
     with pytest.raises(PoolTimeout):
-        await _pool().getconn()
+        await pool.getconn()
 
     recs = _acquire_records(loguru_records)  # pyright: ignore[reportUnknownArgumentType]
     assert len(recs) == 1  # pyright: ignore[reportUnknownArgumentType]
     assert recs[0]["extra"]["event"] == "db_pool_acquire_timeout"
     assert recs[0]["extra"]["name"] == "ops"
+    assert recs[0]["extra"]["pool_size"] == 2
+    assert recs[0]["extra"]["pool_available"] == 0
+    assert recs[0]["extra"]["requests_waiting"] == 3
+    assert recs[0]["extra"]["connections_errors"] == 0
     assert recs[0]["level"].name == "ERROR"  # pyright: ignore[reportUnknownMemberType]

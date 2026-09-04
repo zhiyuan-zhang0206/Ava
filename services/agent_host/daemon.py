@@ -30,9 +30,11 @@ Usage:
    than per turn precisely because a hosted daemon is long-lived: without it a
    host that booted before an install would never pick the skill up, where
    process mode gets a fresh boot on every spawn.
-4. **The shared data plane** — pool, checkpointer, graph. `build_graph` runs the
-   builtin-plugin load and the state-class build, which is the other half of
-   "once per process".
+4. **The shared data plane** — isolated workload/control pools, checkpointer,
+   graph. Before the scheduler exists, the control pool recovers any old
+   applied hosted force whose durable exec evidence proves resource-free.
+   `build_graph` runs the builtin-plugin load and the state-class build, which
+   is the other half of "once per process".
 5. **Healthz**, published only after the above, so a green probe means the host
    can actually take a turn.
 6. **The dispatcher**, last: subscribing before the host can serve would drop
@@ -63,11 +65,17 @@ from psycopg_pool import AsyncConnectionPool
 from agent._turn_progress import turn_progress_age_s
 from services._pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 from services.agent_host.dispatcher import InboundWakeDispatcher, TurnScheduler
-from services.agent_host.host import AgentHost, build_shared_pool, settle_stale_running_rows
+from services.agent_host.host import (
+    AgentHost,
+    build_control_pool,
+    build_shared_pool,
+    settle_stale_running_rows,
+)
 from shared import paths
 from shared.config import settings
 from shared.daemon_health import Liveness, health_port, start_health_server, stop_health_server
 from shared.daemon_shutdown import install_graceful_shutdown
+from shared.hosted_force import recover_orphaned_hosted_forces
 from shared.log import init_gateway_process, logger
 from shared.machine import machine_name
 
@@ -481,7 +489,7 @@ def _spawn_background_tasks(pool: AsyncConnectionPool) -> dict[str, asyncio.Task
 async def _build_checkpointer(
     pool: AsyncConnectionPool[psycopg.AsyncConnection],
 ) -> AsyncPostgresSaver:
-    """One saver for the whole host, over the shared pool.
+    """One saver for the whole host, over the workload pool.
 
     No `setup()` call: the runner role holds no CREATE on the schema by design
     (task #1236), and the gateway owns langgraph's own migrations. A host booting
@@ -500,6 +508,43 @@ async def _build_checkpointer(
         lambda: turn_settings.agent.checkpoint_interval,
     )
     return checkpointer
+
+
+async def _recover_hosted_forces_at_boot(
+    control_pool: AsyncConnectionPool[psycopg.AsyncConnection], machine: str
+) -> None:
+    """Recover only resource-free predecessor forces before scheduling starts."""
+    recovered, deferred = await recover_orphaned_hosted_forces(control_pool, machine)
+    logger.info("hosted boot recovery: observed {n} orphaned force(s)", n=len(recovered))
+    for agent_id, evidence in deferred.items():
+        logger.warning(
+            "hosted boot recovery deferred for agent {agent_id}: "
+            "persistent exec request evidence {evidence}",
+            agent_id=agent_id,
+            evidence=[str(path) for path in evidence],
+        )
+
+
+async def _open_host_pools(
+    workload_pool: AsyncConnectionPool[psycopg.AsyncConnection],
+    control_pool: AsyncConnectionPool[psycopg.AsyncConnection],
+    machine: str,
+) -> None:
+    """Open both client pools, then recover before the scheduler can run."""
+    await workload_pool.open()
+    await control_pool.open()
+    await _recover_hosted_forces_at_boot(control_pool, machine)
+
+
+async def _close_host_pools(
+    workload_pool: AsyncConnectionPool[psycopg.AsyncConnection],
+    control_pool: AsyncConnectionPool[psycopg.AsyncConnection],
+) -> None:
+    """Close both pools even if the control-pool close itself fails."""
+    try:
+        await control_pool.close()
+    finally:
+        await workload_pool.close()
 
 
 def _is_running() -> bool:
@@ -540,20 +585,26 @@ async def run() -> None:
     land_cluster_extensions()
     load_process_extensions()
 
-    pool = build_shared_pool(settings.data_plane.db_url)
-    await pool.open()
+    workload_pool = build_shared_pool(settings.data_plane.db_url)
+    control_pool = build_control_pool(settings.data_plane.db_url)
     liveness = Liveness(_LIVENESS_TIMEOUT_S)
     beat: asyncio.Task[None] | None = None
     health = None
     try:
-        checkpointer = await _build_checkpointer(pool)
+        await _open_host_pools(workload_pool, control_pool, machine_name())
+        checkpointer = await _build_checkpointer(workload_pool)
         # build_graph runs the builtin-plugin load and builds the dynamic state
         # class — process-global, and the reason there is ONE graph here rather
         # than one per agent (services/agent_host/host.py explains the cost).
         graph = build_graph(checkpointer)
-        host = AgentHost(pool=pool, checkpointer=checkpointer, graph=graph)
+        host = AgentHost(
+            pool=workload_pool,
+            control_pool=control_pool,
+            checkpointer=checkpointer,
+            graph=graph,
+        )
         beat = asyncio.create_task(_beat_forever(liveness, host))
-        settled = await settle_stale_running_rows(pool, machine_name())
+        settled = await settle_stale_running_rows(control_pool, machine_name())
         logger.info("hosted boot settle: settled {n} stale running row(s)", n=len(settled))
         # The clock reader is injected, not imported by the scheduler: it owns no
         # pool, and this keeps the uncancellable-turn report able to say how long
@@ -577,7 +628,7 @@ async def run() -> None:
         # Task #2260: heartbeat-independent page-liveness scan for hosted
         # agents — busy agents get no heartbeats, and the hosted daemon runs
         # no per-agent page_reconcile_loop (loop.py:main() is process-only).
-        background = _spawn_background_tasks(pool)
+        background = _spawn_background_tasks(workload_pool)
         try:
             await InboundWakeDispatcher(
                 settings.data_plane.redis_url,
@@ -604,7 +655,7 @@ async def run() -> None:
         await _stop_ownership_beat(beat)
         if health is not None:
             await stop_health_server(health)
-        await pool.close()
+        await _close_host_pools(workload_pool, control_pool)
         remove_pidfile(_PIDFILE)
         _log.info("[agent-host] daemon stopped")
 

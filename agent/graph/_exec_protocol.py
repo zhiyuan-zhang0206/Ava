@@ -14,7 +14,8 @@ logs it shares the home with):
 
 On Windows the parent also creates a short-lived `<uuid>.job-ready.json` gate
 after attaching the child to its Job Object. The child cannot enter user code
-before that file exists; stale gates are pruned with stale envelopes.
+before that file exists. Request/gate leftovers are durable cleanup evidence
+and are never age-pruned; normal resource settlement removes them exactly.
 
 The envelope itself is plain JSON (cat-able for postmortem). The two typed
 payloads — the state snapshot (parent -> child) and the state-update delta
@@ -64,8 +65,8 @@ KILL_GRACE_S = 2.0
 # anything larger means an agent stuffed a giant object into the delta.
 MAX_ENVELOPE_BYTES = 64 * 1024 * 1024
 
-# Stale request/result files older than this are pruned when the parent
-# allocates a new pair (a killed parent can leave orphans behind).
+# Stale result files older than this are pruned when the parent allocates a new
+# pair. Request/gate files are crash-stable resource evidence and are retained.
 STALE_FILE_AGE_S = 3600.0
 
 # Subdir name when no agent id is established (container/eval mode).
@@ -141,10 +142,17 @@ def _agent_dir(exec_dir: Path, agent_id: int | None) -> Path:
 
 
 def _prune_stale(agent_dir: Path) -> None:
-    """Delete request/result files older than `STALE_FILE_AGE_S` — leftovers
-    from a killed parent. Bounded best-effort: a single glob per spawn."""
+    """Delete stale result envelopes, never request/resource evidence.
+
+    Successful settlement removes each request, result, and Windows job gate
+    together. A leftover ``req-*`` file therefore represents uncertain cleanup
+    after a killed parent and must survive age-based hygiene so an exclusive
+    hosted boot can fail closed. Bounded best-effort: a single glob per spawn.
+    """
     cutoff = time.time() - STALE_FILE_AGE_S
     for path in agent_dir.glob("*.json"):
+        if path.name.startswith("req-"):
+            continue
         try:
             if path.stat().st_mtime < cutoff:
                 path.unlink()

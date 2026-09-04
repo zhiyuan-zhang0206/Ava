@@ -83,27 +83,45 @@ class LoggingConnectionPool(AsyncConnectionPool[_CT]):
         self._pool_name = pool_name
         super().__init__(*args, **kwargs)
 
+    def _acquire_stats(self) -> dict[str, int]:
+        """Stable diagnostic fields across psycopg-pool versions and states."""
+        stats = self.get_stats()
+        return {
+            "pool_size": stats.get("pool_size", 0),
+            "pool_available": stats.get("pool_available", 0),
+            "requests_waiting": stats.get("requests_waiting", 0),
+            "connections_errors": stats.get("connections_errors", 0),
+        }
+
     async def getconn(self, timeout: float | None = None) -> _CT:
         t0 = time.monotonic()
         try:
             conn = await super().getconn(timeout=timeout)
         except PoolTimeout:
+            stats = self._acquire_stats()
             logger.error(
                 "[db pool] {name} acquire timed out after {elapsed:.1f}s "
-                "(max_size={mx}) — Postgres unreachable or saturated",
+                "(max_size={mx}, size={pool_size}, available={pool_available}, "
+                "waiting={requests_waiting}, connection_errors={connections_errors}) "
+                "— Postgres unreachable or the client pool is saturated",
                 event="db_pool_acquire_timeout",
                 name=self._pool_name,
                 elapsed=time.monotonic() - t0,
                 mx=self.max_size,
+                **stats,
             )
             raise
         elapsed = time.monotonic() - t0
         if elapsed >= _SLOW_ACQUIRE_WARN_S:
+            stats = self._acquire_stats()
             logger.warning(
-                "[db pool] {name} acquire took {elapsed:.1f}s (slow — Postgres under load)",
+                "[db pool] {name} acquire took {elapsed:.1f}s "
+                "(size={pool_size}, available={pool_available}, "
+                "waiting={requests_waiting}, connection_errors={connections_errors})",
                 event="db_pool_acquire_slow",
                 name=self._pool_name,
                 elapsed=elapsed,
+                **stats,
             )
         return conn
 

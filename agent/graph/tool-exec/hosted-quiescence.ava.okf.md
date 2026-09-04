@@ -35,8 +35,17 @@ evidence; a new cache, elapsed grace or retry count cannot clear it.
 
 ## Remaining boundary
 
-This live-host barrier does not establish hard-host-death recovery with active
-exec. Independent POSIX children may survive and the parent's unreaped root pin
-may be lost. Host PID/birth, lease expiry, or owner UUID alone cannot prove
-managed-domain completion. Persistent shell sessions deliberately retain their
-separate ownership and are not disposable exec descendants to kill wholesale.
+On exclusive agent-host boot, an applied force left by the dead host is observed
+only when no persistent `req-*.json` envelope remains for that agent. The
+envelope is created before a disposable exec child and removed after close,
+root reap, and reader completion, so its absence is the durable resource-free
+witness. Request and Windows gate leftovers are not age-pruned; normal exact
+resource settlement removes them. The database settlement re-locks the exact
+target generation, owner, and command before clearing its active pointer.
+
+This does not establish hard-host-death recovery with active exec. Any surviving
+request envelope keeps recovery deferred: independent POSIX children may survive
+and the parent's unreaped root pin may be lost. Host PID/birth, lease expiry, or
+owner UUID alone cannot prove managed-domain completion. Persistent shell
+sessions deliberately retain their separate ownership and are not disposable
+exec descendants to kill wholesale.

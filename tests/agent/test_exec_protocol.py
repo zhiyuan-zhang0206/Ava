@@ -261,16 +261,23 @@ def test_result_write_fails_on_unknown_kind(tmp_path: Path) -> None:
         write_result(make_result_path(tmp_path, agent_id=7), ResultPayload(kind="nope"))  # type: ignore[arg-type]
 
 
-def test_stale_files_pruned_on_alloc(tmp_path: Path) -> None:
+def test_stale_request_evidence_retained_while_result_is_pruned(tmp_path: Path) -> None:
     path = make_request_path(tmp_path, agent_id=7)
-    old = path.parent / "req-dead.json"
-    old.write_text("{}", encoding="utf-8")
+    old_request = path.parent / "req-dead.json"
+    old_request.write_text("{}", encoding="utf-8")
+    old_gate = path.parent / "req-dead.job-ready.json"
+    old_gate.write_text("{}", encoding="utf-8")
+    old_result = path.parent / "res-dead.json"
+    old_result.write_text("{}", encoding="utf-8")
     old_time = time.time() - STALE_FILE_AGE_S - 10
     import os
 
-    os.utime(old, (old_time, old_time))
+    for old in (old_request, old_gate, old_result):
+        os.utime(old, (old_time, old_time))
     fresh = make_request_path(tmp_path, agent_id=7)
-    assert not old.exists()
+    assert old_request.exists()
+    assert old_gate.exists()
+    assert not old_result.exists()
     assert fresh.parent.is_dir()
 
 
