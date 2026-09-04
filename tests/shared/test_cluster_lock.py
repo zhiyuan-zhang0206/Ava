@@ -114,7 +114,7 @@ def test_expired_lock_with_pending_publication_requires_publication_recovery(
     """
     with db_conn.cursor() as cur:
         cur.execute(
-            "UPDATE deployment_state SET holder='prepared:gateway:pid123', "
+            "UPDATE deployment_state SET holder='gateway:pid123', "
             "acquired_at=now()-interval '2 minutes', expires_at=now()-interval '1 minute', "
             "phase='updating', managed_writer_evidence="
             '\'{"version":2,"current":null,"pending":{"request":"retained"}}\'::jsonb '
@@ -126,8 +126,40 @@ def test_expired_lock_with_pending_publication_requires_publication_recovery(
         assert read_update_lease() is None
         assert acquire_update_lock("ordinary-rollout") is False
         assert claim_recovery_lock("ordinary-recovery", observed=None).acquired is False
-        row = db_conn.execute("SELECT holder, phase FROM deployment_state WHERE id=1").fetchone()
-        assert row == ("prepared:gateway:pid123", "updating")
+        release_update_lock("gateway:pid123")
+        assert settle_update_lock("gateway:pid123", hosts=["runner"]) is False
+        row = db_conn.execute(
+            "SELECT holder, phase, note FROM deployment_state WHERE id=1"
+        ).fetchone()
+        assert row == ("gateway:pid123", "updating", None)
+
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "UPDATE deployment_state SET phase='settling', note='waiting for runner', "
+                "settle_note='waiting for runner', settle_hosts=ARRAY['runner'], "
+                "settle_started_at=now() WHERE id=1"
+            )
+        db_conn.commit()
+        before = db_conn.execute(
+            "SELECT holder, phase, note, settle_note, settle_hosts, "
+            "settle_started_at, managed_writer_evidence->'pending' "
+            "FROM deployment_state WHERE id=1"
+        ).fetchone()
+        assert before is not None
+        assert before[:5] == (
+            "gateway:pid123",
+            "settling",
+            "waiting for runner",
+            "waiting for runner",
+            ["runner"],
+        )
+        assert release_settle_hold("gateway:pid123") is False
+        after = db_conn.execute(
+            "SELECT holder, phase, note, settle_note, settle_hosts, "
+            "settle_started_at, managed_writer_evidence->'pending' "
+            "FROM deployment_state WHERE id=1"
+        ).fetchone()
+        assert after == before
     finally:
         with db_conn.cursor() as cur:
             cur.execute(

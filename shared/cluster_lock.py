@@ -362,14 +362,16 @@ def renew_update_lock(holder: str, *, ttl_s: float = LOCK_TTL_S) -> bool:
 def release_update_lock(holder: str) -> None:
     """Release the lock iff `holder` still holds it — a no-op when another holder
     has since reclaimed it past a TTL expiry, so a slow release never clobbers a
-    newer owner's lock.
+    newer owner's lock. Durable pending publication also refuses this generic
+    release; its checked protocol must clear pending before the lease can end.
     """
     with write_transaction() as conn, conn.cursor() as cur:
         cur.execute(
             "UPDATE deployment_state SET holder = NULL, acquired_at = NULL, expires_at = NULL, "
             "    note = NULL, settle_hosts = NULL, settle_note = NULL, settle_started_at = NULL, "
             "    phase = 'stable', kind = NULL "
-            "WHERE id = 1 AND holder = %s",
+            "WHERE id = 1 AND holder = %s "
+            "AND COALESCE(managed_writer_evidence->'pending','null'::jsonb) = 'null'::jsonb",
             (holder,),
         )
         if cur.rowcount == 1:
@@ -471,7 +473,9 @@ def settle_update_lock(holder: str, *, hosts: list[str], ttl_s: float = SETTLE_T
 
     Holder-scoped like `release_update_lock`, and for the same reason: if the lease
     was already reclaimed past its TTL, the new owner's hold must not be shortened to
-    a settle window by a straggler.
+    a settle window by a straggler. Durable pending publication also refuses this
+    generic transition because changing the phase would invalidate its exact
+    operation while retaining its evidence.
 
     `holder` is left **exactly** as it was, never decorated with the reason — the
     dead-holder probe in `ops.ops_cluster._lock_holder_is_live` parses it as
@@ -492,7 +496,8 @@ def settle_update_lock(holder: str, *, hosts: list[str], ttl_s: float = SETTLE_T
             "UPDATE deployment_state "
             "SET expires_at = now() + make_interval(secs => %s), note = %s, "
             "    settle_note = %s, settle_hosts = %s, settle_started_at = now(), phase = 'settling' "
-            "WHERE id = 1 AND holder = %s",
+            "WHERE id = 1 AND holder = %s "
+            "AND COALESCE(managed_writer_evidence->'pending','null'::jsonb) = 'null'::jsonb",
             (ttl_s, note, note, sorted_hosts, holder),
         )
         held = cur.rowcount == 1
@@ -528,13 +533,16 @@ def release_settle_hold(holder: str) -> bool:
     converged in the first thirty seconds would otherwise block the next deploy —
     and suppress auto-rollback — for the rest of `SETTLE_TTL_S`. The caller
     (`ops.deploy_window`) establishes convergence; this is only the write.
+    A durable pending publication must be cleared by its checked protocol first;
+    generic settle release cannot remove only its lease authority.
     """
     with write_transaction() as conn, conn.cursor() as cur:
         cur.execute(
             "UPDATE deployment_state SET holder = NULL, acquired_at = NULL, "
             "    expires_at = NULL, note = NULL, settle_hosts = NULL, settle_note = NULL, settle_started_at = NULL, "
             "    phase = 'stable', kind = NULL "
-            "WHERE id = 1 AND holder = %s AND note IS NOT NULL",
+            "WHERE id = 1 AND holder = %s AND note IS NOT NULL "
+            "AND COALESCE(managed_writer_evidence->'pending','null'::jsonb) = 'null'::jsonb",
             (holder,),
         )
         released = cur.rowcount == 1
