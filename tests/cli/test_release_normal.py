@@ -96,18 +96,20 @@ def test_mutable_executable_rejected_before_probe(tmp_path: Path) -> None:
 def test_continuation_requires_same_actual_ready_handoff(
     monkeypatch: pytest.MonkeyPatch, generation: str, stage: str
 ) -> None:
-    import json
     from unittest.mock import Mock
 
     from cli.commands import _update_normal_release as normal
     from cli.commands._update_bootstrap import PreparedBootstrapHop
 
-    payload = json.dumps({"generation": generation, "bootstrap_hop": {"stage": stage}}).encode()
-
-    def read_payload(_path: Path) -> bytes:
-        return payload
-
-    monkeypatch.setattr(normal, "regular_bytes", read_payload)
+    monkeypatch.setattr(
+        normal.updater_handoff,
+        "read_bootstrap_recovery",
+        lambda: {
+            "version": 1,
+            "generation": generation,
+            "journal": {"stage": stage},
+        },
+    )
 
     def forbidden(*_args: object, **_kwargs: object) -> None:
         pytest.fail("exit code alone must not authorize normal probing or service effects")

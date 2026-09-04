@@ -9,21 +9,32 @@ description: Exact selector and service effects in the existing per-unit updater
 `_update_agent_runner --normal-release` is an internal continuation, not a second
 release controller. A bootstrap request may alternatively reference this normal
 request before its first stop: the same updater prepares both stages, completes
-the restricted hop, then continues under the original flock/operation/deadline.
-No mutation endpoint is added to bootstrap. Standalone continuation consumes a private request, the existing completed
-restricted-bootstrap handoff, the exact exited predecessor, a fully verified
-image and complete preparation receipt. Unsupported normal readiness transports
-refuse in preparation while bootstrap still serves. Source update flags and
-git/uv/converge fallbacks are unavailable in this mode.
+the restricted hop, then continues under the original flock, operation and
+deadline. No mutation endpoint is added to bootstrap. Standalone continuation
+consumes a private request, the existing completed restricted-bootstrap handoff,
+the exact exited predecessor, a fully verified image and complete preparation
+receipt. Unsupported normal readiness transports refuse in preparation while
+bootstrap still serves. Source update flags and git/uv/converge fallbacks are
+unavailable in this mode.
 
-The same local updater flock and handoff journal survive the bounded wait for
-the existing deployment pending record. A complete adopted collection and an
-actual schema migration receipt authorize selector CAS. Only then can the exact
-prepared normal service set start. The producer checks the native session and
-listening child PID/birth, actual executable/command, and existing service health
-response. Python normal services report their actually loaded module and image;
-development responses remain unchanged. Native frontend/collector probes also
-require native listener ownership, not just an HTTP success.
+The same local updater flock and handoff generation survive the bounded wait for
+the existing deployment pending record. Normal phases are nested inside the
+versioned bootstrap recovery envelope, preserving its generation and exact
+candidate-ready proof; ordinary spawn ownership never carries compensation
+evidence. An unfinished normal phase prevents generic clear or replacement, and
+only `committed` permits both retained files to clear. A complete adopted
+collection and an actual schema migration receipt authorize selector CAS. Only
+then can the exact prepared normal service set start.
+
+The selector and receipt path bind `prepared_receipt_digest`, the SHA-256 of the
+complete sealed preparation receipt. Its internal `inventory_digest` remains the
+narrower `ExpectedUnitWriters` tuple digest and must equal the planned unit
+digest. The producer pins dependency order before bootstrap stop, then checks
+each native session and listening child PID/birth, actual executable/command,
+and existing service health response. Python normal services report their
+actually loaded module and image; development responses remain unchanged.
+Native frontend/collector probes also require native listener ownership, not
+just an HTTP success.
 
 Every permission read has the original challenge budget. No retry renews it.
 Each effect gets fresh pending authorization. PostgreSQL and OS/filesystem
@@ -43,6 +54,7 @@ normal recovery. The preparation receipt's unknown closure is not promoted to a
 positive permit. Unix-only/native services without a verified readiness adapter
 remain pre-stop refusals. These are implementation gaps, not claims awaiting CI.
 
-CI contracts cover exact selector serialization, unsupported/mutable commands,
-CLI source isolation, and retained unfinished handoffs. Actual normal full-roster
-cold launch and the complete distributed transition remain required evidence.
+Tests cover exact selector serialization, separate receipt/inventory digests,
+unsupported or mutable commands, CLI source isolation, pinned service order,
+and retained unfinished recovery. Actual normal full-roster cold launch and the
+complete distributed transition remain required evidence.

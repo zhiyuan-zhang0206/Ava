@@ -45,6 +45,13 @@ the existing updater mutex can reclaim the same generation after exact owner
 death. Initial bootstrap ownership is itself a CAS over the prepared predecessor
 generation, PID, and birth time; a replacement marker cannot be overwritten.
 A missing post-fork session record remains ambiguous, not permission to launch
-another process. Terminal restricted-B readback or verified-A recovery allows
-the normal generation-CAS clear of both files. This is not normal service
-activation.
+another process. Verified-A recovery or terminal restricted-B readback without
+a normal continuation allows the generation-CAS clear of both files.
+
+An admitted normal continuation nests its phase journal inside the same
+versioned bootstrap envelope only after exact `candidate_ready` evidence and
+same-process handoff ownership. This preserves the bootstrap proof while keeping
+ordinary spawn ownership separate. Any unfinished or malformed normal journal
+blocks generic clear, replacement and force-clear; only a `committed` normal
+phase permits the generation-CAS clear of both files. Retained evidence is not
+automatic rollback permission.
