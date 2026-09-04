@@ -74,14 +74,15 @@ from services._pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidf
 
 # The statically imported healthchecks are the ones with NO ServiceSpec in
 # build_services(): brew-pin asserts host package policy, redis/pgbouncer are
-# native per-cluster processes (not sessions), and the LGTM stack is native
-# launchd jobs (deploy/lgtm), so they are not part of the
+# native per-cluster processes, permissions-helper is a launchd-owned app, and
+# the LGTM stack is native launchd jobs (deploy/lgtm), so they are not part of the
 # build_services-derived roster.
 # Every other healthcheck is resolved from its ServiceSpec.healthcheck_module via
 # importlib (see _checks_for_capability), so build_services() stays the single
 # source of the keepalive roster.
 from services.healthchecks.brew_pin import main as brew_pin_healthcheck
 from services.healthchecks.lgtm import main as lgtm_healthcheck
+from services.healthchecks.permissions_helper import main as permissions_helper_healthcheck
 from services.healthchecks.pgbouncer import main as pgbouncer_healthcheck
 from services.healthchecks.redis_acl import main as redis_acl_healthcheck
 from shared import telemetry
@@ -212,7 +213,7 @@ def _checks_for_capability(role: MachineRole) -> list[_Check]:
     60s; the durable operator surface is `ava status`), so a revive can never
     crash-loop a service `ava start` chose not to launch.
 
-    Five pseudo-checks have NO ServiceSpec (they are not session-backed services) and are
+    Six pseudo-checks have NO ServiceSpec (they are not session-backed services) and are
     added by hand — so they state their own
     ``requires_db`` right here, the same fact the other entries carry from their spec:
     - redis-acl FIRST — repairs the per-cluster redis ACL user; every daemon below
@@ -231,6 +232,9 @@ def _checks_for_capability(role: MachineRole) -> list[_Check]:
       Homebrew pin set on any macOS unit. It is warning-only and host-local, so
       neither role ownership nor database availability should suppress it
       (``requires_db=False``).
+    - permissions-helper on the AGENT-RUNNER capability when enabled — probes the
+      launchd-owned helper's real protocol and repairs one persistent failure
+      episode. It needs no Postgres (``requires_db=False``).
     - station-probe on the GATEWAY capability — the remote observatory
       station's health (WP4, task #1946). Probe-only: never restarts anything,
       alerts fail-open. ``requires_db=True`` because it resolves the station's
@@ -263,6 +267,14 @@ def _checks_for_capability(role: MachineRole) -> list[_Check]:
             checks.append(_Check("redis-acl", redis_acl_healthcheck, requires_db=False))
             checks.append(_Check("pgbouncer", pgbouncer_healthcheck, requires_db=False))
     checks.append(_Check("brew-pin", brew_pin_healthcheck, requires_db=False))
+    if role == "agent-runner" and settings.services.permissions_helper_enabled:
+        checks.append(
+            _Check(
+                "permissions-helper",
+                permissions_helper_healthcheck,
+                requires_db=False,
+            )
+        )
     for spec, gate_reason in services_for_capabilities_annotated(frozenset({role})):
         if spec.healthcheck_module is None:
             continue  # not watchdog-monitored (the watchdog daemons themselves)

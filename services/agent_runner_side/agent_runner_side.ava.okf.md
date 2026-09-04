@@ -30,7 +30,7 @@ Source of truth = services in `ops/spec.py` `build_services()` whose `ServiceSpe
 - **agent-runner-watchdog** — watchdog instance for agent-runner capability (`--role agent-runner`; see [[watchdog.ava.okf.md]], one on each side)
 
 ## Notes
-permissions-helper is macOS/Windows, and **not in the session service roster** — it uses launchd KeepAlive for keepalive, belongs to agent-runner by capability, but not managed by the watchdog / `build_services()` roster.
+permissions-helper is macOS/Windows, and **not in the session service roster** — its platform scheduler owns keepalive and it remains outside `build_services()`, while the macOS helper's real protocol healthcheck is manually attached to the agent-runner watchdog.
 
 ## Key Dependencies
 - [[watchdog.ava.okf.md]] — agent-runner-watchdog keeps alive the session services in this group every 60s (restarter / ops / browser)
