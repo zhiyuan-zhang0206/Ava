@@ -56,6 +56,32 @@ def test_help_does_not_attach_cli_sinks(monkeypatch: pytest.MonkeyPatch) -> None
     assert exc_info.value.code == 0
 
 
+def test_normal_release_dispatch_has_no_source_or_logging_effect(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from cli.commands import _update_normal_release as normal
+    from shared import log
+
+    def forbidden(*_args: object, **_kwargs: object) -> None:
+        pytest.fail("prepared normal dispatch must not use source or logging initialization")
+
+    def run(path: Path) -> int:
+        assert path == tmp_path / "request.json"
+        return 29
+
+    monkeypatch.setattr(log, "init_cli_process", forbidden)
+    monkeypatch.setattr(updater, "_repo_root", forbidden)
+    monkeypatch.setattr(normal, "run_normal_release", run)
+    assert updater.main(["--normal-release", str(tmp_path / "request.json")]) == 29
+
+
+@pytest.mark.parametrize("flag", ["--restart-only", "--force-reap", "--post-checkout"])
+def test_normal_release_rejects_source_flags(flag: str) -> None:
+    with pytest.raises(SystemExit) as error:
+        updater.main(["--normal-release", "/not-read.json", flag])
+    assert error.value.code == 2
+
+
 def test_main_survives_log_init_failure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """A DB-unreachable postgres sink (real on the recovery path) must not
     abort the updater — stderr/file sinks attach before the postgres sink."""
@@ -93,3 +119,72 @@ def test_bootstrap_dispatch_does_not_attach_normal_sinks(
     monkeypatch.setattr(log, "init_cli_process", forbidden)
     monkeypatch.setattr(updater, "_run_agent_runner_self_update", dispatch)
     assert updater.main(["--bootstrap-hop", str(tmp_path / "request.json")]) == 3
+
+
+def test_normal_preflight_refusal_precedes_updater_lock_and_stop(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from unittest.mock import Mock
+
+    from cli.commands import _update_bootstrap as bootstrap
+    from cli.commands import _update_normal_release as normal
+    from shared import host_deploy_state
+    from shared.runtime_release import ReleaseRejectedError
+
+    prepared = Mock(spec=bootstrap.PreparedBootstrapHop)
+    prepared.request = Mock(normal_release_path=str(tmp_path / "normal.json"))
+
+    def prepared_hop(_path: Path) -> bootstrap.PreparedBootstrapHop:
+        return prepared
+
+    monkeypatch.setattr(bootstrap, "prepare_bootstrap_hop", prepared_hop)
+
+    def reject(_prepared: bootstrap.PreparedBootstrapHop) -> None:
+        assert _prepared is prepared
+        raise ReleaseRejectedError("unsupported normal roster")
+
+    def forbidden(*_args: object, **_kwargs: object) -> None:
+        pytest.fail("failed normal preflight must precede lock, handoff and stop effects")
+
+    monkeypatch.setattr(normal, "prepare_after_bootstrap", reject)
+    monkeypatch.setattr(host_deploy_state, "try_acquire_updater_lock", forbidden)
+    monkeypatch.setattr(bootstrap, "execute_bootstrap_hop", forbidden)
+    with pytest.raises(ReleaseRejectedError, match="unsupported normal roster"):
+        updater._run_agent_runner_self_update(
+            tmp_path, bootstrap_request=tmp_path / "bootstrap.json"
+        )
+
+
+def test_disabled_normal_activation_precedes_updater_lock_and_bootstrap_stop(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from unittest.mock import Mock
+
+    from cli.commands import _update_bootstrap as bootstrap
+    from cli.commands import _update_normal_release as normal
+    from shared import host_deploy_state
+    from shared.runtime_release import ReleaseRejectedError
+
+    prepared = Mock(spec=bootstrap.PreparedBootstrapHop)
+    prepared.request = Mock(normal_release_path=str(tmp_path / "normal.json"))
+
+    def prepare_hop(_path: Path) -> bootstrap.PreparedBootstrapHop:
+        return prepared
+
+    def prepare_normal(
+        _prepared: bootstrap.PreparedBootstrapHop,
+    ) -> normal.PreparedNormalRelease:
+        return Mock(spec=normal.PreparedNormalRelease)
+
+    monkeypatch.setattr(bootstrap, "prepare_bootstrap_hop", prepare_hop)
+    monkeypatch.setattr(normal, "prepare_after_bootstrap", prepare_normal)
+
+    def forbidden(*_args: object, **_kwargs: object) -> None:
+        pytest.fail("disabled normal activation must precede updater ownership and effects")
+
+    monkeypatch.setattr(host_deploy_state, "try_acquire_updater_lock", forbidden)
+    monkeypatch.setattr(bootstrap, "execute_bootstrap_hop", forbidden)
+    with pytest.raises(ReleaseRejectedError, match="checked crash recovery"):
+        updater._run_agent_runner_self_update(
+            tmp_path, bootstrap_request=tmp_path / "bootstrap.json"
+        )

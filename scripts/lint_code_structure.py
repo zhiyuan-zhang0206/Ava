@@ -111,6 +111,7 @@ _MACHINE_ROLE_ALLOWED: dict[str, str] = {
     "ops/ops_inventory.py": "capability guard: inventory ops are agent-runner-only (what do I serve)",
     "gateway/routers/config.py": "for the gateway itself, local role is authoritative (what do I serve)",
     "cli/commands/_release_inventory.py": "verified installed image reads the real annotated service roster for the unit receipt (read-only, WHEEL_RUNTIME-guarded; no serve decision)",
+    "cli/commands/_release_services.py": "verified candidate updater rechecks the local annotated roster before any service stop or start (read-only, WHEEL_RUNTIME-guarded; no routing decision)",
 }
 
 

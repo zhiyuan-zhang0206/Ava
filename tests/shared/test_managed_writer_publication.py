@@ -148,6 +148,7 @@ def activation_readback(conn: psycopg.Connection, proposal: PendingPublication):
     "session,allowed",
     [
         ("ava-agent-host", True),
+        ("ava-agent-runner-watchdog", True),
         ("ava-agent-1", False),
         ("ava-agent-1-attempt-deadbeef", False),
         ("ava-agent-other", False),

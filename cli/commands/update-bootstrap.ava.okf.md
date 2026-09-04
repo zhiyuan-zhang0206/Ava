@@ -13,6 +13,13 @@ inventory receipt. It never resolves a source checkout, syncs packages, migrates
 converges, changes a selector or starts ordinary services. Return code 3 denotes
 restricted bootstrap success, deliberately not normal updater success.
 
+The request may also reference [[normal-release.ava.okf.md|a normal continuation]].
+That complete selector and service plan is validated before the first stop.
+Activation is currently disabled before updater ownership because checked
+normal recovery and exact spawn receipts are not implemented. The restricted
+bootstrap primitive itself remains mutation-limited as described here; an exit
+code alone does not authorize normal effects.
+
 Before changing a service, it verifies
 the candidate's loaded code, both sealed images, canonical registered unit and
 live deployment operation, coherent explicit child projection, full inventory
@@ -71,9 +78,9 @@ resume inventory drift, malformed-envelope retention, bounded phase evidence,
 and fork-before-record ambiguity. This is not mixed-version compatibility proof.
 
 The first production source-to-image transition still requires a genuinely
-bootable normal-service LKG that survives operation expiry, actual old imported
-orchestrator handoff, all registered unit/writer/job closure, normal-service
-readback and expected-predecessor selector publication. Windows full image
-closure and macOS native quiesce are unsupported here. The normal start gate and
-protocol-v1 admission remain closed. A retained source path/argv or bootstrap
-health response does not satisfy any of those remaining gates.
+bootable normal-service LKG, actual old imported orchestrator handoff, all
+registered unit/writer/job closure, all-unit coordination and checked reverse
+recovery. Windows full image closure and macOS native quiesce are unsupported
+here. Protocol-v1 admission remains separate. A retained source path/argv,
+bootstrap health response, expired operation, or local normal start does not
+satisfy any of those remaining gates.

@@ -35,9 +35,12 @@ separate `$AVA_HOME/run/updater-bootstrap-recovery.json` envelope. Version 1
 binds the handoff generation, private request, context and complete inventory
 receipt hashes, the exact known cron definition, transition stage, and at most
 64 phase observations within a 256 KiB file budget. No database URL or secret
-is recorded. The separate envelope makes malformed bootstrap evidence auditable
-without making an unrelated malformed ordinary spawn marker permanently
-unrecoverable.
+is recorded. `shared/updater_recovery.py` owns the strict typed journal schemas;
+partial terminal-looking dictionaries, a last phase that differs from the outer
+stage, or nested normal evidence outside its planned candidate-ready bootstrap
+are malformed evidence, not permission to clear. The separate envelope makes
+malformed bootstrap evidence auditable without making an unrelated malformed
+ordinary spawn marker permanently unrecoverable.
 
 An unfinished or malformed bootstrap envelope cannot be cleared, replaced by
 ordinary `begin`, or discarded by generic recovery. Only checked recovery under
@@ -45,6 +48,21 @@ the existing updater mutex can reclaim the same generation after exact owner
 death. Initial bootstrap ownership is itself a CAS over the prepared predecessor
 generation, PID, and birth time; a replacement marker cannot be overwritten.
 A missing post-fork session record remains ambiguous, not permission to launch
-another process. Terminal restricted-B readback or verified-A recovery allows
-the normal generation-CAS clear of both files. This is not normal service
-activation.
+another process. Verified-A recovery or terminal restricted-B readback without
+a normal continuation allows the generation-CAS clear of both files.
+
+An admitted normal continuation nests its phase journal inside the same
+versioned bootstrap envelope only after exact `candidate_ready` evidence and
+same-process handoff ownership. The bootstrap writer records
+`normal_release_planned` before the first normal-journal write, so even failure
+of that first write remains non-clearable. Once nested evidence exists,
+bootstrap writes cannot discard it; normal writes preserve request, operation,
+unit and selector identity and follow legal monotonic phases. Bootstrap phase
+writes also preserve their bound request/digests/plan/cron and append exactly one
+phase observation. This preserves the
+bootstrap proof while keeping ordinary spawn ownership separate. Any planned,
+unfinished or malformed normal journal blocks generic clear, replacement and
+force-clear; only a fully validated `committed` normal journal permits the
+generation-CAS clear of both files. Manual and stranded-pause recovery consult
+this exact retained-envelope verdict before unpausing. Retained evidence is not
+automatic rollback permission.

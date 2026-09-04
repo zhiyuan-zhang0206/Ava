@@ -30,7 +30,8 @@ Two kinds of module live here, distinguished by filename:
   `_converge_legacy_permission_watcher` (one-shot cleanup of the removed
   permission-prompt watcher),
   `_update_git` /
-  `_update_orchestration` / `_update_agent_runner` / `_update_uv_sync` /
+  `_update_orchestration` / `_update_agent_runner` / `_update_bootstrap` /
+  `_update_normal_release` / `_update_uv_sync` /
   `_updater_lease` / `_updater_stage` (the cmd.exe ladder's per-step telemetry marker) / `_update_recover` /
   `_gateway_ready` (the staged upgrade), `_probe`, `_setup`, `_session_lifecycle`, `_repo`, `_warmup`,
   `_ownership_preflight`,
@@ -50,6 +51,9 @@ schema change catches the DB up on its own.
   service becomes exit code 4 are one subject, in [[start-readiness.ava.okf.md]].
 - The gateway/runner update boundary, readiness proof, Phase-B verdicts, and
   failed-update recovery are one subject in [[rollout-boundary.ava.okf.md]].
+- The restricted immutable `ava-ops` hop is [[update-bootstrap.ava.okf.md]];
+  its sealed normal-service planning contract and disabled activation boundary are
+  [[normal-release.ava.okf.md]].
 - A full agent-runner update checks out, syncs, and records the installed SHA in
   its pre-checkout image, then re-execs `_update_agent_runner` with its private
   post-checkout flags before validation, quiesce, stop, or start. The gateway's

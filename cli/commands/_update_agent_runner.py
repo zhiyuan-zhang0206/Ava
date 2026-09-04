@@ -68,6 +68,7 @@ def _run_agent_runner_self_update(  # noqa: PLR0915 — one existing lock/handof
     detached pane so a mid-flow `ava stop` does not take itself out.
     """
     prepared = None
+    normal_continuation = None
     if bootstrap_request is not None:
         from cli.commands._update_bootstrap import prepare_bootstrap_hop
 
@@ -81,6 +82,14 @@ def _run_agent_runner_self_update(  # noqa: PLR0915 — one existing lock/handof
         ):
             raise ValueError("prepared bootstrap hop cannot use source-update flags")
         prepared = prepare_bootstrap_hop(bootstrap_request)
+        if prepared.request.normal_release_path is not None:
+            from cli.commands._update_normal_release import (
+                prepare_after_bootstrap,
+                require_checked_normal_activation,
+            )
+
+            normal_continuation = prepare_after_bootstrap(prepared)
+            require_checked_normal_activation()
 
     from shared import ui_update_state, updater_handoff
     from shared.host_deploy_state import (
@@ -186,7 +195,12 @@ def _run_agent_runner_self_update(  # noqa: PLR0915 — one existing lock/handof
 
                 if owned_generation is None:
                     raise RuntimeError("bootstrap updater has no owned handoff generation")
-                return execute_bootstrap_hop(prepared, owned_generation)
+                result = execute_bootstrap_hop(prepared, owned_generation)
+                if normal_continuation is not None and result == RESTART_DECLINED_EXIT_CODE:
+                    from cli.commands._update_normal_release import continue_after_bootstrap
+
+                    return continue_after_bootstrap(prepared, normal_continuation, owned_generation)
+                return result
             return _run_agent_runner_self_update_inner(
                 repo,
                 target_sha=target_sha,
@@ -582,6 +596,11 @@ def main(argv: list[str] | None = None) -> int:
         help="internal verified restricted-ops transition; never normal activation",
     )
     parser.add_argument(
+        "--normal-release",
+        type=Path,
+        help="internal pending-authorized normal continuation; no source fallback",
+    )
+    parser.add_argument(
         "--target-sha",
         default=None,
         help="pinned rollout commit (default: resolve the track ref itself)",
@@ -618,6 +637,21 @@ def main(argv: list[str] | None = None) -> int:
         help="revision to restore if the checked-out tree fails migration-layout validation",
     )
     args = parser.parse_args(argv)
+    if args.normal_release is not None:
+        if (
+            args.bootstrap_hop
+            or args.target_sha
+            or args.restart_only
+            or args.force_reap
+            or args.handoff_generation
+            or args.post_checkout
+            or args.from_sha
+            or args.mode != "smooth"
+        ):
+            parser.error("--normal-release cannot use source/bootstrap update flags")
+        from cli.commands._update_normal_release import run_normal_release
+
+        return run_normal_release(args.normal_release)
     if args.bootstrap_hop is not None:
         if args.mode != "smooth":
             parser.error("--bootstrap-hop cannot use a source drain policy")
