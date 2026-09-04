@@ -44,8 +44,6 @@ from shared.config import settings
 from shared.db import agent_exists, insert_inbound_message, list_pending_inbounds
 from shared.db_transaction import write_transaction
 from shared.inbound import InboundKind
-from shared.lm.content import content_blocks
-from shared.lm.factory import model_supports_vision, vision_capable_provider_names
 from shared.uploads import image_mime_for, parse_upload_url, resolve_upload_path
 
 router = APIRouter()
@@ -102,6 +100,8 @@ def _prepare_message_content(
     model here, up front, rather than letting the LLM call fail after the
     inbound is already queued.
     """
+    from shared.lm.factory import model_supports_vision, vision_capable_provider_names
+
     if isinstance(content, str):
         return content, None
 
@@ -547,6 +547,8 @@ def _extract_message_text(msg: "AIMessage") -> str | None:  # noqa: F821, UP037 
     concatenate text-type blocks. Returns None when there is no text.
     """
     from langchain_core.messages import AIMessage
+
+    from shared.lm.content import content_blocks
 
     if not isinstance(msg, AIMessage):
         return None

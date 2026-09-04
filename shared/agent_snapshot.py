@@ -18,7 +18,6 @@ from pydantic import BaseModel, Field
 from shared.agent_observation import AgentObservation, observation
 from shared.agents import AgentStatus
 from shared.config import settings
-from shared.lm.factory import model_supports_vision
 from shared.priority import Priority
 
 # Canonical columns + JOIN. last_active_at is the agent's REAL-activity clock
@@ -264,6 +263,8 @@ class AgentSnapshot(BaseModel):
 
 
 def _row_to_snapshot(row: tuple[Any, ...]) -> AgentSnapshot:
+    from shared.lm.factory import model_supports_vision
+
     # Pydantic does the per-field type coercion / validation; the tuple
     # positions match the SELECT column order above.
     config_overlay = row[17]
@@ -298,6 +299,8 @@ def _row_to_snapshot(row: tuple[Any, ...]) -> AgentSnapshot:
 
 
 def _row_to_summary(row: tuple[Any, ...]) -> AgentListSummary:
+    from shared.lm.factory import model_supports_vision
+
     effective_model = row[15] or settings.lm.llm_model
     return AgentListSummary.model_validate(
         {
