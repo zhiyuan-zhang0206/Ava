@@ -76,7 +76,7 @@ def test_self_restart_respawns_process_with_new_pid(e2e_env: E2EEnv, restarter_p
     raise RuntimeError(
         f"agent {agent_id} did not complete restart cycle within 90s: "
         f"first_pid={first_pid} completed={last_completed} "
-        f"status={last_status!r} pid={last_pid}"
+        f"status={last_status!r} pid={last_pid}; evidence={_restart_evidence(agent_id)!r}"
     )
 
 
@@ -126,6 +126,26 @@ def _assert_successor_consumes_next_message(env: E2EEnv, successor_pid: int) -> 
                 return
         assert time.monotonic() < deadline, (row, chats, commands, completions)
         time.sleep(0.5)
+
+
+def _restart_evidence(agent_id: int) -> dict[str, object]:
+    """Retain exact IDs/times on failure without logging message bodies or secrets."""
+    with psycopg.connect(settings.data_plane.db_url) as conn:
+        inbounds = conn.execute(
+            "SELECT id,kind,source,status,created_at,claimed_at FROM inbound_messages "
+            "WHERE agent_id=%s ORDER BY id",
+            (agent_id,),
+        ).fetchall()
+        checkpoints = conn.execute(
+            "SELECT checkpoint_id,parent_checkpoint_id,metadata->>'step' "
+            "FROM checkpoints WHERE thread_id=%s ORDER BY checkpoint_id DESC LIMIT 8",
+            (str(agent_id),),
+        ).fetchall()
+        lifecycle = conn.execute(
+            "SELECT status,pid,termination_source FROM agents_meta WHERE id=%s",
+            (agent_id,),
+        ).fetchone()
+    return {"inbounds": inbounds, "checkpoints": checkpoints, "lifecycle": lifecycle}
 
 
 def _assert_hosted_self_restart(e2e_env: E2EEnv, page: Page, agent_id: int) -> None:

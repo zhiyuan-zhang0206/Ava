@@ -59,8 +59,8 @@ class UnanchoredHomeError(RuntimeError):
 # because they are parameterized on a URL rather than on settings: the agent's own
 # pool kwargs (agent/loop.py), the boot-time schema assertion
 # (shared/migrations.py:assert_schema_current), `ava.DB` (ava/_settings.py), the
-# SDK shell-session index (ava/shell/sessions.py), and the self-respawn CAS
-# (agent/db.py). Fail-fast behaviour is pinned by tests/shared/test_connect_fail_fast.py.
+# SDK shell-session index (ava/shell/sessions.py). Fail-fast behaviour is pinned
+# by tests/shared/test_connect_fail_fast.py.
 PG_KEEPALIVE_KWARGS: dict[str, Any] = {
     "keepalives": 1,
     "keepalives_idle": 30,

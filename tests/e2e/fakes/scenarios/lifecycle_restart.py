@@ -16,10 +16,11 @@ It is deliberately independent from successful successor completion evidence.
     ↓ marker enters messages → idle, waiting for next inbound (fake is not called at this stage)
     llm 1 (IDLE_SCRIPT[0]): short chat halt, only called if the user sends another message after idle
 
-The legacy self-respawn fallback does not write restart_completed. Using that
-missing marker to select the script made a fresh fake model request another
-restart, obscuring the actual missing-completion defect. The E2E test separately
-requires completion evidence; this selector neither writes nor fabricates it.
+Using a missing completion marker to select the script made a fresh fake model
+request another restart after the original request was already consumed,
+obscuring the actual missing-completion defect. The E2E test separately requires
+durable-restarter completion evidence; this selector neither writes nor
+fabricates it.
 The fixture truncates before each test. A pending request is not consumed and
 must not select the post-request script.
 """
