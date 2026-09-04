@@ -11,9 +11,16 @@ from typing import Any
 
 import ava
 from ava.agents import AgentStatus as S
+from schedules.agent_status_guard import ensure_agent_status_members
 from shared.config import settings
 from shared.paths import ava_home, repo_root
 from shared.watcher import next_fire
+
+ensure_agent_status_members(
+    S,
+    {"IDLING", "RUNNING", "TERMINATED"},
+    schedule_name="model-update-tracker",
+)
 
 CRON = "0 6 * * *"
 # The cluster default is Asia/Shanghai. Keeping this config-derived matches the
