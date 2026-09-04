@@ -17,3 +17,5 @@ the roster projection for its existing consumers.
 On the 2026-09-01 read-only production sample, 5,218 all-scope rows serialized
 to 381,791 compact JSON bytes, compared with 2,802,663 full bytes and
 2,460,642 summary bytes.
+
+Superseded by [Agent list machine visibility](../2026-09-04/agents-list-machine-visibility.md).

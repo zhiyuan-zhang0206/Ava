@@ -13,7 +13,7 @@ One module per domain:
 - ``cluster`` — the whole-cluster verbs
 - ``agents`` — agents + notices
 - ``plugins`` — plugins + skill
-- ``mcp`` — mcp + memory
+- ``mcp`` — mcp + memory initialization, refresh, and search
 - ``management`` — config + presets + schedules
 """
 

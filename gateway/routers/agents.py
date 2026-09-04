@@ -133,7 +133,8 @@ def get_agents(
 
     ``fields=full`` preserves the historical response. ``fields=summary`` is
     the reduced SQL projection used by roster consumers; ``fields=compact``
-    serves the CLI's three-column table. Detail and SSE keep the full snapshot.
+    remains as a legacy narrow projection. The CLI renders four fields from the
+    summary projection. Detail and SSE keep the full snapshot.
     All scopes remain unpaginated for wire compatibility.
     """
     with request.app.state.db_pool.connection() as conn:

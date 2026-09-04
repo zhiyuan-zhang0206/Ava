@@ -12,7 +12,7 @@ class AgentSummary(AgentListSummary):
 
 
 class AgentCompact(AgentListCompact):
-    """One row of ``GET /api/agents?fields=compact`` for the CLI."""
+    """One row of the legacy narrow ``GET /api/agents?fields=compact`` projection."""
 
 
 class AgentRow(AgentSnapshot):

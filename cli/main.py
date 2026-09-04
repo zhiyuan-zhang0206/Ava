@@ -106,6 +106,7 @@ from cli.parsers.mcp import (
     _h_mcp_upgrade,
     _h_memory_init,
     _h_memory_refresh,
+    _h_memory_search,
 )
 from cli.parsers.pitr import (
     _h_pitr_retention_inspect,
@@ -181,6 +182,7 @@ __all__ = [
     "_h_mcp_upgrade",
     "_h_memory_init",
     "_h_memory_refresh",
+    "_h_memory_search",
     "_h_notices_clear",
     "_h_notices_list",
     "_h_notices_resolve",
