@@ -245,6 +245,7 @@ ensure_utf8_stdio()
 # it to the end of the log, out of order against its children's unbuffered output.
 ensure_line_buffered_stdio()
 
+
 # Detached CLI invocations (gateway `spawn_update` child / the ops update-trigger
 # `ops.controllers.update_trigger.trigger_update`, run by the watchdog's schema/pin
 # controllers) set `AVA_CLI_LOG_NAME` in the child env. When set,
@@ -257,11 +258,17 @@ ensure_line_buffered_stdio()
 #
 # Interactive CLI use leaves the env unset and skips init — the
 # extra sinks would write one PG row per `ava status` invocation.
-_cli_log_name = os.environ.get("AVA_CLI_LOG_NAME")
-if _cli_log_name:
-    from shared.log import init_cli_process
+def _init_detached_cli_logging() -> None:
+    """Initialize detached-command sinks only after settings-free dispatch.
 
-    init_cli_process(name=_cli_log_name)
+    Importing ``cli.main`` must remain side-effect free for retained-image and
+    bootstrap entries that select their settings-free path inside ``main``.
+    """
+    cli_log_name = os.environ.get("AVA_CLI_LOG_NAME")
+    if cli_log_name:
+        from shared.log import init_cli_process
+
+        init_cli_process(name=cli_log_name)
 
 
 # Settings-lite verbs — they must construct Settings while the gateway is down
@@ -360,6 +367,7 @@ def main(argv: list[str] | None = None) -> int:
     # Settings()). It lives in a settings-free module that does not import
     # shared.config. (Host provisioning is `scripts/install.sh`, not a CLI verb.)
     args_in = sys.argv[1:] if argv is None else argv
+    _init_detached_cli_logging()
     if args_in and args_in[0] == "enroll":
         from cli.enroll import run_enroll
 
