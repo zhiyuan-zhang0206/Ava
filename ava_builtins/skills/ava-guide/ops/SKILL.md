@@ -116,7 +116,7 @@ cluster secret.
 
 ## Update & Converge
 
-`ava update` is the capability-dispatched upgrade command:
+`ava cluster update` is the capability-dispatched upgrade command:
 
 - On a gateway-capable host (incl. single box): orchestrates the whole cluster —
   pause agent-runners → local pull/`uv sync`/migrate/restart → trigger
@@ -129,7 +129,7 @@ Related commands:
 - `ava cluster restart` — restart the whole cluster, same code.
 - `ava converge` — re-apply idempotent host wiring (`ava` symlink, PATH,
   home directory, plugin images, memory pool). Runs automatically on every
-  `ava start` / `ava update`; run standalone if wiring looks off.
+  `ava start` / `ava cluster update`; run standalone if wiring looks off.
 
 ## Channel (update track)
 
@@ -142,10 +142,10 @@ controlled by `AVA_TRACK_BRANCH` (default `main`).
 
 ```bash
 ava config get AVA_TRACK_BRANCH      # view current channel
-ava config set AVA_TRACK_BRANCH=<b>  # switch channel (then `ava update`)
+ava config set AVA_TRACK_BRANCH=<b>  # switch channel (then `ava cluster update`)
 ```
 
-Switching channel only declares intent — run `ava update` to actually pull.
+Switching channel only declares intent — run `ava cluster update` to actually pull.
 
 Branch model:
 
@@ -153,44 +153,39 @@ Branch model:
 feature/*  ──→ main  ──→ tag  ──→ ava cluster update   # the ONLY update entry point
 ```
 
-## Update — CLI only, two agent-drain modes
+## Update — operator CLI only
 
-**`ava.self.update()` was removed (2026-08).** Updating the cluster is an
-operator action with a single entry point — the CLI:
-
-```bash
-ava cluster update                  # smooth (default): waits the configured
-                                    # window (default 10s), then force-kills stragglers
-ava cluster update --mode force     # force: ~10s drain, then force-kill whoever
-                                    # is still running (long execs are cut short)
-```
-
-Both modes restart every agent onto the new code; `smooth` just gives them a
-short window to land cleanly first. The quiesce signal (a `restart` inbound per
-live agent) makes each agent exit at its turn boundary; the smooth wait is the
-configured `AVA_UPDATE_QUIESCE_TIMEOUT_SECONDS` (default 10s, deliberately
-short since 2026-08-26 — an agent mid-`execute_code` is cut short), ~10s in
-force mode; anything still alive after the window is force-reaped (marked
-`restarting`, process killed) and respawned by the restarter on the new code.
-The same drain runs on standalone self-heals (`ava restart --quiesce`, the
-watchdog pin/code controllers): no update path leaves an agent running old
-code any more.
+Use the installed `ava cluster update --help` contract, not historical drain
+timeouts or restarter assumptions. Record the actual phase, elapsed time,
+desired service state and hosted/process ownership. Forceful interruption
+requires scoped authorization; a short configured drain is not a promise
+about total downtime or successful convergence.
 
 ## Update Safety Discipline
 
-- **Merge to `main` = tested + safe.** CI is the only trust point — every PR
-  must pass CI on the latest `main` before it merges (merge queue / branch
-  protection). There is no runtime canary and no monitoring auto-rollback; a
-  CI-green PR is allowed to carry destructive migrations.
+- **Merge is not runtime health.** CI and exact-head review establish repository
+  evidence, not successful deployment. Require explicit operator authorization,
+  a fixed target, compatible schema/plugins/protocols and verified recovery
+  evidence. Verify actual running services and representative agent progress
+  after rollout; skipped checks or a filtered roster are not sufficient.
 - **The prod checkout stays on `track_branch`.** It is the tree the live
   processes run from. Sitting on a feature branch means the cluster is running
-  unreviewed code, and the next `ava update` force-checkouts `track_branch`,
+  unreviewed code, and the next `ava cluster update` force-checkouts `track_branch`,
   **discarding any unmerged commits on it**. Develop in a worktree; never switch
   the prod checkout's branch by hand. `ava status` warns when the prod checkout
   has drifted off `track_branch`.
-- **No automatic rollback.** If an update crashes on startup, a human + Claude
-  read the stack and recover by hand — `git reset --hard <old_sha>` on the prod
-  checkout, then `ava start`. Failure table: `.agents/skills/roll-out-a-cluster-update/SKILL.md`.
+- **Recovery uses official lifecycle surfaces.** Preserve logs and inspect the
+  installed `ava cluster recover --help` / `ava cluster rollback --help` contract.
+  Check live holder semantics and schema compatibility. Never reset production
+  source, reinstall its venv, send raw signals, or blindly retry a rollout.
+  Escalate if no supported safe recovery path exists.
+- **Old code drives the first rollout.** A newly merged safeguard does not
+  protect the update that introduces it. Read the old orchestrator and record
+  the bootstrap plan before activation; see `conventions/defensive-patterns.md`.
+- **One operator.** Contributors and reviewers do not launch concurrent
+  rollouts. Respect explicit CI-only/no-local-cluster requirements. Preparation
+  and backup uploads should remain outside maintenance where supported, without
+  dropping backup or rollback gates to meet a downtime target.
 
 ## Release Cut
 
