@@ -42,7 +42,7 @@ _SOURCE_ROOTS = frozenset(
         "schedules",
     }
 )
-_QUEUE_PREFIXES = ("trunk-merge/", "trunk-temp/", "mergify/merge-queue")
+_QUEUE_PREFIXES = ("trunk-merge/", "trunk-temp/")
 _NON_DOCUMENTATION_PREFIXES = ("scripts/", "schedules/", "tests/")
 _TEST_FILE_PATTERN = re.compile(r"(?:test_.*|.*_test)\.py$")
 

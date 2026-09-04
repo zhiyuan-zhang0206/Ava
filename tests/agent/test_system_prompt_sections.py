@@ -67,10 +67,7 @@ def test_invest_in_the_future_section_has_no_platform_words_or_numeric_threshold
     rendered = _invest_in_the_future_section()
 
     assert re.search(r"\d", rendered) is None
-    assert all(
-        word not in rendered
-        for word in ["CI", "flake", "AVA_", "Mergify", "GitHub", "task_registry"]
-    )
+    assert all(word not in rendered for word in ["CI", "flake", "AVA_", "GitHub", "task_registry"])
     assert "Beyond the task at hand" not in rendered
 
 

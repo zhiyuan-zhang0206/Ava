@@ -4,7 +4,7 @@ A test that asserts an exact equality on a value derived from a repo fixed
 instant while the derivation can reach the real clock is correct only while
 the wall clock keeps a particular relation to the constant — a relation that
 expires (2026-08-30: two such tests went deterministic red within seven days,
-each ejecting the Mergify batch queue). The lint has two halves:
+each ejecting the merge-queue batch). The lint has two halves:
 
 - source: a function that accepts a clock parameter must thread it into the
   fixed-instant window boundary instead of letting the callee fall back to

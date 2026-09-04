@@ -45,8 +45,8 @@ Closed since the swap: **job timeouts** — all three jobs now carry
 `timeout-minutes` (2026-08-14), so a hung job stops at its cap rather than
 running to GitHub's global limit.
 
-Dropped as moot: **the `merge_group` trigger**. It existed for a Mergify queue
-that does not run on this repo.
+Dropped as moot: **the `merge_group` trigger**. Trunk does not use it in this
+repository.
 
 ## Why the shape is what it is
 

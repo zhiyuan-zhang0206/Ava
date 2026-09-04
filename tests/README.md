@@ -131,7 +131,7 @@ Push/PR → CI
   ├── backend: pytest + pyright + coverage
   │   coverage output to CI log + xml (can be integrated with external services)
   ├── frontend: tsc + vitest
-  └── e2e: Playwright (Mergify requires success or skipped; skips only on docs-only diffs)
+  └── e2e: Playwright (required checks accept success or skipped; skips only on docs-only diffs)
 ```
 
 Pre-commit does not run pytest (needs DB), but runs ruff + pyright + frontend tsc + frontend vitest.

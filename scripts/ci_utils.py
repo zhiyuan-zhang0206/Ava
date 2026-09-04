@@ -21,18 +21,15 @@ Usage as CLI:
     Default: query once and exit (PENDING prints and exits 0 — a one-shot
     probe, not a poller). `--wait`: poll until the verdict settles, then exit
     with the monitor contract — 0 green, 1 not green (or timed out), 3
-    persistent gh/network errors, 4 enqueue failed or was rejected twice.
+    persistent gh/network errors, 4 Trunk queue submission failed.
     `--merge` implies `--wait`
-    and enqueues the PR once green. `--queue` (or `CI_QUEUE`) selects Mergify
-    (the default) or Trunk; `--priority` maps the Trunk submission
-    priority, which requires `TRUNK_API_TOKEN`. Mergify posts `@mergifyio
-    queue` (or `@mergifyio requeue` after a dequeue); Trunk submits the PR then
-    polls its queue state. Trunk refuses submission unless the PR has the
+    and submits the PR to Trunk once green. `--queue` (or `CI_QUEUE`) selects
+    the Trunk queue; `--priority` maps the submission priority, which requires
+    `TRUNK_API_TOKEN`. Trunk refuses submission unless the PR has the
     `qa-approved` label, and `.trunk/trunk.yaml` requires its
-    `qa-approved-gate` status. Both paths wait at least five minutes after a
-    head update before queueing. The all-green predicate excludes queue-state
-    checks named "Mergify Merge Queue" and "Trunk Merge Queue", plus
-    "qa-approved-gate". This is the canonical CI watcher: launch it with
+    `qa-approved-gate` status. Submission waits at least five minutes after a
+    head update. The all-green predicate excludes the "Trunk Merge Queue"
+    queue-state check and "qa-approved-gate". This is the canonical CI watcher: launch it with
     ava.shell.run_background, and the completion notice delivers the exit code
     + verdict to the agent automatically.
 """
@@ -119,8 +116,7 @@ POLL_INTERVAL = 30  # seconds between polls
 MAX_CONSECUTIVE_ERRORS = 3
 QUEUE_COOLDOWN_SECONDS = 300
 RETRY_BACKOFF_SECONDS = 300
-_MERGIFY_BOT_LOGINS = frozenset({"mergify", "mergify[bot]"})
-_QUEUE_CHOICES = ("trunk", "mergify")
+_QUEUE_CHOICES = ("trunk",)
 _QUEUE_NAMES = frozenset(_QUEUE_CHOICES)
 _TRUNK_PRIORITIES = {"urgent": 0, "high": 10, "medium": 100, "low": 200}
 _TRUNK_API_BASE_URL = "https://api.trunk.io/v1"
@@ -128,7 +124,7 @@ _TRUNK_REQUEST_TIMEOUT_SECONDS = 30
 
 
 def _resolve_queue(queue: str | None) -> str:
-    """Return the CLI-selected queue, then CI_QUEUE, then the gray default."""
+    """Return the CLI-selected queue, then CI_QUEUE, then the Trunk default."""
     resolved = queue or os.environ.get("CI_QUEUE") or "trunk"
     if resolved not in _QUEUE_NAMES:
         raise ValueError(f"unknown CI queue: {resolved}")
@@ -177,57 +173,6 @@ def _queue_cooldown_seconds(pr: str, repo: str) -> int:
     return 0 if last is None else max(0, ceil(QUEUE_COOLDOWN_SECONDS - (time.time() - last)))
 
 
-def _bot_rejection_reason(data: dict, since_ts: float) -> str | None:
-    """Return the newest rejection unless an in-window confirmation proves success.
-
-    A "the merge queue status continues" confirmation wins: the PR is in the
-    queue, so a later rejection can be a force-push dequeue or another agent's
-    command hitting the lock. A standalone dequeue notification ("has been
-    dequeued", e.g. "merge conditions no longer match") counts as a rejection
-    too — it carries no quoted queue command. Retrying feeds the storm; state
-    watch lands or times out."""
-    comments = data.get("comments", []) if isinstance(data, dict) else []
-    if not isinstance(comments, list):
-        return None
-    markers = (
-        "removed from the queue",
-        "left the queue",
-        "manually updated",
-        "already running from a previous command",
-        "cannot be queued",
-        "merge conditions no longer match",
-    )
-    rejection = None
-    for comment in reversed(comments):
-        if not isinstance(comment, dict):
-            continue
-        author = comment.get("author") or {}
-        created = _parse_ts(comment.get("createdAt"))
-        if (
-            not isinstance(author, dict)
-            or author.get("login") not in _MERGIFY_BOT_LOGINS
-            or created is None
-            or created < since_ts
-        ):
-            continue
-        body = str(comment.get("body") or "").lower()
-        if "the merge queue status continues" in body:
-            return None
-        if body.startswith("<!---\ndo not edit\n-*- mergify payload -*-"):
-            continue
-        if rejection is None and "queue-control:queue" in body:
-            rejection = "checkbox (command not executed)"
-        elif rejection is None and ("> queue" in body or "> requeue" in body):
-            rejection = next((m for m in markers if m in body), None)
-        elif rejection is None and "has been dequeued" in body:
-            # Mergify's standalone dequeue notification (no quoted command):
-            # "Pull request #<n> has been dequeued — merge conditions no longer
-            # match. Blocked by: ...". The payload status comment is skipped
-            # above, so this branch only sees the notification form.
-            rejection = "dequeued (merge conditions no longer match)"
-    return rejection
-
-
 @dataclass
 class CIResult:
     verdict: CIStatus
@@ -239,11 +184,6 @@ class CIResult:
     passed: list[str] = field(default_factory=list)
     failed: list[dict] = field(default_factory=list)  # {name, conclusion}
     workflow_checks: list[str] = field(default_factory=list)  # checks a workflow run produced
-    # Checks whose name starts with "Mergify" (issue #98): queue state, not a
-    # CI result — excluded from completed/pending/passed/failed so a check
-    # that sits pending forever after a dequeue can never block the all-green
-    # wait. Kept here so `--merge` can inspect queue state separately.
-    mergify_checks: list[dict] = field(default_factory=list)
     # Trunk's queue-state check is likewise not a CI result and must not turn
     # an otherwise green PR into a perpetual PENDING verdict.
     trunk_checks: list[dict] = field(default_factory=list)
@@ -251,7 +191,6 @@ class CIResult:
     # this CI verdict. Keep it separate so it cannot enter the verdict buckets.
     gate_checks: list[dict] = field(default_factory=list)
     mergeable: str = ""  # MERGEABLE / CONFLICTING / UNKNOWN
-    head_sha: str = ""
     error_detail: str = ""
 
     def summary(self) -> str:
@@ -290,7 +229,6 @@ def _repo_has_workflows() -> bool:
     return any(wf_dir.glob("*.yml")) or any(wf_dir.glob("*.yaml"))
 
 
-MERGIFY_CHECK_PREFIX = "Mergify"
 TRUNK_MERGE_QUEUE_CHECK_NAME = "Trunk Merge Queue"
 # Must match the job name in .github/workflows/qa-approved-gate.yml — the check is
 # required by Trunk and checked before submission, never part of the CI verdict.
@@ -343,8 +281,8 @@ def _partition_checks(checks: list[dict], result: CIResult) -> None:
     so is a COMPLETED one whose conclusion is unrecognized — guessing there is
     how a false "all green" gets reported.
 
-    Mergify and Trunk checks report queue state rather than CI results, while
-    `qa-approved-gate` is required by Trunk and checked before submission. All
+    Trunk checks report queue state rather than CI results, while
+    `qa-approved-gate` is required by Trunk and checked before submission. Both
     are routed to dedicated buckets so they never enter the verdict fields.
     """
     for c in checks:
@@ -372,9 +310,6 @@ def _partition_checks(checks: list[dict], result: CIResult) -> None:
         status = c.get("status", "")
         conclusion = c.get("conclusion", "")
 
-        if name.startswith(MERGIFY_CHECK_PREFIX):
-            result.mergify_checks.append(c)
-            continue
         if name.startswith(TRUNK_MERGE_QUEUE_CHECK_NAME):
             result.trunk_checks.append(c)
             continue
@@ -444,63 +379,6 @@ def _runs_not_yet_reporting(head_sha: str, repo: str | None) -> list[str]:
     return [str(n) for n in names] if isinstance(names, list) else []
 
 
-# ---- Dequeue detection (issue #98) ----
-# `gh pr view --json statusCheckRollup` only exposes name/status/conclusion for
-# a check — not the human-readable text Mergify writes explaining queue state
-# (e.g. "removed from the queue"). The REST check-runs API carries that text as
-# `output.title`, so a dequeue is read from there instead of guessed from the
-# rollup.
-
-_MERGIFY_CHECK_NAME = "Mergify Merge Queue"
-_DEQUEUE_TITLE_MARKERS = ("removed from the queue", "dequeued", "unqueued")
-
-
-def _fetch_mergify_check_title(head_sha: str, repo: str | None) -> str | None:
-    """Best-effort read of the Mergify Merge Queue check-run's `output.title`
-    for `head_sha`. Returns None on any error, empty result, or missing
-    head_sha — the caller then defaults to `queue`, the safe choice for
-    "state unknown"."""
-    if not head_sha:
-        return None
-    r = subprocess.run(  # noqa: S603
-        [
-            "gh",
-            "api",
-            f"repos/{repo}/commits/{head_sha}/check-runs"
-            if repo
-            else f"repos/{{owner}}/{{repo}}/commits/{head_sha}/check-runs",
-            "--jq",
-            f'[.check_runs[] | select(.name=="{_MERGIFY_CHECK_NAME}")][0].output.title',
-        ],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if r.returncode != 0:
-        return None
-    title = r.stdout.strip()
-    return title if title and title != "null" else None
-
-
-def _mergify_was_dequeued(title: str | None) -> bool:
-    """True when the Mergify check's output title reads as a dequeue (a PR
-    that was queued and got knocked out — e.g. by a force-push) rather than
-    "never queued" or "currently queued / merged"."""
-    if not title:
-        return False
-    lowered = title.lower()
-    return any(marker in lowered for marker in _DEQUEUE_TITLE_MARKERS)
-
-
-def _queue_command(repo: str, head_sha: str) -> str:
-    """`@mergifyio queue` for a PR entering the queue fresh, `@mergifyio
-    requeue` for one that was already queued and got dequeued (issue #98: a
-    force-push after queuing auto-dequeues the PR, and `queue` cannot recover
-    it — `requeue` is the verb Mergify defines for that case)."""
-    title = _fetch_mergify_check_title(head_sha, repo)
-    return "@mergifyio requeue" if _mergify_was_dequeued(title) else "@mergifyio queue"
-
-
 def check_ci(pr_number: str | int, *, repo: str | None = None) -> CIResult:
     """Poll one PR's CI status and mergeability via `gh pr view --json`.
 
@@ -544,8 +422,6 @@ def check_ci(pr_number: str | int, *, repo: str | None = None) -> CIResult:
     except json.JSONDecodeError as e:
         result.error_detail = f"JSON parse error: {e}"
         return result
-
-    result.head_sha = data.get("headRefOid", "")
 
     # --- Merge conflict detection ---
     result.mergeable = data.get("mergeable", "UNKNOWN")
@@ -622,7 +498,6 @@ def _query_once(pr: str, repo: str, *, as_json: bool) -> int:
                     "passed": result.passed,
                     "failed": result.failed,
                     "workflow_checks": result.workflow_checks,
-                    "mergify_checks": result.mergify_checks,
                     "trunk_checks": result.trunk_checks,
                     "gate_checks": result.gate_checks,
                     "error_detail": result.error_detail,
@@ -654,24 +529,6 @@ def _deadline_hit(
         print(f"PR #{pr} {what} after {timeout}s — timed out.", file=sys.stderr, flush=True)
         return True
     return False
-
-
-def _enqueue_pr(pr: str, repo: str, command: str = "@mergifyio queue") -> int:
-    """--merge: enqueue the PR once CI is green.
-
-    Enqueuing posts `command` as a PR comment. The gh call carries --repo
-    explicitly so it never depends on the current directory."""
-    r = subprocess.run(  # noqa: S603
-        ["gh", "pr", "comment", pr, "--repo", repo, "--body", command],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if r.returncode != 0:
-        print(f"PR #{pr} enqueue failed: {r.stderr.strip()}", file=sys.stderr, flush=True)
-        return 4
-    print(f"PR #{pr} enqueued with Mergify ({command}): {r.stdout.strip()}")
-    return 0
 
 
 def _trunk_pr_payload(pr: str, repo: str) -> dict[str, object]:
@@ -882,96 +739,6 @@ def _trunk_merge_flow(
     )
 
 
-def _watch_enqueue(
-    pr: str, repo: str, command_time: float, every: int, deadline: float | None, timeout: int
-) -> tuple[int, bool]:
-    """Watch PR state and post-command Mergify replies in one poll."""
-    while True:
-        r = subprocess.run(  # noqa: S603
-            ["gh", "pr", "view", pr, "--repo", repo, "--json", "state,comments"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if r.returncode != 0:
-            print(f"[ci] merge-watch poll error: {r.stderr.strip()}", file=sys.stderr, flush=True)
-            return 3, False
-        try:
-            data = json.loads(r.stdout)
-        except json.JSONDecodeError:
-            print(
-                f"[ci] merge-watch poll JSON error: {r.stdout[:200]}", file=sys.stderr, flush=True
-            )
-            return 3, False
-        if not isinstance(data, dict):
-            print(
-                f"[ci] merge-watch poll JSON error: {r.stdout[:200]}", file=sys.stderr, flush=True
-            )
-            return 3, False
-        state = data.get("state")
-        if state == "MERGED":
-            print(f"PR #{pr} merged by the merge queue")
-            return 0, False
-        if state == "CLOSED":
-            print(f"PR #{pr} CLOSED without merging — investigate", file=sys.stderr, flush=True)
-            return 1, False
-        if reason := _bot_rejection_reason(data, command_time):
-            print(
-                f"PR #{pr} queue command rejected by Mergify: {reason}", file=sys.stderr, flush=True
-            )
-            return 0, True
-        if _deadline_hit(deadline, pr, timeout, "still in the merge queue"):
-            return 1, False
-        time.sleep(every)
-
-
-def _merge_flow(pr: str, repo: str, every: int, timeout: int) -> int:
-    """Cooldown, re-check CI, enqueue, and retry one rejected command."""
-    deadline = time.monotonic() + timeout if timeout else None
-    retried = False
-    while True:
-        while (remaining := _queue_cooldown_seconds(pr, repo)) > 0:
-            if _deadline_hit(deadline, pr, timeout, "queue cooldown not finished"):
-                return 1
-            print(
-                f"PR #{pr} head updated {remaining}s ago — queue cooldown, waiting",
-                file=sys.stderr,
-                flush=True,
-            )
-            time.sleep(min(remaining, every))
-
-        result = check_ci(pr, repo=repo)
-        if result.verdict is CIStatus.ERROR:
-            print(
-                f"PR #{pr} CI error before queueing: {result.error_detail}",
-                file=sys.stderr,
-                flush=True,
-            )
-            return 3
-        if result.verdict is not CIStatus.ALL_PASSED:
-            print(f"PR #{pr} CI no longer green: {result.summary()}", file=sys.stderr, flush=True)
-            return 1
-
-        command = _queue_command(repo, result.head_sha)
-        rc = _enqueue_pr(pr, repo, command)
-        if rc != 0:
-            return rc
-        command_time = time.time()
-        rc, rejected = _watch_enqueue(pr, repo, command_time, every, deadline, timeout)
-        if not rejected:
-            return rc
-        if retried:
-            print(
-                "queue command rejected twice by Mergify — not enqueued",
-                file=sys.stderr,
-                flush=True,
-            )
-            return 4
-        print(f"retrying queue command in {RETRY_BACKOFF_SECONDS}s", file=sys.stderr, flush=True)
-        time.sleep(RETRY_BACKOFF_SECONDS)
-        retried = True
-
-
 def _wait_for_verdict(
     pr: str,
     repo: str,
@@ -979,7 +746,6 @@ def _wait_for_verdict(
     timeout: int,
     *,
     merge: bool,
-    queue: str = "mergify",
     priority: str = "medium",
     trunk_token: str | None = None,
 ) -> int:
@@ -1044,13 +810,11 @@ def _wait_for_verdict(
         if verdict is CIStatus.ALL_PASSED:
             print(f"PR #{pr} CI green: {result.summary()}")
             if merge:
-                if queue == "trunk":
-                    if trunk_token is None:
-                        raise AssertionError("Trunk merge flow requires a token")
-                    return _trunk_merge_flow(
-                        pr, repo, priority, every=every, timeout=timeout, token=trunk_token
-                    )
-                return _merge_flow(pr, repo, every, timeout)
+                if trunk_token is None:
+                    raise AssertionError("Trunk merge flow requires a token")
+                return _trunk_merge_flow(
+                    pr, repo, priority, every=every, timeout=timeout, token=trunk_token
+                )
             return 0
 
         print(f"PR #{pr} CI NOT green: {result.summary()}", file=sys.stderr, flush=True)
@@ -1065,7 +829,7 @@ def _wait_for_verdict(
 def main(argv: list[str] | None = None) -> int:
     """CLI entry. Default: one-shot query (legacy behavior). `--wait`: poll
     until the verdict settles with the monitor exit-code contract; `--merge`
-    implies `--wait` and enqueues once green."""
+    implies `--wait` and submits to Trunk once green."""
     import argparse
 
     p = argparse.ArgumentParser(description="Check CI status of a GitHub PR")
@@ -1104,7 +868,7 @@ def main(argv: list[str] | None = None) -> int:
         "--queue",
         choices=_QUEUE_CHOICES,
         default=None,
-        help="with --merge: merge queue (default: CI_QUEUE, else mergify)",
+        help="with --merge: merge queue (default: CI_QUEUE, else trunk)",
     )
     p.add_argument(
         "--priority",
@@ -1128,7 +892,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = p.parse_args(argv)
     try:
-        queue = _resolve_queue(args.queue)
+        _resolve_queue(args.queue)
     except ValueError as error:
         p.error(str(error))
     if args.every <= 0:
@@ -1146,7 +910,7 @@ def main(argv: list[str] | None = None) -> int:
             args.timeout = 1800
 
     trunk_token = None
-    if args.merge and queue == "trunk":
+    if args.merge:
         trunk_token = os.environ.get("TRUNK_API_TOKEN")
         if not trunk_token:
             print(
@@ -1179,7 +943,6 @@ def main(argv: list[str] | None = None) -> int:
             args.every,
             args.timeout,
             merge=args.merge,
-            queue=queue,
             priority=args.priority,
             trunk_token=trunk_token,
         )

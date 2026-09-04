@@ -309,7 +309,7 @@ Tools report state as a rendered document — a checklist, a comment, a summary
 line — and the state lives in a structured field, not in the document's
 vocabulary. Grepping the prose for `conflict|failed|dequeue|skipped` matches
 condition *names*, including satisfied ones and negated ones, so the filter fires
-on a perfectly healthy report: Mergify's queue comment lists
+on a perfectly healthy report: a queue status comment lists
 `- [ ] check-skipped=backend (pytest + pyright)` on a PR whose backend check
 **passed**, because the state is in the box, not in the word. Read the field that
 carries it — that same comment ships `{"version": 1, "state": "merged", ...}` as a
