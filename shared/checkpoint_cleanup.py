@@ -10,11 +10,10 @@ deletes a thread's older checkpoints, keeping the latest K, and cascades in one
 atomic statement to the writes those checkpoints owned and to any blob no
 surviving checkpoint references.
 
-Compaction boundaries are never trimmed: a checkpoint whose metadata carries
-`compact_boundary: true` (stamped by `mark_compact_boundary` when a compaction
-replaces the pre-compact history) is kept regardless of age, so each past
-compaction segment stays recoverable as one full snapshot — the user's
-"preserve information, bound storage" retention rule (Task #1125).
+Compaction boundaries participate in the same newest-K window as every other
+checkpoint. The `compact_boundary: true` metadata stamped during compaction is
+still useful to timeline segment reads while retained, but it does not bypass
+the per-thread storage bound.
 
 Safety invariant — full-snapshot channels only:
     This naive "keep the latest K, drop the rest" trim is correct ONLY because
@@ -65,15 +64,47 @@ class TrimCounts(NamedTuple):
 # Ordering: ROW_NUMBER() OVER (ORDER BY checkpoint_id DESC) ranks newest first,
 # matching how the PostgresSaver itself selects the latest checkpoint (UUIDv6
 # ids sort lexicographically by time). rn <= keep survives; rn > keep is doomed.
+#
+# Race guard: PostgresSaver may expose a new messages blob before its checkpoint
+# row. Trimming in that window could sweep the in-flight blob, or could delete
+# old rows while the current newest checkpoint still lacks its referenced blob.
+# A trim therefore proceeds only when the newest checkpoint's messages version
+# is committed and no higher messages counter is visible. A missing messages
+# version means that checkpoint has nothing to await.
 _TRIM_SQL = """
 WITH ranked AS (
-    SELECT checkpoint_id, checkpoint, metadata,
+    SELECT checkpoint_id, checkpoint,
            ROW_NUMBER() OVER (ORDER BY checkpoint_id DESC) AS rn
     FROM checkpoints
     WHERE thread_id = %(thread_id)s AND checkpoint_ns = %(ns)s
 ),
--- A compaction boundary (metadata->>'compact_boundary') is kept regardless of
--- age — each past compaction segment stays recoverable as one full snapshot.
+newest_messages AS (
+    SELECT checkpoint -> 'channel_versions' ->> 'messages' AS version
+    FROM ranked
+    WHERE rn = 1
+),
+trim_guard AS (
+    SELECT newest.version IS NULL OR (
+        EXISTS (
+            SELECT 1
+            FROM checkpoint_blobs b
+            WHERE b.thread_id = %(thread_id)s
+              AND b.checkpoint_ns = %(ns)s
+              AND b.channel = 'messages'
+              AND b.version = newest.version
+        )
+        AND NOT EXISTS (
+            SELECT 1
+            FROM checkpoint_blobs b
+            WHERE b.thread_id = %(thread_id)s
+              AND b.checkpoint_ns = %(ns)s
+              AND b.channel = 'messages'
+              AND split_part(b.version, '.', 1)::bigint
+                  > split_part(newest.version, '.', 1)::bigint
+        )
+    ) AS ready
+    FROM newest_messages newest
+),
 doomed AS (
     -- Oldest-first, capped at %(batch)s per statement: a thread can hold
     -- thousands of doomed checkpoints, and one unbounded DELETE is a long
@@ -82,7 +113,7 @@ doomed AS (
     -- the statement until a short batch comes back (see trim_checkpoints).
     SELECT checkpoint_id FROM ranked
     WHERE rn > %(keep)s
-      AND NOT COALESCE((metadata ->> 'compact_boundary')::boolean, false)
+      AND COALESCE((SELECT ready FROM trim_guard), false)
     ORDER BY checkpoint_id ASC
     LIMIT %(batch)s
 ),
@@ -90,7 +121,6 @@ kept_blob_refs AS (
     SELECT DISTINCT cv.key AS channel, cv.value AS version
     FROM ranked, jsonb_each_text(ranked.checkpoint -> 'channel_versions') AS cv
     WHERE ranked.rn <= %(keep)s
-       OR COALESCE((ranked.metadata ->> 'compact_boundary')::boolean, false)
 ),
 del_checkpoints AS (
     DELETE FROM checkpoints
@@ -107,6 +137,7 @@ del_writes AS (
 del_blobs AS (
     DELETE FROM checkpoint_blobs b
     WHERE b.thread_id = %(thread_id)s AND b.checkpoint_ns = %(ns)s
+      AND COALESCE((SELECT ready FROM trim_guard), false)
       AND NOT EXISTS (
           SELECT 1 FROM kept_blob_refs k
           WHERE k.channel = b.channel AND k.version = b.version
@@ -129,10 +160,10 @@ async def mark_compact_boundary(
     """Stamp the thread's newest checkpoint as a compaction boundary (idempotent).
 
     A compaction freezes the pre-compact history into a summary; the newest
-    pre-compact checkpoint is the full-snapshot record of that segment. Stamping
-    it makes every later trim keep it (see `_TRIM_SQL`), so each past compaction
-    segment stays recoverable — the user's retention rule (Task #1125). Called by
-    the agent-side compact paths right before the keep=1 trim; failure-tolerant
+    pre-compact checkpoint is the full-snapshot record of that segment. The
+    stamp lets timeline readers identify that segment while the checkpoint is
+    retained; it ages out normally once outside the keep window. Called by the
+    agent-side compact paths right before the keep=1 trim; failure-tolerant
     callers, since a missed stamp only loses segment traceability, never
     recoverability (the summary survives regardless).
     """
@@ -214,9 +245,8 @@ async def trim_checkpoints(
     Cascades in short atomic statements (`batch` doomed checkpoints each): the
     dropped checkpoints' writes go with them, and any blob no surviving
     checkpoint references is removed. The latest checkpoint is always kept
-    (keep >= 1), so the next resume reads intact state. Compaction-boundary
-    checkpoints (metadata `compact_boundary: true`) are kept regardless of age
-    — see the module docstring.
+    (keep >= 1), so the next resume reads intact state. Compaction boundaries
+    age out like every other checkpoint outside the newest-`keep` window.
 
     Returns the per-table delete counts.
     """

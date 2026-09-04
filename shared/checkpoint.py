@@ -6,12 +6,12 @@ id. Gateway cold-load read paths share this single deserialized view of
 `list[BaseMessage]`; this is the one place that opens the store and pulls
 them out.
 
-Compaction replaces the live messages channel, but `checkpoint_cleanup`
-retains every pre-compaction checkpoint marked `compact_boundary`. Because
-each retained checkpoint stores a full messages snapshot,
-`load_checkpoint_messages_full` losslessly stitches the segments: it removes
-only the repeated SystemMessage at a join, retaining compaction summaries and
-framework session notes as part of the conversation.
+Compaction replaces the live messages channel. While a checkpoint marked
+`compact_boundary` remains inside the retention window, each such full message
+snapshot lets `load_checkpoint_messages_full` stitch the retained segments: it
+removes only the repeated SystemMessage at a join, retaining compaction
+summaries and framework session notes as part of the conversation. Old
+boundaries age out like any checkpoint once they leave that window.
 
 Cold-load tolerance: these reads run on page-mount / ops-query paths, not on
 the live-streaming path. A read can coincide with an in-flight commit; the

@@ -5,10 +5,8 @@ The runtime guards the maintenance daemon needs and that are easy to regress:
   - blocking passes beat only after completion and permanently wedge on timeout;
   - a failed pass still waits a full interval before retrying, so a transient
     DB error does not become a tight hot-loop against Postgres;
-  - the hourly pass ALWAYS runs the rollup + Rule B reaper + blob vacuum
-    (the PG events-archive slices were removed with the task #1281/#1823
-    cleanup), and Rule A rides its own fast loop again (both were collateral
-    of the #1197 cutover).
+  - the hourly pass ALWAYS runs the rollup + blob vacuum, while uniform
+    checkpoint pruning rides its own unconditional fast loop.
 
 All driven directly (no DB): `_run_maintenance` / `_maintenance_with_liveness` are
 monkeypatched, so these are pure asyncio-loop tests.
@@ -19,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import time
 from collections.abc import Callable
+from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
@@ -192,8 +191,6 @@ def _instrument_maintenance_slices(
     """Replace every slice `_run_maintenance` can invoke with a recorder. The
     fake results are the shapes the pass's logging branches read (empty/zero so
     nothing logs)."""
-    from types import SimpleNamespace
-
     rec = {
         "rollup": _CallRecorder(
             SimpleNamespace(start_day=None, end_day=None, metrics_rows=0, tokens_rows=0)
@@ -201,13 +198,11 @@ def _instrument_maintenance_slices(
         "replay": _CallRecorder(
             SimpleNamespace(days_replayed=[], days_failed=[], metrics_rows=0, tokens_rows=0)
         ),
-        "reap": _CallRecorder(SimpleNamespace(agents=0, checkpoints=0, writes=0, blobs=0)),
         "vacuum": _CallRecorder(SimpleNamespace(ran=False, summary=lambda: "")),
         "emit_sizes": _CallRecorder(None),
     }
     monkeypatch.setattr(daemon, "compute_rollup", rec["rollup"])
     monkeypatch.setattr(daemon, "replay_gap_days", rec["replay"])
-    monkeypatch.setattr(daemon, "reap_stale_checkpoints", rec["reap"])
     monkeypatch.setattr(daemon, "run_blob_vacuum", rec["vacuum"])
     monkeypatch.setattr(daemon, "emit_checkpoint_table_sizes", rec["emit_sizes"])
     return rec
@@ -215,12 +210,8 @@ def _instrument_maintenance_slices(
 
 def test_maintenance_pass_runs_unconditional_slices(monkeypatch: pytest.MonkeyPatch) -> None:
     """The hourly pass always runs the cost-ledger rollup, the JSONL replay,
-    the Rule B checkpoint reaper, the size telemetry sample and the blob
-    vacuum — the events-archive slices were removed with the dropped table
-    (task #1281/#1823), and nothing may sit behind a flag: Loki only retains
-    168h, so a skipped rollup would silently stop writing the durable cost
-    ledger (and the reaper regression before it grew checkpoint_blobs
-    ~150MB/h unbounded, 2026-08-12)."""
+    the size telemetry sample, and blob vacuum. Checkpoint pruning belongs only
+    to the fast loop; the hourly pass must not run a second retention rule."""
     rec = _instrument_maintenance_slices(monkeypatch)
     progress = LoopProgress("dispatch", timeout_s=60.0)
     beats = 0
@@ -235,17 +226,25 @@ def test_maintenance_pass_runs_unconditional_slices(monkeypatch: pytest.MonkeyPa
 
     daemon._run_maintenance(cast(ConnectionPool, _FakePool()), progress)  # every slice faked
 
-    for name in ("rollup", "replay", "reap", "vacuum", "emit_sizes"):
+    for name in ("rollup", "replay", "vacuum", "emit_sizes"):
         assert rec[name].calls == 1, name
-    assert beats == 4
+    assert beats == 3
     assert progress.snapshot()["last_success_at"] is not None
 
 
-def test_checkpoint_trim_loop_runs_rule_a(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Rule A (overgrown live threads) rides its own fast loop again: #1197
-    removed the ops-rollup fast loop it shared, silently leaving
-    `trim_overgrown_threads` dead code. The loop runs unconditionally — it must
-    not be coupled to the events flag (same regression class as the reaper)."""
+def test_checkpoint_trim_pass_prunes_threads(monkeypatch: pytest.MonkeyPatch) -> None:
+    prune = _CallRecorder(SimpleNamespace(agents=0, checkpoints=0, writes=0, blobs=0))
+    monkeypatch.setattr(daemon, "prune_threads", prune)
+    progress = LoopProgress("trim", timeout_s=5.0)
+
+    daemon._run_checkpoint_trim(cast(ConnectionPool, _FAKE_POOL), progress)
+
+    assert prune.calls == 1
+    assert progress.snapshot()["last_success_at"] is not None
+
+
+def test_checkpoint_prune_loop_runs_on_fast_cadence(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Uniform pruning is unconditional and independent of the hourly loop."""
     ran: list[object] = []
 
     def fake_trim(pool: object, progress: LoopProgress) -> None:

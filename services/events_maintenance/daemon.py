@@ -6,20 +6,14 @@ loops:
 - Hourly loop (`AVA_EVENTS_MAINTENANCE_INTERVAL_SECONDS`, default 1h): recompute
   the day-grain rollup tables (`services.events_maintenance.rollup`), replay
   ledger gaps from the retained JSONL mirror
-  (`services.events_maintenance.jsonl_replay`), run the Rule B checkpoint
-  reaper (`services.events_maintenance.checkpoint_reaper`, Task #1057):
-  terminated / inactive agents' checkpoints are trimmed to keep=1 (the
-  PostgresSaver is append-only, so terminated threads grow without bound — the
-  2026-08-08 disk crisis: 21GB of blobs; the surviving latest checkpoint keeps
-  a resurrect fully restorable), the incremental blob VACUUM
+  (`services.events_maintenance.jsonl_replay`), run the incremental blob VACUUM
   (`services.events_maintenance.blob_vacuum`), and the hourly checkpoint
   size/row-count telemetry sample. The PG `events` archive slices
   (partitions / retention / table retention / index governance) were removed
   with the task #1281/#1823 cleanup — the table was dropped and its data lives
   in the Loki archive stream.
-- Fast loop (60s): Rule A — trim overgrown LIVE threads
-  (`services.events_maintenance.checkpoint_reaper.trim_overgrown_threads`,
-  keep=2 past 20), replacing the removed agent-side idle trim.
+- Fast loop (60s): prune every checkpoint thread above three rows to its newest
+  three (`services.events_maintenance.checkpoint_reaper.prune_threads`).
 - Resolution loop (`AVA_EVENTS_RESOLUTION_INTERVAL_SECONDS`, default 5m):
   refresh immutable-event class-resolution state and gauges from Loki.
 
@@ -74,10 +68,7 @@ from services.events_maintenance.blob_vacuum import (
     emit_checkpoint_table_sizes,
     run_blob_vacuum,
 )
-from services.events_maintenance.checkpoint_reaper import (
-    reap_stale_checkpoints,
-    trim_overgrown_threads,
-)
+from services.events_maintenance.checkpoint_reaper import prune_threads
 from services.events_maintenance.jsonl_replay import replay_gap_days
 from services.events_maintenance.resolution import run_resolution_slice
 from services.events_maintenance.rollup import compute_rollup
@@ -99,10 +90,8 @@ _log = logging.getLogger("services.events_maintenance.daemon")
 _PIDFILE = settings.services.events_maintenance_pidfile
 _LIVENESS_BEAT_STEP_S = 30.0
 
-# Cadence of the Rule A fast loop. #1197 removed the ops-rollup fast loop this
-# pass rode on, silently killing Rule A (trim_overgrown_threads became dead
-# code); it gets its own loop so a continuously working agent's checkpoints are
-# bounded within a minute of crossing the threshold.
+# The fixed per-thread checkpoint budget is enforced within one minute of a
+# thread crossing it, independent of agent liveness or the hourly event work.
 _CHECKPOINT_TRIM_INTERVAL_S = 60.0
 
 
@@ -113,12 +102,8 @@ class WedgedPassError(RuntimeError):
 def _run_maintenance(pool: ConnectionPool, progress: LoopProgress) -> None:
     """One hourly pass: the cost-ledger rollup (Loki → `agent_model_tokens_daily`
     — Loki only retains 168h, so skipping passes permanently loses days), the
-    JSONL gap replay, the Rule B checkpoint reaper (terminated / inactive
-    agents to keep=1), the hourly checkpoint size/row-count telemetry sample,
-    and the blob VACUUM — checkpoint_blobs growth is independent of the events
-    pipeline, and the reaper is the only thing that bounds it (gating the
-    daemon off, the 2026-08-12 design regression, let blobs grow ~150MB/h
-    unbounded). One `now` drives the time-based steps.
+    JSONL gap replay, the hourly checkpoint size/row-count telemetry sample,
+    and the blob VACUUM. One `now` drives the time-based steps.
     Logs what each step did; a no-op pass logs nothing."""
     now = datetime.now(tz=UTC)
     with pool.connection() as conn:
@@ -142,8 +127,6 @@ def _run_maintenance(pool: ConnectionPool, progress: LoopProgress) -> None:
             replay_result.metrics_rows,
             replay_result.tokens_rows,
         )
-    reaped = reap_stale_checkpoints(pool)
-    progress.beat()
     # Hourly checkpoint size/row-count sample: the gauge is also emitted after
     # each blob vacuum, but the vacuum only runs inside the 05:00-08:00
     # cluster-time window — emitting here on every pass keeps the series dense
@@ -158,36 +141,20 @@ def _run_maintenance(pool: ConnectionPool, progress: LoopProgress) -> None:
     progress.beat()
     if vacuum_result.ran:
         _log.info("[events-maintenance] blob vacuum: %s", vacuum_result.summary())
-    if reaped.agents:
-        _log.info(
-            "[events-maintenance] checkpoint reaper: %d stale agent(s), "
-            "%d checkpoints / %d writes / %d blobs",
-            reaped.agents,
-            reaped.checkpoints,
-            reaped.writes,
-            reaped.blobs,
-        )
     progress.mark_success()
 
 
 def _run_checkpoint_trim(pool: ConnectionPool, progress: LoopProgress) -> None:
-    """One fast checkpoint-trim pass: Rule A — trim active threads past
-    `_LIVE_TRIM_THRESHOLD` checkpoints down to `_LIVE_KEEP` (compaction
-    boundaries always kept). Replaces the removed agent-side idle trim, which
-    only fired when an agent actually idled; the service bounds every thread
-    regardless of liveness. Runs on the fast loop so a continuously working
-    agent's checkpoints are bounded within one loop interval."""
-    now = datetime.now(tz=UTC)
-    reaped = trim_overgrown_threads(pool)
-    if reaped.agents:
+    """Prune every checkpoint thread to newest-three on the fast loop."""
+    pruned = prune_threads(pool)
+    if pruned.agents:
         _log.info(
-            "[events-maintenance] checkpoint trim (fast): %d overgrown thread(s), "
-            "%d checkpoints / %d writes / %d blobs (t=%.0fs)",
-            reaped.agents,
-            reaped.checkpoints,
-            reaped.writes,
-            reaped.blobs,
-            now.timestamp(),
+            "[events-maintenance] checkpoint prune: %d thread(s), "
+            "%d checkpoints / %d writes / %d blobs",
+            pruned.agents,
+            pruned.checkpoints,
+            pruned.writes,
+            pruned.blobs,
         )
     progress.beat()
     progress.mark_success()
@@ -335,13 +302,13 @@ async def _dispatch_loop(pool: ConnectionPool, progress: LoopProgress) -> None:
 
 
 async def _checkpoint_trim_loop(pool: ConnectionPool, progress: LoopProgress) -> None:
-    """Rule A fast loop: trim overgrown live threads every
-    `_CHECKPOINT_TRIM_INTERVAL_S`. Runs unconditionally — the hourly pass only bounds stale
-    threads, and a continuously working agent would grow without bound between
-    hourly passes. Same failure posture as `_dispatch_loop`: a transient error
-    waits a full interval (the trim is idempotent and self-catching-up), a
-    schema/syntax error exits the daemon so the watchdog revives it after the
-    fix."""
+    """Prune all over-budget checkpoint threads every fast-loop interval.
+
+    The loop is unconditional and independent of agent liveness. It has the
+    same failure posture as `_dispatch_loop`: a transient error waits a full
+    interval (the prune is idempotent and self-catching-up), while a schema or
+    syntax error exits so the watchdog revives the daemon after the fix.
+    """
     _log.info(
         "[events-maintenance] checkpoint trim loop started, pid=%s, interval=%.0fs",
         os.getpid(),
