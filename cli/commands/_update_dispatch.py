@@ -220,7 +220,8 @@ def _post_cluster_rollout(*, origin: str | None, mode: str, force: bool, dry_run
         print("  ⚠ half-deployed state — replaying the rollout to reconcile installed code")
     if dry_run:
         print(
-            "  dry-run dispatched — PASS/FAIL see rollout log (`→ prepare dry-run: PASS|FAIL` line)."
+            "  dry-run dispatched — prepare-check PASS/FAIL and the informational estimate "
+            "are in the rollout log."
         )
         return 0
     print("  poll `ava cluster status` for the cluster to return.")

@@ -57,3 +57,6 @@ artifact recovery. The deeper recovery path remains PITR WAL replay (the
 2026-08-27 drill was green) plus nightly backups. The verified local artifact
 can be re-published manually when the detached publication cannot finish:
 `python -m services.backup --publish-offsite <artifact>`.
+
+The 2026-09-01 maintenance-duration admission ruling is superseded by
+[`../2026-09-04/maintenance-duration-gate-removal.md`](../2026-09-04/maintenance-duration-gate-removal.md).
