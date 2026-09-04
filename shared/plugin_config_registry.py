@@ -495,6 +495,7 @@ _FRAMEWORK_RANGE_VALIDATORS: dict[str, Callable[[object], str | None]] = {
     "gemini_cache_timeout_seconds": _range_validator(gt=0),
     "heartbeat_pause_max_seconds": _range_validator(gt=0),
     "llm_stream_inter_chunk_timeout_seconds": _range_validator(gt=0),
+    "llm_stream_total_timeout_seconds": _range_validator(gt=0),
     "llm_stream_ttft_timeout_seconds": _range_validator(gt=0),
     "memory_recall_filter_timeout_seconds": _range_validator(gt=0),
     "memory_recall_deadline_seconds": _range_validator(gt=0),

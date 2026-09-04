@@ -873,7 +873,7 @@ class TestTurnLoop:
 
         host, _, _ = wired({11: _Row(overlay={"llm_model": "model-for-11"})})
         # A stale entry as a long-ago turn would leave behind...
-        _PROGRESS[11] = _time.monotonic() - 99999.0
+        _PROGRESS[11] = [_time.monotonic() - 99999.0]
         await asyncio.wait_for(host.run_turn(11), 2)
         age = turn_progress_age_s(11)
         assert age is not None and age < 5.0, f"clock not reset, age={age}"

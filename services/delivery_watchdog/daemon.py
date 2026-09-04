@@ -1,6 +1,6 @@
-"""Delivery watchdog daemon — gateway-owned wake dispatcher + stale-pending alerter.
+"""Delivery watchdog daemon — gateway-owned wake dispatcher + recovery scanner.
 
-Four jobs on one fast tick (user-confirmed design, 2026-08-02 — see
+Five jobs on one fast tick (user-confirmed design, 2026-08-02 — see
 `delivery-dispatcher-design-2026-08-02.md`):
 
 1. **Wake dispatch** — every `AVA_DELIVERY_WATCHDOG_INTERVAL_SECONDS` (default
@@ -47,6 +47,11 @@ in-flight turn is normal — the claim's turn-end SELECT picks it up. Boot state
    and re-deliver ancient messages as fresh (Task #654). The reconcile-side
    cutoff (`agent/db.py::reconcile_claimed_inbounds`) applies the same
    threshold at boot, closing the resurrect race at the source.
+5. **Hosted-turn liveness recovery** — on the same watchdog tick, select hosted
+   running rows whose DB activity is older than the 2400s wedged-agent budget,
+   then confirm them against the agent-host's 15s Redis progress heartbeat
+   (60s TTL). Missing host heartbeats or stale per-turn marks trigger a
+   terminate-then-resurrect recovery with a 10-minute per-agent cooldown.
 
 Runs on the gateway, one per cluster. Kept alive via
 `services/healthchecks/delivery_watchdog.py` (the gateway watchdog).
@@ -67,8 +72,10 @@ from psycopg_pool import ConnectionPool
 
 import shared.db
 from services._pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
+from services.delivery_watchdog import turn_liveness
 from shared import telemetry
 from shared.config import settings
+from shared.config.service_read import current_field_values
 from shared.daemon_health import Liveness, health_port, start_health_server, stop_health_server
 from shared.daemon_shutdown import install_graceful_shutdown
 from shared.db_transaction import write_transaction
@@ -510,6 +517,11 @@ _DEDUP_GC_EVERY_TICKS = 120
 _CLAIMED_SWEEP_INTERVAL_S = 30.0
 
 
+def _hosted_turn_threshold_seconds() -> float:
+    """Read the runner-owned threshold from the gateway's current `.env` view."""
+    return float(current_field_values()["wedged_agent_inbound_age_seconds"])
+
+
 def _maybe_sweep_stale_claimed(
     pool: ConnectionPool,
     threshold_s: float,
@@ -555,15 +567,22 @@ async def _scan_loop(pool: ConnectionPool, liveness: Liveness) -> None:
     dispatch_threshold = settings.daemon.delivery_watchdog_dispatch_threshold_seconds
     alert_threshold = settings.daemon.delivery_watchdog_threshold_seconds
     stale_claimed_threshold = settings.daemon.delivery_watchdog_stale_claimed_threshold_seconds
+    # This alias belongs to the agent-runner config projection and is removed
+    # from the gateway process environment. Read the gateway-owned `.env`
+    # snapshot so an operator override is preserved at this authority boundary.
+    hosted_turn_threshold = _hosted_turn_threshold_seconds()
     _log.info(
         "[delivery] watchdog started, pid=%s, interval=%.1fs, dispatch_threshold=%.1fs, "
         "alert_threshold=%.0fs, stale_claimed_threshold=%.0fs, "
+        "hosted_turn_threshold=%.0fs, hosted_turn_cooldown=%.0fs, "
         "alert set table-backed (reload per tick)",
         os.getpid(),
         interval,
         dispatch_threshold,
         alert_threshold,
         stale_claimed_threshold,
+        hosted_turn_threshold,
+        turn_liveness.HOSTED_TURN_RECOVERY_COOLDOWN_S,
     )
     ticks = 0
     last_claimed_sweep = 0.0
@@ -603,6 +622,7 @@ async def _scan_loop(pool: ConnectionPool, liveness: Liveness) -> None:
             except Exception:
                 _log.exception("[delivery] alert-dedup persist/prune failed")
             _maybe_spawn_resurrects(pool, settings.daemon.delivery_watchdog_max_resurrect_per_tick)
+            await turn_liveness.scan_hosted_turn_liveness(pool, hosted_turn_threshold)
             last_claimed_sweep = _maybe_sweep_stale_claimed(
                 pool, stale_claimed_threshold, last_claimed_sweep
             )

@@ -81,6 +81,7 @@ class ModelTuning:
     claude_thinking_budget_tokens: int | None = None
     llm_retry_max_attempts: int | None = None
     llm_stream_ttft_timeout_seconds: float | None = None
+    llm_stream_total_timeout_seconds: float | None = None
     llm_stream_inter_chunk_timeout_seconds: float | None = None
     # -- prompt behavior --
     agent_communication_style: str | None = None
@@ -124,6 +125,9 @@ DEFAULT_TUNING = ModelTuning(
     claude_thinking_budget_tokens=0,  # 0 = leave extended thinking off
     llm_retry_max_attempts=6,
     llm_stream_ttft_timeout_seconds=30.0,
+    # Hard wall for one streaming attempt. Gap timeouts still catch silent
+    # providers sooner; this ceiling catches a response that drip-feeds forever.
+    llm_stream_total_timeout_seconds=3600.0,
     # 300, not 10: Claude Code (API_FORCE_IDLE_TIMEOUT, documented as a 5-minute
     # idle timeout) and Codex CLI (stream_idle_timeout_ms) independently ship 300
     # for this exact parameter. Long mid-stream silence is documented-normal, not

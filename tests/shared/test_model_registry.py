@@ -45,6 +45,16 @@ def test_default_tuning_is_fully_populated() -> None:
         assert getattr(DEFAULT_TUNING, f.name) is not None, f.name
 
 
+def test_stream_total_timeout_resolves_shared_floor_and_explicit_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings.lm, "llm_stream_total_timeout_seconds", None)
+    assert resolve_setting("llm_stream_total_timeout_seconds", model="deepseek-v4-pro") == 3600.0
+
+    monkeypatch.setattr(settings.lm, "llm_stream_total_timeout_seconds", 7200.0)
+    assert resolve_setting("llm_stream_total_timeout_seconds", model="deepseek-v4-pro") == 7200.0
+
+
 def test_sentinelized_config_fields_default_to_none() -> None:
     """Each per-model-defaultable settings field carries the None sentinel as
     its pydantic default — a real default there would read as an explicit user

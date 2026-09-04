@@ -49,11 +49,13 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import logging
 import os
 import signal
 import sys
 import time
+from collections.abc import Collection
 from pathlib import Path
 from typing import cast
 
@@ -62,7 +64,8 @@ from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from psycopg.rows import DictRow
 from psycopg_pool import AsyncConnectionPool
 
-from agent._turn_progress import turn_progress_age_s
+import shared.redis_client
+from agent._turn_progress import turn_progress_age_s, turn_progress_snapshot
 from services._pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 from services.agent_host.dispatcher import InboundWakeDispatcher, TurnScheduler
 from services.agent_host.host import (
@@ -89,6 +92,9 @@ _PIDFILE = settings.services.agent_host_pidfile
 # has to exceed the beat step.
 _LIVENESS_TIMEOUT_S = 60.0
 _LIVENESS_BEAT_STEP_S = 15.0
+# The gateway treats key presence as proof that this 15-second host loop still
+# runs. Four missed beats expire the proof without adding another probe process.
+_TURN_PROGRESS_HEARTBEAT_TTL_S = 60
 
 # The launcher redirects fd 1/2 straight at $AVA_HOME/logs/ava-agent-host.out.log
 # — no pty transcript cap, no loguru rotation, nothing owns the file but the
@@ -291,7 +297,34 @@ async def _watch_plugins_for_restart() -> None:
         return
 
 
-async def _beat_forever(liveness: Liveness, host: AgentHost) -> None:
+async def _publish_turn_progress_heartbeat(
+    machine: str,
+    active_agents: Collection[int],
+) -> None:
+    """Best-effort Redis snapshot for the gateway's out-of-process breaker."""
+    snapshots = {}
+    for agent_id in sorted(active_agents):
+        snapshot = turn_progress_snapshot(agent_id)
+        if snapshot is not None:
+            snapshots[str(agent_id)] = snapshot
+    try:
+        await shared.redis_client.get_async_redis().set(
+            f"host_turn_progress:{machine}",
+            json.dumps(snapshots, separators=(",", ":")),
+            ex=_TURN_PROGRESS_HEARTBEAT_TTL_S,
+        )
+    except Exception:
+        # This signal is defensive evidence, not ownership authority. A Redis
+        # outage must not stop lease renewal or make /healthz stale.
+        _log.debug("[agent-host] turn-progress heartbeat publish failed", exc_info=True)
+
+
+async def _beat_forever(
+    liveness: Liveness,
+    host: AgentHost,
+    scheduler: TurnScheduler,
+    machine: str,
+) -> None:
     """Keep /healthz fresh while the host waits for wakes.
 
     The host's main loop is the dispatcher's subscription, which blocks for as
@@ -301,6 +334,7 @@ async def _beat_forever(liveness: Liveness, host: AgentHost) -> None:
     while True:
         await host.renew_ownership()
         liveness.beat()
+        await _publish_turn_progress_heartbeat(machine, scheduler.active_agents)
         await asyncio.sleep(_LIVENESS_BEAT_STEP_S)
 
 
@@ -585,13 +619,16 @@ async def run() -> None:
     land_cluster_extensions()
     load_process_extensions()
 
-    workload_pool = build_shared_pool(settings.data_plane.db_url)
-    control_pool = build_control_pool(settings.data_plane.db_url)
+    workload_pool, control_pool = (
+        build_shared_pool(settings.data_plane.db_url),
+        build_control_pool(settings.data_plane.db_url),
+    )
     liveness = Liveness(_LIVENESS_TIMEOUT_S)
     beat: asyncio.Task[None] | None = None
     health = None
     try:
-        await _open_host_pools(workload_pool, control_pool, machine_name())
+        local_machine = machine_name()
+        await _open_host_pools(workload_pool, control_pool, local_machine)
         checkpointer = await _build_checkpointer(workload_pool)
         # build_graph runs the builtin-plugin load and builds the dynamic state
         # class — process-global, and the reason there is ONE graph here rather
@@ -602,14 +639,15 @@ async def run() -> None:
             control_pool=control_pool,
             checkpointer=checkpointer,
             graph=graph,
+            machine=local_machine,
         )
-        beat = asyncio.create_task(_beat_forever(liveness, host))
-        settled = await settle_stale_running_rows(control_pool, machine_name())
-        logger.info("hosted boot settle: settled {n} stale running row(s)", n=len(settled))
         # The clock reader is injected, not imported by the scheduler: it owns no
         # pool, and this keeps the uncancellable-turn report able to say how long
         # a stuck agent has really been silent.
         scheduler = TurnScheduler(host.run_turn, activity_clock=host.last_active_at)
+        beat = asyncio.create_task(_beat_forever(liveness, host, scheduler, local_machine))
+        settled = await settle_stale_running_rows(control_pool, local_machine)
+        logger.info("hosted boot settle: settled {n} stale running row(s)", n=len(settled))
 
         health = await start_health_server(
             "agent_host",
