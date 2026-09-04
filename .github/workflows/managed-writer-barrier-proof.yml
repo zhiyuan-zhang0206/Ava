@@ -2,11 +2,17 @@ name: Managed writer evidence proof
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - 'shared/managed_writer_barrier.py'
+      - 'shared/managed_writer_publication.py'
+      - 'tests/shared/test_managed_writer_barrier.py'
+      - 'tests/shared/test_managed_writer_publication.py'
+      - 'tests/shared/test_publication_admission.py'
+      - '.github/workflows/managed-writer-barrier-proof.yml'
 permissions:
   contents: read
 jobs:
   prove-operation-evidence:
-    if: github.head_ref == 'ava-5344-managed-writer-barrier'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     env:
@@ -22,4 +28,5 @@ jobs:
           version: 0.10.2
       - uses: ./.github/actions/install-pg-redis
       - run: uv sync --frozen
-      - run: uv run pytest tests/shared/test_managed_writer_barrier.py -q
+      - run: uv run pytest tests/shared/test_managed_writer_barrier.py tests/shared/test_managed_writer_publication.py tests/shared/test_publication_admission.py -q
+      - run: uv run pyright shared/managed_writer_barrier.py shared/managed_writer_publication.py tests/shared/test_managed_writer_barrier.py tests/shared/test_managed_writer_publication.py tests/shared/test_publication_admission.py
