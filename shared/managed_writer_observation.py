@@ -15,11 +15,18 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 from uuid import UUID, uuid4
+from xml.parsers.expat import ExpatError
 
 import psutil
 from pydantic import AwareDatetime, Field, ValidationError
 
 from shared.managed_writer_barrier import Digest, EvidenceModel, ManagedUnit
+from shared.native_job_observation import (
+    LauncherObservation,
+    NativeReadUnavailableError,
+    observe_crontab,
+    observe_launchd,
+)
 from shared.session_record import pid_starttime_ticks
 
 
@@ -121,6 +128,33 @@ class ChallengeRequest(EvidenceModel):
     challenge: UUID
 
 
+def observe_launcher(
+    expected: ExpectedLauncher, unit: ExpectedUnitWriters, valid_until: datetime
+) -> LauncherObservation:
+    try:
+        match expected.kind:
+            case "launchd":
+                return observe_launchd(
+                    expected.name,
+                    expected.definition_digest,
+                    Path(unit.home),
+                    unit.artifact_digest,
+                    valid_until,
+                )
+            case "crontab":
+                return observe_crontab(
+                    expected.name,
+                    expected.definition_digest,
+                    Path(unit.home),
+                    unit.artifact_digest,
+                    valid_until,
+                )
+            case "schtasks":
+                return LauncherObservation()
+    except (NativeReadUnavailableError, OSError, ValueError, TypeError, ExpatError):
+        return LauncherObservation()
+
+
 class UnitObserver:
     """One prepared request challenge; no registration, readiness or lifecycle API."""
 
@@ -160,6 +194,9 @@ class UnitObserver:
             "sessions": [observe_session(home, item) for item in self.expected.sessions],
             # Platform producer/observer integration is mandatory; never treat
             # an unimplemented job lookup or empty input as complete closure.
-            "launchers": ["unknown" for _item in self.expected.launchers],
+            "launchers": [
+                observe_launcher(item, self.expected, self.challenge.valid_until).model_dump()
+                for item in self.expected.launchers
+            ],
             "closure": "unknown",
         }
