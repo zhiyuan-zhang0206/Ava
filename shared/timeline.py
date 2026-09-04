@@ -31,8 +31,6 @@ from pydantic import BaseModel
 
 from shared.config import now_timestamp, settings
 from shared.db import InboundRow
-from shared.lm.content import ContentBlock, content_blocks
-from shared.lm.reasoning import to_canonical_reasoning
 from shared.message_kwargs import (
     AvaMessageKwargs,
     AvaMsgType,
@@ -172,6 +170,8 @@ def _inbound_text(content: str | list[str | dict[str, Any]]) -> str:
     thumbnails from ava_image_urls instead). Any non-text block a future writer
     adds is ignored here rather than str()-d in.
     """
+    from shared.lm.content import content_blocks
+
     if isinstance(content, str):
         return content
     if isinstance(content, list):
@@ -402,6 +402,8 @@ def _inbound_item(
 
 def _attach_images(content: str | list[str | dict[str, Any]]) -> list[str] | None:
     """Data-URI image urls from attach ``image_url`` blocks; other media ignored."""
+    from shared.lm.content import content_blocks
+
     if not isinstance(content, list):
         return None
     urls: list[str] = []
@@ -431,6 +433,8 @@ def _attach_image_captions(content: str | list[str | dict[str, Any]]) -> list[st
     indistinguishable), so this returns None and the frontend falls back to the
     legacy all-text-then-all-images layout.
     """
+    from shared.lm.content import content_blocks
+
     if not isinstance(content, list):
         return None
     text_blocks = [
@@ -565,8 +569,8 @@ def tail_window(items: list[TimelineItem], limit: int) -> tuple[list[TimelineIte
 
 
 def _fold_addl_reasoning_into_content(
-    content: str | list[str | ContentBlock], additional_kwargs: dict[str, Any]
-) -> str | list[str | ContentBlock]:
+    content: str | list[Any], additional_kwargs: dict[str, Any]
+) -> str | list[Any]:
     """Fold `additional_kwargs["reasoning_content"]` into content as a
     canonical thinking block, so the render loop below never branches on
     provider style.
@@ -575,14 +579,17 @@ def _fold_addl_reasoning_into_content(
     (ReasoningContentChatModel produces canonical blocks — no double-render).
     Non-string / empty / whitespace-only reasoning is silently skipped.
     """
+    from shared.lm.content import ContentBlock
+
     addl_reasoning = additional_kwargs.get("reasoning_content")
     if not (addl_reasoning and isinstance(addl_reasoning, str) and addl_reasoning.strip()):
         return content
     if isinstance(content, list):
-        if any(isinstance(b, dict) and b.get("type") == "thinking" for b in content):
+        typed_content = cast("list[str | ContentBlock]", content)
+        if any(isinstance(b, dict) and b.get("type") == "thinking" for b in typed_content):
             return content
         head: ContentBlock = {"type": "thinking", "thinking": addl_reasoning, "index": 0}
-        return [head, *content]
+        return [head, *typed_content]
     if isinstance(content, str):
         return [
             {"type": "thinking", "thinking": addl_reasoning, "index": 0},
@@ -632,7 +639,7 @@ def _ai_message_items(
     # old timelines still show "Thought for X". New turns always write the map.
     legacy_reasoning_ms = kwargs.get("ava_reasoning_ms") if reasoning_ms_by_block is None else None
     code_ms_by_block = kwargs.get("ava_code_ms_by_block")
-    from shared.lm.reasoning import extract_reasoning_tokens
+    from shared.lm.reasoning import extract_reasoning_tokens, to_canonical_reasoning
 
     reasoning_tokens = (
         extract_reasoning_tokens(msg.usage_metadata, content=message_content(msg)) or None
@@ -694,7 +701,7 @@ def _chat_item(msg_idx: int, block_idx: int, payload: str, created_at: str) -> T
 
 
 def _content_block_item(
-    block: str | ContentBlock,
+    block: str | dict[str, Any],
     pos: int,
     msg_idx: int,
     msg: AIMessage,
@@ -714,18 +721,19 @@ def _content_block_item(
     instead); ``reasoning_attached`` is the caller's flag advanced by one when
     this block claimed the turn-level reasoning_tokens.
     """
+    from shared.lm.content import ContentBlock
+
     if not isinstance(block, dict):
         return None, None, reasoning_attached
-    btype = block.get("type")
-    if btype not in ("text", "thinking"):
+    if (typed_block := cast(ContentBlock, block)).get("type") not in ("text", "thinking"):
         # tool_use (anthropic) / function_call (openai) and any other block
         # type: code is rendered from msg.tool_calls below.
         return None, None, reasoning_attached
-    block_idx = block.get("index", pos)
-    if btype == "thinking":
+    block_idx = typed_block.get("index", pos)
+    if typed_block.get("type") == "thinking":
         # signature_delta block: type=thinking but only carries signature
         # (server verifier), no thinking text — skip render.
-        t = block.get("thinking")
+        t = typed_block.get("thinking")
         if not (isinstance(t, str) and t):
             return None, block_idx, reasoning_attached
         if reasoning_ms_by_block is not None:
@@ -745,7 +753,7 @@ def _content_block_item(
         )
         return item, block_idx, True
     # text
-    t = block.get("text")
+    t = typed_block.get("text")
     if not (isinstance(t, str) and t):
         return None, block_idx, reasoning_attached
     return _chat_item(msg_idx, block_idx, t, next_ts(msg)), block_idx, reasoning_attached
