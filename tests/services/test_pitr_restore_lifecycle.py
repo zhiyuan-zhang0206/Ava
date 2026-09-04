@@ -4,7 +4,7 @@ import json
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
-from subprocess import TimeoutExpired
+from typing import Any
 
 import psutil
 import pytest
@@ -16,10 +16,13 @@ from services.pitr.checksums import CRC32C, ObjectChecksum
 from services.pitr.object_store import RemoteObjectAck
 from services.pitr.restore_manifest import RestoreObject
 from services.pitr.restore_postgres import (
+    IsolatedPostgresRestoreExecutor,
+    SandboxPostgresIdentity,
     _append_recovery_config,
     _live_identity,
     _run,
-    _start_sandbox_postgres,
+    _spawn_sandbox_postgres,
+    _wait_for_sandbox_identity,
     _write_sandbox_config,
 )
 from services.pitr.restore_proof import (
@@ -395,100 +398,151 @@ def test_run_error_tail_is_bounded() -> None:
     assert message.endswith("x" * 500)
 
 
-def test_start_sandbox_postgres_passes_log_and_timeout_bound(
+def test_spawn_sandbox_postgres_runs_postgres_directly_in_our_group(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
-    """Activation #8/#9 hang: pg_ctl -w start without -l leaves the sandbox
-    postmaster holding pg_ctl's stdout pipe, so a capture_output wait never
-    sees EOF (pg_ctl had already printed "server started"). The start must
-    pass -l (postmaster output -> log file, pg_ctl exits on readiness) and an
-    explicit -t bound mirroring the executor timeout."""
-    calls: list[list[str]] = []
+    """Activation #10 surfaced the group tripwire: pg_ctl setsid()s the
+    postmaster into its own session, but the restore design reaps a whole run
+    by signalling the worker's process group. The sandbox must be exec'd
+    directly so it stays in our group, with output in the run-root log."""
+    captured: dict[str, Any] = {}
+
+    class FakePopen:
+        def __init__(self, argv: list[str], **kwargs: Any) -> None:
+            captured["argv"] = argv
+            captured["kwargs"] = kwargs
+
+    monkeypatch.setattr(restore_postgres.subprocess, "Popen", FakePopen)
     log_path = tmp_path / "sandbox-postgres.log"
-    pgdata = tmp_path / "data"
 
-    def fake_run(command: list[str], *, timeout: float) -> None:
-        calls.append(command)
-        assert timeout == 900
-
-    monkeypatch.setattr(restore_postgres, "_run", fake_run)
-    _start_sandbox_postgres(
-        Path("/pg_ctl"),
-        pgdata,
-        "-c config_file=/x/sandbox-postgresql.conf",
+    _spawn_sandbox_postgres(
+        Path("/pg/postgres"),
+        tmp_path / "data",
+        tmp_path / "sandbox-postgresql.conf",
         log_path,
-        900,
     )
 
-    assert calls == [
-        [
-            "/pg_ctl",
-            "-D",
-            str(pgdata),
-            "-l",
-            str(log_path),
-            "-t",
-            "900",
-            "-o",
-            "-c config_file=/x/sandbox-postgresql.conf",
-            "-w",
-            "start",
-        ]
+    assert captured["argv"] == [
+        "/pg/postgres",
+        "-D",
+        str(tmp_path / "data"),
+        "-c",
+        f"config_file={tmp_path / 'sandbox-postgresql.conf'}",
     ]
+    kwargs = captured["kwargs"]
+    assert kwargs["stdin"] is restore_postgres.subprocess.DEVNULL
+    assert isinstance(kwargs["stdout"], int)
+    assert isinstance(kwargs["stderr"], int)
 
 
-def test_start_sandbox_postgres_attaches_log_tail_on_failure(
+def test_wait_for_sandbox_identity_raises_crash_with_log_tail(
+    tmp_path: Path,
+) -> None:
+    class DeadProcess:
+        returncode = 1
+
+        def poll(self) -> int:
+            return 1
+
+    log_path = tmp_path / "sandbox-postgres.log"
+    log_path.write_text("FATAL:  could not open file\n")
+    with pytest.raises(RestoreProofError, match=r"exited 1.*could not open file"):
+        _wait_for_sandbox_identity(
+            DeadProcess(),  # type: ignore[arg-type]
+            tmp_path / "data",
+            log_path,
+            30,
+        )
+
+
+def test_wait_for_sandbox_identity_returns_once_pid_file_exists(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
-    """pg_ctl -l points at the log for the real cause (its stderr only says
-    "Examine the log output"); the run root is cleaned on failure, so the
-    tail must ride with the raised error."""
+    class LiveProcess:
+        def poll(self) -> None:
+            return None
 
-    def fake_run(command: list[str], *, timeout: float) -> None:
-        raise RestoreProofError("restore command exited 1: pg_ctl: could not start server")
+    identity = SandboxPostgresIdentity(11, 1.0, 11, "/data")
 
-    monkeypatch.setattr(restore_postgres, "_run", fake_run)
-    log_path = tmp_path / "sandbox-postgres.log"
-    log_path.write_text(
-        "2026-09-03 LOG:  starting PostgreSQL\n"
-        '2026-09-03 FATAL:  lock file "postmaster.pid" already exists\n'
+    def fake_identity(_pgdata: Path) -> SandboxPostgresIdentity:
+        return identity
+
+    monkeypatch.setattr(restore_postgres, "_sandbox_identity", fake_identity)
+    (tmp_path / "data").mkdir()
+    (tmp_path / "data" / "postmaster.pid").write_text("123\n")
+
+    assert (
+        _wait_for_sandbox_identity(
+            LiveProcess(),  # type: ignore[arg-type]
+            tmp_path / "data",
+            tmp_path / "sandbox-postgres.log",
+            30,
+        )
+        is identity
     )
 
-    with pytest.raises(RestoreProofError, match="already exists"):
-        _start_sandbox_postgres(
-            Path("/pg_ctl"), tmp_path / "data", "-c config_file=/x", log_path, 900
-        )
 
+def test_wait_for_sandbox_identity_times_out(tmp_path: Path) -> None:
+    class LiveProcess:
+        def poll(self) -> None:
+            return None
 
-def test_start_sandbox_postgres_reports_timeout_with_log_tail(
-    tmp_path: Path, monkeypatch: MonkeyPatch
-) -> None:
-    def fake_run(command: list[str], *, timeout: float) -> None:
-        raise TimeoutExpired(command, timeout)
-
-    monkeypatch.setattr(restore_postgres, "_run", fake_run)
-    log_path = tmp_path / "sandbox-postgres.log"
-    log_path.write_text("recovery still in progress\n")
-
-    with pytest.raises(RestoreProofError, match="recovery still in progress"):
-        _start_sandbox_postgres(
-            Path("/pg_ctl"), tmp_path / "data", "-c config_file=/x", log_path, 900
-        )
-
-
-def test_start_sandbox_postgres_no_log_file_keeps_original_error(
-    tmp_path: Path, monkeypatch: MonkeyPatch
-) -> None:
-    def fake_run(command: list[str], *, timeout: float) -> None:
-        raise RestoreProofError("restore command exited 1: pg_ctl: boom")
-
-    monkeypatch.setattr(restore_postgres, "_run", fake_run)
-
-    with pytest.raises(RestoreProofError, match="boom"):
-        _start_sandbox_postgres(
-            Path("/pg_ctl"),
+    (tmp_path / "data").mkdir()
+    with pytest.raises(RestoreProofError, match="never wrote its pid file"):
+        _wait_for_sandbox_identity(
+            LiveProcess(),  # type: ignore[arg-type]
             tmp_path / "data",
-            "-c config_file=/x",
-            tmp_path / "absent.log",
-            900,
+            tmp_path / "sandbox-postgres.log",
+            0,
         )
+
+
+def test_wait_for_promotion_raises_on_postmaster_crash(tmp_path: Path) -> None:
+    """A sandbox that dies mid-recovery must fail fast with its log tail, not
+    poll connections until the 900 s deadline."""
+    executor = IsolatedPostgresRestoreExecutor(
+        live_db_url="postgresql://unused",
+        data_directory="/unused",
+        pg_ctl=Path("/pg/pg_ctl"),
+        pg_verifybackup=Path("/pg/pg_verifybackup"),
+        timeout_seconds=900,
+    )
+
+    class DeadProcess:
+        returncode = 6
+
+        def poll(self) -> int:
+            return 6
+
+    log_path = tmp_path / "sandbox-postgres.log"
+    log_path.write_text("replay stalled then died\n")
+    with pytest.raises(RestoreProofError, match=r"exited 6 before promotion.*stalled"):
+        executor._wait_for_promotion(
+            tmp_path / "socket",
+            54321,
+            _dummy_candidate(),
+            DeadProcess(),  # type: ignore[arg-type]
+            log_path,
+        )
+
+
+def _dummy_candidate() -> CandidateManifest:
+    return CandidateManifest(
+        1,
+        "20260904T000000Z",
+        False,
+        17,
+        "ava",
+        "42",
+        16 * 1024 * 1024,
+        1,
+        "0/1000000",
+        "0/2000000",
+        (WalRange(1, "0/1000000", "0/2000000"),),
+        BaseObject("base", "7", 1, "crc", "crc32c", "crc", "sha", 1, "key", "AVAPITRB1"),
+        "native",
+        "backup_manifest",
+        "base",
+        "7",
+        "migrations",
+    )
