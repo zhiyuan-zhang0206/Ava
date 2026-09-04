@@ -84,7 +84,6 @@ from shared.env_registry import health_port_env_aliases
 from shared.loop_health import LivenessGroup, LoopProgress  # noqa: F401  # pyright: ignore
 from shared.paths import ava_home, legacy_pid_path
 from shared.port_block import LEGACY_AVA_PORTS
-from shared.runtime_service_identity import normal_runtime_identity
 
 # Re-export trackers moved to loop_health after this module crossed the 800-line ceiling.
 
@@ -240,6 +239,12 @@ def _healthz_payload(
     refreshed without a restart — which makes a per-daemon `curl /healthz` the
     way to tell a daemon still holding pre-rollout code from one that restarted
     onto it."""
+    # Method-local: keeps session_record out of this module's import closure —
+    # the agent-runner self-update stops services in-process after checkout +
+    # uv sync, so the identity code must load from the just-pulled image, not
+    # the pre-pull one (PR #932 import-closure invariant).
+    from shared.runtime_service_identity import normal_runtime_identity
+
     payload: dict[str, object] = {
         "name": name,
         "pid": pid,
