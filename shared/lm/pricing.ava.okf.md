@@ -34,5 +34,6 @@ tags:
 
 - **DeepSeek reasoning tokens** count into output and bill at the merged output rate; `usage_metadata` reports them separately but the underlying rate is the same.
 - Providers reporting a cache hit through the OpenAI `prompt_tokens_details.cached_tokens` field reach `cache_read` with no per-vendor wiring — langchain-openai maps it, `tally_tokens` sums it, `quote()` prices it.
+- **Embeddings** are priced through the catalog like chat models, with `tok_out=0` and `cache_read=0`. `image_input` records the image-embedding rate for future multimodal use; today's memory-search driver embeds text only.
 
 - Key deps: [[lm.ava.okf.md]] (the provider overview this split out of)
