@@ -17,11 +17,31 @@ class TransportEncryptionUndeclared(RuntimeError):  # noqa: N818 — public exce
 
 def verify_transport_encryption(cluster_secret: str, bind_host: str) -> None:
     """Refuse an off-box secret listener without an encryption declaration."""
-    normalized_host = bind_host.strip().lower().removeprefix("[").removesuffix("]")
-    if not cluster_secret or normalized_host in _LOOPBACK_BIND_HOSTS:
+    if not _requires_transport_encryption_declaration(cluster_secret, bind_host):
         return
 
     from shared.config import settings
 
-    if settings.data_plane.transport_encryption not in TRANSPORT_ENCRYPTION_MODES:
+    verify_transport_encryption_declaration(
+        cluster_secret,
+        bind_host,
+        settings.data_plane.transport_encryption,
+    )
+
+
+def verify_transport_encryption_declaration(
+    cluster_secret: str,
+    bind_host: str,
+    declaration: str,
+) -> None:
+    """Verify an explicit projection without resolving ordinary Settings."""
+    if not _requires_transport_encryption_declaration(cluster_secret, bind_host):
+        return
+
+    if declaration not in TRANSPORT_ENCRYPTION_MODES:
         raise TransportEncryptionUndeclared
+
+
+def _requires_transport_encryption_declaration(cluster_secret: str, bind_host: str) -> bool:
+    normalized_host = bind_host.strip().lower().removeprefix("[").removesuffix("]")
+    return bool(cluster_secret) and normalized_host not in _LOOPBACK_BIND_HOSTS

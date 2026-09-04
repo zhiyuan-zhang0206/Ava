@@ -37,10 +37,12 @@ The actual ops daemon recognizes `--bootstrap-observation <private-context>`
 before normal imports. The restricted entry validates the complete prepared
 image, its loaded module origin, canonical home and registered machine/home,
 and the live old-schema rollout lease before binding. It consumes only the
-existing DB/secret/ops-port aliases pre-projected by its parent; it neither
-fetches gateway configuration nor reads an ordinary Settings singleton. Each
-challenge revalidates the operation. The normal daemon PID and unit registration
-paths are never invoked. Auth/bind posture remains the existing ops policy.
+existing DB/secret/ops-port/transport-encryption aliases pre-projected by its
+parent; it neither fetches gateway configuration nor reads an ordinary Settings
+singleton. A secret-bearing off-box observer fails before socket creation unless
+that explicit projection is `tls`, `mtls`, or `overlay`, matching the normal ops
+daemon contract. Each challenge revalidates the operation. The normal daemon PID
+and unit registration paths are never invoked.
 
 The current observer returns `closure: unknown` unconditionally: platform job
 observation, actual updater replacement and complete inventory production are

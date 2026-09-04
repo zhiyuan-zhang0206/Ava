@@ -8,14 +8,19 @@ import subprocess
 import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import TracebackType
+from typing import Self
+from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
 import psutil
 import pytest
 from pydantic import SecretStr, ValidationError
 
-from services.agent_ops.bootstrap import ObserverProjection
+from services.agent_ops import bootstrap
+from services.agent_ops.bootstrap import ObserverProjection, PreparedObservation
 from shared.daemon_http import start_daemon_http
+from shared.managed_writer_barrier import RolloutIdentity
 from shared.managed_writer_observation import (
     ExpectedProcess,
     ExpectedSession,
@@ -26,6 +31,93 @@ from shared.managed_writer_observation import (
     observe_session,
 )
 from shared.session_record import pid_starttime_ticks
+from shared.transport_encryption import TransportEncryptionUndeclared
+
+
+class _StoppedServer:
+    async def __aenter__(self) -> Self:
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        return None
+
+    async def serve_forever(self) -> None:
+        return None
+
+
+def _prepared_observation(tmp_path: Path) -> PreparedObservation:
+    now = datetime.now(UTC)
+    return PreparedObservation(
+        expected=ExpectedUnitWriters(
+            machine="test",
+            home=str(tmp_path.resolve()),
+            artifact_digest="a" * 64,
+            manifest_digest="b" * 64,
+            processes=(),
+            sessions=(),
+            launchers=(),
+        ),
+        operation=RolloutIdentity(holder="test", acquired_at=now, target_sha="c" * 40),
+        challenge=ObservationChallenge(challenge=uuid4(), valid_until=now + timedelta(minutes=1)),
+        schema_digest="d" * 64,
+    )
+
+
+def _projected_observer(mode: str | None) -> ObserverProjection:
+    environment = {
+        "AVA_DB_URL": "postgresql://projected.invalid/test",
+        "AVA_CLUSTER_SECRET": "test-cluster-secret",
+        "AVA_OPS_HEALTH_PORT": "18106",
+    }
+    if mode is not None:
+        environment["AVA_TRANSPORT_ENCRYPTION"] = mode
+    # This is the Settings-free entry's contract: exercise its raw child
+    # projection before ordinary Settings exists rather than mutating Settings.
+    with patch.dict("os.environ", environment, clear=True):
+        return ObserverProjection.from_environment()
+
+
+def _skip_validate_entry(_context: PreparedObservation, _projection: ObserverProjection) -> None:
+    return None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", (None, "", "none", "wireguard"))
+async def test_secret_bootstrap_observer_refuses_undeclared_off_box_bind(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str | None
+) -> None:
+    projection = _projected_observer(mode)
+    start = AsyncMock(return_value=_StoppedServer())
+    monkeypatch.setattr(bootstrap, "validate_entry", _skip_validate_entry)
+    monkeypatch.setattr(bootstrap, "start_daemon_http", start)
+
+    with pytest.raises(TransportEncryptionUndeclared):
+        await bootstrap.serve(_prepared_observation(tmp_path), projection)
+
+    start.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ("tls", "mtls", "overlay"))
+async def test_secret_bootstrap_observer_accepts_declared_encrypted_off_box_bind(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str
+) -> None:
+    projection = _projected_observer(mode)
+    start = AsyncMock(return_value=_StoppedServer())
+    monkeypatch.setattr(bootstrap, "validate_entry", _skip_validate_entry)
+    monkeypatch.setattr(bootstrap, "start_daemon_http", start)
+
+    await bootstrap.serve(_prepared_observation(tmp_path), projection)
+
+    assert projection.transport_encryption == mode
+    awaited = start.await_args
+    assert awaited is not None
+    assert awaited.kwargs["host"] == "0.0.0.0"  # noqa: S104 — asserted test value
 
 
 @pytest.mark.parametrize("url", ["", "  "])

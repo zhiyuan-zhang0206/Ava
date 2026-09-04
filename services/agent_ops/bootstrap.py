@@ -27,6 +27,7 @@ from shared.managed_writer_observation import (
     UnitObserver,
 )
 from shared.runtime_release import ReleaseRejectedError, VerifiedRelease, verify_release
+from shared.transport_encryption import verify_transport_encryption_declaration
 
 
 class PreparedObservation(EvidenceModel):
@@ -42,6 +43,7 @@ class ObserverProjection(EvidenceModel):
     db_url: SecretStr = Field(min_length=1)
     cluster_secret: SecretStr
     ops_port: int = Field(gt=0, le=65535)
+    transport_encryption: str = ""
 
     @field_validator("db_url")
     @classmethod
@@ -58,6 +60,7 @@ class ObserverProjection(EvidenceModel):
             db_url=SecretStr(os.environ["AVA_DB_URL"]),
             cluster_secret=SecretStr(os.environ["AVA_CLUSTER_SECRET"]),
             ops_port=int(os.environ["AVA_OPS_HEALTH_PORT"]),
+            transport_encryption=os.environ.get("AVA_TRANSPORT_ENCRYPTION", ""),
         )
 
 
@@ -153,8 +156,14 @@ async def serve(context: PreparedObservation, projection: ObserverProjection) ->
         return await observe_response(context, projection, observer, body)
 
     secret = projection.cluster_secret.get_secret_value()
+    bind_host = "0.0.0.0" if secret else "127.0.0.1"  # noqa: S104 — guarded below
+    verify_transport_encryption_declaration(
+        secret,
+        bind_host,
+        projection.transport_encryption,
+    )
     server = await start_daemon_http(
-        host="0.0.0.0" if secret else "127.0.0.1",  # noqa: S104 — existing authenticated ops bind policy
+        host=bind_host,
         port=projection.ops_port,
         auth_token=secret or None,
         health_response=lambda: (

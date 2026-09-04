@@ -1,16 +1,9 @@
 """Real UI self-restart through durable application and successor admission.
 
-Real UI self-restart through durable application and successor admission.
-
-A restart cycle completes on the observable outcome — agents.status returns to
-'idling' with a new PID — via either the restarter path (which also inserts a
-'restart_completed' marker) or the agent's self-respawn fallback (#1464: the
-restarter pass is gateway-health-gated and may defer under load). Where the
-restarter path itself is asserted (successor helper), the original command's
-applied/observed timestamps, the completion marker and a subsequent answered
-message on that same PID are all required. Hosted mode verifies its distinct
-acceptance marker and runnable pidless state; it must not borrow process
-completion language or manufacture an exit event.
+Process mode requires a new PID, one completion marker, the original command's
+applied/observed timestamps and a subsequent answered message on that same PID.
+Hosted mode verifies its distinct acceptance marker and runnable pidless state;
+it must not borrow process completion language or manufacture an exit event.
 """
 
 from __future__ import annotations
@@ -70,13 +63,10 @@ def test_self_restart_respawns_process_with_new_pid(e2e_env: E2EEnv, restarter_p
             row = cur.fetchone()
             if row:
                 last_status, last_pid = row
-        # #1464: the restarter pass is gateway-health-gated. When it defers
-        # (slow pass under CI load), the agent's own self-respawn fallback
-        # completes the restart cycle — new pid, row back to idling — without
-        # inserting the restarter's 'restart_completed' row. Both paths are a
-        # complete restart cycle; require only the observable outcome.
+        # New PID alone cannot discharge the durable command or prove completion.
         if (
-            last_status == AgentStatus.IDLING.value
+            last_completed
+            and last_status == AgentStatus.IDLING.value
             and last_pid is not None
             and last_pid != first_pid
         ):

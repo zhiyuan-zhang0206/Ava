@@ -97,6 +97,7 @@ def main() -> None:  # noqa: PLR0915 — one bounded CI process/DB lifetime with
             "AVA_DB_URL": make_conninfo(base_url, options=f"-csearch_path={namespace}"),
             "AVA_CLUSTER_SECRET": token,
             "AVA_OPS_HEALTH_PORT": str(port),
+            "AVA_TRANSPORT_ENCRYPTION": "overlay",
             "AVA_GATEWAY_URL": "http://127.0.0.1:1",
             "AVA_MACHINE_SERVE_GATEWAY": "false",
             "AVA_MACHINE_SERVE_AGENT_RUNNER": "true",
@@ -256,6 +257,7 @@ def main() -> None:  # noqa: PLR0915 — one bounded CI process/DB lifetime with
                             "expiredOperationRefused": True,
                             "noOrdinaryPidEffects": True,
                             "lockWaitDeadline": True,
+                            "transportEncryptionDeclared": True,
                         }
                     )
                 )
