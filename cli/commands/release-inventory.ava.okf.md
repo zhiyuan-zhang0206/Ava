@@ -2,6 +2,7 @@
 type: doc
 title: Prepared unit inventory
 description: 'Verified-image producer binds the retained service roster plus residual session/launcher facts into an immutable receipt for managed-writer observation; read-only, no maintenance permission.'
+read_when: Connecting verified release preparation to managed-writer observation.
 tags:
 - runtime
 - release
@@ -18,6 +19,12 @@ changing facts refuse before writing a receipt.
 Session/definition reads are bounded and verify the opened inode against the
 path observation; replacement or growth during a read refuses the inventory.
 
+Native reads reuse `shared.native_job_observation`: launchd enumeration requires
+the current user's proven Aqua domain and two identical label snapshots. Raw
+plist bytes must match the label-addressed native reader before hashing. Cron
+uses the same bounded reader as observation. An unavailable domain is an error,
+never an empty inventory or positive shutdown result.
+
 The existing `ExpectedUnitWriters` model carries exact process/session/job
 identities. The full secret-free prepare receipt also carries the complete
 service roster and its gates. Its filename is the canonical payload SHA-256;
@@ -27,6 +34,16 @@ it already references their final digest. The receipt is outside the image,
 under the existing unit run directory, and is distinct from post-stop candidate
 collection. `revalidate_prepared_inventory` rereads actual sources and rejects
 omissions and changed unit/service/session/job facts.
+
+Restricted bootstrap resume uses the same real producer through
+`revalidate_bootstrap_inventory`. It requires the complete receipt's static
+unit, service-roster, and unresolved-coverage facts to remain exact. The sole
+`ava-ops` process/session identity may differ after independent native and image
+verification. The expected launcher set may only remain exact or be empty after
+the hop's accounted quiesce; the updater subsequently requires the raw crontab
+bytes to equal either the journaled original or its exact restricted-entry
+removal before restoring anything. These exceptions are not available to
+ordinary preparation or maintenance.
 
 This bounded producer does **not** cover non-session managed processes,
 predecessor orchestration, system/alternate-user jobs, or positive launcher

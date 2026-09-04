@@ -29,3 +29,22 @@ Writes are atomic, mode `0600`, and generation-CAS.
 
 The updater OS mutex keeps a permanent stable inode: release unlocks and closes
 without unlinking, and only genuine contention errors become a `False` result.
+
+The restricted immutable-ops updater leg retains its compensating inputs in a
+separate `$AVA_HOME/run/updater-bootstrap-recovery.json` envelope. Version 1
+binds the handoff generation, private request, context and complete inventory
+receipt hashes, the exact known cron definition, transition stage, and at most
+64 phase observations within a 256 KiB file budget. No database URL or secret
+is recorded. The separate envelope makes malformed bootstrap evidence auditable
+without making an unrelated malformed ordinary spawn marker permanently
+unrecoverable.
+
+An unfinished or malformed bootstrap envelope cannot be cleared, replaced by
+ordinary `begin`, or discarded by generic recovery. Only checked recovery under
+the existing updater mutex can reclaim the same generation after exact owner
+death. Initial bootstrap ownership is itself a CAS over the prepared predecessor
+generation, PID, and birth time; a replacement marker cannot be overwritten.
+A missing post-fork session record remains ambiguous, not permission to launch
+another process. Terminal restricted-B readback or verified-A recovery allows
+the normal generation-CAS clear of both files. This is not normal service
+activation.

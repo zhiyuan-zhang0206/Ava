@@ -27,6 +27,10 @@ on:
       - 'cli/commands/_release_inventory.py'
       - 'scripts/prepare_plugin_fixture.py'
       - 'scripts/prove_ops_bootstrap.py'
+      - 'scripts/prove_updater_bootstrap.py'
+      - 'cli/commands/_update_bootstrap.py'
+      - 'cli/commands/_update_agent_runner.py'
+      - 'shared/updater_handoff.py'
       - 'services/agent_ops/bootstrap.py'
       - 'services/agent_ops/daemon.py'
       - 'shared/managed_writer_observation.py'
@@ -110,7 +114,7 @@ jobs:
         run: uv run --locked --no-dev python scripts/prepare_otel_release.py "$RUNNER_TEMP/prepare/otel-input"
       - name: Type-check retained collector integration
         shell: bash
-        run: uv run --locked pyright scripts/prepare_otel_release.py scripts/prove_runtime_otel.py scripts/prove_runtime_plugins.py scripts/prove_release_inventory.py scripts/prepare_plugin_fixture.py shared/runtime_plugins.py shared/runtime_prepare.py shared/runtime_interpreter.py shared/paths.py cli/commands/_otel_collector.py cli/commands/_release_inventory.py
+        run: uv run --locked pyright scripts/prepare_otel_release.py scripts/prove_runtime_otel.py scripts/prove_runtime_plugins.py scripts/prove_release_inventory.py scripts/prepare_plugin_fixture.py scripts/prove_updater_bootstrap.py shared/runtime_plugins.py shared/runtime_prepare.py shared/runtime_interpreter.py shared/paths.py shared/updater_handoff.py cli/commands/_otel_collector.py cli/commands/_release_inventory.py cli/commands/_update_bootstrap.py cli/commands/_update_agent_runner.py
       - name: Real offline prepare, retained interpreter and failure isolation
         shell: bash
         run: |
@@ -121,6 +125,11 @@ jobs:
           test -s "$RUNNER_TEMP/prepare/proof.json"
           if [[ "$RUNNER_OS" == Linux ]]; then test -s "$RUNNER_TEMP/prepare/ops-bootstrap-proof.json"; fi
           if [[ "$RUNNER_OS" == Linux ]]; then test -s "$RUNNER_TEMP/prepare/inventory-proof.json"; fi
+          if [[ "$RUNNER_OS" == Linux ]]; then test -s "$RUNNER_TEMP/prepare/updater-bootstrap-proof.json"; fi
+      - name: Updater bootstrap regression cases
+        if: runner.os == 'Linux'
+        shell: bash
+        run: uv run --locked pytest tests/cli/test_update_bootstrap.py tests/cli/test_update_agent_runner.py tests/shared/test_updater_handoff.py tests/shared/test_posixproc_expected_signal.py -q
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: inactive-prepare-${{ matrix.os }}-${{ github.event.pull_request.head.sha }}
@@ -132,7 +141,14 @@ jobs:
             ${{ runner.temp }}/prepare/inventory-proof.json
             ${{ runner.temp }}/frontend-proof.json
             ${{ runner.temp }}/prepare/ops-bootstrap-proof.json
+            ${{ runner.temp }}/prepare/updater-bootstrap-proof.json
           if-no-files-found: error
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always() && runner.os == 'Linux'
+        with:
+          name: updater-hop-observations-${{ github.event.pull_request.head.sha }}
+          path: ${{ runner.temp }}/prepare/hop-observation-*.json
+          if-no-files-found: ignore
       - name: Stop isolated native PG
         if: always() && runner.os == 'Linux'
         shell: bash
