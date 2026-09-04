@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import socket
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -57,9 +58,224 @@ def _missing_environment_value(_alias: str) -> None:
     return None
 
 
+class _JSONResponse:
+    def __init__(self, payload: object) -> None:
+        self._payload = payload
+
+    def raise_for_status(self) -> None:
+        pass
+
+    def json(self) -> object:
+        return self._payload
+
+
 def test_tracker_script_exists() -> None:
     """The schedule's subprocess target must ship in the repository."""
     assert _SCRIPT.is_file()
+
+
+def test_fake_ip_range_boundaries() -> None:
+    tracker = _load_script()
+
+    assert tracker._is_fake_ip("198.18.0.0")
+    assert tracker._is_fake_ip("198.19.255.255")
+    assert not tracker._is_fake_ip("198.17.255.255")
+    assert not tracker._is_fake_ip("198.20.0.0")
+    assert not tracker._is_fake_ip("104.18.6.192")
+    assert not tracker._is_fake_ip("not-an-ip")
+
+
+def test_doh_real_ip_falls_back_to_second_endpoint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tracker = _load_script()
+    host = "api.example.com"
+    calls: list[str] = []
+
+    def get(
+        url: str,
+        *,
+        headers: dict[str, str],
+        params: dict[str, str],
+        timeout: int,
+    ) -> _JSONResponse:
+        assert headers == {"accept": "application/dns-json"}
+        assert params == {"name": host, "type": "A"}
+        assert timeout == 10
+        calls.append(url)
+        if url == tracker._DOH_ENDPOINTS[0]:
+            raise tracker.requests.exceptions.ConnectionError("primary unavailable")
+        return _JSONResponse({"Answer": [{"name": host, "type": 1, "data": "104.18.1.2"}]})
+
+    monkeypatch.setattr(tracker.requests, "get", get)
+
+    assert tracker._doh_real_ip(host) == "104.18.1.2"
+    assert calls == list(tracker._DOH_ENDPOINTS)
+
+
+def test_doh_real_ip_skips_fake_ip_answers(monkeypatch: pytest.MonkeyPatch) -> None:
+    tracker = _load_script()
+    host = "api.example.com"
+    calls: list[str] = []
+    addresses = iter(["198.18.0.5", "104.18.1.2"])
+
+    def get(
+        url: str,
+        *,
+        headers: dict[str, str],
+        params: dict[str, str],
+        timeout: int,
+    ) -> _JSONResponse:
+        del headers, params, timeout
+        calls.append(url)
+        return _JSONResponse({"Answer": [{"name": host, "type": 1, "data": next(addresses)}]})
+
+    monkeypatch.setattr(tracker.requests, "get", get)
+
+    assert tracker._doh_real_ip(host) == "104.18.1.2"
+    assert calls == list(tracker._DOH_ENDPOINTS)
+
+
+def test_doh_real_ip_raises_when_all_endpoints_fail(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tracker = _load_script()
+    calls: list[str] = []
+
+    def get(url: str, **_kwargs: object) -> _JSONResponse:
+        calls.append(url)
+        raise tracker.requests.exceptions.ConnectionError("unavailable")
+
+    monkeypatch.setattr(tracker.requests, "get", get)
+
+    with pytest.raises(ConnectionError, match="DoH"):
+        tracker._doh_real_ip("api.example.com")
+    assert calls == list(tracker._DOH_ENDPOINTS)
+
+
+def test_doh_real_ip_is_cached(monkeypatch: pytest.MonkeyPatch) -> None:
+    tracker = _load_script()
+    host = "api.example.com"
+    calls: list[str] = []
+
+    def get(url: str, **_kwargs: object) -> _JSONResponse:
+        calls.append(url)
+        return _JSONResponse({"Answer": [{"name": host, "type": 1, "data": "104.18.1.2"}]})
+
+    monkeypatch.setattr(tracker.requests, "get", get)
+
+    assert tracker._doh_real_ip(host) == "104.18.1.2"
+    assert tracker._doh_real_ip(host) == "104.18.1.2"
+    assert calls == [tracker._DOH_ENDPOINTS[0]]
+
+
+def test_session_for_host_healthy_resolution_returns_none(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tracker = _load_script()
+    host = "api.example.com"
+
+    def getaddrinfo(
+        _host: str, _port: int, *, type: socket.SocketKind
+    ) -> list[tuple[socket.AddressFamily, socket.SocketKind, int, str, tuple[str, int]]]:
+        del type
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("104.18.1.2", 443))]
+
+    monkeypatch.setattr(
+        tracker.socket,
+        "getaddrinfo",
+        getaddrinfo,
+    )
+
+    assert tracker._session_for_host(host) is None
+
+
+def test_session_for_host_fake_ip_returns_pinned_session(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tracker = _load_script()
+    host = "api.example.com"
+    pinned_ip = "140.82.113.3"
+
+    def getaddrinfo(
+        _host: str, _port: int, *, type: socket.SocketKind
+    ) -> list[tuple[socket.AddressFamily, socket.SocketKind, int, str, tuple[str, int]]]:
+        del type
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("198.18.2.25", 443))]
+
+    def doh_real_ip(_host: str) -> str:
+        return pinned_ip
+
+    monkeypatch.setattr(
+        tracker.socket,
+        "getaddrinfo",
+        getaddrinfo,
+    )
+    monkeypatch.setattr(tracker, "_doh_real_ip", doh_real_ip)
+
+    session = tracker._session_for_host(host)
+
+    assert isinstance(session, tracker.requests.Session)
+    adapter = session.get_adapter(f"https://{host}/")
+    assert isinstance(adapter, tracker.PinnedIPHTTPSAdapter)
+    assert adapter._pinned_ip == pinned_ip
+    prepared = tracker.requests.Request("GET", f"https://{host}/models").prepare()
+    pool = adapter.get_connection_with_tls_context(prepared, verify=True)
+    connection = pool._new_conn()
+    try:
+        assert connection._dns_host == pinned_ip
+        assert connection.host == host
+    finally:
+        connection.close()
+
+
+def test_fetch_json_uses_pinned_session_when_fake_ip(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tracker = _load_script()
+    url = "https://api.example.com/models"
+    headers = {"Authorization": "Bearer test-key"}
+    params = {"limit": 100}
+    payload: dict[str, object] = {"data": []}
+    session_calls: list[tuple[str, dict[str, object]]] = []
+    plain_calls: list[tuple[str, dict[str, object]]] = []
+
+    class Session:
+        def get(self, request_url: str, **kwargs: object) -> _JSONResponse:
+            session_calls.append((request_url, kwargs))
+            return _JSONResponse(payload)
+
+    session = Session()
+
+    def session_for_host(_host: str) -> Session:
+        return session
+
+    monkeypatch.setattr(tracker, "_session_for_host", session_for_host)
+
+    assert tracker.fetch_json(url, headers=headers, params=params) == payload
+    assert session_calls == [
+        (
+            url,
+            {
+                "headers": {"User-Agent": tracker._USER_AGENT, **headers},
+                "params": params,
+                "timeout": tracker._TIMEOUT_SECONDS,
+            },
+        )
+    ]
+
+    def plain_get(request_url: str, **kwargs: object) -> _JSONResponse:
+        plain_calls.append((request_url, kwargs))
+        return _JSONResponse(payload)
+
+    def no_session_for_host(_host: str) -> None:
+        return None
+
+    monkeypatch.setattr(tracker, "_session_for_host", no_session_for_host)
+    monkeypatch.setattr(tracker.requests, "get", plain_get)
+
+    assert tracker.fetch_json(url, headers=headers, params=params) == payload
+    assert plain_calls == session_calls
 
 
 def test_candidate_is_reported_once_then_recorded_in_state(

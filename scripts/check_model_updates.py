@@ -4,16 +4,23 @@
 from __future__ import annotations
 
 import argparse
+import ipaddress
 import json
 import os
 import re
+import socket
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, cast, override
+from urllib.parse import urlparse
 
 import requests
 from dotenv import dotenv_values
+from requests.adapters import HTTPAdapter
+from urllib3.connection import HTTPSConnection
+from urllib3.connectionpool import HTTPConnectionPool, HTTPSConnectionPool
+from urllib3.poolmanager import PoolManager
 
 from shared.lm.registry import MODELS
 from shared.paths import ava_home
@@ -21,6 +28,13 @@ from shared.runtime_config import read_env_aliases
 
 _USER_AGENT = "Ava model-update tracker"
 _TIMEOUT_SECONDS, _QWEN_PAGE_SIZE = 30, 100
+_DOH_TIMEOUT_SECONDS = 10
+_DOH_ENDPOINTS = (
+    "https://cloudflare-dns.com/dns-query",
+    "https://dns.google/resolve",
+)
+_FAKE_IP_NETWORK = ipaddress.ip_network("198.18.0.0/15")
+_doh_cache: dict[str, str] = {}
 _DATED_SNAPSHOT_SUFFIX = re.compile(r"-\d{4}(?:-\d{2}(?:-\d{2})?)?$|-\d{8}$")
 
 
@@ -104,6 +118,126 @@ def _response_object(value: object, name: str) -> dict[str, Any]:
     return value
 
 
+def _is_fake_ip(address: str) -> bool:
+    try:
+        return ipaddress.ip_address(address) in _FAKE_IP_NETWORK
+    except ValueError:
+        return False
+
+
+class _PinnedIPHTTPSConnection(HTTPSConnection):
+    """Keep the origin host independent from urllib3's DNS target."""
+
+    _origin_host: str
+
+    @property
+    def host(self) -> str:
+        return self._origin_host.rstrip(".")
+
+    @host.setter
+    def host(self, value: str) -> None:
+        self._origin_host = value
+        self._dns_host = value
+
+
+class _PinnedIPConnectionPool(HTTPSConnectionPool):
+    """Create connections that dial a pinned IP while retaining the origin host."""
+
+    ConnectionCls = cast(Any, _PinnedIPHTTPSConnection)
+    pinned_ip = ""
+
+    def _new_conn(self) -> Any:
+        connection = cast(_PinnedIPHTTPSConnection, super()._new_conn())
+        connection._dns_host = self.pinned_ip
+        return connection
+
+
+class PinnedIPHTTPSAdapter(HTTPAdapter):
+    """Dial the pinned IP while SNI, Host, and certificate checks use the real hostname."""
+
+    def __init__(self, pinned_ip: str, *args: Any, **kwargs: Any) -> None:
+        self._pinned_ip = pinned_ip
+        super().__init__(*args, **kwargs)
+
+    @override
+    def init_poolmanager(
+        self,
+        connections: int,
+        maxsize: int,
+        block: bool = False,
+        **pool_kwargs: Any,
+    ) -> None:
+        self.poolmanager = PoolManager(
+            num_pools=connections,
+            maxsize=maxsize,
+            block=block,
+            **pool_kwargs,
+        )
+        pinned_pool = type(
+            "_PinnedIPConnectionPool",
+            (_PinnedIPConnectionPool,),
+            {"pinned_ip": self._pinned_ip},
+        )
+        self.poolmanager.pool_classes_by_scheme = {
+            "http": HTTPConnectionPool,
+            "https": pinned_pool,
+        }
+
+
+def _first_real_doh_address(value: object, endpoint: str, host: str) -> str:
+    payload = _response_object(value, endpoint)
+    answers = payload["Answer"]
+    if not isinstance(answers, list):
+        raise TypeError(f"{endpoint} Answer must be a list")
+    for answer in answers:
+        if not isinstance(answer, dict):
+            raise TypeError(f"{endpoint} Answer entries must be objects")
+        address = answer.get("data")
+        if answer.get("type") in (1, "1") and isinstance(address, str) and not _is_fake_ip(address):
+            return address
+    raise ValueError(f"{endpoint} returned no usable A answer for {host}")
+
+
+def _doh_real_ip(host: str) -> str:
+    if host in _doh_cache:
+        return _doh_cache[host]
+    last_error: Exception | None = None
+    for endpoint in _DOH_ENDPOINTS:
+        try:
+            response = requests.get(
+                endpoint,
+                headers={"accept": "application/dns-json"},
+                params={"name": host, "type": "A"},
+                timeout=_DOH_TIMEOUT_SECONDS,
+            )
+            response.raise_for_status()
+            address = _first_real_doh_address(response.json(), endpoint, host)
+            _doh_cache[host] = address
+            return address
+        except Exception as exc:
+            last_error = exc
+    raise ConnectionError(f"DoH resolution failed for {host}") from last_error
+
+
+def _session_for_host(host: str) -> requests.Session | None:
+    try:
+        address_rows = socket.getaddrinfo(host, 443, type=socket.SOCK_STREAM)
+    except socket.gaierror:
+        return None
+    ipv4_addresses: list[str] = []
+    for family, _socket_type, _protocol, _canonical_name, socket_address in address_rows:
+        address = socket_address[0]
+        if family == socket.AF_INET and isinstance(address, str):
+            ipv4_addresses.append(address)
+    if not any(_is_fake_ip(address) for address in ipv4_addresses):
+        return None
+    # A detected fake IP must not fall back to the hijacked resolver if DoH fails.
+    pinned_ip = _doh_real_ip(host)
+    session = requests.Session()
+    session.mount(f"https://{host}/", PinnedIPHTTPSAdapter(pinned_ip))
+    return session
+
+
 def _id_rows(value: object, field: str, source: str) -> list[str]:
     if not isinstance(value, list):
         raise TypeError(f"{source} {field} must be a list")
@@ -123,7 +257,10 @@ def _id_rows(value: object, field: str, source: str) -> list[str]:
 def fetch_json(
     url: str, *, headers: dict[str, str], params: dict[str, str | int]
 ) -> dict[str, Any]:
-    response = requests.get(
+    host = urlparse(url).hostname or ""
+    session = _session_for_host(host)
+    requester = session.get if session is not None else requests.get
+    response = requester(
         url,
         headers={"User-Agent": _USER_AGENT, **headers},
         params=params,
