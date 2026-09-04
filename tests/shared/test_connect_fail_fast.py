@@ -159,10 +159,9 @@ def test_ava_db_connect_fails_fast(silent_peer_url: str, monkeypatch: pytest.Mon
 def _record_connect_kwargs(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     """Replace `psycopg.connect` with a spy that records its kwargs and raises.
 
-    Used for the two call sites whose *behaviour* is impractical to drive here (a
-    shell-session allocation needs an agent identity in agents_meta; the
-    self-respawn handler is an atexit closure over a live agent process). The
-    behaviour is already proven above — these pin that the site hands libpq the
+    Used for the shell-session call site whose *behaviour* is impractical to
+    drive here because allocation needs an agent identity in agents_meta. The
+    behaviour is already proven above — this pins that the site hands libpq the
     same constant, which is the whole mechanism.
     """
     seen: dict[str, Any] = {}

@@ -27,6 +27,8 @@ Settings" — bootstrap ordering constraints; SDK-internal raw env (e.g.
 LangChain consuming ANTHROPIC_API_KEY directly) are owned by Settings
 fields and do not need this exemption. No inline exemption mechanism —
 avoids scattered hard-to-audit `# noqa`-style escape hatches.
+The allowlist is self-auditing: an entry becomes an error as soon as its file
+no longer contains a raw-environment violation that needs suppressing.
 
 ### Rule 2: Test code
 
@@ -110,21 +112,14 @@ _ALLOWED_FILES = frozenset(
         "ava/watcher.py",  # _spawn() bootstrap code uses os.environ.get in a string literal for the child process bootstrap
         "ava/_boot.py",  # _try_establish_from_env() reads os.environ["AVA_AGENT_ID"] as a lazy fallback; the env key is the only channel for child processes (shell sessions, watchers) to discover their parent agent
         "ava/_attach.py",  # attach() reads the one-shot AVA_EXEC_REQUEST_FILE child-protocol marker at call time; it is not Settings config and only an exec child receives it
-        "shared/telemetry_otlp.py",  # _enabled() reads the same one-shot AVA_EXEC_REQUEST_FILE child-protocol marker at call time; boot authority makes Settings unsuitable and the marker is not runtime config
         "shared/observability.py",  # endpoint_override_is_explicit must distinguish operator-set observability URLs from Settings' identical loopback defaults; Settings preserves the value but not whether it was explicit
-        "ava/_mcp_remote.py",
         "shared/turn_identity.py",  # effective_agent_id() reads the ambient AVA_AGENT_ID as the outermost identity fallback (the same per-process identity channel as ava/_boot.py / ava/_mcp_remote.py); the turn contextvar layers above it and Settings models neither  # _current_agent_id() reads the ambient AVA_AGENT_ID to stamp MCP daemon envelopes; the key is the process identity channel, not Settings-managed, and importing ava.self here is circular (moved from ava/mcps.py, 2026-08-13 #1229)
         "services/computer/mcp_wrapper.py",  # _agent_id() reads the ambient AVA_AGENT_ID to stamp computer-mcp requests; same identity channel, not Settings-managed
         "agent/_process_boot.py",  # boot sets os.environ["AVA_AGENT_ID"] so child processes inherit the agent identity; the env forward must run before child spawn and cannot route through Settings (the same forward agent/loop.py previously owned)
         "agent/loop.py",  # run() pops the per-agent config-overlay / birth-config env vars ($AVA_AGENT_CONFIG_OVERLAY / $AVA_AGENT_BIRTH_CONFIG) before spawning children; argv is world-readable via ps (issue #974) and the payloads are per-agent launch secrets, not Settings fields
         "agent/exec_child.py",  # the exec child reads its per-launch protocol env (AVA_EXEC_REQUEST_FILE / AVA_EXEC_RESULT_FILE, one-shot spawn handoff) and pops the re-emitted per-agent overlay maps before child spawn — the same child-env handoff class as agent/loop.py's pop
         "agent/graph/_exec_subprocess.py",  # _build_child_env copies the LIVE parent env and layers the exec protocol vars on top — a whole-environment child handoff (same class as shared/session_env.py / ops/agent_launch.py); Settings cannot enumerate non-modeled keys and the dict must reflect the parent env
-        "agent/db.py",  # register_self_respawn copies the full os.environ so the respawned agent process inherits the identical launch env (venv/PATH); a whole-environment child handoff cannot be enumerated as Settings fields
-        "agent/mcp_daemon.py",  # spawn() clears AVA_AGENT_ID from subprocess env to prevent launched-child misidentification; a whole-environment child handoff cannot be enumerated as Settings fields
         "shared/lm/provider_api.py",  # plugin keys are not Settings fields; require_key reads the live process env for the bootstrap plugin-secrets channel on split runners, the same class as child-env handoff entries
-        "ava/_gateway_client.py",  # _agent_jitter_seconds() reads AVA_AGENT_ID (per-process agent identity set by agent/loop.py) for deterministic per-agent retry de-phasing; Settings is a module-load singleton with no per-agent identity field
-        "agent/graph/_build.py",  # _retry_phase_jitter() reads AVA_AGENT_ID (per-process agent identity set by agent/loop.py) for deterministic per-agent LLM-retry de-phasing; Settings is a module-load singleton with no per-agent identity field
-        "shared/resilience.py",  # _agent_phase() reads AVA_AGENT_ID (per-process agent identity set by agent/loop.py) for deterministic per-process retry de-phasing; Settings is a module-load singleton with no per-agent identity field (same as agent/graph/_build.py)
         "scripts/migrate_skill_identity.py",  # standalone R2-B migration tool: must target an arbitrary AVA_HOME (--ava-home overrides) and build a psql subprocess env at call time; importing shared.config would freeze the settings singleton to the process's own home at import and drag the whole config stack into a script that must run against foreign / fresh homes
         "scripts/guard_editable_venv.py",  # dependency-free pre-uv preflight must inspect inherited VIRTUAL_ENV before a project environment can be trusted or Settings can import
     }
@@ -179,13 +174,17 @@ def _is_test_file(rel_path: str) -> bool:
 
 
 def _scan_file(
-    path: Path, rel_path: str, managed_envs: frozenset[str]
+    path: Path,
+    rel_path: str,
+    managed_envs: frozenset[str],
+    *,
+    honor_exemptions: bool = True,
 ) -> list[tuple[int, str, str]]:
     """Return error list [(lineno, line_stripped, error_kind), ...].
 
     error_kind = "naked-env" (Rule 1) | "setenv-managed" (Rule 2).
     """
-    if rel_path in _ALLOWED_FILES or rel_path in _GRANDFATHERED:
+    if honor_exemptions and (rel_path in _ALLOWED_FILES or rel_path in _GRANDFATHERED):
         return []
     is_test = _is_test_file(rel_path)
     violations: list[tuple[int, str, str]] = []
@@ -216,6 +215,21 @@ def _scan_file(
     return violations
 
 
+def _unused_file_exemptions() -> list[str]:
+    """Return exemptions that no longer suppress a raw-environment violation."""
+    unused: list[str] = []
+    for rel_path in sorted(_ALLOWED_FILES | _GRANDFATHERED):
+        path = _REPO_ROOT / rel_path
+        violations = (
+            _scan_file(path, rel_path, frozenset(), honor_exemptions=False)
+            if path.is_file()
+            else []
+        )
+        if not any(kind == "naked-env" for _, _, kind in violations):
+            unused.append(rel_path)
+    return unused
+
+
 def _iter_py_files(roots: list[Path]) -> list[Path]:
     files: list[Path] = []
     for root in roots:
@@ -237,7 +251,10 @@ def main(argv: list[str] | None = None) -> int:
     py_files = _iter_py_files(targets)
     managed_envs = _settings_managed_aliases()
 
-    total_violations = 0
+    unused_exemptions = _unused_file_exemptions()
+    for rel_path in unused_exemptions:
+        print(f"{rel_path}: unused raw-environment exemption -> remove it from the allowlist")
+    total_violations = len(unused_exemptions)
     for path in sorted(py_files):
         try:
             rel = path.relative_to(_REPO_ROOT).as_posix()
