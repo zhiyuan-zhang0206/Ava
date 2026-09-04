@@ -194,6 +194,7 @@ def test_lease_zombie_pass_skipped_within_grace_window(
     monkeypatch.setattr(respawn_mod, "_reap_local_dead_boot_phase_agents", lambda *_a: [])  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(respawn_mod, "_reap_local_unclaimed_idling", lambda *_a: [])  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(respawn_mod, "_revive_local_dead_running_idling", lambda *_a: [])  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("ops.resource_birth.resume_births", lambda *_a: [])  # pyright: ignore[reportUnknownArgumentType]
 
     def _collect(*_args: object, **_kwargs: object) -> list[int]:
         calls.append(_kwargs)
@@ -218,6 +219,7 @@ def test_lease_zombie_pass_runs_after_grace_expires(
     monkeypatch.setattr(respawn_mod, "_reap_local_dead_boot_phase_agents", lambda *_a: [])  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(respawn_mod, "_reap_local_unclaimed_idling", lambda *_a: [])  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(respawn_mod, "_revive_local_dead_running_idling", lambda *_a: [])  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("ops.resource_birth.resume_births", lambda *_a: [])  # pyright: ignore[reportUnknownArgumentType]
 
     def _collect(*_args: object, **_kwargs: object) -> list[int]:
         calls.append(_kwargs)
@@ -241,6 +243,7 @@ def test_lease_zombie_grace_defaults_to_no_skip(monkeypatch: pytest.MonkeyPatch)
     monkeypatch.setattr(respawn_mod, "_reap_local_dead_boot_phase_agents", lambda *_a: [])  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(respawn_mod, "_reap_local_unclaimed_idling", lambda *_a: [])  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(respawn_mod, "_revive_local_dead_running_idling", lambda *_a: [])  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("ops.resource_birth.resume_births", lambda *_a: [])  # pyright: ignore[reportUnknownArgumentType]
 
     def _collect(*_args: object, **_kwargs: object) -> list[int]:
         calls.append(_kwargs)
@@ -267,6 +270,7 @@ def test_reap_corpses_defers_revival_until_the_host_is_serving(
     from shared import start_serving
 
     cleanup: list[str] = []
+    births: list[int] = []
     revived: list[int] = []
     start_serving.clear_serving()
 
@@ -285,6 +289,10 @@ def test_reap_corpses_defers_revival_until_the_host_is_serving(
         revived.append(42)
         return [42]
 
+    def _resume(_pool: ConnectionPool, _local_machine: str, _limit: int) -> list[int]:
+        births.append(41)
+        return [41]
+
     monkeypatch.setattr(
         respawn_mod,
         "_reap_local_unclaimed_idling",
@@ -296,6 +304,7 @@ def test_reap_corpses_defers_revival_until_the_host_is_serving(
         _reap_boot_phase,
     )
     monkeypatch.setattr(respawn_mod, "_collect_local_lease_zombies", _collect_zombies)
+    monkeypatch.setattr("ops.resource_birth.resume_births", _resume)
     monkeypatch.setattr(
         respawn_mod,
         "_revive_local_dead_running_idling",
@@ -305,10 +314,12 @@ def test_reap_corpses_defers_revival_until_the_host_is_serving(
 
     assert controller._reap_corpses("test-machine") is False
     assert cleanup == ["unclaimed", "boot-phase"]
+    assert births == []
     assert revived == []
 
     generation = start_serving.begin_start()
     assert start_serving.mark_serving(generation) is True
 
     assert controller._reap_corpses("test-machine") is True
+    assert births == [41]
     assert revived == [42]

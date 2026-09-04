@@ -942,6 +942,35 @@ COMMENT ON TABLE deployment_state IS
 COMMENT ON COLUMN deployment_state.managed_writer_evidence IS
     'Versioned operation-bound managed-writer closure evidence; NULL is unknown, never permission.';
 
+-- Runtime admission must serialize with rollout writers, but agent processes
+-- dial as ava_runner and must not receive UPDATE on deployment_state. This
+-- fixed security-definer operation grants only the row lock; callers still
+-- read the publication columns through their ordinary SELECT privilege.
+CREATE OR REPLACE FUNCTION public.lock_runtime_publication_admission()
+RETURNS void
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = pg_catalog
+AS $function$
+    SELECT NULL::void
+    FROM public.deployment_state
+    WHERE id = 1
+    FOR UPDATE
+$function$;
+
+REVOKE ALL ON FUNCTION public.lock_runtime_publication_admission() FROM PUBLIC;
+
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ava_runner') THEN
+        GRANT EXECUTE ON FUNCTION public.lock_runtime_publication_admission() TO ava_runner;
+    END IF;
+END
+$$;
+
+COMMENT ON FUNCTION public.lock_runtime_publication_admission() IS
+    'Take the deployment publication row lock for least-privilege runtime admission without granting rollout writes.';
+
 -- ─────────────── host_deploy_state (R1 — Task #1021) ───────────────
 -- Host-level deploy posture + updater lease, one row per machine (replaces the
 -- cluster_paused file, updating.flag, session probing and updater-log-mtime
