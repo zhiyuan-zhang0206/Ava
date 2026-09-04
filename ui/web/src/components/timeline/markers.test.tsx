@@ -9,7 +9,7 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { EphemeralSystemMarker } from "./markers";
+import { EphemeralSystemMarker, MarkerBody } from "./markers";
 
 // This repo's convention: explicit cleanup (no vitest globals auto-cleanup).
 afterEach(() => {
@@ -17,6 +17,11 @@ afterEach(() => {
 });
 
 describe("marker data-testid hooks (Task #1018)", () => {
+  it("marker payload bodies use the 13px readability floor", () => {
+    const { container } = render(<MarkerBody payload="detail" />);
+    expect(container.querySelector("pre")?.className).toContain("text-[13px]");
+  });
+
   it("unrecognized alarm renders data-testid=marker-unrecognized", () => {
     render(<EphemeralSystemMarker source={null} payload="future_kind_not_adapted" />);
     expect(screen.getByTestId("marker-unrecognized")).toBeTruthy();

@@ -44,7 +44,9 @@ describe("clampTimelineRatio", () => {
 
 describe("timelineMaxWidthCss", () => {
   it("renders <ratio>vw against the cap for the default ratio", () => {
-    expect(timelineMaxWidthCss(0.4)).toBe(`min(40vw, ${TIMELINE_MAX_CAP_PX}px)`);
+    expect(timelineMaxWidthCss(TIMELINE_WIDTH_RATIO_DEFAULT)).toBe(
+      `min(60vw, ${TIMELINE_MAX_CAP_PX}px)`,
+    );
   });
 
   it("scales the viewport fraction with the ratio", () => {
@@ -56,6 +58,6 @@ describe("timelineMaxWidthCss", () => {
   });
 
   it("falls back to the default ratio for a missing value", () => {
-    expect(timelineMaxWidthCss(undefined)).toBe(`min(40vw, ${TIMELINE_MAX_CAP_PX}px)`);
+    expect(timelineMaxWidthCss(undefined)).toBe(`min(60vw, ${TIMELINE_MAX_CAP_PX}px)`);
   });
 });

@@ -1,5 +1,5 @@
 // Timeline content-column max width — a DB-backed user setting
-// (display.timeline_width_ratio, a fraction of the viewport, default 0.4).
+// (display.timeline_width_ratio, a fraction of the viewport, default 0.6).
 //
 // Task #714 capped the column at a fixed max-w-3xl (768px); Task #715 makes
 // the cap user-adjustable: the stored value is a RATIO of the viewport
@@ -15,7 +15,7 @@
 // ceiling still allows ~1.67x their comfort width). On a 1920px screen the
 // slider's 0.2–0.8 range maps to 384–1280px; ratios above 0.667 are capped.
 
-export const TIMELINE_WIDTH_RATIO_DEFAULT = 0.4;
+export const TIMELINE_WIDTH_RATIO_DEFAULT = 0.6;
 export const TIMELINE_WIDTH_RATIO_MIN = 0.2;
 export const TIMELINE_WIDTH_RATIO_MAX = 0.8;
 export const TIMELINE_MAX_CAP_PX = 1280;

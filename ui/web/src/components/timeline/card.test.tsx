@@ -14,7 +14,13 @@ import { describe, expect, it } from "vitest";
 import { render } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
-import { CardHeader, MessageCard, messageCardConfig, type CardConfig } from "./card";
+import {
+  CardHeader,
+  HEADER_CLS,
+  MessageCard,
+  messageCardConfig,
+  type CardConfig,
+} from "./card";
 import type { BackendTimelineItem } from "@/lib/types";
 
 // ---------------------------------------------------------------------------
@@ -77,31 +83,37 @@ describe("messageCardConfig", () => {
     const cfg = messageCardConfig(item("agent_reasoning"));
     expect(cfg!.rich).toBe("reasoning");
     expect(cfg!.fixedDefault).toBe(true);
+    expect(cfg!.border).toContain("slate");
   });
 
-  it("agent_code → rich=code", () => {
+  it("normal code, output, prompt, and attachment cards use quiet neutral frames", () => {
     const cfg = messageCardConfig(item("agent_code"));
     expect(cfg!.rich).toBe("code");
-  });
+    expect(cfg!.border).toBe("border-border/80");
+    expect(cfg!.bg).toBe("bg-card");
 
-  it("attach → paperclip card, open by default", () => {
-    const cfg = messageCardConfig(item("attach"));
-    expect(cfg).not.toBeNull();
-    expect(cfg!.icon?.displayName).toBe("Paperclip");
-    expect(cfg!.titleKey).toBe("timeline.attachedFiles");
-    expect(cfg!.fixedDefault).toBe(true);
-    expect(cfg!.headerTs).toBe(true);
-  });
+    const output = messageCardConfig(item("code_output"));
+    expect(output!.rich).toBe("output");
+    expect(output!.border).toBe("border-border/80");
+    expect(output!.bg).toBe("bg-card");
 
-  it("code_output → rich=output", () => {
-    const cfg = messageCardConfig(item("code_output"));
-    expect(cfg!.rich).toBe("output");
+    const prompt = messageCardConfig(item("system_prompt"));
+    expect(prompt!.border).toBe("border-border/60");
+
+    const attach = messageCardConfig(item("attach"));
+    expect(attach!.icon?.displayName).toBe("Paperclip");
+    expect(attach!.titleKey).toBe("timeline.attachedFiles");
+    expect(attach!.border).toBe("border-border/80");
+    expect(attach!.bg).toBe("bg-card");
+    expect(attach!.fixedDefault).toBe(true);
+    expect(attach!.headerTs).toBe(true);
   });
 
   it("agent_chat → no rich, title='Ava ▸'", () => {
     const cfg = messageCardConfig(item("agent_chat"));
     expect(cfg!.rich).toBeNull();
     expect(cfg!.title).toBe("Ava ▸");
+    expect(cfg!.quietHeader).toBe(true);
   });
 
   it("agent_chat partial → title includes '(streaming…)'", () => {
@@ -118,12 +130,14 @@ describe("messageCardConfig", () => {
     const cfg = messageCardConfig(item("inbound_chat", { source: "user" }));
     expect(cfg!.title).toBe("Human");
     expect(cfg!.border).toContain("gray");
+    expect(cfg!.quietHeader).toBe(true);
   });
 
   it("inbound_chat source=agent:42 → Agent 42, violet border", () => {
     const cfg = messageCardConfig(item("inbound_chat", { source: "agent:42" }));
     expect(cfg!.title).toBe("Agent 42");
     expect(cfg!.border).toContain("violet");
+    expect(cfg!.quietHeader).toBe(false);
   });
 
   it("inbound_chat ui:page → Human", () => {
@@ -139,14 +153,14 @@ describe("messageCardConfig", () => {
     expect(cfg!.border).toContain("sky");
   });
 
-  it("inbound_compact → differentiated labels, sky border", () => {
+  it("inbound_compact → differentiated labels, neutral frame", () => {
     const cfgSummary = messageCardConfig(item("inbound_compact_summary"));
     expect(cfgSummary!.title).toBe("Compact summary");
-    expect(cfgSummary!.border).toContain("sky");
+    expect(cfgSummary!.border).toBe("border-border/60");
 
     const cfgRequest = messageCardConfig(item("inbound_compact_request"));
     expect(cfgRequest!.title).toBe("Compact request");
-    expect(cfgRequest!.border).toContain("sky");
+    expect(cfgRequest!.border).toBe("border-border/60");
   });
 
   it("system_marker lifecycle_terminate → Terminated, rose border", () => {
@@ -169,7 +183,20 @@ describe("messageCardConfig", () => {
     for (const src of ["sdk_hint", "agent_id", "context", "heartbeat", "security"]) {
       const cfg = messageCardConfig(item("system_marker", { source: src }));
       expect(cfg!.title).toBe("Note");
+      expect(cfg!.border).toBe("border-border/60");
+      expect(cfg!.bg).toBe("bg-muted/30");
     }
+  });
+});
+
+describe("timeline header typography", () => {
+  it("uses readable sans metadata without opacity stacking", () => {
+    expect(HEADER_CLS).toContain("text-xs");
+    expect(HEADER_CLS).toContain("font-sans");
+    expect(HEADER_CLS).toContain("font-medium");
+    expect(HEADER_CLS).toContain("text-muted-foreground");
+    expect(HEADER_CLS).not.toContain("font-mono");
+    expect(HEADER_CLS).not.toContain("text-muted-foreground/");
   });
 });
 
@@ -186,6 +213,7 @@ describe("MessageCard", () => {
     bg: "bg-red-50",
     fixedDefault: true,
     headerTs: false,
+    quietHeader: false,
   };
 
   it("renders children inside colored frame", () => {
@@ -256,6 +284,17 @@ describe("CardHeader", () => {
       <CardHeader item={baseItem} config={cfg} expanded={true} onToggle={noop} />,
     );
     expect(container.textContent).toContain("Ava ▸");
+  });
+
+  it("uses quiet compact chrome and a far-right timestamp for primary messages", () => {
+    const cfg = messageCardConfig(baseItem)!;
+    const { container } = renderWithQuery(
+      <CardHeader item={baseItem} config={cfg} expanded={true} onToggle={noop} />,
+    );
+    const button = container.querySelector("button")!;
+    expect(button.className).toContain("py-1");
+    expect(button.className).toContain("justify-between");
+    expect(container.querySelector(".ml-auto")?.className).toContain("ml-auto");
   });
 
   it("collapsed state → aria-expanded=false, data-expanded=false, no title (no hover tooltip)", () => {

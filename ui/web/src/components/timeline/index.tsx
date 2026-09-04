@@ -210,7 +210,7 @@ function CompactHistoryDivider({ rank }: { readonly rank: number }) {
       data-testid="compact-history-divider"
       data-segment-rank={rank}
       aria-live="off"
-      className={cn("items-center gap-2 py-1 text-[11px] text-muted-foreground/70", FLEX)}
+      className={cn("items-center gap-2 py-1 text-xs text-muted-foreground", FLEX)}
     >
       <span aria-hidden="true" className={cn("h-px bg-border/60", FLEX_1)} />
       <span aria-hidden="true" className="shrink-0">↑</span>
@@ -296,6 +296,14 @@ export function TimelineView({
   // A ResizeObserver re-measures on those height changes. Initial true =
   // button hidden until the user scrolls away.
   const [atBottom, setAtBottom] = useState(true);
+  const [unseenItemCount, setUnseenItemCount] = useState(0);
+  const [previousItemsLength, setPreviousItemsLength] = useState(items.length);
+  if (previousItemsLength !== items.length) {
+    setPreviousItemsLength(items.length);
+    if (!atBottom && items.length > previousItemsLength) {
+      setUnseenItemCount((count) => count + items.length - previousItemsLength);
+    }
+  }
 
   // Pointer-aware sticky thresholds: touch keeps the wide bounce-tolerant
   // bottom zone; mouse/trackpad gets a tight one so a small scroll-up to
@@ -332,16 +340,16 @@ export function TimelineView({
   const measureAtBottom = useCallback(() => {
     const viewport = viewportRef.current;
     if (!viewport) return;
-    setAtBottom(
-      isAtBottom(
-        {
-          scrollTop: viewport.scrollTop,
-          scrollHeight: viewport.scrollHeight,
-          clientHeight: viewport.clientHeight,
-        },
-        stickyThresholds,
-      ),
+    const measuredAtBottom = isAtBottom(
+      {
+        scrollTop: viewport.scrollTop,
+        scrollHeight: viewport.scrollHeight,
+        clientHeight: viewport.clientHeight,
+      },
+      stickyThresholds,
     );
+    setAtBottom(measuredAtBottom);
+    if (measuredAtBottom) setUnseenItemCount(0);
   }, [stickyThresholds]);
 
   // Pin the viewport to the bottom and report the performed scroll back to
@@ -556,6 +564,7 @@ export function TimelineView({
     // immediately rather than waiting for the post-scroll measurement.
     // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional one-shot sync on force-scroll
     setAtBottom(true);
+    setUnseenItemCount(0);
     const viewport =
       viewportRef.current ??
       wrapperRef.current?.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]') ??
@@ -729,12 +738,8 @@ export function TimelineView({
   // of turn ids (the first item_id, stable across streaming commits) → the
   // user's PINNED expanded state: a click always flips the turn's current
   // rendered state and pins it, so the choice survives default changes — most
-  // importantly the streaming last turn auto-collapsing when the agent goes
-  // idle. Absence from the map means "follow the detailsMode-driven default".
-  // (A plain "membership = opposite of the default" set, as `overrides` uses,
-  // cannot represent the last turn: its default itself flips when turnActive
-  // ends, so an override stored against the old default meant the wrong thing
-  // afterwards and clicks appeared dead — #510.)
+  // importantly when the latest completed turn remains open in Last mode.
+  // Absence from the map means "follow the detailsMode-driven default".
 
   const [turnOverrides, setTurnOverrides] = useState<ReadonlyMap<string, boolean>>(
     () => new Map(),
@@ -806,12 +811,14 @@ export function TimelineView({
     return -1;
   })();
 
-  // One rendered row for the item at its global `index`. Shared verbatim by the
-  // ungrouped path and the expanded TurnBlock body, so turn-collapse never changes
-  // how an individual item renders — it only decides whether the item sits under
-  // a run header. All memo-stability inputs (config via the WeakMap cache, the
-  // stable toggleExpanded) are captured here.
-  const renderRow = (item: BackendTimelineItem, index: number, forceExpand?: boolean) => {
+  // One rendered row for the item at its global `index`. Turn members use the
+  // flat variant; standalone items retain the full card disclosure. Variant is
+  // a stable primitive, and config still comes from the WeakMap cache.
+  const renderRow = (
+    item: BackendTimelineItem,
+    index: number,
+    variant: "card" | "flat" = "card",
+  ) => {
     const config = cardConfigFor(item);
     const streaming =
       streamingCode && index === items.length - 1 && item.kind === "agent_code";
@@ -823,6 +830,7 @@ export function TimelineView({
           key={item.item_id}
           item={item}
           config={null}
+          variant="card"
           streaming={streaming}
           expanded={false}
           showActions={false}
@@ -834,14 +842,14 @@ export function TimelineView({
     }
     // Default expanded state: driven by the single Details mode.
     //   "all"  — all blocks expanded
-    //   "last" — only the last item expanded (follows streaming), but primary
-    //     items (agent_chat, human inbound) are always expanded — "last" only
-    //     collapses secondary detail blocks (thinking / code / output).
+    //   "last" — primary items stay open; TurnBlock owns latest-work behavior.
     //   "none" — all blocks collapsed
     // A live override always means "opposite of the current default".
-    const isPrimary = classifyItem(item) === "primary";
+    const itemClass = classifyItem(item);
+    const isPrimary = itemClass === "primary";
     const isLastItem = index === items.length - 1;
-    const defaultExpanded = isPrimary || forceExpand ? true
+    const defaultExpanded = isPrimary ? true
+      : itemClass === "breaker" ? config.fixedDefault
       : effectiveDetailsMode === "all" ? true
       : effectiveDetailsMode === "last" ? isLastItem
       : config.fixedDefault;
@@ -860,6 +868,7 @@ export function TimelineView({
         key={item.item_id}
         item={item}
         config={config}
+        variant={variant}
         streaming={streaming}
         expanded={expanded}
         showActions={showActions}
@@ -873,8 +882,15 @@ export function TimelineView({
   // Fold adjacent secondary items into work blocks (always on). Secondary items
   // are always groupable — including in-progress / streaming items — so the first
   // streaming chunk lands directly inside a work block (no bare-then-wrap layout
-  // shift). Primary/bare items break turns by classifyItem returning non-secondary.
+  // shift). Primary/breaker/bare items split turns.
   const groups = groupTimelineSegments(items);
+  let lastTurnEntry: (typeof groups)[number] | undefined;
+  for (let index = groups.length - 1; index >= 0; index -= 1) {
+    if (groups[index].group.kind === "turn") {
+      lastTurnEntry = groups[index];
+      break;
+    }
+  }
 
   const handleScrollToBottom = useCallback(() => {
     const viewport =
@@ -890,6 +906,7 @@ export function TimelineView({
     // is already sticky) — same behavior as before.
     controller.requestStick();
     setAtBottom(true);
+    setUnseenItemCount(0);
     viewport.scrollTo({ top: viewport.scrollHeight, behavior: "smooth" });
   }, [controller]);
 
@@ -910,7 +927,7 @@ export function TimelineView({
           it does not touch scrollTop itself, so it is inert to the sticky
           controller and the touch bounce-tolerance zones in lib/sticky.ts. */}
       <ScrollArea
-        className="h-full text-[13px] leading-relaxed"
+        className="h-full text-sm leading-relaxed"
         viewportClassName="[overflow-anchor:none] overscroll-y-contain"
       >
         {/* BAR_CLEAR_TOP_PADDING_CLASS (pt-14) clears the floating
@@ -949,16 +966,16 @@ export function TimelineView({
               // streaming item is visible. Run id = the first member's item_id
               // (stable across streaming commits).
               const turnId = group.items[0].item_id;
-              // The turn is "last" only when it is the last group overall — not just
-              // the last turn-kind group. When a primary item follows this turn, the
-              // turn is no longer last and its live clock must stop immediately.
-              const isLastTurn = entry === groups[groups.length - 1];
+              // Last mode follows the most recent work turn even after its reply
+              // lands. Once a new secondary run begins, that new turn takes over.
+              const isLastTurn = entry === lastTurnEntry;
+              const isActiveTurn = isLastTurn && entry === groups[groups.length - 1];
               const runExpanded = turnOverrides.has(turnId)
                 ? (turnOverrides.get(turnId) ?? false)
                 : effectiveDetailsMode === "all"
                   ? true
                   : effectiveDetailsMode === "last"
-                    ? isLastTurn && turnActive
+                    ? isLastTurn
                     : false;
               return (
                 <TurnBlock
@@ -967,15 +984,11 @@ export function TimelineView({
                   summary={group.summary}
                   expanded={runExpanded}
                   onToggle={() => toggleTurn(turnId, runExpanded)}
-                  turnActive={turnActive && isLastTurn}
+                  turnActive={turnActive && isActiveTurn}
                 >
                   {runExpanded
                     ? group.items.map((it, i) =>
-                        renderRow(
-                          it,
-                          entry.indexOffset + group.startIndex + i,
-                          runExpanded,
-                        ),
+                        renderRow(it, entry.indexOffset + group.startIndex + i, "flat"),
                       )
                     : null}
                 </TurnBlock>
@@ -993,7 +1006,11 @@ export function TimelineView({
           <div ref={endRef} />
         </div>
       </ScrollArea>
-      <ScrollToBottomButton atBottom={atBottom} onClick={handleScrollToBottom} />
+      <ScrollToBottomButton
+        atBottom={atBottom}
+        unseenItemCount={unseenItemCount}
+        onClick={handleScrollToBottom}
+      />
     </div>
   );
 }
