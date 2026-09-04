@@ -323,6 +323,10 @@ class CrashResurrectController:
         self._boot_pass_done = False  # the one-shot boot revive has not run yet
 
     def reconcile(self, role: MachineRole) -> ReconcileResult:  # noqa: ARG002 — agent-runner-only, uniform Controller signature
+        from ops import runner_mode
+
+        if runner_mode.is_hosted():
+            return ReconcileResult(dimension=self.name, blocks=BlockScope.NONE, acted=False)
         if not settings.daemon.auto_resurrect_enabled:
             return ReconcileResult(dimension=self.name, blocks=BlockScope.NONE, acted=False)
         from shared import start_serving

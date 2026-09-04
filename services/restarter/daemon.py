@@ -26,6 +26,7 @@ import psycopg
 from psycopg_pool import ConnectionPool
 
 import shared.db
+from ops import runner_mode
 from ops.controllers.respawn import RespawnController
 from ops.controllers.resurrect import CrashResurrectController
 from ops.controllers.wedged import WedgedAgentController
@@ -109,6 +110,9 @@ async def _dispatch_loop(pool: ConnectionPool, liveness: Liveness) -> None:
     db_failures = 0
     lease_zombie_grace_until = 0.0  # wall clock; 0 = no grace armed
     while True:
+        if runner_mode.is_hosted():
+            _log.warning("[restarter] hosted runner owns agents; stopping process controllers")
+            return
         liveness.beat()
         try:
             await asyncio.sleep(_POLL_INTERVAL_S)
@@ -184,6 +188,10 @@ def main() -> None:
     the same `KeyboardInterrupt` unwind — see `shared.daemon_shutdown`. `ava stop`
     default force-kill does not reach this.
     """
+    if runner_mode.is_hosted():
+        _log.warning("[restarter] hosted runner owns agents; refusing to start")
+        return
+
     # Belt-and-suspenders with the launchers: a stale watchdog/session launch
     # must not bypass the operator's durable disable and begin claiming agents.
     # Check before schema/DB startup so this process remains inert throughout a
