@@ -370,7 +370,26 @@ The converge phase (`cli/commands/_converge.py:converge_host`) is idempotent —
 by `cmd_start`, so `ava cluster update` re-applies it on every upgrade. One gateway
 `ava cluster update` converges the whole fleet through the Phase B fan-out. Run it standalone
 with `ava converge`. It covers the `ava` symlink (re-ensuring install.sh's bootstrap),
-`~/.local/bin` on PATH, the `$AVA_HOME` dir skeleton, a gateway-host guard that fails
+`~/.local/bin` on PATH, the `$AVA_HOME` dir skeleton, and one prod-host integration for
+external agents: when `~/.codex` and/or `~/.claude` already exists, it copies only
+`.agents/skills/operating-ava-cluster` into that client's global `skills/` root. Missing
+client homes are not created. A private per-client ledger under `$AVA_HOME/configs/`
+binds the installed generation to its in-target marker and a digest of names, kinds,
+bytes, and modes. The ledger also records each generation's expected path manifest,
+so interrupted staging and partially completed cleanup remain named and safely
+resumable. Write-ahead phases precede stage publication and target claim, then
+reconcile their no-replace outcome from both paths plus marker, digest, and
+manifest evidence; ambiguous generation-shaped paths remain fail-closed.
+A per-target process lock serializes claim-and-verify updates; claims and
+restores are atomic no-replace renames. Cleanup records the residue and each
+file's source, claiming, and quarantine state before its no-replace rename into
+the private ledger root. Because supported filesystems provide no portable
+identity-bound unlink, verified residue is terminally retained there and is
+not retried, path-unlinked, or chmodded; the active client target remains
+unblocked. Multi-link files are rejected. Unmanaged or changed copies and
+unsafe linked paths are preserved with a client-labelled warning.
+External-client failures do not abort core converge. Dev worktrees skip this
+host-global step. Converge also applies a gateway-host guard that fails
 loud on frontend build-time env overrides (`ui/web/.env{,.local,.production,.production.local}`
 bake `NEXT_PUBLIC_*` into the bundle and silently beat the runtime gateway inference —
 the 2026-06-09 outage), plugin config images, and the pre-rename disabled-services marker
