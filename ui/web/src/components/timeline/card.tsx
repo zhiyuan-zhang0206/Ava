@@ -1,8 +1,8 @@
 "use client";
 
-// Unified message-card system for the timeline. Every timeline item renders as
-// a MessageCard: a colored left-border container with a clickable CardHeader
-// (chevron + icon + title/summary + timestamp) and a collapsible body below it.
+// Unified label/card system for the timeline. Standalone card-backed items use
+// MessageCard + a clickable CardHeader; members of an expanded work turn reuse
+// the same rich label derivation in a non-interactive flat row.
 //
 // messageCardConfig(item) is the single source of the per-kind visual mapping —
 // icon, title, border/background color, which global toggle governs its default
@@ -49,7 +49,7 @@ import { classifyMarker, markerVisual } from "./markers";
 import { inboundKind } from "./runs";
 import { isLiveCode, isLiveExecution, isLiveReasoning, useNow } from "./reasoning-clock";
 import { ItemTimestamp } from "./timestamp";
-import { FLEX, MIN_W_0 } from "@/lib/layout";
+import { FLEX, FLEX_1, MIN_W_0 } from "@/lib/layout";
 
 // Which of the four rich header summaries a card renders in place of a static
 // title. null = a plain icon + title header.
@@ -76,8 +76,10 @@ export interface CardConfig {
   // Default expanded state — in All mode this is overridden to true,
   // in Last mode overridden based on position, in None mode overridden to false.
   readonly fixedDefault: boolean;
-  // Whether the header stamps the item timestamp (left-aligned after the title).
+  // Whether the standalone card header stamps a far-right item timestamp.
   readonly headerTs: boolean;
+  // Human/Ava backbone messages use quieter conversational header chrome.
+  readonly quietHeader: boolean;
 }
 
 function agentChatTitle(item: BackendTimelineItem): {
@@ -112,41 +114,44 @@ export function messageCardConfig(item: BackendTimelineItem): CardConfig | null 
         rich: "system_prompt",
         icon: Settings,
         title: null,
-        border: "border-indigo-400/40",
-        bg: "bg-indigo-50/40 dark:bg-indigo-950/15",
+        border: "border-border/60",
+        bg: "bg-muted/20",
         fixedDefault: false,
         headerTs: false,
+        quietHeader: false,
       };
     case "agent_reasoning":
       return {
         rich: "reasoning",
         icon: Sparkles,
         title: null,
-        border: "border-slate-400/40",
-        bg: "bg-slate-50/60 dark:bg-slate-900/20",
+        border: "border-slate-300/30 dark:border-slate-600/30",
+        bg: "bg-slate-50/30 dark:bg-slate-900/15",
         fixedDefault: true,
         headerTs: true,
+        quietHeader: false,
       };
     case "agent_code":
       return {
         rich: "code",
         icon: Code2,
         title: null,
-        // Deeper border than agent_chat — the tool call is the load-bearing action.
-        border: "border-emerald-500/70",
+        border: "border-border/80",
         bg: "bg-card",
         fixedDefault: true,
         headerTs: true,
+        quietHeader: false,
       };
     case "code_output":
       return {
         rich: "output",
         icon: Terminal,
         title: null,
-        border: "border-amber-500/50",
-        bg: "bg-amber-50/40 dark:bg-amber-950/10",
+        border: "border-border/80",
+        bg: "bg-card",
         fixedDefault: true,
         headerTs: true,
+        quietHeader: false,
       };
     case "agent_chat": {
       const chatTitle = agentChatTitle(item);
@@ -160,6 +165,7 @@ export function messageCardConfig(item: BackendTimelineItem): CardConfig | null 
         bg: "bg-card",
         fixedDefault: true,
         headerTs: true,
+        quietHeader: true,
       };
     }
     case "attach":
@@ -170,10 +176,11 @@ export function messageCardConfig(item: BackendTimelineItem): CardConfig | null 
         icon: Paperclip,
         title: null,
         titleKey: "timeline.attachedFiles",
-        border: "border-sky-400/50",
-        bg: "bg-sky-50/40 dark:bg-sky-950/10",
+        border: "border-border/80",
+        bg: "bg-card",
         fixedDefault: true,
         headerTs: true,
+        quietHeader: false,
       };
     case "inbound_chat": {
       // Inter-agent + system inbound default collapsed (secondary chatter — the
@@ -186,10 +193,11 @@ export function messageCardConfig(item: BackendTimelineItem): CardConfig | null 
           title: `Agent ${(item.source ?? "").slice("agent:".length)}`,
           titleKey: "timeline.agent",
           titleValues: { id: (item.source ?? "").slice("agent:".length) },
-          border: "border-violet-400/60",
-          bg: "bg-violet-50 dark:bg-violet-950/20",
+          border: "border-violet-400/35",
+          bg: "bg-violet-50/30 dark:bg-violet-950/10",
           fixedDefault: false,
           headerTs: true,
+          quietHeader: false,
         };
       }
       if (kind === "human") {
@@ -202,6 +210,7 @@ export function messageCardConfig(item: BackendTimelineItem): CardConfig | null 
           bg: "bg-gray-50 dark:bg-gray-900/30",
           fixedDefault: true,
           headerTs: true,
+          quietHeader: true,
         };
       }
       return {
@@ -209,10 +218,11 @@ export function messageCardConfig(item: BackendTimelineItem): CardConfig | null 
         icon: Info,
         title: "System",
         titleKey: "timeline.system",
-        border: "border-sky-400/60",
-        bg: "bg-sky-50 dark:bg-sky-950/20",
+        border: "border-sky-400/35",
+        bg: "bg-sky-50/30 dark:bg-sky-950/10",
         fixedDefault: false,
         headerTs: true,
+        quietHeader: false,
       };
     }
     case "inbound_compact_summary":
@@ -221,10 +231,11 @@ export function messageCardConfig(item: BackendTimelineItem): CardConfig | null 
         icon: FileText,
         title: "Compact summary",
         titleKey: "timeline.compactSummary",
-        border: "border-sky-400/60",
-        bg: "bg-sky-50 dark:bg-sky-950/20",
+        border: "border-border/60",
+        bg: "bg-muted/20",
         fixedDefault: false,
         headerTs: true,
+        quietHeader: false,
       };
     case "inbound_compact_request":
       return {
@@ -232,10 +243,11 @@ export function messageCardConfig(item: BackendTimelineItem): CardConfig | null 
         icon: FileText,
         title: "Compact request",
         titleKey: "timeline.compactRequest",
-        border: "border-sky-400/60",
-        bg: "bg-sky-50 dark:bg-sky-950/20",
+        border: "border-border/60",
+        bg: "bg-muted/20",
         fixedDefault: false,
         headerTs: true,
+        quietHeader: false,
       };
     case "system_marker": {
       const cls = classifyMarker(item.source);
@@ -255,6 +267,7 @@ export function messageCardConfig(item: BackendTimelineItem): CardConfig | null 
         fixedDefault: false,
         // Events keep their timestamp; standing context / guidance notes drop it.
         headerTs: item.show_timestamp,
+        quietHeader: false,
       };
     }
   }
@@ -274,8 +287,8 @@ const SUMMARY_PARSE_INTERVAL_MS = 250;
 // Shared by the TurnBlock aggregate header so a collapsed turn reads as the same
 // clickable summary row as a card header.
 export const HEADER_CLS =
-  "w-full flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-mono text-left " +
-  "text-muted-foreground/80 hover:text-foreground hover:bg-accent/30 " +
+  "w-full flex items-center gap-1.5 px-3 py-1.5 text-xs font-sans font-medium text-left " +
+  "text-muted-foreground hover:text-foreground hover:bg-accent/30 " +
   "transition-colors select-none rounded-tr-sm";
 
 // The colored left-border container. cardText tints the whole card (markers).
@@ -341,8 +354,7 @@ export function MessageCard({
   );
 }
 
-// The clickable card header — always visible, toggles the body below it. Renders
-// the rich Summary for the four summary kinds, else a plain icon + title.
+// Shared label derivation for clickable card headers and flat turn-member rows.
 // Render a card's static header title: translated via titleKey when present
 // (falling back to the English `title`). titleKey is a full dotted key
 // ("timeline.agentChat", "markers.terminated", …) resolved through the
@@ -362,6 +374,69 @@ function cardTitle(config: CardConfig, t: ReturnType<typeof useTranslations>): s
   return t(config.titleKey as Parameters<typeof t>[0], values);
 }
 
+export const CardLabel = memo(function CardLabel({
+  item,
+  config,
+}: {
+  item: BackendTimelineItem;
+  config: CardConfig;
+}) {
+  const t = useTranslations();
+  const live = isLiveReasoning(item) || isLiveCode(item) || isLiveExecution(item);
+  const now = useNow(live);
+  const summaryPayload = useThrottledStreaming(
+    item.payload,
+    !!item.partial,
+    SUMMARY_PARSE_INTERVAL_MS,
+  );
+  const Icon = config.icon;
+
+  return config.rich ? (
+    <Summary item={item} payload={summaryPayload} now={now} live={live} />
+  ) : (
+    <span className={cn("items-center gap-1.5", config.titleClass, FLEX, MIN_W_0)}>
+      {Icon ? (
+        <Icon
+          className={cn(
+            "size-3.5 shrink-0",
+            config.quietHeader && "text-muted-foreground/60",
+          )}
+        />
+      ) : null}
+      <span className="truncate">{cardTitle(config, t)}</span>
+    </span>
+  );
+});
+
+export const FlatRowHeader = memo(function FlatRowHeader({
+  item,
+  config,
+}: {
+  item: BackendTimelineItem;
+  config: CardConfig;
+}) {
+  const { settings } = useUserSettings();
+  const showWeekday = settings["display.show_timestamp_weekday"] as boolean;
+
+  return (
+    <span
+      data-testid="flat-row-label"
+      className={cn(
+        "items-center justify-between gap-2 py-1 text-xs font-sans font-medium text-muted-foreground",
+        FLEX,
+      )}
+    >
+      <CardLabel item={item} config={config} />
+      {item.created_at ? (
+        <span className="ml-auto shrink-0 pl-2">
+          <ItemTimestamp iso={item.created_at} showWeekday={showWeekday} />
+        </span>
+      ) : null}
+    </span>
+  );
+});
+
+// The standalone clickable card header; flat turn members never use it.
 export const CardHeader = memo(function CardHeader({
   item,
   config,
@@ -373,17 +448,8 @@ export const CardHeader = memo(function CardHeader({
   expanded: boolean;
   onToggle: () => void;
 }) {
-  const t = useTranslations();
-  const live = isLiveReasoning(item) || isLiveCode(item) || isLiveExecution(item);
-  const now = useNow(live);
   const { settings } = useUserSettings();
   const showWeekday = settings["display.show_timestamp_weekday"] as boolean;
-  const summaryPayload = useThrottledStreaming(
-    item.payload,
-    !!item.partial,
-    SUMMARY_PARSE_INTERVAL_MS,
-  );
-  const Icon = config.icon;
 
   return (
     // No title attribute — deliberately no hover tooltip on this button; the
@@ -395,26 +461,24 @@ export const CardHeader = memo(function CardHeader({
     <button
       type="button"
       onClick={onToggle}
-      className={HEADER_CLS}
+      className={cn(
+        HEADER_CLS,
+        config.quietHeader && "justify-between py-1 font-normal",
+      )}
       aria-expanded={expanded}
       data-testid="card-toggle"
       data-expanded={expanded}
     >
-      {expanded ? (
-        <ChevronDown className="size-3 shrink-0 opacity-60" />
-      ) : (
-        <ChevronRight className="size-3 shrink-0 opacity-60" />
-      )}
-      {config.rich ? (
-        <Summary item={item} payload={summaryPayload} now={now} live={live} />
-      ) : (
-        <span className={cn("items-center gap-1.5", config.titleClass, FLEX, MIN_W_0)}>
-          {Icon ? <Icon className="size-3.5 shrink-0" /> : null}
-          <span className="truncate">{cardTitle(config, t)}</span>
-        </span>
-      )}
+      <span className={cn("items-center gap-1.5", FLEX, MIN_W_0, FLEX_1)}>
+        {expanded ? (
+          <ChevronDown className="size-3 shrink-0 opacity-60" />
+        ) : (
+          <ChevronRight className="size-3 shrink-0 opacity-60" />
+        )}
+        <CardLabel item={item} config={config} />
+      </span>
       {config.headerTs ? (
-        <span className="hidden sm:block shrink-0 pl-2">
+        <span className="ml-auto shrink-0 pl-2">
           <ItemTimestamp iso={item.created_at ?? ""} showWeekday={showWeekday} />
         </span>
       ) : null}

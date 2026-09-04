@@ -7,7 +7,6 @@ import type { BackendTimelineItem } from "@/lib/types";
 import {
   classifyItem,
   formatTurnSummary,
-  formatTurnTiming,
   groupIntoTurns,
   inboundKind,
   summarizeTurn,
@@ -78,11 +77,10 @@ describe("classifyItem", () => {
     }
   });
 
-  it("card-family system_marker is secondary; ephemeral is bare", () => {
-    // note / memory / lifecycle sources render as cards → fold like notes.
+  it("notes and memories are secondary, lifecycle cards break turns, and ephemeral markers are bare", () => {
     expect(classifyItem(item("system_marker", "heartbeat"))).toBe("secondary");
     expect(classifyItem(item("system_marker", "memory"))).toBe("secondary");
-    expect(classifyItem(item("system_marker", "lifecycle_terminate"))).toBe("secondary");
+    expect(classifyItem(item("system_marker", "lifecycle_terminate"))).toBe("breaker");
     // unknown / payload-identified marker has no card → bare.
     expect(classifyItem(item("system_marker", null))).toBe("bare");
     expect(classifyItem(item("system_marker", "cancelled"))).toBe("bare");
@@ -140,6 +138,41 @@ describe("summarizeTurn / formatTurnSummary", () => {
     ]);
     expect(formatTurnSummary(s)).toBe("3 thinking");
   });
+
+  it("prefers SDK actions, counts attachments separately, and flags failed output", () => {
+    const s = summarizeTurn([
+      item("agent_code", null, undefined, {
+        sdk_calls: [
+          { method: "files.read", count: 3 },
+          { method: "shell.run", count: 2 },
+        ],
+      }),
+      item("code_output", null, undefined, { payload: "ValueError: broken" }),
+      item("attach"),
+      item("attach"),
+    ]);
+    expect(s.attachments).toBe(2);
+    expect(s.failedOutput).toBe(true);
+    expect(s.systemNotes).toBe(0);
+    expect(formatTurnSummary(s)).toBe("files.read × 3 · shell.run × 2 · 2 attachments");
+  });
+
+  it("defers turn-level failure parsing while output streams", () => {
+    const live = summarizeTurn([
+      item("code_output", null, undefined, {
+        payload: "ValueError: still streaming",
+        execStartedAt: Date.now(),
+      }),
+    ]);
+    expect(live.failedOutput).toBe(false);
+    const committed = summarizeTurn([
+      item("code_output", null, undefined, {
+        payload: "ValueError: complete",
+        exec_ms: 100,
+      }),
+    ]);
+    expect(committed.failedOutput).toBe(true);
+  });
 });
 
 describe("summarizeTurn — timing aggregation", () => {
@@ -156,8 +189,6 @@ describe("summarizeTurn — timing aggregation", () => {
     expect(s.thinkingMs).toBe(12_000);
     expect(s.codeMs).toBe(5_500);
     expect(s.execMs).toBe(4_000);
-    // formatDuration rounds to whole seconds above 1s: 5.5s → 6s.
-    expect(formatTurnTiming(s)).toBe("Thought for 12s · Wrote code for 6s · Ran for 4s");
   });
 
   it("codeMs is zero when no agent_code items carry codeElapsedMs", () => {
@@ -184,17 +215,11 @@ describe("summarizeTurn — timing aggregation", () => {
     expect(summarizeTurn(run).thinkingMs).toBe(3_000);
   });
 
-  it("a turn with no reasoning/execution items has zero timing and no timing line", () => {
+  it("a turn with no reasoning/execution items has zero timing", () => {
     const run = [item("inbound_chat", "agent:1"), item("system_marker", "heartbeat")];
     const s = summarizeTurn(run);
     expect(s.thinkingMs).toBe(0);
     expect(s.execMs).toBe(0);
-    expect(formatTurnTiming(s)).toBeNull();
-  });
-
-  it("drops the zero side — thinking only", () => {
-    const s = summarizeTurn([item("agent_reasoning", null, undefined, { reasoning_ms: 500 })]);
-    expect(formatTurnTiming(s)).toBe("Thought for 0.5s");
   });
 });
 
@@ -342,8 +367,10 @@ describe("summarizeTurn — workedMs", () => {
       item("system_marker", "lifecycle_restart"),
       item("inbound_chat", "system"),
     ]);
-    expect(several.systemNotes).toBe(2);
-    expect(formatTurnSummary(several)).toBe("2 system notes");
+    // Lifecycle cards never join a turn and are not mislabeled as notes even
+    // when summarizeTurn is called directly with one.
+    expect(several.systemNotes).toBe(1);
+    expect(formatTurnSummary(several)).toBe("1 system note");
   });
 });
 
@@ -398,6 +425,18 @@ describe("groupIntoTurns", () => {
     ];
     const groups = groupIntoTurns(items, { collapseTurns: true, liveIndex: null });
     expect(kinds(groups)).toEqual(["turn(2@0)", "single(system_marker@2)", "turn(2@3)"]);
+  });
+
+  it("card-rendered lifecycle markers split adjacent work into standalone rows", () => {
+    const items = [
+      item("agent_reasoning"),
+      item("system_marker", "lifecycle_restart"),
+      item("agent_code"),
+    ];
+    const groups = groupIntoTurns(items, { collapseTurns: true, liveIndex: null });
+    expect(kinds(groups)).toEqual(["turn(1@0)", "single(system_marker@1)", "turn(1@2)"]);
+    const turns = groups.filter((group) => group.kind === "turn");
+    expect(turns.map((turn) => turn.summary.systemNotes)).toEqual([0, 0]);
   });
 
   it("human inbound breaks a turn", () => {
@@ -460,10 +499,7 @@ describe("groupIntoTurns", () => {
     expect(formatTurnSummary(turn.summary)).toBe("system prompt · 2 compact summaries · 1 memory · 2 system notes");
   });
 
-  it("context-only items after real content fold normally (e.g. restart lifecycle marker + new system prompt)", () => {
-    // After a primary message, context items are part of a real turn transition
-    // (e.g. restart → new system prompt → memory notes). They should fold like
-    // any other secondary items.
+  it("a lifecycle boundary stays standalone before the following context turn", () => {
     const items = [
       item("agent_chat"), // 0 primary — seenNonContext = true
       item("system_marker", "lifecycle_restart"), // 1 context
@@ -473,21 +509,20 @@ describe("groupIntoTurns", () => {
       item("agent_chat"), // 5 primary
     ];
     const groups = groupIntoTurns(items, { collapseTurns: true, liveIndex: null });
-    // Items 1-4 fold into a turn between the two agent_chat primaries.
     expect(kinds(groups)).toEqual([
       "single(agent_chat@0)",
-      "turn(4@1)",
+      "single(system_marker@1)",
+      "turn(3@2)",
       "single(agent_chat@5)",
     ]);
     // Verify the turn summary counts action items (context items like
     // system_prompt/system_marker have no thinking/code/output count).
-    const turn = groups[1];
+    const turn = groups[2];
     if (turn.kind !== "turn") throw new Error("expected turn");
     expect(turn.summary.thinking).toBe(0);
     expect(turn.summary.code).toBe(0);
     expect(turn.summary.output).toBe(0);
-    // The lifecycle_restart marker lands in the systemNotes bucket.
-    expect(formatTurnSummary(turn.summary)).toBe("system prompt · 2 memories · 1 system note");
+    expect(formatTurnSummary(turn.summary)).toBe("system prompt · 2 memories");
   });
 
   it("context items mixed with agent actions before first primary — all fold together", () => {
@@ -530,7 +565,8 @@ describe("groupIntoTurns", () => {
     ]);
     const turn = groups[1];
     if (turn.kind !== "turn") throw new Error("expected turn");
-    // The attach member lands in the systemNotes bucket.
-    expect(formatTurnSummary(turn.summary)).toBe("1 system note · 1 code · 1 output");
+    expect(turn.summary.attachments).toBe(1);
+    expect(turn.summary.systemNotes).toBe(0);
+    expect(formatTurnSummary(turn.summary)).toBe("1 code · 1 output · 1 attachment");
   });
 });
