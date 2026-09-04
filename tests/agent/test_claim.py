@@ -1517,20 +1517,22 @@ async def test_claim_restart_kind_hosted_ends_turn_and_stays_runnable(
     ).fetchone() == ("claimed", None, None)
 
 
-async def test_claim_restart_kind_hosted_self_arms_no_process_respawn(
+async def test_claim_hosted_self_restart_registers_no_agent_side_launcher(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     aredis_inbound_listener: RedisInboundListener,
     monkeypatch: pytest.MonkeyPatch,
 ):
-    """A hosted self-restart must not arm the atexit self-respawn fallback —
-    that fallback forks a replacement PROCESS, which hosted mode has no use
-    for and which would double-claim with the dispatcher's turn task."""
+    """Claim never registers a competing agent-side replacement launcher.
+
+    Process replacement belongs exclusively to the durable restarter; hosted
+    mode resets its runtime in place through the dispatcher's turn task.
+    """
     from shared.turn_identity import bind_turn_identity
     from tests.agent.test_inbound_ownership import _admit, _agent
 
-    scheduled: list[int] = []
-    monkeypatch.setattr("atexit.register", scheduled.append)
+    registered_launchers: list[int] = []
+    monkeypatch.setattr("atexit.register", registered_launchers.append)
     tid = _agent(db_conn)
     owner = await _admit(aops_pool, tid)
     restart_id = _insert_inbound_kind(db_conn, tid, "", "restart", source="self")
@@ -1547,7 +1549,7 @@ async def test_claim_restart_kind_hosted_self_arms_no_process_respawn(
 
     assert cmd.goto == END
     assert cmd.update["restart_requested"] is True  # type: ignore[index]
-    assert scheduled == []
+    assert registered_launchers == []
     await _await_status(aops_pool, tid, "running")
 
 

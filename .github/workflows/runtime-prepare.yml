@@ -24,6 +24,10 @@ on:
       - 'ava/_extend.py'
       - 'scripts/prove_runtime_plugins.py'
       - 'scripts/prepare_plugin_fixture.py'
+      - 'scripts/prove_ops_bootstrap.py'
+      - 'services/agent_ops/bootstrap.py'
+      - 'services/agent_ops/daemon.py'
+      - 'shared/managed_writer_observation.py'
       - 'scripts/prove_runtime_migration.py'
       - 'shared/runtime_migration.py'
       - 'cli/commands/_release_candidate.py'
@@ -113,6 +117,7 @@ jobs:
           python3 scripts/prepare_plugin_fixture.py "$RUNNER_TEMP/prepare/plugin-input"
           python3 scripts/prove_runtime_prepare.py --root "$RUNNER_TEMP/prepare" --python "$(uv python find --managed-python 3.12)" --uv "$(command -v uv)"
           test -s "$RUNNER_TEMP/prepare/proof.json"
+          if [[ "$RUNNER_OS" == Linux ]]; then test -s "$RUNNER_TEMP/prepare/ops-bootstrap-proof.json"; fi
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: inactive-prepare-${{ matrix.os }}-${{ github.event.pull_request.head.sha }}
@@ -122,6 +127,7 @@ jobs:
             ${{ runner.temp }}/prepare/otel-proof.json
             ${{ runner.temp }}/prepare/plugin-proof.json
             ${{ runner.temp }}/frontend-proof.json
+            ${{ runner.temp }}/prepare/ops-bootstrap-proof.json
           if-no-files-found: error
       - name: Stop isolated native PG
         if: always() && runner.os == 'Linux'

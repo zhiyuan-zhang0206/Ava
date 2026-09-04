@@ -39,16 +39,19 @@ def prove_checkout_absent(
     root: Path, checkout: Path, application_name: str, release: VerifiedRelease
 ) -> None:
     """Run the existing CLI with no source checkout at its original path."""
-    verifier = root / "verify_runtime_wheel.py"
-    shutil.copy2(checkout / "scripts/verify_runtime_wheel.py", verifier)
-    consumer = root / "prove_runtime_consumer.py"
-    shutil.copy2(checkout / "scripts/prove_runtime_consumer.py", consumer)
-    migration = root / "prove_runtime_migration.py"
-    shutil.copy2(checkout / "scripts/prove_runtime_migration.py", migration)
-    collector = root / "prove_runtime_otel.py"
-    shutil.copy2(checkout / "scripts/prove_runtime_otel.py", collector)
-    plugin_proof = root / "prove_runtime_plugins.py"
-    shutil.copy2(checkout / "scripts/prove_runtime_plugins.py", plugin_proof)
+    proofs = {
+        name: root / name
+        for name in (
+            "verify_runtime_wheel.py",
+            "prove_runtime_consumer.py",
+            "prove_runtime_migration.py",
+            "prove_runtime_otel.py",
+            "prove_runtime_plugins.py",
+            "prove_ops_bootstrap.py",
+        )
+    }
+    for name, target in proofs.items():
+        shutil.copy2(checkout / f"scripts/{name}", target)
     alias = root / "runtime-entry-alias"
     alias.symlink_to(release.root / "venv", target_is_directory=True)
     if (
@@ -74,7 +77,7 @@ def prove_checkout_absent(
     try:
         if (release.root / "plugins").is_dir():
             subprocess.run(  # noqa: S603 — installed image, private CI home only.
-                [str(release.interpreter), "-I", "-B", str(plugin_proof)],
+                [str(release.interpreter), "-I", "-B", str(proofs["prove_runtime_plugins.py"])],
                 cwd=root,
                 env=child_env | {"GITHUB_ACTIONS": "true"},
                 check=True,
@@ -82,14 +85,21 @@ def prove_checkout_absent(
             )
         if (release.root / "otel").is_dir():
             subprocess.run(  # noqa: S603 — retained interpreter and copied CI-only proof.
-                [str(release.interpreter), "-I", "-B", str(collector)],
+                [str(release.interpreter), "-I", "-B", str(proofs["prove_runtime_otel.py"])],
                 cwd=root,
                 env=child_env | {"GITHUB_ACTIONS": "true"},
                 check=True,
                 timeout=90,
             )
         subprocess.run(  # noqa: S603 — copied proof with the installed generation only.
-            [str(alias / "bin/python"), "-I", "-B", str(consumer), str(root), str(alias)],
+            [
+                str(alias / "bin/python"),
+                "-I",
+                "-B",
+                str(proofs["prove_runtime_consumer.py"]),
+                str(root),
+                str(alias),
+            ],
             cwd=root,
             env=child_env,
             check=True,
@@ -100,7 +110,7 @@ def prove_checkout_absent(
                 str(release.interpreter),
                 "-I",
                 "-B",
-                str(verifier),
+                str(proofs["verify_runtime_wheel.py"]),
                 str(root / "retired-wheels" / application_name),
                 "--checkout",
                 str(checkout),
@@ -152,12 +162,27 @@ def prove_checkout_absent(
                 "RUNNER_TEMP": os.environ["RUNNER_TEMP"],
             }
             schema = json.loads((release.root / "manifest.json").read_text())["schema_digest"]
+            subprocess.run(  # noqa: S603 — real retained ops entry, isolated old-schema CI database.
+                [
+                    str(release.interpreter),
+                    "-I",
+                    "-B",
+                    str(proofs["prove_ops_bootstrap.py"]),
+                    release.digest,
+                    release.manifest_digest,
+                    schema,
+                ],
+                cwd=root,
+                env=migration_env,
+                check=True,
+                timeout=600,
+            )
             result = subprocess.run(  # noqa: S603 — CI-only native PG at the prepared image boundary.
                 [
                     str(release.interpreter),
                     "-I",
                     "-B",
-                    str(migration),
+                    str(proofs["prove_runtime_migration.py"]),
                     release.digest,
                     release.manifest_digest,
                     schema,
