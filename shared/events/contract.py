@@ -1130,6 +1130,34 @@ EVENTS: dict[str, EventSpec] = {
         "SIGKILL always lands",
         tier="anomaly",
     ),
+    "host_turn_stall_timeout": _telemetry(
+        "host_turn_stall_timeout",
+        "the hosted stall guard aborted a graph.ainvoke whose turn clock "
+        "(agent/_turn_progress.py: node enters + completed LLM steps) was "
+        "silent past AVA_HOST_TURN_NO_PROGRESS_TIMEOUT_SECONDS (turn activity = "
+        "node enter, completed LLM step, streamed chunk) — the turn-level "
+        "injection guard of task #2417. The invocation was cancelled and "
+        "unwound; the row settles to idling; the next wake resumes from the "
+        "checkpoint",
+        tier="anomaly",
+    ),
+    "host_turn_stall_uncancellable": _telemetry(
+        "host_turn_stall_uncancellable",
+        "a stalled invocation that had been cancelled for the bounded unwind "
+        "window REFUSED to unwind (blocked where asyncio cannot interrupt it "
+        "— a C call). The host cannot fix this in-process: it signals a "
+        "daemon restart so the supervisor recovers the turn from its "
+        "checkpoint",
+        tier="anomaly",
+    ),
+    "host_turn_stall_aborted": _telemetry(
+        "host_turn_stall_aborted",
+        "a hosted turn task ended after its no-progress abort: the invocation "
+        "unwound and was dropped; the runtime was discarded by run_turn, so "
+        "the next wake re-runs the startup reconcile before resuming from "
+        "the checkpoint",
+        tier="anomaly",
+    ),
     "host_turn_stall_detected": _telemetry(
         "host_turn_stall_detected",
         "the hosted dispatcher's durable scan found an in-flight turn whose "
