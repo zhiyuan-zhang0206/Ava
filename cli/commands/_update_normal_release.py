@@ -14,9 +14,8 @@ import time
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Literal
+from typing import Literal, cast
 
-import psutil
 import psycopg
 from pydantic import Field
 
@@ -50,7 +49,6 @@ from shared.managed_writer_activation import (
 from shared.managed_writer_barrier import EvidenceModel, lock_rollout
 from shared.managed_writer_observation import ExpectedProcess, observe_process
 from shared.managed_writer_publication import CandidateUnitPlan, PublishedUnit, _locked_publication
-from shared.platform import file_lock
 from shared.runtime_release import ReleaseRejectedError
 from shared.session_backend import get_backend
 from shared.session_record import SessionRecord
@@ -154,10 +152,21 @@ def continue_after_bootstrap(
     hop: PreparedBootstrapHop, plan: PreparedNormalRelease, generation: str
 ) -> int:
     """Same process/flock/operation: no second dispatcher or bootstrap write route."""
-    retained = json.loads(regular_bytes(updater_handoff.state_path()))
+    try:
+        retained = updater_handoff.read_bootstrap_recovery()
+    except updater_handoff.BootstrapRecoveryInvalidError as exc:
+        raise ReleaseRejectedError("normal continuation recovery is malformed") from exc
+    journal = (
+        cast("dict[str, object]", retained["journal"])
+        if retained is not None and isinstance(retained.get("journal"), dict)
+        else None
+    )
     if (
-        retained["generation"] != generation
-        or retained["bootstrap_hop"]["stage"] != "candidate_ready"
+        retained is None
+        or retained["generation"] != generation
+        or journal is None
+        or journal.get("stage") != "candidate_ready"
+        or "normal_release" in journal
     ):
         raise ReleaseRejectedError(
             "normal continuation requires the actual candidate-ready handoff"
@@ -199,13 +208,22 @@ def prepare_normal_release(path: Path) -> PreparedNormalRelease:
         or updater_handoff.owner_is_live(handoff)
     ):
         raise ReleaseRejectedError("existing handoff does not identify the exited orchestrator")
-    retained = json.loads(regular_bytes(updater_handoff.state_path()))
-    if "normal_release" in retained:
+    try:
+        retained = updater_handoff.read_bootstrap_recovery()
+    except updater_handoff.BootstrapRecoveryInvalidError as exc:
+        raise ReleaseRejectedError("normal continuation recovery is malformed") from exc
+    journal = (
+        cast("dict[str, object]", retained["journal"])
+        if retained is not None and isinstance(retained.get("journal"), dict)
+        else None
+    )
+    if retained is None or retained["generation"] != handoff.generation or journal is None:
+        raise ReleaseRejectedError("normal continuation has no exact bootstrap recovery")
+    if "normal_release" in journal:
         raise ReleaseRejectedError("unfinished normal release requires explicit checked recovery")
-    bootstrap_journal = retained["bootstrap_hop"]
     if (
-        bootstrap_journal["stage"] != "candidate_ready"
-        or bootstrap_journal["candidate_context_digest"]
+        journal.get("stage") != "candidate_ready"
+        or journal.get("candidate_context_digest")
         != hashlib.sha256(regular_bytes(Path(request.context_path))).hexdigest()
     ):
         raise ReleaseRejectedError("normal continuation has no exact completed bootstrap handoff")
@@ -238,19 +256,10 @@ def prepare_normal_release(path: Path) -> PreparedNormalRelease:
 
 
 def _journal(generation: str, value: NormalReleaseJournal) -> None:
-    with file_lock(updater_handoff.lock_path(), timeout_s=5):
-        current = updater_handoff.read()
-        if (
-            current.generation != generation
-            or current.status != "running"
-            or current.owner_pid != os.getpid()
-            or current.owner_create_time != psutil.Process().create_time()
-        ):
-            raise ReleaseRejectedError("normal updater no longer owns its local handoff")
-        path = updater_handoff.state_path()
-        payload = json.loads(regular_bytes(path))
-        payload["normal_release"] = value.model_dump(mode="json")
-        updater_handoff._write_atomic(path, payload)
+    try:
+        updater_handoff.write_normal_release_recovery(generation, value.model_dump(mode="json"))
+    except updater_handoff.BootstrapRecoveryInvalidError as exc:
+        raise ReleaseRejectedError("normal updater lost exact retained recovery") from exc
 
 
 def _wait_stage(conn: psycopg.Connection, plan: PreparedNormalRelease, expected: str) -> None:
