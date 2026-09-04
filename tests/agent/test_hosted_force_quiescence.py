@@ -23,7 +23,7 @@ from services.agent_host.daemon import _cancel_turn_route
 from services.agent_host.dispatcher import TurnScheduler
 from services.agent_host.host import AgentHost
 from shared.config import settings
-from shared.hosted_force import original_host_force
+from shared.hosted_force import original_host_force, recover_orphaned_hosted_forces
 from shared.lifecycle_termination_observe import observe_applied_termination
 from tests.agent.test_inbound_ownership import _agent, _insert
 
@@ -254,6 +254,77 @@ async def test_idle_force_only_original_live_host_can_observe(
     assert db_conn.execute(
         "SELECT status,observed_at IS NOT NULL FROM inbound_messages WHERE id=%s", (command,)
     ).fetchone() == ("done", True)
+
+
+async def test_exclusive_host_boot_recovers_resource_free_applied_force(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A dead host owner must not strand a force when no exec domain survived."""
+    agent_id = _agent(db_conn)
+    old_host = AgentHost(pool=aops_pool, checkpointer=Mock(), graph=Mock(), machine="claim-test")
+    assert (
+        await admit_hosted_runtime(
+            aops_pool, agent_id, "claim-test", old_host._owner, expected_from="idling"
+        )
+        is not None
+    )
+    with ConnectionPool[psycopg.Connection](settings.data_plane.db_url) as pool:
+        _, _, _, command = await asyncio.to_thread(
+            _force_terminate_transaction, agent_id, pool, source="user", kill_process=False
+        )
+    monkeypatch.setattr("shared.hosted_force.exec_run_dir", lambda: tmp_path)
+
+    recovered, deferred = await recover_orphaned_hosted_forces(aops_pool, "claim-test")
+
+    assert recovered == [agent_id]
+    assert deferred == {}
+    assert db_conn.execute(
+        "SELECT status,observed_at IS NOT NULL FROM inbound_messages WHERE id=%s", (command,)
+    ).fetchone() == ("done", True)
+    assert db_conn.execute(
+        "SELECT lifecycle_command_id FROM agents_meta WHERE id=%s", (agent_id,)
+    ).fetchone() == (None,)
+
+
+async def test_exclusive_host_boot_defers_force_with_persistent_exec_evidence(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A request envelope survives its parent and forbids guessed quiescence."""
+    agent_id = _agent(db_conn)
+    old_host = AgentHost(pool=aops_pool, checkpointer=Mock(), graph=Mock(), machine="claim-test")
+    assert (
+        await admit_hosted_runtime(
+            aops_pool, agent_id, "claim-test", old_host._owner, expected_from="idling"
+        )
+        is not None
+    )
+    with ConnectionPool[psycopg.Connection](settings.data_plane.db_url) as pool:
+        _, _, _, command = await asyncio.to_thread(
+            _force_terminate_transaction, agent_id, pool, source="user", kill_process=False
+        )
+    agent_dir = tmp_path / str(agent_id)
+    agent_dir.mkdir()
+    request = agent_dir / "req-live.json"
+    request.write_text("{}")
+    monkeypatch.setattr("shared.hosted_force.exec_run_dir", lambda: tmp_path)
+
+    recovered, deferred = await recover_orphaned_hosted_forces(aops_pool, "claim-test")
+
+    assert recovered == []
+    assert deferred == {agent_id: (request,)}
+    assert db_conn.execute(
+        "SELECT status,applied_at IS NOT NULL,observed_at FROM inbound_messages WHERE id=%s",
+        (command,),
+    ).fetchone() == ("claimed", True, None)
+    assert db_conn.execute(
+        "SELECT lifecycle_command_id FROM agents_meta WHERE id=%s", (agent_id,)
+    ).fetchone() == (command,)
 
 
 async def test_formatted_exec_cleanup_failure_retains_actual_resource_evidence(

@@ -10,10 +10,12 @@ nothing left to claim.
 
 Shared for the whole daemon, built once at boot and handed in:
 
-- **the Postgres pool** — sized against `AVA_HOST_MAX_CONCURRENT_TURNS` plus
-  headroom. Deliberately NOT per agent: the hosted model's invariant is "an idle
-  agent is no task at all", and a pool that outlives the turn is exactly a
-  per-idle-agent cost, which is the thing this design exists to delete.
+- **the Postgres pools** — a turn/checkpoint pool sized against
+  `AVA_HOST_MAX_CONCURRENT_TURNS` plus headroom, and a fixed four-connection
+  control pool for admission, settlement, ownership, and durable scans. Both
+  are daemon-scoped, never per agent. The split keeps a saturated turn path
+  from starving the control operations that make pending work recoverable;
+  PgBouncer remains the downstream server-connection multiplexer.
 - **the checkpointer** — one `AsyncPostgresSaver` over that pool. Agents are
   already separated inside it by `thread_id`, which is the agent id; a saver per
   agent would separate nothing further.
@@ -158,7 +160,7 @@ from services.agent_host.stall_guard import run_invocation_with_stall_guard
 from shared.config import settings
 from shared.config.turn_view import bind_agent_config, resolve_agent_config_pins
 from shared.context import AvaContext
-from shared.db import PG_KEEPALIVE_KWARGS
+from shared.db import PG_KEEPALIVE_KWARGS, _restore_pooled_session_async
 from shared.db_transaction import async_write_transaction
 from shared.event_publisher import AgentEventPublisher
 from shared.lm.factory import validate_model_config
@@ -179,11 +181,12 @@ _HostGraph = CompiledStateGraph[BaseAgentState, AvaContext, BaseAgentState, Base
 # reaches a running state.
 _UNRUNNABLE_STATUSES = frozenset({"terminated", "restarting"})
 
-# Spare connections above the concurrent-turn bound. Every running turn may hold
-# one for its checkpoint writes and kernel SQL; the spares cover the wake reads
-# of turns still waiting on a slot, so a full host never deadlocks its own
-# admission check against its own running turns.
+# Spare workload connections above the concurrent-turn bound. Every running
+# turn may hold one for checkpoint writes or kernel SQL; the spares cover
+# checkpoint/background overlap. Lifecycle and durable scans have a separate
+# control pool and cannot be starved by these borrowers.
 _POOL_HEADROOM = 4
+_CONTROL_POOL_SIZE = 4
 
 
 def _config_fingerprint(
@@ -297,11 +300,13 @@ class AgentHost:
         self,
         *,
         pool: AsyncConnectionPool[psycopg.AsyncConnection],
+        control_pool: AsyncConnectionPool[psycopg.AsyncConnection] | None = None,
         checkpointer: AsyncPostgresSaver,
         graph: _HostGraph,
         machine: str | None = None,
     ) -> None:
         self._pool = pool
+        self._control_pool = control_pool if control_pool is not None else pool
         self._checkpointer = checkpointer
         self._graph = graph
         self._machine = machine if machine is not None else machine_name()
@@ -365,7 +370,7 @@ class AgentHost:
                 self.drop_agent(agent_id)
             settlement = asyncio.create_task(
                 original_host_force(
-                    self._pool, agent_id, self._owner, self._machine, quiescent=True
+                    self._control_pool, agent_id, self._owner, self._machine, quiescent=True
                 )
             )
             while not settlement.done():
@@ -382,7 +387,7 @@ class AgentHost:
         from shared.hosted_force import original_host_force
 
         return await original_host_force(
-            self._pool, agent_id, self._owner, self._machine, command_id=command_id
+            self._control_pool, agent_id, self._owner, self._machine, command_id=command_id
         )
 
     async def _run_turn(self, agent_id: int) -> None:
@@ -438,7 +443,11 @@ class AgentHost:
             self._rejected_configs.pop(agent_id, None)
             self.stats.turns_started += 1
             incarnation = await admit_hosted_runtime(
-                self._pool, agent_id, self._machine, self._owner, expected_from=stored.status
+                self._control_pool,
+                agent_id,
+                self._machine,
+                self._owner,
+                expected_from=stored.status,
             )
             if incarnation is None:
                 logger.info(
@@ -485,7 +494,7 @@ class AgentHost:
                 finally:
                     self._in_flight.discard(agent_id)
                     if not exited:
-                        await settle_hosted_runtime(self._pool, incarnation)
+                        await settle_hosted_runtime(self._control_pool, incarnation)
 
     # ── locality / runnability ───────────────────────────────────────────────
 
@@ -521,7 +530,7 @@ class AgentHost:
         an agent that does not exist) and says so, unlike the two ordinary
         rejections above.
         """
-        async with self._pool.connection() as conn:
+        async with self._control_pool.connection() as conn:
             row = await (
                 await conn.execute(
                     "SELECT machine, status, config_overlay, birth_config "
@@ -632,7 +641,7 @@ class AgentHost:
         Returns None when the row is gone; raising is left to the caller's
         best-effort wrapper, which runs on the shutdown path.
         """
-        async with self._pool.connection() as conn:
+        async with self._control_pool.connection() as conn:
             row = await (
                 await conn.execute(
                     "SELECT last_active_at FROM agents_meta WHERE id = %s", (agent_id,)
@@ -651,7 +660,7 @@ class AgentHost:
         not cancel a legitimate long-running hosted turn merely because its
         previous LLM step was old.
         """
-        async with self._pool.connection() as conn:
+        async with self._control_pool.connection() as conn:
             rows = await (
                 await conn.execute(
                     "SELECT m.id, "
@@ -800,7 +809,7 @@ class AgentHost:
                 # The graph continuation has returned under existing single-flight.
                 # Cache loss is a consequence of the durable command, not its identity.
                 self.drop_agent(agent_id)
-                kind = await apply_hosted_lifecycle(self._pool, incarnation)
+                kind = await apply_hosted_lifecycle(self._control_pool, incarnation)
                 logger.info(
                     "hosted lifecycle return settled",
                     agent_id=agent_id,
@@ -816,15 +825,15 @@ class AgentHost:
         """Drop every cached runtime. The pool, checkpointer and graph belong to
         the daemon that built them and are closed there."""
         self._runtimes.clear()
-        await release_hosted_owner(self._pool, self._machine, self._owner, self._in_flight)
+        await release_hosted_owner(self._control_pool, self._machine, self._owner, self._in_flight)
 
     async def renew_ownership(self) -> None:
         """Existing daemon health beat also proves idle runtime responsibility."""
-        await renew_hosted_owner(self._pool, self._machine, self._owner)
+        await renew_hosted_owner(self._control_pool, self._machine, self._owner)
 
 
 def build_shared_pool(dsn: str) -> AsyncConnectionPool[psycopg.AsyncConnection]:
-    """The host's one Postgres pool, sized from the concurrent-turn bound.
+    """The host's turn/checkpoint pool, sized from the concurrent-turn bound.
 
     `max_size` is the bound plus headroom rather than a round number, so the
     sizing states its reason (see `_POOL_HEADROOM`). `autocommit=True` +
@@ -838,7 +847,27 @@ def build_shared_pool(dsn: str) -> AsyncConnectionPool[psycopg.AsyncConnection]:
         min_size=1,
         max_size=settings.daemon.host_max_concurrent_turns + _POOL_HEADROOM,
         kwargs={"autocommit": True, "prepare_threshold": None, **PG_KEEPALIVE_KWARGS},
-        check=AsyncConnectionPool.check_connection,
+        check=_restore_pooled_session_async,
+        timeout=settings.agent.db_pool_acquire_timeout_seconds,
+        open=False,
+    )
+
+
+def build_control_pool(dsn: str) -> AsyncConnectionPool[psycopg.AsyncConnection]:
+    """Reserved capacity for host ownership, recovery, and durable scans.
+
+    PgBouncer remains the downstream server-connection multiplexer. This
+    small client pool is a correctness boundary inside agent-host: turn or
+    checkpoint borrowers cannot consume it, so saturation cannot hide pending
+    work or strand lifecycle settlement.
+    """
+    return LoggingConnectionPool[psycopg.AsyncConnection](
+        dsn,
+        pool_name="agent-host-control",
+        min_size=1,
+        max_size=_CONTROL_POOL_SIZE,
+        kwargs={"autocommit": True, "prepare_threshold": None, **PG_KEEPALIVE_KWARGS},
+        check=_restore_pooled_session_async,
         timeout=settings.agent.db_pool_acquire_timeout_seconds,
         open=False,
     )
