@@ -38,10 +38,6 @@ from contextvars import ContextVar
 from typing import Any, Literal, cast
 
 from fastapi import FastAPI, HTTPException, Request
-from mcp.server.context import CallNext, HandlerResult, ServerRequestContext
-from mcp.server.mcpserver import MCPServer
-from mcp.server.mcpserver.exceptions import ToolError
-from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 from starlette.responses import JSONResponse
 
 from gateway import mcp_clients
@@ -148,6 +144,8 @@ def _project_message(msg: dict[str, Any]) -> dict[str, Any]:
 def _validate_status(status: str) -> None:
     """Reject a status filter that matches no lifecycle state (an unrecognized
     value must be an error listing the legal states, never an empty list)."""
+    from mcp.server.mcpserver.exceptions import ToolError
+
     from shared.agents import AgentStatus
 
     if status not in set(AgentStatus):
@@ -183,14 +181,21 @@ def _redact_args(args: dict[str, Any]) -> dict[str, dict[str, str | int]]:
     return {"schema": schema, "size": size, "sha256": hashes}
 
 
-def _tool_result_is_error(result: HandlerResult) -> bool:
-    is_error = getattr(result, "is_error", False)
-    if isinstance(result, dict):
-        is_error = result.get("isError", result.get("is_error", False))
+def _tool_result_is_error(
+    result: HandlerResult,  # noqa: F821  # pyright: ignore[reportUndefinedVariable]
+) -> bool:
+    from mcp.server.context import HandlerResult
+
+    typed_result = cast(HandlerResult, result)
+    is_error = getattr(typed_result, "is_error", False)
+    if isinstance(typed_result, dict):
+        is_error = typed_result.get("isError", typed_result.get("is_error", False))
     return bool(is_error)
 
 
 def _validate_mcp_identity_arguments(tool: str, args: dict[str, Any]) -> None:
+    from mcp.server.mcpserver.exceptions import ToolError
+
     if tool == "send_message" and args.get("caller_protocol") == "v1":
         reserved = {"source", "instance", "caller_identity", "auth_principal", "client_id"}
         if reserved.intersection(args):
@@ -201,11 +206,18 @@ class _AuditMiddleware:
     """Record client identity, outcome, and redacted args for every tools/call."""
 
     async def __call__(
-        self, ctx: ServerRequestContext[Any, Any], call_next: CallNext
-    ) -> HandlerResult:
-        if ctx.method != "tools/call":
-            return await call_next(ctx)
-        params = dict(ctx.params or {})
+        self,
+        ctx: ServerRequestContext[Any, Any],  # noqa: F821  # pyright: ignore[reportUndefinedVariable]
+        call_next: CallNext,  # noqa: F821  # pyright: ignore[reportUndefinedVariable]
+    ) -> HandlerResult:  # noqa: F821  # pyright: ignore[reportUndefinedVariable]
+        from mcp.server.context import CallNext, HandlerResult, ServerRequestContext
+
+        typed_ctx = cast(ServerRequestContext[Any, Any], ctx)
+        typed_call_next = cast(CallNext, call_next)
+        result: HandlerResult
+        if typed_ctx.method != "tools/call":
+            return await typed_call_next(typed_ctx)
+        params = dict(typed_ctx.params or {})
         tool = str(params.get("name", "?"))
         raw_args = params.get("arguments")
         args = cast(dict[str, Any], raw_args) if isinstance(raw_args, dict) else {}
@@ -225,7 +237,7 @@ class _AuditMiddleware:
         }
         try:
             _validate_mcp_identity_arguments(tool, args)
-            result = await call_next(ctx)
+            result = await typed_call_next(typed_ctx)
         except Exception as exc:
             insert_event_log(
                 event_type="mcp_tool_call",
@@ -267,6 +279,8 @@ def _select_one_blocking(pool: Any, agent_id: int) -> Any:
 
 def _require_write_scope(tool: str) -> None:
     """Fail a mutating tool before it reaches any fleet side effect."""
+    from mcp.server.mcpserver.exceptions import ToolError
+
     client = _CURRENT_MCP_CLIENT.get()
     if client is None:
         raise ToolError("authenticated MCP client context is missing")
@@ -274,10 +288,17 @@ def _require_write_scope(tool: str) -> None:
         raise ToolError(f"tool {tool!r} requires write scope")
 
 
-def _register_read_tools(server: MCPServer, pool: Any) -> None:
+def _register_read_tools(
+    server: MCPServer,  # noqa: F821  # pyright: ignore[reportUndefinedVariable]
+    pool: Any,
+) -> None:
     """Read-side tools: list / inspect / cluster snapshot."""
+    from mcp.server.mcpserver import MCPServer
+    from mcp.server.mcpserver.exceptions import ToolError
 
-    @server.tool()
+    typed_server = cast(MCPServer, server)
+
+    @typed_server.tool()
     async def list_agents(status: str | None = None) -> list[dict[str, Any]]:
         """List the agents in this Ava cluster with their live state.
 
@@ -296,7 +317,7 @@ def _register_read_tools(server: MCPServer, pool: Any) -> None:
             rows = [r for r in rows if r.status == status]
         return [_compact_agent(r) for r in rows]
 
-    @server.tool()
+    @typed_server.tool()
     async def get_agent(agent_id: int) -> dict[str, Any]:
         """Read the full state of one agent by id.
 
@@ -309,7 +330,7 @@ def _register_read_tools(server: MCPServer, pool: Any) -> None:
             raise ToolError(f"agent {agent_id} does not exist")
         return AgentRow.model_validate(snap.model_dump()).model_dump(mode="json")
 
-    @server.tool()
+    @typed_server.tool()
     async def cluster_status() -> dict[str, Any]:
         """Report the health of the Ava cluster itself — which host answered,
         what it is capable of running, and whether it is paused.
@@ -339,6 +360,8 @@ async def _mcp_deliver_send_message(
     stays under the PLR0915 statement budget; behavior is identical to an
     inline body.
     """
+    from mcp.server.mcpserver.exceptions import ToolError
+
     source = _MESSAGE_SOURCE
     if caller_protocol == "v1":
         client = _CURRENT_MCP_CLIENT.get()
@@ -380,15 +403,22 @@ async def _mcp_deliver_send_message(
     return {"status": delivery.status, "inbound_id": delivery.inbound_id}
 
 
-def _register_fleet_tools(server: MCPServer, pool: Any) -> None:
+def _register_fleet_tools(
+    server: MCPServer,  # noqa: F821  # pyright: ignore[reportUndefinedVariable]
+    pool: Any,
+) -> None:
     """Fleet-mutating tools: spawn / message / terminate.
 
     Each tool's description is the contract an external model reads before
     calling it, so it states what the call *does to the fleet* — including
     that `terminate_agent` ends a running process.
     """
+    from mcp.server.mcpserver import MCPServer
+    from mcp.server.mcpserver.exceptions import ToolError
 
-    @server.tool()
+    typed_server = cast(MCPServer, server)
+
+    @typed_server.tool()
     async def spawn_agent(
         prompt: str,
         label: str | None = None,
@@ -431,7 +461,7 @@ def _register_fleet_tools(server: MCPServer, pool: Any) -> None:
             raise ToolError(str(exc)) from exc
         return spawned.model_dump(mode="json")
 
-    @server.tool()
+    @typed_server.tool()
     async def send_message(
         agent_id: int,
         content: str,
@@ -465,7 +495,7 @@ def _register_fleet_tools(server: MCPServer, pool: Any) -> None:
             idempotency_key=idempotency_key,
         )
 
-    @server.tool()
+    @typed_server.tool()
     async def get_messages(agent_id: int, limit: int = _DEFAULT_MESSAGE_LIMIT) -> dict[str, Any]:
         """Read an agent's conversation history — what it was told and what it
         has said and done.
@@ -494,7 +524,7 @@ def _register_fleet_tools(server: MCPServer, pool: Any) -> None:
             "total": len(messages),
         }
 
-    @server.tool()
+    @typed_server.tool()
     async def terminate_agent(agent_id: int, *, force: bool = False) -> dict[str, Any]:
         """DESTRUCTIVE. End an agent: it stops working and its process exits.
 
@@ -515,26 +545,30 @@ def _register_fleet_tools(server: MCPServer, pool: Any) -> None:
         return result.model_dump(mode="json")
 
 
-def _build_server(pool: Any) -> MCPServer:
+def _build_server(pool: Any):  # noqa: ANN202 — inferred from the lazy import
     """Assemble the MCP server: one tool per gateway control route.
 
     Kept a builder so the manager (and its tool closures over the live
     db_pool) is created per app lifespan — the session manager can only run
     once per instance.
     """
+    from mcp.server.mcpserver import MCPServer
+
     server = MCPServer("ava", instructions=_INSTRUCTIONS, middleware=[_AuditMiddleware()])
     _register_read_tools(server, pool)
     _register_fleet_tools(server, pool)
     return server
 
 
-def build_manager(pool: Any) -> StreamableHTTPSessionManager:
+def build_manager(pool: Any):  # noqa: ANN201 — inferred from the lazy import
     """Create the /mcp session manager (server + stateless HTTP transport).
 
     Built fresh per gateway lifespan: `StreamableHTTPSessionManager.run()` can
     only be entered once per instance, and the tools close over the live
     db_pool, which is created by that same lifespan.
     """
+    from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
+
     server = _build_server(pool)
     # The public path builds the manager too: streamable_http_app() constructs
     # it and stores it on the server; session_manager then hands it over. The
@@ -546,7 +580,8 @@ def build_manager(pool: Any) -> StreamableHTTPSessionManager:
     # reachable hostname (Host: <private-network ip>), which the loopback
     # allowlist would reject with 421.
     server.streamable_http_app(streamable_http_path="/mcp", stateless_http=True, host="")
-    return server.session_manager
+    manager: StreamableHTTPSessionManager = server.session_manager
+    return manager
 
 
 def _bearer_token(scope: dict[str, Any]) -> str | None:
