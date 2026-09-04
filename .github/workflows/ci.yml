@@ -524,6 +524,10 @@ jobs:
       - name: Run pytest shard
         id: pytest-shard
         shell: bash
+        # Flaky-Tests gate flip (task #2414): test failures no longer red this
+        # step — Trunk's quarantine-aware evaluation of the uploaded JUnit is
+        # the gate now (quarantined failures pass, real failures still block).
+        continue-on-error: true
         run: |
           set +e
           set -o pipefail
@@ -559,7 +563,6 @@ jobs:
 
       - name: Upload test results to Trunk
         if: ${{ !cancelled() }}
-        continue-on-error: true
         uses: trunk-io/analytics-uploader@385f1ccdf345b4532dc4b6c665dd432b702b8e28 # v2.1.2
         with:
           junit-paths: tmp/junit-backend-shard-${{ matrix.group }}-*.xml
@@ -689,6 +692,7 @@ jobs:
         run: uv sync --frozen
 
       - name: Run flaky pytest bucket serially
+        continue-on-error: true
         run: >
           mkdir -p tmp &&
           uv run pytest tests/ -m flaky --ignore=tests/e2e -q
@@ -698,7 +702,6 @@ jobs:
 
       - name: Upload test results to Trunk
         if: ${{ !cancelled() }}
-        continue-on-error: true
         uses: trunk-io/analytics-uploader@385f1ccdf345b4532dc4b6c665dd432b702b8e28 # v2.1.2
         with:
           junit-paths: tmp/junit-backend-serial.xml
@@ -940,6 +943,7 @@ jobs:
         run: npm run lint
       - name: Unit tests (vitest run)
         working-directory: ui/web
+        continue-on-error: true
         run: npx vitest run --coverage
       # vitest.config.ts already emits json-summary for this gate. Quarantined
       # src/**/flaky/** tests run serially below with coverage disabled, so this
@@ -968,11 +972,11 @@ jobs:
       # their own vitest process — see ui/web/vitest.flaky.config.ts.
       - name: Flaky unit tests (vitest run, serial)
         working-directory: ui/web
+        continue-on-error: true
         run: npx vitest run --config vitest.flaky.config.ts
 
       - name: Upload test results to Trunk
         if: ${{ !cancelled() }}
-        continue-on-error: true
         uses: trunk-io/analytics-uploader@385f1ccdf345b4532dc4b6c665dd432b702b8e28 # v2.1.2
         with:
           junit-paths: ui/web/junit.xml,ui/web/junit-flaky.xml
@@ -1039,6 +1043,7 @@ jobs:
         run: uv run playwright install --with-deps chromium
 
       - name: Run e2e tests
+        continue-on-error: true
         # tests/e2e shares .test_durations with the backend suite (pytest-split
         # filters the file to this run's node ids; the nightly refresh measures
         # both suites), so the split is duration-balanced once e2e entries land.
@@ -1055,7 +1060,6 @@ jobs:
 
       - name: Upload test results to Trunk
         if: ${{ !cancelled() }}
-        continue-on-error: true
         uses: trunk-io/analytics-uploader@385f1ccdf345b4532dc4b6c665dd432b702b8e28 # v2.1.2
         with:
           junit-paths: tmp/junit-e2e-shard-${{ matrix.group }}.xml
@@ -1131,6 +1135,7 @@ jobs:
         run: uv run playwright install --with-deps chromium
 
       - name: Run hosted e2e tests
+        continue-on-error: true
         # Five tests, one worker: each test starts its own function-scoped
         # gateway + ops + agent-host, so serial keeps the run simple and the
         # logs unambiguous. message_flow / self_restart / self_terminate are
@@ -1149,7 +1154,6 @@ jobs:
 
       - name: Upload test results to Trunk
         if: ${{ !cancelled() }}
-        continue-on-error: true
         uses: trunk-io/analytics-uploader@385f1ccdf345b4532dc4b6c665dd432b702b8e28 # v2.1.2
         with:
           junit-paths: tmp/junit-e2e-hosted.xml
@@ -1224,6 +1228,7 @@ jobs:
         run: uv run playwright install --with-deps chromium
 
       - name: Run env-guard warmup + home-isolation in one serial process
+        continue-on-error: true
         # The whole point is ONE process: the package-scoped _e2e_process_env
         # fixture must fire and its teardown must land BEFORE the isolation
         # detectors read the environment. One scenario-marked test covers the
@@ -1240,7 +1245,6 @@ jobs:
 
       - name: Upload test results to Trunk
         if: ${{ !cancelled() }}
-        continue-on-error: true
         uses: trunk-io/analytics-uploader@385f1ccdf345b4532dc4b6c665dd432b702b8e28 # v2.1.2
         with:
           junit-paths: tmp/junit-e2e-env-guard.xml
