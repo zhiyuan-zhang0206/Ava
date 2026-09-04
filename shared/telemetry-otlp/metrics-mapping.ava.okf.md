@@ -47,6 +47,10 @@ you percentile). `_METRIC_DISPOSITION` overrides per (event, field):
   They are independent source/replacement size samples; the explicit
   `.compactions=1` field remains the Counter for completion frequency, and
   the float `.summary_history_ratio` uses the default Histogram disposition.
+- `sse.active_connections` -> **ObservableGauge** by stream mode; opened and
+  closed remain Counters.
+- `gateway_process.cpu_percent/rss_bytes/fd_count` -> **ObservableGauge**;
+  each 60-second process sample replaces the previous absolute values.
 
 `llm_usage.calls` (constant 1) exists so the int rule mints
 `ava_llm_usage_calls_total` — the per-agent/per-model call counter (histogram
@@ -76,12 +80,14 @@ would mint a new stream per process start.
 
 ## Views
 
-`_metric_views()` shapes `ava_llm_usage_latency` / `ava_llm_usage_decode`:
+`_metric_views()` shapes `ava_llm_usage_latency` / `ava_llm_usage_decode` with
 explicit LLM-scale buckets (250 ms .. 300 s — the OTel defaults top out at
 10 s, clipping every slower call into +Inf and flatlining ops p95 at exactly
-10 s) and an attribute keep-list of {machine, process, model} — `agent_id`
+10 s) and an attribute keep-list of {machine, process, model}. `agent_id`
 comes off because latency percentiles are read per model/fleet, and the key
-multiplied every (agent, model) into its own 17-series histogram.
+multiplied every (agent, model) into its own 17-series histogram. It also shapes
+`ava_gateway_event_loop_lag` with explicit 1 ms .. 300 s buckets, retaining a
+recovered minute-scale gateway freeze instead of folding it into +Inf.
 
 ## Export
 

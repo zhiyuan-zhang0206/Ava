@@ -568,6 +568,30 @@ class GatewayLatency(TypedDict):
     count: int
 
 
+class SseLifecycle(TypedDict):
+    """`sse` payload — one established or closed gateway stream."""
+
+    mode: Literal["filtered", "throttled"]
+    active_connections: int
+    opened: NotRequired[int]
+    closed: NotRequired[int]
+
+
+class GatewayProcess(TypedDict):
+    """`gateway_process` payload — gateway process resource snapshot."""
+
+    cpu_percent: float
+    rss_bytes: int
+    fd_count: int
+
+
+class GatewayEventLoop(TypedDict):
+    """`gateway_event_loop` payload — worst lag and slow ticks per window."""
+
+    lag_ms: float
+    slow_ticks: int
+
+
 class Auth401Rejected(TypedDict):
     """`auth401_rejected` payload — gateway/_auth401_log.py flusher.
 
@@ -1422,6 +1446,24 @@ EVENTS: dict[str, EventSpec] = {
         "gateway_latency",
         "gateway endpoint latency — 60s aggregate per route (p50/p95/p99/max/count)",
         payload=GatewayLatency,
+        tier="noise",
+    ),
+    "sse": _telemetry(
+        "sse",
+        "gateway SSE lifecycle — active connections by mode plus open/close counters",
+        payload=SseLifecycle,
+        tier="noise",
+    ),
+    "gateway_process": _telemetry(
+        "gateway_process",
+        "gateway process CPU, resident memory, and open file descriptors (60s sample)",
+        payload=GatewayProcess,
+        tier="noise",
+    ),
+    "gateway_event_loop": _telemetry(
+        "gateway_event_loop",
+        "gateway event-loop maximum callback lag and slow ticks (60s window)",
+        payload=GatewayEventLoop,
         tier="noise",
     ),
     # gateway auth middleware 401 aggregate (task #1712) — one event per 60s
