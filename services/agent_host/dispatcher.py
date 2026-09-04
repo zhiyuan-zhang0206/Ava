@@ -191,55 +191,46 @@ class TurnScheduler:
         """
         completed = False
         try:
-            while True:
-                self._pending.discard(agent_id)
-                try:
-                    await self._run_turn(agent_id)
-                except asyncio.CancelledError:
-                    raise
-                except HostRestartRequiredError:
-                    # A turn refused its bounded cancellation and still owns
-                    # the task slot; rescheduling beside it would violate
-                    # one-turn-per-agent. Escalate to the dispatcher loop,
-                    # which exits the daemon; the supervisor restarts it from
-                    # the durable checkpoint (the same recovery the pending
-                    # scan's stale-turn branch uses).
-                    logger.error(
-                        "hosted turn for agent {agent_id} refused its bounded "
-                        "cancellation after a stall — requesting host restart",
-                        event="host_turn_stall_uncancellable",
-                        agent_id=agent_id,
-                    )
-                    self._restart_required = True
-                    return
-                except TurnStallTimeoutError:
-                    # The no-progress stall guard aborted the invocation cleanly
-                    # (it DID unwind): the task ends, the runtime was dropped
-                    # by run_turn, and the next wake resumes from the
-                    # checkpoint after re-running the startup reconcile.
-                    logger.error(
-                        "hosted turn for agent {agent_id} aborted after a "
-                        "no-progress stall — dropping the task; the next wake "
-                        "resumes from the checkpoint",
-                        event="host_turn_stall_aborted",
-                        agent_id=agent_id,
-                    )
-                    return
-                except Exception:
-                    # One agent's failed turn must not take the host down or
-                    # wedge that agent: log it, drop the task, and let the next
-                    # wake start a fresh one. The turn's own state is
-                    # checkpointed, so the retry resumes rather than restarts.
-                    logger.exception(
-                        "hosted turn crashed — dropping the task; the next wake retries",
-                        event="host_turn_crashed",
-                        agent_id=agent_id,
-                    )
-                    return
-                # No await between this check and the `finally` below, so a
-                # wake cannot land in the gap (see the module docstring).
-                if agent_id not in self._pending:
-                    return
+            self._pending.discard(agent_id)
+            await self._run_turn(agent_id)
+            completed = True
+        except asyncio.CancelledError:
+            raise
+        except HostRestartRequiredError:
+            # A turn refused its bounded cancellation and still owns the task
+            # slot; rescheduling beside it would violate one-turn-per-agent.
+            # Escalate to the dispatcher loop, which exits the daemon; the
+            # supervisor restarts it from the durable checkpoint (the same
+            # recovery the pending scan's stale-turn branch uses).
+            logger.error(
+                "hosted turn for agent {agent_id} refused its bounded "
+                "cancellation after a stall — requesting host restart",
+                event="host_turn_stall_uncancellable",
+                agent_id=agent_id,
+            )
+            self._restart_required = True
+        except TurnStallTimeoutError:
+            # The no-progress stall guard aborted the invocation cleanly (it
+            # DID unwind): the task ends, the runtime was dropped by run_turn,
+            # and the next wake resumes from the checkpoint after re-running
+            # the startup reconcile.
+            logger.error(
+                "hosted turn for agent {agent_id} aborted after a "
+                "no-progress stall — dropping the task; the next wake "
+                "resumes from the checkpoint",
+                event="host_turn_stall_aborted",
+                agent_id=agent_id,
+            )
+        except Exception:
+            # One agent's failed turn must not take the host down or wedge
+            # that agent: log it, drop the task, and let the next wake start a
+            # fresh one. The turn's own state is checkpointed, so the retry
+            # resumes rather than restarts.
+            logger.exception(
+                "hosted turn crashed — dropping the task; the next wake retries",
+                event="host_turn_crashed",
+                agent_id=agent_id,
+            )
         finally:
             if self._tasks.get(agent_id) is asyncio.current_task():
                 self._tasks.pop(agent_id)
