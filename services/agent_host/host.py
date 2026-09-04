@@ -165,6 +165,7 @@ from shared.config.turn_view import bind_agent_config, resolve_agent_config_pins
 from shared.context import AvaContext
 from shared.db_transaction import async_write_transaction
 from shared.event_publisher import AgentEventPublisher
+from shared.live_announce import publish_agent_updated
 from shared.lm.factory import validate_model_config
 from shared.log import logger
 from shared.machine import machine_name
@@ -390,43 +391,41 @@ class AgentHost:
                 )
                 return
             exited = False
-            # All three binds wrap the whole turn, so every node task copies
-            # them (the exec child gets the agent config via the re-emitted
-            # overlay env instead — see the module docstring). The
-            # runtime build is INSIDE them on purpose: build_chat_model reads
-            # `turn_settings.lm.llm_model`, which is only this agent's model
-            # while the config bind is in effect.
-            with (
-                bind_turn_identity(agent_id, incarnation=incarnation),
-                bind_agent_config(pins),
-                bind_agent_plugin_config(plugin_pins),
-            ):
-                self._in_flight.add(agent_id)
-                try:
+            # Admission is durable before its optional live announce; every await
+            # after that commit stays inside the settlement boundary so a
+            # cancelled/half-open publish cannot strand a false `running` row.
+            self._in_flight.add(agent_id)
+            try:
+                # All three binds wrap the whole turn (the exec child gets agent
+                # config via the re-emitted overlay env instead — see the module
+                # docstring); the runtime build is inside them: build_chat_model
+                # reads turn_settings.lm.llm_model, only this agent's while bound.
+                with (
+                    bind_turn_identity(agent_id, incarnation=incarnation),
+                    bind_agent_config(pins),
+                    bind_agent_plugin_config(plugin_pins),
+                ):
+                    await publish_agent_updated(self._control_pool, agent_id)
                     runtime = await self._runtime_for(agent_id, stored.fingerprint)
                     exited = await self._drive_turns(agent_id, runtime)
-                except asyncio.CancelledError:
-                    # A cancelled turn (the stale-turn scan, force terminate,
-                    # shutdown) must not keep its runtime either: the abandoned
-                    # turn left claimed inbounds behind, and the next wake's
-                    # runtime build re-runs the startup reconcile — the hosted
-                    # equivalent of a fresh process's boot. The in-flight ref
-                    # keeps the current invocation's build alive; only the
-                    # cache entry is dropped, so an eviction does not matter.
-                    self.drop_agent(agent_id)
-                    raise
-                except Exception:
-                    # The scheduler logs and drops the task; dropping the runtime
-                    # too is what makes the retry equivalent to process mode's
-                    # crash + respawn, where the new process re-runs the startup
-                    # reconcile. Keeping it would let a half-finished turn's
-                    # claimed rows sit unresolved until an unrelated eviction.
-                    self.drop_agent(agent_id)
-                    raise
-                finally:
-                    self._in_flight.discard(agent_id)
-                    if not exited:
-                        await settle_hosted_runtime(self._control_pool, incarnation)
+            except asyncio.CancelledError:
+                # A cancelled turn (stale-turn scan, force terminate, shutdown)
+                # must not keep its runtime either: the next wake's runtime build
+                # re-runs the startup reconcile — the hosted equivalent of a
+                # fresh boot. The in-flight ref keeps the current build alive;
+                # only the cache entry is dropped.
+                self.drop_agent(agent_id)
+                raise
+            except Exception:
+                # The scheduler logs and drops the task; dropping the runtime
+                # too makes the retry equal process mode's crash+respawn (a new
+                # process re-runs the startup reconcile).
+                self.drop_agent(agent_id)
+                raise
+            finally:
+                self._in_flight.discard(agent_id)
+                if not exited:
+                    await settle_hosted_runtime(self._control_pool, incarnation)
 
     async def _run_held_controls(self, agent_id: int, status: str) -> None:
         """Maintain ownership and apply admin intent without touching the graph."""
