@@ -84,6 +84,7 @@ from shared.env_registry import health_port_env_aliases
 from shared.loop_health import LivenessGroup, LoopProgress  # noqa: F401  # pyright: ignore
 from shared.paths import ava_home, legacy_pid_path
 from shared.port_block import LEGACY_AVA_PORTS
+from shared.runtime_service_identity import normal_runtime_identity
 
 # Re-export trackers moved to loop_health after this module crossed the 800-line ceiling.
 
@@ -246,6 +247,9 @@ def _healthz_payload(
         "started_at": started_at,
         "sha": process_sha.get(),
     }
+    runtime = normal_runtime_identity(home)
+    if runtime is not None:
+        payload["runtime"] = runtime
     from shared import health_schema
 
     stale_for = None
