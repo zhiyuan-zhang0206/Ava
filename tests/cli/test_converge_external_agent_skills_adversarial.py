@@ -548,19 +548,19 @@ def test_cleanup_failure_after_activation_is_retried_without_rollback(
     bridge.converge_external_agent_skill(context, host_home=client.parent)
     target = _target(client, tmp_path)
     (source / "SKILL.md").write_text("operator v2\n")
-    original_remove = bridge._remove_owned_tree
+    original_rename = bridge._rename_no_replace
     failed = False
 
-    def fail_previous_once(path: Path, manifest: list[dict[str, Any]]) -> None:
+    def fail_previous_once(source_path: Path, destination: Path) -> None:
         nonlocal failed
-        if f".{SKILL}.ava-previous-" in path.name and not failed:
+        if f".{SKILL}.ava-previous-" in source_path.name and not failed:
             failed = True
             raise PermissionError("cleanup denied")
-        return original_remove(path, manifest)
+        original_rename(source_path, destination)
 
-    monkeypatch.setattr(bridge, "_remove_owned_tree", fail_previous_once)
+    monkeypatch.setattr(bridge, "_rename_no_replace", fail_previous_once)
     bridge.converge_external_agent_skill(context, host_home=client.parent)
-    monkeypatch.setattr(bridge, "_remove_owned_tree", original_remove)
+    monkeypatch.setattr(bridge, "_rename_no_replace", original_rename)
     bridge.converge_external_agent_skill(context, host_home=client.parent)
 
     assert (target / "SKILL.md").read_text() == "operator v2\n"
@@ -673,7 +673,7 @@ def test_late_target_keeps_stage_and_previous_in_transaction_state(
     }
 
 
-def test_cleanup_resumes_after_one_child_was_already_deleted(
+def test_cleanup_retains_private_residue_without_path_unlink(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     repo = tmp_path / "repo"
@@ -684,26 +684,25 @@ def test_cleanup_resumes_after_one_child_was_already_deleted(
     target = _target(client, tmp_path)
     (source / "SKILL.md").write_text("operator v2\n")
     original_unlink = Path.unlink
-    deleted = 0
+    unlink_attempts = 0
 
-    def fail_after_one_delete(path: Path, missing_ok: bool = False) -> None:
-        nonlocal deleted
-        if f".{SKILL}.ava-quarantine-previous-" in str(path):
-            if deleted == 1:
-                raise PermissionError("mid-cleanup interruption")
-            deleted += 1
+    def forbid_cleanup_unlink(path: Path, missing_ok: bool = False) -> None:
+        nonlocal unlink_attempts
+        if "-retained-previous-" in str(path):
+            unlink_attempts += 1
+            raise AssertionError(f"cleanup attempted pathname unlink: {path.name}")
         original_unlink(path, missing_ok=missing_ok)
 
-    monkeypatch.setattr(Path, "unlink", fail_after_one_delete)
+    monkeypatch.setattr(Path, "unlink", forbid_cleanup_unlink)
     bridge.converge_external_agent_skill(context, host_home=client.parent)
-    monkeypatch.setattr(Path, "unlink", original_unlink)
-    assert deleted == 1
+    assert unlink_attempts == 0
     ledger = json.loads(
         (context.ava_home / "configs" / "external-agent-skills" / "codex.json").read_text()
     )
     assert ledger["transaction"] is None
-    assert [item["kind"] for item in ledger["garbage"]] == ["previous"]
-    assert ledger["garbage"][0]["location"] == "quarantine"
+    assert ledger["garbage"] == []
+    assert [item["kind"] for item in ledger["retained"]] == ["previous"]
+    assert ledger["retained"][0]["location"] == "retained"
 
     bridge.converge_external_agent_skill(context, host_home=client.parent)
 

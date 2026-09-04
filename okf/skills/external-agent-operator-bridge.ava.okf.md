@@ -22,7 +22,8 @@ For each present client, the target is
 `<client-home>/skills/operating-ava-cluster`. Ava creates a complete staged copy
 beside that target. A private per-client ledger under
 `$AVA_HOME/configs/external-agent-skills/` records an installation identity,
-installed generation and digest, active transaction, and exact cleanup records;
+installed generation and digest, active transaction, exact cleanup records,
+and terminal private-retention records;
 the target's `.ava-managed.json` marker must match that external authority. The
 digest covers relative paths, entry kinds, file bytes, and file and directory
 modes. Each transaction, installed generation, and cleanup record also carries
@@ -37,24 +38,25 @@ A per-target cross-process lock serializes convergence. A source change stages
 a complete no-follow copy, atomically claims the current target, and verifies
 the claimed directory before activation. A mismatch is restored without
 overwriting a path that appeared late: claim, activation, and restoration all
-use atomic no-replace renames. Activation is recorded before cleanup,
-so a cleanup failure leaves the new copy authoritative and is retried later.
-Cleanup first records and atomically moves each residue tree to a transaction
-quarantine, verifies the claimed tree, and only then deletes. Each regular file
-is separately renamed to a deterministic deletion quarantine and reverified
-before unlink. Paths removed by an earlier attempt stay safely reclaimable,
-while unexpected or modified paths are restored when possible and otherwise
-preserved. The ledger recovers interrupted staged, claimed, cleanup-claimed,
-and activated generations;
+use atomic no-replace renames. Activation is recorded before cleanup, so a
+cleanup failure leaves the new copy authoritative. Cleanup first records and
+atomically moves each residue tree to a quarantine under the private ledger
+root. For every file, the ledger stores the source and quarantine relative
+paths and durably transitions through `source`, `claiming`, `quarantine`, and
+`retained` around its no-replace rename. An interrupted claim never adopts a
+destination from its deterministic name or matching content. No supported
+portable primitive can unlink the verified inode rather than a mutable
+pathname, so cleanup terminally retains the small private tree without unlink,
+chmod, or retry. The ledger recovers interrupted staged, claimed,
+cleanup-claimed, and activated generations;
 temporary and prior directories remain scoped to this exact target.
 
 An existing target without the matching external ledger is unmanaged and is
 preserved, even if it contains a copied or fabricated marker. Content or
 permission changes are user modifications and are also preserved. Source and
 external trees reject symbolic links, junctions, reparse points, and
-non-regular or multi-link entries. Cleanup never changes a regular file's mode;
-required directory permission changes use a verified open descriptor on POSIX
-and otherwise fail closed. The copy model uses ordinary directories and files, so the
+non-regular or multi-link entries. Cleanup changes no file or directory mode.
+The copy model uses ordinary directories and files, so the
 ownership contract does not require symlink support on Windows. Per-client
 path, lock, and rename failures are labelled warnings and do not abort core
 converge; source-integrity failures remain fatal.

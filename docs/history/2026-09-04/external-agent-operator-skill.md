@@ -66,3 +66,12 @@ marker, digest, and manifest evidence; ambiguous outcomes remain live and
 fail-closed. Cleanup claims and verifies both the residue tree and each file
 before deletion, while directory permission changes use a verified descriptor
 rather than a path-based chmod.
+
+The last cleanup hardening removed deletion itself. A verified quarantine
+pathname could still be substituted immediately before `unlink`, and no
+portable identity-bound deletion primitive was available. Residue is now
+atomically isolated under the private ledger root; per-file source, claiming,
+quarantine, and retained states are durable. Interrupted claims never infer
+ownership from a generated name or matching content. The small isolated tree
+is terminally retained without chmod or pathname unlink, so cleanup cannot
+touch a late user replacement and does not block the active external skill.

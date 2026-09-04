@@ -79,3 +79,13 @@ before deletion and restores a mismatch when the source name remains free.
 Each file receives a second deterministic quarantine rename and verification
 before unlink. Directory permission changes are bound to a verified descriptor
 on POSIX and are skipped, allowing deletion to fail closed, on Windows.
+
+Update 2026-09-04: pathname deletion was removed from residue cleanup. Even
+after post-rename verification, a pathname can be replaced before `unlink`, and
+POSIX does not provide a portable unlink-by-open-handle primitive. Cleanup now
+moves the residue under the private ledger root, records every file's source
+and quarantine paths plus write-ahead `claiming` state, and terminally retains
+the isolated tree. Restart reconciliation never treats a deterministic
+quarantine name or matching bytes as proof that Ava completed the file claim.
+An ambiguous or verified file is preserved without chmod, pathname unlink, or
+retry, while the newly activated external skill target remains unblocked.

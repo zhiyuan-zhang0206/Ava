@@ -381,11 +381,14 @@ resumable. Write-ahead phases precede stage publication and target claim, then
 reconcile their no-replace outcome from both paths plus marker, digest, and
 manifest evidence; ambiguous generation-shaped paths remain fail-closed.
 A per-target process lock serializes claim-and-verify updates; claims and
-restores are atomic no-replace renames. Cleanup likewise claims residue and
-individual files into no-replace quarantine names before verification and
-deletion; multi-link files are rejected and directory chmod is descriptor-bound;
-unmanaged or changed copies and unsafe linked paths are preserved with a client-labelled
-warning. External-client failures do not abort core converge. Dev worktrees skip this
+restores are atomic no-replace renames. Cleanup records the residue and each
+file's source, claiming, and quarantine state before its no-replace rename into
+the private ledger root. Because supported filesystems provide no portable
+identity-bound unlink, verified residue is terminally retained there and is
+not retried, path-unlinked, or chmodded; the active client target remains
+unblocked. Multi-link files are rejected. Unmanaged or changed copies and
+unsafe linked paths are preserved with a client-labelled warning.
+External-client failures do not abort core converge. Dev worktrees skip this
 host-global step. Converge also applies a gateway-host guard that fails
 loud on frontend build-time env overrides (`ui/web/.env{,.local,.production,.production.local}`
 bake `NEXT_PUBLIC_*` into the bundle and silently beat the runtime gateway inference —

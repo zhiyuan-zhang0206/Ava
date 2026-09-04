@@ -35,16 +35,18 @@ does not create absent client homes and does not distribute the rest of
 The copy's marker must match a private per-client ownership ledger under the
 prod cluster home. Its digest includes names, kinds, bytes, and modes. A
 per-target process lock serializes claim-and-verify updates and crash recovery.
-The ledger keeps an expected manifest for every transaction-owned generation;
-cleanup accepts already-removed expected entries but never unknown or modified
-ones, so an interrupted deletion can resume without losing its ownership pointer.
+The ledger keeps an expected manifest for every transaction-owned generation
+and a terminal record for privately retained cleanup residue.
 It writes a durable phase before stage publication and prior-target claim, then
 reconciles the atomic no-replace result from source/destination presence plus
 the transaction marker, digest, and manifest. Ambiguous paths remain preserved
-and fail-closed. Cleanup write-ahead claims each residue tree into its own
-no-replace quarantine, and each file gets a second quarantine claim before
-unlink. Multi-link files are rejected; required directory permission changes
-are descriptor-bound on POSIX and fail closed when unavailable.
+and fail-closed. Cleanup write-ahead claims each residue tree into the private
+ledger root, then durably records each file's source, claiming, and quarantine
+states around a second no-replace rename. It never infers file ownership from a
+deterministic name or matching content after an ambiguous restart. Since no
+portable identity-bound unlink is available, the isolated copy is terminally
+retained without pathname unlink, chmod, or retry; the client target remains
+unblocked. Multi-link files are rejected.
 An unmanaged target, modified managed copy, unsafe linked path, or cleanup
 residue that no longer matches its ledger is preserved and reported as a
 client-labelled conflict. Client integration failures are warning-only for core

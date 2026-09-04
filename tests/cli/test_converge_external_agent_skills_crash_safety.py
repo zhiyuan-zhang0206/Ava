@@ -9,6 +9,7 @@ import pytest
 
 from cli.commands import _converge
 from cli.commands import _converge_external_agent_skills as bridge
+from cli.commands import _external_agent_skill_cleanup as bridge_cleanup
 from cli.commands import _external_agent_skill_fs as bridge_fs
 
 SKILL = "operating-ava-cluster"
@@ -124,7 +125,7 @@ def test_restart_reconciles_claim_before_post_write_and_preserves_late_target(
     assert _residues(client) == []
 
 
-def test_cleanup_claim_verifies_swapped_file_before_deletion(
+def test_cleanup_root_claim_restores_tree_modified_before_private_isolation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     source, client, context = _world(tmp_path)
@@ -139,7 +140,7 @@ def test_cleanup_claim_verifies_swapped_file_before_deletion(
 
     def swap_before_cleanup_claim(source_path: Path, destination: Path) -> None:
         nonlocal injected
-        if ".ava-previous-" in source_path.name and ".ava-quarantine-" in destination.name:
+        if ".ava-previous-" in source_path.name and "-retained-previous-" in destination.name:
             victim = source_path / "SKILL.md"
             victim.unlink()
             victim.symlink_to(outside)
@@ -166,6 +167,7 @@ def test_cleanup_claim_verifies_swapped_file_before_deletion(
 
     assert _residues(client) == []
     assert _ledger(context)["garbage"] == []
+    assert len(_ledger(context)["retained"]) == 1
 
 
 def test_restart_reconciles_cleanup_claim_before_post_write(
@@ -180,7 +182,7 @@ def test_restart_reconciles_cleanup_claim_before_post_write(
     def interrupt_after_cleanup_claim(source_path: Path, destination: Path) -> None:
         nonlocal interrupted
         original_rename(source_path, destination)
-        if ".ava-quarantine-" in destination.name and not interrupted:
+        if "-retained-previous-" in destination.name and not interrupted:
             interrupted = True
             raise SystemExit("process killed after cleanup claim")
 
@@ -195,10 +197,11 @@ def test_restart_reconciles_cleanup_claim_before_post_write(
 
     assert (_target(client) / "SKILL.md").read_text() == "operator v2\n"
     assert _ledger(context)["garbage"] == []
+    assert len(_ledger(context)["retained"]) == 1
     assert _residues(client) == []
 
 
-def test_directory_permission_change_is_bound_to_verified_inode(
+def test_unsupported_cleanup_never_changes_directory_permissions(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     residue = tmp_path / "residue"
@@ -210,39 +213,133 @@ def test_directory_permission_change_is_bound_to_verified_inode(
     outside.mkdir()
     outside.chmod(0o755)
     outside_before = outside.stat()
-    original_manifest = bridge_fs._tree_manifest
-    original_lstat = bridge_fs._lstat
-    armed = False
-    swapped = False
 
-    def arm_after_manifest(*args: Any, **kwargs: Any) -> list[dict[str, Any]]:
-        nonlocal armed
-        result = original_manifest(*args, **kwargs)
-        armed = True
-        return result
+    def chmod_forbidden(*args: Any, **kwargs: Any) -> None:
+        raise AssertionError("cleanup must not chmod by pathname or descriptor")
 
-    def swap_after_validation(path: Path):
-        nonlocal armed, swapped
-        current = original_lstat(path)
-        if armed and path == nested:
-            armed = False
-            nested.rmdir()
-            nested.symlink_to(outside, target_is_directory=True)
-            swapped = True
-        return current
-
-    monkeypatch.setattr(bridge_fs, "_tree_manifest", arm_after_manifest)
-    monkeypatch.setattr(bridge_fs, "_lstat", swap_after_validation)
+    monkeypatch.setattr(Path, "chmod", chmod_forbidden)
+    monkeypatch.setattr(bridge_fs.os, "fchmod", chmod_forbidden)
 
     with pytest.raises(bridge_fs._ClientConflictError):
         bridge_fs._remove_manifest_subset(residue, manifest)
 
-    assert swapped
-    assert nested.is_symlink()
+    assert nested.is_dir()
+    assert stat.S_IMODE(nested.stat().st_mode) == 0o500
     assert stat.S_IMODE(outside.stat().st_mode) == stat.S_IMODE(outside_before.st_mode)
 
 
-def test_file_unlink_uses_post_rename_identity_validation(
+def test_restart_does_not_adopt_ambiguous_per_file_claim(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source, client, context = _world(tmp_path)
+    bridge.converge_external_agent_skill(context, host_home=client.parent)
+    source.joinpath("SKILL.md").write_text("operator v2\n")
+    original_rename = bridge._rename_no_replace
+    interrupted = False
+
+    def interrupt_after_file_claim(source_path: Path, destination: Path) -> None:
+        nonlocal interrupted
+        if ".ava-retained-" in destination.name and not interrupted:
+            ledger = _ledger(context)
+            claiming = [
+                claim
+                for claim in ledger["garbage"][0]["file_claims"]
+                if claim["state"] == "claiming"
+            ]
+            assert len(claiming) == 1
+            assert destination.name in claiming[0]["quarantine"]
+        original_rename(source_path, destination)
+        if ".ava-retained-" in destination.name and not interrupted:
+            interrupted = True
+            raise SystemExit("process killed after per-file claim")
+
+    monkeypatch.setattr(bridge, "_rename_no_replace", interrupt_after_file_claim)
+    with pytest.raises(SystemExit, match="per-file claim"):
+        bridge.converge_external_agent_skill(context, host_home=client.parent)
+
+    ledger = _ledger(context)
+    assert ledger["garbage"][0]["location"] == "quarantine"
+    assert "claiming" in {claim["state"] for claim in ledger["garbage"][0]["file_claims"]}
+
+    monkeypatch.setattr(bridge, "_rename_no_replace", original_rename)
+    bridge.converge_external_agent_skill(context, host_home=client.parent)
+
+    ledger = _ledger(context)
+    assert ledger["garbage"] == []
+    assert len(ledger["retained"]) == 1
+    assert all(claim["state"] == "retained" for claim in ledger["retained"][0]["file_claims"])
+    assert (_target(client) / "SKILL.md").read_text() == "operator v2\n"
+
+
+def test_preexisting_per_file_quarantine_is_preserved_without_adoption(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source, client, context = _world(tmp_path)
+    bridge.converge_external_agent_skill(context, host_home=client.parent)
+    source.joinpath("SKILL.md").write_text("operator v2\n")
+    original_preserve = bridge_cleanup._preserve_claimed_tree
+    collision: Path | None = None
+
+    def inject_collision_after_root_verification(
+        ledger_path: Path,
+        ledger: dict[str, Any],
+        item: dict[str, Any],
+        quarantine: Path,
+        rename: Any,
+    ) -> None:
+        nonlocal collision
+        skill_claim = next(claim for claim in item["file_claims"] if claim["path"] == "SKILL.md")
+        candidate = quarantine / skill_claim["quarantine"]
+        candidate.write_text("late user path\n")
+        collision = candidate
+        original_preserve(ledger_path, ledger, item, quarantine, rename)
+
+    monkeypatch.setattr(
+        bridge_cleanup, "_preserve_claimed_tree", inject_collision_after_root_verification
+    )
+    bridge.converge_external_agent_skill(context, host_home=client.parent)
+
+    assert collision is not None
+    assert collision.read_text() == "late user path\n"
+    retained = _ledger(context)["retained"]
+    assert len(retained) == 1
+    skill_claim = next(claim for claim in retained[0]["file_claims"] if claim["path"] == "SKILL.md")
+    assert skill_claim["state"] == "retained"
+    assert (collision.parent / "SKILL.md").read_text() == "operator v1\n"
+    assert (_target(client) / "SKILL.md").read_text() == "operator v2\n"
+
+
+def test_per_file_claim_failure_is_terminal_after_private_root_claim(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source, client, context = _world(tmp_path)
+    bridge.converge_external_agent_skill(context, host_home=client.parent)
+    source.joinpath("SKILL.md").write_text("operator v2\n")
+    original_rename = bridge._rename_no_replace
+    attempts = 0
+
+    def fail_file_claim(source_path: Path, destination: Path) -> None:
+        nonlocal attempts
+        if ".ava-retained-" in destination.name:
+            attempts += 1
+            raise PermissionError("private residue is not writable")
+        original_rename(source_path, destination)
+
+    monkeypatch.setattr(bridge, "_rename_no_replace", fail_file_claim)
+    bridge.converge_external_agent_skill(context, host_home=client.parent)
+    assert attempts >= 1
+    attempts_after_cleanup = attempts
+    ledger = _ledger(context)
+    assert ledger["garbage"] == []
+    assert len(ledger["retained"]) == 1
+
+    bridge.converge_external_agent_skill(context, host_home=client.parent)
+
+    assert attempts == attempts_after_cleanup
+    assert (_target(client) / "SKILL.md").read_text() == "operator v2\n"
+
+
+def test_cleanup_preserves_late_replacement_after_final_file_verification(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     residue = tmp_path / "residue"
@@ -254,23 +351,64 @@ def test_file_unlink_uses_post_rename_identity_validation(
     outside.write_text("outside\n")
     outside.chmod(0o444)
     outside_before = outside.stat()
-    original_rename = bridge_fs._rename_no_replace
-    swapped = False
+    original_verify = bridge_fs._verify_cleanup_file
+    late_replacement: Path | None = None
 
-    def swap_before_file_claim(source: Path, destination: Path) -> None:
-        nonlocal swapped
-        if source == victim and ".ava-delete-" in destination.name:
-            victim.unlink()
-            victim.symlink_to(outside)
-            swapped = True
-        original_rename(source, destination)
+    def swap_after_verification(path: Path, expected: dict[str, Any]) -> None:
+        nonlocal late_replacement
+        original_verify(path, expected)
+        claimed = path.with_name(f"{path.name}.claimed")
+        path.rename(claimed)
+        path.symlink_to(outside)
+        late_replacement = path
 
-    monkeypatch.setattr(bridge_fs, "_rename_no_replace", swap_before_file_claim)
+    monkeypatch.setattr(bridge_fs, "_verify_cleanup_file", swap_after_verification)
 
     with pytest.raises(bridge_fs._ClientConflictError):
         bridge_fs._remove_manifest_subset(residue, manifest)
 
-    assert swapped
-    assert victim.is_symlink()
+    assert late_replacement is not None
+    assert late_replacement.is_symlink()
     assert outside.read_text() == "outside\n"
     assert stat.S_IMODE(outside.stat().st_mode) == stat.S_IMODE(outside_before.st_mode)
+
+
+def test_converge_terminally_records_post_verification_replacement(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source, client, context = _world(tmp_path)
+    bridge.converge_external_agent_skill(context, host_home=client.parent)
+    source.joinpath("SKILL.md").write_text("operator v2\n")
+    outside = tmp_path / "outside.md"
+    outside.write_text("outside\n")
+    outside.chmod(0o444)
+    outside_before = outside.stat()
+    original_verify = bridge_cleanup._verify_cleanup_file
+    late_replacement: Path | None = None
+
+    def swap_after_verification(path: Path, expected: dict[str, Any]) -> None:
+        nonlocal late_replacement
+        original_verify(path, expected)
+        if path.name.startswith(".SKILL.md.ava-retained-"):
+            claimed = path.with_name(f"{path.name}.claimed")
+            path.rename(claimed)
+            path.symlink_to(outside)
+            late_replacement = path
+
+    monkeypatch.setattr(bridge_cleanup, "_verify_cleanup_file", swap_after_verification)
+    bridge.converge_external_agent_skill(context, host_home=client.parent)
+
+    assert late_replacement is not None
+    assert late_replacement.is_symlink()
+    assert outside.read_text() == "outside\n"
+    assert stat.S_IMODE(outside.stat().st_mode) == stat.S_IMODE(outside_before.st_mode)
+    ledger = _ledger(context)
+    assert ledger["garbage"] == []
+    assert len(ledger["retained"]) == 1
+    assert all(claim["state"] == "retained" for claim in ledger["retained"][0]["file_claims"])
+
+    monkeypatch.setattr(bridge_cleanup, "_verify_cleanup_file", original_verify)
+    bridge.converge_external_agent_skill(context, host_home=client.parent)
+
+    assert late_replacement.is_symlink()
+    assert (_target(client) / "SKILL.md").read_text() == "operator v2\n"

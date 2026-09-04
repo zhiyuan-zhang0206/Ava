@@ -25,7 +25,6 @@ from cli.commands._external_agent_skill_fs import (
     _exists,
     _lstat,
     _manifest_digest,
-    _remove_manifest_subset,
     _rename_no_replace,
     _source_lstat,
     _SourceIntegrityError,
@@ -80,10 +79,6 @@ def _validate_directory(path: Path, reason: str) -> None:
         raise _ClientConflictError(reason)
 
 
-def _remove_owned_tree(root: Path, manifest: list[dict[str, Any]]) -> None:
-    _remove_manifest_subset(root, manifest)
-
-
 def _warn(label: str, reason: str) -> None:
     print(f"  ! {label} external operator skill skipped: conflict: {reason}", file=sys.stderr)
 
@@ -91,9 +86,7 @@ def _warn(label: str, reason: str) -> None:
 def _cleanup_garbage(
     ledger_path: Path, ledger: dict[str, Any], skills_root: Path, label: str
 ) -> None:
-    _cleanup_garbage_impl(
-        ledger_path, ledger, skills_root, label, _remove_owned_tree, _rename_no_replace
-    )
+    _cleanup_garbage_impl(ledger_path, ledger, skills_root, label, _rename_no_replace)
 
 
 def _stage_copy(
@@ -147,10 +140,12 @@ def _abandon_transaction(
     if transaction["claim_state"] != "idle":
         return False
     if transaction["stage_state"] == "preparing" and _exists(prepared):
-        try:
-            _remove_owned_tree(prepared, transaction["expected_manifest"])
-        except (OSError, _ClientConflictError):
-            return False
+        _queue_garbage(
+            ledger,
+            kind="prepared",
+            path_generation_id=generation_id,
+            manifest=transaction["expected_manifest"],
+        )
     if transaction["stage_state"] == "publishing" and _exists(prepared):
         return False
     if transaction["stage_state"] in {"publishing", "published"} and _exists(stage):
@@ -403,6 +398,7 @@ def _converge_locked(
                 "garbage": [],
                 "installation_id": uuid.uuid4().hex,
                 "installed": None,
+                "retained": [],
                 "transaction": None,
             },
         )

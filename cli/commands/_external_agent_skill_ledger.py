@@ -16,7 +16,7 @@ from cli.commands._external_agent_skill_fs import (
 )
 from shared.private_storage import write_private_bytes
 
-_FORMAT = 5
+_FORMAT = 6
 _MARKER_NAME = ".ava-managed.json"
 _SKILL_NAME = "operating-ava-cluster"
 _HEX = re.compile(r"^[0-9a-f]{64}$")
@@ -113,6 +113,76 @@ def _valid_manifest(value: object) -> bool:
     return False
 
 
+def _valid_file_claims(value: object, manifest: object) -> bool:
+    if not isinstance(value, list) or not isinstance(manifest, list):
+        return False
+    manifest_items = cast(list[object], manifest)
+    expected_files = {
+        str(cast(dict[str, object], item)["path"])
+        for item in manifest_items
+        if isinstance(item, dict) and cast(dict[str, object], item).get("kind") == "file"
+    }
+    paths: set[str] = set()
+    quarantines: set[str] = set()
+    for claim_value in cast(list[object], value):
+        if not isinstance(claim_value, dict):
+            return False
+        claim = cast(dict[str, object], claim_value)
+        path = claim.get("path")
+        quarantine = claim.get("quarantine")
+        expected_quarantine = None
+        if isinstance(path, str):
+            source_path = Path(path)
+            suffix = hashlib.sha256(path.encode()).hexdigest()[:16]
+            expected_quarantine = source_path.with_name(
+                f".{source_path.name}.ava-retained-{suffix}"
+            ).as_posix()
+        if (
+            set(claim) != {"path", "quarantine", "state"}
+            or not isinstance(path, str)
+            or not isinstance(quarantine, str)
+            or path not in expected_files
+            or path in paths
+            or quarantine in quarantines
+            or quarantine != expected_quarantine
+            or Path(quarantine).is_absolute()
+            or ".." in Path(quarantine).parts
+            or claim.get("state") not in {"source", "claiming", "quarantine", "retained"}
+        ):
+            return False
+        paths.add(path)
+        quarantines.add(quarantine)
+    return paths == expected_files
+
+
+def _all_claims_retained(value: object) -> bool:
+    if not isinstance(value, list):
+        return False
+    for claim_value in cast(list[object], value):
+        if not isinstance(claim_value, dict):
+            return False
+        if cast(dict[str, object], claim_value).get("state") != "retained":
+            return False
+    return True
+
+
+def _valid_cleanup_item(value: object, *, retained: bool) -> bool:
+    if not isinstance(value, dict):
+        return False
+    item = cast(dict[str, Any], value)
+    allowed_locations = {"retained"} if retained else {"source", "claiming", "quarantine"}
+    claims = item.get("file_claims")
+    return (
+        set(item) == {"file_claims", "kind", "location", "manifest", "path_generation_id"}
+        and item["kind"] in {"prepared", "stage", "previous"}
+        and item["location"] in allowed_locations
+        and _valid_id(item["path_generation_id"])
+        and _valid_manifest(item["manifest"])
+        and _valid_file_claims(claims, item["manifest"])
+        and (not retained or _all_claims_retained(claims))
+    )
+
+
 def _load_ledger(path: Path, client_key: str) -> dict[str, Any] | None:
     record = _parse_record(path)
     if record is None:
@@ -122,6 +192,7 @@ def _load_ledger(path: Path, client_key: str) -> dict[str, Any] | None:
         "format",
         "installation_id",
         "installed",
+        "retained",
         "transaction",
         "garbage",
     }
@@ -172,16 +243,13 @@ def _load_ledger(path: Path, client_key: str) -> dict[str, Any] | None:
     if not isinstance(garbage_value, list):
         raise _ClientConflictError("Ava ownership ledger is invalid")
     for item_value in cast(list[object], garbage_value):
-        if not isinstance(item_value, dict):
+        if not _valid_cleanup_item(item_value, retained=False):
             raise _ClientConflictError("Ava ownership ledger is invalid")
-        item = cast(dict[str, Any], item_value)
-        if (
-            set(item) != {"kind", "location", "manifest", "path_generation_id"}
-            or item["kind"] not in {"stage", "previous"}
-            or item["location"] not in {"source", "claiming", "quarantine"}
-            or not _valid_id(item["path_generation_id"])
-            or not _valid_manifest(item["manifest"])
-        ):
+    retained_value: object = record["retained"]
+    if not isinstance(retained_value, list):
+        raise _ClientConflictError("Ava ownership ledger is invalid")
+    for item_value in cast(list[object], retained_value):
+        if not _valid_cleanup_item(item_value, retained=True):
             raise _ClientConflictError("Ava ownership ledger is invalid")
     return record
 
