@@ -166,6 +166,7 @@ def collect_inventory(
     machine: str,
     *,
     schema_digest: str,
+    allow_empty_launchers: bool = False,
 ) -> dict[str, object]:
     """Collect actual facts twice; no writes, stop, plugin install or activation."""
     if not home.is_absolute() or home.resolve(strict=True) != home:
@@ -190,7 +191,7 @@ def collect_inventory(
         raise ReleaseRejectedError("inventory unit is not registered")
     sessions = _sessions(home)
     launchers = _launchers(home)
-    if not launchers:
+    if not launchers and not allow_empty_launchers:
         raise ReleaseRejectedError("empty launcher inventory is not complete coverage")
     # Exact recorded processes are stable across separate prepare/revalidate
     # invocations. The collector itself is not an old writer incarnation.
@@ -301,11 +302,13 @@ def revalidate_bootstrap_inventory(
 ) -> ExpectedUnitWriters:
     """Revalidate a retained receipt while allowing one proved A/B PID turnover.
 
-    The restricted hop intentionally replaces the sole ``ava-ops`` process, so
-    byte-for-byte revalidation would reject every legitimate recovery. All
-    non-process facts still come from the real producer and must remain exact;
-    the one changing session is supplied only after its native record, command,
-    process identity, and verified A/B image have been checked by the caller.
+    The restricted hop intentionally replaces the sole ``ava-ops`` process and
+    quiesces its exact launcher, so byte-for-byte revalidation would reject every
+    legitimate recovery. All other facts still come from the real producer and
+    must remain exact. The changing session is supplied only after its native
+    record, command, process identity, and verified A/B image have been checked;
+    the launcher set may only remain exact or become empty. The caller later
+    compares the raw launcher table with the journaled original/quiesced bytes.
     """
     if path.parent != home / "run" or path.resolve(strict=True) != path:
         raise ReleaseRejectedError("inventory receipt is outside this unit")
@@ -326,14 +329,22 @@ def revalidate_bootstrap_inventory(
         )
     except (KeyError, TypeError, ValueError) as exc:
         raise ReleaseRejectedError("prepared unit inventory is malformed") from exc
-    current = collect_inventory(conn, release, home, machine, schema_digest=schema_digest)
+    current = collect_inventory(
+        conn,
+        release,
+        home,
+        machine,
+        schema_digest=schema_digest,
+        allow_empty_launchers=True,
+    )
     current_expected = ExpectedUnitWriters.model_validate_json(_canonical(current["expected"]))
     if (
         current_session.name != "ava-ops"
         or current_expected.sessions != (current_session,)
         or current_expected.processes != (current_session.process,)
-        or current_expected.model_copy(update={"sessions": (), "processes": ()})
-        != prepared_expected.model_copy(update={"sessions": (), "processes": ()})
+        or current_expected.launchers not in (prepared_expected.launchers, ())
+        or current_expected.model_copy(update={"sessions": (), "processes": (), "launchers": ()})
+        != prepared_expected.model_copy(update={"sessions": (), "processes": (), "launchers": ()})
     ):
         raise ReleaseRejectedError("prepared unit inventory observer substitution changed")
     normalized = dict(current)

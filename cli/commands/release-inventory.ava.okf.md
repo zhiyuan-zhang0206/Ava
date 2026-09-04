@@ -37,10 +37,13 @@ omissions and changed unit/service/session/job facts.
 
 Restricted bootstrap resume uses the same real producer through
 `revalidate_bootstrap_inventory`. It requires the complete receipt's static
-unit, service-roster, launcher, and unresolved-coverage facts to remain exact.
-Only the sole `ava-ops` process/session identity may differ, after the updater
-has independently proved its native record, command, liveness, and verified A/B
-image. This exception is not available to ordinary preparation or maintenance.
+unit, service-roster, and unresolved-coverage facts to remain exact. The sole
+`ava-ops` process/session identity may differ after independent native and image
+verification. The expected launcher set may only remain exact or be empty after
+the hop's accounted quiesce; the updater subsequently requires the raw crontab
+bytes to equal either the journaled original or its exact restricted-entry
+removal before restoring anything. These exceptions are not available to
+ordinary preparation or maintenance.
 
 This bounded producer does **not** cover non-session managed processes,
 predecessor orchestration, system/alternate-user jobs, or positive launcher

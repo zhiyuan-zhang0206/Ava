@@ -47,9 +47,11 @@ they are observation only, never authority, and a new updater PID resets the
 comparable elapsed interval instead of inventing a cross-process duration.
 
 Every resume re-runs the native inventory producer and requires all prepared
-launcher, service-roster, unit, and receipt facts to remain exact. Only the sole
-`ava-ops` process may differ, and only after its record, command, process identity,
-and verified A/B image are checked. Candidate startup failure compensates to the
+service-roster, unit, and receipt facts to remain exact. Only the sole `ava-ops`
+process may differ, and only after its record, command, process identity, and
+verified A/B image are checked. Its launcher set may remain exact or be empty
+after accounted quiesce; the raw table must still equal the journaled original
+or its exact restricted-entry removal before any restore. Candidate startup failure compensates to the
 verified restricted A and restores
 only the unchanged original cron definition. Dead updater recovery reclaims the
 same generation and observes actual A/B state. A malformed envelope is retained

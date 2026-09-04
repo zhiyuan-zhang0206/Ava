@@ -25,3 +25,9 @@ refused before stop until its separate LKG and first-orchestrator bridge is
 proved. This refusal bounds the slice; it does not remove that mandatory work.
 CI uses distinct prepared images of the same code revision and explicitly does
 not claim old/new schema or application-version compatibility.
+
+Execution-proof clarification: after the hop has quiesced its exact inventoried
+launcher, recovery necessarily observes an empty Ava launcher set. That single
+accounted absence is admitted during inventory recollection; every other
+launcher fact stays exact, and the raw crontab must still match the journaled
+original or its exact restricted-entry removal before compensation writes.

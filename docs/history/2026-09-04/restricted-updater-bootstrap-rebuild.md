@@ -24,3 +24,9 @@ The restricted child projection continues to carry the transport-encryption
 declaration and the bootstrap observer continues to enforce the secure off-box
 bind contract introduced by PR #1524. The result remains a bootstrap-only slice,
 not permission for normal service activation or deployment.
+
+Update: the Linux source-absent proof exposed two recovery-boundary mismatches.
+Journal phases now stay a strict tuple until JSON serialization, and a dead-owner
+resume can recollect the deliberately empty Ava launcher set after exact cron
+quiesce. The latter does not loosen compensation: raw crontab bytes must still
+match the journaled original or its exact restricted-entry removal.

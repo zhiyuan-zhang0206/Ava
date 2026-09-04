@@ -88,6 +88,63 @@ def test_resume_inventory_allows_only_the_verified_observer_substitution(
         )
 
 
+def test_resume_inventory_accepts_only_the_accounted_launcher_quiescence(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    before = _expected(ExpectedProcess(pid=11, create_time=1.0, starttime=1))
+    live = ExpectedSession(
+        name="ava-ops", process=ExpectedProcess(pid=22, create_time=2.0, starttime=2)
+    )
+    prepared = _inventory(before)
+    encoded = json.dumps(prepared, sort_keys=True, separators=(",", ":")).encode()
+    receipt = tmp_path / "run" / f"release-inventory-{hashlib.sha256(encoded).hexdigest()}.json"
+    receipt.parent.mkdir()
+    receipt.write_bytes(encoded)
+    current_expected = before.model_copy(
+        update={"processes": (live.process,), "sessions": (live,), "launchers": ()}
+    )
+    current = _inventory(current_expected)
+    allow_empty = False
+
+    def collect(*_args: object, **kwargs: object) -> dict[str, object]:
+        nonlocal allow_empty
+        allow_empty = kwargs.get("allow_empty_launchers") is True
+        return current
+
+    monkeypatch.setattr(inventory, "collect_inventory", collect)
+
+    result = inventory.revalidate_bootstrap_inventory(
+        cast("psycopg.Connection", None),
+        cast("VerifiedRelease", object()),
+        tmp_path,
+        "machine",
+        receipt,
+        current_session=live,
+        schema_digest="d" * 64,
+    )
+    assert result == before
+    assert allow_empty
+
+    changed = current_expected.model_copy(
+        update={
+            "launchers": (
+                ExpectedLauncher(kind="crontab", name="other", definition_digest="e" * 64),
+            )
+        }
+    )
+    current = _inventory(changed)
+    with pytest.raises(ReleaseRejectedError, match="observer substitution"):
+        inventory.revalidate_bootstrap_inventory(
+            cast("psycopg.Connection", None),
+            cast("VerifiedRelease", object()),
+            tmp_path,
+            "machine",
+            receipt,
+            current_session=live,
+            schema_digest="d" * 64,
+        )
+
+
 def test_phase_evidence_is_bounded() -> None:
     phase = {
         "stage": "prepared",
