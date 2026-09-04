@@ -137,7 +137,9 @@ def _embedding_cost(tok_in: int) -> float:
     rounds it (6 decimals)."""
     from shared.lm.pricing import quote
 
-    return quote(_MODEL_ID, tok_in, 0, 0).cost_usd
+    priced = quote(_MODEL_ID, tok_in, 0, 0)
+    assert priced is not None  # gemini-embedding-2 is registered in the catalog
+    return priced.cost_usd
 
 
 def _assert_priced_embedding_span(tracer: _RecordingTracer, *, tok_in: int) -> None:
