@@ -109,10 +109,10 @@ def test_normal_release_retains_exact_recovery_record(
     stage: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _retained_bootstrap("candidate_ready")
-    path = handoff.state_path()
-    raw = json.loads(path.read_text())
-    raw["normal_release"] = {"stage": stage, "previous_selector": "exact original bytes"}
-    path.write_text(json.dumps(raw))
+    handoff.write_normal_release_recovery(
+        "bootstrap", {"stage": stage, "previous_selector": "exact original bytes"}
+    )
+    path = handoff.bootstrap_state_path()
     before = path.read_bytes()
     assert not handoff.clear("bootstrap")
     assert not handoff.force_clear()
@@ -124,11 +124,18 @@ def test_normal_release_retains_exact_recovery_record(
 
 def test_only_committed_normal_release_can_clear() -> None:
     _retained_bootstrap("candidate_ready")
-    path = handoff.state_path()
-    raw = json.loads(path.read_text())
-    raw["normal_release"] = {"stage": "committed"}
-    path.write_text(json.dumps(raw))
+    handoff.write_normal_release_recovery("bootstrap", {"stage": "committed"})
     assert handoff.clear("bootstrap")
+    assert not handoff.state_path().exists()
+    assert not handoff.bootstrap_state_path().exists()
+
+
+def test_normal_release_recovery_requires_candidate_ready_bootstrap() -> None:
+    _retained_bootstrap("candidate_started")
+    before = handoff.bootstrap_state_path().read_bytes()
+    with pytest.raises(handoff.BootstrapRecoveryInvalidError, match="candidate-ready"):
+        handoff.write_normal_release_recovery("bootstrap", {"stage": "waiting"})
+    assert handoff.bootstrap_state_path().read_bytes() == before
 
 
 @pytest.fixture(autouse=True)

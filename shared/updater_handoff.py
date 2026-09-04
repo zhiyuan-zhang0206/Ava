@@ -260,6 +260,32 @@ def write_bootstrap_recovery(generation: str, journal: dict[str, object]) -> Non
         _write_bootstrap_unlocked(generation, journal)
 
 
+def write_normal_release_recovery(generation: str, journal: dict[str, object]) -> None:
+    """Nest normal continuation evidence under the exact completed bootstrap hop."""
+    with file_lock(lock_path(), timeout_s=_LOCK_TIMEOUT_S):
+        current = _read_unlocked(state_path())
+        process = psutil.Process()
+        if (
+            current.status != "running"
+            or current.generation != generation
+            or current.owner_pid != process.pid
+            or current.owner_create_time != process.create_time()
+        ):
+            raise BootstrapRecoveryInvalidError("normal writer lost exact handoff ownership")
+        recovery = _read_bootstrap_unlocked()
+        if recovery is None or recovery["generation"] != generation:
+            raise BootstrapRecoveryInvalidError("normal writer has no exact bootstrap recovery")
+        bootstrap = cast("dict[str, object]", recovery["journal"])
+        if bootstrap.get("stage") != "candidate_ready":
+            raise BootstrapRecoveryInvalidError("normal writer has no candidate-ready bootstrap")
+        existing = bootstrap.get("normal_release")
+        if existing is not None and not isinstance(existing, dict):
+            raise BootstrapRecoveryInvalidError("normal recovery journal is malformed")
+        retained = dict(bootstrap)
+        retained["normal_release"] = journal
+        _write_bootstrap_unlocked(generation, retained)
+
+
 def begin(
     *,
     expected_session: str,
