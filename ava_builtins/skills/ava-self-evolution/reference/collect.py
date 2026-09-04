@@ -250,7 +250,8 @@ def _inbounds_by_agent(
     flagged the whole fleet as fumbled every day (1336 "peer feedback"
     messages across 70 runs on a day when agents were fine).
 
-    Returns dict[agent_id, list[{"source", "content", "is_broadcast"}]].
+    Returns dict[agent_id, list[{"source", "content", "is_broadcast",
+    "is_first_ever", "is_in_collection_window"}]].
     A broadcast is one source/content pair delivered to multiple agents in the
     collection window. It remains visible in the record but does not count as
     a correction or re-prompt for each recipient.
@@ -268,7 +269,13 @@ def _inbounds_by_agent(
     first_rows: dict[int, dict[str, Any]] = {}
     for msg_id, agent_id, source, content in cur.fetchall():
         first_ids[agent_id] = msg_id
-        first_rows[agent_id] = {"source": source, "content": content, "is_broadcast": False}
+        first_rows[agent_id] = {
+            "source": source,
+            "content": content,
+            "is_broadcast": False,
+            "is_first_ever": True,
+            "is_in_collection_window": False,
+        }
     # Everything the agent actually received during this collection window.
     cur.execute(
         "WITH window_inbounds AS ("
@@ -292,10 +299,20 @@ def _inbounds_by_agent(
     out: dict[int, list[dict[str, Any]]] = defaultdict(list)
     for msg_id, agent_id, source, content, is_broadcast in cur.fetchall():
         if msg_id == first_ids.get(agent_id):
+            first_rows[agent_id]["is_in_collection_window"] = True
             continue  # the task prompt — already first via prepend below
-        out[agent_id].append({"source": source, "content": content, "is_broadcast": is_broadcast})
-    # Prepend the task prompt so build_record still finds it at
-    # user_msgs[0] / spawner_msgs[0].
+        out[agent_id].append(
+            {
+                "source": source,
+                "content": content,
+                "is_broadcast": is_broadcast,
+                "is_first_ever": False,
+                "is_in_collection_window": True,
+            }
+        )
+    # Prepend the first-ever message so build_record still finds the initial
+    # user task prompt first, while its window marker distinguishes old and
+    # fresh spawner briefs.
     for agent_id, row in first_rows.items():
         out[agent_id].insert(0, row)
     return out
@@ -451,13 +468,20 @@ def collect_one(
     ]
     with connect() as conn, conn.cursor() as cur:
         cur.execute(
-            "SELECT source, content FROM inbound_messages WHERE agent_id = %s AND kind = 'chat' "
+            "SELECT source, content, created_at > %s AS is_in_collection_window "
+            "FROM inbound_messages WHERE agent_id = %s AND kind = 'chat' "
             "ORDER BY created_at",
-            [agent_id],
+            [window_from, agent_id],
         )
         inbounds: list[dict[str, Any]] = [
-            {"source": source, "content": content, "is_broadcast": False}
-            for source, content in cur.fetchall()
+            {
+                "source": source,
+                "content": content,
+                "is_broadcast": False,
+                "is_first_ever": index == 0,
+                "is_in_collection_window": is_in_collection_window,
+            }
+            for index, (source, content, is_in_collection_window) in enumerate(cur.fetchall())
         ]
         cur.execute(
             "SELECT spawner, status, last_message_text FROM agents_meta WHERE id = %s", [agent_id]
