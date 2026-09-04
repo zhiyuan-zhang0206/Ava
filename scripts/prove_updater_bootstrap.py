@@ -41,6 +41,7 @@ from shared.managed_writer_observation import (
 from shared.native_job_observation import read_crontab
 from shared.runtime_release import ReleaseRejectedError, VerifiedRelease, verify_release
 from shared.session_backend import get_backend
+from shared.updater_recovery import BootstrapRecoveryStage
 
 
 def require(value: bool, message: str) -> None:  # noqa: FBT001 — CI assertion predicate.
@@ -171,7 +172,12 @@ def fault_worker(mode: str, request: Path) -> int:  # noqa: PLR0915 — scoped r
     if mode == "crash-after-stop":
         real_journal = hop._journal
 
-        def crash(plan: hop.PreparedBootstrapHop, generation: str, stage: str, cron: bytes) -> None:
+        def crash(
+            plan: hop.PreparedBootstrapHop,
+            generation: str,
+            stage: BootstrapRecoveryStage,
+            cron: bytes,
+        ) -> None:
             real_journal(plan, generation, stage, cron)
             if stage == "old_stopped":
                 raise SystemExit(77)

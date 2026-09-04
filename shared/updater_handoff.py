@@ -512,6 +512,10 @@ def _bootstrap_clearable_unlocked(generation: str) -> bool:
         "recovered",
     }:
         return False
+    if journal.normal_release is not None and (
+        not journal.normal_release_planned or journal.stage != "candidate_ready"
+    ):
+        return False
     if journal.normal_release is None:
         return journal.stage == "recovered" or not journal.normal_release_planned
     return journal.normal_release.stage == "committed"

@@ -36,10 +36,11 @@ binds the handoff generation, private request, context and complete inventory
 receipt hashes, the exact known cron definition, transition stage, and at most
 64 phase observations within a 256 KiB file budget. No database URL or secret
 is recorded. `shared/updater_recovery.py` owns the strict typed journal schemas;
-partial terminal-looking dictionaries are malformed evidence, not permission
-to clear. The separate envelope makes malformed bootstrap evidence auditable
-without making an unrelated malformed ordinary spawn marker permanently
-unrecoverable.
+partial terminal-looking dictionaries, a last phase that differs from the outer
+stage, or nested normal evidence outside its planned candidate-ready bootstrap
+are malformed evidence, not permission to clear. The separate envelope makes
+malformed bootstrap evidence auditable without making an unrelated malformed
+ordinary spawn marker permanently unrecoverable.
 
 An unfinished or malformed bootstrap envelope cannot be cleared, replaced by
 ordinary `begin`, or discarded by generic recovery. Only checked recovery under

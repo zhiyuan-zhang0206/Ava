@@ -60,6 +60,9 @@ from shared.updater_recovery import (
 from shared.updater_recovery import (
     BootstrapRecoveryPhase as BootstrapPhase,
 )
+from shared.updater_recovery import (
+    BootstrapRecoveryStage,
+)
 
 
 class BootstrapHopRequest(EvidenceModel):
@@ -363,7 +366,12 @@ def _cron_tables(plan: PreparedBootstrapHop) -> tuple[bytes, bytes]:
     return original, b"".join(retained)
 
 
-def _journal(plan: PreparedBootstrapHop, generation: str, stage: str, cron: bytes) -> None:
+def _journal(
+    plan: PreparedBootstrapHop,
+    generation: str,
+    stage: BootstrapRecoveryStage,
+    cron: bytes,
+) -> None:
     """Replace one bounded versioned recovery envelope under exact ownership."""
     recovery = updater_handoff.read_bootstrap_recovery()
     previous = (

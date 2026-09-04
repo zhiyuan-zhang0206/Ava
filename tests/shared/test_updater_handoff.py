@@ -38,7 +38,15 @@ def _bootstrap_journal(stage: str, *, normal_release_planned: bool = False) -> d
         "normal_release_planned": normal_release_planned,
         "stage": stage,
         "cron": "",
-        "phases": [],
+        "phases": [
+            {
+                "stage": stage,
+                "observed_at": "2026-09-04T00:00:00Z",
+                "monotonic_s": 0.0,
+                "pid": 1,
+                "elapsed_s": None,
+            }
+        ],
         "normal_release": None,
     }
 
@@ -272,6 +280,23 @@ def test_partial_committed_normal_release_is_retained_as_malformed() -> None:
     assert path.read_bytes() == before
 
 
+def test_complete_but_incoherent_terminal_recovery_is_retained() -> None:
+    _retained_bootstrap("candidate_ready", normal_release_planned=True)
+    _write_normal_through("committed")
+    path = handoff.bootstrap_state_path()
+    envelope = json.loads(path.read_text())
+    envelope["journal"]["stage"] = "recovered"
+    envelope["journal"]["normal_release_planned"] = False
+    envelope["journal"]["phases"][-1]["stage"] = "recovered"
+    path.write_text(json.dumps(envelope))
+    before = path.read_bytes()
+    with pytest.raises(handoff.BootstrapRecoveryInvalidError, match="malformed"):
+        handoff.read_bootstrap_recovery()
+    assert not handoff.clear("bootstrap")
+    assert not handoff.allows_generic_recovery(handoff.read())
+    assert path.read_bytes() == before
+
+
 def test_normal_release_recovery_requires_candidate_ready_bootstrap() -> None:
     _retained_bootstrap("candidate_started")
     before = handoff.bootstrap_state_path().read_bytes()
@@ -294,14 +319,17 @@ def test_bootstrap_writer_cannot_discard_retained_normal_recovery() -> None:
 def test_bootstrap_writer_preserves_plan_identity_and_appends_phase() -> None:
     _retained_bootstrap("prepared", normal_release_planned=True)
     changed = _bootstrap_journal("cron_quiesced")
+    prepared_phases = _bootstrap_journal("prepared", normal_release_planned=True)["phases"]
+    assert isinstance(prepared_phases, list)
     changed["phases"] = [
+        *prepared_phases,
         {
             "stage": "cron_quiesced",
             "observed_at": dt.datetime.now(dt.UTC).isoformat(),
             "monotonic_s": 1.0,
             "pid": os.getpid(),
             "elapsed_s": None,
-        }
+        },
     ]
     with pytest.raises(handoff.BootstrapRecoveryInvalidError, match="identity changed"):
         handoff.write_bootstrap_recovery("bootstrap", changed)
