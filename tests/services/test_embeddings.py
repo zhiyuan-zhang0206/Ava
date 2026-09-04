@@ -129,7 +129,20 @@ def _enable_tracing(monkeypatch: pytest.MonkeyPatch) -> _RecordingTracer:
     return tracer
 
 
-def _assert_unpriced_embedding_span(tracer: _RecordingTracer, *, tok_in: int) -> None:
+def _embedding_cost(tok_in: int) -> float:
+    """Cost of an embedding call under the catalog's gemini-embedding-2 entry.
+
+    Text input $0.20/1M tokens; embeddings have no output and no cache, so
+    the billed cost is tok_in × 0.20 / 1M, rounded the way emit_billing_event
+    rounds it (6 decimals)."""
+    from shared.lm.pricing import quote
+
+    priced = quote(_MODEL_ID, tok_in, 0, 0)
+    assert priced is not None  # gemini-embedding-2 is registered in the catalog
+    return priced.cost_usd
+
+
+def _assert_priced_embedding_span(tracer: _RecordingTracer, *, tok_in: int) -> None:
     assert len(tracer.spans) == 1
     span = tracer.spans[0]
     assert span.name == "ava.billing.call"
@@ -138,6 +151,24 @@ def _assert_unpriced_embedding_span(tracer: _RecordingTracer, *, tok_in: int) ->
     assert span.attributes["ava.billing.model"] == _MODEL_ID
     assert span.attributes["ava.billing.tokens_in"] == tok_in
     assert span.attributes["ava.billing.tokens_out"] == 0
+    assert span.attributes["ava.billing.usage_kind"] == "embedding"
+    assert span.attributes["ava.billing.cost"] == round(_embedding_cost(tok_in), 6)
+    assert "ava.billing.unpriced" not in span.attributes
+
+
+def _assert_unpriced_embedding_span(tracer: _RecordingTracer, *, tok_in: int) -> None:
+    """Pins the unpriced fallback path for a model absent from the catalog."""
+    # Read the module attribute, not the test file's import snapshot, so a
+    # monkeypatched _MODEL_ID (the unknown-model case) is what we assert on.
+    from services.memory_indexer.embeddings import gemini
+
+    assert len(tracer.spans) == 1
+    span = tracer.spans[0]
+    assert span.name == "ava.billing.call"
+    assert span.ended is True
+    assert span.attributes["ava.billing.vendor"] == "google"
+    assert span.attributes["ava.billing.model"] == gemini._MODEL_ID
+    assert span.attributes["ava.billing.tokens_in"] == tok_in
     assert span.attributes["ava.billing.usage_kind"] == "embedding"
     assert span.attributes["ava.billing.cost"] == 0.0
     assert span.attributes["ava.billing.unpriced"] is True
@@ -209,10 +240,34 @@ def test_embed_query_shape(monkeypatch: pytest.MonkeyPatch) -> None:
     assert body["requests"][0]["taskType"] == "RETRIEVAL_QUERY"
 
 
-def test_embed_batch_emits_unpriced_billing_span(
+def test_embed_batch_emits_priced_billing_span(
     monkeypatch: pytest.MonkeyPatch,
     loguru_records: list[dict[str, Any]],
 ) -> None:
+    fake = _FakePost(vectors=[[1.0] * DIM], prompt_token_count=123)
+    _patch_post(monkeypatch, fake)
+    tracer = _enable_tracing(monkeypatch)
+
+    _provider().embed_batch(["hello"])
+
+    _assert_priced_embedding_span(tracer, tok_in=123)
+    [record] = [record for record in loguru_records if record["extra"].get("event") == "llm_usage"]
+    assert record["extra"]["usage_kind"] == "embedding"
+    assert "unpriced" not in record["extra"]
+    assert record["extra"]["cost_usd"] == _embedding_cost(123)
+
+
+def test_embed_batch_unknown_model_emits_unpriced_billing_span(
+    monkeypatch: pytest.MonkeyPatch,
+    loguru_records: list[dict[str, Any]],
+) -> None:
+    """Pins the unpriced fallback: a model absent from the pricing catalog
+    still emits a billing span, flagged unpriced with cost 0 (task #2493 —
+    gemini-embedding-2 entering the catalog flipped the other tests from this
+    path to the priced one; keep one case proving the fallback survives)."""
+    from services.memory_indexer.embeddings import gemini
+
+    monkeypatch.setattr(gemini, "_MODEL_ID", "gemini-unknown-embedding-model")
     fake = _FakePost(vectors=[[1.0] * DIM], prompt_token_count=123)
     _patch_post(monkeypatch, fake)
     tracer = _enable_tracing(monkeypatch)
@@ -225,7 +280,7 @@ def test_embed_batch_emits_unpriced_billing_span(
     assert record["extra"]["unpriced"] == 1
 
 
-def test_embed_batch_emits_unpriced_accounting_without_usage_metadata(
+def test_embed_batch_emits_priced_accounting_without_usage_metadata(
     monkeypatch: pytest.MonkeyPatch,
     loguru_records: list[dict[str, Any]],
 ) -> None:
@@ -235,10 +290,11 @@ def test_embed_batch_emits_unpriced_accounting_without_usage_metadata(
 
     _provider().embed_batch(["hello"])
 
-    _assert_unpriced_embedding_span(tracer, tok_in=0)
+    _assert_priced_embedding_span(tracer, tok_in=0)
     [record] = [record for record in loguru_records if record["extra"].get("event") == "llm_usage"]
     assert record["extra"]["usage_kind"] == "embedding"
-    assert record["extra"]["unpriced"] == 1
+    assert "unpriced" not in record["extra"]
+    assert record["extra"]["cost_usd"] == 0.0
 
 
 def test_embed_query_async_shape(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -282,7 +338,7 @@ def test_embed_query_async_shape(monkeypatch: pytest.MonkeyPatch) -> None:
     assert body["requests"][0]["outputDimensionality"] == DIM
 
 
-def test_embed_query_async_emits_unpriced_billing_span(
+def test_embed_query_async_emits_priced_billing_span(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     class _AsyncClient:
@@ -311,7 +367,7 @@ def test_embed_query_async_emits_unpriced_billing_span(
     result = asyncio.run(_provider().embed_query_async("hello"))
 
     assert result.shape == (DIM,)
-    _assert_unpriced_embedding_span(tracer, tok_in=123)
+    _assert_priced_embedding_span(tracer, tok_in=123)
 
 
 def test_embed_request_payload_and_auth(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -348,10 +404,11 @@ def test_embed_retries_then_succeeds(
     result = _provider().embed_batch(["hello"])
     assert result.shape == (1, DIM)
     assert fake.call_count == 3
-    _assert_unpriced_embedding_span(tracer, tok_in=0)
+    _assert_priced_embedding_span(tracer, tok_in=0)
     [record] = [record for record in loguru_records if record["extra"].get("event") == "llm_usage"]
     assert record["extra"]["usage_kind"] == "embedding"
-    assert record["extra"]["unpriced"] == 1
+    assert "unpriced" not in record["extra"]
+    assert record["extra"]["cost_usd"] == 0.0
 
 
 def test_embed_raises_after_max_retries(monkeypatch: pytest.MonkeyPatch) -> None:
