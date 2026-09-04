@@ -151,11 +151,6 @@ _OVERSIZE_ALLOWED: dict[str, tuple[str, int, str]] = {
     # IM Bridge core: envelope, command routing, per-channel state, SSE
     # subscription push, inbound outbox — one cohesive dispatch module.
     "services/im_bridge/core.py": ("#405", 500, "2026-12-31"),
-    # Computer-use MCP daemon: wire protocol + the serialized/audited tool
-    # surface, all tools sharing one coordinate-space contract (the browser
-    # daemon sibling has the same single-module shape). Was 798 lines on main;
-    # crossed the ceiling with the OCR text tools (find_text/click_text).
-    "services/computer/mcp_daemon.py": ("#405", 800, "2026-12-31"),
     # Agent-host daemon: lifecycle settlement + wake dispatch in one
     # process-local module; crossed 800 when the hosted lifecycle
     # settlement commits landed (#1530). Split tracked as follow-up.
