@@ -50,6 +50,7 @@ Error format `file:line: <line content>` + non-zero exit.
 
 from __future__ import annotations
 
+import ast
 import re
 import sys
 from pathlib import Path
@@ -147,11 +148,6 @@ _TEST_SETENV_PATTERN = re.compile(
     r"\bmonkeypatch\.(?:setenv|delenv)\s*\(\s*['\"]([A-Z_][A-Z0-9_]*)['\"]"
 )
 
-# Triple-quoted docstring literals like `monkeypatch.setenv("AVA_X"...)`
-# (e.g. a fixture's docstring describing the call) are not violations —
-# track triple-quote state line-by-line and skip inside docstring ranges.
-_TRIPLE_QUOTE_PATTERN = re.compile(r'"""|\'\'\'')
-
 
 def _settings_managed_aliases() -> frozenset[str]:
     """Read every alias from the config field registry — auto-syncs when Settings adds a field.
@@ -173,6 +169,52 @@ def _is_test_file(rel_path: str) -> bool:
     return any(p.search(rel_path) for p in _TEST_PATTERNS)
 
 
+def _character_column(line: str, byte_column: int) -> int:
+    """Translate an AST UTF-8 byte offset into a Python string offset."""
+    return len(line.encode("utf-8")[:byte_column].decode("utf-8"))
+
+
+def _source_lines_without_docstrings(source: str) -> list[str]:
+    """Blank actual module, class, and function docstrings from source lines.
+
+    Other string literals stay visible because bootstrap and generated-code
+    strings are executable data whose raw-environment references still require
+    an exemption.
+    """
+    lines = source.splitlines()
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        # Be conservative for an invalid file: scan every source character.
+        return lines
+
+    docstring_owners = (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)
+    for owner in ast.walk(tree):
+        if not isinstance(owner, docstring_owners) or not owner.body:
+            continue
+        statement = owner.body[0]
+        if not (
+            isinstance(statement, ast.Expr)
+            and isinstance(statement.value, ast.Constant)
+            and isinstance(statement.value.value, str)
+            and statement.end_lineno is not None
+            and statement.end_col_offset is not None
+        ):
+            continue
+        for lineno in range(statement.lineno, statement.end_lineno + 1):
+            line = lines[lineno - 1]
+            start = (
+                _character_column(line, statement.col_offset) if lineno == statement.lineno else 0
+            )
+            end = (
+                _character_column(line, statement.end_col_offset)
+                if lineno == statement.end_lineno
+                else len(line)
+            )
+            lines[lineno - 1] = f"{line[:start]}{' ' * (end - start)}{line[end:]}"
+    return lines
+
+
 def _scan_file(
     path: Path,
     rel_path: str,
@@ -188,21 +230,12 @@ def _scan_file(
         return []
     is_test = _is_test_file(rel_path)
     violations: list[tuple[int, str, str]] = []
-    inside_triple = False
-    for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
-        # Triple-quote state machine: count occurrences of """ / ''' per
-        # line; odd count flips the inside state. We do not parse nested
-        # string semantics, but this suffices (docstrings not written on a
-        # single line `"""..."""` have all middle lines inside the triple range).
-        quote_count = len(_TRIPLE_QUOTE_PATTERN.findall(line))
-        line_starts_inside = inside_triple
-        if quote_count % 2:
-            inside_triple = not inside_triple
-        # Entire line in docstring range (both start and end inside) -> skip
-        if line_starts_inside and inside_triple:
-            continue
+    source = path.read_text(encoding="utf-8")
+    original_lines = source.splitlines()
+    for lineno, code_line in enumerate(_source_lines_without_docstrings(source), start=1):
+        line = original_lines[lineno - 1]
         # `#` splits the line into code and comment; only check the code part.
-        code, _, _ = line.partition("#")
+        code, _, _ = code_line.partition("#")
         if is_test:
             # Rule 2: monkeypatch.setenv/delenv in tests changing a Settings-managed env (silent no-op).
             for m in _TEST_SETENV_PATTERN.finditer(code):
