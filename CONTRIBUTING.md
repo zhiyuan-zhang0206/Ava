@@ -26,12 +26,12 @@ Standard fork-and-PR — use whatever local git setup you like:
    (`.venv/bin/pytest tests/<area>`) and `.venv/bin/pre-commit run --all-files`.
 3. Open a PR with a clear **what + why**. Rebase onto latest `main` before
    pushing (see [`.agents/skills/ship-a-change/SKILL.md`](.agents/skills/ship-a-change/SKILL.md)). CI must
-   be green; the PR then merges through the Mergify queue as a rebase merge
+   be green; the PR then merges through the Trunk queue as a squash merge
    (linear history — no merge commits).
 
 ### Merge gate: `qa-approved` label
 
-Every merge through the Mergify queue requires the `qa-approved` label in
+Every merge through the Trunk queue requires the `qa-approved` label in
 addition to green CI — a PR without it is never merged, even with green CI
 and an enqueued position. The label is applied by the maintainers' QA
 review only:

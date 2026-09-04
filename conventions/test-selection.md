@@ -5,7 +5,7 @@
 Backend CI uses two layers. A real pull request keeps the full backend suite
 that branch protection already requires, and, in shadow mode, also runs a
 direct-import-selected subset as an informational measurement. A Trunk
-merge-tree branch (trunk-merge/, trunk-temp/, or mergify/merge-queue) always
+merge-tree branch (trunk-merge/ or trunk-temp/) always
 uses the full suite. The merge queue therefore continues to verify the combined
 tree with its full regression net; test selection does not change broken-main
 risk.
@@ -28,7 +28,7 @@ backend test-file list.
 
 | Order | Changed-path or event condition | Result |
 | --- | --- | --- |
-| 1 | Not a pull_request, or head ref begins trunk-merge/, trunk-temp/, or mergify/merge-queue | FULL (queue-or-non-pr) |
+| 1 | Not a pull_request, or head ref begins trunk-merge/ or trunk-temp/ | FULL (queue-or-non-pr) |
 | 2 | Every path is a documentation path | SKIP |
 | 3 | A path is under shared/, ava/, agent/, ava_builtins/, db/, migrations/, or evals/ | FULL (the report names the forced root) |
 | 4 | A path is pyproject.toml, .test_durations, or any conftest.py | FULL |

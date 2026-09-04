@@ -19,10 +19,10 @@
 # docs-only skips everything, frontend-only skips the backend suite,
 # backend-only skips the frontend suite. e2e runs whenever EITHER side changed
 # (it is the integration net). Draft PRs skip CI entirely until
-# ready_for_review. Skipped required checks satisfy branch protection; the
-# Mergify conditions accept success-or-skipped for the same reason.
+# ready_for_review. Skipped required checks satisfy branch protection and the
+# merge queue for the same reason.
 #
-# Branch protection and the Mergify queue key on exactly three check names —
+# Branch protection and the Trunk queue key on exactly three check names —
 # "backend (pytest + pyright)", "frontend (eslint + tsc + vitest)",
 # "e2e (Playwright happy path)". The backend and e2e names are AGGREGATOR jobs
 # that fan in their shards (and, for backend, combine coverage and apply the
@@ -82,9 +82,9 @@ jobs:
     name: classify change
     runs-on: ubuntu-24.04
     timeout-minutes: 5
-    # Draft PRs skip CI except Mergify speculative batch drafts and Trunk test branches
-    # (mergify/merge-queue/*, trunk-merge/*, trunk-temp/*), which must verify.
-    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false || startsWith(github.head_ref, 'mergify/merge-queue') || startsWith(github.head_ref, 'trunk-merge/') || startsWith(github.head_ref, 'trunk-temp/') }}
+    # Draft PRs skip CI except Trunk test branches
+    # (trunk-merge/*, trunk-temp/*), which must verify.
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false || startsWith(github.head_ref, 'trunk-merge/') || startsWith(github.head_ref, 'trunk-temp/') }}
     outputs:
       frontend: ${{ steps.decide.outputs.frontend }}
       backend: ${{ steps.decide.outputs.backend }}
@@ -129,7 +129,7 @@ jobs:
     # Any setup or selector failure is shadow telemetry, never a merge gate.
     continue-on-error: true
     needs: [classify]
-    if: ${{ github.event_name == 'pull_request' && (github.event.pull_request.draft == false || startsWith(github.head_ref, 'mergify/merge-queue') || startsWith(github.head_ref, 'trunk-merge/') || startsWith(github.head_ref, 'trunk-temp/')) && needs.classify.outputs.backend == 'true' }}
+    if: ${{ github.event_name == 'pull_request' && (github.event.pull_request.draft == false || startsWith(github.head_ref, 'trunk-merge/') || startsWith(github.head_ref, 'trunk-temp/')) && needs.classify.outputs.backend == 'true' }}
     outputs:
       decision: ${{ steps.selector.outputs.decision }}
       tests: ${{ steps.selector.outputs.tests }}
@@ -187,9 +187,9 @@ jobs:
     name: repo language (no raw CJK)
     runs-on: ubuntu-24.04
     timeout-minutes: 5
-    # Draft PRs skip CI except Mergify speculative batch drafts and Trunk test branches
-    # (mergify/merge-queue/*, trunk-merge/*, trunk-temp/*), which must verify.
-    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false || startsWith(github.head_ref, 'mergify/merge-queue') || startsWith(github.head_ref, 'trunk-merge/') || startsWith(github.head_ref, 'trunk-temp/') }}
+    # Draft PRs skip CI except Trunk test branches
+    # (trunk-merge/*, trunk-temp/*), which must verify.
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false || startsWith(github.head_ref, 'trunk-merge/') || startsWith(github.head_ref, 'trunk-temp/') }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -205,9 +205,9 @@ jobs:
     name: secret scan (Gitleaks)
     runs-on: ubuntu-24.04
     timeout-minutes: 10
-    # Draft PRs skip CI except Mergify speculative batch drafts and Trunk test branches
-    # (mergify/merge-queue/*, trunk-merge/*, trunk-temp/*), which must verify.
-    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false || startsWith(github.head_ref, 'mergify/merge-queue') || startsWith(github.head_ref, 'trunk-merge/') || startsWith(github.head_ref, 'trunk-temp/') }}
+    # Draft PRs skip CI except Trunk test branches
+    # (trunk-merge/*, trunk-temp/*), which must verify.
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false || startsWith(github.head_ref, 'trunk-merge/') || startsWith(github.head_ref, 'trunk-temp/') }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -228,9 +228,9 @@ jobs:
     name: dependency audit (informational)
     runs-on: ubuntu-24.04
     timeout-minutes: 10
-    # Draft PRs skip CI except Mergify speculative batch drafts and Trunk test branches
-    # (mergify/merge-queue/*, trunk-merge/*, trunk-temp/*), which must verify.
-    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false || startsWith(github.head_ref, 'mergify/merge-queue') || startsWith(github.head_ref, 'trunk-merge/') || startsWith(github.head_ref, 'trunk-temp/') }}
+    # Draft PRs skip CI except Trunk test branches
+    # (trunk-merge/*, trunk-temp/*), which must verify.
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false || startsWith(github.head_ref, 'trunk-merge/') || startsWith(github.head_ref, 'trunk-temp/') }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -754,7 +754,7 @@ jobs:
         run: uv run python scripts/pgvector_runtime_smoke.py
 
   backend:
-    # The aggregator carrying the branch-protection / Mergify check name:
+    # The aggregator carrying the branch-protection check name:
     # skipped (= satisfied) when the diff has no backend side; otherwise green
     # iff the static job and every pytest shard are green AND the combined
     # coverage clears the gate.
@@ -1345,7 +1345,7 @@ jobs:
           path: tmp/e2e-logs/
 
   e2e:
-    # Aggregator carrying the branch-protection / Mergify check name; skipped
+    # Aggregator carrying the branch-protection check name; skipped
     # (= satisfied) on docs-only diffs.
     name: e2e (Playwright happy path)
     runs-on: ubuntu-24.04

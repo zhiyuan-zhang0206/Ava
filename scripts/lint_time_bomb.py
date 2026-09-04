@@ -15,7 +15,7 @@ INDEX_LABEL_CUTOVER_AT`) is correct only while `now` keeps a particular
 relation to the constant — and that relation expires the moment the wall clock
 passes the constant's cutoff (2026-08-30: two fixed-instant tests went
 deterministically red within seven days of each other, each red run ejecting
-the whole Mergify batch queue). The fix pattern is to *pin* the clock (pass
+the whole merge-queue batch). The fix pattern is to *pin* the clock (pass
 `now=`/`at=`), assert with a tolerance (`pytest.approx`), or assert the
 terminal monotone behavior — never an exact value whose correctness depends on
 an unstated wall-clock relation.

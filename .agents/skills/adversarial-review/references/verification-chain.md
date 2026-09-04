@@ -39,8 +39,8 @@ For every job that "passed", verify:
   `coverage.xml`. A gate whose env fallback is lower than the claimed
   threshold is a finding (B4).
 - **`NO_WORKFLOW_RUNS`** is not green — the suite never ran. A skipped
-  check is not a pass (Mergify's `or: check-skipped` branches are by design,
-  but the reviewer must confirm the skip reason matches the diff scope).
+  check must have a skip reason that matches the diff scope, even when branch
+  protection accepts the skipped result.
 
 ## 3. Local verification
 

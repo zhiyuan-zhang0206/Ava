@@ -14,7 +14,7 @@ tags:
 
 A failed completed CI run can dispatch one rerun of its failed jobs. The workflow
 records its marker on the PR and refuses an unbounded rerun loop; a still-red run
-returns to normal maintainer triage and Mergify queueing.
+returns to normal maintainer triage.
 
 ## `workflows/update-model-pricing.yml`
 
@@ -33,8 +33,8 @@ file is passed as data to the trusted updater.
 A weekly schedule (plus manual dispatch) runs
 `scripts/audit_branch_protection.py` with read access to GitHub's live branch
 protection and workflow registry. The script derives the expected checks from
-`.mergify.yml`, then verifies exact required contexts, non-strict update policy,
-admin enforcement, and active `ci.yml` / `ci-rerun.yml` workflows.
+`.trunk/trunk.yaml`, then verifies exact required contexts, non-strict update
+policy, admin enforcement, and active `ci.yml` / `ci-rerun.yml` workflows.
 
 Verified drift keeps the run red and creates or updates one marker issue. A
 could-not-verify result stays red without opening an issue, avoiding transient API

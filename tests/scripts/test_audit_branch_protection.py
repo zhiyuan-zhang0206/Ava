@@ -50,25 +50,6 @@ merge:
     - qa-approved-gate
 """
 
-_MERGIFY_FIXTURE = """
-queue_rules:
-  - name: default
-    queue_conditions:
-      - or:
-          - check-success=backend (pytest + pyright)
-          - check-skipped=backend (pytest + pyright)
-      - or:
-          - check-success=frontend (eslint + tsc + vitest)
-          - check-skipped=frontend (eslint + tsc + vitest)
-    merge_conditions:
-      - or:
-          - check-success=backend (pytest + pyright)
-          - check-skipped=backend (pytest + pyright)
-      - or:
-          - check-success=frontend (eslint + tsc + vitest)
-          - check-skipped=frontend (eslint + tsc + vitest)
-"""
-
 
 def _audit() -> ModuleType:
     if not _SCRIPT.exists():
@@ -148,12 +129,6 @@ def test_real_trunk_yaml_declares_the_full_gate() -> None:
     assert "frontend (eslint + tsc + vitest)" in statuses
     assert "e2e (Playwright happy path)" in statuses
     assert not any("${{" in name for name in statuses)
-
-
-def test_mergify_stub_is_inert() -> None:
-    text = (_REPO_ROOT / ".mergify.yml").read_text()
-    document = yaml.safe_load(text)
-    assert document is None or "queue_rules" not in document
 
 
 def test_drift_report_accepts_the_exact_live_contract() -> None:

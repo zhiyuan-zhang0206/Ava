@@ -24,9 +24,9 @@ import yaml
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _TRUNK_FILE = _REPO_ROOT / ".trunk" / "trunk.yaml"
 # P2 ruling (2026-09-02): the branch-protection admission gate is the three
-# suite aggregators (the names Mergify also keyed on) plus the qa-approved
-# label gate. The queue TESTING gate lives in trunk.yaml (13 statuses) and is
-# audited separately by trunk_gate_findings().
+# suite aggregators plus the qa-approved label gate. The queue TESTING gate
+# lives in trunk.yaml (13 statuses) and is audited separately by
+# trunk_gate_findings().
 _ADMISSION_CHECKS = frozenset(
     {
         "backend (pytest + pyright)",

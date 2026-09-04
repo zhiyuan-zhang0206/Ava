@@ -59,8 +59,7 @@ structure for review; `main` gets one commit per PR.
 ### Merge queue (mandatory)
 
 PRs merge through the **Trunk** merge queue — not by direct merge.
-(Historical: Mergify was retired 2026-09-02; `.mergify.yml` has no queue
-rules and `@mergifyio queue` immediately dequeues.) **QA gate:** the queue's merge conditions require the
+**QA gate:** the queue's merge conditions require the
 `qa-approved` label — a PR without it is never merged, even with green CI
 and an enqueued position (it waits in the queue until QA labels it). The
 label is applied by QA / the maintainers only, and only on a final PASS /

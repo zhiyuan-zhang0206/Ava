@@ -319,8 +319,8 @@ repos:
       # A test that exactly asserts a value derived from a repo fixed-instant
       # constant while the derivation can reach the real clock is correct only
       # until the wall clock passes the constant's boundary — the 2026-08-30
-      # pair of deterministic-red tests that each ejected the Mergify batch
-      # queue. Also guards the source side: a function that accepts a clock
+      # pair of deterministic-red tests that each ejected the merge-queue
+      # batch. Also guards the source side: a function that accepts a clock
       # parameter must thread it into fixed-instant window boundaries. See
       # scripts/lint_time_bomb.py.
       - id: lint-time-bomb
