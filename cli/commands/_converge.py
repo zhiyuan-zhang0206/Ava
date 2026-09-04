@@ -674,14 +674,15 @@ CONVERGE_STEPS: tuple[ConvergeStep, ...] = (
     ConvergeStep("prod editable exec gate", _ensure_prod_editable_exec_gate, host_global=True),
     ConvergeStep("ava symlink on PATH", _ensure_ava_symlink, host_global=True),
     ConvergeStep("~/.local/bin on PATH", _ensure_local_bin_on_path, host_global=True),
+    ConvergeStep("$AVA_HOME dir skeleton", _ensure_ava_home_dirs),
     # Codex and Claude Code own their global homes. This prod-only host step
     # contributes exactly the Ava operator skill when those homes already exist.
+    # The private ownership ledger lives under the skeleton created above.
     ConvergeStep(
         "external agent operator skill",
         converge_external_agent_skill,
         host_global=True,
     ),
-    ConvergeStep("$AVA_HOME dir skeleton", _ensure_ava_home_dirs),
     # Warning-only port preflight: bind-check the cluster's port block + this
     # unit's health ports before anything is launched; foreign occupants are
     # printed and logged, never blocking (the blocking health-port gate is

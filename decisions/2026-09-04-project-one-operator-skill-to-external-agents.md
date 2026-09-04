@@ -58,3 +58,7 @@ activation fails.
 
 Related:
 `decisions/2026-08-20-stop-fleet-distributing-kernel-contributor-skills.md`.
+
+Update 2026-09-04: the ownership and update protocol was strengthened after
+adversarial review; see
+[`2026-09-04-bind-external-skill-ownership-outside-target.md`](2026-09-04-bind-external-skill-ownership-outside-target.md).

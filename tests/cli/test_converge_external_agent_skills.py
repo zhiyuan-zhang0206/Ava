@@ -13,10 +13,10 @@ MARKER_NAME = ".ava-managed.json"
 
 
 @pytest.fixture
-def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+def home(tmp_path: Path) -> Path:
     host_home = tmp_path / "home"
     host_home.mkdir()
-    monkeypatch.setenv("HOME", str(host_home))
+    assert host_home.resolve().is_relative_to(tmp_path.resolve())
     return host_home
 
 
@@ -33,11 +33,19 @@ def _write_source(repo: Path, *, body: str = "operator v1\n") -> Path:
 
 
 def _ctx(repo: Path, home: Path) -> _converge.ConvergeCtx:
-    return _converge.ConvergeCtx(repo=repo, ava_home=home / ".ava", roles=None)
+    ava_home = home / ".ava"
+    (ava_home / "configs").mkdir(parents=True, exist_ok=True)
+    return _converge.ConvergeCtx(repo=repo, ava_home=ava_home, roles=None)
 
 
 def _target(client_home: Path) -> Path:
-    return client_home / "skills" / SKILL_NAME
+    target = client_home / "skills" / SKILL_NAME
+    assert target.resolve(strict=False).is_relative_to(client_home.parent.resolve())
+    return target
+
+
+def _run(repo: Path, home: Path) -> None:
+    _bridge_module().converge_external_agent_skill(_ctx(repo, home), host_home=home)
 
 
 def _tree_snapshot(root: Path) -> dict[str, tuple[str, bytes]]:
@@ -58,7 +66,7 @@ def _temp_entries(skills_root: Path) -> list[Path]:
 def test_absent_client_homes_are_not_created(home: Path, tmp_path: Path) -> None:
     repo = tmp_path / "repo"
 
-    _bridge_module().converge_external_agent_skill(_ctx(repo, home))
+    _run(repo, home)
 
     assert not (home / ".codex").exists()
     assert not (home / ".claude").exists()
@@ -74,7 +82,7 @@ def test_present_codex_and_claude_homes_receive_complete_managed_copy(
         client_home.mkdir()
         (client_home / "settings.json").write_text(f"{client} settings\n")
 
-    _bridge_module().converge_external_agent_skill(_ctx(repo, home))
+    _run(repo, home)
 
     for client in (".codex", ".claude"):
         client_home = home / client
@@ -86,7 +94,10 @@ def test_present_codex_and_claude_homes_receive_complete_managed_copy(
         marker = json.loads((target / MARKER_NAME).read_text())
         assert marker["owner"] == "ava"
         assert marker["skill"] == SKILL_NAME
-        assert len(marker["content_sha256"]) == 64
+        assert marker["format"] == 2
+        assert len(marker["source_digest"]) == 64
+        assert len(marker["installation_id"]) == 32
+        assert len(marker["generation_id"]) == 32
         assert (client_home / "settings.json").read_text() == f"{client} settings\n"
 
 
@@ -97,12 +108,12 @@ def test_second_converge_is_byte_and_timestamp_idempotent(home: Path, tmp_path: 
     client_home.mkdir()
     module = _bridge_module()
 
-    module.converge_external_agent_skill(_ctx(repo, home))
+    module.converge_external_agent_skill(_ctx(repo, home), host_home=home)
     target = _target(client_home)
     before = _tree_snapshot(target)
     mtimes = {path.relative_to(target): path.stat().st_mtime_ns for path in target.rglob("*")}
 
-    module.converge_external_agent_skill(_ctx(repo, home))
+    module.converge_external_agent_skill(_ctx(repo, home), host_home=home)
 
     assert _tree_snapshot(target) == before
     assert {
@@ -119,7 +130,7 @@ def test_unmodified_managed_copy_updates_and_removes_only_stale_target_content(
     client_home = home / ".claude"
     client_home.mkdir()
     module = _bridge_module()
-    module.converge_external_agent_skill(_ctx(repo, home))
+    module.converge_external_agent_skill(_ctx(repo, home), host_home=home)
     unrelated = client_home / "skills" / "personal-skill" / "notes.txt"
     unrelated.parent.mkdir()
     unrelated.write_text("user owned\n")
@@ -127,7 +138,7 @@ def test_unmodified_managed_copy_updates_and_removes_only_stale_target_content(
     (source / "SKILL.md").write_text("operator v2\n")
     (source / "references" / "recovery.md").unlink()
     (source / "references" / "workspace.md").write_text("workspace lookup\n")
-    module.converge_external_agent_skill(_ctx(repo, home))
+    module.converge_external_agent_skill(_ctx(repo, home), host_home=home)
 
     target = _target(client_home)
     assert (target / "SKILL.md").read_text() == "operator v2\n"
@@ -148,7 +159,7 @@ def test_unmanaged_preexisting_target_is_preserved_and_reported(
     (target / "SKILL.md").write_text("user version\n")
     before = _tree_snapshot(target)
 
-    _bridge_module().converge_external_agent_skill(_ctx(repo, home))
+    _run(repo, home)
 
     assert _tree_snapshot(target) == before
     assert "unmanaged" in capsys.readouterr().err
@@ -163,14 +174,14 @@ def test_user_modified_managed_copy_is_preserved_and_reported(
     client_home = home / ".claude"
     client_home.mkdir()
     module = _bridge_module()
-    module.converge_external_agent_skill(_ctx(repo, home))
+    module.converge_external_agent_skill(_ctx(repo, home), host_home=home)
     target = _target(client_home)
     (target / "SKILL.md").write_text("user customization\n")
     (target / "private-note.md").write_text("preserve me\n")
     (source / "SKILL.md").write_text("operator v2\n")
     before = _tree_snapshot(target)
 
-    module.converge_external_agent_skill(_ctx(repo, home))
+    module.converge_external_agent_skill(_ctx(repo, home), host_home=home)
 
     assert _tree_snapshot(target) == before
     assert "user-modified" in capsys.readouterr().err
@@ -185,7 +196,7 @@ def test_failed_update_restores_previous_copy_and_cleans_only_its_staging_dir(
     client_home = home / ".codex"
     client_home.mkdir()
     module = _bridge_module()
-    module.converge_external_agent_skill(_ctx(repo, home))
+    module.converge_external_agent_skill(_ctx(repo, home), host_home=home)
     target = _target(client_home)
     before = _tree_snapshot(target)
     unrelated = client_home / "skills" / ".someone-elses-staging"
@@ -205,11 +216,13 @@ def test_failed_update_restores_previous_copy_and_cleans_only_its_staging_dir(
 
     monkeypatch.setattr(Path, "replace", fail_staged_activation)
 
-    with pytest.raises(OSError, match="injected activation failure"):
-        module.converge_external_agent_skill(_ctx(repo, home))
+    module.converge_external_agent_skill(_ctx(repo, home), host_home=home)
 
     assert _tree_snapshot(target) == before
     assert (unrelated / "keep").read_text() == "untouched\n"
+    monkeypatch.setattr(Path, "replace", original_replace)
+    module.converge_external_agent_skill(_ctx(repo, home), host_home=home)
+    assert (target / "SKILL.md").read_text() == "operator v2\n"
     assert _temp_entries(client_home / "skills") == []
 
 
@@ -231,6 +244,7 @@ def test_bridge_step_is_prod_host_global_and_skipped_for_dev_worktrees(
         return True
 
     monkeypatch.setattr(_converge, "is_default_home", default_home)
+    monkeypatch.setattr(module.Path, "home", lambda: home)
 
     dev_repo = tmp_path / ".worktrees" / "feature"
     _write_source(dev_repo)
@@ -239,5 +253,6 @@ def test_bridge_step_is_prod_host_global_and_skipped_for_dev_worktrees(
 
     prod_repo = tmp_path / "prod" / "source"
     _write_source(prod_repo)
+    (home / ".ava" / "configs").mkdir(parents=True)
     _converge.converge_host(prod_repo, None, ava_home=home / ".ava", steps=(step,))
     assert _target(home / ".codex").is_dir()

@@ -25,3 +25,22 @@ cluster home, never infer a remote workspace from the gateway home, and read
 
 Decision:
 [`decisions/2026-09-04-project-one-operator-skill-to-external-agents.md`](../../../decisions/2026-09-04-project-one-operator-skill-to-external-agents.md).
+
+## Security and concurrency update
+
+Adversarial review replaced marker-only authority with a private per-client
+ledger under the prod cluster home. The ledger binds an installation identity,
+installed generation, transaction, and exact cleanup records to the external
+copy. A per-target cross-process lock serializes converge, and update now claims
+the current target before verifying it so a late user edit is restored rather
+than overwritten.
+
+The copier rejects linked, reparse, and non-regular source or destination
+entries and includes modes in its digest. Crash recovery distinguishes staged,
+claimed, activated, and cleanup-pending generations. Activation is committed
+before cleanup, making cleanup failure retryable without rolling back the
+usable target. External client failures became labelled warnings while source
+integrity failures remained fatal.
+
+Follow-up decision:
+[`decisions/2026-09-04-bind-external-skill-ownership-outside-target.md`](../../../decisions/2026-09-04-bind-external-skill-ownership-outside-target.md).

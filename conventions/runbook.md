@@ -373,9 +373,12 @@ with `ava converge`. It covers the `ava` symlink (re-ensuring install.sh's boots
 `~/.local/bin` on PATH, the `$AVA_HOME` dir skeleton, and one prod-host integration for
 external agents: when `~/.codex` and/or `~/.claude` already exists, it copies only
 `.agents/skills/operating-ava-cluster` into that client's global `skills/` root. Missing
-client homes are not created; a marker and content digest permit updates only while the
-copy remains Ava-owned and unmodified, and conflicts are preserved with a warning. Dev
-worktrees skip this host-global step. Converge also applies a gateway-host guard that fails
+client homes are not created. A private per-client ledger under `$AVA_HOME/configs/`
+binds the installed generation to its in-target marker and a digest of names, kinds,
+bytes, and modes. A per-target process lock serializes claim-and-verify updates;
+unmanaged or changed copies and unsafe linked paths are preserved with a client-labelled
+warning. External-client failures do not abort core converge. Dev worktrees skip this
+host-global step. Converge also applies a gateway-host guard that fails
 loud on frontend build-time env overrides (`ui/web/.env{,.local,.production,.production.local}`
 bake `NEXT_PUBLIC_*` into the bundle and silently beat the runtime gateway inference —
 the 2026-06-09 outage), plugin config images, and the pre-rename disabled-services marker

@@ -1,7 +1,7 @@
 ---
 type: doc
 title: External-agent operator skill bridge
-description: Prod host convergence copies only operating-ava-cluster into already-present Codex and Claude Code global skill roots, with marker-and-digest ownership that preserves conflicts.
+description: Prod host convergence copies only operating-ava-cluster into already-present Codex and Claude Code global skill roots, with externally bound ownership and serialized recovery that preserve conflicts.
 tags:
 - extensions
 - agent-instruction
@@ -20,17 +20,29 @@ checkout and skips both `.worktrees/` and `.claude/worktrees/` checkouts.
 
 For each present client, the target is
 `<client-home>/skills/operating-ava-cluster`. Ava creates a complete staged copy
-beside that target and records `.ava-managed.json` with the skill identity and a
-digest over relative paths, entry kinds, and file bytes. A matching unmodified
-copy is idempotent; a source change replaces it through a staged rename with
-rollback to the prior verified copy if activation fails. Temporary and prior
-directories are scoped to this exact target.
+beside that target. A private per-client ledger under
+`$AVA_HOME/configs/external-agent-skills/` records an installation identity,
+installed generation and digest, active transaction, and exact cleanup records;
+the target's `.ava-managed.json` marker must match that external authority. The
+digest covers relative paths, entry kinds, file bytes, and file and directory
+modes.
 
-An existing target without the valid marker is unmanaged and is preserved. If
-the target's current digest differs from the marker's recorded digest, it is a
-user-modified managed copy and is also preserved. Both states print a conflict
-warning. The copy model uses ordinary directories and files rather than
-symlinks, so the ownership contract is the same on POSIX and Windows.
+A per-target cross-process lock serializes convergence. A source change stages
+a complete no-follow copy, atomically claims the current target, and verifies
+the claimed directory before activation. A mismatch is restored without
+overwriting a path that appeared late. Activation is recorded before cleanup,
+so a cleanup failure leaves the new copy authoritative and is retried later.
+The ledger recovers interrupted staged, claimed, and activated generations;
+temporary and prior directories remain scoped to this exact target.
+
+An existing target without the matching external ledger is unmanaged and is
+preserved, even if it contains a copied or fabricated marker. Content or
+permission changes are user modifications and are also preserved. Source and
+external trees reject symbolic links, junctions, reparse points, and
+non-regular entries. The copy model uses ordinary directories and files, so the
+ownership contract does not require symlink support on Windows. Per-client
+path, lock, and rename failures are labelled warnings and do not abort core
+converge; source-integrity failures remain fatal.
 
 This projection is not an Ava skill source: it writes no install-registry row,
 does not enter `~/.ava/skills/`, and does not make `.agents/skills/` a

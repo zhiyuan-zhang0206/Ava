@@ -32,10 +32,13 @@ exists, Ava copies that package to the client's global `skills/` directory. It
 does not create absent client homes and does not distribute the rest of
 `.agents/skills/`.
 
-The copy carries an Ava ownership marker and a digest of its last written
-content. Converge updates only a matching, unmodified managed copy. An existing
-unmanaged target or a modified managed copy is left byte-for-byte intact and
-reported as a conflict.
+The copy's marker must match a private per-client ownership ledger under the
+prod cluster home. Its digest includes names, kinds, bytes, and modes. A
+per-target process lock serializes claim-and-verify updates and crash recovery.
+An unmanaged target, modified managed copy, unsafe linked path, or cleanup
+residue that no longer matches its ledger is preserved and reported as a
+client-labelled conflict. Client integration failures are warning-only for core
+converge; repository source-integrity failures remain fatal.
 
 ## Design decisions
 
