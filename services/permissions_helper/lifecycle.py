@@ -39,11 +39,20 @@ demands confirmation, are both checked for before any signing starts.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import plistlib
+import re
+import shutil
 import subprocess
+import sys
 import tempfile
+import time
+from datetime import UTC, datetime
 from pathlib import Path
+from typing import TypedDict, cast
 
+import shared.paths
 from shared.config import settings
 from shared.paths import logs_dir, permissions_helper_socket
 from shared.proc import run_bounded
@@ -53,7 +62,16 @@ _BUNDLE_ID = "com.ava.permissions-helper"  # fixed across clusters so one grant 
 _SERVICE_DIR = Path(__file__).resolve().parent
 _SOURCE = _SERVICE_DIR / "helper" / "main.swift"
 _INFO_PLIST = _SERVICE_DIR / "helper" / "Info.plist"
-_BUILD_DIR = _SERVICE_DIR / "build"
+_BUILD_DIR = shared.paths.permissions_helper_app_dir()
+_LEGACY_BUILD_DIR = _SERVICE_DIR / "build"
+_BUILD_STATE_NAME = "build-state.json"
+_HELPER_PING_ATTEMPTS = 10
+_HELPER_PING_SETTLE_S = 0.5
+_IDENTITY_RE = re.compile(
+    rf'^\s*\d+\)\s+([0-9A-F]{{40}})\s+"{re.escape(_CERT_CN)}"',
+    re.IGNORECASE | re.MULTILINE,
+)
+_DESIGNATED_REQUIREMENT_RE = re.compile(r"^designated => (.+)$", re.MULTILINE)
 _AD_HOC_REFUSAL = (
     "Signing ad-hoc instead would hand the helper a fresh code identity, dropping "
     "the Screen Recording / Accessibility grants TCC keyed on the stable one, so "
@@ -132,6 +150,12 @@ class PermissionsHelperSigningUnavailableError(PermissionsHelperBuildError):
     with nothing to bring them back (2026-08-09 -- a rollout's force-checkout
     freshens main.swift's mtime, which forces the rebuild that reaches for the
     key, so this fires on every rollout rather than rarely)."""
+
+
+class _BuildState(TypedDict):
+    source_hash: str
+    dr: str
+    signed_at: str
 
 
 def _run(cmd: list[str]) -> subprocess.CompletedProcess[bytes]:
@@ -240,6 +264,131 @@ def _signed_with_stable_cert(app: Path) -> bool:
     return f"Authority={_CERT_CN}" in proc.stderr.decode(errors="replace")
 
 
+def _expected_dr() -> str:
+    """Return the designated requirement pinned to the named identity's SHA-1."""
+    listing = _probe(["security", "find-identity", "-p", "codesigning"])
+    if listing.returncode != 0:
+        detail = listing.stderr.decode(errors="replace").strip() or f"exit {listing.returncode}"
+        raise PermissionsHelperBuildError(f"security find-identity failed: {detail}")
+    match = _IDENTITY_RE.search(listing.stdout.decode(errors="replace"))
+    if match is None:
+        raise PermissionsHelperBuildError(
+            f"code-signing identity {_CERT_CN!r} is missing or name mismatch prevented "
+            "its SHA-1 from being resolved"
+        )
+    return f'identifier "{_BUNDLE_ID}" and certificate leaf = H"{match.group(1).lower()}"'
+
+
+def _source_content_hash() -> str:
+    """Hash every input that determines the helper's compiled signing identity."""
+    digest = hashlib.sha256()
+    digest.update(_SOURCE.read_bytes())
+    digest.update(_INFO_PLIST.read_bytes())
+    digest.update(_expected_dr().encode())
+    return digest.hexdigest()
+
+
+def _read_dr(app: Path) -> str:
+    proc = _run(["codesign", "-d", "-r-", str(app)])
+    match = _DESIGNATED_REQUIREMENT_RE.search(proc.stderr.decode(errors="replace"))
+    if match is None:
+        raise PermissionsHelperBuildError(
+            "codesign did not report a designated requirement for the permissions helper"
+        )
+    return match.group(1)
+
+
+def _verify_dr(app: Path) -> str:
+    """Verify and return the app's exact designated requirement."""
+    actual = _read_dr(app)
+    expected = _expected_dr()
+    if actual != expected:
+        raise PermissionsHelperBuildError(
+            "permissions helper designated requirement drift is a macOS permissions reset risk; "
+            f"refusing rollout (expected {expected!r}, got {actual!r})"
+        )
+    return actual
+
+
+def _build_state_path() -> Path:
+    return _BUILD_DIR / _BUILD_STATE_NAME
+
+
+def _read_build_state() -> _BuildState | None:
+    try:
+        raw: object = json.loads(_build_state_path().read_text())
+    except (FileNotFoundError, OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(raw, dict):
+        return None
+    data = cast(dict[str, object], raw)
+    try:
+        source_hash = data["source_hash"]
+        dr = data["dr"]
+        signed_at = data["signed_at"]
+    except KeyError:
+        return None
+    if (
+        not isinstance(source_hash, str)
+        or not isinstance(dr, str)
+        or not isinstance(signed_at, str)
+    ):
+        return None
+    return _BuildState(source_hash=source_hash, dr=dr, signed_at=signed_at)
+
+
+def _write_build_state(source_hash: str, dr: str) -> None:
+    _BUILD_DIR.mkdir(parents=True, exist_ok=True)
+    state = _BuildState(
+        source_hash=source_hash,
+        dr=dr,
+        signed_at=datetime.now(UTC).isoformat(),
+    )
+    _build_state_path().write_text(json.dumps(state, indent=2, sort_keys=True) + "\n")
+
+
+def _app_executable(app: Path) -> Path:
+    return app / "Contents" / "MacOS" / "AvaPermissionsHelper"
+
+
+def _is_valid_stable_app(app: Path) -> bool:
+    return (
+        _app_executable(app).exists()
+        and _probe(["codesign", "--verify", str(app)]).returncode == 0
+        and _signed_with_stable_cert(app)
+    )
+
+
+def _remove_app(app: Path) -> None:
+    if app.is_symlink() or app.is_file():
+        app.unlink(missing_ok=True)
+    else:
+        shutil.rmtree(app, ignore_errors=True)
+
+
+def _migrate_checkout_build(source_hash: str) -> tuple[Path, bool] | None:
+    """Move one valid checkout-era bundle into the stable install directory."""
+    app = _BUILD_DIR / "AvaPermissionsHelper.app"
+    old_app = _LEGACY_BUILD_DIR / app.name
+    if _is_valid_stable_app(app):
+        shutil.rmtree(_LEGACY_BUILD_DIR, ignore_errors=True)
+        return None
+    if not _is_valid_stable_app(old_app):
+        shutil.rmtree(_LEGACY_BUILD_DIR, ignore_errors=True)
+        return None
+
+    _BUILD_DIR.mkdir(parents=True, exist_ok=True)
+    _remove_app(app)
+    shutil.move(str(old_app), str(app))
+    shutil.rmtree(_LEGACY_BUILD_DIR, ignore_errors=True)
+    _write_build_state(source_hash, _read_dr(app))
+    return app, False
+
+
+def _installed_build_is_current(app: Path, state: _BuildState | None, source_hash: str) -> bool:
+    return _is_valid_stable_app(app) and state is not None and state["source_hash"] == source_hash
+
+
 def ensure_signing_cert() -> None:
     """Provision the stable self-signed code-signing identity if it is missing.
 
@@ -319,22 +468,27 @@ def ensure_signing_cert() -> None:
 def build_and_sign() -> tuple[Path, bool]:
     """Compile and sign the helper; return (app bundle path, rebuilt).
 
-    Skips the compile + sign when the signed executable is already newer than
-    the source, so a converge that changed nothing does not churn the binary
-    (a fresh cdhash) or bounce the running helper. `rebuilt` is False on a skip."""
+    Skips the compile + sign only when the installed bundle is valid and its
+    recorded content hash matches all source and identity inputs. Checkout
+    mtimes therefore cannot churn the binary or its TCC identity."""
     app = _BUILD_DIR / "AvaPermissionsHelper.app"
-    exe = app / "Contents" / "MacOS" / "AvaPermissionsHelper"
-    if exe.exists():
-        newest_src = max(_SOURCE.stat().st_mtime, _INFO_PLIST.stat().st_mtime)
-        # "Up to date" means built AND signed by the stable identity. codesign runs
-        # after the exe is written, so a fresh mtime alone could be a half-built,
-        # unsigned binary from a prior failed sign; and a bundle an older build left
-        # ad-hoc-signed holds a throwaway identity that TCC drops on every rebuild
-        # anyway, so re-signing it forfeits no live grant and is the only way it
-        # returns to the stable one. Either case rebuilds rather than loads.
-        verified = _probe(["codesign", "--verify", str(app)]).returncode == 0
-        if verified and _signed_with_stable_cert(app) and exe.stat().st_mtime >= newest_src:
-            return app, False
+    exe = _app_executable(app)
+    source_hash = _source_content_hash()
+    expected_dr = _expected_dr()
+    state = _read_build_state()
+    if state is not None and state["dr"] != expected_dr:
+        sys.stderr.write(
+            "  ! permissions-helper: code-signing identity changed — "
+            "macOS permissions may need re-granting\n"
+        )
+
+    migrated = _migrate_checkout_build(source_hash)
+    if migrated is not None:
+        return migrated
+
+    state = _read_build_state()
+    if _installed_build_is_current(app, state, source_hash):
+        return app, False
 
     # Only a real rebuild needs the signing key, so neither check below can fail a
     # converge on a host whose helper is already current -- the common SSH case.
@@ -355,13 +509,26 @@ def build_and_sign() -> tuple[Path, bool]:
     binary = _BUILD_DIR / "AvaPermissionsHelper"
     _run(["swiftc", "-O", str(_SOURCE), "-o", str(binary)])
 
+    _remove_app(app)
     exe.parent.mkdir(parents=True, exist_ok=True)
     (app / "Contents" / "Info.plist").write_bytes(_INFO_PLIST.read_bytes())
     exe.write_bytes(binary.read_bytes())
     exe.chmod(0o755)
 
     try:
-        _run(["codesign", "--force", "--sign", _CERT_CN, "--identifier", _BUNDLE_ID, str(app)])
+        _run(
+            [
+                "codesign",
+                "--force",
+                "--sign",
+                _CERT_CN,
+                "--identifier",
+                _BUNDLE_ID,
+                "--requirements",
+                f"=designated => {expected_dr}",
+                str(app),
+            ]
+        )
     except PermissionsHelperTimeoutError as exc:
         # The preflight cleared this host, so a sign that still ran out the clock
         # is the same GUI prompt arriving late (a key ACL that grants per-item, a
@@ -369,6 +536,8 @@ def build_and_sign() -> tuple[Path, bool]:
         raise PermissionsHelperBuildError(f"{exc}. {_ACL_REMEDY}") from exc
     except PermissionsHelperBuildError as exc:
         raise PermissionsHelperBuildError(f"{exc}. {_AD_HOC_REFUSAL}") from exc
+    actual_dr = _verify_dr(app)
+    _write_build_state(source_hash, actual_dr)
     return app, True
 
 
@@ -460,9 +629,9 @@ def _retire_stale_jobs() -> None:
 def install_and_load(app: Path, *, rebuilt: bool) -> None:
     """Write the LaunchAgent plist and ensure launchd is running this binary.
 
-    Bootstraps the job when it is not loaded; kickstarts (bounces) it only when
-    the binary was rebuilt, so a no-op converge leaves a healthy helper alone.
-    Old-layout jobs racing this cluster's socket are retired first."""
+    Bootstraps the job when it is not loaded. A rebuilt loaded helper first
+    upgrades itself in place; kickstart is the compatibility fallback. A final
+    ping repairs one launchd spawn-failed state before converge gives up."""
     _retire_stale_jobs()
     exe = app / "Contents" / "MacOS" / "AvaPermissionsHelper"
     log = logs_dir() / "permissions-helper.log"
@@ -488,10 +657,49 @@ def install_and_load(app: Path, *, rebuilt: bool) -> None:
         # bootout + bootstrap.
         _probe(["launchctl", "bootout", f"{_domain()}/{_label()}"])
         loaded = False
+    healthy = False
     if not loaded:
         _run(["launchctl", "bootstrap", _domain(), str(path)])
     elif rebuilt:
-        _run(["launchctl", "kickstart", "-k", f"{_domain()}/{_label()}"])
+        healthy = _request_running_helper_upgrade(exe)
+        if not healthy:
+            _run(["launchctl", "kickstart", "-k", f"{_domain()}/{_label()}"])
+
+    if healthy or _helper_answers_ping():
+        return
+    _probe(["launchctl", "bootout", f"{_domain()}/{_label()}"])
+    _run(["launchctl", "bootstrap", _domain(), str(path)])
+    if not _helper_answers_ping():
+        raise PermissionsHelperBuildError(
+            "permissions helper did not answer after one launchd bootout/bootstrap repair; "
+            "the job may be stuck in the LWCR/EX_CONFIG spawn-failed state"
+        )
+
+
+def _helper_answers_ping() -> bool:
+    from services.permissions_helper import client
+
+    for attempt in range(_HELPER_PING_ATTEMPTS):
+        try:
+            healthy = client.ping().get("pong") is True
+        except Exception:
+            healthy = False
+        if healthy:
+            return True
+        if attempt < _HELPER_PING_ATTEMPTS - 1:
+            time.sleep(_HELPER_PING_SETTLE_S)
+    return False
+
+
+def _request_running_helper_upgrade(exe: Path) -> bool:
+    from services.permissions_helper import client
+
+    try:
+        if not client.request_self_upgrade(str(exe)):
+            return False
+    except Exception:
+        return False
+    return _helper_answers_ping()
 
 
 def converge() -> None:

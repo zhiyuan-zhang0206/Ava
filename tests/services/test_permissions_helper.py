@@ -139,6 +139,15 @@ def test_socket_path_keyed_on_port(monkeypatch: pytest.MonkeyPatch) -> None:
     assert paths.permissions_helper_socket().name == "permissions-helper.9999.sock"
 
 
+def test_permissions_helper_app_dir_is_stable_under_ava_home(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from shared import paths
+
+    monkeypatch.setattr(paths.settings.general, "ava_home", str(tmp_path / "home"))
+    assert paths.permissions_helper_app_dir() == tmp_path / "home" / "helper"
+
+
 def test_method_name_mapping(fake_helper) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
     # type_text dispatches as method "type", not "type_text" -- pin that wire name.
     seen: list[str] = []
@@ -652,6 +661,9 @@ def test_accessibility_probe_treats_the_windows_wire_shape_as_granted(fake_helpe
 # is never an acceptable substitute -- and a current bundle is never re-signed.
 
 
+_TEST_CERT_SHA1 = "0123456789ABCDEF0123456789ABCDEF01234567"
+
+
 def _stage_bundle(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, exe_present: bool) -> Path:
     from services.permissions_helper import lifecycle
 
@@ -659,7 +671,7 @@ def _stage_bundle(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, exe_presen
     src.write_text("// swift")
     info = tmp_path / "Info.plist"
     info.write_bytes(b"<plist/>")
-    build = tmp_path / "build"
+    build = tmp_path / "installed-helper"
     app = build / "AvaPermissionsHelper.app"
     if exe_present:
         exe = app / "Contents" / "MacOS" / "AvaPermissionsHelper"
@@ -668,7 +680,27 @@ def _stage_bundle(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, exe_presen
     monkeypatch.setattr(lifecycle, "_SOURCE", src)
     monkeypatch.setattr(lifecycle, "_INFO_PLIST", info)
     monkeypatch.setattr(lifecycle, "_BUILD_DIR", build)
+    monkeypatch.setattr(lifecycle, "_LEGACY_BUILD_DIR", tmp_path / "checkout-build")
     return app
+
+
+def _test_dr() -> str:
+    return (
+        'identifier "com.ava.permissions-helper" and certificate leaf = '
+        f'H"{_TEST_CERT_SHA1.lower()}"'
+    )
+
+
+def _write_current_build_state(app: Path, source_hash: str, *, dr: str | None = None) -> None:
+    (app.parent / "build-state.json").write_text(
+        json.dumps(
+            {
+                "source_hash": source_hash,
+                "dr": dr or _test_dr(),
+                "signed_at": "2026-09-05T00:00:00+00:00",
+            }
+        )
+    )
 
 
 class _Call(NamedTuple):
@@ -685,6 +717,9 @@ def _fake_tools(
     keychain_rc: int = 0,
     sign_rc: int = 0,
     acl_probe_rc: int = 0,
+    verify_rc: int = 0,
+    designated_requirement: str | None = None,
+    identity_output: str | None = None,
     hang: tuple[str, ...] = (),
 ) -> list[_Call]:
     """Stand in for swiftc / codesign / security, recording every invocation.
@@ -715,9 +750,17 @@ def _fake_tools(
             raise subprocess.TimeoutExpired(cmd, kwargs["timeout"])  # pyright: ignore[reportUnknownArgumentType]
         if cmd[0] == "swiftc":
             Path(cmd[cmd.index("-o") + 1]).write_bytes(b"\x00")  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+        if cmd[:3] == ["security", "find-identity", "-p"]:
+            output = identity_output or f'  1) {_TEST_CERT_SHA1} "{lifecycle._CERT_CN}"\n'
+            return subprocess.CompletedProcess(cmd, 0, output.encode(), b"")  # pyright: ignore[reportUnknownArgumentType]
+        if cmd[:2] == ["codesign", "--verify"]:
+            return subprocess.CompletedProcess(cmd, verify_rc, b"", b"invalid")  # pyright: ignore[reportUnknownArgumentType]
         if cmd[:2] == ["codesign", "--display"]:
             shown = f"Authority={authority}\n" if authority else "Signature=adhoc\n"
             return subprocess.CompletedProcess(cmd, 0, b"", shown.encode())  # pyright: ignore[reportUnknownArgumentType]
+        if cmd[:3] == ["codesign", "-d", "-r-"]:
+            dr = designated_requirement or _test_dr()
+            return subprocess.CompletedProcess(cmd, 0, b"", f"designated => {dr}\n".encode())  # pyright: ignore[reportUnknownArgumentType]
         if cmd[:2] == ["security", "show-keychain-info"] and keychain_rc != 0:
             return subprocess.CompletedProcess(
                 cmd,  # pyright: ignore[reportUnknownArgumentType]
@@ -752,6 +795,7 @@ def test_current_stable_signed_bundle_is_not_resigned(
 
     app = _stage_bundle(monkeypatch, tmp_path, exe_present=True)
     recorded = _fake_tools(monkeypatch, authority=lifecycle._CERT_CN)
+    _write_current_build_state(app, lifecycle._source_content_hash())
 
     assert lifecycle.build_and_sign() == (app, False)
     assert not any(c[0] == "swiftc" for c in _argvs(recorded))
@@ -768,6 +812,7 @@ def test_locked_keychain_does_not_fail_a_current_host(
 
     app = _stage_bundle(monkeypatch, tmp_path, exe_present=True)
     recorded = _fake_tools(monkeypatch, authority=lifecycle._CERT_CN, keychain_rc=1)
+    _write_current_build_state(app, lifecycle._source_content_hash())
 
     assert lifecycle.build_and_sign() == (app, False)
     assert not any(c[:2] == ["security", "show-keychain-info"] for c in _argvs(recorded))
@@ -790,8 +835,166 @@ def test_fresh_build_signs_with_the_stable_certificate(
         lifecycle._CERT_CN,
         "--identifier",
         lifecycle._BUNDLE_ID,
+        "--requirements",
+        f"=designated => {_test_dr()}",
         str(app),
     ]
+    state = json.loads((app.parent / "build-state.json").read_text())
+    assert state["source_hash"] == lifecycle._source_content_hash()
+    assert state["dr"] == _test_dr()
+
+
+def test_source_mtime_change_does_not_rebuild_identical_content(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from services.permissions_helper import lifecycle
+
+    app = _stage_bundle(monkeypatch, tmp_path, exe_present=True)
+    recorded = _fake_tools(monkeypatch, authority=lifecycle._CERT_CN)
+    _write_current_build_state(app, lifecycle._source_content_hash())
+    exe = app / "Contents" / "MacOS" / "AvaPermissionsHelper"
+    newer = exe.stat().st_mtime + 60
+    os.utime(lifecycle._SOURCE, (newer, newer))
+
+    assert lifecycle.build_and_sign() == (app, False)
+    assert not any(c[0] == "swiftc" for c in _argvs(recorded))
+
+
+def test_source_content_change_forces_rebuild(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from services.permissions_helper import lifecycle
+
+    app = _stage_bundle(monkeypatch, tmp_path, exe_present=True)
+    recorded = _fake_tools(monkeypatch, authority=lifecycle._CERT_CN)
+    _write_current_build_state(app, lifecycle._source_content_hash())
+    lifecycle._SOURCE.write_text("// changed swift")
+
+    assert lifecycle.build_and_sign() == (app, True)
+    assert any(c[0] == "swiftc" for c in _argvs(recorded))
+
+
+def test_missing_build_state_forces_rebuild(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from services.permissions_helper import lifecycle
+
+    app = _stage_bundle(monkeypatch, tmp_path, exe_present=True)
+    recorded = _fake_tools(monkeypatch, authority=lifecycle._CERT_CN)
+
+    assert lifecycle.build_and_sign() == (app, True)
+    assert any(c[0] == "swiftc" for c in _argvs(recorded))
+
+
+def test_expected_dr_uses_the_named_identity_sha1(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from services.permissions_helper import lifecycle
+
+    _stage_bundle(monkeypatch, tmp_path, exe_present=False)
+    mixed_case_sha1 = "aBcDeF0123456789aBcDeF0123456789aBcDeF01"
+    _fake_tools(
+        monkeypatch,
+        authority=None,
+        identity_output=(
+            f'  2) {mixed_case_sha1} "{lifecycle._CERT_CN}" (CSSMERR_TP_NOT_TRUSTED)\n'
+        ),
+    )
+
+    assert lifecycle._expected_dr() == (
+        f'identifier "{lifecycle._BUNDLE_ID}" and certificate leaf = H"{mixed_case_sha1.lower()}"'
+    )
+
+
+def test_expected_dr_rejects_a_missing_or_misnamed_identity(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from services.permissions_helper import lifecycle
+
+    _stage_bundle(monkeypatch, tmp_path, exe_present=False)
+    _fake_tools(
+        monkeypatch,
+        authority=None,
+        identity_output=f'  1) {_TEST_CERT_SHA1} "Some Other Identity"\n',
+    )
+
+    with pytest.raises(lifecycle.PermissionsHelperBuildError, match="missing or name mismatch"):
+        lifecycle._expected_dr()
+
+
+def test_verify_dr_rejects_permission_reset_risk(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from services.permissions_helper import lifecycle
+
+    app = _stage_bundle(monkeypatch, tmp_path, exe_present=True)
+    _fake_tools(
+        monkeypatch,
+        authority=lifecycle._CERT_CN,
+        designated_requirement='identifier "wrong.bundle"',
+    )
+
+    with pytest.raises(lifecycle.PermissionsHelperBuildError, match="permissions reset risk"):
+        lifecycle._verify_dr(app)
+
+
+def test_identity_change_warns_and_rebuilds(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from services.permissions_helper import lifecycle
+
+    app = _stage_bundle(monkeypatch, tmp_path, exe_present=True)
+    recorded = _fake_tools(monkeypatch, authority=lifecycle._CERT_CN)
+    _write_current_build_state(app, "hash-for-previous-identity", dr='identifier "old"')
+
+    assert lifecycle.build_and_sign() == (app, True)
+    assert any(c[0] == "swiftc" for c in _argvs(recorded))
+    assert (
+        "code-signing identity changed — macOS permissions may need re-granting"
+        in capsys.readouterr().err
+    )
+
+
+def test_valid_checkout_bundle_is_migrated_without_rebuild(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from services.permissions_helper import lifecycle
+
+    app = _stage_bundle(monkeypatch, tmp_path, exe_present=False)
+    old_app = lifecycle._LEGACY_BUILD_DIR / app.name
+    old_exe = old_app / "Contents" / "MacOS" / "AvaPermissionsHelper"
+    old_exe.parent.mkdir(parents=True)
+    old_exe.write_bytes(b"old signed helper")
+    legacy_dr = 'identifier "legacy.permissions-helper"'
+    recorded = _fake_tools(
+        monkeypatch,
+        authority=lifecycle._CERT_CN,
+        designated_requirement=legacy_dr,
+    )
+
+    assert lifecycle.build_and_sign() == (app, False)
+    assert (
+        app / "Contents" / "MacOS" / "AvaPermissionsHelper"
+    ).read_bytes() == b"old signed helper"
+    assert not lifecycle._LEGACY_BUILD_DIR.exists()
+    assert json.loads((app.parent / "build-state.json").read_text())["dr"] == legacy_dr
+    assert not any(c[0] == "swiftc" for c in _argvs(recorded))
+
+
+def test_invalid_checkout_bundle_is_removed_and_rebuilt(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from services.permissions_helper import lifecycle
+
+    app = _stage_bundle(monkeypatch, tmp_path, exe_present=False)
+    old_exe = lifecycle._LEGACY_BUILD_DIR / app.name / "Contents" / "MacOS" / app.stem
+    old_exe.parent.mkdir(parents=True)
+    old_exe.write_bytes(b"invalid helper")
+    recorded = _fake_tools(monkeypatch, authority=lifecycle._CERT_CN, verify_rc=1)
+
+    assert lifecycle.build_and_sign() == (app, True)
+    assert not lifecycle._LEGACY_BUILD_DIR.exists()
+    assert any(c[0] == "swiftc" for c in _argvs(recorded))
 
 
 def test_ad_hoc_signed_bundle_is_rebuilt_onto_the_stable_certificate(
@@ -968,6 +1171,231 @@ def test_a_hung_probe_answers_no_rather_than_raising(monkeypatch: pytest.MonkeyP
     reason = lifecycle._keychain_lock_reason()
     assert reason is not None
     assert "timed out" in reason
+
+
+# --- Install, in-place upgrade, and launchd repair ------------------------
+
+
+def _install_env(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    *,
+    loaded: bool,
+    matching_plist: bool = True,
+) -> tuple[Path, list[list[str]], list[list[str]]]:
+    import subprocess
+
+    from services.permissions_helper import lifecycle
+
+    app = tmp_path / "helper" / "AvaPermissionsHelper.app"
+    exe = app / "Contents" / "MacOS" / "AvaPermissionsHelper"
+    exe.parent.mkdir(parents=True)
+    exe.write_bytes(b"signed helper")
+    agents = tmp_path / "LaunchAgents"
+    plist_path = agents / "com.ava.permissions-helper.test.plist"
+    log = tmp_path / "logs" / "permissions-helper.log"
+    socket_path = tmp_path / "run" / "permissions-helper.sock"
+    monkeypatch.setattr(lifecycle, "_retire_stale_jobs", lambda: None)
+    monkeypatch.setattr(lifecycle, "_label", lambda: "com.ava.permissions-helper.test")
+    monkeypatch.setattr(lifecycle, "_domain", lambda: "gui/501")
+    monkeypatch.setattr(lifecycle, "_plist_path", lambda: plist_path)
+    monkeypatch.setattr(lifecycle, "_is_loaded", lambda: loaded)
+    monkeypatch.setattr(lifecycle, "logs_dir", lambda: log.parent)
+    monkeypatch.setattr(lifecycle, "permissions_helper_socket", lambda: socket_path)
+    run_calls: list[list[str]] = []
+    probe_calls: list[list[str]] = []
+
+    def run(cmd: list[str]) -> None:
+        run_calls.append(cmd)
+
+    def probe(cmd: list[str], **_kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        probe_calls.append(cmd)
+        return subprocess.CompletedProcess(cmd, 0, b"", b"")
+
+    monkeypatch.setattr(lifecycle, "_run", run)
+    monkeypatch.setattr(lifecycle, "_probe", probe)
+    if matching_plist:
+        plist_path.parent.mkdir(parents=True)
+        plist_path.write_bytes(
+            plistlib.dumps(
+                {
+                    "Label": "com.ava.permissions-helper.test",
+                    "ProgramArguments": [str(exe)],
+                    "EnvironmentVariables": {"AVA_PERMISSIONS_HELPER_SOCKET": str(socket_path)},
+                    "RunAtLoad": True,
+                    "KeepAlive": True,
+                    "StandardOutPath": str(log),
+                    "StandardErrorPath": str(log),
+                }
+            )
+        )
+    return app, run_calls, probe_calls
+
+
+def _skip_sleep(_seconds: float) -> None:
+    return
+
+
+def test_helper_ping_settles_until_cold_start_answers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from services.permissions_helper import client, lifecycle
+
+    replies: list[object] = [
+        client.PermissionsHelperError("socket not ready"),
+        {},
+        {"pong": False},
+        {"pong": True},
+    ]
+    sleeps: list[float] = []
+
+    def ping() -> dict[str, object]:
+        reply = replies.pop(0)
+        if isinstance(reply, Exception):
+            raise reply
+        assert isinstance(reply, dict)
+        return reply
+
+    monkeypatch.setattr(client, "ping", ping)
+    monkeypatch.setattr(time, "sleep", sleeps.append)
+
+    assert lifecycle._helper_answers_ping()
+    assert sleeps == [0.5, 0.5, 0.5]
+
+
+def test_rebuilt_loaded_helper_self_upgrades_without_kickstart(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from services.permissions_helper import client, lifecycle
+
+    app, run_calls, _ = _install_env(monkeypatch, tmp_path, loaded=True)
+    requested: list[str] = []
+
+    def request_self_upgrade(exe: str) -> bool:
+        requested.append(exe)
+        return True
+
+    monkeypatch.setattr(client, "request_self_upgrade", request_self_upgrade)
+    monkeypatch.setattr(
+        client,
+        "ping",
+        lambda: {"pong": True, "preflight_screen": True, "ax_trusted": True},
+    )
+
+    lifecycle.install_and_load(app, rebuilt=True)
+
+    assert requested == [str(app / "Contents" / "MacOS" / "AvaPermissionsHelper")]
+    assert not any(call[:2] == ["launchctl", "kickstart"] for call in run_calls)
+
+
+def test_self_upgrade_failure_falls_back_to_kickstart(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from services.permissions_helper import client, lifecycle
+
+    app, run_calls, _ = _install_env(monkeypatch, tmp_path, loaded=True)
+
+    def fail_upgrade(_exe: str) -> bool:
+        raise client.PermissionsHelperError("old helper has no self_upgrade")
+
+    monkeypatch.setattr(client, "request_self_upgrade", fail_upgrade)
+    monkeypatch.setattr(
+        client,
+        "ping",
+        lambda: {"pong": True, "preflight_screen": True, "ax_trusted": True},
+    )
+
+    lifecycle.install_and_load(app, rebuilt=True)
+
+    assert ["launchctl", "kickstart", "-k", "gui/501/com.ava.permissions-helper.test"] in run_calls
+
+
+def test_self_upgrade_ping_failure_falls_back_to_kickstart(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from services.permissions_helper import client, lifecycle
+
+    app, run_calls, _ = _install_env(monkeypatch, tmp_path, loaded=True)
+
+    def accept_upgrade(_exe: str) -> bool:
+        return True
+
+    monkeypatch.setattr(client, "request_self_upgrade", accept_upgrade)
+    replies: list[object] = [client.PermissionsHelperError("exec transition") for _ in range(10)]
+    replies.append({"pong": True, "preflight_screen": True, "ax_trusted": True})
+
+    def ping():  # pyright: ignore[reportMissingReturnType]
+        reply = replies.pop(0)
+        if isinstance(reply, Exception):
+            raise reply
+        return reply
+
+    monkeypatch.setattr(client, "ping", ping)
+    monkeypatch.setattr(time, "sleep", _skip_sleep)
+
+    lifecycle.install_and_load(app, rebuilt=True)
+
+    assert ["launchctl", "kickstart", "-k", "gui/501/com.ava.permissions-helper.test"] in run_calls
+
+
+def test_failed_post_load_ping_repairs_with_bootout_and_bootstrap(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from services.permissions_helper import client, lifecycle
+
+    app, run_calls, probe_calls = _install_env(monkeypatch, tmp_path, loaded=True)
+    replies: list[object] = [client.PermissionsHelperError("spawn failed") for _ in range(10)]
+    replies.append({"pong": True, "preflight_screen": True, "ax_trusted": True})
+
+    def ping():  # pyright: ignore[reportMissingReturnType]
+        reply = replies.pop(0)
+        if isinstance(reply, Exception):
+            raise reply
+        return reply
+
+    monkeypatch.setattr(client, "ping", ping)
+    monkeypatch.setattr(time, "sleep", _skip_sleep)
+
+    lifecycle.install_and_load(app, rebuilt=False)
+
+    assert probe_calls == [["launchctl", "bootout", "gui/501/com.ava.permissions-helper.test"]]
+    assert ["launchctl", "bootstrap", "gui/501", str(lifecycle._plist_path())] in run_calls
+
+
+def test_failed_ping_after_one_launchd_repair_raises_with_fault_clues(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from services.permissions_helper import client, lifecycle
+
+    app, _, _ = _install_env(monkeypatch, tmp_path, loaded=True)
+    monkeypatch.setattr(
+        client,
+        "ping",
+        lambda: (_ for _ in ()).throw(client.PermissionsHelperError("still dead")),
+    )
+    monkeypatch.setattr(time, "sleep", _skip_sleep)
+
+    with pytest.raises(lifecycle.PermissionsHelperBuildError, match="LWCR/EX_CONFIG"):
+        lifecycle.install_and_load(app, rebuilt=False)
+
+
+def test_unloaded_helper_bootstraps_and_must_answer_ping(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from services.permissions_helper import client, lifecycle
+
+    app, run_calls, _ = _install_env(monkeypatch, tmp_path, loaded=False, matching_plist=False)
+    monkeypatch.setattr(
+        client,
+        "ping",
+        lambda: {"pong": True, "preflight_screen": True, "ax_trusted": True},
+    )
+
+    lifecycle.install_and_load(app, rebuilt=False)
+
+    assert ["launchctl", "bootstrap", "gui/501", str(lifecycle._plist_path())] in run_calls
+    plist = plistlib.loads(lifecycle._plist_path().read_bytes())
+    assert plist["ProgramArguments"] == [str(app / "Contents" / "MacOS" / "AvaPermissionsHelper")]
 
 
 # --- Old-layout job retirement -------------------------------------------
