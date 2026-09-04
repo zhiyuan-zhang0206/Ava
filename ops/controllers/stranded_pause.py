@@ -263,6 +263,12 @@ def recover_stranded_pause() -> bool:
                 owner,
             )
             return False
+        if not updater_handoff.allows_generic_recovery(handoff):
+            _log.warning(
+                "[ops.pause] retained updater recovery requires an explicit checked "
+                "recovery; refusing generic self-unpause"
+            )
+            return False
         snapshot = ui_update_state.read()
         pause_snapshot = pause_owner.read()
         _log.warning(

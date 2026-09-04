@@ -190,6 +190,22 @@ def test_no_lease_still_unpauses_a_stranded_host(
     assert recover_calls == {"released": True, "unpaused": True}
 
 
+def test_recover_refuses_retained_normal_compensation_before_unpause(
+    monkeypatch: pytest.MonkeyPatch, recover_calls: dict[str, bool]
+) -> None:
+    _set_lease(monkeypatch, None)
+
+    def refuse(_snapshot: _ops.updater_handoff.UpdaterHandoffSnapshot) -> bool:
+        return False
+
+    monkeypatch.setattr(_ops.updater_handoff, "allows_generic_recovery", refuse)
+
+    with pytest.raises(ClusterUpdateInProgress, match="explicit checked recovery"):
+        _ops.cluster_recover_op()
+
+    assert recover_calls == {"released": False, "unpaused": False}
+
+
 def test_recover_cas_loses_to_a_new_owner_without_unpausing_or_clearing(
     monkeypatch: pytest.MonkeyPatch, recover_calls: dict[str, bool]
 ) -> None:

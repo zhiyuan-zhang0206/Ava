@@ -52,7 +52,7 @@ schema change catches the DB up on its own.
 - The gateway/runner update boundary, readiness proof, Phase-B verdicts, and
   failed-update recovery are one subject in [[rollout-boundary.ava.okf.md]].
 - The restricted immutable `ava-ops` hop is [[update-bootstrap.ava.okf.md]];
-  its same-updater selector and normal-service continuation is
+  its sealed normal-service planning contract and disabled activation boundary are
   [[normal-release.ava.okf.md]].
 - A full agent-runner update checks out, syncs, and records the installed SHA in
   its pre-checkout image, then re-execs `_update_agent_runner` with its private

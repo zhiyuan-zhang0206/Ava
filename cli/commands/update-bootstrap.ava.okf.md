@@ -14,10 +14,11 @@ converges, changes a selector or starts ordinary services. Return code 3 denotes
 restricted bootstrap success, deliberately not normal updater success.
 
 The request may also reference [[normal-release.ava.okf.md|a normal continuation]].
-That complete selector and service plan is prepared before the first stop, then
-the same updater may continue only after exact candidate-ready recovery evidence.
-The restricted bootstrap primitive itself remains mutation-limited as described
-here; an exit code alone does not authorize normal effects.
+That complete selector and service plan is validated before the first stop.
+Activation is currently disabled before updater ownership because checked
+normal recovery and exact spawn receipts are not implemented. The restricted
+bootstrap primitive itself remains mutation-limited as described here; an exit
+code alone does not authorize normal effects.
 
 Before changing a service, it verifies
 the candidate's loaded code, both sealed images, canonical registered unit and

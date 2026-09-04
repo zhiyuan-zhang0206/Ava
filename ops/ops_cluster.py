@@ -271,6 +271,11 @@ def cluster_recover_op() -> dict[str, object]:
             raise ClusterUpdateInProgress(
                 "an updater process still owns this host pause — recovery refused"
             )
+        if not updater_handoff.allows_generic_recovery(handoff):
+            raise ClusterUpdateInProgress(
+                "retained updater compensation requires an explicit checked recovery — "
+                "generic unpause refused"
+            )
         live_session = cluster_session.live_orchestration_session()
         if live_session is not None:
             raise ClusterUpdateInProgress(

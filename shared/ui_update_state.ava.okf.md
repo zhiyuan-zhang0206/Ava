@@ -34,7 +34,9 @@ the UI marker.
   A late process from generation A cannot overwrite or unlink generation B.
 - A hard-killed owner leaves the marker as honest interrupted-update state.
   `ava cluster recover`, or stranded-pause automatic recovery after the same
-  no-live-owner proof and a successful unpause, force-clears it.
+  no-live-owner proof, may unpause only when the exact updater handoff and
+  bootstrap/normal recovery envelope is terminal-clearable; successful unpause
+  then force-clears this UI marker.
 
 The marker does not cover `cluster rollback` yet. A rollback deliberately boots
 an older target whose host-posture writer can overwrite this shared compatibility

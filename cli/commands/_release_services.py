@@ -53,7 +53,9 @@ class PreparedService:
     environment: dict[str, str]  # Private child transport only; never serialize to a receipt.
 
 
-def _command(spec: ServiceSpec, image: VerifiedRelease) -> PreparedService:
+def _command(  # noqa: PLR0915 — one ordered fail-closed command admission boundary.
+    spec: ServiceSpec, image: VerifiedRelease
+) -> PreparedService:
     tokens = shlex.split(spec.cmd)
     public: dict[str, str] = {}
     while tokens and "=" in tokens[0]:
@@ -71,7 +73,10 @@ def _command(spec: ServiceSpec, image: VerifiedRelease) -> PreparedService:
     module: str | None = None
     entrypoint = executable
     if "-m" in tokens:
-        module = tokens[tokens.index("-m") + 1]
+        module_index = tokens.index("-m")
+        if module_index + 1 >= len(tokens):
+            raise ReleaseRejectedError("service Python module is absent")
+        module = tokens[module_index + 1]
         if not all(part.isidentifier() for part in module.split(".")):
             raise ReleaseRejectedError("service Python module is invalid")
         import shared
@@ -89,6 +94,8 @@ def _command(spec: ServiceSpec, image: VerifiedRelease) -> PreparedService:
         if "-B" not in tokens:
             tokens.insert(1, "-B")
     elif spec.session == "frontend":
+        if len(tokens) < 2:
+            raise ReleaseRejectedError("frontend entry point is absent")
         entrypoint = Path(tokens[1]).resolve(strict=True)
     elif spec.session != "otel-collector":
         raise ReleaseRejectedError("native service has no retained readiness adapter")
