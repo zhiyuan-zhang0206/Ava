@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import sys
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -32,30 +33,58 @@ def build_prepare_gate(
     note_runner: Callable[..., str | None],
     persist_seed: bool,
 ) -> PrepareGate:
-    """Prepare a commit and calculate the exact estimate context from the same baseline."""
+    """Prepare a commit and collect best-effort observational timing context."""
+    observation_notes: list[str] = []
+
+    def _observe_estimate() -> float:
+        try:
+            return estimate_runner()
+        except Exception as exc:
+            observation_notes.append(f"estimate unavailable ({type(exc).__name__})")
+            return math.nan
+
     prepared = prepare_runner(
         repo,
         target_sha,
         pull=pull,
         snapshotter=snapshotter,
         check_runner=check_runner,
-        estimate_runner=estimate_runner,
+        estimate_runner=_observe_estimate,
     )
-    breakdown = breakdown_runner(persist_seed=persist_seed)
+    try:
+        breakdown = breakdown_runner(persist_seed=persist_seed)
+        breakdown_line = ", ".join(
+            f"{name}={duration:.1f}s" for name, duration in breakdown.items()
+        )
+    except Exception as exc:
+        breakdown_line = "stage breakdown unavailable"
+        observation_notes.append(f"breakdown unavailable ({type(exc).__name__})")
+    try:
+        estimate_note = note_runner(persist_seed=persist_seed)
+    except Exception as exc:
+        estimate_note = None
+        observation_notes.append(f"estimate note unavailable ({type(exc).__name__})")
+    if estimate_note is not None:
+        observation_notes.insert(0, estimate_note)
     return PrepareGate(
         prepared=prepared,
-        breakdown_line=", ".join(f"{name}={duration:.1f}s" for name, duration in breakdown.items()),
-        estimate_note=note_runner(persist_seed=persist_seed),
+        breakdown_line=breakdown_line,
+        estimate_note="; ".join(observation_notes) if observation_notes else None,
     )
 
 
 def print_dry_run_verdict(gate: PrepareGate) -> int:
     """Print the dry-run verdict and return its shell exit status."""
-    verdict = "PASS" if not gate.prepared.failures and gate.prepared.estimate_s < 120.0 else "FAIL"
+    verdict = "PASS" if not gate.prepared.failures else "FAIL"
+    estimate = (
+        f"{gate.prepared.estimate_s:.1f}s"
+        if math.isfinite(gate.prepared.estimate_s)
+        else "unavailable"
+    )
     estimate_context = f"; {gate.estimate_note}" if gate.estimate_note is not None else ""
     print(
-        f"\n→ prepare dry-run: {verdict} (estimate {gate.prepared.estimate_s:.1f}s; "
-        f"{gate.breakdown_line}{estimate_context})"
+        f"\n→ prepare dry-run: {verdict} (estimate {estimate}; "
+        f"{gate.breakdown_line}{estimate_context}; informational only)"
     )
     for failure in gate.prepared.failures:
         print(f"  ✗ {failure}")
@@ -69,12 +98,4 @@ def refuse_normal_prepare(gate: PrepareGate) -> int | None:
         for failure in gate.prepared.failures:
             print(f"  · {failure}", file=sys.stderr)
         return 1
-    if gate.prepared.estimate_s < 120.0:
-        return None
-    estimate_context = f"; {gate.estimate_note}" if gate.estimate_note is not None else ""
-    print(
-        f"\n✗ estimated maintenance window {gate.prepared.estimate_s:.1f}s is at least 120.0s; "
-        f"refusing commit before Phase A ({gate.breakdown_line}{estimate_context})",
-        file=sys.stderr,
-    )
-    return 1
+    return None

@@ -335,7 +335,7 @@ def _add_cluster_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]
     update_kind.add_argument(
         "--dry-run",
         action="store_true",
-        help="run prepare checks and the maintenance-window gate without snapshotting, "
+        help="run prepare checks and report the maintenance-window estimate without snapshotting, "
         "pausing, stopping, or changing the cluster pin",
     )
     cluster_update_p.add_argument(
