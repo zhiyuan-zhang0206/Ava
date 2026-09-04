@@ -5,6 +5,9 @@ on:
       - 'shared/runtime_prepare.py'
       - 'shared/runtime_release.py'
       - 'shared/runtime_interpreter.py'
+      - 'shared/runtime_publication_input.py'
+      - 'shared/verified_file.py'
+      - 'scripts/prove_runtime_publication_input.py'
       - 'scripts/runtime-node-version'
       - 'shared/dotenv_boot.py'
       - 'shared/platform_backend.py'
@@ -115,6 +118,11 @@ jobs:
       - name: Type-check retained collector integration
         shell: bash
         run: uv run --locked pyright scripts/prepare_otel_release.py scripts/prove_runtime_otel.py scripts/prove_runtime_plugins.py scripts/prove_release_inventory.py scripts/prepare_plugin_fixture.py scripts/prove_updater_bootstrap.py shared/runtime_plugins.py shared/runtime_prepare.py shared/runtime_interpreter.py shared/paths.py shared/updater_handoff.py cli/commands/_otel_collector.py cli/commands/_release_inventory.py cli/commands/_update_bootstrap.py cli/commands/_update_agent_runner.py
+      - name: Type-check publication input reader
+        run: uv run --locked pyright shared/runtime_publication_input.py shared/verified_file.py scripts/prove_runtime_publication_input.py
+      - name: Publication selector compatibility
+        if: runner.os == 'Linux'
+        run: uv run --locked pytest tests/shared/test_runtime_publication_input.py -q
       - name: Real offline prepare, retained interpreter and failure isolation
         shell: bash
         run: |
@@ -130,6 +138,13 @@ jobs:
         if: runner.os == 'Linux'
         shell: bash
         run: uv run --locked pytest tests/cli/test_update_bootstrap.py tests/cli/test_update_agent_runner.py tests/shared/test_updater_handoff.py tests/shared/test_posixproc_expected_signal.py -q
+      - name: Retain independent resolver proof even when inherited hop fails
+        if: always() && runner.os == 'Linux'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: runtime-publication-input-${{ github.sha }}
+          path: ${{ runner.temp }}/prepare/runtime-publication-input-proof.json
+          if-no-files-found: error
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: inactive-prepare-${{ matrix.os }}-${{ github.event.pull_request.head.sha }}

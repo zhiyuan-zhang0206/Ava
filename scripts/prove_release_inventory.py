@@ -12,6 +12,7 @@ import json
 import os
 import platform
 import plistlib
+import subprocess
 import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -103,7 +104,7 @@ def check_bounded_read(home: Path) -> None:
         replacement.replace(target)
         return original_open(target, flags)
 
-    with patch.object(inventory.os, "open", side_effect=replace_before_open):
+    with patch("shared.verified_file.os.open", side_effect=replace_before_open):
         try:
             inventory._regular_bytes(path)
         except ReleaseRejectedError:
@@ -195,6 +196,18 @@ def main() -> None:
             schema_digest=schema,
         )
         check_observer(expected, receipt)
+        subprocess.run(  # noqa: S603 — copied CI-only script in the actual retained interpreter.
+            [
+                sys.executable,
+                "-I",
+                "-B",
+                str(Path(__file__).with_name("prove_runtime_publication_input.py")),
+                str(home),
+                str(receipt),
+            ],
+            check=True,
+            timeout=180,
+        )
         check_unknown_scheduler(conn, release, home, receipt, schema)
         # Omission of a residual old session, service-only roster drift, and
         # unit relocation must all invalidate the full prepared receipt.
