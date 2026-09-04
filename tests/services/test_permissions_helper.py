@@ -154,6 +154,120 @@ def test_method_name_mapping(fake_helper) -> None:  # pyright: ignore[reportMiss
     assert seen == ["type", "click", "ping"]
 
 
+def test_nursery_method_requests_and_results(fake_helper) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    seen: list[dict] = []  # pyright: ignore[reportMissingTypeArgument, reportUnknownVariableType]
+
+    def handler(req: dict) -> dict:  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+        seen.append({key: value for key, value in req.items() if key != "id"})  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+        results: dict[str, object] = {
+            "spawn": {"pid": 4123, "reused": False},
+            "session_list": {"sessions": [{"name": "agent-demo", "pid": 4123, "alive": True}]},
+            "session_has": {"alive": True},
+            "signal": {"sent": True},
+        }
+        return {"id": req["id"], "ok": True, "result": results[req["method"]]}  # pyright: ignore[reportUnknownVariableType]
+
+    path = fake_helper(handler)  # pyright: ignore[reportUnknownVariableType]
+    assert client.spawn_process(
+        "agent-demo",
+        ["/usr/bin/env", "python"],
+        {"AVA_HOME": "/Users/ava/.ava"},
+        "/Users/ava/work",
+        "/Users/ava/logs/stdout.log",
+        "/Users/ava/logs/stderr.log",
+        sock_path=path,  # pyright: ignore[reportUnknownArgumentType]
+    ) == {"pid": 4123, "reused": False}
+    assert client.session_list("agent-", sock_path=path) == [  # pyright: ignore[reportUnknownArgumentType]
+        {"name": "agent-demo", "pid": 4123, "alive": True}
+    ]
+    assert client.session_has("agent-demo", sock_path=path)  # pyright: ignore[reportUnknownArgumentType]
+    assert client.signal_session(name="agent-demo", sig=2, sock_path=path)  # pyright: ignore[reportUnknownArgumentType]
+    assert client.signal_session(pid=4123, sock_path=path)  # pyright: ignore[reportUnknownArgumentType]
+
+    assert seen == [
+        {
+            "method": "spawn",
+            "name": "agent-demo",
+            "argv": ["/usr/bin/env", "python"],
+            "env": {"AVA_HOME": "/Users/ava/.ava"},
+            "cwd": "/Users/ava/work",
+            "stdout": "/Users/ava/logs/stdout.log",
+            "stderr": "/Users/ava/logs/stderr.log",
+        },
+        {"method": "session_list", "prefix": "agent-"},
+        {"method": "session_has", "name": "agent-demo"},
+        {"method": "signal", "sig": 2, "name": "agent-demo"},
+        {"method": "signal", "sig": 15, "pid": 4123},
+    ]
+
+
+def test_spawn_process_preserves_reused_result(fake_helper) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    def handler(req: dict) -> dict:  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+        return {"id": req["id"], "ok": True, "result": {"pid": 4123, "reused": True}}  # pyright: ignore[reportUnknownVariableType]
+
+    assert client.spawn_process(  # pyright: ignore[reportUnknownArgumentType]
+        "agent-demo",
+        ["/usr/bin/env", "python"],
+        {},
+        "/Users/ava/work",
+        "/Users/ava/logs/stdout.log",
+        "/Users/ava/logs/stderr.log",
+        sock_path=fake_helper(handler),  # pyright: ignore[reportUnknownArgumentType]
+    ) == {"pid": 4123, "reused": True}
+
+
+def test_native_spawn_contract_requires_absolute_output_paths_without_redundant_dup2() -> None:
+    source = (
+        Path(__file__).parents[2] / "services/permissions_helper/helper/main.swift"
+    ).read_text()
+    spawn_source = source.split("func spawnProcess", 1)[1].split("func sessionList", 1)[0]
+
+    assert "(stdoutPath as NSString).isAbsolutePath" in spawn_source
+    assert "(stderrPath as NSString).isAbsolutePath" in spawn_source
+    assert (
+        "posix_spawn_file_actions_adddup2(&fileActions, STDIN_FILENO, STDIN_FILENO)"
+        not in spawn_source
+    )
+
+
+@pytest.mark.parametrize(
+    ("name", "pid"),
+    [(None, None), ("agent-demo", 4123)],
+)
+def test_signal_session_requires_exactly_one_target(name: str | None, pid: int | None) -> None:
+    with pytest.raises(ValueError, match="exactly one"):
+        client.signal_session(name=name, pid=pid)
+
+
+def test_self_upgrade_treats_connection_close_as_success(fake_helper) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    seen: list[dict[str, object]] = []
+
+    def close_after_request(conn: socket.socket) -> None:
+        request: dict[str, object] = json.loads(_read_line(conn))
+        seen.append(request)
+
+    path = fake_helper(raw=close_after_request)  # pyright: ignore[reportUnknownVariableType]
+    assert client.request_self_upgrade(  # pyright: ignore[reportUnknownArgumentType]
+        "/Applications/AvaPermissionsHelper.app/Contents/MacOS/AvaPermissionsHelper",
+        sock_path=path,  # pyright: ignore[reportUnknownArgumentType]
+    )
+    assert seen[0]["method"] == "self_upgrade"
+    assert seen[0]["exe_path"] == (
+        "/Applications/AvaPermissionsHelper.app/Contents/MacOS/AvaPermissionsHelper"
+    )
+
+
+def test_self_upgrade_validation_error_is_not_a_success(fake_helper) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    def handler(req: dict) -> dict:  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+        return {"id": req["id"], "ok": False, "error": "outside helper bundle"}  # pyright: ignore[reportUnknownVariableType]
+
+    with pytest.raises(PermissionsHelperError, match="outside helper bundle"):
+        client.request_self_upgrade(  # pyright: ignore[reportUnknownArgumentType]
+            "/Applications/UntrustedHelper.app/Contents/MacOS/UntrustedHelper",
+            sock_path=fake_helper(handler),  # pyright: ignore[reportUnknownArgumentType]
+        )
+
+
 def test_file_method_mapping_and_list_result(fake_helper) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
     seen: list[str] = []
     entries = [{"name": "notes.txt", "size": 12, "mtime": 1_725_000_000, "is_dir": False}]
