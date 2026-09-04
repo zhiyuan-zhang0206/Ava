@@ -1362,6 +1362,22 @@ def test_failed_post_load_ping_repairs_with_bootout_and_bootstrap(
     assert ["launchctl", "bootstrap", "gui/501", str(lifecycle._plist_path())] in run_calls
 
 
+@pytest.mark.parametrize("healthy", [True, False])
+def test_repair_unresponsive_helper_reloads_launchd_job_and_returns_ping_verdict(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, healthy: bool
+) -> None:
+    from services.permissions_helper import lifecycle
+
+    _, run_calls, probe_calls = _install_env(monkeypatch, tmp_path, loaded=True)
+    monkeypatch.setattr(lifecycle, "_helper_answers_ping", lambda: healthy)
+
+    assert lifecycle.repair_unresponsive_helper() is healthy
+    assert probe_calls == [["launchctl", "bootout", "gui/501/com.ava.permissions-helper.test"]]
+    assert run_calls == [
+        ["launchctl", "bootstrap", "gui/501", str(lifecycle._plist_path())],
+    ]
+
+
 def test_failed_ping_after_one_launchd_repair_raises_with_fault_clues(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

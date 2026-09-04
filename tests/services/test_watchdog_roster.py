@@ -73,6 +73,25 @@ def test_station_capable_runner_watchdog_keeps_lgtm_alive(
     assert "lgtm" not in got
 
 
+def test_permissions_helper_check_is_agent_runner_only_and_config_gated(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(wd, "read_skipped", set)
+    monkeypatch.setattr(wd.settings.services, "permissions_helper_enabled", True)
+
+    assert "permissions-helper" in {
+        check.name for check in wd._checks_for_capability("agent-runner")
+    }
+    assert "permissions-helper" not in {
+        check.name for check in wd._checks_for_capability("gateway")
+    }
+
+    monkeypatch.setattr(wd.settings.services, "permissions_helper_enabled", False)
+    assert "permissions-helper" not in {
+        check.name for check in wd._checks_for_capability("agent-runner")
+    }
+
+
 @pytest.mark.parametrize("role", ["gateway", "agent-runner"])
 def test_derived_roster_covers_all_role_healthchecks(
     role: MachineRole, monkeypatch: pytest.MonkeyPatch
@@ -84,6 +103,7 @@ def test_derived_roster_covers_all_role_healthchecks(
     monkeypatch.setattr(wd.settings.daemon, "heartbeat_enabled", True)
     monkeypatch.setattr(wd.settings.daemon, "task_maintenance_enabled", True)
     monkeypatch.setattr(wd.settings.services, "browser_enabled", True)
+    monkeypatch.setattr(wd.settings.services, "permissions_helper_enabled", True)
     monkeypatch.setattr("ops.spec.browser_incapability", lambda: None)
 
     expected = {
@@ -99,6 +119,6 @@ def test_derived_roster_covers_all_role_healthchecks(
     pseudo = (
         {"redis-acl", "pgbouncer", "lgtm", "station-probe", "brew-pin"}
         if role == "gateway"
-        else {"brew-pin"}
+        else {"brew-pin", "permissions-helper"}
     )
     assert got == expected | pseudo
