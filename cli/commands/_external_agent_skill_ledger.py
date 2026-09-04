@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from pathlib import Path
@@ -15,9 +16,44 @@ from cli.commands._external_agent_skill_fs import (
 )
 from shared.private_storage import write_private_bytes
 
-_FORMAT = 4
+_FORMAT = 5
+_MARKER_NAME = ".ava-managed.json"
+_SKILL_NAME = "operating-ava-cluster"
 _HEX = re.compile(r"^[0-9a-f]{64}$")
 _ID = re.compile(r"^[0-9a-f]{32}$")
+
+
+def _ownership_marker(installation_id: str, generation_id: str, source_digest: str) -> bytes:
+    return (
+        json.dumps(
+            {
+                "format": _FORMAT,
+                "generation_id": generation_id,
+                "installation_id": installation_id,
+                "owner": "ava",
+                "skill": _SKILL_NAME,
+                "source_digest": source_digest,
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n"
+    ).encode()
+
+
+def _stage_manifest(source_manifest: list[dict[str, Any]], marker: bytes) -> list[dict[str, Any]]:
+    return sorted(
+        [
+            *source_manifest,
+            {
+                "kind": "file",
+                "mode": 0o600,
+                "path": _MARKER_NAME,
+                "sha256": hashlib.sha256(marker).hexdigest(),
+            },
+        ],
+        key=lambda item: str(item["path"]),
+    )
 
 
 def _parse_record(path: Path) -> dict[str, Any] | None:
@@ -114,24 +150,22 @@ def _load_ledger(path: Path, client_key: str) -> dict[str, Any] | None:
         if (
             set(transaction)
             != {
-                "copy_complete",
+                "claim_state",
                 "expected_digest",
                 "expected_manifest",
                 "generation_id",
-                "previous_claimed",
                 "source_digest",
-                "stage_created",
+                "stage_state",
             }
             or not _valid_id(transaction["generation_id"])
             or not _valid_digest(transaction["source_digest"])
             or not _valid_digest(transaction["expected_digest"])
             or not _valid_manifest(transaction["expected_manifest"])
             or _manifest_digest(transaction["expected_manifest"]) != transaction["expected_digest"]
-            or not isinstance(transaction["copy_complete"], bool)
-            or not isinstance(transaction["stage_created"], bool)
-            or not isinstance(transaction["previous_claimed"], bool)
-            or (transaction["copy_complete"] and not transaction["stage_created"])
-            or (transaction["previous_claimed"] and not transaction["copy_complete"])
+            or transaction["claim_state"] not in {"idle", "claiming", "claimed"}
+            or transaction["stage_state"] not in {"preparing", "publishing", "published"}
+            or (transaction["claim_state"] != "idle" and transaction["stage_state"] != "published")
+            or (transaction["claim_state"] != "idle" and installed_value is None)
         ):
             raise _ClientConflictError("Ava ownership ledger is invalid")
     garbage_value: object = record["garbage"]
@@ -142,8 +176,9 @@ def _load_ledger(path: Path, client_key: str) -> dict[str, Any] | None:
             raise _ClientConflictError("Ava ownership ledger is invalid")
         item = cast(dict[str, Any], item_value)
         if (
-            set(item) != {"kind", "manifest", "path_generation_id"}
+            set(item) != {"kind", "location", "manifest", "path_generation_id"}
             or item["kind"] not in {"stage", "previous"}
+            or item["location"] not in {"source", "claiming", "quarantine"}
             or not _valid_id(item["path_generation_id"])
             or not _valid_manifest(item["manifest"])
         ):

@@ -94,7 +94,7 @@ def test_present_codex_and_claude_homes_receive_complete_managed_copy(
         marker = json.loads((target / MARKER_NAME).read_text())
         assert marker["owner"] == "ava"
         assert marker["skill"] == SKILL_NAME
-        assert marker["format"] == 4
+        assert marker["format"] == 5
         assert len(marker["source_digest"]) == 64
         assert len(marker["installation_id"]) == 32
         assert len(marker["generation_id"]) == 32

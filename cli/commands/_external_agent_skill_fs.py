@@ -162,10 +162,31 @@ def _tree_manifest(
     return sorted(manifest, key=lambda item: str(item["path"]))
 
 
-def _remove_manifest_subset(root: Path, expected: list[dict[str, Any]]) -> None:
-    """Remove an Ava-owned tree, accepting paths deleted by an earlier attempt."""
+def _make_directory_removable(path: Path, expected: os.stat_result, mode: int) -> None:
+    """Add owner permissions only through a descriptor bound to the verified inode."""
+    if os.name == "nt":
+        return
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(path, flags)
+        try:
+            opened = os.fstat(fd)
+            if _signature(opened) != _signature(expected) or not stat.S_ISDIR(opened.st_mode):
+                raise _ClientConflictError("transaction residue changed during cleanup")
+            os.fchmod(fd, mode)
+            after = os.fstat(fd)
+            if (after.st_dev, after.st_ino) != (opened.st_dev, opened.st_ino):
+                raise _ClientConflictError("transaction residue changed during cleanup")
+        finally:
+            os.close(fd)
+    except OSError as exc:
+        raise _ClientConflictError("transaction directory cannot be changed safely") from exc
+
+
+def _validate_manifest_subset(
+    current: list[dict[str, Any]], expected: list[dict[str, Any]]
+) -> None:
     expected_by_path = {str(item["path"]): item for item in expected}
-    current = _tree_manifest(root)
     for item in current:
         path = str(item["path"])
         wanted = expected_by_path.get(path)
@@ -181,6 +202,53 @@ def _remove_manifest_subset(root: Path, expected: list[dict[str, Any]]) -> None:
         if item["kind"] == "file" and item["sha256"] != wanted["sha256"]:
             raise _ClientConflictError("transaction residue content was modified")
 
+
+def _file_deletion_path(path: Path, relative: str) -> Path:
+    suffix = hashlib.sha256(relative.encode()).hexdigest()[:16]
+    return path.with_name(f".{path.name}.ava-delete-{suffix}")
+
+
+def _verify_cleanup_file(path: Path, expected: dict[str, Any]) -> None:
+    data, mode = _read_regular(path, source=False)
+    if mode != int(expected["mode"]) or hashlib.sha256(data).hexdigest() != expected["sha256"]:
+        raise _ClientConflictError("transaction residue file changed during cleanup")
+
+
+def _resume_file_deletion_claims(root: Path, expected: list[dict[str, Any]]) -> None:
+    for item in expected:
+        if item["kind"] != "file":
+            continue
+        relative = str(item["path"])
+        source = root / relative
+        deletion = _file_deletion_path(source, relative)
+        if not _exists(deletion):
+            continue
+        if _exists(source):
+            raise _ClientConflictError("cleanup file and deletion quarantine both exist")
+        _verify_cleanup_file(deletion, item)
+        deletion.unlink()
+
+
+def _claim_verify_delete_file(root: Path, item: dict[str, Any]) -> None:
+    relative = str(item["path"])
+    source = root / relative
+    deletion = _file_deletion_path(source, relative)
+    _rename_no_replace(source, deletion)
+    try:
+        _verify_cleanup_file(deletion, item)
+    except (OSError, _ClientConflictError):
+        if _exists(deletion) and not _exists(source):
+            _rename_no_replace(deletion, source)
+        raise
+    deletion.unlink()
+
+
+def _remove_manifest_subset(root: Path, expected: list[dict[str, Any]]) -> None:
+    """Remove an Ava-owned tree, accepting paths deleted by an earlier attempt."""
+    _resume_file_deletion_claims(root, expected)
+    current = _tree_manifest(root)
+    _validate_manifest_subset(current, expected)
+
     directories = sorted(
         (item for item in current if item["kind"] == "directory"),
         key=lambda item: str(item["path"]).count("/"),
@@ -190,7 +258,7 @@ def _remove_manifest_subset(root: Path, expected: list[dict[str, Any]]) -> None:
         current_stat = _lstat(path)
         if not stat.S_ISDIR(current_stat.st_mode):
             raise _ClientConflictError("transaction residue changed during cleanup")
-        path.chmod(int(item["mode"]) | stat.S_IRWXU)
+        _make_directory_removable(path, current_stat, int(item["mode"]) | stat.S_IRWXU)
 
     files = (item for item in current if item["kind"] == "file")
     for item in files:
@@ -208,7 +276,7 @@ def _remove_manifest_subset(root: Path, expected: list[dict[str, Any]]) -> None:
         # leak that metadata mutation outside the residue tree.
         if _signature(_lstat(path)) != _signature(after):
             raise _ClientConflictError("transaction residue changed during cleanup")
-        path.unlink()
+        _claim_verify_delete_file(root, item)
 
     for item in reversed(directories):
         if item["path"] == ".":

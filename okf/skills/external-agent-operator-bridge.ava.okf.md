@@ -28,9 +28,10 @@ digest covers relative paths, entry kinds, file bytes, and file and directory
 modes. Each transaction, installed generation, and cleanup record also carries
 the expected path manifest. Moving a residue from transaction state to cleanup
 state is one atomic ledger write, so no live stage or prior copy loses its
-durable pointer. Separate transaction facts record successful exclusive stage
-creation and successful prior-target claim; a merely colliding path with the
-same generation-shaped name never becomes Ava-owned.
+durable pointer. Write-ahead stage-publication and target-claim phases precede
+their no-replace renames. Recovery reconciles source and destination presence
+against the transaction marker, digest, and manifest; a merely colliding or
+otherwise ambiguous generation-shaped path never becomes Ava-owned.
 
 A per-target cross-process lock serializes convergence. A source change stages
 a complete no-follow copy, atomically claims the current target, and verifies
@@ -38,19 +39,22 @@ the claimed directory before activation. A mismatch is restored without
 overwriting a path that appeared late: claim, activation, and restoration all
 use atomic no-replace renames. Activation is recorded before cleanup,
 so a cleanup failure leaves the new copy authoritative and is retried later.
-Cleanup validates the remaining tree as an unmodified subset of the manifest;
-paths removed by an earlier attempt stay safely reclaimable, while unexpected
-or modified paths are preserved. The ledger recovers interrupted staged,
-claimed, and activated generations;
+Cleanup first records and atomically moves each residue tree to a transaction
+quarantine, verifies the claimed tree, and only then deletes. Each regular file
+is separately renamed to a deterministic deletion quarantine and reverified
+before unlink. Paths removed by an earlier attempt stay safely reclaimable,
+while unexpected or modified paths are restored when possible and otherwise
+preserved. The ledger recovers interrupted staged, claimed, cleanup-claimed,
+and activated generations;
 temporary and prior directories remain scoped to this exact target.
 
 An existing target without the matching external ledger is unmanaged and is
 preserved, even if it contains a copied or fabricated marker. Content or
 permission changes are user modifications and are also preserved. Source and
 external trees reject symbolic links, junctions, reparse points, and
-non-regular or multi-link entries. Cleanup changes directory permissions only;
-it never changes a regular file's mode before unlink. The copy model uses
-ordinary directories and files, so the
+non-regular or multi-link entries. Cleanup never changes a regular file's mode;
+required directory permission changes use a verified open descriptor on POSIX
+and otherwise fail closed. The copy model uses ordinary directories and files, so the
 ownership contract does not require symlink support on Windows. Per-client
 path, lock, and rename failures are labelled warnings and do not abort core
 converge; source-integrity failures remain fatal.

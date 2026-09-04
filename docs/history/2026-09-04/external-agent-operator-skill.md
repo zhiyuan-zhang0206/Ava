@@ -58,3 +58,11 @@ paths use atomic no-replace renames, leaving a late user destination untouched
 and retaining the prior installed authority. Residue cleanup also rejects
 multi-link files and avoids chmod on regular files, preventing a hard-linked
 outside inode from receiving a metadata change.
+
+The final crash-safety pass moved filesystem intent ahead of stage publication,
+target claim, and residue cleanup claim. Recovery now distinguishes a completed
+rename from a colliding path through source/destination state plus matching
+marker, digest, and manifest evidence; ambiguous outcomes remain live and
+fail-closed. Cleanup claims and verifies both the residue tree and each file
+before deletion, while directory permission changes use a verified descriptor
+rather than a path-based chmod.

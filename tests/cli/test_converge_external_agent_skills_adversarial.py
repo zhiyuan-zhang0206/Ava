@@ -269,7 +269,7 @@ def test_late_previous_destination_during_claim_is_not_replaced_or_owned(
     assert (target / "SKILL.md").read_text() == "operator v1\n"
     ledger = _ledger(context)
     assert ledger["installed"] == installed_before
-    assert ledger["transaction"] is None
+    assert ledger["transaction"]["claim_state"] == "claiming"
     assert ledger["garbage"] == []
 
 
@@ -310,7 +310,7 @@ def test_late_target_during_verification_restore_is_not_replaced_or_disowned(
     assert (target / "user.txt").read_text() == "late user target\n"
     ledger = _ledger(context)
     assert ledger["installed"] == installed_before
-    assert ledger["transaction"]["previous_claimed"] is True
+    assert ledger["transaction"]["claim_state"] == "claimed"
     assert ledger["garbage"] == []
 
 
@@ -346,7 +346,7 @@ def test_late_target_during_activation_restore_is_not_replaced_or_disowned(
     assert (target / "user.txt").read_text() == "late user target\n"
     ledger = _ledger(context)
     assert ledger["installed"] == installed_before
-    assert ledger["transaction"]["previous_claimed"] is True
+    assert ledger["transaction"]["claim_state"] == "claimed"
     assert ledger["garbage"] == []
 
 
@@ -373,7 +373,7 @@ def test_preexisting_generation_sibling_is_preserved_without_false_ownership(
     assert (target / "SKILL.md").read_text() == "operator v1\n"
     ledger = _ledger(context)
     assert ledger["installed"] == installed_before
-    assert ledger["transaction"] is None
+    assert ledger["transaction"]["stage_state"] == "publishing"
     assert ledger["garbage"] == []
 
 
@@ -663,7 +663,7 @@ def test_late_target_keeps_stage_and_previous_in_transaction_state(
     assert target.is_symlink()
     assert (outside / "SKILL.md").read_text() == "user target\n"
     ledger = _ledger(context)
-    assert ledger["transaction"]["previous_claimed"] is True
+    assert ledger["transaction"]["claim_state"] == "claimed"
     assert ledger["garbage"] == []
     assert {
         path.name.split(".ava-")[1].split("-")[0] for path in target.parent.glob(f".{SKILL}.ava-*")
@@ -688,7 +688,7 @@ def test_cleanup_resumes_after_one_child_was_already_deleted(
 
     def fail_after_one_delete(path: Path, missing_ok: bool = False) -> None:
         nonlocal deleted
-        if f".{SKILL}.ava-previous-" in str(path):
+        if f".{SKILL}.ava-quarantine-previous-" in str(path):
             if deleted == 1:
                 raise PermissionError("mid-cleanup interruption")
             deleted += 1
@@ -703,6 +703,7 @@ def test_cleanup_resumes_after_one_child_was_already_deleted(
     )
     assert ledger["transaction"] is None
     assert [item["kind"] for item in ledger["garbage"]] == ["previous"]
+    assert ledger["garbage"][0]["location"] == "quarantine"
 
     bridge.converge_external_agent_skill(context, host_home=client.parent)
 

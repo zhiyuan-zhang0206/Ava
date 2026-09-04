@@ -7,8 +7,6 @@ named skill target (plus transaction siblings bearing an Ava generation ID).
 
 from __future__ import annotations
 
-import hashlib
-import json
 import stat
 import sys
 import uuid
@@ -16,6 +14,11 @@ from pathlib import Path
 from typing import Any, cast
 
 from cli.commands._converge_spec import ConvergeCtx
+from cli.commands._external_agent_skill_cleanup import (
+    _cleanup_garbage_impl,
+    _queue_garbage,
+    _transaction_path,
+)
 from cli.commands._external_agent_skill_fs import (
     _ClientConflictError,
     _copy_source_contents,
@@ -33,7 +36,9 @@ from cli.commands._external_agent_skill_fs import (
 from cli.commands._external_agent_skill_ledger import (
     _FORMAT,
     _load_ledger,
+    _ownership_marker,
     _parse_record,
+    _stage_manifest,
     _write_ledger,
 )
 from shared.platform import LockTimeoutError, file_lock
@@ -44,41 +49,8 @@ _MARKER_NAME = ".ava-managed.json"
 _CLIENTS = (("Codex", ".codex", "codex"), ("Claude Code", ".claude", "claude"))
 
 
-def _marker(installation_id: str, generation_id: str, source_digest: str) -> bytes:
-    return (
-        json.dumps(
-            {
-                "format": _FORMAT,
-                "generation_id": generation_id,
-                "installation_id": installation_id,
-                "owner": "ava",
-                "skill": _SKILL_NAME,
-                "source_digest": source_digest,
-            },
-            indent=2,
-            sort_keys=True,
-        )
-        + "\n"
-    ).encode()
-
-
-def _stage_manifest(source_manifest: list[dict[str, Any]], marker: bytes) -> list[dict[str, Any]]:
-    return sorted(
-        [
-            *source_manifest,
-            {
-                "kind": "file",
-                "mode": 0o600,
-                "path": _MARKER_NAME,
-                "sha256": hashlib.sha256(marker).hexdigest(),
-            },
-        ],
-        key=lambda item: str(item["path"]),
-    )
-
-
-def _transaction_path(skills_root: Path, kind: str, generation_id: str) -> Path:
-    return skills_root / f".{_SKILL_NAME}.ava-{kind}-{generation_id}"
+def _prepared_stage_path(ledger_path: Path, generation_id: str) -> Path:
+    return ledger_path.parent / f".{ledger_path.stem}-stage-{generation_id}"
 
 
 def _verify_marker(root: Path, installation_id: str, generation_id: str) -> None:
@@ -119,19 +91,9 @@ def _warn(label: str, reason: str) -> None:
 def _cleanup_garbage(
     ledger_path: Path, ledger: dict[str, Any], skills_root: Path, label: str
 ) -> None:
-    remaining: list[dict[str, Any]] = []
-    for item in ledger["garbage"]:
-        path = _transaction_path(skills_root, item["kind"], item["path_generation_id"])
-        if not _exists(path):
-            continue
-        try:
-            _remove_owned_tree(path, item["manifest"])
-        except (OSError, _ClientConflictError) as exc:
-            remaining.append(item)
-            _warn(label, f"transaction cleanup conflict ({type(exc).__name__})")
-    if remaining != ledger["garbage"]:
-        ledger["garbage"] = remaining
-        _write_ledger(ledger_path, ledger)
+    _cleanup_garbage_impl(
+        ledger_path, ledger, skills_root, label, _remove_owned_tree, _rename_no_replace
+    )
 
 
 def _stage_copy(
@@ -143,46 +105,31 @@ def _stage_copy(
     source_digest: str,
 ) -> Path:
     generation_id = uuid.uuid4().hex
-    marker = _marker(ledger["installation_id"], generation_id, source_digest)
+    marker = _ownership_marker(ledger["installation_id"], generation_id, source_digest)
     expected_manifest = _stage_manifest(source_manifest, marker)
     transaction = {
-        "copy_complete": False,
+        "claim_state": "idle",
         "expected_digest": _manifest_digest(expected_manifest),
         "expected_manifest": expected_manifest,
         "generation_id": generation_id,
-        "previous_claimed": False,
         "source_digest": source_digest,
-        "stage_created": False,
+        "stage_state": "preparing",
     }
     ledger["transaction"] = transaction
     _write_ledger(ledger_path, ledger)
-    stage = _transaction_path(skills_root, "stage", generation_id)
-    stage.mkdir(mode=0o700)
-    transaction["stage_created"] = True
-    _write_ledger(ledger_path, ledger)
-    _write_new(stage / _MARKER_NAME, marker, 0o600)
-    _copy_source_contents(source, stage)
-    if _tree_manifest(stage) != expected_manifest:
+    prepared = _prepared_stage_path(ledger_path, generation_id)
+    prepared.mkdir(mode=0o700)
+    _write_new(prepared / _MARKER_NAME, marker, 0o600)
+    _copy_source_contents(source, prepared)
+    if _tree_manifest(prepared) != expected_manifest:
         raise _SourceIntegrityError("operator skill source copy did not verify")
-    transaction["copy_complete"] = True
+    transaction["stage_state"] = "publishing"
+    _write_ledger(ledger_path, ledger)
+    stage = _transaction_path(skills_root, "stage", generation_id)
+    _rename_no_replace(prepared, stage)
+    transaction["stage_state"] = "published"
     _write_ledger(ledger_path, ledger)
     return stage
-
-
-def _queue_garbage(
-    ledger: dict[str, Any],
-    *,
-    kind: str,
-    path_generation_id: str,
-    manifest: list[dict[str, Any]],
-) -> None:
-    record = {
-        "kind": kind,
-        "manifest": manifest,
-        "path_generation_id": path_generation_id,
-    }
-    if record not in ledger["garbage"]:
-        ledger["garbage"].append(record)
 
 
 def _abandon_transaction(
@@ -196,9 +143,17 @@ def _abandon_transaction(
         return True
     generation_id = transaction["generation_id"]
     stage = _transaction_path(skills_root, "stage", generation_id)
-    if transaction["previous_claimed"]:
+    prepared = _prepared_stage_path(ledger_path, generation_id)
+    if transaction["claim_state"] != "idle":
         return False
-    if transaction["stage_created"] and _exists(stage):
+    if transaction["stage_state"] == "preparing" and _exists(prepared):
+        try:
+            _remove_owned_tree(prepared, transaction["expected_manifest"])
+        except (OSError, _ClientConflictError):
+            return False
+    if transaction["stage_state"] == "publishing" and _exists(prepared):
+        return False
+    if transaction["stage_state"] in {"publishing", "published"} and _exists(stage):
         _queue_garbage(
             ledger,
             kind="stage",
@@ -218,7 +173,7 @@ def _restore_claimed_previous(
     target: Path,
 ) -> None:
     """Restore a claimed target without replacing a late user destination."""
-    if not transaction["previous_claimed"]:
+    if transaction["claim_state"] != "claimed":
         return
     old = ledger["installed"]
     if old is None:
@@ -230,7 +185,65 @@ def _restore_claimed_previous(
         _require_digest(target, old["digest"], "restored managed target was modified")
     else:
         _rename_no_replace(previous, target)
-    transaction["previous_claimed"] = False
+    transaction["claim_state"] = "idle"
+    _write_ledger(ledger_path, ledger)
+
+
+def _reconcile_stage_publication(
+    ledger_path: Path,
+    ledger: dict[str, Any],
+    skills_root: Path,
+    transaction: dict[str, Any],
+) -> None:
+    if transaction["stage_state"] != "publishing":
+        return
+    generation_id = transaction["generation_id"]
+    prepared = _prepared_stage_path(ledger_path, generation_id)
+    stage = _transaction_path(skills_root, "stage", generation_id)
+    prepared_exists = _exists(prepared)
+    stage_exists = _exists(stage)
+    if prepared_exists and stage_exists:
+        raise _ClientConflictError("stage source and destination both exist")
+    if prepared_exists:
+        if _tree_manifest(prepared) != transaction["expected_manifest"]:
+            raise _ClientConflictError("prepared Ava stage was modified")
+        _rename_no_replace(prepared, stage)
+    elif stage_exists:
+        _verify_marker(stage, ledger["installation_id"], generation_id)
+        if _tree_manifest(stage) != transaction["expected_manifest"]:
+            raise _ClientConflictError("published Ava stage was modified")
+    else:
+        raise _ClientConflictError("stage publication outcome is ambiguous")
+    transaction["stage_state"] = "published"
+    _write_ledger(ledger_path, ledger)
+
+
+def _reconcile_target_claim(
+    ledger_path: Path,
+    ledger: dict[str, Any],
+    transaction: dict[str, Any],
+    previous: Path,
+    target: Path,
+) -> None:
+    if transaction["claim_state"] != "claiming":
+        return
+    old = ledger["installed"]
+    if old is None:
+        raise _ClientConflictError("target claim has no installed ownership record")
+    previous_exists = _exists(previous)
+    target_exists = _exists(target)
+    if previous_exists and target_exists:
+        raise _ClientConflictError("target claim outcome is ambiguous")
+    if previous_exists:
+        _verify_marker(previous, ledger["installation_id"], old["generation_id"])
+        _require_digest(previous, old["digest"], "claimed managed target was modified")
+        transaction["claim_state"] = "claimed"
+    elif target_exists:
+        _verify_marker(target, ledger["installation_id"], old["generation_id"])
+        _require_digest(target, old["digest"], "managed target changed during claim")
+        transaction["claim_state"] = "idle"
+    else:
+        raise _ClientConflictError("target claim outcome is ambiguous")
     _write_ledger(ledger_path, ledger)
 
 
@@ -268,7 +281,7 @@ def _activate(
     generation_id = transaction["generation_id"]
     stage = _transaction_path(skills_root, "stage", generation_id)
     previous = _transaction_path(skills_root, "previous", generation_id)
-    if not transaction["stage_created"] or not transaction["copy_complete"] or not _exists(stage):
+    if transaction["stage_state"] != "published" or not _exists(stage):
         raise _ClientConflictError("incomplete Ava transaction was preserved")
     _verify_marker(stage, ledger["installation_id"], generation_id)
     if _tree_manifest(stage) != transaction["expected_manifest"]:
@@ -280,9 +293,11 @@ def _activate(
             raise _ClientConflictError("unmanaged target appeared during installation")
         if _exists(previous):
             raise _ClientConflictError("prior transaction path already exists")
-        _rename_no_replace(target, previous)
-        transaction["previous_claimed"] = True
+        transaction["claim_state"] = "claiming"
+        _write_ledger(ledger_path, ledger)
         try:
+            _rename_no_replace(target, previous)
+            transaction["claim_state"] = "claimed"
             _write_ledger(ledger_path, ledger)
             _verify_marker(previous, ledger["installation_id"], old["generation_id"])
             _require_digest(
@@ -316,12 +331,8 @@ def _recover(
         return None
     stage = _transaction_path(skills_root, "stage", transaction["generation_id"])
     previous = _transaction_path(skills_root, "previous", transaction["generation_id"])
-    if (
-        transaction["stage_created"]
-        and transaction["copy_complete"]
-        and _exists(target)
-        and not _exists(stage)
-    ):
+    _reconcile_stage_publication(ledger_path, ledger, skills_root, transaction)
+    if transaction["stage_state"] == "published" and _exists(target) and not _exists(stage):
         _verify_marker(target, ledger["installation_id"], transaction["generation_id"])
         _require_digest(
             target, transaction["expected_digest"], "activated transaction was modified"
@@ -329,11 +340,12 @@ def _recover(
         action = "installed" if ledger["installed"] is None else "updated"
         _commit_activation(ledger_path, ledger, transaction, previous)
         return action
-    if transaction["previous_claimed"]:
+    _reconcile_target_claim(ledger_path, ledger, transaction, previous, target)
+    if transaction["claim_state"] == "claimed":
         if _exists(previous) and _exists(target):
             raise _ClientConflictError("late target prevents restoration of claimed copy")
         _restore_claimed_previous(ledger_path, ledger, transaction, previous, target)
-    if transaction["stage_created"] and transaction["copy_complete"] and _exists(stage):
+    if transaction["stage_state"] == "published" and _exists(stage):
         return _activate(ledger_path, ledger, skills_root, target)
     if _abandon_transaction(ledger_path, ledger, skills_root):
         return None

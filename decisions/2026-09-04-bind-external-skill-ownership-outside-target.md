@@ -65,3 +65,17 @@ unmanaged. Claim and every restoration use atomic no-replace renames, so a late
 destination is preserved together with the still-tracked claimed copy. Cleanup
 rejects multi-link regular files and never changes regular-file modes; only
 directory permissions needed for unlink are widened.
+
+Update 2026-09-04: stage publication and prior-target claim now have durable
+write-ahead phases. Stage content is prepared under Ava's private ledger root;
+publication is one no-replace rename, and recovery requires the prepared/stage
+outcome plus the transaction marker and manifest. Claim recovery similarly
+requires the canonical/prior outcome plus the installed marker and digest.
+Ambiguous outcomes retain the transaction and all paths fail-closed.
+
+Cleanup now records a write-ahead claim before moving each residue tree to a
+transaction-specific no-replace quarantine. It verifies the post-rename tree
+before deletion and restores a mismatch when the source name remains free.
+Each file receives a second deterministic quarantine rename and verification
+before unlink. Directory permission changes are bound to a verified descriptor
+on POSIX and are skipped, allowing deletion to fail closed, on Windows.

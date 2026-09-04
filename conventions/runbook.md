@@ -377,10 +377,13 @@ client homes are not created. A private per-client ledger under `$AVA_HOME/confi
 binds the installed generation to its in-target marker and a digest of names, kinds,
 bytes, and modes. The ledger also records each generation's expected path manifest,
 so interrupted staging and partially completed cleanup remain named and safely
-resumable. Transaction flags distinguish a successfully created stage and a
-successfully claimed prior target from a colliding generation-shaped user path.
+resumable. Write-ahead phases precede stage publication and target claim, then
+reconcile their no-replace outcome from both paths plus marker, digest, and
+manifest evidence; ambiguous generation-shaped paths remain fail-closed.
 A per-target process lock serializes claim-and-verify updates; claims and
-restores are atomic no-replace renames, and multi-link files are rejected;
+restores are atomic no-replace renames. Cleanup likewise claims residue and
+individual files into no-replace quarantine names before verification and
+deletion; multi-link files are rejected and directory chmod is descriptor-bound;
 unmanaged or changed copies and unsafe linked paths are preserved with a client-labelled
 warning. External-client failures do not abort core converge. Dev worktrees skip this
 host-global step. Converge also applies a gateway-host guard that fails
