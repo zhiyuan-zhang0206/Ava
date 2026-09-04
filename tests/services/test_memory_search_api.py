@@ -13,7 +13,7 @@ import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 
-from services.memory_search.app import build_app
+from services.memory_search.app import _MAX_BATCH_ROWS, build_app
 from services.memory_search.store import MemoryStore
 
 _DIM = 8
@@ -31,6 +31,17 @@ def _store(tmp_path: Path) -> MemoryStore:
 
 def _client(tmp_path: Path) -> TestClient:
     return TestClient(build_app(_store(tmp_path)))
+
+
+def _upsert_body(path: str, seed: int, *, mtime: float = 1.0) -> dict[str, object]:
+    return {
+        "path": path,
+        "mtime": mtime,
+        "content_hash": f"hash-{seed}",
+        "kind": "body",
+        "chunk_idx": 0,
+        "vector": _vec(seed).tolist(),
+    }
 
 
 def test_healthz(tmp_path: Path) -> None:
@@ -103,6 +114,83 @@ def test_upsert_persists_before_ack(tmp_path: Path) -> None:
     fresh.load()
     assert fresh.all_meta() == {"/a.md": (1.0, "ha", _FP)}
     assert fresh.search_topk(ones, k=5) == ["/a.md"]
+
+
+def test_upsert_batch_persists_all_rows_before_ack(tmp_path: Path) -> None:
+    rows = [_upsert_body("/batch-a.md", 0), _upsert_body("/batch-b.md", 1)]
+    with _client(tmp_path) as client:
+        assert client.post("/upsert_batch", json={"rows": rows}).json() == {"status": "ok"}
+
+    fresh = _store(tmp_path)
+    fresh.load()
+    assert fresh.all_meta() == {
+        "/batch-a.md": (1.0, "hash-0", _FP),
+        "/batch-b.md": (1.0, "hash-1", _FP),
+    }
+    assert len(fresh) == 2
+
+
+def test_upsert_batch_matches_sequential_endpoints(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import services.memory_search.store as store_module
+
+    ticks = iter([0.0, 1.0] * 4)
+
+    class _FakeTime:
+        @staticmethod
+        def perf_counter() -> float:
+            return next(ticks)
+
+    monkeypatch.setattr(store_module, "time", _FakeTime)
+    rows = [_upsert_body("/a.md", 0), _upsert_body("/b.md", 1), _upsert_body("/c.md", 2)]
+    with _client(tmp_path / "sequential") as sequential, _client(tmp_path / "batched") as batched:
+        for row in rows:
+            assert sequential.post("/upsert", json=row).status_code == 200
+        assert batched.post("/upsert_batch", json={"rows": rows}).status_code == 200
+
+        assert batched.get("/meta").json() == sequential.get("/meta").json()
+        query = {"vector": _vec(0).tolist(), "k": 10}
+        assert (
+            batched.post("/search", json=query).json()
+            == sequential.post("/search", json=query).json()
+        )
+        assert batched.get("/stats").json() == sequential.get("/stats").json()
+
+
+def test_upsert_batch_saves_once_while_single_upserts_save_each_row(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = _store(tmp_path)
+    save_calls: list[None] = []
+    original_save = store.save
+
+    def _save() -> None:
+        save_calls.append(None)
+        original_save()
+
+    monkeypatch.setattr(store, "save", _save)
+    rows = [_upsert_body(f"/{idx}.md", idx) for idx in range(5)]
+    with TestClient(build_app(store)) as client:
+        assert client.post("/upsert_batch", json={"rows": rows}).status_code == 200
+        assert len(save_calls) == 1
+        for row in rows:
+            assert client.post("/upsert", json=row).status_code == 200
+        assert len(save_calls) == 1 + len(rows)
+
+
+def test_upsert_batch_rejects_empty_oversized_and_wrong_dim(tmp_path: Path) -> None:
+    row = _upsert_body("/a.md", 0)
+    bad_dim = {**row, "vector": [0.0] * (_DIM - 1)}
+    with _client(tmp_path) as client:
+        assert client.post("/upsert_batch", json={"rows": []}).status_code == 422
+        assert (
+            client.post("/upsert_batch", json={"rows": [row] * (_MAX_BATCH_ROWS + 1)}).status_code
+            == 422
+        )
+        response = client.post("/upsert_batch", json={"rows": [row, bad_dim]})
+        assert response.status_code == 422
+        assert response.json()["detail"] == f"embedding shape ({_DIM - 1},) != ({_DIM},)"
 
 
 def test_stats_empty_fresh_store(tmp_path: Path) -> None:

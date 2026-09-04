@@ -9,6 +9,7 @@ pinned, plus the factory's fail-fast switch.
 from __future__ import annotations
 
 import asyncio
+from typing import cast
 
 import numpy as np
 import pytest
@@ -123,12 +124,44 @@ def test_backend_write_read_delegation(milvus_client) -> None:  # pyright: ignor
     assert backend.all_meta() == {"/b.md": (2.0, "hb", _FP)}
 
 
+def test_backend_upsert_many_delegates_one_client_call() -> None:
+    calls: list[dict[str, object]] = []
+
+    class _FakeClient:
+        def upsert(self, **kwargs: object) -> None:
+            calls.append(kwargs)
+
+    backend = MilvusBackend(dim=_DIM, fingerprint=_FP, client=_FakeClient())  # pyright: ignore[reportArgumentType]
+    backend.upsert_many(
+        [
+            ("/a.md", 1.0, "ha", _vec(0), "body", 0),
+            ("/b.md", 2.0, "hb", _vec(1), "desc", 0),
+        ]
+    )
+
+    assert len(calls) == 1
+    assert calls[0]["collection_name"] == "memory_embeddings"
+    data = calls[0]["data"]
+    assert isinstance(data, list)
+    rows = cast(list[dict[str, object]], data)
+    assert [row["path"] for row in rows] == ["/a.md", "/b.md"]
+    assert all(row["embedder"] == _FP for row in rows)
+
+
+def test_empty_upsert_many_is_noop_before_connect() -> None:
+    for name in (MilvusBackend.name, PGVectorBackend.name, NumPyBackend.name):
+        backend = factory.get_backend_named(name, dim=_DIM, fingerprint=_FP)
+        backend.upsert_many([])
+
+
 def test_readonly_backends_refuse_mutations() -> None:
     """Factory-provided read-only backends reject writes before connect."""
     for name in (MilvusBackend.name, PGVectorBackend.name, NumPyBackend.name):
         backend = factory.get_backend_named(name, dim=_DIM, fingerprint=_FP, readonly=True)
         with pytest.raises(RuntimeError, match="read-only"):
             backend.upsert("/a.md", 1.0, "hash", _vec(0), kind="body", chunk_idx=0)
+        with pytest.raises(RuntimeError, match="read-only"):
+            backend.upsert_many([("/a.md", 1.0, "hash", _vec(0), "body", 0)])
         with pytest.raises(RuntimeError, match="read-only"):
             backend.delete("/a.md")
 

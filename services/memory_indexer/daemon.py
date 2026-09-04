@@ -54,6 +54,7 @@ import time
 from contextlib import suppress
 from pathlib import Path
 
+import numpy as np
 from watchdog.events import FileSystemEvent, FileSystemEventHandler
 from watchdog.observers import Observer
 
@@ -317,10 +318,9 @@ def _process_paths(
         backend.delete(str(p))
         _log.info("[indexer] deleted %s", p)
 
-    # Flatten each dirty file into its chunk rows (desc + body chunks);
-    # embedding and upserting happen per row. A file whose content hash is
-    # unchanged is skipped before this point, so a re-embed only happens when
-    # the file actually changed.
+    # Flatten each dirty file into its chunk rows (desc + body chunks). A file
+    # whose content hash is unchanged is skipped before this point, so a
+    # re-embed only happens when the file actually changed.
     rows: list[
         tuple[Path, float, str, str, int, str]
     ] = []  # (path, mtime, hash, kind, chunk_idx, text)
@@ -328,16 +328,39 @@ def _process_paths(
         for kind, chunk_idx, text in _file_rows(content):
             rows.append((path, mtime, hash_, kind, chunk_idx, text))
 
-    for i in range(0, len(rows), _BATCH_SIZE):
-        batch = rows[i : i + _BATCH_SIZE]
-        texts = [text for *_, text in batch]
-        vectors = provider.embed_batch(texts)
-        last_path: str | None = None
-        for (path, mtime, hash_, kind, chunk_idx, _), vector in zip(batch, vectors, strict=True):
-            backend.upsert(str(path), mtime, hash_, vector, kind=kind, chunk_idx=chunk_idx)
-            if str(path) != last_path:
-                _log.info("[indexer] indexed %s", path)
-                last_path = str(path)
+    upsert_rows: list[tuple[str, float, str, np.ndarray, str, int]] = []
+    indexed_paths: list[Path] = []
+    indexed_path_set: set[Path] = set()
+    try:
+        for i in range(0, len(rows), _BATCH_SIZE):
+            batch = rows[i : i + _BATCH_SIZE]
+            texts = [text for *_, text in batch]
+            vectors = provider.embed_batch(texts)
+            for (path, mtime, hash_, kind, chunk_idx, _), vector in zip(
+                batch, vectors, strict=True
+            ):
+                upsert_rows.append((str(path), mtime, hash_, vector, kind, chunk_idx))
+                if path not in indexed_path_set:
+                    indexed_path_set.add(path)
+                    indexed_paths.append(path)
+    except EmbeddingAPIError:
+        if upsert_rows:
+            try:
+                backend.upsert_many(upsert_rows)
+            except Exception:
+                _log.warning(
+                    "[indexer] failed to flush %d embedded rows after an embedding failure",
+                    len(upsert_rows),
+                    exc_info=True,
+                )
+            else:
+                for path in indexed_paths:
+                    _log.info("[indexer] indexed %s", path)
+        raise
+
+    backend.upsert_many(upsert_rows)
+    for path in indexed_paths:
+        _log.info("[indexer] indexed %s", path)
 
 
 def _cold_start_reconcile(backend: MemorySearchBackend, provider: EmbeddingProvider) -> None:

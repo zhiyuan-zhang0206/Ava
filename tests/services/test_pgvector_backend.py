@@ -185,6 +185,26 @@ def test_upsert_overwrite_same_pk(db_conn: psycopg.Connection, backend: PGVector
     assert len(_rows(db_conn)) == 1
 
 
+def test_upsert_many_inserts_all_rows_and_overwrites(
+    db_conn: psycopg.Connection, backend: PGVectorBackend
+) -> None:
+    backend.upsert_many(
+        [
+            ("/a.md", 1.0, "old", _vec(0), "body", 0),
+            ("/b.md", 2.0, "hb", _vec(1), "body", 0),
+            ("/a.md", 3.0, "new", _vec(2), "body", 0),
+        ]
+    )
+    assert backend.all_meta() == {"/a.md": (3.0, "new", _FP), "/b.md": (2.0, "hb", _FP)}
+    assert len(_rows(db_conn)) == 2
+
+
+def test_readonly_upsert_many_raises_before_connect() -> None:
+    backend = PGVectorBackend(dim=_DIM, fingerprint=_FP, readonly=True)
+    with pytest.raises(RuntimeError, match="read-only"):
+        backend.upsert_many([("/a.md", 1.0, "ha", _vec(0), "body", 0)])
+
+
 def test_delete_removes_all_chunks_of_path(
     db_conn: psycopg.Connection, backend: PGVectorBackend
 ) -> None:
