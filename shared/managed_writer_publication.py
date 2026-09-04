@@ -48,7 +48,8 @@ class CurrentAdmission:
 
 
 AdmissionDecision = LegacyProtocolZero | DeferredAdmission | CurrentAdmission
-_ADMISSION_ROW = "SELECT managed_writer_evidence, phase FROM deployment_state WHERE id=1 FOR UPDATE"
+_ADMISSION_LOCK = "SELECT public.lock_runtime_publication_admission()"
+_ADMISSION_ROW = "SELECT managed_writer_evidence, phase FROM deployment_state WHERE id=1"
 _UNIT_LOCK = "LOCK TABLE machine_units, machines IN SHARE MODE"
 _UNITS = "SELECT machine_name, home FROM machine_units ORDER BY machine_name, home"
 _MACHINES = "SELECT name FROM machines"
@@ -454,6 +455,7 @@ def publication_admission(
     """
     if conn.info.transaction_status != TransactionStatus.INTRANS:
         raise ManagedWriterBarrierError("admission requires a caller-owned transaction")
+    conn.execute(_ADMISSION_LOCK)
     state = _admission_state(conn.execute(_ADMISSION_ROW).fetchone())
     if not isinstance(state, WriterPublication):
         return state
@@ -475,6 +477,7 @@ async def publication_admission_async(
     """Async transport for the identical SQL, lock order and decision function."""
     if conn.info.transaction_status != TransactionStatus.INTRANS:
         raise ManagedWriterBarrierError("admission requires a caller-owned transaction")
+    await conn.execute(_ADMISSION_LOCK)
     state = _admission_state(await (await conn.execute(_ADMISSION_ROW)).fetchone())
     if not isinstance(state, WriterPublication):
         return state

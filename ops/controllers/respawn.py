@@ -164,6 +164,10 @@ def _reap_local_unclaimed_idling(
     reaped: list[int] = []
     for agent_id in ids:
         with write_transaction(pool) as conn, conn.cursor() as cur:
+            from shared.runtime_admission import legacy_boot_terminal_allowed
+
+            if not legacy_boot_terminal_allowed(conn):
+                continue
             # Capture cascade-closable show() page names before the status
             # flip. Daemon-supervised serve() pages stay open.
             page_names = list_open_page_names(conn, agent_id)
@@ -488,6 +492,10 @@ class RespawnController:
             if not permitted:
                 _log.debug("[ops.respawn] revive pass deferred until this host is serving")
                 return acted
+        from ops.resource_birth import resume_births
+
+        if resume_births(self._pool, local_machine, settings.daemon.revive_max_per_pass):
+            acted = True
         for tid in _revive_local_dead_running_idling(
             self._pool, local_machine, settings.daemon.revive_max_per_pass
         ):

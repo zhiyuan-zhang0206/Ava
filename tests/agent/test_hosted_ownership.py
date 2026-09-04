@@ -22,8 +22,16 @@ from agent.hosted_ownership import (
 from shared.config import settings
 from shared.db import PG_KEEPALIVE_KWARGS, create_agent, insert_inbound_message
 from shared.incarnation_resources import IncarnationResources, ResourceProcess, decode_resources
+from shared.managed_writer_publication import AdmissionDecision, CurrentAdmission
+from shared.runtime_admission import RuntimeAdmission
 from shared.runtime_incarnation import RuntimeIncarnation, current_incarnation
 from shared.turn_identity import bind_turn_identity
+
+
+class _CurrentRuntimeAdmission(RuntimeAdmission):
+    async def decide_async(self, conn: psycopg.AsyncConnection) -> AdmissionDecision:
+        del conn
+        return CurrentAdmission(uuid4())
 
 
 def _agent(conn: psycopg.Connection) -> int:
@@ -149,7 +157,12 @@ async def test_new_host_owner_requires_exact_old_host_exit_for_managed_set(
         old_host.wait(timeout=5)
 
         successor = await admit_hosted_runtime(
-            aops_pool, agent_id, "host-test", uuid4(), expected_from="idling"
+            aops_pool,
+            agent_id,
+            "host-test",
+            uuid4(),
+            expected_from="idling",
+            publication=_CurrentRuntimeAdmission(None),
         )
         assert successor is not None and successor.generation != old.generation
         stored = db_conn.execute(

@@ -32,9 +32,32 @@ resource set plus its applied lifecycle decision. A same-machine hosted process
 restart is the narrow exception: while holding the metadata lock, it may transfer
 an empty, unfrozen set only after the admission-captured host PID/birth is proven
 ended. A live exact host, an expired lease, a missing host identity, a frozen set,
-or any request refuses that handoff. No default spawn stamps the birth marker:
-enabling new births still requires the publication/all-writer boundary, never an
-environment flag or an installed revision.
+or any request refuses that handoff. Legacy spawn does not stamp the birth marker:
+enabling new births requires the publication/all-writer
+boundary, never an environment flag or an installed revision. The integrated
+current-only spawn boundary stamps a fixed first-birth deadline and attempt
+limit in that same record. Its existing process controller revisits exact birth
+attempts after maintenance; missing prior native identity refuses another launch.
+Counter allocation commits before Popen, and the actual Python checks the exact
+birth UUID/attempt and original deadline before admission. Hosted first admission
+consumes the same marker within its deadline without a process launch token.
+
+Actual process admission resolves the loaded image once before the database
+transaction. Hosted admission shares one boot-resolution task and rechecks its
+cheap immutable binding without traversing the image on each turn. The existing
+publication decision locks deployment and registry before agent metadata. Pending
+publication exits a process before ownership or returns no hosted admission;
+queued inbound is not consumed. Legacy generic unowned-boot terminal cleanup is
+allowed only in the exact stable, never-enabled SQL-NULL publication state, not
+after a deferred child exits. This does not renew a command's launch deadline.
+Incomplete historical v2 publication without activation hash/challenge is not
+new-mode permission. Historical NULL resource rows remain unknown under current
+publication and cannot become empty through admission.
+
+Process runtimes keep the least-privilege `ava_runner` database identity. They
+take the publication row lock through the fixed security-definer
+`lock_runtime_publication_admission()` operation, which exposes no rollout
+mutation surface; publication columns remain ordinary read-only facts.
 
 Managed exec launches the fixed isolated read-only `agent.exec_domain_owner`
 entry (`-I -B -X utf8`) behind a permit gate, validates its actual PID/birth and

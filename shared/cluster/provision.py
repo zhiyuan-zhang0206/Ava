@@ -438,6 +438,9 @@ def ensure_runner_role(identity: str, *, base_admin_url: str, runner_password: s
         beside it — on every table a later migration adds. The `ALL TABLES`
         form alone covers only what exists at grant time; see the comment at
         the two ALTERs for why that gap is invisible until it bites.
+      - EXECUTE on `lock_runtime_publication_admission()`, the narrow
+        security-definer operation that takes the deployment-state row lock
+        required by runtime admission without granting UPDATE on rollout state.
       - SELECT, UPDATE, INSERT on inbound_messages — claim polling AND the
         agent-side self-lifecycle inbounds (`ava.self.terminate` / `restart` /
         `compact` insert their own 'terminate' / 'restart' / 'compact_summary'
@@ -548,6 +551,11 @@ def ensure_runner_role(identity: str, *, base_admin_url: str, runner_password: s
                 "ALTER DEFAULT PRIVILEGES FOR ROLE {} IN SCHEMA public"
                 " GRANT USAGE, SELECT ON SEQUENCES TO {}"
             ).format(pgsql.Identifier(identity), pgsql.Identifier(RUNNER_ROLE))
+        )
+        conn.execute(
+            pgsql.SQL(
+                "GRANT EXECUTE ON FUNCTION public.lock_runtime_publication_admission() TO {}"
+            ).format(pgsql.Identifier(RUNNER_ROLE))
         )
         for table in ("inbound_messages", "agents_meta"):
             conn.execute(

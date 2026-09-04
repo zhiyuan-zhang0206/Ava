@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import os
 import sys
+from uuid import UUID
 
 from agent import _boot_timing
 from shared.agents import AgentStatus
@@ -29,7 +30,11 @@ from shared.runtime_incarnation import bind_process_incarnation, new_process_inc
 
 
 def claim_agent_row_or_die_on_stale_schema(
-    agent_id: int, *, restart_command_id: int | None = None, resurrect_command_id: int | None = None
+    agent_id: int,
+    *,
+    restart_command_id: int | None = None,
+    resurrect_command_id: int | None = None,
+    resource_birth: tuple[UUID, int] | None = None,
 ) -> None:
     """Schema-gate, then claim this process's row in one early boot step.
 
@@ -49,13 +54,20 @@ def claim_agent_row_or_die_on_stale_schema(
         raise
     _boot_timing.mark("schema_check")
     claim_agent_row(
-        agent_id, restart_command_id=restart_command_id, resurrect_command_id=resurrect_command_id
+        agent_id,
+        restart_command_id=restart_command_id,
+        resurrect_command_id=resurrect_command_id,
+        resource_birth=resource_birth,
     )
 
 
 def _mark_preclaim_terminated(agent_id: int) -> None:
     """Mark an unclaimed row terminated and close its show() pages after boot rejection."""
     with write_transaction() as conn, conn.cursor() as cur:
+        from shared.runtime_admission import legacy_boot_terminal_allowed
+
+        if not legacy_boot_terminal_allowed(conn):
+            return
         # Capture only agent-owned pages before the terminal transition closes them.
         cur.execute(
             "SELECT name FROM agent_pages "
@@ -81,7 +93,11 @@ def _mark_preclaim_terminated(agent_id: int) -> None:
 
 
 def claim_agent_row(
-    agent_id: int, *, restart_command_id: int | None = None, resurrect_command_id: int | None = None
+    agent_id: int,
+    *,
+    restart_command_id: int | None = None,
+    resurrect_command_id: int | None = None,
+    resource_birth: tuple[UUID, int] | None = None,
 ) -> None:
     """Atomically claim an unowned row as running and grant its first lease.
 
@@ -91,18 +107,29 @@ def claim_agent_row(
     """
     local_machine = machine_name()
     incarnation = new_process_incarnation(agent_id)
+    from shared.runtime_admission import RuntimeAdmission, require_current_for_managed
+
+    publication = RuntimeAdmission.load()
+    publication.revalidate()
     from agent.session_admission import wait_for_launch_record
 
     wait_for_launch_record(agent_id)
     from shared.exec_owner_recovery import recover_local_resources
 
     recover_local_resources(agent_id, local_machine)
+    import psutil
+
+    from shared.incarnation_resources import ResourceProcess
+
+    native = psutil.Process()
+    host_identity = ResourceProcess(pid=native.pid, birth=native.create_time())
     with write_transaction() as conn, conn.cursor() as cur:
+        publication_decision = publication.decide(conn)
         # A guarded auto-resurrect transaction may still be committing the row
         # when its child starts. Lock first so this process validates that final
         # committed state rather than a stale pre-resurrection snapshot.
         cur.execute(
-            "SELECT machine FROM agents_meta WHERE id = %s FOR UPDATE",
+            "SELECT machine,incarnation_resources FROM agents_meta WHERE id = %s FOR UPDATE",
             (agent_id,),
         )
         row = cur.fetchone()
@@ -112,6 +139,7 @@ def claim_agent_row(
                 "Create first via spawn_agent or resurrect_agent."
             )
         row_machine = row[0]
+        require_current_for_managed(publication_decision, row[1])
         if row_machine != local_machine:
             conn.rollback()
             _mark_preclaim_terminated(agent_id)
@@ -128,15 +156,12 @@ def claim_agent_row(
         from shared.resurrection_launch import require_admission
 
         require_admission(conn, agent_id, resurrect_command_id)
-        import psutil
+        from shared.resource_birth import require_birth_token
 
-        from shared.incarnation_resources import ResourceProcess
+        require_birth_token(conn, agent_id, resource_birth)
         from shared.resource_admission import admit_resources
 
-        native = psutil.Process()
-        admit_resources(
-            conn, incarnation, ResourceProcess(pid=native.pid, birth=native.create_time())
-        )
+        admit_resources(conn, incarnation, host_identity)
         cur.execute(
             "UPDATE agents_meta SET status = %s, pid = %s, started_at = now(), "
             "lease_expires_at = now() + make_interval(secs => %s), "

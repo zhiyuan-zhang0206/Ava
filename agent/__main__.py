@@ -35,13 +35,20 @@ if _agent_id is not None:
 
     from agent._starting import claim_agent_row_or_die_on_stale_schema
     from agent.restart_admission import consume_restart_command
+    from shared.resource_birth import consume_birth_token
+    from shared.runtime_admission import PublicationAdmissionDeferredError
 
     _boot_timing.mark("starting_import")
-    claim_agent_row_or_die_on_stale_schema(
-        _agent_id,
-        restart_command_id=consume_restart_command(sys.argv),
-        resurrect_command_id=consume_restart_command(sys.argv, flag="--resurrect-command-id"),
-    )
+    try:
+        claim_agent_row_or_die_on_stale_schema(
+            _agent_id,
+            restart_command_id=consume_restart_command(sys.argv),
+            resurrect_command_id=consume_restart_command(sys.argv, flag="--resurrect-command-id"),
+            resource_birth=consume_birth_token(sys.argv),
+        )
+    except PublicationAdmissionDeferredError:
+        _boot_deadline.disarm()
+        raise SystemExit(75) from None
     _boot_timing.mark("claim_row")
     _boot_deadline.disarm()
 

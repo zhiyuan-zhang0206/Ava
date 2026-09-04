@@ -399,6 +399,10 @@ def _mark_resurrect_launch_failed(agent_id: int, prepared: _PreparedResurrect) -
     page_names: list[str] = []
     changed = False
     with write_transaction() as conn, conn.cursor() as cur:
+        from shared.runtime_admission import legacy_boot_terminal_allowed
+
+        if not legacy_boot_terminal_allowed(conn):
+            return
         cur.execute(
             "SELECT status, status_changed_at, pid FROM agents_meta WHERE id = %s FOR UPDATE",
             (agent_id,),

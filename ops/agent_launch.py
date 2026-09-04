@@ -30,7 +30,7 @@ import asyncio
 import json
 import os
 import time
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import psutil
 
@@ -283,6 +283,7 @@ def _launch_agent_process(
     confirm: bool = True,
     restart_attempt: tuple[int, int, float] | None = None,
     resurrect_attempt: tuple[int, int, float] | None = None,
+    resource_attempt: tuple[UUID, int, float] | None = None,
 ) -> str:
     """Spawn a new detached agent process via the native supervisor.
     Raises RuntimeError if the spawn itself fails; does **not** clean up DB on
@@ -318,12 +319,29 @@ def _launch_agent_process(
     `schedule_launch_confirm`, so the spawn response is not held for the confirm
     window.
     """
+    if resource_attempt is None and restart_attempt is None and resurrect_attempt is None:
+        from ops.resource_birth import launch_birth
+
+        managed = launch_birth(agent_id, confirm=confirm)
+        if managed is not None:
+            return managed
     supervisor = native_proc()
     _require_released_agent_session(agent_id)
     if restart_attempt is not None and resurrect_attempt is not None:
         raise ValueError("one launch cannot belong to two lifecycle commands")
     bound_attempt = restart_attempt if restart_attempt is not None else resurrect_attempt
-    if bound_attempt is None:
+    if resource_attempt is not None:
+        if (
+            bound_attempt is not None
+            or resource_attempt[1] <= 0
+            or resource_attempt[2] <= 0
+            or confirm
+        ):
+            raise ValueError("invalid resource birth launch attempt")
+        from ops.resource_birth import birth_session
+
+        agent_session = birth_session(agent_id, resource_attempt[0], resource_attempt[1])
+    elif bound_attempt is None:
         agent_session = session_name(f"boot-{agent_id}-{uuid4().hex}")
     else:
         command_id, attempt_number, remaining_budget = bound_attempt
@@ -364,6 +382,9 @@ def _launch_agent_process(
     if resurrect_attempt is not None:
         argv[-1] = str(min(BOOT_BUDGET_SEC, resurrect_attempt[2]))
         argv.extend(["--resurrect-command-id", str(resurrect_attempt[0])])
+    if resource_attempt is not None:
+        argv[-1] = str(min(BOOT_BUDGET_SEC, resource_attempt[2]))
+        argv.extend(["--resource-birth", f"{resource_attempt[0]}:{resource_attempt[1]}"])
 
     env = agent_spawn_env_dict()
     env["PYTHONMALLOC"] = "malloc"
@@ -438,6 +459,10 @@ def _confirm_launch_or_force_terminated(agent_id: int, attempt_session: str | No
             event="launch_confirm_failed",
         )
     with write_transaction() as conn, conn.cursor() as cur:
+        from shared.runtime_admission import legacy_boot_terminal_allowed
+
+        if not legacy_boot_terminal_allowed(conn):
+            return False
         # Capture cascade-closable show() page names BEFORE the status flip.
         # Daemon-supervised serve() pages stay open across termination.
         # An unclaimed 'idling' row can hold open pages (resurrect's cascade_open
@@ -545,6 +570,10 @@ def _launch_or_force_terminated(
                     event="launch_force_terminated",
                 )
                 with write_transaction() as conn, conn.cursor() as cur:
+                    from shared.runtime_admission import legacy_boot_terminal_allowed
+
+                    if not legacy_boot_terminal_allowed(conn):
+                        raise
                     # Capture cascade-closable show() page names BEFORE the
                     # status flip. Daemon-supervised serve() pages stay open;
                     # resurrect reopens only show() rows the cascade closed.
