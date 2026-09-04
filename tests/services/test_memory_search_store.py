@@ -28,6 +28,24 @@ def _vec(seed: int) -> np.ndarray:
     return rng.standard_normal(_DIM).astype(np.float32)
 
 
+def _row(
+    path: str,
+    mtime: float,
+    content_hash: str,
+    seed: int,
+    kind: str = "body",
+    chunk_idx: int = 0,
+) -> tuple[str, float, str, np.ndarray, str, int]:
+    return (path, mtime, content_hash, _vec(seed), kind, chunk_idx)
+
+
+def _upsert_sequentially(
+    store: MemoryStore, rows: list[tuple[str, float, str, np.ndarray, str, int]]
+) -> None:
+    for path, mtime, hash_, vector, kind, chunk_idx in rows:
+        store.upsert(path, mtime, hash_, vector, kind=kind, chunk_idx=chunk_idx)
+
+
 def test_upsert_all_meta_aggregates_per_path(tmp_path: Path) -> None:
     store = _store(tmp_path)
     store.upsert("/a.md", 1.0, "ha", _vec(0), kind="body", chunk_idx=0)
@@ -43,6 +61,102 @@ def test_upsert_overwrite_same_pk(tmp_path: Path) -> None:
     store.upsert("/a.md", 2.0, "h2", _vec(1), kind="body", chunk_idx=0)
     assert store.all_meta() == {"/a.md": (2.0, "h2", _FP)}
     assert len(store) == 1  # overwritten, not appended
+
+
+@pytest.mark.parametrize(
+    ("initial_rows", "rows"),
+    [
+        ([], [_row("/a.md", 1.0, "ha", 0), _row("/b.md", 2.0, "hb", 1)]),
+        (
+            [_row("/a.md", 1.0, "old", 0)],
+            [_row("/a.md", 3.0, "new", 2), _row("/b.md", 2.0, "hb", 1)],
+        ),
+        (
+            [],
+            [_row("/a.md", 1.0, "old", 0), _row("/a.md", 2.0, "new", 1)],
+        ),
+        (
+            [],
+            [
+                _row("/a.md", 1.0, "ha", 0, "desc", 0),
+                _row("/a.md", 1.0, "ha", 1, "body", 0),
+                _row("/a.md", 1.0, "ha", 2, "body", 1),
+            ],
+        ),
+    ],
+    ids=["all-new", "mixed-new-overwrite", "duplicate-pk", "desc-and-body"],
+)
+def test_upsert_many_matches_sequential_upserts(
+    tmp_path: Path,
+    initial_rows: list[tuple[str, float, str, np.ndarray, str, int]],
+    rows: list[tuple[str, float, str, np.ndarray, str, int]],
+) -> None:
+    sequential = MemoryStore(tmp_path / "sequential.npz", dim=_DIM, fingerprint=_FP)
+    batched = MemoryStore(tmp_path / "batched.npz", dim=_DIM, fingerprint=_FP)
+    _upsert_sequentially(sequential, initial_rows)
+    _upsert_sequentially(batched, initial_rows)
+
+    _upsert_sequentially(sequential, rows)
+    batched.upsert_many(rows)
+
+    query = _vec(99)
+    assert batched.all_meta() == sequential.all_meta()
+    assert len(batched) == len(sequential)
+    assert batched.search_topk(query, 10) == sequential.search_topk(query, 10)
+
+
+def test_upsert_many_rejects_bad_row_without_mutation(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    store.upsert_many([_row("/present.md", 1.0, "original", 0)])
+    before = (store.all_meta(), len(store), store.search_topk(_vec(0), 10))
+
+    with pytest.raises(ValueError, match=r"embedding shape \(7,\) != \(8,\)"):
+        store.upsert_many(
+            [
+                _row("/would-be-new.md", 2.0, "new", 1),
+                ("/bad.md", 3.0, "bad", np.zeros(7, dtype=np.float32), "body", 0),
+            ]
+        )
+
+    assert (store.all_meta(), len(store), store.search_topk(_vec(0), 10)) == before
+
+
+def test_upsert_many_empty_is_noop(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    store.upsert_many([_row("/present.md", 1.0, "original", 0)])
+    before = (store.all_meta(), len(store), store.search_topk(_vec(0), 10))
+    store.upsert_many([])
+    assert (store.all_meta(), len(store), store.search_topk(_vec(0), 10)) == before
+
+
+def test_upsert_many_grows_matrix_once_for_new_rows(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import services.memory_search.store as store_module
+
+    new_rows = [_row(f"/{idx}.md", 1.0, str(idx), idx) for idx in range(5)]
+    update_rows = [_row(f"/{idx}.md", 2.0, f"new-{idx}", idx + 10) for idx in range(5)]
+    calls: list[str] = []
+    original_vstack = store_module.np.vstack
+    original_concatenate = store_module.np.concatenate
+
+    def _vstack(*args: object, **kwargs: object) -> np.ndarray:
+        calls.append("vstack")
+        return original_vstack(*args, **kwargs)  # type: ignore[arg-type]
+
+    def _concatenate(*args: object, **kwargs: object) -> np.ndarray:
+        calls.append("concatenate")
+        return original_concatenate(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(store_module.np, "vstack", _vstack)
+    monkeypatch.setattr(store_module.np, "concatenate", _concatenate)
+    store = _store(tmp_path)
+    store.upsert_many(new_rows)
+    assert calls == ["concatenate"]
+
+    calls.clear()
+    store.upsert_many(update_rows)
+    assert calls == []
 
 
 def test_delete_removes_all_chunks_of_path(tmp_path: Path) -> None:

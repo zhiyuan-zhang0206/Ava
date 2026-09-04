@@ -90,6 +90,62 @@ def test_write_read_roundtrip(backend: NumPyBackend) -> None:
     assert backend.all_meta() == {"/b.md": (2.0, "hb", _FP)}
 
 
+def test_upsert_many_roundtrip(backend: NumPyBackend) -> None:
+    rows = [
+        ("/batch-a.md", 1.0, "ha", _vec(0), "body", 0),
+        ("/batch-b.md", 2.0, "hb", _vec(1), "body", 0),
+    ]
+    backend.upsert_many(rows)
+    meta = backend.all_meta()
+    assert meta["/batch-a.md"] == (1.0, "ha", _FP)
+    assert meta["/batch-b.md"] == (2.0, "hb", _FP)
+    results = backend.search_topk(_vec(0), k=1000)
+    assert {"/batch-a.md", "/batch-b.md"}.issubset(results)
+    backend.delete("/batch-a.md")
+    backend.delete("/batch-b.md")
+
+
+def test_upsert_many_uses_one_request_with_batch_timeout() -> None:
+    requests: list[httpx.Request] = []
+
+    def _respond(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"status": "ok"})
+
+    backend = NumPyBackend()
+    backend._client = httpx.Client(  # pyright: ignore[reportPrivateUsage]
+        base_url="http://memory-search", transport=httpx.MockTransport(_respond)
+    )
+    try:
+        backend.upsert_many(
+            [
+                ("/a.md", 1.0, "ha", _vec(0), "body", 0),
+                ("/b.md", 2.0, "hb", _vec(1), "body", 0),
+            ]
+        )
+    finally:
+        backend.close()
+
+    assert len(requests) == 1
+    assert requests[0].url.path == "/upsert_batch"
+    assert requests[0].extensions["timeout"]["read"] == 300.0
+
+
+def test_readonly_upsert_many_connects_but_refuses_write(
+    memory_search_uri: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from shared.config import settings
+
+    monkeypatch.setattr(settings.services, "memory_search_uri", memory_search_uri)
+    backend = NumPyBackend(readonly=True)
+    backend.connect()
+    try:
+        with pytest.raises(RuntimeError, match="read-only"):
+            backend.upsert_many([("/a.md", 1.0, "ha", _vec(0), "body", 0)])
+    finally:
+        backend.close()
+
+
 def test_search_topk_async_matches_sync(backend: NumPyBackend) -> None:
     ones = np.ones(_DIM, dtype=np.float32)
     backend.upsert("/a.md", 1.0, "ha", ones, kind="body", chunk_idx=0)

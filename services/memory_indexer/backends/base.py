@@ -1,7 +1,7 @@
 """The memory search backend contract + the indexer-layer row vocabulary.
 
 The protocol is the CTO-frozen interface (memory search backend
-abstraction, 2026-08-30): every backend implements exactly these seven
+abstraction, 2026-08-30): every backend implements exactly these eight
 methods, so switching storage is one env var + a restart — the cold-start
 reconcile rebuilds the index on the new backend without hand-copying data.
 
@@ -21,6 +21,7 @@ constant and no import of the embeddings package.
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Sequence
 from typing import Protocol
 
 import numpy as np
@@ -60,7 +61,7 @@ def pk_of(path: str, kind: str, chunk_idx: int) -> str:
 class MemorySearchBackend(Protocol):
     """Storage contract behind the memory search index (CTO-frozen 2026-08-30).
 
-    The write path is the indexer daemon's (`upsert` / `delete` /
+    The write path is the indexer daemon's (`upsert` / `upsert_many` / `delete` /
     `all_meta`); the read path is the gateway's (`search_topk` returns
     top-k **paths**, aggregated over chunk rows). Backends may implement
     the async variant with internal thread pooling — no true-async
@@ -90,6 +91,14 @@ class MemorySearchBackend(Protocol):
         kind: str,
         chunk_idx: int,
     ) -> None: ...
+
+    def upsert_many(self, rows: Sequence[tuple[str, float, str, np.ndarray, str, int]]) -> None:
+        """Apply the same per-row semantics as `upsert`, in order.
+
+        A backend may batch the rows into one storage write or round trip.
+        Empty rows are a no-op.
+        """
+        ...
 
     def delete(self, path: str) -> None: ...
 

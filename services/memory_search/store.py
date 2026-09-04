@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 import time
+from collections.abc import Sequence
 from pathlib import Path
 from zipfile import BadZipFile
 
@@ -201,33 +202,53 @@ class MemoryStore:
     ) -> None:
         """Write / update one chunk row; re-upserting the same triple
         overwrites in place — identical semantics to the milvus backend."""
-        vector = embedding.astype(np.float32).reshape(-1)
-        if vector.shape != (self._dim,):
-            raise ValueError(f"embedding shape {vector.shape} != ({self._dim},)")
-        pk = pk_of(path, kind, chunk_idx)
-        idx = self._pk_index.get(pk)
-        if idx is None:
-            idx = len(self._pks)
-            self._pks.append(pk)
-            self._paths.append(path)
-            self._kinds.append(kind)
-            self._chunk_idx.append(int(chunk_idx))
-            self._mtimes.append(float(mtime))
-            self._hashes.append(content_hash)
-            self._embedders.append(self._fingerprint)
-            self._pk_index[pk] = idx
-            if self._matrix.shape[0] == 0:
-                self._matrix = vector[np.newaxis, :]
-            else:
-                self._matrix = np.vstack([self._matrix, vector[np.newaxis, :]])
-        else:
+        self.upsert_many([(path, mtime, content_hash, embedding, kind, chunk_idx)])
+
+    def upsert_many(self, rows: Sequence[tuple[str, float, str, np.ndarray, str, int]]) -> None:
+        """Apply chunk rows in order without persisting.
+
+        Every vector is normalized and dimension-checked before any state
+        changes. New rows grow the matrix together, while repeated keys update
+        the row reserved by their first occurrence so the last write wins.
+        """
+        validated_rows: list[tuple[str, float, str, np.ndarray, str, int]] = []
+        for path, mtime, content_hash, embedding, kind, chunk_idx in rows:
+            vector = embedding.astype(np.float32).reshape(-1)
+            if vector.shape != (self._dim,):
+                raise ValueError(f"embedding shape {vector.shape} != ({self._dim},)")
+            validated_rows.append((path, float(mtime), content_hash, vector, kind, int(chunk_idx)))
+
+        initial_row_count = len(self._pks)
+        new_vectors: list[np.ndarray] = []
+        for path, mtime, content_hash, vector, kind, chunk_idx in validated_rows:
+            pk = pk_of(path, kind, chunk_idx)
+            idx = self._pk_index.get(pk)
+            if idx is None:
+                idx = len(self._pks)
+                self._pks.append(pk)
+                self._paths.append(path)
+                self._kinds.append(kind)
+                self._chunk_idx.append(chunk_idx)
+                self._mtimes.append(mtime)
+                self._hashes.append(content_hash)
+                self._embedders.append(self._fingerprint)
+                self._pk_index[pk] = idx
+                new_vectors.append(vector)
+                continue
+
             self._paths[idx] = path
             self._kinds[idx] = kind
-            self._chunk_idx[idx] = int(chunk_idx)
-            self._mtimes[idx] = float(mtime)
+            self._chunk_idx[idx] = chunk_idx
+            self._mtimes[idx] = mtime
             self._hashes[idx] = content_hash
             self._embedders[idx] = self._fingerprint
-            self._matrix[idx] = vector
+            if idx < initial_row_count:
+                self._matrix[idx] = vector
+            else:
+                new_vectors[idx - initial_row_count] = vector
+
+        if new_vectors:
+            self._matrix = np.concatenate((self._matrix, new_vectors))
 
     def delete(self, path: str) -> None:
         """Delete every chunk row of `path`; no-op when the path is absent."""

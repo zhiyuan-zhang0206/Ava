@@ -16,6 +16,7 @@ not the same semantic space).
 from __future__ import annotations
 
 import subprocess
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -30,6 +31,7 @@ from services.memory_indexer.backends.milvus import (
     MilvusBackend,
     _schema_current,
 )
+from services.memory_indexer.embeddings.base import EmbeddingAPIError
 
 _DIM = 8
 _FP = "test:gemini:dim=8"
@@ -111,6 +113,33 @@ def test_upsert_overwrite(milvus_client) -> None:  # pyright: ignore[reportMissi
     backend.upsert("/a.md", 1.0, "hash1", _vec(0), kind="body", chunk_idx=0)
     backend.upsert("/a.md", 2.0, "hash2", _vec(1), kind="body", chunk_idx=0)
     assert backend.all_meta() == {"/a.md": (2.0, "hash2", _FP)}
+
+
+def test_upsert_many_inserts_all_rows_and_overwrites(milvus_client) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    backend = _backend(milvus_client)
+    backend.upsert_many(
+        [
+            ("/a.md", 1.0, "old", _vec(0), "body", 0),
+            ("/b.md", 2.0, "hb", _vec(1), "body", 0),
+            ("/a.md", 3.0, "new", _vec(2), "body", 0),
+        ]
+    )
+    assert backend.all_meta() == {"/a.md": (3.0, "new", _FP), "/b.md": (2.0, "hb", _FP)}
+    rows = milvus_client.query(  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+        collection_name=_COLLECTION, filter="", output_fields=["pk"], limit=100
+    )
+    assert len(rows) == 2  # pyright: ignore[reportUnknownArgumentType]
+
+
+def test_readonly_milvus_upsert_many_raises(milvus_client) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    backend = MilvusBackend(
+        dim=_DIM,
+        fingerprint=_FP,
+        client=milvus_client,  # pyright: ignore[reportUnknownArgumentType]
+        readonly=True,
+    )
+    with pytest.raises(RuntimeError, match="read-only"):
+        backend.upsert_many([("/a.md", 1.0, "ha", _vec(0), "body", 0)])
 
 
 def test_delete(milvus_client) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
@@ -628,3 +657,66 @@ def test_process_paths_indexes_desc_and_body_chunks(
     )
     kinds = sorted((r["kind"], r["chunk_idx"]) for r in rows)  # pyright: ignore[reportUnknownArgumentType, reportUnknownVariableType]
     assert kinds == [("body", 0), ("body", 1), ("desc", 0)]
+
+
+def test_process_paths_calls_upsert_many_once_across_embed_batches(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    milvus_client,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+) -> None:
+    class _RecordingBackend(MilvusBackend):
+        def __init__(self) -> None:
+            super().__init__(dim=_DIM, fingerprint=_FP, client=milvus_client)  # pyright: ignore[reportUnknownArgumentType]
+            self.calls: list[list[tuple[str, float, str, np.ndarray, str, int]]] = []
+
+        def upsert_many(self, rows: Sequence[tuple[str, float, str, np.ndarray, str, int]]) -> None:
+            self.calls.append(list(rows))
+            super().upsert_many(rows)
+
+    first = tmp_path / "first.md"
+    first.write_text("---\ndescription: first description\n---\nfirst body", encoding="utf-8")
+    second = tmp_path / "second.md"
+    second.write_text("second body", encoding="utf-8")
+    monkeypatch.setattr(daemon, "_BATCH_SIZE", 2)
+    backend = _RecordingBackend()
+
+    daemon._process_paths(backend, {first.resolve(), second.resolve()}, _FakeProvider())
+
+    assert len(backend.calls) == 1
+    assert len(backend.calls[0]) == 3
+    assert {row[0] for row in backend.calls[0]} == {str(first.resolve()), str(second.resolve())}
+
+
+def test_process_paths_flushes_embedded_rows_before_embedding_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    milvus_client,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+) -> None:
+    class _FailSecondBatchProvider(_FakeProvider):
+        def embed_batch(self, texts: list[str]) -> np.ndarray:
+            if self.embed_batch_count == 1:
+                raise EmbeddingAPIError("second batch failed")
+            return super().embed_batch(texts)
+
+    class _RecordingBackend(MilvusBackend):
+        def __init__(self) -> None:
+            super().__init__(dim=_DIM, fingerprint=_FP, client=milvus_client)  # pyright: ignore[reportUnknownArgumentType]
+            self.calls: list[list[tuple[str, float, str, np.ndarray, str, int]]] = []
+
+        def upsert_many(self, rows: Sequence[tuple[str, float, str, np.ndarray, str, int]]) -> None:
+            self.calls.append(list(rows))
+            super().upsert_many(rows)
+
+    note = tmp_path / "note.md"
+    note.write_text("---\ndescription: description\n---\nbody", encoding="utf-8")
+    monkeypatch.setattr(daemon, "_BATCH_SIZE", 1)
+    backend = _RecordingBackend()
+
+    with pytest.raises(EmbeddingAPIError, match="second batch failed"):
+        daemon._process_paths(backend, {note.resolve()}, _FailSecondBatchProvider())
+
+    assert len(backend.calls) == 1
+    assert len(backend.calls[0]) == 1
+    assert backend.all_meta() == {
+        str(note.resolve()): (note.stat().st_mtime, content_hash(note.read_text()), _FP)
+    }
