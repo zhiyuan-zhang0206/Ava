@@ -59,6 +59,7 @@ from langgraph.types import Command
 # read agent_id from RunnableConfig.configurable.thread_id, not ava.self.AGENT_ID.
 import ava
 from agent import state as _state
+from agent._turn_progress import mark_turn_progress
 from agent.observe import log_llm_usage
 from agent.state_channels import CircuitState
 from shared.config import settings
@@ -534,6 +535,10 @@ async def _persist_last_active(ctx: AvaContext, agent_id: int, text: str) -> Non
       compact (which replaces the whole checkpoint but not this column), read
       back by get_last_message.
     """
+    # A completed LLM step is turn progress regardless of the DB outcome
+    # below — the hosted stall clock must not age just because the persist
+    # write itself failed.
+    mark_turn_progress(agent_id)
     if ctx.ops_pool is None:
         return
     try:

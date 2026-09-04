@@ -50,6 +50,7 @@ from langchain_core.messages import AIMessageChunk
 from langchain_core.messages.tool import ToolCallChunk
 from langchain_core.utils.json import parse_partial_json
 
+from agent._turn_progress import mark_turn_progress
 from shared.event_coalescer import DeltaCoalescer
 from shared.event_publisher import AgentEventPublisher
 from shared.live_events import (
@@ -181,6 +182,11 @@ class RedisStreamHandler:
         Both paths are handled — the `additional_kwargs` variant uses
         block_idx=0 since the reasoning is not embedded in content blocks.
         """
+        # A flowing chunk is turn activity: without this mark a model that
+        # streams one long reasoning/text block for longer than the stall
+        # budget — no node completes, no LLM step finishes — would read as
+        # "no progress" and be aborted by the hosted stall guard mid-stream.
+        mark_turn_progress(self._agent_id)
         self._process_content(chunk.content)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
         self._process_additional_reasoning(chunk.additional_kwargs)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
         # tool_call_chunks is list[ToolCallChunk] TypedDict (not list[dict]),

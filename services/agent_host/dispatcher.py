@@ -53,6 +53,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Protocol, cast
 
+from agent._turn_progress import turn_progress_age_s
 from shared.log import logger
 from shared.stop_timing import CANCEL_UNWIND_TIMEOUT_S, CLOCK_READ_TIMEOUT_S
 
@@ -548,6 +549,34 @@ class InboundWakeDispatcher:
                         f"hosted turn for agent {candidate.agent_id} did not unwind"
                     )
             self._scheduler.wake(candidate.agent_id)
+
+        # Turn-level fake-alive: an in-flight agent whose turn-progress clock
+        # is stale is not making progress even though NO pending inbound has
+        # aged — the exact shape the pending-row checks above cannot see.
+        # The 2026-09-04 incident: agent 2998 claimed its whole inbound queue
+        # (the chats are committed into the checkpoint, none stay 'pending'),
+        # then hung inside graph.ainvoke for 3.5 hours; every detector keyed on
+        # a pending row or a pid stayed blind, and the row kept its heartbeat
+        # lease. An in-flight agent is the answer to "is anything running for
+        # this agent" — its stale clock is the answer to "has that turn done
+        # ANYTHING since" (see agent/_turn_progress.py for what counts).
+        for agent_id in self._scheduler.active_agents:
+            age = turn_progress_age_s(agent_id)
+            if age is None or age < self._stale_after_s:
+                continue
+            await self._scheduler.cancel_agent(agent_id)
+            if agent_id in self._scheduler.active_agents:
+                raise HostRestartRequiredError(f"hosted turn for agent {agent_id} did not unwind")
+            logger.warning(
+                "hosted turn for agent {agent_id} showed no progress for "
+                "{no_progress_s:.0f}s (turn-level fake-alive) — turn task "
+                "cancelled and the agent rescheduled; its next wake rebuilds "
+                "the runtime, which re-runs the startup reconcile",
+                event="host_turn_stall_detected",
+                agent_id=agent_id,
+                no_progress_s=age,
+            )
+            self._scheduler.wake(agent_id)
 
     def _handle(self, message: dict[str, object]) -> None:
         """Turn one pub/sub message into a wake. Never raises: a bad frame must

@@ -139,6 +139,7 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent._process_boot import boot_agent_scope
 from agent._runloop import _graph_config
+from agent._turn_progress import reset_turn_progress
 from agent.db import LoggingConnectionPool
 from agent.hosted_ownership import (
     admit_hosted_runtime,
@@ -397,6 +398,13 @@ class AgentHost:
             self.stats.wakes_skipped += 1
             return
 
+        # A new turn starts a fresh progress window the moment it is entered:
+        # without this, a long-idle agent's stale clock entry would read as
+        # "stalled" during this turn's runtime (re)build — whose startup
+        # reconcile can be slow — and the dispatcher's turn-level scan would
+        # cancel the very recovery turn it just scheduled.
+        reset_turn_progress(agent_id)
+
         async with self._turn_slots:
             pins = resolve_agent_config_pins(stored.config_overlay, stored.birth_config)
             plugin_pins = resolve_agent_plugin_pins(stored.config_overlay)
@@ -455,6 +463,16 @@ class AgentHost:
                 try:
                     runtime = await self._runtime_for(agent_id, stored.fingerprint)
                     exited = await self._drive_turns(agent_id, runtime)
+                except asyncio.CancelledError:
+                    # A cancelled turn (the stale-turn scan, force terminate,
+                    # shutdown) must not keep its runtime either: the abandoned
+                    # turn left claimed inbounds behind, and the next wake's
+                    # runtime build re-runs the startup reconcile — the hosted
+                    # equivalent of a fresh process's boot. The in-flight ref
+                    # keeps the current invocation's build alive; only the
+                    # cache entry is dropped, so an eviction does not matter.
+                    self.drop_agent(agent_id)
+                    raise
                 except Exception:
                     # The scheduler logs and drops the task; dropping the runtime
                     # too is what makes the retry equivalent to process mode's
