@@ -215,6 +215,26 @@ class LmSettings(EnvSettings):
         },
     )
 
+    llm_stream_total_timeout_seconds: float | None = Field(
+        default=None,
+        alias="AVA_LLM_STREAM_TOTAL_TIMEOUT_SECONDS",
+        description=(
+            "Total duration ceiling (seconds) for one streaming LLM attempt, "
+            "even while chunks keep arriving. This bounds a drip-fed stream and "
+            "is independent of the TTFT and inter-chunk gap timeouts. Unset "
+            "resolves the per-model default (shared/lm/registry.py; shared floor "
+            "3600). Per-agent overridable."
+        ),
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-default",
+            "per_agent": True,
+            "lifecycle": "live",
+        },
+    )
+
     llm_stream_inter_chunk_timeout_seconds: float | None = Field(
         default=None,
         alias="AVA_LLM_STREAM_INTER_CHUNK_TIMEOUT_SECONDS",

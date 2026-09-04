@@ -1,8 +1,9 @@
 """Streaming consumption for the llm node — the unified streaming-first LLM call.
 
 ``_consume_llm`` is the single entry: stream via ``bound_llm.astream(...)``
-under per-stage stall timeouts, falling back once to a non-stream ``ainvoke``
-on a stalled stream or a configured-fatal provider error type.
+under per-stage stall timeouts plus a total-attempt ceiling, falling back once
+to a non-stream ``ainvoke`` on a stalled stream or a configured-fatal provider
+error type.
 ``_stream_with_cache_retry`` wraps the whole exchange (stale Gemini cache
 invalidation + one plain-path retry, concurrency-limiter slot, latency/decode
 stamps).
@@ -58,10 +59,10 @@ async def _consume_llm(
        ``FatalProviderError`` → fast-fail (no LangGraph retry).
 
     Note the two paths run under different clocks: the streaming attempt is
-    bounded by the per-model TTFT / inter-chunk timeouts, the fallback by
-    ``llm_non_streaming_fallback_timeout_seconds`` (600s). Any apparent
-    "streaming fails, non-streaming succeeds" asymmetry has to be read against
-    that gap before it is attributed to the provider.
+    bounded by the per-model TTFT / inter-chunk gap timeouts and total-duration
+    ceiling, the fallback by ``llm_non_streaming_fallback_timeout_seconds``
+    (600s). Any apparent "streaming fails, non-streaming succeeds" asymmetry
+    has to be read against that gap before it is attributed to the provider.
 
     Fallback runs only once per call — if non-stream also hits the same error,
     propagate naturally. Cost: that turn loses UI progressive streaming display;
@@ -85,6 +86,9 @@ async def _consume_llm(
             # without loosening every model's stall detection).
             ttft_timeout=resolve_setting(
                 "llm_stream_ttft_timeout_seconds", model=turn_settings.lm.llm_model
+            ),
+            total_timeout=resolve_setting(
+                "llm_stream_total_timeout_seconds", model=turn_settings.lm.llm_model
             ),
             inter_chunk_timeout=resolve_setting(
                 "llm_stream_inter_chunk_timeout_seconds", model=turn_settings.lm.llm_model
@@ -184,6 +188,7 @@ async def _consume_stream_with_stall_timeout(
     handler: RedisStreamHandler,
     ttft_timeout: float,
     inter_chunk_timeout: float,
+    total_timeout: float | None = None,
 ) -> tuple[float | None, float | None]:
     """`asyncio.wait_for` wraps `__anext__` — raises
     `LLMStreamStallTimeoutError` if no chunk arrives within the timeout.
@@ -193,6 +198,8 @@ async def _consume_stream_with_stall_timeout(
       (e.g. Gemini) may have >10s cold-start; this value should be higher.
     - `inter_chunk_timeout`: applied to subsequent chunks — mid-stream
       latency should be tight; 10s is the baseline.
+    - `total_timeout`: hard ceiling for this streaming attempt, even when every
+      individual gap stays healthy. None leaves the attempt unbounded.
 
     `StopAsyncIteration` is not wrapped in timeout (empty stream should not
     wait N seconds); `chunk_idx` distinguishes TTFT vs mid-stream, giving
@@ -215,16 +222,39 @@ async def _consume_stream_with_stall_timeout(
     chunk_idx = 0
     first_ts: float | None = None
     last_ts: float | None = None
+    started_at = time.monotonic()
     while True:
-        timeout = ttft_timeout if chunk_idx == 0 else inter_chunk_timeout
+        stage_timeout = ttft_timeout if chunk_idx == 0 else inter_chunk_timeout
+        timeout = stage_timeout
+        total_is_next_deadline = False
+        if total_timeout is not None:
+            remaining_total = total_timeout - (time.monotonic() - started_at)
+            if remaining_total <= 0:
+                raise LLMStreamStallTimeoutError(
+                    f"LLM stream exceeded {total_timeout:.1f}s total duration "
+                    f"after {chunk_idx} chunks; abort streaming attempt."
+                )
+            if remaining_total <= stage_timeout:
+                timeout = remaining_total
+                total_is_next_deadline = True
         try:
             chunk = await asyncio.wait_for(stream_iter.__anext__(), timeout=timeout)
         except StopAsyncIteration:
+            if total_timeout is not None and time.monotonic() - started_at >= total_timeout:
+                raise LLMStreamStallTimeoutError(
+                    f"LLM stream exceeded {total_timeout:.1f}s total duration "
+                    f"after {chunk_idx} chunks; abort streaming attempt."
+                ) from None
             return (first_ts, last_ts)
         except TimeoutError as e:
+            if total_is_next_deadline:
+                raise LLMStreamStallTimeoutError(
+                    f"LLM stream exceeded {total_timeout:.1f}s total duration "
+                    f"after {chunk_idx} chunks; abort streaming attempt."
+                ) from e
             stage = "TTFT" if chunk_idx == 0 else f"mid-stream after {chunk_idx} chunks"
             raise LLMStreamStallTimeoutError(
-                f"LLM stream stalled — no chunk for {timeout:.1f}s ({stage}); "
+                f"LLM stream stalled — no chunk for {stage_timeout:.1f}s ({stage}); "
                 f"abort turn. Provider hang / network drop suspected."
             ) from e
         assert isinstance(chunk, AIMessageChunk)  # noqa: S101
@@ -232,6 +262,11 @@ async def _consume_stream_with_stall_timeout(
         # generation window (first token → last token), excluding the
         # synchronous SSE publish cost on our side.
         now = time.monotonic()
+        if total_timeout is not None and now - started_at >= total_timeout:
+            raise LLMStreamStallTimeoutError(
+                f"LLM stream exceeded {total_timeout:.1f}s total duration "
+                f"after {chunk_idx} chunks; abort streaming attempt."
+            )
         if first_ts is None:
             first_ts = now
         last_ts = now
