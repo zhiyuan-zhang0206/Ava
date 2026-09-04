@@ -106,9 +106,48 @@ def test_phase_evidence_is_bounded() -> None:
                 "recovery_context_digest": "d" * 64,
                 "stage": "prepared",
                 "cron": "",
-                "phases": [phase] * 65,
+                "phases": tuple([phase] * 65),
             }
         )
+
+
+def test_journal_round_trips_the_strict_phase_tuple_as_json(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    request = tmp_path / "request.json"
+    receipt = tmp_path / "inventory.json"
+    candidate = tmp_path / "candidate.json"
+    recovery = tmp_path / "recovery.json"
+    for path in (request, receipt, candidate, recovery):
+        path.write_text("{}")
+    plan = SimpleNamespace(
+        request_path=request,
+        request=SimpleNamespace(
+            inventory_receipt=str(receipt),
+            candidate_context=str(candidate),
+            recovery_context=str(recovery),
+        ),
+        validation_seconds=0.0,
+    )
+    envelope: dict[str, object] | None = None
+
+    def read() -> dict[str, object] | None:
+        return envelope
+
+    def write(generation: str, journal: dict[str, object]) -> None:
+        nonlocal envelope
+        envelope = {"version": 1, "generation": generation, "journal": journal}
+
+    monkeypatch.setattr(bootstrap.updater_handoff, "read_bootstrap_recovery", read)
+    monkeypatch.setattr(bootstrap.updater_handoff, "write_bootstrap_recovery", write)
+
+    bootstrap._journal(cast("bootstrap.PreparedBootstrapHop", plan), "g", "prepared", b"")
+    bootstrap._journal(cast("bootstrap.PreparedBootstrapHop", plan), "g", "cron_quiesced", b"")
+
+    assert envelope is not None
+    journal = cast("dict[str, object]", envelope["journal"])
+    phases = cast("list[dict[str, object]]", journal["phases"])
+    assert [phase["stage"] for phase in phases] == ["prepared", "cron_quiesced"]
 
 
 def test_child_projection_preserves_transport_encryption() -> None:

@@ -422,7 +422,7 @@ def _journal(plan: PreparedBootstrapHop, generation: str, stage: str, cron: byte
             "stage": stage,
             # Only the validated secret-free restricted-A command shape reaches here.
             "cron": cron.decode("utf-8"),
-            "phases": [entry.model_dump(mode="json") for entry in (*previous, phase)],
+            "phases": (*previous, phase),
         }
     )
     updater_handoff.write_bootstrap_recovery(generation, journal.model_dump(mode="json"))
