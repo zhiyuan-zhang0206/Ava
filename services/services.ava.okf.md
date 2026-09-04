@@ -12,7 +12,9 @@ Ava's background service collection—roster services are independent long-lived
 processes hosted in sessions and restarted by a watchdog health check every 60
 seconds. Agent interactive shells live in per-session pty hosts outside that
 roster. On macOS, the permissions-helper is a
-launchd-owned exception with its own keepalive.
+launchd-owned exception with its own keepalive and a nursery protocol for
+idempotently spawning, listing, checking, and signaling named direct children,
+plus in-place helper upgrades.
 
 ## Grouped by Capability
 Each service declares which machine capabilities it runs on (`ServiceSpec.capabilities` in `ops/spec.py`); a machine runs every service whose capability set matches. The groupings reflect the **merged roster** of core entries + entries contributed by `_plugin_services()`; node ownership follows the code—a service registered by a plugin has its node under that plugin's subtree. Sub-trees are split accordingly into two groups; services that run on both sides stay at this layer:

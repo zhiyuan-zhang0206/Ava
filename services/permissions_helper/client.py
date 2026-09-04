@@ -69,7 +69,13 @@ def _connect(path: str) -> socket.socket:
     raise PermissionsHelperError(f"permissions helper not reachable at {path}: {last}")
 
 
-def _call(method: str, *, sock_path: str | Path | None = None, **args: object) -> Any:
+def _call(
+    method: str,
+    *,
+    sock_path: str | Path | None = None,
+    _disconnect_is_success: bool = False,
+    **args: object,
+) -> Any:
     """One JSON-line request/response over the platform transport.
 
     POSIX dials this cluster's Unix socket; Windows dials the machine-wide
@@ -79,7 +85,7 @@ def _call(method: str, *, sock_path: str | Path | None = None, **args: object) -
     """
     req = {"id": next(_ids), "method": method, **args}
     if _IS_WINDOWS:
-        return _call_pipe(req)
+        return _call_pipe(req, disconnect_is_success=_disconnect_is_success)
     path = str(sock_path or permissions_helper_socket())
     s = _connect(path)
     s.settimeout(_CALL_TIMEOUT_S)
@@ -99,10 +105,12 @@ def _call(method: str, *, sock_path: str | Path | None = None, **args: object) -
         ) from e
     finally:
         s.close()
+    if _disconnect_is_success and not buf:
+        return True
     return _parse_reply(bytes(buf), method)
 
 
-def _call_pipe(req: dict[str, object]) -> Any:
+def _call_pipe(req: dict[str, object], *, disconnect_is_success: bool = False) -> Any:
     """Windows transport: named-pipe file I/O (see services.permissions_helper._win_pipe)."""
     from services.permissions_helper import _win_pipe
 
@@ -131,6 +139,8 @@ def _call_pipe(req: dict[str, object]) -> Any:
                 raise PermissionsHelperError("permissions helper response exceeded line limit")
     finally:
         conn.close()
+    if disconnect_is_success and not buf:
+        return True
     return _parse_reply(bytes(buf), str(req["method"]))
 
 
@@ -205,6 +215,29 @@ class WindowInfo(WindowGeometry):
 class SessionInfo(TypedDict):
     locked: bool
     on_console: bool
+
+
+class SessionProc(TypedDict):
+    name: str
+    pid: int
+    alive: bool
+
+
+class SpawnResult(TypedDict):
+    pid: int
+    reused: bool
+
+
+class SessionListResult(TypedDict):
+    sessions: list[SessionProc]
+
+
+class AliveResult(TypedDict):
+    alive: bool
+
+
+class SignalResult(TypedDict):
+    sent: bool
 
 
 class ScreenSize(TypedDict):
@@ -305,6 +338,71 @@ def window_info(owner: str, *, sock_path: str | Path | None = None) -> WindowInf
 def session_info(*, sock_path: str | Path | None = None) -> SessionInfo:
     """Report whether the login session is locked or off-console."""
     return _call("session_info", sock_path=sock_path)
+
+
+def spawn_process(
+    name: str,
+    argv: list[str],
+    env: dict[str, str],
+    cwd: str,
+    stdout: str,
+    stderr: str,
+    *,
+    sock_path: str | Path | None = None,
+) -> SpawnResult:
+    """Spawn or reuse a named direct child of the permissions helper."""
+    result: SpawnResult = _call(
+        "spawn",
+        name=name,
+        argv=argv,
+        env=env,
+        cwd=cwd,
+        stdout=stdout,
+        stderr=stderr,
+        sock_path=sock_path,
+    )
+    return result
+
+
+def session_list(prefix: str = "", *, sock_path: str | Path | None = None) -> list[SessionProc]:
+    """List helper-owned process sessions whose names start with `prefix`."""
+    result: SessionListResult = _call("session_list", prefix=prefix, sock_path=sock_path)
+    return result["sessions"]
+
+
+def session_has(name: str, *, sock_path: str | Path | None = None) -> bool:
+    """Report whether the named helper-owned process session is alive."""
+    result: AliveResult = _call("session_has", name=name, sock_path=sock_path)
+    return result["alive"]
+
+
+def signal_session(
+    *,
+    name: str | None = None,
+    pid: int | None = None,
+    sig: int = 15,
+    sock_path: str | Path | None = None,
+) -> bool:
+    """Send `sig` to exactly one named session or explicit pid."""
+    if (name is None) == (pid is None):
+        raise ValueError("exactly one of name or pid is required")
+    if name is not None:
+        result: SignalResult = _call("signal", name=name, sig=sig, sock_path=sock_path)
+    else:
+        result = _call("signal", pid=pid, sig=sig, sock_path=sock_path)
+    return result["sent"]
+
+
+def request_self_upgrade(exe_path: str, *, sock_path: str | Path | None = None) -> bool:
+    """Ask the helper to exec a replacement; a clean disconnect means it succeeded."""
+    return bool(
+        _call(
+            "self_upgrade",
+            exe_path=exe_path,
+            sock_path=sock_path,
+            _disconnect_is_success=True,
+        )
+    )
 
 
 def screen_size(*, sock_path: str | Path | None = None) -> ScreenSize:

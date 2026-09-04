@@ -26,6 +26,7 @@
 
 import AppKit
 import CoreGraphics
+import Darwin
 import Foundation
 
 // MARK: - JSON line IO
@@ -71,6 +72,288 @@ func writeJSONLine(_ fd: Int32, _ obj: [String: Any]) {
 enum OpError: Error { case bad(String) }
 
 private let maxFileReadBytes: Int64 = 32 * 1024 * 1024
+private let inheritedSocketFDEnvironment = "AVA_PERMISSIONS_HELPER_LISTEN_FD"
+
+struct Child {
+    let pid: pid_t
+    let startedAt: Date
+}
+
+private let childTableLock = NSLock()
+private var children: [String: Child] = [:]
+private var childReaper: DispatchSourceSignal?
+
+func withChildTable<T>(_ body: () -> T) -> T {
+    childTableLock.lock()
+    defer { childTableLock.unlock() }
+    return body()
+}
+
+func childIsAlive(_ pid: pid_t) -> Bool {
+    kill(pid, 0) == 0
+}
+
+func startChildReaper() {
+    let source = DispatchSource.makeSignalSource(signal: SIGCHLD)
+    source.setEventHandler {
+        while true {
+            let pid = waitpid(-1, nil, WNOHANG)
+            if pid <= 0 { break }
+            withChildTable {
+                if let name = children.first(where: { $0.value.pid == pid })?.key {
+                    children.removeValue(forKey: name)
+                }
+            }
+        }
+    }
+    source.resume()
+    childReaper = source
+}
+
+func setCloseOnExec(_ fd: Int32, _ enabled: Bool) -> Bool {
+    let flags = fcntl(fd, F_GETFD)
+    guard flags >= 0 else { return false }
+    let updated = enabled ? flags | FD_CLOEXEC : flags & ~FD_CLOEXEC
+    return fcntl(fd, F_SETFD, updated) == 0
+}
+
+func reportResponsiblePID() {
+    typealias ProcPIDInfo = @convention(c) (
+        pid_t, Int32, UInt64, UnsafeMutableRawPointer?, Int32
+    ) -> Int32
+    typealias ResponsiblePID = @convention(c) (pid_t) -> pid_t
+
+    let symbols = UnsafeMutableRawPointer(bitPattern: -2)  // RTLD_DEFAULT on Darwin.
+    guard let procPIDInfoSymbol = dlsym(symbols, "proc_pidinfo") else {
+        FileHandle.standardError.write(Data("AvaPermissionsHelper: responsible-probe unsupported\n".utf8))
+        return
+    }
+
+    let ownPID = getpid()
+    var responsiblePID: pid_t = 0
+    let procPIDResponsible: Int32 = 2
+    let procPIDInfo = unsafeBitCast(procPIDInfoSymbol, to: ProcPIDInfo.self)
+    let bytes = withUnsafeMutablePointer(to: &responsiblePID) { pointer in
+        procPIDInfo(
+            ownPID,
+            procPIDResponsible,
+            0,
+            UnsafeMutableRawPointer(pointer),
+            Int32(MemoryLayout<pid_t>.size)
+        )
+    }
+
+    // Older SDKs expose flavor 2 as PROC_PIDTASKALLINFO. Keep the startup probe
+    // useful there through the long-standing private responsibility symbol.
+    if bytes != MemoryLayout<pid_t>.size || responsiblePID <= 0,
+       let fallbackSymbol = dlsym(symbols, "responsibility_get_pid_responsible_for_pid") {
+        let responsiblePIDForProcess = unsafeBitCast(fallbackSymbol, to: ResponsiblePID.self)
+        responsiblePID = responsiblePIDForProcess(ownPID)
+    }
+    guard responsiblePID > 0 else {
+        FileHandle.standardError.write(Data("AvaPermissionsHelper: responsible-probe unsupported\n".utf8))
+        return
+    }
+    FileHandle.standardError.write(
+        Data("AvaPermissionsHelper: responsible_pid=\(responsiblePID) self=\(ownPID)\n".utf8)
+    )
+}
+
+func createParentDirectory(of path: String) throws {
+    let directory = URL(fileURLWithPath: path).deletingLastPathComponent()
+    do {
+        try FileManager.default.createDirectory(
+            at: directory, withIntermediateDirectories: true
+        )
+    } catch {
+        throw OpError.bad("could not create output directory: \(directory.path)")
+    }
+}
+
+/// Spawn one direct child without an intermediate process. PR-3 will verify
+/// posix_spawn's launchd ResponsiblePid inheritance through tccd
+/// AUTHREQ_ATTRIBUTION; if it does not inherit, a fallback will be evaluated.
+func spawnProcess(_ req: [String: Any]) throws -> [String: Any] {
+    guard let name = req["name"] as? String, !name.isEmpty,
+          let argv = req["argv"] as? [String], !argv.isEmpty,
+          (argv[0] as NSString).isAbsolutePath,
+          let env = req["env"] as? [String: String],
+          let cwd = req["cwd"] as? String,
+          let stdoutPath = req["stdout"] as? String,
+          (stdoutPath as NSString).isAbsolutePath,
+          let stderrPath = req["stderr"] as? String,
+          (stderrPath as NSString).isAbsolutePath
+    else {
+        throw OpError.bad(
+            "spawn needs non-empty name, absolute argv[0]/stdout/stderr, argv, env, cwd"
+        )
+    }
+    if let existingPID = withChildTable({
+        children[name].flatMap { childIsAlive($0.pid) ? $0.pid : nil }
+    }) {
+        return ["pid": existingPID, "reused": true]
+    }
+    try createParentDirectory(of: stdoutPath)
+    try createParentDirectory(of: stderrPath)
+
+    var argumentPointers = argv.map { strdup($0) }
+    guard argumentPointers.allSatisfy({ $0 != nil }) else {
+        argumentPointers.forEach { if let pointer = $0 { free(pointer) } }
+        throw OpError.bad("could not allocate argv")
+    }
+    argumentPointers.append(nil)
+    defer { argumentPointers.forEach { if let pointer = $0 { free(pointer) } } }
+
+    var childEnvironment = env
+    childEnvironment["AVA_PERMISSIONS_HELPER_PID"] = String(getpid())
+    var environmentPointers = childEnvironment.map { key, value in strdup("\(key)=\(value)") }
+    guard environmentPointers.allSatisfy({ $0 != nil }) else {
+        environmentPointers.forEach { if let pointer = $0 { free(pointer) } }
+        throw OpError.bad("could not allocate envp")
+    }
+    environmentPointers.append(nil)
+    defer { environmentPointers.forEach { if let pointer = $0 { free(pointer) } } }
+
+    var fileActions: posix_spawn_file_actions_t?
+    var attributes: posix_spawnattr_t?
+    var result = posix_spawn_file_actions_init(&fileActions)
+    guard result == 0 else {
+        throw OpError.bad("posix_spawn file actions init failed: \(String(cString: strerror(result)))")
+    }
+    defer { posix_spawn_file_actions_destroy(&fileActions) }
+    result = posix_spawnattr_init(&attributes)
+    guard result == 0 else {
+        throw OpError.bad("posix_spawn attributes init failed: \(String(cString: strerror(result)))")
+    }
+    defer { posix_spawnattr_destroy(&attributes) }
+
+    let spawnFlags = Int16(POSIX_SPAWN_SETSID | POSIX_SPAWN_CLOEXEC_DEFAULT)
+    let setupResults = [
+        posix_spawnattr_setflags(&attributes, spawnFlags),
+        posix_spawn_file_actions_addopen(
+            &fileActions, STDIN_FILENO, "/dev/null", O_RDONLY, mode_t(0)
+        ),
+        posix_spawn_file_actions_addopen(
+            &fileActions, STDOUT_FILENO, stdoutPath,
+            O_WRONLY | O_CREAT | O_APPEND, mode_t(0o644)
+        ),
+        posix_spawn_file_actions_addopen(
+            &fileActions, STDERR_FILENO, stderrPath,
+            O_WRONLY | O_CREAT | O_APPEND, mode_t(0o644)
+        ),
+        posix_spawn_file_actions_addchdir_np(&fileActions, cwd),
+    ]
+    if let failure = setupResults.first(where: { $0 != 0 }) {
+        throw OpError.bad("posix_spawn setup failed: \(String(cString: strerror(failure)))")
+    }
+
+    var spawnedPID: pid_t = 0
+    let pid: pid_t = withChildTable {
+        result = argumentPointers.withUnsafeMutableBufferPointer { argvBuffer in
+            environmentPointers.withUnsafeMutableBufferPointer { envBuffer in
+                posix_spawn(
+                    &spawnedPID, argvBuffer[0], &fileActions, &attributes,
+                    argvBuffer.baseAddress, envBuffer.baseAddress
+                )
+            }
+        }
+        if result == 0 {
+            children[name] = Child(pid: spawnedPID, startedAt: Date())
+        }
+        return spawnedPID
+    }
+    guard result == 0 else {
+        throw OpError.bad("posix_spawn failed: \(String(cString: strerror(result)))")
+    }
+    return ["pid": pid, "reused": false]
+}
+
+func sessionList(_ req: [String: Any]) throws -> [String: Any] {
+    let prefix: String
+    if let supplied = req["prefix"] {
+        guard let supplied = supplied as? String else {
+            throw OpError.bad("session_list prefix must be a string")
+        }
+        prefix = supplied
+    } else {
+        prefix = ""
+    }
+    let sessions: [[String: Any]] = withChildTable {
+        children
+            .filter { $0.key.hasPrefix(prefix) }
+            .sorted { $0.key < $1.key }
+            .map { name, child in
+                ["name": name, "pid": child.pid, "alive": childIsAlive(child.pid)]
+            }
+    }
+    return ["sessions": sessions]
+}
+
+func sessionHas(_ req: [String: Any]) throws -> [String: Any] {
+    guard let name = req["name"] as? String else {
+        throw OpError.bad("session_has needs string name")
+    }
+    let alive = withChildTable { children[name].map { childIsAlive($0.pid) } ?? false }
+    return ["alive": alive]
+}
+
+func signalSession(_ req: [String: Any]) throws -> [String: Any] {
+    guard let signalNumber = req["sig"] as? Int,
+          let signalValue = Int32(exactly: signalNumber), signalValue > 0
+    else { throw OpError.bad("signal needs positive int sig") }
+    let name = req["name"] as? String
+    let requestedPID = req["pid"] as? Int
+    guard (name == nil) != (requestedPID == nil) else {
+        throw OpError.bad("signal needs exactly one of name or pid")
+    }
+
+    let pid: pid_t
+    if let name {
+        guard let child = withChildTable({ children[name] }) else {
+            throw OpError.bad("unknown session: \(name)")
+        }
+        pid = child.pid
+    } else {
+        guard let requestedPID, requestedPID > 0, let exactPID = pid_t(exactly: requestedPID) else {
+            throw OpError.bad("signal pid must be positive")
+        }
+        pid = exactPID
+    }
+    return ["sent": kill(pid, signalValue) == 0]
+}
+
+func selfUpgrade(_ req: [String: Any], listeningFD: Int32) throws -> [String: Any] {
+    guard let requestedPath = req["exe_path"] as? String,
+          (requestedPath as NSString).isAbsolutePath
+    else { throw OpError.bad("self_upgrade needs absolute exe_path") }
+
+    let executableURL = URL(fileURLWithPath: requestedPath)
+        .standardizedFileURL.resolvingSymlinksInPath()
+    let bundleURL = Bundle.main.bundleURL.standardizedFileURL.resolvingSymlinksInPath()
+    let bundlePath = bundleURL.path
+    guard executableURL.path == bundlePath || executableURL.path.hasPrefix(bundlePath + "/") else {
+        throw OpError.bad("self_upgrade exe_path is outside helper bundle")
+    }
+
+    var arguments: [UnsafeMutablePointer<CChar>?] = [strdup(executableURL.path), nil]
+    guard arguments[0] != nil else { throw OpError.bad("could not allocate self_upgrade argv") }
+    defer { free(arguments[0]) }
+    guard setenv(inheritedSocketFDEnvironment, String(listeningFD), 1) == 0 else {
+        throw OpError.bad("could not preserve listening socket")
+    }
+    guard setCloseOnExec(listeningFD, false) else {
+        unsetenv(inheritedSocketFDEnvironment)
+        throw OpError.bad("could not preserve listening socket")
+    }
+
+    arguments.withUnsafeMutableBufferPointer { buffer in
+        _ = execv(buffer[0], buffer.baseAddress)
+    }
+    let execError = errno
+    _ = setCloseOnExec(listeningFD, true)
+    unsetenv(inheritedSocketFDEnvironment)
+    throw OpError.bad("self_upgrade exec failed: \(String(cString: strerror(execError)))")
+}
 
 /// Resolve an allowed path or reject it. A bare prefix is insufficient:
 /// `/Users/ava/DownloadsEvil` is not in `/Users/ava/Downloads`.
@@ -382,7 +665,7 @@ func axWindowInfo(_ req: [String: Any]) throws -> [String: Any] {
 
 // MARK: - Dispatch
 
-func dispatch(_ req: [String: Any]) -> [String: Any] {
+func dispatch(_ req: [String: Any], listeningFD: Int32) -> [String: Any] {
     let id = req["id"]
     let method = req["method"] as? String ?? ""
     let axGatedMethods: Set<String> = ["click", "type", "key", "scroll", "ax_window_info"]
@@ -407,6 +690,11 @@ func dispatch(_ req: [String: Any]) -> [String: Any] {
         case "session_info": result = sessionInfo()
         case "screen_size": result = try screenSize(req)
         case "frontmost_app": result = frontmostApp()
+        case "spawn": result = try spawnProcess(req)
+        case "session_list": result = try sessionList(req)
+        case "session_has": result = try sessionHas(req)
+        case "signal": result = try signalSession(req)
+        case "self_upgrade": result = try selfUpgrade(req, listeningFD: listeningFD)
         default:
             return ["id": id as Any, "ok": false, "error": "unknown method: \(method)"]
         }
@@ -440,34 +728,45 @@ func registerPermissions() {
 /// the socket file to mode 0700, and `getpeereid` admits only this process's
 /// uid; same-uid processes remain the documented residual threat surface.
 func serve() {
+    reportResponsiblePID()
     registerPermissions()
     let path = socketPath()
-    unlink(path)
+    let fd: Int32
+    if let inherited = ProcessInfo.processInfo.environment[inheritedSocketFDEnvironment],
+       let inheritedFD = Int32(inherited), inheritedFD >= 0 {
+        fd = inheritedFD
+        unsetenv(inheritedSocketFDEnvironment)
+    } else {
+        unlink(path)
+        fd = socket(AF_UNIX, SOCK_STREAM, 0)
+        if fd < 0 { perror("socket"); exit(1) }
 
-    let fd = socket(AF_UNIX, SOCK_STREAM, 0)
-    if fd < 0 { perror("socket"); exit(1) }
-
-    var addr = sockaddr_un()
-    addr.sun_family = sa_family_t(AF_UNIX)
-    let pathBytes = Array(path.utf8)
-    guard pathBytes.count < MemoryLayout.size(ofValue: addr.sun_path) else {
-        FileHandle.standardError.write(Data("socket path too long: \(path)\n".utf8)); exit(1)
-    }
-    withUnsafeMutablePointer(to: &addr.sun_path) { p in
-        p.withMemoryRebound(to: UInt8.self, capacity: pathBytes.count) { dst in
-            for (i, b) in pathBytes.enumerated() { dst[i] = b }
+        var addr = sockaddr_un()
+        addr.sun_family = sa_family_t(AF_UNIX)
+        let pathBytes = Array(path.utf8)
+        guard pathBytes.count < MemoryLayout.size(ofValue: addr.sun_path) else {
+            FileHandle.standardError.write(Data("socket path too long: \(path)\n".utf8)); exit(1)
         }
+        withUnsafeMutablePointer(to: &addr.sun_path) { p in
+            p.withMemoryRebound(to: UInt8.self, capacity: pathBytes.count) { dst in
+                for (i, b) in pathBytes.enumerated() { dst[i] = b }
+            }
+        }
+        let len = socklen_t(MemoryLayout<sockaddr_un>.size)
+        let bindRC = withUnsafePointer(to: &addr) { ptr in
+            ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(fd, $0, len) }
+        }
+        if bindRC < 0 { perror("bind"); exit(1) }
+        // This helper holds TCC-granted desktop access, so the socket must be
+        // owner-only: a foreign local process must not drive screenshots or clicks.
+        // Same-uid processes are the documented residual threat surface.
+        if chmod(path, mode_t(0o700)) != 0 { perror("chmod"); exit(1) }
+        if listen(fd, 16) < 0 { perror("listen"); exit(1) }
     }
-    let len = socklen_t(MemoryLayout<sockaddr_un>.size)
-    let bindRC = withUnsafePointer(to: &addr) { ptr in
-        ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(fd, $0, len) }
+    guard setCloseOnExec(fd, true) else {
+        perror("fcntl"); exit(1)
     }
-    if bindRC < 0 { perror("bind"); exit(1) }
-    // This helper holds TCC-granted desktop access, so the socket must be
-    // owner-only: a foreign local process must not drive screenshots or clicks.
-    // Same-uid processes are the documented residual threat surface.
-    if chmod(path, mode_t(0o700)) != 0 { perror("chmod"); exit(1) }
-    if listen(fd, 16) < 0 { perror("listen"); exit(1) }
+    startChildReaper()
     FileHandle.standardError.write(Data("AvaPermissionsHelper: listening on \(path)\n".utf8))
 
     while true {
@@ -476,6 +775,10 @@ func serve() {
             if errno == EINTR || errno == ECONNABORTED { continue }
             perror("accept")
             usleep(100_000)  // a persistent error (e.g. fd exhaustion) must not become a tight CPU spin
+            continue
+        }
+        guard setCloseOnExec(conn, true) else {
+            close(conn)
             continue
         }
         var peerUID: uid_t = 0
@@ -487,7 +790,7 @@ func serve() {
         while let line = readLine(conn) {
             let req = (try? JSONSerialization.jsonObject(with: line)) as? [String: Any]
             if let req = req {
-                writeJSONLine(conn, dispatch(req))
+                writeJSONLine(conn, dispatch(req, listeningFD: fd))
             } else {
                 writeJSONLine(conn, ["id": NSNull(), "ok": false, "error": "JSON parse error"])
             }
