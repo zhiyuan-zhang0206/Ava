@@ -31,15 +31,16 @@ _DRY_RUN_UV_SYNC_TIMEOUT_S = 180.0
 _RUNNER_PROBE_TIMEOUT_S = 5.0
 _OFFSITE_PROBE_TIMEOUT_S = 5.0
 _WINDOW_STAGES = ("stop_the_world", "local_leg", "readiness", "phase_b")
-# The maintenance window the gate estimates: the period the cluster entry
+# The maintenance window this observational estimate describes: the period the cluster entry
 # (gateway + local services) is down. phase_b is deliberately excluded — it
 # is the remote-runner fan-out after readiness already passed (gateway
 # serving), its duration is dominated by the slowest remote runner (the
 # Windows leg is ~2 orders of magnitude slower) and bounded by poll
 # timeouts, so counting it fully makes the estimate describe convergence,
 # not the maintenance window; with the 10-value window a single slow
-# rollout pins p95 at its max and the gate refuses every rollout with no
-# way to refresh (2026-09-02 self-lock, estimate 126.2s >= 120s).
+# rollout pins p95 at its max. That behavior contributed to the retired
+# duration gate's self-lock (2026-09-02, estimate 126.2s >= 120s), but Phase B
+# remains excluded because it is not gateway downtime.
 _WINDOW_ESTIMATE_STAGES = ("stop_the_world", "local_leg", "readiness")
 _SEED_STAGE_DURATIONS = {
     "stop_the_world": 8.0,
@@ -51,7 +52,7 @@ _SEED_STAGE_DURATIONS = {
 
 @dataclass(frozen=True)
 class PrepareResult:
-    """All evidence needed to decide whether a rollout may enter commit."""
+    """Blocking prepare evidence plus the informational duration estimate."""
 
     pull_recover: tuple[str, set[str], Path | None] | None
     failures: list[str]

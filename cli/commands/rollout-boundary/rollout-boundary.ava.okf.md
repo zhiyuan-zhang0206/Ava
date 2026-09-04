@@ -33,6 +33,8 @@ tags:
   proves unchanged schema; any unexpected error after rollback begins leaves
   code on the new revision and reports schema state as unknown.
 
+- Deterministic prepare failures block; duration estimates are telemetry only.
+
 ## Readiness and Phase B
 
 - Phase 0 freezes the eligible runner set before any pause: a runner whose

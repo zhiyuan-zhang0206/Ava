@@ -3,17 +3,19 @@
 from __future__ import annotations
 
 import json
+import math
 import subprocess
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from contextlib import contextmanager
 from pathlib import Path
-from typing import cast
+from typing import Never, cast
 
 import pytest
 
 from cli import commands as _cli
 from cli.commands import _update_dryrun as _dryrun
 from cli.commands import _update_finalize as _finalize
+from cli.commands import _update_prepare as _prepare
 from cli.commands import update as _up
 
 
@@ -50,7 +52,7 @@ def _run_inner(*, dry_run: bool = False) -> int:
     )
 
 
-def test_estimate_seeds_missing_baseline_with_conservative_first_gate(
+def test_estimate_seeds_missing_baseline_with_conservative_first_sample(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """An unseen cluster persists design targets but cannot claim an observed fast window."""
@@ -79,6 +81,40 @@ def test_explicit_estimate_does_not_seed_baseline_file(
 
     assert _dryrun.estimate_maintenance_window(persist_seed=False) == pytest.approx(65.0)  # pyright: ignore[reportUnknownMemberType]
     assert not (tmp_path / "update-baseline.json").exists()
+
+
+def test_unavailable_estimate_is_informational(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Broken observational telemetry cannot become rollout admission control."""
+
+    def _prepare_runner(*_args: object, **kwargs: object) -> _dryrun.PrepareResult:
+        estimate_runner = cast(Callable[[], float], kwargs["estimate_runner"])
+        return _dryrun.PrepareResult(None, [], estimate_runner())
+
+    def _unavailable(*_args: object, **_kwargs: object) -> Never:
+        raise TypeError("invalid baseline")
+
+    gate = _prepare.build_prepare_gate(
+        _prepare_runner,
+        Path("/repo"),
+        "target-sha",
+        pull=False,
+        snapshotter=lambda: None,
+        check_runner=list,
+        estimate_runner=_unavailable,
+        breakdown_runner=_unavailable,
+        note_runner=_unavailable,
+        persist_seed=False,
+    )
+
+    assert math.isnan(gate.prepared.estimate_s)
+    assert _prepare.refuse_normal_prepare(gate) is None
+    assert _prepare.print_dry_run_verdict(gate) == 0
+    output = capsys.readouterr().out
+    assert "PASS" in output
+    assert "estimate unavailable" in output
+    assert "informational only" in output
 
 
 def test_staging_worktree_prunes_stale_registration_before_add(
@@ -285,23 +321,32 @@ def test_offsite_probe_performs_a_read_only_remote_stat(
     assert names and names[0].startswith("ava-logical/probe/")
 
 
-def test_excessive_estimate_refuses_before_stop_or_pin(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Changing the gate threshold branch to enter commit must fail this zero-state test."""
+def test_excessive_estimate_does_not_block_phase_a(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A slow prior rollout is observational data, never permission to update."""
     _stub_prepare(monkeypatch)
-    stopped: list[bool] = []
+    stopped: list[str] = []
     pins: list[str] = []
     monkeypatch.setattr(_up, "dry_run_checks", lambda *_args, **_kw: [])  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_up, "estimate_maintenance_window", lambda: 130.0)
     monkeypatch.setattr(_up, "_snapshot_known_good", lambda **_kw: ("old", set[str](), None))  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_up, "_stop_the_world", lambda *_args, **_kw: stopped.append(True))  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(
+        _up,
+        "_stop_the_world",
+        lambda *_args, **_kw: stopped.append("stop") or (set[str](), True),  # pyright: ignore[reportUnknownArgumentType]
+    )
+    monkeypatch.setattr(_cli, "_run_gateway_local_update", lambda *_args, **_kw: 0)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_up, "refresh_data_plane_settings", lambda: None)
     monkeypatch.setattr(_up, "_persist_cluster_pin", lambda sha, **_kw: pins.append(sha))  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("ops.cluster.unpause_local_cluster", lambda: None)
+    monkeypatch.setattr("ops.cluster_pause.finalize_pause_owner_journal", lambda: None)
+    monkeypatch.setattr(_up, "finalize_rollout", lambda *_args, **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
 
-    assert _run_inner() == 1
-    assert stopped == []
-    assert pins == []
+    assert _run_inner() == 0
+    assert stopped == ["stop"]
+    assert pins == ["target-sha"]
 
 
-def test_gate_refusal_resumes_nothing_and_skips_local_unpause(
+def test_prepare_check_refusal_resumes_nothing_and_skips_local_unpause(
     monkeypatch: pytest.MonkeyPatch, local_unpauses: list[bool]
 ) -> None:
     """A prepare refusal cannot compensate for a Phase A pause that never began."""
@@ -313,7 +358,11 @@ def test_gate_refusal_resumes_nothing_and_skips_local_unpause(
         "_resolve_fanout_targets",
         lambda **_kw: [("runner-a", "http://runner-a")],  # pyright: ignore[reportUnknownArgumentType]
     )
-    monkeypatch.setattr(_up, "dry_run_checks", lambda *_args, **_kw: [])  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(
+        _up,
+        "dry_run_checks",
+        lambda *_args, **_kw: ["candidate import failed"],  # pyright: ignore[reportUnknownArgumentType]
+    )
     monkeypatch.setattr(_up, "estimate_maintenance_window", lambda: 130.0)
     monkeypatch.setattr(
         _up,
@@ -366,7 +415,7 @@ def test_dry_run_failure_refuses_before_stop(monkeypatch: pytest.MonkeyPatch) ->
     _stub_prepare(monkeypatch)
     stopped: list[bool] = []
     monkeypatch.setattr(_up, "dry_run_checks", lambda *_args, **_kw: ["candidate import failed"])  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_up, "estimate_maintenance_window", lambda **_kw: 80.0)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_up, "estimate_maintenance_window", lambda **_kw: 130.0)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_up, "_snapshot_known_good", lambda **_kw: ("old", set[str](), None))  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_up, "_stop_the_world", lambda *_args, **_kw: stopped.append(True))  # pyright: ignore[reportUnknownArgumentType]
 
@@ -374,7 +423,7 @@ def test_dry_run_failure_refuses_before_stop(monkeypatch: pytest.MonkeyPatch) ->
     assert stopped == []
 
 
-@pytest.mark.parametrize("failure_site", ["snapshot", "checks", "estimate"])
+@pytest.mark.parametrize("failure_site", ["snapshot", "checks"])
 def test_normal_prepare_error_finalizes_an_aborted_record_without_traceback(
     failure_site: str, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -402,11 +451,7 @@ def test_normal_prepare_error_finalizes_an_aborted_record_without_traceback(
     monkeypatch.setattr(
         _up,
         "estimate_maintenance_window",
-        lambda: (
-            (_ for _ in ()).throw(RuntimeError("estimate unavailable"))
-            if failure_site == "estimate"
-            else 80.0
-        ),
+        lambda: 80.0,
     )
     monkeypatch.setattr(_up, "refresh_data_plane_settings", lambda: None)
     monkeypatch.setattr("ops.cluster.unpause_local_cluster", lambda: None)
@@ -612,7 +657,7 @@ def test_async_offsite_upload_uses_detached_module_process(
 def test_explicit_dry_run_never_snapshots_or_enters_maintenance(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """The public dry-run path only reports phase-0 checks and the estimate verdict."""
+    """The public dry-run reports prepare verdict and a non-gating estimate."""
     _stub_prepare(monkeypatch)
     preflight_options: dict[str, object] = {}
     monkeypatch.setattr(
@@ -621,7 +666,7 @@ def test_explicit_dry_run_never_snapshots_or_enters_maintenance(
         lambda _repo, **kwargs: preflight_options.update(kwargs) or (None, False, "target-sha"),  # pyright: ignore[reportUnknownArgumentType]
     )
     monkeypatch.setattr(_up, "dry_run_checks", lambda *_args, **_kw: [])  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_up, "estimate_maintenance_window", lambda **_kw: 80.0)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_up, "estimate_maintenance_window", lambda **_kw: 130.0)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
         _up,
         "maintenance_window_estimate_note",
@@ -643,6 +688,7 @@ def test_explicit_dry_run_never_snapshots_or_enters_maintenance(
     output = capsys.readouterr().out
     assert "PASS" in output
     assert "no baseline — seeded + 25s margin" in output
+    assert "informational only" in output
 
 
 def test_cmd_update_posts_the_dry_run_flag(
@@ -675,4 +721,4 @@ def test_cmd_update_posts_the_dry_run_flag(
 
     assert _dispatch.cmd_update(dry_run=True) == 0
     assert request["dry_run"] is True
-    assert "dry-run dispatched — PASS/FAIL see rollout log" in capsys.readouterr().out
+    assert "dry-run dispatched — prepare-check PASS/FAIL" in capsys.readouterr().out
