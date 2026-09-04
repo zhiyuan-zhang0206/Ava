@@ -20,6 +20,7 @@ This module owns:
 """
 
 import asyncio
+import os
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from datetime import UTC, datetime
@@ -31,6 +32,7 @@ from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.graph.state import CompiledStateGraph
 from psycopg_pool import PoolTimeout
 
+import shared.helper_chain_guard
 from shared.audit_events import insert_event_log_async
 from shared.config import settings
 from shared.config.turn_view import turn_settings
@@ -394,6 +396,14 @@ def _graph_config(agent_id: int, tags: list[str], metadata: dict[str, object]) -
     }
 
 
+def _require_helper_parent_chain() -> None:
+    """Exit a helper-spawned agent whose direct-parent chain was broken."""
+    if shared.helper_chain_guard.parent_chain_intact():
+        return
+    logger.warning("permissions helper parent chain broken, self-terminating for helper respawn")
+    os._exit(70)
+
+
 async def _invoke_graph_with_lifecycle_logging(
     graph: CompiledStateGraph[BaseAgentState, AvaContext, BaseAgentState, BaseAgentState],
     agent_id: int,
@@ -484,6 +494,7 @@ async def _invoke_graph_with_lifecycle_logging(
     checkpointer = cast(AsyncPostgresSaver, graph.checkpointer)  # pyright: ignore[reportUnknownMemberType]
     turn = 0
     while True:
+        _require_helper_parent_chain()
         turn += 1
         try:
             with turn_span(name=f"ava-agent-{agent_id}", session_id=str(agent_id), turn=turn):

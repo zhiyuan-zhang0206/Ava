@@ -19,6 +19,7 @@ import psycopg
 import pytest
 from psycopg_pool import PoolTimeout
 
+import shared.helper_chain_guard
 from agent._runloop import (
     _invoke_graph_with_lifecycle_logging,
     _probe_db_reachable,
@@ -125,6 +126,46 @@ class TestInvokeGraphLifecycleLogging:
     """fail-loud safety net — for any exit path of ainvoke, write traceback to file sink.
     Prevent regression of agent #45 incident (process silent death + ~/.ava/logs/agent-{N}.log empty).
     """
+
+    async def test_broken_helper_parent_chain_exits_before_first_turn(
+        self, monkeypatch: pytest.MonkeyPatch, loguru_records
+    ) -> None:
+        graph = MagicMock()
+        graph.ainvoke = AsyncMock(return_value={"exit_requested": True})
+        chain_intact = MagicMock(return_value=False)
+        exit_process = MagicMock(side_effect=SystemExit(70))
+        monkeypatch.setattr(shared.helper_chain_guard, "parent_chain_intact", chain_intact)
+        monkeypatch.setattr(os, "_exit", exit_process)
+
+        with pytest.raises(SystemExit) as raised:
+            await _invoke_graph_with_lifecycle_logging(graph, agent_id=42, ctx=_fake_ctx())
+
+        assert raised.value.code == 70
+        chain_intact.assert_called_once_with()
+        exit_process.assert_called_once_with(70)
+        graph.ainvoke.assert_not_awaited()
+        warning_records = [r for r in loguru_records if r["level"].name == "WARNING"]  # pyright: ignore[reportUnknownMemberType]
+        assert any(
+            "permissions helper parent chain broken, self-terminating for helper respawn"
+            in r["message"]
+            for r in warning_records
+        )
+
+    async def test_intact_helper_parent_chain_enters_first_turn(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        graph = MagicMock()
+        graph.ainvoke = AsyncMock(return_value={"exit_requested": True})
+        chain_intact = MagicMock(return_value=True)
+        exit_process = MagicMock()
+        monkeypatch.setattr(shared.helper_chain_guard, "parent_chain_intact", chain_intact)
+        monkeypatch.setattr(os, "_exit", exit_process)
+
+        await _invoke_graph_with_lifecycle_logging(graph, agent_id=42, ctx=_fake_ctx())
+
+        chain_intact.assert_called_once_with()
+        exit_process.assert_not_called()
+        graph.ainvoke.assert_awaited_once()
 
     async def test_cancelled_logs_info_and_reraises(self, loguru_records) -> None:
         """ainvoke raises CancelledError → opt(exception=True).info leaves traceback + raise.
@@ -476,7 +517,9 @@ class TestInvokeGraphLifecycleLogging:
             "restart_requested": False,
         }
 
-    async def test_turn_boundary_reinvokes_until_exit_requested(self) -> None:
+    async def test_turn_boundary_reinvokes_until_exit_requested(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """One ainvoke = one TURN: a turn-boundary END (exit_requested=False in
         the returned state) re-invokes the graph on the same thread instead of
         exiting; only exit_requested=True (claim's terminate/restart winner or
@@ -493,9 +536,12 @@ class TestInvokeGraphLifecycleLogging:
                 {"exit_requested": True},
             ]
         )
+        chain_intact = MagicMock(return_value=True)
+        monkeypatch.setattr(shared.helper_chain_guard, "parent_chain_intact", chain_intact)
 
         await _invoke_graph_with_lifecycle_logging(graph, agent_id=42, ctx=_fake_ctx())
 
+        assert chain_intact.call_count == 3, "the helper parent chain must be checked every turn"
         assert graph.ainvoke.call_count == 3, (
             "loop must re-invoke on each turn-boundary END and stop on exit_requested=True"
         )
