@@ -140,12 +140,12 @@ jobs:
         run: uv run --locked pytest tests/cli/test_update_bootstrap.py tests/cli/test_update_agent_runner.py tests/shared/test_updater_handoff.py tests/shared/test_posixproc_expected_signal.py -q
       - name: Retain independent resolver proof even when inherited hop fails
         if: always() && runner.os == 'Linux'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: runtime-publication-input-${{ github.sha }}
           path: ${{ runner.temp }}/prepare/runtime-publication-input-proof.json
           if-no-files-found: error
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: inactive-prepare-${{ matrix.os }}-${{ github.event.pull_request.head.sha }}
           path: |
@@ -158,7 +158,7 @@ jobs:
             ${{ runner.temp }}/prepare/ops-bootstrap-proof.json
             ${{ runner.temp }}/prepare/updater-bootstrap-proof.json
           if-no-files-found: error
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: always() && runner.os == 'Linux'
         with:
           name: updater-hop-observations-${{ github.event.pull_request.head.sha }}
@@ -171,7 +171,7 @@ jobs:
           if test -f "$RUNNER_TEMP/runtime-pg/postmaster.pid"; then
             pg_ctl -D "$RUNNER_TEMP/runtime-pg" -m fast -w stop
           fi
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: always() && runner.os == 'Linux'
         with:
           name: migration-pg-log-${{ github.event.pull_request.head.sha }}
