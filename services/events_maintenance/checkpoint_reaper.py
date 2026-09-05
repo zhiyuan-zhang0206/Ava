@@ -6,9 +6,10 @@ scans the checkpoint table every minute and prunes every thread above the
 fixed keep-three budget, independent of agent status or liveness. This makes
 the scan and retained storage O(thread count).
 
-Compaction-boundary metadata remains useful to timeline segment reads while a
-row is retained, but boundaries age out outside the newest-three window like
-every other checkpoint. The shared trim protects each candidate against an
+Compaction-boundary checkpoints are exempt from the budget: a row stamped
+`compact_boundary: true` is never trimmed, so each past compaction segment
+stays recoverable as one full snapshot (user ruling: preserve information,
+bound storage). The shared trim protects each candidate against an
 in-progress messages write and retains blobs by the channel-version references
 of surviving checkpoints.
 """
