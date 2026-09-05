@@ -13,6 +13,10 @@ tags:
 
 Code and document structure guards, mostly invoked by `.pre-commit-config.yaml` and CI:
 - `lint_ava_okf.py` — OKF format validation (frontmatter / size / wikilink)
+- `lint_python_lock.py` — the shared `uv.lock` must use PyPI registry and
+  `files.pythonhosted.org` distribution URLs; explicit regional mirror profiles
+  remain host-local. Runs through pre-commit and the always-on `repo-language`
+  CI job, requiring no project dependency installation.
 - `lint_no_tailnet.py` — repo-wide ban on tailnet IP literals (100.64.0.0/10 host
   addresses; the CIDR range notation stays allowed, as does `decisions/` and an
   inline `# tailnet-ip-ok:` boundary-test opt-out) — pre-commit `lint-no-tailnet`

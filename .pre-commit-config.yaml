@@ -38,6 +38,13 @@ repos:
 
   - repo: local
     hooks:
+      - id: lint-python-lock
+        name: lint Python lock (canonical PyPI sources)
+        entry: .venv/bin/python scripts/lint_python_lock.py
+        language: system
+        files: ^(uv\.lock|scripts/lint_python_lock\.py|tests/scripts/test_lint_python_lock\.py)$
+        pass_filenames: false
+
       - id: pyright
         name: pyright (strict mode)
         # Use the pyright from the uv venv — deps are complete, no need to
