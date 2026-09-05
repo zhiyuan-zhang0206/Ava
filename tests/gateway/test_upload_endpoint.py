@@ -550,7 +550,7 @@ class TestRemoteAgentPull:
 
         runner_path = f"/Users/runner/Downloads/AvaAgent-{agent_id}/hello.txt"
 
-        async def fake_dispatch(target_machine: str, kind: str, payload: dict, **kw):  # pyright: ignore[reportMissingParameterType, reportMissingTypeArgument, reportUnknownParameterType]
+        async def fake_dispatch(target_machine: str, kind: str, payload: dict, **kw):
             assert target_machine == "mbp-remote"
             assert kind == "upload_receive"
             assert payload == {"agent_id": agent_id, "name": "hello.txt"}
@@ -584,7 +584,7 @@ class TestRemoteAgentPull:
             )
         db_conn.commit()
 
-        async def fake_dispatch(target_machine: str, kind: str, payload: dict, **kw):  # pyright: ignore[reportMissingParameterType, reportMissingTypeArgument, reportUnknownParameterType]
+        async def fake_dispatch(target_machine: str, kind: str, payload: dict, **kw):
             raise RuntimeError("runner unreachable")
 
         from ops import cluster_rpc
@@ -620,7 +620,7 @@ class TestRemoteAgentPull:
 
         called = []
 
-        async def fake_dispatch(target_machine: str, kind: str, payload: dict, **kw):  # pyright: ignore[reportMissingParameterType, reportMissingTypeArgument, reportUnknownParameterType]
+        async def fake_dispatch(target_machine: str, kind: str, payload: dict, **kw):
             called.append((target_machine, kind))  # pyright: ignore[reportUnknownMemberType]
             raise AssertionError("should not dispatch for a local agent")
 
@@ -671,7 +671,7 @@ class TestRemoteAgentPull:
 
         from ops import cluster_rpc
 
-        monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", fake_dispatch)  # pyright: ignore[reportUnknownArgumentType]
+        monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", fake_dispatch)
 
         with TestClient(app) as client:
             resp = client.post(

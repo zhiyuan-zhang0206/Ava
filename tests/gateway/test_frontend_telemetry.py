@@ -29,12 +29,12 @@ ELEMENT = "spawn"
 SESSION = "123e4567-e89b-12d3-a456-426614174000"
 
 
-def _payload(events: list[dict], session: str = SESSION) -> dict:  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
-    return {"session_id": session, "events": events}  # pyright: ignore[reportUnknownVariableType]
+def _payload(events: list[dict], session: str = SESSION) -> dict:
+    return {"session_id": session, "events": events}
 
 
-def _one(page: str = PAGE, element: str = ELEMENT, **extra: str) -> dict:  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
-    return {"page": page, "element": element, **extra}  # pyright: ignore[reportUnknownVariableType]
+def _one(page: str = PAGE, element: str = ELEMENT, **extra: str) -> dict:
+    return {"page": page, "element": element, **extra}
 
 
 def _rows(session: str) -> list[tuple]:  # type: ignore[no-untyped-def]
@@ -102,17 +102,14 @@ class TestFrontendTelemetryIngest:
                 ),
             )
         assert r.status_code == 204
-        rows = _rows(session)  # pyright: ignore[reportUnknownVariableType]
+        rows = _rows(session)
         assert len(rows) == 3  # pyright: ignore[reportUnknownArgumentType]
-        for row in rows:  # pyright: ignore[reportUnknownVariableType]
+        for row in rows:
             assert row[0] == "frontend_interaction"
             assert row[1] == "telemetry"
             assert row[2] == "info"
             assert row[3] == "user"
-        attrs = [  # pyright: ignore[reportUnknownVariableType]
-            row[4]
-            for row in rows  # pyright: ignore[reportUnknownVariableType]
-        ]  # psycopg decodes jsonb to dict  # pyright: ignore[reportUnknownVariableType]
+        attrs = [row[4] for row in rows]  # psycopg decodes jsonb to dict
         assert attrs[0] == {"page": "fleet", "element": "spawn", "session_id": session}
         assert attrs[1] == {
             "page": "control/config",
@@ -136,13 +133,13 @@ class TestFrontendTelemetryIngest:
                 json=_payload([_one(element="composer-send")], session=session),
             )
         assert r.status_code == 204
-        attrs = _rows(session)[0][4]  # pyright: ignore[reportUnknownVariableType]
+        attrs = _rows(session)[0][4]
         assert "key" not in attrs
         assert "value" not in attrs
 
     def test_malformed_batch_422(self) -> None:  # type: ignore[no-untyped-def]
         session = _session()
-        cases = [  # pyright: ignore[reportUnknownVariableType]
+        cases = [
             # empty events list
             _payload([]),
             # bad element charset (free text / spaces)
@@ -157,12 +154,12 @@ class TestFrontendTelemetryIngest:
             _payload([_one(element="setting-change", value="v" * 200)]),
         ]
         with TestClient(app) as client:
-            for body in cases:  # pyright: ignore[reportUnknownVariableType]
+            for body in cases:
                 r = client.post("/api/frontend-telemetry", json=body)
                 assert r.status_code == 422, body
                 assert r.json()["code"] == "invalid_telemetry_batch"
         # nothing landed
-        assert _rows(session) == []  # pyright: ignore[reportUnknownVariableType]
+        assert _rows(session) == []
 
     def test_oversized_body_413(self) -> None:  # type: ignore[no-untyped-def]
         session = _session()
@@ -174,21 +171,21 @@ class TestFrontendTelemetryIngest:
             )
         assert r.status_code == 413
         assert r.json()["code"] == "telemetry_batch_too_large"
-        assert _rows(session) == []  # pyright: ignore[reportUnknownVariableType]
+        assert _rows(session) == []
 
     def test_rate_limit_backstop_drops_excess(
         self,
-        monkeypatch: pytest.MonkeyPatch,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:  # type: ignore[no-untyped-def]
         """Over the per-session budget: accepted up to the cap, the rest
         dropped — the events table cannot be flooded by one tab."""
         ft_router._session_windows.clear()
         session = _session()
-        events = [_one(element=f"e{i}") for i in range(ft_router._MAX_EVENTS_PER_MINUTE + 10)]  # pyright: ignore[reportUnknownVariableType]
+        events = [_one(element=f"e{i}") for i in range(ft_router._MAX_EVENTS_PER_MINUTE + 10)]
         with TestClient(app) as client:
             r = client.post("/api/frontend-telemetry", json=_payload(events, session=session))
         assert r.status_code == 204
-        rows = _rows(session)  # pyright: ignore[reportUnknownVariableType]
+        rows = _rows(session)
         assert len(rows) == ft_router._MAX_EVENTS_PER_MINUTE  # pyright: ignore[reportUnknownArgumentType]
 
     def test_second_session_gets_own_budget(self) -> None:  # type: ignore[no-untyped-def]
@@ -206,5 +203,5 @@ class TestFrontendTelemetryIngest:
             )
         assert r1.status_code == 204
         assert r2.status_code == 204
-        assert len(_rows(session)) == ft_router._MAX_EVENTS_PER_MINUTE  # pyright: ignore[reportUnknownVariableType, reportUnknownArgumentType]
-        assert len(_rows(other)) == 3  # pyright: ignore[reportUnknownVariableType, reportUnknownArgumentType]
+        assert len(_rows(session)) == ft_router._MAX_EVENTS_PER_MINUTE  # pyright: ignore[reportUnknownArgumentType]
+        assert len(_rows(other)) == 3  # pyright: ignore[reportUnknownArgumentType]

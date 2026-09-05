@@ -140,7 +140,7 @@ def test_config_read_op_can_enable_for_browser_enabled(
     monkeypatch.setattr(
         host_config_validators,
         "read_time_capability",
-        lambda name: (  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda name: (  # pyright: ignore[reportUnknownArgumentType]
             host_config_validators.ValidationResult(ok=True) if name == "browser_enabled" else None
         ),
     )
@@ -159,7 +159,7 @@ def test_config_read_op_can_enable_false_carries_reason(
     monkeypatch.setattr(
         host_config_validators,
         "read_time_capability",
-        lambda name: (  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda name: (  # pyright: ignore[reportUnknownArgumentType]
             host_config_validators.ValidationResult(ok=False, reason="no display detected")
             if name == "browser_enabled"
             else None
@@ -268,7 +268,7 @@ def test_config_write_op_local_accepts_writable_host_field(
     monkeypatch.setattr(
         host_config_validators,
         "validate",
-        lambda _f, _v: host_config_validators.ValidationResult(ok=True),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda _f, _v: host_config_validators.ValidationResult(ok=True),  # pyright: ignore[reportUnknownArgumentType]
     )
     result = config_write_op({"cross_machine_transfer_backend": "none"}, local=True)
     assert result.applied is True
@@ -333,7 +333,7 @@ def test_config_write_op_all_good_writes_file(
     monkeypatch.setattr(
         host_config_validators,
         "validate",
-        lambda _field, _val: host_config_validators.ValidationResult(ok=True),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda _field, _val: host_config_validators.ValidationResult(ok=True),  # pyright: ignore[reportUnknownArgumentType]
     )
     result = config_write_op({"ops_concurrency": 4, "machine_description": "test"})
     assert result.applied is True
@@ -349,7 +349,7 @@ def test_config_write_op_none_unsets_field(
     monkeypatch.setattr(
         host_config_validators,
         "validate",
-        lambda _field, _val: host_config_validators.ValidationResult(ok=True),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda _field, _val: host_config_validators.ValidationResult(ok=True),  # pyright: ignore[reportUnknownArgumentType]
     )
     config_write_op({"ops_concurrency": 4, "machine_description": "hi"})
     assert runtime_config.env_set_field_names() == {"ops_concurrency", "machine_description"}
@@ -370,7 +370,7 @@ def test_config_write_op_absent_key_left_untouched(
     monkeypatch.setattr(
         host_config_validators,
         "validate",
-        lambda _field, _val: host_config_validators.ValidationResult(ok=True),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda _field, _val: host_config_validators.ValidationResult(ok=True),  # pyright: ignore[reportUnknownArgumentType]
     )
     config_write_op({"ops_concurrency": 4, "machine_description": "hi"})
     # A patch touching only ops_concurrency must NOT drop machine_description.
@@ -388,7 +388,7 @@ def test_config_write_op_empty_patch_is_noop(
     monkeypatch.setattr(
         host_config_validators,
         "validate",
-        lambda _field, _val: host_config_validators.ValidationResult(ok=True),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda _field, _val: host_config_validators.ValidationResult(ok=True),  # pyright: ignore[reportUnknownArgumentType]
     )
     config_write_op({"ops_concurrency": 4})
     result = config_write_op({})
@@ -406,7 +406,7 @@ def test_config_write_op_does_not_disturb_non_managed_env(
     monkeypatch.setattr(
         host_config_validators,
         "validate",
-        lambda _field, _val: host_config_validators.ValidationResult(ok=True),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda _field, _val: host_config_validators.ValidationResult(ok=True),  # pyright: ignore[reportUnknownArgumentType]
     )
     isolated_host_home.joinpath(".env").write_text("AVA_DB_URL=postgresql://x@127.0.0.1:1/x\n")
     config_write_op({"ops_concurrency": 4})
@@ -423,7 +423,7 @@ def test_config_write_op_restart_required_union(
     monkeypatch.setattr(
         host_config_validators,
         "validate",
-        lambda _field, _val: host_config_validators.ValidationResult(ok=True),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda _field, _val: host_config_validators.ValidationResult(ok=True),  # pyright: ignore[reportUnknownArgumentType]
     )
     result = config_write_op({"ops_concurrency": 4, "machine_description": "hi"})
     assert result.applied is True

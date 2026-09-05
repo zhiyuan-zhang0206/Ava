@@ -304,7 +304,7 @@ class TestSpawnAgent:
     ) -> None:
         """A spawner-assigned label is stored with label_user_set=TRUE so the
         labeler's CAS (WHERE label IS NULL AND NOT label_user_set) skips it."""
-        monkeypatch.setattr("ops.agent_launch._launch_agent_process", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        monkeypatch.setattr("ops.agent_launch._launch_agent_process", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType]
         new_id = _spawn_agent(label="auth worker")
         with db_conn.cursor() as cur:
             cur.execute("SELECT label, label_user_set FROM agents WHERE id=%s", (new_id,))
@@ -347,7 +347,7 @@ class TestSpawnAgent:
 
         captured: dict[str, object] = {}
 
-        def _record(aid: int, config_overlay: dict[str, object] | None = None, **_kw) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+        def _record(aid: int, config_overlay: dict[str, object] | None = None, **_kw) -> None:
             captured.update(aid=aid, cfg=config_overlay)
 
         monkeypatch.setattr("ops.agent_launch._launch_agent_process", _record)  # pyright: ignore[reportUnknownArgumentType]
@@ -1315,14 +1315,14 @@ class TestResurrectAgent:
         returned = resurrect_agent(agent_id, resurrected_by="user", prompt="resume work")
 
         assert returned == agent_id
-        row = _agents_row(db_conn, agent_id)  # pyright: ignore[reportUnknownVariableType]
+        row = _agents_row(db_conn, agent_id)
         assert row is not None
         assert (
             row[2] == "idling"
         )  # unclaimed, waiting for the process to claim and UPDATE 'running'
         # resurrect inserts lifecycle inbound — content empty, trigger written to source field;
         # prompt as chat inbound follows in the same transaction
-        rows = _inbound_rows(db_conn, agent_id)  # pyright: ignore[reportUnknownVariableType]
+        rows = _inbound_rows(db_conn, agent_id)
         assert rows == [("", "resurrect", "user"), ("resume work", "chat", "user")]
 
     def test_resurrect_without_prompt_inserts_only_lifecycle_inbound(
@@ -1353,7 +1353,7 @@ class TestResurrectAgent:
 
         resurrect_agent(agent_id, resurrected_by="agent:42", prompt="resume work")
 
-        rows = _inbound_rows(db_conn, agent_id)  # pyright: ignore[reportUnknownVariableType]
+        rows = _inbound_rows(db_conn, agent_id)
         assert rows == [
             ("", "resurrect", "agent:42"),
             ("resume work", "chat", "agent:42"),
@@ -1372,19 +1372,19 @@ class TestResurrectAgent:
 
         resurrect_agent(agent_id, resurrected_by="user", prompt="catch up with #341")
 
-        rows = _inbound_rows(db_conn, agent_id)  # pyright: ignore[reportUnknownVariableType]
+        rows = _inbound_rows(db_conn, agent_id)
         assert rows == [
             ("", "resurrect", "user"),
             ("catch up with #341", "chat", "user"),
         ]
         # The chat inbound's source must be a valid value accepted by the claim-side wrap
-        for content, kind, source in rows:  # pyright: ignore[reportUnknownVariableType]
+        for content, kind, source in rows:
             if kind == "chat":
                 assert source is not None
                 wrap_inbound(
-                    content,  # pyright: ignore[reportUnknownArgumentType]
-                    source,  # pyright: ignore[reportUnknownArgumentType]
-                )  # raises ValueError on illegal source  # pyright: ignore[reportUnknownArgumentType]
+                    content,
+                    source,
+                )  # raises ValueError on illegal source
 
     def test_resurrect_nonexistent_raises_agent_not_found(
         self,
@@ -1453,10 +1453,10 @@ class TestResurrectAgent:
             if id(self) in status_select_cursors:
                 status_select_cursors.remove(id(self))
                 return ("terminated", machine_name())  # enter UPDATE while preserving placement
-            return original_fetchone(self)  # pyright: ignore[reportUnknownArgumentType]
+            return original_fetchone(self)
 
-        monkeypatch.setattr(psycopg.Cursor, "execute", tracking_execute)  # pyright: ignore[reportUnknownArgumentType]
-        monkeypatch.setattr(psycopg.Cursor, "fetchone", lying_fetchone)  # pyright: ignore[reportUnknownArgumentType]
+        monkeypatch.setattr(psycopg.Cursor, "execute", tracking_execute)
+        monkeypatch.setattr(psycopg.Cursor, "fetchone", lying_fetchone)
 
         with pytest.raises(ResurrectAlreadyAlive, match="concurrently modified"):
             resurrect_agent(agent_id, resurrected_by="user", prompt="test")
@@ -1465,7 +1465,7 @@ class TestResurrectAgent:
         monkeypatch.undo()  # restore fetchone so subsequent queries work
         assert _inbound_count(db_conn, agent_id) == 0
         # key invariant 2: status unchanged (UPDATE 0 rows + raise rolls back entire transaction)
-        row = _agents_row(db_conn, agent_id)  # pyright: ignore[reportUnknownVariableType]
+        row = _agents_row(db_conn, agent_id)
         assert row is not None and row[2] == "idling"
 
     def test_subclasses_inherit_from_resurrect_error(
@@ -1529,7 +1529,7 @@ class TestResurrectAgent:
         with pytest.raises(RuntimeError, match="launch \u6545\u610f\u6302"):
             resurrect_agent(agent_id, resurrected_by="user", prompt="test")
 
-        row = _agents_row(db_conn, agent_id)  # pyright: ignore[reportUnknownVariableType]
+        row = _agents_row(db_conn, agent_id)
         assert row is not None and row[2] == "terminated"
 
 
@@ -1564,7 +1564,7 @@ class TestRespawnAgent:
         assert ok is True
 
         # status moved back to unclaimed idling, waiting for process to claim and UPDATE 'running'
-        row = _agents_row(db_conn, agent_id)  # pyright: ignore[reportUnknownVariableType]
+        row = _agents_row(db_conn, agent_id)
         assert row is not None and row[2] == "idling"
 
         # restart inbound (status='done') + new restart_completed inbound (status='pending')
@@ -1612,7 +1612,7 @@ class TestRespawnAgent:
         assert ok is False
         # no inbound inserted, status unchanged
         assert _inbound_count(db_conn, agent_id) == 0
-        row = _agents_row(db_conn, agent_id)  # pyright: ignore[reportUnknownVariableType]
+        row = _agents_row(db_conn, agent_id)
         assert row is not None and row[2] == "idling"
 
     def test_respawn_raises_when_no_prior_restart_inbound_and_forces_terminated(
@@ -1632,7 +1632,7 @@ class TestRespawnAgent:
             respawn_agent(agent_id)
 
         # before raise, status switched to 'terminated' (avoids stuck 'idling' with no process)
-        row = _agents_row(db_conn, agent_id)  # pyright: ignore[reportUnknownVariableType]
+        row = _agents_row(db_conn, agent_id)
         assert row is not None and row[2] == "terminated"
 
     def test_respawn_uses_latest_restart_inbound_source(
@@ -1684,7 +1684,7 @@ class TestRespawnAgent:
         with pytest.raises(RuntimeError, match="launch \u6545\u610f\u6302"):
             respawn_agent(agent_id)
 
-        row = _agents_row(db_conn, agent_id)  # pyright: ignore[reportUnknownVariableType]
+        row = _agents_row(db_conn, agent_id)
         assert row is not None and row[2] == "terminated"
 
     def test_resurrect_and_respawn_are_symmetric_lifecycle_inbound_writers(
@@ -1749,15 +1749,15 @@ class TestLaunchConfirm:
 
         class _FakeSupervisor:
             @staticmethod
-            def new_session(*_a, **_kw):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+            def new_session(*_a, **_kw):
                 return True
 
             @staticmethod
-            def kill_session(*_a, **_kw):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+            def kill_session(*_a, **_kw):
                 return (True, "noop")
 
             @staticmethod
-            def has_session(*_a, **_kw):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+            def has_session(*_a, **_kw):
                 return False
 
         monkeypatch.setattr("ops.agent_launch.native_proc", lambda: _FakeSupervisor)
@@ -1809,14 +1809,14 @@ class TestLaunchConfirm:
         """The off-path confirm forces a row that never leaves 'idling' to
         'terminated' (a silently-failed launch) so it does not linger until the
         reaper. This is the spawn-path replacement for the inline confirm."""
-        monkeypatch.setattr("ops.agent_launch._launch_agent_process", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        monkeypatch.setattr("ops.agent_launch._launch_agent_process", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType]
         agent_id = _spawn_agent()
         monkeypatch.undo()
         self._shrink_confirm_timeout(monkeypatch)
 
         _confirm_launch_or_force_terminated(agent_id)
 
-        row = _agents_row(db_conn, agent_id)  # pyright: ignore[reportUnknownVariableType]
+        row = _agents_row(db_conn, agent_id)
         assert row is not None and row[2] == "terminated"
 
     def test_off_path_confirm_leaves_claimed_child_alone(
@@ -1824,7 +1824,7 @@ class TestLaunchConfirm:
     ) -> None:
         """If the child claimed (status left 'idling'), the off-path confirm
         is a no-op — it must not terminate a live agent that merely claimed late."""
-        monkeypatch.setattr("ops.agent_launch._launch_agent_process", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        monkeypatch.setattr("ops.agent_launch._launch_agent_process", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType]
         agent_id = _spawn_agent()
         with db_conn.cursor() as cur:
             cur.execute(
@@ -1834,7 +1834,7 @@ class TestLaunchConfirm:
         # Verify the UPDATE is visible before proceeding — on slow CI runners
         # the first poll inside _wait_for_agent_claim may race
         # with the write becoming visible.
-        row_check = _agents_row(db_conn, agent_id)  # pyright: ignore[reportUnknownVariableType]
+        row_check = _agents_row(db_conn, agent_id)
         assert row_check is not None and row_check[2] == "running", (
             f"pre-condition failed: expected 'running', got {row_check}"
         )
@@ -1843,7 +1843,7 @@ class TestLaunchConfirm:
 
         _confirm_launch_or_force_terminated(agent_id)
 
-        row = _agents_row(db_conn, agent_id)  # pyright: ignore[reportUnknownVariableType]
+        row = _agents_row(db_conn, agent_id)
         assert row is not None and row[2] == "running"
 
     @pytest.mark.flaky  # real confirm-timeout poll loop (child never claims)
@@ -1855,7 +1855,7 @@ class TestLaunchConfirm:
         resurrect from 'terminated'."""
         # setup: first use noop launch for spawn (this class real_agent_launch opt-out of
         # global guard, so setup spawn must stub itself to avoid a real process), then change to 'terminated'
-        monkeypatch.setattr("ops.agent_launch._launch_agent_process", lambda _id, **_kw: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        monkeypatch.setattr("ops.agent_launch._launch_agent_process", lambda _id, **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
         agent_id = _spawn_agent()
         with db_conn.cursor() as cur:
             cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (agent_id,))
@@ -1869,7 +1869,7 @@ class TestLaunchConfirm:
         with pytest.raises(RuntimeError, match=r"pid stayed NULL|did not reach"):
             resurrect_agent(agent_id, resurrected_by="user", prompt="test")
 
-        row = _agents_row(db_conn, agent_id)  # pyright: ignore[reportUnknownVariableType]
+        row = _agents_row(db_conn, agent_id)
         assert row is not None and row[2] == "terminated"
 
     @pytest.mark.flaky  # real confirm-timeout poll loop (child never claims)
@@ -1880,7 +1880,7 @@ class TestLaunchConfirm:
         → force_terminated catches."""
         # setup: spawn → simulate 'restarting' + restart inbound (noop launch: this class
         # real_agent_launch opt-out of global guard, so setup spawn must stub itself to avoid a real process)
-        monkeypatch.setattr("ops.agent_launch._launch_agent_process", lambda _id, **_kw: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        monkeypatch.setattr("ops.agent_launch._launch_agent_process", lambda _id, **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
         agent_id = _spawn_agent()
         with db_conn.cursor() as cur:
             cur.execute("UPDATE agents_meta SET status = 'restarting' WHERE id = %s", (agent_id,))
@@ -1897,7 +1897,7 @@ class TestLaunchConfirm:
         with pytest.raises(RuntimeError, match=r"pid stayed NULL|did not reach"):
             respawn_agent(agent_id)
 
-        row = _agents_row(db_conn, agent_id)  # pyright: ignore[reportUnknownVariableType]
+        row = _agents_row(db_conn, agent_id)
         assert row is not None and row[2] == "terminated"
 
 
@@ -1912,7 +1912,7 @@ class _FakeClock:
     virtual instant.
     """
 
-    def __init__(self, on_tick=None) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    def __init__(self, on_tick=None) -> None:
         self.now = 0.0
         self._on_tick = on_tick  # pyright: ignore[reportUnknownMemberType]
 
@@ -2002,7 +2002,7 @@ class TestLaunchConfirmExtension:
             "have returned early"
         )
         assert probes["n"] >= 1, "the wait must have consulted the supervisor at all"
-        row = _agents_row(db_conn, agent_id)  # pyright: ignore[reportUnknownVariableType]
+        row = _agents_row(db_conn, agent_id)
         assert row is not None and row[2] == "running"
 
     def test_extension_is_bounded_by_the_reap_grace(
@@ -2027,7 +2027,7 @@ class TestLaunchConfirmExtension:
             <= clock.now
             < boot_timing.BOOT_REAP_GRACE_SEC + agent_launch._LAUNCH_CONFIRM_POLL_INTERVAL_SEC
         ), f"waited {clock.now}s, expected the reap grace as the hard bound"
-        row = _agents_row(db_conn, agent_id)  # pyright: ignore[reportUnknownVariableType]
+        row = _agents_row(db_conn, agent_id)
         assert row is not None and row[2] == "idling", (
             "the confirm only raises; forcing 'terminated' is the caller's job"
         )
@@ -2110,12 +2110,12 @@ def test_launch_hands_the_child_the_window_it_will_be_judged_by(
 
     class _FakeSupervisor:
         @staticmethod
-        def new_session(_name, argv, _cwd, **_kw) -> bool:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-            captured.append([str(a) for a in argv])  # pyright: ignore[reportUnknownArgumentType, reportUnknownVariableType]
+        def new_session(_name, argv, _cwd, **_kw) -> bool:
+            captured.append([str(a) for a in argv])  # pyright: ignore[reportUnknownArgumentType]
             return True
 
         @staticmethod
-        def kill_session(*_a, **_kw) -> tuple[bool, str]:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+        def kill_session(*_a, **_kw) -> tuple[bool, str]:
             return (True, "noop")
 
     monkeypatch.setattr("ops.agent_launch.native_proc", lambda: _FakeSupervisor)
@@ -2161,14 +2161,14 @@ class TestLaunchRetry:
         monkeypatch.setattr("ops.agent_launch._launch_agent_process", flaky)
         monkeypatch.setattr(
             "ops.agent_launch._require_released_agent_session",
-            lambda _id: kills.__setitem__("n", kills["n"] + 1),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+            lambda _id: kills.__setitem__("n", kills["n"] + 1),  # pyright: ignore[reportUnknownArgumentType]
         )
 
         _launch_or_force_terminated(agent_id)
 
         assert attempts["n"] == 3, "should retry until the third succeeds"
         assert kills["n"] == 2, "each retry clears a stale session once"
-        row = _agents_row(db_conn, agent_id)  # pyright: ignore[reportUnknownVariableType]
+        row = _agents_row(db_conn, agent_id)
         assert row is not None and row[2] != "terminated"
 
     def test_exhaust_retries_forces_terminated(
@@ -2185,13 +2185,13 @@ class TestLaunchRetry:
         monkeypatch.setattr("ops.agent_launch._LAUNCH_RETRY_BASE_BACKOFF_SEC", 0.0)
         monkeypatch.setattr("ops.agent_launch._LAUNCH_MAX_RETRIES", 3)
         monkeypatch.setattr("ops.agent_launch._launch_agent_process", always_boom)
-        monkeypatch.setattr("ops.agent_launch._require_released_agent_session", lambda _id: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        monkeypatch.setattr("ops.agent_launch._require_released_agent_session", lambda _id: None)  # pyright: ignore[reportUnknownArgumentType]
 
         with pytest.raises(RuntimeError, match="permanent launch fail"):
             _launch_or_force_terminated(agent_id)
 
         assert attempts["n"] == 4, "1 initial + 3 retries"
-        row = _agents_row(db_conn, agent_id)  # pyright: ignore[reportUnknownVariableType]
+        row = _agents_row(db_conn, agent_id)
         assert row is not None and row[2] == "terminated"
 
     def test_exhausted_retries_do_not_clobber_a_claimed_row(
@@ -2233,7 +2233,7 @@ class TestLaunchRetry:
         with pytest.raises(RuntimeError, match="confirm timed out"):
             _launch_or_force_terminated(agent_id)
 
-        row = _agents_row(db_conn, agent_id)  # pyright: ignore[reportUnknownVariableType]
+        row = _agents_row(db_conn, agent_id)
         assert row is not None and (row[2], row[3]) == ("running", 777), (
             "the force-terminate write must be guarded on status='idling' — a child "
             f"that claimed late owns this row, got {row}"
@@ -2253,13 +2253,13 @@ class TestLaunchRetry:
 
         monkeypatch.setattr("ops.agent_launch._LAUNCH_RETRY_BASE_BACKOFF_SEC", 0.0)
         monkeypatch.setattr("ops.agent_launch._launch_agent_process", boom_value)
-        monkeypatch.setattr("ops.agent_launch._require_released_agent_session", lambda _id: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        monkeypatch.setattr("ops.agent_launch._require_released_agent_session", lambda _id: None)  # pyright: ignore[reportUnknownArgumentType]
 
         with pytest.raises(ValueError, match="unexpected bug"):
             _launch_or_force_terminated(agent_id)
 
         assert attempts["n"] == 1, "non-RuntimeError does not retry"
-        row = _agents_row(db_conn, agent_id)  # pyright: ignore[reportUnknownVariableType]
+        row = _agents_row(db_conn, agent_id)
         assert row is not None and row[2] == "idling", "non-RuntimeError does not force-terminate"
 
 
@@ -2269,11 +2269,11 @@ def _fake_launch_supervisor(monkeypatch: pytest.MonkeyPatch) -> None:
 
     class _FakeSupervisor:
         @staticmethod
-        def new_session(*_a, **_kw):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+        def new_session(*_a, **_kw):
             return True
 
         @staticmethod
-        def kill_session(*_a, **_kw):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+        def kill_session(*_a, **_kw):
             return (True, "noop")
 
     monkeypatch.setattr("ops.agent_launch.native_proc", lambda: _FakeSupervisor)
@@ -2308,7 +2308,7 @@ class TestStderrLogsDir:
         # let _wait_for_agent_claim return immediately (avoids needing real agents_meta table)
         monkeypatch.setattr(
             "ops.agent_launch._wait_for_agent_claim",
-            lambda _id, _attempt: None,  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+            lambda _id, _attempt: None,  # pyright: ignore[reportUnknownArgumentType]
         )
         _fake_launch_supervisor(monkeypatch)  # don't actually start a process
         monkeypatch.setattr("ops.agent_launch.agent_spawn_env_dict", dict)
@@ -2334,7 +2334,7 @@ class TestStderrLogsDir:
         upsert_env(unit_home / ".env", {"AVA_RUNNER_DB_PASSWORD": "abc"})
         monkeypatch.setattr(
             "ops.agent_launch._wait_for_agent_claim",
-            lambda _id, _attempt: None,  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+            lambda _id, _attempt: None,  # pyright: ignore[reportUnknownArgumentType]
         )
         _fake_launch_supervisor(monkeypatch)
         monkeypatch.setattr("ops.agent_launch.agent_spawn_env_dict", dict)
@@ -2509,9 +2509,9 @@ class TestSpawnFork:
         source = _spawn_agent()
         _insert_checkpoint(db_conn, source, "ck")
 
-        seen: list[tuple] = []  # pyright: ignore[reportMissingTypeArgument, reportUnknownVariableType]
+        seen: list[tuple] = []
 
-        def _spy_launch(agent_id: int, config_overlay: dict | None = None, **_kw) -> None:  # pyright: ignore[reportMissingParameterType, reportMissingTypeArgument, reportUnknownParameterType]
+        def _spy_launch(agent_id: int, config_overlay: dict | None = None, **_kw) -> None:
             with shared.db.connect() as conn, conn.cursor() as cur:
                 cur.execute(
                     "SELECT content, kind, source FROM inbound_messages "
@@ -2558,7 +2558,7 @@ class TestSpawnFork:
         telemetry.sync()
         day = datetime.now(UTC).strftime("%Y%m%d")
         path = logs_dir() / f"events-{day}.jsonl"
-        fork_rows: list[dict[str, Any]] = []  # pyright: ignore[reportUnknownVariableType]
+        fork_rows: list[dict[str, Any]] = []
         if path.exists():
             for line in path.read_text(encoding="utf-8").splitlines():
                 try:
@@ -2568,10 +2568,10 @@ class TestSpawnFork:
                 if obj.get("event_name") != "fork" or obj.get("agent_id") != new_id:
                     continue
                 fork_rows.append(obj)
-        assert len(fork_rows) == 1  # pyright: ignore[reportUnknownArgumentType]
-        assert fork_rows[0]["source"] == f"agent:{executor}"  # pyright: ignore[reportUnknownVariableType]
-        assert fork_rows[0]["target_agent_id"] == source  # pyright: ignore[reportUnknownVariableType]
-        assert fork_rows[0]["attributes"]["fork_from"] == source  # pyright: ignore[reportUnknownVariableType]
+        assert len(fork_rows) == 1
+        assert fork_rows[0]["source"] == f"agent:{executor}"
+        assert fork_rows[0]["target_agent_id"] == source
+        assert fork_rows[0]["attributes"]["fork_from"] == source
 
         with db_conn.cursor() as cur:
             cur.execute("SELECT spawner, born_spawner FROM agents_meta WHERE id = %s", (new_id,))
@@ -2597,7 +2597,7 @@ class TestSpawnFork:
         telemetry.sync()
         day = datetime.now(UTC).strftime("%Y%m%d")
         path = logs_dir() / f"events-{day}.jsonl"
-        spawn_rows: list[dict[str, Any]] = []  # pyright: ignore[reportUnknownVariableType]
+        spawn_rows: list[dict[str, Any]] = []
         if path.exists():
             for line in path.read_text(encoding="utf-8").splitlines():
                 try:
@@ -2607,9 +2607,9 @@ class TestSpawnFork:
                 if obj.get("event_name") != "spawn" or obj.get("agent_id") != new_id:
                     continue
                 spawn_rows.append(obj)
-        assert len(spawn_rows) == 1  # pyright: ignore[reportUnknownArgumentType]
-        assert spawn_rows[0]["source"] == f"agent:{parent}"  # pyright: ignore[reportUnknownVariableType]
-        assert spawn_rows[0]["target_agent_id"] == parent  # pyright: ignore[reportUnknownVariableType]
+        assert len(spawn_rows) == 1
+        assert spawn_rows[0]["source"] == f"agent:{parent}"
+        assert spawn_rows[0]["target_agent_id"] == parent
 
         with db_conn.cursor() as cur:
             cur.execute("SELECT spawner, born_spawner FROM agents_meta WHERE id = %s", (new_id,))
@@ -2638,7 +2638,7 @@ class TestSpawnFork:
         telemetry.sync()
         day = datetime.now(UTC).strftime("%Y%m%d")
         path = logs_dir() / f"events-{day}.jsonl"
-        fork_rows: list[dict[str, Any]] = []  # pyright: ignore[reportUnknownVariableType]
+        fork_rows: list[dict[str, Any]] = []
         if path.exists():
             for line in path.read_text(encoding="utf-8").splitlines():
                 try:
@@ -2650,9 +2650,9 @@ class TestSpawnFork:
                 fork_rows.append(obj)
         # The event carries the inbound id in its payload — the raw-SQL fork
         # path emits no such event, so exactly this one row is expected.
-        assert len(fork_rows) == 1  # pyright: ignore[reportUnknownArgumentType]
-        assert fork_rows[0]["target_agent_id"] == source  # pyright: ignore[reportUnknownVariableType]
-        assert fork_rows[0]["source"] == f"agent:{source}"  # pyright: ignore[reportUnknownVariableType]
+        assert len(fork_rows) == 1
+        assert fork_rows[0]["target_agent_id"] == source
+        assert fork_rows[0]["source"] == f"agent:{source}"
 
 
 @pytest.mark.real_agent_launch
@@ -2666,30 +2666,30 @@ class TestEnvForward:
     """
 
     @staticmethod
-    def _capture_launch_env(monkeypatch: pytest.MonkeyPatch) -> list[dict]:  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
-        captured: list[dict] = []  # pyright: ignore[reportMissingTypeArgument, reportUnknownVariableType]
+    def _capture_launch_env(monkeypatch: pytest.MonkeyPatch) -> list[dict]:
+        captured: list[dict] = []
 
         class _FakeSupervisor:
             @staticmethod
-            def new_session(_name, _argv, _cwd, *, env, **_kw):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+            def new_session(_name, _argv, _cwd, *, env, **_kw):
                 captured.append(dict(env))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
                 return True
 
             @staticmethod
-            def kill_session(*_a, **_kw):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+            def kill_session(*_a, **_kw):
                 return (True, "noop")
 
         monkeypatch.setattr("ops.agent_launch.native_proc", lambda: _FakeSupervisor)
         # spawn launches with confirm=False, so it captures the env and returns
         # without polling — no confirm timeout to shrink here.
-        return captured  # pyright: ignore[reportUnknownVariableType]
+        return captured
 
     def test_forwards_ava_env_to_child(
         self,
         db_conn: psycopg.Connection,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        captured = self._capture_launch_env(monkeypatch)  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+        captured = self._capture_launch_env(monkeypatch)  # pyright: ignore[reportUnknownMemberType]
         monkeypatch.setattr("shared.bootstrap.config_source_is_local", lambda: False)
         # An agent-scope allowlist key rides through (the child needs it before
         # Settings); a non-modeled AVA_* knob does NOT (F-s3-4: the allowlist
@@ -2711,7 +2711,7 @@ class TestEnvForward:
         _spawn_agent()  # confirm=False — returns after the launch
 
         assert len(captured) == 1  # pyright: ignore[reportUnknownArgumentType]
-        env = captured[0]  # pyright: ignore[reportUnknownVariableType]
+        env = captured[0]
         assert env["AVA_LLM_OVERRIDE"] == "mod:factory"
         assert "AVA_FOO_E2E" not in env
 
@@ -2727,7 +2727,7 @@ class TestRespawnConfigOverlay:
     @staticmethod
     def _setup_restarting_with_payload(
         db: psycopg.Connection,
-        payload: dict | None,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+        payload: dict | None,
     ) -> int:
         """spawn → simulate 'restarting' + restart inbound (with payload)."""
         agent_id = _spawn_agent()
@@ -2752,13 +2752,13 @@ class TestRespawnConfigOverlay:
         launch source is the authoritative column.
         """
         overlay = {"some_plugin": {"enabled": True}, "max_turns": 5}
-        captured: list[dict | None] = []  # pyright: ignore[reportMissingTypeArgument, reportUnknownVariableType]
+        captured: list[dict | None] = []
 
         def fake_launch(
             _id: int,
             *,
-            config_overlay: dict | None = None,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
-            birth_config: dict | None = None,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+            config_overlay: dict | None = None,
+            birth_config: dict | None = None,
         ) -> None:
             captured.append(config_overlay)  # pyright: ignore[reportUnknownMemberType]
 
@@ -2788,13 +2788,13 @@ class TestRespawnConfigOverlay:
         """payload=NULL and column is NULL (default) → launch receives config_overlay=None.
         Locks the "plain restart without config" path, ensuring it still correctly carries no overlay
         (column is source, payload does not drive launch)."""
-        captured: list[dict | None] = []  # pyright: ignore[reportMissingTypeArgument, reportUnknownVariableType]
+        captured: list[dict | None] = []
 
         def fake_launch(
             _id: int,
             *,
-            config_overlay: dict | None = None,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
-            birth_config: dict | None = None,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+            config_overlay: dict | None = None,
+            birth_config: dict | None = None,
         ) -> None:
             captured.append(config_overlay)  # pyright: ignore[reportUnknownMemberType]
 
@@ -2811,13 +2811,13 @@ class TestRespawnConfigOverlay:
         """payload is dict containing arbitrary keys but column is NULL → launch receives config_overlay=None.
         Locks that "payload content (with or without a config_overlay key) does not drive launch overlay,
         column is the authoritative source"."""
-        captured: list[dict | None] = []  # pyright: ignore[reportMissingTypeArgument, reportUnknownVariableType]
+        captured: list[dict | None] = []
 
         def fake_launch(
             _id: int,
             *,
-            config_overlay: dict | None = None,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
-            birth_config: dict | None = None,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+            config_overlay: dict | None = None,
+            birth_config: dict | None = None,
         ) -> None:
             captured.append(config_overlay)  # pyright: ignore[reportUnknownMemberType]
 
@@ -2883,18 +2883,18 @@ class TestRespawnResurrectColumnOverlay:
             )
         db_conn.commit()
 
-        captured: list[dict | None] = []  # pyright: ignore[reportMissingTypeArgument, reportUnknownVariableType]
+        captured: list[dict | None] = []
 
         def fake_launch(
             _id: int,
             *,
-            config_overlay: dict | None = None,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
-            birth_config: dict | None = None,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+            config_overlay: dict | None = None,
+            birth_config: dict | None = None,
         ) -> None:
             captured.append(config_overlay)  # pyright: ignore[reportUnknownMemberType]
 
         monkeypatch.setattr("ops.agent_launch._launch_or_force_terminated", fake_launch)  # pyright: ignore[reportUnknownArgumentType]
-        monkeypatch.setattr("ops.agent_launch._require_released_agent_session", lambda _id: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        monkeypatch.setattr("ops.agent_launch._require_released_agent_session", lambda _id: None)  # pyright: ignore[reportUnknownArgumentType]
 
         result = respawn_agent(agent_id)
 
@@ -2918,20 +2918,20 @@ class TestRespawnResurrectColumnOverlay:
             )
         db_conn.commit()
 
-        captured: list[dict | None] = []  # pyright: ignore[reportMissingTypeArgument, reportUnknownVariableType]
+        captured: list[dict | None] = []
 
         def fake_launch(
             _id: int,
             *,
-            config_overlay: dict | None = None,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
-            birth_config: dict | None = None,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+            config_overlay: dict | None = None,
+            birth_config: dict | None = None,
             confirm: bool = True,
             resurrect_attempt: tuple[int, int, float] | None = None,
         ) -> None:
             captured.append(config_overlay)  # pyright: ignore[reportUnknownMemberType]
 
         monkeypatch.setattr("ops.agent_launch._launch_agent_process", fake_launch)  # pyright: ignore[reportUnknownArgumentType]
-        monkeypatch.setattr("ops.agent_launch._require_released_agent_session", lambda _id: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        monkeypatch.setattr("ops.agent_launch._require_released_agent_session", lambda _id: None)  # pyright: ignore[reportUnknownArgumentType]
 
         resurrect_agent(agent_id, resurrected_by="user", prompt="test")
 
@@ -2957,18 +2957,18 @@ class TestLaunchAgentProcessConfigOverlay:
 
         class _FakeSupervisor:
             @staticmethod
-            def new_session(_name, argv, _cwd, *, env, **_kw):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+            def new_session(_name, argv, _cwd, *, env, **_kw):
                 captured.append((list(argv), dict(env)))  # pyright: ignore[reportUnknownArgumentType]
                 return True
 
             @staticmethod
-            def kill_session(*_a, **_kw):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+            def kill_session(*_a, **_kw):
                 return (True, "noop")
 
         monkeypatch.setattr("ops.agent_launch.native_proc", lambda: _FakeSupervisor)
         monkeypatch.setattr(
             "ops.agent_launch._wait_for_agent_claim",
-            lambda _id, _attempt: None,  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+            lambda _id, _attempt: None,  # pyright: ignore[reportUnknownArgumentType]
         )
         return captured
 
@@ -3152,7 +3152,7 @@ class TestExitedEndpoint:
     ) -> None:
         """'running' (including an early boot-phase death) →
         'terminated', so the row never petrifies."""
-        monkeypatch.setattr("ops.agent_launch._launch_agent_process", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        monkeypatch.setattr("ops.agent_launch._launch_agent_process", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType]
         agent_id = _spawn_agent()
         _set_status(db_conn, agent_id, "running")
         with TestClient(app) as client:
@@ -3169,7 +3169,7 @@ class TestExitedEndpoint:
         self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """'idling' (claim waiting on inbound) → 'terminated'."""
-        monkeypatch.setattr("ops.agent_launch._launch_agent_process", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        monkeypatch.setattr("ops.agent_launch._launch_agent_process", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType]
         agent_id = _spawn_agent()
         _set_status(db_conn, agent_id, "idling")
         with TestClient(app) as client:
@@ -3186,7 +3186,7 @@ class TestExitedEndpoint:
     ) -> None:
         """'restarting' is NOT touched — the restarter daemon owns that row; a
         restart's process-exit hitting /exited must leave it for the restarter."""
-        monkeypatch.setattr("ops.agent_launch._launch_agent_process", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        monkeypatch.setattr("ops.agent_launch._launch_agent_process", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType]
         agent_id = _spawn_agent()
         _set_status(db_conn, agent_id, "restarting")
         # Read back to confirm the UPDATE is visible before the POST — a
@@ -3208,7 +3208,7 @@ class TestExitedEndpoint:
     def test_idempotent(self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch) -> None:
         """Calling twice is safe (the finally block may run more than once) —
         the second call is a no-op on the already-'terminated' row."""
-        monkeypatch.setattr("ops.agent_launch._launch_agent_process", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        monkeypatch.setattr("ops.agent_launch._launch_agent_process", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType]
         agent_id = _spawn_agent()
         _set_status(db_conn, agent_id, "running")
         with TestClient(app) as client:
@@ -3275,48 +3275,48 @@ class TestSpawnerValidation:
     "Agent None" in the frontend tree."""
 
     def test_agent_none_rejected(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr("ops.agent_launch._launch_agent_process", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        monkeypatch.setattr("ops.agent_launch._launch_agent_process", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType]
         with pytest.raises(ValueError, match="spawner has agent: prefix"):
             _spawn_agent(spawner="agent:None")
 
     def test_agent_empty_id_rejected(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr("ops.agent_launch._launch_agent_process", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        monkeypatch.setattr("ops.agent_launch._launch_agent_process", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType]
         with pytest.raises(ValueError, match="spawner has agent: prefix"):
             _spawn_agent(spawner="agent:")
 
     def test_agent_alphabetic_id_rejected(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr("ops.agent_launch._launch_agent_process", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        monkeypatch.setattr("ops.agent_launch._launch_agent_process", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType]
         with pytest.raises(ValueError, match="spawner has agent: prefix"):
             _spawn_agent(spawner="agent:abc")
 
     def test_agent_zero_rejected(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr("ops.agent_launch._launch_agent_process", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        monkeypatch.setattr("ops.agent_launch._launch_agent_process", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType]
         with pytest.raises(ValueError, match="spawner has agent: prefix"):
             _spawn_agent(spawner="agent:0")
 
-    def test_agent_valid_id_accepted(self, db_conn, monkeypatch: pytest.MonkeyPatch) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-        monkeypatch.setattr("ops.agent_launch._launch_agent_process", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    def test_agent_valid_id_accepted(self, db_conn, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr("ops.agent_launch._launch_agent_process", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType]
         # spawner="agent:42" is valid — must not raise
         new_id = _spawn_agent(spawner="agent:42")
-        row = _agents_row(db_conn, new_id)  # pyright: ignore[reportUnknownArgumentType, reportUnknownVariableType]
+        row = _agents_row(db_conn, new_id)  # pyright: ignore[reportUnknownArgumentType]
         assert row is not None
         assert row[1] == "agent:42"
 
-    def test_user_spawner_accepted(self, db_conn, monkeypatch: pytest.MonkeyPatch) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-        monkeypatch.setattr("ops.agent_launch._launch_agent_process", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    def test_user_spawner_accepted(self, db_conn, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr("ops.agent_launch._launch_agent_process", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType]
         new_id = _spawn_agent(spawner="user")
-        row = _agents_row(db_conn, new_id)  # pyright: ignore[reportUnknownArgumentType, reportUnknownVariableType]
+        row = _agents_row(db_conn, new_id)  # pyright: ignore[reportUnknownArgumentType]
         assert row is not None
         assert row[1] == "user"
 
-    def test_arbitrary_spawner_accepted(self, db_conn, monkeypatch: pytest.MonkeyPatch) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-        monkeypatch.setattr("ops.agent_launch._launch_agent_process", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    def test_arbitrary_spawner_accepted(self, db_conn, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr("ops.agent_launch._launch_agent_process", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType]
         new_id = _spawn_agent(spawner="claude-code")
-        row = _agents_row(db_conn, new_id)  # pyright: ignore[reportUnknownArgumentType, reportUnknownVariableType]
+        row = _agents_row(db_conn, new_id)  # pyright: ignore[reportUnknownArgumentType]
         assert row is not None
         assert row[1] == "claude-code"
 
     def test_agent_negative_id_rejected(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr("ops.agent_launch._launch_agent_process", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        monkeypatch.setattr("ops.agent_launch._launch_agent_process", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType]
         with pytest.raises(ValueError, match="spawner has agent: prefix"):
             _spawn_agent(spawner="agent:-1")

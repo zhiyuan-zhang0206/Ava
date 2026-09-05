@@ -589,7 +589,7 @@ def test_put_self_edits_writable_host_capability_field(
     monkeypatch.setattr(
         host_config_validators,
         "validate",
-        lambda _f, _v: host_config_validators.ValidationResult(ok=True),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda _f, _v: host_config_validators.ValidationResult(ok=True),  # pyright: ignore[reportUnknownArgumentType]
     )
     with TestClient(app) as client:
         resp = client.put("/api/config", json={"cross_machine_transfer_backend": "none"})
@@ -667,7 +667,7 @@ def test_put_explicit_self_edits_remote_writable_host_toggle(
     monkeypatch.setattr(
         host_config_validators,
         "validate",
-        lambda _f, _v: host_config_validators.ValidationResult(ok=True),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda _f, _v: host_config_validators.ValidationResult(ok=True),  # pyright: ignore[reportUnknownArgumentType]
     )
     with TestClient(app) as client:
         # Cluster view (machine omitted): writable=False -> rejected read-only.

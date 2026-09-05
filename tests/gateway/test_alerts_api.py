@@ -462,7 +462,7 @@ def test_ingest_im_failure_does_not_fail_ingest(
 ) -> None:
     """im_bridge down -> the ingest still stores the row (notified_at stays
     NULL) and answers 200."""
-    monkeypatch.setattr(alerts_router, "_notify_im", lambda _text: False)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(alerts_router, "_notify_im", lambda _text: False)  # pyright: ignore[reportUnknownArgumentType]
     with TestClient(app) as client:
         resp = _ingest(client, _webhook())
         assert resp.status_code == 200
@@ -480,10 +480,10 @@ def test_ingest_firing_retries_notify_after_failed_attempt(
 ) -> None:
     """notified_at NULL keeps the firing gate open — the next re-send retries
     the IM."""
-    monkeypatch.setattr(alerts_router, "_notify_im", lambda _text: False)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(alerts_router, "_notify_im", lambda _text: False)  # pyright: ignore[reportUnknownArgumentType]
     with TestClient(app) as client:
         _ingest(client, _webhook())
-    monkeypatch.setattr(alerts_router, "_notify_im", lambda _text: True)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(alerts_router, "_notify_im", lambda _text: True)  # pyright: ignore[reportUnknownArgumentType]
     with TestClient(app) as client:
         resp = _ingest(client, _webhook())
         assert resp.json()["notified"] == 1
@@ -943,7 +943,7 @@ def test_start_readiness_alert_lifecycle_on_real_db(
     def _fresh_conn() -> psycopg.Connection:
         return psycopg.connect(settings.data_plane.db_url)
 
-    monkeypatch.setattr(_probe_mod, "_alert_db_connect", _fresh_conn)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_probe_mod, "_alert_db_connect", _fresh_conn)
     monkeypatch.setattr(_alerts, "notify_im", lambda t: ims.append(t) or True)  # pyright: ignore[reportUnknownArgumentType]
     with db_conn.cursor() as cur:
         cur.execute(

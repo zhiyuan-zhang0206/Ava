@@ -50,8 +50,8 @@ def _note(content: str, tag: NoteTag) -> HumanMessage:
     return system_note_message(content=content, tag=tag, created_at=datetime.now(UTC))
 
 
-def _sample_messages() -> list:  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
-    return [  # pyright: ignore[reportUnknownVariableType]
+def _sample_messages() -> list:
+    return [
         SystemMessage(content="intro paragraph\n\n# Tools\ntool stuff\n\n# Skills\nskill stuff"),
         inbound_message(content="hello there", source="user", inbound_id=1),
         inbound_message(content="peer agent says hi", source="agent:5", inbound_id=2),
@@ -306,7 +306,7 @@ def test_client(db_conn: psycopg.Connection):
         yield client
 
 
-def _put_checkpoint(agent_id: int, messages: list) -> None:  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+def _put_checkpoint(agent_id: int, messages: list) -> None:
     from langgraph.checkpoint.base import empty_checkpoint
     from langgraph.checkpoint.postgres import PostgresSaver
 

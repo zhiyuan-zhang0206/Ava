@@ -25,7 +25,7 @@ from shared.agents import CrossMachineGatewayUnavailable, MachineNotRegistered
 
 
 @pytest.fixture
-def _force_local_machine(set_machine_identity) -> str:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def _force_local_machine(set_machine_identity) -> str:
     """Sets this unit's identity at the source via set_machine_identity so every
     machine_name() / machine_role() call site sees role=agent-runner, name='local-test'."""
     set_machine_identity(role="agent-runner", name="local-test")
@@ -52,11 +52,11 @@ class TestResurrectRouting:
         local does not touch DB / does not spawn a session."""
         captured: dict[str, Any] = {}
 
-        async def _capture_forward(agent_id: int, path: str, json_body: dict) -> dict:  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+        async def _capture_forward(agent_id: int, path: str, json_body: dict) -> dict:
             captured["agent_id"] = agent_id
             captured["path"] = path
             captured["json_body"] = json_body
-            return {"status": "spawned"}  # pyright: ignore[reportUnknownVariableType]
+            return {"status": "spawned"}
 
         with TestClient(app) as client:
             agent_id = client.post("/api/agents", json={}).json()["id"]
@@ -84,9 +84,9 @@ class TestResurrectRouting:
         auto-resurrect cannot cover."""
         captured: dict[str, Any] = {}
 
-        async def _capture_forward(agent_id: int, path: str, json_body: dict) -> dict:  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+        async def _capture_forward(agent_id: int, path: str, json_body: dict) -> dict:
             captured["json_body"] = json_body
-            return {"status": "spawned"}  # pyright: ignore[reportUnknownVariableType]
+            return {"status": "spawned"}
 
         with TestClient(app) as client:
             agent_id = client.post("/api/agents", json={}).json()["id"]
@@ -153,10 +153,10 @@ def test_local_home_machine_is_forwarded(
     happens to be on localhost."""
     captured: dict[str, Any] = {}
 
-    async def _capture_enqueue(target: str, path: str, json_body: dict) -> dict:  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+    async def _capture_enqueue(target: str, path: str, json_body: dict) -> dict:
         captured["target"] = target
         captured["path"] = path
-        return {"status": "spawned"}  # pyright: ignore[reportUnknownVariableType]
+        return {"status": "spawned"}
 
     with TestClient(app) as client:
         agent_id = client.post("/api/agents", json={}).json()["id"]
@@ -182,9 +182,7 @@ async def test_lifecycle_forward_uses_a_short_idempotent_retry_budget(
         captured.update(kwargs)
         return {"status": "enqueued"}
 
-    monkeypatch.setattr(  # pyright: ignore[reportUnknownArgumentType]
-        forward._cluster_rpc, "dispatch_to_machine", _dispatch
-    )
+    monkeypatch.setattr(forward._cluster_rpc, "dispatch_to_machine", _dispatch)
 
     result = await forward._enqueue_lifecycle("offline-runner", "/restart", {})
 
@@ -207,9 +205,7 @@ async def test_lifecycle_forward_deadline_becomes_a_clear_gateway_error(
         await never.wait()
         return {}
 
-    monkeypatch.setattr(  # pyright: ignore[reportUnknownArgumentType]
-        forward._cluster_rpc, "dispatch_to_machine", _never_dispatch
-    )
+    monkeypatch.setattr(forward._cluster_rpc, "dispatch_to_machine", _never_dispatch)
     monkeypatch.setattr(forward, "_LIFECYCLE_DISPATCH_DEADLINE_S", 0.01, raising=False)
 
     with pytest.raises(CrossMachineGatewayUnavailable, match="did not answer"):

@@ -30,13 +30,13 @@ def _stub_native_kill(monkeypatch: pytest.MonkeyPatch) -> None:
 
     class _FakeSupervisor:
         @staticmethod
-        def kill_session(*_a, **_kw):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+        def kill_session(*_a, **_kw):
             return (True, "noop")
 
     monkeypatch.setattr("ops.ops_exit.native_proc", lambda: _FakeSupervisor)
 
 
-def _agent_row(db: psycopg.Connection, agent_id: int) -> tuple | None:  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+def _agent_row(db: psycopg.Connection, agent_id: int) -> tuple | None:
     with db.cursor() as cur:
         cur.execute(
             "SELECT id, spawner, fork_source_agent_id, "
@@ -46,7 +46,7 @@ def _agent_row(db: psycopg.Connection, agent_id: int) -> tuple | None:  # pyrigh
         return cur.fetchone()
 
 
-def _returned_id(cur: psycopg.Cursor) -> int:  # pyright: ignore[reportMissingTypeArgument]
+def _returned_id(cur: psycopg.Cursor) -> int:
     """Read an integer primary key from a RETURNING cursor."""
     row = cur.fetchone()
     assert row is not None
@@ -233,7 +233,7 @@ class TestSpawn:
             resp = client.post("/api/agents", json={})
         assert resp.status_code == 201
         new_id = resp.json()["id"]
-        row = _agent_row(db_conn, new_id)  # pyright: ignore[reportUnknownVariableType]
+        row = _agent_row(db_conn, new_id)
         # spawner defaults to 'user' (triggered by UI button)
         assert row == (new_id, "user", None, None, "idling")
         # No inbound delivered
@@ -259,7 +259,7 @@ class TestSpawn:
         with TestClient(app) as client:
             resp = client.post("/api/agents", json={"spawner": "claude-code"})
         new_id = resp.json()["id"]
-        row = _agent_row(db_conn, new_id)  # pyright: ignore[reportUnknownVariableType]
+        row = _agent_row(db_conn, new_id)
         assert row is not None and row[1] == "claude-code"
 
     def test_spawn_fork_resolves_latest_and_copies_checkpoint(
@@ -281,7 +281,7 @@ class TestSpawn:
             resp = client.post("/api/agents", json={"fork_from": source})
         new_id = resp.json()["id"]
         # agents row records fork_source_*
-        row = _agent_row(db_conn, new_id)  # pyright: ignore[reportUnknownVariableType]
+        row = _agent_row(db_conn, new_id)
         assert row is not None
         assert row[2] == source and row[3] == "ckc"  # latest = ckc
         # new agent gets full a/b/c chain
@@ -588,7 +588,7 @@ class TestTerminate:
         assert resp.json() == {"status": "force_killed"}
 
         # status should become 'terminated'
-        row = _agent_row(db_conn, agent_id)  # pyright: ignore[reportUnknownVariableType]
+        row = _agent_row(db_conn, agent_id)
         assert row is not None and row[4] == "terminated"
 
         # should have inserted an audit inbound (terminate kind)
@@ -688,8 +688,8 @@ class TestTerminate:
         )
 
         # track os.kill calls
-        kill_calls: list[tuple] = []  # pyright: ignore[reportMissingTypeArgument, reportUnknownVariableType]
-        monkeypatch.setattr("shared.proc.os.kill", lambda pid, sig: kill_calls.append((pid, sig)))  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType, reportUnknownMemberType]
+        kill_calls: list[tuple] = []
+        monkeypatch.setattr("shared.proc.os.kill", lambda pid, sig: kill_calls.append((pid, sig)))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
 
         with TestClient(app) as client:
             agent_id = client.post("/api/agents", json={}).json()["id"]

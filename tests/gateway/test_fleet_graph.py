@@ -217,10 +217,10 @@ def test_loki_edge_tail_keeps_unlabeled_history_and_excludes_other_cluster(
     assert edges[0]["last_seen_at"]
 
 
-def _nodes_by_id(client: TestClient, query: str = "") -> dict[int, dict]:  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+def _nodes_by_id(client: TestClient, query: str = "") -> dict[int, dict]:
     resp = client.get(f"/api/fleet/graph{query}")
     assert resp.status_code == 200, resp.text
-    return {n["agent_id"]: n for n in resp.json()["nodes"]}  # pyright: ignore[reportUnknownVariableType]
+    return {n["agent_id"]: n for n in resp.json()["nodes"]}
 
 
 def test_nodes_use_immutable_birth_parent(db_conn: psycopg.Connection) -> None:
@@ -245,7 +245,7 @@ def test_total_tokens_sums_in_plus_out_counters(
     _install_prom(monkeypatch, retained={_IN_METRIC: {str(a): 300.0}, _OUT_METRIC: {str(a): 80.0}})
 
     with TestClient(app) as client:
-        nodes = _nodes_by_id(client)  # pyright: ignore[reportUnknownVariableType]
+        nodes = _nodes_by_id(client)
 
     assert nodes[a]["total_tokens"] == 380  # in 300 + out 80
 
@@ -292,7 +292,7 @@ def test_node_exposes_canonical_status_and_independent_liveness(
     db_conn.commit()
 
     with TestClient(app) as client:
-        nodes = _nodes_by_id(client)  # pyright: ignore[reportUnknownVariableType]
+        nodes = _nodes_by_id(client)
 
     assert nodes[a]["status"] == "restarting"
     assert nodes[a]["liveness_state"] == "offline"
@@ -305,7 +305,7 @@ def test_total_tokens_zero_without_usage(
     _install_prom(monkeypatch)  # no llm_usage series -> all counters absent
 
     with TestClient(app) as client:
-        nodes = _nodes_by_id(client)  # pyright: ignore[reportUnknownVariableType]
+        nodes = _nodes_by_id(client)
     assert nodes[a]["total_tokens"] == 0
 
 
@@ -320,7 +320,7 @@ def test_total_tokens_comes_from_llm_usage_counters_only(
     _install_prom(monkeypatch, retained={_IN_METRIC: {str(a): 100.0}, _OUT_METRIC: {str(a): 50.0}})
 
     with TestClient(app) as client:
-        nodes = _nodes_by_id(client)  # pyright: ignore[reportUnknownVariableType]
+        nodes = _nodes_by_id(client)
 
     assert nodes[a]["total_tokens"] == 150
 
@@ -339,7 +339,7 @@ def test_total_tokens_scoped_per_agent(
     )
 
     with TestClient(app) as client:
-        nodes = _nodes_by_id(client)  # pyright: ignore[reportUnknownVariableType]
+        nodes = _nodes_by_id(client)
 
     assert nodes[a]["total_tokens"] == 150
     assert nodes[b]["total_tokens"] == 2
@@ -359,7 +359,7 @@ def test_node_score_weights_output_ten_times_input(
     )
 
     with TestClient(app) as client:
-        nodes = _nodes_by_id(client)  # pyright: ignore[reportUnknownVariableType]
+        nodes = _nodes_by_id(client)
 
     # SUM(in)*0.1 + SUM(out)*1.0 = 300*0.1 + 80*1.0 = 30 + 80 = 110
     assert nodes[a]["node_score"] == 110.0
@@ -372,7 +372,7 @@ def test_node_score_zero_without_usage(
     _install_prom(monkeypatch)  # no llm_usage series -> score 0
 
     with TestClient(app) as client:
-        nodes = _nodes_by_id(client)  # pyright: ignore[reportUnknownVariableType]
+        nodes = _nodes_by_id(client)
     assert nodes[a]["node_score"] == 0.0
 
 
@@ -390,7 +390,7 @@ def test_node_score_windowed_excludes_old_events(
     )
 
     with TestClient(app) as client:
-        nodes = _nodes_by_id(client, "?hours=24")  # pyright: ignore[reportUnknownVariableType]
+        nodes = _nodes_by_id(client, "?hours=24")
 
     # Only the recent event scores: 100*0.1 + 100*1.0 = 110. total_tokens keeps
     # both events because they fall inside its retained 7d window.
@@ -401,7 +401,7 @@ def test_node_score_windowed_excludes_old_events(
 def test_node_drops_degree_fields(db_conn: psycopg.Connection) -> None:
     a = _seed_agent(db_conn)
     with TestClient(app) as client:
-        nodes = _nodes_by_id(client)  # pyright: ignore[reportUnknownVariableType]
+        nodes = _nodes_by_id(client)
     assert "degree_in" not in nodes[a]
     assert "degree_out" not in nodes[a]
     assert "node_score" in nodes[a]
@@ -410,10 +410,10 @@ def test_node_drops_degree_fields(db_conn: psycopg.Connection) -> None:
 # ── edge weight: per-event sum-of-exponentials decay ──────────────────────
 
 
-def _edges_by_type(client: TestClient, query: str = "") -> dict[str, dict]:  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+def _edges_by_type(client: TestClient, query: str = "") -> dict[str, dict]:
     resp = client.get(f"/api/fleet/graph{query}")
     assert resp.status_code == 200, resp.text
-    return {e["event_type"]: e for e in resp.json()["edges"]}  # pyright: ignore[reportUnknownVariableType]
+    return {e["event_type"]: e for e in resp.json()["edges"]}
 
 
 def test_edge_weight_type_multiplier_fresh(
@@ -425,7 +425,7 @@ def test_edge_weight_type_multiplier_fresh(
     _event_loki(fake_loki, source_agent=s, target_agent=c, event_type="send_message")
 
     with TestClient(app) as client:
-        edges = _edges_by_type(client)  # pyright: ignore[reportUnknownVariableType]
+        edges = _edges_by_type(client)
 
     # Fresh single events: lineage weight = COUNT(*) * 2.0 = 2.0 (permanent);
     # message weight = EXP(0) * 1.0 = 1.0 (decayed, but age 0 -> factor 1).
@@ -445,7 +445,7 @@ def test_lineage_edge_permanent_no_decay_always_shown(
     _event(fake_loki, source_agent=s, target_agent=c, event_type="spawn", age_hours=2000)
 
     with TestClient(app) as client:
-        edges = _edges_by_type(client)  # pyright: ignore[reportUnknownVariableType]
+        edges = _edges_by_type(client)
 
     assert edges["spawn"]["weight"] == 2.0
     assert edges["spawn"]["event_count"] == 1
@@ -461,7 +461,7 @@ def test_resurrect_edge_included_as_permanent_lineage(
     _event_loki(fake_loki, source_agent=s, target_agent=c, event_type="resurrect")
 
     with TestClient(app) as client:
-        edges = _edges_by_type(client)  # pyright: ignore[reportUnknownVariableType]
+        edges = _edges_by_type(client)
 
     # Permanent weight = COUNT(*) * 2.0 = 2 * 2.0 = 4.0.
     assert edges["resurrect"]["weight"] == 4.0
@@ -483,7 +483,7 @@ def test_lineage_edge_not_excluded_by_time_window(
     _event(fake_loki, source_agent=s, target_agent=c, event_type="spawn", age_hours=100)
 
     with TestClient(app) as client:
-        edges = _edges_by_type(client, "?hours=24")  # pyright: ignore[reportUnknownVariableType]
+        edges = _edges_by_type(client, "?hours=24")
 
     # Lineage edge survives the time window.
     assert "spawn" in edges
@@ -501,7 +501,7 @@ def test_message_edge_below_threshold_filtered(
     _event(fake_loki, source_agent=s, target_agent=c, event_type="send_message", age_hours=2000)
 
     with TestClient(app) as client:
-        edges = _edges_by_type(client)  # pyright: ignore[reportUnknownVariableType]
+        edges = _edges_by_type(client)
 
     assert "send_message" not in edges
 
@@ -519,7 +519,7 @@ def test_edge_weight_sums_per_event_with_decay(
     _event(fake_loki, source_agent=s, target_agent=c, event_type="send_message", age_hours=48)
 
     with TestClient(app) as client:
-        edges = _edges_by_type(client)  # pyright: ignore[reportUnknownVariableType]
+        edges = _edges_by_type(client)
 
     archive_age_days = (
         datetime.now(UTC) - (ARCHIVE_FREEZE_AT - timedelta(hours=48))
@@ -611,8 +611,8 @@ def test_decay_lambda_param_steepens_decay(
     )
 
     with TestClient(app) as client:
-        gentle = _edges_by_type(client, "?decay_lambda=0.1")["send_message"]["weight"]  # pyright: ignore[reportUnknownVariableType]
-        steep = _edges_by_type(client, "?decay_lambda=2.0")["send_message"]["weight"]  # pyright: ignore[reportUnknownVariableType]
+        gentle = _edges_by_type(client, "?decay_lambda=0.1")["send_message"]["weight"]
+        steep = _edges_by_type(client, "?decay_lambda=2.0")["send_message"]["weight"]
 
     # A larger lambda decays an aged event harder -> smaller weight.
     assert steep < gentle
@@ -629,7 +629,7 @@ def test_decay_lambda_is_quantized_for_edge_computation(
     )
 
     with TestClient(app) as client:
-        weight = _edges_by_type(client, "?decay_lambda=0.551")["send_message"]["weight"]  # pyright: ignore[reportUnknownVariableType]
+        weight = _edges_by_type(client, "?decay_lambda=0.551")["send_message"]["weight"]
 
     assert weight == pytest.approx(math.exp(-0.55 * 2.0), abs=1e-4)  # pyright: ignore[reportUnknownMemberType]
 
@@ -743,7 +743,7 @@ def test_live_live_edge_still_returned_after_filter(
     _event_loki(fake_loki, source_agent=s, target_agent=c, event_type="send_message")
 
     with TestClient(app) as client:
-        edges = _edges_by_type(client)  # pyright: ignore[reportUnknownVariableType]
+        edges = _edges_by_type(client)
 
     assert edges["spawn"]["weight"] == 2.0
     assert edges["send_message"]["weight"] == 1.0
@@ -816,7 +816,7 @@ def test_cache_serves_stale_graph_within_ttl(
     _install_prom(monkeypatch, retained={_IN_METRIC: {str(a): 100.0}, _OUT_METRIC: {str(a): 50.0}})
 
     with TestClient(app) as client:
-        first = _nodes_by_id(client)  # pyright: ignore[reportUnknownVariableType]
+        first = _nodes_by_id(client)
 
     # Counter values change after the first request — must NOT be visible.
     _install_prom(
@@ -824,7 +824,7 @@ def test_cache_serves_stale_graph_within_ttl(
     )
 
     with TestClient(app) as client:
-        second = _nodes_by_id(client)  # pyright: ignore[reportUnknownVariableType]
+        second = _nodes_by_id(client)
 
     assert first[a]["total_tokens"] == 150
     assert second[a]["total_tokens"] == 150  # cached, not 19998
@@ -843,8 +843,8 @@ def test_cache_key_separates_params(
     )
 
     with TestClient(app) as client:
-        all_time = _nodes_by_id(client)  # pyright: ignore[reportUnknownVariableType]
-        windowed = _nodes_by_id(client, "?hours=24")  # pyright: ignore[reportUnknownVariableType]
+        all_time = _nodes_by_id(client)
+        windowed = _nodes_by_id(client, "?hours=24")
 
     # All-time includes the old increment; the 24h window excludes it.
     assert all_time[a]["total_tokens"] == 350

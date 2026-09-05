@@ -207,7 +207,7 @@ def _seed_vision_agent(db_conn: psycopg.Connection, model: str = "claude-opus-4-
     return tid
 
 
-def _payload_row(conn: psycopg.Connection, agent_id: int) -> tuple[str, dict | None]:  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+def _payload_row(conn: psycopg.Connection, agent_id: int) -> tuple[str, dict | None]:
     with conn.cursor() as cur:
         cur.execute(
             "SELECT content, payload FROM inbound_messages WHERE agent_id = %s ORDER BY id",
@@ -271,10 +271,10 @@ class TestMultimodalMessage:
                 },
             )
         assert resp.status_code == 201
-        content, payload = _payload_row(db_conn, tid)  # pyright: ignore[reportUnknownVariableType]
+        content, payload = _payload_row(db_conn, tid)
         assert content == "describe this"
         assert payload is not None
-        blocks = payload["content_blocks"]  # pyright: ignore[reportUnknownVariableType]
+        blocks = payload["content_blocks"]
         assert blocks[0] == {"type": "text", "text": "describe this"}
         assert blocks[1]["type"] == "image_url"
         assert blocks[1]["image_url"]["url"] == url
@@ -306,10 +306,10 @@ class TestMultimodalMessage:
                 },
             )
         assert resp.status_code == 201
-        content, payload = _payload_row(db_conn, tid)  # pyright: ignore[reportUnknownVariableType]
+        content, payload = _payload_row(db_conn, tid)
         assert content == "describe this"
         assert payload is not None
-        blocks = payload["content_blocks"]  # pyright: ignore[reportUnknownVariableType]
+        blocks = payload["content_blocks"]
         assert blocks[0] == {"type": "text", "text": "describe this"}
         assert blocks[1]["type"] == "image_url"
         assert blocks[1]["image_url"]["url"] == url
@@ -371,6 +371,6 @@ class TestMultimodalMessage:
                 f"/api/agents/{tid}/messages", json={"content": "hi", "source": "user"}
             )
         assert resp.status_code == 201
-        content, payload = _payload_row(db_conn, tid)  # pyright: ignore[reportUnknownVariableType]
+        content, payload = _payload_row(db_conn, tid)
         assert content == "hi"
         assert payload is None

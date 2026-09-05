@@ -93,7 +93,7 @@ def test_emit_bucket_computes_stats(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         _latency.telemetry,
         "emit",
-        lambda category, event_name, **kwargs: captured.update(  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda category, event_name, **kwargs: captured.update(  # pyright: ignore[reportUnknownArgumentType]
             category=category, event_name=event_name, **kwargs
         ),
     )

@@ -152,7 +152,7 @@ class TestPresetCrud:
 
 
 class TestSpawnWithPreset:
-    def _overlay(self, db_conn: psycopg.Connection, agent_id: int) -> dict:  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+    def _overlay(self, db_conn: psycopg.Connection, agent_id: int) -> dict:
         with db_conn.cursor() as cur:
             cur.execute("SELECT config_overlay FROM agents_meta WHERE id = %s", (agent_id,))
             row = cur.fetchone()

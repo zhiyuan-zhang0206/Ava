@@ -29,7 +29,7 @@ from shared.db import create_agent
 _HOST = "127.0.0.1"  # loopback — the single-box posture the SDK registers (audit P1-4: only loopback / the agent's own machine are legal proxy targets)
 
 
-def _page_rows(conn: psycopg.Connection, agent_id: int) -> list[tuple]:  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+def _page_rows(conn: psycopg.Connection, agent_id: int) -> list[tuple]:
     with conn.cursor() as cur:
         cur.execute(
             "SELECT name, port, host, title, serve_dir, closed_at FROM agent_pages "
@@ -70,7 +70,7 @@ def test_register_page_inserts_open_row(db_conn: psycopg.Connection) -> None:
     assert body["url"] == f"http://test-gateway.invalid:8000/pages/{aid}-cleanup/"
 
     db_conn.rollback()  # reset the transaction held by the fixture to get the latest view
-    rows = _page_rows(db_conn, aid)  # pyright: ignore[reportUnknownVariableType]
+    rows = _page_rows(db_conn, aid)
     assert rows == [("cleanup", 8765, _HOST, "Cleanup picker", None, None)]
 
 
@@ -137,11 +137,11 @@ def test_register_page_same_name_auto_closes_then_creates(db_conn: psycopg.Conne
     assert r2.json()["url"] == f"http://test-gateway.invalid:8000/pages/{aid}-p/"
 
     db_conn.rollback()
-    rows = _page_rows(db_conn, aid)  # pyright: ignore[reportUnknownVariableType]
+    rows = _page_rows(db_conn, aid)
     # Two total rows: r1 now closed, r2 open.
     assert len(rows) == 2  # pyright: ignore[reportUnknownArgumentType]
-    closed_row = [r for r in rows if r[5] is not None]  # pyright: ignore[reportUnknownVariableType]
-    open_row = [r for r in rows if r[5] is None]  # pyright: ignore[reportUnknownVariableType]
+    closed_row = [r for r in rows if r[5] is not None]
+    open_row = [r for r in rows if r[5] is None]
     assert len(closed_row) == 1  # pyright: ignore[reportUnknownArgumentType]
     assert len(open_row) == 1  # pyright: ignore[reportUnknownArgumentType]
     assert open_row[0] == ("p", 8002, "localhost", "v2", None, None)
@@ -269,7 +269,7 @@ def test_close_page_cas_open_to_closed(db_conn: psycopg.Connection) -> None:
     assert r.json()["closed_at"] is not None
 
     db_conn.rollback()
-    rows = _page_rows(db_conn, aid)  # pyright: ignore[reportUnknownVariableType]
+    rows = _page_rows(db_conn, aid)
     assert len(rows) == 1  # pyright: ignore[reportUnknownArgumentType]
     assert rows[0][5] is not None  # closed_at
 
@@ -372,8 +372,8 @@ def test_cascade_close_on_agent_terminate(db_conn: psycopg.Connection) -> None:
         cur.execute("UPDATE agents_meta SET status='terminated' WHERE id=%s", (a2,))
     db_conn.commit()
 
-    assert _page_rows(db_conn, a1)[0][5] is not None  # pyright: ignore[reportUnknownVariableType]
-    assert _page_rows(db_conn, a2)[0][5] is None  # pyright: ignore[reportUnknownVariableType]
+    assert _page_rows(db_conn, a1)[0][5] is not None
+    assert _page_rows(db_conn, a2)[0][5] is None
     with TestClient(app) as client:
         response = client.get(f"/api/agents/{a2}/pages")
     assert response.status_code == 200
@@ -422,7 +422,7 @@ def test_register_page_with_serve_dir(db_conn: psycopg.Connection) -> None:
     assert body["title"] is None
 
     db_conn.rollback()
-    rows = _page_rows(db_conn, aid)  # pyright: ignore[reportUnknownVariableType]
+    rows = _page_rows(db_conn, aid)
     assert rows == [("report", 8766, _HOST, None, "/data/report", None)]
 
 
@@ -438,7 +438,7 @@ def test_register_page_upsert_updates_serve_dir(db_conn: psycopg.Connection) -> 
     assert r2.title == "v2"
     assert r2.serve_dir == "/data/b"
     db_conn.rollback()
-    rows = _page_rows(db_conn, aid)  # pyright: ignore[reportUnknownVariableType]
+    rows = _page_rows(db_conn, aid)
     assert rows == [("p", 8002, "10.0.0.2", "v2", "/data/b", None)]
 
 
@@ -481,8 +481,8 @@ def test_cascade_reopen_on_resurrect(db_conn: psycopg.Connection) -> None:
         cur.execute("UPDATE agents_meta SET status='terminated' WHERE id=%s", (aid,))
     db_conn.commit()
     db_conn.rollback()
-    rows = _page_rows(db_conn, aid)  # pyright: ignore[reportUnknownVariableType]
-    by_name = {name: closed_at for name, _port, _host, _title, _sd, closed_at in rows}  # pyright: ignore[reportUnknownVariableType]
+    rows = _page_rows(db_conn, aid)
+    by_name = {name: closed_at for name, _port, _host, _title, _sd, closed_at in rows}
     assert by_name["x"] is not None
     assert by_name["y"] is not None
     assert by_name["serve"] is None
@@ -492,8 +492,8 @@ def test_cascade_reopen_on_resurrect(db_conn: psycopg.Connection) -> None:
         cur.execute("UPDATE agents_meta SET status='running' WHERE id=%s", (aid,))
     db_conn.commit()
     db_conn.rollback()
-    rows = _page_rows(db_conn, aid)  # pyright: ignore[reportUnknownVariableType]
-    by_name = {name: closed_at for name, _port, _host, _title, _sd, closed_at in rows}  # pyright: ignore[reportUnknownVariableType]
+    rows = _page_rows(db_conn, aid)
+    by_name = {name: closed_at for name, _port, _host, _title, _sd, closed_at in rows}
     assert by_name["y"] is None
     assert by_name["x"] is not None
     assert by_name["serve"] is None
@@ -521,16 +521,16 @@ def test_cascade_reopen_repeated_terminate_resurrect(db_conn: psycopg.Connection
     with db_conn.cursor() as cur:
         cur.execute("UPDATE agents_meta SET status='terminated' WHERE id=%s", (aid,))
     db_conn.commit()
-    rows = _page_rows(db_conn, aid)  # pyright: ignore[reportUnknownVariableType]
-    by_name = {name: closed_at for name, _p, _h, _t, _sd, closed_at in rows}  # pyright: ignore[reportUnknownVariableType]
+    rows = _page_rows(db_conn, aid)
+    by_name = {name: closed_at for name, _p, _h, _t, _sd, closed_at in rows}
     assert by_name["a"] is not None
     assert by_name["serve"] is None
     with db_conn.cursor() as cur:
         cur.execute("UPDATE agents_meta SET status='running' WHERE id=%s", (aid,))
     db_conn.commit()
     db_conn.rollback()
-    rows = _page_rows(db_conn, aid)  # pyright: ignore[reportUnknownVariableType]
-    by_name = {name: closed_at for name, _p, _h, _t, _sd, closed_at in rows}  # pyright: ignore[reportUnknownVariableType]
+    rows = _page_rows(db_conn, aid)
+    by_name = {name: closed_at for name, _p, _h, _t, _sd, closed_at in rows}
     assert by_name["a"] is None
     assert by_name["serve"] is None
 
@@ -553,8 +553,8 @@ def test_cascade_reopen_repeated_terminate_resurrect(db_conn: psycopg.Connection
         cur.execute("UPDATE agents_meta SET status='running' WHERE id=%s", (aid,))
     db_conn.commit()
     db_conn.rollback()
-    rows = _page_rows(db_conn, aid)  # pyright: ignore[reportUnknownVariableType]
-    by_name = {name: closed_at for name, _p, _h, _t, _sd, closed_at in rows}  # pyright: ignore[reportUnknownVariableType]
+    rows = _page_rows(db_conn, aid)
+    by_name = {name: closed_at for name, _p, _h, _t, _sd, closed_at in rows}
     assert by_name["b"] is None  # reopened by the second cycle
     assert by_name["a"] is not None  # closed before the second termination
     assert by_name["serve"] is None

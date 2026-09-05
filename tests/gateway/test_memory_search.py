@@ -822,10 +822,10 @@ def _legacy_extract_meta(path: Path) -> tuple[str, list[str]]:
         return "", []
     if not isinstance(fm, dict):
         return "", []
-    desc = fm.get("description")  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+    desc = fm.get("description")  # pyright: ignore[reportUnknownMemberType]
     description = desc.strip() if isinstance(desc, str) and desc.strip() else ""
-    raw_tags = fm.get("tags")  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
-    tags = [t for t in raw_tags if isinstance(t, str)] if isinstance(raw_tags, list) else []  # pyright: ignore[reportUnknownVariableType]
+    raw_tags = fm.get("tags")  # pyright: ignore[reportUnknownMemberType]
+    tags = [t for t in raw_tags if isinstance(t, str)] if isinstance(raw_tags, list) else []
     return description, tags
 
 
@@ -1259,7 +1259,7 @@ def test_semaphore_sized_from_setting(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings.services, "memory_search_max_concurrency", 7)
     _gw_memory._search_semaphore.cache_clear()
     try:
-        assert _gw_memory._search_semaphore()._value == 7  # pyright: ignore[reportUnknownMemberType]
+        assert _gw_memory._search_semaphore()._value == 7
     finally:
         _gw_memory._search_semaphore.cache_clear()
 

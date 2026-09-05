@@ -20,7 +20,7 @@ from shared.agents import CrossMachineGatewayUnavailable
 
 
 @pytest.fixture
-def _force_local_machine(set_machine_identity) -> str:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def _force_local_machine(set_machine_identity) -> str:
     """Sets this unit's identity at the source via set_machine_identity so every
     machine_name() / machine_role() call site sees role=agent-runner, name='local-test'."""
     set_machine_identity(role="agent-runner", name="local-test")
@@ -66,8 +66,8 @@ class TestRouting:
 
     def test_local_gateway_only_target_400(
         self,
-        set_machine_identity,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-        monkeypatch: pytest.MonkeyPatch,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+        set_machine_identity,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """A target the registry resolves to gateway-only (no agent-runner
         capability) returns 400 + reason='spawn_target_not_agent_runner' via the
@@ -77,7 +77,7 @@ class TestRouting:
         set_machine_identity(role="gateway", name="gw-only")
         # The registry says the (local) target is gateway-only — overrides the
         # conftest autouse stub that defaults the local machine to agent-runner.
-        monkeypatch.setattr("shared.machines.lookup_role", lambda _name: ["gateway"])  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        monkeypatch.setattr("shared.machines.lookup_role", lambda _name: ["gateway"])  # pyright: ignore[reportUnknownArgumentType]
         forwarded: list[str] = []
 
         async def _should_not_forward(target: str, body: LaunchAgentRequest) -> SpawnedAgent:
@@ -95,8 +95,8 @@ class TestRouting:
 
     def test_paused_target_409_no_forward(
         self,
-        set_machine_identity,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-        monkeypatch: pytest.MonkeyPatch,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+        set_machine_identity,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """A spawn targeting a PAUSED machine (operator `ava cluster pause`) is
         refused with 409 + reason='machine_paused' before any forward — the
@@ -104,8 +104,8 @@ class TestRouting:
         ops server may be unreachable), so a spawn would fail at dial time
         anyway; the precise wire error is what schedules / peers see."""
         set_machine_identity(role="agent-runner", name="local-test")
-        monkeypatch.setattr("shared.machines.lookup_role", lambda _name: ["agent-runner"])  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-        monkeypatch.setattr("shared.machines.is_paused", lambda _name: True)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        monkeypatch.setattr("shared.machines.lookup_role", lambda _name: ["agent-runner"])  # pyright: ignore[reportUnknownArgumentType]
+        monkeypatch.setattr("shared.machines.is_paused", lambda _name: True)  # pyright: ignore[reportUnknownArgumentType]
         forwarded: list[str] = []
 
         async def _should_not_forward(target: str, body: LaunchAgentRequest) -> SpawnedAgent:
@@ -136,8 +136,8 @@ class TestRouting:
         # The pre-dispatch capability check resolves the target's role; stub it as
         # a runner so the forward proceeds (the lookup itself is exercised by the
         # 404 / no-capability tests).
-        monkeypatch.setattr("shared.machines.lookup_role", lambda _name: ["agent-runner"])  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-        monkeypatch.setattr("shared.machines.is_paused", lambda _name: False)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        monkeypatch.setattr("shared.machines.lookup_role", lambda _name: ["agent-runner"])  # pyright: ignore[reportUnknownArgumentType]
+        monkeypatch.setattr("shared.machines.is_paused", lambda _name: False)  # pyright: ignore[reportUnknownArgumentType]
         with TestClient(app) as client:
             resp = client.post(
                 "/api/agents",
@@ -167,8 +167,8 @@ class TestRouting:
             return SpawnedAgent(id=999)
 
         monkeypatch.setattr(app_module, "_forward_spawn_to_remote", _capture_forward)
-        monkeypatch.setattr("shared.machines.lookup_role", lambda _name: ["agent-runner"])  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-        monkeypatch.setattr("shared.machines.is_paused", lambda _name: False)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        monkeypatch.setattr("shared.machines.lookup_role", lambda _name: ["agent-runner"])  # pyright: ignore[reportUnknownArgumentType]
+        monkeypatch.setattr("shared.machines.is_paused", lambda _name: False)  # pyright: ignore[reportUnknownArgumentType]
         with TestClient(app) as client:
             resp = client.post("/api/agents", json={"machine": "remote-mac"})
         assert resp.status_code == 201
@@ -200,8 +200,8 @@ class TestRouting:
             raise CrossMachineGatewayUnavailable("target unreachable after 3 retries")
 
         monkeypatch.setattr(app_module, "_forward_spawn_to_remote", _forward_raises)
-        monkeypatch.setattr("shared.machines.lookup_role", lambda _name: ["agent-runner"])  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-        monkeypatch.setattr("shared.machines.is_paused", lambda _name: False)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        monkeypatch.setattr("shared.machines.lookup_role", lambda _name: ["agent-runner"])  # pyright: ignore[reportUnknownArgumentType]
+        monkeypatch.setattr("shared.machines.is_paused", lambda _name: False)  # pyright: ignore[reportUnknownArgumentType]
         with TestClient(app) as client:
             resp = client.post("/api/agents", json={"machine": "remote-mac"})
         assert resp.status_code == 502
