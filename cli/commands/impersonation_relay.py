@@ -75,13 +75,14 @@ def inbox_hint(agent_id: int, lease_id: UUID, pending: frozenset[int]) -> str:
 
 
 def activation_hint(agent_id: int, lease_id: UUID, pending: frozenset[int]) -> str:
-    command = shlex.join([sys.executable, "-m", "cli", "agents", "timeline", str(agent_id)])
+    prefix = [sys.executable, "-m", "cli", "impersonate"]
+    inbox = shlex.join([*prefix, "inbox", str(lease_id)])
+    ack = shlex.join([*prefix, "ack", str(lease_id)])
     return (
-        f"AVA control active: agent={agent_id} lease={lease_id} "
+        f"AVA control active: agent={agent_id} "
         f"pending_page={len(pending)} newest_id={max(pending, default=0)}. "
-        f"Read context with {command}. Then use that same CLI: "
-        f"impersonate inbox {lease_id}; process and explicitly ACK IDs, "
-        "draining pages until empty."
+        f"Read missing context as needed. Inbox: {inbox}. "
+        f"After processing, explicitly ACK: {ack} ID...; drain pages until empty."
     )
 
 
@@ -99,10 +100,15 @@ def _ended(
     return True
 
 
-def queue_codex(thread_id: UUID, message: str) -> None:
+def queue_codex(thread_id: UUID, message: str, *, remote: str | None = None) -> None:
     """Queue on the explicitly selected existing Codex session; never spawn one."""
+    argv = ["codex", "queue", "--thread", str(thread_id), "--message", message]
+    if remote is not None:
+        # Queue into the server holding this thread. A different server can
+        # persist the hint but leave delivery to Codex's 10-second DB watcher.
+        argv.extend(["--remote", remote])
     result = shared.proc.run_bounded(
-        ["codex", "queue", "--thread", str(thread_id), "--message", message],
+        argv,
         timeout=_QUEUE_TIMEOUT_SECONDS,
         capture_output=True,
         text=True,
@@ -117,14 +123,18 @@ def monitor_claude(message: str) -> None:
     print(message, flush=True)
 
 
-def host_emitter(provider: str, thread_id: str | None) -> Callable[[str], None]:
+def host_emitter(
+    provider: str, thread_id: str | None, *, codex_remote: str | None = None
+) -> Callable[[str], None]:
     """Resolve an explicit host destination before opening the inbox relay."""
     if provider == "codex":
         if thread_id is None:
             raise ValueError("codex relay requires --thread-id for an existing session")
         target = UUID(thread_id)
-        return lambda message: queue_codex(target, message)
+        return lambda message: queue_codex(target, message, remote=codex_remote)
     if provider == "claude":
+        if codex_remote is not None:
+            raise ValueError("Claude Monitor does not use --codex-remote")
         if thread_id is not None:
             raise ValueError("Claude Monitor routes to its owner; omit --thread-id")
         return monitor_claude
@@ -225,7 +235,7 @@ def cmd_relay(args: argparse.Namespace) -> int:
     try:
         lease_id = UUID(args.lease_id)
         token = impersonation.token_from_env()
-        emit = host_emitter(args.provider, args.thread_id)
+        emit = host_emitter(args.provider, args.thread_id, codex_remote=args.codex_remote)
 
         async def run() -> None:
             async def read_inbox() -> InboxSnapshot:
