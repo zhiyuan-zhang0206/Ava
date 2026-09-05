@@ -149,9 +149,6 @@ _OVERSIZE_ALLOWED: dict[str, tuple[str, int, str]] = {
     # process-local module; crossed 800 when the hosted lifecycle
     # settlement commits landed (#1530). Split tracked as follow-up.
     "services/agent_host/host.py": ("#405", 800, "2026-12-31"),
-    # Migration lifecycle: apply, rollback_to/apply_down, applied-set
-    # bookkeeping — one invariant shared across all of them.
-    "shared/migrations.py": ("#405", 500, "2026-12-31"),
     # Kernel inbound queue + lifecycle SQL (claim / restart helpers) — one
     # cohesive kernel-DB module; the #1587 fatal-provider heartbeat throttle
     # (last_heartbeat_at + pending-wake accounting) regrew it past the ceiling
