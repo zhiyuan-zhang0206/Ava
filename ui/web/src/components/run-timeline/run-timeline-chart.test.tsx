@@ -115,12 +115,19 @@ const labels = {
   timestamp: "Timestamp",
   detail: "Detail",
 };
+const chartActions = {
+  onDrillBucket: vi.fn(),
+  onZoomWindow: vi.fn(),
+};
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+});
 
 describe("RunTimelineChart", () => {
   it("renders every turn as one clickable block on a single linear track", () => {
-    const { container } = render(<RunTimelineChart timeline={timeline} labels={labels} />);
+    const { container } = render(<RunTimelineChart timeline={timeline} labels={labels} {...chartActions} />);
 
     expect(screen.getByLabelText("Timeline chart")).toBeTruthy();
     expect(screen.getByLabelText("Timeline visualization")).toBeTruthy();
@@ -131,7 +138,7 @@ describe("RunTimelineChart", () => {
   });
 
   it("keeps every glyph in a fixed sibling overlay outside transformable geometry", () => {
-    const { container } = render(<RunTimelineChart timeline={timeline} labels={labels} />);
+    const { container } = render(<RunTimelineChart timeline={timeline} labels={labels} {...chartActions} />);
     const geometry = screen.getByTestId("run-timeline-geometry");
     const fixedText = container.querySelectorAll('[data-testid="fixed-timeline-text"]');
 
@@ -150,7 +157,7 @@ describe("RunTimelineChart", () => {
       ...timeline,
       window: { from: "2026-08-29T08:00:00Z", to: "2026-08-29T08:00:40Z" },
     };
-    const { container } = render(<RunTimelineChart timeline={subMinuteTimeline} labels={labels} />);
+    const { container } = render(<RunTimelineChart timeline={subMinuteTimeline} labels={labels} {...chartActions} />);
 
     const tickLabels = Array.from(container.querySelectorAll("[data-timeline-tick]"), (tick) => tick.textContent);
     expect(tickLabels).toEqual(["08:00:00", "08:00:10", "08:00:20", "08:00:30", "08:00:40"]);
@@ -162,7 +169,7 @@ describe("RunTimelineChart", () => {
       ...timeline,
       window: { from: "2026-08-29T08:00:00Z", to: "2026-08-29T08:01:30Z" },
     };
-    const { container } = render(<RunTimelineChart timeline={ninetySecondTimeline} labels={labels} />);
+    const { container } = render(<RunTimelineChart timeline={ninetySecondTimeline} labels={labels} {...chartActions} />);
 
     const tickLabels = Array.from(container.querySelectorAll("[data-timeline-tick]"), (tick) => tick.textContent);
     expect(tickLabels).toEqual(["08:00:00", "08:00:22", "08:00:45", "08:01:07", "08:01:30"]);
@@ -170,14 +177,14 @@ describe("RunTimelineChart", () => {
   });
 
   it("keeps minute-only tick labels for the one-hour window", () => {
-    const { container } = render(<RunTimelineChart timeline={timeline} labels={labels} />);
+    const { container } = render(<RunTimelineChart timeline={timeline} labels={labels} {...chartActions} />);
 
     const tickLabels = Array.from(container.querySelectorAll("[data-timeline-tick]"), (tick) => tick.textContent);
     expect(tickLabels).toEqual(["08:00", "08:15", "08:30", "08:45", "09:00"]);
   });
 
   it("anchors connector paths to the exact source and destination node coordinates", () => {
-    const { container } = render(<RunTimelineChart timeline={timeline} labels={labels} />);
+    const { container } = render(<RunTimelineChart timeline={timeline} labels={labels} {...chartActions} />);
     const connector = container.querySelector('[data-testid="event-connector"][data-event-index="0"]');
     const source = container.querySelector('[data-testid="event-source-node"][data-event-index="0"]');
     const destination = container.querySelector('[data-testid="event-destination-node"][data-event-index="0"]');
@@ -194,7 +201,7 @@ describe("RunTimelineChart", () => {
   });
 
   it("opens a turn detail panel containing every supported row field", () => {
-    render(<RunTimelineChart timeline={timeline} labels={labels} />);
+    render(<RunTimelineChart timeline={timeline} labels={labels} {...chartActions} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Turn 1" }));
     const panel = screen.getByRole("region", { name: "Turn details" });
@@ -213,7 +220,7 @@ describe("RunTimelineChart", () => {
   });
 
   it("shows turn facts on hover without breaking click-to-select", () => {
-    render(<RunTimelineChart timeline={timeline} labels={labels} />);
+    render(<RunTimelineChart timeline={timeline} labels={labels} {...chartActions} />);
 
     const turn = screen.getByRole("button", { name: "Turn 1" });
     fireEvent.pointerEnter(turn);
@@ -230,8 +237,85 @@ describe("RunTimelineChart", () => {
     expect(screen.getByRole("region", { name: "Turn details" })).toBeTruthy();
   });
 
+  it("shows bucket facts and drills into the bucket instead of selecting it", () => {
+    const bucketRow: RunTimelineResponse["rows"][number] = {
+      ...timeline.rows[0],
+      turn: null,
+      n_turns: 12,
+      end: "2026-08-29T08:05:00Z",
+    };
+    const onDrillBucket = vi.fn();
+    render(
+      <RunTimelineChart
+        timeline={{ ...timeline, rows: [bucketRow] }}
+        labels={labels}
+        onDrillBucket={onDrillBucket}
+        onZoomWindow={vi.fn()}
+      />,
+    );
+
+    const bucket = screen.getByRole("button", { name: "Bucket (12)" });
+    fireEvent.pointerEnter(bucket);
+    expect(within(screen.getByRole("tooltip")).getByText("Bucket (12)")).toBeTruthy();
+
+    fireEvent.click(bucket);
+    expect(onDrillBucket).toHaveBeenCalledWith(bucketRow);
+    expect(screen.queryByRole("region", { name: "Turn details" })).toBeNull();
+  });
+
+  it("zooms around the ctrl-wheel cursor without hijacking a plain wheel", () => {
+    const onZoomWindow = vi.fn();
+    render(
+      <RunTimelineChart
+        timeline={timeline}
+        labels={labels}
+        onDrillBucket={vi.fn()}
+        onZoomWindow={onZoomWindow}
+      />,
+    );
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-29T10:00:00Z"));
+    const visualization = screen.getByRole("group", { name: "Timeline visualization" });
+    vi.spyOn(visualization, "getBoundingClientRect").mockReturnValue({
+      x: 100,
+      y: 0,
+      top: 0,
+      right: 1100,
+      bottom: 200,
+      left: 100,
+      width: 1000,
+      height: 200,
+      toJSON: () => ({}),
+    });
+
+    const plainWheel = new WheelEvent("wheel", {
+      bubbles: true,
+      cancelable: true,
+      clientX: 366,
+      deltaY: -1,
+    });
+    visualization.dispatchEvent(plainWheel);
+    expect(plainWheel.defaultPrevented).toBe(false);
+    expect(onZoomWindow).not.toHaveBeenCalled();
+
+    const zoomWheel = new WheelEvent("wheel", {
+      bubbles: true,
+      cancelable: true,
+      clientX: 366,
+      deltaY: -1,
+    });
+    Object.defineProperty(zoomWheel, "ctrlKey", { value: true });
+    Object.defineProperty(zoomWheel, "clientX", { value: 366 });
+    visualization.dispatchEvent(zoomWheel);
+    expect(onZoomWindow).toHaveBeenCalledWith({
+      from: "2026-08-29T07:56:15.000Z",
+      to: "2026-08-29T09:11:15.000Z",
+    });
+    expect(zoomWheel.defaultPrevented).toBe(true);
+  });
+
   it("shows the full event label on hover and focus through one shared popover", () => {
-    render(<RunTimelineChart timeline={timeline} labels={labels} />);
+    render(<RunTimelineChart timeline={timeline} labels={labels} {...chartActions} />);
 
     const event = screen.getByRole("button", { name: /exec_failed/ });
     fireEvent.pointerEnter(event);
@@ -269,7 +353,7 @@ describe("RunTimelineChart", () => {
       };
     });
     const fixture = fixture3187Json as RunTimelineResponse;
-    const { container } = render(<RunTimelineChart timeline={fixture} labels={labels} />);
+    const { container } = render(<RunTimelineChart timeline={fixture} labels={labels} {...chartActions} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Turn 1" }));
     await waitFor(() => {
@@ -296,7 +380,9 @@ describe("RunTimelineChart", () => {
       })),
       { ts: "2026-08-29T09:00:00Z", kind: "compact", trace_id: null, label: null },
     ];
-    const { container } = render(<RunTimelineChart timeline={{ ...timeline, events }} labels={labels} />);
+    const { container } = render(
+      <RunTimelineChart timeline={{ ...timeline, events }} labels={labels} {...chartActions} />,
+    );
 
     expect(container.querySelectorAll('[data-testid="event-chip"]')).toHaveLength(120);
     expect(screen.getByText("compact")).toBeTruthy();
@@ -307,14 +393,14 @@ describe("RunTimelineChart", () => {
     ["3187", fixture3187Json as RunTimelineResponse],
     ["405", fixture405Json as RunTimelineResponse],
   ])("renders all real turn rows from fixture %s", (_agentId, fixture) => {
-    const { container } = render(<RunTimelineChart timeline={fixture} labels={labels} />);
+    const { container } = render(<RunTimelineChart timeline={fixture} labels={labels} {...chartActions} />);
 
     expect(container.querySelectorAll('[data-testid="turn-block"]')).toHaveLength(fixture.rows.length);
     expect(container.querySelectorAll('[data-testid="event-chip"]')).toHaveLength(fixture.events.length);
   });
 
   it("replaces an empty track with an activity hint", () => {
-    render(<RunTimelineChart timeline={{ ...timeline, rows: [] }} labels={labels} />);
+    render(<RunTimelineChart timeline={{ ...timeline, rows: [] }} labels={labels} {...chartActions} />);
 
     expect(screen.getByText("No activity in this window.")).toBeTruthy();
   });

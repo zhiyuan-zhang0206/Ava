@@ -23,6 +23,7 @@ import {
   type RunTimelineChartLabels,
   type TimelinePopoverTarget,
 } from "./run-timeline-details";
+import { zoomWindowAround, type TimelineWindowOverride } from "./request-level";
 import { buildTimelineLayout } from "./timeline-layout";
 
 export type { RunTimelineChartLabels } from "./run-timeline-details";
@@ -85,11 +86,16 @@ function prioritizedRailEvents(events: RunTimelineResponse["events"]) {
 export function RunTimelineChart({
   timeline,
   labels,
+  onDrillBucket,
+  onZoomWindow,
 }: {
   timeline: RunTimelineResponse;
   labels: RunTimelineChartLabels;
+  onDrillBucket: (row: RunTimelineResponse["rows"][number]) => void;
+  onZoomWindow: (window: TimelineWindowOverride) => void;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const visualizationRef = useRef<HTMLDivElement>(null);
   const popoverLayerRef = useRef<HTMLDivElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
   const [canvasWidth, setCanvasWidth] = useState(MIN_CANVAS_WIDTH);
@@ -173,6 +179,25 @@ export function RunTimelineChart({
     return () => window.removeEventListener("resize", updateWidth);
   }, [selectedRow]);
 
+  useEffect(() => {
+    const visualization = visualizationRef.current;
+    if (!visualization) return;
+    const zoomOnWheel = (event: WheelEvent) => {
+      if ((!event.ctrlKey && !event.metaKey) || event.deltaY === 0) return;
+      event.preventDefault();
+      const bounds = visualization.getBoundingClientRect();
+      const cursorX = event.clientX - bounds.left;
+      const anchor = Math.max(
+        0,
+        Math.min(1, (cursorX - layout.plot.left) / layout.plot.width),
+      );
+      const factor = event.deltaY < 0 ? 1.25 : 0.8;
+      onZoomWindow(zoomWindowAround(timeline.window, factor, anchor, new Date()));
+    };
+    visualization.addEventListener("wheel", zoomOnWheel, { passive: false });
+    return () => visualization.removeEventListener("wheel", zoomOnWheel);
+  }, [layout.plot.left, layout.plot.width, onZoomWindow, timeline.window]);
+
   if (timeline.rows.length === 0) {
     return (
       <section
@@ -194,6 +219,7 @@ export function RunTimelineChart({
           </div>
           <div ref={scrollRef} data-testid="run-timeline-scroll" className="overflow-x-auto">
             <div
+              ref={visualizationRef}
               role="group"
               aria-label={labels.visualization}
               className={cn("relative", selectedRow ? "min-w-[320px]" : "min-w-[1000px]")}
@@ -349,21 +375,6 @@ export function RunTimelineChart({
               {layout.turns.map((turn) => {
                 const row = timeline.rows[turn.rowIndex];
                 const label = rowLabel(row, labels);
-                if (row.turn === null) {
-                  return (
-                    <div
-                      key={turn.rowIndex}
-                      aria-label={label}
-                      className="absolute"
-                      style={{
-                        left: `${turn.left}px`,
-                        top: `${layout.track.top}px`,
-                        width: `${turn.width}px`,
-                        height: `${layout.track.height}px`,
-                      }}
-                    />
-                  );
-                }
                 return (
                   <button
                     key={turn.rowIndex}
@@ -380,7 +391,13 @@ export function RunTimelineChart({
                     onPointerLeave={hidePopover}
                     onFocus={showPopover}
                     onBlur={hidePopover}
-                    onClick={() => setSelectedRowIndex(turn.rowIndex)}
+                    onClick={() => {
+                      if (row.turn === null) {
+                        onDrillBucket(row);
+                      } else {
+                        setSelectedRowIndex(turn.rowIndex);
+                      }
+                    }}
                     className="absolute rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-foreground focus-visible:ring-offset-2"
                     style={{
                       left: `${turn.left}px`,
@@ -389,7 +406,7 @@ export function RunTimelineChart({
                       height: `${layout.track.height}px`,
                     }}
                   >
-                    {turn.width >= 32 ? (
+                    {row.turn !== null && turn.width >= 32 ? (
                       <span
                         data-testid="fixed-timeline-text"
                         className="block truncate px-1 font-mono text-[10px] font-semibold text-white"
