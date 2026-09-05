@@ -575,6 +575,82 @@ groups:
                   query:
                     params: [C]
 
+      # ── R6b: event stream below its measured low-water mark ──
+      # Complements R6: absent_over_time catches a total stop (zero flow),
+      # while this rule catches partial write loss when a few batches still
+      # reach Loki. The rules intentionally run in parallel and may overlap.
+      # Calibration at 2026-09-06 03:11 Beijing over the preceding 24h,
+      # measured with this exact expression (same stream selector and
+      # pipeline): 5m counts min=295 (~59/min, two windows), p05=349,
+      # median=1071, max=3167. The 150/5m threshold (~30/min) is about half
+      # the measured trough; it must remain breached for 10m before firing.
+      - uid: ava-ops-events-low-water
+        title: "Event stream below low-water mark"
+        condition: D
+        for: 10m
+        noDataState: OK
+        execErrState: OK
+        labels:
+          severity: warning
+          ruleUID: ava-ops-events-low-water
+          metric: events_freshness
+          team: ava-ops
+        annotations:
+          summary: "Only {{ $values.C }} events reached Loki in 5 minutes (low-water 150)"
+          description: >-
+            Whole-cluster event volume stayed below 150 lines per 5 minutes
+            for 10 minutes. This catches partial Loki write loss that the
+            parallel absent-over-time freshness rule cannot see while even
+            one batch still arrives. The calibrated floor is about half the
+            lowest measured 5-minute volume, leaving substantial night-time
+            headroom while detecting a degraded write path.
+        data:
+          - refId: A
+            datasourceUid: loki
+            queryType: ""
+            model:
+              refId: A
+              datasource:
+                type: loki
+                uid: loki
+              editorMode: code
+              expr: >-
+                sum(count_over_time({service_name="unknown_service"} | json | cluster=".ava" [5m])) or vector(0)
+              instant: true
+              queryType: instant
+            relativeTimeRange:
+              from: 300
+              to: 0
+          - refId: C
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: C
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: reduce
+              expression: A
+              reducer: mean
+          - refId: D
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: D
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: threshold
+              expression: C
+              conditions:
+                - evaluator:
+                    type: lt
+                    params: [150]
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+
       # ── R8: host CPU saturated (issue #46) ──
       # 1 - idle, averaged over the machine's cores. 0.90 sustained for 15m is
       # the shipped default: short bursts are normal work (a build, an eval
@@ -798,6 +874,144 @@ groups:
                 - evaluator:
                     type: gt
                     params: [0.9]
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+
+      # ── R10b: disk escalation before Loki's WAL hard stop ──
+      # 0.93 is the escalation warning between the retained 0.90 watermark
+      # and Loki's 0.95 WAL disk_full_threshold. The shorter critical hold at
+      # 0.95 reflects the 2026-09-05 incident: WAL write throttling killed the
+      # event stream while /ready continued to answer 200.
+      - uid: ava-ops-host-disk-watermark-93
+        title: "Filesystem approaching Loki WAL hard stop"
+        condition: D
+        for: 15m
+        noDataState: OK
+        execErrState: OK
+        labels:
+          severity: warning
+          ruleUID: ava-ops-host-disk-watermark-93
+          metric: host_disk
+          team: ava-ops
+        annotations:
+          summary: "{{ $labels.machine_name }} {{ $labels.mountpoint }} at {{ $values.C }} full (threshold 0.93)"
+          description: >-
+            Filesystem {{ $labels.mountpoint }} on {{ $labels.machine_name }} is
+            {{ $values.C }} full. This escalation warning sits between the
+            0.90 capacity watermark and Loki's 0.95 WAL disk-full hard stop.
+            Free space before write throttling can interrupt the event stream.
+        data:
+          - refId: A
+            datasourceUid: prometheus
+            queryType: ""
+            model:
+              refId: A
+              datasource:
+                type: prometheus
+                uid: prometheus
+              editorMode: code
+              expr: >-
+                round(max by (machine_name, mountpoint)
+                (system_filesystem_utilization_ratio{mountpoint!~"/mnt/wsl/docker-desktop.*"}), 0.001)
+              instant: true
+              range: false
+            relativeTimeRange:
+              from: 900
+              to: 0
+          - refId: C
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: C
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: reduce
+              expression: A
+              reducer: mean
+          - refId: D
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: D
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: threshold
+              expression: C
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0.93]
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+
+      - uid: ava-ops-host-disk-watermark-95
+        title: "Filesystem at Loki WAL hard stop"
+        condition: D
+        for: 5m
+        noDataState: OK
+        execErrState: OK
+        labels:
+          severity: critical
+          ruleUID: ava-ops-host-disk-watermark-95
+          metric: host_disk
+          team: ava-ops
+        annotations:
+          summary: "{{ $labels.machine_name }} {{ $labels.mountpoint }} at {{ $values.C }} full (critical threshold 0.95)"
+          description: >-
+            Filesystem {{ $labels.mountpoint }} on {{ $labels.machine_name }} is
+            {{ $values.C }} full. 0.95 is Loki WAL's disk_full_threshold: the
+            2026-09-05 incident crossed this line, throttled WAL writes, and
+            killed the event stream while Loki /ready stayed green. Free disk
+            immediately and verify the write path recovers.
+        data:
+          - refId: A
+            datasourceUid: prometheus
+            queryType: ""
+            model:
+              refId: A
+              datasource:
+                type: prometheus
+                uid: prometheus
+              editorMode: code
+              expr: >-
+                round(max by (machine_name, mountpoint)
+                (system_filesystem_utilization_ratio{mountpoint!~"/mnt/wsl/docker-desktop.*"}), 0.001)
+              instant: true
+              range: false
+            relativeTimeRange:
+              from: 900
+              to: 0
+          - refId: C
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: C
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: reduce
+              expression: A
+              reducer: mean
+          - refId: D
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: D
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: threshold
+              expression: C
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0.95]
                   operator:
                     type: and
                   query:
