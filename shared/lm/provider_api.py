@@ -50,7 +50,7 @@ Builder contract (plain Python, documented rather than schema'd — see
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import NamedTuple
 
@@ -134,6 +134,23 @@ class BuildContext:
     base_url: str | None = None
 
 
+def _empty_file_size_limits() -> dict[str, int]:
+    return {}
+
+
+@dataclass(frozen=True)
+class AttachPolicy:
+    """Provider-owned limits and wire shape for local file attachments.
+
+    ``file_size_limits`` narrows the core ``ATTACH_MAX_FILE_BYTES`` ceiling
+    for a media type; entries above that ceiling are inert while it stands.
+    """
+
+    file_size_limits: Mapping[str, int] = field(default_factory=_empty_file_size_limits)
+    image_dimension_tiers: tuple[tuple[int, int], ...] = ()
+    pdf_document_block: bool = False
+
+
 @dataclass(frozen=True)
 class ProviderBinding:
     """One dispatch prefix's client binding and optional provider-key override."""
@@ -150,6 +167,9 @@ class ProviderBinding:
     # Usually derived from prefix.rstrip("-"); set only when a narrower legal
     # dispatch prefix differs from the stable public provider identity.
     provider_key: str | None = None
+    # Absent means the core attachment defaults; older plugins and consumers
+    # degrade without a provider-specific override.
+    attach: AttachPolicy | None = None
 
 
 class _ProviderRegistry:

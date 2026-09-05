@@ -1,4 +1,4 @@
-"""Tests for shared/lm/_gemini_cache.py — explicit cachedContents lifecycle.
+"""Tests for the lm_google plugin's explicit cachedContents lifecycle.
 
 No API hits: the genai client's async caches surface is faked; the llm is a
 real ChatGoogleGenerativeAI (construction is offline) with its client swapped
@@ -17,14 +17,14 @@ from langchain_core.messages import AIMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.tools import tool  # pyright: ignore[reportUnknownVariableType]
 
-from shared.config import settings
-from shared.lm import _gemini_cache
-from shared.lm._gemini_cache import (
+from ava_builtins.plugins.lm_google import gemini_cache
+from ava_builtins.plugins.lm_google.gemini_cache import (
     CacheRef,
     get_or_create_cache,
     invalidate,
     is_stale_cache_error,
 )
+from shared.config import settings
 
 
 @tool("execute_code", parse_docstring=True)
@@ -165,11 +165,11 @@ def _gemini_llm(caches: _FakeCaches) -> Any:
 
 @pytest.fixture(autouse=True)
 def _clear_memo():
-    _gemini_cache._MEMO.clear()
-    _gemini_cache._NEGATIVE.clear()
+    gemini_cache._MEMO.clear()
+    gemini_cache._NEGATIVE.clear()
     yield
-    _gemini_cache._MEMO.clear()
-    _gemini_cache._NEGATIVE.clear()
+    gemini_cache._MEMO.clear()
+    gemini_cache._NEGATIVE.clear()
 
 
 class TestGetOrCreate:
@@ -228,7 +228,7 @@ class TestGetOrCreate:
             convert_to_genai_function_declarations,  # pyright: ignore[reportUnknownVariableType]
         )
 
-        from shared.lm._gemini_cache import _hash_material
+        from ava_builtins.plugins.lm_google.gemini_cache import _hash_material
 
         key = _hash_material(
             llm.model, _BIG_PROMPT, convert_to_genai_function_declarations([_fake_tool])
@@ -253,7 +253,7 @@ class TestGetOrCreate:
             convert_to_genai_function_declarations,  # pyright: ignore[reportUnknownVariableType]
         )
 
-        from shared.lm._gemini_cache import _hash_material
+        from ava_builtins.plugins.lm_google.gemini_cache import _hash_material
 
         key = _hash_material(
             llm.model, _BIG_PROMPT, convert_to_genai_function_declarations([_fake_tool])
@@ -367,9 +367,9 @@ class TestStaleAndInvalidate:
         ref = CacheRef(
             name="cachedContents/x", key="k", expire_time=datetime.now(UTC) + timedelta(hours=1)
         )
-        _gemini_cache._MEMO["k"] = ref
+        gemini_cache._MEMO["k"] = ref
         invalidate(ref)
-        assert "k" not in _gemini_cache._MEMO
+        assert "k" not in gemini_cache._MEMO
 
 
 class _NonGeminiLLM(BaseChatModel):

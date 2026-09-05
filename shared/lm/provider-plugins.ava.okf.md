@@ -40,6 +40,9 @@ retryable after the enable configuration is fixed.
   services, then retired rates. `MODEL_PRICING` excludes retired-history
   entries. The plugin that owns a client class registers its terminal-reason
   `StopSpec`; compatible bindings share that emitted `model_provider` key.
+- A binding's optional `AttachPolicy` owns provider-specific per-media byte
+  limits, image-dimension tiers, and native PDF document blocks. An absent
+  policy preserves the core attachment defaults for older plugins.
 
 ## Builder and key contract
 

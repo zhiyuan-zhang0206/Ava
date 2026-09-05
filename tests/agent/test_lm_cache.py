@@ -10,9 +10,9 @@ import pytest
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
-from agent import lm_cache
 from agent.lm_cache import ainvoke_with_cache_retry, prepare_invocation
-from shared.lm._gemini_cache import CacheRef
+from ava_builtins.plugins.lm_google import gemini_cache
+from ava_builtins.plugins.lm_google.gemini_cache import CacheRef
 
 _SYSTEM = SystemMessage(content="You are a test agent. " * 100)
 _CONVO = [HumanMessage(content="hi"), AIMessage(content="hello")]
@@ -65,7 +65,11 @@ class TestPrepareInvocation:
     ) -> None:
         llm = _StubLLM()
         ref = _ref()
-        monkeypatch.setattr(lm_cache, "get_or_create_cache", lambda *_a, **_k: _async_return(ref))  # pyright: ignore[reportUnknownArgumentType]
+        monkeypatch.setattr(
+            gemini_cache,
+            "get_or_create_cache",
+            lambda *_a, **_k: _async_return(ref),  # pyright: ignore[reportUnknownArgumentType]
+        )
         inv = await prepare_invocation(cast(BaseChatModel, llm), [_SYSTEM, *_CONVO])
         assert inv.cache_ref is ref
         assert inv.messages == _CONVO  # SystemMessage stripped
@@ -75,7 +79,11 @@ class TestPrepareInvocation:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         llm = _StubLLM()
-        monkeypatch.setattr(lm_cache, "get_or_create_cache", lambda *_a, **_k: _async_return(None))  # pyright: ignore[reportUnknownArgumentType]
+        monkeypatch.setattr(
+            gemini_cache,
+            "get_or_create_cache",
+            lambda *_a, **_k: _async_return(None),  # pyright: ignore[reportUnknownArgumentType]
+        )
         inv = await prepare_invocation(cast(BaseChatModel, llm), [_SYSTEM, *_CONVO])
         assert inv.cache_ref is None
         assert inv.messages == [_SYSTEM, *_CONVO]
@@ -91,7 +99,7 @@ class TestPrepareInvocation:
             called = True
             return _async_return(None)
 
-        monkeypatch.setattr(lm_cache, "get_or_create_cache", _spy)
+        monkeypatch.setattr(gemini_cache, "get_or_create_cache", _spy)
         inv = await prepare_invocation(cast(BaseChatModel, _StubLLM()), list(_CONVO))
         assert inv.cache_ref is None and not called
 
@@ -108,7 +116,7 @@ class TestPrepareInvocation:
             called = True
             return _async_return(None)
 
-        monkeypatch.setattr(lm_cache, "get_or_create_cache", _spy)
+        monkeypatch.setattr(gemini_cache, "get_or_create_cache", _spy)
         inv = await prepare_invocation(
             cast(BaseChatModel, _StubLLM()),
             [_SYSTEM, HumanMessage(content="x"), SystemMessage(content="later")],
@@ -120,7 +128,7 @@ class TestAinvokeWithCacheRetry:
     async def test_success_no_retry(self, monkeypatch: pytest.MonkeyPatch) -> None:
         llm = _StubLLM()
         monkeypatch.setattr(
-            lm_cache,
+            gemini_cache,
             "get_or_create_cache",
             lambda *_a, **_k: _async_return(_ref()),  # pyright: ignore[reportUnknownArgumentType]
         )
@@ -146,11 +154,11 @@ class TestAinvokeWithCacheRetry:
         # Production: invalidate() drops the memo, so the retry's prepare takes
         # the plain path. Mirror that by consulting the invalidated list.
         monkeypatch.setattr(
-            lm_cache,
+            gemini_cache,
             "get_or_create_cache",
             lambda *_a, **_k: _async_return(None if invalidated else _ref()),  # pyright: ignore[reportUnknownArgumentType]
         )
-        monkeypatch.setattr(lm_cache, "invalidate", lambda ref: invalidated.append(ref.name))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+        monkeypatch.setattr(gemini_cache, "invalidate", lambda ref: invalidated.append(ref.name))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
         response = await ainvoke_with_cache_retry(cast(BaseChatModel, llm), [_SYSTEM, *_CONVO])
         assert response.content == "done"  # pyright: ignore[reportUnknownMemberType]
         assert invalidated == ["cachedContents/t1"]
@@ -161,7 +169,7 @@ class TestAinvokeWithCacheRetry:
     async def test_non_stale_error_propagates(self, monkeypatch: pytest.MonkeyPatch) -> None:
         llm = _StubLLM(invoke_errors=[ValueError("boom")])
         monkeypatch.setattr(
-            lm_cache,
+            gemini_cache,
             "get_or_create_cache",
             lambda *_a, **_k: _async_return(_ref()),  # pyright: ignore[reportUnknownArgumentType]
         )
@@ -183,7 +191,11 @@ class TestAinvokeWithCacheRetry:
             },
         )
         llm = _StubLLM(invoke_errors=[stale])
-        monkeypatch.setattr(lm_cache, "get_or_create_cache", lambda *_a, **_k: _async_return(None))  # pyright: ignore[reportUnknownArgumentType]
+        monkeypatch.setattr(
+            gemini_cache,
+            "get_or_create_cache",
+            lambda *_a, **_k: _async_return(None),  # pyright: ignore[reportUnknownArgumentType]
+        )
         with pytest.raises(ClientError):
             await ainvoke_with_cache_retry(cast(BaseChatModel, llm), [_SYSTEM, *_CONVO])
         assert len(llm.runnable.calls) == 1  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
