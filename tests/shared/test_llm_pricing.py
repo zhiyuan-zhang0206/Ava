@@ -65,6 +65,14 @@ def deepseek_archive_catalog(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(pricing, "_CATALOG", merged)
 
 
+@pytest.fixture
+def gemini_archive_catalog(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Route explicit Gemini period/tier history checks through the archive."""
+    merged = dict(pricing._CATALOG)
+    merged.update(_parse_catalog(_pricing_archive_raw()))
+    monkeypatch.setattr(pricing, "_CATALOG", merged)
+
+
 def test_pricing_catalog_schema_v2_vendor_lock() -> None:
     raw = _pricing_catalog_raw()
     models = _pricing_catalog_models(raw)
@@ -88,7 +96,7 @@ def test_pricing_catalog_schema_v2_vendor_lock() -> None:
     }
     assert {
         "claude-opus-4-8": models["claude-opus-4-8"]["vendor"],
-        "gemini-3.8-flash": models["gemini-3.8-flash"]["vendor"],
+        "gemini-embedding-2": models["gemini-embedding-2"]["vendor"],
         "gpt-5.6-sol": models["gpt-5.6-sol"]["vendor"],
         "mimo-v2.5-pro": models["mimo-v2.5-pro"]["vendor"],
         "kimi-k3": models["kimi-k3"]["vendor"],
@@ -96,7 +104,7 @@ def test_pricing_catalog_schema_v2_vendor_lock() -> None:
         "qwen3.8-max": models["qwen3.8-max"]["vendor"],
     } == {
         "claude-opus-4-8": "anthropic",
-        "gemini-3.8-flash": "google",
+        "gemini-embedding-2": "google",
         "gpt-5.6-sol": "openai",
         "mimo-v2.5-pro": "xiaomi",
         "kimi-k3": "moonshot",
@@ -115,7 +123,27 @@ def test_deepseek_catalog_entries_live_only_in_the_archive() -> None:
     }
 
     assert expected.isdisjoint(runtime_models)
-    assert set(archive_models) == expected
+    assert expected <= archive_models.keys()
+
+
+def test_gemini_chat_catalog_entries_live_only_in_the_archive() -> None:
+    runtime_models = _pricing_catalog_models(_pricing_catalog_raw())
+    archive_models = _pricing_catalog_models(_pricing_archive_raw())
+    expected = {
+        "gemini-3.8-flash",
+        "gemini-3.7-flash",
+        "gemini-3.5-flash",
+        "gemini-3.1-pro-preview",
+        "gemini-2.5-pro",
+        "gemini-2.5-flash",
+    }
+
+    assert expected.isdisjoint(runtime_models)
+    assert expected <= archive_models.keys()
+    # Embedding pricing has no chat ProviderBinding/ModelSpec and remains a
+    # runtime-catalog consumer until the final catalog migration owns it.
+    assert "gemini-embedding-2" in runtime_models
+    assert "gemini-embedding-2" not in archive_models
 
 
 def test_model_vendor_returns_catalog_vendor_or_none() -> None:
@@ -193,7 +221,7 @@ def test_parse_catalog_rejects_unknown_schema_version() -> None:
         ("mimo-v2.5-pro-ultraspeed", 1.305 + 2.61),
     ],
 )
-def test_cost_usd_priced_models(model: str, expected: float) -> None:
+def test_cost_usd_priced_models(model: str, expected: float, gemini_archive_catalog: None) -> None:
     assert cost_usd(model, _M, _M, 0) == pytest.approx(expected)  # pyright: ignore[reportUnknownMemberType]
 
 
@@ -324,14 +352,16 @@ def test_peak_windows_normalize_an_aware_non_utc_instant(
     assert rates_at("deepseek-v4-flash", at, _M) == Rates(0.44, 0.014, 1.32)
 
 
-def test_input_token_tier_boundary_is_inclusive() -> None:
+def test_input_token_tier_boundary_is_inclusive(gemini_archive_catalog: None) -> None:
     at = datetime(2026, 8, 18, tzinfo=UTC)
     assert rates_at("gemini-3.1-pro-preview", at, 200_000) == Rates(2.0, 0.2, 12.0)
     assert rates_at("gemini-3.1-pro-preview", at, 200_001) == Rates(4.0, 0.4, 18.0)
 
 
 @pytest.mark.parametrize("model", ("gemini-3.7-flash", "gemini-3.8-flash"))
-def test_gemini_flash_date_only_increase_uses_earliest_global_boundary(model: str) -> None:
+def test_gemini_flash_date_only_increase_uses_earliest_global_boundary(
+    model: str, gemini_archive_catalog: None
+) -> None:
     """The source omits a timezone, so UTC+14 prevents underestimating cost."""
     before = datetime(2026, 12, 31, 9, 59, 59, 999999, tzinfo=UTC)
     after = datetime(2026, 12, 31, 10, 0, tzinfo=UTC)
@@ -371,6 +401,34 @@ def test_deepseek_plugin_prices_equal_archive_current_base_tier(
 
     for model in model_ids:
         selected = rates_at(model, outside_daily_override, input_tokens=0)
+        assert selected is not None
+        assert plugin_rates[model].as_tuple() == pytest.approx(selected.as_tuple())  # pyright: ignore[reportUnknownMemberType]
+        assert pricing.plugin_price_provenance(model) == (
+            archive_models[model]["source_url"],
+            archive_models[model]["source_checked_at"],
+        )
+
+
+def test_gemini_plugin_prices_equal_archive_current_base_tier(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ensure_provider_plugins_loaded()
+    model_ids = (
+        "gemini-3.8-flash",
+        "gemini-3.7-flash",
+        "gemini-3.5-flash",
+        "gemini-3.1-pro-preview",
+        "gemini-2.5-pro",
+        "gemini-2.5-flash",
+    )
+    plugin_rates = {model: pricing._PLUGIN_PRICES[model].rates for model in model_ids}
+    archive_raw = _pricing_archive_raw()
+    archive_models = _pricing_catalog_models(archive_raw)
+    monkeypatch.setattr(pricing, "_CATALOG", _parse_catalog(archive_raw))
+    current_instant = datetime(2026, 9, 5, tzinfo=UTC)
+
+    for model in model_ids:
+        selected = rates_at(model, current_instant, input_tokens=0)
         assert selected is not None
         assert plugin_rates[model].as_tuple() == pytest.approx(selected.as_tuple())  # pyright: ignore[reportUnknownMemberType]
         assert pricing.plugin_price_provenance(model) == (

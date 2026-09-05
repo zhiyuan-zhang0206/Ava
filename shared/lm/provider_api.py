@@ -86,7 +86,7 @@ class PriceRates:
 
 @dataclass(frozen=True)
 class BuildContext:
-    """Construction inputs, including the binding's optional effort vocabulary."""
+    """Construction inputs, including optional effort and media-provider knobs."""
 
     model: str
     spec: ModelSpec | None  # the registered ModelSpec for `model` (None = unregistered id)
@@ -95,6 +95,9 @@ class BuildContext:
     disable_streaming: bool
     timeout: float | None
     effort_levels: tuple[str, ...] | None = None
+    media_resolution: str | None = None
+    media_thinking_level: str | None = None
+    base_url: str | None = None
 
 
 @dataclass(frozen=True)

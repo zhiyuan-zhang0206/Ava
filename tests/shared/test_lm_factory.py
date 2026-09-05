@@ -1,8 +1,9 @@
 """Plugin provider key validation and model media capability tests.
 
-DeepSeek is a provider plugin, so its key declaration is plugin-owned and the
-cluster's `.env` file is the only spawn-validation source. The legacy Settings
-field stays for configuration compatibility but no longer authorizes a spawn.
+DeepSeek and Gemini are provider plugins, so their key declarations are
+plugin-owned and the cluster's `.env` file is the only spawn-validation source.
+The legacy Settings fields stay for configuration compatibility but no longer
+authorize a spawn.
 """
 
 from __future__ import annotations
@@ -38,6 +39,20 @@ def test_plugin_key_ignores_legacy_settings_field(monkeypatch: pytest.MonkeyPatc
     assert provider_key_map()["deepseek-"] == ("DeepSeek", None, "DEEPSEEK_API_KEY")
     with pytest.raises(ValueError, match="DEEPSEEK_API_KEY"):
         validate_model_config(model="deepseek-v4-pro", config={})
+
+
+def test_gemini_plugin_key_ignores_legacy_settings_field(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The migrated Gemini binding also reads only its declared env channel."""
+    monkeypatch.setattr(settings.lm, "gemini_api_key", "sk-test")
+    monkeypatch.setattr(settings.lm, "llm_override", "")
+    monkeypatch.setattr("shared.runtime_config.read_env_aliases", dict)
+    ensure_provider_plugins_loaded()
+
+    assert provider_key_map()["gemini-"] == ("Google", None, "GEMINI_API_KEY")
+    with pytest.raises(ValueError, match="GEMINI_API_KEY"):
+        validate_model_config(model="gemini-3.5-flash", config={})
 
 
 def test_file_fallback_allows_key_after_gateway_pop(env_file: Path) -> None:

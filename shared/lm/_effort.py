@@ -35,17 +35,15 @@ from shared.lm.registry import MODELS
 _CLAUDE_EXTENDED_THINKING_DEFAULT_BUDGET = 8192
 
 # Per-provider clamp targets for the cross-provider AVA_REASONING_EFFORT knob
-# on the OpenAI-style branches. gemini's tuple is its `thinking_level`
-# vocabulary — same clamp, different wire field. mimo's official
-# chat-completions reference documents no reasoning_effort field, only a
-# body-level thinking.type enabled/disabled toggle — so its tuple is a binary
+# on the remaining core OpenAI-style branches. mimo's official chat-completions
+# reference documents no reasoning_effort field, only a body-level
+# thinking.type enabled/disabled toggle — so its tuple is a binary
 # "none"/"high": "none" sends thinking.type=disabled, anything else leaves the
 # provider default (thinking already on) untouched. Keyed by provider because
 # the vocabulary is an endpoint contract shared by every model of the
 # provider; the claude branch clamps per model instead
 # (`ModelSpec.effort_levels`) since claude models genuinely diverge.
 _PROVIDER_EFFORT_LEVELS: dict[str, tuple[str, ...]] = {
-    "gemini": ("minimal", "low", "medium", "high"),
     "kimi": ("low", "high", "max"),
     "glm": ("low", "high", "max"),
     "mimo": ("none", "high"),

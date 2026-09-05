@@ -1,4 +1,4 @@
-"""Model specifications for Claude, Gemini, and GPT."""
+"""Model specifications for Claude and GPT."""
 
 from __future__ import annotations
 
@@ -117,78 +117,6 @@ PRIMARY_MODELS: dict[str, ModelSpec] = {
             llm_stream_ttft_timeout_seconds=120.0,
         ),
         media_types=frozenset({"image", "pdf"}),
-    ),
-    # -- gemini --
-    "gemini-3.8-flash": ModelSpec(
-        provider="gemini",
-        unavailable_fallback="gemini-3.7-flash",
-        context_window=1_048_576,
-        # Google does not publish a cutoff for 3.8 Flash; carries the 3.7
-        # estimate forward (3.7 GA'd 2026-08-13, 3.8 GA'd 2026-09-02).
-        knowledge_cutoff="2026-03",
-        # thinking_level vocabulary; `minimal` 400s (verified live 2026-09-03).
-        effort_levels=("low", "medium", "high"),
-        tuning=ModelTuning(
-            # The model page says its default thinking_level is `medium`
-            # (decisions/2026-07-25-per-model-tuning-values.md).
-            reasoning_effort="medium",
-        ),
-        media_types=frozenset({"image", "pdf", "audio", "video"}),
-    ),
-    "gemini-3.7-flash": ModelSpec(
-        provider="gemini",
-        spawnable=True,
-        context_window=1_048_576,
-        knowledge_cutoff="2026-03",
-        effort_levels=("minimal", "low", "medium", "high"),
-        tuning=ModelTuning(reasoning_effort="medium"),
-        media_types=frozenset({"image", "pdf", "audio", "video"}),
-    ),
-    "gemini-3.5-flash": ModelSpec(
-        provider="gemini",
-        spawnable=True,
-        context_window=1_048_576,
-        knowledge_cutoff="2025-01",
-        effort_levels=("minimal", "low", "medium", "high"),
-        tuning=ModelTuning(
-            # Pinned 2026-08-01 (task #568): flash default thinking_level is
-            # `medium` (see gemini-3.8-flash).
-            reasoning_effort="medium",
-        ),
-        media_types=frozenset({"image", "pdf", "audio", "video"}),
-    ),
-    "gemini-3.1-pro-preview": ModelSpec(
-        provider="gemini",
-        spawnable=True,
-        # 1,048,576 per three independent first-party Google pages (the model
-        # page, the thinking guide, and the DeepMind model card). Every "2M"
-        # claim traces back to speculative blogs about a rumored Ultra tier.
-        context_window=1_048_576,
-        knowledge_cutoff="2025-01",
-        # `minimal` returns 400 (verified live 2026-09-03); matches the
-        # recorded decision that this model cannot drop to minimal.
-        effort_levels=("low", "medium", "high"),
-        tuning=ModelTuning(
-            # Pinned 2026-08-01 (task #568): this model defaults to
-            # thinking_level=high and cannot drop to minimal (Google docs;
-            # also recorded in decisions/2026-07-25-per-model-tuning-
-            # values.md Decision 3).
-            reasoning_effort="high",
-            # The only asymmetry Google's own docs admit inside this family:
-            # preview models "might come with more restrictive rate limits" and
-            # "rate limits are more restricted for experimental and preview
-            # models"; the two flashes are GA. Matching first-party 503 reports
-            # against paid accounts since launch.
-            llm_retry_max_attempts=10,
-            # Gemini's wire has no protocol preamble (no message_start /
-            # response.created), so the first chunk IS the first content or
-            # thought — unlike Claude and GPT, thinking time lands inside TTFT
-            # here. This model defaults to thinking_level=high and cannot go to
-            # `minimal`, and first-output latency of 17s+ was observed during a
-            # Vertex degradation.
-            llm_stream_ttft_timeout_seconds=90.0,
-        ),
-        media_types=frozenset({"image", "pdf", "audio", "video"}),
     ),
     # -- gpt --
     "gpt-5.6-sol": ModelSpec(

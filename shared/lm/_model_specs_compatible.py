@@ -290,14 +290,6 @@ COMPATIBLE_MODELS: dict[str, ModelSpec] = {
         ),
         media_types=frozenset({"image", "pdf"}),
     ),
-    "gemini-2.5-pro": ModelSpec(
-        provider="gemini",
-        media_types=frozenset({"image", "pdf", "audio", "video"}),
-    ),
-    "gemini-2.5-flash": ModelSpec(
-        provider="gemini",
-        media_types=frozenset({"image", "pdf", "audio", "video"}),
-    ),
     "gpt-5.5": ModelSpec(
         provider="gpt",
         context_window=256_000,

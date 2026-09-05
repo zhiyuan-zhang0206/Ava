@@ -91,7 +91,6 @@ from shared.lm._plugin_providers import (
 from shared.lm._providers import (
     ThinkingConfig,
     _build_claude_model,
-    _build_gemini_model,
     _build_glm_model,
     _build_gpt_model,
     _build_kimi_model,
@@ -143,7 +142,6 @@ class _LLMFactory(Protocol):
 # why the registered gate is per-model.
 _VISION_MODEL_PREFIXES: tuple[str, ...] = (
     "claude-",
-    "gemini-",
     "gpt-",
     "kimi-",
     "qwen",
@@ -223,6 +221,7 @@ def provider_key_of_model(model: str) -> str | None:
     `AVA_LLM_MAX_CONCURRENT` accepts (`shared/lm/_concurrency.py`). None
     means the limiter passes through.
     """
+    ensure_provider_plugins_loaded()
     for prefix in _MODEL_KEY_MAP:
         if model.startswith(prefix):
             return prefix.rstrip("-")
@@ -244,7 +243,6 @@ def provider_key_of_model(model: str) -> str | None:
 # as `qwen` rather than a truncated `qwe`.
 _MODEL_KEY_MAP: dict[str, tuple[str, str, str]] = {
     "claude-": ("Anthropic", "anthropic_api_key", "ANTHROPIC_API_KEY"),
-    "gemini-": ("Google", "gemini_api_key", "GEMINI_API_KEY"),
     "gpt-": ("OpenAI", "openai_api_key", "OPENAI_API_KEY"),
     "mimo-": ("Xiaomi", "xiaomi_api_key", "MIMO_API_KEY"),
     "kimi-": ("Moonshot", "moonshot_api_key", "MOONSHOT_API_KEY"),
@@ -548,17 +546,6 @@ def build_chat_model(
         return _build_claude_model(
             model, spec, thinking, resolved_effort, extra_kwargs, timeout=timeout
         )
-    if model.startswith("gemini-"):
-        return _build_gemini_model(
-            model,
-            thinking=thinking,
-            resolved_effort=resolved_effort,
-            disable_streaming=disable_streaming,
-            timeout=timeout,
-            media_resolution=media_resolution,
-            media_thinking_level=media_thinking_level,
-            base_url=base_url,
-        )
     if model.startswith("gpt-"):
         return _build_gpt_model(
             model,
@@ -616,6 +603,9 @@ def build_chat_model(
                     disable_streaming=disable_streaming,
                     timeout=timeout,
                     effort_levels=binding.effort_levels,
+                    media_resolution=media_resolution,
+                    media_thinking_level=media_thinking_level,
+                    base_url=base_url,
                 )
             )
 

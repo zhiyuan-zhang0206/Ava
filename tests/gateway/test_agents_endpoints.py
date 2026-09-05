@@ -122,6 +122,7 @@ def test_get_models_reasoning_effort_options_match_factory_tables() -> None:
     providers must mirror the factory's per-provider clamp tables — a drift
     would silently offer the spawn UI a value build_chat_model then clamps
     away, or hide a value the provider actually accepts."""
+    from shared.lm import provider_api
     from shared.lm._effort import _PROVIDER_EFFORT_LEVELS
     from shared.lm.registry import MODELS
 
@@ -152,7 +153,9 @@ def test_get_models_reasoning_effort_options_match_factory_tables() -> None:
         assert provider_models, f"no models registered for provider {provider!r}"
         for model in provider_models:
             assert models[model]["reasoning_effort_options"] == expected, model
-    gemini_fallback = set(_PROVIDER_EFFORT_LEVELS["gemini"])
+    gemini_binding_levels = provider_api.REGISTRY.bindings["gemini-"].effort_levels
+    assert gemini_binding_levels is not None
+    gemini_fallback = set(gemini_binding_levels)
     gemini_models = [m for m, info in models.items() if info["provider"] == "gemini"]
     assert gemini_models, "no gemini models registered for the subset check"
     for model in gemini_models:

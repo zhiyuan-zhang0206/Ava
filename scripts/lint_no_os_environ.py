@@ -76,6 +76,7 @@ _SCAN_DIRS = (
 _PROVIDER_KEY_ENV_VARS = frozenset(
     {
         "DEEPSEEK_API_KEY",  # ava_builtins/plugins/lm_deepseek
+        "GEMINI_API_KEY",  # ava_builtins/plugins/lm_google
     }
 )
 

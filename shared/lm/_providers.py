@@ -24,7 +24,7 @@ from shared.lm._effort import (
     mimo_extra_body,
     qwen_extra_body,
 )
-from shared.lm.registry import MODELS, ModelSpec, resolve_setting
+from shared.lm.registry import ModelSpec, resolve_setting
 
 
 class ThinkingConfig(TypedDict):
@@ -147,142 +147,6 @@ def _build_claude_model(
     )
 
 
-def _build_gemini_model(
-    model: str,
-    *,
-    thinking: ThinkingConfig | None,
-    resolved_effort: str,
-    disable_streaming: bool,
-    timeout: float | None = None,
-    media_resolution: str | None = None,
-    media_thinking_level: str | None = None,
-    base_url: str | None = None,
-) -> BaseChatModel:
-    """gemini-* branch: ChatGoogleGenerativeAI. include_thoughts surfaces
-    the thinking summary as canonical thinking blocks; thinking depth
-    rides thinking_level (cannot fully turn off — disabled maps to
-    "minimal" + include_thoughts=False).
-
-    Media-path extras (ava.understand): `media_resolution` maps the
-    low/medium/high setting onto Google's MediaResolution enum;
-    `media_thinking_level` carries the Gemini thinking_level vocabulary
-    explicitly (the media path maps effort itself, including the
-    `max` → configured-knob special case) and keeps include_thoughts at
-    the SDK default — the media path never surfaced thought blocks, and
-    surfacing them would change latency/cost even though the response
-    flattener drops them. `base_url` overrides the Gemini endpoint.
-    All three are None on the agent main path, so it behaves exactly as
-    before."""
-    from langchain_google_genai import ChatGoogleGenerativeAI
-
-    # Reuse GEMINI_API_KEY (already used by ava.understand). Direct
-    # construction matches the claude-/deepseek- branches; the repo has
-    # no `langchain` meta-package, so no init_chat_model dispatcher.
-    # Fail fast on missing key rather than a later server 401.
-    if settings.lm.gemini_api_key is None:
-        raise RuntimeError(
-            "GEMINI_API_KEY not set — gemini-* model needs this key; "
-            "configure in ~/.ava/.env or export before starting"
-        )
-    # include_thoughts surfaces the model's thinking summary as
-    # `{"type":"thinking", "thinking":...}` content blocks — the same
-    # shape claude/deepseek emit, so the streaming fan-out and timeline
-    # render reasoning without a provider-specific branch. Without it the
-    # model still thinks but returns zero thought blocks (no reasoning in
-    # the live view).
-    #
-    # Thinking depth rides `thinking_level`. Gemini 3.x cannot fully turn
-    # thinking off, so a caller disabling thinking (short-text paths) gets
-    # the model's lowest declared level + include_thoughts=False — dropping
-    # include_thoughts alone would only hide the thought blocks while the
-    # model keeps thinking (and billing) at its default level. Otherwise
-    # the cross-provider effort maps onto the thinking_level vocabulary;
-    # unset effort leaves thinking_level None → the model default
-    # (3.8/3.5 Flash medium, 3.1 Pro high).
-    thinking_disabled = thinking is not None and thinking.get("type") == "disabled"
-    thinking_level: str | None = None
-    if media_thinking_level is not None:
-        # Media path — the caller owns the Gemini vocabulary mapping
-        # (ava/understand.py), including the `max` → configured-knob
-        # special case; the resolved-effort path is skipped entirely so a
-        # global AVA_REASONING_EFFORT cannot silently override the media
-        # knob (historic behavior).
-        thinking_level = media_thinking_level
-    elif thinking_disabled:
-        # thinking_level is a Gemini 3.x vocabulary; older models
-        # (gemini-2.5-*) reject it with a 400 on every call (issue #190), so
-        # "disabled" is only expressible where the model declares the
-        # vocabulary. Elsewhere it is a no-op — no thinking parameters on the
-        # wire, exactly what the issue measured as working — plus a warning
-        # so the operator knows the request was not honored.
-        spec = MODELS.get(model)
-        if spec is not None and spec.effort_levels is not None:
-            thinking_level = spec.effort_levels[0] if spec.effort_levels else "minimal"
-        else:
-            logger.warning(
-                f"{model} does not support the thinking_level vocabulary; "
-                f"thinking={{'type': 'disabled'}} ignored (issue #190)"
-            )
-    elif resolved_effort:
-        # A declared model vocabulary is authoritative: 3.8 Flash does not
-        # accept `minimal`, even though the Gemini-wide fallback includes it.
-        spec = MODELS.get(model)
-        levels = (
-            spec.effort_levels
-            if spec is not None and spec.effort_levels
-            else _PROVIDER_EFFORT_LEVELS["gemini"]
-        )
-        thinking_level = _clamp_effort(
-            resolved_effort,
-            levels,
-            target="gemini",
-        )
-    # include_thoughts only on the vocabulary-supporting path: passing it to a
-    # model that rejects thinking parameters would 400 exactly like
-    # thinking_level (issue #190). Unsupported models keep the SDK default;
-    # the non-disabled path keeps its historical include_thoughts=True.
-    if media_thinking_level is not None:
-        # Media path historic behavior: the field was never set on the
-        # ChatGoogleGenerativeAI constructor, so leave it at the SDK default
-        # (None) — do not surface thought blocks.
-        include_thoughts: bool | None = None
-    elif thinking_disabled and thinking_level is None:
-        include_thoughts = None
-    else:
-        include_thoughts = not thinking_disabled
-    # Media-resolution mapping (ava.understand's media path). The enum import
-    # is lazy like the model class itself so the google-genai SDK binding
-    # stays inside this provider branch.
-    media_resolution_value: Any | None = None
-    if media_resolution is not None:
-        from google.genai.types import MediaResolution
-
-        resolutions = {
-            "low": MediaResolution.MEDIA_RESOLUTION_LOW,
-            "medium": MediaResolution.MEDIA_RESOLUTION_MEDIUM,
-            "high": MediaResolution.MEDIA_RESOLUTION_HIGH,
-        }
-        try:
-            media_resolution_value = resolutions[media_resolution]
-        except KeyError:
-            raise ValueError(
-                f"media_resolution must be one of {sorted(resolutions)}, got {media_resolution!r}"
-            ) from None
-    kwargs: dict[str, Any] = {
-        "model": model,  # type: ignore[call-arg]
-        "google_api_key": settings.lm.gemini_api_key.get_secret_value(),  # type: ignore[arg-type]
-        "include_thoughts": include_thoughts,
-        "thinking_level": thinking_level,  # type: ignore[arg-type]
-        "disable_streaming": disable_streaming,
-        "timeout": timeout,
-    }
-    if media_resolution_value is not None:
-        kwargs["media_resolution"] = media_resolution_value
-    if base_url is not None:
-        kwargs["base_url"] = base_url
-    return ChatGoogleGenerativeAI(**kwargs)
-
-
 def _build_gpt_model(
     model: str,
     *,
@@ -297,7 +161,7 @@ def _build_gpt_model(
     Completions path returns zero reasoning.)"""
     from langchain_openai import ChatOpenAI
 
-    # Direct construction, same rationale as the gemini- branch.
+    # Direct construction keeps this SDK-specific path explicit.
     if settings.lm.openai_api_key is None:
         raise RuntimeError(
             "OPENAI_API_KEY not set — gpt-* model needs this key; "

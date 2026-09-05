@@ -33,7 +33,7 @@ class TestBuildChatModel:
     ) -> None:
         """The builder—not only spawn validation—must protect restarted agents
         whose frozen model configuration still names Gemini 3.8 Flash."""
-        monkeypatch.setattr(settings.lm, "gemini_api_key", SecretStr("sk-gemini-test"))
+        monkeypatch.setenv("GEMINI_API_KEY", "sk-gemini-test")
         from langchain_google_genai import ChatGoogleGenerativeAI
 
         llm = build_chat_model("gemini-3.8-flash")
@@ -276,7 +276,7 @@ class TestBuildChatModel:
 
     def test_gemini_branch_builds(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(settings.lm, "llm_override", "")
-        monkeypatch.setattr(settings.lm, "gemini_api_key", SecretStr("k"))
+        monkeypatch.setenv("GEMINI_API_KEY", "k")
         m = build_chat_model("gemini-3.1-pro-preview")
         from langchain_google_genai import ChatGoogleGenerativeAI
 
@@ -284,7 +284,7 @@ class TestBuildChatModel:
 
     def test_gemini_missing_key_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(settings.lm, "llm_override", "")
-        monkeypatch.setattr(settings.lm, "gemini_api_key", None)
+        monkeypatch.delenv("GEMINI_API_KEY", raising=False)
         with pytest.raises(RuntimeError, match="GEMINI_API_KEY"):
             build_chat_model("gemini-3.1-pro-preview")
 
@@ -294,7 +294,7 @@ class TestBuildChatModel:
         `{"type":"thinking","thinking":...}` content blocks, same shape as claude/deepseek,
         reusing the existing streaming/timeline path without a provider branch."""
         monkeypatch.setattr(settings.lm, "llm_override", "")
-        monkeypatch.setattr(settings.lm, "gemini_api_key", SecretStr("k"))
+        monkeypatch.setenv("GEMINI_API_KEY", "k")
         from langchain_google_genai import ChatGoogleGenerativeAI
 
         m = build_chat_model("gemini-3.5-flash")
@@ -308,7 +308,7 @@ class TestBuildChatModel:
         no thought blocks returned. Symmetric with deepseek thinking-disabled skipping effort
         injection: the caller explicitly disables reasoning, so thinking should not be emitted."""
         monkeypatch.setattr(settings.lm, "llm_override", "")
-        monkeypatch.setattr(settings.lm, "gemini_api_key", SecretStr("k"))
+        monkeypatch.setenv("GEMINI_API_KEY", "k")
         from langchain_google_genai import ChatGoogleGenerativeAI
 
         m = build_chat_model("gemini-3.5-flash", thinking={"type": "disabled"})
@@ -321,7 +321,7 @@ class TestBuildChatModel:
         base_url overrides the endpoint. include_thoughts stays at the SDK
         default (None) — the media path never surfaced thought blocks."""
         monkeypatch.setattr(settings.lm, "llm_override", "")
-        monkeypatch.setattr(settings.lm, "gemini_api_key", SecretStr("k"))
+        monkeypatch.setenv("GEMINI_API_KEY", "k")
         from google.genai.types import MediaResolution
         from langchain_google_genai import ChatGoogleGenerativeAI
 
@@ -339,7 +339,7 @@ class TestBuildChatModel:
 
     def test_gemini_media_resolution_maps_each_level(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(settings.lm, "llm_override", "")
-        monkeypatch.setattr(settings.lm, "gemini_api_key", SecretStr("k"))
+        monkeypatch.setenv("GEMINI_API_KEY", "k")
         from google.genai.types import MediaResolution
         from langchain_google_genai import ChatGoogleGenerativeAI
 
@@ -354,7 +354,7 @@ class TestBuildChatModel:
 
     def test_gemini_invalid_media_resolution_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(settings.lm, "llm_override", "")
-        monkeypatch.setattr(settings.lm, "gemini_api_key", SecretStr("k"))
+        monkeypatch.setenv("GEMINI_API_KEY", "k")
         with pytest.raises(ValueError, match="media_resolution"):
             build_chat_model("gemini-3.5-flash", media_resolution="ultra")
 
@@ -621,7 +621,7 @@ class TestBuildChatModel:
     def test_gemini_defaults_to_streaming(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """gemini-* carries no registry streaming opt-out → default streaming=True."""
         monkeypatch.setattr(settings.lm, "llm_override", "")
-        monkeypatch.setattr(settings.lm, "gemini_api_key", SecretStr("k"))
+        monkeypatch.setenv("GEMINI_API_KEY", "k")
         from langchain_google_genai import ChatGoogleGenerativeAI
 
         m = build_chat_model("gemini-3.5-flash")
@@ -643,7 +643,7 @@ class TestBuildChatModel:
         non-Kimi). The caller should be able to force non-streaming
         regardless of the model catalog."""
         monkeypatch.setattr(settings.lm, "llm_override", "")
-        monkeypatch.setattr(settings.lm, "gemini_api_key", SecretStr("k"))
+        monkeypatch.setenv("GEMINI_API_KEY", "k")
         from langchain_google_genai import ChatGoogleGenerativeAI
 
         m = build_chat_model("gemini-3.5-flash", streaming=False)
@@ -858,7 +858,7 @@ class TestReasoningEffortDispatch:
 
     def test_gemini_effort_maps_to_thinking_level(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(settings.lm, "llm_override", "")
-        monkeypatch.setattr(settings.lm, "gemini_api_key", SecretStr("k"))
+        monkeypatch.setenv("GEMINI_API_KEY", "k")
         monkeypatch.setattr(settings.lm, "reasoning_effort", "low")
         from langchain_google_genai import ChatGoogleGenerativeAI
 
@@ -869,7 +869,7 @@ class TestReasoningEffortDispatch:
     def test_gemini_max_clamps_to_high(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """gemini's thinking_level vocabulary only goes up to high — max/xhigh clamp to high."""
         monkeypatch.setattr(settings.lm, "llm_override", "")
-        monkeypatch.setattr(settings.lm, "gemini_api_key", SecretStr("k"))
+        monkeypatch.setenv("GEMINI_API_KEY", "k")
         monkeypatch.setattr(settings.lm, "reasoning_effort", "max")
         from langchain_google_genai import ChatGoogleGenerativeAI
 
@@ -882,7 +882,7 @@ class TestReasoningEffortDispatch:
     ) -> None:
         """effort empty → thinking_level=None → model default tier (Flash medium / Pro high)."""
         monkeypatch.setattr(settings.lm, "llm_override", "")
-        monkeypatch.setattr(settings.lm, "gemini_api_key", SecretStr("k"))
+        monkeypatch.setenv("GEMINI_API_KEY", "k")
         monkeypatch.setattr(settings.lm, "reasoning_effort", "")
         from langchain_google_genai import ChatGoogleGenerativeAI
 
@@ -897,7 +897,7 @@ class TestReasoningEffortDispatch:
         only disabling include_thoughts still causes the model to think and bill, so we must also
         set thinking_level='minimal' to be a cost switch."""
         monkeypatch.setattr(settings.lm, "llm_override", "")
-        monkeypatch.setattr(settings.lm, "gemini_api_key", SecretStr("k"))
+        monkeypatch.setenv("GEMINI_API_KEY", "k")
         monkeypatch.setattr(settings.lm, "reasoning_effort", "high")
         from langchain_google_genai import ChatGoogleGenerativeAI
 
@@ -1265,12 +1265,16 @@ class TestValidateModelConfig:
             "dashscope_api_key",
         ):
             monkeypatch.setattr(settings.lm, attr, None)
+        monkeypatch.delenv("GEMINI_API_KEY", raising=False)
 
     @staticmethod
-    def _set_deepseek_plugin_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    def _set_plugin_keys(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(
             "shared.runtime_config.read_env_aliases",
-            lambda: {"DEEPSEEK_API_KEY": "sk-test"},
+            lambda: {
+                "DEEPSEEK_API_KEY": "sk-test",
+                "GEMINI_API_KEY": "sk-test",
+            },
         )
 
     # --- model resolution -------------------------------------------------------
@@ -1278,7 +1282,7 @@ class TestValidateModelConfig:
     def test_model_from_config_wins_over_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """config.llm_model takes precedence over the cluster default."""
         self._clear_all_keys(monkeypatch)
-        self._set_deepseek_plugin_key(monkeypatch)
+        self._set_plugin_keys(monkeypatch)
         result = validate_model_config(
             model="claude-sonnet-5",
             config={"llm_model": "deepseek-v4-pro"},
@@ -1290,7 +1294,7 @@ class TestValidateModelConfig:
     ) -> None:
         """When config doesn't have llm_model, use the cluster default."""
         self._clear_all_keys(monkeypatch)
-        self._set_deepseek_plugin_key(monkeypatch)
+        self._set_plugin_keys(monkeypatch)
         result = validate_model_config(
             model="deepseek-v4-pro",
             config={"some_other_key": "value"},
@@ -1302,7 +1306,7 @@ class TestValidateModelConfig:
     ) -> None:
         """When config=None, use the cluster default."""
         self._clear_all_keys(monkeypatch)
-        self._set_deepseek_plugin_key(monkeypatch)
+        self._set_plugin_keys(monkeypatch)
         result = validate_model_config(model="deepseek-v4-pro", config=None)
         assert result == "deepseek-v4-pro"
 
@@ -1326,13 +1330,13 @@ class TestValidateModelConfig:
     def test_known_model_succeeds(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Registered model → returns model name."""
         self._clear_all_keys(monkeypatch)
-        self._set_deepseek_plugin_key(monkeypatch)
+        self._set_plugin_keys(monkeypatch)
         result = validate_model_config(model="deepseek-v4-pro")
         assert result == "deepseek-v4-pro"
 
     def test_all_supported_models_pass_name_check(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Every model in SUPPORTED_MODELS passes the name check."""
-        self._set_deepseek_plugin_key(monkeypatch)
+        self._set_plugin_keys(monkeypatch)
         all_models = [
             m
             for models in __import__(
@@ -1343,7 +1347,7 @@ class TestValidateModelConfig:
         for m in all_models:
             # Only testing name existence, not key (key validation is separate)
             monkeypatch.setattr(settings.lm, "anthropic_api_key", SecretStr("sk-test-anthropic"))
-            monkeypatch.setattr(settings.lm, "gemini_api_key", SecretStr("sk-test-gemini"))
+            self._set_plugin_keys(monkeypatch)
             monkeypatch.setattr(settings.lm, "openai_api_key", SecretStr("sk-test-openai"))
             monkeypatch.setattr(settings.lm, "xiaomi_api_key", SecretStr("sk-test-mimo"))
             monkeypatch.setattr(settings.lm, "moonshot_api_key", SecretStr("sk-test-moonshot"))
@@ -1384,6 +1388,7 @@ class TestValidateModelConfig:
     def test_missing_gemini_key_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """GEMINI_API_KEY not set → ValueError."""
         self._clear_all_keys(monkeypatch)
+        monkeypatch.setattr("shared.runtime_config.read_env_aliases", dict)
         with pytest.raises(ValueError, match="GEMINI_API_KEY"):
             validate_model_config(model="gemini-3.5-flash")
 
@@ -1427,7 +1432,7 @@ class TestValidateModelConfig:
     def test_config_model_with_missing_key_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """config.llm_model points to a provider with missing key → ValueError (not the cluster default's key)."""
         self._clear_all_keys(monkeypatch)
-        self._set_deepseek_plugin_key(monkeypatch)
+        self._set_plugin_keys(monkeypatch)
         # The cluster default has its plugin key, but config picks claude → fail.
         with pytest.raises(ValueError, match="ANTHROPIC_API_KEY"):
             validate_model_config(
@@ -1448,7 +1453,7 @@ class TestValidateModelConfig:
     def test_config_with_non_string_model_ignores(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """config.llm_model is not a str → ignored, fallback to cluster default."""
         self._clear_all_keys(monkeypatch)
-        self._set_deepseek_plugin_key(monkeypatch)
+        self._set_plugin_keys(monkeypatch)
         result = validate_model_config(
             model="deepseek-v4-pro",
             config={"llm_model": 42},  # not a string
@@ -1468,7 +1473,7 @@ class TestValidateModelConfig:
         """An existing Gemini 3.8 configuration is accepted but runs on the
         explicitly registered Gemini 3.7 fallback."""
         self._clear_all_keys(monkeypatch)
-        monkeypatch.setattr(settings.lm, "gemini_api_key", SecretStr("sk-test"))
+        self._set_plugin_keys(monkeypatch)
 
         result = validate_model_config(model="gemini-3.8-flash")
 
@@ -1496,6 +1501,7 @@ class TestThinkingDisabledAcrossRoster:
         for attr in self._ALL_KEY_FIELDS:
             monkeypatch.setattr(settings.lm, attr, SecretStr("sk-test"))
         monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test")
+        monkeypatch.setenv("GEMINI_API_KEY", "sk-test")
 
     @pytest.mark.parametrize("model", [m for models in SUPPORTED_MODELS.values() for m in models])
     def test_roster_model_constructs_with_thinking_disabled(
@@ -1513,7 +1519,7 @@ class TestThinkingDisabledAcrossRoster:
         """gemini-2.5-flash has no thinking_level vocabulary: disabled must not
         put thinking parameters on the wire (the 400 of issue #190) and must
         warn instead of silently dropping the request."""
-        monkeypatch.setattr(settings.lm, "gemini_api_key", SecretStr("sk-test"))
+        monkeypatch.setenv("GEMINI_API_KEY", "sk-test")
         from langchain_google_genai import ChatGoogleGenerativeAI
 
         llm = build_chat_model("gemini-2.5-flash", thinking={"type": "disabled"})
@@ -1529,7 +1535,7 @@ class TestThinkingDisabledAcrossRoster:
     ) -> None:
         """Gemini 3.1 rejects `minimal`, so disabled thinking maps to its
         lowest declared level while retaining no thought blocks on the wire."""
-        monkeypatch.setattr(settings.lm, "gemini_api_key", SecretStr("sk-test"))
+        monkeypatch.setenv("GEMINI_API_KEY", "sk-test")
         from langchain_google_genai import ChatGoogleGenerativeAI
 
         llm = build_chat_model("gemini-3.1-pro-preview", thinking={"type": "disabled"})

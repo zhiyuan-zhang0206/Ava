@@ -103,10 +103,12 @@ def provider_plugin() -> Generator[Callable[..., None], None, None]:
     prices_snapshot = dict(pricing._PLUGIN_PRICES)
     stop_snapshot = dict(stop._BY_PROVIDER)
     for model_id in tuple(MODELS):
-        if model_id.startswith("deepseek-"):
+        if model_id.startswith(("deepseek-", "gemini-")):
             MODELS.pop(model_id)
             pricing._PLUGIN_PRICES.pop(model_id, None)
     provider_api.REGISTRY.bindings.pop("deepseek-", None)
+    provider_api.REGISTRY.bindings.pop("gemini-", None)
+    stop._BY_PROVIDER.pop("google_genai", None)
     _rebuild_derived_views()
     # Tests share one session AVA_HOME — remove anything this test created so
     # a later test's loader scan cannot see leftover plugin dirs.
@@ -205,6 +207,45 @@ def test_repo_deepseek_provider_is_enabled_and_registers_complete_contract() -> 
     assert binding.stop_spec is None
 
 
+def test_repo_google_provider_is_enabled_and_registers_complete_contract() -> None:
+    discovered = plugins_config._discover_plugins()
+    config = plugins_config.load_for_runtime(set(discovered))
+
+    assert config.plugins["lm_google"].enabled
+    ensure_provider_plugins_loaded()
+
+    gemini_models = {
+        "gemini-3.8-flash",
+        "gemini-3.7-flash",
+        "gemini-3.5-flash",
+        "gemini-3.1-pro-preview",
+        "gemini-2.5-pro",
+        "gemini-2.5-flash",
+    }
+    assert gemini_models <= MODELS.keys()
+    assert set(SUPPORTED_MODELS["gemini"]) == {
+        "gemini-3.7-flash",
+        "gemini-3.5-flash",
+        "gemini-3.1-pro-preview",
+    }
+    assert pricing.model_vendor("gemini-3.8-flash") == "google"
+
+    from shared.lm.factory import _MODEL_KEY_MAP, provider_key_map
+
+    assert "gemini-" not in _MODEL_KEY_MAP
+    assert provider_key_map()["gemini-"] == ("Google", None, "GEMINI_API_KEY")
+    binding = provider_api.REGISTRY.bindings["gemini-"]
+    assert binding.effort_levels == ("minimal", "low", "medium", "high")
+    assert not binding.anthropic_protocol
+    assert binding.vision
+    assert binding.stop_spec == stop.StopSpec(
+        "google_genai",
+        "finish_reason",
+        frozenset({"STOP"}),
+        frozenset({"MAX_TOKENS"}),
+    )
+
+
 def test_plugin_model_registers_and_builds(provider_plugin: Callable[..., None]) -> None:
     provider_plugin()
     ensure_provider_plugins_loaded()
@@ -261,8 +302,19 @@ def test_plugin_binding_effort_levels_reach_build_context(
     monkeypatch.setitem(provider_api.REGISTRY.bindings, binding.prefix, binding)
     monkeypatch.setattr("shared.lm.factory.ensure_provider_plugins_loaded", lambda: None)
 
-    assert isinstance(build_chat_model("testctx-model"), FakeListChatModel)
+    assert isinstance(
+        build_chat_model(
+            "testctx-model",
+            media_resolution="high",
+            media_thinking_level="low",
+            base_url="https://example.com/v1",
+        ),
+        FakeListChatModel,
+    )
     assert contexts[0].effort_levels == ("low", "high")
+    assert contexts[0].media_resolution == "high"
+    assert contexts[0].media_thinking_level == "low"
+    assert contexts[0].base_url == "https://example.com/v1"
 
 
 def test_plugin_model_validation_and_key_check(
