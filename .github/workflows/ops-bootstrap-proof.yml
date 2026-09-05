@@ -21,7 +21,7 @@ jobs:
         with:
           version: 0.10.2
       - uses: ./.github/actions/install-pg-redis
-      - run: uv sync --frozen
+      - uses: ./.github/actions/uv-sync
       - run: uv run pytest tests/shared/test_daemon_http.py tests/shared/test_daemon_health.py tests/shared/test_managed_writer_barrier.py tests/shared/test_managed_writer_observation.py -q
       - name: Verify consumed restart does not claim completion
         run: uv run pytest tests/ops/test_restart_fallback_scenario.py -q -s

@@ -22,7 +22,7 @@ jobs:
         with:
           version: 0.10.2
       - uses: ./.github/actions/install-pg-redis
-      - run: uv sync --frozen
+      - uses: ./.github/actions/uv-sync
       - run: uv run pyright shared/lifecycle_acceptance.py ops/cold_lifecycle.py ops/lifecycle_recovery.py tests/ops/test_cold_lifecycle.py
       - name: Verify failed-command terminal and explicit-only recovery through actual consumers
         shell: bash
