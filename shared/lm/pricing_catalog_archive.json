@@ -589,6 +589,121 @@
           ]
         }
       ]
+    },
+    "gpt-5.6-sol": {
+      "vendor": "openai",
+      "source_url": "https://openai.com/api/pricing/",
+      "source_checked_at": "2026-06-27",
+      "periods": [
+        {
+          "effective_from": null,
+          "effective_until": null,
+          "tiers": [
+            {
+              "input_tokens_min": 0,
+              "input_tokens_max": null,
+              "rates": {
+                "input": "5.0",
+                "cache_read": "0.5",
+                "output": "30.0"
+              },
+              "utc_daily_overrides": []
+            }
+          ]
+        }
+      ]
+    },
+    "gpt-5.6-terra": {
+      "vendor": "openai",
+      "source_url": "https://developers.openai.com/api/docs/models/gpt-5.6-terra",
+      "source_checked_at": "2026-07-30",
+      "periods": [
+        {
+          "effective_from": null,
+          "effective_until": null,
+          "tiers": [
+            {
+              "input_tokens_min": 0,
+              "input_tokens_max": null,
+              "rates": {
+                "input": "2.0",
+                "cache_read": "0.20",
+                "output": "12.0"
+              },
+              "utc_daily_overrides": []
+            }
+          ]
+        }
+      ]
+    },
+    "gpt-5.6-luna": {
+      "vendor": "openai",
+      "source_url": "https://developers.openai.com/api/docs/models/gpt-5.6-luna",
+      "source_checked_at": "2026-07-30",
+      "periods": [
+        {
+          "effective_from": null,
+          "effective_until": null,
+          "tiers": [
+            {
+              "input_tokens_min": 0,
+              "input_tokens_max": null,
+              "rates": {
+                "input": "0.20",
+                "cache_read": "0.02",
+                "output": "1.20"
+              },
+              "utc_daily_overrides": []
+            }
+          ]
+        }
+      ]
+    },
+    "gpt-5.5": {
+      "vendor": "openai",
+      "source_url": "https://openai.com/api/pricing/",
+      "source_checked_at": "2026-06-27",
+      "periods": [
+        {
+          "effective_from": null,
+          "effective_until": null,
+          "tiers": [
+            {
+              "input_tokens_min": 0,
+              "input_tokens_max": null,
+              "rates": {
+                "input": "5.0",
+                "cache_read": "0.5",
+                "output": "30.0"
+              },
+              "utc_daily_overrides": []
+            }
+          ]
+        }
+      ]
+    },
+    "gpt-5.4-mini": {
+      "vendor": "openai",
+      "source_url": "https://openai.com/api/pricing/",
+      "source_checked_at": "2026-06-27",
+      "periods": [
+        {
+          "effective_from": null,
+          "effective_until": null,
+          "tiers": [
+            {
+              "input_tokens_min": 0,
+              "input_tokens_max": null,
+              "rates": {
+                "input": "0.75",
+                "cache_read": "0.075",
+                "output": "4.5"
+              },
+              "utc_daily_overrides": []
+            }
+          ]
+        }
+      ]
     }
   }
 }

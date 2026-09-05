@@ -101,14 +101,12 @@ def test_pricing_catalog_schema_v2_vendor_lock() -> None:
     }
     assert {
         "gemini-embedding-2": models["gemini-embedding-2"]["vendor"],
-        "gpt-5.6-sol": models["gpt-5.6-sol"]["vendor"],
         "mimo-v2.5-pro": models["mimo-v2.5-pro"]["vendor"],
         "kimi-k3": models["kimi-k3"]["vendor"],
         "glm-5.3": models["glm-5.3"]["vendor"],
         "qwen3.8-max": models["qwen3.8-max"]["vendor"],
     } == {
         "gemini-embedding-2": "google",
-        "gpt-5.6-sol": "openai",
         "mimo-v2.5-pro": "xiaomi",
         "kimi-k3": "moonshot",
         "glm-5.3": "zhipu",
@@ -169,9 +167,25 @@ def test_anthropic_catalog_entries_live_only_in_the_archive() -> None:
     assert expected <= archive_models.keys()
 
 
+def test_openai_catalog_entries_live_only_in_the_archive() -> None:
+    runtime_models = _pricing_catalog_models(_pricing_catalog_raw())
+    archive_models = _pricing_catalog_models(_pricing_archive_raw())
+    expected = {
+        "gpt-5.6-sol",
+        "gpt-5.6-terra",
+        "gpt-5.6-luna",
+        "gpt-5.5",
+        "gpt-5.4-mini",
+    }
+
+    assert expected.isdisjoint(runtime_models)
+    assert expected <= archive_models.keys()
+
+
 def test_model_vendor_returns_catalog_vendor_or_none() -> None:
     assert model_vendor("claude-sonnet-5") == "anthropic"
     assert model_vendor("deepseek-v4-pro") == "deepseek"
+    assert model_vendor("gpt-5.6-sol") == "openai"
     assert model_vendor("qwen3.8-flash") == "alibaba"
     assert model_vendor("no-such-model") is None
 
@@ -190,13 +204,13 @@ def test_parse_catalog_v2_rejects_missing_or_empty_vendor(vendor: str | None) ->
     raw = copy.deepcopy(_pricing_catalog_raw())
     raw["schema_version"] = 2
     models = _pricing_catalog_models(raw)
-    entry = models["gpt-5.6-sol"]
+    entry = models["mimo-v2.5-pro"]
     if vendor is None:
         entry.pop("vendor", None)
     else:
         entry["vendor"] = vendor
 
-    with pytest.raises(RuntimeError, match=r"gpt-5\.6-sol"):
+    with pytest.raises(RuntimeError, match=r"mimo-v2\.5-pro"):
         _parse_catalog(raw)
 
 
@@ -209,7 +223,7 @@ def test_parse_catalog_v1_allows_missing_vendor() -> None:
 
     catalog = _parse_catalog(raw)
 
-    assert catalog["gpt-5.6-sol"].vendor is None
+    assert catalog["mimo-v2.5-pro"].vendor is None
 
 
 def test_parse_catalog_rejects_empty_models_mapping() -> None:
@@ -474,6 +488,32 @@ def test_anthropic_plugin_prices_equal_archive_current_base_tier(
         "claude-opus-4-7",
         "claude-opus-4-6",
         "claude-haiku-4-5",
+    )
+    plugin_rates = {model: pricing._PLUGIN_PRICES[model].rates for model in model_ids}
+    archive_raw = _pricing_archive_raw()
+    archive_models = _pricing_catalog_models(archive_raw)
+    monkeypatch.setattr(pricing, "_CATALOG", _parse_catalog(archive_raw))
+    current_instant = datetime(2026, 9, 5, tzinfo=UTC)
+
+    for model in model_ids:
+        selected = rates_at(model, current_instant, input_tokens=0)
+        assert selected is not None
+        assert plugin_rates[model].as_tuple() == pytest.approx(selected.as_tuple())  # pyright: ignore[reportUnknownMemberType]
+        assert pricing.plugin_price_provenance(model) == (
+            archive_models[model]["source_url"],
+            archive_models[model]["source_checked_at"],
+        )
+
+
+def test_openai_plugin_prices_equal_archive_current_base_tier(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    model_ids = (
+        "gpt-5.6-sol",
+        "gpt-5.6-terra",
+        "gpt-5.6-luna",
+        "gpt-5.5",
+        "gpt-5.4-mini",
     )
     plugin_rates = {model: pricing._PLUGIN_PRICES[model].rates for model in model_ids}
     archive_raw = _pricing_archive_raw()

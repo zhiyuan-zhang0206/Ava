@@ -1,9 +1,9 @@
 """Plugin provider key validation and model media capability tests.
 
-Anthropic, DeepSeek, and Gemini are provider plugins, so their key declarations are
-plugin-owned and the cluster's `.env` file is the only spawn-validation source.
-The legacy Settings fields stay for configuration compatibility but no longer
-authorize a spawn.
+Anthropic, DeepSeek, Gemini, and OpenAI are provider plugins, so their key
+declarations are plugin-owned and the cluster's `.env` file is the only
+spawn-validation source. The legacy Settings fields stay for configuration
+compatibility but no longer authorize a spawn.
 """
 
 from __future__ import annotations
@@ -70,6 +70,20 @@ def test_anthropic_plugin_key_ignores_legacy_settings_field(
         validate_model_config(model="claude-sonnet-5", config={})
 
 
+def test_openai_plugin_key_ignores_legacy_settings_field(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The migrated OpenAI binding also reads only its declared env channel."""
+    monkeypatch.setattr(settings.lm, "openai_api_key", "sk-test")
+    monkeypatch.setattr(settings.lm, "llm_override", "")
+    monkeypatch.setattr("shared.runtime_config.read_env_aliases", dict)
+    ensure_provider_plugins_loaded()
+
+    assert provider_key_map()["gpt-"] == ("OpenAI", None, "OPENAI_API_KEY")
+    with pytest.raises(ValueError, match="OPENAI_API_KEY"):
+        validate_model_config(model="gpt-5.6-sol", config={})
+
+
 def test_file_fallback_allows_key_after_gateway_pop(env_file: Path) -> None:
     """A plugin key declared in the cluster `.env` authorizes the model."""
     env_file.write_text("DEEPSEEK_API_KEY=sk-file-value\n")
@@ -111,7 +125,8 @@ class TestModelSupportsVision:
 
     def test_unregistered_id_falls_back_to_prefix(self) -> None:
         # config_overlay experiments and retired aliases keep the old prefix
-        # behavior: Anthropic and Gemini plugin ids pass, a DeepSeek id does not.
+        # behavior: vision-capable plugin ids pass, a DeepSeek id does not.
         assert model_supports_vision("claude-unknown-id") is True
         assert model_supports_vision("gemini-4-experiment") is True
+        assert model_supports_vision("gpt-unknown-id") is True
         assert model_supports_vision("deepseek-unknown-id") is False

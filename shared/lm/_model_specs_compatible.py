@@ -233,17 +233,4 @@ COMPATIBLE_MODELS: dict[str, ModelSpec] = {
         # same conservatism as qwen3.8-max's entry.
         media_types=frozenset({"image"}),
     ),
-    # -- legacy / non-spawnable (facts kept for old agents) --
-    "gpt-5.5": ModelSpec(
-        provider="gpt",
-        context_window=256_000,
-        knowledge_cutoff="2025-12",
-        media_types=frozenset({"image"}),
-    ),
-    "gpt-5.4-mini": ModelSpec(
-        provider="gpt",
-        context_window=256_000,
-        knowledge_cutoff="2025-08",
-        media_types=frozenset({"image"}),
-    ),
 }

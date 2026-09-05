@@ -103,12 +103,13 @@ def provider_plugin() -> Generator[Callable[..., None], None, None]:
     prices_snapshot = dict(pricing._PLUGIN_PRICES)
     stop_snapshot = dict(stop._BY_PROVIDER)
     for model_id in tuple(MODELS):
-        if model_id.startswith(("claude-", "deepseek-", "gemini-")):
+        if model_id.startswith(("claude-", "deepseek-", "gemini-", "gpt-")):
             MODELS.pop(model_id)
             pricing._PLUGIN_PRICES.pop(model_id, None)
     provider_api.REGISTRY.bindings.pop("claude-", None)
     provider_api.REGISTRY.bindings.pop("deepseek-", None)
     provider_api.REGISTRY.bindings.pop("gemini-", None)
+    provider_api.REGISTRY.bindings.pop("gpt-", None)
     stop._BY_PROVIDER.pop("google_genai", None)
     _rebuild_derived_views()
     # Tests share one session AVA_HOME — remove anything this test created so
@@ -287,6 +288,39 @@ def test_repo_anthropic_provider_is_enabled_and_registers_complete_contract() ->
     assert binding.stop_spec is None
 
 
+def test_repo_openai_provider_is_enabled_and_registers_complete_contract() -> None:
+    discovered = plugins_config._discover_plugins()
+    config = plugins_config.load_for_runtime(set(discovered))
+
+    assert config.plugins["lm_openai"].enabled
+    ensure_provider_plugins_loaded()
+
+    gpt_models = {
+        "gpt-5.6-sol",
+        "gpt-5.6-terra",
+        "gpt-5.6-luna",
+        "gpt-5.5",
+        "gpt-5.4-mini",
+    }
+    assert gpt_models <= MODELS.keys()
+    assert set(SUPPORTED_MODELS["gpt"]) == {
+        "gpt-5.6-sol",
+        "gpt-5.6-terra",
+        "gpt-5.6-luna",
+    }
+    assert pricing.model_vendor("gpt-5.6-sol") == "openai"
+
+    from shared.lm.factory import _MODEL_KEY_MAP, provider_key_map
+
+    assert "gpt-" not in _MODEL_KEY_MAP
+    assert provider_key_map()["gpt-"] == ("OpenAI", None, "OPENAI_API_KEY")
+    binding = provider_api.REGISTRY.bindings["gpt-"]
+    assert binding.effort_levels == ("none", "low", "medium", "high", "xhigh", "max")
+    assert not binding.anthropic_protocol
+    assert binding.vision
+    assert binding.stop_spec is None
+
+
 def test_plugin_model_registers_and_builds(provider_plugin: Callable[..., None]) -> None:
     provider_plugin()
     ensure_provider_plugins_loaded()
@@ -302,7 +336,7 @@ def test_plugin_model_registers_and_builds(provider_plugin: Callable[..., None])
     llm = build_chat_model("testp-1")
     assert isinstance(llm, FakeListChatModel)
     # An id under the plugin's prefix that has no registry entry still
-    # dispatches (matching the gemini/gpt core branches): the builder receives
+    # dispatches (matching the repo provider plugins): the builder receives
     # spec=None and decides its own posture.
     llm2 = build_chat_model("testp-2")
     assert isinstance(llm2, FakeListChatModel)
@@ -456,7 +490,7 @@ def test_core_prefix_cannot_be_shadowed(provider_plugin: Callable[..., None]) ->
     with pytest.raises(ValueError, match="already claimed"):
         provider_api.register(
             provider_api.ProviderBinding(
-                prefix="gpt-",
+                prefix="mimo-",
                 display_name="Shadow",
                 key_env="X",
                 build=lambda _ctx: FakeListChatModel(responses=["x"]),
@@ -472,7 +506,7 @@ def test_loader_reserves_core_prefixes_before_bootstrap_can_load_a_plugin(
     """Bootstrap may be the first provider consumer, before factory import setup."""
     reserved = set(provider_api.REGISTRY._reserved_prefixes)
     provider_api.REGISTRY._reserved_prefixes.clear()
-    provider_plugin(prefix="gpt-", model="gpt-test")
+    provider_plugin(prefix="mimo-", model="mimo-test")
     try:
         with pytest.raises(RuntimeError) as excinfo:
             ensure_provider_plugins_loaded()
@@ -537,7 +571,7 @@ def test_plugin_price_must_name_registered_model() -> None:
 
 def test_duplicate_model_id_rejected() -> None:
     with pytest.raises(RuntimeError, match="already registered"):
-        register_models("testp", {"gpt-5.6-sol": ModelSpec(provider="testp")})
+        register_models("testp", {"mimo-v2.5-pro": ModelSpec(provider="testp")})
 
 
 def test_spawnable_model_without_price_rejected(provider_plugin: Callable[..., None]) -> None:

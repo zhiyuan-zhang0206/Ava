@@ -174,10 +174,6 @@ class ModelSpec:
     tuning: ModelTuning = field(default_factory=ModelTuning)
 
 
-# Effort vocabulary shared by every GPT model — named once so the core entries
-# stay readable; it remains per-model data.
-_GPT_EFFORT = ("none", "low", "medium", "high", "xhigh", "max")
-
 # These classes remain public through shared.lm.registry; preserve their
 # historical identity for introspection and pickle compatibility.
 ModelTuning.__module__ = "shared.lm.registry"

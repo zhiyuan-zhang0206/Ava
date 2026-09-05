@@ -239,5 +239,5 @@ def test_media_types_use_registry_plugin_then_vision_prefix_fallback(
         {"image", "pdf", "audio", "video"}
     )
     assert media_types_for_model("attachment-plugin-unregistered") == frozenset({"image"})
-    assert media_types_for_model("gpt-unknown-x") == frozenset({"image"})
+    assert media_types_for_model("kimi-unknown-x") == frozenset({"image"})
     assert media_types_for_model("deepseek-unknown-x") == frozenset()

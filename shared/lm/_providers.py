@@ -45,55 +45,6 @@ class ThinkingConfig(TypedDict):
     display: NotRequired[Literal["summarized", "omitted"]]
 
 
-def _build_gpt_model(
-    model: str,
-    *,
-    thinking: ThinkingConfig | None,
-    resolved_effort: str,
-    disable_streaming: bool,
-    timeout: float | None = None,
-) -> BaseChatModel:
-    """gpt-* branch: ChatOpenAI on the Responses API. `reasoning.{effort,
-    summary}` returns the reasoning summary as a canonical block; a
-    caller disabling thinking drops to effort "none". (The Chat
-    Completions path returns zero reasoning.)"""
-    from langchain_openai import ChatOpenAI
-
-    # Direct construction keeps this SDK-specific path explicit.
-    if settings.lm.openai_api_key is None:
-        raise RuntimeError(
-            "OPENAI_API_KEY not set — gpt-* model needs this key; "
-            "configure in ~/.ava/.env or export before starting"
-        )
-    # The Chat Completions path returns zero reasoning. The Responses API
-    # with `reasoning.{effort,summary}` returns the model's reasoning
-    # summary as a `{"type":"reasoning","summary":[{"type":"summary_text",
-    # "text":...}]}` content block, streamed incrementally — the streaming
-    # fan-out and timeline pull the visible text out of summary[].text
-    # (folded to the canonical `thinking` shape by shared.lm.reasoning).
-    #
-    # effort must be set: the model's default reasoning effort is too low
-    # to emit a summary, so `summary="auto"` alone yields zero reasoning
-    # every turn (verified empirically). "medium" reliably surfaces a
-    # summary; raw chain of thought stays provider-hidden, only the summary
-    # is exposed. A caller disabling thinking (short-text paths) drops to
-    # effort "none". Tool-call args still stream through `tool_call_chunks`,
-    # so code rendering is unaffected by the API switch.
-    thinking_disabled = thinking is not None and thinking.get("type") == "disabled"
-    gpt_effort = resolved_effort or "medium"
-    gpt_reasoning: dict[str, Any] = (
-        {"effort": "none"} if thinking_disabled else {"effort": gpt_effort, "summary": "auto"}
-    )
-    return ChatOpenAI(
-        model=model,  # type: ignore[call-arg]
-        api_key=settings.lm.openai_api_key.get_secret_value(),  # type: ignore[arg-type]
-        use_responses_api=True,
-        reasoning=gpt_reasoning,
-        disable_streaming=disable_streaming,
-        timeout=timeout,
-    )
-
-
 def _build_mimo_model(
     model: str,
     *,

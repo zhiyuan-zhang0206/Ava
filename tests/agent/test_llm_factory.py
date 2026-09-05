@@ -360,7 +360,7 @@ class TestBuildChatModel:
 
     def test_gpt_branch_builds(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(settings.lm, "llm_override", "")
-        monkeypatch.setattr(settings.lm, "openai_api_key", SecretStr("k"))
+        monkeypatch.setenv("OPENAI_API_KEY", "k")
         m = build_chat_model("gpt-5.6-sol")
         from langchain_openai import ChatOpenAI
 
@@ -368,7 +368,8 @@ class TestBuildChatModel:
 
     def test_gpt_missing_key_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(settings.lm, "llm_override", "")
-        monkeypatch.setattr(settings.lm, "openai_api_key", None)
+        monkeypatch.setattr(settings.lm, "openai_api_key", SecretStr("legacy-settings-key"))
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
         with pytest.raises(RuntimeError, match="OPENAI_API_KEY"):
             build_chat_model("gpt-5.6-sol")
 
@@ -381,13 +382,26 @@ class TestBuildChatModel:
         set. summary='auto' surfaces the reasoning summary as a `reasoning`
         content block (folded to the canonical `thinking` shape downstream)."""
         monkeypatch.setattr(settings.lm, "llm_override", "")
-        monkeypatch.setattr(settings.lm, "openai_api_key", SecretStr("k"))
+        monkeypatch.setenv("OPENAI_API_KEY", "k")
         from langchain_openai import ChatOpenAI
 
         m = build_chat_model("gpt-5.6-sol")
         assert isinstance(m, ChatOpenAI)
         assert m.use_responses_api is True
         assert m.reasoning == {"effort": "medium", "summary": "auto"}
+
+    def test_gpt_effort_clamps_to_plugin_vocabulary(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """OpenAI omits the cross-provider `minimal` rung, so the plugin
+        clamps it to its nearest supported wire value instead of sending an
+        invalid Responses API request."""
+        monkeypatch.setattr(settings.lm, "llm_override", "")
+        monkeypatch.setattr(settings.lm, "reasoning_effort", "minimal")
+        monkeypatch.setenv("OPENAI_API_KEY", "k")
+        from langchain_openai import ChatOpenAI
+
+        m = build_chat_model("gpt-5.6-sol")
+        assert isinstance(m, ChatOpenAI)
+        assert m.reasoning == {"effort": "low", "summary": "auto"}
 
     def test_gpt_thinking_disabled_drops_to_effort_none(
         self, monkeypatch: pytest.MonkeyPatch
@@ -396,7 +410,7 @@ class TestBuildChatModel:
         summary requested. Symmetric with gemini include_thoughts=False and the
         deepseek effort skip: a caller disabling thinking gets no reasoning."""
         monkeypatch.setattr(settings.lm, "llm_override", "")
-        monkeypatch.setattr(settings.lm, "openai_api_key", SecretStr("k"))
+        monkeypatch.setenv("OPENAI_API_KEY", "k")
         from langchain_openai import ChatOpenAI
 
         m = build_chat_model("gpt-5.6-sol", thinking={"type": "disabled"})
@@ -631,7 +645,7 @@ class TestBuildChatModel:
     def test_gpt_defaults_to_streaming(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """gpt-* carries no registry streaming opt-out → default streaming=True."""
         monkeypatch.setattr(settings.lm, "llm_override", "")
-        monkeypatch.setattr(settings.lm, "openai_api_key", SecretStr("k"))
+        monkeypatch.setenv("OPENAI_API_KEY", "k")
         from langchain_openai import ChatOpenAI
 
         m = build_chat_model("gpt-5.6-sol")
@@ -1267,6 +1281,7 @@ class TestValidateModelConfig:
             monkeypatch.setattr(settings.lm, attr, None)
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
         monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
 
     @staticmethod
     def _set_plugin_keys(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1276,6 +1291,7 @@ class TestValidateModelConfig:
                 "ANTHROPIC_API_KEY": "sk-test",
                 "DEEPSEEK_API_KEY": "sk-test",
                 "GEMINI_API_KEY": "sk-test",
+                "OPENAI_API_KEY": "sk-test",
             },
         )
 
@@ -1349,7 +1365,6 @@ class TestValidateModelConfig:
         for m in all_models:
             # Only testing name existence, not key (key validation is separate)
             self._set_plugin_keys(monkeypatch)
-            monkeypatch.setattr(settings.lm, "openai_api_key", SecretStr("sk-test-openai"))
             monkeypatch.setattr(settings.lm, "xiaomi_api_key", SecretStr("sk-test-mimo"))
             monkeypatch.setattr(settings.lm, "moonshot_api_key", SecretStr("sk-test-moonshot"))
             monkeypatch.setattr(settings.lm, "zhipu_api_key", SecretStr("sk-test-zhipu"))
@@ -1397,6 +1412,7 @@ class TestValidateModelConfig:
     def test_missing_openai_key_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """OPENAI_API_KEY not set → ValueError."""
         self._clear_all_keys(monkeypatch)
+        monkeypatch.setattr("shared.runtime_config.read_env_aliases", dict)
         with pytest.raises(ValueError, match="OPENAI_API_KEY"):
             validate_model_config(model="gpt-5.6-sol")
 
@@ -1517,6 +1533,7 @@ class TestThinkingDisabledAcrossRoster:
         monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
         monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test")
         monkeypatch.setenv("GEMINI_API_KEY", "sk-test")
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
 
     @pytest.mark.parametrize("model", [m for models in SUPPORTED_MODELS.values() for m in models])
     def test_roster_model_constructs_with_thinking_disabled(
