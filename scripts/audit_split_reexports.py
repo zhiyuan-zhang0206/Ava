@@ -69,7 +69,7 @@ def _missing(module: str, refs: set[str]) -> list[str]:
 
 
 def main(argv: list[str]) -> int:
-    parser = argparse.ArgumentParser(description=__doc__.split("## What it checks")[0])
+    parser = argparse.ArgumentParser(description=(__doc__ or "").split("## What it checks")[0])
     parser.add_argument(
         "modules",
         nargs="+",
