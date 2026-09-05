@@ -151,7 +151,13 @@ from agent.startup import (
 )
 from agent.state import BaseAgentState
 from services.agent_host.dispatcher import PendingInboundWake
-from services.agent_host.runtime import HostStats, _AgentRuntime, _StoredConfig
+from services.agent_host.runtime import (
+    HostStats,
+    _active_turn_config_fingerprint,
+    _AgentRuntime,
+    _copy_active_turn_context,
+    _StoredConfig,
+)
 from services.agent_host.stall_guard import run_invocation_with_stall_guard
 from shared.config import settings
 from shared.config.turn_view import bind_agent_config, resolve_agent_config_pins
@@ -248,7 +254,11 @@ class AgentHost:
 
         resources = HostedTurnResources()
         with bind_hosted_resources(resources):
-            work = asyncio.create_task(self._run_turn(agent_id))
+            # Keep the child's Context so its config fingerprint can be copied
+            # back to the scheduler task before a crash is re-raised. A normal
+            # create_task copy would isolate the value from the crash logger.
+            turn_context = _copy_active_turn_context()
+            work = asyncio.create_task(self._run_turn(agent_id), context=turn_context)
         cancelled = False
         try:
             while not work.done():
@@ -258,6 +268,7 @@ class AgentHost:
                     cancelled = True
             work.result()
         finally:
+            _active_turn_config_fingerprint.set(turn_context.get(_active_turn_config_fingerprint))
             from shared.hosted_force import original_host_force
 
             if resources.unresolved:
@@ -316,6 +327,7 @@ class AgentHost:
         if stored is None or not self._is_runnable(agent_id, stored):
             self.stats.wakes_skipped += 1
             return
+        _active_turn_config_fingerprint.set(stored.fingerprint)
 
         # A new turn starts a fresh progress window the moment it is entered:
         # without this, a long-idle agent's stale clock entry would read as

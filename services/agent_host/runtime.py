@@ -5,11 +5,30 @@ from __future__ import annotations
 import hashlib
 import json
 import time
+from contextvars import Context, ContextVar, copy_context
 from dataclasses import dataclass, field
 
 from langchain_core.language_models.chat_models import BaseChatModel
 
-__all__ = ["HostStats", "_AgentRuntime", "_StoredConfig", "_config_fingerprint"]
+__all__ = [
+    "HostStats",
+    "_AgentRuntime",
+    "_StoredConfig",
+    "_active_turn_config_fingerprint",
+    "_config_fingerprint",
+    "_copy_active_turn_context",
+]
+
+_active_turn_config_fingerprint: ContextVar[str | None] = ContextVar(
+    "agent_host_active_turn_config_fingerprint", default=None
+)
+
+
+def _copy_active_turn_context() -> Context:
+    """Copy the caller's context with no inherited config fingerprint."""
+    context = copy_context()
+    context.run(_active_turn_config_fingerprint.set, None)
+    return context
 
 
 def _config_fingerprint(
