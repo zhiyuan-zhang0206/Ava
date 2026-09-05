@@ -100,6 +100,12 @@ _SNAPSHOT_RETIREMENT_MIGRATION = (
     / "20260901T141933_drop-expired-backfill-snapshots.sql"
 )
 _SNAPSHOT_RETIREMENT_MIGRATION_NAME = _SNAPSHOT_RETIREMENT_MIGRATION.stem
+_FAILURE_FEEDBACK_UP = (
+    Path(__file__).resolve().parents[2] / "migrations" / "20260905T121043_failure-feedback.sql"
+)
+_FAILURE_FEEDBACK_DOWN = (
+    Path(__file__).resolve().parents[2] / "migrations" / "20260905T121043_failure-feedback.down.sql"
+)
 _RETIRED_SNAPSHOT_TABLES = (
     "fork_lineage_fix_backfill_agents_meta",
     "fork_lineage_fix_backfill_events",
@@ -1917,3 +1923,54 @@ def test_allow_non_root_ongoing_migration_down_restores_bidirectional_pin() -> N
             pytest.raises(psycopg.errors.CheckViolation),
         ):
             cur.execute("UPDATE agent_tasks SET status = 'ongoing' WHERE id = 2")
+
+
+# ─── failure-feedback migration: additive up/down ────────────────────────────
+
+
+def test_failure_feedback_migration_adds_trust_facts_and_event_store() -> None:
+    with _throwaway_database("failure-feedback-up") as url:
+        _run_sql(url, "CREATE TABLE inbound_messages (id BIGSERIAL PRIMARY KEY)")
+        _run_sql(url, _FAILURE_FEEDBACK_UP.read_text())
+
+        with psycopg.connect(url) as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_name = 'inbound_messages' AND column_name LIKE 'source_%' "
+                "OR table_name = 'inbound_messages' AND column_name = 'content_hash'"
+            )
+            assert {row[0] for row in cur.fetchall()} == {
+                "source_assertion_match",
+                "source_transport",
+                "source_verified_by",
+                "content_hash",
+            }
+            cur.execute(
+                "INSERT INTO work_failed_events "
+                "(repo, ref, commit_sha, stage, summary, author_agent_id, dedup_key) "
+                "VALUES ('Ava', 'main', 'abc', 'qa', 'failed', 1, 'same')"
+            )
+            with pytest.raises(psycopg.errors.UniqueViolation):
+                cur.execute(
+                    "INSERT INTO work_failed_events "
+                    "(repo, ref, commit_sha, stage, summary, author_agent_id, dedup_key) "
+                    "VALUES ('Ava', 'main', 'abc', 'qa', 'failed', 1, 'same')"
+                )
+
+
+def test_failure_feedback_migration_down_removes_additive_schema() -> None:
+    with _throwaway_database("failure-feedback-down") as url:
+        _run_sql(url, "CREATE TABLE inbound_messages (id BIGSERIAL PRIMARY KEY)")
+        _run_sql(url, _FAILURE_FEEDBACK_UP.read_text())
+        _run_sql(url, _FAILURE_FEEDBACK_DOWN.read_text())
+
+        with psycopg.connect(url) as conn, conn.cursor() as cur:
+            cur.execute("SELECT to_regclass('work_failed_events')")
+            assert cur.fetchone() == (None,)
+            cur.execute(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_name = 'inbound_messages' "
+                "AND column_name IN ('source_verified_by', 'source_transport', "
+                "'content_hash', 'source_assertion_match')"
+            )
+            assert cur.fetchall() == []

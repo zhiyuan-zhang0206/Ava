@@ -49,6 +49,7 @@ from shared import telemetry
 from shared.config import cluster_tz, settings
 from shared.db import insert_inbound_message, publish_inbound_wake
 from shared.db_transaction import write_transaction
+from shared.inbound_provenance import InboundProvenance
 from shared.live_events import PageClosed
 from shared.redis_client import publish_best_effort_sync
 
@@ -99,7 +100,13 @@ def _notify_owner(
         row = cur.fetchone()
     if row is None or row[0] not in _NOTIFIABLE_STATUSES:
         return
-    inbound_id = insert_inbound_message(conn, agent_id, content, source="system")
+    inbound_id = insert_inbound_message(
+        conn,
+        agent_id,
+        content,
+        source="system",
+        provenance=InboundProvenance(source_verified_by=None, source_transport="ops"),
+    )
     with suppress(Exception):
         publish_inbound_wake(agent_id, str(inbound_id))
 

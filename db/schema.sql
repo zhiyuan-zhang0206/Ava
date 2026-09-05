@@ -343,6 +343,14 @@ CREATE TABLE inbound_messages (
     -- restart_completed carries {"effective_config": {...}}. Other kinds leave NULL.
     -- See future/plugin-system-redesign.md PR-E section.
     payload    JSONB,
+    -- Server-owned ingress facts. Gateway writers fill these from the
+    -- authenticated request/transport boundary; agent-side and legacy writers
+    -- leave them NULL. The assertion comparison is informational and never
+    -- rejects delivery.
+    source_verified_by TEXT,
+    source_transport TEXT,
+    content_hash TEXT,
+    source_assertion_match BOOLEAN,
     -- Caller-generated identity for one logical chat delivery. NULL keeps
     -- internal / legacy writers unchanged; non-NULL keys are cluster-wide
     -- unique so a timeout retry can reconcile at the same transaction that
@@ -405,6 +413,45 @@ CREATE INDEX idx_inbound_per_agent_pending ON inbound_messages (agent_id, create
 CREATE UNIQUE INDEX idx_inbound_messages_client_message_id
     ON inbound_messages (client_message_id)
     WHERE client_message_id IS NOT NULL;
+
+-- Failure producers submit one stable dedup key. The gateway records the event
+-- before routing it to the author, the nearest live birth-lineage delegator, or
+-- a task-registry alert when the entire chain is dead.
+CREATE TABLE work_failed_events (
+    id                  BIGSERIAL PRIMARY KEY,
+    repo                TEXT NOT NULL,
+    ref                 TEXT NOT NULL,
+    commit_sha          TEXT NOT NULL,
+    stage               TEXT NOT NULL CHECK (stage IN ('ci', 'qa', 'merge')),
+    summary             TEXT NOT NULL,
+    author_agent_id     BIGINT NOT NULL CHECK (author_agent_id > 0),
+    dedup_key           TEXT NOT NULL UNIQUE,
+    delivered_to        TEXT,
+    delivery_kind       TEXT CHECK (
+        delivery_kind IN ('author', 'author_resurrected', 'delegator', 'task_alert')
+    ),
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    delivered_at        TIMESTAMPTZ,
+    CONSTRAINT work_failed_events_delivery_complete CHECK (
+        (delivered_to IS NULL AND delivery_kind IS NULL AND delivered_at IS NULL)
+        OR (delivered_to IS NOT NULL AND delivery_kind IS NOT NULL AND delivered_at IS NOT NULL)
+    )
+);
+
+COMMENT ON TABLE work_failed_events IS
+    'Idempotent CI, QA, and merge failure events routed to the author, nearest live delegator, or task registry.';
+
+COMMENT ON COLUMN inbound_messages.source_verified_by IS
+    'Server-owned credential identity that admitted the gateway inbound; NULL is unauthenticated or legacy.';
+
+COMMENT ON COLUMN inbound_messages.source_transport IS
+    'Server-owned ingress transport for a gateway inbound; NULL is legacy.';
+
+COMMENT ON COLUMN inbound_messages.content_hash IS
+    'Lowercase SHA-256 of inbound content at gateway persistence time; NULL is legacy.';
+
+COMMENT ON COLUMN inbound_messages.source_assertion_match IS
+    'Whether an agent:N source assertion matches a verified agent_token:M credential; NULL when either side is unknown. Informational only.';
 
 -- ─────────────── events Since-Birth rollup ───────────────
 -- Day-grain rollups that preserve the `events` "since-birth" aggregates
@@ -1315,3 +1362,7 @@ INSERT INTO schema_migrations (name) VALUES ('20260903T080634_add-last-heartbeat
 -- it, while existing DBs without this applied marker still run the migration and
 -- fail loudly if the column was added outside migration tracking.
 INSERT INTO schema_migrations (name) VALUES ('20260903T175722_add-born-spawner');
+
+-- Failure feedback is already represented above. Fresh DBs stamp it instead
+-- of replaying the strict ALTER/CREATE delta against the baseline schema.
+INSERT INTO schema_migrations (name) VALUES ('20260905T121043_failure-feedback');

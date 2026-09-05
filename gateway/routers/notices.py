@@ -34,6 +34,7 @@ import psycopg
 from fastapi import APIRouter, HTTPException, Query, Request, Response
 from psycopg_pool import ConnectionPool
 
+from gateway.inbound_provenance import request_inbound_provenance
 from gateway.routers._delivery import deliver_chat_inbound
 from gateway.schemas import (
     AgentMessageEnqueued,
@@ -439,6 +440,7 @@ async def post_notice_resolve(
         prepare=_resolve,
         source=deliver_source,
         refresh_badge=True,
+        provenance=request_inbound_provenance(request),
     )
     # Drop the row from the FYI feed (no-op by id for a require_response notice,
     # which lives on the snapshot, not the feed).

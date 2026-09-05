@@ -736,6 +736,7 @@ def pytest_sessionstart(session: pytest.Session) -> None:
 # (deployment_state, cluster_update_lock, ...) are deliberately absent — see
 # the guard's exemption list for the reasons.
 _PER_TEST_TRUNCATE_TABLES = (
+    "work_failed_events",
     "inbound_messages",
     "agents_meta",
     # "events" was dropped with the task #1281/#1823 cleanup (migration
