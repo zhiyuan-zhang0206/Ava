@@ -49,7 +49,7 @@ Gateway's 43 route modules, split by business domain under `gateway/routers/<dom
 - **memory** (`/api/memory/search`, `/refresh`, `/graph`) — Memory pool search/refresh/graph
 - **commands** (`/api/commands`) — slash command list acceptable by composer
 - **auth** (`/api/auth/login|logout|check|sessions`) — opaque server-side session login, validation, listing, and per-session revocation
-- **uploads** (`/api/agents/{id}/uploads`) — file upload
+- **uploads** (`/api/agents/{id}/uploads`) — file upload; notifications name the machine owning each path. Remote runner pulls are tracked per filename; a failed pull retains the gateway location and authenticated download route without shifting another file's path.
 
 ## Design principles
 

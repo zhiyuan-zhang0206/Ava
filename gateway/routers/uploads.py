@@ -12,9 +12,10 @@ runs on a remote runner cannot read the gateway's disk. When `deliver=true`
 and the agent's machine is not this host, the gateway dispatches an
 `upload_receive` op to that runner first, which pulls the file into the
 runner's own ~/Downloads/AvaAgent-{agent_id}/; the notification then carries
-the agent's LOCAL absolute path. If the runner is unreachable the upload
-still succeeds and the message falls back to the gateway-side path (the URL
-remains the uniform address any machine can dial).
+the agent's local absolute path and machine name. Each failed pull retains
+its own gateway path, explicitly labels the gateway machine, and includes
+the authenticated gateway download route; partial failures never shift a
+successful path onto another file.
 
 GET serves a saved file back (image thumbnails in the timeline, and any client
 that wants to fetch an upload by its reference url).
@@ -38,6 +39,7 @@ from gateway.routers._delivery import deliver_chat_inbound
 from gateway.schemas import UploadedBatch, UploadedFile
 from shared.agents import AgentNotFound
 from shared.db import agent_exists
+from shared.machine import machine_name
 from shared.private_storage import ensure_private_dir, write_private_bytes
 from shared.uploads import (
     MAX_AGENT_UPLOAD_BYTES,
@@ -250,22 +252,20 @@ async def upload_files(
         # runner, first pull the files onto that host so the message can carry
         # the agent's LOCAL absolute path (the address it can act on) — the
         # gateway's own path is meaningless on another machine. A runner that
-        # is unreachable does NOT fail the upload: the file is safe on the
-        # gateway and the message falls back to the gateway-side path.
-        local_paths: list[str] = await _pull_uploads_to_agent_machine(
+        # is unreachable does NOT fail the upload: identify the gateway copy
+        # and its download route without pretending that path is runner-local.
+        target_machine, local_paths = await _pull_uploads_to_agent_machine(
             request, agent_id, [f.filename for f in saved]
         )
+        locations = [
+            _upload_location(f, target_machine, local_paths.get(f.filename)) for f in saved
+        ]
         if len(saved) == 1:
-            f = saved[0]
-            path = local_paths[0] if len(local_paths) == 1 else f.path
-            message = f"File uploaded: {path} ({f.size} bytes)"
+            message = f"File uploaded: {locations[0]}"
         else:
-            lines: list[str] = []
-            for i, f in enumerate(saved):
-                lp = local_paths[i] if i < len(local_paths) else None
-                path = lp if lp else f.path
-                lines.append(f"- {path} ({f.size} bytes)")
-            message = f"{len(saved)} files uploaded:\n" + "\n".join(lines)
+            message = f"{len(saved)} files uploaded:\n" + "\n".join(
+                f"- {location}" for location in locations
+            )
         await deliver_chat_inbound(
             request.app.state.db_pool,
             agent_id,
@@ -274,6 +274,16 @@ async def upload_files(
         )
 
     return UploadedBatch(files=saved)
+
+
+def _upload_location(file: UploadedFile, target_machine: str, local_path: str | None) -> str:
+    """Describe one file's actual location and the gateway route without a confirmed local copy."""
+    if local_path is not None:
+        return f"{local_path} (machine: {target_machine}, {file.size} bytes)"
+    return (
+        f"{file.path} (machine: {machine_name()}, {file.size} bytes; "
+        f"local copy unconfirmed on {target_machine or 'unknown machine'}; gateway download: {file.url})"
+    )
 
 
 @router.get("/api/agents/{agent_id}/uploads/{filename}")
@@ -312,14 +322,12 @@ def _agent_machine_blocking(pool: ConnectionPool, agent_id: int) -> str:
 
 async def _pull_uploads_to_agent_machine(
     request: Request, agent_id: int, names: list[str]
-) -> list[str]:
+) -> tuple[str, dict[str, str]]:
     """Pull the just-saved uploads onto the agent's own machine, if remote.
 
-    Returns the LOCAL absolute paths on the agent's machine (one per name,
-    in order). An empty list means no pull happened: either the agent runs on
-    this gateway (its local path IS the gateway's path, already usable), the
-    machine is unknown, or every pull failed — the caller then falls back to
-    the gateway-side path in the message.
+    Returns the target machine and the local paths keyed by filename. A missing
+    key means that file has no confirmed local copy; subsequent successful
+    pulls retain their own keys. Same-machine uploads already have local copies.
 
     Best-effort by design: a failed pull (runner offline / mid-rollout /
     unregistered) must not fail the upload itself. The file is already safe
@@ -327,16 +335,15 @@ async def _pull_uploads_to_agent_machine(
     """
     machine = await asyncio.to_thread(_agent_machine_blocking, request.app.state.db_pool, agent_id)
     if not machine or machine == "unknown":
-        return []
-    from shared.machine import machine_name
+        return machine, {}
 
     if machine == machine_name():
         # Same host — the gateway path IS the agent's local path.
-        return []
+        return machine, {name: str(agent_upload_dir(agent_id) / name) for name in names}
 
     from ops import cluster_rpc
 
-    pulled: list[str] = []
+    pulled: dict[str, str] = {}
     for name in names:
         try:
             result = await cluster_rpc.dispatch_to_machine(
@@ -347,16 +354,16 @@ async def _pull_uploads_to_agent_machine(
                 # can exceed the default 30s op deadline; give it headroom.
                 timeout_s=120.0,
             )
-            pulled.append(result["path"])
+            pulled[name] = result["path"]
         except Exception as exc:  # ClusterOpUnreachable / ClusterOpFailed / wire errors
             _log.warning(
                 "upload: pull %s to machine=%r failed (%r) — file stays on the "
-                "gateway, message carries the URL only",
+                "gateway, message identifies its location and download route",
                 name,
                 machine,
                 exc,
             )
-    return pulled
+    return machine, pulled
 
 
 def _agent_exists_blocking(pool: ConnectionPool, agent_id: int) -> None:
