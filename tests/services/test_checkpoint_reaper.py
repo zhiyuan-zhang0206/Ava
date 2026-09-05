@@ -3,7 +3,7 @@
 Every thread with more than three checkpoints is pruned to its newest three,
 independent of agent status or liveness. The tests exercise real Postgres
 tables and pin rotation, the productive-thread cap, eligibility re-check,
-compaction-boundary aging, and the shared trim's in-flight write guard.
+compaction-boundary exemption, and the shared trim's in-flight write guard.
 """
 
 from __future__ import annotations
@@ -243,15 +243,16 @@ def test_prune_skips_threads_at_or_below_keep(pool: ConnectionPool[Any]) -> None
     assert _count(pool, "checkpoints") == 5
 
 
-def test_compaction_boundary_counts_and_ages_out(pool: ConnectionPool[Any]) -> None:
+def test_compaction_boundary_is_exempt_from_prune(pool: ConnectionPool[Any]) -> None:
+    """The only out-of-window row is a boundary — the thread is not trimmed
+    and does not consume a productive slot."""
     checkpoint_ids = _thread(pool, "271", 4, boundary_at=0)
 
     assert reaper._thread_counts(pool)["271"] == 4
     counts = reaper.prune_threads(pool)
 
-    assert counts == ReapCounts(agents=1, checkpoints=1, writes=1, blobs=0)
-    assert _checkpoint_ids(pool, "271") == set(checkpoint_ids[-3:])
-    assert checkpoint_ids[0] not in _checkpoint_ids(pool, "271")
+    assert counts == ReapCounts(agents=0, checkpoints=0, writes=0, blobs=0)
+    assert _checkpoint_ids(pool, "271") == set(checkpoint_ids)
 
 
 def test_eligibility_recheck_skips_thread_no_longer_above_keep(
