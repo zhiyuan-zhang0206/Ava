@@ -873,9 +873,20 @@ jobs:
               ]
           )
 
-          # Keep designated-requirement stream parsing on the real macOS codesign path.
-          dr = lifecycle._read_dr(app)
-          assert "cdhash" in dr, "ad-hoc signature must carry a cdhash designated requirement"
+          # Keep designated-requirement readback on the real macOS codesign path. The
+          # ad-hoc signature's DR has no "designated =>" line, so assert on the raw
+          # readback (lifecycle._read_dr parses the stable-identity DR shape and is
+          # covered by unit tests + the production preflight gate).
+          dr_result = subprocess.run(
+              ["codesign", "-d", "-r-", str(app)],
+              capture_output=True,
+              check=False,
+              text=True,
+          )
+          dr_text = (dr_result.stdout or "") + (dr_result.stderr or "")
+          print(f"DR readback: {dr_text[:500]}")
+          assert dr_result.returncode == 0, f"codesign -d -r- failed: {dr_text[:500]}"
+          assert "cdhash" in dr_text, f"no cdhash in designated requirement output: {dr_text[:500]}"
 
           # Bootstrap failure intentionally fails this lane: the hosted runner's
           # user launchd chain is part of the production contract being tested.
