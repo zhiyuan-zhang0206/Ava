@@ -34,7 +34,7 @@ import pytest
 import cli.commands as _cli
 from cli.commands._probe import ServiceProbe
 from cli.commands._repo import ServiceSpec
-from ops.spec import _GATEWAY
+from ops.service_spec import _GATEWAY
 
 
 def _spec(service: str) -> ServiceSpec:

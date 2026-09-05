@@ -187,7 +187,8 @@ def _stop_stray_mode_gated_services() -> None:
     and stops the stray itself.
     """
     try:
-        from ops.spec import _gate_reason, build_services
+        from ops.roster import build_services
+        from ops.spec import _gate_reason
     except Exception:
         _log.exception("[agent-host] roster reconcile: cannot read ops roster, skipping")
         return

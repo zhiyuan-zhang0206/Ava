@@ -3,7 +3,7 @@
 The memory indexer is the pool's search side: it watches the gateway's
 consolidated checkout and keeps the Milvus index current, which is what makes
 `ava.memory.search` — and therefore passive recall — return anything. It is
-declared here rather than hardcoded into `ops/spec.py` because the pool is this
+declared here rather than hardcoded into `ops/roster.py` because the pool is this
 plugin's, end to end: disable ava_memory and there is no pool to index, no
 `ava.memory` to search it with, and now no daemon indexing it either.
 
@@ -11,8 +11,8 @@ Discovery keys on this plugin's code being PRESENT on the machine (see
 `ops.spec._plugin_services`), so the cluster-level on/off is the explicit gate
 below rather than the presence check.
 
-Deliberately light, like `ava_fleet/services.py`: it imports `ops.spec`,
-`shared.config`, and `shared.daemon_health` — never `plugin.py` or the memory
+Deliberately light, like `ava_fleet/services.py`: it imports the ops service
+contract and roster probe helper plus `shared` — never `plugin.py` or the memory
 domain code — so the ops/CLI/watchdog process that discovers it does not pull in
 the agent kernel. `services()` is a function so probe ports derived from settings
 are read at use-time.
@@ -22,7 +22,8 @@ from __future__ import annotations
 
 import os
 
-from ops.spec import ServiceSpec, daemon_identity
+from ops.roster import daemon_identity
+from ops.service_spec import ServiceSpec
 from shared.config import settings
 from shared.daemon_health import health_port
 from shared.machine import MachineRole

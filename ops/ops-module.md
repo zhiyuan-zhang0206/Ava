@@ -6,7 +6,8 @@ this describes the end state, and sequencing is left to the implementing agents.
 
 > **Status: mostly built. Two rows of the vocabulary table below are still
 > unrealized** — `ops/identity.py` and the shared Drain primitive.
-> Landed: `ops/spec.py` (the desired-state expression), `ops/observe.py`, the
+> Landed: the desired-state module family (`ops/service_spec.py`,
+> `ops/roster.py`, `ops/spec.py`), `ops/observe.py`, the
 > controller set under `ops/controllers/` (respawn, pin, schema, stranded-pause,
 > resurrect, wedged, update-trigger, over a shared `base`), and
 > `ops/manager.py` as the tick loop. `services/watchdog/daemon.py` shrank from the
@@ -18,7 +19,7 @@ this describes the end state, and sequencing is left to the implementing agents.
 
 | Concept | Ava realization | Replaces (scattered today) | State |
 |---|---|---|---|
-| Spec | `ops/spec.py` — the single expression of desired state | `build_services()` + registry + `cluster_pin` + `.env` identity + prose | ✅ built |
+| Spec | `ops/service_spec.py` + `ops/roster.py` + `ops/spec.py` — the single expression of desired state | `build_services()` + registry + `cluster_pin` + `.env` identity + prose | ✅ built |
 | Status | `ops/observe.py` — probe set | `services/healthchecks/` + status commands | ✅ built |
 | Controller | `ops/controllers/<dimension>.py`, one per state dimension | watchdog's inline gates + restarter reapers | ✅ built |
 | controller-manager | `ops/manager.py` — tick loop running the controller list | `services/watchdog/daemon.py` (680-line mix) | ✅ built |
@@ -27,8 +28,8 @@ this describes the end state, and sequencing is left to the implementing agents.
 
 ## Spec content
 
-What this machine-role should run (service roster — absorbed from
-`build_services()`; watchdog/restarter/healthchecks all derive from it — the
+What this machine-role should run (service roster in `ops/roster.py`;
+watchdog/restarter/healthchecks all derive from `build_services()` — the
 watchdog keepalive roster already does, via `ServiceSpec.healthcheck_module` (I-5);
 restarter/healthchecks fold in next), what data plane
 should exist (instances, roles, redis ACL users, bind addresses), what SHA the

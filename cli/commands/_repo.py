@@ -2,8 +2,8 @@
 
 The cli-facing façade for the service roster: `ServiceSpec`, `build_services()`,
 and the capability filters (`_services_for_roles`, `_services_for_roles_annotated`)
-are re-exported from `ops.spec` (the single desired-state source) so existing call
-sites keep their `from cli.commands._repo import ...` imports. This module owns:
+are re-exported from the ops desired-state module family so existing call sites
+keep their `from cli.commands._repo import ...` imports. This module owns:
 - `session_name()` composer re-export: `ava-<service>`
 - `_roles_or_none()` capability read
 - repo root + memory-pool / frontend / schema / gateway / register
@@ -19,14 +19,17 @@ import time
 from pathlib import Path
 from typing import NamedTuple
 
-# The service roster + capability filtering now live in `ops.spec` — the single
-# desired-state source (`shared < ops < {gateway, cli}`). Bound here under their
+# The service roster + capability filtering live in the `ops` module family — the
+# single desired-state source (`shared < ops < {gateway, cli}`). Bound here under their
 # historical names (module-level assignments, so both ruff and pyright see them as
 # intentional exports) so existing `from cli.commands._repo import ...` call sites
 # (start / status / stop / update / converge / __init__) keep working; `_repo` stays
-# the cli-facing façade, `ops.spec` owns the definitions.
+# the cli-facing façade, while the `ops` module family owns the definitions.
 from cli.commands._setup import SetupValues
 from ops import spec as _spec
+from ops.roster import build_services as build_services
+from ops.service_spec import ServiceSpec as ServiceSpec
+from ops.service_spec import profile_marker as profile_marker
 
 # Re-exported (redundant alias marks intentional re-export) so existing call
 # sites `from cli.commands._repo import session_name` keep working after the
@@ -38,9 +41,6 @@ from shared.machine import MachineRoles
 from shared.platform_backend import get_backend
 from shared.session_env import frontend_toolchain_env
 
-ServiceSpec = _spec.ServiceSpec
-build_services = _spec.build_services
-profile_marker = _spec.profile_marker
 _services_for_roles = _spec.services_for_capabilities
 _services_for_roles_annotated = _spec.services_for_capabilities_annotated
 

@@ -10,7 +10,7 @@ from __future__ import annotations
 import pytest
 
 import cli.commands._repo as repo
-import ops.spec as spec_mod  # build_services + health_port now live here; repo re-exports the roster
+import ops.roster as spec_mod  # build_services + health_port live here; repo re-exports the roster
 import shared.daemon_health as dh
 
 

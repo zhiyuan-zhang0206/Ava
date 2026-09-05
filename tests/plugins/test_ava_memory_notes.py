@@ -207,11 +207,11 @@ def test_indexer_is_declared_by_the_plugin_not_the_core_roster() -> None:
     from pathlib import Path as _Path
 
     from ava_builtins.plugins.ava_memory.services import services
-    from ops import spec
+    from ops import roster
 
     assert [s.session for s in services()] == ["memory-indexer"]
-    assert "memory-indexer" in [s.session for s in spec.build_services()]
-    core_source = _Path(spec.__file__).read_text(encoding="utf-8")
+    assert "memory-indexer" in [s.session for s in roster.build_services()]
+    core_source = _Path(roster.__file__).read_text(encoding="utf-8")
     assert 'session="memory-indexer"' not in core_source
 
 

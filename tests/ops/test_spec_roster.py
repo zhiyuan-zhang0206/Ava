@@ -15,7 +15,7 @@ from typing import cast
 import pytest
 
 from cli.commands import _repo
-from ops import spec
+from ops import roster, service_spec, spec
 from shared.machine import MachineRole
 
 _GATEWAY_SESSIONS = {
@@ -57,9 +57,9 @@ _AGENT_RUNNER_SESSIONS = {
 def test_repo_is_a_pure_reexport_of_ops_spec() -> None:
     """`_repo`'s roster names are the SAME objects as ops.spec — proving the
     definitions live once (single source), not duplicated."""
-    assert _repo.build_services is spec.build_services
-    assert _repo.ServiceSpec is spec.ServiceSpec
-    assert _repo.profile_marker is spec.profile_marker
+    assert _repo.build_services is roster.build_services
+    assert _repo.ServiceSpec is service_spec.ServiceSpec
+    assert _repo.profile_marker is service_spec.profile_marker
     assert _repo._services_for_roles is spec.services_for_capabilities
     assert _repo._services_for_roles_annotated is spec.services_for_capabilities_annotated
 
@@ -71,22 +71,22 @@ def test_agent_host_spec_launches_under_the_agent_profile() -> None:
     read — 2026-08-30 soak startup); the spec must carry the explicit override
     so BOTH launch paths (ava start / ava restart spec path AND the watchdog
     respawn path) agree."""
-    agent_host = next(s for s in spec.build_services() if s.session == "agent-host")
+    agent_host = next(s for s in roster.build_services() if s.session == "agent-host")
     assert agent_host.profile == "agent"
-    assert spec.profile_marker(agent_host) == "agent"
+    assert service_spec.profile_marker(agent_host) == "agent"
 
 
 def test_profile_override_wins_over_derivation_and_no_marker() -> None:
     """An explicit spec.profile beats the capabilities derivation and
     no_profile_marker alike (explicit beats derived, one rule)."""
-    derived = spec.ServiceSpec(
+    derived = service_spec.ServiceSpec(
         session="x",
         cmd="true",
         capabilities=cast(frozenset[MachineRole], frozenset({"agent-runner"})),
         requires_db=False,
     )
-    assert spec.profile_marker(derived) == "runner"
-    overridden = spec.ServiceSpec(
+    assert service_spec.profile_marker(derived) == "runner"
+    overridden = service_spec.ServiceSpec(
         session="x",
         cmd="true",
         capabilities=cast(frozenset[MachineRole], frozenset({"agent-runner"})),
@@ -94,11 +94,11 @@ def test_profile_override_wins_over_derivation_and_no_marker() -> None:
         profile="agent",
         no_profile_marker=True,
     )
-    assert spec.profile_marker(overridden) == "agent"
+    assert service_spec.profile_marker(overridden) == "agent"
 
 
 def test_every_service_declares_non_empty_capabilities() -> None:
-    for s in spec.build_services():
+    for s in roster.build_services():
         assert s.capabilities, f"{s.session} declares no capabilities"
         assert s.capabilities <= {"gateway", "agent-runner"}
 
@@ -106,7 +106,7 @@ def test_every_service_declares_non_empty_capabilities() -> None:
 def test_capability_partition() -> None:
     """The `capabilities` field reproduces the intended gateway/agent-runner split
     (the encoding that replaced the exclusion set)."""
-    by_session = {s.session: s for s in spec.build_services()}
+    by_session = {s.session: s for s in roster.build_services()}
     assert set(by_session) == _GATEWAY_SESSIONS | _AGENT_RUNNER_SESSIONS
     for session, s in by_session.items():
         on_gateway = "gateway" in s.capabilities
@@ -143,7 +143,7 @@ def test_gateway_roster_ordering_is_load_bearing() -> None:
     under the numpy backend (see test_milvus_gated_out_unless_milvus_backend),
     so it cannot carry an ordering check.
     """
-    order = [s.session for s in spec.build_services()]
+    order = [s.session for s in roster.build_services()]
     assert order.index("milvus") < order.index("memory-indexer")
 
 
@@ -160,7 +160,7 @@ def test_watchdogs_declare_no_healthcheck_module() -> None:
     # Keyed off the cmd module, not the session-name suffix: delivery-watchdog
     # is a monitored service whose session ends in "watchdog" but runs its own
     # module with its own healthcheck.
-    watchdogs = [s for s in spec.build_services() if "services.watchdog.daemon" in s.cmd]
+    watchdogs = [s for s in roster.build_services() if "services.watchdog.daemon" in s.cmd]
     assert watchdogs
     assert all(s.healthcheck_module is None for s in watchdogs)
 
@@ -372,7 +372,7 @@ def test_every_healthz_service_declares_an_identity_probe() -> None:
     which is exactly what an impostor satisfies."""
     missing = {
         s.session
-        for s in spec.build_services()
+        for s in roster.build_services()
         if s.identity_probe is None and s.session not in _LIVENESS_ONLY_SESSIONS
     }
     assert missing == set(), (
@@ -385,7 +385,7 @@ def test_liveness_only_services_declare_no_identity_probe() -> None:
     """The other direction: the exemption list cannot go stale silently either."""
     wrong = {
         s.session
-        for s in spec.build_services()
+        for s in roster.build_services()
         if s.identity_probe is not None and s.session in _LIVENESS_ONLY_SESSIONS
     }
     assert wrong == set(), f"{sorted(wrong)} gained an identity probe — drop them from the list"
@@ -398,8 +398,8 @@ def test_browser_identity_is_the_profile_probe_not_a_curl() -> None:
     answered."""
     from services.browser.probe import probe_browser
 
-    browser = next(s for s in spec.build_services() if s.session == "browser")
-    assert browser.identity_probe is spec._browser_probe
+    browser = next(s for s in roster.build_services() if s.session == "browser")
+    assert browser.identity_probe is roster._browser_probe
     assert probe_browser is not None  # the lazy import target exists
 
 
@@ -420,10 +420,10 @@ def test_daemon_identity_binds_the_probe_to_one_daemons_facts(
 
     monkeypatch.setattr("shared.daemon_health._probe_daemon", _capture)
     pidfile = tmp_path / "ops.pid"
-    assert spec.daemon_identity("ops", pidfile)().alive is True
+    assert roster.daemon_identity("ops", pidfile)().alive is True
     assert seen["name"] == "ops"
     assert seen["pidfile"] == pidfile
-    assert str(spec.health_port("ops")) in str(seen["url"])
+    assert str(roster.health_port("ops")) in str(seen["url"])
 
 
 def test_im_bridge_gated_when_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -475,13 +475,13 @@ def test_profile_marker_derives_from_capabilities(
 ) -> None:
     """profile_marker() maps a spec's capability set to the AVA_PROCESS_PROFILE
     value its session should carry — unless the spec opts out explicitly."""
-    s = spec.ServiceSpec(
+    s = service_spec.ServiceSpec(
         session="x",
         cmd="true",
         capabilities=cast(frozenset[MachineRole], caps),
         requires_db=False,
     )
-    assert spec.profile_marker(s) == expected
+    assert service_spec.profile_marker(s) == expected
 
 
 def test_labeler_is_the_only_service_that_opts_out_of_the_profile_marker() -> None:
@@ -492,19 +492,19 @@ def test_labeler_is_the_only_service_that_opts_out_of_the_profile_marker() -> No
     other service must keep its marker so the pop still keeps provider keys out
     of their processes (task #1230: fix the labeler only, do not scatter keys
     into all gateway-profile daemons)."""
-    by_session = {s.session: s for s in spec.build_services()}
+    by_session = {s.session: s for s in roster.build_services()}
     opted_out = {sess for sess, s in by_session.items() if s.no_profile_marker}
     assert opted_out == {"labeler"}, (
         f"expected only the labeler to opt out of the profile marker, got {opted_out}"
     )
-    assert spec.profile_marker(by_session["labeler"]) is None
+    assert service_spec.profile_marker(by_session["labeler"]) is None
     for sess, s in by_session.items():
         if sess == "labeler":
             continue
         # A both-capability service (otel-collector) cannot carry one marker —
         # it runs on both roles, and the derivation is "both -> neutral". Its
         # Go binary never reads provider keys, so the neutral env is safe.
-        assert spec.profile_marker(s) is not None or (
+        assert service_spec.profile_marker(s) is not None or (
             "agent-runner" in s.capabilities and "gateway" in s.capabilities
         ), (
             f"{sess} must keep its AVA_PROCESS_PROFILE marker (provider keys stay "
@@ -516,15 +516,15 @@ def test_gateway_daemons_keep_the_gateway_marker() -> None:
     """The sibling gateway daemons (heartbeat / events-maintenance / im-bridge /
     memory-indexer / ...) still boot as gateway-profile processes — their envs
     must not gain the provider keys the labeler needs (anti-spread)."""
-    by_session = {s.session: s for s in spec.build_services()}
+    by_session = {s.session: s for s in roster.build_services()}
     for sess in ("heartbeat", "events-maintenance", "im-bridge", "memory-indexer", "gateway"):
-        assert spec.profile_marker(by_session[sess]) == "gateway", sess
+        assert service_spec.profile_marker(by_session[sess]) == "gateway", sess
 
 
 def test_runner_daemons_keep_the_runner_marker() -> None:
-    by_session = {s.session: s for s in spec.build_services()}
+    by_session = {s.session: s for s in roster.build_services()}
     for sess in ("ops", "restarter", "page-server"):
-        assert spec.profile_marker(by_session[sess]) == "runner", sess
+        assert service_spec.profile_marker(by_session[sess]) == "runner", sess
 
 
 def test_restarter_gated_out_in_hosted_mode(monkeypatch: pytest.MonkeyPatch) -> None:
