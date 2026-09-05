@@ -26,7 +26,10 @@ The evaluator runs trusted default-branch code and writes a commit status named
 signal; a default-branch workflow then fetches authoritative evidence. No PR
 checkout executes with the evaluator's write token. Queue exemption requires
 the verified Trunk bot account ID, same repository, main base, draft status and
-the actual synthetic ref shape; branch names alone confer no authority.
+the actual synthetic ref shape: `trunk-merge/pr-<number>/<uuid>`, optionally
+ending in exactly one `-bisection` suffix when Trunk splits a failed batch.
+Both forms require every identity and repository check; branch names alone
+confer no authority.
 
 Activation requires reviewer workflow adoption and verification that required
 status checks consume the exact-head status. Existing legacy check runs with
