@@ -571,11 +571,11 @@ class TestRemoteAgentPull:
         # The agent's LOCAL path on the runner, not the gateway's path.
         assert runner_path in content
 
-    def test_remote_agent_pull_failure_falls_back_to_gateway_path(
+    def test_remote_agent_pull_failure_identifies_gateway_location(
         self, db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Runner unreachable: the upload still succeeds, the message falls
-        back to the gateway-side path (best-effort pull)."""
+        """Runner unreachable: the upload succeeds and its notification
+        identifies the gateway-side path and download route (best-effort pull)."""
         agent_id = _spawn_agent()
         monkeypatch.setattr(Path, "home", lambda: tmp_path)
         with db_conn.cursor() as cur:
@@ -599,7 +599,16 @@ class TestRemoteAgentPull:
         assert resp.status_code == 200  # upload never fails on a failed pull
         content = _inbound_rows(db_conn, agent_id)[0][0]
         dest = tmp_path / "Downloads" / f"AvaAgent-{agent_id}" / "hello.txt"
-        assert str(dest) in content  # gateway path as fallback
+        from shared.machine import machine_name
+
+        assert str(dest) in content
+        assert f"machine: {machine_name()}" in content
+        assert f"gateway download: /api/agents/{agent_id}/uploads/hello.txt" in content
+        assert "local copy unconfirmed on mbp-remote" in content
+        with TestClient(app) as client:
+            download = client.get(resp.json()["files"][0]["url"])
+        assert download.status_code == 200
+        assert download.content == b"Hello, world!"
 
     def test_local_agent_skips_dispatch(
         self, db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -630,12 +639,19 @@ class TestRemoteAgentPull:
         dest = tmp_path / "Downloads" / f"AvaAgent-{agent_id}" / "hello.txt"
         assert str(dest) in content
 
-    def test_remote_agent_partial_pull_failure_keeps_gateway_paths(
-        self, db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    @pytest.mark.parametrize(
+        "failed", [{"a.txt"}, {"b.txt"}, {"c.txt"}, {"a.txt", "b.txt", "c.txt"}]
+    )
+    def test_remote_agent_partial_pull_failure_preserves_file_association(
+        self,
+        db_conn: psycopg.Connection,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        failed: set[str],
     ) -> None:
         """Batch upload where only some files pull: the message carries the
         pulled runner paths for successes and the gateway paths for failures —
-        no crash, no strict-zip blowup."""
+        each path stays paired with the correct filename and byte count."""
         agent_id = _spawn_agent()
         monkeypatch.setattr(Path, "home", lambda: tmp_path)
         with db_conn.cursor() as cur:
@@ -644,14 +660,14 @@ class TestRemoteAgentPull:
             )
         db_conn.commit()
 
-        runner_paths = {
-            "a.txt": f"/Users/runner/Downloads/AvaAgent-{agent_id}/a.txt",
-        }
-
-        async def fake_dispatch(target_machine: str, kind: str, payload: dict, **kw):  # pyright: ignore[reportMissingParameterType, reportMissingTypeArgument, reportUnknownParameterType]
-            if payload["name"] == "a.txt":
-                return {"path": runner_paths["a.txt"]}
-            raise RuntimeError("runner unreachable for b")
+        async def fake_dispatch(
+            target_machine: str, kind: str, payload: dict[str, object], **kw: object
+        ) -> dict[str, str]:
+            name = payload["name"]
+            assert isinstance(name, str)
+            if name in failed:
+                raise RuntimeError(f"runner unreachable for {name}")
+            return {"path": f"/Users/runner/Downloads/AvaAgent-{agent_id}/{name}"}
 
         from ops import cluster_rpc
 
@@ -663,10 +679,24 @@ class TestRemoteAgentPull:
                 files=[
                     ("files", ("a.txt", b"aaa", "text/plain")),
                     ("files", ("b.txt", b"bb", "text/plain")),
+                    ("files", ("c.txt", b"c", "text/plain")),
                 ],
             )
         assert resp.status_code == 200
         content = _inbound_rows(db_conn, agent_id)[0][0]
         base = tmp_path / "Downloads" / f"AvaAgent-{agent_id}"
-        assert runner_paths["a.txt"] in content  # pulled path
-        assert str(base / "b.txt") in content  # fallback gateway path
+        from shared.machine import machine_name
+
+        lines = content.splitlines()[1:]
+        assert len(lines) == 3
+        for line, name, size in zip(lines, ("a.txt", "b.txt", "c.txt"), (3, 2, 1), strict=True):
+            assert name in line
+            assert f"{size} bytes" in line
+            if name in failed:
+                assert str(base / name) in line
+                assert f"machine: {machine_name()}" in line
+                assert f"gateway download: /api/agents/{agent_id}/uploads/{name}" in line
+                assert "local copy unconfirmed on mbp-remote" in line
+            else:
+                assert f"/Users/runner/Downloads/AvaAgent-{agent_id}/{name}" in line
+                assert "machine: mbp-remote" in line
