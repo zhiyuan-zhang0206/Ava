@@ -301,7 +301,7 @@ def test_orchestration_session_keeps_its_wrapper_shell(monkeypatch: pytest.Monke
 def test_every_service_spec_command_is_exec_safe():
     """The roster gate: a new spec whose command would strand a wrapper shell
     fails here rather than silently reintroducing the full-timeout stop."""
-    from ops.spec import build_services
+    from ops.roster import build_services
 
     for spec in build_services():
         exec_into(spec.cmd)  # raises if the command could not hand over its pid

@@ -32,7 +32,7 @@ import pytest
 import cli.commands as _cli
 from cli.commands import start as _start_mod
 from cli.commands._repo import ServiceSpec
-from ops.spec import _GATEWAY
+from ops.service_spec import _GATEWAY
 from shared.exit_codes import RESTART_DECLINED_EXIT_CODE, SERVICES_NOT_READY_EXIT_CODE
 
 # Captured at import time, before the autouse fixture shortens the bound for the

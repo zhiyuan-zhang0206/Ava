@@ -23,7 +23,7 @@ from services.im_bridge.adapters.feishu import (
     _backoff_delay,
     _segment,
 )
-from services.im_bridge.core import InboundMessage
+from services.im_bridge.types import InboundMessage
 
 
 class FakeCore:

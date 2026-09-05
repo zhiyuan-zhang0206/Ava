@@ -8,7 +8,7 @@ import pytest
 
 import cli.commands._session_lifecycle as lifecycle
 from cli import commands
-from ops.spec import _AGENT_RUNNER, ServiceSpec
+from ops.service_spec import _AGENT_RUNNER, ServiceSpec
 from shared.machine import MachineRoles
 
 

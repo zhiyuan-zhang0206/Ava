@@ -36,7 +36,7 @@ import cli.commands as _cli
 from cli.commands import _update_recover as _rec
 from cli.commands import update as _up
 from cli.commands._repo import ServiceSpec
-from ops.spec import _GATEWAY
+from ops.service_spec import _GATEWAY
 
 
 def _spec(service: str) -> ServiceSpec:

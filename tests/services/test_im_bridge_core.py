@@ -16,8 +16,9 @@ import httpx
 import pytest
 
 from services.im_bridge import copy
-from services.im_bridge import core as core_mod
-from services.im_bridge.core import ChatState, IMAdapter, IMBridgeCore, InboundMessage, Reply
+from services.im_bridge import state as state_mod
+from services.im_bridge.core import IMBridgeCore
+from services.im_bridge.types import ChatState, IMAdapter, InboundMessage, Reply
 from shared.config import settings
 
 
@@ -428,7 +429,7 @@ def test_send_message_retries_through_gateway_rollout(
 ) -> None:
     """A 5xx from the gateway (mid-rollout) is retried with backoff until it
     lands — an IM message must not be dropped because the gateway blinked."""
-    from services.im_bridge.core import GatewayClient
+    from services.im_bridge.gateway_client import GatewayClient
 
     monkeypatch.setattr(settings.services, "im_send_retry_delays", [0.01, 0.01, 0.01])
     calls: list[httpx.Request] = []
@@ -453,7 +454,7 @@ def test_send_message_retries_through_gateway_rollout(
 
 
 def test_send_message_gives_up_after_retries(monkeypatch: pytest.MonkeyPatch) -> None:
-    from services.im_bridge.core import GatewayClient
+    from services.im_bridge.gateway_client import GatewayClient
 
     monkeypatch.setattr(settings.services, "im_send_retry_delays", [0.01, 0.01])
     calls: list[httpx.Request] = []
@@ -1010,7 +1011,7 @@ def test_weixin_push_recovery_hints_on_next_inbound() -> None:
         wx.sent.append((chat_id, text))
 
     wx.send = ok_send  # type: ignore[method-assign]
-    from services.im_bridge.core import InboundMessage
+    from services.im_bridge.types import InboundMessage
 
     async def scenario() -> None:
         await core.handle_inbound(
@@ -1117,7 +1118,7 @@ def test_handle_inbound_outboxes_when_gateway_down(
     async def scenario() -> None:
         await core.handle_inbound(msg)
         assert gateway.sent == []  # gateway is down — nothing delivered
-        outbox = core_mod._load_outbox()
+        outbox = state_mod._load_outbox()
         assert len(outbox) == 1
         assert outbox[0].text == "hello"
         assert outbox[0].agent_id == 405
@@ -1142,11 +1143,11 @@ def test_outbox_replay_delivers_and_clears(monkeypatch: pytest.MonkeyPatch, tmp_
 
     async def scenario() -> None:
         await core.handle_inbound(msg)  # first send fails → outboxed
-        entry = core_mod._load_outbox()[0]
+        entry = state_mod._load_outbox()[0]
         await core._replay_outbox_once()  # gateway back — drains
         assert gateway.sent == [(405, "hello", "user")]
         assert gateway.sent_keys == [entry.idempotency_key]
-        assert core_mod._load_outbox() == []
+        assert state_mod._load_outbox() == []
 
     asyncio.run(scenario())
 

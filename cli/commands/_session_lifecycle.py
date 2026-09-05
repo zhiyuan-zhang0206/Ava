@@ -36,9 +36,9 @@ from cli.commands._repo import (
     ServiceSpec,
     _ensure_frontend_deps,
     _services_for_roles_annotated,
-    profile_marker,
     session_name,
 )
+from ops.service_spec import profile_marker
 from shared.cluster.derive import runner_db_url_projection
 from shared.config import settings
 from shared.machine import MachineRoles
@@ -389,7 +389,7 @@ def _launch_sessions(roles: MachineRoles, skip: set[str], repo: Path) -> LaunchO
             print(f"  + {sess}")
         if spec.before_launch is not None:
             spec.before_launch()
-        # Determine process profile from the service's spec (ops.spec.profile_marker):
+        # Determine process profile from the service's spec (ops.service_spec.profile_marker):
         # gateway daemons get AVA_PROCESS_PROFILE=gateway, agent-runner daemons get
         # =runner; a spec with no_profile_marker (labeler) or with both capabilities
         # gets none. The profile drives per-process env assembly in

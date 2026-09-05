@@ -33,7 +33,7 @@ import pytest
 
 import cli.commands as _cli
 from cli.commands._repo import ServiceSpec
-from ops.spec import _AGENT_RUNNER, _GATEWAY
+from ops.service_spec import _AGENT_RUNNER, _GATEWAY
 from shared.daemon_health import DaemonProbe
 
 # The gate IS the subject here, so stand the global autouse net down for this

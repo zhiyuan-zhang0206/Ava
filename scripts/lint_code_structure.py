@@ -139,16 +139,6 @@ def _machine_role_calls(tree: ast.AST) -> list[int]:
 # re-justification, never a silent rollover. Owner defaults to #405 (the
 # Ava P0 line) until a renewal names the file's actual maintainer.
 _OVERSIZE_ALLOWED: dict[str, tuple[str, int, str]] = {
-    # The single-service-roster schema block — one ServiceSpec per session
-    # (no logic to split); crossed 800 when the memory-search spec landed.
-    "ops/spec.py": ("#405", 800, "2026-12-31"),
-    # IM Bridge core: envelope, command routing, per-channel state, SSE
-    # subscription push, inbound outbox — one cohesive dispatch module.
-    "services/im_bridge/core.py": ("#405", 500, "2026-12-31"),
-    # Agent-host daemon: lifecycle settlement + wake dispatch in one
-    # process-local module; crossed 800 when the hosted lifecycle
-    # settlement commits landed (#1530). Split tracked as follow-up.
-    "services/agent_host/host.py": ("#405", 800, "2026-12-31"),
     # Kernel inbound queue + lifecycle SQL (claim / restart helpers) — one
     # cohesive kernel-DB module; the #1587 fatal-provider heartbeat throttle
     # (last_heartbeat_at + pending-wake accounting) regrew it past the ceiling

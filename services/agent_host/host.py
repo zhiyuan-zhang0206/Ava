@@ -122,18 +122,14 @@ overlay lets the next scan serve it without a crash-and-retry loop.
 from __future__ import annotations
 
 import asyncio
-import hashlib
-import json
 import time
 from collections import OrderedDict
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, field
 from datetime import datetime
 from typing import cast
 from uuid import uuid4
 
 import psycopg
-from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.graph.state import CompiledStateGraph
@@ -142,7 +138,6 @@ from psycopg_pool import AsyncConnectionPool
 from agent._process_boot import boot_agent_scope
 from agent._runloop import _graph_config
 from agent._turn_progress import reset_turn_progress
-from agent.db import LoggingConnectionPool
 from agent.hosted_ownership import (
     admit_hosted_runtime,
     apply_hosted_lifecycle,
@@ -156,11 +151,11 @@ from agent.startup import (
 )
 from agent.state import BaseAgentState
 from services.agent_host.dispatcher import PendingInboundWake
+from services.agent_host.runtime import HostStats, _AgentRuntime, _StoredConfig
 from services.agent_host.stall_guard import run_invocation_with_stall_guard
 from shared.config import settings
 from shared.config.turn_view import bind_agent_config, resolve_agent_config_pins
 from shared.context import AvaContext
-from shared.db import PG_KEEPALIVE_KWARGS, _restore_pooled_session_async
 from shared.db_transaction import async_write_transaction
 from shared.event_publisher import AgentEventPublisher
 from shared.lm.factory import validate_model_config
@@ -180,88 +175,6 @@ _HostGraph = CompiledStateGraph[BaseAgentState, AvaContext, BaseAgentState, Base
 # `restarting` belong to the boot / respawn path, which owns the row until it
 # reaches a running state.
 _UNRUNNABLE_STATUSES = frozenset({"terminated", "restarting"})
-
-# Spare workload connections above the concurrent-turn bound. Every running
-# turn may hold one for checkpoint writes or kernel SQL; the spares cover
-# checkpoint/background overlap. Lifecycle and durable scans have a separate
-# control pool and cannot be starved by these borrowers.
-_POOL_HEADROOM = 4
-_CONTROL_POOL_SIZE = 4
-
-
-def _config_fingerprint(
-    config_overlay: dict[str, object] | None, birth_config: dict[str, object] | None
-) -> str:
-    """A stable digest of the two stored config maps — the runtime cache key.
-
-    `sort_keys` makes it independent of JSONB key order, so re-reading the same
-    unchanged row never looks like a change. `default=str` keeps a value psycopg
-    decoded into something non-JSON (a Decimal, a datetime) from raising here: a
-    fingerprint that cannot be computed would be a hard failure on the turn path,
-    while a coerced one at worst compares two odd values by their repr — and
-    these maps hold validated Settings scalars.
-    """
-    blob = json.dumps(
-        {"overlay": config_overlay, "birth": birth_config}, sort_keys=True, default=str
-    )
-    return hashlib.sha256(blob.encode()).hexdigest()
-
-
-@dataclass
-class _StoredConfig:
-    """One agent's row as the host needs it: where it lives, whether it may run,
-    and the two config maps that decide what running means."""
-
-    machine: str
-    status: str
-    config_overlay: dict[str, object] | None
-    birth_config: dict[str, object] | None
-
-    @property
-    def fingerprint(self) -> str:
-        return _config_fingerprint(self.config_overlay, self.birth_config)
-
-
-@dataclass
-class _AgentRuntime:
-    """The per-agent half of a turn, cached across turns.
-
-    `fingerprint` is what makes the cache honest: it records the config this
-    runtime was built FROM, so a turn whose freshly-read config disagrees
-    rebuilds instead of running the old model.
-    """
-
-    fingerprint: str
-    llm: BaseChatModel
-    last_used: float = field(default_factory=time.monotonic)
-
-
-@dataclass
-class HostStats:
-    """Counters the /healthz payload exposes — the cheap half of the cold-build
-    observability, whose expensive half is the `host_agent_prepared` event.
-
-    `wakes_skipped` is the one to read on a multi-runner cluster: the dispatcher
-    pattern is cluster-wide, so every runner sees every agent's wake and each
-    skips the ones it does not own.
-
-    `config_rejected` counts wakes whose bound model configuration cannot build.
-    """
-
-    cache_hits: int = 0
-    cache_misses: int = 0
-    turns_started: int = 0
-    wakes_skipped: int = 0
-    config_rejected: int = 0
-
-    def as_payload(self) -> dict[str, int]:
-        return {
-            "cache_hits": self.cache_hits,
-            "cache_misses": self.cache_misses,
-            "turns_started": self.turns_started,
-            "wakes_skipped": self.wakes_skipped,
-            "config_rejected": self.config_rejected,
-        }
 
 
 async def settle_stale_running_rows(pool: AsyncConnectionPool, machine: str) -> list[int]:
@@ -830,44 +743,3 @@ class AgentHost:
     async def renew_ownership(self) -> None:
         """Existing daemon health beat also proves idle runtime responsibility."""
         await renew_hosted_owner(self._control_pool, self._machine, self._owner)
-
-
-def build_shared_pool(dsn: str) -> AsyncConnectionPool[psycopg.AsyncConnection]:
-    """The host's turn/checkpoint pool, sized from the concurrent-turn bound.
-
-    `max_size` is the bound plus headroom rather than a round number, so the
-    sizing states its reason (see `_POOL_HEADROOM`). `autocommit=True` +
-    `prepare_threshold=None` are the two settings the per-agent pool already
-    carries in process mode: the saver expects autocommit, and never preparing
-    is what keeps borrows safe across PgBouncer's transaction pooling.
-    """
-    return LoggingConnectionPool[psycopg.AsyncConnection](
-        dsn,
-        pool_name="agent-host",
-        min_size=1,
-        max_size=settings.daemon.host_max_concurrent_turns + _POOL_HEADROOM,
-        kwargs={"autocommit": True, "prepare_threshold": None, **PG_KEEPALIVE_KWARGS},
-        check=_restore_pooled_session_async,
-        timeout=settings.agent.db_pool_acquire_timeout_seconds,
-        open=False,
-    )
-
-
-def build_control_pool(dsn: str) -> AsyncConnectionPool[psycopg.AsyncConnection]:
-    """Reserved capacity for host ownership, recovery, and durable scans.
-
-    PgBouncer remains the downstream server-connection multiplexer. This
-    small client pool is a correctness boundary inside agent-host: turn or
-    checkpoint borrowers cannot consume it, so saturation cannot hide pending
-    work or strand lifecycle settlement.
-    """
-    return LoggingConnectionPool[psycopg.AsyncConnection](
-        dsn,
-        pool_name="agent-host-control",
-        min_size=1,
-        max_size=_CONTROL_POOL_SIZE,
-        kwargs={"autocommit": True, "prepare_threshold": None, **PG_KEEPALIVE_KWARGS},
-        check=_restore_pooled_session_async,
-        timeout=settings.agent.db_pool_acquire_timeout_seconds,
-        open=False,
-    )

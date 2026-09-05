@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 from cli.commands import _cluster_watchdog_probe as wp
-from ops.spec import ServiceSpec
+from ops.service_spec import ServiceSpec
 
 
 def _spec_for(role: str, pidfile: Path | None) -> ServiceSpec:
