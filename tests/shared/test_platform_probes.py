@@ -26,14 +26,14 @@ def test_resolve_uses_explicit_override(monkeypatch: pytest.MonkeyPatch, tmp_pat
 def test_resolve_macos_default(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(_settings_for(monkeypatch), "chrome_binary", None)
     monkeypatch.setattr(pp, "sys", _FakeSys("darwin"))
-    monkeypatch.setattr(pp.Path, "exists", lambda _self: True)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(pp.Path, "exists", lambda _self: True)  # pyright: ignore[reportUnknownArgumentType]
     assert pp.resolve_chrome_binary() == pp._MACOS_CHROME
 
 
 def test_resolve_returns_none_when_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(_settings_for(monkeypatch), "chrome_binary", None)
     monkeypatch.setattr(pp, "sys", _FakeSys("darwin"))
-    monkeypatch.setattr(pp.Path, "exists", lambda _self: False)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(pp.Path, "exists", lambda _self: False)  # pyright: ignore[reportUnknownArgumentType]
     assert pp.resolve_chrome_binary() is None
 
 
@@ -43,7 +43,7 @@ def test_resolve_linux_uses_which(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         pp.shutil,
         "which",
-        lambda name: "/usr/bin/google-chrome" if name == "google-chrome" else None,  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda name: "/usr/bin/google-chrome" if name == "google-chrome" else None,  # pyright: ignore[reportUnknownArgumentType]
     )
     assert pp.resolve_chrome_binary() == "/usr/bin/google-chrome"
 
@@ -51,7 +51,7 @@ def test_resolve_linux_uses_which(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_resolve_linux_none_when_not_on_path(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(_settings_for(monkeypatch), "chrome_binary", None)
     monkeypatch.setattr(pp, "sys", _FakeSys("linux"))
-    monkeypatch.setattr(pp.shutil, "which", lambda _name: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(pp.shutil, "which", lambda _name: None)  # pyright: ignore[reportUnknownArgumentType]
     assert pp.resolve_chrome_binary() is None
 
 
@@ -126,7 +126,7 @@ def _all_present(monkeypatch: pytest.MonkeyPatch) -> None:
     """Make all three browser prongs (display + Chrome + npx) pass."""
     monkeypatch.setattr(pp, "display_available", lambda: True)
     monkeypatch.setattr(pp, "resolve_chrome_binary", lambda: "/chrome")
-    monkeypatch.setattr(pp.shutil, "which", lambda _name: "/usr/bin/npx")  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(pp.shutil, "which", lambda _name: "/usr/bin/npx")  # pyright: ignore[reportUnknownArgumentType]
 
 
 def test_incapability_none_when_all_present(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -151,7 +151,7 @@ def test_incapability_no_chrome(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_incapability_no_npx(monkeypatch: pytest.MonkeyPatch) -> None:
     _all_present(monkeypatch)
-    monkeypatch.setattr(pp.shutil, "which", lambda _name: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(pp.shutil, "which", lambda _name: None)  # pyright: ignore[reportUnknownArgumentType]
     assert pp.browser_incapability() == "no npx (install Node.js for chrome-devtools-mcp)"
     assert pp.browser_capable() is False
 
@@ -161,7 +161,7 @@ def test_incapability_checks_display_first(monkeypatch: pytest.MonkeyPatch) -> N
     bare host reports the display reason (not a misleading Chrome/npx one)."""
     monkeypatch.setattr(pp, "display_available", lambda: False)
     monkeypatch.setattr(pp, "resolve_chrome_binary", lambda: None)
-    monkeypatch.setattr(pp.shutil, "which", lambda _name: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(pp.shutil, "which", lambda _name: None)  # pyright: ignore[reportUnknownArgumentType]
     assert pp.browser_incapability() == "no display (WSL without WSLg / headless server)"
 
 
@@ -179,7 +179,7 @@ def _all_platform_browser_deps_present(monkeypatch: pytest.MonkeyPatch) -> None:
     """Make the settings-free browser dependency prongs pass."""
     monkeypatch.setattr(pp, "display_available", lambda: True)
     monkeypatch.setattr(pp, "_platform_chrome_binary", lambda: "/chrome")
-    monkeypatch.setattr(pp.shutil, "which", lambda _name: "/usr/bin/npx")  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(pp.shutil, "which", lambda _name: "/usr/bin/npx")  # pyright: ignore[reportUnknownArgumentType]
 
 
 def test_browser_deps_incapability_none_when_all_present(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -203,7 +203,7 @@ def test_browser_deps_incapability_returns_chrome_reason(monkeypatch: pytest.Mon
 
 def test_browser_deps_incapability_returns_npx_reason(monkeypatch: pytest.MonkeyPatch) -> None:
     _all_platform_browser_deps_present(monkeypatch)
-    monkeypatch.setattr(pp.shutil, "which", lambda _name: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(pp.shutil, "which", lambda _name: None)  # pyright: ignore[reportUnknownArgumentType]
     assert pp.browser_deps_incapability() == "no npx (install Node.js for chrome-devtools-mcp)"
 
 
@@ -257,7 +257,7 @@ def test_browser_mcp_incapability_inherits_browser_prongs(monkeypatch: pytest.Mo
     superset, not a separate list."""
     _all_present(monkeypatch)
     monkeypatch.setattr(pp, "unix_sockets_available", lambda: True)
-    monkeypatch.setattr(pp.shutil, "which", lambda _name: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(pp.shutil, "which", lambda _name: None)  # pyright: ignore[reportUnknownArgumentType]
     assert pp.browser_mcp_incapability() == pp.browser_incapability()
 
 

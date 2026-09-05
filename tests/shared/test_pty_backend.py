@@ -79,14 +79,14 @@ def _argv(calls: list[list[str]]) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
-def test_has_session_true(cli_calls):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-    calls, _ = cli_calls  # pyright: ignore[reportUnknownVariableType]
+def test_has_session_true(cli_calls):
+    calls, _ = cli_calls
     assert _backend().has_session("ava-agent-1-shell-2") is True
     assert _argv(calls) == ["ava-agent-1-shell-2", "has"]  # pyright: ignore[reportUnknownArgumentType]
 
 
-def test_has_session_false(cli_calls):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-    _calls, script = cli_calls  # pyright: ignore[reportUnknownVariableType]
+def test_has_session_false(cli_calls):
+    _calls, script = cli_calls
     script[("ava-agent-1-shell-2", "has")] = _FakeCompletedProcess(returncode=1)
     assert _backend().has_session("ava-agent-1-shell-2") is False
 
@@ -99,11 +99,11 @@ def test_has_session_false(cli_calls):  # pyright: ignore[reportMissingParameter
 def test_new_session_cli_shape_and_envfile(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
-    cli_calls,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    cli_calls,
 ):
     """new → CLI `new <name> <cwd> <envfile>`; the env rides a 0600 handoff
     file, never argv (issue #974 — the CLI only ever sees the file path)."""
-    calls, _ = cli_calls  # pyright: ignore[reportUnknownVariableType]
+    calls, _ = cli_calls
     monkeypatch.setattr("shared.session_backend.run_dir", lambda: tmp_path)
     backend = _backend()
     ok = backend.new_session(
@@ -128,8 +128,8 @@ def test_new_session_cli_shape_and_envfile(
     assert "hunter2" not in " ".join(argv)
 
 
-def test_new_session_login_shell_false_raises(cli_calls):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-    calls, _ = cli_calls  # pyright: ignore[reportUnknownVariableType]
+def test_new_session_login_shell_false_raises(cli_calls):
+    calls, _ = cli_calls
     with pytest.raises(NotImplementedError):
         _backend().new_session("s", "cmd", Path("/"), env={}, login_shell=False)
     assert calls == []  # nothing reached the CLI
@@ -139,9 +139,9 @@ def test_new_session_failure_returns_false_and_cleans_envfile(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     caplog: pytest.LogCaptureFixture,
-    cli_calls,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    cli_calls,
 ):
-    calls, script = cli_calls  # pyright: ignore[reportUnknownVariableType]
+    calls, script = cli_calls
     monkeypatch.setattr("shared.session_backend.run_dir", lambda: tmp_path)
     script[("s", "new")] = _FakeCompletedProcess(
         returncode=1, stderr="pty allocation refused: generation 'freeze-1'"
@@ -154,8 +154,8 @@ def test_new_session_failure_returns_false_and_cleans_envfile(
     assert "pty allocation refused: generation 'freeze-1'" in caplog.text
 
 
-def test_new_session_env_null_byte_raises(cli_calls):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-    calls, _ = cli_calls  # pyright: ignore[reportUnknownVariableType]
+def test_new_session_env_null_byte_raises(cli_calls):
+    calls, _ = cli_calls
     with pytest.raises(RuntimeError):
         _backend().new_session("s", "", Path("/"), env={"A": "x\0y"})
     assert calls == []
@@ -166,10 +166,10 @@ def test_new_session_env_null_byte_raises(cli_calls):  # pyright: ignore[reportM
 # ---------------------------------------------------------------------------
 
 
-def test_send_text_base64_single_argument(cli_calls):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_send_text_base64_single_argument(cli_calls):
     """The text rides one base64 argument (the W1a contract — no quote hell);
     Enter is NOT included (the caller submits it separately)."""
-    calls, _ = cli_calls  # pyright: ignore[reportUnknownVariableType]
+    calls, _ = cli_calls
     _backend().send("s", 'echo "hi"; ls ~/a b')
     argv = _argv(calls)  # pyright: ignore[reportUnknownArgumentType]
     assert argv[0] == "s"
@@ -179,21 +179,21 @@ def test_send_text_base64_single_argument(cli_calls):  # pyright: ignore[reportM
     assert "\r" not in argv[2] and "Enter" not in argv
 
 
-def test_send_raises_with_cli_stderr(cli_calls):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-    _calls, script = cli_calls  # pyright: ignore[reportUnknownVariableType]
+def test_send_raises_with_cli_stderr(cli_calls):
+    _calls, script = cli_calls
     script[("s", "send")] = _FakeCompletedProcess(returncode=1, stderr="no such session")
     with pytest.raises(RuntimeError, match="no such session"):
         _backend().send("s", "echo x")
 
 
-def test_send_keys_names_pass_through(cli_calls):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-    calls, _ = cli_calls  # pyright: ignore[reportUnknownVariableType]
+def test_send_keys_names_pass_through(cli_calls):
+    calls, _ = cli_calls
     _backend().send_keys("s", "C-c", "Up", "Enter")
     assert _argv(calls) == ["s", "send_keys", "C-c", "Up", "Enter"]  # pyright: ignore[reportUnknownArgumentType]
 
 
-def test_send_keys_raises_with_cli_stderr(cli_calls):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-    _calls, script = cli_calls  # pyright: ignore[reportUnknownVariableType]
+def test_send_keys_raises_with_cli_stderr(cli_calls):
+    _calls, script = cli_calls
     script[("s", "send_keys")] = _FakeCompletedProcess(returncode=1, stderr="dead")
     with pytest.raises(RuntimeError, match="dead"):
         _backend().send_keys("s", "C-c")
@@ -204,31 +204,31 @@ def test_send_keys_raises_with_cli_stderr(cli_calls):  # pyright: ignore[reportM
 # ---------------------------------------------------------------------------
 
 
-def test_capture_pane_with_scrollback(cli_calls):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-    calls, script = cli_calls  # pyright: ignore[reportUnknownVariableType]
+def test_capture_pane_with_scrollback(cli_calls):
+    calls, script = cli_calls
     script[("s", "capture")] = _FakeCompletedProcess(returncode=0, stdout="line1\nline2\n")
     out = _backend().capture_pane("s")
     assert out == "line1\nline2\n"
     assert _argv(calls) == ["s", "capture", "200", "--scrollback"]  # pyright: ignore[reportUnknownArgumentType]
 
 
-def test_capture_pane_custom_lines(cli_calls):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-    calls, _ = cli_calls  # pyright: ignore[reportUnknownVariableType]
+def test_capture_pane_custom_lines(cli_calls):
+    calls, _ = cli_calls
     _backend().capture_pane("s", lines=50)
     assert _argv(calls) == ["s", "capture", "50", "--scrollback"]  # pyright: ignore[reportUnknownArgumentType]
 
 
-def test_capture_pane_no_scrollback_passes_flag(cli_calls):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_capture_pane_no_scrollback_passes_flag(cli_calls):
     """scrollback=False shows only the visible screen — the CLI defaults to
     scrollback=True, so the flag must be explicit (W1a contract: capture
     <name> [lines] [--scrollback|--no-scrollback])."""
-    calls, _ = cli_calls  # pyright: ignore[reportUnknownVariableType]
+    calls, _ = cli_calls
     _backend().capture_pane("s", scrollback=False)
     assert _argv(calls) == ["s", "capture", "--no-scrollback"]  # pyright: ignore[reportUnknownArgumentType]
 
 
-def test_capture_pane_raises_with_cli_stderr(cli_calls):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-    _calls, script = cli_calls  # pyright: ignore[reportUnknownVariableType]
+def test_capture_pane_raises_with_cli_stderr(cli_calls):
+    _calls, script = cli_calls
     script[("s", "capture")] = _FakeCompletedProcess(returncode=1, stderr="gone")
     with pytest.raises(RuntimeError, match="gone"):
         _backend().capture_pane("s")
@@ -239,40 +239,40 @@ def test_capture_pane_raises_with_cli_stderr(cli_calls):  # pyright: ignore[repo
 # ---------------------------------------------------------------------------
 
 
-def test_kill_session_force(cli_calls):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-    calls, _ = cli_calls  # pyright: ignore[reportUnknownVariableType]
+def test_kill_session_force(cli_calls):
+    calls, _ = cli_calls
     ok, mode = _backend().kill_session("s", graceful=False)
     assert (ok, mode) == (True, "forced")
     assert _argv(calls) == ["s", "kill"]  # pyright: ignore[reportUnknownArgumentType]
 
 
-def test_kill_session_graceful_flag(cli_calls):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-    calls, _ = cli_calls  # pyright: ignore[reportUnknownVariableType]
+def test_kill_session_graceful_flag(cli_calls):
+    calls, _ = cli_calls
     ok, mode = _backend().kill_session("s", graceful=True, timeout=9.0, expected=True)
     assert (ok, mode) == (True, "graceful")
     assert _argv(calls) == ["s", "kill", "--graceful"]  # pyright: ignore[reportUnknownArgumentType]
 
 
-def test_kill_session_reports_failure(cli_calls):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-    _calls, script = cli_calls  # pyright: ignore[reportUnknownVariableType]
+def test_kill_session_reports_failure(cli_calls):
+    _calls, script = cli_calls
     script[("s", "kill")] = _FakeCompletedProcess(returncode=1)
     ok, mode = _backend().kill_session("s")
     assert (ok, mode) == (False, "forced")
 
 
-def test_kill_session_absent_session_is_ok(cli_calls):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_kill_session_absent_session_is_ok(cli_calls):
     """Idempotence: killing an absent session is a noop success — the CLI
     answers exit 0 and the backend maps it straight through."""
-    _calls, _ = cli_calls  # default fake answers 0  # pyright: ignore[reportUnknownVariableType]
+    _calls, _ = cli_calls  # default fake answers 0
     ok, mode = _backend().kill_session("ghost")
     assert (ok, mode) == (True, "forced")
 
 
-def test_kill_session_with_verdict_maps_cli_stdout(cli_calls):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_kill_session_with_verdict_maps_cli_stdout(cli_calls):
     """The TTL reaper's interrupt verdict rides the kill CLI's stdout: `idle`
     → not interrupted; `interrupted` → interrupted; anything else (record-based
     fallback kill of a wedged host) is not proven idle → interrupted (fail-open)."""
-    calls, script = cli_calls  # pyright: ignore[reportUnknownVariableType]
+    calls, script = cli_calls
     script[("s", "kill")] = _FakeCompletedProcess(returncode=0, stdout="interrupted\n")
     assert _backend().kill_session_with_verdict("s") == (True, "forced", True)
     assert _argv(calls) == ["s", "kill"]  # pyright: ignore[reportUnknownArgumentType]

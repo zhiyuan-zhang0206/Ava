@@ -24,8 +24,8 @@ def _clean():
     clear_registry()
 
 
-def _spec(name: str = "core_test", **overrides) -> MetricSpec:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-    query = overrides.pop("query", None) or (  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+def _spec(name: str = "core_test", **overrides) -> MetricSpec:
+    query = overrides.pop("query", None) or (  # pyright: ignore[reportUnknownMemberType]
         "SELECT count(*) AS n FROM events WHERE event_name = 'turn_end' AND category = 'telemetry'"
     )
     return MetricSpec(
@@ -125,8 +125,8 @@ def _logql_spec(name: str = "core_loki", **overrides: Any) -> MetricSpec:
         event_name="llm_usage",
         category="telemetry",
         query_type="logql",
-        query=query,  # pyright: ignore[reportUnknownArgumentType]
-        **overrides,  # pyright: ignore[reportUnknownArgumentType]
+        query=query,
+        **overrides,
     )
 
 

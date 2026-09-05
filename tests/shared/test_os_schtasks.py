@@ -61,7 +61,7 @@ def registered(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> list[tuple[li
     calls: list[tuple[list[str], str]] = []
     xml_dir = tmp_path / "schtasks"
     xml_dir.mkdir()
-    monkeypatch.setattr(st, "_xml_path", lambda kind: xml_dir / f"{kind}.xml")  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(st, "_xml_path", lambda kind: xml_dir / f"{kind}.xml")  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(st, "_pythonw", lambda: _PYTHONW)
 
     def _fake_run(argv: list[str]):  # type: ignore[no-untyped-def]
@@ -368,7 +368,7 @@ def test_delete_is_success_even_when_absent(monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.setattr(
         st,
         "_run",
-        lambda _argv: _ok(returncode=1, stderr="ERROR: task does not exist"),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda _argv: _ok(returncode=1, stderr="ERROR: task does not exist"),  # pyright: ignore[reportUnknownArgumentType]
     )
     assert st.delete_task("health-probe", "ava-target") == 0
 
@@ -380,7 +380,7 @@ def test_delete_targets_the_given_slug_not_this_process(monkeypatch: pytest.Monk
     would name — and delete — the running cluster's own task instead.
     """
     seen: list[list[str]] = []
-    monkeypatch.setattr(st, "_run", lambda argv: seen.append(argv) or _ok())  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(st, "_run", lambda argv: seen.append(argv) or _ok())  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(st, "_home_slug", lambda: "ava-this-process")
 
     st.delete_task("health-probe", "ava-target")

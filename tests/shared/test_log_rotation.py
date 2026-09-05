@@ -70,7 +70,7 @@ def test_day_boundary_is_utc_not_message_local_tz(
     fixed_ctime = datetime.datetime(2026, 6, 15, 23, 50, tzinfo=datetime.UTC).timestamp()
     real_stat = Path.stat
 
-    def fake_stat(self):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    def fake_stat(self):
         if self == f:
             return SimpleNamespace(st_ctime=fixed_ctime)
         return real_stat(self)  # pyright: ignore[reportUnknownArgumentType]

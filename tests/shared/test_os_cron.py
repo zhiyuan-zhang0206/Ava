@@ -88,7 +88,7 @@ def test_cleanup_bootout_failure_never_claims_success(
     monkeypatch.setattr(
         os_cron.subprocess,
         "run",
-        lambda *_a, **_k: types.SimpleNamespace(returncode=3, stdout="", stderr="boom"),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda *_a, **_k: types.SimpleNamespace(returncode=3, stdout="", stderr="boom"),  # pyright: ignore[reportUnknownArgumentType]
     )
     os_cron.cleanup_legacy_macos_job("autostart")
 
@@ -103,7 +103,7 @@ def test_cleanup_noop_without_legacy_plist(
 ) -> None:
     monkeypatch.setattr(os_cron, "_legacy_label_tokens", lambda: ["t"])
     called: list[object] = []
-    monkeypatch.setattr(os_cron.subprocess, "run", lambda *a, **_k: called.append(a))  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(os_cron.subprocess, "run", lambda *a, **_k: called.append(a))  # pyright: ignore[reportUnknownArgumentType]
     os_cron.cleanup_legacy_macos_job("health-probe")
     assert called == []
 
@@ -176,7 +176,7 @@ def test_register_linux_aborts_when_crontab_read_fails(
     real crontab from an empty read."""
     import shutil
 
-    monkeypatch.setattr(shutil, "which", lambda _n: "/usr/bin/crontab")  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(shutil, "which", lambda _n: "/usr/bin/crontab")  # pyright: ignore[reportUnknownArgumentType]
 
     def _run(cmd, **_kw):  # type: ignore[no-untyped-def]
         if cmd[:2] == ["crontab", "-l"]:
@@ -191,7 +191,7 @@ def test_register_linux_aborts_when_crontab_read_fails(
 def test_register_linux_treats_no_crontab_as_empty(monkeypatch: pytest.MonkeyPatch) -> None:
     import shutil
 
-    monkeypatch.setattr(shutil, "which", lambda _n: "/usr/bin/crontab")  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(shutil, "which", lambda _n: "/usr/bin/crontab")  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(os_cron, "ava_binary_path", lambda: "/x/ava")
     writes: dict[str, str] = {}
 
@@ -218,7 +218,7 @@ def test_launchd_path_env_includes_brew_bin(monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.setattr(
         shutil,
         "which",
-        lambda name: "/opt/homebrew/bin/brew" if name == "brew" else None,  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda name: "/opt/homebrew/bin/brew" if name == "brew" else None,  # pyright: ignore[reportUnknownArgumentType]
     )
     path = os_cron.launchd_path_env()
     assert "/opt/homebrew/bin" in path  # brew bin (launchd omits it)
@@ -232,7 +232,7 @@ def test_launchd_path_env_falls_back_without_brew(monkeypatch: pytest.MonkeyPatc
     import shutil
 
     monkeypatch.setattr(os_cron, "ava_binary_path", lambda: "/Users/x/.local/bin/ava")
-    monkeypatch.setattr(shutil, "which", lambda _name: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(shutil, "which", lambda _name: None)  # pyright: ignore[reportUnknownArgumentType]
     path = os_cron.launchd_path_env()
     assert "/opt/homebrew/bin" in path
     assert "/usr/local/bin" in path
@@ -246,7 +246,7 @@ def test_launchd_path_env_deduplicates(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         shutil,
         "which",
-        lambda name: "/opt/homebrew/bin/brew" if name == "brew" else None,  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda name: "/opt/homebrew/bin/brew" if name == "brew" else None,  # pyright: ignore[reportUnknownArgumentType]
     )
     assert os_cron.launchd_path_env().split(":").count("/opt/homebrew/bin") == 1
 
@@ -262,7 +262,7 @@ def test_launchd_path_env_deduplicates(monkeypatch: pytest.MonkeyPatch) -> None:
 def _crontab_stub(monkeypatch: pytest.MonkeyPatch, existing: str, writes: dict[str, str]) -> None:
     import shutil
 
-    monkeypatch.setattr(shutil, "which", lambda _n: "/usr/bin/crontab")  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(shutil, "which", lambda _n: "/usr/bin/crontab")  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(os_cron, "ava_binary_path", lambda: "/x/ava")
 
     def _run(cmd, **kw):  # type: ignore[no-untyped-def]

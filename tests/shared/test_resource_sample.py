@@ -52,7 +52,7 @@ class TestResourceSample:
     def test_is_frozen(self) -> None:
         s = resource_sample()
         with pytest.raises(Exception, match="frozen"):
-            s.cpu_pct = 1.0  # pyright: ignore[reportAttributeAccessIssue]
+            s.cpu_pct = 1.0
 
     def test_propagates_psutil_failure(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """The module does not swallow a read failure — the status callers own

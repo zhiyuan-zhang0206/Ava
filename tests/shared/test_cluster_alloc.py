@@ -45,7 +45,7 @@ def test_per_cluster_pg_redis_ports():
 def test_allocated_block_includes_pg_redis(monkeypatch: pytest.MonkeyPatch):
     """A freshly allocated (non-main) block gives pg/redis their own ports inside
     the block, distinct from every other service and from each other."""
-    monkeypatch.setattr(cluster, "_port_free", lambda _: True)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(cluster, "_port_free", lambda _: True)  # pyright: ignore[reportUnknownArgumentType]
     ports = cluster.allocate_ports(existing_bases=set())
     assert ports["postgres"] == 18011
     assert ports["redis"] == 18012
@@ -53,7 +53,7 @@ def test_allocated_block_includes_pg_redis(monkeypatch: pytest.MonkeyPatch):
 
 
 def test_allocate_ports_first_block(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setattr(cluster, "_port_free", lambda _: True)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(cluster, "_port_free", lambda _: True)  # pyright: ignore[reportUnknownArgumentType]
     ports = cluster.allocate_ports(existing_bases=set())
     assert ports["gateway"] == 18000
     assert ports["milvus"] == 18008
@@ -70,6 +70,6 @@ def test_allocate_ports_skips_used_base(monkeypatch: pytest.MonkeyPatch):
     Concrete on purpose, like its sibling in test_cluster_env: a block growth
     must force someone to re-check allocation rather than slide past a
     derived assertion."""
-    monkeypatch.setattr(cluster, "_port_free", lambda _: True)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(cluster, "_port_free", lambda _: True)  # pyright: ignore[reportUnknownArgumentType]
     ports = cluster.allocate_ports(existing_bases={18000})
     assert ports["gateway"] == 18027

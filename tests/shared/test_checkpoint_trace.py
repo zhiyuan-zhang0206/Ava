@@ -24,9 +24,9 @@ from shared.config import settings
 
 def _put_checkpoint(
     thread_id: str,
-    messages: list,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+    messages: list,
     *,
-    metadata: dict | None = None,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+    metadata: dict | None = None,
     version: str = "1",
 ) -> str:
     """Write one checkpoint and return its checkpoint_id.
@@ -53,7 +53,7 @@ def _put_checkpoint(
     return str(cfg["checkpoint_id"])
 
 
-def test_load_by_trace_resolves_checkpoint(db_conn) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_load_by_trace_resolves_checkpoint(db_conn) -> None:
     """A checkpoint stamped with trace_id resolves to its full messages
     (system prompt included — the channel is the whole conversation)."""
     msgs = [HumanMessage(content="system prompt"), AIMessage(content="hi")]
@@ -85,7 +85,7 @@ def test_load_by_trace_resolves_checkpoint(db_conn) -> None:  # pyright: ignore[
 
 
 @pytest.mark.asyncio
-async def test_attach_trace_to_checkpoint_stamps_metadata(aops_pool) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+async def test_attach_trace_to_checkpoint_stamps_metadata(aops_pool) -> None:
     """attach_trace_to_checkpoint merges trace_id into the checkpoint's
     metadata jsonb (idempotent — re-stamping replaces the same key)."""
     msgs = [HumanMessage(content="hello")]
@@ -113,7 +113,7 @@ async def test_attach_trace_to_checkpoint_stamps_metadata(aops_pool) -> None:  #
     assert row == ("d" * 32,)
 
 
-def test_load_by_trace_picks_newest_when_multiple(db_conn) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_load_by_trace_picks_newest_when_multiple(db_conn) -> None:
     """Multiple checkpoints of one thread carrying the same trace_id resolve to
     the newest (checkpoint_id DESC) — a re-run inside one trace re-commits."""
     thread = "9"

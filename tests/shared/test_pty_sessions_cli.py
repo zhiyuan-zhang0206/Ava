@@ -57,7 +57,7 @@ def _run_cli(home: Path, *args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
-def _wait(predicate, timeout: float = 30.0, interval: float = 0.05) -> bool:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def _wait(predicate, timeout: float = 30.0, interval: float = 0.05) -> bool:
     # 30s default (2026-08-09): under CI runner CPU oversubscription a host's
     # reader thread can lag its reap well past 10s.
     deadline = time.monotonic() + timeout
@@ -65,7 +65,7 @@ def _wait(predicate, timeout: float = 30.0, interval: float = 0.05) -> bool:  # 
         if predicate():
             return True
         time.sleep(interval)
-    return predicate()  # pyright: ignore[reportUnknownVariableType]
+    return predicate()
 
 
 def _proc_exited(proc_or_pid: psutil.Process | int) -> bool:

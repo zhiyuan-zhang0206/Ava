@@ -134,7 +134,7 @@ def test_direct_db_url_already_direct_names_a_local_pg_port(
 
 def test_direct_db_url_remote_host_ignores_local_registry(
     monkeypatch: pytest.MonkeyPatch,
-    loguru_records,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    loguru_records,
 ) -> None:
     """A URL naming a REMOTE host (a split runner dialing the gateway, or a
     remote/SaaS plane — Task #1752) must not be resolved against local records
@@ -151,12 +151,12 @@ def test_direct_db_url_remote_host_ignores_local_registry(
     )
     got = db_module.direct_db_url()
     assert got == "postgresql://ava_main:sek@10.0.0.9:6433/ava_main"
-    assert not any("direct_db_url" in r["message"] for r in loguru_records)  # pyright: ignore[reportUnknownVariableType]
+    assert not any("direct_db_url" in r["message"] for r in loguru_records)
 
 
 def test_direct_db_url_split_runner_falls_back_loudly(
     monkeypatch: pytest.MonkeyPatch,
-    loguru_records,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    loguru_records,
 ) -> None:
     """The split-runner case: no local record explains the URL's port (the
     gateway's pooler port is a fact of the GATEWAY box's registry). The URL is
@@ -173,12 +173,12 @@ def test_direct_db_url_split_runner_falls_back_loudly(
     )
     got = db_module.direct_db_url()
     assert got == "postgresql://ava_main:sek@10.0.0.9:6433/ava_main"
-    assert any("no local registry" in r["message"] for r in loguru_records)  # pyright: ignore[reportUnknownVariableType]
+    assert any("no local registry" in r["message"] for r in loguru_records)
 
 
 def test_direct_db_url_unknown_port_stays_silent_when_pooling_off(
     monkeypatch: pytest.MonkeyPatch,
-    loguru_records,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    loguru_records,
 ) -> None:
     """Pooling off: the one URL IS the direct Postgres URL by construction; an
     unknown port (an operator stand-in) is genuinely direct — no warning."""

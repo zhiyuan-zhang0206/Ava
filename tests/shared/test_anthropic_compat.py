@@ -39,7 +39,7 @@ def test_message_delta_with_thinking_tokens_sets_reasoning():
     )
     # Simulate the override's post-processing logic
     assert msg.usage_metadata is not None
-    existing: dict = dict(msg.usage_metadata.get("output_token_details") or {})  # pyright: ignore[reportMissingTypeArgument]
+    existing: dict = dict(msg.usage_metadata.get("output_token_details") or {})
     thinking = event.usage.output_tokens_details.thinking_tokens
     if thinking > 0 and "reasoning" not in existing and "reasoning_tokens" not in existing:
         msg.usage_metadata["output_token_details"] = {**existing, "reasoning": thinking}  # type: ignore[typeddict-item]

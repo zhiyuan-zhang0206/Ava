@@ -127,7 +127,7 @@ def test_ava_binary_path_prefers_this_checkout_over_path(monkeypatch: pytest.Mon
     prod's."""
     import shutil
 
-    monkeypatch.setattr(shutil, "which", lambda _n: "/somewhere/else/bin/ava")  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(shutil, "which", lambda _n: "/somewhere/else/bin/ava")  # pyright: ignore[reportUnknownArgumentType]
     resolved = Path(os_cron.ava_binary_path())
     assert resolved.parent.parent.parent == Path(__file__).resolve().parents[2]
     assert resolved.parent.parent.name == ".venv"
@@ -139,7 +139,7 @@ def test_ava_binary_path_falls_back_to_path_without_a_venv(
     import shutil
 
     monkeypatch.setattr("shared.paths.repo_root", lambda: tmp_path)
-    monkeypatch.setattr(shutil, "which", lambda _n: "/usr/local/bin/ava")  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(shutil, "which", lambda _n: "/usr/local/bin/ava")  # pyright: ignore[reportUnknownArgumentType]
     assert os_cron.ava_binary_path() == "/usr/local/bin/ava"
 
 

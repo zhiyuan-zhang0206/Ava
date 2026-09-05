@@ -716,17 +716,17 @@ def test_flag_off_disables_export(otlp_backend: Any, monkeypatch: pytest.MonkeyP
     """AVA_TELEMETRY_OTLP_ENABLED=false -> export is a no-op: no backend
     bring-up, no records, no queue traffic."""
     backend, log_exporter, metric_reader = otlp_backend
-    monkeypatch.setattr("shared.config.settings.observability.telemetry_otlp_enabled", False)  # pyright: ignore[reportUnknownMemberType]
+    monkeypatch.setattr("shared.config.settings.observability.telemetry_otlp_enabled", False)
 
     def fail_emit(*_args: object, **_kwargs: object) -> None:
         pytest.fail("flag-off must not emit backend status events")
 
     monkeypatch.setattr(telemetry, "emit", fail_emit)
-    backend.export_batch([_event()])  # pyright: ignore[reportUnknownMemberType]
-    assert backend._logs is None  # never brought up  # pyright: ignore[reportUnknownMemberType]
-    assert backend._queue.empty()  # pyright: ignore[reportUnknownMemberType]
-    assert log_exporter.get_finished_logs() == ()  # pyright: ignore[reportUnknownMemberType]
-    assert metric_reader.get_metrics_data() is None  # pyright: ignore[reportUnknownMemberType]
+    backend.export_batch([_event()])
+    assert backend._logs is None  # never brought up
+    assert backend._queue.empty()
+    assert log_exporter.get_finished_logs() == ()
+    assert metric_reader.get_metrics_data() is None
 
 
 def test_flag_defaults_on_with_standard_endpoint(monkeypatch) -> None:
@@ -747,7 +747,7 @@ def test_backend_init_failure_isolated_and_waits_before_retry(
 ) -> None:
     """A backend that cannot come up (bad endpoint / missing dep) never raises
     into the emitter and does not retry again inside the five-minute window."""
-    monkeypatch.setattr("shared.config.settings.observability.telemetry_otlp_enabled", True)  # pyright: ignore[reportUnknownMemberType]
+    monkeypatch.setattr("shared.config.settings.observability.telemetry_otlp_enabled", True)
 
     def reachable(_endpoint: str) -> bool:
         return True
@@ -759,7 +759,7 @@ def test_backend_init_failure_isolated_and_waits_before_retry(
         attempts.append(endpoint)
         raise RuntimeError("collector unreachable")
 
-    monkeypatch.setattr(telemetry_otlp, "_build_providers", boom)  # pyright: ignore[reportUnknownMemberType]
+    monkeypatch.setattr(telemetry_otlp, "_build_providers", boom)
     backend = telemetry_otlp._OtlpBackend()
     assert backend.export_batch([_event()]) is None  # does not raise
     assert backend._logs is None
@@ -988,7 +988,7 @@ def test_endpoint_reachable_accepts_any_http_status(
 ):
     port = probe_server.server_address[1]
     endpoint = f"http://127.0.0.1:{port}"
-    reachable = telemetry_otlp._OtlpBackend._endpoint_reachable  # pyright: ignore[reportUnknownMemberType]
+    reachable = telemetry_otlp._OtlpBackend._endpoint_reachable
 
     _ProbeHandler.status = 200
     assert reachable(endpoint) is True
@@ -1006,21 +1006,11 @@ def test_endpoint_reachable_connection_refused_is_false():
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
         port = sock.getsockname()[1]
-    assert (
-        telemetry_otlp._OtlpBackend._endpoint_reachable(  # pyright: ignore[reportUnknownMemberType] — private seam under test
-            f"http://127.0.0.1:{port}"
-        )
-        is False
-    )
+    assert telemetry_otlp._OtlpBackend._endpoint_reachable(f"http://127.0.0.1:{port}") is False
 
 
 def test_endpoint_reachable_non_http_scheme_skips_probe():
-    assert (
-        telemetry_otlp._OtlpBackend._endpoint_reachable(  # pyright: ignore[reportUnknownMemberType] — private seam under test
-            "file:///tmp/x"
-        )
-        is True
-    )
+    assert telemetry_otlp._OtlpBackend._endpoint_reachable("file:///tmp/x") is True
 
 
 # ── exec-child export path (task #1423) ──────────────────────────────────────
@@ -1031,7 +1021,7 @@ def test_handshake_env_no_longer_gates_export(monkeypatch: pytest.MonkeyPatch) -
     must no longer disable OTLP — the export flag is the only authority."""
     monkeypatch.setenv("AVA_EXEC_REQUEST_FILE", "request.json")
     monkeypatch.setattr("shared.config.settings.observability.telemetry_otlp_enabled", True)
-    assert telemetry_otlp._OtlpBackend._enabled() is True  # pyright: ignore[reportUnknownMemberType]
+    assert telemetry_otlp._OtlpBackend._enabled() is True
 
 
 def test_flush_force_flushes_sdk_batch_records(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1051,10 +1041,8 @@ def test_flush_force_flushes_sdk_batch_records(monkeypatch: pytest.MonkeyPatch) 
     logger_provider.add_log_record_processor(BatchLogRecordProcessor(log_exporter))
     metric_provider = MeterProvider(metric_readers=[InMemoryMetricReader()])
     monkeypatch.setattr("shared.config.settings.observability.telemetry_otlp_enabled", True)
-    backend = telemetry_otlp._OtlpBackend(  # pyright: ignore[reportUnknownMemberType]
-        providers=(logger_provider, metric_provider)
-    )
-    monkeypatch.setattr(telemetry_otlp, "backend", backend)  # pyright: ignore[reportUnknownMemberType]
+    backend = telemetry_otlp._OtlpBackend(providers=(logger_provider, metric_provider))
+    monkeypatch.setattr(telemetry_otlp, "backend", backend)
     try:
         backend.export_batch([_event(attributes={"fn": "files.read"})])
         # Without force_flush the in-memory batch exporter would stay empty
@@ -1079,16 +1067,16 @@ def test_warmup_builds_backend_when_enabled(monkeypatch: pytest.MonkeyPatch) -> 
     log_exporter = InMemoryLogRecordExporter()
     logger_provider = LoggerProvider()
     logger_provider.add_log_record_processor(SimpleLogRecordProcessor(log_exporter))
-    backend = telemetry_otlp._OtlpBackend(  # pyright: ignore[reportUnknownMemberType]
+    backend = telemetry_otlp._OtlpBackend(
         providers=(
             logger_provider,
             MeterProvider(metric_readers=[InMemoryMetricReader()]),
         )
     )
-    monkeypatch.setattr(telemetry_otlp, "backend", backend)  # pyright: ignore[reportUnknownMemberType]
+    monkeypatch.setattr(telemetry_otlp, "backend", backend)
     monkeypatch.setattr("shared.config.settings.observability.telemetry_otlp_enabled", True)
     try:
         telemetry_otlp.warmup()
-        assert backend._logs is not None  # pyright: ignore[reportUnknownMemberType]
+        assert backend._logs is not None
     finally:
         backend.shutdown()

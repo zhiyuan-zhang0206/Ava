@@ -76,24 +76,24 @@ class TestPublishBestEffortSync:
     def test_never_raises_and_debug_logs_on_transient(
         self,
         monkeypatch: pytest.MonkeyPatch,
-        loguru_records: list[dict],  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+        loguru_records: list[dict],
     ) -> None:
         """A transient failure (redis down) is swallowed → None, logged at DEBUG."""
         monkeypatch.setattr(
             redis_client,
             "sync_redis",
-            lambda **_: _BoomSyncClient(RedisConnectionError("down")),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+            lambda **_: _BoomSyncClient(RedisConnectionError("down")),  # pyright: ignore[reportUnknownArgumentType]
         )
         result = publish_best_effort_sync("ava:x", "{}", context="unit")
         assert result is None
-        hits = [r for r in loguru_records if "skipped" in r["message"] and "ava:x" in r["message"]]  # pyright: ignore[reportUnknownVariableType]
+        hits = [r for r in loguru_records if "skipped" in r["message"] and "ava:x" in r["message"]]
         assert hits, "expected a best-effort DEBUG skip line"
-        assert all(r["level"].no < 30 for r in hits), "transient failure must be DEBUG, not WARNING"  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType, reportUnknownVariableType]
+        assert all(r["level"].no < 30 for r in hits), "transient failure must be DEBUG, not WARNING"  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
 
     def test_never_raises_and_warns_on_noperm(
         self,
         monkeypatch: pytest.MonkeyPatch,
-        loguru_records: list[dict],  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+        loguru_records: list[dict],
     ) -> None:
         """A ResponseError (redis NOPERM — ACL misconfig) is swallowed → None, but
         logged at WARNING because it silently disables live updates fleet-wide."""
@@ -101,19 +101,19 @@ class TestPublishBestEffortSync:
         monkeypatch.setattr(
             redis_client,
             "sync_redis",
-            lambda **_: _BoomSyncClient(NoPermissionError("NOPERM")),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+            lambda **_: _BoomSyncClient(NoPermissionError("NOPERM")),  # pyright: ignore[reportUnknownArgumentType]
         )
         result = publish_best_effort_sync("ava:noperm-sync", "{}", context="unit")
         assert result is None
         assert any(
             "rejected by redis" in r["message"] and r["level"].no >= 30  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
-            for r in loguru_records  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType, reportUnknownVariableType]
+            for r in loguru_records
         ), "a NOPERM publish must be logged at WARNING"
 
     def test_noperm_warning_is_rate_limited(
         self,
         monkeypatch: pytest.MonkeyPatch,
-        loguru_records: list[dict],  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+        loguru_records: list[dict],
     ) -> None:
         """A persistent NOPERM outage warns once per channel then drops repeats to
         DEBUG — one event funnels the whole fleet through here, so the WARNING must
@@ -122,18 +122,18 @@ class TestPublishBestEffortSync:
         monkeypatch.setattr(
             redis_client,
             "sync_redis",
-            lambda **_: _BoomSyncClient(NoPermissionError("NOPERM")),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+            lambda **_: _BoomSyncClient(NoPermissionError("NOPERM")),  # pyright: ignore[reportUnknownArgumentType]
         )
         channel = "ava:noperm-throttle"
         for _ in range(4):
             assert publish_best_effort_sync(channel, "{}", context="unit") is None
-        warnings = [  # pyright: ignore[reportUnknownVariableType]
+        warnings = [
             r
-            for r in loguru_records  # pyright: ignore[reportUnknownVariableType]
+            for r in loguru_records
             if "rejected by redis" in r["message"] and r["level"].no >= 30  # pyright: ignore[reportUnknownMemberType]
         ]
         assert len(warnings) == 1, f"expected exactly one WARNING, got {len(warnings)}"  # pyright: ignore[reportUnknownArgumentType]
-        assert any("rate-limited" in r["message"] and r["level"].no < 30 for r in loguru_records), (  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType, reportUnknownVariableType]
+        assert any("rate-limited" in r["message"] and r["level"].no < 30 for r in loguru_records), (  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
             "suppressed repeats must drop to a DEBUG rate-limited line"
         )
 
@@ -146,7 +146,7 @@ class TestPublishBestEffortAsync:
     async def test_never_raises_and_debug_logs_on_transient(
         self,
         monkeypatch: pytest.MonkeyPatch,
-        loguru_records: list[dict],  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+        loguru_records: list[dict],
     ) -> None:
         monkeypatch.setattr(
             redis_client,
@@ -155,14 +155,14 @@ class TestPublishBestEffortAsync:
         )
         result = await publish_best_effort("ava:x", "{}", context="unit")
         assert result is None
-        assert any("skipped" in r["message"] and r["level"].no < 30 for r in loguru_records), (  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType, reportUnknownVariableType]
+        assert any("skipped" in r["message"] and r["level"].no < 30 for r in loguru_records), (  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
             "expected a best-effort DEBUG skip line"
         )
 
     async def test_never_raises_and_warns_on_noperm(
         self,
         monkeypatch: pytest.MonkeyPatch,
-        loguru_records: list[dict],  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+        loguru_records: list[dict],
     ) -> None:
         redis_client._warn_last.clear()  # deterministic first-warn (see throttle)
         monkeypatch.setattr(
@@ -174,7 +174,7 @@ class TestPublishBestEffortAsync:
         assert result is None
         assert any(
             "rejected by redis" in r["message"] and r["level"].no >= 30  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
-            for r in loguru_records  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType, reportUnknownVariableType]
+            for r in loguru_records
         )
 
     async def test_reports_live_receiver_count(self) -> None:

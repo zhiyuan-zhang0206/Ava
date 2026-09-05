@@ -47,7 +47,7 @@ def _wire_listener(
     def _matches(_pid: int, _binary: Path) -> bool:
         return holder_matches_binary
 
-    monkeypatch.setattr(supervised_listener, "listeners_on", lambda _port: [1109])  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(supervised_listener, "listeners_on", lambda _port: [1109])  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
         supervised_listener,
         "_listener_matches_binary",
@@ -57,7 +57,7 @@ def _wire_listener(
     # time, so the patches target the owning modules (test_update_import_timing
     # forbids top-level imports of the kill chain anywhere in the updater's
     # import closure).
-    monkeypatch.setattr(session_record.SessionRecord, "read", lambda _path: record)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(session_record.SessionRecord, "read", lambda _path: record)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
         session_backend,
         "get_backend",

@@ -75,13 +75,13 @@ def test_batch_writes_one_row_per_payload(db_conn: psycopg.Connection) -> None:
     )
 
     rows = _rows(aid)
-    assert [p for _t, _s, p in rows] == payloads  # pyright: ignore[reportUnknownVariableType]
-    assert {t for t, _s, _p in rows} == {"skill_invoked"}  # pyright: ignore[reportUnknownVariableType]
-    assert {s for _t, s, _p in rows} == {"self"}  # pyright: ignore[reportUnknownVariableType]
+    assert [p for _t, _s, p in rows] == payloads
+    assert {t for t, _s, _p in rows} == {"skill_invoked"}
+    assert {s for _t, s, _p in rows} == {"self"}
     # The unified stream carries the same events with category=audit.
     event_rows = _event_rows(aid)
-    assert [p for _k, _c, _s, p in event_rows] == payloads  # pyright: ignore[reportUnknownVariableType]
-    assert {c for _k, c, _s, _p in event_rows} == {"audit"}  # pyright: ignore[reportUnknownVariableType]
+    assert [p for _k, _c, _s, p in event_rows] == payloads
+    assert {c for _k, c, _s, _p in event_rows} == {"audit"}
 
 
 def test_batch_row_matches_the_per_row_writer(db_conn: psycopg.Connection) -> None:

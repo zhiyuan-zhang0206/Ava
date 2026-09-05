@@ -52,9 +52,9 @@ def _patch_slug(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_blocker_none_when_all_checks_pass(monkeypatch: pytest.MonkeyPatch) -> None:
     _patch_slug(monkeypatch)
-    monkeypatch.setattr(gp.shutil, "which", lambda _: "/usr/bin/gh")  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(gp.shutil, "which", lambda _: "/usr/bin/gh")  # pyright: ignore[reportUnknownArgumentType]
 
-    def fake_run(args, **_):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    def fake_run(args, **_):
         if args[:3] == ["gh", "auth", "status"]:
             return _FakeProc(returncode=0)
         return _FakeProc(returncode=0, stdout="WRITE\n")
@@ -64,14 +64,14 @@ def test_blocker_none_when_all_checks_pass(monkeypatch: pytest.MonkeyPatch) -> N
 
 
 def test_blocker_gh_missing(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(gp.shutil, "which", lambda _: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(gp.shutil, "which", lambda _: None)  # pyright: ignore[reportUnknownArgumentType]
     assert gp.github_pr_blocker() == "gh CLI not installed"
 
 
 def test_blocker_not_authenticated(monkeypatch: pytest.MonkeyPatch) -> None:
     _patch_slug(monkeypatch)
-    monkeypatch.setattr(gp.shutil, "which", lambda _: "/usr/bin/gh")  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-    monkeypatch.setattr(gp.subprocess, "run", lambda *_a, **_k: _FakeProc(returncode=1))  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(gp.shutil, "which", lambda _: "/usr/bin/gh")  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(gp.subprocess, "run", lambda *_a, **_k: _FakeProc(returncode=1))  # pyright: ignore[reportUnknownArgumentType]
     reason = gp.github_pr_blocker()
     assert reason is not None
     assert "not authenticated" in reason
@@ -79,9 +79,9 @@ def test_blocker_not_authenticated(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_blocker_read_only_permission(monkeypatch: pytest.MonkeyPatch) -> None:
     _patch_slug(monkeypatch)
-    monkeypatch.setattr(gp.shutil, "which", lambda _: "/usr/bin/gh")  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(gp.shutil, "which", lambda _: "/usr/bin/gh")  # pyright: ignore[reportUnknownArgumentType]
 
-    def fake_run(args, **_):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    def fake_run(args, **_):
         if args[:3] == ["gh", "auth", "status"]:
             return _FakeProc(returncode=0)
         return _FakeProc(returncode=0, stdout="READ\n")
@@ -95,9 +95,9 @@ def test_blocker_read_only_permission(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_blocker_permission_read_fails(monkeypatch: pytest.MonkeyPatch) -> None:
     _patch_slug(monkeypatch)
-    monkeypatch.setattr(gp.shutil, "which", lambda _: "/usr/bin/gh")  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(gp.shutil, "which", lambda _: "/usr/bin/gh")  # pyright: ignore[reportUnknownArgumentType]
 
-    def fake_run(args, **_):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    def fake_run(args, **_):
         if args[:3] == ["gh", "auth", "status"]:
             return _FakeProc(returncode=0)
         return _FakeProc(returncode=1, stdout="")
@@ -108,9 +108,9 @@ def test_blocker_permission_read_fails(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_blocker_auth_timeout_is_reason_not_crash(monkeypatch: pytest.MonkeyPatch) -> None:
     _patch_slug(monkeypatch)
-    monkeypatch.setattr(gp.shutil, "which", lambda _: "/usr/bin/gh")  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(gp.shutil, "which", lambda _: "/usr/bin/gh")  # pyright: ignore[reportUnknownArgumentType]
 
-    def fake_run(args, **_):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    def fake_run(args, **_):
         raise subprocess.TimeoutExpired(cmd=args, timeout=20)  # pyright: ignore[reportUnknownArgumentType]
 
     monkeypatch.setattr(gp.subprocess, "run", fake_run)  # pyright: ignore[reportUnknownArgumentType]
