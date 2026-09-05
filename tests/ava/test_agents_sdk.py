@@ -110,7 +110,7 @@ def _sdk_via_inprocess_gateway(monkeypatch: pytest.MonkeyPatch):
         monkeypatch.setattr(_settings.lm, _attr, SecretStr("sk-test"))
 
     with TestClient(app, base_url="http://test-gateway") as tc:
-        monkeypatch.setattr("ava._gateway_client._client", tc)
+        monkeypatch.setattr("ava._gateway_transport._client", tc)
         monkeypatch.setattr(_agents_router, "_forward_spawn_to_remote", _in_process_forward)
         monkeypatch.setattr(_agents_forward_router, "_enqueue_lifecycle", _in_process_lifecycle)
         monkeypatch.setattr(_machines, "lookup_role", _lookup_role)

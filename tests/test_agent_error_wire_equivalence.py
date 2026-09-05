@@ -23,7 +23,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from ava._gateway_client import _raise_from_response
+from ava._gateway_transport import _raise_from_response
 from gateway.app import _ava_agent_error_handler
 from shared.agents import EXCEPTION_BY_REASON, AvaAgentError
 

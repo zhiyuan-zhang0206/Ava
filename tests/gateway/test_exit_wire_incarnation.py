@@ -6,7 +6,7 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
-from ava import _gateway_client
+from ava import _gateway_client, _gateway_transport
 from gateway.app import app
 from tests.agent.test_runtime_incarnation import _replace, _row
 
@@ -19,7 +19,7 @@ def test_legacy_sdk_empty_exit_body_obeys_runtime_fence(
     if owned:
         _replace(db_conn, aid)
     with TestClient(app) as client:
-        monkeypatch.setattr(_gateway_client, "_client_singleton", lambda: client)
+        monkeypatch.setattr(_gateway_transport, "_client_singleton", lambda: client)
         _gateway_client.exited(aid)
     assert db_conn.execute("SELECT status FROM agents_meta WHERE id=%s", (aid,)).fetchone() == (
         "running" if owned else "terminated",
