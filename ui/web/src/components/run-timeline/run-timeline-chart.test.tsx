@@ -110,6 +110,10 @@ const labels = {
   none: "None",
   noExecutions: "No executions",
   closeDetails: "Close details",
+  eventDetails: "Event details",
+  kind: "Kind",
+  timestamp: "Timestamp",
+  detail: "Detail",
 };
 
 afterEach(() => vi.restoreAllMocks());
@@ -206,6 +210,46 @@ describe("RunTimelineChart", () => {
     expect(within(panel).getByText("0.00s")).toBeTruthy();
     expect(within(panel).getAllByText("Failed")).toHaveLength(2);
     expect(within(panel).getByText("exec_failed")).toBeTruthy();
+  });
+
+  it("shows turn facts on hover without breaking click-to-select", () => {
+    render(<RunTimelineChart timeline={timeline} labels={labels} />);
+
+    const turn = screen.getByRole("button", { name: "Turn 1" });
+    fireEvent.pointerEnter(turn);
+
+    const popover = screen.getByRole("tooltip");
+    expect(within(popover).getByText("Turn 1")).toBeTruthy();
+    expect(within(popover).getByText("2026-08-29 08:00:00 – 08:00:04")).toBeTruthy();
+    expect(within(popover).getByText("2.0s")).toBeTruthy();
+    expect(within(popover).getByText("Failed")).toBeTruthy();
+    expect(within(popover).getByText("1")).toBeTruthy();
+    expect(within(popover).getByText("$0.02")).toBeTruthy();
+
+    fireEvent.click(turn);
+    expect(screen.getByRole("region", { name: "Turn details" })).toBeTruthy();
+  });
+
+  it("shows the full event label on hover and focus through one shared popover", () => {
+    render(<RunTimelineChart timeline={timeline} labels={labels} />);
+
+    const event = screen.getByRole("button", { name: /exec_failed/ });
+    fireEvent.pointerEnter(event);
+
+    let popover = screen.getByRole("tooltip");
+    expect(within(popover).getByText("Event details")).toBeTruthy();
+    expect(within(popover).getByText("exec_failed")).toBeTruthy();
+    expect(within(popover).getByText("2026-08-29 08:00:03")).toBeTruthy();
+    expect(within(popover).getByText("ValueError")).toBeTruthy();
+    expect(event.getAttribute("aria-describedby")).toBe(popover.id);
+
+    fireEvent.pointerEnter(screen.getByRole("button", { name: "Turn 2" }));
+    expect(screen.getAllByRole("tooltip")).toHaveLength(1);
+
+    fireEvent.focus(event);
+    popover = screen.getByRole("tooltip");
+    expect(within(popover).getByText("ValueError")).toBeTruthy();
+    expect(event.getAttribute("aria-describedby")).toBe(popover.id);
   });
 
   it("reprojects the last tick and turn inside the visible chart when details open", async () => {
