@@ -49,6 +49,10 @@ function chartLabels(t: ReturnType<typeof useTranslations<"runTimeline">>): RunT
     none: t("none"),
     noExecutions: t("noExecutions"),
     closeDetails: t("closeDetails"),
+    eventDetails: t("eventDetails"),
+    kind: t("kind"),
+    timestamp: t("timestamp"),
+    detail: t("detail"),
   };
 }
 

@@ -1,16 +1,36 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  type FocusEvent,
+  type PointerEvent,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
-import { FLEX, MIN_W_0, OVERFLOW_HIDDEN } from "@/lib/layout";
+import { FLEX, MIN_W_0 } from "@/lib/layout";
 import type { RunTimelineResponse } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
+import {
+  rowFailed,
+  rowLabel,
+  tickLabel,
+  TimelinePopover,
+  TIMELINE_POPOVER_ID,
+  TurnDetailPanel,
+  type RunTimelineChartLabels,
+  type TimelinePopoverTarget,
+} from "./run-timeline-details";
 import { buildTimelineLayout } from "./timeline-layout";
+
+export type { RunTimelineChartLabels } from "./run-timeline-details";
 
 const MIN_CANVAS_WIDTH = 1000;
 const MIN_DETAIL_CANVAS_WIDTH = 320;
 const EVENT_RAIL_LIMIT = 120;
+const TIMELINE_POPOVER_WIDTH = 288;
 const EVENT_RAIL_PRIORITY = new Set([
   "exec_failed",
   "exec(failed)",
@@ -25,71 +45,6 @@ const EVENT_RAIL_PRIORITY = new Set([
   "resurrect",
   "agent_terminated",
 ]);
-
-export interface RunTimelineChartLabels {
-  chart: string;
-  visualization: string;
-  time: string;
-  eventRail: string;
-  input: string;
-  output: string;
-  turn: string;
-  bucket: string;
-  cost: string;
-  model: string;
-  empty: string;
-  moreEvents: (count: number, summary: string) => string;
-  turnDetails: string;
-  timeRange: string;
-  activeSeconds: string;
-  latency: string;
-  executions: string;
-  tool: string;
-  duration: string;
-  status: string;
-  succeeded: string;
-  failed: string;
-  anomalies: string;
-  none: string;
-  noExecutions: string;
-  closeDetails: string;
-}
-
-function rowLabel(row: RunTimelineResponse["rows"][number], labels: RunTimelineChartLabels): string {
-  return row.turn === null ? `${labels.bucket} (${row.n_turns})` : `${labels.turn} ${row.turn}`;
-}
-
-function currency(amount: number): string {
-  return `$${amount.toFixed(amount < 0.01 ? 4 : 2)}`;
-}
-
-function pad(value: number): string {
-  return String(value).padStart(2, "0");
-}
-
-function datePart(date: Date): string {
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
-}
-
-function timePart(date: Date): string {
-  return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
-}
-
-function timeRange(startValue: string, endValue: string): string {
-  const start = new Date(startValue);
-  const end = new Date(endValue);
-  const endLabel = datePart(start) === datePart(end) ? timePart(end) : `${datePart(end)} ${timePart(end)}`;
-  return `${datePart(start)} ${timePart(start)} – ${endLabel}`;
-}
-
-function tickLabel(timestamp: string, includeSeconds: boolean): string {
-  const date = new Date(timestamp);
-  return includeSeconds ? timePart(date) : `${pad(date.getHours())}:${pad(date.getMinutes())}`;
-}
-
-function rowFailed(row: RunTimelineResponse["rows"][number]): boolean {
-  return row.ok === false || row.execs.some((execution) => !execution.ok) || row.anomalies.length > 0;
-}
 
 function eventChipClass(kind: string): string {
   if (kind.includes("failed") || kind.includes("timeout")) {
@@ -127,108 +82,6 @@ function prioritizedRailEvents(events: RunTimelineResponse["events"]) {
   };
 }
 
-function DetailMetric({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="space-y-1 rounded-[10px] border border-border bg-muted px-3 py-2">
-      <dt className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{label}</dt>
-      <dd className="font-mono text-xs tabular-nums text-foreground">{value}</dd>
-    </div>
-  );
-}
-
-function TurnDetailPanel({
-  row,
-  labels,
-  onClose,
-}: {
-  row: RunTimelineResponse["rows"][number];
-  labels: RunTimelineChartLabels;
-  onClose: () => void;
-}) {
-  return (
-    <aside
-      role="region"
-      aria-label={labels.turnDetails}
-      className="h-fit space-y-4 rounded-[10px] border border-border bg-card p-4 text-foreground"
-    >
-      <header className={cn(FLEX, "items-start justify-between gap-3")}>
-        <div>
-          <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{labels.turnDetails}</p>
-          <h3 className="text-sm font-semibold">{rowLabel(row, labels)}</h3>
-        </div>
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label={labels.closeDetails}
-          className="rounded-md px-1.5 py-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
-        >
-          ×
-        </button>
-      </header>
-
-      <dl className="grid grid-cols-2 gap-2">
-        <div className="col-span-2">
-          <DetailMetric label={labels.timeRange} value={timeRange(row.start, row.end)} />
-        </div>
-        <DetailMetric label={labels.activeSeconds} value={`${row.active_s.toFixed(1)}s`} />
-        <DetailMetric label={labels.latency} value={`${(row.llm.latency_ms / 1000).toFixed(2)}s`} />
-        <DetailMetric label={labels.input} value={row.llm.in_total.toLocaleString()} />
-        <DetailMetric label={labels.output} value={row.llm.out_total.toLocaleString()} />
-        <DetailMetric label={labels.cost} value={currency(row.llm.cost_usd)} />
-        <DetailMetric label={labels.model} value={row.llm.model ?? "—"} />
-        <div className="col-span-2">
-          <DetailMetric label={labels.status} value={rowFailed(row) ? labels.failed : labels.succeeded} />
-        </div>
-      </dl>
-
-      <section className="space-y-2">
-        <h4 className="text-xs font-semibold">{labels.executions}</h4>
-        {row.execs.length === 0 ? (
-          <p className="text-xs text-muted-foreground">{labels.noExecutions}</p>
-        ) : (
-          <div className={cn(OVERFLOW_HIDDEN, "rounded-[10px] border border-border")}>
-            <div className="grid grid-cols-[minmax(0,1fr)_auto_auto] gap-3 bg-muted px-3 py-2 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-              <span>{labels.tool}</span>
-              <span>{labels.duration}</span>
-              <span>{labels.status}</span>
-            </div>
-            {row.execs.map((execution, index) => (
-              <div
-                key={`${execution.tool}-${index}`}
-                className="grid grid-cols-[minmax(0,1fr)_auto_auto] gap-3 border-t border-border px-3 py-2 font-mono text-[11px]"
-              >
-                <span className="truncate">{execution.tool}</span>
-                <span className="tabular-nums">{execution.dur_s.toFixed(2)}s</span>
-                <span className={execution.ok ? "text-emerald-700 dark:text-emerald-400" : "text-red-700 dark:text-red-400"}>
-                  {execution.ok ? labels.succeeded : labels.failed}
-                </span>
-              </div>
-            ))}
-          </div>
-        )}
-      </section>
-
-      <section className="space-y-2">
-        <h4 className="text-xs font-semibold">{labels.anomalies}</h4>
-        {row.anomalies.length === 0 ? (
-          <p className="text-xs text-muted-foreground">{labels.none}</p>
-        ) : (
-          <div className={cn(FLEX, "flex-wrap gap-1.5")}>
-            {row.anomalies.map((anomaly) => (
-              <span
-                key={anomaly}
-                className="rounded-md border border-red-200 bg-red-50 px-2 py-1 font-mono text-[10px] text-red-700 dark:border-red-500/30 dark:bg-red-950/30 dark:text-red-400"
-              >
-                {anomaly}
-              </span>
-            ))}
-          </div>
-        )}
-      </section>
-    </aside>
-  );
-}
-
 export function RunTimelineChart({
   timeline,
   labels,
@@ -237,8 +90,11 @@ export function RunTimelineChart({
   labels: RunTimelineChartLabels;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const popoverLayerRef = useRef<HTMLDivElement>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
   const [canvasWidth, setCanvasWidth] = useState(MIN_CANVAS_WIDTH);
   const [selectedRowIndex, setSelectedRowIndex] = useState<number | null>(null);
+  const [popoverTarget, setPopoverTarget] = useState<TimelinePopoverTarget | null>(null);
   const rail = useMemo(() => prioritizedRailEvents(timeline.events), [timeline.events]);
   const layout = useMemo(
     () =>
@@ -256,6 +112,54 @@ export function RunTimelineChart({
     (Date.parse(timeline.window.to) - Date.parse(timeline.window.from)) /
     (layout.ticks.length - 1);
   const includeTickSeconds = tickSpacingMs < 60_000;
+
+  const readPopoverKey = (
+    element: HTMLButtonElement,
+  ): Pick<TimelinePopoverTarget, "kind" | "index"> => {
+    const kind = element.dataset.timelinePopoverKind;
+    if (kind !== "turn" && kind !== "event") {
+      throw new Error("Timeline popover trigger is missing its target kind");
+    }
+    const index = Number(element.dataset.timelinePopoverIndex);
+    if (!Number.isInteger(index)) {
+      throw new Error("Timeline popover trigger is missing its target index");
+    }
+    return { kind, index };
+  };
+
+  const showPopover = (event: PointerEvent<HTMLButtonElement> | FocusEvent<HTMLButtonElement>) => {
+    const layer = popoverLayerRef.current;
+    if (!layer) return;
+    const { kind, index } = readPopoverKey(event.currentTarget);
+    const targetBox = event.currentTarget.getBoundingClientRect();
+    const layerBox = layer.getBoundingClientRect();
+    const layerWidth = layerBox.width || canvasWidth;
+    const width = Math.min(TIMELINE_POPOVER_WIDTH, Math.max(0, layerWidth - 16));
+    const targetLeft = targetBox.width
+      ? targetBox.left - layerBox.left
+      : Number.parseFloat(event.currentTarget.style.left) || 0;
+    const targetTop = targetBox.height
+      ? targetBox.bottom - layerBox.top
+      : (Number.parseFloat(event.currentTarget.style.top) || 0) +
+        (Number.parseFloat(event.currentTarget.style.height) || 0);
+    const centeredLeft = targetLeft + targetBox.width / 2 - width / 2;
+    const left = Math.max(8, Math.min(layerWidth - width - 8, centeredLeft));
+    setPopoverTarget({ kind, index, left, top: targetTop, width });
+  };
+
+  const hidePopover = (event: PointerEvent<HTMLButtonElement> | FocusEvent<HTMLButtonElement>) => {
+    if (event.type === "pointerleave" && event.currentTarget === document.activeElement) return;
+    if (event.relatedTarget instanceof Node && popoverRef.current?.contains(event.relatedTarget)) return;
+    const { kind, index } = readPopoverKey(event.currentTarget);
+    setPopoverTarget((current) =>
+      current?.kind === kind && current.index === index ? null : current,
+    );
+  };
+
+  const hoveredRow =
+    popoverTarget?.kind === "turn" ? (timeline.rows[popoverTarget.index] ?? null) : null;
+  const hoveredEvent =
+    popoverTarget?.kind === "event" ? (rail.events[popoverTarget.index] ?? null) : null;
 
   useEffect(() => {
     const container = scrollRef.current;
@@ -283,7 +187,7 @@ export function RunTimelineChart({
   return (
     <section aria-label={labels.chart} className="rounded-[10px] border border-border bg-card p-3">
       <div className={cn("grid gap-3", selectedRow ? "lg:grid-cols-[minmax(0,1fr)_320px]" : "")}>
-        <div className={cn(MIN_W_0, "space-y-2")}>
+        <div ref={popoverLayerRef} className={cn(MIN_W_0, "relative space-y-2")}>
           <div className={cn(FLEX, "items-center justify-between px-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground")}>
             <span>{labels.time}</span>
             <span>{labels.eventRail}</span>
@@ -412,11 +316,23 @@ export function RunTimelineChart({
               {layout.events.map((eventLayout) => {
                 const event = rail.events[eventLayout.eventIndex];
                 return (
-                  <span
+                  <button
                     key={`${event.kind}-${event.ts}-${eventLayout.eventIndex}`}
+                    type="button"
                     data-testid="event-chip"
+                    data-timeline-popover-kind="event"
+                    data-timeline-popover-index={eventLayout.eventIndex}
+                    aria-describedby={
+                      popoverTarget?.kind === "event" && popoverTarget.index === eventLayout.eventIndex
+                        ? TIMELINE_POPOVER_ID
+                        : undefined
+                    }
+                    onPointerEnter={showPopover}
+                    onPointerLeave={hidePopover}
+                    onFocus={showPopover}
+                    onBlur={hidePopover}
                     className={cn(
-                      "absolute truncate rounded-md border px-1.5 py-0.5 text-center font-mono text-[10px] leading-4",
+                      "absolute truncate rounded-md border px-1.5 py-0.5 text-center font-mono text-[10px] leading-4 outline-none focus-visible:ring-2 focus-visible:ring-foreground focus-visible:ring-offset-2",
                       eventChipClass(event.kind),
                     )}
                     style={{
@@ -424,10 +340,9 @@ export function RunTimelineChart({
                       top: `${eventLayout.chipTop}px`,
                       width: `${eventLayout.chipWidth}px`,
                     }}
-                    title={event.label ?? event.ts}
                   >
                     {event.kind}
-                  </span>
+                  </button>
                 );
               })}
 
@@ -454,6 +369,17 @@ export function RunTimelineChart({
                     key={turn.rowIndex}
                     type="button"
                     aria-label={label}
+                    aria-describedby={
+                      popoverTarget?.kind === "turn" && popoverTarget.index === turn.rowIndex
+                        ? TIMELINE_POPOVER_ID
+                        : undefined
+                    }
+                    data-timeline-popover-kind="turn"
+                    data-timeline-popover-index={turn.rowIndex}
+                    onPointerEnter={showPopover}
+                    onPointerLeave={hidePopover}
+                    onFocus={showPopover}
+                    onBlur={hidePopover}
                     onClick={() => setSelectedRowIndex(turn.rowIndex)}
                     className="absolute rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-foreground focus-visible:ring-offset-2"
                     style={{
@@ -477,6 +403,16 @@ export function RunTimelineChart({
               })}
             </div>
           </div>
+          {popoverTarget && (hoveredRow || hoveredEvent) ? (
+            <TimelinePopover
+              target={popoverTarget}
+              row={hoveredRow}
+              event={hoveredEvent}
+              labels={labels}
+              popoverRef={popoverRef}
+              onPointerLeave={() => setPopoverTarget(null)}
+            />
+          ) : null}
           {rail.skippedCount > 0 ? (
             <p className="px-1 font-mono text-[10px] text-muted-foreground">
               {labels.moreEvents(rail.skippedCount, rail.skippedSummary)}
