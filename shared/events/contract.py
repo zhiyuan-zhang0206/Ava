@@ -38,6 +38,7 @@ from shared.events.payloads import CompactionCompleted as CompactionCompleted
 from shared.events.payloads import ComputerAction as ComputerAction
 from shared.events.payloads import ComputerSessionEnd as ComputerSessionEnd
 from shared.events.payloads import ComputerSessionStart as ComputerSessionStart
+from shared.events.payloads import DeliveryPoisoned as DeliveryPoisoned
 from shared.events.payloads import DeliveryStalled as DeliveryStalled
 from shared.events.payloads import EventLogDrop as EventLogDrop
 from shared.events.payloads import EventTier as EventTier
@@ -192,6 +193,7 @@ SYNTAX_FIX_KEYS = _sql_keys("syntax_fix")
 SSE_DROP_KEYS = _sql_keys("sse_drop")
 EVENT_LOG_DROP_KEYS = _sql_keys("event_log_drop")
 DELIVERY_STALLED_KEYS = _sql_keys("delivery_stalled")
+DELIVERY_POISONED_KEYS = _sql_keys("delivery_poisoned")
 FRONTEND_INTERACTION_KEYS = _sql_keys("frontend_interaction")
 SDK_CALL_KEYS = _sql_keys("sdk_call")
 SERVICE_STARTED_KEYS = _sql_keys("service_started")

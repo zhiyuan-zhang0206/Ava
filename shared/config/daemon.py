@@ -6,9 +6,11 @@ env alias so the .env surface is unchanged. Aggregated by shared/config.
 
 from __future__ import annotations
 
-from typing import Literal
+import json
+from typing import Annotated, Literal
 
-from pydantic import Field
+from pydantic import Field, field_validator
+from pydantic_settings import NoDecode
 
 from shared.config._base import EnvSettings
 
@@ -262,6 +264,31 @@ class DaemonSettings(EnvSettings):
         default=1.0,
         alias="AVA_DELIVERY_WATCHDOG_DISPATCH_THRESHOLD_SECONDS",
         description="Wake re-dispatch threshold (seconds): a pending inbound of an idling owner older than this gets its Redis wake re-published (plus the wake-key breadcrumb). Must stay below the claim loop's 30s SELECT recheck — it is the fast fallback for lost pub/sub wakes.",
+        json_schema_extra={
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    delivery_watchdog_max_dispatch_count: int = Field(
+        default=5,
+        ge=1,
+        alias="AVA_DELIVERY_WATCHDOG_MAX_DISPATCH_COUNT",
+        description="Maximum successful delivery-watchdog wake re-dispatches for one pending inbound before the watchdog poisons the row and stops re-publishing. Poison does not prevent the agent from claiming the inbound after recovery.",
+        json_schema_extra={
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    delivery_watchdog_dispatch_backoff_steps_s: Annotated[list[float], NoDecode] = Field(
+        default=[5.0, 30.0, 120.0, 300.0],
+        alias="AVA_DELIVERY_WATCHDOG_DISPATCH_BACKOFF_STEPS_S",
+        description="Minimum seconds between successive delivery-watchdog wake re-dispatches, indexed by the row's current dispatch count (the first re-dispatch waits steps[0]). The last step repeats when the dispatch cap is longer than this list.",
         json_schema_extra={
             "restart_required": "all",
             "writable": True,
@@ -619,3 +646,23 @@ class DaemonSettings(EnvSettings):
             "remote_writable": True,
         },
     )
+
+    @field_validator("delivery_watchdog_dispatch_backoff_steps_s", mode="before")
+    @classmethod
+    def _parse_delivery_watchdog_dispatch_backoff_steps(cls, value: object) -> object:
+        """Accept either a JSON array or a comma-separated environment value."""
+        if isinstance(value, str):
+            try:
+                return json.loads(value)
+            except json.JSONDecodeError:
+                return [float(step.strip()) for step in value.split(",") if step.strip()]
+        return value
+
+    @field_validator("delivery_watchdog_dispatch_backoff_steps_s")
+    @classmethod
+    def _validate_delivery_watchdog_dispatch_backoff_steps(cls, value: list[float]) -> list[float]:
+        if not value:
+            raise ValueError("delivery watchdog dispatch backoff steps must not be empty")
+        if any(step <= 0 for step in value):
+            raise ValueError("delivery watchdog dispatch backoff steps must all be positive")
+        return value

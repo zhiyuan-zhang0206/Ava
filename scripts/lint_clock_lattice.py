@@ -180,6 +180,10 @@ _INDEPENDENT_CLOCKS: dict[tuple[str, str], str] = {
         "DELIVERY_STALLED_KEYS",
     ): "SQL key set for the delivery_stalled view, not a clock",
     (
+        "shared/events/contract.py",
+        "DELIVERY_POISONED_KEYS",
+    ): "SQL key set for the delivery_poisoned view, not a clock",
+    (
         "ava_builtins/plugins/lm_anthropic/provider.py",
         "_CLAUDE_EXTENDED_THINKING_DEFAULT_BUDGET",
     ): "LLM thinking-token budget, not a wall-clock constant",

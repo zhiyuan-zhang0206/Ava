@@ -139,9 +139,10 @@ def test_category_projection_matches_telemetry_whitelist() -> None:
     # #2417's turn-level fake-alive detection + stall guard) raise it to 147;
     # and the schedule_self_respawn removal takes restart_cas_lost back out,
     # which the guard below keeps asserted. Gateway SSE lifecycle, process,
-    # and event-loop metrics bring the current total to 150.
+    # and event-loop metrics bring the total to 150; delivery_poisoned raises
+    # the current total to 151.
     assert "restart_cas_lost" not in _TELEMETRY_KINDS
-    assert len(_TELEMETRY_KINDS) == 150
+    assert len(_TELEMETRY_KINDS) == 151
 
 
 def test_gateway_observability_payloads_and_gauge_dispositions() -> None:

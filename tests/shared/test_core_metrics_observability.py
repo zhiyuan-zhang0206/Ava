@@ -1,7 +1,7 @@
 """Core observability metrics pack tests (Task #882 migration, #1280 Loki).
 
 Covers the generic observability pack migrated from the retired
-``ava_observability`` plugin to core metrics: registration shape (21 metrics
+``ava_observability`` plugin to core metrics: registration shape (22 metrics
 across grafana / inspector surfaces, plugin == "core"), the LogQL template
 safety validation, and every rendered query's structure — the stream selector,
 the ``| json`` pipeline, the event_name/category placeholders, and the
@@ -53,6 +53,13 @@ EXPECTED = {
         "stat",
         ["grafana"],
         "delivery_stalled",
+        "telemetry",
+        1,
+    ),
+    "ava_obs_delivery_poisoned_count": (
+        "stat",
+        ["grafana"],
+        "delivery_poisoned",
         "telemetry",
         1,
     ),

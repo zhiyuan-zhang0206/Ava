@@ -366,6 +366,9 @@ CREATE TABLE inbound_messages (
     -- gateway compute creation -> pickup latency (claimed_at - created_at),
     -- e.g. for the delivery watchdog / degraded-wake alerts.
     claimed_at TIMESTAMPTZ,
+    dispatch_count INT NOT NULL DEFAULT 0,
+    last_dispatch_at TIMESTAMPTZ,
+    poisoned_at TIMESTAMPTZ,
     target_generation UUID,
     target_owner UUID,
     applied_at TIMESTAMPTZ,
@@ -1430,3 +1433,9 @@ INSERT INTO schema_migrations (name) VALUES ('20260905T121043_failure-feedback')
 -- Failure-feedback bounds and retry accounting are represented above. Fresh
 -- DBs must not replay the strict ADD COLUMN against the baseline schema.
 INSERT INTO schema_migrations (name) VALUES ('20260905T140829_bound-failure-feedback');
+
+-- Dispatch-cap/backoff/poison columns are already represented above. Fresh
+-- DBs must not replay the strict ADD COLUMN against the baseline schema,
+-- while existing DBs without this applied marker still run the migration and
+-- fail loudly if the columns were added outside migration tracking.
+INSERT INTO schema_migrations (name) VALUES ('20260905T162656_watchdog-dispatch-poison');

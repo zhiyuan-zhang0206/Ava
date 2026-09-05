@@ -9,6 +9,7 @@ from shared.events.payloads import (
     ComputerAction,
     ComputerSessionEnd,
     ComputerSessionStart,
+    DeliveryPoisoned,
     DeliveryStalled,
     EventLogDrop,
     EventTier,
@@ -408,6 +409,12 @@ _EVENTS_RUNTIME: dict[str, EventSpec] = {
     ),
     "delivery_stalled": _telemetry(
         "delivery_stalled", "delivery backlog", payload=DeliveryStalled, tier="anomaly"
+    ),
+    "delivery_poisoned": _telemetry(
+        "delivery_poisoned",
+        "delivery backlog — permanently-failing inbound poisoned (dispatch cap reached)",
+        payload=DeliveryPoisoned,
+        tier="anomaly",
     ),
     "claim_cas_lost": _telemetry(
         "claim_cas_lost", "claim CAS race lost — another lifecycle op owns the row", tier="anomaly"
