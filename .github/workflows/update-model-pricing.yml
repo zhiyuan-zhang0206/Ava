@@ -65,29 +65,29 @@ jobs:
       - name: Reconcile official pricing
         env:
           CANDIDATE: ${{ steps.candidate.outputs.path }}
-          CATALOG: ${{ steps.candidate.outputs.path }}/shared/lm/pricing_catalog.json
+          ARCHIVE: ${{ steps.candidate.outputs.path }}/shared/lm/pricing_catalog_archive.json
         run: |
-          if [ ! -f "$CATALOG" ] || [ -L "$CATALOG" ]; then
-            echo "Candidate catalog must be a regular, non-symlink file" >&2
+          if [ ! -f "$ARCHIVE" ] || [ -L "$ARCHIVE" ]; then
+            echo "Candidate archive must be a regular, non-symlink file" >&2
             exit 1
           fi
           CANDIDATE_REAL="$(realpath "$CANDIDATE")"
-          CATALOG_REAL="$(realpath "$CATALOG")"
-          case "$CATALOG_REAL" in
+          ARCHIVE_REAL="$(realpath "$ARCHIVE")"
+          case "$ARCHIVE_REAL" in
             "$CANDIDATE_REAL"/*) ;;
             *)
-              echo "Candidate catalog resolves outside its isolated worktree" >&2
+              echo "Candidate archive resolves outside its isolated worktree" >&2
               exit 1
               ;;
           esac
-          uv run python scripts/update_model_pricing.py --catalog "$CATALOG" --write
+          uv run python scripts/update_model_pricing.py --catalog "$ARCHIVE" --write
 
       - name: Detect a catalog change
         id: diff
         env:
           CANDIDATE: ${{ steps.candidate.outputs.path }}
         run: |
-          if git -C "$CANDIDATE" diff --quiet -- shared/lm/pricing_catalog.json; then
+          if git -C "$CANDIDATE" diff --quiet -- shared/lm/pricing_catalog_archive.json; then
             echo 'changed=false' >> "$GITHUB_OUTPUT"
           else
             echo 'changed=true' >> "$GITHUB_OUTPUT"
@@ -101,7 +101,7 @@ jobs:
         run: |
           git -C "$CANDIDATE" config user.name 'ava-pricing-bot'
           git -C "$CANDIDATE" config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git -C "$CANDIDATE" add shared/lm/pricing_catalog.json
+          git -C "$CANDIDATE" add shared/lm/pricing_catalog_archive.json
           git -C "$CANDIDATE" commit -m 'fix: update model pricing catalog'
           git -C "$CANDIDATE" push --force-with-lease origin "HEAD:refs/heads/$BRANCH"
 
@@ -127,13 +127,13 @@ jobs:
           ## File tree
 
           ```text
-          shared/lm/pricing_catalog.json  (M) ★ effective-dated rates and provenance
+          shared/lm/pricing_catalog_archive.json  (M) ★ effective-dated rates and provenance
           ```
 
           ## Data flow
 
           Official source → strict provider adapter → normalized rate invariants
-          → append-only catalog period → CI + human review → runtime `quote()`.
+          → append-only archive period → CI equivalence gate → human-reviewed plugin rate.
 
           ## Not tested automatically
 

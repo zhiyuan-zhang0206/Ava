@@ -41,7 +41,9 @@ the Anthropic Messages protocol instead (thinking in `content[type=thinking]`
 blocks with signature, echoed transparently) — ChatAnthropic handles it out
 of the box, bypassing the broken reasoning_content roundtrip entirely.
 
-Adding a provider just adds one `_build_*_model` helper in `shared/lm/_providers.py` + one dispatch line in `build_chat_model` — or, as a plugin, a `provider.py` beside a plugin's `plugin.py` (`shared/lm/model-providers-as-plugins.md`; contract in `shared/lm/provider_api.py`, loaded by `shared/lm/_plugin_providers.py`).
+Adding a provider means adding a `provider.py` beside a plugin's `plugin.py`
+(`shared/lm/model-providers-as-plugins.md`; contract in
+`shared/lm/provider_api.py`, loaded by `shared/lm/_plugin_providers.py`).
 
 **`max_tokens` + reasoning effort dispatching** — per-model facts (output caps,
 effort vocabularies) live in `shared/lm/registry.py` (`MODELS`); the
@@ -89,7 +91,6 @@ from shared.lm._plugin_providers import (
 from shared.lm._providers import (
     ThinkingConfig,
     _build_claude_model,
-    _build_deepseek_model,
     _build_gemini_model,
     _build_glm_model,
     _build_gpt_model,
@@ -132,8 +133,8 @@ class _LLMFactory(Protocol):
 # in `ModelSpec.media_types` (see `model_supports_vision`). claude / gemini / gpt
 # are multimodal on the endpoints Ava binds; kimi accepts image input on its
 # OpenAI-compatible endpoint, and every Qwen model in the registry accepts native
-# images. deepseek (bound to its anthropic-compatible endpoint above), mimo, and
-# glm are text-only there, so a HumanMessage carrying an image block would 400
+# images. deepseek (bound by its plugin to an anthropic-compatible endpoint),
+# mimo, and glm are text-only there, so a HumanMessage carrying an image block would 400
 # (or be silently dropped) mid-turn. The message endpoint gates on this to 422 an
 # image addressed to a text-only agent up front, rather than letting the LLM call
 # fail after the inbound is already queued. A prefix is only correct while every
@@ -231,15 +232,11 @@ def provider_key_of_model(model: str) -> str | None:
     return None
 
 
-# Model prefix → (provider display name, settings attribute, env var name).
-# Single-source mapping used by both build_chat_model and validate_model_config.
-# An entry here plus a build_chat_model branch is the dispatch half only — a new
-# vendor also needs a registry.py MODELS entry, a _providers.py builder, a
-# config/lm.py key field, usually an _effort.py vocabulary, and a stop.py entry
-# when its client emits a model_provider string stop.py does not already carry.
-# The full per-vendor cost, and the plan to make it a plugin concern instead, are
-# in shared/lm/model-providers-as-plugins.md (summarized in
-# shared/lm/lm.ava.okf.md).
+# Core model prefix → (provider display name, settings attribute, env var name).
+# Single-source mapping used by both build_chat_model and validate_model_config
+# for providers that have not migrated to plugins yet. Plugin providers declare
+# the corresponding prefix, display name, and environment variable in their
+# ProviderBinding instead.
 #
 # Prefixes usually carry the trailing dash of the id they match; `qwen` does not,
 # because Alibaba versions inside the family name (`qwen3.8-max`). The provider
@@ -247,7 +244,6 @@ def provider_key_of_model(model: str) -> str | None:
 # as `qwen` rather than a truncated `qwe`.
 _MODEL_KEY_MAP: dict[str, tuple[str, str, str]] = {
     "claude-": ("Anthropic", "anthropic_api_key", "ANTHROPIC_API_KEY"),
-    "deepseek-": ("DeepSeek", "deepseek_api_key", "DEEPSEEK_API_KEY"),
     "gemini-": ("Google", "gemini_api_key", "GEMINI_API_KEY"),
     "gpt-": ("OpenAI", "openai_api_key", "OPENAI_API_KEY"),
     "mimo-": ("Xiaomi", "xiaomi_api_key", "MIMO_API_KEY"),
@@ -444,12 +440,13 @@ def build_chat_model(
     at use site via `llm.bind_tools([execute_code])`. This way paths that
     don't need tools (compaction etc.) can use the same ChatModel instance.
 
-    Dispatches to the per-provider `_build_*_model` helpers in
-    `shared/lm/_providers.py` (each documents its own key / thinking /
-    reasoning-effort wiring). The cross-provider resolution shared by every
-    branch happens here: `AVA_LLM_OVERRIDE`, the streaming default, and the
-    reasoning-effort knob (`resolved_effort` — explicit env/.env/overlay
-    value wins, else the model's registry default, else the provider default).
+    Dispatches to the remaining core `_build_*_model` helpers in
+    `shared/lm/_providers.py` or a registered provider-plugin binding (each
+    documents its own key / thinking / reasoning-effort wiring). The
+    cross-provider resolution shared by every branch happens here:
+    `AVA_LLM_OVERRIDE`, the streaming default, and the reasoning-effort knob
+    (`resolved_effort` — explicit env/.env/overlay value wins, else the model's
+    registry default, else the provider default).
 
     Args:
         model: e.g. `claude-sonnet-5` / `deepseek-v4-pro`.
@@ -551,16 +548,6 @@ def build_chat_model(
         return _build_claude_model(
             model, spec, thinking, resolved_effort, extra_kwargs, timeout=timeout
         )
-    if model.startswith("deepseek-"):
-        return _build_deepseek_model(
-            model,
-            spec,
-            thinking,
-            reasoning_effort,
-            resolved_effort,
-            extra_kwargs,
-            timeout=timeout,
-        )
     if model.startswith("gemini-"):
         return _build_gemini_model(
             model,
@@ -625,7 +612,7 @@ def build_chat_model(
                     model=model,
                     spec=spec,
                     thinking=thinking,
-                    resolved_effort=resolved_effort,
+                    resolved_effort=reasoning_effort or resolved_effort,
                     disable_streaming=disable_streaming,
                     timeout=timeout,
                     effort_levels=binding.effort_levels,

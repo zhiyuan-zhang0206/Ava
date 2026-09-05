@@ -291,6 +291,10 @@ os.environ["AVA_GATEWAY_URL"] = "http://test-gateway.invalid:8000"
 # `settings.telegram` explicitly (tests/cli/test_cluster_health.py does).
 os.environ["AVA_TELEGRAM_BOT_TOKEN"] = ""
 os.environ["AVA_TELEGRAM_OWNER_ID"] = "0"
+# The repo-default DeepSeek provider is a plugin: its builder reads the process
+# environment and spawn validation reads the cluster `.env` file. Seed the same
+# inert test key through both channels before project imports.
+os.environ["DEEPSEEK_API_KEY"] = "sk-test"
 # ── The same DERIVED keys, declared in the test home's .env ──
 #
 # `_enforce_cluster_env_authority` (dotenv_boot, run at `load_ava_env`) forces a
@@ -313,6 +317,7 @@ os.environ["AVA_TELEGRAM_OWNER_ID"] = "0"
             f"AVA_GATEWAY_URL={os.environ['AVA_GATEWAY_URL']}",
             f"AVA_TELEGRAM_BOT_TOKEN={os.environ['AVA_TELEGRAM_BOT_TOKEN']}",
             f"AVA_TELEGRAM_OWNER_ID={os.environ['AVA_TELEGRAM_OWNER_ID']}",
+            f"DEEPSEEK_API_KEY={os.environ['DEEPSEEK_API_KEY']}",
             f"AVA_TELEMETRY_OTLP_ENABLED={os.environ['AVA_TELEMETRY_OTLP_ENABLED']}",
             f"AVA_TELEMETRY_TEMPO_QUERY_URL={os.environ['AVA_TELEMETRY_TEMPO_QUERY_URL']}",
             f"AVA_TELEMETRY_TEMPO_ENDPOINT={os.environ['AVA_TELEMETRY_TEMPO_ENDPOINT']}",

@@ -1,4 +1,4 @@
-"""Model specifications for DeepSeek, Claude, Gemini, and GPT."""
+"""Model specifications for Claude, Gemini, and GPT."""
 
 from __future__ import annotations
 
@@ -10,77 +10,6 @@ from shared.lm._model_registry_types import (
 )
 
 PRIMARY_MODELS: dict[str, ModelSpec] = {
-    # -- deepseek --
-    "deepseek-v4-pro": ModelSpec(
-        provider="deepseek",
-        spawnable=True,
-        context_window=1_000_000,
-        max_output_tokens=384_000,
-        knowledge_cutoff="2026-04",
-        model_identity="You are running on DeepSeek V4 Pro.",
-        effort_levels=("high", "max"),
-        tuning=ModelTuning(
-            # DeepSeek defaults to `high` and only auto-promotes to `max` for
-            # harnesses it recognizes (it names Claude Code / OpenCode); Ava is
-            # not on that list, so the promotion has to be explicit. Their own
-            # V4 report has max beating high on EVERY agentic metric.
-            reasoning_effort="max",
-            # DeepSeek documents queueing a request for up to 10 minutes while
-            # emitting only SSE COMMENT frames (`: keep-alive`), which no SDK
-            # surfaces as a chunk — so a healthy queued request is indistinguish-
-            # able from a dead one until data starts. 600 matches the server's
-            # own connection-close cutoff.
-            llm_stream_ttft_timeout_seconds=600.0,
-            # Compact thresholds pinned 2026-08-29 (user decision, reverting
-            # the 2026-08-27 600k/700k pin): soft 374k / hard 512k — the task
-            # #581 values. 0.512 / 0.374 of the 1M window is exactly
-            # 512_000 / 374_000
-            # (decisions/2026-08-29-deepseek-compact-thresholds-374k-512k.md).
-            auto_compact_fraction=0.512,
-            compact_reminder_fraction=0.374,
-        ),
-    ),
-    "deepseek-v4-flash": ModelSpec(
-        provider="deepseek",
-        spawnable=True,
-        context_window=1_000_000,
-        max_output_tokens=384_000,
-        knowledge_cutoff="2026-04",
-        model_identity="You are running on DeepSeek V4 Flash.",
-        effort_levels=("high", "max"),
-        tuning=ModelTuning(
-            reasoning_effort="max",  # same as pro: Ava is not an auto-promoted harness
-            llm_stream_ttft_timeout_seconds=600.0,  # same documented 10-minute queue
-            # Same decision as deepseek-v4-pro (2026-08-29): soft 374k /
-            # hard 512k on the 1M window — 0.512 / 0.374 exactly.
-            auto_compact_fraction=0.512,
-            compact_reminder_fraction=0.374,
-        ),
-    ),
-    # DeepSeek's experimental multimodal variant of v4-flash (api-docs.deepseek.com/
-    # guides/vision, 2026-08-21): same text capabilities, window, output cap and
-    # rates as v4-flash; adds still-image input (JPEG/PNG/GIF/WebP, no video/
-    # audio) on every API surface, including the anthropic-compatible endpoint
-    # Ava binds. Images bill as input tokens (<=384 per image) at v4-flash rates.
-    "deepseek-v4-flash-vision-exp": ModelSpec(
-        provider="deepseek",
-        spawnable=True,
-        context_window=1_000_000,
-        max_output_tokens=384_000,
-        # No vision-specific cutoff published; carries the v4 family's value.
-        knowledge_cutoff="2026-04",
-        model_identity="You are running on DeepSeek V4 Flash Vision (experimental).",
-        effort_levels=("high", "max"),
-        media_types=frozenset({"image"}),
-        tuning=ModelTuning(
-            reasoning_effort="max",  # same as pro/flash: Ava is not an auto-promoted harness
-            llm_stream_ttft_timeout_seconds=600.0,  # same documented 10-minute queue
-            # Same decision as deepseek-v4-pro (2026-08-29): soft 374k /
-            # hard 512k on the 1M window — 0.512 / 0.374 exactly.
-            auto_compact_fraction=0.512,
-            compact_reminder_fraction=0.374,
-        ),
-    ),
     # -- claude --
     "claude-sonnet-5": ModelSpec(
         provider="claude",

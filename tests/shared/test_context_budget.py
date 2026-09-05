@@ -8,12 +8,18 @@ import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from shared.config import settings
+from shared.lm._plugin_providers import ensure_provider_plugins_loaded
 from shared.lm.context_budget import (
     UnknownModelWindowError,
     latest_input_tokens,
     resolve_context_budget,
 )
 from shared.lm.factory import MODEL_CONTEXT_WINDOW, SUPPORTED_MODELS
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _load_provider_plugins() -> None:
+    ensure_provider_plugins_loaded()
 
 
 def test_budget_is_thirty_forty_percent_of_a_1m_window() -> None:

@@ -138,7 +138,7 @@ def test_deepseek_parser_rejects_an_unknown_pricing_meter(band: str) -> None:
 
 
 def test_reconcile_is_a_noop_when_the_reviewed_catalog_matches() -> None:
-    catalog = json.loads((_REPO_ROOT / "shared/lm/pricing_catalog.json").read_text())
+    catalog = json.loads((_REPO_ROOT / "shared/lm/pricing_catalog_archive.json").read_text())
     fetched = pricing_updater.parse_deepseek_pricing(_DEEPSEEK_TABLE)
 
     assert (
@@ -152,7 +152,7 @@ def test_reconcile_is_a_noop_when_the_reviewed_catalog_matches() -> None:
 
 
 def test_reconcile_appends_a_new_effective_period_without_rewriting_history() -> None:
-    catalog = json.loads((_REPO_ROOT / "shared/lm/pricing_catalog.json").read_text())
+    catalog = json.loads((_REPO_ROOT / "shared/lm/pricing_catalog_archive.json").read_text())
     fetched = pricing_updater.parse_deepseek_pricing(
         _DEEPSEEK_TABLE.replace("$3.96", "$4.00").replace("$1.98", "$2.00")
     )
@@ -175,7 +175,7 @@ def test_reconcile_appends_a_new_effective_period_without_rewriting_history() ->
 
 
 def test_reconcile_appends_a_period_when_peak_windows_change() -> None:
-    catalog = json.loads((_REPO_ROOT / "shared/lm/pricing_catalog.json").read_text())
+    catalog = json.loads((_REPO_ROOT / "shared/lm/pricing_catalog_archive.json").read_text())
     fetched = pricing_updater.parse_deepseek_pricing(
         _DEEPSEEK_TABLE.replace(
             "Peak hours are 01:00 - 04:00 and 06:00 - 10:00 UTC.",
@@ -205,8 +205,8 @@ def test_workflow_runs_only_trusted_main_code_with_write_permissions() -> None:
     assert "if: github.ref == 'refs/heads/main'" in workflow
     assert "ref: main" in workflow
     assert 'git worktree add -B "$BRANCH" "$CANDIDATE"' in workflow
-    assert '[ -L "$CATALOG" ]' in workflow
-    assert 'CATALOG_REAL="$(realpath "$CATALOG")"' in workflow
+    assert '[ -L "$ARCHIVE" ]' in workflow
+    assert 'ARCHIVE_REAL="$(realpath "$ARCHIVE")"' in workflow
     assert '"$CANDIDATE_REAL"/*' in workflow
-    assert 'python scripts/update_model_pricing.py --catalog "$CATALOG" --write' in workflow
+    assert 'python scripts/update_model_pricing.py --catalog "$ARCHIVE" --write' in workflow
     assert "git checkout" not in workflow

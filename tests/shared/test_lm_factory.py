@@ -1,12 +1,8 @@
-"""validate_model_config's provider-key check must survive the gateway profile pop.
+"""Plugin provider key validation and model media capability tests.
 
-The gateway process no longer carries provider keys in os.environ (per-process
-env assembly, Task #856) — the pop removes DEEPSEEK_API_KEY etc. from the
-gateway's live env, so `settings.lm.<provider>_api_key` is None there. But the
-cluster's `.env` file remains the authoritative configuration source, and the
-gateway's spawn boundary must still fail fast on a genuinely missing key.
-These tests pin the file fallback (regression: #1562 popped the keys and every
-POST /api/agents 400'd with "requires DEEPSEEK_API_KEY which is not configured").
+DeepSeek is a provider plugin, so its key declaration is plugin-owned and the
+cluster's `.env` file is the only spawn-validation source. The legacy Settings
+field stays for configuration compatibility but no longer authorizes a spawn.
 """
 
 from __future__ import annotations
@@ -16,33 +12,36 @@ from pathlib import Path
 import pytest
 
 from shared.config import settings
-from shared.lm.factory import model_supports_vision, validate_model_config
+from shared.lm._plugin_providers import ensure_provider_plugins_loaded
+from shared.lm.factory import model_supports_vision, provider_key_map, validate_model_config
 
 
 @pytest.fixture
 def env_file(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
-    """Point the runtime_config file reader at a scratch .env and simulate the
-    gateway profile (provider key absent from settings, as after the pop)."""
+    """Point the plugin key reader at a scratch cluster `.env`."""
     import shared.runtime_config as rc
 
     env_path = tmp_path / ".env"
     monkeypatch.setattr(rc, "env_file_path", lambda: env_path)
-    # Simulate the gateway pop: the key is absent from settings.
     monkeypatch.setattr(settings.lm, "deepseek_api_key", None)
     monkeypatch.setattr(settings.lm, "llm_override", "")
     return env_path
 
 
-def test_provider_key_present_in_settings_still_passes(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Unpopped process (agent/runner): the settings value wins, no file read needed."""
+def test_plugin_key_ignores_legacy_settings_field(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Provider plugins use their declared env channel, never the Settings alias."""
     monkeypatch.setattr(settings.lm, "deepseek_api_key", "sk-test")
     monkeypatch.setattr(settings.lm, "llm_override", "")
-    assert validate_model_config(model="deepseek-v4-pro", config={}) == "deepseek-v4-pro"
+    monkeypatch.setattr("shared.runtime_config.read_env_aliases", dict)
+    ensure_provider_plugins_loaded()
+
+    assert provider_key_map()["deepseek-"] == ("DeepSeek", None, "DEEPSEEK_API_KEY")
+    with pytest.raises(ValueError, match="DEEPSEEK_API_KEY"):
+        validate_model_config(model="deepseek-v4-pro", config={})
 
 
 def test_file_fallback_allows_key_after_gateway_pop(env_file: Path) -> None:
-    """Gateway profile: key popped from settings but declared in the .env file
-    → validation passes (the file is the authoritative config source)."""
+    """A plugin key declared in the cluster `.env` authorizes the model."""
     env_file.write_text("DEEPSEEK_API_KEY=sk-file-value\n")
     assert validate_model_config(model="deepseek-v4-pro", config={}) == "deepseek-v4-pro"
 

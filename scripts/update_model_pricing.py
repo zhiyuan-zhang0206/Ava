@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fetch official model pricing and reconcile it with Ava's catalog.
+"""Fetch official DeepSeek pricing and reconcile it with Ava's archive.
 
 Provider adapters are intentionally strict and independent. A changed page
 shape, missing model, unknown meter, or unit invariant is an error: automation
@@ -55,7 +55,7 @@ _PEAK_HOURS = re.compile(
 )
 _USD = re.compile(r"\$(?:0|[1-9]\d*)(?:\.\d+)?")
 _DEEPSEEK_PRICING_URL = "https://api-docs.deepseek.com/quick_start/pricing/"
-_CATALOG_PATH = Path(__file__).resolve().parents[1] / "shared/lm/pricing_catalog.json"
+_CATALOG_PATH = Path(__file__).resolve().parents[1] / "shared/lm/pricing_catalog_archive.json"
 
 
 def _usd(cell: str) -> Decimal:

@@ -1,9 +1,10 @@
 """Detached agent child env (ops.agent_launch.agent_spawn_env_dict).
 
 The child env is a POSITIVE allowlist (child_env("agent", ...)) — a non-modeled
-knob (AVA_AGENT_ID, ...) never rides; cluster-scope secrets are dropped so the
-child self-fetches at boot; the ambient display passthroughs ride through
-(non-empty only) so the agent computes the same display verdict as the spawner.
+knob (AVA_AGENT_ID, ...) never rides; modeled cluster config is fetched at boot,
+while plugin-declared provider keys ride for build-time use. Ambient display
+passthroughs ride through (non-empty only) so the agent computes the same
+display verdict as the spawner.
 """
 
 from __future__ import annotations
@@ -13,8 +14,11 @@ import os
 import pytest
 
 from ops import agent_launch
+from shared.lm._plugin_providers import ensure_provider_plugins_loaded
 
 _RUNNER_URL = "postgresql://ava_runner:runner-password@x/db"
+
+ensure_provider_plugins_loaded()
 
 
 def test_agent_spawn_forwards_display(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -50,7 +54,11 @@ def test_agent_spawn_does_not_forward_empty_display(monkeypatch: pytest.MonkeyPa
     assert "DISPLAY" not in env
 
 
-def test_agent_spawn_drops_secrets_and_fetch_skip(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_agent_spawn_forwards_plugin_key_and_drops_fetch_skip(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The supplied URL is already the projection fetched by a remote runner.
+    monkeypatch.setattr("shared.bootstrap.config_source_is_local", lambda: False)
     monkeypatch.setattr(
         os,
         "environ",
@@ -59,7 +67,7 @@ def test_agent_spawn_drops_secrets_and_fetch_skip(monkeypatch: pytest.MonkeyPatc
             "AVA_GATEWAY_PORT": "9000",  # guide key (single-box localhost fallback)
             "AVA_LLM_OVERRIDE": "mod:fac",  # agent-scope, not in bootstrap payload
             "AVA_RESTARTER_HEALTH_PORT": "8102",  # host-scope daemon port — forwarded
-            "DEEPSEEK_API_KEY": "secret",  # cluster-common secret — must be dropped
+            "DEEPSEEK_API_KEY": "secret",  # plugin-declared key — forwarded
             "AVA_CONFIG_FETCH": "skip",  # a maintenance verb's lite opt-out
         },
     )
@@ -67,7 +75,7 @@ def test_agent_spawn_drops_secrets_and_fetch_skip(monkeypatch: pytest.MonkeyPatc
     assert env["AVA_DB_URL"] == _RUNNER_URL
     assert env["AVA_GATEWAY_PORT"] == "9000"
     assert env["AVA_LLM_OVERRIDE"] == "mod:fac"
-    assert "DEEPSEEK_API_KEY" not in env  # dropped so the child re-fetches
+    assert env["DEEPSEEK_API_KEY"] == "secret"
     # A daemon health port rides along, because the drop set IS "what the gateway
     # redistributes" and a health port is a per-UNIT fact the gateway does not own
     # (issue #977). Dropping it would leave a child on a unit with a non-default
@@ -130,7 +138,7 @@ def test_agent_spawn_never_pins_a_config_source(monkeypatch: pytest.MonkeyPatch)
     env = agent_launch.agent_spawn_env_dict()
     assert "AVA_CONFIG_SOURCE" not in env
     assert "AVA_CONFIG_FETCH" not in env
-    assert "DEEPSEEK_API_KEY" not in env  # still dropped — .env / the fetch fills it
+    assert env["DEEPSEEK_API_KEY"] == "secret"
 
 
 def test_agent_spawn_allowlist_never_carries_agent_id(monkeypatch: pytest.MonkeyPatch) -> None:

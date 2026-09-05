@@ -20,7 +20,6 @@ AVA_BILLING_ATTR_UNPRICED = "ava.billing.unpriced"
 
 _CORE_VENDOR_PREFIXES: tuple[tuple[str, str], ...] = (
     ("claude-", "anthropic"),
-    ("deepseek-", "deepseek"),
     ("gemini-", "google"),
     ("gpt-", "openai"),
     ("mimo-", "xiaomi"),

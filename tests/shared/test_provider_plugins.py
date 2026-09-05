@@ -21,7 +21,8 @@ import pytest
 from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from langchain_core.messages import AIMessage
 
-from shared import paths
+from shared import paths, plugins_config
+from shared.lm import _plugin_providers as plugin_loader
 from shared.lm import pricing, provider_api, stop
 from shared.lm._concurrency import _invalidate_known_provider_keys_cache, known_provider_keys
 from shared.lm._plugin_providers import _reset_loaded_for_tests, ensure_provider_plugins_loaded
@@ -95,11 +96,18 @@ def provider_plugin() -> Generator[Callable[..., None], None, None]:
     # Another test in the same process may have already triggered the
     # production loader. Reset the test-only once flag before creating this
     # fixture plugin, or its provider.py would never be discovered.
+    loader_was_loaded = plugin_loader._STATE.loaded
     _reset_loaded_for_tests()
     models_snapshot = dict(MODELS)
     bindings_snapshot = dict(provider_api.REGISTRY.bindings)
     prices_snapshot = dict(pricing._PLUGIN_PRICES)
     stop_snapshot = dict(stop._BY_PROVIDER)
+    for model_id in tuple(MODELS):
+        if model_id.startswith("deepseek-"):
+            MODELS.pop(model_id)
+            pricing._PLUGIN_PRICES.pop(model_id, None)
+    provider_api.REGISTRY.bindings.pop("deepseek-", None)
+    _rebuild_derived_views()
     # Tests share one session AVA_HOME — remove anything this test created so
     # a later test's loader scan cannot see leftover plugin dirs.
     created: list[Path] = []
@@ -163,10 +171,38 @@ def provider_plugin() -> Generator[Callable[..., None], None, None]:
     stop._BY_PROVIDER.clear()
     stop._BY_PROVIDER.update(stop_snapshot)
     _reset_loaded_for_tests()
+    plugin_loader._STATE.loaded = loader_was_loaded
     _invalidate_known_provider_keys_cache()
     from shared.env_registry import seed_allowlist
 
     seed_allowlist.cache_clear()
+
+
+def test_repo_deepseek_provider_is_enabled_and_registers_complete_contract() -> None:
+    discovered = plugins_config._discover_plugins()
+    config = plugins_config.load_for_runtime(set(discovered))
+
+    assert config.plugins["lm_deepseek"].enabled
+    ensure_provider_plugins_loaded()
+
+    deepseek_models = {
+        "deepseek-v4-pro",
+        "deepseek-v4-flash",
+        "deepseek-v4-flash-vision-exp",
+    }
+    assert deepseek_models <= MODELS.keys()
+    assert set(SUPPORTED_MODELS["deepseek"]) == deepseek_models
+    assert pricing.model_vendor("deepseek-v4-pro") == "deepseek"
+
+    from shared.lm.factory import _MODEL_KEY_MAP, provider_key_map
+
+    assert "deepseek-" not in _MODEL_KEY_MAP
+    assert provider_key_map()["deepseek-"] == ("DeepSeek", None, "DEEPSEEK_API_KEY")
+    binding = provider_api.REGISTRY.bindings["deepseek-"]
+    assert binding.effort_levels == ("high", "max")
+    assert binding.anthropic_protocol
+    assert not binding.vision
+    assert binding.stop_spec is None
 
 
 def test_plugin_model_registers_and_builds(provider_plugin: Callable[..., None]) -> None:
@@ -408,7 +444,7 @@ def test_plugin_price_must_name_registered_model() -> None:
 
 def test_duplicate_model_id_rejected() -> None:
     with pytest.raises(RuntimeError, match="already registered"):
-        register_models("testp", {"deepseek-v4-pro": ModelSpec(provider="testp")})
+        register_models("testp", {"claude-sonnet-5": ModelSpec(provider="testp")})
 
 
 def test_spawnable_model_without_price_rejected(provider_plugin: Callable[..., None]) -> None:

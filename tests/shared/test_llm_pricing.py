@@ -16,6 +16,8 @@ from typing import Any, cast
 
 import pytest
 
+from shared.lm import pricing
+from shared.lm._plugin_providers import ensure_provider_plugins_loaded
 from shared.lm.pricing import (
     CostQuote,
     Rates,
@@ -44,6 +46,25 @@ def _pricing_catalog_models(raw: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return cast(dict[str, dict[str, Any]], models)
 
 
+def _pricing_archive_raw() -> dict[str, Any]:
+    return cast(
+        dict[str, Any],
+        json.loads(
+            (
+                Path(__file__).resolve().parents[2] / "shared/lm/pricing_catalog_archive.json"
+            ).read_text()
+        ),
+    )
+
+
+@pytest.fixture
+def deepseek_archive_catalog(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Route explicit DeepSeek history checks through the archived periods."""
+    merged = dict(pricing._CATALOG)
+    merged.update(_parse_catalog(_pricing_archive_raw()))
+    monkeypatch.setattr(pricing, "_CATALOG", merged)
+
+
 def test_pricing_catalog_schema_v2_vendor_lock() -> None:
     raw = _pricing_catalog_raw()
     models = _pricing_catalog_models(raw)
@@ -58,7 +79,6 @@ def test_pricing_catalog_schema_v2_vendor_lock() -> None:
     # first, but a new model reusing a registered vendor needs no test edit.
     assert {entry["vendor"] for entry in models.values()} <= {
         "anthropic",
-        "deepseek",
         "google",
         "openai",
         "xiaomi",
@@ -67,7 +87,6 @@ def test_pricing_catalog_schema_v2_vendor_lock() -> None:
         "alibaba",
     }
     assert {
-        "deepseek-v4-pro": models["deepseek-v4-pro"]["vendor"],
         "claude-opus-4-8": models["claude-opus-4-8"]["vendor"],
         "gemini-3.8-flash": models["gemini-3.8-flash"]["vendor"],
         "gpt-5.6-sol": models["gpt-5.6-sol"]["vendor"],
@@ -76,7 +95,6 @@ def test_pricing_catalog_schema_v2_vendor_lock() -> None:
         "glm-5.3": models["glm-5.3"]["vendor"],
         "qwen3.8-max": models["qwen3.8-max"]["vendor"],
     } == {
-        "deepseek-v4-pro": "deepseek",
         "claude-opus-4-8": "anthropic",
         "gemini-3.8-flash": "google",
         "gpt-5.6-sol": "openai",
@@ -87,7 +105,21 @@ def test_pricing_catalog_schema_v2_vendor_lock() -> None:
     }
 
 
+def test_deepseek_catalog_entries_live_only_in_the_archive() -> None:
+    runtime_models = _pricing_catalog_models(_pricing_catalog_raw())
+    archive_models = _pricing_catalog_models(_pricing_archive_raw())
+    expected = {
+        "deepseek-v4-pro",
+        "deepseek-v4-flash",
+        "deepseek-v4-flash-vision-exp",
+    }
+
+    assert expected.isdisjoint(runtime_models)
+    assert set(archive_models) == expected
+
+
 def test_model_vendor_returns_catalog_vendor_or_none() -> None:
+    ensure_provider_plugins_loaded()
     assert model_vendor("deepseek-v4-pro") == "deepseek"
     assert model_vendor("qwen3.8-flash") == "alibaba"
     assert model_vendor("no-such-model") is None
@@ -107,13 +139,13 @@ def test_parse_catalog_v2_rejects_missing_or_empty_vendor(vendor: str | None) ->
     raw = copy.deepcopy(_pricing_catalog_raw())
     raw["schema_version"] = 2
     models = _pricing_catalog_models(raw)
-    entry = models["deepseek-v4-pro"]
+    entry = models["claude-opus-4-8"]
     if vendor is None:
         entry.pop("vendor", None)
     else:
         entry["vendor"] = vendor
 
-    with pytest.raises(RuntimeError, match="deepseek-v4-pro"):
+    with pytest.raises(RuntimeError, match="claude-opus-4-8"):
         _parse_catalog(raw)
 
 
@@ -126,7 +158,7 @@ def test_parse_catalog_v1_allows_missing_vendor() -> None:
 
     catalog = _parse_catalog(raw)
 
-    assert catalog["deepseek-v4-pro"].vendor is None
+    assert catalog["claude-opus-4-8"].vendor is None
 
 
 def test_parse_catalog_rejects_empty_models_mapping() -> None:
@@ -234,7 +266,7 @@ def test_cost_usd_none_tokens_is_none() -> None:
     assert cost_usd("gpt-5.6-sol", None, None, None) is None
 
 
-def test_deepseek_v4_effective_interval_boundary() -> None:
+def test_deepseek_v4_effective_interval_boundary(deepseek_archive_catalog: None) -> None:
     """The new schedule starts at one exact instant: [from, until)."""
     before = datetime(2026, 8, 16, 15, 59, 59, 999999, tzinfo=UTC)
     cutover = datetime(2026, 8, 16, 16, 0, tzinfo=UTC)
@@ -274,12 +306,16 @@ def test_glm_5_3_flash_launch_discount_boundary() -> None:
         (datetime(2026, 8, 17, 10, 0, tzinfo=UTC), Rates(0.66, 0.022, 1.98)),
     ],
 )
-def test_deepseek_v4_utc_peak_window_boundaries(at: datetime, expected: Rates) -> None:
+def test_deepseek_v4_utc_peak_window_boundaries(
+    at: datetime, expected: Rates, deepseek_archive_catalog: None
+) -> None:
     """Daily peak windows are [01:00,04:00) and [06:00,10:00) UTC."""
     assert rates_at("deepseek-v4-pro", at, _M) == expected
 
 
-def test_peak_windows_normalize_an_aware_non_utc_instant() -> None:
+def test_peak_windows_normalize_an_aware_non_utc_instant(
+    deepseek_archive_catalog: None,
+) -> None:
     utc_plus_8 = timezone(timedelta(hours=8))
     at = datetime(2026, 8, 17, 9, 0, tzinfo=utc_plus_8)
     # Keep the test's offset explicit without relying on the machine timezone:
@@ -304,7 +340,7 @@ def test_gemini_flash_date_only_increase_uses_earliest_global_boundary(model: st
     assert rates_at(model, after, _M) == Rates(1.5, 0.15, 7.5)
 
 
-def test_quote_returns_cost_and_the_exact_selected_rates() -> None:
+def test_quote_returns_cost_and_the_exact_selected_rates(deepseek_archive_catalog: None) -> None:
     at = datetime(2026, 8, 17, 1, 0, tzinfo=UTC)
     result = quote("deepseek-v4-pro", _M, _M, _M, at=at)
 
@@ -316,6 +352,31 @@ def test_quote_returns_cost_and_the_exact_selected_rates() -> None:
 def test_rates_at_rejects_a_naive_instant() -> None:
     with pytest.raises(ValueError, match="timezone-aware"):
         rates_at("deepseek-v4-pro", datetime.fromisoformat("2026-08-17T01:00:00"), _M)
+
+
+def test_deepseek_plugin_prices_equal_archive_current_base_tier(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ensure_provider_plugins_loaded()
+    model_ids = (
+        "deepseek-v4-pro",
+        "deepseek-v4-flash",
+        "deepseek-v4-flash-vision-exp",
+    )
+    plugin_rates = {model: pricing._PLUGIN_PRICES[model].rates for model in model_ids}
+    archive_raw = _pricing_archive_raw()
+    archive_models = _pricing_catalog_models(archive_raw)
+    monkeypatch.setattr(pricing, "_CATALOG", _parse_catalog(archive_raw))
+    outside_daily_override = datetime(2026, 9, 5, tzinfo=UTC)
+
+    for model in model_ids:
+        selected = rates_at(model, outside_daily_override, input_tokens=0)
+        assert selected is not None
+        assert plugin_rates[model].as_tuple() == pytest.approx(selected.as_tuple())  # pyright: ignore[reportUnknownMemberType]
+        assert pricing.plugin_price_provenance(model) == (
+            archive_models[model]["source_url"],
+            archive_models[model]["source_checked_at"],
+        )
 
 
 @pytest.mark.parametrize(

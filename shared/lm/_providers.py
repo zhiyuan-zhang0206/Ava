@@ -1,4 +1,4 @@
-"""Per-provider chat-model builders — one `_build_*_model` per model prefix.
+"""Core chat-model builders — one `_build_*_model` per remaining core prefix.
 
 Companion module of `shared/lm/factory.py` (split for the file-size ceiling,
 same pattern as `_effort.py` / `registry.py`): factory keeps the catalog
@@ -21,7 +21,6 @@ from shared.lm._effort import (
     _PROVIDER_EFFORT_LEVELS,
     _clamp_effort,
     claude_extended_thinking_kwarg,
-    deepseek_wire_effort,
     mimo_extra_body,
     qwen_extra_body,
 )
@@ -45,12 +44,6 @@ class ThinkingConfig(TypedDict):
     type: Literal["enabled", "disabled", "adaptive"]
     budget_tokens: NotRequired[int]
     display: NotRequired[Literal["summarized", "omitted"]]
-
-
-# DeepSeek's anthropic-compatible endpoint. Also the single source of truth
-# for model name → endpoint resolution; not written twice — to change the
-# endpoint, change here.
-_DEEPSEEK_ANTHROPIC_BASE_URL = "https://api.deepseek.com/anthropic"
 
 
 def _build_claude_model(
@@ -150,103 +143,6 @@ def _build_claude_model(
         model_kwargs={"cache_control": {"type": "ephemeral"}},
         timeout=timeout,
         **claude_kwargs,
-        **extra_kwargs,
-    )
-
-
-def _build_deepseek_model(
-    model: str,
-    spec: ModelSpec | None,
-    thinking: ThinkingConfig | None,
-    reasoning_effort: str | None,
-    resolved_effort: str,
-    extra_kwargs: dict[str, Any],
-    *,
-    timeout: float | None = None,
-) -> BaseChatModel:
-    """deepseek-* branch: ChatAnthropic on the anthropic-compatible
-    endpoint, pinned max_tokens. Reasoning effort rides
-    `output_config.effort` via extra_body; `none` maps onto thinking
-    disabled (the endpoint's effort vocabulary has no off level).
-    """
-    from shared.lm._anthropic_compat import ThinkingTokensChatAnthropic
-
-    # Use DeepSeek's anthropic-compatible endpoint via ChatAnthropic client.
-    # Not langchain-deepseek (1.0.1 reasoning_content roundtrip bug).
-    # api_key comes from DEEPSEEK_API_KEY (settings.lm.deepseek_api_key);
-    # if missing, RuntimeError fail-fast immediately — don't silently use
-    # wrong key and only find out from a server 401.
-    if settings.lm.deepseek_api_key is None:
-        raise RuntimeError(
-            "DEEPSEEK_API_KEY not set — deepseek-* model needs this key; "
-            "configure in ~/.ava/.env or export before starting"
-        )
-    api_key = settings.lm.deepseek_api_key
-
-    # Per-model output cap (ModelSpec.max_output_tokens). An unregistered
-    # deepseek model fails fast here rather than borrowing a wrong cap —
-    # the same fail-fast posture as the unknown-prefix raise at the end.
-    if spec is None or spec.max_output_tokens is None:
-        known_models = ", ".join(
-            sorted(
-                model_id
-                for model_id, registered_spec in MODELS.items()
-                if registered_spec.provider == "deepseek"
-            )
-        )
-        raise ValueError(
-            f"Unknown deepseek model {model!r} — register it (with "
-            f"max_output_tokens) in `shared/lm/registry.py:MODELS`. "
-            f"Known deepseek models: {known_models}"
-        )
-    max_tokens = spec.max_output_tokens
-
-    # Reasoning effort: DeepSeek's anthropic-compat endpoint accepts
-    # `output_config.effort` to control reasoning depth (the official
-    # benchmark 80.6% Verified runs the max mode). Note: the standard
-    # anthropic `budget_tokens` is *ignored* on this endpoint (DeepSeek
-    # docs explicitly say so); must go through output_config.
-    # Passed via model_kwargs.extra_body to the underlying Anthropic SDK,
-    # which merges extra_body into the POST body without touching schema.
-    #
-    # thinking={"type":"disabled"} is mutually exclusive with reasoning_effort
-    # (server 400: "thinking options type cannot be disabled when
-    # reasoning_effort is set"). Caller explicitly disabling thinking →
-    # also skip effort injection; don't let global env sneakily push
-    # reasoning back (the labeler short-text path is exactly this case).
-    #
-    # The effort goes through the same per-model clamp as claude
-    # (`ModelSpec.effort_levels`), and "none" — the only cross-provider
-    # value that means off rather than a level — lands on the endpoint's
-    # own off-switch, `thinking={"type":"disabled"}` (the mimo branch makes
-    # the same mapping). DeepSeek's vocabulary has no `none` variant, so
-    # sending it unclamped 400s the request: that is what took every
-    # `ava.web.fetch` down, since AVA_WEB_FETCH_REASONING ships as "none".
-    deepseek_model_kwargs: dict[str, Any] = {}
-    thinking_disabled = thinking is not None and thinking.get("type") == "disabled"
-    effort = reasoning_effort or resolved_effort
-    if effort and not thinking_disabled and spec.effort_levels is not None:
-        wire_effort = deepseek_wire_effort(effort, spec.effort_levels, target=model)
-        if wire_effort is not None:
-            deepseek_model_kwargs["extra_body"] = {"output_config": {"effort": wire_effort}}
-        elif thinking is None:
-            # A caller-passed `thinking` states its own intent and wins.
-            extra_kwargs["thinking"] = {"type": "disabled"}
-
-    # type ignore same as claude branch: langchain-anthropic stub treats
-    # model / api_key / base_url / max_tokens as pydantic alias; signature
-    # only exposes canonical field names model_name / anthropic_api_key /
-    # anthropic_api_url / max_tokens_to_sample; runtime goes through
-    # alias. Each parameter line of a multi-line call needs its own
-    # ignore — pyright does not propagate from the opening paren line to
-    # subsequent keyword argument lines.
-    return ThinkingTokensChatAnthropic(
-        model=model,  # type: ignore[call-arg]
-        api_key=api_key,
-        base_url=_DEEPSEEK_ANTHROPIC_BASE_URL,
-        max_tokens=max_tokens,  # type: ignore[call-arg]
-        model_kwargs=deepseek_model_kwargs,
-        timeout=timeout,
         **extra_kwargs,
     )
 

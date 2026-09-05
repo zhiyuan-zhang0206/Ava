@@ -9,6 +9,13 @@ from typing import Any
 import pytest
 from langchain_core.messages import AIMessage
 
+from shared.lm._plugin_providers import ensure_provider_plugins_loaded
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _load_provider_plugins() -> None:
+    ensure_provider_plugins_loaded()
+
 
 class _RecordedSpan:
     def __init__(self, name: str, start_time: int | None) -> None:
@@ -141,11 +148,11 @@ def test_emit_billing_from_message_skips_missing_usage_metadata(
         ("unregistered-model", None),
     ],
 )
-def test_vendor_of_model_recognizes_only_registered_core_prefixes(
+def test_vendor_of_model_recognizes_registered_core_and_plugin_prefixes(
     model: str,
     vendor: str | None,
 ) -> None:
-    """Vendor attribution uses the approved manufacturer map without guessing."""
+    """Vendor attribution uses registered manufacturer identities without guessing."""
     from shared.lm.billing import vendor_of_model
 
     assert vendor_of_model(model) == vendor

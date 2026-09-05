@@ -9,6 +9,7 @@ from dataclasses import fields as dataclass_fields
 import pytest
 
 from shared.config import field_names, get_field, per_agent_field_names, settings
+from shared.lm._plugin_providers import ensure_provider_plugins_loaded
 from shared.lm.registry import (
     DEFAULT_TUNING,
     MODELS,
@@ -20,6 +21,12 @@ from shared.lm.registry import (
     resolve_setting,
     tuning_field_names,
 )
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _load_provider_plugins() -> None:
+    ensure_provider_plugins_loaded()
+
 
 # ---------------------------------------------------------------------------
 # Structural invariants

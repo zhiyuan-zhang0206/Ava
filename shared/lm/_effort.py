@@ -183,20 +183,6 @@ def qwen_extra_body(*, thinking: Mapping[str, Any] | None, reasoning_effort: str
     return {}
 
 
-def deepseek_wire_effort(effort: str, levels: tuple[str, ...], *, target: str) -> str | None:
-    """Resolve a cross-provider effort onto DeepSeek's `output_config.effort`.
-
-    None means "no reasoning": DeepSeek's wire vocabulary is graded levels only
-    and carries no `none` variant (sending one 400s with ``unknown variant
-    `none` ``), so off is the endpoint's thinking switch instead — the caller's
-    job. Every other value clamps onto `levels`, which is what keeps a global
-    effort this model does not accept from reaching the wire unclamped.
-    """
-    if effort == "none":
-        return None
-    return _clamp_effort(effort, levels, target=target)
-
-
 def claude_extended_thinking_kwarg(
     model: str,
     *,

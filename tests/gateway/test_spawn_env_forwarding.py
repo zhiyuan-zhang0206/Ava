@@ -1,7 +1,8 @@
-"""Verify an agent spawn drops the cluster-common secrets and never inherits the
-settings-lite opt-out, so the child SELF-FETCHES its config at startup per its
-own role (a restarted agent picks up a rotated key instead of inheriting a stale
-snapshot). AVA_CONFIG_SOURCE is gone (2026-08-01); the fetch decision is
+"""Verify agent spawn environment projection for config and provider secrets.
+
+The child SELF-FETCHES modeled config at startup, while plugin-declared provider
+keys ride the positive allowlist because the plugin builder reads its process
+environment. AVA_CONFIG_SOURCE is gone (2026-08-01); the fetch decision is
 role-derived at the child's Settings build.
 
 agent_spawn_env_dict (ops.agent_launch) reads os.environ
@@ -16,9 +17,14 @@ import os
 import pytest
 
 from ops import agent_launch
+from shared.lm._plugin_providers import ensure_provider_plugins_loaded
+
+ensure_provider_plugins_loaded()
 
 
-def test_agent_spawn_drops_secrets_and_fetch_skip(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_agent_spawn_forwards_plugin_key_and_drops_fetch_skip(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setitem(os.environ, "DEEPSEEK_API_KEY", "fake-deepseek-test-value")
     # A remote launcher receives an already projected URL from bootstrap.
     projected_url = "postgresql://ava_runner:bootstrap-password@x/y"
@@ -30,9 +36,8 @@ def test_agent_spawn_drops_secrets_and_fetch_skip(monkeypatch: pytest.MonkeyPatc
     # agent must NOT inherit it (the child decides by its own role and fetches).
     monkeypatch.setitem(os.environ, "AVA_CONFIG_FETCH", "skip")
     env = agent_launch.agent_spawn_env_dict()
-    # the secret is dropped from the child env entirely (not blanked), so the child
-    # re-fetches it rather than inheriting a stale snapshot
-    assert "DEEPSEEK_API_KEY" not in env
+    # A provider plugin's declared key is the single-box builder's delivery seam.
+    assert env["DEEPSEEK_API_KEY"] == "fake-deepseek-test-value"
     # bootstrap/identity guide keys ARE forwarded (the child needs them to reach the
     # gateway + its data plane before Settings exists)
     assert env["AVA_DB_URL"] == projected_url

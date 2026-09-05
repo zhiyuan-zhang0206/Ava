@@ -35,7 +35,9 @@ Scan all `monkeypatch.setenv("X", ...)` / `monkeypatch.delenv("X")` /
 X is in Settings's **model_fields alias set**, error — `Settings` is a
 BaseSettings module-load singleton, env is read once at import time, so
 later setenv/delenv cannot reach `settings.x`, and the test silently no-ops.
-Must switch to `monkeypatch.setattr(settings, "<field_name>", value)`.
+Must switch to `monkeypatch.setattr(settings, "<field_name>", value)` —
+except provider API-key env vars declared in `_PROVIDER_KEY_ENV_VARS` (see
+below): those are read from the environment live by the plugin builders.
 
 The alias set is dynamically read from `the config field registry` — adding a
 new field to Settings auto-syncs the ban list; no manual maintenance.
@@ -63,6 +65,18 @@ _SCAN_DIRS = (
     "services",
     "ava",
     "scripts",
+)
+
+# Provider API-key env vars are read from os.environ at build time
+# (shared/lm/provider_api.require_key) once the provider is a plugin — the
+# Settings field is retired from that provider's key path (task #2505). In
+# tests, monkeypatch.setenv on these is a REAL seam (require_key reads env
+# live), not a Settings-singleton no-op. Grow this set as each provider
+# migrates to plugin mode; each key must match a ProviderBinding.key_env.
+_PROVIDER_KEY_ENV_VARS = frozenset(
+    {
+        "DEEPSEEK_API_KEY",  # ava_builtins/plugins/lm_deepseek
+    }
 )
 
 # File-level exemption — must demonstrate "cannot go through Settings":
@@ -204,7 +218,7 @@ def _scan_file(
             # Rule 2: monkeypatch.setenv/delenv in tests changing a Settings-managed env (silent no-op).
             for m in _TEST_SETENV_PATTERN.finditer(code):
                 env_name = m.group(1)
-                if env_name in managed_envs:
+                if env_name in managed_envs and env_name not in _PROVIDER_KEY_ENV_VARS:
                     violations.append((lineno, line.strip(), f"setenv-managed:{env_name}"))
         elif _OS_ENV_PATTERN.search(code):
             # Rule 1: bare os.environ in non-test code.
