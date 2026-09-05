@@ -136,7 +136,7 @@ def test_unregister_macos_removes_plist(fake_home: Path, monkeypatch: pytest.Mon
     monkeypatch.setattr(
         probe.subprocess,
         "run",
-        lambda *_a, **_k: type("R", (), {"returncode": 0, "stderr": "", "stdout": ""})(),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda *_a, **_k: type("R", (), {"returncode": 0, "stderr": "", "stdout": ""})(),  # pyright: ignore[reportUnknownArgumentType]
     )
     assert probe._unregister_macos("gateway", "ava-deadbeef") == 0
     assert not plist.exists()
@@ -150,7 +150,7 @@ def test_register_linux_skips_when_crontab_absent(
 ) -> None:
     """A hermetic bench / CI container has no crontab. That is a missing
     capability, not a bring-up failure."""
-    monkeypatch.setattr(shutil, "which", lambda _n: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(shutil, "which", lambda _n: None)  # pyright: ignore[reportUnknownArgumentType]
     assert probe._register_linux("gateway", 60) == 0
     assert "crontab not installed" in capsys.readouterr().out
 
@@ -161,7 +161,7 @@ def test_register_linux_aborts_when_crontab_read_fails(
     """Only the benign "no crontab for <user>" may be read as an empty crontab.
     Any other failure and we must NOT rewrite, or the user's real crontab is
     replaced by just our line."""
-    monkeypatch.setattr(shutil, "which", lambda _n: "/usr/bin/crontab")  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(shutil, "which", lambda _n: "/usr/bin/crontab")  # pyright: ignore[reportUnknownArgumentType]
 
     def _run(cmd, **_kw):  # type: ignore[no-untyped-def]
         assert cmd != ["crontab", "-"], "must not write after a failed read"
@@ -177,7 +177,7 @@ def test_register_linux_preserves_foreign_lines_and_replaces_own(
 ) -> None:
     """Idempotent: this role's own line is replaced, everything else — including
     the OTHER capability's probe line — survives."""
-    monkeypatch.setattr(shutil, "which", lambda _n: "/usr/bin/crontab")  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(shutil, "which", lambda _n: "/usr/bin/crontab")  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(probe, "ava_binary_path", lambda: "/x/ava")
     other = f"*/1 * * * * /x/ava cluster watchdog-probe --role agent-runner  {probe._cron_marker('agent-runner', 'ava-deadbeef')}"
     existing = "\n".join(
@@ -208,7 +208,7 @@ def test_register_linux_preserves_foreign_lines_and_replaces_own(
 def test_register_linux_rounds_sub_minute_interval_up(monkeypatch: pytest.MonkeyPatch) -> None:
     """crontab cannot express seconds. A 5s request becomes */1, not */0 (which
     crond rejects) and not a silent "every minute" that hides the mismatch."""
-    monkeypatch.setattr(shutil, "which", lambda _n: "/usr/bin/crontab")  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(shutil, "which", lambda _n: "/usr/bin/crontab")  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(probe, "ava_binary_path", lambda: "/x/ava")
     written: dict[str, str] = {}
 
@@ -224,7 +224,7 @@ def test_register_linux_rounds_sub_minute_interval_up(monkeypatch: pytest.Monkey
 
 
 def test_unregister_linux_is_a_noop_without_our_line(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(shutil, "which", lambda _n: "/usr/bin/crontab")  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(shutil, "which", lambda _n: "/usr/bin/crontab")  # pyright: ignore[reportUnknownArgumentType]
     wrote: list[object] = []
 
     def _run(cmd, **_kw):  # type: ignore[no-untyped-def]
@@ -248,13 +248,13 @@ def test_register_linux_holds_crontab_lock_around_rmw(monkeypatch: pytest.Monkey
 
     import shared.platform as platform_mod
 
-    monkeypatch.setattr(shutil, "which", lambda _n: "/usr/bin/crontab")  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(shutil, "which", lambda _n: "/usr/bin/crontab")  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(probe, "ava_binary_path", lambda: "/x/ava")
     seen: dict[str, bool] = {}
     lock_paths: list[str] = []
 
     @contextlib.contextmanager
-    def recording_lock(path):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    def recording_lock(path):
         lock_paths.append(str(path))  # pyright: ignore[reportUnknownArgumentType]
         seen["in_lock"] = True
         try:

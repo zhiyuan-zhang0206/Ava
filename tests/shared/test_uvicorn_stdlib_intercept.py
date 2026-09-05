@@ -37,7 +37,7 @@ def _reset_uvicorn_levels() -> Iterator[None]:
     logging.getLogger("uvicorn.error").setLevel(logging.NOTSET)
 
 
-def test_uvicorn_error_traceback_reaches_loguru(loguru_records: list[dict]) -> None:  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+def test_uvicorn_error_traceback_reaches_loguru(loguru_records: list[dict]) -> None:
     """An ERROR record on `uvicorn.error` — the shape of an unhandled ASGI
     exception — flows through to loguru after `_install_stdlib_intercept`,
     which is the precondition for it landing in gateway.log + events."""
@@ -50,13 +50,13 @@ def test_uvicorn_error_traceback_reaches_loguru(loguru_records: list[dict]) -> N
         )
     assert any(
         r["level"].name == "ERROR" and "Exception in ASGI application" in r["message"]  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
-        for r in loguru_records  # pyright: ignore[reportUnknownVariableType]
+        for r in loguru_records
     )
 
 
 def test_intercept_restores_uvicorn_propagation_after_default_config(
     loguru_records: list[dict],
-) -> None:  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+) -> None:
     """A prior default Uvicorn config must not bypass the root intercept.
 
     Uvicorn's default ``LOGGING_CONFIG`` sets ``uvicorn.propagate = False``.
@@ -68,13 +68,13 @@ def test_intercept_restores_uvicorn_propagation_after_default_config(
     logging.getLogger("uvicorn.error").error("Uvicorn error after default config")
     assert any(
         r["level"].name == "ERROR" and "Uvicorn error after default config" in r["message"]  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
-        for r in loguru_records  # pyright: ignore[reportUnknownVariableType]
+        for r in loguru_records
     )
 
 
 def test_intercept_resets_uvicorn_error_level_after_default_config(
     loguru_records: list[dict],
-) -> None:  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+) -> None:
     """A prior Uvicorn Config must not leave uvicorn.error at CRITICAL.
 
     ``Config.__init__`` applies Uvicorn's logging config immediately, including
@@ -91,22 +91,22 @@ def test_intercept_resets_uvicorn_error_level_after_default_config(
     logging.getLogger("uvicorn.error").error("Uvicorn error after critical config")
     assert any(
         r["level"].name == "ERROR" and "Uvicorn error after critical config" in r["message"]  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
-        for r in loguru_records  # pyright: ignore[reportUnknownVariableType]
+        for r in loguru_records
     )
 
 
-def test_uvicorn_error_startup_info_reaches_loguru(loguru_records: list[dict]) -> None:  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+def test_uvicorn_error_startup_info_reaches_loguru(loguru_records: list[dict]) -> None:
     """INFO startup lines ("Uvicorn running on ...", "Started server process")
     still pass — they are the pane-scrollback staples operators grep for."""
     _install_stdlib_intercept()
     logging.getLogger("uvicorn.error").info("Uvicorn running on http://127.0.0.1:8000")
     assert any(
         r["level"].name == "INFO" and "Uvicorn running on" in r["message"]  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
-        for r in loguru_records  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType, reportUnknownVariableType]
+        for r in loguru_records
     )
 
 
-def test_uvicorn_access_info_gated_away(loguru_records: list[dict]) -> None:  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+def test_uvicorn_access_info_gated_away(loguru_records: list[dict]) -> None:
     """Per-request INFO on `uvicorn.access` is gated to WARNING — a busy
     gateway would otherwise emit thousands of access lines into the file
     sink and the events table every day."""
@@ -114,13 +114,13 @@ def test_uvicorn_access_info_gated_away(loguru_records: list[dict]) -> None:  # 
     logging.getLogger("uvicorn.access").info('GET /api/health HTTP/1.1" 200')
     assert not any(
         r["level"].name == "INFO" and "/api/health" in r["message"]  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
-        for r in loguru_records  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType, reportUnknownVariableType]
+        for r in loguru_records
     )
     # WARNING+ still passes (e.g. a record with an over-long request line).
     logging.getLogger("uvicorn.access").warning("ASGI access record warning marker")
     assert any(
         r["level"].name == "WARNING" and "access record warning" in r["message"]  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
-        for r in loguru_records  # pyright: ignore[reportUnknownVariableType]
+        for r in loguru_records
     )
 
 

@@ -101,7 +101,7 @@ def _settings_with(
     # session's env is irrelevant) — the model-validator runs at construction, which
     # is what setattr on the singleton could not exercise. Kwargs are the field
     # aliases, since the fields populate by alias.
-    return DataPlaneSettings(  # pyright: ignore[reportCallIssue]
+    return DataPlaneSettings(
         AVA_DB_URL=db_url,
         AVA_REDIS_URL=redis_url,
         AVA_CLUSTER_SECRET=secret,
@@ -309,7 +309,7 @@ class TestSelfHostDialsLoopback:
         # The one-URL design: AVA_DB_URL itself carries the pooler port (pooling
         # on), and the loopback rewrite applies to that same dial URL.
         self._isolate(tmp_path, machine_host="gw.host")
-        s = DataPlaneSettings(  # pyright: ignore[reportCallIssue]
+        s = DataPlaneSettings(
             AVA_DB_URL=_pg("STALE", host="gw.host:6433"),
             AVA_REDIS_URL=_redis("STALE", host="gw.host:6380"),
             AVA_CLUSTER_SECRET=_SECRET,

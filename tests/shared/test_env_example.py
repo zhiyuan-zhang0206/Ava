@@ -99,4 +99,4 @@ def test_env_example_loads_as_settings(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv(name, raising=False)
     for key, value in _env_example_values().items():
         monkeypatch.setenv(key, value)
-    Settings()  # pyright: ignore[reportCallIssue]  # fields injected from env
+    Settings()

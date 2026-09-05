@@ -364,7 +364,7 @@ def test_health_port_default(monkeypatch: pytest.MonkeyPatch) -> None:
     daemon for the whole session (tests/conftest.py) precisely so no test can bind
     or probe a prod default. Stubbing the settings lookup is what "unconfigured"
     means to `health_port`."""
-    monkeypatch.setattr(daemon_health, "get_field", lambda _name: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(daemon_health, "get_field", lambda _name: None)  # pyright: ignore[reportUnknownArgumentType]
     assert daemon_health.health_port("restarter") == 8102
     assert daemon_health.health_port("labeler") == 8103
     assert daemon_health.health_port("memory_indexer") == 8105
@@ -375,19 +375,19 @@ def test_health_port_default(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_health_port_fallback_warns_once_per_daemon(
     monkeypatch: pytest.MonkeyPatch,
-    caplog,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    caplog,
 ) -> None:
     """F-s4-12: a unit that never declared a per-unit block falls back to the
     shared 8102-8111 segment — the fallback must be LOUD (a warning naming the
     fix), once per daemon per process, not silent and not per-call (healthchecks
     call health_port every round)."""
-    monkeypatch.setattr(daemon_health, "get_field", lambda _name: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(daemon_health, "get_field", lambda _name: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(daemon_health, "_warned_shared_default", set())  # pyright: ignore[reportUnknownArgumentType]
     with caplog.at_level(logging.WARNING, logger="shared.daemon_health"):  # pyright: ignore[reportUnknownMemberType]
         assert daemon_health.health_port("im_bridge") == 8111
         assert daemon_health.health_port("im_bridge") == 8111  # same daemon: silent now
         assert daemon_health.health_port("delivery_watchdog") == 8110  # new daemon: warns
-    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]  # pyright: ignore[reportUnknownMemberType]
     assert len(warnings) == 2  # pyright: ignore[reportUnknownArgumentType]
     assert "im_bridge" in warnings[0].getMessage()  # pyright: ignore[reportUnknownMemberType]
     assert "--health-port-base" in warnings[0].getMessage()  # pyright: ignore[reportUnknownMemberType]
@@ -728,7 +728,7 @@ def test_probe_daemon_survives_a_pidfile_oserror(
     monkeypatch.setattr(
         daemon_health,
         "_probe_daemon",
-        lambda *_a, **_k: (_ for _ in ()).throw(PermissionError("pidfile unreadable")),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda *_a, **_k: (_ for _ in ()).throw(PermissionError("pidfile unreadable")),  # pyright: ignore[reportUnknownArgumentType]
     )
     probe = daemon_health.probe_daemon("restarter", _probe_url(9), pidfile=tmp_path / "x.pid")
     assert probe.alive is False
@@ -747,7 +747,7 @@ def test_probe_daemon_verdict_is_down_never_up_on_failure(
     monkeypatch.setattr(
         daemon_health,
         "_probe_daemon",
-        lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("nobody predicted this")),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("nobody predicted this")),  # pyright: ignore[reportUnknownArgumentType]
     )
     probe = daemon_health.probe_daemon("labeler", _probe_url(9), pidfile=tmp_path / "x.pid")
     assert probe.verdict is daemon_health.ProbeVerdict.DOWN
@@ -762,7 +762,7 @@ def test_probe_daemon_passes_through_a_normal_verdict(
     monkeypatch.setattr(
         daemon_health,
         "_probe_daemon",
-        lambda *_a, **_k: daemon_health.DaemonProbe.up("pid 42"),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda *_a, **_k: daemon_health.DaemonProbe.up("pid 42"),  # pyright: ignore[reportUnknownArgumentType]
     )
     probe = daemon_health.probe_daemon("ops", _probe_url(9), pidfile=tmp_path / "x.pid")
     assert probe.alive is True
@@ -797,7 +797,7 @@ class _Resp:
 
 
 def _answer(monkeypatch: pytest.MonkeyPatch, status: int, body: bytes) -> None:
-    monkeypatch.setattr(urllib.request, "urlopen", lambda _url, **_kw: _Resp(status, body))  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(urllib.request, "urlopen", lambda _url, **_kw: _Resp(status, body))  # pyright: ignore[reportUnknownArgumentType]
 
 
 def test_probe_home_alive_when_home_matches(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -863,7 +863,7 @@ def test_probe_home_always_returns_a_verdict(monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.setattr(
         daemon_health,
         "_probe_home",
-        lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("nobody predicted this")),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("nobody predicted this")),  # pyright: ignore[reportUnknownArgumentType]
     )
     probe = daemon_health.probe_home("http://127.0.0.1:9/api/health")
     assert probe.verdict is daemon_health.ProbeVerdict.DOWN
@@ -872,7 +872,7 @@ def test_probe_home_always_returns_a_verdict(monkeypatch: pytest.MonkeyPatch) ->
 
 def test_health_port_warns_once_on_windows_8106(
     monkeypatch: pytest.MonkeyPatch,
-    caplog,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    caplog,
 ) -> None:
     """#1179: Windows iphlpsvc permanently holds 8106 — a daemon whose port
     resolves there (default OR explicit override) must be named loudly, once
@@ -884,12 +884,12 @@ def test_health_port_warns_once_on_windows_8106(
     monkeypatch.setattr(
         daemon_health,
         "get_field",
-        lambda _name: 8106,  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda _name: 8106,  # pyright: ignore[reportUnknownArgumentType]
     )
     with caplog.at_level(logging.WARNING, logger="shared.daemon_health"):  # pyright: ignore[reportUnknownMemberType]
         assert daemon_health.health_port("events_maintenance") == 8106
         assert daemon_health.health_port("events_maintenance") == 8106  # same daemon: silent now
-    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]  # pyright: ignore[reportUnknownMemberType]
     assert len(warnings) == 1  # pyright: ignore[reportUnknownArgumentType]
-    assert "8106" in warnings[0].getMessage()  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
-    assert "iphlpsvc" in warnings[0].getMessage()  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+    assert "8106" in warnings[0].getMessage()  # pyright: ignore[reportUnknownMemberType]
+    assert "iphlpsvc" in warnings[0].getMessage()  # pyright: ignore[reportUnknownMemberType]

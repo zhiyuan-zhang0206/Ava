@@ -83,7 +83,7 @@ def _fake_child_pid_never_resolves(monkeypatch: pytest.MonkeyPatch) -> None:
     def guarded(pid: int | None = None, *args: Any, **kwargs: Any) -> Any:
         if pid == _FAKE_CHILD_PID:
             raise psutil.NoSuchProcess(pid)
-        return real_process(pid, *args, **kwargs)  # pyright: ignore[reportUnknownArgumentType]
+        return real_process(pid, *args, **kwargs)
 
     monkeypatch.setattr(psutil, "Process", guarded)
 
@@ -108,8 +108,8 @@ def captured_argv(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
 
     def fake_run(args: Any, **_kwargs: Any) -> Any:
         if isinstance(args, (list, tuple)):
-            calls.append([str(a) for a in args])  # pyright: ignore[reportUnknownArgumentType, reportUnknownVariableType]
-        if isinstance(args, (list, tuple)) and "shared._reparent" in [str(a) for a in args]:  # pyright: ignore[reportUnknownArgumentType, reportUnknownVariableType]
+            calls.append([str(a) for a in args])  # pyright: ignore[reportUnknownArgumentType]
+        if isinstance(args, (list, tuple)) and "shared._reparent" in [str(a) for a in args]:  # pyright: ignore[reportUnknownArgumentType]
             # The native supervisor's reparent helper reports the child pid on
             # stdout; the launch continues past it with a fake pid.
             pid_line = f"{_FAKE_CHILD_PID}\n"
@@ -174,7 +174,7 @@ def test_service_respawn(secret_env: None, monkeypatch: pytest.MonkeyPatch) -> N
 
     def fake_run(args: Any, **_kwargs: Any) -> Any:
         if isinstance(args, (list, tuple)):
-            calls.append([str(a) for a in args])  # pyright: ignore[reportUnknownArgumentType, reportUnknownVariableType]
+            calls.append([str(a) for a in args])  # pyright: ignore[reportUnknownArgumentType]
         if args[:2] == [sys.executable, "-m"] and "shared._reparent" in args:
             # The helper reports the child pid on stdout; a fake pid's
             # create_time read is caught by posixproc.
@@ -219,10 +219,10 @@ def test_schedule_launch(
     from gateway.schedule_manager import ScheduleManager
 
     manager = ScheduleManager(None)  # type: ignore[arg-type] — _launch's pool-touching writes are stubbed below
-    monkeypatch.setattr(ScheduleManager, "_set_status", lambda *_a, **_k: True)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(ScheduleManager, "_set_status", lambda *_a, **_k: True)  # pyright: ignore[reportUnknownArgumentType]
     # The orphan-run close is a pool write like _set_status — stubbed the same
     # way; this test asserts argv cleanliness, not DB behavior.
-    monkeypatch.setattr(ScheduleManager, "_close_null_runs", lambda _self, _sid: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(ScheduleManager, "_close_null_runs", lambda _self, _sid: None)  # pyright: ignore[reportUnknownArgumentType]
     manager._launch(7)
     launches = [
         a
@@ -314,7 +314,7 @@ def test_agent_process_launch(monkeypatch: pytest.MonkeyPatch) -> None:
             return (True, "noop")
 
     monkeypatch.setattr("ops.agent_launch.native_proc", lambda: _FakeSupervisor)
-    monkeypatch.setattr("ops.agent_launch._wait_for_agent_claim", lambda _id, _attempt=None: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr("ops.agent_launch._wait_for_agent_claim", lambda _id, _attempt=None: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr("ops.agent_launch.agent_spawn_env_dict", lambda: dict(_SECRET_ENV))
 
     _launch_agent_process(
@@ -352,9 +352,9 @@ def test_redis_bringup(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
 
     monkeypatch.setattr(ci.subprocess, "run", fake_run)
     monkeypatch.setattr(ci, "_redis_data_dir", lambda: tmp_path / "redis")
-    monkeypatch.setattr(ci, "_ensure_redis_acl", lambda *_a, **_k: 0)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-    monkeypatch.setattr(ci, "_bind_addrs", lambda _secret: ["127.0.0.1"])  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-    monkeypatch.setattr(ci, "print", lambda *_a, **_k: None, raising=False)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(ci, "_ensure_redis_acl", lambda *_a, **_k: 0)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(ci, "_bind_addrs", lambda _secret: ["127.0.0.1"])  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(ci, "print", lambda *_a, **_k: None, raising=False)  # pyright: ignore[reportUnknownArgumentType]
     # `_redis_server_bin` resolves through `brew_prefix`, which is `@cache`d for
     # the process lifetime — routing it through the faked `subprocess.run` above
     # would permanently poison that cache with "PONG" (brew's stdout stand-in)
@@ -368,7 +368,7 @@ def test_redis_bringup(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
 
     # down on the first probe (so the full start path runs), up on the next
     probes = iter([False, True, True])
-    monkeypatch.setattr(ci, "_redis_running", lambda *_a: next(probes))  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(ci, "_redis_running", lambda *_a: next(probes))  # pyright: ignore[reportUnknownArgumentType]
     assert ci._start_redis(46999, _SECRET, _SECRET, _SECRET, "ava") == 0
 
     for argv in calls:

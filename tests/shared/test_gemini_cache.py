@@ -15,7 +15,7 @@ import pytest
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
-from langchain_core.tools import tool  # pyright: ignore[reportUnknownVariableType]
+from langchain_core.tools import tool
 
 from shared.config import settings
 from shared.lm import _gemini_cache
@@ -225,7 +225,7 @@ class TestGetOrCreate:
         llm = _gemini_llm(caches)
         # pre-seed the "other process" cache with the display_name convention
         from langchain_google_genai._function_utils import (
-            convert_to_genai_function_declarations,  # pyright: ignore[reportUnknownVariableType]
+            convert_to_genai_function_declarations,
         )
 
         from shared.lm._gemini_cache import _hash_material
@@ -250,7 +250,7 @@ class TestGetOrCreate:
         caches = _FakeCaches()
         llm = _gemini_llm(caches)
         from langchain_google_genai._function_utils import (
-            convert_to_genai_function_declarations,  # pyright: ignore[reportUnknownVariableType]
+            convert_to_genai_function_declarations,
         )
 
         from shared.lm._gemini_cache import _hash_material
@@ -379,7 +379,7 @@ class _NonGeminiLLM(BaseChatModel):
     def _llm_type(self) -> str:
         return "fake-non-gemini"
 
-    def _generate(  # pyright: ignore[reportIncompatibleMethodOverride]
+    def _generate(
         self,
         messages: list[Any],
         stop: list[str] | None = None,

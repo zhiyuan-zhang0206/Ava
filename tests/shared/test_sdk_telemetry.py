@@ -28,7 +28,7 @@ def _spy_emit(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, dict[str, Any]
     monkeypatch.setattr(
         sdk_telemetry,
         "emit",
-        lambda fn, detail=None, **_: calls.append((fn, dict(detail or {}))),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda fn, detail=None, **_: calls.append((fn, dict(detail or {}))),  # pyright: ignore[reportUnknownArgumentType]
     )
     return calls
 
@@ -67,7 +67,7 @@ def test_only_outermost_call_emits(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_return_and_exception_pass_through(monkeypatch: pytest.MonkeyPatch) -> None:
     _spy_emit(monkeypatch)
     with sdk_telemetry.recording():
-        assert sdk_telemetry.run_metered("ns.fn", lambda a, b: a + b, (2, 3), {}) == 5  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        assert sdk_telemetry.run_metered("ns.fn", lambda a, b: a + b, (2, 3), {}) == 5  # pyright: ignore[reportUnknownArgumentType]
 
         def boom() -> None:
             raise ValueError("boom")

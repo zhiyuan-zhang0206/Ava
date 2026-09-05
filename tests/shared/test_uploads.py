@@ -116,7 +116,7 @@ class TestFetchUploadB64:
     def test_non_image_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from shared import http_dial
 
-        monkeypatch.setattr(http_dial, "get", lambda *_a, **_kw: pytest.fail("must not fetch"))  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        monkeypatch.setattr(http_dial, "get", lambda *_a, **_kw: pytest.fail("must not fetch"))  # pyright: ignore[reportUnknownArgumentType]
         with pytest.raises(ValueError, match="not a recognized image"):
             uploads.fetch_upload_b64(7, "notes.txt")
 
@@ -125,7 +125,7 @@ class TestFetchUploadB64:
         degrade-to-text-note path catches exactly that."""
         from shared import http_dial
 
-        monkeypatch.setattr(http_dial, "get", lambda *_a, **_kw: _FakeResp(b"", status=404))  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        monkeypatch.setattr(http_dial, "get", lambda *_a, **_kw: _FakeResp(b"", status=404))  # pyright: ignore[reportUnknownArgumentType]
         monkeypatch.setattr("shared.machine.gateway_api_base", lambda: "http://gw.test:8000")
         with pytest.raises(OSError, match="404"):
             uploads.fetch_upload_b64(7, "gone.png")

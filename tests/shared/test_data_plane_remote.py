@@ -124,7 +124,7 @@ def test_foreign_url_password_survives_a_nonempty_cluster_secret() -> None:
     remote/SaaS provider's credential at every settings load, so the remote
     probe always failed auth. A foreign-host URL is authoritative: its
     password must pass through untouched."""
-    s = DataPlaneSettings(  # pyright: ignore[reportCallIssue]
+    s = DataPlaneSettings(
         AVA_DB_URL=_FOREIGN_DB,
         AVA_REDIS_URL=_FOREIGN_REDIS,
         AVA_CLUSTER_SECRET=_LOCAL_SECRET,
@@ -140,7 +140,7 @@ def test_loopback_url_password_still_self_heals_from_secret() -> None:
     """The local self-heal is untouched: a loopback URL on a secret cluster
     keeps re-deriving its password from the owner password / secret (the
     historical behavior)."""
-    s = DataPlaneSettings(  # pyright: ignore[reportCallIssue]
+    s = DataPlaneSettings(
         AVA_DB_URL=_LOOPBACK_DB,
         AVA_REDIS_URL=_LOOPBACK_REDIS,
         AVA_CLUSTER_SECRET=_LOCAL_SECRET,

@@ -25,16 +25,16 @@ def _mimo() -> ReasoningContentChatModel:
     )
 
 
-def _raw(delta: dict) -> dict:  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+def _raw(delta: dict) -> dict:
     """A raw OpenAI-style stream chunk carrying one delta."""
-    return {  # pyright: ignore[reportUnknownVariableType]
+    return {
         "id": "chatcmpl-x",
         "model": "mimo-v2.5-pro",
         "choices": [{"index": 0, "delta": delta, "finish_reason": None}],
     }
 
 
-def _convert(m: ReasoningContentChatModel, delta: dict) -> AIMessageChunk:  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+def _convert(m: ReasoningContentChatModel, delta: dict) -> AIMessageChunk:
     gen = m._convert_chunk_to_generation_chunk(_raw(delta), AIMessageChunk, {})  # pyright: ignore[reportUnknownArgumentType]
     assert gen is not None
     msg = gen.message

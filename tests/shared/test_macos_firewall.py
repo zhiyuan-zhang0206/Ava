@@ -121,7 +121,7 @@ def test_non_macos_is_a_no_op(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -
     monkeypatch.setattr(
         fw,
         "_query",
-        lambda *_a: pytest.fail("queried socketfilterfw on a non-macOS host"),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda *_a: pytest.fail("queried socketfilterfw on a non-macOS host"),  # pyright: ignore[reportUnknownArgumentType]
     )
     audit = fw.audit_allowlist((_existing(tmp_path, "python3.12"),), machine_host="10.0.0.4")
     assert audit.verdict is fw.FirewallVerdict.NOT_MACOS
@@ -280,7 +280,7 @@ def test_unreadable_firewall_is_not_reported_as_healthy(
 # --- declarative manifest --------------------------------------------------
 
 
-def _stub_manifest(monkeypatch: pytest.MonkeyPatch, entries: tuple) -> None:  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+def _stub_manifest(monkeypatch: pytest.MonkeyPatch, entries: tuple) -> None:
     monkeypatch.setattr(fw, "FIREWALL_MANIFEST", entries)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(fw, "FIREWALL_LEGACY_FAMILY", ())
     monkeypatch.setattr(fw, "_machine_name", lambda: "testhost")
@@ -624,7 +624,7 @@ def test_prune_stale_rules_removes_managed_orphans(
     )
     monkeypatch.setattr(fw, "FIREWALL_LEGACY_FAMILY", ())
     calls: list[list[str]] = []
-    monkeypatch.setattr(fw, "run_bounded", lambda _cmd, **_kw: calls.append(_cmd) or _FakeProc())  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(fw, "run_bounded", lambda _cmd, **_kw: calls.append(_cmd) or _FakeProc())  # pyright: ignore[reportUnknownArgumentType]
     rules = {"/opt/homebrew/Cellar/node/25.6.1/bin/node": True}
     repair = fw.prune_stale_rules(rules)
     assert repair.removed == (Path("/opt/homebrew/Cellar/node/25.6.1/bin/node"),)
@@ -636,7 +636,7 @@ def test_sudo_grant_probe_sees_the_alias(monkeypatch: pytest.MonkeyPatch) -> Non
     monkeypatch.setattr(
         fw.subprocess,
         "run",
-        lambda _cmd, **_kw: _FakeProc(  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda _cmd, **_kw: _FakeProc(  # pyright: ignore[reportUnknownArgumentType]
             stdout="User ava may run the following commands on this host:\n"
             "    (root) NOPASSWD: AVA_FIREWALL\n"
         ),
@@ -645,5 +645,5 @@ def test_sudo_grant_probe_sees_the_alias(monkeypatch: pytest.MonkeyPatch) -> Non
 
 
 def test_sudo_grant_probe_absent_fails_fast(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(fw.subprocess, "run", lambda _cmd, **_kw: _FakeProc(rc=1))  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(fw.subprocess, "run", lambda _cmd, **_kw: _FakeProc(rc=1))  # pyright: ignore[reportUnknownArgumentType]
     assert fw.sudo_grant_installed() is False

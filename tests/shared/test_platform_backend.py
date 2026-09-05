@@ -81,10 +81,10 @@ def test_windows_scheduling_delegates_to_schtasks(monkeypatch: pytest.MonkeyPatc
         ("shared.os_cron", "cron"),
         ("shared.os_watchdog_probe", "watchdog"),
     ]:
-        monkeypatch.setattr(f"{mod}._register_windows", lambda *_a, _n=name: calls.append(_n) or 0)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        monkeypatch.setattr(f"{mod}._register_windows", lambda *_a, _n=name: calls.append(_n) or 0)  # pyright: ignore[reportUnknownArgumentType]
         monkeypatch.setattr(
             f"{mod}._unregister_windows",
-            lambda *a, _n=name: unregistered.append((_n, a)) or 0,  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+            lambda *a, _n=name: unregistered.append((_n, a)) or 0,  # pyright: ignore[reportUnknownArgumentType]
         )
 
     backend = WindowsPlatformBackend()
@@ -120,7 +120,7 @@ def test_windows_scheduling_failure_degrades_to_a_warning(
         ("shared.os_cron", "health probe"),
         ("shared.os_watchdog_probe", "watchdog probe"),
     ]:
-        monkeypatch.setattr(f"{mod}._register_windows", lambda *_a: "ERROR: Access is denied.")  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        monkeypatch.setattr(f"{mod}._register_windows", lambda *_a: "ERROR: Access is denied.")  # pyright: ignore[reportUnknownArgumentType]
 
     backend = WindowsPlatformBackend()
     backend.register_autostart()

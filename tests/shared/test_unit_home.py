@@ -46,7 +46,7 @@ def test_pidfile_fields_rooted_under_unit_home(_restore_ava_home: None) -> None:
     os.environ["AVA_HOME"] = "/srv/.ava_gateway"
     from shared.config import Settings
 
-    s = Settings()  # pyright: ignore[reportCallIssue]  # BaseSettings reads required fields from env
+    s = Settings()
     root = Path("/srv/.ava_gateway")
     assert s.services.restarter_pidfile == root / "run" / "restarter.pid"
     assert s.services.gateway_pidfile == root / "run" / "gateway.pid"

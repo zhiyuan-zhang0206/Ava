@@ -93,7 +93,7 @@ def _recorded(name: str) -> psutil.Process:
     return psutil.Process(rec.pid)
 
 
-def test_login_shell_session_records_the_daemon_not_a_wrapper_shell(tmp_path: Path, unit_home):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_login_shell_session_records_the_daemon_not_a_wrapper_shell(tmp_path: Path, unit_home):
     """The structural invariant the whole kill layer rests on: the recorded pid
     is the daemon itself, with no shell left between it and the supervisor."""
     del unit_home
@@ -125,7 +125,7 @@ def test_login_shell_session_records_the_daemon_not_a_wrapper_shell(tmp_path: Pa
         posixproc.kill_session("ava-test-shape", graceful=False)
 
 
-def test_graceful_signal_reaches_the_daemon_and_runs_its_cleanup(tmp_path: Path, unit_home):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_graceful_signal_reaches_the_daemon_and_runs_its_cleanup(tmp_path: Path, unit_home):
     """The fix itself: SIGTERM to the recorded pid arrives at the daemon, which
     unwinds through its `finally` promptly. Before the exec, the signal hit a
     wrapper shell and the daemon never learned anything — the marker never
@@ -156,7 +156,7 @@ def test_graceful_signal_reaches_the_daemon_and_runs_its_cleanup(tmp_path: Path,
         posixproc.kill_session("ava-test-graceful", graceful=False)
 
 
-def test_kill_session_reports_forced_when_the_daemon_ignores_sigterm(tmp_path: Path, unit_home):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_kill_session_reports_forced_when_the_daemon_ignores_sigterm(tmp_path: Path, unit_home):
     """`mode` is what happened, not what was asked for — otherwise a stop that
     always escalated to SIGKILL reports ✓ (graceful) forever, which is how the
     unreachable-SIGTERM bug stayed invisible across every rollout."""
@@ -275,7 +275,7 @@ def test_exec_into_rejects_a_compound_command_that_never_execs():
         exec_into("npm run build && npm run start")
 
 
-def test_orchestration_session_keeps_its_wrapper_shell(monkeypatch: pytest.MonkeyPatch, unit_home):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_orchestration_session_keeps_its_wrapper_shell(monkeypatch: pytest.MonkeyPatch, unit_home):
     """`exec_cmd=False` is the opt-out for a session whose shell is doing the
     work — the updater's `tee` pipeline and its `[session-exit] rc=` verdict have
     to outlive the command, so that shell must NOT exec itself away."""

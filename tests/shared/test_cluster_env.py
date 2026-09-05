@@ -441,7 +441,7 @@ def test_allocate_ports_skips_blocks_overlapping_legacy_16_port_records(
     from shared import cluster as cl
     from shared.port_block import BLOCK_SIZE, BLOCK_START
 
-    monkeypatch.setattr(cl, "_port_free", lambda _port: True)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(cl, "_port_free", lambda _port: True)  # pyright: ignore[reportUnknownArgumentType]
 
     # Existing record at 18016 occupies 18016..18031. At BLOCK_SIZE 27,
     # candidates 18000 and 18027 overlap it; the first legal base is 18054.

@@ -66,7 +66,7 @@ def test_begin_returns_the_generation_it_wrote_not_a_later_owner(
     identity of generation B; A's later CAS cleanup could otherwise delete B."""
     original_read = state.read
 
-    def _replace_before_old_lockless_read(path: Path | str | None = None):  # pyright: ignore[reportMissingParameterType]
+    def _replace_before_old_lockless_read(path: Path | str | None = None):
         monkeypatch.setattr(state, "read", original_read)
         state.force_clear()
         state.begin(kind="restart", origin="second")

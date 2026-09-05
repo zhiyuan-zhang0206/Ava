@@ -164,7 +164,7 @@ class TestCached:
         calls = 0
         real = SkillIndex.build.__func__  # type: ignore[attr-defined]
 
-        def counting_build(cls, roots):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+        def counting_build(cls, roots):
             nonlocal calls
             calls += 1
             return real(cls, roots)
