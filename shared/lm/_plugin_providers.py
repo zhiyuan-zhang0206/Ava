@@ -77,7 +77,7 @@ def ensure_provider_plugins_loaded() -> None:
 
         # Bootstrap can be the first provider consumer. Importing factory here
         # establishes its core-prefix reservation before any plugin registers;
-        # otherwise bootstrap-first startup could let a plugin claim `claude-`.
+        # otherwise bootstrap-first startup could let a plugin claim `gpt-`.
         provider_api.REGISTRY.reserve_core_prefixes(set(_MODEL_KEY_MAP))
 
         discovered = plugins_config._discover_plugins()

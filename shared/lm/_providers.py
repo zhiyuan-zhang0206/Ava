@@ -20,11 +20,10 @@ from shared.config import settings
 from shared.lm._effort import (
     _PROVIDER_EFFORT_LEVELS,
     _clamp_effort,
-    claude_extended_thinking_kwarg,
     mimo_extra_body,
     qwen_extra_body,
 )
-from shared.lm.registry import ModelSpec, resolve_setting
+from shared.lm.registry import ModelSpec
 
 
 class ThinkingConfig(TypedDict):
@@ -44,107 +43,6 @@ class ThinkingConfig(TypedDict):
     type: Literal["enabled", "disabled", "adaptive"]
     budget_tokens: NotRequired[int]
     display: NotRequired[Literal["summarized", "omitted"]]
-
-
-def _build_claude_model(
-    model: str,
-    spec: ModelSpec | None,
-    thinking: ThinkingConfig | None,
-    resolved_effort: str,
-    extra_kwargs: dict[str, Any],
-    *,
-    timeout: float | None = None,
-) -> BaseChatModel:
-    """claude-* branch: ThinkingTokensChatAnthropic, pinned max_tokens.
-
-    Extended-thinking-only models (haiku-4-5) map budget_tokens / effort
-    onto their thinking on/off binary (`claude_extended_thinking_kwarg`);
-    adaptive-thinking models get `display: "summarized"` forced on so the
-    wire returns thinking text the timeline can render. Reasoning effort
-    rides the `effort` field, gated per model.
-    """
-    from shared.lm._anthropic_compat import ThinkingTokensChatAnthropic
-
-    # Fail fast on missing key — the same posture as every other provider
-    # branch. Without it, ChatAnthropic reads ANTHROPIC_API_KEY from env
-    # (or not) and hangs rather than surfacing a clear error.
-    if settings.lm.anthropic_api_key is None:
-        raise RuntimeError(
-            "ANTHROPIC_API_KEY not set — claude-* model needs this key; "
-            "configure in ~/.ava/.env or export before starting"
-        )
-
-    # Per-model output cap (ModelSpec.max_output_tokens). Same fail-fast
-    # posture as the deepseek branch — an unregistered claude model raises
-    # rather than falling back to langchain's stale profile table (4096
-    # for unknown ids).
-    if spec is None or spec.max_output_tokens is None:
-        raise ValueError(
-            f"Unknown claude model {model!r} — register it (with "
-            f"max_output_tokens) in `shared/lm/registry.py:MODELS`"
-        )
-
-    thinking_disabled = thinking is not None and thinking.get("type") == "disabled"
-
-    # Reasoning effort rides ChatAnthropic's `effort` field
-    # (output_config.effort on the wire), gated per model — extended-
-    # thinking-only models (haiku-4-5) have no effort support (server 400)
-    # and map the knob onto their thinking on/off binary below instead.
-    # Caller-disabled thinking skips effort injection, mirroring deepseek:
-    # an explicit cheap/fast path shouldn't have the global env push
-    # reasoning back in.
-    claude_kwargs: dict[str, Any] = {}
-    effort = resolved_effort
-    if effort and not thinking_disabled and not spec.extended_thinking_only:
-        if spec.effort_levels is not None:
-            claude_kwargs["effort"] = _clamp_effort(effort, spec.effort_levels, target=model)
-        else:
-            logger.warning(
-                f"{model} does not support reasoning effort; "
-                f"AVA_REASONING_EFFORT={effort!r} ignored"
-            )
-
-    # Extended-thinking-only models (haiku-4-5) map budget_tokens / effort
-    # onto their thinking on/off binary — see
-    # shared/lm/_effort.py:claude_extended_thinking_kwarg.
-    extended_thinking = claude_extended_thinking_kwarg(
-        model,
-        thinking=thinking,
-        budget_tokens=resolve_setting("claude_thinking_budget_tokens", model=model),
-        reasoning_effort=effort,
-    )
-    if extended_thinking is not None:
-        extra_kwargs["thinking"] = extended_thinking
-    elif not thinking_disabled and not spec.extended_thinking_only:
-        # Adaptive-thinking claude models (everything on the current API
-        # except the extended-thinking-only ones) default to
-        # `thinking.display="omitted"` server-side: the model thinks, but
-        # the wire returns only a signature with no thinking text — the
-        # stream emits no thinking_delta and the committed message carries
-        # an empty thinking block, so the timeline has nothing to render.
-        # Opt into summarized thinking text explicitly; a caller-passed
-        # config keeps its own `display` when it set one.
-        wire_thinking: dict[str, Any] = (
-            dict(thinking) if thinking is not None else {"type": "adaptive"}
-        )
-        wire_thinking.setdefault("display", "summarized")
-        extra_kwargs["thinking"] = wire_thinking
-
-    # ThinkingTokensChatAnthropic subclasses ChatAnthropic to also surface
-    # thinking_tokens in usage_metadata.output_token_details (the base
-    # _create_usage_metadata drops them). Same __init__ signature.
-    # cache_control enables Anthropic prompt caching — the system prompt and
-    # eligible message blocks get cached server-side for 5 minutes (default TTL),
-    # reducing input token cost and latency on repeated turns.
-    return ThinkingTokensChatAnthropic(
-        model=model,  # type: ignore[call-arg]
-        api_key=settings.lm.anthropic_api_key,
-        max_tokens=spec.max_output_tokens,  # type: ignore[call-arg]
-        model_kwargs={"cache_control": {"type": "ephemeral"}},
-        timeout=timeout,
-        **claude_kwargs,
-        **extra_kwargs,
-    )
 
 
 def _build_gpt_model(

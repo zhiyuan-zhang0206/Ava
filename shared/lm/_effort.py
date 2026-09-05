@@ -11,10 +11,9 @@ concerns:
   provider's endpoint actually accepts; out-of-range values clamp (logged),
   unknown strings fail fast at build time instead of surfacing as a provider
   400 after the agent is already running.
-- **Binary-thinking resolvers** (`mimo_extra_body` / `qwen_extra_body` /
-  `claude_extended_thinking_kwarg`): for providers/models with no graded effort
-  field, only a thinking on/off switch (mimo, qwen; extended-thinking-only
-  claude models), these fold the clamp + switch-selection logic that
+- **Binary-thinking resolvers** (`mimo_extra_body` / `qwen_extra_body`): for
+  providers/models with no graded effort field, only a thinking on/off switch
+  (mimo, qwen), these fold the clamp + switch-selection logic that
   build_chat_model's branches would otherwise inline.
 """
 
@@ -26,14 +25,6 @@ from typing import Any
 
 from loguru import logger
 
-from shared.lm.registry import MODELS
-
-# Budget used when AVA_REASONING_EFFORT clamps an extended-thinking-only claude
-# model to its "on" tier and no explicit AVA_CLAUDE_THINKING_BUDGET_TOKENS is
-# configured (0 = unset). Anthropic's minimum is 1024; this sits well under
-# haiku-4-5's 64K max_tokens cap with headroom left for the actual response.
-_CLAUDE_EXTENDED_THINKING_DEFAULT_BUDGET = 8192
-
 # Per-provider clamp targets for the cross-provider AVA_REASONING_EFFORT knob
 # on the remaining core OpenAI-style branches. mimo's official chat-completions
 # reference documents no reasoning_effort field, only a body-level
@@ -41,8 +32,7 @@ _CLAUDE_EXTENDED_THINKING_DEFAULT_BUDGET = 8192
 # "none"/"high": "none" sends thinking.type=disabled, anything else leaves the
 # provider default (thinking already on) untouched. Keyed by provider because
 # the vocabulary is an endpoint contract shared by every model of the
-# provider; the claude branch clamps per model instead
-# (`ModelSpec.effort_levels`) since claude models genuinely diverge.
+# provider.
 _PROVIDER_EFFORT_LEVELS: dict[str, tuple[str, ...]] = {
     "kimi": ("low", "high", "max"),
     "glm": ("low", "high", "max"),
@@ -179,34 +169,3 @@ def qwen_extra_body(*, thinking: Mapping[str, Any] | None, reasoning_effort: str
         if tier == "none":
             return {"enable_thinking": False}
     return {}
-
-
-def claude_extended_thinking_kwarg(
-    model: str,
-    *,
-    thinking: Mapping[str, Any] | None,
-    budget_tokens: int,
-    reasoning_effort: str,
-) -> dict[str, Any] | None:
-    """Resolve the `thinking` kwarg for extended-thinking-only claude models
-    (`ModelSpec.extended_thinking_only`, currently haiku-4-5) when the caller
-    passed none explicitly.
-
-    `budget_tokens` (the resolved claude_thinking_budget_tokens, an explicit
-    numeric budget) wins when set; otherwise `reasoning_effort` clamped onto
-    the model's binary `effort_levels` ("none"/"high") opts in at
-    `_CLAUDE_EXTENDED_THINKING_DEFAULT_BUDGET` — these models have no `effort`
-    wire field, so this is the knob's only effect on them. None = leave
-    thinking unset (provider default OFF); also None for any model that is not
-    extended-thinking-only or when the caller already set `thinking`.
-    """
-    spec = MODELS.get(model)
-    if thinking is not None or spec is None or not spec.extended_thinking_only:
-        return None
-    if budget_tokens > 0:
-        return {"type": "enabled", "budget_tokens": budget_tokens}
-    if reasoning_effort:
-        levels = spec.effort_levels
-        if levels is not None and _clamp_effort(reasoning_effort, levels, target=model) != "none":
-            return {"type": "enabled", "budget_tokens": _CLAUDE_EXTENDED_THINKING_DEFAULT_BUDGET}
-    return None

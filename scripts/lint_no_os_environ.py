@@ -23,10 +23,10 @@ unless the file is in _ALLOWED_FILES (Settings itself + .env loader +
 bootstrap that cannot depend on Settings).
 
 Adding a new _ALLOWED_FILES entry requires demonstrating "cannot go through
-Settings" — bootstrap ordering constraints; SDK-internal raw env (e.g.
-LangChain consuming ANTHROPIC_API_KEY directly) are owned by Settings
-fields and do not need this exemption. No inline exemption mechanism —
-avoids scattered hard-to-audit `# noqa`-style escape hatches.
+Settings" — bootstrap ordering constraints; provider-key reads are centralized
+behind ``provider_api.require_key``, and other SDK-internal raw env is owned by
+Settings fields. No inline exemption mechanism — avoids scattered hard-to-audit
+`# noqa`-style escape hatches.
 
 ### Rule 2: Test code
 
@@ -75,6 +75,7 @@ _SCAN_DIRS = (
 # migrates to plugin mode; each key must match a ProviderBinding.key_env.
 _PROVIDER_KEY_ENV_VARS = frozenset(
     {
+        "ANTHROPIC_API_KEY",  # ava_builtins/plugins/lm_anthropic
         "DEEPSEEK_API_KEY",  # ava_builtins/plugins/lm_deepseek
         "GEMINI_API_KEY",  # ava_builtins/plugins/lm_google
     }

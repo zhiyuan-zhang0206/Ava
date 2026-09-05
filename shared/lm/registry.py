@@ -222,7 +222,7 @@ def _validate_registry() -> None:
         _validate_spec(
             model_id,
             spec,
-            anthropic_protocol=spec.provider == "claude",
+            anthropic_protocol=False,
         )
 
     # The supersession chain must stay coherent — a broken link would hide a

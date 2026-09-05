@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from shared.lm._model_registry_types import (
-    _CLAUDE_ADAPTIVE_EFFORT,
     ModelSpec,
     ModelTuning,
 )
@@ -235,61 +234,6 @@ COMPATIBLE_MODELS: dict[str, ModelSpec] = {
         media_types=frozenset({"image"}),
     ),
     # -- legacy / non-spawnable (facts kept for old agents) --
-    "claude-opus-4-8": ModelSpec(
-        provider="claude",
-        context_window=200_000,
-        max_output_tokens=128_000,
-        knowledge_cutoff="2026-01",
-        effort_levels=_CLAUDE_ADAPTIVE_EFFORT,
-        tuning=ModelTuning(
-            # User decision (2026-09-03): Claude family defaults this section off.
-            prompt_user_tone_enabled=False,
-        ),
-        media_types=frozenset({"image", "pdf"}),
-    ),
-    "claude-sonnet-4-6": ModelSpec(
-        provider="claude",
-        context_window=200_000,
-        max_output_tokens=128_000,
-        knowledge_cutoff="2025-08",
-        effort_levels=("low", "medium", "high", "max"),  # xhigh arrived with opus-4-7
-        tuning=ModelTuning(
-            # User decision (2026-09-03): Claude family defaults this section off.
-            prompt_user_tone_enabled=False,
-        ),
-        media_types=frozenset({"image", "pdf"}),
-    ),
-    "claude-opus-4-7": ModelSpec(
-        provider="claude",
-        max_output_tokens=128_000,
-        effort_levels=_CLAUDE_ADAPTIVE_EFFORT,
-        tuning=ModelTuning(
-            # User decision (2026-09-03): Claude family defaults this section off.
-            prompt_user_tone_enabled=False,
-        ),
-        media_types=frozenset({"image", "pdf"}),
-    ),
-    "claude-opus-4-6": ModelSpec(
-        provider="claude",
-        tuning=ModelTuning(
-            # User decision (2026-09-03): Claude family defaults this section off.
-            prompt_user_tone_enabled=False,
-        ),
-        media_types=frozenset({"image", "pdf"}),
-    ),
-    # Bare alias of the dated snapshot above, kept for old agent configs.
-    # Carries the same extended-thinking-only flag as the dated entry: without
-    # it the factory's adaptive-thinking default would send `type: "adaptive"`,
-    # which this model 400s on.
-    "claude-haiku-4-5": ModelSpec(
-        provider="claude",
-        extended_thinking_only=True,
-        tuning=ModelTuning(
-            # User decision (2026-09-03): Claude family defaults this section off.
-            prompt_user_tone_enabled=False,
-        ),
-        media_types=frozenset({"image", "pdf"}),
-    ),
     "gpt-5.5": ModelSpec(
         provider="gpt",
         context_window=256_000,

@@ -174,10 +174,8 @@ class ModelSpec:
     tuning: ModelTuning = field(default_factory=ModelTuning)
 
 
-# Effort vocabularies shared by every model of a family — named once so the
-# entries below stay readable; still per-model data (a model may diverge, e.g.
-# claude-sonnet-4-6 has no xhigh).
-_CLAUDE_ADAPTIVE_EFFORT = ("low", "medium", "high", "xhigh", "max")
+# Effort vocabulary shared by every GPT model — named once so the core entries
+# stay readable; it remains per-model data.
 _GPT_EFFORT = ("none", "low", "medium", "high", "xhigh", "max")
 
 # These classes remain public through shared.lm.registry; preserve their

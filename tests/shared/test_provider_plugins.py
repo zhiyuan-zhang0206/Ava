@@ -103,9 +103,10 @@ def provider_plugin() -> Generator[Callable[..., None], None, None]:
     prices_snapshot = dict(pricing._PLUGIN_PRICES)
     stop_snapshot = dict(stop._BY_PROVIDER)
     for model_id in tuple(MODELS):
-        if model_id.startswith(("deepseek-", "gemini-")):
+        if model_id.startswith(("claude-", "deepseek-", "gemini-")):
             MODELS.pop(model_id)
             pricing._PLUGIN_PRICES.pop(model_id, None)
+    provider_api.REGISTRY.bindings.pop("claude-", None)
     provider_api.REGISTRY.bindings.pop("deepseek-", None)
     provider_api.REGISTRY.bindings.pop("gemini-", None)
     stop._BY_PROVIDER.pop("google_genai", None)
@@ -244,6 +245,46 @@ def test_repo_google_provider_is_enabled_and_registers_complete_contract() -> No
         frozenset({"STOP"}),
         frozenset({"MAX_TOKENS"}),
     )
+
+
+def test_repo_anthropic_provider_is_enabled_and_registers_complete_contract() -> None:
+    discovered = plugins_config._discover_plugins()
+    config = plugins_config.load_for_runtime(set(discovered))
+
+    assert config.plugins["lm_anthropic"].enabled
+    ensure_provider_plugins_loaded()
+
+    claude_models = {
+        "claude-sonnet-5",
+        "claude-haiku-4-5-20251001",
+        "claude-opus-5",
+        "claude-fable-5",
+        "claude-fable-5-1",
+        "claude-opus-4-8",
+        "claude-sonnet-4-6",
+        "claude-opus-4-7",
+        "claude-opus-4-6",
+        "claude-haiku-4-5",
+    }
+    assert claude_models <= MODELS.keys()
+    assert set(SUPPORTED_MODELS["claude"]) == {
+        "claude-sonnet-5",
+        "claude-haiku-4-5-20251001",
+        "claude-opus-5",
+        "claude-fable-5",
+        "claude-fable-5-1",
+    }
+    assert pricing.model_vendor("claude-sonnet-5") == "anthropic"
+
+    from shared.lm.factory import _MODEL_KEY_MAP, provider_key_map
+
+    assert "claude-" not in _MODEL_KEY_MAP
+    assert provider_key_map()["claude-"] == ("Anthropic", None, "ANTHROPIC_API_KEY")
+    binding = provider_api.REGISTRY.bindings["claude-"]
+    assert binding.effort_levels is None
+    assert binding.anthropic_protocol
+    assert binding.vision
+    assert binding.stop_spec is None
 
 
 def test_plugin_model_registers_and_builds(provider_plugin: Callable[..., None]) -> None:
@@ -415,7 +456,7 @@ def test_core_prefix_cannot_be_shadowed(provider_plugin: Callable[..., None]) ->
     with pytest.raises(ValueError, match="already claimed"):
         provider_api.register(
             provider_api.ProviderBinding(
-                prefix="claude-",
+                prefix="gpt-",
                 display_name="Shadow",
                 key_env="X",
                 build=lambda _ctx: FakeListChatModel(responses=["x"]),
@@ -431,7 +472,7 @@ def test_loader_reserves_core_prefixes_before_bootstrap_can_load_a_plugin(
     """Bootstrap may be the first provider consumer, before factory import setup."""
     reserved = set(provider_api.REGISTRY._reserved_prefixes)
     provider_api.REGISTRY._reserved_prefixes.clear()
-    provider_plugin(prefix="claude-", model="claude-test")
+    provider_plugin(prefix="gpt-", model="gpt-test")
     try:
         with pytest.raises(RuntimeError) as excinfo:
             ensure_provider_plugins_loaded()
@@ -496,7 +537,7 @@ def test_plugin_price_must_name_registered_model() -> None:
 
 def test_duplicate_model_id_rejected() -> None:
     with pytest.raises(RuntimeError, match="already registered"):
-        register_models("testp", {"claude-sonnet-5": ModelSpec(provider="testp")})
+        register_models("testp", {"gpt-5.6-sol": ModelSpec(provider="testp")})
 
 
 def test_spawnable_model_without_price_rejected(provider_plugin: Callable[..., None]) -> None:

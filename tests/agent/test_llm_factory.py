@@ -42,13 +42,13 @@ class TestBuildChatModel:
         assert llm.model == "gemini-3.7-flash"
 
     def test_claude_prefix_returns_chat_anthropic(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(settings.lm, "anthropic_api_key", SecretStr("sk-ant-test"))
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
         llm = build_chat_model("claude-opus-4-7")
         assert isinstance(llm, ChatAnthropic)
         assert llm.anthropic_api_key.get_secret_value() == "sk-ant-test"
 
     def test_claude_sonnet(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(settings.lm, "anthropic_api_key", SecretStr("sk-ant-test"))
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
         llm = build_chat_model("claude-sonnet-5")
         assert isinstance(llm, ChatAnthropic)
 
@@ -86,7 +86,7 @@ class TestBuildChatModel:
         langchain-anthropic 1.4.4's profile table didn't include claude-sonnet-5, falling back
         to legacy 4096; thinking tokens count toward max_tokens and guaranteed truncation
         (same failure mode as #169)."""
-        monkeypatch.setattr(settings.lm, "anthropic_api_key", SecretStr("sk-ant-test"))
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
         llm = build_chat_model("claude-sonnet-5")
         assert isinstance(llm, ChatAnthropic)
         assert llm.max_tokens == 128_000
@@ -95,7 +95,7 @@ class TestBuildChatModel:
         """haiku-4-5's official output cap is 64K (not 128K) — per-model table, not
         a prefix-shared constant, prevents a small-cap model from borrowing a large cap
         and hitting a server 400."""
-        monkeypatch.setattr(settings.lm, "anthropic_api_key", SecretStr("sk-ant-test"))
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
         llm = build_chat_model("claude-haiku-4-5-20251001")
         assert isinstance(llm, ChatAnthropic)
         assert llm.max_tokens == 64_000
@@ -104,7 +104,7 @@ class TestBuildChatModel:
         """claude models not registered in the registry (MODELS) with a max_output_tokens
         raise immediately — do not fall back to langchain's stale profile (unknown id gives 4096)
         which would borrow the wrong cap."""
-        monkeypatch.setattr(settings.lm, "anthropic_api_key", SecretStr("sk-ant-test"))
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
         with pytest.raises(ValueError, match="Unknown claude model"):
             build_chat_model("claude-sonnet-3-9")
 
@@ -270,7 +270,7 @@ class TestBuildChatModel:
         """Missing ANTHROPIC_API_KEY raises RuntimeError fail-fast — consistent with all other
         provider branches. Previously claude-* lacked this check; ChatAnthropic with no key
         silently hung, the agent process stuck in the LLM call never returning."""
-        monkeypatch.setattr(settings.lm, "anthropic_api_key", None)
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
         with pytest.raises(RuntimeError, match="ANTHROPIC_API_KEY"):
             build_chat_model("claude-opus-4-7")
 
@@ -604,7 +604,7 @@ class TestBuildChatModel:
         constructor (ChatAnthropic)."""
         from langchain_anthropic import ChatAnthropic
 
-        monkeypatch.setattr(settings.lm, "anthropic_api_key", SecretStr("sk-ant-test"))
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
         m = build_chat_model("claude-sonnet-5")
         assert isinstance(m, ChatAnthropic)
         assert m.disable_streaming is False
@@ -693,14 +693,14 @@ class TestReasoningEffortDispatch:
     def test_claude_effort_injected(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """sonnet-5 supports effort → uses ChatAnthropic's effort field
         (on the wire it is output_config.effort)."""
-        monkeypatch.setattr(settings.lm, "anthropic_api_key", SecretStr("sk-ant-test"))
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
         monkeypatch.setattr(settings.lm, "reasoning_effort", "xhigh")
         llm = build_chat_model("claude-sonnet-5")
         assert isinstance(llm, ChatAnthropic)
         assert llm.effort == "xhigh"
 
     def test_claude_empty_effort_not_injected(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(settings.lm, "anthropic_api_key", SecretStr("sk-ant-test"))
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
         monkeypatch.setattr(settings.lm, "reasoning_effort", "")
         llm = build_chat_model("claude-sonnet-5")
         assert isinstance(llm, ChatAnthropic)
@@ -711,7 +711,7 @@ class TestReasoningEffortDispatch:
         knob is ignored rather than passed through and causing an error. AVA_REASONING_EFFORT
         itself is not completely ignored — it instead maps to the thinking budget
         mapping (see TestReasoningEffortDispatch's test_haiku_high_effort_opts_in_at_default_budget)."""
-        monkeypatch.setattr(settings.lm, "anthropic_api_key", SecretStr("sk-ant-test"))
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
         monkeypatch.setattr(settings.lm, "reasoning_effort", "max")
         llm = build_chat_model("claude-haiku-4-5-20251001")
         assert isinstance(llm, ChatAnthropic)
@@ -721,7 +721,7 @@ class TestReasoningEffortDispatch:
         """caller explicitly disables thinking (labeler/judge short-text path) → do not
         inject effort, aligning with the deepseek branch: the global env should not sneak
         reasoning back in."""
-        monkeypatch.setattr(settings.lm, "anthropic_api_key", SecretStr("sk-ant-test"))
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
         monkeypatch.setattr(settings.lm, "reasoning_effort", "max")
         llm = build_chat_model("claude-sonnet-5", thinking={"type": "disabled"})
         assert isinstance(llm, ChatAnthropic)
@@ -730,14 +730,14 @@ class TestReasoningEffortDispatch:
     def test_haiku_thinking_budget_opts_in(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """haiku-4-5 defaults thinking OFF; when AVA_CLAUDE_THINKING_BUDGET_TOKENS>0,
         injects thinking={'type':'enabled','budget_tokens':N} so the haiku agent really thinks."""
-        monkeypatch.setattr(settings.lm, "anthropic_api_key", SecretStr("sk-ant-test"))
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
         monkeypatch.setattr(settings.lm, "claude_thinking_budget_tokens", 8192)
         llm = build_chat_model("claude-haiku-4-5-20251001")
         assert isinstance(llm, ChatAnthropic)
         assert llm.thinking == {"type": "enabled", "budget_tokens": 8192}
 
     def test_haiku_budget_zero_leaves_thinking_off(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(settings.lm, "anthropic_api_key", SecretStr("sk-ant-test"))
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
         monkeypatch.setattr(settings.lm, "claude_thinking_budget_tokens", 0)
         llm = build_chat_model("claude-haiku-4-5-20251001")
         assert isinstance(llm, ChatAnthropic)
@@ -748,7 +748,7 @@ class TestReasoningEffortDispatch:
     ) -> None:
         """caller explicitly passes thinking (e.g. labeler's disabled) always overrides
         the budget config."""
-        monkeypatch.setattr(settings.lm, "anthropic_api_key", SecretStr("sk-ant-test"))
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
         monkeypatch.setattr(settings.lm, "claude_thinking_budget_tokens", 8192)
         llm = build_chat_model("claude-haiku-4-5-20251001", thinking={"type": "disabled"})
         assert isinstance(llm, ChatAnthropic)
@@ -762,7 +762,7 @@ class TestReasoningEffortDispatch:
         'high' opts extended thinking in at the fallback default budget — this
         is the only lever available when claude_thinking_budget_tokens is unset,
         so the spawn-UI effort dropdown isn't inert for this model."""
-        monkeypatch.setattr(settings.lm, "anthropic_api_key", SecretStr("sk-ant-test"))
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
         monkeypatch.setattr(settings.lm, "claude_thinking_budget_tokens", 0)
         monkeypatch.setattr(settings.lm, "reasoning_effort", "high")
         llm = build_chat_model("claude-haiku-4-5-20251001")
@@ -771,7 +771,7 @@ class TestReasoningEffortDispatch:
         assert llm.effort is None
 
     def test_haiku_none_effort_leaves_thinking_off(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(settings.lm, "anthropic_api_key", SecretStr("sk-ant-test"))
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
         monkeypatch.setattr(settings.lm, "claude_thinking_budget_tokens", 0)
         monkeypatch.setattr(settings.lm, "reasoning_effort", "none")
         llm = build_chat_model("claude-haiku-4-5-20251001")
@@ -783,7 +783,7 @@ class TestReasoningEffortDispatch:
         budget) always wins over the effort-derived default — an operator who
         tuned the budget directly shouldn't have a spawn-time effort pick
         silently override it to the generic 8192 fallback."""
-        monkeypatch.setattr(settings.lm, "anthropic_api_key", SecretStr("sk-ant-test"))
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
         monkeypatch.setattr(settings.lm, "claude_thinking_budget_tokens", 20_000)
         monkeypatch.setattr(settings.lm, "reasoning_effort", "high")
         llm = build_chat_model("claude-haiku-4-5-20251001")
@@ -795,7 +795,7 @@ class TestReasoningEffortDispatch:
         400 — budget config only acts on extended-thinking-only models (haiku).
         Ignoring the budget does not leave thinking unset: the branch still sends the
         adaptive default with display='summarized'."""
-        monkeypatch.setattr(settings.lm, "anthropic_api_key", SecretStr("sk-ant-test"))
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
         monkeypatch.setattr(settings.lm, "claude_thinking_budget_tokens", 8192)
         llm = build_chat_model("claude-sonnet-5")
         assert isinstance(llm, ChatAnthropic)
@@ -811,7 +811,7 @@ class TestReasoningEffortDispatch:
         in the stream and an empty thinking block in the committed message, so the
         timeline has nothing to render. haiku-4-5 (extended-thinking-only) is NOT in
         this list — it 400s on type='adaptive'."""
-        monkeypatch.setattr(settings.lm, "anthropic_api_key", SecretStr("sk-ant-test"))
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
         for model in (
             "claude-sonnet-5",
             "claude-opus-5",
@@ -829,7 +829,7 @@ class TestReasoningEffortDispatch:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """A caller-passed adaptive config without display gets summarized filled in."""
-        monkeypatch.setattr(settings.lm, "anthropic_api_key", SecretStr("sk-ant-test"))
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
         llm = build_chat_model("claude-sonnet-5", thinking={"type": "adaptive"})
         assert isinstance(llm, ChatAnthropic)
         assert llm.thinking == {"type": "adaptive", "display": "summarized"}
@@ -837,7 +837,7 @@ class TestReasoningEffortDispatch:
     def test_adaptive_caller_display_respected(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """A caller that explicitly chose display='omitted' keeps it — the factory
         only fills the field when absent."""
-        monkeypatch.setattr(settings.lm, "anthropic_api_key", SecretStr("sk-ant-test"))
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
         llm = build_chat_model(
             "claude-sonnet-5", thinking={"type": "adaptive", "display": "omitted"}
         )
@@ -849,7 +849,7 @@ class TestReasoningEffortDispatch:
     ) -> None:
         """thinking={'type':'disabled'} (labeler/judge short-text path) passes through
         untouched — no adaptive default, no display added."""
-        monkeypatch.setattr(settings.lm, "anthropic_api_key", SecretStr("sk-ant-test"))
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
         llm = build_chat_model("claude-sonnet-5", thinking={"type": "disabled"})
         assert isinstance(llm, ChatAnthropic)
         assert llm.thinking == {"type": "disabled"}
@@ -1265,6 +1265,7 @@ class TestValidateModelConfig:
             "dashscope_api_key",
         ):
             monkeypatch.setattr(settings.lm, attr, None)
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
         monkeypatch.delenv("GEMINI_API_KEY", raising=False)
 
     @staticmethod
@@ -1272,6 +1273,7 @@ class TestValidateModelConfig:
         monkeypatch.setattr(
             "shared.runtime_config.read_env_aliases",
             lambda: {
+                "ANTHROPIC_API_KEY": "sk-test",
                 "DEEPSEEK_API_KEY": "sk-test",
                 "GEMINI_API_KEY": "sk-test",
             },
@@ -1346,7 +1348,6 @@ class TestValidateModelConfig:
         ]
         for m in all_models:
             # Only testing name existence, not key (key validation is separate)
-            monkeypatch.setattr(settings.lm, "anthropic_api_key", SecretStr("sk-test-anthropic"))
             self._set_plugin_keys(monkeypatch)
             monkeypatch.setattr(settings.lm, "openai_api_key", SecretStr("sk-test-openai"))
             monkeypatch.setattr(settings.lm, "xiaomi_api_key", SecretStr("sk-test-mimo"))
@@ -1375,6 +1376,7 @@ class TestValidateModelConfig:
     def test_missing_claude_key_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """ANTHROPIC_API_KEY not set → ValueError."""
         self._clear_all_keys(monkeypatch)
+        monkeypatch.setattr("shared.runtime_config.read_env_aliases", dict)
         with pytest.raises(ValueError, match="ANTHROPIC_API_KEY"):
             validate_model_config(model="claude-sonnet-5")
 
@@ -1425,14 +1427,23 @@ class TestValidateModelConfig:
     def test_key_present_succeeds(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """key is set → validation passes."""
         self._clear_all_keys(monkeypatch)
-        monkeypatch.setattr(settings.lm, "anthropic_api_key", SecretStr("sk-ant-123"))
+        monkeypatch.setattr(
+            "shared.runtime_config.read_env_aliases",
+            lambda: {"ANTHROPIC_API_KEY": "sk-ant-123"},
+        )
         result = validate_model_config(model="claude-sonnet-5")
         assert result == "claude-sonnet-5"
 
     def test_config_model_with_missing_key_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """config.llm_model points to a provider with missing key → ValueError (not the cluster default's key)."""
         self._clear_all_keys(monkeypatch)
-        self._set_plugin_keys(monkeypatch)
+        monkeypatch.setattr(
+            "shared.runtime_config.read_env_aliases",
+            lambda: {
+                "DEEPSEEK_API_KEY": "sk-test",
+                "GEMINI_API_KEY": "sk-test",
+            },
+        )
         # The cluster default has its plugin key, but config picks claude → fail.
         with pytest.raises(ValueError, match="ANTHROPIC_API_KEY"):
             validate_model_config(
@@ -1443,7 +1454,10 @@ class TestValidateModelConfig:
     def test_config_model_with_key_present_succeeds(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """config.llm_model's provider key is set → passes. The cluster default is irrelevant."""
         self._clear_all_keys(monkeypatch)
-        monkeypatch.setattr(settings.lm, "anthropic_api_key", SecretStr("sk-ant-123"))
+        monkeypatch.setattr(
+            "shared.runtime_config.read_env_aliases",
+            lambda: {"ANTHROPIC_API_KEY": "sk-ant-123"},
+        )
         result = validate_model_config(
             model="deepseek-v4-pro",  # cluster default (has no deepseek key)
             config={"llm_model": "claude-sonnet-5"},  # per-agent (has key)
@@ -1500,6 +1514,7 @@ class TestThinkingDisabledAcrossRoster:
     def _stub_all_keys(self, monkeypatch: pytest.MonkeyPatch) -> None:
         for attr in self._ALL_KEY_FIELDS:
             monkeypatch.setattr(settings.lm, attr, SecretStr("sk-test"))
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
         monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test")
         monkeypatch.setenv("GEMINI_API_KEY", "sk-test")
 

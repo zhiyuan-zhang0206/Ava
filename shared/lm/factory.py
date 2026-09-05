@@ -90,7 +90,6 @@ from shared.lm._plugin_providers import (
 )  # re-exported (gateway entry points call it before reading the registry)
 from shared.lm._providers import (
     ThinkingConfig,
-    _build_claude_model,
     _build_glm_model,
     _build_gpt_model,
     _build_kimi_model,
@@ -129,11 +128,10 @@ class _LLMFactory(Protocol):
 
 
 # Prefix fallback for UNREGISTERED model ids — registered ids are authoritative
-# in `ModelSpec.media_types` (see `model_supports_vision`). claude / gemini / gpt
-# are multimodal on the endpoints Ava binds; kimi accepts image input on its
-# OpenAI-compatible endpoint, and every Qwen model in the registry accepts native
-# images. deepseek (bound by its plugin to an anthropic-compatible endpoint),
-# mimo, and glm are text-only there, so a HumanMessage carrying an image block would 400
+# in `ModelSpec.media_types` (see `model_supports_vision`). GPT is multimodal on
+# the endpoint Ava binds; kimi accepts image input on its OpenAI-compatible
+# endpoint, and every Qwen model in the registry accepts native images. MiMo and
+# GLM are text-only there, so a HumanMessage carrying an image block would 400
 # (or be silently dropped) mid-turn. The message endpoint gates on this to 422 an
 # image addressed to a text-only agent up front, rather than letting the LLM call
 # fail after the inbound is already queued. A prefix is only correct while every
@@ -141,7 +139,6 @@ class _LLMFactory(Protocol):
 # does (v4-flash-vision-exp is multimodal, pro/flash are not), which is exactly
 # why the registered gate is per-model.
 _VISION_MODEL_PREFIXES: tuple[str, ...] = (
-    "claude-",
     "gpt-",
     "kimi-",
     "qwen",
@@ -242,7 +239,6 @@ def provider_key_of_model(model: str) -> str | None:
 # key is the prefix with a trailing dash stripped IF it has one, so `qwen` reads
 # as `qwen` rather than a truncated `qwe`.
 _MODEL_KEY_MAP: dict[str, tuple[str, str, str]] = {
-    "claude-": ("Anthropic", "anthropic_api_key", "ANTHROPIC_API_KEY"),
     "gpt-": ("OpenAI", "openai_api_key", "OPENAI_API_KEY"),
     "mimo-": ("Xiaomi", "xiaomi_api_key", "MIMO_API_KEY"),
     "kimi-": ("Moonshot", "moonshot_api_key", "MOONSHOT_API_KEY"),
@@ -542,10 +538,6 @@ def build_chat_model(
     # env/.env/overlay value wins, else the model's registry default, else "".
     resolved_effort: str = resolve_setting("reasoning_effort", model=model)
 
-    if model.startswith("claude-"):
-        return _build_claude_model(
-            model, spec, thinking, resolved_effort, extra_kwargs, timeout=timeout
-        )
     if model.startswith("gpt-"):
         return _build_gpt_model(
             model,
