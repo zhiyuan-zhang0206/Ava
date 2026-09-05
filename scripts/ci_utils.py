@@ -685,7 +685,12 @@ def _watch_trunk_enqueue(
                 return 0
             if state in {"failed", "cancelled"}:
                 reason = data.get("reason") or state
-                print(f"PR #{pr} Trunk queue {state}: {reason}", file=sys.stderr, flush=True)
+                print(
+                    f"PR #{pr} Trunk queue {state}: {reason} — "
+                    f"full getSubmittedPullRequest payload: {json.dumps(data, indent=2)}",
+                    file=sys.stderr,
+                    flush=True,
+                )
                 return 1
             print(f"[ci] Trunk queue state: {state or 'unknown'}", file=sys.stderr, flush=True)
         if _deadline_hit(deadline, pr, timeout, "still in the Trunk merge queue"):

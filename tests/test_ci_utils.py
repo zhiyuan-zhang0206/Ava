@@ -665,6 +665,36 @@ def test_wait_merge_trunk_submits_and_lands_when_green(no_sleep, poll, monkeypat
     assert label_calls[0][:4] == ["gh", "pr", "view", "1243"]
 
 
+def test_wait_merge_trunk_failed_state_prints_full_payload(
+    no_sleep, poll, monkeypatch, capsys
+) -> None:
+    """Task #2541: a failed/cancelled Trunk submission often carries an empty
+    `reason`, so the old one-line print was undiagnosable (five first-submit
+    failures 2026-09-06 left no trace). The full getSubmittedPullRequest
+    payload must be printed on the terminal branch."""
+    poll(CIStatus.ALL_PASSED)
+    monkeypatch.setattr(ci_utils, "_queue_cooldown_seconds", lambda *_a, **_k: 0)
+    monkeypatch.setenv("TRUNK_API_TOKEN", "test-token")
+    monkeypatch.setattr(ci_utils.subprocess, "run", _labels_runner(["qa-approved"], []))
+    monkeypatch.setattr(
+        ci_utils.urllib.request,
+        "urlopen",
+        _urlopen_sequence(
+            [
+                _TrunkResponse({"accepted": True}),
+                _TrunkResponse({"state": "failed", "details": {"message": "batch rejected"}}),
+            ],
+            [],
+        ),
+    )
+    assert ci_utils.main(["1243", "--merge"]) == 1
+    err = capsys.readouterr().err
+    assert "PR #1243 Trunk queue failed" in err
+    assert "full getSubmittedPullRequest payload" in err
+    assert '"state": "failed"' in err
+    assert '"batch rejected"' in err
+
+
 def test_wait_merge_trunk_submit_failure_exits_four(no_sleep, poll, monkeypatch, capsys) -> None:
     poll(CIStatus.ALL_PASSED)
     monkeypatch.setattr(ci_utils, "_queue_cooldown_seconds", lambda *_a, **_k: 0)
