@@ -28,15 +28,16 @@ the private mutable tool-state path. Invalid records fail closed.
 
 - `inactive|terminal -> launching`: one atomic claimant publishes a fresh
   generation before creating a PTY. Concurrent claimants observe `busy`.
-- `launching -> active`: the winner CAS-publishes the ready numeric and full PTY
-  handle. A fresh unfinished launch cannot be replaced during its bounded spawn
-  grace.
+- `launching -> active`: the winner CAS-publishes the allocated numeric and full
+  PTY handle immediately after creation, before slow tool startup and bootstrap.
+  A fresh unfinished launch cannot be replaced during its bounded spawn grace;
+  after that grace, a live suffix-matching PTY still keeps the generation busy.
 - `active -> adopt`: a live, supervised, unexpired generation is returned
   unchanged even when another Ava agent asks to launch it. A missing supervisor
   makes the generation stale rather than silently falling back to TTL.
 - `active|stale launching -> launching`: owner termination, expiry, process
-  death, or stale launch permits transfer only after the old PTY and private
-  state are reclaimed.
+  death, or a stale launch with no live candidate PTY permits transfer only
+  after the old PTY and private state are reclaimed.
 - `launching|active -> terminal`: exact-generation cleanup stops the PTY,
   verifies it is no longer live, removes private state, then publishes the
   terminal reason. A stale generation is a no-op.

@@ -131,12 +131,13 @@ def test_supervisor_bootstrap_restores_owner_identity(tmp_path: Path) -> None:
     assert "['watch']" in code
 
 
-def test_failed_publish_kills_unpublished_codex_session(
+def test_failed_early_publish_kills_codex_session_before_startup(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     active = _owner(tmp_path)
     launching = replace(active, status="launching", session_id=None, session_name=None)
+    events: list[str] = []
     killed: list[int] = []
 
     def _claim(
@@ -149,6 +150,7 @@ def test_failed_publish_kills_unpublished_codex_session(
         assert tasks_file.name == "tasks.md"
         assert work_file.name == "work.md"
         assert ttl_seconds == 3600
+        events.append("claim")
         return coding_session_owner.CodingSessionClaim(action="launch", owner=launching)
 
     def _seed(_state_dir: Path, _workspace: Path) -> None:
@@ -169,21 +171,23 @@ def test_failed_publish_kills_unpublished_codex_session(
     ) -> coding_session_owner.CodingSessionOwner:
         assert session_id == 6
         assert session_name.endswith("-codex-owner-supervisor")
+        events.append("attach")
         return launching
 
     def _new(*, name: str, ttl: float) -> int:
         assert name == launching.expected_suffix
         assert ttl == 3600
+        events.append("new")
         return 7
 
     def _send(_session_id: int, _content: str) -> None:
-        return None
+        events.append("send")
 
     def _ready(_session_id: int) -> None:
-        return None
+        events.append("ready")
 
     def _verified(_sid: int, _codex_home: Path) -> None:
-        return None
+        events.append("verified")
 
     def _publish(
         _key: coding_session_owner.CodingSessionKey,
@@ -194,6 +198,7 @@ def test_failed_publish_kills_unpublished_codex_session(
     ) -> coding_session_owner.CodingSessionOwner:
         assert session_id == 7
         assert session_name.endswith("-codex-workspace-11111111")
+        events.append("publish")
         raise coding_session_owner.CodingSessionGenerationChangedError("replacement won")
 
     def _kill(session_id: int) -> None:
@@ -229,6 +234,7 @@ def test_failed_publish_kills_unpublished_codex_session(
             3600,
         )
 
+    assert events == ["claim", "attach", "new", "publish"]
     assert killed == [7]
 
 

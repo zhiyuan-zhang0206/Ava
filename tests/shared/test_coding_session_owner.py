@@ -91,21 +91,28 @@ def _publish(claim: owner.CodingSessionClaim, session_id: int) -> owner.CodingSe
     )
 
 
-def test_concurrent_claim_has_one_launch_winner(tmp_path: Path) -> None:
-    key = _key(tmp_path)
+def test_concurrent_claims_never_lose_the_winner(tmp_path: Path) -> None:
+    for round_number in range(5):
+        key = _key(tmp_path, f"workspace-{round_number}")
 
-    def _attempt(agent_id: int) -> owner.CodingSessionClaim:
-        return _claim(key, agent_id=agent_id)
+        def _attempt(
+            agent_id: int,
+            claim_key: owner.CodingSessionKey = key,
+        ) -> owner.CodingSessionClaim:
+            return _claim(claim_key, agent_id=agent_id)
 
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        results = list(pool.map(_attempt, (41, 42)))
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            results = list(pool.map(_attempt, range(41, 49)))
 
-    assert sorted(result.action for result in results) == ["busy", "launch"]
-    generations = {result.owner.generation for result in results}
-    assert len(generations) == 1
+        launched = [result for result in results if result.action == "launch"]
+        assert len(launched) == 1
+        assert all(result.action in {"launch", "busy", "adopt"} for result in results)
+        current = owner.read(key)
+        assert current.status in {"launching", "active"}
+        assert current.generation == launched[0].owner.generation
 
 
-def test_stale_launch_reclaims_unpublished_session_before_retry(tmp_path: Path) -> None:
+def test_stale_launching_with_live_session_is_busy_not_replaced(tmp_path: Path) -> None:
     key = _key(tmp_path)
     first = _claim(key, agent_id=41)
     record = first.owner
@@ -116,7 +123,7 @@ def test_stale_launch_reclaims_unpublished_session_before_retry(tmp_path: Path) 
     live = {partial_name}
     stopped: list[str] = []
 
-    replacement = _claim(
+    second = _claim(
         key,
         agent_id=42,
         now=NOW + dt.timedelta(seconds=61),
@@ -124,10 +131,56 @@ def test_stale_launch_reclaims_unpublished_session_before_retry(tmp_path: Path) 
         stopped=stopped,
     )
 
+    assert second.action == "busy"
+    assert second.owner == record
+    assert owner.read(key) == record
+    assert stopped == []
+    assert live == {partial_name}
+    assert record.state_dir.exists()
+
+
+def test_stale_launching_without_live_session_is_replaced(tmp_path: Path) -> None:
+    key = _key(tmp_path)
+    first = _claim(key, agent_id=41)
+    record = first.owner
+    assert record.state_dir is not None
+    record.state_dir.mkdir(parents=True)
+    (record.state_dir / "state_5.sqlite").write_text("partial")
+    stopped: list[str] = []
+
+    replacement = _claim(
+        key,
+        agent_id=42,
+        now=NOW + dt.timedelta(seconds=61),
+        stopped=stopped,
+    )
+
     assert replacement.action == "launch"
     assert replacement.owner.generation != record.generation
-    assert stopped == [partial_name]
+    assert owner.read(key) == replacement.owner
+    assert stopped == []
     assert not record.state_dir.exists()
+
+
+def test_publish_active_from_live_stale_generation_succeeds(tmp_path: Path) -> None:
+    key = _key(tmp_path)
+    first = _claim(key, agent_id=41)
+    record = first.owner
+    assert record.expected_suffix is not None
+    partial_name = owner.full_session_name(41, 3, record.expected_suffix)
+
+    second = _claim(
+        key,
+        agent_id=42,
+        now=NOW + dt.timedelta(seconds=61),
+        live={partial_name},
+    )
+    active = _publish(first, 3)
+
+    assert second.action == "busy"
+    assert active.status == "active"
+    assert active.generation == record.generation
+    assert owner.read(key) == active
 
 
 def test_live_generation_is_adopted_across_agents(tmp_path: Path) -> None:

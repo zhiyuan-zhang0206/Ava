@@ -8,6 +8,9 @@ record instead of stacking another Codex process.
 
 An expired, crashed, unsupervised, or terminated-owner record transfers to a
 fresh generation only after the old Codex PTY and private state are reclaimed.
+After PTY allocation, the launcher publishes its active handle before waiting
+for Codex startup and bootstrap. A launching record that exceeds its spawn
+grace remains busy while a matching PTY is live.
 Each successful command prints the core file handles plus these Codex fields:
 
 ```text
