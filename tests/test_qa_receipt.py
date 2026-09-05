@@ -101,15 +101,53 @@ def test_review_veto_does_not_use_old_submitted_time(state: str) -> None:
     assert approved(pr, [], [review])
 
 
-def test_forged_queue_prefix_cannot_bypass_qa() -> None:
+@pytest.mark.parametrize("suffix", ["", "-bisection"])
+def test_forged_queue_prefix_cannot_bypass_qa(suffix: str) -> None:
     pr = _pr()
     pr["labels"] = []
     pr["draft"] = True
-    pr["head"]["ref"] = "trunk-merge/pr-42/08e75c6f-3a64-4eb5-9df4-2662a9ff00ca"
+    # PR #1795 used this ref with the bisection suffix after splitting a red batch.
+    pr["head"]["ref"] = "trunk-merge/pr-1790/1449ac46-d2cb-40d1-922a-e3a11e4e7bca" + suffix
     assert not approved(pr, [], [])
     pr["user"] = {"id": TRUNK_ACCOUNT_ID, "type": "Bot"}
     assert approved(pr, [], [])
     pr["head"]["repo"]["full_name"] = "attacker/Ava"
+    assert not approved(pr, [], [])
+
+
+@pytest.mark.parametrize("suffix", ["", "-bisection"])
+@pytest.mark.parametrize(
+    ("path", "value"),
+    [
+        (("user", "id"), QA_ACCOUNT_ID),
+        (("user", "type"), "User"),
+        (("head", "repo", "full_name"), "attacker/Ava"),
+        (("base", "repo", "full_name"), "attacker/Ava"),
+        (("base", "ref"), "feature"),
+        (("draft",), False),
+        (("draft",), 1),
+    ],
+)
+def test_queue_exemption_requires_every_trust_guard(
+    suffix: str, path: tuple[str, ...], value: Any
+) -> None:
+    pr = _pr()
+    pr.update(user={"id": TRUNK_ACCOUNT_ID, "type": "Bot"}, draft=True, labels=[])
+    pr["head"]["ref"] = "trunk-merge/pr-1790/1449ac46-d2cb-40d1-922a-e3a11e4e7bca" + suffix
+    field = pr
+    for key in path[:-1]:
+        field = field[key]
+    field[path[-1]] = value
+    assert not approved(pr, [], [])
+
+
+@pytest.mark.parametrize(
+    "suffix", ["-bisection-extra", "-bisection-bisection", "/extra", "\n", "-BISECTION"]
+)
+def test_queue_exemption_rejects_unrecognized_suffixes(suffix: str) -> None:
+    pr = _pr()
+    pr.update(user={"id": TRUNK_ACCOUNT_ID, "type": "Bot"}, draft=True, labels=[])
+    pr["head"]["ref"] = "trunk-merge/pr-1790/1449ac46-d2cb-40d1-922a-e3a11e4e7bca" + suffix
     assert not approved(pr, [], [])
 
 
