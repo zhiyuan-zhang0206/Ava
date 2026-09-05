@@ -103,13 +103,14 @@ def provider_plugin() -> Generator[Callable[..., None], None, None]:
     prices_snapshot = dict(pricing._PLUGIN_PRICES)
     stop_snapshot = dict(stop._BY_PROVIDER)
     for model_id in tuple(MODELS):
-        if model_id.startswith(("claude-", "deepseek-", "gemini-", "gpt-")):
+        if model_id.startswith(("claude-", "deepseek-", "gemini-", "gpt-", "qwen3.8-")):
             MODELS.pop(model_id)
             pricing._PLUGIN_PRICES.pop(model_id, None)
     provider_api.REGISTRY.bindings.pop("claude-", None)
     provider_api.REGISTRY.bindings.pop("deepseek-", None)
     provider_api.REGISTRY.bindings.pop("gemini-", None)
     provider_api.REGISTRY.bindings.pop("gpt-", None)
+    provider_api.REGISTRY.bindings.pop("qwen3.8-", None)
     stop._BY_PROVIDER.pop("google_genai", None)
     _rebuild_derived_views()
     # Tests share one session AVA_HOME — remove anything this test created so
@@ -316,6 +317,34 @@ def test_repo_openai_provider_is_enabled_and_registers_complete_contract() -> No
     assert provider_key_map()["gpt-"] == ("OpenAI", None, "OPENAI_API_KEY")
     binding = provider_api.REGISTRY.bindings["gpt-"]
     assert binding.effort_levels == ("none", "low", "medium", "high", "xhigh", "max")
+    assert not binding.anthropic_protocol
+    assert binding.vision
+    assert binding.stop_spec is None
+
+
+def test_repo_alibaba_provider_is_enabled_and_registers_complete_contract() -> None:
+    discovered = plugins_config._discover_plugins()
+    config = plugins_config.load_for_runtime(set(discovered))
+
+    assert config.plugins["lm_alibaba"].enabled
+    ensure_provider_plugins_loaded()
+
+    qwen_models = {
+        "qwen3.8-max",
+        "qwen3.8-27b",
+        "qwen3.8-flash",
+    }
+    assert qwen_models <= MODELS.keys()
+    assert set(SUPPORTED_MODELS["qwen"]) == qwen_models
+    assert pricing.model_vendor("qwen3.8-max") == "alibaba"
+
+    from shared.lm.factory import _MODEL_KEY_MAP, provider_key_map
+
+    assert "qwen" not in _MODEL_KEY_MAP
+    assert provider_key_map()["qwen"] == ("Alibaba", None, "DASHSCOPE_API_KEY")
+    binding = provider_api.REGISTRY.bindings["qwen3.8-"]
+    assert binding.provider_key == "qwen"
+    assert binding.effort_levels == ("none", "high")
     assert not binding.anthropic_protocol
     assert binding.vision
     assert binding.stop_spec is None

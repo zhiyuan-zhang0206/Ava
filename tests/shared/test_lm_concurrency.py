@@ -92,11 +92,9 @@ def test_known_provider_keys_derive_from_all_provider_prefixes() -> None:
     assert set(parse_limits(csv)) == known_provider_keys()
 
 
-def test_dashless_prefix_keeps_its_last_letter() -> None:
-    """`qwen` is the one prefix with no trailing dash (Alibaba versions inside
-    the family name: qwen3.8-max), so the key derivation must strip a dash only
-    where there is one — a blanket `[:-1]` would publish `qwe`, and a cap the
-    operator wrote as `qwen:8` would then fail to parse."""
+def test_qwen_binding_keeps_its_public_provider_key() -> None:
+    """Qwen's legal dispatch prefix is `qwen3.8-`, but its registry and
+    concurrency key remains the stable public `qwen` value."""
     from shared.lm.factory import provider_key_of_model
 
     assert "qwen" in known_provider_keys()

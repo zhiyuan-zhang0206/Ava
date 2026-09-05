@@ -500,7 +500,7 @@ class TestBuildChatModel:
         the `reasoning_content` delta, which the subclass recovers into thinking
         blocks."""
         monkeypatch.setattr(settings.lm, "llm_override", "")
-        monkeypatch.setattr(settings.lm, "dashscope_api_key", SecretStr("sk-qwen"))
+        monkeypatch.setenv("DASHSCOPE_API_KEY", "sk-qwen")
         from shared.lm._reasoning_compat import ReasoningContentChatModel
 
         m = build_chat_model("qwen3.8-max")
@@ -513,7 +513,7 @@ class TestBuildChatModel:
         """qwen3.8-flash dispatches through the same qwen branch — DashScope
         compatible-mode endpoint, ReasoningContentChatModel."""
         monkeypatch.setattr(settings.lm, "llm_override", "")
-        monkeypatch.setattr(settings.lm, "dashscope_api_key", SecretStr("sk-qwen"))
+        monkeypatch.setenv("DASHSCOPE_API_KEY", "sk-qwen")
         from shared.lm._reasoning_compat import ReasoningContentChatModel
 
         m = build_chat_model("qwen3.8-flash")
@@ -526,7 +526,7 @@ class TestBuildChatModel:
         which the public default cannot reach at all — so the endpoint has to be
         config, not a constant. Hardcoding it locked those accounts out entirely."""
         monkeypatch.setattr(settings.lm, "llm_override", "")
-        monkeypatch.setattr(settings.lm, "dashscope_api_key", SecretStr("sk-qwen"))
+        monkeypatch.setenv("DASHSCOPE_API_KEY", "sk-qwen")
         workspace = "https://ws-example.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"
         monkeypatch.setattr(settings.lm, "dashscope_base_url", workspace)
         from shared.lm._reasoning_compat import ReasoningContentChatModel
@@ -542,7 +542,7 @@ class TestBuildChatModel:
         (`prompt_tokens_details.cached_tokens`). Drop it and every qwen turn
         bills as a full cache miss."""
         monkeypatch.setattr(settings.lm, "llm_override", "")
-        monkeypatch.setattr(settings.lm, "dashscope_api_key", SecretStr("sk-qwen"))
+        monkeypatch.setenv("DASHSCOPE_API_KEY", "sk-qwen")
         from shared.lm._reasoning_compat import ReasoningContentChatModel
 
         m = build_chat_model("qwen3.8-max")
@@ -551,7 +551,8 @@ class TestBuildChatModel:
 
     def test_qwen_missing_key_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(settings.lm, "llm_override", "")
-        monkeypatch.setattr(settings.lm, "dashscope_api_key", None)
+        monkeypatch.setattr(settings.lm, "dashscope_api_key", SecretStr("legacy-settings-key"))
+        monkeypatch.delenv("DASHSCOPE_API_KEY", raising=False)
         with pytest.raises(RuntimeError, match="DASHSCOPE_API_KEY"):
             build_chat_model("qwen3.8-max")
 
@@ -605,7 +606,7 @@ class TestBuildChatModel:
     def test_qwen_defaults_to_streaming(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """qwen* carries no registry streaming opt-out → default streaming=True."""
         monkeypatch.setattr(settings.lm, "llm_override", "")
-        monkeypatch.setattr(settings.lm, "dashscope_api_key", SecretStr("sk-test"))
+        monkeypatch.setenv("DASHSCOPE_API_KEY", "sk-test")
         from shared.lm._reasoning_compat import ReasoningContentChatModel
 
         m = build_chat_model("qwen3.8-max")
@@ -1029,7 +1030,7 @@ class TestReasoningEffortDispatch:
         Ava does not bind. So the cross-provider knob clamps onto the binary
         none/high and 'none' lands on the endpoint's own off-switch."""
         monkeypatch.setattr(settings.lm, "llm_override", "")
-        monkeypatch.setattr(settings.lm, "dashscope_api_key", SecretStr("sk-qwen"))
+        monkeypatch.setenv("DASHSCOPE_API_KEY", "sk-qwen")
         monkeypatch.setattr(settings.lm, "reasoning_effort", "none")
         from shared.lm._reasoning_compat import ReasoningContentChatModel
 
@@ -1046,7 +1047,7 @@ class TestReasoningEffortDispatch:
         (thinking already on) — so nothing is sent rather than a level the
         endpoint has no field for."""
         monkeypatch.setattr(settings.lm, "llm_override", "")
-        monkeypatch.setattr(settings.lm, "dashscope_api_key", SecretStr("sk-qwen"))
+        monkeypatch.setenv("DASHSCOPE_API_KEY", "sk-qwen")
         monkeypatch.setattr(settings.lm, "reasoning_effort", "low")
         from shared.lm._reasoning_compat import ReasoningContentChatModel
 
@@ -1060,7 +1061,7 @@ class TestReasoningEffortDispatch:
         """A caller disabling thinking (the labeler / judge short-text path) wins
         over a global effort that would otherwise leave reasoning on."""
         monkeypatch.setattr(settings.lm, "llm_override", "")
-        monkeypatch.setattr(settings.lm, "dashscope_api_key", SecretStr("sk-qwen"))
+        monkeypatch.setenv("DASHSCOPE_API_KEY", "sk-qwen")
         monkeypatch.setattr(settings.lm, "reasoning_effort", "high")
         from shared.lm._reasoning_compat import ReasoningContentChatModel
 
@@ -1071,7 +1072,7 @@ class TestReasoningEffortDispatch:
     def test_qwen_unknown_effort_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """A typo'd effort fails fast at build time, not as a provider 400."""
         monkeypatch.setattr(settings.lm, "llm_override", "")
-        monkeypatch.setattr(settings.lm, "dashscope_api_key", SecretStr("sk-qwen"))
+        monkeypatch.setenv("DASHSCOPE_API_KEY", "sk-qwen")
         monkeypatch.setattr(settings.lm, "reasoning_effort", "hihg")
         with pytest.raises(ValueError, match="unknown reasoning effort"):
             build_chat_model("qwen3.8-max")
@@ -1282,6 +1283,7 @@ class TestValidateModelConfig:
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
         monkeypatch.delenv("GEMINI_API_KEY", raising=False)
         monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        monkeypatch.delenv("DASHSCOPE_API_KEY", raising=False)
 
     @staticmethod
     def _set_plugin_keys(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1292,6 +1294,7 @@ class TestValidateModelConfig:
                 "DEEPSEEK_API_KEY": "sk-test",
                 "GEMINI_API_KEY": "sk-test",
                 "OPENAI_API_KEY": "sk-test",
+                "DASHSCOPE_API_KEY": "sk-test",
             },
         )
 
@@ -1368,7 +1371,6 @@ class TestValidateModelConfig:
             monkeypatch.setattr(settings.lm, "xiaomi_api_key", SecretStr("sk-test-mimo"))
             monkeypatch.setattr(settings.lm, "moonshot_api_key", SecretStr("sk-test-moonshot"))
             monkeypatch.setattr(settings.lm, "zhipu_api_key", SecretStr("sk-test-zhipu"))
-            monkeypatch.setattr(settings.lm, "dashscope_api_key", SecretStr("sk-test-dashscope"))
             result = validate_model_config(model=m)
             assert result == m
 
@@ -1437,6 +1439,7 @@ class TestValidateModelConfig:
     def test_missing_qwen_key_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """DASHSCOPE_API_KEY not set → ValueError."""
         self._clear_all_keys(monkeypatch)
+        monkeypatch.setattr("shared.runtime_config.read_env_aliases", dict)
         with pytest.raises(ValueError, match="DASHSCOPE_API_KEY"):
             validate_model_config(model="qwen3.8-max")
 
@@ -1534,6 +1537,7 @@ class TestThinkingDisabledAcrossRoster:
         monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test")
         monkeypatch.setenv("GEMINI_API_KEY", "sk-test")
         monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+        monkeypatch.setenv("DASHSCOPE_API_KEY", "sk-test")
 
     @pytest.mark.parametrize("model", [m for models in SUPPORTED_MODELS.values() for m in models])
     def test_roster_model_constructs_with_thinking_disabled(

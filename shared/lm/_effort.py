@@ -11,10 +11,9 @@ concerns:
   provider's endpoint actually accepts; out-of-range values clamp (logged),
   unknown strings fail fast at build time instead of surfacing as a provider
   400 after the agent is already running.
-- **Binary-thinking resolvers** (`mimo_extra_body` / `qwen_extra_body`): for
-  providers/models with no graded effort field, only a thinking on/off switch
-  (mimo, qwen), these fold the clamp + switch-selection logic that
-  build_chat_model's branches would otherwise inline.
+- **Binary-thinking resolver** (`mimo_extra_body`): for a provider with no
+  graded effort field, only a thinking on/off switch, this folds the clamp +
+  switch-selection logic that build_chat_model's branch would otherwise inline.
 """
 
 from __future__ import annotations
@@ -37,14 +36,6 @@ _PROVIDER_EFFORT_LEVELS: dict[str, tuple[str, ...]] = {
     "kimi": ("low", "high", "max"),
     "glm": ("low", "high", "max"),
     "mimo": ("none", "high"),
-    # Qwen's compatible-mode endpoint grades reasoning by a TOKEN budget
-    # (`thinking_budget`), not by a level enum — the OpenAI-standard
-    # `reasoning_effort` string is documented only for DashScope's Responses
-    # API, which Ava does not bind. So the knob's only wire effect here is the
-    # `enable_thinking` on/off switch, and the vocabulary is the same binary
-    # mimo carries: "none" sends enable_thinking=false, anything else leaves
-    # the model's own default (thinking already on for the registered roster).
-    "qwen": ("none", "high"),
 }
 
 # The cross-provider AVA_REASONING_EFFORT vocabulary, ordered weakest →
@@ -148,24 +139,4 @@ def mimo_extra_body(*, thinking: Mapping[str, Any] | None, reasoning_effort: str
         tier = _clamp_effort(reasoning_effort, _PROVIDER_EFFORT_LEVELS["mimo"], target="mimo")
         if tier == "none":
             return {"thinking": {"type": "disabled"}}
-    return {}
-
-
-def qwen_extra_body(*, thinking: Mapping[str, Any] | None, reasoning_effort: str) -> dict[str, Any]:
-    """Resolve the qwen branch's `extra_body` kwarg.
-
-    Same shape as `mimo_extra_body` on a different wire switch: DashScope's
-    compatible-mode endpoint carries thinking on the top-level `enable_thinking`
-    boolean. Caller-explicit `thinking={"type":"disabled"}` (short-text paths)
-    wins outright; otherwise `reasoning_effort` clamped onto
-    `_PROVIDER_EFFORT_LEVELS["qwen"]` toggles the same switch — "none" sends
-    `enable_thinking=False`, "high" is the registered roster's own default
-    (already on — nothing to send). Empty dict = no override.
-    """
-    if thinking is not None and thinking.get("type") == "disabled":
-        return {"enable_thinking": False}
-    if reasoning_effort:
-        tier = _clamp_effort(reasoning_effort, _PROVIDER_EFFORT_LEVELS["qwen"], target="qwen")
-        if tier == "none":
-            return {"enable_thinking": False}
     return {}

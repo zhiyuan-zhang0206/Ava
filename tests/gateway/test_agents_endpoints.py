@@ -147,12 +147,18 @@ def test_get_models_reasoning_effort_options_match_factory_tables() -> None:
     # The gemini invariant is that every declared vocabulary stays a subset of
     # that fallback — a model must never accept a level the fallback cannot
     # express.
-    for provider in ("kimi", "glm", "mimo", "qwen"):
+    for provider in ("kimi", "glm", "mimo"):
         expected = list(_PROVIDER_EFFORT_LEVELS[provider])
         provider_models = [m for m, info in models.items() if info["provider"] == provider]
         assert provider_models, f"no models registered for provider {provider!r}"
         for model in provider_models:
             assert models[model]["reasoning_effort_options"] == expected, model
+    qwen_binding_levels = provider_api.REGISTRY.bindings["qwen3.8-"].effort_levels
+    assert qwen_binding_levels is not None
+    qwen_models = [m for m, info in models.items() if info["provider"] == "qwen"]
+    assert qwen_models, "no qwen models registered for the binding check"
+    for model in qwen_models:
+        assert models[model]["reasoning_effort_options"] == list(qwen_binding_levels), model
     gemini_binding_levels = provider_api.REGISTRY.bindings["gemini-"].effort_levels
     assert gemini_binding_levels is not None
     gemini_fallback = set(gemini_binding_levels)

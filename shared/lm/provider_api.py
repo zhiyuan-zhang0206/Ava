@@ -102,7 +102,7 @@ class BuildContext:
 
 @dataclass(frozen=True)
 class ProviderBinding:
-    """One provider prefix's client binding and optional effort vocabulary."""
+    """One dispatch prefix's client binding and optional provider-key override."""
 
     prefix: str  # e.g. "foo-"; dispatch is `model.startswith(prefix)`
     display_name: str  # human-facing provider name (errors, UI text)
@@ -114,6 +114,9 @@ class ProviderBinding:
     stop_spec: StopSpec | None = None  # only when the client emits a model_provider
     # string stop.py does not already carry (a client class already in the
     # table — e.g. anything OpenAI-compatible — inherits its entry)
+    # Usually derived from prefix.rstrip("-"); set only when a narrower legal
+    # dispatch prefix differs from the stable public provider identity.
+    provider_key: str | None = None
 
 
 class _ProviderRegistry:
@@ -219,7 +222,7 @@ def register(
     """
     plugin = _CURRENT_PLUGIN or "<unknown>"
     REGISTRY.ensure_available(binding, plugin=plugin)
-    provider = binding.prefix.rstrip("-")
+    provider = binding.provider_key or binding.prefix.rstrip("-")
 
     extra_prices = set(pricing) - set(models)
     if extra_prices:

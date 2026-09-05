@@ -21,7 +21,6 @@ from shared.lm._effort import (
     _PROVIDER_EFFORT_LEVELS,
     _clamp_effort,
     mimo_extra_body,
-    qwen_extra_body,
 )
 from shared.lm.registry import ModelSpec
 
@@ -209,66 +208,4 @@ def _build_glm_model(
         disable_streaming=disable_streaming,
         timeout=timeout,
         **glm_kwargs,
-    )
-
-
-def _build_qwen_model(
-    model: str,
-    *,
-    thinking: ThinkingConfig | None,
-    resolved_effort: str,
-    disable_streaming: bool,
-    timeout: float | None = None,
-) -> BaseChatModel:
-    """qwen* branch: ReasoningContentChatModel (OpenAI-compatible).
-    Thinking on/off rides top-level `enable_thinking` via extra_body; there is
-    no graded effort field on this endpoint (`qwen_extra_body`)."""
-    from shared.lm._reasoning_compat import ReasoningContentChatModel
-
-    # Alibaba Cloud Model Studio (DashScope) serves Qwen on an OpenAI-compatible
-    # endpoint with standard `Authorization: Bearer` auth. The host is CONFIG,
-    # not a constant: a dedicated Model Studio workspace serves the same API on
-    # its own `<workspace-id>.cn-beijing.maas.aliyuncs.com` host, which the
-    # public default cannot reach at all, so a hardcoded URL locks those accounts
-    # out entirely (`AVA_DASHSCOPE_BASE_URL`). The `/compatible-mode/v1` suffix is
-    # the load-bearing part — `/api/v1` on the same host is DashScope's native
-    # protocol and 404s this client's paths. Regions price differently, so
-    # repointing it means re-checking pricing_catalog.json too.
-    # Qwen streams its thinking in the delta's `reasoning_content` field,
-    # which ReasoningContentChatModel recovers into canonical thinking blocks —
-    # the same reason glm / mimo use it rather than bare ChatOpenAI.
-    if settings.lm.dashscope_api_key is None:
-        raise RuntimeError(
-            "DASHSCOPE_API_KEY not set — qwen* model needs this key; "
-            "configure in ~/.ava/.env or export before starting"
-        )
-    # The registered Qwen roster thinks by default and can be switched off with
-    # the body-level `enable_thinking` boolean, delivered via extra_body
-    # (declared on BaseChatOpenAI; model_kwargs would collide). DashScope's
-    # graded knob is a token budget (`thinking_budget`), not a level enum, so
-    # the cross-provider effort maps onto the same on/off switch — see
-    # shared/lm/_effort.py:qwen_extra_body. Verified live 2026-08-20 on both
-    # registered models: `enable_thinking: false` returns 200 with empty
-    # reasoning, not the 400 the undocumented switch risked.
-    qwen_kwargs: dict[str, Any] = {}
-    extra_body = qwen_extra_body(thinking=thinking, reasoning_effort=resolved_effort)
-    if extra_body:
-        qwen_kwargs["extra_body"] = extra_body
-    # stream_usage sends `stream_options.include_usage`, without which the
-    # stream carries no final usage frame — and DashScope reports its implicit
-    # context-cache hits in that frame's `prompt_tokens_details.cached_tokens`,
-    # which langchain-openai maps onto usage_metadata's `cache_read` and the
-    # cost ledger prices at the catalog's cache_read rate. Verified live
-    # 2026-08-20 on both registered models: the streamed terminal frame does
-    # carry the details object (cold call cached_tokens 0; warm repeat of a
-    # ~2.7k-token prefix 2048 on max, 1664 on 27b), so the ledger reads a real
-    # number rather than silently billing every turn as a full cache miss.
-    return ReasoningContentChatModel(
-        model=model,  # type: ignore[call-arg]
-        api_key=settings.lm.dashscope_api_key.get_secret_value(),  # type: ignore[arg-type]
-        base_url=settings.lm.dashscope_base_url,
-        stream_usage=True,
-        disable_streaming=disable_streaming,
-        timeout=timeout,
-        **qwen_kwargs,
     )

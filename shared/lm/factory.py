@@ -93,7 +93,6 @@ from shared.lm._providers import (
     _build_glm_model,
     _build_kimi_model,
     _build_mimo_model,
-    _build_qwen_model,
 )
 from shared.lm.registry import (
     MODEL_CONTEXT_WINDOW as MODEL_CONTEXT_WINDOW,  # re-exported catalog view
@@ -137,10 +136,7 @@ class _LLMFactory(Protocol):
 # unregistered model under it shares one answer — the deepseek family no longer
 # does (v4-flash-vision-exp is multimodal, pro/flash are not), which is exactly
 # why the registered gate is per-model.
-_VISION_MODEL_PREFIXES: tuple[str, ...] = (
-    "kimi-",
-    "qwen",
-)
+_VISION_MODEL_PREFIXES: tuple[str, ...] = ("kimi-",)
 
 
 def media_types_for_model(model: str) -> frozenset[str]:
@@ -211,18 +207,18 @@ def vision_capable_provider_names() -> list[str]:
 def provider_key_of_model(model: str) -> str | None:
     """Provider key for a model name, or None for an unregistered prefix.
 
-    Keys are the core `_MODEL_KEY_MAP` prefixes plus registered plugin
-    prefixes, with a trailing dash stripped when present — the same keys
-    `AVA_LLM_MAX_CONCURRENT` accepts (`shared/lm/_concurrency.py`). None
-    means the limiter passes through.
+    Keys are the core `_MODEL_KEY_MAP` prefixes with a trailing dash stripped,
+    plus each registered plugin's explicit provider key or stripped dispatch
+    prefix — the same keys `AVA_LLM_MAX_CONCURRENT` accepts
+    (`shared/lm/_concurrency.py`). None means the limiter passes through.
     """
     ensure_provider_plugins_loaded()
     for prefix in _MODEL_KEY_MAP:
         if model.startswith(prefix):
             return prefix.rstrip("-")
-    for prefix in provider_api.REGISTRY.bindings:
+    for prefix, binding in provider_api.REGISTRY.bindings.items():
         if model.startswith(prefix):
-            return prefix.rstrip("-")
+            return binding.provider_key or prefix.rstrip("-")
     return None
 
 
@@ -232,15 +228,10 @@ def provider_key_of_model(model: str) -> str | None:
 # the corresponding prefix, display name, and environment variable in their
 # ProviderBinding instead.
 #
-# Prefixes usually carry the trailing dash of the id they match; `qwen` does not,
-# because Alibaba versions inside the family name (`qwen3.8-max`). The provider
-# key is the prefix with a trailing dash stripped IF it has one, so `qwen` reads
-# as `qwen` rather than a truncated `qwe`.
 _MODEL_KEY_MAP: dict[str, tuple[str, str, str]] = {
     "mimo-": ("Xiaomi", "xiaomi_api_key", "MIMO_API_KEY"),
     "kimi-": ("Moonshot", "moonshot_api_key", "MOONSHOT_API_KEY"),
     "glm-": ("Zhipu", "zhipu_api_key", "GLM_API_KEY"),
-    "qwen": ("Alibaba", "dashscope_api_key", "DASHSCOPE_API_KEY"),
 }
 
 # A plugin prefix may never shadow or nest inside a core prefix — provider_api
@@ -249,7 +240,7 @@ provider_api.REGISTRY.reserve_core_prefixes(set(_MODEL_KEY_MAP))
 
 
 def provider_key_map() -> dict[str, tuple[str, str | None, str]]:
-    """Core + plugin prefix → (display name, settings attr | None, env var).
+    """Core match prefix / plugin provider key → key-source metadata.
 
     The merged single source for `_ensure_provider_key` and the concurrency
     limiter's known-key set. Plugin entries carry None for the settings attr —
@@ -262,7 +253,7 @@ def provider_key_map() -> dict[str, tuple[str, str | None, str]]:
     }
     merged.update(
         {
-            prefix: (binding.display_name, None, binding.key_env)
+            binding.provider_key or prefix: (binding.display_name, None, binding.key_env)
             for prefix, binding in provider_api.REGISTRY.bindings.items()
         }
     )
@@ -560,15 +551,6 @@ def build_chat_model(
             disable_streaming=disable_streaming,
             timeout=timeout,
         )
-    if model.startswith("qwen"):
-        return _build_qwen_model(
-            model,
-            thinking=thinking,
-            resolved_effort=resolved_effort,
-            disable_streaming=disable_streaming,
-            timeout=timeout,
-        )
-
     # Plugin providers: flat prefix map (no nesting, collisions rejected at
     # registration), so at most one binding matches. The builder gets the same
     # cross-provider resolution every core branch gets — the contract is
