@@ -50,7 +50,9 @@ schema change catches the DB up on its own.
   and its exact `context` alias. `impersonation.py` manages explicit external
   requests, leases, inbox acknowledgments and local Python SDK attachment;
   `impersonation_relay.py` forwards inbound availability to the owning external
-  model session. Usage: [External agent impersonation](../../conventions/agent-impersonation.md).
+  model session; `--codex-remote` routes to the app server holding a Codex thread
+  without waiting for its external queue-store scan.
+  Usage: [External agent impersonation](../../conventions/agent-impersonation.md).
 
 - Which cluster a command acts on comes from `cli/commands/_repo.py:_repo_root` — the
   checkout the running `ava` belongs to — never the current directory.

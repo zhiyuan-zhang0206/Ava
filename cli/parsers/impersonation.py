@@ -102,6 +102,10 @@ def _add_impersonation_parser(sub: argparse._SubParsersAction[argparse.ArgumentP
     relay.add_argument("--provider", choices=("codex", "claude"), required=True)
     relay.add_argument("--thread-id")
     relay.add_argument(
+        "--codex-remote",
+        help="Codex app-server endpoint used by the session, e.g. unix:///private/tmp/codex.sock",
+    )
+    relay.add_argument(
         "--debounce",
         type=partial(_seconds_range, maximum=30),
         default=0.5,

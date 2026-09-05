@@ -7,8 +7,10 @@ host conversation; the external agent fetches and processes the full messages.
 
 Start the relay immediately after making an impersonation request. It waits
 natively for consent and quiescence, then sends one control-active hint even if
-the inbox is empty. That hint directs the controller to the agent's existing
-timeline/context and inbox. Rejection or expiry also wakes the controller;
+the inbox is empty. That hint directs the controller to the inbox and to any
+relevant context it has not already loaded. It gives independent complete inbox
+and ACK commands; do not append them to the `agents timeline` command.
+Rejection or expiry also wakes the controller;
 waiting for a decision never requires a model to poll status. Pass the lease
 UUID explicitly and inherit its credential as `AVA_IMPERSONATION_TOKEN`.
 No relay session, token or message files are created.
@@ -21,8 +23,10 @@ Give the interactive host a live PTY and keep its stdin open through workspace
 trust confirmation. An unattended launch with closed stdin can leave an accepted
 AVA lease active without a usable Codex session.
 
-Pass the token through the host's environment, with an explicit shell policy.
-This recipe was verified with Codex 0.153.4; its
+Use one explicitly addressed app server for both the TUI and the relay. Pass the
+token through that **server's** environment, with an explicit shell policy;
+setting the remote TUI's environment does not configure its server's tools.
+The environment policy was verified with Codex 0.153.4; its
 [environment filtering order](https://github.com/openai/codex/blob/rust-v0.153.4/codex-rs/protocol/src/shell_environment.rs)
 and [snapshot implementation](https://github.com/openai/codex/blob/rust-v0.153.4/codex-rs/core/src/shell_snapshot.rs)
 explain the required settings:
@@ -31,7 +35,17 @@ explain the required settings:
 codex --disable shell_snapshot \
   -c 'shell_environment_policy.inherit="all"' \
   -c 'shell_environment_policy.ignore_default_excludes=true' \
-  -c 'shell_environment_policy.include_only=["PATH","HOME","USER","LOGNAME","SHELL","TERM","LANG","LC_ALL","TMPDIR","AVA_IMPERSONATION_TOKEN","CODEX_THREAD_ID"]'
+  -c 'shell_environment_policy.include_only=["PATH","HOME","USER","LOGNAME","SHELL","TERM","LANG","LC_ALL","TMPDIR","AVA_IMPERSONATION_TOKEN","CODEX_THREAD_ID"]' \
+  app-server --listen unix:///path/to/private/run/codex.sock
+```
+
+Create the socket's parent as a private directory and keep this native server
+running. The socket carries native IPC; it is not a token or message file.
+Configure the server's sandbox and approval policy for the authorized work.
+Connect the interactive TUI to that exact endpoint:
+
+```sh
+codex --remote unix:///path/to/private/run/codex.sock -C /path/to/agent/workspace
 ```
 
 Use these options together. `inherit="core"` removes the token before
@@ -63,16 +77,30 @@ Start the relay as a background shell process owned by the external session:
 
 ```sh
 /path/to/checkout/.venv/bin/ava impersonate relay 42 \
-  --lease-id LEASE_UUID --provider codex --thread-id CODEX_SESSION_UUID
+  --lease-id LEASE_UUID --provider codex --thread-id CODEX_SESSION_UUID \
+  --codex-remote unix:///path/to/private/run/codex.sock
 ```
 
-The adapter invokes `codex queue --thread UUID --message TEXT`, preserving the
+The adapter invokes `codex queue --thread UUID --message TEXT --remote ENDPOINT`, preserving the
 existing conversation. It never starts `codex exec` or resumes a conversation
 per message. Select the session UUID explicitly; `/status` in that CLI session
 shows it. The `codex` executable on PATH must support `queue` and reach the same
-local app-server daemon as that session. Run `codex queue --help` to check the
+app server as that session. Run `codex queue --help` to check the
 installed command. Codex 0.149.0 introduced the queue command and idle-session
 wake behavior; see the [official changelog](https://developers.openai.com/codex/changelog/).
+
+The endpoint is optional for existing setups that already share a server, but
+the UUID alone does not select the process holding the session. In Codex 0.153.4,
+CLI configuration overrides can select an embedded server while a separate
+queue command reaches another server. The owning server then discovers the
+external queue write on a **10-second interval**, adding up to roughly ten
+seconds before it starts an idle turn. Queue submission to that owning server
+instead calls its wake path immediately; see the tagged
+[server selection](https://github.com/openai/codex/blob/rust-v0.153.4/codex-rs/tui/src/lib.rs)
+and [queue dispatch](https://github.com/openai/codex/blob/rust-v0.153.4/codex-rs/ext/queue/src/service.rs)
+implementations. Both TUI and relay must use the same endpoint. A successful
+queue command means accepted delivery, not that the model has started or ACKed
+the AVA message. `--codex-remote` is rejected for Claude Monitor.
 
 The CLI daemon's session namespace is the tested destination. A Desktop session
 may use a different app-server instance; its UUID alone does not establish that
