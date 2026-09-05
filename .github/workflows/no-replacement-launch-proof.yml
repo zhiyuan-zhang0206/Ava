@@ -60,7 +60,7 @@ jobs:
           assert 'did not complete resurrect cycle' in failure.get('message', '')
           PY
       - if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: actual-restart-${{ github.event.pull_request.head.sha }}
           path: |
@@ -149,7 +149,7 @@ jobs:
           grep -F 'FAILED (failures=1)' proof/baseline-native.log
           grep -F 'Ctrl-Break did not reach the actual child handler' proof/baseline-native.log
       - if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: native-records-${{ matrix.os }}-${{ github.event.pull_request.head.sha }}
           path: proof/
@@ -228,7 +228,7 @@ jobs:
           assert len(failures) == 1 and 'AssertionError' in failures[0].text
           PY
       - if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: no-replacement-launch-${{ github.event.pull_request.head.sha }}
           path: proof/

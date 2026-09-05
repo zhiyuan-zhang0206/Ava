@@ -44,7 +44,7 @@ jobs:
           git rev-parse HEAD > proof/head-sha.txt
           uv run pyright shared/incarnation_resources.py shared/resource_admission.py shared/exec_owner_protocol.py shared/exec_owner_recovery.py agent/graph/_exec_owned_run.py agent/exec_domain_owner.py agent/exec_owner_child.py tests/agent/test_incarnation_resources.py tests/agent/test_incarnation_resources_migration.py tests/agent/test_resource_admission.py
           timeout 240 uv run pytest tests/agent/test_incarnation_resources.py tests/agent/test_incarnation_resources_migration.py tests/agent/test_resource_admission.py -q --junitxml=proof/resource-fences.xml
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: always()
         with:
           name: exec-resource-fences-${{ github.event.pull_request.head.sha }}
@@ -94,7 +94,7 @@ jobs:
           test "$status" = 1
           grep -F '_enter_buffered_busy' proof/old-buffered-control.txt
           grep -F 'FAILED tests/agent/test_exec_owner_entry.py::test_completed_owner_exits_while_original_host_keeps_control_open' proof/old-buffered-control.txt
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: always()
         with:
           name: exec-native-domain-${{ matrix.os }}-${{ github.event.pull_request.head.sha }}
