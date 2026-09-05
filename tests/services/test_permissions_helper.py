@@ -1185,6 +1185,7 @@ def test_signing_smoke_signs_scratch_and_reads_matching_requirement(
         "codesign",
         "--sign",
         lifecycle._CERT_CN,
+        "-v",
         "--identifier",
         lifecycle._BUNDLE_ID,
         "--requirements",

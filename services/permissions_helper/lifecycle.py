@@ -327,6 +327,7 @@ def preflight_signing_smoke() -> None:
                     "codesign",
                     "--sign",
                     _CERT_CN,
+                    "-v",
                     "--identifier",
                     _BUNDLE_ID,
                     "--requirements",

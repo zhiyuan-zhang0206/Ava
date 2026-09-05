@@ -788,10 +788,30 @@ jobs:
         run: |
           uv run python - <<'PY'
           import json
+          import subprocess
+          from pathlib import Path
 
           from services.permissions_helper import client, lifecycle
 
           lifecycle.ensure_signing_cert()
+
+          # Hosted-runner quirk: a freshly imported key's partition list does not
+          # grant codesign access (find-identity sees the cert, signing fails with
+          # errSecItemNotFound). Re-partition the login keychain after the import.
+          subprocess.run(
+              [
+                  "security",
+                  "set-key-partition-list",
+                  "-S",
+                  "apple-tool:,apple:,codesign:",
+                  "-s",
+                  "-k",
+                  "",
+                  str(Path.home() / "Library/Keychains/login.keychain-db"),
+              ],
+              check=True,
+          )
+          subprocess.run(["security", "list-keychains"], check=True)
 
           app, rebuilt = lifecycle.build_and_sign()
           assert rebuilt is True, "the isolated first build must compile and sign"
