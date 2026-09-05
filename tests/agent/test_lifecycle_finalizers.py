@@ -58,7 +58,7 @@ def test_generic_dead_letter_leaves_fixed_command_claimed(
         (agent_id,),
     )
     db_conn.commit()
-    assert dead_letter_stale_claimed(cold_pool, 60) == 1
+    assert dead_letter_stale_claimed(cold_pool, 60, 7200.0) == 1
     assert db_conn.execute(
         "SELECT id,status FROM inbound_messages WHERE agent_id=%s ORDER BY id", (agent_id,)
     ).fetchall() == [(command_id, "claimed"), (chat_id, "done")]

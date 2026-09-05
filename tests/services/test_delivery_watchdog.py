@@ -56,6 +56,16 @@ def _make_idling_agent(db: psycopg.Connection) -> int:
     return aid
 
 
+def _make_running_agent(db: psycopg.Connection) -> int:
+    from tests.conftest import spawn_agent
+
+    aid = spawn_agent(spawner="user")
+    with db.cursor() as cur:
+        cur.execute("UPDATE agents_meta SET status = 'running' WHERE id = %s", (aid,))
+    db.commit()
+    return aid
+
+
 def _insert_old_inbound(db: psycopg.Connection, agent_id: int, *, age_s: float) -> int:
     """Insert a chat inbound backdated `age_s` (timestamp-only UPDATE — the
     inbound table has no triggers on created_at). Returns the inbound id."""
@@ -393,7 +403,7 @@ class TestDeadLetterStaleClaimed:
         aid = _make_terminated_agent(db_conn)
         iid = _insert_claimed_row(db_conn, aid, claim_age_s=2 * 86400)
 
-        assert dead_letter_stale_claimed(pool, 86400.0) == 1
+        assert dead_letter_stale_claimed(pool, 86400.0, 7200.0) == 1
         with db_conn.cursor() as cur:
             cur.execute("SELECT status FROM inbound_messages WHERE id = %s", (iid,))
             assert cur.fetchone() == ("done",)
@@ -409,25 +419,35 @@ class TestDeadLetterStaleClaimed:
         aid = _make_terminated_agent(db_conn)
         iid = _insert_claimed_row(db_conn, aid, claim_age_s=60)
 
-        assert dead_letter_stale_claimed(pool, 86400.0) == 0
+        assert dead_letter_stale_claimed(pool, 86400.0, 7200.0) == 0
         with db_conn.cursor() as cur:
             cur.execute("SELECT status FROM inbound_messages WHERE id = %s", (iid,))
             assert cur.fetchone() == ("claimed",)
 
-    def test_claimed_of_live_owner_untouched(
+    def test_claimed_of_idling_and_running_owners_use_distinct_thresholds(
         self, db_conn: psycopg.Connection, pool: ConnectionPool
     ) -> None:
-        """A live agent's claimed rows are mid-flight (finalized at its next
-        boot) — never swept regardless of age."""
+        """Idling claims age out, while fresh idling and running claims stay."""
         from services.delivery_watchdog.daemon import dead_letter_stale_claimed
 
-        aid = _make_idling_agent(db_conn)
-        iid = _insert_claimed_row(db_conn, aid, claim_age_s=10 * 86400)
+        stale_idling = _make_idling_agent(db_conn)
+        stale_idling_row = _insert_claimed_row(db_conn, stale_idling, claim_age_s=7201)
+        fresh_idling = _make_idling_agent(db_conn)
+        fresh_idling_row = _insert_claimed_row(db_conn, fresh_idling, claim_age_s=3600)
+        running = _make_running_agent(db_conn)
+        running_row = _insert_claimed_row(db_conn, running, claim_age_s=10 * 86400)
 
-        assert dead_letter_stale_claimed(pool, 86400.0) == 0
+        assert dead_letter_stale_claimed(pool, 86400.0, 7200.0) == 1
         with db_conn.cursor() as cur:
-            cur.execute("SELECT status FROM inbound_messages WHERE id = %s", (iid,))
-            assert cur.fetchone() == ("claimed",)
+            cur.execute(
+                "SELECT id, status FROM inbound_messages WHERE id = ANY(%s)",
+                ([stale_idling_row, fresh_idling_row, running_row],),
+            )
+            assert dict(cur.fetchall()) == {
+                stale_idling_row: "done",
+                fresh_idling_row: "claimed",
+                running_row: "claimed",
+            }
 
     def test_null_claimed_at_falls_back_to_created_at(
         self, db_conn: psycopg.Connection, pool: ConnectionPool
@@ -441,7 +461,7 @@ class TestDeadLetterStaleClaimed:
         old = _insert_claimed_row(db_conn, aid, claim_age_s=None, created_age_s=10 * 86400)
         fresh = _insert_claimed_row(db_conn, aid, claim_age_s=None, created_age_s=60)
 
-        assert dead_letter_stale_claimed(pool, 86400.0) == 1
+        assert dead_letter_stale_claimed(pool, 86400.0, 7200.0) == 1
         with db_conn.cursor() as cur:
             cur.execute(
                 "SELECT id, status FROM inbound_messages WHERE id IN (%s, %s)",
@@ -499,6 +519,81 @@ class TestDeadLetterStalePendingResurrects:
         assert rows[old_non_resurrect] == ("pending", False)
         assert rows[claimed] == ("claimed", False)
         assert rows[done] == ("done", False)
+
+
+class TestDeadLetterStalePendingTerminated:
+    def test_old_lifecycle_rows_of_terminated_owner_are_dead_lettered(
+        self, db_conn: psycopg.Connection, pool: ConnectionPool
+    ) -> None:
+        from services.delivery_watchdog.daemon import dead_letter_stale_pending_terminated
+
+        aid = _make_terminated_agent(db_conn)
+        rows = {
+            _insert_pending_resurrect_row(db_conn, aid, age_s=2 * 86400, kind=kind)
+            for kind in ("terminate", "system_note", "restart_completed")
+        }
+
+        assert dead_letter_stale_pending_terminated(pool, 86400.0) == 3
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "SELECT id, status, claimed_at IS NOT NULL FROM inbound_messages "
+                "WHERE id = ANY(%s)",
+                (list(rows),),
+            )
+            assert {row[0]: row[1:] for row in cur.fetchall()} == dict.fromkeys(
+                rows, ("done", True)
+            )
+
+    def test_old_pending_chat_of_terminated_owner_is_untouched(
+        self, db_conn: psycopg.Connection, pool: ConnectionPool
+    ) -> None:
+        from services.delivery_watchdog.daemon import dead_letter_stale_pending_terminated
+
+        aid = _make_terminated_agent(db_conn)
+        row = _insert_pending_resurrect_row(db_conn, aid, age_s=2 * 86400, kind="chat")
+
+        assert dead_letter_stale_pending_terminated(pool, 86400.0) == 0
+        with db_conn.cursor() as cur:
+            cur.execute("SELECT status, claimed_at FROM inbound_messages WHERE id = %s", (row,))
+            assert cur.fetchone() == ("pending", None)
+
+    def test_fresh_lifecycle_rows_of_terminated_owner_are_untouched(
+        self, db_conn: psycopg.Connection, pool: ConnectionPool
+    ) -> None:
+        from services.delivery_watchdog.daemon import dead_letter_stale_pending_terminated
+
+        aid = _make_terminated_agent(db_conn)
+        rows = [
+            _insert_pending_resurrect_row(db_conn, aid, age_s=60, kind=kind)
+            for kind in ("terminate", "system_note", "restart_completed")
+        ]
+
+        assert dead_letter_stale_pending_terminated(pool, 86400.0) == 0
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "SELECT id, status FROM inbound_messages WHERE id = ANY(%s)",
+                (rows,),
+            )
+            assert dict(cur.fetchall()) == dict.fromkeys(rows, "pending")
+
+    def test_old_lifecycle_rows_of_live_owner_are_untouched(
+        self, db_conn: psycopg.Connection, pool: ConnectionPool
+    ) -> None:
+        from services.delivery_watchdog.daemon import dead_letter_stale_pending_terminated
+
+        aid = _make_idling_agent(db_conn)
+        rows = [
+            _insert_pending_resurrect_row(db_conn, aid, age_s=2 * 86400, kind=kind)
+            for kind in ("terminate", "system_note", "restart_completed")
+        ]
+
+        assert dead_letter_stale_pending_terminated(pool, 86400.0) == 0
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "SELECT id, status FROM inbound_messages WHERE id = ANY(%s)",
+                (rows,),
+            )
+            assert dict(cur.fetchall()) == dict.fromkeys(rows, "pending")
 
 
 class TestSelectTerminatedOwnersWithPending:

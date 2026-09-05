@@ -294,6 +294,18 @@ class DaemonSettings(EnvSettings):
         },
     )
 
+    delivery_watchdog_stale_claimed_idling_threshold_seconds: float = Field(
+        default=7200.0,
+        alias="AVA_DELIVERY_WATCHDOG_STALE_CLAIMED_IDLING_THRESHOLD_SECONDS",
+        description="Stale-claimed dead-letter threshold for IDLING owners (seconds): a 'claimed' chat inbound whose owner is idling and whose claim is older than this is flipped to 'done'. Hosted agents stay idling without booting, so their claims never hit the reconcile path; running owners are never swept.",
+        json_schema_extra={
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
     auto_resurrect_enabled: bool = Field(
         default=True,
         alias="AVA_AUTO_RESURRECT_ENABLED",
