@@ -27,6 +27,7 @@ import pytest
 from services.permissions_helper import client
 from services.permissions_helper.client import PermissionsHelperError
 from shared.accessibility import AccessibilityState
+from shared.config import settings
 from shared.screen_capture import ScreenCaptureState
 
 
@@ -833,6 +834,20 @@ def test_current_stable_signed_bundle_is_not_resigned(
     assert lifecycle.build_and_sign() == (app, False)
     assert not any(c[0] == "swiftc" for c in _argvs(recorded))
     assert not any(c[:2] == ["codesign", "--force"] for c in _argvs(recorded))
+
+
+def test_keychain_path_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    """AVA_PERMISSIONS_HELPER_KEYCHAIN routes signing to a CI-owned keychain."""
+    from services.permissions_helper import lifecycle
+
+    monkeypatch.setattr(
+        settings.services,
+        "permissions_helper_keychain",
+        "/tmp/ci-signing.keychain-db",  # noqa: S108
+    )
+    assert lifecycle._keychain_path() == Path("/tmp/ci-signing.keychain-db")  # noqa: S108
+    monkeypatch.setattr(settings.services, "permissions_helper_keychain", None)
+    assert lifecycle._keychain_path() == Path.home() / "Library" / "Keychains" / "login.keychain-db"
 
 
 def test_locked_keychain_does_not_fail_a_current_host(

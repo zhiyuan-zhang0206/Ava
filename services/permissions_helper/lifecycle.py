@@ -197,6 +197,16 @@ def _probe(cmd: list[str], *, timeout: float | None = None) -> subprocess.Comple
 
 
 def _keychain_path() -> Path:
+    """Return the signing keychain path.
+
+    Defaults to the user's login keychain. CI sets the
+    ``AVA_PERMISSIONS_HELPER_KEYCHAIN`` setting to an isolated keychain it
+    owns -- the hosted runner's login keychain password is unknowable, so the
+    partition-list grant codesign needs cannot be authorized there.
+    """
+    override = settings.services.permissions_helper_keychain
+    if override:
+        return Path(override).expanduser()
     return Path.home() / "Library" / "Keychains" / "login.keychain-db"
 
 
