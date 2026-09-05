@@ -23,22 +23,36 @@ from shared.task_timestamps import render_task_timestamps
 
 from ._task_update import (
     _DEFAULT_PRIORITY,
-    _MAX_REMIND_INTERVAL_SECONDS,  # noqa: F401 — preserve the original module surface
     _STATUSES,
     _UNSET,
-    _append_note_to_results,  # noqa: F401 — preserve the original module surface
     _collect_update_fields,
-    _log_task_update,  # noqa: F401 — preserve the original module surface
     _nothing_to_update,
     _owner_actually_changed,
-    _owner_change_payload,  # noqa: F401 — preserve the original module surface
-    _owner_is_changing,  # noqa: F401 — preserve the original module surface
     _resolve_create_args,
     _resolve_update_args,
-    _Unset,  # noqa: F401 — preserve the original module surface
     _validate_budgets,
-    _validate_remind_interval_seconds,  # noqa: F401 — preserve the original module surface
     _write_task_update,
+)
+from ._task_update import (
+    _MAX_REMIND_INTERVAL_SECONDS as _MAX_REMIND_INTERVAL_SECONDS,
+)
+from ._task_update import (
+    _append_note_to_results as _append_note_to_results,
+)
+from ._task_update import (
+    _log_task_update as _log_task_update,
+)
+from ._task_update import (
+    _owner_change_payload as _owner_change_payload,
+)
+from ._task_update import (
+    _owner_is_changing as _owner_is_changing,
+)
+from ._task_update import (
+    _Unset as _Unset,
+)
+from ._task_update import (
+    _validate_remind_interval_seconds as _validate_remind_interval_seconds,
 )
 
 # `list` / `get` shadow builtins intentionally: these are the agent-facing names

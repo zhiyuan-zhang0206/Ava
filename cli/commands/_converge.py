@@ -35,8 +35,12 @@ from cli.commands._converge_source_tree import ensure_source_tree_integrity
 # test reaches for `cli.commands._converge.ConvergeCtx` / `ALL_ROLES`.
 from cli.commands._converge_spec import ALL_ROLES, ConvergeCtx, ConvergeStep
 from cli.commands._converge_steps import (
-    _PATH_BEGIN,  # noqa: F401 — preserve the original module surface
-    _PATH_END,  # noqa: F401 — preserve the original module surface
+    _PATH_BEGIN as _PATH_BEGIN,
+)
+from cli.commands._converge_steps import (
+    _PATH_END as _PATH_END,
+)
+from cli.commands._converge_steps import (
     _backfill_health_port_keys_step,
     _ensure_ava_home_dirs,
     _ensure_ava_symlink,
@@ -47,7 +51,9 @@ from cli.commands._converge_steps import (
     _ensure_prod_editable_pth,
     _ensure_redis_url_identity_step,
     _migrate_host_config_to_env,
-    _shell_rc_path,  # noqa: F401 — preserve the original module surface
+)
+from cli.commands._converge_steps import (
+    _shell_rc_path as _shell_rc_path,
 )
 from cli.commands._health_preflight import ensure_health_preflight as _ensure_health_preflight
 from cli.commands._lgtm import ensure_lgtm_stack_step

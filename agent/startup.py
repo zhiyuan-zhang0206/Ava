@@ -43,11 +43,19 @@ from langgraph.graph.state import CompiledStateGraph
 from psycopg_pool import AsyncConnectionPool
 
 from agent._page_reconcile import (
-    _PAGE_RECOVERY_MIN_INTERVAL_S,  # noqa: F401 — preserve the original module surface
-    _PAGE_RECOVERY_NOTICE_PREFIX,  # noqa: F401 — preserve the original module surface
+    _PAGE_RECOVERY_MIN_INTERVAL_S as _PAGE_RECOVERY_MIN_INTERVAL_S,
+)
+from agent._page_reconcile import (
+    _PAGE_RECOVERY_NOTICE_PREFIX as _PAGE_RECOVERY_NOTICE_PREFIX,
+)
+from agent._page_reconcile import (
     _close_dead_show_pages,
-    _page_recovery_notice,  # noqa: F401 — preserve the original module surface
-    _recent_page_recovery_notice,  # noqa: F401 — preserve the original module surface
+)
+from agent._page_reconcile import (
+    _page_recovery_notice as _page_recovery_notice,
+)
+from agent._page_reconcile import (
+    _recent_page_recovery_notice as _recent_page_recovery_notice,
 )
 from agent.hooks.repair import dangling_tool_pairing_repairs
 from shared.log import logger
