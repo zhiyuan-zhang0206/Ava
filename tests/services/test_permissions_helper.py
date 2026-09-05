@@ -760,7 +760,9 @@ def _fake_tools(
             return subprocess.CompletedProcess(cmd, 0, b"", shown.encode())  # pyright: ignore[reportUnknownArgumentType]
         if cmd[:3] == ["codesign", "-d", "-r-"]:
             dr = designated_requirement or _test_dr()
-            return subprocess.CompletedProcess(cmd, 0, b"", f"designated => {dr}\n".encode())  # pyright: ignore[reportUnknownArgumentType]
+            # Real codesign on current macOS emits the DR line on stdout
+            # (stderr carries `Executable=...`); the reader accepts either.
+            return subprocess.CompletedProcess(cmd, 0, f"designated => {dr}\n".encode(), b"")  # pyright: ignore[reportUnknownArgumentType]
         if cmd[:2] == ["security", "show-keychain-info"] and keychain_rc != 0:
             return subprocess.CompletedProcess(
                 cmd,  # pyright: ignore[reportUnknownArgumentType]
@@ -784,6 +786,30 @@ def _argvs(recorded: list[_Call]) -> list[list[str]]:
 
 def _sign_command(recorded: list[_Call]) -> list[str]:
     return next(c.argv for c in recorded if c.argv[:2] == ["codesign", "--force"])
+
+
+def test_read_dr_accepts_legacy_stderr_stream(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """codesign once emitted the DR line on stderr; the reader searches both."""
+    import subprocess
+
+    from services.permissions_helper import lifecycle
+
+    app = tmp_path / "AvaPermissionsHelper.app"
+
+    def run(cmd, **kwargs):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+        if list(cmd)[:3] == ["codesign", "-d", "-r-"]:  # pyright: ignore[reportUnknownArgumentType]
+            return subprocess.CompletedProcess(
+                cmd,  # pyright: ignore[reportUnknownArgumentType]
+                0,
+                b"",
+                f"designated => {_test_dr()}\n".encode(),
+            )
+        raise AssertionError(f"unexpected call {cmd}")
+
+    monkeypatch.setattr(lifecycle, "run_bounded", run)  # pyright: ignore[reportUnknownArgumentType]
+    assert lifecycle._read_dr(app) == _test_dr()
 
 
 def test_current_stable_signed_bundle_is_not_resigned(

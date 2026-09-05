@@ -290,7 +290,11 @@ def _source_content_hash() -> str:
 
 def _read_dr(app: Path) -> str:
     proc = _run(["codesign", "-d", "-r-", str(app)])
-    match = _DESIGNATED_REQUIREMENT_RE.search(proc.stderr.decode(errors="replace"))
+    # codesign writes the designated-requirement line to stdout on current
+    # macOS (stderr carries `Executable=...`); older toolchains have emitted
+    # it on stderr, so search both streams rather than pinning one.
+    text = proc.stdout.decode(errors="replace") + proc.stderr.decode(errors="replace")
+    match = _DESIGNATED_REQUIREMENT_RE.search(text)
     if match is None:
         raise PermissionsHelperBuildError(
             "codesign did not report a designated requirement for the permissions helper"
