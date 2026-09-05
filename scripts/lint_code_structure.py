@@ -169,21 +169,9 @@ _OVERSIZE_ALLOWED: dict[str, tuple[str, int, str]] = {
     # Migration lifecycle: apply, rollback_to/apply_down, applied-set
     # bookkeeping — one invariant shared across all of them.
     "shared/migrations.py": ("#405", 500, "2026-12-31"),
-    # A flat name→spec model registry (one entry per model) — the one lookup
-    # surface build_chat_model consults. Schema-registry shard split tracked.
-    "shared/lm/registry.py": ("#405", 500, "2026-12-31"),
     # The whole ava.tasks SDK surface in one module: Task model,
     # create/get/list/update/log, validation, owner-notification helpers.
     "ava_builtins/plugins/ava_fleet/task_registry.py": ("#405", 500, "2026-12-31"),
-    # One cohesive SDK<->gateway HTTP client (one module per SDK namespace);
-    # crossed the ceiling when concurrent main work landed beside the
-    # system-note delivery function (Task #1838).
-    "ava/_gateway_client.py": ("#405", 800, "2026-12-31"),
-    # The whole ava.watcher SDK surface in one module: spawn (at/cron/launch),
-    # script+bootstrap generation, registry registration, and the boot
-    # reconcile all share the session/registry primitives; the reconcile-split
-    # refactor is tracked, not forgotten (Task #1825 pushed it over the line).
-    "ava/watcher.py": ("#405", 500, "2026-12-31"),
     # The converge step table — one aggregation of every bring-up step; the
     # source-tree guard step (Task #1905) pushed it over the ceiling. The
     # step-split refactor is tracked, not forgotten.

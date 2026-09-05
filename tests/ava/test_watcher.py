@@ -20,7 +20,7 @@ from typing import Any
 import pytest
 
 import ava
-from ava import watcher
+from ava import _watcher_reconcile, watcher
 from ava.shell import _background
 from shared.platform import IS_WINDOWS
 
@@ -862,7 +862,7 @@ def test_reconcile_rebuilds_missing_cron(_agent_row: int, monkeypatch: pytest.Mo
 
     monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType]
     calls: list[tuple[Any, ...]] = []
-    monkeypatch.setattr(watcher, "cron", lambda *a, **k: calls.append((a, k)) or 999)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_watcher_reconcile, "cron", lambda *a, **k: calls.append((a, k)) or 999)  # pyright: ignore[reportUnknownArgumentType]
     from shared.watcher_registry import register_watcher
 
     register_watcher(
@@ -893,7 +893,7 @@ def test_reconcile_rebuilds_missing_current_generation_cron(
     monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_sessions, "_current_session_generation", lambda: "current-generation")
     calls: list[tuple[Any, ...]] = []
-    monkeypatch.setattr(watcher, "cron", lambda *a, **k: calls.append((a, k)) or 999)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_watcher_reconcile, "cron", lambda *a, **k: calls.append((a, k)) or 999)  # pyright: ignore[reportUnknownArgumentType]
     register_watcher(
         _agent_row,
         424247,
@@ -930,7 +930,7 @@ def test_reconcile_reaps_superseded_generation_without_rebuilding(
         lambda session_id: reaped.append(session_id) or True,  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     )
     calls: list[tuple[Any, ...]] = []
-    monkeypatch.setattr(watcher, "cron", lambda *a, **k: calls.append((a, k)) or 999)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_watcher_reconcile, "cron", lambda *a, **k: calls.append((a, k)) or 999)  # pyright: ignore[reportUnknownArgumentType]
     register_watcher(
         _agent_row,
         424248,
@@ -1147,7 +1147,7 @@ def test_reconcile_never_reruns_launch(_agent_row: int, monkeypatch: pytest.Monk
     sent: list[str] = []
     monkeypatch.setattr("ava.agents.send_message", lambda _aid, content: sent.append(content))  # pyright: ignore[reportUnknownArgumentType]
     calls: list[tuple[Any, ...]] = []
-    monkeypatch.setattr(watcher, "launch", lambda *a, **k: calls.append((a, k)) or 999)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_watcher_reconcile, "launch", lambda *a, **k: calls.append((a, k)) or 999)  # pyright: ignore[reportUnknownArgumentType]
     from shared.watcher_registry import register_watcher
 
     register_watcher(
@@ -1244,7 +1244,7 @@ def test_reconcile_skips_rebuilt_rows(_agent_row: int, monkeypatch: pytest.Monke
     monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_sessions, "list", dict)
     calls: list[tuple[Any, ...]] = []
-    monkeypatch.setattr(watcher, "cron", lambda *a, **k: calls.append((a, k)) or 999)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_watcher_reconcile, "cron", lambda *a, **k: calls.append((a, k)) or 999)  # pyright: ignore[reportUnknownArgumentType]
     from shared.watcher_registry import mark_status, register_watcher
 
     # a rebuilt row (session 424250 was rebuilt into a new session long ago)
@@ -1302,7 +1302,7 @@ def test_reconcile_kills_orphan_process_before_rebuild(
 
     monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType]
     calls: list[tuple[Any, ...]] = []
-    monkeypatch.setattr(watcher, "cron", lambda *a, **k: calls.append((a, k)) or 999)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_watcher_reconcile, "cron", lambda *a, **k: calls.append((a, k)) or 999)  # pyright: ignore[reportUnknownArgumentType]
     from shared.watcher_registry import register_watcher
 
     register_watcher(
@@ -1437,7 +1437,7 @@ def test_reconcile_rebuilds_live_cron_watcher_with_stale_template(
         )
         return 999
 
-    monkeypatch.setattr(watcher, "cron", fake_cron)
+    monkeypatch.setattr(_watcher_reconcile, "cron", fake_cron)
 
     actions = watcher.reconcile()
 
@@ -1500,7 +1500,7 @@ def test_reconcile_leaves_current_template_watcher_alone(
         )
         return 999
 
-    monkeypatch.setattr(watcher, "cron", fake_cron)
+    monkeypatch.setattr(_watcher_reconcile, "cron", fake_cron)
 
     actions = watcher.reconcile()
 
@@ -1532,7 +1532,7 @@ def test_reconcile_missing_session_still_rebuilds_cron(
     )
     spawned: list[object] = []
     monkeypatch.setattr(
-        watcher,
+        _watcher_reconcile,
         "cron",
         lambda *a, **k: spawned.append((a, k)) or 999,  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     )
@@ -1705,7 +1705,7 @@ def test_reconcile_rebuild_dedupes_against_live_duplicate(
 
     monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     calls: list[tuple[Any, ...]] = []
-    monkeypatch.setattr(watcher, "cron", lambda *a, **k: calls.append((a, k)) or 999)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(_watcher_reconcile, "cron", lambda *a, **k: calls.append((a, k)) or 999)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     # Both rows carry the CURRENT template version: a NULL/0 version would
     # route the live row into the stale-template rebuild (a different branch)
     # instead of the missing-session dedupe under test.

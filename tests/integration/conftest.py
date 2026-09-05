@@ -111,14 +111,14 @@ def _local_spawn_in_process(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture
 def gateway_client(db_conn: psycopg.Connection) -> Iterator[httpx.Client]:
-    """Monkeypatch _gateway_client._client → TestClient transport."""
+    """Monkeypatch _gateway_transport._client → TestClient transport."""
     pool = ConnectionPool(settings.data_plane.db_url, min_size=1, max_size=2, open=True)
     app.state.db_pool = pool
 
     test_client = TestClient(app)
     transport = _TestClientTransport(test_client)
 
-    import ava._gateway_client as gc
+    import ava._gateway_transport as gc
 
     # the module's `httpx` name is runtime-injected (ava SDK design),
     # so `_client`'s declared type does not resolve statically.

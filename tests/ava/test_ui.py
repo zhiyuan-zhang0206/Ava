@@ -38,7 +38,7 @@ def _sdk_via_inprocess_gateway(monkeypatch: pytest.MonkeyPatch):
 
     set_identity(host=_HOST)
     with TestClient(app, base_url="http://test-gateway") as tc:
-        monkeypatch.setattr("ava._gateway_client._client", tc)
+        monkeypatch.setattr("ava._gateway_transport._client", tc)
         yield
     reset_identity()
 

@@ -28,7 +28,7 @@ tags:
 | `glm-` | ReasoningContentChatModel (Zhipu) | GLM_API_KEY |
 | `qwen` | ReasoningContentChatModel (Alibaba) | DASHSCOPE_API_KEY + `AVA_DASHSCOPE_BASE_URL` |
 
-- `shared/lm/registry.py:MODELS` is the SSOT; picker/context/cutoff/identity views are factory exports. Per-provider tables remain in factory / `_effort.py`. A withdrawn model resolves persisted config to its declared spawnable fallback, never after provider failure.
+- `shared/lm/registry.py:MODELS` is the assembled SSOT; core rows live in `_model_specs_primary.py` / `_model_specs_compatible.py`, and `_model_registry_types.py` owns their value types and tuning defaults. Picker/context/cutoff/identity views are factory exports. Per-provider tables remain in factory / `_effort.py`. A withdrawn model resolves persisted config to its declared spawnable fallback, never after provider failure.
 - `validate_model_config()` — spawn-boundary pre-check (`POST /api/agents`): model registered + key configured, else 400 (fail-fast vs silent hang).
 - [[media-capabilities.ava.okf.md]] — per-model media resolution and attachment packing.
 - `AVA_LLM_OVERRIDE=mod:factory` injects a fake factory (e2e/multi-instance); key checks skipped.
