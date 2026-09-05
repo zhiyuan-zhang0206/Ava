@@ -139,9 +139,6 @@ def _machine_role_calls(tree: ast.AST) -> list[int]:
 # re-justification, never a silent rollover. Owner defaults to #405 (the
 # Ava P0 line) until a renewal names the file's actual maintainer.
 _OVERSIZE_ALLOWED: dict[str, tuple[str, int, str]] = {
-    # One cohesive OTLP export backend (exporter class + metric views +
-    # batch/flush lifecycle); a real split is tracked, not forgotten.
-    "shared/telemetry_otlp.py": ("#405", 500, "2026-12-31"),
     # The single-service-roster schema block — one ServiceSpec per session
     # (no logic to split); crossed 800 when the memory-search spec landed.
     "ops/spec.py": ("#405", 800, "2026-12-31"),
@@ -155,12 +152,6 @@ _OVERSIZE_ALLOWED: dict[str, tuple[str, int, str]] = {
     # The EVENTS registry — one flat name→spec dict emit() consults; grows
     # one entry per event. Schema-registry shard split tracked.
     "shared/events/contract.py": ("#405", 500, "2026-12-31"),
-    # Aggregate fetch + report assemblers + injected LokiBackend contract —
-    # one unit sharing the EventAggregate shape.
-    "shared/metrics_aggregate.py": ("#405", 500, "2026-12-31"),
-    # Metric registry: MetricSpec schema + SQL-template whitelist + dialect
-    # routing + template rendering — splitting forces a circular import.
-    "shared/plugin_metrics.py": ("#405", 500, "2026-12-31"),
     # Migration lifecycle: apply, rollback_to/apply_down, applied-set
     # bookkeeping — one invariant shared across all of them.
     "shared/migrations.py": ("#405", 500, "2026-12-31"),
