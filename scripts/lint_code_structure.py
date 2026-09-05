@@ -139,9 +139,6 @@ def _machine_role_calls(tree: ast.AST) -> list[int]:
 # re-justification, never a silent rollover. Owner defaults to #405 (the
 # Ava P0 line) until a renewal names the file's actual maintainer.
 _OVERSIZE_ALLOWED: dict[str, tuple[str, int, str]] = {
-    # Per-domain ServiceSettings schema block — same cohesion rationale as
-    # agent.py, one Field per service port / health port / pidfile.
-    "shared/config/services.py": ("#405", 500, "2026-12-31"),
     # One cohesive OTLP export backend (exporter class + metric views +
     # batch/flush lifecycle); a real split is tracked, not forgotten.
     "shared/telemetry_otlp.py": ("#405", 500, "2026-12-31"),
