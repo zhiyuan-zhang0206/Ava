@@ -15,19 +15,15 @@ Genuine exceptions (circular imports, `import torch`-class heavy deps) go in
 `_TYPE_CHECKING_ALLOWED` with a reason. This rule is lint-enforced by
 `scripts/lint_code_structure.py`.
 
-## Per-file line budget: 500 soft / 800 hard
+## Per-file line budget: 600 soft / 800 hard
 
-- ≤500 lines: normal.
-- 500–800: transitional zone — tolerated, listed as a non-blocking nudge on a
+- ≤600 lines: normal.
+- 600–800: transitional zone — tolerated, listed as a non-blocking nudge on a
   full run.
-- >800: fails lint.
+- >800: fails lint. No exemption — split into focused modules.
 
-`_OVERSIZE_ALLOWED` grandfathers genuinely cohesive files (Settings aggregator,
-SDK entry surface, schema block), plus a separately-marked section for files
-inherited over-ceiling when a previously ungated package joined the scan — debt
-with a pending split, not a blessing. Scope (`_SCAN_DIRS`) tracks
-`[tool.importlinter] root_packages`, so a package declared a layer is gated;
-`ava_builtins` is the one deliberate exclusion. Enforced by
+Scope (`_SCAN_DIRS`) tracks `[tool.importlinter] root_packages`, so a package
+declared a layer is gated. Enforced by
 `scripts/lint_code_structure.py`.
 
 ## No `print()` in framework code

@@ -8,7 +8,7 @@ asked both by the next attempt and, because a hung session refuses that next
 attempt cluster-wide before it can arrive, once a watchdog round
 (`ops.controllers.stalled_updater`).
 
-**This file sits in the 500-800 transitional zone on purpose, not by oversight.**
+**This file sits in the 600-800 transitional zone on purpose, not by oversight.**
 That zone is a non-blocking nudge, and the only way to leave it would be to cut
 the rollout control flow — preflight, trigger, refusal, reap — across two modules
 that are each half of one story. A module that exists because its sibling was

@@ -84,7 +84,7 @@ Not the coverage percentage (CI gates that already) — the judgment:
 ### 6. Architecture consistency
 - Is new code in the correct layer (`shared < ava < agent < gateway`)?
 - Any reverse-direction layer dependency that shouldn't exist?
-- Per-file line budget (500 soft / 800 hard) — flag only what the structure lint
+- Per-file line budget (600 soft / 800 hard) — flag only what the structure lint
   does not already block.
 
 ## Review comment template

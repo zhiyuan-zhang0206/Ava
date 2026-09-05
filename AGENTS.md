@@ -200,7 +200,7 @@ and the `ava.skills.ava-code:testing` discipline; rule 4's ask-first loop is [wo
 ## Python conventions (quick reference)
 
 - No `if TYPE_CHECKING:` (lint-enforced). Exceptions in `_TYPE_CHECKING_ALLOWED`.
-- Per-file line budget: 500 soft / 800 hard.
+- Per-file line budget: 600 soft / 800 hard.
 - No `print()` in framework code (use `shared.log.logger`).
 - No decorative emoji in core Python.
 - Import layering: `shared < ava < agent < gateway < cli`.

@@ -39,17 +39,12 @@ else fails the run; an allowlisted module that stops calling it also fails
 (stale-entry alert, the `unmatched_ignore_imports_alerting` shape from #176)
 so the list cannot rot into a permission wall.
 
-### Rule 2: per-file line budget (500 soft / 800 hard)
+### Rule 2: per-file line budget (600 soft / 800 hard)
 
-500-800 lines is a transitional zone: tolerated, but surfaced on every full run
+600-800 lines is a transitional zone: tolerated, but surfaced on every full run
 as a nudge to split. Past 800 it is a hard error — a file that large is hard for
-an agent to hold in context and reason about as a unit. `_OVERSIZE_ALLOWED`
-grandfathers the few files that exceed 800 yet are genuinely cohesive (a single
-schema block, an aggregator re-export) and should not be split. It carries a
-second, clearly-marked section for the opposite case: files that are simply too
-big and were inherited when a previously ungated package entered `_SCAN_DIRS`.
-Those are debt with a pending split, not a blessing — the distinction is the
-point of listing them separately rather than raising the ceiling.
+an agent to hold in context and reason about as a unit. There is no exemption:
+split into focused modules.
 
 Scope (`_SCAN_DIRS`) tracks `[tool.importlinter] root_packages` in pyproject.toml,
 so a new governed package is gated the moment it is declared a layer.
@@ -62,12 +57,11 @@ from __future__ import annotations
 
 import ast
 import sys
-from datetime import UTC, datetime
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 
-_TRANSITIONAL_FLOOR = 500
+_TRANSITIONAL_FLOOR = 600
 _HARD_CEILING = 800
 
 # Core source held to the line budget — scripts/migrations/db/tests
@@ -125,24 +119,6 @@ def _machine_role_calls(tree: ast.AST) -> list[int]:
         ):
             hits.append(node.lineno)
     return hits
-
-
-# Files allowed to exceed _HARD_CEILING — naturally cohesive single units that
-# splitting would only scatter. Each entry carries three fields (tech audit
-# 2026-08-24 P2): the OWNER accountable for the eventual split, the TARGET
-# line count the file should reach when split, and the EXPIRY date — the
-# exemption lapses on that date. The lint enforces both failure modes: an
-# EXPIRED entry is a hard error (renew it with a current justification, or
-# split the file) and a STALE entry (a listed file now under the hard
-# ceiling) is a hard error too — the list must match reality, same shape as
-# the machine_role() stale-entry alert. Renewal is a deliberate
-# re-justification, never a silent rollover. Owner defaults to #405 (the
-# Ava P0 line) until a renewal names the file's actual maintainer.
-_OVERSIZE_ALLOWED: dict[str, tuple[str, int, str]] = {
-    # Kernel inbound queue + lifecycle SQL (claim / restart helpers) — one
-    # cohesive kernel-DB module; the #1587 fatal-provider heartbeat throttle
-    # (last_heartbeat_at + pending-wake accounting) regrew it past the ceiling
-}
 
 
 # Files allowed to use `if TYPE_CHECKING:` — real circular import or heavy
@@ -219,38 +195,12 @@ def _scan_file(path: Path, rel_path: str) -> list[tuple[int, str, str]]:
             )
 
     n_lines = len(text.splitlines())
-    if rel_path in _OVERSIZE_ALLOWED:
-        owner, target_lines, expires_on = _OVERSIZE_ALLOWED[rel_path]
-        if n_lines <= _HARD_CEILING:
-            out.append(
-                (
-                    n_lines,
-                    f"stale _OVERSIZE_ALLOWED entry — {rel_path} is {n_lines} "
-                    f"lines, under the {_HARD_CEILING}-line ceiling; remove it "
-                    "from _OVERSIZE_ALLOWED in scripts/lint_code_structure.py "
-                    "(the list must match reality).",
-                    "error",
-                )
-            )
-        elif datetime.now(UTC).date().isoformat() > expires_on:
-            out.append(
-                (
-                    n_lines,
-                    f"_OVERSIZE_ALLOWED exemption for {rel_path} expired "
-                    f"{expires_on} (owner {owner}, target {target_lines} lines) "
-                    "— renew it with a current justification or split the file "
-                    f"toward its {target_lines}-line target.",
-                    "error",
-                )
-            )
-    elif n_lines > _HARD_CEILING:
+    if n_lines > _HARD_CEILING:
         out.append(
             (
                 n_lines,
                 f"file is {n_lines} lines, over the {_HARD_CEILING}-line hard ceiling — "
-                "split into focused modules. If genuinely cohesive (one schema block / "
-                "an aggregator re-export), add to _OVERSIZE_ALLOWED in "
-                "scripts/lint_code_structure.py with a one-line reason.",
+                "split into focused modules.",
                 "error",
             )
         )
