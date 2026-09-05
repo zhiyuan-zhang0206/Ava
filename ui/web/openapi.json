@@ -14882,16 +14882,19 @@
         "properties": {
           "repo": {
             "type": "string",
+            "maxLength": 200,
             "minLength": 1,
             "title": "Repo"
           },
           "ref": {
             "type": "string",
+            "maxLength": 255,
             "minLength": 1,
             "title": "Ref"
           },
           "commit_sha": {
             "type": "string",
+            "maxLength": 64,
             "minLength": 1,
             "title": "Commit Sha"
           },
@@ -14906,6 +14909,7 @@
           },
           "summary": {
             "type": "string",
+            "maxLength": 2000,
             "minLength": 1,
             "title": "Summary"
           },
@@ -14916,6 +14920,7 @@
           },
           "dedup_key": {
             "type": "string",
+            "maxLength": 255,
             "minLength": 1,
             "title": "Dedup Key"
           }

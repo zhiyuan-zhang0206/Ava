@@ -422,13 +422,13 @@ CREATE UNIQUE INDEX idx_inbound_messages_client_message_id
 -- a task-registry alert when the entire chain is dead.
 CREATE TABLE work_failed_events (
     id                  BIGSERIAL PRIMARY KEY,
-    repo                TEXT NOT NULL,
-    ref                 TEXT NOT NULL,
-    commit_sha          TEXT NOT NULL,
+    repo                VARCHAR(200) NOT NULL,
+    ref                 VARCHAR(255) NOT NULL,
+    commit_sha          VARCHAR(64) NOT NULL,
     stage               TEXT NOT NULL CHECK (stage IN ('ci', 'qa', 'merge')),
-    summary             TEXT NOT NULL,
+    summary             VARCHAR(2000) NOT NULL,
     author_agent_id     BIGINT NOT NULL CHECK (author_agent_id > 0),
-    dedup_key           TEXT NOT NULL UNIQUE,
+    dedup_key           VARCHAR(255) NOT NULL UNIQUE,
     delivered_to        TEXT,
     delivery_kind       TEXT CHECK (
         delivery_kind IN ('author', 'author_resurrected', 'delegator', 'task_alert')
