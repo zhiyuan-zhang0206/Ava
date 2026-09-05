@@ -13,8 +13,10 @@ The events-maintenance daemon calls `checkpoint_reaper.prune_threads` every
 minute. One table-driven grouping counts all checkpoint rows by `thread_id`;
 threads above the fixed keep-three budget become candidates regardless of agent
 status, liveness, or whether an `agents_meta` row exists. Compaction boundaries
-count toward the same budget and age out once they leave the newest-three
-window.
+are exempt from the budget: a checkpoint stamped `compact_boundary: true` is
+never trimmed, and blob retention follows the surviving-checkpoint reference
+rule — each past compaction segment stays recoverable as one full snapshot
+(user ruling: preserve information, bound storage).
 
 Each pass sorts and rotates the candidates using a wall-clock-derived offset,
 then completes at most 64 productive trims. It rechecks a thread's row count

@@ -10,10 +10,11 @@ deletes a thread's older checkpoints, keeping the latest K, and cascades in one
 atomic statement to the writes those checkpoints owned and to any blob no
 surviving checkpoint references.
 
-Compaction boundaries participate in the same newest-K window as every other
-checkpoint. The `compact_boundary: true` metadata stamped during compaction is
-still useful to timeline segment reads while retained, but it does not bypass
-the per-thread storage bound.
+Compaction boundaries are never trimmed: a checkpoint whose metadata carries
+`compact_boundary: true` (stamped by `mark_compact_boundary` when a compaction
+replaces the pre-compact history) is kept regardless of age, so each past
+compaction segment stays recoverable as one full snapshot — the user's
+"preserve information, bound storage" retention rule (Task #1125).
 
 Safety invariant — full-snapshot channels only:
     This naive "keep the latest K, drop the rest" trim is correct ONLY because
@@ -73,7 +74,7 @@ class TrimCounts(NamedTuple):
 # version means that checkpoint has nothing to await.
 _TRIM_SQL = """
 WITH ranked AS (
-    SELECT checkpoint_id, checkpoint,
+    SELECT checkpoint_id, checkpoint, metadata,
            ROW_NUMBER() OVER (ORDER BY checkpoint_id DESC) AS rn
     FROM checkpoints
     WHERE thread_id = %(thread_id)s AND checkpoint_ns = %(ns)s
@@ -114,6 +115,7 @@ doomed AS (
     SELECT checkpoint_id FROM ranked
     WHERE rn > %(keep)s
       AND COALESCE((SELECT ready FROM trim_guard), false)
+      AND NOT COALESCE((metadata ->> 'compact_boundary')::boolean, false)
     ORDER BY checkpoint_id ASC
     LIMIT %(batch)s
 ),
@@ -121,6 +123,7 @@ kept_blob_refs AS (
     SELECT DISTINCT cv.key AS channel, cv.value AS version
     FROM ranked, jsonb_each_text(ranked.checkpoint -> 'channel_versions') AS cv
     WHERE ranked.rn <= %(keep)s
+       OR COALESCE((ranked.metadata ->> 'compact_boundary')::boolean, false)
 ),
 del_checkpoints AS (
     DELETE FROM checkpoints
@@ -160,10 +163,10 @@ async def mark_compact_boundary(
     """Stamp the thread's newest checkpoint as a compaction boundary (idempotent).
 
     A compaction freezes the pre-compact history into a summary; the newest
-    pre-compact checkpoint is the full-snapshot record of that segment. The
-    stamp lets timeline readers identify that segment while the checkpoint is
-    retained; it ages out normally once outside the keep window. Called by the
-    agent-side compact paths right before the keep=1 trim; failure-tolerant
+    pre-compact checkpoint is the full-snapshot record of that segment. Stamping
+    it makes every later trim keep it (see `_TRIM_SQL`), so each past compaction
+    segment stays recoverable — the user's retention rule (Task #1125). Called by
+    the agent-side compact paths right before the keep=1 trim; failure-tolerant
     callers, since a missed stamp only loses segment traceability, never
     recoverability (the summary survives regardless).
     """
