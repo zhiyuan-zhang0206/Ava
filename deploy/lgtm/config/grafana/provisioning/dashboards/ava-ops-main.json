@@ -3365,7 +3365,7 @@
    },
    "gridPos": {
     "h": 4,
-    "w": 8,
+    "w": 6,
     "x": 0,
     "y": 156
    },
@@ -3386,7 +3386,7 @@
    },
    "title": "Delivery stalled (window)",
    "type": "stat",
-   "description": "Windowed delivery_stalled total \u2014 the delivery watchdog's alert signal for over-age pending inbound (a raw window count, not a per-minute rate \u2014 explicit exception to the per-minute basis). event_name='delivery_stalled', category='telemetry'.",
+   "description": "Windowed delivery_stalled total \u2014 a delivery-watchdog row signal (a raw window count, not a per-minute rate). event_name='delivery_stalled', category='telemetry'.",
    "targets": [
     {
      "datasource": {
@@ -3398,6 +3398,66 @@
      "refId": "A",
      "queryType": "instant",
      "legendFormat": "stalled"
+    }
+   ]
+  },
+  {
+   "datasource": {
+    "type": "loki",
+    "uid": "loki"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "color": {
+      "mode": "palette-classic"
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       }
+      ]
+     },
+     "unit": "short"
+    }
+   },
+   "gridPos": {
+    "h": 4,
+    "w": 6,
+    "x": 6,
+    "y": 156
+   },
+   "id": 52,
+   "options": {
+    "colorMode": "value",
+    "graphMode": "area",
+    "justifyMode": "auto",
+    "orientation": "auto",
+    "reduceOptions": {
+     "calcs": [
+      "last"
+     ],
+     "fields": "",
+     "values": false
+    },
+    "textMode": "auto"
+   },
+   "title": "Delivery poisoned (window)",
+   "type": "stat",
+   "description": "Windowed delivery_poisoned total \u2014 a delivery-watchdog row signal (a raw window count, not a per-minute rate). event_name='delivery_poisoned', category='telemetry'.",
+   "targets": [
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "editorMode": "code",
+     "expr": "sum(count_over_time({service_name=\"unknown_service\", event_name=\"delivery_poisoned\"} | json | category=\"telemetry\" [$__range]))",
+     "refId": "A",
+     "queryType": "instant",
+     "legendFormat": "poisoned"
     }
    ]
   },

@@ -182,8 +182,9 @@ def test_dashboard_json_matches_core_registrations() -> None:
         assert all(target["queryType"] == expected_query_type for target in targets)
 
 
-def test_dashboard_has_93_loki_targets() -> None:
-    """Recall timing and compaction views each add two Loki targets."""
+def test_dashboard_has_94_loki_targets() -> None:
+    """Recall timing and compaction views each add two Loki targets;
+    the delivery-poisoned panel adds one."""
     path = _REPO_ROOT / "deploy/lgtm/config/grafana/provisioning/dashboards/ava-ops-main.json"
     panels = json.loads(path.read_text())["panels"]
     loki_targets = [
@@ -192,7 +193,7 @@ def test_dashboard_has_93_loki_targets() -> None:
         for target in panel.get("targets", [])
         if target.get("datasource", panel.get("datasource", {})).get("uid") == "loki"
     ]
-    assert len(loki_targets) == 93
+    assert len(loki_targets) == 94
 
 
 def test_unresolved_gauge_names_match_the_otlp_contract() -> None:

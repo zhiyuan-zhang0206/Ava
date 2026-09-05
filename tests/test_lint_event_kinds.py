@@ -37,9 +37,10 @@ _REGISTRY = _REPO / "shared" / "events" / "registry.md"
 # the orphaned registry entry).
 _SQL_OR_DYNAMIC_KINDS = frozenset(
     {
-        # Direct SQL writes (bypass loguru/emitter) - noted in registry §3.
-        "delivery_stalled",  # services/delivery_watchdog/daemon.py:242
-        "heartbeat_nudged",  # services/heartbeat/daemon.py:187
+        # Positional emit calls from daemon alert paths, with no `event=` literal.
+        "delivery_stalled",  # services/delivery_watchdog/daemon.py:_alert_stalled
+        "delivery_poisoned",  # services/delivery_watchdog/dispatch_guard.py:_alert_poisoned
+        "heartbeat_nudged",  # services/heartbeat/daemon.py:_alert_idle
         # Dynamic emit: positional-argument form, no `event=` literal.
         "task_reminder_digest",  # task_maintenance/daemon.py:_run_reminders
         "task_escalation",  # task_maintenance/daemon.py:_run_escalate

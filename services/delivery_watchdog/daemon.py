@@ -6,11 +6,11 @@ Five jobs on one fast tick (user-confirmed design, 2026-08-02 — see
 1. **Wake dispatch** — every `AVA_DELIVERY_WATCHDOG_INTERVAL_SECONDS` (default
    0.5s), re-publish the Redis wake for every `pending` inbound whose owner is
    `idling` and whose row is older than `AVA_DELIVERY_WATCHDOG_DISPATCH_THRESHOLD_SECONDS`
-   (default 1s). A publish that was lost (pub/sub is fire-and-forget) is thus
-   retried within ~1.5s instead of waiting out the claim loop's 30s SELECT
-   recheck — the 2026-08-02 incident class (agent 2476 sat 30.06s). The load is
-   a few SELECTs per tick (~8 qps at the 0.5s interval; audit round 2, P2
-   corrected the stale "one SELECT" claim) and independent of fleet size; the
+   (default 1s). Per-row dispatch counts apply a configurable backoff ladder;
+   after the cap, the row is poisoned and no longer re-published by the
+   watchdog. Poisoned rows remain pending and claimable. A publish that was
+   lost (pub/sub is fire-and-forget) is thus retried without allowing a
+   permanently failing inbound to create an unbounded wake storm. The
    per-agent 30s recheck stays as the double-fault safety net (dispatcher dead
    AND wake lost) and its degraded-WARNING doubles as a dispatcher-health
    signal.
@@ -75,7 +75,7 @@ from psycopg_pool import ConnectionPool
 
 import shared.db
 from services._pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
-from services.delivery_watchdog import turn_liveness
+from services.delivery_watchdog import dispatch_guard, turn_liveness
 from shared import telemetry
 from shared.config import settings
 from shared.config.service_read import current_field_values
@@ -137,57 +137,8 @@ def select_stale_pending(
         return [(r[0], r[1], r[2], float(r[3])) for r in cur.fetchall()]
 
 
-def select_pending_for_dispatch(
-    pool: ConnectionPool,
-    age_s: float,
-) -> list[tuple[int, int]]:
-    """`(inbound_id, agent_id)` for every `pending` inbound whose owner is
-    `idling` and whose row is older than `age_s` — the rows whose original
-    pub/sub wake may have been lost and need a re-publish.
-
-    All kinds (chat + lifecycle): a lost wake strands terminate/restart
-    signals too, not just chat. `idling` only: a `running` owner queues
-    legitimately (turn-end SELECT picks up), `terminated` owners are woken
-    by their own controller (auto-resurrect), boot states by their boot
-    SELECT.
-    """
-    with pool.connection() as conn, conn.cursor() as cur:
-        cur.execute(
-            "SELECT m.id, m.agent_id "
-            "FROM inbound_messages m "
-            "JOIN agents_meta am ON am.id = m.agent_id "
-            "WHERE m.status = 'pending' AND am.status = 'idling' "
-            "  AND m.created_at < now() - make_interval(secs => %s) "
-            "ORDER BY m.created_at ASC",
-            (age_s,),
-        )
-        return [(r[0], r[1]) for r in cur.fetchall()]
-
-
-def dispatch_wakes(
-    pool: ConnectionPool,
-    dispatch_threshold_s: float,
-) -> int:
-    """Re-publish the Redis wake for every stale pending row of an idling
-    owner (see `select_pending_for_dispatch`). Reuses `publish_inbound_wake`
-    so each re-publish also SETEXes the durable wake-key breadcrumb — a
-    listener mid-reconnect catches up on subscribe instead of waiting for the
-    next tick. Returns the number of wakes dispatched. Best-effort: a publish
-    failure is logged, never raised (the alert path + the claim loop's 30s
-    recheck remain as backstops).
-    """
-    dispatched = 0
-    for inbound_id, agent_id in select_pending_for_dispatch(pool, dispatch_threshold_s):
-        try:
-            shared.db.publish_inbound_wake(agent_id, str(inbound_id))
-            dispatched += 1
-        except Exception:
-            _log.exception(
-                "[delivery] re-publish wake failed for inbound %s to agent %s",
-                inbound_id,
-                agent_id,
-            )
-    return dispatched
+select_pending_for_dispatch = dispatch_guard.select_pending_for_dispatch
+dispatch_wakes = dispatch_guard.dispatch_wakes
 
 
 def select_terminated_owners_with_pending(pool: ConnectionPool) -> list[tuple[int, int]]:
@@ -602,6 +553,8 @@ async def _scan_loop(pool: ConnectionPool, liveness: Liveness) -> None:
     every still-stalled inbound (R1 old-signal sweep, PR5)."""
     interval = settings.daemon.delivery_watchdog_interval_seconds
     dispatch_threshold = settings.daemon.delivery_watchdog_dispatch_threshold_seconds
+    max_dispatch_count = settings.daemon.delivery_watchdog_max_dispatch_count
+    dispatch_backoff_steps = settings.daemon.delivery_watchdog_dispatch_backoff_steps_s
     alert_threshold = settings.daemon.delivery_watchdog_threshold_seconds
     stale_claimed_threshold = settings.daemon.delivery_watchdog_stale_claimed_threshold_seconds
     stale_claimed_idling_threshold = (
@@ -644,7 +597,12 @@ async def _scan_loop(pool: ConnectionPool, liveness: Liveness) -> None:
             # snapshot before the call — the delta below must compare against
             # the pre-scan set, not the mutated one.
             prev_alerted = set(alerted)
-            dispatched = dispatch_wakes(pool, dispatch_threshold)
+            dispatched = dispatch_wakes(
+                pool,
+                dispatch_threshold,
+                max_dispatch_count,
+                dispatch_backoff_steps,
+            )
             newly_alerted, alerted = scan_once(pool, alert_threshold, alerted)
             # Persist the delta: new alerts INSERT, resolved rows DELETE, TTL
             # sweep on a slow cadence. A DB failure here is degraded, not
