@@ -11,7 +11,6 @@ the publisher serves the UI itself and nothing downstream waits on it.
 
 Contrast with deep_research_orchestrator.py (7 waves, ~40 agents).
 """
-# ruff: noqa: ANN201, DTZ005, PTH123
 
 import json
 from datetime import datetime
