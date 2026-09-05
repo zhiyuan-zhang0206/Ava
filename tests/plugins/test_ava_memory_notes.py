@@ -282,3 +282,48 @@ def test_memory_index_note_is_suppressed_for_eval_isolation(
     (tmp_path / "MEMORY.md").write_text("shared result", encoding="utf-8")
 
     assert notes.memory_index_note() is None
+
+
+def test_personal_index_uses_hosted_turn_identity(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from ava import _boot
+    from ava_builtins.plugins.ava_memory import notes
+    from shared.config import settings
+    from shared.turn_identity import bind_turn_identity
+
+    def workspace(agent_id: int) -> Path:
+        return tmp_path / str(agent_id)
+
+    monkeypatch.setattr(_boot, "_agent_id", 17)
+    monkeypatch.setattr(notes, "workspace_dir", workspace)
+    monkeypatch.setattr(settings.agent, "memory_per_agent_inject_enabled", True)
+    index = tmp_path / "29" / "memory" / "MEMORY.md"
+    index.parent.mkdir(parents=True)
+    index.write_text("- [Current rule](current-rule.md) — Agent 29's own rule\n")
+
+    with bind_turn_identity(29):
+        note = notes.per_agent_memory_note()
+
+    assert note is not None
+    assert "Agent 29's own rule" in note.text
+    assert not (tmp_path / "17").exists()
+
+
+def test_personal_index_skips_unestablished_identity(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from ava import _boot
+    from ava_builtins.plugins.ava_memory import notes
+    from shared.config import settings
+
+    def workspace(agent_id: int) -> Path:
+        return tmp_path / str(agent_id)
+
+    monkeypatch.setattr(_boot, "_agent_id", None)
+    monkeypatch.delenv("AVA_AGENT_ID", raising=False)
+    monkeypatch.setattr(notes, "workspace_dir", workspace)
+    monkeypatch.setattr(settings.agent, "memory_per_agent_inject_enabled", True)
+
+    assert notes.per_agent_memory_note() is None
+    assert not list(tmp_path.iterdir())

@@ -97,6 +97,23 @@ def test_personal_write_creates_entry_and_upserts_index(memory_plugin: Any, tmp_
     )
 
 
+def test_personal_write_uses_hosted_turn_identity(
+    memory_plugin: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import shared.paths
+    from shared.turn_identity import bind_turn_identity
+
+    def workspace(agent_id: int) -> Path:
+        return tmp_path / str(agent_id)
+
+    monkeypatch.setattr(shared.paths, "workspace_dir", workspace)
+    with bind_turn_identity(29):
+        entry = ava.memory.write("hosted-note", "Belongs to agent 29.")
+
+    assert entry == tmp_path / "29" / "memory" / "hosted-note.md"
+    assert not (tmp_path / "17").exists()
+
+
 def test_write_truncates_long_description_in_index_pointer(
     memory_plugin: Any, tmp_path: Path
 ) -> None:
