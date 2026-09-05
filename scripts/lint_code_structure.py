@@ -183,11 +183,6 @@ _OVERSIZE_ALLOWED: dict[str, tuple[str, int, str]] = {
     # source-tree guard step (Task #1905) pushed it over the ceiling. The
     # step-split refactor is tracked, not forgotten.
     "cli/commands/_converge.py": ("#405", 800, "2026-12-31"),
-    # The single sanctioned DB chokepoint: connect/pool/direct-URL derivation,
-    # connection constants, and the pooled baseline-session restore
-    # (2026-09-02 P0 read-only pollution). Was exactly 800 lines on main; the
-    # restore helpers pushed it over.
-    "shared/db.py": ("#5716", 800, "2026-12-31"),
     # Kernel inbound queue + lifecycle SQL (claim / restart helpers) — one
     # cohesive kernel-DB module; the #1587 fatal-provider heartbeat throttle
     # (last_heartbeat_at + pending-wake accounting) regrew it past the ceiling

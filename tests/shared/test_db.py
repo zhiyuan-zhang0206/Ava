@@ -15,7 +15,7 @@ import time
 import psycopg
 import pytest
 
-from shared import db
+from shared import db, db_connections
 from shared.config import settings
 from shared.dotenv_boot import UNANCHORED_DB_SENTINEL
 from shared.redis_listener import RedisInboundListener
@@ -217,7 +217,7 @@ def test_pool_check_connections_flag(monkeypatch: pytest.MonkeyPatch) -> None:
     Task #1027 dead-connection check (a dead connection raises and is replaced).
     A DIRECT pool owns its backend exclusively — no scrub needed — and there the
     `check_connections=True` flag keeps its original Task #1027 meaning."""
-    real_check = db.ConnectionPool.check_connection
+    real_check = db_connections.ConnectionPool.check_connection
     captured: dict[str, object] = {}
 
     class _FakePool:
@@ -226,12 +226,12 @@ def test_pool_check_connections_flag(monkeypatch: pytest.MonkeyPatch) -> None:
         def __init__(self, *_a: object, **_kw: object) -> None:
             captured.update(_kw)
 
-    monkeypatch.setattr(db, "ConnectionPool", _FakePool)
-    monkeypatch.setattr(db, "direct_db_url", lambda: "postgresql://direct-test")
+    monkeypatch.setattr(db_connections, "ConnectionPool", _FakePool)
+    monkeypatch.setattr(db_connections, "direct_db_url", lambda: "postgresql://direct-test")
     # Pooled (the default): the baseline restore is armed on configure + check.
     db.pool()
-    assert captured.get("configure") is db._restore_pooled_session
-    assert captured.get("check") is db._restore_pooled_session
+    assert captured.get("configure") is db_connections._restore_pooled_session
+    assert captured.get("check") is db_connections._restore_pooled_session
     captured.clear()
     # Direct: no scrub; the flag keeps arming the plain dead-connection check.
     db.pool(direct=True, check_connections=True)
