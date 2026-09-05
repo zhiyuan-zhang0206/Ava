@@ -308,10 +308,25 @@ describe("RunTimelineChart", () => {
     Object.defineProperty(zoomWheel, "clientX", { value: 366 });
     visualization.dispatchEvent(zoomWheel);
     expect(onZoomWindow).toHaveBeenCalledWith({
+      from: "2026-08-29T08:03:00.000Z",
+      to: "2026-08-29T08:51:00.000Z",
+    });
+    expect(zoomWheel.defaultPrevented).toBe(true);
+
+    // Wheel down (deltaY > 0) zooms out — locks the platform direction.
+    const zoomOutWheel = new WheelEvent("wheel", {
+      bubbles: true,
+      cancelable: true,
+      clientX: 366,
+      deltaY: 1,
+    });
+    Object.defineProperty(zoomOutWheel, "ctrlKey", { value: true });
+    Object.defineProperty(zoomOutWheel, "clientX", { value: 366 });
+    visualization.dispatchEvent(zoomOutWheel);
+    expect(onZoomWindow).toHaveBeenLastCalledWith({
       from: "2026-08-29T07:56:15.000Z",
       to: "2026-08-29T09:11:15.000Z",
     });
-    expect(zoomWheel.defaultPrevented).toBe(true);
   });
 
   it("shows the full event label on hover and focus through one shared popover", () => {

@@ -191,7 +191,7 @@ export function RunTimelineChart({
         0,
         Math.min(1, (cursorX - layout.plot.left) / layout.plot.width),
       );
-      const factor = event.deltaY < 0 ? 1.25 : 0.8;
+      const factor = event.deltaY < 0 ? 0.8 : 1.25;
       onZoomWindow(zoomWindowAround(timeline.window, factor, anchor, new Date()));
     };
     visualization.addEventListener("wheel", zoomOnWheel, { passive: false });
