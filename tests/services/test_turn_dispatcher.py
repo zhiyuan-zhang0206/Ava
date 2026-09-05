@@ -31,6 +31,7 @@ from services.agent_host.dispatcher import (
     TurnScheduler,
     agent_id_from_channel,
 )
+from services.agent_host.runtime import _active_turn_config_fingerprint
 
 
 class _Recorder:
@@ -208,6 +209,49 @@ class TestWakeRace:
 
 
 class TestFailureIsolation:
+    async def test_crash_event_carries_exception_type_and_config_fingerprint(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        records: list[dict[str, object]] = []
+
+        def _capture(_msg: str, **kw: object) -> None:
+            records.append(kw)
+
+        monkeypatch.setattr(dispatcher.logger, "exception", _capture)
+
+        async def boom(_agent_id: int) -> None:
+            _active_turn_config_fingerprint.set("stored-config-fingerprint")
+            raise ValueError("turn exploded")
+
+        sched = TurnScheduler(boom)
+        sched.wake(7)
+        await _settle()
+
+        report = next(r for r in records if r.get("event") == "host_turn_crashed")
+        assert report["exception_type"] == "ValueError"
+        assert report["config_fingerprint"] == "stored-config-fingerprint"
+
+    async def test_crash_event_omits_unavailable_config_fingerprint(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        records: list[dict[str, object]] = []
+
+        def _capture(_msg: str, **kw: object) -> None:
+            records.append(kw)
+
+        monkeypatch.setattr(dispatcher.logger, "exception", _capture)
+
+        async def boom(_agent_id: int) -> None:
+            raise ValueError("turn exploded")
+
+        sched = TurnScheduler(boom)
+        sched.wake(7)
+        await _settle()
+
+        report = next(r for r in records if r.get("event") == "host_turn_crashed")
+        assert report["exception_type"] == "ValueError"
+        assert "config_fingerprint" not in report
+
     async def test_a_crashing_turn_drops_the_task_without_killing_the_host(self) -> None:
         """A turn that raises must not wedge its agent (the task has to be
         removed so the next wake can start one) and must not propagate."""

@@ -37,6 +37,7 @@ from psycopg_pool import AsyncConnectionPool
 from pydantic import BaseModel, ConfigDict, Field
 
 import ava._boot
+from services.agent_host import dispatcher
 from services.agent_host.dispatcher import TurnScheduler
 from services.agent_host.host import AgentHost
 from services.agent_host.runtime import _config_fingerprint
@@ -1293,6 +1294,31 @@ class TestGateFailsClosed:
 
 
 class TestSchedulerIntegration:
+    async def test_crash_event_keeps_config_fingerprint_across_host_shield_task(
+        self, wired: _Build, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        overlay: dict[str, object] = {"llm_model": "broken-model-config"}
+        host, _, _ = wired({1: _Row(overlay=overlay)})
+        records: list[dict[str, object]] = []
+
+        def _capture(_msg: str, **kw: object) -> None:
+            records.append(kw)
+
+        async def _explode(_agent_id: int, _fingerprint: str) -> None:
+            raise ValueError("runtime build failed")
+
+        monkeypatch.setattr(dispatcher.logger, "exception", _capture)
+        monkeypatch.setattr(host, "_runtime_for", _explode)
+        sched = TurnScheduler(host.run_turn)
+
+        sched.wake(1)
+        for _ in range(8):
+            await asyncio.sleep(0)
+
+        report = next(r for r in records if r.get("event") == "host_turn_crashed")
+        assert report["exception_type"] == "ValueError"
+        assert report["config_fingerprint"] == _config_fingerprint(overlay, None)
+
     async def test_a_wake_race_during_a_hosted_turn_still_runs_the_agent(
         self, wired: _Build
     ) -> None:

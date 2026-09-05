@@ -296,7 +296,8 @@ _EVENTS_RUNTIME: dict[str, EventSpec] = {
     "host_turn_crashed": _telemetry(
         "host_turn_crashed",
         "a hosted turn task raised — the task is dropped and the next wake retries "
-        "from the checkpoint; neighbours are unaffected",
+        "from the checkpoint; neighbours are unaffected. Carries exception_type, plus "
+        "config_fingerprint when the stored config was read before the failure",
         tier="anomaly",
     ),
     "host_agent_prepared": _telemetry(
