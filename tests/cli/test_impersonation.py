@@ -126,13 +126,23 @@ def test_release_preserves_summary(monkeypatch: pytest.MonkeyPatch) -> None:
     assert seen == ["Completed X.\nNext Y."]
 
 
-def test_relay_parser() -> None:
+@pytest.mark.parametrize("remote", [None, "unix:///tmp/ava-codex.sock"])
+def test_relay_parser(remote: str | None) -> None:
     args = _args(
-        "relay", "405", "--lease-id", "lease", "--provider", "codex", "--thread-id", "thread"
+        "relay",
+        "405",
+        "--lease-id",
+        "lease",
+        "--provider",
+        "codex",
+        "--thread-id",
+        "thread",
+        *(["--codex-remote", remote] if remote is not None else []),
     )
     assert args.provider == "codex"
     assert args.thread_id == "thread"
     assert args.func.__name__ == "_h_impersonate_relay"
+    assert args.codex_remote == remote
 
 
 @pytest.mark.parametrize(

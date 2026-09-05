@@ -345,8 +345,9 @@ def test_claude_writes_one_short_line(
     assert len(relay.activation_hint(42, LEASE_ID, frozenset())) < 500
 
 
+@pytest.mark.parametrize("remote", [None, "unix:///private/tmp/AVA queue $(literal).sock"])
 def test_codex_queues_exact_thread_and_literal_message(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, remote: str | None
 ) -> None:
     executable = tmp_path / "codex"
     executable.write_text(
@@ -364,7 +365,7 @@ def test_codex_queues_exact_thread_and_literal_message(
 
     monkeypatch.setattr(relay.shared.proc, "run_bounded", record)
     message = "AVA hint with literal $(no-shell) and `no-shell`"
-    relay.queue_codex(THREAD_ID, message)
+    relay.host_emitter("codex", str(THREAD_ID), codex_remote=remote)(message)
     assert len(outputs) == 1
     assert json.loads(outputs[0].stdout) == [
         "queue",
@@ -372,7 +373,57 @@ def test_codex_queues_exact_thread_and_literal_message(
         str(THREAD_ID),
         "--message",
         message,
-    ]
+    ] + (["--remote", remote] if remote is not None else [])
+
+
+def test_claude_rejects_codex_remote() -> None:
+    with pytest.raises(ValueError, match="--codex-remote"):
+        relay.host_emitter("claude", None, codex_remote="unix:///tmp/codex.sock")
+
+
+def test_command_passes_remote_to_queue(monkeypatch: pytest.MonkeyPatch) -> None:
+    from cli.commands import impersonation
+    from cli.parsers import build_parser
+
+    remote = "unix:///private/tmp/ava-codex.sock"
+    args = build_parser().parse_args(
+        [
+            "impersonate",
+            "relay",
+            "42",
+            "--lease-id",
+            str(LEASE_ID),
+            "--provider",
+            "codex",
+            "--thread-id",
+            str(THREAD_ID),
+            "--codex-remote",
+            remote,
+            "--debounce",
+            "0",
+        ]
+    )
+    inbox = Inbox()
+    listener = Listener(inbox)
+    queued: list[tuple[UUID, str | None]] = []
+    monkeypatch.setattr(impersonation, "token_from_env", lambda: "test-credential")
+
+    def read(*_args: object) -> relay.InboxSnapshot:
+        return relay.InboxSnapshot(frozenset(), inbox.expires_at, inbox.status)
+
+    def make_listener(*_args: object) -> Listener:
+        return listener
+
+    monkeypatch.setattr(relay, "_read_inbox", read)
+    monkeypatch.setattr(relay.shared.redis_listener, "RedisInboundListener", make_listener)
+
+    def queue(thread_id: UUID, _message: str, *, remote: str | None = None) -> None:
+        queued.append((thread_id, remote))
+
+    monkeypatch.setattr(relay, "queue_codex", queue)
+    assert args.func(args) == 0
+    assert queued == [(THREAD_ID, remote)]
+    assert listener.closed
 
 
 def test_codex_failure_is_not_delivery_or_provider_output_leak(
