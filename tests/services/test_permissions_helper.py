@@ -720,10 +720,13 @@ def _fake_tools(
     sign_rc: int = 0,
     acl_probe_rc: int = 0,
     smoke_sign_rc: int = 0,
+    smoke_sign_stderr: bytes = b"errSecInternalComponent",
     verify_rc: int = 0,
     designated_requirement: str | None = None,
     dr_streams: tuple[bytes, bytes] | None = None,
     identity_output: str | None = None,
+    list_keychains_output: bytes | None = None,
+    list_keychains_rc: int = 0,
     hang: tuple[str, ...] = (),
 ) -> list[_Call]:
     """Stand in for swiftc / codesign / security, recording every invocation.
@@ -757,6 +760,16 @@ def _fake_tools(
         if cmd[:3] == ["security", "find-identity", "-p"]:
             output = identity_output or f'  1) {_TEST_CERT_SHA1} "{lifecycle._CERT_CN}"\n'
             return subprocess.CompletedProcess(cmd, 0, output.encode(), b"")  # pyright: ignore[reportUnknownArgumentType]
+        if cmd[:4] == ["security", "list-keychains", "-d", "user"]:
+            output = list_keychains_output
+            if output is None:
+                output = f'    "{lifecycle._keychain_path()}"\n'.encode()
+            return subprocess.CompletedProcess(
+                cmd,  # pyright: ignore[reportUnknownArgumentType]
+                list_keychains_rc,
+                output,
+                b"search list unavailable" if list_keychains_rc else b"",
+            )
         if cmd[:2] == ["codesign", "--verify"]:
             return subprocess.CompletedProcess(cmd, verify_rc, b"", b"invalid")  # pyright: ignore[reportUnknownArgumentType]
         if cmd[:2] == ["codesign", "--display"]:
@@ -779,7 +792,10 @@ def _fake_tools(
         if cmd[:2] == ["codesign", "--sign"]:
             scratch_name = Path(cmd[-1]).name  # pyright: ignore[reportUnknownArgumentType]
             rc = smoke_sign_rc if scratch_name == "signing-smoke" else acl_probe_rc
-            return subprocess.CompletedProcess(cmd, rc, b"", b"errSecInternalComponent")  # pyright: ignore[reportUnknownArgumentType]
+            stderr = (
+                smoke_sign_stderr if scratch_name == "signing-smoke" else b"errSecInternalComponent"
+            )
+            return subprocess.CompletedProcess(cmd, rc, b"", stderr)  # pyright: ignore[reportUnknownArgumentType]
         if cmd[:2] == ["codesign", "--force"] and sign_rc != 0:
             return subprocess.CompletedProcess(cmd, sign_rc, b"", b"errSecInternalComponent")  # pyright: ignore[reportUnknownArgumentType]
         return subprocess.CompletedProcess(cmd, 0, b"", b"")  # pyright: ignore[reportUnknownArgumentType]
@@ -1249,6 +1265,82 @@ def test_signing_smoke_refuses_a_codesign_failure(
         lifecycle.preflight_signing_smoke()
     assert "signing smoke failed — refusing to rebuild/deploy" in str(err.value)
     assert "errSecInternalComponent" in str(err.value)
+    assert lifecycle._SIGNING_REACH_REMEDY not in str(err.value)
+
+
+def test_signing_smoke_exit_25300_names_repair_and_present_search_list(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from services.permissions_helper import lifecycle
+
+    _stage_bundle(monkeypatch, tmp_path, exe_present=False)
+    recorded = _fake_tools(monkeypatch, authority=None, smoke_sign_rc=-25300)
+
+    with pytest.raises(lifecycle.PermissionsHelperBuildError) as err:
+        lifecycle.preflight_signing_smoke()
+    message = str(err.value)
+    assert lifecycle._SIGNING_REACH_REMEDY in message
+    assert "is present in the user keychain search list" in message
+    assert ["security", "list-keychains", "-d", "user"] in _argvs(recorded)
+
+
+def test_signing_smoke_item_not_found_text_names_repair(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from services.permissions_helper import lifecycle
+
+    _stage_bundle(monkeypatch, tmp_path, exe_present=False)
+    _fake_tools(
+        monkeypatch,
+        authority=None,
+        smoke_sign_rc=1,
+        smoke_sign_stderr=b"The specified item could not be found: errSecItemNotFound",
+    )
+
+    with pytest.raises(lifecycle.PermissionsHelperBuildError) as err:
+        lifecycle.preflight_signing_smoke()
+    assert lifecycle._SIGNING_REACH_REMEDY in str(err.value)
+
+
+def test_signing_smoke_item_not_found_names_missing_search_list_path(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from services.permissions_helper import lifecycle
+
+    _stage_bundle(monkeypatch, tmp_path, exe_present=False)
+    _fake_tools(
+        monkeypatch,
+        authority=None,
+        smoke_sign_rc=-25300,
+        list_keychains_output=b'  "/Library/Keychains/System.keychain"  \n',
+    )
+
+    with pytest.raises(lifecycle.PermissionsHelperBuildError) as err:
+        lifecycle.preflight_signing_smoke()
+    message = str(err.value)
+    assert lifecycle._SIGNING_REACH_REMEDY in message
+    assert "is missing from the user keychain search list" in message
+
+
+def test_signing_smoke_item_not_found_tolerates_unreadable_search_list(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from services.permissions_helper import lifecycle
+
+    _stage_bundle(monkeypatch, tmp_path, exe_present=False)
+    _fake_tools(
+        monkeypatch,
+        authority=None,
+        smoke_sign_rc=-25300,
+        list_keychains_rc=1,
+    )
+
+    with pytest.raises(lifecycle.PermissionsHelperBuildError) as err:
+        lifecycle.preflight_signing_smoke()
+    message = str(err.value)
+    assert "signing smoke failed — refusing to rebuild/deploy" in message
+    assert lifecycle._SIGNING_REACH_REMEDY in message
+    assert "user keychain search list is unreadable" in message
 
 
 def test_signing_smoke_refuses_when_requirement_cannot_be_read(
