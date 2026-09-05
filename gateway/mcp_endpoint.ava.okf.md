@@ -46,6 +46,8 @@ endpoint replaces over time.
   stored only as SHA-256 hashes in `mcp_clients`, and can be revoked through the
   cluster-authenticated `/api/mcp/clients` admin routes. A no-secret cluster
   still requires an MCP client token; cluster cookies and secrets never count.
+  Messages written through this boundary record `mcp_client:<id>` as their
+  server-verified credential fact without storing the token.
 - **Scope**: `read` clients may list/inspect agents, messages, and cluster
   status. `spawn_agent`, `send_message`, and `terminate_agent` require `write`.
 - **Roster reads**: `list_agents` starts from the same SQL-level agent summary

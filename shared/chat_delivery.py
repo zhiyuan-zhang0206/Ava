@@ -20,6 +20,7 @@ from shared.audit_events import insert_event_log
 from shared.caller_identity import caller_payload
 from shared.caller_protocol import require_caller_protocol
 from shared.db import fetch_one, publish_inbound_wake
+from shared.inbound_provenance import InboundProvenance, content_sha256, source_assertion_match
 
 
 class ClientMessageConflictError(ValueError):
@@ -117,6 +118,7 @@ def insert_chat_inbound_once(
     source: str,
     payload: dict[str, object] | None,
     client_message_id: str | None,
+    provenance: InboundProvenance | None = None,
 ) -> ChatInboundReceipt:
     """Insert one logical chat, or return its existing same-key inbound id."""
     with db.transaction():
@@ -128,6 +130,7 @@ def insert_chat_inbound_once(
             source=source,
             payload=payload,
             client_message_id=client_message_id,
+            provenance=provenance,
         )
     db.commit()
     if receipt.inserted:
@@ -143,18 +146,34 @@ def _insert_chat_inbound_once(
     source: str,
     payload: dict[str, object] | None,
     client_message_id: str | None,
+    provenance: InboundProvenance | None,
 ) -> ChatInboundReceipt:
     """The locked INSERT body; ownership cannot change before commit."""
     payload = caller_payload(source, payload)
     encoded_payload = json.dumps(payload) if payload else None
+    source_verified_by = provenance.source_verified_by if provenance is not None else None
+    source_transport = provenance.source_transport if provenance is not None else None
+    content_hash = content_sha256(content) if provenance is not None else None
+    assertion_match = source_assertion_match(source, provenance) if provenance is not None else None
     with db.cursor() as cur:
         cur.execute(
             "INSERT INTO inbound_messages "
-            "(agent_id, content, kind, source, payload, client_message_id) "
-            "VALUES (%s, %s, 'chat', %s, %s::jsonb, %s) "
+            "(agent_id, content, kind, source, payload, client_message_id, "
+            "source_verified_by, source_transport, content_hash, source_assertion_match) "
+            "VALUES (%s, %s, 'chat', %s, %s::jsonb, %s, %s, %s, %s, %s) "
             "ON CONFLICT (client_message_id) WHERE client_message_id IS NOT NULL "
             "DO NOTHING RETURNING id",
-            (agent_id, content, source, encoded_payload, client_message_id),
+            (
+                agent_id,
+                content,
+                source,
+                encoded_payload,
+                client_message_id,
+                source_verified_by,
+                source_transport,
+                content_hash,
+                assertion_match,
+            ),
         )
         inserted = cur.fetchone()
         if inserted is None:

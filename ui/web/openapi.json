@@ -6342,6 +6342,45 @@
           }
         }
       }
+    },
+    "/api/work-failed": {
+      "post": {
+        "summary": "Post Work Failed",
+        "description": "Record one failure and route it once without enforcing source assertions.",
+        "operationId": "post_work_failed_api_work_failed_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkFailedIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkFailedResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -14838,6 +14877,116 @@
           "type"
         ],
         "title": "ValidationError"
+      },
+      "WorkFailedIn": {
+        "properties": {
+          "repo": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Repo"
+          },
+          "ref": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Ref"
+          },
+          "commit_sha": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Commit Sha"
+          },
+          "stage": {
+            "type": "string",
+            "enum": [
+              "ci",
+              "qa",
+              "merge"
+            ],
+            "title": "Stage"
+          },
+          "summary": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Summary"
+          },
+          "author_agent_id": {
+            "type": "integer",
+            "exclusiveMinimum": 0.0,
+            "title": "Author Agent Id"
+          },
+          "dedup_key": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Dedup Key"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "repo",
+          "ref",
+          "commit_sha",
+          "stage",
+          "summary",
+          "author_agent_id",
+          "dedup_key"
+        ],
+        "title": "WorkFailedIn",
+        "description": "One producer-owned failure fact; identity is supplied by commit parsing."
+      },
+      "WorkFailedResult": {
+        "properties": {
+          "event_id": {
+            "type": "integer",
+            "title": "Event Id"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "delivered",
+              "task_alerted",
+              "duplicate"
+            ],
+            "title": "Status"
+          },
+          "delivered_to": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Delivered To"
+          },
+          "delivery_kind": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "author",
+                  "author_resurrected",
+                  "delegator",
+                  "task_alert"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Delivery Kind"
+          }
+        },
+        "type": "object",
+        "required": [
+          "event_id",
+          "status",
+          "delivered_to",
+          "delivery_kind"
+        ],
+        "title": "WorkFailedResult",
+        "description": "The durable event identity and the one routing outcome it reached."
       }
     }
   }

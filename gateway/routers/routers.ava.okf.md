@@ -7,7 +7,7 @@ tags: []
 
 # Gateway Routers
 
-Gateway's 38 route modules, split by business domain under `gateway/routers/<domain>.py`, each a FastAPI `APIRouter` `include_router`-mounted to `/api/*` at the bottom of `gateway/app.py` (grafana mounts outside `/api`). `_delivery.py` / `agents_forward.py` are not routers but internal helpers (chat-inbound delivery / cross-machine forward).
+Gateway's 43 route modules, split by business domain under `gateway/routers/<domain>.py`, each a FastAPI `APIRouter` `include_router`-mounted to `/api/*` at the bottom of `gateway/app.py` (grafana mounts outside `/api`). `_delivery.py` / `agents_forward.py` are not routers but internal helpers (chat-inbound delivery / cross-machine forward).
 
 ## Router categories
 
@@ -18,9 +18,10 @@ Gateway's 38 route modules, split by business domain under `gateway/routers/<dom
 - **run_timeline** (`/api/agents/{id}/run-timeline`) — event-driven run/turn view: reads bounded Loki history for one agent, joins `llm_usage` to `turn_end` by span ID when available and otherwise once by completed-turn time window; execution and anomaly events use the same time-window association. It returns turn rows or caller-selected time buckets with lifecycle, compact, idle, and failure markers, reports fallback and unmatched usage counts, and supports the default compact-ended or `session=current` lifecycle window. Missing lifecycle history falls back to the last 24 hours.
 - **agent_inspect** (`/api/agents/{id}/inspect` + `/inspect/live` + `/neighbors` + `/inspect/metrics`) — per-agent LLM cost/token/TPS + neighbor graph; inspect p50/p90 combine complete daily integer-second duration histograms (backfilled archive-era days bucketed) with an exact live tail; frozen-archive exact values only as a raw full-window fallback while daily histogram coverage is incomplete; min/max always exact; plus the plugin-metric inspector surface (`/inspect/metrics`, W13b: builds the metric registry in process — shipped plugin `metrics.py` modules + core definitions — renders `output`-inspector templates per agent, re-validates the rendered query, executes LogQL over Loki / SQL read-only over Postgres — see `shared/plugin_metrics.py` + the `deploy/lgtm` dashboards README)
 - **system** (`/api/system`, `/api/agents/{id}/system`, `/api/system/all`) — SSE broadcasting (see [[sse.ava.okf.md]])
-- **_delivery** — chat inbound delivery internal helper (not a router)
+- **_delivery** — chat inbound delivery internal helper (not a router); gateway callers attach server-owned credential, transport, content-hash, and source-assertion facts at the durable insert
 - **ops_monitor** (`/api/ops/monitor`) — time-bucketed ops panel series (SSE backlog / LLM latency+TPS / restart counts), see [[gateway/routers/ops-monitor.ava.okf.md]]
 - **alerts** (`/api/alerts` + `/stream` + `/read`) — the system→human alert store (Alertmanager shape, `alerts` table), unresolved-first list + counts, SSE tail, mark-as-read, IM fan-out via im_bridge [[gateway/routers/alerts.ava.okf.md]]
+- **work_failed** (`POST /api/work-failed`) — durable, deduplicated CI/QA/merge failure feedback routed to the author, nearest live birth-lineage delegator, or a P1 task alert [[gateway/routers/work-failed.ava.okf.md]]
 - **event_resolutions** (`/api/event-resolutions`) — authenticated immutable-Loki warning/error class dismissal history: create, status-filtered review list, and manual reopen; writes `event_dismissals` and emits transition markers, while the events-maintenance daemon publishes the resulting gauges
 
 ### Cluster & configuration

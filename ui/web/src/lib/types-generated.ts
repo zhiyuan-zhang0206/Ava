@@ -3594,6 +3594,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/work-failed": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Post Work Failed
+         * @description Record one failure and route it once without enforcing source assertions.
+         */
+        post: operations["post_work_failed_api_work_failed_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -7806,6 +7826,46 @@ export interface components {
             input?: unknown;
             /** Context */
             ctx?: Record<string, never>;
+        };
+        /**
+         * WorkFailedIn
+         * @description One producer-owned failure fact; identity is supplied by commit parsing.
+         */
+        WorkFailedIn: {
+            /** Repo */
+            repo: string;
+            /** Ref */
+            ref: string;
+            /** Commit Sha */
+            commit_sha: string;
+            /**
+             * Stage
+             * @enum {string}
+             */
+            stage: "ci" | "qa" | "merge";
+            /** Summary */
+            summary: string;
+            /** Author Agent Id */
+            author_agent_id: number;
+            /** Dedup Key */
+            dedup_key: string;
+        };
+        /**
+         * WorkFailedResult
+         * @description The durable event identity and the one routing outcome it reached.
+         */
+        WorkFailedResult: {
+            /** Event Id */
+            event_id: number;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "delivered" | "task_alerted" | "duplicate";
+            /** Delivered To */
+            delivered_to: string | null;
+            /** Delivery Kind */
+            delivery_kind: ("author" | "author_resurrected" | "delegator" | "task_alert") | null;
         };
     };
     responses: never;
@@ -12034,6 +12094,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    post_work_failed_api_work_failed_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkFailedIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkFailedResult"];
                 };
             };
             /** @description Validation Error */

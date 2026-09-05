@@ -222,6 +222,9 @@ from gateway.routers import (
 from gateway.routers import (
     uploads as uploads_router,
 )
+from gateway.routers import (
+    work_failed as work_failed_router,
+)
 from gateway.schedule_manager import ScheduleManager
 from gateway.session_store import session_is_valid, touch_session
 from shared.agents import AvaAgentError
@@ -546,11 +549,12 @@ _AUTH_BYPASS_PATHS: frozenset[str] = frozenset(
 )
 _AUTH_BYPASS_METHOD_PATHS: frozenset[tuple[str, str]] = frozenset(
     {
-        # Alert webhook (Grafana embedded Alertmanager) — authenticated by
+        # Ingest webhooks — authenticated by
         # its own token (X-Alerts-Token / X-Ops-Alerts-Token / cluster-secret
         # Bearer / loopback trust) inside the router, not by the
         # session/bearer middleware. Alert reads still require cluster auth.
         ("POST", "/api/alerts"),
+        ("POST", "/api/work-failed"),
     }
 )
 _STATE_CHANGING_METHODS: frozenset[str] = frozenset({"POST", "PUT", "PATCH", "DELETE"})
@@ -598,6 +602,7 @@ async def _cluster_auth_middleware(
 
     # This is set only by credential verification, never by caller/source JSON.
     request.state.auth_principal = None
+    request.state.source_verified_by = None
     secret = settings.data_plane.cluster_secret
     if not settings.gateway.auth_middleware_enabled or not secret:
         return await call_next(request)
@@ -627,6 +632,7 @@ async def _cluster_auth_middleware(
         cookie_token,
     ):
         request.state.auth_principal = AuthPrincipal("cluster", "administrator")
+        request.state.source_verified_by = "user_session"
         origin = request.headers.get("Origin")
         # Origin is checked only after valid cookie auth; without it, the request
         # reaches 401 unless another explicit credential authenticates it.
@@ -661,6 +667,7 @@ async def _cluster_auth_middleware(
     authorization = request.headers.get("Authorization")
     if verify_bearer(authorization, secret):
         request.state.auth_principal = AuthPrincipal("cluster", "administrator")
+        request.state.source_verified_by = "cluster_bearer"
         return await call_next(request)
 
     _log_auth401_rejection(request)
@@ -770,6 +777,7 @@ app.include_router(tasks_router.router)
 app.include_router(plugin_ui_router.router)
 app.include_router(ui_contributions_router.router)
 app.include_router(uploads_router.router)
+app.include_router(work_failed_router.router)
 
 # /mcp — MCP control plane (design task #1212 step 1). Mounted always; the
 # wrapper answers 404 while settings.gateway.mcp_endpoint_enabled is off, so

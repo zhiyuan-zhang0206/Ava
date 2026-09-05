@@ -33,6 +33,7 @@ from fastapi import APIRouter, File, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse
 from psycopg_pool import ConnectionPool
 
+from gateway.inbound_provenance import request_inbound_provenance
 from gateway.routers._delivery import deliver_chat_inbound
 from gateway.schemas import UploadedBatch, UploadedFile
 from shared.agents import AgentNotFound
@@ -266,7 +267,10 @@ async def upload_files(
                 lines.append(f"- {path} ({f.size} bytes)")
             message = f"{len(saved)} files uploaded:\n" + "\n".join(lines)
         await deliver_chat_inbound(
-            request.app.state.db_pool, agent_id, prepare=lambda _conn: message
+            request.app.state.db_pool,
+            agent_id,
+            prepare=lambda _conn: message,
+            provenance=request_inbound_provenance(request),
         )
 
     return UploadedBatch(files=saved)
