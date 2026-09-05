@@ -17,6 +17,12 @@ from shared.lm._concurrency import (
     known_provider_keys,
     parse_limits,
 )
+from shared.lm._plugin_providers import ensure_provider_plugins_loaded
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _load_provider_plugins() -> None:
+    ensure_provider_plugins_loaded()
 
 
 def test_deepseek_concurrency_cap_is_enabled_by_default() -> None:
@@ -73,24 +79,22 @@ def test_parse_limits_missing_colon_fails_fast() -> None:
         parse_limits("deepseek400")
 
 
-def test_known_provider_keys_derive_from_factory_prefixes() -> None:
-    """The accepted keys DERIVE from the factory's model-prefix map (minus
+def test_known_provider_keys_derive_from_all_provider_prefixes() -> None:
+    """The accepted keys derive from the merged provider-prefix map (minus
     any trailing dash) — single source, so a new provider is accepted by the
     limiter the moment the catalog knows it (audit 2026-08-08 P2: the old
     explicit list drifted in the one direction parse_limits cannot catch)."""
-    from shared.lm.factory import _MODEL_KEY_MAP
+    from shared.lm.factory import provider_key_map
 
-    assert known_provider_keys() == {p.rstrip("-") for p in _MODEL_KEY_MAP}
+    assert known_provider_keys() == {p.rstrip("-") for p in provider_key_map()}
     # and the parse path accepts exactly those
     csv = ",".join(f"{k}:1" for k in sorted(known_provider_keys()))
     assert set(parse_limits(csv)) == known_provider_keys()
 
 
-def test_dashless_prefix_keeps_its_last_letter() -> None:
-    """`qwen` is the one prefix with no trailing dash (Alibaba versions inside
-    the family name: qwen3.8-max), so the key derivation must strip a dash only
-    where there is one — a blanket `[:-1]` would publish `qwe`, and a cap the
-    operator wrote as `qwen:8` would then fail to parse."""
+def test_qwen_binding_keeps_its_public_provider_key() -> None:
+    """Qwen's legal dispatch prefix is `qwen3.8-`, but its registry and
+    concurrency key remains the stable public `qwen` value."""
     from shared.lm.factory import provider_key_of_model
 
     assert "qwen" in known_provider_keys()

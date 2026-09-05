@@ -52,8 +52,8 @@ def _provider_keys() -> frozenset[str]:
 
 def known_provider_keys() -> frozenset[str]:
     """The provider keys `AVA_LLM_MAX_CONCURRENT` accepts — DERIVED from
-    `shared/lm/factory.py:provider_key_map` (core + plugin prefixes, with a
-    trailing dash stripped when present), the model catalog's single source
+    `shared/lm/factory.py:provider_key_map` (plugin prefixes, with a trailing
+    dash stripped when present), the provider registry's single source
     (audit 2026-08-08 P2: the old explicit list drifted in exactly the one
     direction a config parse cannot catch — factory gained a provider and the
     limiter silently passed it through). Lazy import + lru_cache:

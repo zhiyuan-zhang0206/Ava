@@ -12,9 +12,14 @@ tags:
 # Provider Plugin Mechanics
 
 `provider_api.py` is the shared extension contract and `_plugin_providers.py`
-loads each enabled plugin's `provider.py` lazily, once, and under a lock. This
-path is independent of `plugin.py`: the gateway, labeler, and eval harness need
-provider bindings even though they do not import agent-side plugin code.
+loads each enabled plugin's `provider.py` lazily, once, and under a lock.
+Discovery identity remains the sibling `plugin.py`, but provider loading does
+not import that agent-side module: gateway, labeler, and eval harness need the
+binding without an agent runtime.
+Core registers no binding or chat-model fallback. The eight repository `lm_*`
+plugins are enabled by default, and gateway startup calls the loader eagerly;
+an empty binding registry raises before the once flag is set so recovery is
+retryable after the enable configuration is fixed.
 
 ## Registration
 
@@ -23,17 +28,18 @@ provider bindings even though they do not import agent-side plugin code.
   model id must begin with its binding prefix. Prices must name a registered
   model; they must be finite, non-negative, HTTPS-provenanced, and carry a
   YYYY-MM-DD source-check date.
-- `ModelSpec` entries merge into `MODELS` in place and receive the same
-  facts/price/effort validation as the core roster. The derived
+- `ModelSpec` entries merge into the initially empty `MODELS` table in place and
+  receive the same facts/price/effort validation. The derived
   `SUPPORTED_MODELS`, `MODEL_CONTEXT_WINDOW`, `MODEL_KNOWLEDGE_CUTOFF`, and
   `MODEL_IDENTITY` views rebuild in place, so existing import sites see the
   plugin. Provider registration also invalidates `_concurrency`'s known-key
   cache.
-- Plugin rates live in the plugin price table: `rates_at` selects catalog,
-  plugin, then retired rates. `MODEL_PRICING` includes current catalog and
-  plugin prices, never retired-history entries. A binding optionally registers
-  a terminal-reason `StopSpec` when its client emits an unseen
-  `model_provider`.
+- Plugin rates are the runtime source for chat models. Registration removes an
+  overlapping archive row from the in-memory catalog view; `rates_at` therefore
+  selects plugin rates for bound chat models, archive rates for catalog-only
+  services, then retired rates. `MODEL_PRICING` excludes retired-history
+  entries. The plugin that owns a client class registers its terminal-reason
+  `StopSpec`; compatible bindings share that emitted `model_provider` key.
 
 ## Builder and key contract
 

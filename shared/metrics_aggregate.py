@@ -34,6 +34,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from shared.lm._plugin_providers import ensure_provider_plugins_loaded
 from shared.lm.pricing import cost_usd
 from shared.metrics import (
     MetricSection,
@@ -432,6 +433,7 @@ def _llm_totals_from_models(rows: list[tuple[str, int, int, int, int, int]]) -> 
     """Token + cost totals from per-model sums — cost_usd is linear in tokens
     per model, so pricing the summed tokens once per model equals the per-row
     loop (`_llm_totals`) exactly; every call on an unpriced model is unpriced."""
+    ensure_provider_plugins_loaded()
     calls = sum(r[1] for r in rows)
     tin = sum(r[2] for r in rows)
     tout = sum(r[3] for r in rows)
@@ -648,6 +650,7 @@ def build_report_from_aggregate(
 def agent_rollups_from_aggregate(agg: EventAggregate) -> dict[int, dict[str, Any]]:
     """Per-agent headline counters for `/api/metrics/agents` — the same shape
     `agent_rollup` produces per agent, from the aggregate fetch."""
+    ensure_provider_plugins_loaded()
     out: dict[int, dict[str, Any]] = {}
     for aid, row in agg.per_agent.items():
         if aid is None:

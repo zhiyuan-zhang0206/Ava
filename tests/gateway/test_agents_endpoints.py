@@ -119,10 +119,10 @@ def test_get_models_every_model_has_reasoning_effort_control() -> None:
 def test_get_models_reasoning_effort_options_match_factory_tables() -> None:
     """Gateway's per-model effort option lists come straight off the registry
     (`ModelSpec.effort_levels`), and the registry values for the OpenAI-style
-    providers must mirror the factory's per-provider clamp tables — a drift
+    providers must mirror their plugin binding's clamp vocabularies — a drift
     would silently offer the spawn UI a value build_chat_model then clamps
     away, or hide a value the provider actually accepts."""
-    from shared.lm._effort import _PROVIDER_EFFORT_LEVELS
+    from shared.lm import provider_api
     from shared.lm.registry import MODELS
 
     with TestClient(app) as client:
@@ -136,9 +136,9 @@ def test_get_models_reasoning_effort_options_match_factory_tables() -> None:
         assert info["reasoning_effort_options"] == list(expected_levels), model
 
     # And the registry vocabulary for the OpenAI-style providers matches the
-    # per-provider wire clamp, so UI options and clamp cannot diverge.
+    # plugin binding's wire clamp, so UI options and clamp cannot diverge.
     # Providers whose whole registry shares one vocabulary mirror the
-    # per-provider wire clamp table exactly (UI options == clamp). Gemini
+    # binding vocabulary exactly (UI options == clamp). Gemini
     # diverged deliberately: the agent build path clamps per model
     # (`ModelSpec.effort_levels`), so a model's options equal its own registry
     # vocabulary (verified in the loop above), and the provider-wide table is
@@ -146,13 +146,33 @@ def test_get_models_reasoning_effort_options_match_factory_tables() -> None:
     # The gemini invariant is that every declared vocabulary stays a subset of
     # that fallback — a model must never accept a level the fallback cannot
     # express.
-    for provider in ("kimi", "glm", "mimo", "qwen"):
-        expected = list(_PROVIDER_EFFORT_LEVELS[provider])
-        provider_models = [m for m, info in models.items() if info["provider"] == provider]
-        assert provider_models, f"no models registered for provider {provider!r}"
-        for model in provider_models:
-            assert models[model]["reasoning_effort_options"] == expected, model
-    gemini_fallback = set(_PROVIDER_EFFORT_LEVELS["gemini"])
+    mimo_binding_levels = provider_api.REGISTRY.bindings["mimo-"].effort_levels
+    assert mimo_binding_levels is not None
+    mimo_models = [m for m, info in models.items() if info["provider"] == "mimo"]
+    assert mimo_models, "no mimo models registered for the binding check"
+    for model in mimo_models:
+        assert models[model]["reasoning_effort_options"] == list(mimo_binding_levels), model
+    kimi_binding_levels = provider_api.REGISTRY.bindings["kimi-"].effort_levels
+    assert kimi_binding_levels is not None
+    kimi_models = [m for m, info in models.items() if info["provider"] == "kimi"]
+    assert kimi_models, "no kimi models registered for the binding check"
+    for model in kimi_models:
+        assert models[model]["reasoning_effort_options"] == list(kimi_binding_levels), model
+    glm_binding_levels = provider_api.REGISTRY.bindings["glm-"].effort_levels
+    assert glm_binding_levels is not None
+    glm_models = [m for m, info in models.items() if info["provider"] == "glm"]
+    assert glm_models, "no glm models registered for the binding check"
+    for model in glm_models:
+        assert models[model]["reasoning_effort_options"] == list(glm_binding_levels), model
+    qwen_binding_levels = provider_api.REGISTRY.bindings["qwen3.8-"].effort_levels
+    assert qwen_binding_levels is not None
+    qwen_models = [m for m, info in models.items() if info["provider"] == "qwen"]
+    assert qwen_models, "no qwen models registered for the binding check"
+    for model in qwen_models:
+        assert models[model]["reasoning_effort_options"] == list(qwen_binding_levels), model
+    gemini_binding_levels = provider_api.REGISTRY.bindings["gemini-"].effort_levels
+    assert gemini_binding_levels is not None
+    gemini_fallback = set(gemini_binding_levels)
     gemini_models = [m for m, info in models.items() if info["provider"] == "gemini"]
     assert gemini_models, "no gemini models registered for the subset check"
     for model in gemini_models:

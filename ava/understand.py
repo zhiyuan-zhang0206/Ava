@@ -43,9 +43,9 @@ from ava import files as _files
 from ava._batch import DEFAULT_BATCH_MAX_CONCURRENT, run_batch, validate_max_concurrent
 from ava._sdk_validation import coerce_str
 from shared.config import settings
+from shared.lm import provider_api
 from shared.lm._call import invoke_text
 from shared.lm._effort import (
-    _PROVIDER_EFFORT_LEVELS,
     ReasoningEffort,
     _clamp_effort,
     coerce_effort,
@@ -425,7 +425,17 @@ def _call_media(content: list[Any], *, mime: str, effort: str | ReasoningEffort)
 
     thinking_level = settings.lm.understand_media_thinking_level
     if effort != ReasoningEffort.MAX:
-        thinking_level = _clamp_effort(effort, _PROVIDER_EFFORT_LEVELS["gemini"], target="gemini")
+        binding = next(
+            binding
+            for prefix, binding in provider_api.REGISTRY.bindings.items()
+            if model.startswith(prefix)
+        )
+        levels = binding.effort_levels
+        if levels is None:
+            raise UnderstandError(
+                f"media model {model!r} does not declare a reasoning-effort vocabulary"
+            )
+        thinking_level = _clamp_effort(effort, levels, target="gemini")
     try:
         llm = build_chat_model(
             model,

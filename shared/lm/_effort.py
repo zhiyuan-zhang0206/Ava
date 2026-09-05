@@ -1,63 +1,22 @@
-"""Per-provider reasoning-effort dispatch for build_chat_model.
+"""Cross-provider reasoning-effort vocabulary and clamping.
 
 Split out of `shared/lm/factory.py` (its companion module — factory re-exports
-these names, so callers and tests keep importing from factory). Per-MODEL facts
-(output caps, per-model effort vocabularies, the extended-thinking-only flag)
-live in `shared/lm/registry.py`; this module keeps the per-PROVIDER wire
-concerns:
-
-- **Effort dispatch** (`_clamp_effort` + `_PROVIDER_EFFORT_LEVELS`): the
-  cross-provider `AVA_REASONING_EFFORT` vocabulary is mapped onto what each
-  provider's endpoint actually accepts; out-of-range values clamp (logged),
-  unknown strings fail fast at build time instead of surfacing as a provider
-  400 after the agent is already running.
-- **Binary-thinking resolvers** (`mimo_extra_body` / `qwen_extra_body` /
-  `claude_extended_thinking_kwarg`): for providers/models with no graded effort
-  field, only a thinking on/off switch (mimo, qwen; extended-thinking-only
-  claude models), these fold the clamp + switch-selection logic that
-  build_chat_model's branches would otherwise inline.
+these names, so callers and tests keep importing from factory). Provider plugins
+own endpoint vocabularies and wire switches. This module keeps only the shared
+``AVA_REASONING_EFFORT`` vocabulary, its public SDK enum/coercion surface, and
+the clamp that maps a cross-provider value onto a plugin's declared levels.
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from enum import StrEnum
-from typing import Any
 
 from loguru import logger
 
-from shared.lm.registry import MODELS
-
-# Budget used when AVA_REASONING_EFFORT clamps an extended-thinking-only claude
-# model to its "on" tier and no explicit AVA_CLAUDE_THINKING_BUDGET_TOKENS is
-# configured (0 = unset). Anthropic's minimum is 1024; this sits well under
-# haiku-4-5's 64K max_tokens cap with headroom left for the actual response.
-_CLAUDE_EXTENDED_THINKING_DEFAULT_BUDGET = 8192
-
-# Per-provider clamp targets for the cross-provider AVA_REASONING_EFFORT knob
-# on the OpenAI-style branches. gemini's tuple is its `thinking_level`
-# vocabulary — same clamp, different wire field. mimo's official
-# chat-completions reference documents no reasoning_effort field, only a
-# body-level thinking.type enabled/disabled toggle — so its tuple is a binary
-# "none"/"high": "none" sends thinking.type=disabled, anything else leaves the
-# provider default (thinking already on) untouched. Keyed by provider because
-# the vocabulary is an endpoint contract shared by every model of the
-# provider; the claude branch clamps per model instead
-# (`ModelSpec.effort_levels`) since claude models genuinely diverge.
-_PROVIDER_EFFORT_LEVELS: dict[str, tuple[str, ...]] = {
-    "gemini": ("minimal", "low", "medium", "high"),
-    "kimi": ("low", "high", "max"),
-    "glm": ("low", "high", "max"),
-    "mimo": ("none", "high"),
-    # Qwen's compatible-mode endpoint grades reasoning by a TOKEN budget
-    # (`thinking_budget`), not by a level enum — the OpenAI-standard
-    # `reasoning_effort` string is documented only for DashScope's Responses
-    # API, which Ava does not bind. So the knob's only wire effect here is the
-    # `enable_thinking` on/off switch, and the vocabulary is the same binary
-    # mimo carries: "none" sends enable_thinking=false, anything else leaves
-    # the model's own default (thinking already on for the registered roster).
-    "qwen": ("none", "high"),
-}
+# Core owns no provider-specific effort vocabularies; plugins declare them on
+# their bindings. The empty compatibility table remains as a cross-provider
+# import surface.
+_PROVIDER_EFFORT_LEVELS: dict[str, tuple[str, ...]] = {}
 
 # The cross-provider AVA_REASONING_EFFORT vocabulary, ordered weakest →
 # strongest. Superset of the public `ReasoningEffort` enum — the extra
@@ -143,86 +102,3 @@ def _clamp_effort(effort: str, allowed: tuple[str, ...], *, target: str) -> str:
         clamped=clamped,
     )
     return clamped
-
-
-def mimo_extra_body(*, thinking: Mapping[str, Any] | None, reasoning_effort: str) -> dict[str, Any]:
-    """Resolve the mimo branch's `extra_body` kwarg.
-
-    Caller-explicit `thinking={"type":"disabled"}` (short-text paths) wins
-    outright. Otherwise `reasoning_effort` clamped onto
-    `_PROVIDER_EFFORT_LEVELS["mimo"]` toggles the same body switch: "none"
-    disables thinking, "high" is the provider default (already on — nothing
-    to send). Empty dict = no override, provider default applies.
-    """
-    if thinking is not None and thinking.get("type") == "disabled":
-        return {"thinking": {"type": "disabled"}}
-    if reasoning_effort:
-        tier = _clamp_effort(reasoning_effort, _PROVIDER_EFFORT_LEVELS["mimo"], target="mimo")
-        if tier == "none":
-            return {"thinking": {"type": "disabled"}}
-    return {}
-
-
-def qwen_extra_body(*, thinking: Mapping[str, Any] | None, reasoning_effort: str) -> dict[str, Any]:
-    """Resolve the qwen branch's `extra_body` kwarg.
-
-    Same shape as `mimo_extra_body` on a different wire switch: DashScope's
-    compatible-mode endpoint carries thinking on the top-level `enable_thinking`
-    boolean. Caller-explicit `thinking={"type":"disabled"}` (short-text paths)
-    wins outright; otherwise `reasoning_effort` clamped onto
-    `_PROVIDER_EFFORT_LEVELS["qwen"]` toggles the same switch — "none" sends
-    `enable_thinking=False`, "high" is the registered roster's own default
-    (already on — nothing to send). Empty dict = no override.
-    """
-    if thinking is not None and thinking.get("type") == "disabled":
-        return {"enable_thinking": False}
-    if reasoning_effort:
-        tier = _clamp_effort(reasoning_effort, _PROVIDER_EFFORT_LEVELS["qwen"], target="qwen")
-        if tier == "none":
-            return {"enable_thinking": False}
-    return {}
-
-
-def deepseek_wire_effort(effort: str, levels: tuple[str, ...], *, target: str) -> str | None:
-    """Resolve a cross-provider effort onto DeepSeek's `output_config.effort`.
-
-    None means "no reasoning": DeepSeek's wire vocabulary is graded levels only
-    and carries no `none` variant (sending one 400s with ``unknown variant
-    `none` ``), so off is the endpoint's thinking switch instead — the caller's
-    job. Every other value clamps onto `levels`, which is what keeps a global
-    effort this model does not accept from reaching the wire unclamped.
-    """
-    if effort == "none":
-        return None
-    return _clamp_effort(effort, levels, target=target)
-
-
-def claude_extended_thinking_kwarg(
-    model: str,
-    *,
-    thinking: Mapping[str, Any] | None,
-    budget_tokens: int,
-    reasoning_effort: str,
-) -> dict[str, Any] | None:
-    """Resolve the `thinking` kwarg for extended-thinking-only claude models
-    (`ModelSpec.extended_thinking_only`, currently haiku-4-5) when the caller
-    passed none explicitly.
-
-    `budget_tokens` (the resolved claude_thinking_budget_tokens, an explicit
-    numeric budget) wins when set; otherwise `reasoning_effort` clamped onto
-    the model's binary `effort_levels` ("none"/"high") opts in at
-    `_CLAUDE_EXTENDED_THINKING_DEFAULT_BUDGET` — these models have no `effort`
-    wire field, so this is the knob's only effect on them. None = leave
-    thinking unset (provider default OFF); also None for any model that is not
-    extended-thinking-only or when the caller already set `thinking`.
-    """
-    spec = MODELS.get(model)
-    if thinking is not None or spec is None or not spec.extended_thinking_only:
-        return None
-    if budget_tokens > 0:
-        return {"type": "enabled", "budget_tokens": budget_tokens}
-    if reasoning_effort:
-        levels = spec.effort_levels
-        if levels is not None and _clamp_effort(reasoning_effort, levels, target=model) != "none":
-            return {"type": "enabled", "budget_tokens": _CLAUDE_EXTENDED_THINKING_DEFAULT_BUDGET}
-    return None

@@ -16,6 +16,10 @@ gateway's per-model views). Import order is sorted plugin names — deterministi
 rather than filesystem-order. A provider.py that fails to import or register
 raises out of the triggering call: an enabled plugin whose provider code is
 broken fails the process loudly, never silently omits its models.
+
+Core registers no providers. At least one enabled provider plugin must bind at
+load time; an empty registry raises before the once flag is set, so correcting
+the enable configuration can be retried in the same process.
 """
 
 from __future__ import annotations
@@ -66,18 +70,21 @@ def ensure_provider_plugins_loaded() -> None:
     """Import every enabled plugin's ``provider.py``, once per process.
 
     Idempotent and thread-safe (the gateway serves spawn endpoints from a
-    thread pool; two concurrent first calls must not double-register).
+    thread pool; two concurrent first calls must not double-register). Core
+    contributes no fallback binding, so loading zero providers is a retryable
+    startup error.
     """
     with _lock:
         if _STATE.loaded:
             return
         from shared import paths, plugins_config
         from shared.lm import provider_api
+        from shared.lm import registry as model_registry
         from shared.lm.factory import _MODEL_KEY_MAP
 
         # Bootstrap can be the first provider consumer. Importing factory here
-        # establishes its core-prefix reservation before any plugin registers;
-        # otherwise bootstrap-first startup could let a plugin claim `claude-`.
+        # applies the same core-prefix reservation contract before any plugin
+        # registers; the set is empty once every provider is plugin-owned.
         provider_api.REGISTRY.reserve_core_prefixes(set(_MODEL_KEY_MAP))
 
         discovered = plugins_config._discover_plugins()
@@ -95,6 +102,18 @@ def ensure_provider_plugins_loaded() -> None:
                 continue
             is_builtin = repo_dir in str(plugin_dir.resolve())
             _load_one(name, provider_py, is_builtin=is_builtin)
+        if not provider_api.REGISTRY.bindings:
+            raise RuntimeError(
+                "no provider plugins enabled — enable at least one provider plugin "
+                "(the repo ships the lm_* default set; check the plugin enable config)"
+            )
+        anthropic_protocol_by_model = {
+            model_id: binding.anthropic_protocol
+            for prefix, binding in provider_api.REGISTRY.bindings.items()
+            for model_id in model_registry.MODELS
+            if model_id.startswith(prefix)
+        }
+        model_registry._validate_registry(anthropic_protocol_by_model=anthropic_protocol_by_model)
         _STATE.loaded = True
 
 

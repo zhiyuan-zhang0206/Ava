@@ -693,7 +693,7 @@ def test_labeler_boot_without_profile_marker_reads_provider_key_from_env(
     allowlist — cluster-scope provider keys deliberately NOT forwarded, and no
     AVA_PROCESS_PROFILE marker after the ops.spec opt-out, task #1230) boots
     against a unit .env that declares DEEPSEEK_API_KEY; the key must resolve
-    through settings.lm.deepseek_api_key.
+    through the DeepSeek provider plugin's DEEPSEEK_API_KEY environment seam.
 
     This is the regression test for the labeler's RuntimeError('DEEPSEEK_API_KEY
     not set') retry loop: the .env re-source (F-s4-4 force branch) restores the
@@ -715,7 +715,7 @@ def test_labeler_boot_without_profile_marker_reads_provider_key_from_env(
         assert os.environ["DEEPSEEK_API_KEY"] == "sk-labeler-test"
 
         # A fresh (profile-less) Settings reads the key — the exact read the
-        # labeler daemon performs via build_chat_model -> settings.lm.deepseek_api_key.
+        # labeler daemon performs via build_chat_model -> plugin require_key.
         from shared.config import Settings
 
         fresh = Settings(profile=None)
