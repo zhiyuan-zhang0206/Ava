@@ -789,6 +789,7 @@ jobs:
           security create-keychain -p ci-ava-signing "$AVA_SIGNING_KEYCHAIN"
           security unlock-keychain -p ci-ava-signing "$AVA_SIGNING_KEYCHAIN"
           security list-keychains -d user -s "$AVA_SIGNING_KEYCHAIN"
+          security default-keychain -s "$AVA_SIGNING_KEYCHAIN"
           echo "AVA_PERMISSIONS_HELPER_KEYCHAIN=$AVA_SIGNING_KEYCHAIN" >> "$GITHUB_ENV"
 
       - name: Real build + sign + DR verify
@@ -819,6 +820,7 @@ jobs:
               check=True,
           )
           subprocess.run(["security", "list-keychains"], check=True)
+          subprocess.run(["security", "find-identity", "-v", "-p", "codesigning"], check=True)
 
           app, rebuilt = lifecycle.build_and_sign()
           assert rebuilt is True, "the isolated first build must compile and sign"
