@@ -221,14 +221,29 @@ def _check_prefix(
             )
 
 
+def provider_key_present(key_env: str) -> bool:
+    """Whether the live process env carries ``key_env``.
+
+    The env half of the spawn-boundary channel (``_ensure_provider_key``):
+    a pure agent-runner receives provider keys from ``/api/bootstrap``
+    injected into os.environ (no materialized .env cluster facts since
+    2026-08-01); the gateway loads its own ``.env`` into the process env at
+    boot. Callers combine this with the ``.env``-file fallback.
+    """
+    import os
+
+    return bool(os.environ.get(key_env))
+
+
 def require_key(key_env: str) -> str:
     """Read a plugin provider's API key from the process environment, failing
     fast with the same posture as the core builders.
 
-    The gateway's spawn-boundary check (``_ensure_provider_key``) reads the
-    cluster's ``.env`` file; a split agent-runner receives the key through
-    ``/api/bootstrap`` (plugin-secrets section) into ``os.environ`` before any
-    build. This helper is the build-time half of that channel.
+    The spawn-boundary check (``_ensure_provider_key``) reads os.environ
+    first, then the unit's ``.env`` file fallback; a pure agent-runner
+    receives the key through ``/api/bootstrap`` (plugin-secrets section) into
+    ``os.environ`` before any build. This helper is the build-time half of
+    the same channel.
     """
     import os
 
