@@ -11,6 +11,7 @@ from uuid import uuid4
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
+from shared import redis_client
 from shared._impersonation_store import (
     OPEN,
     authenticate,
@@ -28,8 +29,10 @@ from shared._impersonation_store import (
     ImpersonationError as ImpersonationError,
 )
 from shared.caller_identity import CallerIdentity
+from shared.config import settings
 from shared.db import publish_inbound_wake
 from shared.db_transaction import write_transaction
+from shared.live_events import Cancelled
 from shared.machine import machine_name
 from shared.runtime_incarnation import RuntimeIncarnation
 
@@ -277,7 +280,7 @@ def inbox(lease_id: str, token: str, *, limit: int = 100) -> list[dict[str, Any]
         with conn.cursor(row_factory=dict_row) as cur:
             cur.execute(
                 "SELECT id,content,kind,source,payload,created_at FROM inbound_messages "
-                "WHERE agent_id=%s AND status='pending' AND kind IN ('chat','system_note') "
+                "WHERE agent_id=%s AND status='pending' AND kind IN ('chat','system_note','cancel') "
                 "ORDER BY id LIMIT %s",
                 (lease["agent_id"], limit),
             )
@@ -302,15 +305,21 @@ def ack(lease_id: str, token: str, message_ids: list[int]) -> None:
         ).fetchall()
         if {row[0] for row in rows} != set(message_ids):
             raise ImpersonationError("ACK contains messages not read by this impersonation")
-        conn.execute(
+        acknowledged = conn.execute(
             "UPDATE inbound_messages SET status='done' WHERE agent_id=%s AND id=ANY(%s) "
-            "AND status='pending'",
+            "AND status='pending' RETURNING kind",
             (lease["agent_id"], message_ids),
-        )
+        ).fetchall()
         conn.execute(
             "UPDATE agent_impersonation_messages SET acknowledged_at=clock_timestamp() "
             "WHERE lease_id=%s AND inbound_id=ANY(%s)",
             (lease_id, message_ids),
+        )
+    if any(row[0] == "cancel" for row in acknowledged):
+        redis_client.publish_best_effort_sync(
+            settings.data_plane.events_channel,
+            Cancelled(agent_id=lease["agent_id"]).model_dump_json(),
+            context="impersonation_cancel_ack",
         )
     _wake(lease["agent_id"])
 

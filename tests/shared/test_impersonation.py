@@ -11,7 +11,9 @@ from psycopg import sql
 
 from shared import impersonation as leases
 from shared.caller_identity import CallerIdentity
+from shared.config import settings
 from shared.db import create_agent, insert_inbound_message
+from shared.live_events import Cancelled
 from shared.machine import machine_name
 from shared.runtime_incarnation import RuntimeIncarnation
 
@@ -108,6 +110,64 @@ def test_inbox_ack_and_atomic_real_sender_handoff(db_conn: psycopg.Connection) -
     db_conn.commit()
     assert leases.release(lease["id"], lease["token"], "Retry") == result
     assert db_conn.execute("SELECT count(*) FROM inbound_messages").fetchone() == (3,)
+
+
+def test_external_inbox_preserves_cancel_until_explicit_processing_ack(
+    db_conn: psycopg.Connection,
+) -> None:
+    owner = _agent(db_conn)
+    lease = _active(owner)
+    cancel = insert_inbound_message(
+        db_conn, owner.agent_id, "Stop current work", "user", kind="cancel"
+    )
+    assert [(m["id"], m["kind"]) for m in leases.inbox(lease["id"], lease["token"])] == [
+        (cancel, "cancel")
+    ]
+    assert db_conn.execute(
+        "SELECT status FROM inbound_messages WHERE id=%s", (cancel,)
+    ).fetchone() == ("pending",)
+    db_conn.commit()
+    leases.ack(lease["id"], lease["token"], [cancel])
+    assert db_conn.execute(
+        "SELECT status FROM inbound_messages WHERE id=%s", (cancel,)
+    ).fetchone() == ("done",)
+
+
+def test_cancel_ack_publishes_committed_completion_once(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    owner = _agent(db_conn)
+    lease = _active(owner)
+    cancel = insert_inbound_message(db_conn, owner.agent_id, "Stop", "user", kind="cancel")
+    peer = insert_inbound_message(db_conn, owner.agent_id, "Peer work", "agent:99")
+    leases.inbox(lease["id"], lease["token"])
+    unread = insert_inbound_message(db_conn, owner.agent_id, "Unread", "user", kind="cancel")
+    published: list[Cancelled] = []
+
+    def publish(channel: str, payload: str, *, context: str = "") -> int:
+        assert channel == settings.data_plane.events_channel
+        # A separate connection must see both writes before the UI is told
+        # the external actor completed cancellation.
+        assert db_conn.execute(
+            "SELECT i.status,m.acknowledged_at IS NOT NULL FROM inbound_messages i "
+            "JOIN agent_impersonation_messages m ON m.inbound_id=i.id "
+            "WHERE i.id=%s AND m.lease_id=%s",
+            (cancel, lease["id"]),
+        ).fetchone() == ("done", True)
+        db_conn.commit()
+        published.append(Cancelled.model_validate_json(payload))
+        return 1
+
+    monkeypatch.setattr("shared.redis_client.publish_best_effort_sync", publish)
+    with pytest.raises(leases.ImpersonationError, match="not read"):
+        leases.ack(lease["id"], lease["token"], [cancel, unread])
+    assert published == []
+    leases.ack(lease["id"], lease["token"], [peer])
+    assert published == []
+    leases.ack(lease["id"], lease["token"], [cancel])
+    assert published == [Cancelled(agent_id=owner.agent_id)]
+    leases.ack(lease["id"], lease["token"], [cancel, peer])
+    assert len(published) == 1
 
 
 def test_ttl_revokes_all_borrower_operations_and_preserves_pending(

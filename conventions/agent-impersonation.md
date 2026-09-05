@@ -58,6 +58,11 @@ and item cursors to read older history. This works without impersonating the age
 The API preserves its existing UI read behavior: a checkpoint read failure can
 produce an empty view, so an empty result alone does not establish an empty agent.
 
+`ava.agents.get_status()` still reports the parked native runtime, which can be
+`idling` while the external host works. Existing idle watchers do not track
+external model turns. Use explicit completion messages or the return handoff
+to judge external work; host busy/idle mirroring is outside this first version.
+
 ## Use the agent's SDK from local Python
 
 The external model continues to use its own native tools. Where Ava context or
@@ -115,6 +120,12 @@ only the IDs actually handled; unacknowledged rows remain available after releas
 The CLI uses the existing Redis inbound listener and a durable database recheck.
 For automatic same-session wake-up, use the [Codex and Claude host relay](agent-impersonation-hosts.md).
 The relay sends availability hints and never acknowledges work for the external model.
+
+An inbox row with `kind="cancel"` asks the controller to stop its current work.
+Stop that work and explicitly ACK the request; an unacknowledged cancel remains
+for native processing when control returns. This reaches the external model at
+its next processing opportunity. To interrupt an in-flight external tool
+immediately, use that Codex or Claude session's own stop control.
 
 ## Return control
 

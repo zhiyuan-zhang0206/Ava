@@ -252,6 +252,13 @@ async def test_replacement_host_adopts_held_agent_without_model(
     await host.run_turn(agent_id)
     expected = "expired" if control == "terminate" else "active"
     assert leases.get(lease["id"], lease["token"])["status"] == expected
+    if control == "cancel":
+        assert db_conn.execute(
+            "SELECT status FROM inbound_messages WHERE agent_id=%s AND kind='cancel'",
+            (agent_id,),
+        ).fetchone() == ("pending",)
+        db_conn.commit()
+        assert agent_id not in {wake.agent_id for wake in await host.pending_inbound_wakes(180)}
     if control == "restart":
         # The replacement logical incarnation also adopts without boot hooks.
         await host.run_turn(agent_id)

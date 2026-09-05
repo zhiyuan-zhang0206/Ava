@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from contextlib import ExitStack
+from threading import Lock
 from types import TracebackType
 from typing import Any, Self
 
@@ -20,6 +21,8 @@ from ._external_state import (
 )
 
 __all_for_ava__ = ["attach", "Attachment"]
+
+_attachment_lock = Lock()
 
 
 class Attachment:
@@ -43,13 +46,15 @@ class Attachment:
         self._token = token
         self._closed = False
         self._stack = ExitStack()
-        lease = self._lease()
-        self.agent_id = int(lease["agent_id"])
-        self._version = int(lease["delta_version"])
+        if not _attachment_lock.acquire(blocking=False):
+            raise RuntimeError("this process already has an external attachment")
         self._prior_state = ava.state
         self._prior_update = ava.state_update
-        _boot._external_identity = self._validate
         try:
+            lease = self._lease()
+            self.agent_id = int(lease["agent_id"])
+            self._version = int(lease["delta_version"])
+            _boot._external_identity = self._validate
             ava._ensure_plugins_loaded()
             state, overlay, birth = load_snapshot(self.agent_id)
             self._stack.enter_context(bind_agent_config(resolve_agent_config_pins(overlay, birth)))
@@ -64,8 +69,7 @@ class Attachment:
             self._validate()
             ava.state, ava.state_update = state, {}
         except BaseException:
-            _boot._external_identity = None
-            self._stack.close()
+            self._detach()
             raise
 
     def _lease(self) -> dict[str, Any]:
@@ -101,20 +105,33 @@ class Attachment:
 
     def close(self) -> None:
         """Flush plugin changes and remove the borrowed identity even if flushing fails."""
-        import ava
-
         if self._closed:
             return
         try:
             self.flush()
         finally:
-            self._closed = True
+            self._detach()
+
+    def _detach(self) -> None:
+        """Restore local bindings without reading or writing the lease."""
+        import ava
+
+        if self._closed:
+            return
+        self._closed = True
+        try:
             _boot._external_identity = None
             ava.state, ava.state_update = self._prior_state, self._prior_update
             self._stack.close()
+        finally:
+            _attachment_lock.release()
 
     def __enter__(self) -> Self:
-        self._validate()
+        try:
+            self._validate()
+        except BaseException:
+            self._detach()
+            raise
         return self
 
     def __exit__(

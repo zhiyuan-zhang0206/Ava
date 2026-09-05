@@ -658,7 +658,7 @@ class AgentHost:
                     "    AND held.expires_at>clock_timestamp()) "
                     "    OR EXISTS (SELECT 1 FROM inbound_messages control "
                     "    WHERE control.agent_id=m.id AND control.status IN ('pending','claimed') "
-                    "    AND control.kind IN ('cancel','restart','terminate')))",
+                    "    AND control.kind IN ('restart','terminate')))",
                     (
                         stale_after_s,
                         stale_after_s,

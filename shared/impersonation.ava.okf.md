@@ -35,10 +35,13 @@ the result is durably checkpointed. A replacement incarnation before activation
 increments the consent version and asks again; a fully active lease survives
 native process/host restarts. Updated native drivers gate recovered graph nodes,
 automatic compaction and normal inbox claims. Hosted agents release their turn
-slot while paused. Administrative cancel/restart/terminate still reach the
+slot while paused. Administrative restart/terminate still reach the
 native lifecycle dispatcher, without consuming ordinary chats. Every database
 termination writer revokes the lease through the same status transaction's
-trigger; restart preserves it.
+trigger; restart preserves it. Native status metadata remains native: an active
+controller's busy/idle turns are not mirrored. Idle watchers can observe the
+parked runtime as idling; external completion requires an explicit message or
+the return handoff.
 
 `ava.external.attach` binds identity in the external Python process and hydrates
 the existing checkpoint, pinned config and plugin state. It validates identity
@@ -54,7 +57,11 @@ Native shell/editor actions outside AVA are not intercepted or rolled back.
 Peers continue addressing `agent:<id>`. Redis's existing per-agent inbound
 channel supplies wake hints; the database supplies messages after connection
 loss. External inbox reads leave messages pending. Only an explicit ACK after
-processing marks them done. Unacknowledged messages return to the native agent.
+processing marks them done. Cancel requests are also external inbox entries:
+the native control-only claim leaves them pending for the controller to process.
+Unacknowledged messages and cancellations return to the native agent.
+Newly acknowledged cancellations publish the existing `Cancelled` event after
+commit; repeated ACKs do not emit another completion event.
 Host relay delivery is at least once: a relay restart repeats pending hints.
 
 Voluntary release atomically inserts a normal inbound with the actual external

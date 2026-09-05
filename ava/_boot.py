@@ -107,7 +107,7 @@ def _try_establish_from_env() -> None:
     child, whose generated bootstrap inlines it (`ava.watcher._build_boot`),
     or a test harness. A bare ``python x.py`` in a persistent shell session
     has no identity and reports it as such. ``owns_loop=False`` means
-    lifecycle self-actions (``ava.self.compact/terminate/restart/update``)
+    lifecycle self-actions (``ava.self.compact/terminate/restart``)
     are refused — only the real agent process owns the turn loop.
     """
     global _agent_id, _owns_loop  # noqa: PLW0603
@@ -141,13 +141,14 @@ def is_launched_child() -> bool:
 
 
 def agent_id() -> int:
-    """This process's agent id, bound by `establish` at startup — the framework's
-    single source of truth, read by every kernel/SDK call site that stamps work
-    with "who am I". Before a bootstrap runs, falls back to the `AVA_AGENT_ID`
-    environment variable if present; returns `None` only when neither source
-    provides an identity (the pre-bootstrap placeholder). Callers that must
-    tolerate the pre-bootstrap state check for `None` explicitly. A hosted
-    turn context (turn contextvar bound) wins over both fallbacks."""
+    """Resolve the agent id used to attribute this process's work.
+
+    A validated borrowed identity takes precedence, followed by the hosted turn
+    context, the process identity bound by `establish`, and `AVA_AGENT_ID` from
+    the environment. An invalid borrowed lease raises instead of falling back.
+    Returns `None` when no source provides an identity; callers that tolerate
+    this pre-bootstrap state must check for it explicitly.
+    """
     external = validate_external_identity()
     if external is not None:
         return external
@@ -187,19 +188,21 @@ def require_agent_id() -> int:
 
 
 def require_actor() -> str:
-    """Return this process's asserted provenance — an explicit non-agent actor
-    (`establish_actor`) if set, else `agent:<id>` from the established agent id.
+    """Return this process's asserted provenance, validating a borrowed lease first.
 
-    A real hosted turn identity takes precedence. An explicitly configured
-    external tool profile takes precedence over inherited agent environment.
-    Neither is a substitute for the gateway's credential checks.
+    A borrowed `agent:<id>` identity takes precedence, followed by a hosted turn,
+    an explicit external tool profile, a non-agent actor from `establish_actor`,
+    and the process or environment agent identity. An invalid borrowed lease
+    raises instead of falling back. These provenance channels do not replace
+    the gateway's credential checks.
 
     Use at every call site that stamps provenance into durable data (spawner /
     message source). Fails fast if neither a system actor nor an agent id was
     established, instead of letting a malformed ``agent:None`` leak into the DB.
 
     Raises:
-        RuntimeError: neither an actor nor an agent identity was established.
+        RuntimeError: no actor or agent identity is available, or the borrowed
+            lease no longer permits this identity.
     """
     borrowed = validate_external_identity()
     if borrowed is not None:
@@ -227,9 +230,10 @@ def require_actor() -> str:
 def default_actor() -> str:
     """Provenance principal for the *default*-source paths (terminate / restart /
     resurrect when the caller passes no source). Same as `require_actor` but
-    non-raising: with no identity at all it returns the pre-actor
+    tolerant of absent identity: with none it returns the pre-actor
     ``agent:None`` sentinel, preserving the legacy default-source behavior rather
-    than turning an unset identity into an error at these lower-stakes sites."""
+    than turning an unset identity into an error at these lower-stakes sites.
+    An invalid borrowed lease still raises instead of falling back."""
     borrowed = validate_external_identity()
     if borrowed is not None:
         return f"agent:{borrowed}"

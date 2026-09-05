@@ -46,11 +46,11 @@ async def control_ready(agent_id: int, delivered_id: str | None) -> bool:
 
 
 async def lifecycle_ready(pool: AsyncConnectionPool, agent_id: int) -> bool:
-    """Administrative controls can run while ordinary work remains parked."""
+    """Native restart/terminate can run while the external owner handles cancel."""
     async with pool.connection() as conn:
         cursor = await conn.execute(
             "SELECT 1 FROM inbound_messages i WHERE i.agent_id=%s "
-            "AND i.kind IN ('cancel','restart','terminate') AND (i.status='pending' "
+            "AND i.kind IN ('restart','terminate') AND (i.status='pending' "
             "OR (i.status='claimed' AND EXISTS (SELECT 1 FROM agents_meta m "
             "WHERE m.id=i.agent_id AND m.lifecycle_command_id=i.id))) LIMIT 1",
             (agent_id,),

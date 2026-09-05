@@ -191,7 +191,7 @@ def test_exec_envelope_carries_parent_incarnation(
     assert read_request(path).incarnation == incarnation
 
 
-async def test_control_claim_leaves_chat_and_compaction_pending(
+async def test_control_claim_leaves_cancel_for_external_or_resumed_native(
     db_conn: psycopg.Connection[Any], aops_pool: AsyncConnectionPool[Any]
 ) -> None:
     from agent.db import claim_inbound_batch
@@ -205,11 +205,21 @@ async def test_control_claim_leaves_chat_and_compaction_pending(
         )
     db_conn.commit()
     batch = await claim_inbound_batch(aops_pool, agent_id, lifecycle_only=True)
-    assert [item.kind for item in batch] == ["cancel"]
+    assert batch == []
     assert db_conn.execute(
         "SELECT kind FROM inbound_messages WHERE agent_id=%s AND status='pending' ORDER BY kind",
         (agent_id,),
-    ).fetchall() == [("chat",), ("compact_request",)]
+    ).fetchall() == [("cancel",), ("chat",), ("compact_request",)]
+    db_conn.commit()
+    assert not await impersonation.lifecycle_ready(aops_pool, agent_id)
+    # If the external holder never acknowledges cancellation, the ordinary
+    # native claim after release/expiry still receives the durable request.
+    resumed = await claim_inbound_batch(aops_pool, agent_id)
+    assert {item.kind for item in resumed} == {"cancel", "chat", "compact_request"}
+    assert db_conn.execute(
+        "SELECT status FROM inbound_messages WHERE agent_id=%s AND kind='cancel'",
+        (agent_id,),
+    ).fetchone() == ("done",)
 
 
 async def test_held_host_wake_returns_before_runtime_or_slot(

@@ -237,6 +237,9 @@ async def claim_inbound_batch(
     Without an active lifecycle command, chat becomes claimed for checkpoint
     reconciliation and other kinds become done. An unowned consumer cannot
     acknowledge lifecycle work it has no authority to apply.
+
+    The lifecycle-only path leaves cancellation for the external decision
+    owner, or the ordinary native claim if that owner returns without ACK.
     """
     async with async_write_transaction(pool) as conn, conn.cursor() as cur:
         await lock_inbound_owner(conn, agent_id)
@@ -301,7 +304,7 @@ async def claim_inbound_batch(
             "  SELECT id FROM inbound_messages "
             "  WHERE status = 'pending' AND agent_id = %s "
             "  AND (NOT %s OR kind NOT IN ('restart','terminate')) "
-            "  AND (NOT %s OR kind IN ('cancel','restart','terminate')) "
+            "  AND (NOT %s OR kind IN ('restart','terminate')) "
             "  ORDER BY created_at ASC, id ASC "
             "  FOR UPDATE SKIP LOCKED"
             ") RETURNING id, agent_id, content, kind, source, payload, created_at, claimed_at",

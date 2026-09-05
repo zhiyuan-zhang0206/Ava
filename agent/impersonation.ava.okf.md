@@ -28,12 +28,17 @@ slot and reject ordinary active-lease wakes before runtime preparation.
 The claim gate leaves chat, heartbeat and compaction input pending while held.
 Node guards suppress initialization hooks, automatic compaction, and execution
 hooks; cold boot and database recovery defer checkpoint repair while held.
-Administrative cancel/restart/terminate input uses a control-only claim and
+Administrative restart/terminate input uses a control-only claim and
 the existing lifecycle apply helpers entirely outside graph execution. Restart preserves the external lease; termination revokes it atomically
 through the database lifecycle trigger. New runtime incarnations read the same
 lease before normal execution. Database-clock expiry and explicit release
 restore the ordinary inbound path, including unacknowledged external input and
 the durable handoff message.
+
+Cancel requests remain pending in the external inbox while held. The controller
+stops its current work and explicitly acknowledges the request; an unacknowledged
+cancel returns to normal native claim processing when the lease ends. The native
+dispatcher cannot interrupt an external host's in-flight tools.
 
 External plugin deltas are an ordered lease log using the checkpoint codec.
 On return, the native driver applies each delta through `graph.aupdate_state`
