@@ -6,11 +6,19 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 
 import { RunTimelineChart, type RunTimelineChartLabels } from "@/components/run-timeline/run-timeline-chart";
-import { usesTimelineBuckets, type TimelineWindowOverride } from "@/components/run-timeline/request-level";
+import {
+  bucketLabel,
+  centerZoomWindow,
+  needsBuckets,
+  pickBucketSeconds,
+  usesTimelineBuckets,
+  type TimelineWindowOverride,
+} from "@/components/run-timeline/request-level";
 import { buttonVariants } from "@/components/ui/button";
 import { api } from "@/lib/api";
 import { formatTokensCompact } from "@/lib/item-summary";
 import { FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0 } from "@/lib/layout";
+import type { RunTimelineResponse } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 const ZOOM_WINDOWS = [24, 12, 6, 1, 0.5] as const;
@@ -96,7 +104,13 @@ export default function RunTimelinePage({
     enabled: agentId !== null && !requestsBucketsUpfront,
     placeholderData: keepPreviousData,
   });
-  const shouldBucket = requestsBucketsUpfront || (turnQuery.data?.meta.n_turns ?? 0) > 400;
+  const densityWindow = requestsBucketsUpfront ? windowOverride : turnQuery.data?.window;
+  const spanMs = densityWindow
+    ? Date.parse(densityWindow.to) - Date.parse(densityWindow.from)
+    : 60_000;
+  const turnCount = requestsBucketsUpfront ? null : (turnQuery.data?.meta.n_turns ?? null);
+  const bucketSeconds = pickBucketSeconds(spanMs, turnCount);
+  const shouldBucket = requestsBucketsUpfront || needsBuckets(turnCount ?? 0);
   const bucketQuery = useQuery({
     queryKey: [
       "run-timeline",
@@ -105,13 +119,13 @@ export default function RunTimelinePage({
       windowOverride?.to ?? null,
       session,
       "bucket",
-      "1h",
+      bucketLabel(bucketSeconds),
     ],
     queryFn: () =>
       api.getRunTimeline(safeAgentId, {
         ...(windowOverride ?? {}),
         level: "bucket",
-        bucket: "1h",
+        bucket: `${bucketSeconds}s`,
         session,
       }),
     enabled: agentId !== null && shouldBucket,
@@ -124,13 +138,49 @@ export default function RunTimelinePage({
   const selectedFromInput = fromInput || defaultFromInput;
   const selectedToInput = toInput || defaultToInput;
 
-  const setZoomWindow = (hours: number) => {
-    const to = new Date();
-    const from = new Date(to.getTime() - hours * 60 * 60 * 1000);
-    const next = { from: from.toISOString(), to: to.toISOString() };
+  const selectWindow = (next: TimelineWindowOverride) => {
     setWindowOverride(next);
     setFromInput(dateTimeInputValue(next.from));
     setToInput(dateTimeInputValue(next.to));
+  };
+
+  const setZoomWindow = (hours: number) => {
+    const now = new Date();
+    const presetSpanMs = hours * 60 * 60 * 1000;
+    const next = timeline
+      ? centerZoomWindow(
+          timeline.window,
+          presetSpanMs / (Date.parse(timeline.window.to) - Date.parse(timeline.window.from)),
+          now,
+        )
+      : {
+          from: new Date(now.getTime() - presetSpanMs).toISOString(),
+          to: now.toISOString(),
+        };
+    selectWindow(next);
+  };
+
+  const zoomBy = (factor: number) => {
+    const visibleWindow = timeline?.window ?? windowOverride;
+    if (visibleWindow === null) return;
+    selectWindow(centerZoomWindow(visibleWindow, factor, new Date()));
+  };
+
+  const resetWindow = () => {
+    setWindowOverride(null);
+    setFromInput("");
+    setToInput("");
+  };
+
+  const drillBucket = (row: RunTimelineResponse["rows"][number]) => {
+    if (!timeline || row.turn !== null) {
+      throw new Error("Bucket drill-down requires an aggregated timeline row");
+    }
+    const drillTo = Math.min(
+      Date.parse(row.start) + bucketSeconds * 1000,
+      Date.parse(timeline.window.to),
+    );
+    selectWindow({ from: row.start, to: new Date(drillTo).toISOString() });
   };
 
   const applyWindow = () => {
@@ -142,9 +192,7 @@ export default function RunTimelinePage({
 
   const selectSession = (nextSession: "compact" | "current") => {
     setSession(nextSession);
-    setWindowOverride(null);
-    setFromInput("");
-    setToInput("");
+    resetWindow();
   };
 
   if (paramsResolved && agentId === null) {
@@ -168,11 +216,19 @@ export default function RunTimelinePage({
 
       <div className="overflow-y-auto">
         <div className="mx-auto max-w-6xl space-y-5 p-6">
-          <div className={cn(FLEX, "pointer-events-none sticky top-0 z-10 -mb-[34px] h-[34px] justify-end px-4")}>
+          <div className={cn(FLEX, "pointer-events-none sticky top-0 z-10 justify-end px-4")}>
             <div
-              className={cn(FLEX, "pointer-events-auto relative top-4 w-fit flex-wrap gap-1 rounded bg-card py-1")}
+              className={cn(FLEX, "pointer-events-auto max-w-full flex-wrap justify-end gap-1 rounded border border-border bg-card p-1 shadow-sm")}
               aria-label={t("zoom")}
             >
+              {timeline ? (
+                <span className="max-w-full truncate px-1 font-mono text-[10px] text-muted-foreground">
+                  {t("windowRange", {
+                    from: dateTimeInputValue(timeline.window.from).replace("T", " "),
+                    to: dateTimeInputValue(timeline.window.to).replace("T", " "),
+                  })}
+                </span>
+              ) : null}
               {ZOOM_WINDOWS.map((hours) => (
                 <button
                   key={hours}
@@ -183,6 +239,30 @@ export default function RunTimelinePage({
                   {hours >= 1 ? `${hours}h` : "30m"}
                 </button>
               ))}
+              <button
+                type="button"
+                aria-label={t("zoomOut")}
+                onClick={() => zoomBy(2)}
+                className="rounded border border-border px-2 py-1 font-mono text-xs hover:bg-muted"
+              >
+                −
+              </button>
+              <button
+                type="button"
+                aria-label={t("zoomIn")}
+                onClick={() => zoomBy(0.5)}
+                className="rounded border border-border px-2 py-1 font-mono text-xs hover:bg-muted"
+              >
+                +
+              </button>
+              <button
+                type="button"
+                aria-label={t("resetWindow")}
+                onClick={resetWindow}
+                className="rounded border border-border px-2 py-1 font-mono text-xs hover:bg-muted"
+              >
+                {t("resetWindow")}
+              </button>
             </div>
           </div>
 
@@ -190,7 +270,7 @@ export default function RunTimelinePage({
             className="space-y-3 rounded border border-border bg-card p-4"
             style={{ marginTop: 0 }}
           >
-            <div className="pt-10 sm:pr-56 sm:pt-0">
+            <div>
               <h2 className="text-sm font-semibold">{t("session")}</h2>
               <p className="text-xs text-muted-foreground">
                 {session === "compact" ? t("compactDescription") : t("currentDescription")}
@@ -286,7 +366,12 @@ export default function RunTimelinePage({
                   </div>
                 ))}
               </section>
-              <RunTimelineChart timeline={timeline} labels={chartLabels(t)} />
+              <RunTimelineChart
+                timeline={timeline}
+                labels={chartLabels(t)}
+                onDrillBucket={drillBucket}
+                onZoomWindow={selectWindow}
+              />
             </>
           ) : timelinePending ? (
             <p className="font-mono text-sm text-muted-foreground">{t("loading")}</p>
