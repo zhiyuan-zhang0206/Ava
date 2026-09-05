@@ -142,9 +142,6 @@ _OVERSIZE_ALLOWED: dict[str, tuple[str, int, str]] = {
     # The single-service-roster schema block — one ServiceSpec per session
     # (no logic to split); crossed 800 when the memory-search spec landed.
     "ops/spec.py": ("#405", 800, "2026-12-31"),
-    # IM Bridge core: envelope, command routing, per-channel state, SSE
-    # subscription push, inbound outbox — one cohesive dispatch module.
-    "services/im_bridge/core.py": ("#405", 500, "2026-12-31"),
     # Agent-host daemon: lifecycle settlement + wake dispatch in one
     # process-local module; crossed 800 when the hosted lifecycle
     # settlement commits landed (#1530). Split tracked as follow-up.

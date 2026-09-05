@@ -13,7 +13,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from services.im_bridge.core import IMAdapter, IMBridgeCore
+from services.im_bridge.core import IMBridgeCore
+from services.im_bridge.types import IMAdapter
 
 
 class _RecordingAdapter(IMAdapter):
