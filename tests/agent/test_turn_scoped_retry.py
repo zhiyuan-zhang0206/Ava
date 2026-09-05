@@ -175,7 +175,7 @@ class TestLangGraphReadsFieldsAtRetryTime:
         )
         g.add_edge(START, "boom")
         g.add_edge("boom", END)
-        graph = g.compile()  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+        graph = g.compile()  # pyright: ignore[reportUnknownMemberType]
 
         token = attempts_pin.set(4)
         try:
@@ -227,7 +227,7 @@ class TestLangGraphReadsFieldsAtRetryTime:
         )
         g.add_edge(START, "boom")
         g.add_edge("boom", END)
-        graph = g.compile()  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+        graph = g.compile()  # pyright: ignore[reportUnknownMemberType]
 
         token = interval_pin.set(0.0)
         started = asyncio.get_running_loop().time()

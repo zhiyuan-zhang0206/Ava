@@ -1447,7 +1447,7 @@ def test_ingest_alert_fallback_skips_im_when_already_notified(
     key = ("health-probe", datetime(2026, 8, 5, 0, 10, tzinfo=UTC))
     monkeypatch.setattr(
         "shared.alerts.upsert_alert",
-        lambda *_a, **_k: (key, False, False, {"notified_at": datetime(2026, 8, 5, tzinfo=UTC)}),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda *_a, **_k: (key, False, False, {"notified_at": datetime(2026, 8, 5, tzinfo=UTC)}),  # pyright: ignore[reportUnknownArgumentType]
     )
     notified: list[str] = []
     stamped: list[object] = []

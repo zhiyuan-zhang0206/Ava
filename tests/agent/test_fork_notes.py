@@ -138,7 +138,7 @@ async def test_fork_end_to_end_single_copy_each_note(
     # then the grafted sequence.
     from langgraph.graph.message import REMOVE_ALL_MESSAGES
 
-    assert isinstance(msgs[0], RemoveMessage) and msgs[0].id == REMOVE_ALL_MESSAGES  # pyright: ignore[reportUnknownMemberType]
+    assert isinstance(msgs[0], RemoveMessage) and msgs[0].id == REMOVE_ALL_MESSAGES
     rebuilt_ids = {m.id for m in msgs[1:] if not isinstance(m, RemoveMessage)}
     assert {"note-old-id", "note-old-mem", "note-old-preload"} & rebuilt_ids == set()
     assert "note-cluster-index" in rebuilt_ids

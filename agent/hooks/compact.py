@@ -278,7 +278,7 @@ def _last_compact_summary_text(messages: list[AnyMessage]) -> str | None:
             AvaMsgType.COMPACT_SUMMARY.value,
             AvaMsgType.COMPACT_REQUEST.value,
         ):
-            content = msg.content  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+            content = msg.content  # pyright: ignore[reportUnknownMemberType]
             if isinstance(content, str) and content:
                 return content
             return None

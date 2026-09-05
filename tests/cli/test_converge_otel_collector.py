@@ -160,10 +160,10 @@ def test_ensure_skips_download_when_version_matches(
     )
 
     downloaded: list[str] = []
-    monkeypatch.setattr(  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(
         oc,
         "_download_and_verify",
-        lambda _tag, _dir: downloaded.append(_tag),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType, reportUnknownMemberType]
+        lambda _tag, _dir: downloaded.append(_tag),  # pyright: ignore[reportUnknownArgumentType]
     )
 
     monkeypatch.setattr(
@@ -192,10 +192,10 @@ def test_ensure_downloads_when_missing(monkeypatch: pytest.MonkeyPatch, tmp_path
     )
 
     downloaded: list[str] = []
-    monkeypatch.setattr(  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(
         oc,
         "_download_and_verify",
-        lambda tag, _d: downloaded.append(tag),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType, reportUnknownMemberType]
+        lambda tag, _d: downloaded.append(tag),  # pyright: ignore[reportUnknownArgumentType]
     )
 
     monkeypatch.setattr(
@@ -216,12 +216,12 @@ def test_ensure_downloads_when_missing(monkeypatch: pytest.MonkeyPatch, tmp_path
 
 def test_unsupported_platform_skips(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """No pinned tag -> warn + skip, never download."""
-    monkeypatch.setattr(oc, "platform_tag", lambda: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(oc, "platform_tag", lambda: None)
     downloaded: list[str] = []
-    monkeypatch.setattr(  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(
         oc,
         "_download_and_verify",
-        lambda _t, _d: downloaded.append(_t),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType, reportUnknownMemberType]
+        lambda _t, _d: downloaded.append(_t),  # pyright: ignore[reportUnknownArgumentType]
     )
     oc.ensure_otel_collector(tmp_path / "repo", tmp_path, roles=None)
     assert downloaded == []
@@ -531,7 +531,7 @@ def test_non_lgtm_gateway_with_explicit_endpoint_installs_collector(
     monkeypatch.setattr(
         oc,
         "ensure_otel_collector",
-        lambda *args: installed.append(args),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda *args: installed.append(args),  # pyright: ignore[reportUnknownArgumentType]
     )
 
     oc.ensure_otel_collector_step(ctx)
@@ -1025,7 +1025,7 @@ def test_config_file_is_owner_only(monkeypatch: pytest.MonkeyPatch, tmp_path: Pa
     (tmp_path / "otel-collector").mkdir(parents=True)
     (tmp_path / "otel-collector/otelcol-contrib").write_bytes(b"bin")
     (tmp_path / "otel-collector/version").write_text(oc.OTELCOL_CONTRIB_VERSION, encoding="utf-8")
-    monkeypatch.setattr(oc, "_download_and_verify", lambda _tag, _dir: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(oc, "_download_and_verify", lambda _tag, _dir: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr("shared.db.direct_db_url", lambda: "postgresql://ava:abc@10.0.0.2:5433/ava")
     monkeypatch.setattr(
         "shared.config.settings.data_plane.redis_url", "redis://:abc@10.0.0.2:6380/0"
@@ -1124,7 +1124,7 @@ def test_download_with_retry_exhausts_and_names_url(
         raise OSError("connection reset")
 
     monkeypatch.setattr(oc, "_stream_download", _always_fail)
-    monkeypatch.setattr(oc.time, "sleep", lambda _s: None)  # pyright: ignore[reportUnknownLambdaType, reportUnknownArgumentType]  # no real backoff wait
+    monkeypatch.setattr(oc.time, "sleep", lambda _s: None)  # pyright: ignore[reportUnknownArgumentType]  # no real backoff wait
 
     with pytest.raises(RuntimeError) as ei:
         oc._download_with_retry("https://example.invalid/t.tar.gz", tmp_path / "t.tar.gz")
@@ -1149,7 +1149,7 @@ def test_download_with_retry_succeeds_on_second_attempt(
         dest.write_bytes(b"ok")
 
     monkeypatch.setattr(oc, "_stream_download", _fail_then_win)
-    monkeypatch.setattr(oc.time, "sleep", lambda _s: None)  # pyright: ignore[reportUnknownLambdaType, reportUnknownArgumentType]
+    monkeypatch.setattr(oc.time, "sleep", lambda _s: None)  # pyright: ignore[reportUnknownArgumentType]
 
     oc._download_with_retry("https://example.invalid/t.tar.gz", tmp_path / "t.tar.gz")
     assert calls["n"] == 2

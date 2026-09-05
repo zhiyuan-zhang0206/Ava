@@ -779,12 +779,12 @@ async def test_exec_node_injects_security_finding_after_toolmessage(fake_cancel_
 
     update = cast(dict[str, Any], cmd.update)
     msgs = update["messages"]
-    assert len(msgs) == 2, f"expected ToolMessage + security note, got {msgs!r}"  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
-    assert msgs[0].type == "tool", f"exec ToolMessage must come first: {msgs[0]!r}"  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
-    assert msgs[0].tool_call_id == "call_1"  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
-    assert msgs[1].type == "human"  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
-    assert "shell.run" in msgs[1].content  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
-    assert "ignore previous instructions" in msgs[1].content  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+    assert len(msgs) == 2, f"expected ToolMessage + security note, got {msgs!r}"
+    assert msgs[0].type == "tool", f"exec ToolMessage must come first: {msgs[0]!r}"
+    assert msgs[0].tool_call_id == "call_1"
+    assert msgs[1].type == "human"
+    assert "shell.run" in msgs[1].content
+    assert "ignore previous instructions" in msgs[1].content
     # Buffer cleared — findings delivered exactly once
     from ava import security as _security
 
@@ -811,12 +811,12 @@ async def test_exec_node_orders_tool_security_then_plugin_notes(fake_cancel_even
 
     update = cast(dict[str, Any], cmd.update)
     msgs = update["messages"]
-    assert [m.type for m in msgs] == ["tool", "human", "human"], (  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
-        f"expected [tool, security, plugin], got {[m.type for m in msgs]}"  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+    assert [m.type for m in msgs] == ["tool", "human", "human"], (
+        f"expected [tool, security, plugin], got {[m.type for m in msgs]}"
     )
-    assert "context-file:/repo/AGENTS.md" in msgs[1].content  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
-    assert msgs[2].id == "p1"  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
-    assert msgs[2].content == "project note"  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+    assert "context-file:/repo/AGENTS.md" in msgs[1].content
+    assert msgs[2].id == "p1"
+    assert msgs[2].content == "project note"
 
 
 async def test_exec_node_checkpoints_child_attachment(
@@ -912,10 +912,10 @@ async def test_exec_node_compact_path_drops_notes_and_clears_findings(
     cmd = await _exec_node_impl(state, runtime, config)
 
     update = cast(dict, cmd.update)
-    assert update.get("messages") == [], (  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
-        f"compact path must write no messages back, got {update.get('messages')!r}"  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+    assert update.get("messages") == [], (  # pyright: ignore[reportUnknownMemberType]
+        f"compact path must write no messages back, got {update.get('messages')!r}"  # pyright: ignore[reportUnknownMemberType]
     )
-    assert update.get("halted") is True  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+    assert update.get("halted") is True  # pyright: ignore[reportUnknownMemberType]
     assert "attach" not in update  # pyright: ignore[operator]
     # Findings drained even though nothing was injected
     from ava import security as _security

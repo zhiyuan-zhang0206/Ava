@@ -640,7 +640,7 @@ def test_memory_index_note_present(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     assert note.additional_kwargs["ava_note_tag"] == "memory"  # pyright: ignore[reportUnknownMemberType]
     assert (
         "prod=~/.ava/source" in note.content  # pyright: ignore[reportUnknownMemberType]
-    )  # raw file content carried through  # pyright: ignore[reportUnknownMemberType]
+    )  # raw file content carried through
 
 
 def test_memory_index_note_none_when_absent_empty_or_disabled(
@@ -970,7 +970,7 @@ async def test_claim_fresh_invocation_waits_then_runs_turn(
         waited.append(agent_id)
         return [ClaimedInbound(id=1, agent_id=tid, content="hi", kind="chat", source="user")]
 
-    monkeypatch.setattr("agent.graph._claim._wait_for_batch", fake_wait)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("agent.graph._claim._wait_for_batch", fake_wait)
 
     cmd = await claim_node(
         AgentState(messages=[SystemMessage(content="sys")], halted=True, turn_active=False),
@@ -2383,7 +2383,7 @@ async def test_claim_fork_strips_inherited_source_notes(
     # The rebuild: one full-wipe marker, then the inherited history re-listed
     # with the three source-identity notes dropped (the cluster index — the
     # SYSTEM_NOTE not owned by the source — survives the rebuild).
-    assert isinstance(msgs[0], RemoveMessage) and msgs[0].id == REMOVE_ALL_MESSAGES  # pyright: ignore[reportUnknownMemberType]
+    assert isinstance(msgs[0], RemoveMessage) and msgs[0].id == REMOVE_ALL_MESSAGES
     rebuilt_ids = {m.id for m in msgs[1:] if not isinstance(m, RemoveMessage)}
     assert {old_id.id, old_mem.id, old_preload.id} & rebuilt_ids == set()
     assert cluster_index.id in rebuilt_ids
@@ -2395,7 +2395,7 @@ async def test_claim_fork_strips_inherited_source_notes(
         "agent_id",
         "agent_memory",
     ]
-    grafted_content: object = tail[-1].content  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+    grafted_content: object = tail[-1].content  # pyright: ignore[reportUnknownMemberType]
     assert isinstance(grafted_content, str) and "source's memory" not in grafted_content
 
 
@@ -2555,17 +2555,17 @@ async def test_claim_short_path_does_not_enter_idling(
     after completion (not idling).
     """
     tid = running_agent()
-    insert_inbound_message(db_conn, tid, "preexisting", source="user")  # pyright: ignore[reportUnknownArgumentType]
+    insert_inbound_message(db_conn, tid, "preexisting", source="user")
 
     cmd = await claim_node(
         AgentState(),
         _make_runtime(ops_pool=aops_pool, inbound_listener=aredis_inbound_listener),
-        _config(tid),  # pyright: ignore[reportUnknownArgumentType]
+        _config(tid),
     )
 
     assert isinstance(cmd, Command)
     with db_conn.cursor() as cur:
-        cur.execute("SELECT status FROM agents_meta WHERE id = %s", (tid,))  # pyright: ignore[reportUnknownArgumentType]
+        cur.execute("SELECT status FROM agents_meta WHERE id = %s", (tid,))
         row = cur.fetchone()
     # short path: did not enter _wait_for_batch, no mark idling/running switch, status remains 'running'
     assert row is not None and row[0] == "running"
@@ -2981,7 +2981,7 @@ async def test_wait_for_batch_records_wait_inside_claim_idle_wait_span(
     async def _fake_claim(pool, agent_id):
         return [ClaimedInbound(id=1, agent_id=tid, content="x", kind="chat", source="user")]
 
-    monkeypatch.setattr("agent.graph._claim_batch.claim_idle_wait_span", _fake_span)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("agent.graph._claim_batch.claim_idle_wait_span", _fake_span)
     monkeypatch.setattr("agent.graph._claim_batch.wait_for_inbound", _fake_wait)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr("agent.graph._claim_batch.claim_inbound_batch", _fake_claim)  # pyright: ignore[reportUnknownArgumentType]
 
@@ -3061,7 +3061,7 @@ async def test_claim_multi_step_continue_no_inbound(
     cmd = await claim_node(
         AgentState(messages=[SystemMessage(content="sys"), HumanMessage(content="hi")]),
         _make_runtime(ops_pool=aops_pool, inbound_listener=aredis_inbound_listener),
-        _config(tid),  # pyright: ignore[reportUnknownArgumentType]
+        _config(tid),
     )
     assert isinstance(cmd, Command)
     assert cmd.goto == "before_llm"
@@ -3070,7 +3070,7 @@ async def test_claim_multi_step_continue_no_inbound(
     assert cmd.update.get("messages") in ([], None) or "messages" not in (cmd.update or {})  # type: ignore[union-attr]
     # status should remain running (did not enter _wait_for_batch to switch to idling)
     with db_conn.cursor() as cur:
-        cur.execute("SELECT status FROM agents_meta WHERE id = %s", (tid,))  # pyright: ignore[reportUnknownArgumentType]
+        cur.execute("SELECT status FROM agents_meta WHERE id = %s", (tid,))
         row = cur.fetchone()
     assert row is not None and row[0] == "running"
 

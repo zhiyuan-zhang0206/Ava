@@ -58,24 +58,24 @@ def sync_pool() -> Iterator[ConnectionPool]:
 
 def _park_wedged(db_conn: psycopg.Connection, *, pid: int = 1234, status: str = "running") -> int:
     aid = spawn_agent(spawner="user")
-    with db_conn.cursor() as cur:  # pyright: ignore[reportUnknownMemberType]
+    with db_conn.cursor() as cur:
         cur.execute(
             "UPDATE agents_meta SET status=%s, pid=%s, lease_expires_at=%s WHERE id=%s",
             (status, pid, datetime.now(UTC) + timedelta(minutes=10), aid),
         )
-    db_conn.commit()  # pyright: ignore[reportUnknownMemberType]
+    db_conn.commit()
     return aid
 
 
 def _add_stale_pending_chat(db_conn: psycopg.Connection, aid: int, *, age_s: float) -> None:
-    with db_conn.cursor() as cur:  # pyright: ignore[reportUnknownMemberType]
+    with db_conn.cursor() as cur:
         cur.execute(
             "INSERT INTO inbound_messages (agent_id, content, kind, source, created_at) "
             "VALUES (%s, 'stale work', 'chat', 'user', "
             "now() - make_interval(secs => %s))",
             (aid, age_s),
         )
-    db_conn.commit()  # pyright: ignore[reportUnknownMemberType]
+    db_conn.commit()
 
 
 def _set_turn_timestamps(
@@ -85,33 +85,33 @@ def _set_turn_timestamps(
     status_age_s: float,
     last_active_age_s: float,
 ) -> None:
-    with db_conn.cursor() as cur:  # pyright: ignore[reportUnknownMemberType]
+    with db_conn.cursor() as cur:
         cur.execute(
             "UPDATE agents_meta SET status_changed_at = now() - make_interval(secs => %s), "
             "last_active_at = now() - make_interval(secs => %s) WHERE id = %s",
             (status_age_s, last_active_age_s, aid),
         )
-    db_conn.commit()  # pyright: ignore[reportUnknownMemberType]
+    db_conn.commit()
 
 
 def _add_pending_lifecycle_inbound(db_conn: psycopg.Connection, aid: int, *, kind: str) -> None:
-    with db_conn.cursor() as cur:  # pyright: ignore[reportUnknownMemberType]
+    with db_conn.cursor() as cur:
         cur.execute(
             "INSERT INTO inbound_messages (agent_id, content, kind, source) "
             "VALUES (%s, '', %s, 'user')",
             (aid, kind),
         )
-    db_conn.commit()  # pyright: ignore[reportUnknownMemberType]
+    db_conn.commit()
 
 
 def _add_pending_resurrect_inbound(db_conn: psycopg.Connection, aid: int) -> None:
-    with db_conn.cursor() as cur:  # pyright: ignore[reportUnknownMemberType]
+    with db_conn.cursor() as cur:
         cur.execute(
             "INSERT INTO inbound_messages (agent_id, content, kind, source) "
             "VALUES (%s, '', 'resurrect', 'system')",
             (aid,),
         )
-    db_conn.commit()  # pyright: ignore[reportUnknownMemberType]
+    db_conn.commit()
 
 
 def _owned_process(_pid: int, _agent_id: int) -> AgentProcessIdentity:
@@ -380,7 +380,7 @@ class TestRecovery:
         response = await ops_lifecycle.restart_agent_op(
             aid, RestartAgentRequest(source="user"), sync_pool
         )
-        with db_conn.cursor() as cur:  # pyright: ignore[reportUnknownMemberType]
+        with db_conn.cursor() as cur:
             cur.execute(
                 "UPDATE inbound_messages SET created_at = now() - interval '120 seconds' "
                 "WHERE agent_id = %s AND kind = 'restart'",
@@ -391,7 +391,7 @@ class TestRecovery:
                 "WHERE id = %s",
                 (aid,),
             )
-        db_conn.commit()  # pyright: ignore[reportUnknownMemberType]
+        db_conn.commit()
 
         result = _fresh_controller(sync_pool).reconcile("agent-runner")
 
@@ -419,9 +419,9 @@ class TestRecovery:
 
         monkeypatch.setattr(wedged_mod, "resurrect_agent", _capture_resurrect)
         aid = _park_wedged(db_conn, status="terminated")
-        with db_conn.cursor() as cur:  # pyright: ignore[reportUnknownMemberType]
+        with db_conn.cursor() as cur:
             cur.execute("UPDATE agents_meta SET termination_source='user' WHERE id=%s", (aid,))
-        db_conn.commit()  # pyright: ignore[reportUnknownMemberType]
+        db_conn.commit()
         _add_pending_lifecycle_inbound(db_conn, aid, kind="terminate")
 
         result = _fresh_controller(sync_pool).reconcile("agent-runner")
@@ -429,7 +429,7 @@ class TestRecovery:
         assert result.acted is True
         assert killed == [1234]
         assert resurrected == []
-        with db_conn.cursor() as cur:  # pyright: ignore[reportUnknownMemberType]
+        with db_conn.cursor() as cur:
             cur.execute(
                 "SELECT status, pid, lease_expires_at, termination_source "
                 "FROM agents_meta WHERE id=%s",
@@ -480,13 +480,13 @@ class TestRecovery:
 
         monkeypatch.setattr(wedged_mod, "resurrect_agent", _capture_resurrect)
         aid = _park_wedged(db_conn, status="idling")
-        with db_conn.cursor() as cur:  # pyright: ignore[reportUnknownMemberType]
+        with db_conn.cursor() as cur:
             cur.execute(
                 "UPDATE agents_meta SET status_changed_at = now() - interval '120 seconds' "
                 "WHERE id = %s",
                 (aid,),
             )
-        db_conn.commit()  # pyright: ignore[reportUnknownMemberType]
+        db_conn.commit()
         _add_stale_pending_chat(db_conn, aid, age_s=120.0)
 
         result = _fresh_controller(sync_pool).reconcile("agent-runner")
@@ -515,7 +515,7 @@ class TestRecovery:
         assert result.acted is False
         assert killed == []
         assert resurrected == []
-        with db_conn.cursor() as cur:  # pyright: ignore[reportUnknownMemberType]
+        with db_conn.cursor() as cur:
             cur.execute("SELECT status FROM agents_meta WHERE id = %s", (aid,))
             assert cur.fetchone() == ("idling",)
 
@@ -541,7 +541,7 @@ class TestRecovery:
         assert result.acted is True
         assert killed == [1234]
         assert resurrected == []
-        with db_conn.cursor() as cur:  # pyright: ignore[reportUnknownMemberType]
+        with db_conn.cursor() as cur:
             cur.execute("SELECT status FROM agents_meta WHERE id = %s", (aid,))
             assert cur.fetchone() == ("terminated",)
 
@@ -564,7 +564,7 @@ class TestRecovery:
         assert killed == []
         assert resurrected == []
         assert result.acted is False
-        with db_conn.cursor() as cur:  # pyright: ignore[reportUnknownMemberType]
+        with db_conn.cursor() as cur:
             cur.execute("SELECT status, termination_source FROM agents_meta WHERE id=%s", (aid,))
             assert cur.fetchone() == ("running", None)
 
@@ -615,7 +615,7 @@ class TestRecovery:
         assert str(resurrected[0]["prompt"]).startswith(
             "You were restarted by the wedged-agent detector"
         )
-        with db_conn.cursor() as cur:  # pyright: ignore[reportUnknownMemberType]
+        with db_conn.cursor() as cur:
             cur.execute("SELECT status, termination_source FROM agents_meta WHERE id=%s", (aid,))
             assert cur.fetchone() == ("terminated", "reaper")
         assert result.acted is True
@@ -634,7 +634,7 @@ class TestRecovery:
         result = _fresh_controller(sync_pool).reconcile("agent-runner")
 
         assert killed == [] and resurrected == [] and not result.acted
-        with db_conn.cursor() as cur:  # pyright: ignore[reportUnknownMemberType]
+        with db_conn.cursor() as cur:
             cur.execute("SELECT status FROM agents_meta WHERE id=%s", (aid,))
             assert cur.fetchone() == ("running",)
         assert result.detail is None
@@ -656,7 +656,7 @@ class TestRecovery:
         result = _fresh_controller(sync_pool).reconcile("agent-runner")
 
         assert killed == [] and resurrected == [] and not result.acted
-        with db_conn.cursor() as cur:  # pyright: ignore[reportUnknownMemberType]
+        with db_conn.cursor() as cur:
             cur.execute("SELECT status FROM agents_meta WHERE id=%s", (aid,))
             assert cur.fetchone() == ("running",)
 
@@ -673,12 +673,12 @@ class TestRecovery:
             pid=1234,
             identities=[AgentProcessIdentity.OWNED, AgentProcessIdentity.OWNED],
         )
-        with db_conn.cursor() as cur:  # pyright: ignore[reportUnknownMemberType]
+        with db_conn.cursor() as cur:
             cur.execute(
                 "UPDATE agents_meta SET status='terminated', termination_source='user' WHERE id=%s",
                 (aid,),
             )
-        db_conn.commit()  # pyright: ignore[reportUnknownMemberType]
+        db_conn.commit()
 
         result = _fresh_controller(sync_pool).reconcile("agent-runner")
 
@@ -762,9 +762,9 @@ class TestTerminatedZombieEvidence:
 
         monkeypatch.setattr(wedged_mod, "probe_agent_process", _identity)
 
-        assert wedged_mod._reap_terminated_lease_zombie(sync_pool, aid, 1234) is True  # pyright: ignore[reportPrivateUsage]
+        assert wedged_mod._reap_terminated_lease_zombie(sync_pool, aid, 1234) is True
         assert killed == expected_kill
-        with db_conn.cursor() as cur:  # pyright: ignore[reportUnknownMemberType]
+        with db_conn.cursor() as cur:
             cur.execute("SELECT pid, lease_expires_at FROM agents_meta WHERE id = %s", (aid,))
             assert cur.fetchone() == (None, None)
 
@@ -780,7 +780,7 @@ class TestTerminatedZombieEvidence:
 
         monkeypatch.setattr(wedged_mod, "probe_agent_process", _unreadable)
 
-        assert wedged_mod._reap_terminated_lease_zombie(pool, 7, 1234) is False  # pyright: ignore[reportPrivateUsage]
+        assert wedged_mod._reap_terminated_lease_zombie(pool, 7, 1234) is False
         pool.connection.assert_not_called()
 
     def test_concurrent_status_change_that_loses_clear_cas_is_deferred(
@@ -795,5 +795,5 @@ class TestTerminatedZombieEvidence:
         monkeypatch.setattr(wedged_mod, "force_kill", killed.append)
         monkeypatch.setattr(wedged_mod, "probe_agent_process", _owned_process)
 
-        assert wedged_mod._reap_terminated_lease_zombie(pool, 7, 1234) is False  # pyright: ignore[reportPrivateUsage]
+        assert wedged_mod._reap_terminated_lease_zombie(pool, 7, 1234) is False
         assert killed == []

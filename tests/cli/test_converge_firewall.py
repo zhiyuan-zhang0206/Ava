@@ -180,7 +180,7 @@ def test_grant_installed_repairs_silently(
     def rules() -> dict[str, bool]:
         return {str(missing): True} if persisted else {}
 
-    monkeypatch.setattr(fw, "allowlisted_paths", rules)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(fw, "allowlisted_paths", rules)
 
     def mutate(verb: str, _path: str) -> bool:
         nonlocal persisted
@@ -234,9 +234,9 @@ def test_prune_runs_before_repair_so_replacement_rules_persist(
         FirewallAudit(FirewallVerdict.RULES_MISSING, "1 of 1 have no rule", missing=(missing,)),
     )
     state = {str(stale): True}
-    monkeypatch.setattr(fw, "allowlisted_paths", lambda: dict(state))  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-    monkeypatch.setattr(fw, "manifest_paths", lambda: (missing,))  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-    monkeypatch.setattr(fw, "stale_manifest_rules", lambda _rules: (stale,))  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(fw, "allowlisted_paths", lambda: dict(state))
+    monkeypatch.setattr(fw, "manifest_paths", lambda: (missing,))
+    monkeypatch.setattr(fw, "stale_manifest_rules", lambda _rules: (stale,))  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(fw, "_VERIFY_RETRY_S", 0.0)
     order: list[tuple[str, str]] = []
 

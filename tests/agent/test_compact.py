@@ -184,7 +184,7 @@ async def test_generate_summary_emits_agent_billing_span(
     tracer = _Tracer()
     monkeypatch.setattr("shared.config.settings.observability.trace_enabled", True)
     monkeypatch.setitem(trace_mod._state, "initialized", True)
-    monkeypatch.setattr(otel_trace, "get_tracer", lambda _name: tracer)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(otel_trace, "get_tracer", lambda _name: tracer)  # pyright: ignore[reportUnknownArgumentType]
     response = AIMessage(
         content="a complete summary",
         usage_metadata={
@@ -626,7 +626,7 @@ async def test_compact_reminder_fires_in_band(_ava_compact_loaded, monkeypatch: 
     result = await wrap_fn(
         _reminder_state(state_cls),  # pyright: ignore[reportUnknownArgumentType]
         _runtime_with_llm(_fake_llm()),
-        _fake_config(),  # pyright: ignore[reportUnknownArgumentType]
+        _fake_config(),
     )
 
     assert result is not None
@@ -637,7 +637,7 @@ async def test_compact_reminder_fires_in_band(_ava_compact_loaded, monkeypatch: 
     assert result["compact"].reminder_shown is True  # pyright: ignore[reportUnknownMemberType]
     assert (
         result["compact"].version == 0  # pyright: ignore[reportUnknownMemberType]
-    )  # reminder != force: version untouched  # pyright: ignore[reportUnknownMemberType]
+    )  # reminder != force: version untouched
 
 
 async def test_compact_reminder_silent_below_threshold(
@@ -651,7 +651,7 @@ async def test_compact_reminder_silent_below_threshold(
     result = await wrap_fn(
         _reminder_state(state_cls),  # pyright: ignore[reportUnknownArgumentType]
         _runtime_with_llm(_fake_llm()),
-        _fake_config(),  # pyright: ignore[reportUnknownArgumentType]
+        _fake_config(),
     )
     assert result is None
 
@@ -666,16 +666,16 @@ async def test_compact_reminder_yields_to_force_above_ceiling(
     result = await wrap_fn(
         _reminder_state(state_cls),  # pyright: ignore[reportUnknownArgumentType]
         _runtime_with_llm(_fake_llm(_LONG_SUMMARY)),
-        _fake_config(),  # pyright: ignore[reportUnknownArgumentType]
+        _fake_config(),
     )
 
     assert result is not None
     assert (
         result["compact"].version == 1  # pyright: ignore[reportUnknownMemberType]
-    )  # force path bumped version  # pyright: ignore[reportUnknownMemberType]
+    )  # force path bumped version
     assert (
         result["compact"].reminder_shown is False  # pyright: ignore[reportUnknownMemberType]
-    )  # force preserves the flag, does not set it  # pyright: ignore[reportUnknownMemberType]
+    )  # force preserves the flag, does not set it
     assert isinstance(result["messages"][0], RemoveMessage)  # full replacement
 
 
@@ -705,7 +705,7 @@ async def test_compact_reminder_rearms_after_compaction(
     assert result["compact"].reminder_shown is True  # pyright: ignore[reportUnknownMemberType]
     assert (
         result["compact"].reminder_seen_version == 1  # pyright: ignore[reportUnknownMemberType]
-    )  # bookmark caught up  # pyright: ignore[reportUnknownMemberType]
+    )  # bookmark caught up
 
 
 async def test_compact_reminder_defers_to_agent_reply(

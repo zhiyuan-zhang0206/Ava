@@ -23,7 +23,7 @@ def test_public_probe_is_a_noop_for_loopback_only_bind(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """No-secret clusters have no public listener, so the fast path calls nothing."""
-    monkeypatch.setattr(pgbouncer, "_bind_addrs", lambda _secret: ["127.0.0.1"])  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(pgbouncer, "_bind_addrs", lambda _secret: ["127.0.0.1"])  # pyright: ignore[reportUnknownArgumentType]
 
     def _fail_host_lookup() -> str:
         pytest.fail("no-secret probe must not resolve the reachable host")
@@ -51,7 +51,7 @@ def test_public_probe_accepts_the_exact_reachable_host_in_the_socket_table(
     monkeypatch.setattr(
         pgbouncer,
         "_bind_addrs",
-        lambda _secret: ["127.0.0.1", "10.0.0.5"],  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda _secret: ["127.0.0.1", "10.0.0.5"],  # pyright: ignore[reportUnknownArgumentType]
     )
     monkeypatch.setattr(pgbouncer, "reachable_host", lambda: "10.0.0.5")
     monkeypatch.setattr(port_preflight, "listener_addrs", _listener_addrs)
@@ -85,7 +85,7 @@ def test_public_probe_interprets_socket_table_bindings(
     monkeypatch.setattr(
         pgbouncer,
         "_bind_addrs",
-        lambda _secret: ["127.0.0.1", "10.0.0.5"],  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda _secret: ["127.0.0.1", "10.0.0.5"],  # pyright: ignore[reportUnknownArgumentType]
     )
     monkeypatch.setattr(pgbouncer, "reachable_host", lambda: "10.0.0.5")
     monkeypatch.setattr(port_preflight, "listener_addrs", _listener_addrs)

@@ -202,7 +202,7 @@ def _redis_probe(host: str, port: int, password: str, *, username: str) -> bool:
             socket_connect_timeout=3,
             socket_timeout=3,
         ) as client:
-            return bool(client.ping())  # pyright: ignore[reportUnknownMemberType]
+            return bool(client.ping())
     except Exception:
         return False
 
@@ -318,9 +318,7 @@ def apply_admin(state: RotationState) -> None:
         socket_connect_timeout=3,
         socket_timeout=3,
     ) as client:
-        client.execute_command(  # pyright: ignore[reportUnknownMemberType]
-            "CONFIG", "SET", "requirepass", state.new_redis_admin_password
-        )
+        client.execute_command("CONFIG", "SET", "requirepass", state.new_redis_admin_password)
     _refresh_pgbouncer(state)
 
 
