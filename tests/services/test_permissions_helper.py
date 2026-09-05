@@ -850,6 +850,32 @@ def test_keychain_path_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
     assert lifecycle._keychain_path() == Path.home() / "Library" / "Keychains" / "login.keychain-db"
 
 
+def test_signing_cert_import_uses_supported_security_argv(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The macOS security import command must contain only supported flags."""
+    from services.permissions_helper import lifecycle
+
+    keychain = tmp_path / "ci-signing.keychain-db"
+    monkeypatch.setattr(lifecycle, "_keychain_path", lambda: keychain)
+    recorded = _fake_tools(monkeypatch, authority=None, identity_output="0 identities found\n")
+
+    lifecycle.ensure_signing_cert()
+
+    import_argv = next(argv for argv in _argvs(recorded) if argv[:2] == ["security", "import"])
+    assert import_argv[:2] == ["security", "import"]
+    assert import_argv[2].endswith("ident.p12")
+    assert import_argv[3:] == [
+        "-k",
+        str(keychain),
+        "-P",
+        "ava",
+        "-T",
+        "/usr/bin/codesign",
+        "-A",
+    ]
+
+
 def test_locked_keychain_does_not_fail_a_current_host(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
