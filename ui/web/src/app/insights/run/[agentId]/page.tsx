@@ -3,7 +3,7 @@
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { RunTimelineChart, type RunTimelineChartLabels } from "@/components/run-timeline/run-timeline-chart";
 import {
@@ -19,9 +19,18 @@ import { api } from "@/lib/api";
 import { formatTokensCompact } from "@/lib/item-summary";
 import { FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0 } from "@/lib/layout";
 import type { RunTimelineResponse } from "@/lib/types";
+import { useUserSettings } from "@/lib/use-user-settings";
 import { cn } from "@/lib/utils";
 
 const ZOOM_WINDOWS = [24, 12, 6, 1, 0.5] as const;
+const RUN_TIMELINE_WINDOW_HOURS_SETTING = "display.run_timeline_window_hours";
+const RUN_TIMELINE_WINDOW_HOURS_DEFAULT = 2;
+
+function runTimelineWindowHours(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0
+    ? value
+    : RUN_TIMELINE_WINDOW_HOURS_DEFAULT;
+}
 
 function dateTimeInputValue(iso: string): string {
   const date = new Date(iso);
@@ -74,7 +83,26 @@ export default function RunTimelinePage({
   const [agentId, setAgentId] = useState<number | null>(null);
   const [paramsResolved, setParamsResolved] = useState(false);
   const [session, setSession] = useState<"compact" | "current">("compact");
-  const [windowOverride, setWindowOverride] = useState<TimelineWindowOverride | null>(null);
+  const { settings, isLoading: settingsLoading } = useUserSettings();
+  const configuredWindowHours = runTimelineWindowHours(
+    settings[RUN_TIMELINE_WINDOW_HOURS_SETTING],
+  );
+  const initialWindowOverride = useMemo<TimelineWindowOverride | null>(() => {
+    if (settingsLoading || typeof window === "undefined") return null;
+    const now = new Date();
+    return {
+      from: new Date(now.getTime() - configuredWindowHours * 60 * 60 * 1000).toISOString(),
+      to: now.toISOString(),
+    };
+  }, [configuredWindowHours, settingsLoading]);
+  // `undefined` means settings have not supplied the one-time initial window;
+  // `null` remains the user's explicit reset to the full session.
+  const [selectedWindowOverride, setWindowOverride] = useState<
+    TimelineWindowOverride | null | undefined
+  >(undefined);
+  const windowOverride =
+    selectedWindowOverride === undefined ? initialWindowOverride : selectedWindowOverride;
+  const windowReady = selectedWindowOverride !== undefined || initialWindowOverride !== null;
   const [fromInput, setFromInput] = useState("");
   const [toInput, setToInput] = useState("");
 
@@ -101,7 +129,7 @@ export default function RunTimelinePage({
   const turnQuery = useQuery({
     queryKey: ["run-timeline", agentId, windowOverride?.from ?? null, windowOverride?.to ?? null, session, "turn"],
     queryFn: () => api.getRunTimeline(safeAgentId, { ...(windowOverride ?? {}), session }),
-    enabled: agentId !== null && !requestsBucketsUpfront,
+    enabled: agentId !== null && windowReady && !requestsBucketsUpfront,
     placeholderData: keepPreviousData,
   });
   const densityWindow = requestsBucketsUpfront ? windowOverride : turnQuery.data?.window;
@@ -128,7 +156,7 @@ export default function RunTimelinePage({
         bucket: `${bucketSeconds}s`,
         session,
       }),
-    enabled: agentId !== null && shouldBucket,
+    enabled: agentId !== null && windowReady && shouldBucket,
     placeholderData: keepPreviousData,
   });
   const timeline = shouldBucket ? bucketQuery.data : turnQuery.data;
