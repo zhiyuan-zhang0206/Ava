@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, fireEvent, render as rtlRender, waitFor } from "@testing-library/react";
+import { fireEvent, render as rtlRender, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { RunTimelineResponse, UserSettingListResponse } from "@/lib/types";
@@ -65,7 +65,7 @@ describe("RunTimelinePage initial window", () => {
       },
       { timeout: 500 },
     );
-    act(() => vi.advanceTimersByTime(60_000));
+    vi.advanceTimersByTime(60_000);
 
     expect(getRunTimeline).not.toHaveBeenCalled();
   });
