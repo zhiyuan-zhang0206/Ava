@@ -190,6 +190,16 @@
   [role="button"]:not(:disabled) {
     cursor: pointer;
   }
+  /* Radix normally hides the native scrollbar with an injected style tag,
+     which the production CSP blocks. Keep that rule in the compiled app
+     stylesheet instead. */
+  [data-slot="scroll-area-viewport"] {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  [data-slot="scroll-area-viewport"]::-webkit-scrollbar {
+    display: none;
+  }
   /* Radix ScrollArea wraps viewport content in an inline-styled
      `display:table; min-width:100%` box. On iOS WebKit a display:table box
      as the scrolled content of an overflow:scroll viewport triggers a
