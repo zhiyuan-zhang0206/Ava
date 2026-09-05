@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render as rtlRender, waitFor } from "@testing-library/react";
+import { act, fireEvent, render as rtlRender, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { RunTimelineResponse, UserSettingListResponse } from "@/lib/types";
@@ -51,6 +51,25 @@ afterEach(() => {
 });
 
 describe("RunTimelinePage initial window", () => {
+  it("does not request the timeline while settings are pending", async () => {
+    getSettings.mockReturnValue(new Promise(() => undefined));
+
+    const { getByRole } = render();
+
+    await waitFor(
+      () => {
+        expect(getSettings).toHaveBeenCalledTimes(1);
+        expect(
+          getByRole("heading", { name: "Run timeline — agent 42" }),
+        ).toBeTruthy();
+      },
+      { timeout: 500 },
+    );
+    act(() => vi.advanceTimersByTime(60_000));
+
+    expect(getRunTimeline).not.toHaveBeenCalled();
+  });
+
   it("requests the most recent two hours by default", async () => {
     render();
 
@@ -62,6 +81,22 @@ describe("RunTimelinePage initial window", () => {
       }),
     );
     expect(getRunTimeline).toHaveBeenCalledTimes(1);
+  });
+
+  it("requests the full session after the user resets the window", async () => {
+    const { getByRole } = render();
+
+    await waitFor(() => expect(getRunTimeline).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(getByRole("button", { name: "Reset window" }));
+
+    await waitFor(() =>
+      expect(getRunTimeline).toHaveBeenNthCalledWith(2, 42, { session: "compact" }),
+    );
+    expect(getRunTimeline).toHaveBeenCalledTimes(2);
+    const resetOptions = getRunTimeline.mock.calls[1]?.[1];
+    expect(resetOptions).not.toHaveProperty("from");
+    expect(resetOptions).not.toHaveProperty("to");
   });
 
   it("uses the configured positive window duration", async () => {
