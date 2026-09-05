@@ -199,6 +199,9 @@ jobs:
       - name: Scan for tailnet IP literals (CIDR range notation exempt)
         run: python3 scripts/lint_no_tailnet.py
 
+      - name: Check canonical Python lock sources (stdlib only)
+        run: python3 scripts/lint_python_lock.py
+
   secret-scan:
     # Run independently of classify: a secret can be introduced by any file,
     # including a docs-only change that skips the backend and frontend suites.
