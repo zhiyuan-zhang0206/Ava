@@ -26,7 +26,6 @@ Wave structure:
 
 Total: ~28 agents / 7 waves
 """
-# ruff: noqa: ANN201, DTZ005, PTH123
 
 import json
 from datetime import datetime

@@ -146,7 +146,16 @@ _IMPL_KEYWORDS: list[tuple[str, str]] = [
 #   the plugin module itself). Functions inside plugin.py ARE still scanned
 #   because they may be wrap targets (e.g. `_wrapped_read` replaces
 #   `ava.files.read` and shows up in the prompt under that name).
-_PLUGIN_MODULE_DOCSTRING_EXEMPT = True
+_PLUGIN_MODULE_DOCSTRING_EXEMPT: frozenset[str] = frozenset(
+    {
+        "ava_builtins/plugins/ava_code/plugin.py",
+        "ava_builtins/plugins/ava_fleet/plugin.py",
+        "ava_builtins/plugins/ava_memory/plugin.py",
+        "ava_builtins/plugins/ava_sdk_reminder/plugin.py",
+        "ava_builtins/plugins/ava_silent_idle/plugin.py",
+        "ava_builtins/plugins/ava_syntax_fix/plugin.py",
+    }
+)
 
 
 def _discover_plugin_namespace_modules(repo_root: Path) -> set[Path]:
@@ -402,7 +411,7 @@ def _check_file(path: Path) -> list[tuple[Path, int, str]]:
     # `_PLUGIN_MODULE_DOCSTRING_EXEMPT`.
     rel = str(path).replace("\\", "/")
     is_plugin_module = rel.endswith("/plugin.py")
-    skip_module_doc = _PLUGIN_MODULE_DOCSTRING_EXEMPT and is_plugin_module
+    skip_module_doc = any(rel.endswith("/" + exempt) for exempt in _PLUGIN_MODULE_DOCSTRING_EXEMPT)
     if not skip_module_doc:
         for line_no, reason in _docstring_violations(tree, source_lines, extra=extra):
             out.append((path, line_no, reason))
