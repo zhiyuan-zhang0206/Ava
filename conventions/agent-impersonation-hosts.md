@@ -8,7 +8,9 @@ host conversation; the external agent fetches and processes the full messages.
 Start the relay immediately after making an impersonation request. It waits
 natively for consent and quiescence, then sends one control-active hint even if
 the inbox is empty. That hint directs the controller to the inbox and to any
-relevant context it has not already loaded. Rejection or expiry also wakes the controller;
+relevant context it has not already loaded. It gives independent complete inbox
+and ACK commands; do not append them to the `agents timeline` command.
+Rejection or expiry also wakes the controller;
 waiting for a decision never requires a model to poll status. Pass the lease
 UUID explicitly and inherit its credential as `AVA_IMPERSONATION_TOKEN`.
 No relay session, token or message files are created.

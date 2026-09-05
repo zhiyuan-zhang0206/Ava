@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import shlex
 import subprocess
 import sys
 from collections.abc import Callable
@@ -261,7 +262,7 @@ def test_waits_for_native_consent_then_wakes_empty_active_inbox() -> None:
     run(inbox, listener, emit)
     assert len(hints) == 1
     assert "control active" in hints[0]
-    assert "agents timeline 42" in hints[0]
+    assert "Read missing context" in hints[0]
     assert "pending_page=0" in hints[0]
     assert len(listener.waits) == 4
 
@@ -343,6 +344,15 @@ def test_claude_writes_one_short_line(
     assert "explicitly ACK" in message
     assert f"pending_page={len(pending)} newest_id={newest}" in message
     assert len(relay.activation_hint(42, LEASE_ID, frozenset())) < 500
+
+
+def test_activation_hint_provides_independent_inbox_and_ack_commands() -> None:
+    hint = relay.activation_hint(42, LEASE_ID, frozenset())
+    for verb in ("inbox", "ack"):
+        command = shlex.join([sys.executable, "-m", "cli", "impersonate", verb, str(LEASE_ID)])
+        assert command in hint
+    assert "agents timeline" not in hint
+    assert "same CLI" not in hint
 
 
 @pytest.mark.parametrize("remote", [None, "unix:///private/tmp/AVA queue $(literal).sock"])

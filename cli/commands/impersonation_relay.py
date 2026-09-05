@@ -75,13 +75,14 @@ def inbox_hint(agent_id: int, lease_id: UUID, pending: frozenset[int]) -> str:
 
 
 def activation_hint(agent_id: int, lease_id: UUID, pending: frozenset[int]) -> str:
-    command = shlex.join([sys.executable, "-m", "cli", "agents", "timeline", str(agent_id)])
+    prefix = [sys.executable, "-m", "cli", "impersonate"]
+    inbox = shlex.join([*prefix, "inbox", str(lease_id)])
+    ack = shlex.join([*prefix, "ack", str(lease_id)])
     return (
-        f"AVA control active: agent={agent_id} lease={lease_id} "
+        f"AVA control active: agent={agent_id} "
         f"pending_page={len(pending)} newest_id={max(pending, default=0)}. "
-        f"If relevant context is missing, read {command}. Use that same CLI: "
-        f"impersonate inbox {lease_id}; process and explicitly ACK IDs, "
-        "draining pages until empty."
+        f"Read missing context as needed. Inbox: {inbox}. "
+        f"After processing, explicitly ACK: {ack} ID...; drain pages until empty."
     )
 
 
