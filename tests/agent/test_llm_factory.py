@@ -1290,6 +1290,9 @@ class TestValidateModelConfig:
         monkeypatch.delenv("DASHSCOPE_API_KEY", raising=False)
         monkeypatch.delenv("MOONSHOT_API_KEY", raising=False)
         monkeypatch.delenv("MIMO_API_KEY", raising=False)
+        monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+        monkeypatch.delenv("MOONSHOT_API_KEY", raising=False)
+        monkeypatch.delenv("MIMO_API_KEY", raising=False)
 
     @staticmethod
     def _set_plugin_keys(monkeypatch: pytest.MonkeyPatch) -> None:
