@@ -176,7 +176,13 @@ def _read_counter() -> int:
 
 
 def _write_counter(consecutive_failures: int) -> None:
-    _write_probe_counter_path().write_text(str(consecutive_failures), encoding="utf-8")
+    """Advisory state: a failed write (e.g. a full disk — the exact
+    failure this check exists to catch) must not crash the healthcheck
+    round; a lost increment only delays the restart verdict by one round."""
+    try:
+        _write_probe_counter_path().write_text(str(consecutive_failures), encoding="utf-8")
+    except OSError as exc:
+        sys.stderr.write(f"lgtm write-probe counter write failed: {exc}\n")
 
 
 def _restart_stack() -> bool:

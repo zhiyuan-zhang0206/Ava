@@ -232,6 +232,13 @@ def test_main_noop_without_marker(monkeypatch: pytest.MonkeyPatch) -> None:
     assert probed == []
 
 
+def test_write_counter_survives_oserror(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A counter write failure (e.g. full disk) must not crash the round."""
+    monkeypatch.setattr(hc, "_write_probe_counter_path", lambda: Path("/no-such-dir/x"))  # pyright: ignore[reportUnknownArgumentType]
+
+    hc._write_counter(3)  # no raise — the lost increment only delays the verdict
+
+
 def test_main_restarts_on_down_probe(monkeypatch: pytest.MonkeyPatch) -> None:
     """A down backend on the marked host triggers the start.sh re-run; a failed
     re-run exits non-zero (the watchdog's failure contract)."""

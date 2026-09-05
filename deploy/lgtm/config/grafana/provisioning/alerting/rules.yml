@@ -579,8 +579,9 @@ groups:
       # Complements R6: absent_over_time catches a total stop (zero flow),
       # while this rule catches partial write loss when a few batches still
       # reach Loki. The rules intentionally run in parallel and may overlap.
-      # Calibration at 2026-09-06 03:11 Beijing over the preceding 24h:
-      # whole-cluster 5m counts min=295 (~59/min, two windows), p05=349,
+      # Calibration at 2026-09-06 03:11 Beijing over the preceding 24h,
+      # measured with this exact expression (same stream selector and
+      # pipeline): 5m counts min=295 (~59/min, two windows), p05=349,
       # median=1071, max=3167. The 150/5m threshold (~30/min) is about half
       # the measured trough; it must remain breached for 10m before firing.
       - uid: ava-ops-events-low-water
