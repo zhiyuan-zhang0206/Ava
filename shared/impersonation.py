@@ -24,13 +24,14 @@ from shared._impersonation_store import (
     require_active_locked,
     require_native,
     token_hash,
+    validate_active,
 )
 from shared._impersonation_store import (
     ImpersonationError as ImpersonationError,
 )
 from shared.caller_identity import CallerIdentity
 from shared.config import settings
-from shared.db import publish_inbound_wake
+from shared.db import connect, publish_inbound_wake
 from shared.db_transaction import write_transaction
 from shared.live_events import Cancelled
 from shared.machine import machine_name
@@ -104,10 +105,25 @@ def get(lease_id: str, token: str) -> dict[str, Any]:
 
 
 def require_active(lease_id: str, token: str) -> dict[str, Any]:
-    with write_transaction() as conn:
-        lease = lock_lease(conn, lease_id)
-        require_active_locked(conn, lease, token)
-        return public(lease)
+    """Check one committed snapshot; SDK work does not hold a database lock."""
+    with connect() as conn, conn.cursor(row_factory=dict_row) as cur:
+        cur.execute(
+            "SELECT l.*,m.machine AS current_machine,m.status AS current_status,"
+            "l.expires_at>clock_timestamp() AS fresh FROM agent_impersonations l "
+            "JOIN agents_meta m ON m.id=l.agent_id WHERE l.id=%s",
+            (lease_id,),
+        )
+        lease = cur.fetchone()
+    if lease is None:
+        raise ImpersonationError("Impersonation does not exist")
+    validate_active(
+        lease,
+        token,
+        fresh=lease.pop("fresh"),
+        machine=lease.pop("current_machine"),
+        status=lease.pop("current_status"),
+    )
+    return public(lease)
 
 
 def accept(lease_id: str, agent_id: int, incarnation: RuntimeIncarnation) -> dict[str, Any]:
@@ -189,9 +205,25 @@ def activate(lease_id: str, incarnation: RuntimeIncarnation) -> dict[str, Any]:
 
 
 def native_status(agent_id: int, incarnation: RuntimeIncarnation) -> dict[str, Any] | None:
+    if incarnation.agent_id != agent_id:
+        raise ImpersonationError("Native status belongs to a different agent")
+    # No-lease reads must not lock the hot native metadata row at every node.
+    # A concurrently inserted request still needs this native owner's consent;
+    # absence can delay presentation until the next gate, never activate it.
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT runtime_generation=%s AND runtime_owner=%s "
+            "AND status IN ('running','idling') AND lease_expires_at>clock_timestamp(),"
+            "EXISTS(SELECT 1 FROM agent_impersonations WHERE agent_id=%s AND "
+            "(status IN ('requested','accepted','active') OR delta_version>applied_version)) "
+            "FROM agents_meta WHERE id=%s",
+            (incarnation.generation, incarnation.owner, agent_id, agent_id),
+        ).fetchone()
+    if row is None or row[0] is not True:
+        raise ImpersonationError("Native runtime no longer owns this agent")
+    if not row[1]:
+        return None
     with write_transaction() as conn:
-        if incarnation.agent_id != agent_id:
-            raise ImpersonationError("Native status belongs to a different agent")
         require_native(conn, incarnation)
         with conn.cursor(row_factory=dict_row) as cur:
             cur.execute(
@@ -220,20 +252,6 @@ def native_status(agent_id: int, incarnation: RuntimeIncarnation) -> dict[str, A
             lease["accepted_owner"] = None
             lease["consent_version"] += 1
         return public(lease)
-
-
-def is_paused(agent_id: int) -> bool:
-    """Recheck the lease before native claim/model work, including recovered nodes."""
-    with write_transaction() as conn:
-        lock_agent(conn, agent_id)
-        with conn.cursor(row_factory=dict_row) as cur:
-            cur.execute(
-                "SELECT * FROM agent_impersonations WHERE agent_id=%s "
-                "AND status IN ('accepted','active') FOR UPDATE",
-                (agent_id,),
-            )
-            lease = cur.fetchone()
-        return lease is not None and expire(conn, lease)["status"] in ("accepted", "active")
 
 
 def renew(lease_id: str, token: str, *, ttl_seconds: int | None = None) -> dict[str, Any]:
@@ -321,7 +339,10 @@ def ack(lease_id: str, token: str, message_ids: list[int]) -> None:
             Cancelled(agent_id=lease["agent_id"]).model_dump_json(),
             context="impersonation_cancel_ack",
         )
-    _wake(lease["agent_id"])
+    # Consuming a page exposes previously hidden pending IDs to the relay.
+    # Publish after real progress so its next page does not wait for DB catchup.
+    if acknowledged:
+        _wake(lease["agent_id"])
 
 
 def merge_plugin_delta(

@@ -24,9 +24,16 @@ holding cluster credentials, not a sandbox for untrusted Python or native tools.
 from requested to rejected. The request deadline prevents abandoned requests
 from blocking later ones. The active TTL starts only after native acceptance,
 execution resource closure and checkpoint flush. Explicit renewal replaces the
-deadline; neither attaching nor relaying renews it. Database-clock checks after
-locking decide expiry. New requests serialize on the agent row and cannot
+deadline; neither attaching nor relaying renews it. Mutations check the database
+clock after locking. New requests serialize on the agent row and cannot
 overlap an existing request, active lease or unapplied plugin journal.
+
+SDK identity reads validate one joined lease/agent snapshot without row locks;
+this authorizes the call at that boundary, not a lock across arbitrary SDK or
+native-tool work. Native node gates check ownership and lease existence in one
+read snapshot. With no lease they return without locking; a concurrent request
+still needs native consent before it can activate. Any open lease or unapplied
+journal enters the locked reconciliation path and rechecks native ownership.
 
 Requests stay in the protocol's private table until the native claim gate
 renders their real external sender and asks for consent. Native acceptance ends

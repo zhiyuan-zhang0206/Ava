@@ -29,7 +29,11 @@ The claim gate leaves chat, heartbeat and compaction input pending while held.
 Node guards suppress initialization hooks, automatic compaction, and execution
 hooks; cold boot and database recovery defer checkpoint repair while held.
 Administrative restart/terminate input uses a control-only claim and
-the existing lifecycle apply helpers entirely outside graph execution. Restart preserves the external lease; termination revokes it atomically
+the existing lifecycle apply helpers entirely outside graph execution. Only
+an accepted command can leave that claim path; it bypasses ordinary batch
+acknowledgement. Invalid directed pending intents fail without settlement;
+an accepted intent whose target was replaced receives the existing explicit
+`superseded` result. Restart preserves the external lease; termination revokes it atomically
 through the database lifecycle trigger. New runtime incarnations read the same
 lease before normal execution. Database-clock expiry and explicit release
 restore the ordinary inbound path, including unacknowledged external input and

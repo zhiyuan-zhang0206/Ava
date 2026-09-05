@@ -1,6 +1,8 @@
 """Database leases, explicit consent, and durable handoff/inbox invariants."""
 
+from collections.abc import Generator
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, LiteralString, cast
 from uuid import uuid4
@@ -53,6 +55,80 @@ def _active(owner: RuntimeIncarnation) -> dict[str, Any]:
     return lease
 
 
+@pytest.fixture
+def short_lock_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    transaction = leases.write_transaction
+    connect = leases.connect
+
+    @contextmanager
+    def bounded_transaction() -> Generator[psycopg.Connection]:
+        with transaction() as conn:
+            conn.execute("SET LOCAL lock_timeout='100ms'")
+            yield conn
+
+    @contextmanager
+    def bounded_read() -> Generator[psycopg.Connection]:
+        with connect() as conn:
+            conn.execute("SET LOCAL lock_timeout='100ms'")
+            yield conn
+
+    monkeypatch.setattr(leases, "write_transaction", bounded_transaction)
+    monkeypatch.setattr(leases, "connect", bounded_read)
+
+
+def test_native_without_lease_does_not_contend_with_agent_writes(
+    db_conn: psycopg.Connection, short_lock_timeout: None
+) -> None:
+    owner = _agent(db_conn)
+    db_conn.execute("SELECT id FROM agents_meta WHERE id=%s FOR UPDATE", (owner.agent_id,))
+    assert leases.native_status(owner.agent_id, owner) is None
+
+
+def test_external_identity_read_does_not_contend_with_lease_writes(
+    db_conn: psycopg.Connection, short_lock_timeout: None
+) -> None:
+    owner = _agent(db_conn)
+    lease = _active(owner)
+    db_conn.execute("SELECT id FROM agents_meta WHERE id=%s FOR UPDATE", (owner.agent_id,))
+    db_conn.execute("SELECT id FROM agent_impersonations WHERE id=%s FOR UPDATE", (lease["id"],))
+    result = leases.require_active(lease["id"], lease["token"])
+    assert result["status"] == "active"
+    assert set(result) == set(lease) - {"token"}
+
+
+def test_existing_lease_still_serializes_native_reconciliation(
+    db_conn: psycopg.Connection, short_lock_timeout: None
+) -> None:
+    owner = _agent(db_conn)
+    lease = _request(owner)
+    leases.accept(lease["id"], owner.agent_id, owner)
+    db_conn.execute("SELECT id FROM agents_meta WHERE id=%s FOR UPDATE", (owner.agent_id,))
+    with pytest.raises(psycopg.errors.LockNotAvailable):
+        leases.native_status(owner.agent_id, owner)
+    db_conn.rollback()
+    assert _status(owner)["status"] == "accepted"
+
+
+@pytest.mark.parametrize("invalid", ["owner", "ttl", "status"])
+def test_native_without_lease_still_requires_current_ownership(
+    db_conn: psycopg.Connection, invalid: str
+) -> None:
+    owner = _agent(db_conn)
+    if invalid == "owner":
+        owner = RuntimeIncarnation(owner.agent_id, uuid4(), uuid4())
+    elif invalid == "ttl":
+        db_conn.execute(
+            "UPDATE agents_meta SET lease_expires_at=clock_timestamp()-interval '1 second' "
+            "WHERE id=%s",
+            (owner.agent_id,),
+        )
+    else:
+        db_conn.execute("UPDATE agents_meta SET status='restarting' WHERE id=%s", (owner.agent_id,))
+    db_conn.commit()
+    with pytest.raises(leases.ImpersonationError, match="no longer owns"):
+        leases.native_status(owner.agent_id, owner)
+
+
 def test_request_needs_consent_then_native_checkpoint_ack(db_conn: psycopg.Connection) -> None:
     owner = _agent(db_conn)
     lease = _request(owner)
@@ -64,7 +140,7 @@ def test_request_needs_consent_then_native_checkpoint_ack(db_conn: psycopg.Conne
     with pytest.raises(leases.ImpersonationError, match="not active"):
         leases.require_active(lease["id"], lease["token"])
     leases.accept(lease["id"], owner.agent_id, owner)
-    assert leases.is_paused(owner.agent_id)
+    assert _status(owner)["status"] == "accepted"
     with pytest.raises(leases.ImpersonationError, match="not active"):
         leases.inbox(lease["id"], lease["token"])
     leases.activate(lease["id"], owner)
@@ -99,7 +175,7 @@ def test_inbox_ack_and_atomic_real_sender_handoff(db_conn: psycopg.Connection) -
     assert [m["id"] for m in leases.inbox(lease["id"], lease["token"])] == [second]
     result = leases.release(lease["id"], lease["token"], "Finished first; second still needs work.")
     assert result["status"] == "released"
-    assert not leases.is_paused(owner.agent_id)
+    assert leases.native_status(owner.agent_id, owner) is None
     rows = db_conn.execute(
         "SELECT id,status,source,payload FROM inbound_messages ORDER BY id"
     ).fetchall()
@@ -143,6 +219,7 @@ def test_cancel_ack_publishes_committed_completion_once(
     leases.inbox(lease["id"], lease["token"])
     unread = insert_inbound_message(db_conn, owner.agent_id, "Unread", "user", kind="cancel")
     published: list[Cancelled] = []
+    wakes: list[int] = []
 
     def publish(channel: str, payload: str, *, context: str = "") -> int:
         assert channel == settings.data_plane.events_channel
@@ -159,15 +236,20 @@ def test_cancel_ack_publishes_committed_completion_once(
         return 1
 
     monkeypatch.setattr("shared.redis_client.publish_best_effort_sync", publish)
+    monkeypatch.setattr(leases, "_wake", wakes.append)
     with pytest.raises(leases.ImpersonationError, match="not read"):
         leases.ack(lease["id"], lease["token"], [cancel, unread])
     assert published == []
+    assert wakes == []
     leases.ack(lease["id"], lease["token"], [peer])
     assert published == []
+    assert wakes == [owner.agent_id]
     leases.ack(lease["id"], lease["token"], [cancel])
     assert published == [Cancelled(agent_id=owner.agent_id)]
+    assert wakes == [owner.agent_id, owner.agent_id]
     leases.ack(lease["id"], lease["token"], [cancel, peer])
     assert len(published) == 1
+    assert wakes == [owner.agent_id, owner.agent_id]
 
 
 def test_ttl_revokes_all_borrower_operations_and_preserves_pending(
@@ -195,7 +277,7 @@ def test_ttl_revokes_all_borrower_operations_and_preserves_pending(
         with pytest.raises(leases.ImpersonationError, match="TTL has expired"):
             operation()
     assert _status(owner)["status"] == "expired"
-    assert not leases.is_paused(owner.agent_id)
+    assert leases.native_status(owner.agent_id, owner) is None
     rows = db_conn.execute("SELECT id,status,source FROM inbound_messages ORDER BY id").fetchall()
     assert rows[0] == (pending, "pending", "agent:99")
     assert rows[1][1:] == ("pending", "system:impersonation")
@@ -297,7 +379,7 @@ def test_expiry_between_driver_read_and_activation_returns_control(
     )
     db_conn.commit()
     assert leases.activate(lease["id"], owner)["status"] == "expired"
-    assert not leases.is_paused(owner.agent_id)
+    assert leases.native_status(owner.agent_id, owner) is None
 
 
 def test_renew_replaces_ttl_and_reject_records_reason(db_conn: psycopg.Connection) -> None:

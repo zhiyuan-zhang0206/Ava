@@ -152,6 +152,9 @@ async def settle_checkpoint(
     if session["status"] == "accepted":
         if not activate_accepted:
             return False
+        # Hosted turns track asynchronous continuations here. Process mode has
+        # no turn-resource scope; it relies on exec return and the durable
+        # execution-allocation check inside activate(), after checkpoint flush.
         if not hosted_resources_settled():
             raise RuntimeError(
                 "cannot activate impersonation with unresolved native exec resources"

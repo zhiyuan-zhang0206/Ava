@@ -291,6 +291,10 @@ async def claim_inbound_batch(
             )
             if await cur.fetchone() is not None:
                 raise RuntimeError("lifecycle claim requires an admitted runtime incarnation")
+        if lifecycle_only:
+            # Accepted intents returned above. A held native runtime has no
+            # authority to acknowledge ordinary input in the generic batch.
+            return []
         # CASE-on-kind in a single UPDATE keeps the batch grab atomic — chat
         # and non-chat rows in the same batch all commit together. RETURNING
         # order for UPDATE … WHERE id IN (subquery) is heap-scan order, not
@@ -304,11 +308,10 @@ async def claim_inbound_batch(
             "  SELECT id FROM inbound_messages "
             "  WHERE status = 'pending' AND agent_id = %s "
             "  AND (NOT %s OR kind NOT IN ('restart','terminate')) "
-            "  AND (NOT %s OR kind IN ('restart','terminate')) "
             "  ORDER BY created_at ASC, id ASC "
             "  FOR UPDATE SKIP LOCKED"
             ") RETURNING id, agent_id, content, kind, source, payload, created_at, claimed_at",
-            (agent_id, runtime_owned, lifecycle_only),
+            (agent_id, runtime_owned),
         )
         rows = await cur.fetchall()
     rows.sort(key=lambda r: r[6])  # created_at FIFO (index follows SELECT column count)

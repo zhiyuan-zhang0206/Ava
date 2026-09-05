@@ -326,8 +326,9 @@ def _dispatch_exec_result(
         case _ExecLifecycle(
             output=output, exc=AgentTermination() | AgentRestart() | AgentImpersonation() as exc
         ):
-            # SDK already INSERTed the inbound; the claim side writes the
-            # lifecycle marker — no "[halt]" annotation (duplication is noise).
+            # Restart/terminate enqueue lifecycle inbounds; impersonation
+            # records consent in its lease. Their drivers resume after exec
+            # cleanup, without adding a duplicate "[halt]" annotation here.
             halted = True
             result_text = wrap_code_output(output, stream_cap=stream_cap)
             exit_code_for_msg = IDLE_EXIT_CODE

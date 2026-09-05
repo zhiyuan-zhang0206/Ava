@@ -133,3 +133,55 @@ def test_relay_parser() -> None:
     assert args.provider == "codex"
     assert args.thread_id == "thread"
     assert args.func.__name__ == "_h_impersonate_relay"
+
+
+@pytest.mark.parametrize(
+    ("command", "option", "invalid_values"),
+    [
+        (["request", "--agent", "405", "--as", "codex"], "--ttl", ["0", "86401"]),
+        (["renew", "lease"], "--ttl", ["-1", "86401"]),
+        (["inbox", "lease"], "--limit", ["0", "1001"]),
+        (["inbox", "lease"], "--wait", ["-1", "nan", "inf"]),
+        (
+            ["relay", "405", "--lease-id", "lease", "--provider", "claude"],
+            "--debounce",
+            ["-1", "30.1", "nan", "inf"],
+        ),
+    ],
+)
+def test_numeric_options_reject_out_of_bounds_values_during_parsing(
+    command: list[str],
+    option: str,
+    invalid_values: list[str],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    for value in invalid_values:
+        with pytest.raises(SystemExit) as raised:
+            _args(*command, option, value)
+        assert raised.value.code == 2
+        output = capsys.readouterr()
+        assert output.out == ""
+        assert f"argument {option}:" in output.err
+        assert "Traceback" not in output.err
+
+
+@pytest.mark.parametrize(
+    ("command", "option", "values"),
+    [
+        (["request", "--agent", "405", "--as", "codex"], "--ttl", ["1", "86400"]),
+        (["renew", "lease"], "--ttl", ["1", "86400"]),
+        (["inbox", "lease"], "--limit", ["1", "1000"]),
+        (["inbox", "lease"], "--wait", ["0", "0.5", "86400"]),
+        (
+            ["relay", "405", "--lease-id", "lease", "--provider", "claude"],
+            "--debounce",
+            ["0", "0.5", "30"],
+        ),
+    ],
+)
+def test_numeric_options_accept_runtime_boundaries(
+    command: list[str], option: str, values: list[str]
+) -> None:
+    for value in values:
+        parsed = _args(*command, option, value)
+        assert getattr(parsed, option.removeprefix("--")) == float(value)

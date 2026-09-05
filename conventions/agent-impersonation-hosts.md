@@ -74,6 +74,9 @@ the [channel protocol](https://code.claude.com/docs/en/channels-reference).
   never travel through its stdout channel. Fetch messages using `impersonate
   inbox LEASE_UUID`; process and explicitly `impersonate ack LEASE_UUID ID ...`.
   Drain inbox pages until empty before waiting again.
+  An ACK that marks messages done publishes a wake so the relay immediately
+  discovers the next pending page, even when no new message has arrived.
+  Repeating an ACK for already-done messages does not publish another wake.
   Treat `kind="cancel"` as a request to stop current work, then explicitly ACK it.
   Native AVA does not consume cancellation on behalf of the external controller.
 - Reading or successfully queueing a hint does not mark a message done. The

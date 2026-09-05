@@ -438,7 +438,9 @@ class AgentHost:
         if incarnation is None:
             return
         with bind_turn_identity(agent_id, incarnation=incarnation):
-            await claim_inbound_batch(self._control_pool, agent_id, lifecycle_only=True)
+            batch = await claim_inbound_batch(self._control_pool, agent_id, lifecycle_only=True)
+            if len(batch) > 1 or any(not item.durable_lifecycle for item in batch):
+                raise RuntimeError("held control claim returned an unaccepted command")
             kind = await apply_hosted_lifecycle(self._control_pool, incarnation)
             if kind is None:
                 await settle_hosted_runtime(self._control_pool, incarnation)

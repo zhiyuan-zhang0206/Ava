@@ -22,15 +22,17 @@ THREAD_ID = UUID("b9d32d0d-bd27-40fc-83e8-692769b21523")
 
 
 class Inbox:
-    def __init__(self, *pending: int) -> None:
+    def __init__(self, *pending: int, page_size: int | None = None) -> None:
         self.pending = set(pending)
+        self.page_size = page_size
         self.status: relay.LeaseStatus = "active"
         self.expires_at = datetime.now(UTC) + timedelta(minutes=5)
         self.reads = 0
 
     async def read(self) -> relay.InboxSnapshot:
         self.reads += 1
-        return relay.InboxSnapshot(frozenset(self.pending), self.expires_at, self.status)
+        page = frozenset(sorted(self.pending)[: self.page_size])
+        return relay.InboxSnapshot(page, self.expires_at, self.status)
 
     @property
     def active(self) -> bool:
@@ -159,6 +161,25 @@ def test_later_commit_with_lower_id_is_not_hidden_by_watermark() -> None:
     assert len(hints) == 2
     assert "pending_page=2" in hints[-1]
     assert inbox.pending == {9, 10}
+
+
+def test_ack_wake_exposes_next_inbox_page_without_a_new_message() -> None:
+    inbox = Inbox(*range(1, 102), page_size=100)
+
+    def waited(n: int) -> None:
+        if n == 1:
+            # The controller's ACK publishes a wake after removing page one.
+            inbox.pending.difference_update(range(1, 101))
+        else:
+            inbox.active = False
+
+    hints: list[str] = []
+    run(inbox, Listener(inbox, waited=waited), hints.append)
+
+    assert len(hints) == 2
+    assert "pending_page=100 newest_id=100" in hints[0]
+    assert "pending_page=1 newest_id=101" in hints[1]
+    assert inbox.pending == {101}
 
 
 def test_failed_delivery_preserves_pending_and_restart_replays() -> None:
@@ -309,14 +330,18 @@ def test_bursts_are_coalesced_below_monitor_event_rate(monkeypatch: pytest.Monke
     assert "pending_page=3" in hints[1]
 
 
-def test_claude_writes_one_short_line(capsys: pytest.CaptureFixture[str]) -> None:
-    message = relay.inbox_hint(42, LEASE_ID, frozenset({1, 2, 3}))
+@pytest.mark.parametrize(("pending", "newest"), [(frozenset[int](), 0), (frozenset({1, 2, 3}), 3)])
+def test_claude_writes_one_short_line(
+    capsys: pytest.CaptureFixture[str], pending: frozenset[int], newest: int
+) -> None:
+    message = relay.inbox_hint(42, LEASE_ID, pending)
     relay.monitor_claude(message)
     captured = capsys.readouterr()
     assert captured.out == message + "\n"
     assert len(message) < 500
     assert captured.err == ""
     assert "explicitly ACK" in message
+    assert f"pending_page={len(pending)} newest_id={newest}" in message
     assert len(relay.activation_hint(42, LEASE_ID, frozenset())) < 500
 
 

@@ -11,8 +11,10 @@ import base64
 import importlib
 from typing import Any, cast
 
+from langchain_core.messages import RemoveMessage, convert_to_messages
 from langgraph.checkpoint.postgres import PostgresSaver
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
+from langgraph.graph.message import REMOVE_ALL_MESSAGES
 from psycopg import Connection, connect
 from psycopg.rows import DictRow, dict_row
 
@@ -29,10 +31,24 @@ def _serializer() -> JsonPlusSerializer:
     )
 
 
+def _validate_messages_delta(delta: dict[str, Any]) -> None:
+    if "messages" not in delta:
+        return
+    value = delta["messages"]
+    messages = cast(list[Any], value) if isinstance(value, list) else [value]
+    for message in convert_to_messages(messages):
+        if isinstance(message, RemoveMessage) and message.id == REMOVE_ALL_MESSAGES:
+            raise ValueError(
+                "external plugin deltas cannot use REMOVE_ALL to reset message history; "
+                "full-history resets are reserved for native compaction and crash repair"
+            )
+
+
 def encode_plugin_delta(delta: dict[str, Any]) -> dict[str, str]:
     """Serialize a validated reducer input without coercing it to a field value."""
     state_module = _state_module()
     checked = state_module._validate_plugin_state_keys(delta, state_module.AgentState)
+    _validate_messages_delta(checked)
     encoding, payload = _serializer().dumps_typed(checked)
     return {"encoding": encoding, "data": base64.b64encode(payload).decode("ascii")}
 
@@ -45,15 +61,18 @@ def decode_plugin_delta(encoded: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise TypeError("external plugin delta must decode to a dict")
     state_module = _state_module()
-    return cast(
+    checked = cast(
         dict[str, Any], state_module._validate_plugin_state_keys(payload, state_module.AgentState)
     )
+    _validate_messages_delta(checked)
+    return checked
 
 
 def apply_plugin_delta(state: Any, delta: dict[str, Any]) -> None:
     """Replay one journal entry through the registered field reducers."""
     state_module = _state_module()
     state_module._validate_plugin_state_keys(delta, type(state))
+    _validate_messages_delta(delta)
     for name, value in delta.items():
         reducer = state_module._resolve_reducer(state.__class__.model_fields[name])
         setattr(state, name, reducer(getattr(state, name), value))

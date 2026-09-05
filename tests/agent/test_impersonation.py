@@ -222,6 +222,84 @@ async def test_control_claim_leaves_cancel_for_external_or_resumed_native(
     ).fetchone() == ("done",)
 
 
+@pytest.mark.parametrize("runtime_kind", ["process", "hosted"])
+@pytest.mark.parametrize("kind", ["restart", "terminate"])
+async def test_control_claim_records_superseded_accepted_intent(
+    db_conn: psycopg.Connection[Any],
+    aops_pool: AsyncConnectionPool[Any],
+    runtime_kind: str,
+    kind: str,
+) -> None:
+    from agent._starting import claim_agent_row
+    from agent.db import claim_inbound_batch
+    from agent.hosted_ownership import admit_hosted_runtime
+    from shared.machine import machine_name
+    from shared.runtime_incarnation import current_incarnation
+    from tests.conftest import spawn_agent
+
+    agent_id = spawn_agent()
+    if runtime_kind == "process":
+        claim_agent_row(agent_id)
+        owner = current_incarnation(agent_id)
+    else:
+        owner = await admit_hosted_runtime(
+            aops_pool, agent_id, machine_name(), uuid4(), expected_from="idling"
+        )
+    assert owner is not None
+    db_conn.execute(
+        "INSERT INTO inbound_messages(agent_id,content,kind,source) VALUES(%s,'',%s,'user')",
+        (agent_id, kind),
+    )
+    db_conn.commit()
+    with bind_turn_identity(agent_id, incarnation=owner):
+        accepted = await claim_inbound_batch(aops_pool, agent_id, lifecycle_only=True)
+    assert len(accepted) == 1 and accepted[0].durable_lifecycle
+    replacement = RuntimeIncarnation(agent_id, uuid4(), uuid4())
+    db_conn.execute(
+        "UPDATE agents_meta SET runtime_generation=%s,runtime_owner=%s WHERE id=%s",
+        (replacement.generation, replacement.owner, agent_id),
+    )
+    db_conn.commit()
+    with bind_turn_identity(agent_id, incarnation=replacement):
+        assert await claim_inbound_batch(aops_pool, agent_id, lifecycle_only=True) == []
+    assert db_conn.execute(
+        "SELECT status,applied_at,target_generation,target_owner,payload->'lifecycle_result' "
+        "FROM inbound_messages WHERE agent_id=%s AND kind=%s",
+        (agent_id, kind),
+    ).fetchone() == (
+        "done",
+        None,
+        owner.generation,
+        owner.owner,
+        {"outcome": "superseded", "reason": "target_replaced"},
+    )
+    assert db_conn.execute(
+        "SELECT lifecycle_command_id FROM agents_meta WHERE id=%s", (agent_id,)
+    ).fetchone() == (None,)
+
+
+@pytest.mark.parametrize("kind", ["restart", "terminate"])
+async def test_control_claim_preserves_unaccepted_intent(
+    db_conn: psycopg.Connection[Any], aops_pool: AsyncConnectionPool[Any], kind: str
+) -> None:
+    from agent.db import claim_inbound_batch
+    from tests.conftest import spawn_agent
+
+    agent_id = spawn_agent()
+    db_conn.execute(
+        "INSERT INTO inbound_messages(agent_id,content,kind,source) VALUES(%s,'',%s,'user')",
+        (agent_id, kind),
+    )
+    db_conn.commit()
+    with pytest.raises(RuntimeError, match="lifecycle claim requires an admitted"):
+        await claim_inbound_batch(aops_pool, agent_id, lifecycle_only=True)
+    assert db_conn.execute(
+        "SELECT status,claimed_at,payload->'lifecycle_result' "
+        "FROM inbound_messages WHERE agent_id=%s",
+        (agent_id,),
+    ).fetchone() == ("pending", None, None)
+
+
 async def test_held_host_wake_returns_before_runtime_or_slot(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -249,6 +327,29 @@ async def test_held_host_wake_returns_before_runtime_or_slot(
     host._runtime_for.assert_not_awaited()
     admission.assert_awaited_once()
     settlement.assert_awaited_once()
+
+
+async def test_held_host_refuses_unaccepted_control_batch(monkeypatch: pytest.MonkeyPatch) -> None:
+    from services.agent_host.host import AgentHost
+
+    host = object.__new__(AgentHost)
+    host._machine = "local"
+    host._owner = uuid4()
+    host._control_pool = MagicMock()
+    owner = RuntimeIncarnation(42, uuid4(), host._owner)
+    monkeypatch.setattr(
+        "services.agent_host.host.admit_hosted_runtime", AsyncMock(return_value=owner)
+    )
+    monkeypatch.setattr(
+        "agent.db.claim_inbound_batch",
+        AsyncMock(return_value=[SimpleNamespace(durable_lifecycle=False)]),
+    )
+    apply = AsyncMock(return_value=None)
+    monkeypatch.setattr("services.agent_host.host.apply_hosted_lifecycle", apply)
+    monkeypatch.setattr("services.agent_host.host.settle_hosted_runtime", AsyncMock())
+    with pytest.raises(RuntimeError, match="held control claim returned an unaccepted command"):
+        await host._run_held_controls(42, "idling")
+    apply.assert_not_awaited()
 
 
 async def test_idle_request_wakes_without_claiming_an_inbound(

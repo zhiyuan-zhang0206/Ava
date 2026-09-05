@@ -89,6 +89,10 @@ external tool as itself.
 The context manager stages plugin state on exit. A longer attachment can call
 `attachment.flush()` between steps; this does not renew the lease. Native execution
 remains the sole checkpoint writer and applies staged deltas before resuming.
+Message updates may append to the existing history under the normal reducer rules.
+External deltas cannot clear or rebuild the full history with
+`RemoveMessage(REMOVE_ALL_MESSAGES)`; that operation is reserved for native
+compaction and crash repair, and is rejected before journaling or replay.
 Concurrent attachments detect conflicting state versions and fail rather than
 silently overwriting one another. SDK calls already in progress are ordinary
 external process work; expiry prevents further validated calls.
@@ -117,6 +121,7 @@ ava impersonate ack '<lease id>' 123 124
 
 Inbox reads return durable inbound rows without marking them processed. Acknowledge
 only the IDs actually handled; unacknowledged rows remain available after release.
+`--limit` accepts 1 through 1000 rows; `--wait` accepts finite, nonnegative seconds.
 The CLI uses the existing Redis inbound listener and a durable database recheck.
 For automatic same-session wake-up, use the [Codex and Claude host relay](agent-impersonation-hosts.md).
 The relay sends availability hints and never acknowledges work for the external model.

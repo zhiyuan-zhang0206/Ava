@@ -67,7 +67,7 @@ def inbox_hint(agent_id: int, lease_id: UUID, pending: frozenset[int]) -> str:
     command = shlex.join([sys.executable, "-m", "cli", "impersonate", "inbox", str(lease_id)])
     return (
         f"AVA inbox ready: agent={agent_id} lease={lease_id} "
-        f"pending_page={len(pending)} newest_id={max(pending)}. "
+        f"pending_page={len(pending)} newest_id={max(pending, default=0)}. "
         f"Run {command}; "
         "process and explicitly ACK message IDs, draining pages until empty. "
         "This hint is not a processing ACK."

@@ -132,13 +132,22 @@ def expire(conn: psycopg.Connection, lease: dict[str, Any]) -> dict[str, Any]:
     return lease
 
 
-def require_active_locked(conn: psycopg.Connection, lease: dict[str, Any], token: str) -> None:
+def validate_active(
+    lease: dict[str, Any], token: str, *, fresh: bool, machine: str, status: str
+) -> None:
+    """Validate either a joined read snapshot or rows already locked for mutation."""
     authenticate(lease, token)
+    if lease["status"] != "active" or not fresh:
+        raise ImpersonationError("Impersonation is not active or its TTL has expired")
+    if machine != lease["machine"] or status not in ("running", "idling"):
+        raise ImpersonationError("Agent placement or lifecycle changed")
+
+
+def require_active_locked(conn: psycopg.Connection, lease: dict[str, Any], token: str) -> None:
     # Do not persist expiration here and then raise (which would roll it back).
     # The native boundary/get reconciler persists it independently.
-    fresh = conn.execute("SELECT %s > clock_timestamp()", (lease["expires_at"],)).fetchone()
-    if lease["status"] != "active" or fresh != (True,):
-        raise ImpersonationError("Impersonation is not active or its TTL has expired")
     meta = lock_agent(conn, lease["agent_id"])
-    if meta["machine"] != lease["machine"] or meta["status"] not in ("running", "idling"):
-        raise ImpersonationError("Agent placement or lifecycle changed")
+    fresh = conn.execute("SELECT %s > clock_timestamp()", (lease["expires_at"],)).fetchone()
+    validate_active(
+        lease, token, fresh=fresh == (True,), machine=meta["machine"], status=meta["status"]
+    )

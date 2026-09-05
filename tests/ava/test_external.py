@@ -10,13 +10,14 @@ from threading import Event
 from typing import Annotated, Any
 
 import pytest
-from langchain_core.messages import HumanMessage, RemoveMessage
+from langchain_core.messages import AnyMessage, HumanMessage, RemoveMessage
+from langgraph.graph.message import REMOVE_ALL_MESSAGES, add_messages
 from pydantic import BaseModel, Field
 
 import ava
 from agent import state as state_module
-from ava import _boot, external
-from ava._external_state import decode_plugin_delta, encode_plugin_delta
+from ava import _boot, _external_state, external
+from ava._external_state import apply_plugin_delta, decode_plugin_delta, encode_plugin_delta
 from shared.config.turn_view import bind_agent_config, current_agent_config_pins, turn_settings
 from shared.plugin_config_view import bind_agent_plugin_config, current_plugin_config_view
 
@@ -31,6 +32,10 @@ class ExampleState(state_module.BaseAgentState):
 
 class ExamplePlugin(BaseModel):
     seen: Annotated[set[str], _union] = Field(default_factory=set)
+
+
+class ExampleMessagesPlugin(BaseModel):
+    messages: Annotated[list[AnyMessage], add_messages] = Field(default_factory=list[AnyMessage])
 
 
 @pytest.fixture
@@ -376,3 +381,71 @@ def test_delta_codec_rejects_framework_state_injection(
 ) -> None:
     with pytest.raises(ValueError, match="framework core"):
         encode_plugin_delta({"halted": False})
+
+
+@pytest.mark.parametrize("boundary", ["encode", "decode", "apply"])
+@pytest.mark.parametrize(
+    "messages",
+    [
+        RemoveMessage(id=REMOVE_ALL_MESSAGES),
+        [RemoveMessage(id=REMOVE_ALL_MESSAGES), HumanMessage(content="replacement")],
+        [{"type": "remove", "id": REMOVE_ALL_MESSAGES, "content": ""}],
+    ],
+    ids=["single-marker", "wipe-and-replace", "message-dict"],
+)
+def test_external_delta_rejects_full_history_reset_before_any_mutation(
+    attached_runtime: tuple[dict[str, Any], Any, list[dict[str, Any]]],
+    boundary: str,
+    messages: Any,
+) -> None:
+    _, snapshot, _ = attached_runtime
+    snapshot.messages = [HumanMessage(content="Native history", id="native")]
+    before = snapshot.model_copy(deep=True)
+    delta = {"sample__seen": {"must-not-apply"}, "messages": messages}
+    with pytest.raises(ValueError, match=r"REMOVE_ALL.*native compaction"):
+        if boundary == "encode":
+            encode_plugin_delta(delta)
+        elif boundary == "decode":
+            # A persisted envelope must pass the same check before native replay.
+            import base64
+
+            encoding, payload = _external_state._serializer().dumps_typed(delta)
+            decode_plugin_delta(
+                {"encoding": encoding, "data": base64.b64encode(payload).decode("ascii")}
+            )
+        else:
+            apply_plugin_delta(snapshot, delta)
+    assert snapshot == before
+
+
+def test_external_attachment_appends_messages_without_replacing_native_history(
+    attached_runtime: tuple[dict[str, Any], Any, list[dict[str, Any]]],
+) -> None:
+    _, snapshot, staged = attached_runtime
+    native_message = HumanMessage(content="Native history", id="native")
+    appended_message = HumanMessage(content="External progress", id="external")
+    snapshot.messages = [native_message]
+    handle = state_module.PluginStateHandle(ExampleMessagesPlugin, "sample")
+    with external.attach("lease", token="credential"):
+        handle.update({"messages": [appended_message]})
+        assert handle.read().messages == [native_message, appended_message]
+    assert len(staged) == 1
+    assert decode_plugin_delta(staged[0]) == {"messages": [appended_message]}
+    assert snapshot.messages == [native_message]
+    with external.attach("lease", token="credential"):
+        assert handle.read().messages == [native_message, appended_message]
+    assert len(staged) == 1
+
+
+def test_external_attachment_refuses_to_journal_a_full_history_reset(
+    attached_runtime: tuple[dict[str, Any], Any, list[dict[str, Any]]],
+) -> None:
+    _, snapshot, staged = attached_runtime
+    snapshot.messages = [HumanMessage(content="Native history", id="native")]
+    attachment = external.attach("lease", token="credential")
+    ava.state_update = {"messages": [RemoveMessage(id=REMOVE_ALL_MESSAGES)]}
+    with pytest.raises(ValueError, match=r"REMOVE_ALL.*native compaction"):
+        attachment.close()
+    assert not staged
+    assert _boot._external_identity is None
+    assert snapshot.messages == [HumanMessage(content="Native history", id="native")]

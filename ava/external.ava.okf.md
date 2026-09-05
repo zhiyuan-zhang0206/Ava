@@ -33,5 +33,12 @@ ordered delta under a lease version comparison. The native graph alone checkpoin
 that journal and records an applied receipt, preventing repeat application after
 a crash between checkpoint persistence and database acknowledgment.
 
+The external journal permits ordinary message appends under the existing message
+reducer rules. Encoding, decoding, and applying a delta reject
+`RemoveMessage(REMOVE_ALL_MESSAGES)`, including equivalent message dictionaries,
+before changing any state. Full-history resets remain exclusive to native
+compaction and crash repair; external controllers request compaction in their
+handoff summary.
+
 The usage procedure and CLI commands live in
 [External agent impersonation](../conventions/agent-impersonation.md).
