@@ -6,7 +6,7 @@ scanning the whole repo). Also run automatically via pre-commit hook.
 ## Why
 
 Pool connections are **long-lived**, which is what makes a missing keepalive
-invisible until it costs minutes. `shared/db.py:PG_KEEPALIVE_KWARGS` documents the
+invisible until it costs minutes. `shared/db_connections.py:PG_KEEPALIVE_KWARGS` documents the
 mechanism: a laptop-grade runner that sleeps or changes networks wakes holding
 dead TCP flows, and a query already in flight on a borrowed half-dead socket has
 no application-level bound — it waits out the OS TCP-retransmit timeout.
@@ -35,7 +35,7 @@ dict containing `**PG_KEEPALIVE_KWARGS`. AST-based, so it sees through
 `AsyncConnectionPool[psycopg.AsyncConnection](...)` subscripts and subclasses
 (`LoggingConnectionPool`) without regex guesswork.
 
-Exempt: `shared/db.py` (the definition of the posture — it builds the merged dict
+Exempt: `shared/db_connections.py` (the definition of the posture — it builds the merged dict
 literal that every other site inherits) and test/eval-fixture code under
 `tests/`, where a throwaway pool against a local test Postgres has nothing to
 survive. `ConnectionPool.check_connection(...)` and bare type annotations are not
@@ -66,10 +66,10 @@ _SCAN_DIRS = (
     "shared",
 )
 
-# `shared/db.py` owns the merged kwargs dict every other site routes through, so
+# `shared/db_connections.py` owns the merged kwargs dict every other site routes through, so
 # it is the one file that writes the values as a literal rather than unpacking
 # the constant. Any addition here must show it cannot reach the constant at all.
-_ALLOWED_FILES = frozenset({"shared/db.py"})
+_ALLOWED_FILES = frozenset({"shared/db_connections.py"})
 
 _TEST_PATTERNS = (
     re.compile(r"(^|/)tests?/"),
