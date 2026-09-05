@@ -1,0 +1,26 @@
+name: "Install Python deps (uv sync --frozen with bounded retry)"
+description: >
+  Runs `uv sync --frozen` with backoff retries to absorb transient 403s from
+  the locked mirror index (pypi.tuna.tsinghua.edu.cn). uv does not retry 4xx
+  responses (verified against uv 0.10.2), so a single rate-limit window fails
+  the job within seconds; this loop rides it out (flake class 112, task #2537).
+runs:
+  using: composite
+  steps:
+    - name: uv sync --frozen
+      shell: bash
+      run: |
+        # uv has no retry on 4xx (verified against uv 0.10.2): a transient 403
+        # from the locked mirror index fails fast. Retry with backoff.
+        for attempt in 1 2 3 4; do
+          if uv sync --frozen; then
+            exit 0
+          fi
+          if [ "$attempt" -lt 4 ]; then
+            delay=$((attempt * 15))
+            echo "uv sync --frozen attempt ${attempt} failed; retrying in ${delay}s"
+            sleep "$delay"
+          fi
+        done
+        echo "uv sync --frozen failed after 4 attempts; giving up"
+        exit 1

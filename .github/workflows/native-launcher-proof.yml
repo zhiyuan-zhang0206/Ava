@@ -26,7 +26,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y cron
       - if: runner.os == 'Linux'
         uses: ./.github/actions/install-pg-redis
-      - run: uv sync --frozen
+      - uses: ./.github/actions/uv-sync
       - if: runner.os == 'Linux'
         run: uv run pytest tests/shared/test_native_job_observation.py tests/shared/test_managed_writer_observation.py -q
       - if: runner.os == 'Linux'

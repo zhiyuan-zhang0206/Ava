@@ -22,7 +22,7 @@ jobs:
         with:
           version: 0.10.2
       - uses: ./.github/actions/install-pg-redis
-      - run: uv sync --frozen
+      - uses: ./.github/actions/uv-sync
       - name: Verify actual controller, durable attempts, and admitted record protection
         shell: bash
         run: |

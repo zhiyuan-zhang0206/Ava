@@ -24,7 +24,7 @@ jobs:
         with:
           node-version: 22
       - uses: ./.github/actions/install-pg-redis
-      - run: uv sync --frozen
+      - uses: ./.github/actions/uv-sync
       - run: npm ci
         working-directory: ui/web
       - name: Verify termination acceptance consumers
@@ -87,7 +87,7 @@ jobs:
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d
         with:
           version: 0.10.2
-      - run: uv sync --frozen
+      - uses: ./.github/actions/uv-sync
       - shell: bash
         run: |
           set -euo pipefail
@@ -171,7 +171,7 @@ jobs:
         with:
           version: 0.10.2
       - uses: ./.github/actions/install-pg-redis
-      - run: uv sync --frozen
+      - uses: ./.github/actions/uv-sync
       - name: Verify actual admission and real launch consumers
         run: |
           mkdir -p proof
