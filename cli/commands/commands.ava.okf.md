@@ -30,6 +30,7 @@ Two kinds of module live here, distinguished by filename:
   `_converge_steps` (early host and data-plane wiring) / `_converge_os_jobs`
   (the OS-scheduled jobs) / `_converge_skills` / `_converge_firewall` (idempotent host wiring) /
   `_converge_gate` / `_gate_systemd` (per-home launchd or Linux user-systemd gate),
+  `_converge_redis_bridge` (idempotent host wiring) /
   `_converge_legacy_permission_watcher` (one-shot cleanup of the removed
   permission-prompt watcher),
   `_update_git` /
@@ -82,6 +83,11 @@ schema change catches the DB up on its own.
   `sudo -n` and then an exact manual command without blocking `ava start`.
   `_gateway_ready` uses the same audit when an off-box probe fails. See
   [[shared/shared.ava.okf.md|Shared Libraries]].
+- `_converge_redis_bridge` installs the repo-owned pure-stdlib relay into
+  `$AVA_HOME`, converges its macOS KeepAlive job, and exposes the authenticated
+  Redis PING used by `ava status` and the alert-only cluster health check. The
+  listener recreates its socket after an interface or descriptor failure; Redis
+  itself never widens beyond loopback.
 - The prod editable-install assertion and update write window are one lifecycle
   guard: [[editable-install-guard.ava.okf.md]]; the prod source checkout's
   integrity (periodic reset + probe detection) is its sibling guard:

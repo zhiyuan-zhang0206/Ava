@@ -167,6 +167,7 @@ def test_liveness_retry_recovers_before_the_counter_is_armed(
     monkeypatch.setattr(_cluster_health, "_schema_health", lambda: True)
     monkeypatch.setattr(_cluster_health, "_service_probes", list)
     monkeypatch.setattr(_cluster_health, "_gate_probe", lambda: None)
+    monkeypatch.setattr(_cluster_health, "_redis_bridge_probe", lambda: None)
     monkeypatch.setattr(_cluster_health, "_disk_usage_failure", lambda: None)
     # Check 7 resolves the real prod venv through prod_source_dir() unless
     # stubbed — on a dev box with a healthy prod install this passes by luck,
@@ -304,6 +305,7 @@ def _all_checks_pass(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(_cluster_health, "_schema_health", lambda: True)
     monkeypatch.setattr(_cluster_health, "_service_probes", list)
     monkeypatch.setattr(_cluster_health, "_gate_probe", lambda: None)
+    monkeypatch.setattr(_cluster_health, "_redis_bridge_probe", lambda: None)
     monkeypatch.setattr(_cluster_health, "_disk_usage_failure", lambda: None)
     monkeypatch.setattr(_cluster_health, "_editable_install_failure", lambda: None)
     # Check 8 (source tree) is environment-dependent by construction: it reads
@@ -1106,6 +1108,59 @@ def test_dark_gate_fails_the_probe_without_arming_rollback(
     assert _read_count(_home).splitlines()[0] == "0"
 
 
+# ── the Redis bridge rides in check 5 (alert-only) ───────────────────────────
+
+
+def _redis_bridge(**kw: object) -> object:
+    import cli.commands._converge_redis_bridge as bridge
+
+    fields: dict[str, object] = {
+        "required": True,
+        "endpoint": "10.64.0.7:6380",
+        "serving": True,
+        "supervised": True,
+        "detail": "Redis PING succeeded",
+    }
+    fields.update(kw)
+    return bridge.RedisBridgeStatus(**fields)  # type: ignore[arg-type]
+
+
+def test_redis_bridge_probe_reports_running_but_dead_listener(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A loaded launchd job cannot hide a relay whose PING path is dead."""
+    import cli.commands as _ns
+    import cli.commands._converge_redis_bridge as bridge
+
+    monkeypatch.setattr(_ns, "_roles_or_none", lambda: frozenset({"gateway"}))
+    monkeypatch.setattr(
+        bridge,
+        "probe_redis_bridge",
+        lambda *_a: _redis_bridge(serving=False, detail="connection refused"),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    )
+
+    failure = _cluster_health._redis_bridge_probe()
+
+    assert failure is not None
+    assert "failed authenticated PING" in failure
+    assert "connection refused" in failure
+
+
+def test_redis_bridge_failure_alerts_without_arming_rollback(
+    monkeypatch: pytest.MonkeyPatch,
+    _all_checks_pass: None,
+    _home: Path,
+    _sent_alerts: list[str],
+) -> None:
+    failure = "Redis bridge 10.64.0.7:6380 failed authenticated PING (connection refused)"
+    monkeypatch.setattr(_cluster_health, "_redis_bridge_probe", lambda: failure)
+    _write_aged_alert_state(_home, f"FAIL: service probe — not healthy: {failure}")
+
+    assert _cluster_health.run_health_probe(auto_rollback=True, threshold=1) == 1
+    assert any("Redis bridge" in alert for alert in _sent_alerts)
+    assert _read_count(_home).splitlines()[0] == "0"
+
+
 # ── crash-loop detection: category=audit only (W9 fix) ──────────────────────
 
 
@@ -1878,6 +1933,7 @@ def test_run_health_probe_allowed_from_prod_checkout(
     monkeypatch.setattr(_cluster_health, "_schema_health", _ok)
     monkeypatch.setattr(_cluster_health, "_service_probes", list)
     monkeypatch.setattr(_cluster_health, "_gate_probe", lambda: None)
+    monkeypatch.setattr(_cluster_health, "_redis_bridge_probe", lambda: None)
     monkeypatch.setattr(_cluster_health, "_disk_usage_failure", lambda: None)
     monkeypatch.setattr(_cluster_health, "_editable_install_failure", lambda: None)
     # Check 8 reads the real anchored checkout — whose git state varies by
@@ -2168,6 +2224,7 @@ def test_editable_install_healthy_records_keep_probe_green(
     monkeypatch.setattr(_cluster_health, "_schema_health", lambda: True)
     monkeypatch.setattr(_cluster_health, "_service_probes", list)
     monkeypatch.setattr(_cluster_health, "_gate_probe", lambda: None)
+    monkeypatch.setattr(_cluster_health, "_redis_bridge_probe", lambda: None)
     monkeypatch.setattr(_cluster_health, "_disk_usage_failure", lambda: None)
     # The throwaway `_prod_source` is not a git checkout; check 8 is not this
     # test's subject (the editable-install check is), so stub it rather than
