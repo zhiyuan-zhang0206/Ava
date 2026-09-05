@@ -104,7 +104,7 @@ def test_no_marker_never_touches_native_backends(
     ctx = _ctx(tmp_path)
     ctx.ava_home.mkdir(parents=True)
     runs: list[list[str]] = []
-    monkeypatch.setattr(_lgtm.subprocess, "run", lambda cmd, **_kw: runs.append(cmd))  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType, reportUnknownMemberType]
+    monkeypatch.setattr(_lgtm.subprocess, "run", lambda cmd, **_kw: runs.append(cmd))  # pyright: ignore[reportUnknownArgumentType]
 
     _lgtm.ensure_lgtm_stack_step(ctx)
     assert runs == []
@@ -125,7 +125,7 @@ def test_marker_runs_start_sh(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -
         calls.append((cmd, Path(str(kw["cwd"]))))
         return _Result()
 
-    monkeypatch.setattr(_lgtm.subprocess, "run", fake_run)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_lgtm.subprocess, "run", fake_run)
 
     _lgtm.ensure_lgtm_stack_step(ctx)
     assert calls == [(["bash", "start.sh"], ctx.repo / "deploy" / "lgtm")]
@@ -146,7 +146,7 @@ def test_marker_starts_without_docker_cli(monkeypatch: pytest.MonkeyPatch, tmp_p
         runs.append(cmd)
         return _Result()
 
-    monkeypatch.setattr(_lgtm.subprocess, "run", record_run)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_lgtm.subprocess, "run", record_run)
 
     _lgtm.ensure_lgtm_stack_step(ctx)
     assert runs == [["bash", "start.sh"]]
@@ -162,7 +162,7 @@ def test_failing_start_sh_propagates(monkeypatch: pytest.MonkeyPatch, tmp_path: 
     class _Failed:
         returncode = 1
 
-    monkeypatch.setattr(_lgtm.subprocess, "run", lambda *_a, **_kw: _Failed())  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(_lgtm.subprocess, "run", lambda *_a, **_kw: _Failed())  # pyright: ignore[reportUnknownArgumentType]
 
     with pytest.raises(RuntimeError, match=r"start\.sh exited 1"):
         _lgtm.ensure_lgtm_stack_step(ctx)
@@ -462,22 +462,22 @@ def test_ensure_kickstarts_grafana_when_config_changed(
     monkeypatch.setattr(
         _lgtm_native,
         "platform_tag",
-        lambda: "darwin_arm64",  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda: "darwin_arm64",
     )
     monkeypatch.setattr(
         _lgtm_native,
         "_load_versions",
-        lambda _repo: {},  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda _repo: {},  # pyright: ignore[reportUnknownArgumentType]
     )
     monkeypatch.setattr(
         _lgtm_native,
         "_download_and_verify",
-        lambda *_a, **_k: None,  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda *_a, **_k: None,  # pyright: ignore[reportUnknownArgumentType]
     )
     monkeypatch.setattr(
         _lgtm_native,
         "_agents_dir",
-        lambda: tmp_path / "plists",  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda: tmp_path / "plists",
     )
     monkeypatch.setattr("shared.config.settings.alerts.grafana_admin_password", None)
     calls: list[list[str]] = []
@@ -514,22 +514,22 @@ def test_ensure_no_kickstart_when_config_unchanged(
     monkeypatch.setattr(
         _lgtm_native,
         "platform_tag",
-        lambda: "darwin_arm64",  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda: "darwin_arm64",
     )
     monkeypatch.setattr(
         _lgtm_native,
         "_load_versions",
-        lambda _repo: {},  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda _repo: {},  # pyright: ignore[reportUnknownArgumentType]
     )
     monkeypatch.setattr(
         _lgtm_native,
         "_download_and_verify",
-        lambda *_a, **_k: None,  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda *_a, **_k: None,  # pyright: ignore[reportUnknownArgumentType]
     )
     monkeypatch.setattr(
         _lgtm_native,
         "_agents_dir",
-        lambda: tmp_path / "plists",  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda: tmp_path / "plists",
     )
     monkeypatch.setattr("shared.config.settings.alerts.grafana_admin_password", None)
     calls: list[list[str]] = []

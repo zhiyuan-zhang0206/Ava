@@ -83,7 +83,7 @@ def test_live_watchdog_is_left_alone(tmp_path: Path, monkeypatch: pytest.MonkeyP
     respawns: list[str] = []
     monkeypatch.setattr(
         "shared.service_respawn.respawn_service",
-        lambda s, _c, _r, **_k: respawns.append(s) or True,  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda s, _c, _r, **_k: respawns.append(s) or True,  # pyright: ignore[reportUnknownArgumentType]
     )
     assert wp.cmd_watchdog_probe("gateway") == 0
     assert respawns == []
@@ -114,7 +114,7 @@ def test_respawn_is_forced_through_the_source_switch_window(
     (respawn_service's source-switch guard would otherwise hold it back): its
     contract is dumb revival that ignores every gate, and a watchdog that stays
     dead through the whole update leaves the capability unsupervised."""
-    monkeypatch.setattr(  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(
         wp,
         "_watchdog_spec",
         lambda _r: _spec_for("agent-runner", tmp_path / "w.pid"),  # pyright: ignore[reportUnknownArgumentType]
@@ -122,11 +122,11 @@ def test_respawn_is_forced_through_the_source_switch_window(
     monkeypatch.setattr(wp, "_alive", lambda _s: False)  # pyright: ignore[reportUnknownArgumentType]
     seen: dict[str, object] = {}
 
-    def _respawn(session: str, cmd: str, repo: Path, **kwargs: object) -> bool:  # pyright: ignore[reportUnknownParameterType]
-        seen.update(session=session, force=kwargs.get("force"))  # pyright: ignore[reportUnknownArgumentType]
+    def _respawn(session: str, cmd: str, repo: Path, **kwargs: object) -> bool:
+        seen.update(session=session, force=kwargs.get("force"))
         return True
 
-    monkeypatch.setattr("shared.service_respawn.respawn_service", _respawn)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("shared.service_respawn.respawn_service", _respawn)
     assert wp.cmd_watchdog_probe("agent-runner") == 0
     assert seen["force"] is True
 
@@ -139,5 +139,5 @@ def test_failed_respawn_is_reported_not_swallowed(
     to end."""
     monkeypatch.setattr(wp, "_watchdog_spec", lambda _r: _spec_for("gateway", tmp_path / "w.pid"))  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(wp, "_alive", lambda _s: False)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr("shared.service_respawn.respawn_service", lambda *_a, **_k: False)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr("shared.service_respawn.respawn_service", lambda *_a, **_k: False)  # pyright: ignore[reportUnknownArgumentType]
     assert wp.cmd_watchdog_probe("gateway") == 1

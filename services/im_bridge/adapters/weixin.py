@@ -664,7 +664,7 @@ def _show_qr(qrcode_value: str, qrcode_url: str) -> None:
     """Print the scannable URL, plus a best-effort terminal QR render."""
     logger.info("Scan the QR code below with WeChat: {}", qrcode_url or qrcode_value)
     try:
-        import qrcode  # optional dependency  # pyright: ignore[reportMissingModuleSource]
+        import qrcode  # optional dependency
 
         qr = qrcode.QRCode()
         qr.add_data(qrcode_url or qrcode_value)

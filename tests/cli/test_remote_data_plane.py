@@ -204,9 +204,9 @@ def test_stop_remote_warns_about_orphaned_local_instance(
         gateway_home=str(settings.general.ava_home),
         created_at="now",
     )
-    monkeypatch.setattr(cluster, "get_record", lambda _home: rec)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-    monkeypatch.setattr(ci, "_pg_running", lambda *_a: True)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-    monkeypatch.setattr(ci, "_redis_running", lambda *_a: True)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(cluster, "get_record", lambda _home: rec)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(ci, "_pg_running", lambda *_a: True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(ci, "_redis_running", lambda *_a: True)  # pyright: ignore[reportUnknownArgumentType]
 
     rc = ci.stop_cluster_instance()
 

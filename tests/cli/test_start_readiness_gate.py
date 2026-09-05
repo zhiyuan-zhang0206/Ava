@@ -608,7 +608,7 @@ def test_cli_flag_reaches_cmd_start(monkeypatch: pytest.MonkeyPatch) -> None:
         _cli,
         "cmd_start",
         _start,
-    )  # pyright: ignore[reportUnknownArgumentType]
+    )
 
     from cli.main import _build_parser
 
@@ -772,7 +772,7 @@ def test_rollback_keeps_the_rollback_when_a_service_is_unready(
 
     monkeypatch.setattr(_rb, "git_reset_hard", undone.append)
     monkeypatch.setattr(_rb, "rollback_schema_to", lambda *_a, **_kw: (True, []))  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_rb, "run_uv_sync", sync)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_rb, "run_uv_sync", sync)
     monkeypatch.setattr(_rb, "current_schema_state", set)
     monkeypatch.setattr(_rb, "_migration_set_at_commit", lambda _sha: set())  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_rb, "git_head_sha", lambda: "f" * 40)
@@ -810,7 +810,7 @@ def test_gateway_recovery_reports_degraded_not_down(
 
     monkeypatch.setattr(_rec, "rollback_schema_to", lambda *_a, **_kw: (True, []))  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_rec, "git_reset_hard", lambda _sha: None)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_rec, "run_uv_sync", sync)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_rec, "run_uv_sync", sync)
 
     def _fake_run(args, **_kw):
         argv = [str(a) for a in args]  # pyright: ignore[reportUnknownArgumentType]
@@ -1078,10 +1078,10 @@ def _fake_clock(monkeypatch: pytest.MonkeyPatch) -> _FakeClock:
     clock = _FakeClock()
     # Rebind only THIS module's `time` name — the stdlib module object stays
     # intact for every other consumer (the same lesson as issue #1001).
-    monkeypatch.setattr(_probe_mod, "time", clock)  # pyright: ignore[reportAttributeAccessIssue]
+    monkeypatch.setattr(_probe_mod, "time", clock)
     monkeypatch.setattr(
         "cli.commands._probe._poll_sleep",
-        clock.advance,  # pyright: ignore[reportArgumentType]
+        clock.advance,
     )
     return clock
 
@@ -1241,7 +1241,7 @@ def test_non_critical_failure_posts_alert_and_im(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setattr(_cli, "_has_session", lambda _s: True)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_probe_mod, "NON_CRITICAL_SERVICE_READY_TIMEOUT_S", 0.0)
     calls: dict[str, list[object]] = {"upsert": [], "im": []}
-    monkeypatch.setattr(_probe_mod, "_alert_db_connect", _FakeConn)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_probe_mod, "_alert_db_connect", _FakeConn)
     monkeypatch.setattr(_alerts, "display_language", lambda _conn: "en")  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_alerts, "notify_text", lambda _a, _l: f"TEXT:{_a['labels']['service']}")  # pyright: ignore[reportUnknownArgumentType]
 
@@ -1251,7 +1251,7 @@ def test_non_critical_failure_posts_alert_and_im(monkeypatch: pytest.MonkeyPatch
         calls["upsert"].append((alert, source))
         return ("fp", "start"), True, True, {"notified_at": None}
 
-    monkeypatch.setattr(_alerts, "upsert_alert", _upsert)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_alerts, "upsert_alert", _upsert)
     monkeypatch.setattr(_alerts, "stamp_notified", lambda _conn, _keys: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_alerts, "fingerprint", lambda _labels: "fp")  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
@@ -1292,7 +1292,7 @@ def test_non_critical_alert_failure_degrades_to_a_print(monkeypatch: pytest.Monk
     def _boom() -> object:
         raise RuntimeError("db down")
 
-    monkeypatch.setattr(_probe_mod, "_alert_db_connect", _boom)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_probe_mod, "_alert_db_connect", _boom)
     # Both rails degrade to a printed note; the start itself must not fail.
     monkeypatch.setattr(_probe_mod, "_unresolved_alert_instance", lambda _c, _s: None)  # pyright: ignore[reportUnknownArgumentType]
 
@@ -1332,7 +1332,7 @@ def _wire_alert_store(monkeypatch: pytest.MonkeyPatch, conn: _FakeAlertConn) -> 
     import shared.alerts as _alerts
     from cli.commands import _probe as _probe_mod
 
-    monkeypatch.setattr(_probe_mod, "_alert_db_connect", lambda: conn)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_probe_mod, "_alert_db_connect", lambda: conn)
 
     def _lookup(c: object, service: str) -> tuple[str, str] | None:
         for (fp, starts_at), row in conn.rows.items():
@@ -1343,7 +1343,7 @@ def _wire_alert_store(monkeypatch: pytest.MonkeyPatch, conn: _FakeAlertConn) -> 
                 return starts_at, fp  # type: ignore[return-value]
         return None
 
-    monkeypatch.setattr(_probe_mod, "_unresolved_alert_instance", _lookup)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_probe_mod, "_unresolved_alert_instance", _lookup)
 
     def _upsert(
         _c: object, alert: dict[str, object], source: str
@@ -1370,13 +1370,13 @@ def _wire_alert_store(monkeypatch: pytest.MonkeyPatch, conn: _FakeAlertConn) -> 
                 conn.rows[k]["notified_at"] = "yes"  # type: ignore[index]
         conn.notified.extend(keys)  # type: ignore[arg-type]
 
-    monkeypatch.setattr(_alerts, "upsert_alert", _upsert)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_alerts, "stamp_notified", _stamp)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_alerts, "upsert_alert", _upsert)
+    monkeypatch.setattr(_alerts, "stamp_notified", _stamp)
     monkeypatch.setattr(_alerts, "display_language", lambda _c: "en")  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
         _alerts,
         "notify_text",
-        lambda _a, _l: f"TEXT:{_a['status']}:{_a['labels']['service']}",  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda _a, _l: f"TEXT:{_a['status']}:{_a['labels']['service']}",  # pyright: ignore[reportUnknownArgumentType]
     )
     monkeypatch.setattr(_alerts, "fingerprint", lambda labels: f"fp:{labels['service']}")  # pyright: ignore[reportUnknownArgumentType]
 

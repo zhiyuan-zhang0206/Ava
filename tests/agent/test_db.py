@@ -192,8 +192,8 @@ class TestWaitForInbound:
         listener = RedisInboundListener(settings.data_plane.redis_url, agent_id=tid)
         command = _HalfOpenCommandConnection()
         pubsub = _LivePubSub()
-        listener._redis = command  # pyright: ignore[reportPrivateUsage, reportAttributeAccessIssue]
-        listener._pubsub = pubsub  # pyright: ignore[reportPrivateUsage, reportAttributeAccessIssue]
+        listener._redis = command  # pyright: ignore[reportAttributeAccessIssue]
+        listener._pubsub = pubsub  # pyright: ignore[reportAttributeAccessIssue]
         rebuilt_command = _HalfOpenCommandConnection()
         rebuilt_command.release.set()
         rebuilt_pubsub = _LivePubSub()
@@ -203,8 +203,8 @@ class TestWaitForInbound:
             nonlocal rebuilds
             if listener._pubsub is None:
                 rebuilds += 1
-                listener._redis = rebuilt_command  # pyright: ignore[reportPrivateUsage, reportAttributeAccessIssue]
-                listener._pubsub = rebuilt_pubsub  # pyright: ignore[reportPrivateUsage, reportAttributeAccessIssue]
+                listener._redis = rebuilt_command  # pyright: ignore[reportAttributeAccessIssue]
+                listener._pubsub = rebuilt_pubsub  # pyright: ignore[reportAttributeAccessIssue]
                 return rebuilt_pubsub
             return pubsub
 
@@ -238,8 +238,8 @@ class TestWaitForInbound:
         await listener.wait_one(0.01)
 
         assert rebuilds == 1
-        assert listener._redis is rebuilt_command  # pyright: ignore[reportPrivateUsage]
-        assert listener._pubsub is rebuilt_pubsub  # pyright: ignore[reportPrivateUsage]
+        assert listener._redis is rebuilt_command
+        assert listener._pubsub is rebuilt_pubsub
 
     async def test_idling_claim_loop_records_each_wait_round(
         self,

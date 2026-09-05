@@ -25,14 +25,14 @@ def _ensure_from_home_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Pa
     """Run the fresh-start path while keeping config writes real and local."""
     monkeypatch.setattr(pg, "ava_home", lambda: tmp_path)
     monkeypatch.setattr(pg, "pgbouncer_bin", lambda: str(Path(__file__)))
-    monkeypatch.setattr(pg, "_live_pg_socket_dir", lambda _port: tmp_path / "pg-socket")  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-    monkeypatch.setattr(pg, "_bind_addrs", lambda _secret: ["127.0.0.1"])  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(pg, "_live_pg_socket_dir", lambda _port: tmp_path / "pg-socket")  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(pg, "_bind_addrs", lambda _secret: ["127.0.0.1"])  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(pg, "_running_pid", lambda: None)
-    monkeypatch.setattr(pg, "_wait_for_reachable_bind_gated", lambda _secret: True)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-    monkeypatch.setattr(pg.subprocess, "run", lambda *_args, **_kwargs: _CompletedOk())  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-    monkeypatch.setattr(pg, "_admin_reachable", lambda *_args, **_kwargs: True)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-    monkeypatch.setattr(pg, "pgbouncer_public_listener_reachable", lambda *_args: True)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-    monkeypatch.setattr(pg, "_report_backend_verification", lambda *_args: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(pg, "_wait_for_reachable_bind_gated", lambda _secret: True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(pg.subprocess, "run", lambda *_args, **_kwargs: _CompletedOk())  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(pg, "_admin_reachable", lambda *_args, **_kwargs: True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(pg, "pgbouncer_public_listener_reachable", lambda *_args: True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(pg, "_report_backend_verification", lambda *_args: None)  # pyright: ignore[reportUnknownArgumentType]
 
     assert (
         pg.ensure_pgbouncer(

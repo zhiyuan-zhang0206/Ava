@@ -152,11 +152,11 @@ def _migrate_object(
 
 
 def _crc32c(path: Path) -> str:
-    checksum = google_crc32c.Checksum()  # pyright: ignore[reportUnknownMemberType]
+    checksum = google_crc32c.Checksum()
     with path.open("rb") as source:
         for chunk in iter(lambda: source.read(1024 * 1024), b""):
-            checksum.update(chunk)  # pyright: ignore[reportUnknownMemberType]
-    return base64.b64encode(checksum.digest()).decode("ascii")  # pyright: ignore[reportUnknownMemberType]
+            checksum.update(chunk)
+    return base64.b64encode(checksum.digest()).decode("ascii")
 
 
 def _mapping_rows(rows: list[dict[str, str]]) -> dict[str, dict[str, str]]:

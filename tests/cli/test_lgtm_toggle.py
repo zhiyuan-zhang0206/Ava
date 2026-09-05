@@ -41,7 +41,7 @@ def _wire(
     deploy_dir = tmp_path / "repo" / "deploy" / "lgtm"
     deploy_dir.mkdir(parents=True, exist_ok=True)
     monkeypatch.setattr(_lgtm, "lgtm_host_marker", lambda: marker)
-    monkeypatch.setattr(_lgtm, "lgtm_deploy_dir", lambda _repo: deploy_dir)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(_lgtm, "lgtm_deploy_dir", lambda _repo: deploy_dir)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(commands_ns, "_repo_root", lambda: tmp_path / "repo")
 
     def noop_native(_repo: Path, _home: Path) -> None:

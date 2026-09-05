@@ -568,7 +568,7 @@ def test_watcher_completion_notice_e2e(
     fake_cli = tmp_path / "fake-ava"
     fake_cli.write_text(f"#!/bin/sh\nprintf '%s\\n' \"$@\" > {argv_file}\n")
     fake_cli.chmod(0o755)
-    monkeypatch.setattr(_background, "cli_path", lambda: fake_cli)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_background, "cli_path", lambda: fake_cli)
 
     # `exit 7` exits the shell subshell wrapping the python command — use a
     # python-level SystemExit instead so the exit code flows through the child.
@@ -674,7 +674,7 @@ def test_watcher_child_sees_agent_identity(
     fake_cli = tmp_path / "fake-ava"
     fake_cli.write_text("#!/bin/sh\nexit 0\n")
     fake_cli.chmod(0o755)
-    monkeypatch.setattr(_background, "cli_path", lambda: fake_cli)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_background, "cli_path", lambda: fake_cli)
 
     wid = watcher.launch(code, timeout="1h", name="test-identity")
 
@@ -750,7 +750,7 @@ def test_watcher_child_overrides_stale_session_identity(
     fake_cli = tmp_path / "fake-ava"
     fake_cli.write_text("#!/bin/sh\nexit 0\n")
     fake_cli.chmod(0o755)
-    monkeypatch.setattr(_background, "cli_path", lambda: fake_cli)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_background, "cli_path", lambda: fake_cli)
 
     stale = _agent_row + 1  # a WRONG identity, as if frozen into the session env
 
@@ -762,7 +762,7 @@ def test_watcher_child_overrides_stale_session_identity(
         _sessions,
         "forward_env_dict",
         forward_env,
-    )  # pyright: ignore[reportUnknownArgumentType]
+    )
 
     wid = watcher.launch(code, timeout="1h", name="test-stale-id")
 
@@ -921,13 +921,13 @@ def test_reconcile_reaps_superseded_generation_without_rebuilding(
     from shared.watcher_registry import register_watcher
 
     monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_sessions, "list", lambda: {424248: "old-cron"})  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_sessions, "list", lambda: {424248: "old-cron"})
     monkeypatch.setattr(_sessions, "_current_session_generation", lambda: "current-generation")
     reaped: list[int] = []
     monkeypatch.setattr(
         _sessions,
         "_reap",
-        lambda session_id: reaped.append(session_id) or True,  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda session_id: reaped.append(session_id) or True,  # pyright: ignore[reportUnknownArgumentType]
     )
     calls: list[tuple[Any, ...]] = []
     monkeypatch.setattr(_watcher_reconcile, "cron", lambda *a, **k: calls.append((a, k)) or 999)  # pyright: ignore[reportUnknownArgumentType]
@@ -961,7 +961,7 @@ def test_reconcile_notifies_when_a_superseded_one_shot_is_reaped(
 
     session_id = 424249 if kind == "at" else 424250
     monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_sessions, "list", lambda: {session_id: f"old-{kind}"})  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_sessions, "list", lambda: {session_id: f"old-{kind}"})
     monkeypatch.setattr(_sessions, "_current_session_generation", lambda: "current-generation")
     monkeypatch.setattr(_sessions, "_reap", lambda _session_id: True)  # pyright: ignore[reportUnknownArgumentType]
     sent: list[str] = []
@@ -1128,7 +1128,7 @@ def test_reconcile_leaves_alive_watchers_alone(
     from shared.watcher_registry import register_watcher
 
     monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_sessions, "list", lambda: {555555: "test-alive"})  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_sessions, "list", lambda: {555555: "test-alive"})
     register_watcher(_agent_row, 555555, kind="cron", name="alive", cron_expr="* * * * *")
     assert watcher.reconcile() == []
     rows = [r for r in _registry_rows(_agent_row) if r["session_id"] == 555555]
@@ -1180,7 +1180,7 @@ def test_spawn_keeps_sibling_files_while_session_alive(
     from ava.shell import sessions as _sessions
 
     monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_sessions, "list", lambda: {4242: "test-sibling"})  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_sessions, "list", lambda: {4242: "test-sibling"})
     d = watcher._watchers_dir()
     live_script = d / "watcher_4242.py"
     live_boot = d / "watcher_4242_boot.py"
@@ -1219,7 +1219,7 @@ def test_spawn_back_to_back_keeps_all_files(
         return sid, name
 
     monkeypatch.setattr(_sessions, "_create_session", _fake_create)
-    monkeypatch.setattr(_sessions, "list", lambda: dict.fromkeys(alive, "w"))  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_sessions, "list", lambda: dict.fromkeys(alive, "w"))
     d = watcher._watchers_dir()
 
     ids: list[int] = []
@@ -1349,7 +1349,7 @@ def test_reconcile_kill_skips_alive_watcher_process(
     from ava.shell import sessions as _sessions
 
     monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_sessions, "list", set)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_sessions, "list", set)
     from shared.watcher_registry import register_watcher
 
     register_watcher(
@@ -1409,13 +1409,13 @@ def test_reconcile_rebuilds_live_cron_watcher_with_stale_template(
     monkeypatch.setattr(
         watcher_registry,
         "watcher_rows",
-        lambda _agent_id: [_cron_row()],  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda _agent_id: [_cron_row()],  # pyright: ignore[reportUnknownArgumentType]
     )
-    monkeypatch.setattr(watcher_registry, "mark_status", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-    monkeypatch.setattr(watcher_registry, "delete_watcher", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(watcher_registry, "mark_status", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(watcher_registry, "delete_watcher", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(ava.shell.sessions, "list", lambda: {68: "watcher:68"})
     killed: list[int] = []
-    monkeypatch.setattr(ava.shell.sessions, "kill", killed.append)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(ava.shell.sessions, "kill", killed.append)
     spawned: dict[str, object] = {}
 
     def fake_cron(
@@ -1474,11 +1474,11 @@ def test_reconcile_leaves_current_template_watcher_alone(
     monkeypatch.setattr(
         watcher_registry,
         "watcher_rows",
-        lambda _agent_id: [_cron_row(template_version=TEMPLATE_VERSION)],  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda _agent_id: [_cron_row(template_version=TEMPLATE_VERSION)],  # pyright: ignore[reportUnknownArgumentType]
     )
     monkeypatch.setattr(ava.shell.sessions, "list", lambda: {68: "watcher:68"})
     killed: list[int] = []
-    monkeypatch.setattr(ava.shell.sessions, "kill", killed.append)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(ava.shell.sessions, "kill", killed.append)
     spawned: dict[str, object] = {}
 
     def fake_cron(
@@ -1521,20 +1521,20 @@ def test_reconcile_missing_session_still_rebuilds_cron(
     monkeypatch.setattr(
         watcher_registry,
         "watcher_rows",
-        lambda _agent_id: [_cron_row(template_version=TEMPLATE_VERSION)],  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda _agent_id: [_cron_row(template_version=TEMPLATE_VERSION)],  # pyright: ignore[reportUnknownArgumentType]
     )
     monkeypatch.setattr(ava.shell.sessions, "list", set)
     statuses: list[tuple[object, object, object]] = []
     monkeypatch.setattr(
         watcher_registry,
         "mark_status",
-        lambda a, s, st: statuses.append((a, s, st)),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda a, s, st: statuses.append((a, s, st)),  # pyright: ignore[reportUnknownArgumentType]
     )
     spawned: list[object] = []
     monkeypatch.setattr(
         _watcher_reconcile,
         "cron",
-        lambda *a, **k: spawned.append((a, k)) or 999,  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda *a, **k: spawned.append((a, k)) or 999,  # pyright: ignore[reportUnknownArgumentType]
     )
 
     actions = watcher.reconcile()
@@ -1562,7 +1562,7 @@ def test_spawn_registers_before_starting(_agent_row: int, monkeypatch: pytest.Mo
         # _spawn calls send AFTER registering — the row must already exist.
         registered_at_start.append(any(r["session_id"] == _sid for r in _registry_rows(_agent_row)))
 
-    monkeypatch.setattr(_sessions, "send", recording_send)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_sessions, "send", recording_send)
     wid = watcher.launch("import ava\n", timeout=120, name="test-reg-order")
     try:
         assert registered_at_start and registered_at_start[0] is True
@@ -1582,14 +1582,14 @@ def test_spawn_fails_when_registry_write_fails(
     started: list[str] = []
     killed: list[int] = []
     monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: started.append(_cmd))  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_sessions, "kill", killed.append)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_sessions, "kill", killed.append)
 
     def _fail_registration(*_a: object, **_k: object) -> None:
         raise RuntimeError("db down")
 
     monkeypatch.setattr(
         "shared.watcher_registry.register_watcher",
-        _fail_registration,  # pyright: ignore[reportUnknownArgumentType]
+        _fail_registration,
     )
     with pytest.raises(RuntimeError, match="db down"):
         watcher.launch("import ava\n", timeout=120, name="test-reg-fail")
@@ -1610,7 +1610,7 @@ def test_spawn_compensates_row_when_start_fails(
     monkeypatch.setattr(
         _sessions,
         "send",
-        lambda _id, _cmd: (_ for _ in ()).throw(RuntimeError("pty down")),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda _id, _cmd: (_ for _ in ()).throw(RuntimeError("pty down")),  # pyright: ignore[reportUnknownArgumentType]
     )
     with pytest.raises(RuntimeError, match="pty down"):
         watcher.launch("import ava\n", timeout=120, name="test-reg-comp")
@@ -1627,7 +1627,7 @@ def test_cron_kill_unregisters(_agent_row: int, monkeypatch: pytest.MonkeyPatch)
     as a second live instance (the double-instance class)."""
     from ava.shell import sessions as _sessions
 
-    monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType]
     wid = watcher.cron("0 9 * * *", "daily", timezone="UTC", name="test-kill-cron")
     try:
         assert any(r["session_id"] == wid for r in _registry_rows(_agent_row))
@@ -1642,7 +1642,7 @@ def test_kill_all_unregisters_watchers(_agent_row: int, monkeypatch: pytest.Monk
     nothing the sweep killed may be resurrected at the next boot."""
     from ava.shell import sessions as _sessions
 
-    monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType]
     wid = watcher.cron("0 9 * * *", "daily", timezone="UTC", name="test-killall")
     assert any(r["session_id"] == wid for r in _registry_rows(_agent_row))
     _sessions.kill_all()
@@ -1658,7 +1658,7 @@ def test_cron_double_registration_reuses_live_session(
     or a restart race all flow through cron())."""
     from ava.shell import sessions as _sessions
 
-    monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType]
     wid1 = watcher.cron("0 9 * * *", "stand-up", timezone="UTC", name="dup-a")
     try:
         wid2 = watcher.cron("0 9 * * *", "stand-up", timezone="UTC", name="dup-b")
@@ -1678,7 +1678,7 @@ def test_cron_same_expr_different_timezone_registers_separately(
     is a different watcher."""
     from ava.shell import sessions as _sessions
 
-    monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType]
     w1 = watcher.cron("0 9 * * *", "utc-nine", timezone="UTC", name="tz-a")
     try:
         w2 = watcher.cron("0 9 * * *", "shanghai-nine", timezone="Asia/Shanghai", name="tz-b")
@@ -1703,9 +1703,9 @@ def test_reconcile_rebuild_dedupes_against_live_duplicate(
     from shared.watcher import TEMPLATE_VERSION
     from shared.watcher_registry import register_watcher
 
-    monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType]
     calls: list[tuple[Any, ...]] = []
-    monkeypatch.setattr(_watcher_reconcile, "cron", lambda *a, **k: calls.append((a, k)) or 999)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(_watcher_reconcile, "cron", lambda *a, **k: calls.append((a, k)) or 999)  # pyright: ignore[reportUnknownArgumentType]
     # Both rows carry the CURRENT template version: a NULL/0 version would
     # route the live row into the stale-template rebuild (a different branch)
     # instead of the missing-session dedupe under test.
@@ -1729,7 +1729,7 @@ def test_reconcile_rebuild_dedupes_against_live_duplicate(
         cron_timezone="UTC",
         template_version=TEMPLATE_VERSION,
     )
-    monkeypatch.setattr(_sessions, "list", lambda: {53: "watcher:53"})  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(_sessions, "list", lambda: {53: "watcher:53"})
 
     actions = watcher.reconcile()
 
@@ -1754,7 +1754,7 @@ def test_reconcile_collapses_two_dead_rows_into_one_rebuild(
     from shared.watcher import TEMPLATE_VERSION
     from shared.watcher_registry import register_watcher
 
-    monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType]
     register_watcher(
         _agent_row,
         52,

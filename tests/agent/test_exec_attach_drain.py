@@ -93,11 +93,11 @@ async def test_exec_drains_attachment_right_after_output(
     # exec output ToolMessage first, attach HumanMessage immediately after
     assert isinstance(msgs[0], ToolMessage)
     assert isinstance(msgs[1], HumanMessage)
-    assert msgs[1].additional_kwargs["ava_msg_type"] == AvaMsgType.ATTACH.value  # pyright: ignore[reportUnknownMemberType]
+    assert msgs[1].additional_kwargs["ava_msg_type"] == AvaMsgType.ATTACH.value
     # pending attachments are drained (cleared) in the same update
     assert update["attach"] == AttachState()  # type: ignore[index]
     # the attach message carries the caption + the native image block
-    content = msgs[1].content  # pyright: ignore[reportUnknownMemberType]
+    content = msgs[1].content
     assert isinstance(content, list)
     # Interleaved pack: [text(notice), text(caption line), image_url, ...] —
     # the file's own caption line sits directly before its media block.

@@ -153,13 +153,13 @@ def test_price_snapshot_rides_payload(loguru_records):
         model="deepseek-v4-pro",
         priced_at=datetime(2026, 8, 17, 0, 0, tzinfo=UTC),
     )
-    extra = loguru_records[0]["extra"]  # pyright: ignore[reportUnknownArgumentType]
+    extra = loguru_records[0]["extra"]
     assert extra["cost_usd"] == pytest.approx(0.0003476)  # pyright: ignore[reportUnknownMemberType]
     assert extra["price_miss"] == 0.66
     assert extra["price_hit"] == 0.022
     assert extra["price_out"] == 1.98
     # never in the human-readable line
-    assert "cost" not in loguru_records[0]["message"]  # pyright: ignore[reportUnknownArgumentType]
+    assert "cost" not in loguru_records[0]["message"]
 
 
 def test_log_llm_usage_emits_agent_billing_span(
@@ -202,7 +202,7 @@ def test_log_llm_usage_emits_agent_billing_span(
     assert expected is not None
     monkeypatch.setattr("shared.config.settings.observability.trace_enabled", True)
     monkeypatch.setitem(trace_mod._state, "initialized", True)
-    monkeypatch.setattr(otel_trace, "get_tracer", lambda _name: tracer)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(otel_trace, "get_tracer", lambda _name: tracer)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr("time.time_ns", lambda: 5_000_000_000)
     message = AIMessage(
         content="",
@@ -264,7 +264,7 @@ def test_log_llm_usage_skips_billing_when_usage_metadata_is_incomplete(
     tracer = _Tracer()
     monkeypatch.setattr("shared.config.settings.observability.trace_enabled", True)
     monkeypatch.setitem(trace_mod._state, "initialized", True)
-    monkeypatch.setattr(otel_trace, "get_tracer", lambda _name: tracer)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(otel_trace, "get_tracer", lambda _name: tracer)  # pyright: ignore[reportUnknownArgumentType]
     message = AIMessage(
         content="",
         usage_metadata={"input_tokens": 100, "output_tokens": 0, "total_tokens": 100},
@@ -292,7 +292,7 @@ def test_price_snapshot_absent_for_unpriced_model(
     usage_record = next(
         record for record in loguru_records if record["extra"].get("event") == "llm_usage"
     )
-    extra = usage_record["extra"]  # pyright: ignore[reportUnknownArgumentType]
+    extra = usage_record["extra"]
     assert "cost_usd" not in extra
     assert "price_miss" not in extra
     warnings = [record for record in loguru_records if record["level"].name == "WARNING"]
