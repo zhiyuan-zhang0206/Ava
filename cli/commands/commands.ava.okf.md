@@ -22,7 +22,8 @@ Two kinds of module live here, distinguished by filename:
 - **public** (`start.py`, `stop.py`, `status.py`, `logs.py`, `update.py`,
   `cluster.py`, `agents.py`, `config.py`, `plugins.py`, `skill.py`, `mcp.py`, `pitr.py`,
   `memory.py`, `presets.py`, `pty.py`, `schedules.py`, `trace.py`, `migrations.py`,
-  `cluster_lifecycle.py`) — reachable from the command line.
+  `cluster_lifecycle.py`, `agent_timeline.py`, `impersonation.py`,
+  `impersonation_relay.py`) — reachable from the command line.
 - **internal** (`_`-prefixed) — steps `start` / `update` call, never dispatched
   directly: `_cluster_instance` (per-cluster pg+redis bring-up), `_converge`
   (step-table aggregation and execution) / `_converge_spec` (the step contract) /
@@ -44,6 +45,12 @@ it runs as a step of `ava start` / `ava update`, so any restart crossing a
 schema change catches the DB up on its own.
 
 ## Notes
+
+- `agent_timeline.py` exposes the existing timeline API as `ava agents timeline`
+  and its exact `context` alias. `impersonation.py` manages explicit external
+  requests, leases, inbox acknowledgments and local Python SDK attachment;
+  `impersonation_relay.py` forwards inbound availability to the owning external
+  model session. Usage: [External agent impersonation](../../conventions/agent-impersonation.md).
 
 - Which cluster a command acts on comes from `cli/commands/_repo.py:_repo_root` — the
   checkout the running `ava` belongs to — never the current directory.

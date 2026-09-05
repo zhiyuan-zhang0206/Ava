@@ -425,6 +425,9 @@ def _list_tools(server: str) -> list[ToolInfo]:
 
 def _call_raw(server: str, tool: str, **args: Any) -> dict[str, Any]:
     """Call tool, return the full result dict ({content, isError, structuredContent})."""
+    from ava import _boot
+
+    _boot.validate_external_identity()
     remote = _get_remote_client()
     if remote is not None:
         # Only a transport failure falls back to local; a tool/server-level error
@@ -432,6 +435,8 @@ def _call_raw(server: str, tool: str, **args: Any) -> dict[str, Any]:
         # retried locally (which would double-run a side-effectful tool).
         with suppress(MCPConnectError, OSError):
             return remote.call_tool(server, tool, args)
+        # The daemon attempt may have outlived the borrowed lease.
+        _boot.validate_external_identity()
 
     async def _do() -> dict[str, Any]:
         try:

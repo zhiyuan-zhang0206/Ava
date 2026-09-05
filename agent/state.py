@@ -147,6 +147,11 @@ class BaseAgentState(BaseModel):
     chat or unassociated inbound work, so ownership never implies attribution.
     """
 
+    impersonation_request_id: str | None = None
+    """Last presented takeover request; survives history compaction."""
+    impersonation_applied: dict[str, object] = Field(default_factory=dict)
+    """Atomic checkpoint receipt for the last external plugin delta applied."""
+
     compact: CompactState = Field(default_factory=CompactState)
     """Compaction bookkeeping — nested last-value channel (see CompactState)."""
 
@@ -403,6 +408,9 @@ class PluginStateHandle[T: BaseModel]:
             PluginStateOutsideTurnError: `ava.state` slot not injected (called outside exec turn).
         """
         import ava  # lazy import: avoid circular (ava imports agent.state via plugin loading)
+        from ava._boot import validate_external_identity
+
+        validate_external_identity()
 
         if ava.state is None:
             raise ava.PluginStateOutsideTurnError(
@@ -430,6 +438,9 @@ class PluginStateHandle[T: BaseModel]:
             ValueError: delta contains a key outside the BaseModel schema (plugin author typo).
         """
         import ava
+        from ava._boot import validate_external_identity
+
+        validate_external_identity()
 
         if ava.state is None or ava.state_update is None:
             raise ava.PluginStateOutsideTurnError(

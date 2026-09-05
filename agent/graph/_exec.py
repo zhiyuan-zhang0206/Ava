@@ -78,6 +78,7 @@ from ava.security import SecurityFindingEntry, take_findings
 from shared.config import settings
 from shared.exit_codes import IDLE_EXIT_CODE, SYSTEM_HALT_EXIT_CODE
 from shared.lifecycle import (
+    AgentImpersonation,
     AgentRestart,
     AgentTermination,
     _SystemHalt,
@@ -322,9 +323,12 @@ def _dispatch_exec_result(
             exit_code_for_msg = SYSTEM_HALT_EXIT_CODE
             logger.info("[{label}] {body}", label="exec", body=result_text)
             logger.info("[{label}] {body}", label="halt", body="system_halt (compact)")
-        case _ExecLifecycle(output=output, exc=AgentTermination() | AgentRestart() as exc):
-            # SDK already INSERTed the inbound; the claim side writes the
-            # lifecycle marker — no "[halt]" annotation (duplication is noise).
+        case _ExecLifecycle(
+            output=output, exc=AgentTermination() | AgentRestart() | AgentImpersonation() as exc
+        ):
+            # Restart/terminate enqueue lifecycle inbounds; impersonation
+            # records consent in its lease. Their drivers resume after exec
+            # cleanup, without adding a duplicate "[halt]" annotation here.
             halted = True
             result_text = wrap_code_output(output, stream_cap=stream_cap)
             exit_code_for_msg = IDLE_EXIT_CODE

@@ -49,6 +49,7 @@ from shared import telemetry
 from shared.config import cluster_tz, settings
 from shared.db import insert_inbound_message, publish_inbound_wake
 from shared.db_transaction import write_transaction
+from shared.impersonation_maintenance import reap_impersonations
 from shared.inbound_provenance import InboundProvenance
 from shared.live_events import PageClosed
 from shared.redis_client import publish_best_effort_sync
@@ -350,15 +351,17 @@ async def _reaper_loop(pool: ConnectionPool, stop: asyncio.Event) -> None:
     """Reclaim once at startup, then on the configured interval."""
     while not stop.is_set():
         try:
+            impersonations = await asyncio.to_thread(reap_impersonations, pool)
             pages = await asyncio.to_thread(_reap_expired_pages_blocking, pool)
             shells = await _reap_expired_shells(pool)
             sessions = await asyncio.to_thread(_reap_expired_web_sessions_blocking, pool)
-            if pages or shells or sessions:
+            if pages or shells or sessions or impersonations:
                 _log.info(
-                    "[ttl-reaper] reclaimed %d page(s), %d shell(s), %d web session(s)",
+                    "[ttl-reaper] reclaimed %d page(s), %d shell(s), %d web session(s), %d impersonation(s)",
                     len(pages),
                     len(shells),
                     sessions,
+                    impersonations,
                 )
         except Exception:
             _log.warning("[ttl-reaper] pass failed", exc_info=True)

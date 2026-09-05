@@ -39,6 +39,7 @@ timeout is a defensive SELECT recheck for the fire-and-forget channel.
 import asyncio
 import json
 import time
+from collections.abc import Awaitable, Callable
 from datetime import datetime
 from typing import Any, NamedTuple, TypeVar, cast
 
@@ -223,6 +224,8 @@ async def enqueue_fatal_provider_report_to_nearest_alive_ancestor(
 async def claim_inbound_batch(
     pool: AsyncConnectionPool,
     agent_id: int,
+    *,
+    lifecycle_only: bool = False,
 ) -> list[ClaimedInbound]:
     """Claim under current runtime ownership in one explicit write transaction.
 
@@ -234,6 +237,9 @@ async def claim_inbound_batch(
     Without an active lifecycle command, chat becomes claimed for checkpoint
     reconciliation and other kinds become done. An unowned consumer cannot
     acknowledge lifecycle work it has no authority to apply.
+
+    The lifecycle-only path leaves cancellation for the external decision
+    owner, or the ordinary native claim if that owner returns without ACK.
     """
     async with async_write_transaction(pool) as conn, conn.cursor() as cur:
         await lock_inbound_owner(conn, agent_id)
@@ -285,6 +291,10 @@ async def claim_inbound_batch(
             )
             if await cur.fetchone() is not None:
                 raise RuntimeError("lifecycle claim requires an admitted runtime incarnation")
+        if lifecycle_only:
+            # Accepted intents returned above. A held native runtime has no
+            # authority to acknowledge ordinary input in the generic batch.
+            return []
         # CASE-on-kind in a single UPDATE keeps the batch grab atomic — chat
         # and non-chat rows in the same batch all commit together. RETURNING
         # order for UPDATE … WHERE id IN (subquery) is heap-scan order, not
@@ -623,6 +633,8 @@ async def wait_for_inbound(
     listener: RedisInboundListener,
     agent_id: int | None = None,
     timeout_s: float = DEFAULT_WAIT_TIMEOUT_S,
+    *,
+    extra_ready: Callable[[], Awaitable[bool]] | None = None,
 ) -> None:
     """Async block until an inbound is available to claim.
 
@@ -653,6 +665,8 @@ async def wait_for_inbound(
     started = time.monotonic()
     rounds = 0
     while True:
+        if extra_ready is not None and await extra_ready():
+            return
         if agent_id is not None:
             await record_claim_loop_progress(pool, agent_id)
         if agent_id is not None and await _has_pending_inbound(pool, agent_id):
