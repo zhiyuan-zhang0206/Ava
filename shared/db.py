@@ -114,7 +114,7 @@ def list_agents(db: psycopg.Connection) -> list[tuple[int, str | None]]:
         return cur.fetchall()
 
 
-def publish_inbound_wake(agent_id: int, payload: str) -> None:
+def publish_inbound_wake(agent_id: int, payload: str) -> bool:
     """Best-effort Redis publish to wake an idle agent — the fast path paired
     with the claim loop's SELECT recheck. Also SETEXes the agent's wake key
     (`shared.cluster.wake_key`) as a durable breadcrumb so a wake lost to a
@@ -123,7 +123,10 @@ def publish_inbound_wake(agent_id: int, payload: str) -> None:
 
     Never raises: a wake lost here is recovered by `wait_for_inbound`'s SELECT
     within `timeout_s`, so the caller's INSERT+commit is never held hostage to
-    Redis. But the failure is NOT swallowed blindly — a `NoPermissionError`
+    Redis. Returns True when the wake reached Redis, False when the publish
+    was rejected or skipped — callers that meter delivery (the delivery
+    watchdog's dispatch counter) must read the return value, never assume
+    success. Ignoring the return value stays backward compatible. But the failure is NOT swallowed blindly — a `NoPermissionError`
     (a `ResponseError`) means the publisher's redis ACL user is not granted this
     cluster's `<prefix>:inbound:*` channel (a channel-prefix or ACL misconfig),
     which would silently disable instant wake fleet-wide, so it is logged at
@@ -148,6 +151,7 @@ def publish_inbound_wake(agent_id: int, payload: str) -> None:
             # claim loop's 30s SELECT recheck. The listener GETDELs this key
             # on (re)subscribe and SELECTs immediately when it is present.
             r.set(wake_key(agent_id), payload, ex=WAKE_KEY_TTL_S)
+            return True
         finally:
             r.close()
     except ResponseError as exc:
@@ -158,6 +162,7 @@ def publish_inbound_wake(agent_id: int, payload: str) -> None:
             ch=channel,
             exc=exc,
         )
+        return False
     except Exception as exc:
         logger.debug(
             "inbound wake publish to {ch!r} skipped ({exc!r}) — best-effort; the "
@@ -165,6 +170,7 @@ def publish_inbound_wake(agent_id: int, payload: str) -> None:
             ch=channel,
             exc=exc,
         )
+        return False
 
 
 def insert_inbound_message(

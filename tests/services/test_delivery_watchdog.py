@@ -32,7 +32,7 @@ from shared.redis_listener import RedisInboundListener
 _THRESHOLD_S = 30.0
 _DISPATCH_THRESHOLD_S = 1.0
 _MAX_DISPATCH_COUNT = 5
-_DISPATCH_BACKOFF_STEPS_S = [1.0, 5.0, 30.0, 120.0, 300.0]
+_DISPATCH_BACKOFF_STEPS_S = [5.0, 30.0, 120.0, 300.0]
 
 
 @pytest.fixture
@@ -298,7 +298,7 @@ class TestDispatchWakes:
         monkeypatch.setattr(
             shared.db,
             "publish_inbound_wake",
-            lambda agent_id, payload: calls.append((agent_id, payload)),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+            lambda agent_id, payload: calls.append((agent_id, payload)) or True,  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
         )
         dispatched = dispatch_wakes(
             pool,
@@ -319,8 +319,8 @@ class TestDispatchWakes:
         aid = _make_idling_agent(db_conn)
         _insert_old_inbound(db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 0.5)
 
-        def boom(*_a, **_k):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-            raise RuntimeError("redis down")
+        def boom(*_a, **_k) -> bool:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+            return False
 
         monkeypatch.setattr(shared.db, "publish_inbound_wake", boom)  # pyright: ignore[reportUnknownArgumentType]
         assert (
@@ -394,8 +394,9 @@ class TestDispatchBackoffAndPoison:
         iid = _insert_old_inbound(db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 1)
         calls: list[tuple[int, str]] = []
 
-        def record_publish(agent_id: int, payload: str) -> None:
+        def record_publish(agent_id: int, payload: str) -> bool:
             calls.append((agent_id, payload))
+            return True
 
         monkeypatch.setattr("shared.db.publish_inbound_wake", record_publish)
 
@@ -419,8 +420,8 @@ class TestDispatchBackoffAndPoison:
         aid = _make_idling_agent(db_conn)
         iid = _insert_old_inbound(db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 1)
 
-        def accept_publish(_agent_id: int, _payload: str) -> None:
-            return None
+        def accept_publish(_agent_id: int, _payload: str) -> bool:
+            return True
 
         monkeypatch.setattr("shared.db.publish_inbound_wake", accept_publish)
         assert self._dispatch(pool) == 1
@@ -468,8 +469,8 @@ class TestDispatchBackoffAndPoison:
         aid = _make_idling_agent(db_conn)
         iid = _insert_old_inbound(db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 1)
 
-        def fail_publish(*_args: object) -> None:
-            raise RuntimeError("redis unavailable")
+        def fail_publish(*_args: object) -> bool:
+            return False
 
         monkeypatch.setattr("shared.db.publish_inbound_wake", fail_publish)
         assert self._dispatch(pool) == 0
@@ -480,6 +481,34 @@ class TestDispatchBackoffAndPoison:
             )
             row = cur.fetchone()
         assert row == (0, None)
+
+    def test_claimed_mid_dispatch_is_not_counted(
+        self,
+        db_conn: psycopg.Connection,
+        pool: ConnectionPool,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        aid = _make_idling_agent(db_conn)
+        iid = _insert_old_inbound(db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 1)
+
+        def publish_and_claim(agent_id: int, payload: str) -> bool:
+            with db_conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE inbound_messages SET status = 'claimed' WHERE id = %s",
+                    (iid,),
+                )
+            db_conn.commit()
+            return True
+
+        monkeypatch.setattr("shared.db.publish_inbound_wake", publish_and_claim)
+        assert self._dispatch(pool) == 1
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "SELECT status, dispatch_count, poisoned_at FROM inbound_messages WHERE id = %s",
+                (iid,),
+            )
+            row = cur.fetchone()
+        assert row == ("claimed", 0, None)
 
     def test_dispatch_cap_poisons_once_and_emits_event(
         self,
@@ -495,8 +524,8 @@ class TestDispatchBackoffAndPoison:
         aid = _make_idling_agent(db_conn)
         iid = _insert_old_inbound(db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 1)
 
-        def accept_publish(_agent_id: int, _payload: str) -> None:
-            return None
+        def accept_publish(_agent_id: int, _payload: str) -> bool:
+            return True
 
         monkeypatch.setattr("shared.db.publish_inbound_wake", accept_publish)
 
@@ -581,8 +610,9 @@ class TestDispatchBackoffAndPoison:
         db_conn.commit()
         calls: list[tuple[int, str]] = []
 
-        def record_unexpected_publish(agent_id: int, payload: str) -> None:
+        def record_unexpected_publish(agent_id: int, payload: str) -> bool:
             calls.append((agent_id, payload))
+            return True
 
         monkeypatch.setattr("shared.db.publish_inbound_wake", record_unexpected_publish)
 
@@ -612,8 +642,9 @@ class TestDispatchBackoffAndPoison:
         db_conn.commit()
         calls: list[tuple[int, str]] = []
 
-        def record_publish(agent_id: int, payload: str) -> None:
+        def record_publish(agent_id: int, payload: str) -> bool:
             calls.append((agent_id, payload))
+            return True
 
         monkeypatch.setattr("shared.db.publish_inbound_wake", record_publish)
 
@@ -637,8 +668,9 @@ class TestDispatchBackoffAndPoison:
         iid = _insert_old_inbound(db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 1)
         calls: list[tuple[int, str]] = []
 
-        def record_publish(agent_id: int, payload: str) -> None:
+        def record_publish(agent_id: int, payload: str) -> bool:
             calls.append((agent_id, payload))
+            return True
 
         monkeypatch.setattr("shared.db.publish_inbound_wake", record_publish)
 

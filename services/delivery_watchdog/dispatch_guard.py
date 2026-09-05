@@ -40,10 +40,10 @@ def select_pending_for_dispatch(
 ) -> list[tuple[int, int]]:
     """Return stale pending inbounds eligible for their next wake publish.
 
-    The initial publish is gated by ``age_s``. Later publishes also wait for
-    the configured step indexed by the row's current dispatch count, repeating
-    the final step when the configured list is shorter than the dispatch cap.
-    Poisoned rows and rows at the cap are never selected.
+    The initial publish is gated by ``age_s``. Later publishes wait for the
+    configured step indexed by the row's current dispatch count (1-based),
+    repeating the final step when the configured list is shorter than the
+    dispatch cap. Poisoned rows and rows at the cap are never selected.
     """
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
@@ -55,7 +55,7 @@ def select_pending_for_dispatch(
             "  AND m.dispatch_count < %s AND m.poisoned_at IS NULL "
             "  AND (m.last_dispatch_at IS NULL OR m.last_dispatch_at < now() - "
             "       make_interval(secs => (%s::float8[])[LEAST("
-            "           m.dispatch_count + 1, array_length(%s::float8[], 1))])) "
+            "           GREATEST(m.dispatch_count, 1), array_length(%s::float8[], 1))])) "
             "ORDER BY m.created_at ASC",
             (age_s, max_dispatch_count, backoff_steps, backoff_steps),
         )
@@ -80,15 +80,11 @@ def dispatch_wakes(
     for inbound_id, agent_id in select_pending_for_dispatch(
         pool, dispatch_threshold_s, max_dispatch_count, backoff_steps
     ):
-        try:
-            shared.db.publish_inbound_wake(agent_id, str(inbound_id))
+        # publish_inbound_wake never raises; it reports delivery through its
+        # return value. Only a wake that actually reached Redis advances the
+        # counter — a Redis outage must not burn a row's dispatch budget.
+        if shared.db.publish_inbound_wake(agent_id, str(inbound_id)):
             dispatched_ids.append(inbound_id)
-        except Exception:
-            _log.exception(
-                "[delivery] re-publish wake failed for inbound %s to agent %s",
-                inbound_id,
-                agent_id,
-            )
 
     if dispatched_ids:
         with write_transaction(pool) as conn, conn.cursor() as cur:

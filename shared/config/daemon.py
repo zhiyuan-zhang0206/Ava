@@ -286,9 +286,9 @@ class DaemonSettings(EnvSettings):
     )
 
     delivery_watchdog_dispatch_backoff_steps_s: Annotated[list[float], NoDecode] = Field(
-        default=[1.0, 5.0, 30.0, 120.0, 300.0],
+        default=[5.0, 30.0, 120.0, 300.0],
         alias="AVA_DELIVERY_WATCHDOG_DISPATCH_BACKOFF_STEPS_S",
-        description="Minimum seconds between successive delivery-watchdog wake re-dispatches. The last step repeats when the dispatch cap is longer than this list.",
+        description="Minimum seconds between successive delivery-watchdog wake re-dispatches, indexed by the row's current dispatch count (the first re-dispatch waits steps[0]). The last step repeats when the dispatch cap is longer than this list.",
         json_schema_extra={
             "restart_required": "all",
             "writable": True,
