@@ -1428,7 +1428,7 @@ class TestValidateModelConfig:
         """MIMO_API_KEY not set → ValueError."""
         self._clear_all_keys(monkeypatch)
         monkeypatch.setattr(settings.lm, "xiaomi_api_key", SecretStr("legacy-settings-key"))
-        monkeypatch.delenv("MIMO_API_KEY", raising=False)
+        monkeypatch.setattr("shared.runtime_config.read_env_aliases", dict)
         with pytest.raises(ValueError, match="MIMO_API_KEY"):
             validate_model_config(model="mimo-v2.5-pro")
 
@@ -1436,13 +1436,14 @@ class TestValidateModelConfig:
         """MOONSHOT_API_KEY not set → ValueError."""
         self._clear_all_keys(monkeypatch)
         monkeypatch.setattr(settings.lm, "moonshot_api_key", SecretStr("legacy-settings-key"))
-        monkeypatch.delenv("MOONSHOT_API_KEY", raising=False)
+        monkeypatch.setattr("shared.runtime_config.read_env_aliases", dict)
         with pytest.raises(ValueError, match="MOONSHOT_API_KEY"):
             validate_model_config(model="kimi-k3")
 
     def test_missing_glm_key_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """GLM_API_KEY not set → ValueError."""
         self._clear_all_keys(monkeypatch)
+        monkeypatch.setattr("shared.runtime_config.read_env_aliases", dict)
         with pytest.raises(ValueError, match="GLM_API_KEY"):
             validate_model_config(model="glm-5.2")
 
