@@ -16,6 +16,10 @@ gateway's per-model views). Import order is sorted plugin names — deterministi
 rather than filesystem-order. A provider.py that fails to import or register
 raises out of the triggering call: an enabled plugin whose provider code is
 broken fails the process loudly, never silently omits its models.
+
+Core registers no providers. At least one enabled provider plugin must bind at
+load time; an empty registry raises before the once flag is set, so correcting
+the enable configuration can be retried in the same process.
 """
 
 from __future__ import annotations
@@ -66,7 +70,9 @@ def ensure_provider_plugins_loaded() -> None:
     """Import every enabled plugin's ``provider.py``, once per process.
 
     Idempotent and thread-safe (the gateway serves spawn endpoints from a
-    thread pool; two concurrent first calls must not double-register).
+    thread pool; two concurrent first calls must not double-register). Core
+    contributes no fallback binding, so loading zero providers is a retryable
+    startup error.
     """
     with _lock:
         if _STATE.loaded:
@@ -95,6 +101,11 @@ def ensure_provider_plugins_loaded() -> None:
                 continue
             is_builtin = repo_dir in str(plugin_dir.resolve())
             _load_one(name, provider_py, is_builtin=is_builtin)
+        if not provider_api.REGISTRY.bindings:
+            raise RuntimeError(
+                "no provider plugins enabled — enable at least one provider plugin "
+                "(the repo ships the lm_* default set; check the plugin enable config)"
+            )
         _STATE.loaded = True
 
 

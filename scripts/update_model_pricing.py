@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import sys
 from copy import deepcopy
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
@@ -19,6 +20,11 @@ from typing import Any, NamedTuple
 
 import requests
 from bs4 import BeautifulSoup
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from scripts.plugin_price_sync import PluginSyncResult
+from scripts.plugin_price_sync import sync_plugin_rates as _sync_plugin_rates
 
 
 class Rates(NamedTuple):
@@ -56,6 +62,7 @@ _PEAK_HOURS = re.compile(
 _USD = re.compile(r"\$(?:0|[1-9]\d*)(?:\.\d+)?")
 _DEEPSEEK_PRICING_URL = "https://api-docs.deepseek.com/quick_start/pricing/"
 _CATALOG_PATH = Path(__file__).resolve().parents[1] / "shared/lm/pricing_catalog_archive.json"
+_REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 def _usd(cell: str) -> Decimal:
@@ -250,6 +257,20 @@ def _detected_at_now() -> str:
     return datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
+def _now_utc() -> datetime:
+    return datetime.now(UTC)
+
+
+def sync_plugin_rates(
+    archive_path: Path,
+    repo_root: Path,
+    *,
+    write: bool = True,
+) -> PluginSyncResult:
+    """Synchronize built-in provider rates to the archive period covering now."""
+    return _sync_plugin_rates(archive_path, repo_root, now=_now_utc(), write=write)
+
+
 def _fetch_deepseek_html() -> str:
     response = requests.get(
         _DEEPSEEK_PRICING_URL,
@@ -264,17 +285,33 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Compare Ava's reviewed catalog with official provider pricing."
     )
-    parser.add_argument(
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument(
         "--write",
         action="store_true",
         help="append detected changes to the catalog for a reviewable PR",
+    )
+    mode.add_argument(
+        "--check",
+        action="store_true",
+        help="report drift without writing and exit 1 when changes are needed",
+    )
+    parser.add_argument(
+        "--sync-plugins",
+        action="store_true",
+        help="synchronize plugin PriceRates from the archive instead of fetching DeepSeek",
     )
     parser.add_argument(
         "--source-file",
         type=Path,
         help="read a captured DeepSeek HTML page instead of the live official URL",
     )
-    parser.add_argument("--catalog", type=Path, default=_CATALOG_PATH)
+    parser.add_argument("--catalog", type=Path)
+    parser.add_argument(
+        "--repo-root",
+        type=Path,
+        help="repository whose built-in provider files are synchronized",
+    )
     parser.add_argument(
         "--detected-at",
         default=None,
@@ -282,12 +319,29 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
+    repo_root = args.repo_root or _REPO_ROOT
+    catalog_path = args.catalog or (
+        repo_root / "shared/lm/pricing_catalog_archive.json" if args.sync_plugins else _CATALOG_PATH
+    )
+    if args.sync_plugins:
+        if args.source_file is not None or args.detected_at is not None:
+            parser.error("--source-file/--detected-at cannot be used with --sync-plugins")
+        result = sync_plugin_rates(catalog_path, repo_root, write=args.write)
+        if result.drifted_models and not args.write:
+            print(f"Plugin pricing drift detected for: {', '.join(result.drifted_models)}")
+            return 1
+        if result.changed_files:
+            print(f"Synchronized plugin rates in {len(result.changed_files)} provider file(s).")
+        else:
+            print("Plugin prices match the archive period covering now.")
+        return 0
+
     html = (
         args.source_file.read_text(encoding="utf-8")
         if args.source_file is not None
         else _fetch_deepseek_html()
     )
-    catalog = json.loads(args.catalog.read_text(encoding="utf-8"))
+    catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
     detected_at = args.detected_at or _detected_at_now()
     updated = reconcile_deepseek_catalog(
         catalog,
@@ -303,11 +357,11 @@ def main(argv: list[str] | None = None) -> int:
             "effective period, then verify its timestamp against the provider announcement."
         )
         return 1
-    args.catalog.write_text(
+    catalog_path.write_text(
         json.dumps(updated, indent=2, ensure_ascii=False) + "\n",
         encoding="utf-8",
     )
-    print(f"Updated {args.catalog} at provisional effective time {detected_at}.")
+    print(f"Updated {catalog_path} at provisional effective time {detected_at}.")
     return 0
 
 

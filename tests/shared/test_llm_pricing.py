@@ -40,7 +40,9 @@ def _pricing_catalog_raw() -> dict[str, Any]:
     return cast(
         dict[str, Any],
         json.loads(
-            (Path(__file__).resolve().parents[2] / "shared/lm/pricing_catalog.json").read_text()
+            (
+                Path(__file__).resolve().parents[2] / "shared/lm/pricing_catalog_archive.json"
+            ).read_text()
         ),
     )
 
@@ -51,13 +53,11 @@ def _pricing_catalog_models(raw: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return cast(dict[str, dict[str, Any]], models)
 
 
-def _pricing_archive_raw() -> dict[str, Any]:
+def _runtime_pricing_catalog_raw() -> dict[str, Any]:
     return cast(
         dict[str, Any],
         json.loads(
-            (
-                Path(__file__).resolve().parents[2] / "shared/lm/pricing_catalog_archive.json"
-            ).read_text()
+            (Path(__file__).resolve().parents[2] / "shared/lm/pricing_catalog.json").read_text()
         ),
     )
 
@@ -66,7 +66,7 @@ def _pricing_archive_raw() -> dict[str, Any]:
 def deepseek_archive_catalog(monkeypatch: pytest.MonkeyPatch) -> None:
     """Route explicit DeepSeek history checks through the archived periods."""
     merged = dict(pricing._CATALOG)
-    merged.update(_parse_catalog(_pricing_archive_raw()))
+    merged.update(_parse_catalog(_pricing_catalog_raw()))
     monkeypatch.setattr(pricing, "_CATALOG", merged)
 
 
@@ -74,7 +74,7 @@ def deepseek_archive_catalog(monkeypatch: pytest.MonkeyPatch) -> None:
 def gemini_archive_catalog(monkeypatch: pytest.MonkeyPatch) -> None:
     """Route explicit Gemini period/tier history checks through the archive."""
     merged = dict(pricing._CATALOG)
-    merged.update(_parse_catalog(_pricing_archive_raw()))
+    merged.update(_parse_catalog(_pricing_catalog_raw()))
     monkeypatch.setattr(pricing, "_CATALOG", merged)
 
 
@@ -82,7 +82,7 @@ def gemini_archive_catalog(monkeypatch: pytest.MonkeyPatch) -> None:
 def glm_archive_catalog(monkeypatch: pytest.MonkeyPatch) -> None:
     """Route explicit GLM period/tier history checks through the archive."""
     merged = dict(pricing._CATALOG)
-    merged.update(_parse_catalog(_pricing_archive_raw()))
+    merged.update(_parse_catalog(_pricing_catalog_raw()))
     monkeypatch.setattr(pricing, "_CATALOG", merged)
 
 
@@ -100,6 +100,7 @@ def test_pricing_catalog_schema_v2_vendor_lock() -> None:
     # first, but a new model reusing a registered vendor needs no test edit.
     assert {entry["vendor"] for entry in models.values()} <= {
         "anthropic",
+        "deepseek",
         "google",
         "openai",
         "xiaomi",
@@ -115,8 +116,8 @@ def test_pricing_catalog_schema_v2_vendor_lock() -> None:
 
 
 def test_deepseek_catalog_entries_live_only_in_the_archive() -> None:
-    runtime_models = _pricing_catalog_models(_pricing_catalog_raw())
-    archive_models = _pricing_catalog_models(_pricing_archive_raw())
+    runtime_models = _pricing_catalog_models(_runtime_pricing_catalog_raw())
+    archive_models = _pricing_catalog_models(_pricing_catalog_raw())
     expected = {
         "deepseek-v4-pro",
         "deepseek-v4-flash",
@@ -128,8 +129,8 @@ def test_deepseek_catalog_entries_live_only_in_the_archive() -> None:
 
 
 def test_gemini_chat_catalog_entries_live_only_in_the_archive() -> None:
-    runtime_models = _pricing_catalog_models(_pricing_catalog_raw())
-    archive_models = _pricing_catalog_models(_pricing_archive_raw())
+    runtime_models = _pricing_catalog_models(_runtime_pricing_catalog_raw())
+    archive_models = _pricing_catalog_models(_pricing_catalog_raw())
     expected = {
         "gemini-3.8-flash",
         "gemini-3.7-flash",
@@ -141,15 +142,13 @@ def test_gemini_chat_catalog_entries_live_only_in_the_archive() -> None:
 
     assert expected.isdisjoint(runtime_models)
     assert expected <= archive_models.keys()
-    # Embedding pricing has no chat ProviderBinding/ModelSpec and remains a
-    # runtime-catalog consumer until the final catalog migration owns it.
-    assert "gemini-embedding-2" in runtime_models
-    assert "gemini-embedding-2" not in archive_models
+    assert "gemini-embedding-2" in archive_models
+    assert runtime_models == {}
 
 
 def test_anthropic_catalog_entries_live_only_in_the_archive() -> None:
-    runtime_models = _pricing_catalog_models(_pricing_catalog_raw())
-    archive_models = _pricing_catalog_models(_pricing_archive_raw())
+    runtime_models = _pricing_catalog_models(_runtime_pricing_catalog_raw())
+    archive_models = _pricing_catalog_models(_pricing_catalog_raw())
     expected = {
         "claude-sonnet-5",
         "claude-haiku-4-5-20251001",
@@ -168,8 +167,8 @@ def test_anthropic_catalog_entries_live_only_in_the_archive() -> None:
 
 
 def test_openai_catalog_entries_live_only_in_the_archive() -> None:
-    runtime_models = _pricing_catalog_models(_pricing_catalog_raw())
-    archive_models = _pricing_catalog_models(_pricing_archive_raw())
+    runtime_models = _pricing_catalog_models(_runtime_pricing_catalog_raw())
+    archive_models = _pricing_catalog_models(_pricing_catalog_raw())
     expected = {
         "gpt-5.6-sol",
         "gpt-5.6-terra",
@@ -183,8 +182,8 @@ def test_openai_catalog_entries_live_only_in_the_archive() -> None:
 
 
 def test_qwen_catalog_entries_live_only_in_the_archive() -> None:
-    runtime_models = _pricing_catalog_models(_pricing_catalog_raw())
-    archive_models = _pricing_catalog_models(_pricing_archive_raw())
+    runtime_models = _pricing_catalog_models(_runtime_pricing_catalog_raw())
+    archive_models = _pricing_catalog_models(_pricing_catalog_raw())
     expected = {
         "qwen3.8-max",
         "qwen3.8-27b",
@@ -196,8 +195,8 @@ def test_qwen_catalog_entries_live_only_in_the_archive() -> None:
 
 
 def test_glm_catalog_entries_live_only_in_the_archive() -> None:
-    runtime_models = _pricing_catalog_models(_pricing_catalog_raw())
-    archive_models = _pricing_catalog_models(_pricing_archive_raw())
+    runtime_models = _pricing_catalog_models(_runtime_pricing_catalog_raw())
+    archive_models = _pricing_catalog_models(_pricing_catalog_raw())
     expected = {
         "glm-5.2",
         "glm-5.3",
@@ -209,8 +208,8 @@ def test_glm_catalog_entries_live_only_in_the_archive() -> None:
 
 
 def test_kimi_catalog_entries_live_only_in_the_archive() -> None:
-    runtime_models = _pricing_catalog_models(_pricing_catalog_raw())
-    archive_models = _pricing_catalog_models(_pricing_archive_raw())
+    runtime_models = _pricing_catalog_models(_runtime_pricing_catalog_raw())
+    archive_models = _pricing_catalog_models(_pricing_catalog_raw())
     expected = {"kimi-k3"}
 
     assert expected.isdisjoint(runtime_models)
@@ -218,8 +217,8 @@ def test_kimi_catalog_entries_live_only_in_the_archive() -> None:
 
 
 def test_mimo_catalog_entries_live_only_in_the_archive() -> None:
-    runtime_models = _pricing_catalog_models(_pricing_catalog_raw())
-    archive_models = _pricing_catalog_models(_pricing_archive_raw())
+    runtime_models = _pricing_catalog_models(_runtime_pricing_catalog_raw())
+    archive_models = _pricing_catalog_models(_pricing_catalog_raw())
     expected = {
         "mimo-v2.5-pro",
         "mimo-v2.5-pro-ultraspeed",
@@ -478,7 +477,7 @@ def test_deepseek_plugin_prices_equal_archive_current_base_tier(
         "deepseek-v4-flash-vision-exp",
     )
     plugin_rates = {model: pricing._PLUGIN_PRICES[model].rates for model in model_ids}
-    archive_raw = _pricing_archive_raw()
+    archive_raw = _pricing_catalog_raw()
     archive_models = _pricing_catalog_models(archive_raw)
     monkeypatch.setattr(pricing, "_CATALOG", _parse_catalog(archive_raw))
     outside_daily_override = datetime(2026, 9, 5, tzinfo=UTC)
@@ -506,7 +505,7 @@ def test_gemini_plugin_prices_equal_archive_current_base_tier(
         "gemini-2.5-flash",
     )
     plugin_rates = {model: pricing._PLUGIN_PRICES[model].rates for model in model_ids}
-    archive_raw = _pricing_archive_raw()
+    archive_raw = _pricing_catalog_raw()
     archive_models = _pricing_catalog_models(archive_raw)
     monkeypatch.setattr(pricing, "_CATALOG", _parse_catalog(archive_raw))
     current_instant = datetime(2026, 9, 5, tzinfo=UTC)
@@ -537,7 +536,7 @@ def test_anthropic_plugin_prices_equal_archive_current_base_tier(
         "claude-haiku-4-5",
     )
     plugin_rates = {model: pricing._PLUGIN_PRICES[model].rates for model in model_ids}
-    archive_raw = _pricing_archive_raw()
+    archive_raw = _pricing_catalog_raw()
     archive_models = _pricing_catalog_models(archive_raw)
     monkeypatch.setattr(pricing, "_CATALOG", _parse_catalog(archive_raw))
     current_instant = datetime(2026, 9, 5, tzinfo=UTC)
@@ -563,7 +562,7 @@ def test_openai_plugin_prices_equal_archive_current_base_tier(
         "gpt-5.4-mini",
     )
     plugin_rates = {model: pricing._PLUGIN_PRICES[model].rates for model in model_ids}
-    archive_raw = _pricing_archive_raw()
+    archive_raw = _pricing_catalog_raw()
     archive_models = _pricing_catalog_models(archive_raw)
     monkeypatch.setattr(pricing, "_CATALOG", _parse_catalog(archive_raw))
     current_instant = datetime(2026, 9, 5, tzinfo=UTC)
@@ -587,7 +586,7 @@ def test_qwen_plugin_prices_equal_archive_current_base_tier(
         "qwen3.8-flash",
     )
     plugin_rates = {model: pricing._PLUGIN_PRICES[model].rates for model in model_ids}
-    archive_raw = _pricing_archive_raw()
+    archive_raw = _pricing_catalog_raw()
     archive_models = _pricing_catalog_models(archive_raw)
     monkeypatch.setattr(pricing, "_CATALOG", _parse_catalog(archive_raw))
     current_instant = datetime(2026, 9, 5, tzinfo=UTC)
@@ -611,7 +610,7 @@ def test_glm_plugin_prices_equal_archive_current_base_tier(
         "glm-5.3-flash",
     )
     plugin_rates = {model: pricing._PLUGIN_PRICES[model].rates for model in model_ids}
-    archive_raw = _pricing_archive_raw()
+    archive_raw = _pricing_catalog_raw()
     archive_models = _pricing_catalog_models(archive_raw)
     monkeypatch.setattr(pricing, "_CATALOG", _parse_catalog(archive_raw))
     current_instant = datetime(2026, 9, 5, tzinfo=UTC)
@@ -631,7 +630,7 @@ def test_kimi_plugin_prices_equal_archive_current_base_tier(
 ) -> None:
     model = "kimi-k3"
     plugin_rates = pricing._PLUGIN_PRICES[model].rates
-    archive_raw = _pricing_archive_raw()
+    archive_raw = _pricing_catalog_raw()
     archive_models = _pricing_catalog_models(archive_raw)
     monkeypatch.setattr(pricing, "_CATALOG", _parse_catalog(archive_raw))
     current_instant = datetime(2026, 9, 5, tzinfo=UTC)
@@ -653,7 +652,7 @@ def test_mimo_plugin_prices_equal_archive_current_base_tier(
         "mimo-v2.5-pro-ultraspeed",
     )
     plugin_rates = {model: pricing._PLUGIN_PRICES[model].rates for model in model_ids}
-    archive_raw = _pricing_archive_raw()
+    archive_raw = _pricing_catalog_raw()
     archive_models = _pricing_catalog_models(archive_raw)
     monkeypatch.setattr(pricing, "_CATALOG", _parse_catalog(archive_raw))
     current_instant = datetime(2026, 9, 5, tzinfo=UTC)

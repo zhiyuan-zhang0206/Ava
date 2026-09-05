@@ -1,11 +1,14 @@
-"""Versioned LLM pricing catalog + deterministic quote selection.
+"""Versioned LLM pricing archive + deterministic quote selection.
 
-``pricing_catalog.json`` is the reviewed source of truth. Its effective
-intervals, input-token tiers, and recurring UTC windows select one exact rate
-triple for a call; ``quote`` returns that triple with its cost atomically.
+``pricing_catalog_archive.json`` is the reviewed catalog source. It preserves
+effective intervals, input-token tiers, recurring UTC windows, and provenance;
+provider plugins supply the current flat runtime rate for chat models, while
+catalog-only services such as embeddings continue to price directly from the
+archive. ``pricing_catalog.json`` is an empty schema-v2 compatibility shell.
+``quote`` returns one selected rate triple with its cost atomically, and
 ``cost_usd`` remains the compatibility surface for existing readers. Schema v2
-requires each model entry to identify its vendor; the cross-line contract lives
-in ``pricing_catalog_schema.md``.
+requires each catalog entry to identify its vendor; the cross-line contract
+lives in ``pricing_catalog_schema.md``.
 
 ## Cache hit vs miss must be computed separately
 
@@ -265,7 +268,7 @@ def _parse_periods(model: str, raw_periods: list[dict[str, Any]]) -> tuple[_Effe
 
 
 def _load_catalog() -> dict[str, _ModelPrice]:
-    path = Path(__file__).with_name("pricing_catalog.json")
+    path = Path(__file__).with_name("pricing_catalog_archive.json")
     raw = cast(dict[str, Any], json.loads(path.read_text(encoding="utf-8")))
     return _parse_catalog(raw)
 
@@ -321,8 +324,8 @@ class _PluginPrice:
     """A plugin-declared price: flat Rates + provenance (no periods/tiers).
 
     Plugin prices live in plugin code — the plugin is the reviewed object;
-    its freshness signal is ``source_checked_at``. The core catalog keeps its
-    own stricter discipline (effective periods, tiers, windows). Runtime never
+    its freshness signal is ``source_checked_at``. The archive keeps its own
+    stricter discipline (effective periods, tiers, windows). Runtime never
     scrapes either source.
     """
 
@@ -348,15 +351,11 @@ def register_plugin_price(
 ) -> None:
     """Register a plugin provider's per-model price (shared/lm/provider_api.py).
 
-    A duplicate model id is an error, whatever the source: the catalog owns
-    core models, plugin prices own plugin models, and a collision is a typo or
-    a rebinding — never a precedence order.
+    The archive intentionally contains the same chat-model ids for history and
+    scheduled windows. A successful plugin price registration removes that
+    model from the in-memory catalog view, making the plugin's flat rate the
+    runtime source. A second plugin price for one id is still an error.
     """
-    if model in _CATALOG:
-        raise ValueError(
-            f"provider plugin {plugin!r}: model {model!r} is priced by the core "
-            "catalog — plugin pricing cannot override it"
-        )
     if model in _PLUGIN_PRICES:
         raise ValueError(
             f"provider plugin {plugin!r}: model {model!r} already has a plugin "
@@ -389,6 +388,7 @@ def register_plugin_price(
         source_checked_at=source_checked_at,
         vendor=vendor,
     )
+    _CATALOG.pop(model, None)
 
 
 def plugin_price_provenance(model: str) -> tuple[str, str] | None:

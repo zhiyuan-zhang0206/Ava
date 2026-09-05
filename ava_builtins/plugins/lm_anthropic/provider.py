@@ -17,6 +17,7 @@ from shared.lm.provider_api import (
     require_key,
 )
 from shared.lm.registry import MODELS, ModelSpec, ModelTuning, resolve_setting
+from shared.lm.stop import StopSpec
 
 # Budget used when AVA_REASONING_EFFORT clamps an extended-thinking-only claude
 # model to its "on" tier and no explicit AVA_CLAUDE_THINKING_BUDGET_TOKENS is
@@ -164,7 +165,12 @@ register(
         effort_levels=None,
         vision=True,
         anthropic_protocol=True,
-        stop_spec=None,
+        stop_spec=StopSpec(
+            "anthropic",
+            "stop_reason",
+            frozenset({"end_turn", "tool_use", "refusal"}),
+            frozenset({"max_tokens"}),
+        ),
     ),
     models={
         "claude-sonnet-5": ModelSpec(

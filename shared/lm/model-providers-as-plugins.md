@@ -1,289 +1,178 @@
 # Model providers as plugins
 
-> **Status: the mechanics are built** (extension points below, provider.py
-> contract + loader; 2026-08, `provider_api.py`). The Grok pilot is extracted;
-> the remaining eight providers still live in core. A new provider onboarded as
-> a plugin registers its binding, models, prices, and declared key without a
-> core edit across the former per-vendor surfaces. This doc commits to making
-> provider onboarding a plugin
-> concern and records its implemented extension points. It does not extract a
-> provider.
->
-> One thing is already true and worth keeping: downstream of the registry the
-> roster is **data, not code**. Pricing, the spawn dropdown, context budgets and
-> the per-model config view all derive from `shared/lm/registry.py:MODELS` and
-> need no per-provider edit. What is still code is the **binding** — how the
-> vendor's client is constructed — and that is what a plugin should own.
+> **Status: implemented.** Core registers no provider bindings or chat models.
+> The eight repository providers live under `ava_builtins/plugins/lm_*`, and
+> enabled provider plugins are the sole source of chat models, builders, API-key
+> declarations, effort vocabularies, vision fallbacks, stop vocabularies, and
+> current prices.
 
-## The constraint: a provider plugin adds access, never routing
+## Constraint: a provider plugin adds access, never routing
 
-A provider plugin makes one more vendor's models *nameable*. It never decides
-which model an agent runs on. That is the standing non-goal — no framework
-mechanism swaps an agent's model mid-run to paper over a provider error, and
-none picks one by an opaque cost/load heuristic
-([`conventions/non-goals.md`](../../conventions/non-goals.md),
-[`decisions/2026-07-29-no-runtime-model-routing.md`](../../decisions/2026-07-29-no-runtime-model-routing.md)).
-Model choice is made once, at spawn, by whoever is deciding the agent's job.
+A provider plugin makes one vendor's models nameable. It never decides which
+model an agent runs on. Model choice happens at spawn; no provider hook observes
+a request and swaps models after a failure or according to cost or load. This is
+the standing non-goal in
+[`conventions/non-goals.md`](../../conventions/non-goals.md) and
+[`decisions/2026-07-29-no-runtime-model-routing.md`](../../decisions/2026-07-29-no-runtime-model-routing.md).
 
-That is not a disclaimer to bolt on afterwards; it is a shape constraint on the
-extension surface itself. Three things fall out of it directly:
+The extension surface enforces that boundary:
 
-- **Registration happens at process start, never per turn.** There is no hook
-  that runs inside a turn boundary, so no plugin can observe a request and
-  answer it with a different model.
-- **`build_chat_model(model)` stays a pure function of the model id.** A plugin
-  supplies the builder for a prefix; it does not get to see the caller, the
-  agent, the error history, or the budget.
-- **The prefix map is flat, and a collision is an error.** Any *ordered* list of
-  candidate providers for one model is a fallback chain wearing a different
-  name, and would grow into the router this project has said no to. Two plugins
-  claiming `foo-` must fail fast at load, not resolve by precedence.
+- Registration happens once per process, outside the turn loop.
+- `build(ctx)` receives construction inputs, not the caller, agent, error
+  history, budget, or a list of fallback candidates.
+- The prefix map is flat. Duplicate or nested prefixes fail at registration;
+  there is no precedence order from which a fallback chain could emerge.
 
-The carve-out stays where it already lives: an ordered fallback chain becomes a
-real *availability* mechanism once no operator is present to swap config, and is
-tracked as an open-source prerequisite
-([`future/roadmap/open-source-prerequisites.md`](../../future/roadmap/open-source-prerequisites.md),
-"Provider fallback chain"). Nothing in this doc builds toward it, and a provider
-plugin API shaped as above does not accidentally deliver it.
+## Current ownership
 
-## What a provider costs today
+Core owns only the extension and normalization mechanisms:
 
-Read off the roster as it stands (nine providers), file by file. The last real
-vendor addition — `69514272` "feat: add Kimi K3, GLM 5.2, Grok 4.5 model support
-(#485)", 2026-07-16 — is deliberately *not* cited as corroboration: it predates
-`_effort.py` (2026-07-23), `registry.py` (2026-07-24) and `_providers.py`
-(2026-07-31), so three of the files below did not exist when it landed. The cost
-grew after that commit, not before it.
+- `provider_api.py` defines `ProviderBinding`, `BuildContext`, `PriceRates`, and
+  the fail-fast registration contract.
+- `_plugin_providers.py` discovers enabled plugins and imports their
+  `provider.py` modules under a process-wide lock.
+- `registry.py`, `factory.py`, `_effort.py`, and `stop.py` assemble plugin data
+  into provider-agnostic views and behavior. Their provider-owned tables start
+  empty.
+- `pricing.py` selects plugin runtime prices or catalog-only archive prices and
+  preserves the retired-model ledger.
 
-| Edit | Where | Why it is there |
-|---|---|---|
-| API key field | `shared/config/lm.py` — `<vendor>_api_key: SecretStr \| None` with its env alias | `scope: "cluster-pinned"` is what makes the key travel to a split agent-runner through `/api/bootstrap`; `sensitive: True` masks it in the config panel |
-| Model facts | `shared/lm/_model_specs_primary.py` + `_model_specs_compatible.py` — one `ModelSpec` per model id, assembled into `registry.py:MODELS` | `ModelSpec.provider` **is** the `build_chat_model` prefix and the `SUPPORTED_MODELS` group key. `_validate_registry()` refuses at import if a `spawnable` model lacks `context_window` / `knowledge_cutoff` / `pricing` / `effort_levels` |
-| Client construction | `shared/lm/_providers.py` — a `_build_<vendor>_model(...)` helper | Key check, thinking switch, effort injection, streaming — the whole vendor-specific wire shape |
-| Dispatch | `shared/lm/factory.py` — a `_MODEL_KEY_MAP` entry plus a prefix branch in `build_chat_model` | `_MODEL_KEY_MAP` is the single-source prefix → (display name, settings attr, env var) map that `_ensure_provider_key` also drives, so the spawn boundary can 400 on a missing key |
-| Vision gate | `shared/lm/factory.py` — `_VISION_MODEL_PREFIXES`, only if the endpoint accepts images | The message endpoint 422s an image addressed to a text-only agent up front instead of letting the LLM call fail after the inbound is queued |
-| Effort vocabulary | `shared/lm/_effort.py` — a `_PROVIDER_EFFORT_LEVELS` entry | OpenAI-style branches only; the claude branch clamps per model off `ModelSpec.effort_levels` instead |
-| Terminal-reason vocabulary | `shared/lm/stop.py` — a `ProviderKey` member plus its `_BY_PROVIDER` spec (`stop.py:36`, `:52`) | LangChain standardizes tool calls and usage metadata but *not* the finish/stop reason, so `classify_stop` carries each vendor's key and word list — and raises on a `model_provider` it does not know, mid-turn |
-| Dependency | `pyproject.toml` — the vendor's LangChain package | Skipped when the endpoint is OpenAI-compatible enough for `shared/lm/_reasoning_compat.py:ReasoningContentChatModel`; glm, mimo and qwen take that path and add no dependency |
+The repository ships this default enabled set:
 
-The `stop.py` row is the one keyed by something other than the model prefix: its
-key is the `model_provider` string the LangChain client emits, so five entries
-already cover today's nine vendors — `anthropic` serves claude *and* deepseek
-(deepseek binds `ChatAnthropic` against an anthropic-compatible endpoint), and
-`openai` serves gpt, mimo, glm *and* qwen (`ReasoningContentChatModel` subclasses
-`ChatOpenAI`). So it is a conditional cost: a vendor bound through a client class
-already in that table costs nothing there; one shipping its own class costs an
-entry, and skipping it turns into a `ValueError` on the first turn that ends.
+| Plugin | Prefix | Client binding | Stop vocabulary owner |
+|---|---|---|---|
+| `lm_alibaba` | `qwen3.8-` | `ReasoningContentChatModel` | `lm_openai` (`openai`) |
+| `lm_anthropic` | `claude-` | `ThinkingTokensChatAnthropic` | `lm_anthropic` (`anthropic`) |
+| `lm_deepseek` | `deepseek-` | `ThinkingTokensChatAnthropic` | `lm_anthropic` (`anthropic`) |
+| `lm_google` | `gemini-` | `ChatGoogleGenerativeAI` | `lm_google` (`google_genai`) |
+| `lm_moonshot` | `kimi-` | `ChatMoonshot` | `lm_moonshot` (`moonshot`) |
+| `lm_openai` | `gpt-` | `ChatOpenAI` Responses API | `lm_openai` (`openai`) |
+| `lm_xiaomi` | `mimo-` | `ReasoningContentChatModel` | `lm_openai` (`openai`) |
+| `lm_zhipu` | `glm-` | `ReasoningContentChatModel` | `lm_openai` (`openai`) |
 
-Cosmetic and optional: `ui/web/src/lib/models.ts:PROVIDER_LABELS` prettifies a
-provider key. An unrecognized provider still renders, just capitalized.
+Stop vocabulary is client-class scoped, not model-prefix scoped. The
+`model_provider` value emitted by `ChatAnthropic` is `anthropic`, so the
+Anthropic registration also classifies DeepSeek. `ReasoningContentChatModel`
+subclasses `ChatOpenAI`, so the OpenAI registration also classifies Alibaba,
+Xiaomi, and Zhipu. A binding that reuses one of those clients omits
+`stop_spec`; a client with a distinct emitted key owns one registration.
 
-Everything else is already derived and needs no edit — this is the part worth
-preserving through any refactor:
+## Loading and startup
 
-- `shared/lm/pricing.py:MODEL_PRICING`, `SUPPORTED_MODELS`,
-  `MODEL_CONTEXT_WINDOW`, `MODEL_KNOWLEDGE_CUTOFF`, `MODEL_IDENTITY` — all
-  comprehensions over `MODELS`.
-- `GET /api/models` (`gateway/routers/agents.py:get_models`) serves the spawn
-  dropdown straight from the registry, so the frontend picks a new provider up
-  with no frontend change.
-- `shared/lm/context_budget.py:resolve_context_budget` and the per-model config
-  view (`gateway/routers/config.py`, via `registry.explain_setting`) likewise.
+Discovery is keyed on a plugin directory's `plugin.py`; `provider.py` is the
+separately loaded shared-layer module. It may import `shared` and installed
+LangChain packages, never `ava` or `agent`, because gateway, labeler, and eval
+processes load it without an agent runtime.
 
-That was a **core** edit in this repo: a private provider meant carrying a diff
-across every `git pull`, and the vendor's SDK landed in the shared `pyproject.toml`
-for every install whether or not that vendor was used. The plugin path removes
-that per-provider core cost; dependency installation remains an open concern.
+`ensure_provider_plugins_loaded()` reuses `_discover_plugins()` and
+`load_for_runtime()`, imports enabled `provider.py` files in sorted-name order,
+and sets its once flag only after registration succeeds. The default config
+enables every discovered plugin, including the exact eight `lm_*` plugins
+above. A deployment that disables or loses every provider raises:
 
-## Why the existing plugin mechanism cannot carry it
+```text
+no provider plugins enabled — enable at least one provider plugin (the repo ships the lm_* default set; check the plugin enable config)
+```
 
-The plugin system gives a plugin two ways to change the agent-facing SDK, and
-they are the whole surface: `ava.extend.wrap(target, fn)` layers behavior over an
-existing `ava.*` member (`ava/_extend.py`, decided in
-[`decisions/2026-07-19-plugin-core-boundary-wrapper-extension.md`](../../decisions/2026-07-19-plugin-core-boundary-wrapper-extension.md)),
-and `ava.register_namespace(name, module)` / `register_namespace_member(...)`
-add a new one (`ava/_exports/plugins.py` — this is how `ava_memory` owns
-`ava.memory` outright). Neither can reach the provider layer, for three
-independent reasons that apply equally to both. Any one of them is
-disqualifying.
+That failure occurs before the loaded flag is set, so a corrected enable
+configuration is retryable. Gateway lifespan calls the loader directly during
+startup, outside best-effort blocks; a zero-provider deployment therefore
+fails boot rather than serving an empty model list. Other consumers retain the
+same loader guard at their first registry read.
 
-1. **Import layering.** The contract is `shared < ava < agent < gateway <
-   {cli}` (`pyproject.toml`, import-linter). Both primitives live in
-   `ava`; `shared/lm/factory.py` is a layer below and cannot import them. A
-   plugin's `plugin.py` sits higher still — it imports the agent runtime.
-2. **Plugins load in the agent process only.** Loading is
-   `agent/graph/_build.py:_load_extensions()`: it discovers builtin and external
-   plugins through `shared/plugins_config.py:_discover_plugins()`, reads the
-   enabled set, and imports each enabled `plugin.py` **itself**, by path, with
-   `importlib.util.spec_from_file_location` — one loop covering both kinds
-   (`ava_builtins.plugins.<n>.plugin` / `plugins.<n>.plugin`). `ava._extend`
-   also exposes a simpler external-only loader, `scan_and_load()`, whose one
-   call site is `agent/loop.py:527` at process boot. Both entry points sit in
-   `agent`. But a chat model is built or validated in contexts that never load
-   plugins at all: the gateway spawn boundary (`validate_model_config` behind
-   `POST /api/agents`), the labeler daemon (`services/labeler/labeler.py`
-   imports `build_chat_model` directly), and the eval harness
-   (any embedding driver). A
-   separate import-linter contract forbids `services` from importing `agent` at
-   all, so the labeler cannot be fixed by loading agent plugins there.
-3. **Wrong altitude.** Both primitives operate on the agent-facing SDK —
-   `wrap` replaces one of its members, `register_namespace` adds one. Provider
-   construction sits below the SDK entirely: the SDK's own consumers
-   (`ava/web.py`, `ava/_understand.py`) call `build_chat_model` themselves, so a
-   provider registered as an `ava.*` member would arrive after the code that
-   needs it.
+Registration mutates `MODELS` and rebuilds `SUPPORTED_MODELS`,
+`MODEL_CONTEXT_WINDOW`, `MODEL_KNOWLEDGE_CUTOFF`, and `MODEL_IDENTITY` in place.
+Existing importers see a newly registered model immediately, with no module
+reload or process restart. The known-provider-key cache is invalidated by the
+same registration.
 
-The conclusion this doc commits to: **the provider extension point is not
-`plugin.py`, and it is neither of the `ava.*` primitives.** It belongs at the
-`shared` layer, and it must be loadable by any process that builds a chat model.
+## Provider contract
 
-## The shape already exists: a `shared`-only plugin module
+A `provider.py` calls `register(binding, models=..., pricing=...)` once:
 
-A plugin today is a directory carrying up to three separately-loaded modules,
-plus bundled assets:
+- `ProviderBinding` declares the dispatch prefix, display name, `.env` key,
+  builder, provider-wide effort ladder, vision fallback, optional client-class
+  `StopSpec`, and an optional stable provider-key override.
+- Each `ModelSpec` owns model-specific availability, context, output cap,
+  knowledge cutoff, effort ladder, tuning defaults, identity, and media types.
+- Each `PriceRates` owns the current flat cache-miss, cache-hit, and output rate
+  plus official-source provenance and vendor vocabulary.
+- Registration validates prefix ownership, model-prefix/provider agreement,
+  spawnable facts, current prices, effort defaults, and Anthropic-protocol
+  output caps before the binding becomes available.
 
-| Module | Loaded by | May depend on |
-|---|---|---|
-| `plugin.py` | `agent/graph/_build.py:_load_extensions()` in the agent process | the agent runtime, hooks, the `ava.*` namespace |
-| `setup.py` | `cli/commands/_converge_plugins.py:run_plugin_scaffolds` from explicit `ava memory init` | **`shared` only** |
-| `default_config.py` | `shared/plugins_config.py:update_all_disk_images`, and the framework extension load via `shared/plugin_config_registry.py:register_plugin_config` | `shared` only |
-| bundled `skills/`, `.mcp.json` | converge / the MCP loader | n/a |
+`ProviderBinding.key_env` is the secret-delivery declaration. The gateway reads
+the cluster `.env` during spawn validation, bootstrap relays enabled bindings'
+present keys to split runners, and the single-box child allowlist forwards only
+declared provider keys. Plugin config images never carry provider secrets.
 
-The second and third rows are the precedent, and they are not an accident. Both
-modules exist *separately from* `plugin.py` precisely because `plugin.py` drags
-in an agent runtime the loading process does not have:
-`cli/commands/_converge_plugins.py` says a scaffold "may depend on `shared`
-only", and `update_all_disk_images` documents that it imports `default_config.py`
-and "not plugin.py" to avoid triggering hook and state registration. Both load
-their module standalone by path with
-`importlib.util.spec_from_file_location`, gated on the same enabled set
-(`shared/plugins_config.py:_discover_plugins` + `load`).
+The builder is plain Python deliberately: provider wire behavior is the place
+where a closed schema becomes restrictive. It must return an unbound
+`BaseChatModel`, fail immediately on a missing key, clamp effort to the endpoint
+vocabulary, and honor the shared thinking switch according to provider
+capability.
 
-The `default_config.py` path is the stronger precedent: that loader lives **in
-`shared/` itself**. So a `shared`-layer module loading a plugin-supplied module,
-without importing `ava` or `agent`, is a thing this codebase already does in
-production — the provider extension point does not need a layering exception, a
-new discovery mechanism, or a new enabled-set concept.
+## Pricing catalog and runtime prices
 
-A provider binding should therefore be a fourth module of the same family — call
-it `provider.py` — discovered the same way, importable from `shared/lm`.
+`pricing_catalog_archive.json` is the single complete catalog source. It keeps
+official provenance, historical effective periods, token tiers, recurring UTC
+windows, and scheduled future price windows for all repository chat models and
+catalog-priced services. `gemini-embedding-2` remains catalog-priced because it
+has no chat `ProviderBinding`.
 
-## The extension points
+Provider `PriceRates` are the runtime source for chat models. When a plugin
+registers a chat-model price, `pricing.py` removes the overlapping archive row
+from its in-memory runtime catalog view and uses the plugin's flat rate. The
+archive remains available for deterministic historical checks, price-window
+selection, and bot reconciliation. `pricing_catalog.json` is retained only as
+an empty valid schema-v2 shell (`"models": {}`). Runtime never scrapes a
+pricing page.
 
-The mechanics' implemented extension points, in dependency order.
+The checked-in archive is also the scheduling ledger for automation. Future
+effective boundaries stay explicit there so the pricing bot can reconcile the
+currently active period and reviewers can see upcoming changes before they
+take effect.
 
-1. **`shared/lm/registry.py` — a registration entry for `MODELS`.** A
-   `register_models(...)` that merges `ModelSpec` entries under a plugin's
-   provider key, and rejects a duplicate model id. The real mechanical work is
-   that `SUPPORTED_MODELS`, `MODEL_CONTEXT_WINDOW`, `MODEL_KNOWLEDGE_CUTOFF` and
-   `MODEL_IDENTITY` are module-level constants computed once at import: they
-   have to become recomputed views (or callables) or a plugin's models will be
-   invisible to every consumer that reads them. `_validate_registry()` must run
-   over registered entries too — a plugin model missing `pricing` should fail at
-   registration, not surface as an unpriced eval.
-2. **`shared/lm/factory.py` — prefix dispatch as a map.** The `if
-   model.startswith(...)` chain in `build_chat_model` becomes a prefix →
-   builder lookup that a plugin adds to, and `_MODEL_KEY_MAP` gains the same
-   registration path so `_ensure_provider_key` keeps working at the spawn
-   boundary. `_VISION_MODEL_PREFIXES` is the third table on this file keyed by
-   prefix and needs the same treatment. Registration is keyed and flat;
-   a duplicate prefix raises.
-3. **The per-provider vocabularies — `shared/lm/_effort.py`
-   (`_PROVIDER_EFFORT_LEVELS`) and `shared/lm/stop.py` (`_BY_PROVIDER`).** Both
-   are endpoint contracts rather than model facts, so both register alongside
-   the builder. Unknown effort strings must keep failing fast at build time
-   rather than arriving as a provider 400 mid-run; the stop vocabulary is the
-   conditional one (a plugin binding an existing client class inherits an
-   existing key), but leaving it unregisterable means a plugin that ships its
-   own client class cannot complete a single turn.
-4. **The API key — decided: the existing `.env` channel.** `key_env` on the
-   binding is the declaration; the gateway spawn boundary reads that key from
-   the cluster `.env` file. A split runner receives only enabled bindings'
-   present keys, verbatim, in the
-   authenticated `/api/bootstrap` payload. On a single box, the agent child-env
-   allowlist forwards only enabled bindings' keys from its parent's live env;
-   arbitrary variables remain excluded. The install-time seed allowlist also
-   includes an unmodeled declared key, or one already seedable as a Settings
-   alias. It excludes every other modeled setting, cluster identity/data-plane
-   aliases, and the runner database password, so a fresh worktree receives the
-   same provider credential surface without inheriting its source cluster's
-   identity or unrelated credentials. Plugin config remains a separate
-   plaintext config-image channel and is not a secret-distribution mechanism.
-5. **The load call.** Whoever registers must run before the first
-   `build_chat_model` / `validate_model_config` in *each* process that has one —
-   agent, gateway, labeler, evals. A lazy load inside the factory (first call
-   loads enabled provider modules once) keeps every entry point honest without
-   asking four different mains to remember.
+## Boundary rationale
 
-## Boundary check against the plugin/core criterion
-
-The standing criterion is that capabilities which die as models improve live in
-plugins, while things tied to deployment physics — including "the extension
-points themselves" — live in core
+The plugin/core criterion is that deployment-physics extension points stay in
+core while removable vendor bindings live in plugins
 ([`decisions/2026-07-19-plugin-core-boundary-wrapper-extension.md`](../../decisions/2026-07-19-plugin-core-boundary-wrapper-extension.md)).
-A vendor binding does not obviously die as models improve, so the criterion is
-worth applying carefully rather than assumed.
+A binding's lifetime follows a vendor endpoint and the deployment's decision to
+enable it; the registry, loader, normalization, and fail-fast invariants remain
+useful regardless of which providers are installed.
 
-It lands cleanly, and the split is the one the criterion already names: the
-**dispatch and the registry contract stay in core** (they are the extension
-points), while each **vendor binding becomes removable** — its lifetime is tied
-to that vendor's endpoint existing and being wanted on this deployment, not to
-model capability. Disabling a provider plugin should leave no trace: no
-dependency, no config field, no dropdown entry. That is the same removability
-test every other plugin is held to.
+The provider module is separate from the agent-facing plugin SDK. `ava.extend`
+and namespace registration operate above `shared/lm` and load only in agent
+processes, so they cannot supply bindings to gateway validation, labeler, or
+eval consumers. `AVA_LLM_OVERRIDE` is likewise only a test-injection seam: it
+replaces the factory and deliberately skips real-key validation rather than
+adding a provider.
 
-The eight bindings in `shared/lm/_providers.py` today are not automatically
-candidates for extraction. Deciding which (if any) move out of core is a
-separate call, taken when the mechanics exist — a repo that ships zero providers
-by default is a different product decision from a repo that ships eight and
-allows a ninth.
+## Resolved questions
+
+- **Dependencies:** repository provider dependencies remain pinned in Ava's
+  `pyproject.toml`. An external provider can use only packages already present
+  in the Ava environment; provider plugins do not have an independent
+  dependency-install mechanism.
+- **Repository providers:** all eight current bindings are plugins. Core ships
+  the contract and an all-enabled default set, not fallback providers.
+- **Tests:** provider contract tests lock duplicate/nested-prefix rejection,
+  immediate model visibility, the exact default plugin set, zero-provider
+  startup failure, all 33 model/vendor mappings, archive/plugin price
+  equivalence, stop-vocabulary ownership, and gateway model views.
 
 ## Alternatives rejected
 
-- **Keep onboarding a provider as a core patch (the status quo).** Rejected as
-  the *end state*, not as a description of today. The table above is the cost:
-  every vendor widens the core dispatch surface — a factory branch, a key field,
-  an effort table, sometimes a stop-reason table — which is the opposite of the
-  small-core minimal design, and a vendor binding is exactly the kind of
-  thing whose lifetime is tied to an endpoint existing rather than to model
-  capability. The seams are named here only because they are where a plugin
-  hooks; the commitment is that a *new* provider stops editing them.
-- **Let the plugin machinery carry a runtime router or fallback chain.**
-  Rejected, and this is the load-bearing one — see the constraint section above,
-  which shapes the extension surface so the router cannot be smuggled in through
-  registration. Beyond the standing non-goal there is a mechanical reason a
-  router does not pay for itself: every provider's prompt cache is keyed to a
-  stable system-prompt + tool-schema prefix on one model, so a mid-run swap
-  invalidates the prefix and spends the savings back on cache misses
-  ([`2026-07-29-no-runtime-model-routing.md`](../../decisions/2026-07-29-no-runtime-model-routing.md)).
-  The open-source-scale availability carve-out stays gated on its roadmap entry
-  and is untouched by this doc.
-- **A schema'd hook registry that providers declare themselves into.** Rejected
-  for the reason the plugin boundary decision already gives generally
-  ([`2026-07-19-plugin-core-boundary-wrapper-extension.md`](../../decisions/2026-07-19-plugin-core-boundary-wrapper-extension.md)):
-  a schema admits only the shapes it anticipated, and a vendor binding is
-  precisely where the unanticipated lives — a thinking switch here, a
-  `reasoning_content` recovery there, a conversation-id namespace for grok. The
-  builder stays plain Python behind a documented contract, which is also what
-  keeps it code-as-action rather than configuration.
-- **`AVA_LLM_OVERRIDE` as the onboarding path.** It already resolves a
-  `module:factory` string to a `BaseChatModel` at build time, which looks like
-  the registration hook this doc is asking for. It is not one: it is the e2e /
-  multi-instance **test injection** seam — it replaces the factory wholesale
-  rather than adding a provider to it, and `validate_model_config` returns early
-  without calling `_ensure_provider_key` whenever it is set, so the key check is
-  deliberately skipped: correct for a fake, wrong for a real vendor. The
-  `_LLMFactory` protocol in `shared/lm/factory.py` documents that injection
-  contract specifically; it is not the per-provider builder contract, and a
-  provider extension point should not be built by widening it.
-
-## Open
-
-- Whether a provider plugin may ship its own dependency, and how it gets
-  installed. `pyproject.toml` is the repo's; a plugin that needs
-  `langchain-<vendor>` has nowhere to declare it today.
-- Whether any of the eight current bindings move out of core, or whether the
-  extension points exist only for third-party providers.
-- Test story: `tests/agent/test_llm_factory.py` enumerates providers directly.
-  A registration path needs its own coverage for duplicate-prefix rejection and
-  for a plugin model reaching `GET /api/models`.
+- **Core patches for each vendor:** this couples endpoint-specific builders,
+  keys, vocabularies, models, and prices to every deployment and defeats
+  provider removability.
+- **A runtime router or fallback list in the provider registry:** an ordered
+  candidate set is routing by another name and would also invalidate stable
+  provider prompt-cache prefixes during a run.
+- **A closed schema for builders:** vendor integrations contain unanticipated
+  wire behavior; plain Python behind a narrow documented context preserves the
+  boundary without pretending every client can be configured identically.
+- **`AVA_LLM_OVERRIDE` for real providers:** the override bypasses normal
+  provider registration and key validation, which is correct for fakes and
+  incorrect for production access.

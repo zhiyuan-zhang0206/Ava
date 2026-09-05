@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Language Model Provider Layer
-description: '`shared/lm/` — unified LLM provider abstraction above LangChain; eight providers behind one factory.'
+description: '`shared/lm/` — provider-neutral LLM contracts above LangChain; enabled plugins own every chat provider.'
 tags:
 - shared
 - library
@@ -10,12 +10,12 @@ tags:
 
 # Language Model Provider Layer
 
-`shared/lm/` — unified LLM provider abstraction above LangChain, below the agent kernel: eight core providers, provider-agnostic upper layers. A **provider plugin** supplies a `provider.py` beside its `plugin.py`, registering a binding + models + prices against the contract in [provider_api](provider_api.py), loaded once per process by `_plugin_providers.py`. Design: [model-providers-as-plugins](model-providers-as-plugins.md).
+`shared/lm/` — provider-neutral contracts above LangChain, below the agent kernel. Core registers no providers or chat models; enabled plugins own every chat binding and model fact. The repository's eight `lm_*` plugins are enabled by default. Mechanics: [[shared/lm/provider-plugins.ava.okf.md]]; design: [model-providers-as-plugins](model-providers-as-plugins.md).
 
 ## Core Responsibilities
 
 ### factory (`factory.py`)
-`build_chat_model(model)` dispatches by prefix:
+`build_chat_model(model)` dispatches through plugin-owned prefix bindings:
 
 | Prefix | LangChain Class | Key Env |
 |---|---|---|
@@ -28,8 +28,9 @@ tags:
 | `glm-` | ReasoningContentChatModel (Zhipu) | GLM_API_KEY |
 | `qwen` | ReasoningContentChatModel (Alibaba) | DASHSCOPE_API_KEY + `AVA_DASHSCOPE_BASE_URL` |
 
-- `shared/lm/registry.py:MODELS` is the assembled SSOT; core rows live in `_model_specs_primary.py` / `_model_specs_compatible.py`, and `_model_registry_types.py` owns their value types and tuning defaults. Picker/context/cutoff/identity views are factory exports. Per-provider tables remain in factory / `_effort.py`. A withdrawn model resolves persisted config to its declared spawnable fallback, never after provider failure.
+- `shared/lm/registry.py:MODELS` starts empty and is plugin-populated; derived views rebuild in place, so imported readers see new models immediately. A withdrawn model resolves persisted config to its declared spawnable fallback, never after provider failure.
 - `validate_model_config()` — spawn-boundary pre-check (`POST /api/agents`): model registered + key configured, else 400 (fail-fast vs silent hang).
+- Gateway lifespan loads providers; zero bindings raises before the once flag, so a corrected config is retryable.
 - [[media-capabilities.ava.okf.md]] — per-model media resolution and attachment packing.
 - `AVA_LLM_OVERRIDE=mod:factory` injects a fake factory (e2e/multi-instance); key checks skipped.
 - `thinking: ThinkingConfig | None` — `TypedDict` for Anthropic extended-thinking (`{"type":"disabled"}`/`{"type":"enabled","budget_tokens":N}`); gemini-*/gpt-* read only `type`, mirroring on/off to reasoning toggles.
@@ -42,11 +43,11 @@ LangChain types `AIMessage(Chunk).content` weakly as `str | list[str | dict[str,
 - `extract_reasoning_tokens()` — `usage_metadata.output_token_details` preferred, else char estimates.
 
 ### stop classification (`stop.py`)
-- `classify_stop()` → `StopCategory` (NORMAL/TRUNCATED/UNEXPECTED/CORRUPTED) by `model_provider`; `_BY_PROVIDER` has four keys for eight providers (anthropic ← claude+deepseek, openai ← gpt+mimo+glm+qwen, google_genai, moonshot). TRUNCATED retries with raised max_tokens; unknown provider fail-fast.
+- `classify_stop()` → `StopCategory` (NORMAL/TRUNCATED/UNEXPECTED/CORRUPTED) by `model_provider`; core's table starts empty and plugin bindings register four client-class keys for eight providers (anthropic ← claude+deepseek, openai ← gpt+mimo+glm+qwen, google_genai, moonshot). TRUNCATED retries with raised max_tokens; an unregistered provider key fails with a `register_stop_spec` pointer.
 
-### billing (`billing.py` + `pricing.py` + `pricing_catalog.json`) — [[pricing.ava.okf.md]]
+### billing (`billing.py` + `pricing.py` + `pricing_catalog_archive.json`) — [[pricing.ava.okf.md]]
 - `billing.py` records one `ava.billing.call` span for each completed provider call. Its v1 attributes use the `ava.billing.*` ledger schema and deliberately carry no task dimension; task budgets instead consume explicit `task_id` on `llm_usage` events. Core/provider-plugin manufacturer resolution, catalog pricing, and tracing guards are centralized so call sites only provide the response and usage kind.
-- A reviewed, network-free JSON catalog with official-source provenance is the sole volatile price source; `quote()` returns the selected rates and the cost atomically. Selection rules, the CNY-conversion and tier-boundary traps, and region sensitivity live in the child node.
+- Plugin `PriceRates` are live for chat. The archive owns history, scheduled windows, bot reconciliation, and catalog-only services; `pricing_catalog.json` is an empty shell. `quote()` returns rates and cost atomically; selection and sourcing rules live in the child node.
 
 ### durable usage — [[usage.ava.okf.md]]
 

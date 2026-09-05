@@ -117,7 +117,7 @@ def _log_usage(
     else:
         logger.warning(
             "[llm usage] model {model!r} is unpriced; add it to "
-            "shared/lm/pricing_catalog.json or the plugin price registry",
+            "shared/lm/pricing_catalog_archive.json or the plugin price registry",
             model=model,
         )
         snapshot = {"unpriced": 1}

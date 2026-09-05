@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import importlib.util
 import json
+from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -36,6 +38,99 @@ _DEEPSEEK_TABLE = """
 <p>Off-peak rates are half of the peak rates. Peak hours are 01:00 - 04:00 and 06:00 - 10:00 UTC.</p>
 </main></html>
 """
+
+_PLUGIN_SOURCE = """from shared.lm.provider_api import PriceRates, register
+
+register(
+    None,
+    models={"fixture-model": None},
+    pricing={
+        "fixture-model": PriceRates(
+            cache_miss=1.0,
+            cache_hit=0.1,
+            output=3.0,
+            source_url="https://example.com/pricing",
+            source_checked_at="2026-09-01",
+            vendor="fixture",
+        ),
+    },
+)
+"""
+
+
+def _sync_fixture(
+    tmp_path: Path,
+    *,
+    current_rates: tuple[str, str, str],
+    future_rates: tuple[str, str, str] | None = None,
+    plugin_checked_at: str = "2026-09-01",
+) -> tuple[Path, Path, Path]:
+    repo_root = tmp_path / "repo"
+    provider_path = repo_root / "ava_builtins/plugins/lm_fixture/provider.py"
+    provider_path.parent.mkdir(parents=True)
+    provider_path.write_text(
+        _PLUGIN_SOURCE.replace("2026-09-01", plugin_checked_at),
+        encoding="utf-8",
+    )
+    periods: list[dict[str, Any]] = [
+        {
+            "effective_from": None,
+            "effective_until": "2027-01-01T00:00:00Z" if future_rates else None,
+            "tiers": [
+                {
+                    "input_tokens_min": 0,
+                    "input_tokens_max": None,
+                    "rates": {
+                        "input": current_rates[0],
+                        "cache_read": current_rates[1],
+                        "output": current_rates[2],
+                    },
+                    "utc_daily_overrides": [],
+                }
+            ],
+        }
+    ]
+    if future_rates is not None:
+        periods.append(
+            {
+                "effective_from": "2027-01-01T00:00:00Z",
+                "effective_until": None,
+                "tiers": [
+                    {
+                        "input_tokens_min": 0,
+                        "input_tokens_max": None,
+                        "rates": {
+                            "input": future_rates[0],
+                            "cache_read": future_rates[1],
+                            "output": future_rates[2],
+                        },
+                        "utc_daily_overrides": [],
+                    }
+                ],
+            }
+        )
+    archive_path = repo_root / "shared/lm/pricing_catalog_archive.json"
+    archive_path.parent.mkdir(parents=True)
+    archive_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 2,
+                "catalog_version": "fixture",
+                "currency": "USD",
+                "unit_tokens": 1_000_000,
+                "models": {
+                    "fixture-model": {
+                        "vendor": "fixture",
+                        "source_url": "https://example.com/pricing",
+                        "source_checked_at": "2026-09-05",
+                        "periods": periods,
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    return repo_root, archive_path, provider_path
 
 
 def test_deepseek_parser_preserves_models_meters_and_decimal_units() -> None:
@@ -199,6 +294,109 @@ def test_reconcile_appends_a_period_when_peak_windows_change() -> None:
     ]
 
 
+def test_plugin_sync_rewrites_drift_and_is_idempotent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo_root, archive_path, provider_path = _sync_fixture(
+        tmp_path,
+        current_rates=("2.0", "0.2", "6.0"),
+    )
+    monkeypatch.setattr(
+        pricing_updater,
+        "_now_utc",
+        lambda: datetime(2026, 9, 5, tzinfo=UTC),
+    )
+
+    first = pricing_updater.sync_plugin_rates(archive_path, repo_root)
+    rewritten = provider_path.read_text(encoding="utf-8")
+    compile(rewritten, str(provider_path), "exec")
+
+    assert first.drifted_models == ("fixture-model",)
+    assert first.changed_files == (provider_path,)
+    assert "cache_miss=2.0," in rewritten
+    assert "cache_hit=0.2," in rewritten
+    assert "output=6.0," in rewritten
+    assert 'source_checked_at="2026-09-05",' in rewritten
+
+    second = pricing_updater.sync_plugin_rates(archive_path, repo_root)
+    assert second.drifted_models == ()
+    assert second.changed_files == ()
+    assert provider_path.read_text(encoding="utf-8") == rewritten
+
+
+def test_plugin_sync_leaves_matching_provider_byte_identical(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo_root, archive_path, provider_path = _sync_fixture(
+        tmp_path,
+        current_rates=("1.0", "0.1", "3.0"),
+        plugin_checked_at="2026-09-05",
+    )
+    monkeypatch.setattr(
+        pricing_updater,
+        "_now_utc",
+        lambda: datetime(2026, 9, 5, tzinfo=UTC),
+    )
+    before = provider_path.read_bytes()
+
+    result = pricing_updater.sync_plugin_rates(archive_path, repo_root)
+
+    assert result.drifted_models == ()
+    assert result.changed_files == ()
+    assert provider_path.read_bytes() == before
+
+
+def test_plugin_sync_check_exit_status_tracks_drift(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo_root, archive_path, provider_path = _sync_fixture(
+        tmp_path,
+        current_rates=("2.0", "0.2", "6.0"),
+    )
+    monkeypatch.setattr(
+        pricing_updater,
+        "_now_utc",
+        lambda: datetime(2026, 9, 5, tzinfo=UTC),
+    )
+    args = [
+        "--sync-plugins",
+        "--check",
+        "--catalog",
+        str(archive_path),
+        "--repo-root",
+        str(repo_root),
+    ]
+
+    assert pricing_updater.main(args) == 1
+    assert provider_path.read_text(encoding="utf-8") == _PLUGIN_SOURCE
+
+    pricing_updater.sync_plugin_rates(archive_path, repo_root)
+    assert pricing_updater.main(args) == 0
+
+
+def test_plugin_sync_reports_future_effective_window(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    repo_root, archive_path, _provider_path = _sync_fixture(
+        tmp_path,
+        current_rates=("1.0", "0.1", "3.0"),
+        future_rates=("2.0", "0.2", "6.0"),
+        plugin_checked_at="2026-09-05",
+    )
+    monkeypatch.setattr(
+        pricing_updater,
+        "_now_utc",
+        lambda: datetime(2026, 9, 5, tzinfo=UTC),
+    )
+
+    pricing_updater.sync_plugin_rates(archive_path, repo_root, write=False)
+
+    assert capsys.readouterr().err == (
+        "- `fixture-model` changes at `2027-01-01T00:00:00Z` to "
+        "cache miss 2.0, cache hit 0.2, output 6.0 USD/1M tokens.\n"
+    )
+
+
 def test_workflow_runs_only_trusted_main_code_with_write_permissions() -> None:
     workflow = (_REPO_ROOT / ".github/workflows/update-model-pricing.yml").read_text()
 
@@ -209,4 +407,9 @@ def test_workflow_runs_only_trusted_main_code_with_write_permissions() -> None:
     assert 'ARCHIVE_REAL="$(realpath "$ARCHIVE")"' in workflow
     assert '"$CANDIDATE_REAL"/*' in workflow
     assert 'python scripts/update_model_pricing.py --catalog "$ARCHIVE" --write' in workflow
+    assert "python scripts/update_model_pricing.py --sync-plugins --write" in workflow
+    assert "ava_builtins/plugins/lm_*/provider.py" in workflow
+    assert "bot sync → human review of the PR" in workflow
+    assert "model-pricing-future-windows.md" in workflow
+    assert 'cd "$CANDIDATE"' not in workflow
     assert "git checkout" not in workflow

@@ -657,7 +657,7 @@ class LmSettings(EnvSettings):
             "which the default cannot reach. Keep the `/compatible-mode/v1` suffix — "
             "`/api/v1` on those hosts is the native protocol, not this one. Regions "
             "price differently, so pointing this at another region also means "
-            "re-checking shared/lm/pricing_catalog.json."
+            "re-checking shared/lm/pricing_catalog_archive.json."
         ),
         json_schema_extra={
             "restart_required": "agent",

@@ -299,5 +299,5 @@ def test_price_snapshot_absent_for_unpriced_model(
     assert len(warnings) == 1
     warning = warnings[0]["message"]
     assert "no-such-model" in warning
-    assert "shared/lm/pricing_catalog.json" in warning
+    assert "shared/lm/pricing_catalog_archive.json" in warning
     assert "plugin price registry" in warning

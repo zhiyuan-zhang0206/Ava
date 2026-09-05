@@ -98,7 +98,7 @@ def test_moonshot_length_truncated():
 
 
 def test_unknown_provider_raises():
-    with pytest.raises(ValueError, match="unknown model_provider"):
+    with pytest.raises(ValueError, match="register_stop_spec"):
         classify_stop(_msg({"model_provider": "cohere", "finish_reason": "stop"}))
 
 

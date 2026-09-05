@@ -8,6 +8,8 @@ once per process, before the first build / spawn validation / model list
 (``shared/lm/_plugin_providers.py`` loads every enabled plugin's
 ``provider.py``); the prefix map is flat — a duplicate prefix, or one that
 nests inside another (``foo-`` vs ``foo-bar-``), fails fast at registration.
+Core registers no providers; enabled plugins are the sole source of bindings,
+chat-model rows, provider vocabularies, media fallbacks, keys, and live prices.
 
 A ``provider.py`` module may import ``shared`` and LangChain packages only —
 never ``ava`` / ``agent`` (the gateway, the labeler daemon, and the eval
@@ -70,7 +72,7 @@ class PriceRates:
 
     Plugins declare prices in code — the plugin is itself the reviewed object
     (``decisions/2026-07-29-skill-trust-tiers-and-install-scan.md``). The
-    versioned catalog in ``shared/lm/pricing_catalog.json`` keeps its own,
+    versioned archive in ``shared/lm/pricing_catalog_archive.json`` keeps its own,
     stricter discipline (effective periods, tiers, windows — see
     ``decisions/2026-08-18-versioned-model-pricing-catalog.md``); plugin prices
     are flat and their freshness is carried by ``source_checked_at``.
@@ -111,9 +113,8 @@ class ProviderBinding:
     effort_levels: tuple[str, ...] | None = None
     vision: bool = False  # the bound endpoint accepts native image content blocks
     anthropic_protocol: bool = False  # ChatAnthropic binding — see module docstring
-    stop_spec: StopSpec | None = None  # only when the client emits a model_provider
-    # string stop.py does not already carry (a client class already in the
-    # table — e.g. anything OpenAI-compatible — inherits its entry)
+    stop_spec: StopSpec | None = None  # set by the plugin that owns the client
+    # class's emitted model_provider string; compatible bindings share its entry
     # Usually derived from prefix.rstrip("-"); set only when a narrower legal
     # dispatch prefix differs from the stable public provider identity.
     provider_key: str | None = None
@@ -122,8 +123,8 @@ class ProviderBinding:
 class _ProviderRegistry:
     """Plugin-side registration state; consulted by ``shared/lm/factory.py``.
 
-    Core prefixes are not here — factory keeps them and reserves them via
-    ``reserve_core_prefixes`` so a plugin cannot shadow a core binding.
+    Core registers no bindings. The reserved-prefix seam remains for contract
+    compatibility, but the production reserved set is empty.
     """
 
     def __init__(self) -> None:

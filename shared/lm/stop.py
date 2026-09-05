@@ -9,8 +9,8 @@ finish/stop reason — each provider keeps its own key + vocabulary:
   google_genai  -> response_metadata["finish_reason"] (STOP / MAX_TOKENS / SAFETY / RECITATION / ...)
 
 `classify_stop` maps any of them to a provider-agnostic StopCategory, dispatched
-on model_provider. Unknown provider raises (fail-fast — a plugin provider
-registers its vocabulary via register_stop_spec; see shared/lm/provider_api.py).
+on model_provider. Core pre-declares no vocabularies: provider plugins register
+them through their ProviderBinding, and an unknown provider fails fast.
 """
 
 import enum
@@ -30,12 +30,9 @@ class StopCategory(enum.Enum):
     CORRUPTED = "corrupted"  # terminal reason missing -> protocol drift / lost final frame
 
 
-# model_provider values the bound client classes emit
-# (response_metadata["model_provider"]). A provider bound through a client class
-# already in this table inherits its entry; a plugin binding a client class
-# whose model_provider string is not here must register one via
-# register_stop_spec (shared/lm/provider_api.py wires it through) or the first
-# turn that ends raises ValueError.
+# Populated only by provider-plugin registration. The key is the model_provider
+# value a bound client class emits, so one owner registration covers every
+# binding that reuses that client class.
 class StopSpec(NamedTuple):
     """How to read + classify one provider's terminal reason.
 
@@ -51,29 +48,16 @@ class StopSpec(NamedTuple):
     truncated: frozenset[str]
 
 
-_BY_PROVIDER: dict[str, StopSpec] = {
-    "anthropic": StopSpec(
-        "anthropic",
-        "stop_reason",
-        frozenset({"end_turn", "tool_use", "refusal"}),
-        frozenset({"max_tokens"}),
-    ),
-    "openai": StopSpec(
-        "openai",
-        "finish_reason",
-        frozenset({"stop", "tool_calls", "function_call"}),
-        frozenset({"length"}),
-    ),
-}
+_BY_PROVIDER: dict[str, StopSpec] = {}
 
 
 def register_stop_spec(spec: StopSpec, *, plugin: str = "<unknown>") -> None:
     """Register a plugin provider's terminal-reason vocabulary.
 
-    Key is the ``model_provider`` string the plugin's client class emits. A
-    key already present is an error — two different client classes never
-    share a model_provider string, so a collision is a typo or a rebinding of
-    a core client (which should reuse the existing entry, not re-declare it).
+    Core pre-declares no entries. The plugin that owns a client class registers
+    its emitted ``model_provider`` string once; other bindings reusing that
+    class omit ``stop_spec`` and share the registered vocabulary. A second
+    owner for the same key is an error, never a precedence rule.
     """
     if spec.provider_key in _BY_PROVIDER:
         raise ValueError(
@@ -89,7 +73,7 @@ def classify_stop(final_msg: AIMessage) -> tuple[StopCategory, str | None]:
 
     Raises:
         ValueError: model_provider is missing or not one build_chat_model emits —
-            a new provider branch must add its vocabulary here.
+            its provider plugin must register a terminal-reason vocabulary.
     """
     metadata = message_response_metadata(final_msg) or {}
     provider = metadata.get("model_provider")
@@ -99,7 +83,8 @@ def classify_stop(final_msg: AIMessage) -> tuple[StopCategory, str | None]:
     if spec is None:
         raise ValueError(
             f"unknown model_provider {provider!r} (metadata keys={list(metadata.keys())!r}); "
-            f"add its terminal-reason vocabulary to shared/lm/stop.py"
+            "register its terminal-reason vocabulary with register_stop_spec "
+            "via ProviderBinding.stop_spec"
         )
     raw = metadata.get(spec.key)
     if raw is None:

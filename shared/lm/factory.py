@@ -121,22 +121,18 @@ class _LLMFactory(Protocol):
     def __call__(self, model: str) -> BaseChatModel: ...
 
 
-# Prefix fallback for UNREGISTERED core model ids — registered ids are
-# authoritative in `ModelSpec.media_types` (see `model_supports_vision`), and
-# provider plugins declare their fallback through `ProviderBinding.vision`.
-# No remaining core provider accepts image input. The message endpoint uses
-# this gate to reject an image for a text-only agent before the inbound is
-# queued and the provider call can fail or silently drop it.
+# The legacy core vision-prefix fallback is empty. Registered plugin models are
+# authoritative through `ModelSpec.media_types`; unregistered ids under a
+# plugin prefix use `ProviderBinding.vision`.
 _VISION_MODEL_PREFIXES: tuple[str, ...] = ()
 
 
 def media_types_for_model(model: str) -> frozenset[str]:
     """Native media capability for `model` across the three provider tiers.
 
-    Core and registered plugin models use their per-model
-    ``ModelSpec.media_types``. An unregistered plugin id gets the plugin
-    binding's v1 image-only ``vision`` capability; other unregistered ids use
-    the core prefix fallback. No match means text-only.
+    Registered plugin models use their per-model ``ModelSpec.media_types``. An
+    unregistered id under a plugin prefix gets the binding's v1 image-only
+    ``vision`` capability. No match means text-only.
     """
     ensure_provider_plugins_loaded()
     spec = MODELS.get(model)
@@ -219,13 +215,12 @@ def provider_key_of_model(model: str) -> str | None:
 # ProviderBinding.
 _MODEL_KEY_MAP: dict[str, tuple[str, str, str]] = {}
 
-# A plugin prefix may never shadow or nest inside a core prefix — provider_api
-# checks new registrations against this reserved set (populated once, here).
+# The legacy reserved-prefix seam remains, but core owns no provider prefixes.
 provider_api.REGISTRY.reserve_core_prefixes(set())
 
 
 def provider_key_map() -> dict[str, tuple[str, str | None, str]]:
-    """Core match prefix / plugin provider key → key-source metadata.
+    """Provider dispatch prefix/key → key-source metadata.
 
     The merged single source for `_ensure_provider_key` and the concurrency
     limiter's known-key set. Plugin entries carry None for the settings attr —
@@ -313,19 +308,18 @@ def validate_model_config(
 def _ensure_provider_key(effective_model: str) -> None:
     """Fail fast when the effective model's provider API key is not configured.
 
-    Drives the lookup from `provider_key_map()` — core entries read the
-    settings field first (with the `.env`-file fallback, regression #1562);
-    plugin entries read the `.env` file only (their key has no settings
-    field). An unregistered model that slipped past SUPPORTED_MODELS raises
-    with a pointer to the map.
+    Drives the lookup from `provider_key_map()`. Provider-plugin entries read
+    the `.env` file directly because their keys have no Settings field. The
+    settings-backed branch remains only for compatibility with the empty core
+    map. An unregistered model that slipped past SUPPORTED_MODELS raises with a
+    pointer to the map.
     """
     for prefix, (_provider, attr, env_var) in provider_key_map().items():
         if not effective_model.startswith(prefix):
             continue
         if attr is None:
             # Plugin provider: the key lives in the cluster's `.env` file
-            # only (it has no Settings field). Same read_env_aliases fallback
-            # posture as the core branch below.
+            # only (it has no Settings field).
             from shared.runtime_config import read_env_aliases
 
             if env_var in read_env_aliases():
@@ -502,10 +496,9 @@ def build_chat_model(
     # env/.env/overlay value wins, else the model's registry default, else "".
     resolved_effort: str = resolve_setting("reasoning_effort", model=model)
 
-    # Plugin providers: flat prefix map (no nesting, collisions rejected at
-    # registration), so at most one binding matches. The builder gets the same
-    # cross-provider resolution every core branch gets — the contract is
-    # shared/lm/provider_api.py.
+    # The prefix map is flat (no nesting, collisions rejected at registration),
+    # so at most one binding matches. Every builder receives the shared
+    # cross-provider context defined in provider_api.py.
     for prefix, binding in provider_api.REGISTRY.bindings.items():
         if model.startswith(prefix):
             return binding.build(

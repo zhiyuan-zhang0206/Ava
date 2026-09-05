@@ -15,6 +15,7 @@ import json
 import math
 import shutil
 from collections.abc import Callable, Generator
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -42,6 +43,53 @@ from shared.lm.registry import (
     _rebuild_derived_views,
     register_models,
 )
+
+_REPO_PROVIDER_PLUGINS = {
+    "lm_alibaba",
+    "lm_anthropic",
+    "lm_deepseek",
+    "lm_google",
+    "lm_moonshot",
+    "lm_openai",
+    "lm_xiaomi",
+    "lm_zhipu",
+}
+
+_REPO_MODEL_VENDORS = {
+    "claude-fable-5": "anthropic",
+    "claude-fable-5-1": "anthropic",
+    "claude-haiku-4-5": "anthropic",
+    "claude-haiku-4-5-20251001": "anthropic",
+    "claude-opus-4-6": "anthropic",
+    "claude-opus-4-7": "anthropic",
+    "claude-opus-4-8": "anthropic",
+    "claude-opus-5": "anthropic",
+    "claude-sonnet-4-6": "anthropic",
+    "claude-sonnet-5": "anthropic",
+    "deepseek-v4-flash": "deepseek",
+    "deepseek-v4-flash-vision-exp": "deepseek",
+    "deepseek-v4-pro": "deepseek",
+    "gemini-2.5-flash": "google",
+    "gemini-2.5-pro": "google",
+    "gemini-3.1-pro-preview": "google",
+    "gemini-3.5-flash": "google",
+    "gemini-3.7-flash": "google",
+    "gemini-3.8-flash": "google",
+    "glm-5.2": "zhipu",
+    "glm-5.3": "zhipu",
+    "glm-5.3-flash": "zhipu",
+    "gpt-5.4-mini": "openai",
+    "gpt-5.5": "openai",
+    "gpt-5.6-luna": "openai",
+    "gpt-5.6-sol": "openai",
+    "gpt-5.6-terra": "openai",
+    "kimi-k3": "moonshot",
+    "mimo-v2.5-pro": "xiaomi",
+    "mimo-v2.5-pro-ultraspeed": "xiaomi",
+    "qwen3.8-27b": "alibaba",
+    "qwen3.8-flash": "alibaba",
+    "qwen3.8-max": "alibaba",
+}
 
 _PLUGIN_SOURCE = """from langchain_core.language_models.fake_chat_models import FakeListChatModel
 
@@ -117,16 +165,19 @@ def provider_plugin() -> Generator[Callable[..., None], None, None]:
         ):
             MODELS.pop(model_id)
             pricing._PLUGIN_PRICES.pop(model_id, None)
-    provider_api.REGISTRY.bindings.pop("claude-", None)
-    provider_api.REGISTRY.bindings.pop("deepseek-", None)
-    provider_api.REGISTRY.bindings.pop("gemini-", None)
-    provider_api.REGISTRY.bindings.pop("glm-", None)
-    provider_api.REGISTRY.bindings.pop("gpt-", None)
-    provider_api.REGISTRY.bindings.pop("kimi-", None)
-    provider_api.REGISTRY.bindings.pop("mimo-", None)
-    provider_api.REGISTRY.bindings.pop("qwen3.8-", None)
-    stop._BY_PROVIDER.pop("google_genai", None)
-    stop._BY_PROVIDER.pop("moonshot", None)
+    for prefix in (
+        "claude-",
+        "deepseek-",
+        "gemini-",
+        "glm-",
+        "gpt-",
+        "kimi-",
+        "mimo-",
+        "qwen3.8-",
+    ):
+        provider_api.REGISTRY.bindings.pop(prefix, None)
+    for provider_key in ("anthropic", "google_genai", "moonshot", "openai"):
+        stop._BY_PROVIDER.pop(provider_key, None)
     _rebuild_derived_views()
     # Tests share one session AVA_HOME — remove anything this test created so
     # a later test's loader scan cannot see leftover plugin dirs.
@@ -196,6 +247,79 @@ def provider_plugin() -> Generator[Callable[..., None], None, None]:
     from shared.env_registry import seed_allowlist
 
     seed_allowlist.cache_clear()
+
+
+def test_repo_provider_plugins_are_the_exact_default_enabled_set() -> None:
+    discovered = plugins_config._discover_plugins()
+    config = plugins_config.load_for_runtime(set(discovered))
+    repo_root = paths.repo_plugins_dir().resolve()
+    repo_provider_plugins = {
+        name
+        for name, plugin_dir in discovered.items()
+        if plugin_dir.resolve().parent == repo_root
+        and name.startswith("lm_")
+        and (plugin_dir / "provider.py").is_file()
+    }
+
+    assert repo_provider_plugins == _REPO_PROVIDER_PLUGINS
+    assert {
+        name for name in repo_provider_plugins if config.plugins[name].enabled
+    } == _REPO_PROVIDER_PLUGINS
+
+
+def test_zero_provider_plugins_fail_loud_and_remain_retryable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    loader_was_loaded = plugin_loader._STATE.loaded
+
+    try:
+        with monkeypatch.context() as isolated:
+            isolated.setattr(provider_api.REGISTRY, "bindings", {})
+            isolated.setattr(plugins_config, "_discover_plugins", dict)
+            _reset_loaded_for_tests()
+
+            with pytest.raises(RuntimeError, match="no provider plugins enabled"):
+                ensure_provider_plugins_loaded()
+            assert not plugin_loader._STATE.loaded
+    finally:
+        _reset_loaded_for_tests()
+        plugin_loader._STATE.loaded = loader_was_loaded
+
+
+def test_repo_model_vendor_vocabulary_is_complete() -> None:
+    ensure_provider_plugins_loaded()
+
+    assert len(_REPO_MODEL_VENDORS) == 33
+    assert set(MODELS) == _REPO_MODEL_VENDORS.keys()
+    assert set(pricing._CATALOG) == {"gemini-embedding-2"}
+    assert {
+        model: pricing.model_vendor(model) for model in pricing._PLUGIN_PRICES
+    } == _REPO_MODEL_VENDORS
+
+
+def test_repo_plugin_prices_equal_archive_at_frozen_instant(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ensure_provider_plugins_loaded()
+    plugin_prices = dict(pricing._PLUGIN_PRICES)
+    archive_raw = json.loads(
+        (Path(__file__).resolve().parents[2] / "shared/lm/pricing_catalog_archive.json").read_text()
+    )
+    archive_models = archive_raw["models"]
+    monkeypatch.setattr(pricing, "_CATALOG", pricing._parse_catalog(archive_raw))
+    monkeypatch.setattr(pricing, "_PLUGIN_PRICES", {})
+    frozen_instant = datetime(2026, 9, 5, tzinfo=UTC)
+
+    assert set(plugin_prices) == _REPO_MODEL_VENDORS.keys()
+    for model, plugin_price in plugin_prices.items():
+        archive_rates = pricing.rates_at(model, frozen_instant, input_tokens=0)
+        assert archive_rates is not None
+        assert plugin_price.rates.as_tuple() == pytest.approx(archive_rates.as_tuple())  # pyright: ignore[reportUnknownMemberType]
+        assert plugin_price.vendor == archive_models[model]["vendor"]
+        assert (plugin_price.source_url, plugin_price.source_checked_at) == (
+            archive_models[model]["source_url"],
+            archive_models[model]["source_checked_at"],
+        )
 
 
 def test_repo_deepseek_provider_is_enabled_and_registers_complete_contract() -> None:
@@ -301,7 +425,12 @@ def test_repo_anthropic_provider_is_enabled_and_registers_complete_contract() ->
     assert binding.effort_levels is None
     assert binding.anthropic_protocol
     assert binding.vision
-    assert binding.stop_spec is None
+    assert binding.stop_spec == stop.StopSpec(
+        "anthropic",
+        "stop_reason",
+        frozenset({"end_turn", "tool_use", "refusal"}),
+        frozenset({"max_tokens"}),
+    )
 
 
 def test_repo_openai_provider_is_enabled_and_registers_complete_contract() -> None:
@@ -334,7 +463,12 @@ def test_repo_openai_provider_is_enabled_and_registers_complete_contract() -> No
     assert binding.effort_levels == ("none", "low", "medium", "high", "xhigh", "max")
     assert not binding.anthropic_protocol
     assert binding.vision
-    assert binding.stop_spec is None
+    assert binding.stop_spec == stop.StopSpec(
+        "openai",
+        "finish_reason",
+        frozenset({"stop", "tool_calls", "function_call"}),
+        frozenset({"length"}),
+    )
 
 
 def test_repo_alibaba_provider_is_enabled_and_registers_complete_contract() -> None:
@@ -458,6 +592,7 @@ def test_plugin_model_registers_and_builds(provider_plugin: Callable[..., None])
     provider_plugin()
     ensure_provider_plugins_loaded()
 
+    assert "testp-1" in MODELS
     assert "testp-1" in SUPPORTED_MODELS["testp"]
     assert MODEL_CONTEXT_WINDOW["testp-1"] == 200_000
     assert MODEL_KNOWLEDGE_CUTOFF["testp-1"] == "2026-01"
@@ -765,27 +900,33 @@ def test_stop_spec_registration_reaches_classify_stop(provider_plugin: Callable[
 
 
 def test_disabled_plugin_skipped(provider_plugin: Callable[..., None]) -> None:
-    provider_plugin()
+    provider_plugin(prefix="kept-", model="kept-1", dir_name="enabled_provider")
+    provider_plugin(dir_name="disabled_provider")
     cfg_path = paths.ava_home() / "plugins_config.json"
-    cfg_path.write_text(json.dumps({"plugins": {"test_provider": {"enabled": False}}}))
+    cfg_path.write_text(json.dumps({"plugins": {"disabled_provider": {"enabled": False}}}))
     ensure_provider_plugins_loaded()
     assert "testp-1" not in MODELS
+    assert "kept-1" in MODELS
 
 
 def test_provider_missing_provider_py_is_noop(provider_plugin: Callable[..., None]) -> None:
     # A plugin dir with only plugin.py (the common case) registers nothing.
+    provider_plugin(prefix="kept-", model="kept-1", dir_name="enabled_provider")
     plugin_dir = paths.plugins_dir() / "no_provider"
     plugin_dir.mkdir(parents=True, exist_ok=True)
     (plugin_dir / "plugin.py").write_text("# empty")
     ensure_provider_plugins_loaded()
-    assert "testp-1" not in MODELS
+    assert "kept-1" in MODELS
+    assert "no_provider-1" not in MODELS
 
 
 def test_provider_only_dir_is_not_a_plugin(provider_plugin: Callable[..., None]) -> None:
     # A dir with provider.py but no plugin.py is not discovered — discovery
     # identity is plugin.py, documented in provider_api.
+    provider_plugin(prefix="kept-", model="kept-1", dir_name="enabled_provider")
     plugin_dir = paths.plugins_dir() / "orphan_provider"
     plugin_dir.mkdir(parents=True, exist_ok=True)
     (plugin_dir / "provider.py").write_text("# no plugin.py beside me")
     ensure_provider_plugins_loaded()
-    assert "testp-1" not in MODELS
+    assert "kept-1" in MODELS
+    assert "orphan-provider-1" not in MODELS

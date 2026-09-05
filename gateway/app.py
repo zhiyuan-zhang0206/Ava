@@ -231,6 +231,7 @@ from shared.cluster_auth import (
 )
 from shared.config import settings, warn_deprecated_env_aliases
 from shared.context import AvaContext
+from shared.lm._plugin_providers import ensure_provider_plugins_loaded
 from shared.machine import machine_name
 from shared.os_cron import register_os_cron
 
@@ -270,6 +271,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     Auto label generation has likewise been extracted to the
     services/labeler daemon.
     """
+    ensure_provider_plugins_loaded()
+
     # AvaContext bundle — gateway is a non-graph entry point, so handles
     # (llm / ops_pool / inbound_listener) stay None; string-level
     # config (db_url / events_channel / ...) populates from settings defaults. Handlers that

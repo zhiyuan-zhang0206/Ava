@@ -360,6 +360,31 @@
         }
       ]
     },
+    "gemini-embedding-2": {
+      "vendor": "google",
+      "source_url": "https://ai.google.dev/gemini-api/docs/pricing",
+      "source_checked_at": "2026-08-28",
+      "effective_time_note": "Embedding-service price with no chat ProviderBinding; retained in the archive as a catalog-priced runtime model.",
+      "periods": [
+        {
+          "effective_from": null,
+          "effective_until": null,
+          "tiers": [
+            {
+              "input_tokens_min": 0,
+              "input_tokens_max": null,
+              "rates": {
+                "input": "0.20",
+                "cache_read": "0",
+                "output": "0",
+                "image_input": "0.45"
+              },
+              "utc_daily_overrides": []
+            }
+          ]
+        }
+      ]
+    },
     "claude-sonnet-5": {
       "vendor": "anthropic",
       "source_url": "https://www.anthropic.com/pricing",

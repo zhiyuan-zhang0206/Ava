@@ -15,6 +15,7 @@ from shared.lm.provider_api import (
     require_key,
 )
 from shared.lm.registry import ModelSpec, ModelTuning
+from shared.lm.stop import StopSpec
 
 # Effort vocabulary shared by every GPT model — named once so the entries stay
 # readable; it remains per-model data.
@@ -73,7 +74,12 @@ register(
         build=build,
         effort_levels=_GPT_EFFORT,
         vision=True,
-        stop_spec=None,
+        stop_spec=StopSpec(
+            "openai",
+            "finish_reason",
+            frozenset({"stop", "tool_calls", "function_call"}),
+            frozenset({"length"}),
+        ),
     ),
     models={
         "gpt-5.6-sol": ModelSpec(

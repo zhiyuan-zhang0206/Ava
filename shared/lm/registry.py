@@ -9,11 +9,10 @@ Replaces the parallel per-model-id tables that had accumulated across
 — their membership had drifted apart because adding a model
 meant editing up to a dozen dicts. Here a model is one entry; the legacy table
 names survive as derived views (below) so existing import sites keep working.
-Externally mutable prices live separately in ``pricing_catalog.json`` and are
-selected through ``shared.lm.pricing``.
-Per-PROVIDER tables (prefix → API key, wire effort vocabularies for the
-OpenAI-style endpoints, vision prefixes) are *not* per-model facts and stay in
-``factory.py`` / ``_effort.py``.
+Core registers no provider or model rows: provider plugins are the sole source
+of chat ``ModelSpec`` entries and per-provider bindings. Current chat prices
+live with those plugins; the reviewed historical and scheduled periods live in
+``pricing_catalog_archive.json`` and are selected through ``shared.lm.pricing``.
 
 ## Config layering — how a per-model default takes effect
 
@@ -127,7 +126,7 @@ def _rebuild_derived_views() -> None:
 def _validate_spec(model_id: str, spec: ModelSpec, *, anthropic_protocol: bool) -> None:
     """Fail fast on a registry gap for one spawnable model entry.
 
-    A spawnable model missing a core fact would surface as a degraded UI row /
+    A spawnable model missing a required fact would surface as a degraded UI row /
     an uncompactable agent / an unpriced eval — catch it where the entry is
     written instead. Shared by the import-time core validation and the
     registration-time plugin validation.
@@ -155,9 +154,9 @@ def _validate_spec(model_id: str, spec: ModelSpec, *, anthropic_protocol: bool) 
         )
     if rates_at(model_id, input_tokens=0) is None:
         raise RuntimeError(
-            f"spawnable model {model_id!r} has no current price — a core model "
-            "needs a shared/lm/pricing_catalog.json entry; a plugin model needs "
-            "a price in its register() call"
+            f"spawnable model {model_id!r} has no current price — a catalog-priced "
+            "model needs an archive entry; a plugin model needs a price in its "
+            "register() call"
         )
     # The spawn picker pre-selects each model's default effort
     # (GET /api/models reasoning_effort_default) — without a concrete
@@ -190,9 +189,8 @@ def register_models(
     Called by ``shared.lm/provider_api.py:register`` — not by core code.
     Mutates the same MODELS dict object (every imported reference sees it) and
     rebuilds the derived views in place; validates each new spawnable entry
-    with the same facts/price/effort checks the core roster gets at import. A
-    duplicate model id — core or another plugin's — is an error, never a
-    precedence order.
+    with the same facts/price/effort checks for every provider. A duplicate
+    model id from another plugin is an error, never a precedence order.
     """
     for model_id, spec in models.items():
         if spec.provider != provider:
@@ -202,8 +200,8 @@ def register_models(
             )
         if model_id in MODELS:
             raise RuntimeError(
-                f"model id {model_id!r} is already registered (core roster or an "
-                "earlier plugin) — model ids are flat and a duplicate is an error"
+                f"model id {model_id!r} is already registered by an earlier plugin — "
+                "model ids are flat and a duplicate is an error"
             )
         _validate_spec(model_id, spec, anthropic_protocol=anthropic_protocol)
     MODELS.update(models)
@@ -211,7 +209,7 @@ def register_models(
 
 
 def _validate_registry() -> None:
-    """Fail fast at import on a core-registry gap (see _validate_spec)."""
+    """Validate core tuning defaults before plugins populate the model registry."""
     for tuning_field in dataclass_fields(ModelTuning):
         if getattr(DEFAULT_TUNING, tuning_field.name) is None:
             raise RuntimeError(
