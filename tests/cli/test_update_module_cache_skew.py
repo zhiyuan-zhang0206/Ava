@@ -105,7 +105,7 @@ def _patch_wrapper_lifecycle(monkeypatch: pytest.MonkeyPatch) -> None:
     """Keep wrapper tests hermetic while preserving their control-flow shape."""
     from shared import host_deploy_state, ui_update_state, updater_handoff
 
-    monkeypatch.setattr(host_deploy_state, "try_acquire_updater_lock", lambda: True)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(host_deploy_state, "try_acquire_updater_lock", lambda: True)
     monkeypatch.setattr(host_deploy_state, "release_updater_lock", lambda: None)
     monkeypatch.setattr(host_deploy_state, "touch_updater_lease", lambda: None)
     monkeypatch.setattr(host_deploy_state, "clear_updater_lease", lambda: None)
@@ -113,11 +113,11 @@ def _patch_wrapper_lifecycle(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         updater_handoff,
         "begin",
-        lambda **_kwargs: SimpleNamespace(generation="handoff-generation"),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda **_kwargs: SimpleNamespace(generation="handoff-generation"),  # pyright: ignore[reportUnknownArgumentType]
     )
-    monkeypatch.setattr(updater_handoff, "claim_running", lambda *_args, **_kwargs: True)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-    monkeypatch.setattr(updater_handoff, "clear", lambda *_args: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-    monkeypatch.setattr("shared.cluster.session_name", lambda _name: "ava-updater")  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(updater_handoff, "claim_running", lambda *_args, **_kwargs: True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(updater_handoff, "clear", lambda *_args: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("shared.cluster.session_name", lambda _name: "ava-updater")  # pyright: ignore[reportUnknownArgumentType]
 
 
 def test_updater_hands_off_to_fresh_interpreter_after_sync(
@@ -135,15 +135,15 @@ def test_updater_hands_off_to_fresh_interpreter_after_sync(
     ) -> subprocess.CompletedProcess[bytes]:
         return subprocess.CompletedProcess(["uv", "sync"], returncode=0)
 
-    monkeypatch.setattr(_runner, "git_checkout_sha", lambda _sha: "oldsha0000")  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(_runner, "git_checkout_sha", lambda _sha: "oldsha0000")  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_runner, "run_uv_sync_verified", sync_verified)
-    monkeypatch.setattr("shared.source_integrity.set_installed", lambda _sha: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr("shared.source_integrity.set_installed", lambda _sha: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
         _runner,
         "_exec_post_checkout",
-        lambda argv: handoff_argv.append(argv) or (_ for _ in ()).throw(SystemExit(0)),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda argv: handoff_argv.append(argv) or (_ for _ in ()).throw(SystemExit(0)),  # pyright: ignore[reportUnknownArgumentType]
     )
-    monkeypatch.setattr(_cli, "_do_stop", lambda *_args, **_kwargs: stopped.append(True))  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(_cli, "_do_stop", lambda *_args, **_kwargs: stopped.append(True))  # pyright: ignore[reportUnknownArgumentType]
 
     with pytest.raises(SystemExit, match="0"):
         _runner._run_agent_runner_self_update(
@@ -187,11 +187,11 @@ def test_handoff_claim_failure_releases_the_updater_lock(
     monkeypatch.setattr(
         updater_handoff,
         "begin",
-        lambda **_kwargs: SimpleNamespace(generation="handoff-generation"),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda **_kwargs: SimpleNamespace(generation="handoff-generation"),  # pyright: ignore[reportUnknownArgumentType]
     )
-    monkeypatch.setattr(updater_handoff, "claim_running", lambda *_args, **_kwargs: False)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-    monkeypatch.setattr(updater_handoff, "clear", lambda *_args: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-    monkeypatch.setattr("shared.cluster.session_name", lambda _name: "ava-updater")  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(updater_handoff, "claim_running", lambda *_args, **_kwargs: False)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(updater_handoff, "clear", lambda *_args: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("shared.cluster.session_name", lambda _name: "ava-updater")  # pyright: ignore[reportUnknownArgumentType]
 
     assert _runner._run_agent_runner_self_update(tmp_path, target_sha="newsha1111") == (
         RESTART_DECLINED_EXIT_CODE
@@ -226,36 +226,36 @@ def test_post_checkout_leg_runs_validate_to_start(
     monkeypatch.setattr(
         updater_handoff,
         "begin",
-        lambda **_kwargs: (_ for _ in ()).throw(  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda **_kwargs: (_ for _ in ()).throw(  # pyright: ignore[reportUnknownArgumentType]
             AssertionError("post-checkout must not begin a handoff")
         ),
     )
     monkeypatch.setattr(
         updater_handoff,
         "claim_running",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(  # pyright: ignore[reportUnknownArgumentType]
             AssertionError("post-checkout must not claim a handoff")
         ),
     )
-    monkeypatch.setattr(updater_handoff, "clear", lambda *_args: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(updater_handoff, "clear", lambda *_args: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
         _runner,
         "validate_migrations_at_ref",
-        lambda _sha, **_kwargs: steps.append("validate"),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda _sha, **_kwargs: steps.append("validate"),  # pyright: ignore[reportUnknownArgumentType]
     )
     monkeypatch.setattr(_runner, "platform_backend", _Backend)
-    monkeypatch.setattr(_runner, "_refresh_builtin_skills", lambda *_args: steps.append("skills"))  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(_runner, "_refresh_builtin_skills", lambda *_args: steps.append("skills"))  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_cli, "_preflight_probes", lambda: steps.append("preflight") or 0)
     monkeypatch.setattr(
         _cli,
         "_quiesce_local_agents",
-        lambda _mode: steps.append("quiesce") or True,  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda _mode: steps.append("quiesce") or True,  # pyright: ignore[reportUnknownArgumentType]
     )
-    monkeypatch.setattr(_cli, "_do_stop", lambda *_args, **_kwargs: steps.append("stop"))  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(_cli, "_do_stop", lambda *_args, **_kwargs: steps.append("stop"))  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
         _runner.subprocess,
         "run",
-        lambda *_args, **_kwargs: steps.append("start") or SimpleNamespace(returncode=0),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda *_args, **_kwargs: steps.append("start") or SimpleNamespace(returncode=0),  # pyright: ignore[reportUnknownArgumentType]
     )
 
     assert (
@@ -281,8 +281,8 @@ def test_post_checkout_fails_fast_when_the_flock_did_not_survive(
     monkeypatch.setattr(host_deploy_state, "touch_updater_lease", lambda: None)
     monkeypatch.setattr(host_deploy_state, "clear_updater_lease", lambda: None)
     monkeypatch.setattr(host_deploy_state, "release_updater_lock", lambda: None)
-    monkeypatch.setattr(host_deploy_state, "try_acquire_updater_lock", lambda: True)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-    monkeypatch.setattr(updater_handoff, "clear", lambda *_args: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(host_deploy_state, "try_acquire_updater_lock", lambda: True)
+    monkeypatch.setattr(updater_handoff, "clear", lambda *_args: None)  # pyright: ignore[reportUnknownArgumentType]
 
     with pytest.raises(RuntimeError, match="flock did not survive"):
         _runner._run_agent_runner_self_update(
@@ -300,7 +300,7 @@ def test_post_checkout_flag_parses(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         _runner,
         "_run_agent_runner_self_update",
-        lambda _repo, **kwargs: calls.append(kwargs) or 0,  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda _repo, **kwargs: calls.append(kwargs) or 0,  # pyright: ignore[reportUnknownArgumentType]
     )
 
     assert (

@@ -62,9 +62,9 @@ def _patch_leg(monkeypatch: pytest.MonkeyPatch) -> None:
 
     The pre-update recovery tuple belongs to orchestration, so callers pass it
     directly when they exercise the pull path."""
-    monkeypatch.setattr(_local, "_checkout_and_sync", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-    monkeypatch.setattr(_local, "_boot_gateway_fresh", lambda *_a, **_kw: 0)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-    monkeypatch.setattr(_update, "_do_stop", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(_local, "_checkout_and_sync", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_local, "_boot_gateway_fresh", lambda *_a, **_kw: 0)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_update, "_do_stop", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
 
 
 def test_pull_path_bounces_schedule_sessions_in_a_fresh_interpreter(
@@ -130,10 +130,10 @@ def test_failed_boot_skips_schedule_bounce(monkeypatch: pytest.MonkeyPatch, repo
     the recovered (current-again) code, so they must not be bounced."""
     calls: list[tuple[list[str], Path]] = []
     monkeypatch.setattr(_local, "subprocess", _RecordingSubprocess(calls))
-    monkeypatch.setattr(_local, "_boot_gateway_fresh", lambda *_a, **_kw: 1)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-    monkeypatch.setattr(_local, "_checkout_and_sync", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-    monkeypatch.setattr(_update, "_do_stop", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-    monkeypatch.setattr(_local, "_recover_rc", lambda *_a, **_kw: 1)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(_local, "_boot_gateway_fresh", lambda *_a, **_kw: 1)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_local, "_checkout_and_sync", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_update, "_do_stop", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_local, "_recover_rc", lambda *_a, **_kw: 1)  # pyright: ignore[reportUnknownArgumentType]
 
     assert (
         _local._run_gateway_local_update(
@@ -156,7 +156,7 @@ def test_kill_failure_is_non_fatal(
             return False, "forced"
 
     backend = _StubbornBackend([session_name("schedule-1")])
-    monkeypatch.setattr("shared.session_backend.get_shell_backend", lambda: backend)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("shared.session_backend.get_shell_backend", lambda: backend)
     _local._restart_schedule_sessions()
 
     assert "kill failed (non-fatal)" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
@@ -166,7 +166,7 @@ def test_no_sessions_is_a_noop(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
     backend = _FakeBackend([])
-    monkeypatch.setattr("shared.session_backend.get_shell_backend", lambda: backend)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("shared.session_backend.get_shell_backend", lambda: backend)
     _local._restart_schedule_sessions()
 
     assert backend.killed == []
@@ -233,7 +233,7 @@ def test_scan_failure_is_non_fatal(
             raise RuntimeError("pty daemon gone")
 
     boom = _BoomBackend()
-    monkeypatch.setattr("shared.session_backend.get_shell_backend", lambda: boom)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr("shared.session_backend.get_shell_backend", lambda: boom)
     _local._restart_schedule_sessions()  # must not raise
 
     assert "non-fatal" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]

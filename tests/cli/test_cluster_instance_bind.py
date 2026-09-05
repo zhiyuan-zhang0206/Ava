@@ -219,7 +219,7 @@ def _wire_redis_start(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> list[l
     monkeypatch.setattr(
         _ci,
         "_wait_for_reachable_bind",
-        lambda: pytest.fail("redis must never wait for the reachable bind"),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda: pytest.fail("redis must never wait for the reachable bind"),
     )
     monkeypatch.setattr(_ci, "_redis_server_bin", lambda: "redis-server")
     monkeypatch.setattr(_ci, "_redis_data_dir", lambda: tmp_path)
@@ -227,8 +227,8 @@ def _wire_redis_start(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> list[l
     monkeypatch.setattr(
         _ci,
         "_redis_running",
-        lambda *_a, **_kw: next(redis_answers),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-    )  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda *_a, **_kw: next(redis_answers),  # pyright: ignore[reportUnknownArgumentType]
+    )
     started: list[list[str]] = []
 
     def _run(cmd: list[str], **_: object) -> object:
@@ -236,7 +236,7 @@ def _wire_redis_start(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> list[l
         return type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()
 
     monkeypatch.setattr(_ci.subprocess, "run", _run)
-    monkeypatch.setattr(_ci, "_ensure_redis_acl", lambda *_a, **_kw: 0)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(_ci, "_ensure_redis_acl", lambda *_a, **_kw: 0)  # pyright: ignore[reportUnknownArgumentType]
     return started
 
 
@@ -278,7 +278,7 @@ def test_start_redis_does_not_use_shared_pg_bind_addrs(
     monkeypatch.setattr(
         _ci,
         "_bind_addrs",
-        lambda _secret: pytest.fail("redis must not use the shared pg bind helper"),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda _secret: pytest.fail("redis must not use the shared pg bind helper"),  # pyright: ignore[reportUnknownArgumentType]
     )
     started = _wire_redis_start(monkeypatch, tmp_path)
 
@@ -423,7 +423,7 @@ def _wire_pg_start(
     """Common mocks for _start_pg: a not-running pg on a scratch data dir, with
     subprocess.run captured."""
     monkeypatch.setattr(_ci, "_ensure_pg_data", lambda: tmp_path)
-    monkeypatch.setattr(_ci, "_pg_running", lambda _port, _host: running)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(_ci, "_pg_running", lambda _port, _host: running)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_ci, "_pg_socket_dir", lambda: tmp_path)
     calls: list[list[str]] = []
 
@@ -440,11 +440,11 @@ def test_start_pg_loopback_only_bind_never_waits(
 ) -> None:
     """A no-secret cluster binds loopback only — the wait is never consulted and
     the start proceeds (a stray AVA_MACHINE_HOST must not hold a warm start)."""
-    monkeypatch.setattr(_ci, "_bind_addrs", lambda _secret: ["127.0.0.1"])  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(_ci, "_bind_addrs", lambda _secret: ["127.0.0.1"])  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
         _ci,
         "_wait_for_reachable_bind",
-        lambda: pytest.fail("loopback-only bind must never wait"),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda: pytest.fail("loopback-only bind must never wait"),
     )
     calls = _wire_pg_start(monkeypatch, tmp_path)
 
@@ -468,7 +468,7 @@ def test_start_pg_waits_and_fails_fast_on_timeout(
 ) -> None:
     """Secret-set cluster, reachable address never assigned: postgres must not be
     launched into a guaranteed bind failure — fail fast with an explicit error."""
-    monkeypatch.setattr(_ci, "_bind_addrs", lambda _secret: ["127.0.0.1", "10.0.0.5"])  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(_ci, "_bind_addrs", lambda _secret: ["127.0.0.1", "10.0.0.5"])  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_ci, "_wait_for_reachable_bind", lambda: False)
     monkeypatch.setattr(_ci, "reachable_host", lambda: "10.0.0.5")
     calls = _wire_pg_start(monkeypatch, tmp_path)
@@ -488,11 +488,11 @@ def test_start_pg_waits_for_reachable_bind_before_starting(
     """Secret-set cluster, address appears late: the wait resolves and the start
     proceeds — the boot-race case the wait exists for."""
     waited: list[bool] = []
-    monkeypatch.setattr(_ci, "_bind_addrs", lambda _secret: ["127.0.0.1", "10.0.0.5"])  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(_ci, "_bind_addrs", lambda _secret: ["127.0.0.1", "10.0.0.5"])  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
         _ci,
         "_wait_for_reachable_bind",
-        lambda: waited.append(True) or True,  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda: waited.append(True) or True,
     )
     calls = _wire_pg_start(monkeypatch, tmp_path)
 

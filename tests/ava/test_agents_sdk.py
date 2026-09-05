@@ -209,7 +209,7 @@ class TestSpawn:
         from ava import agents
 
         seen: dict[str, Any] = {}
-        monkeypatch.setattr(agents._client, "spawn", lambda **kw: seen.update(kw) or 3)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        monkeypatch.setattr(agents._client, "spawn", lambda **kw: seen.update(kw) or 3)  # pyright: ignore[reportUnknownArgumentType]
 
         assert agents.spawn(prompt=prompt) == 3  # pyright: ignore[reportArgumentType]
         assert seen["prompt"] == expected
@@ -217,7 +217,7 @@ class TestSpawn:
     def test_spawn_rejects_non_string_prompt(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from ava import agents
 
-        monkeypatch.setattr(agents._client, "spawn", lambda **_kw: 3)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        monkeypatch.setattr(agents._client, "spawn", lambda **_kw: 3)  # pyright: ignore[reportUnknownArgumentType]
 
         with pytest.raises(
             TypeError,
@@ -239,7 +239,7 @@ class TestSpawn:
         silently joined (user ruling 2026-08-28)."""
         from ava import agents
 
-        monkeypatch.setattr(agents._client, "spawn", lambda **_kw: 3)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        monkeypatch.setattr(agents._client, "spawn", lambda **_kw: 3)  # pyright: ignore[reportUnknownArgumentType]
         with pytest.raises(TypeError, match="prompt must be a string"):
             agents.spawn(prompt=prompt)  # pyright: ignore[reportArgumentType]
 
@@ -405,7 +405,7 @@ class TestSendMessage:
         ruling 2026-08-28: multi-element sequences raise TypeError)."""
         from ava import agents
 
-        monkeypatch.setattr(agents._client, "send_message", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        monkeypatch.setattr(agents._client, "send_message", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
         with pytest.raises(TypeError, match="content must be a string"):
             agents.send_message(7, content)  # pyright: ignore[reportArgumentType]
 
@@ -431,7 +431,7 @@ class TestSendMessage:
     def test_send_message_rejects_non_string_content(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from ava import agents
 
-        monkeypatch.setattr(agents._client, "send_message", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        monkeypatch.setattr(agents._client, "send_message", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
         with pytest.raises(
             TypeError,
             match="content must be a string, got int",
@@ -956,7 +956,7 @@ class TestResurrect:
         monkeypatch.setattr(
             agents._client,
             "resurrect",
-            lambda agent_id, **kw: seen.update({"agent_id": agent_id, **kw}) or "spawned",  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+            lambda agent_id, **kw: seen.update({"agent_id": agent_id, **kw}) or "spawned",  # pyright: ignore[reportUnknownArgumentType]
         )
 
         result = agents.resurrect(42, ("wake",))  # pyright: ignore[reportArgumentType]
