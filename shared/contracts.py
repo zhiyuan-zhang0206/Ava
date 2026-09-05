@@ -430,6 +430,11 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
         Idempotency.NON_IDEMPOTENT,
         note="save files to disk + enqueue inbound; a retry duplicates files",
     ),
+    # ── gateway/routers/work_failed.py ───────────────────────────────
+    ("POST", "/api/work-failed"): RouteContract(
+        pause=PauseSemantics.CONTROL_PLANE,
+        note="failure-feedback ingest webhook — dedup by dedup_key; see gateway/routers/work_failed.py",
+    ),
 }
 
 
