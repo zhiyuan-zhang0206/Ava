@@ -13,7 +13,7 @@ def test_gateway_client_base_url_is_gateway_url(monkeypatch: pytest.MonkeyPatch)
     set_identity(role="agent-runner")
     monkeypatch.setattr(settings.gateway, "gateway_url", "https://cp.example.com")
 
-    import ava._gateway_client as gc
+    import ava._gateway_transport as gc
 
     monkeypatch.setattr(gc, "_client", None)  # reset lazy singleton so it rebuilds
     try:
@@ -31,7 +31,7 @@ def test_gateway_client_sends_cluster_secret_bearer(monkeypatch: pytest.MonkeyPa
 
     monkeypatch.setattr(settings.data_plane, "cluster_secret", "s3cr3t-token")
 
-    import ava._gateway_client as gc
+    import ava._gateway_transport as gc
 
     monkeypatch.setattr(gc, "_client", None)  # reset lazy singleton so it rebuilds
     client = cast(Any, gc._client_singleton())  # pyright: ignore[reportUnknownMemberType]
@@ -46,7 +46,7 @@ def test_gateway_client_no_bearer_when_secret_unset(monkeypatch: pytest.MonkeyPa
 
     monkeypatch.setattr(settings.data_plane, "cluster_secret", "")
 
-    import ava._gateway_client as gc
+    import ava._gateway_transport as gc
 
     monkeypatch.setattr(gc, "_client", None)  # reset lazy singleton so it rebuilds
     client = cast(Any, gc._client_singleton())  # pyright: ignore[reportUnknownMemberType]

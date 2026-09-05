@@ -24,13 +24,13 @@ def _sdk_via_testclient(monkeypatch: pytest.MonkeyPatch):
     from gateway.app import app
 
     with TestClient(app, base_url="http://test-gateway") as tc:
-        monkeypatch.setattr("ava._gateway_client._client", tc)
+        monkeypatch.setattr("ava._gateway_transport._client", tc)
         yield
 
 
 def _post_preset(name: str, label: str, **kw: object) -> None:
     """Create a preset through the wired TestClient."""
-    import ava._gateway_client as _client
+    import ava._gateway_transport as _client
 
     tc = cast(Any, _client._client)  # pyright: ignore[reportUnknownMemberType]
     assert tc is not None
