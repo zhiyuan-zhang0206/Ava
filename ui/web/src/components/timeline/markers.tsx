@@ -131,10 +131,10 @@ const MEMORY_VISUAL: MarkerVisual = {
   icon: NotebookText,
   title: "Memory",
   titleKey: "memory",
-  titleClass: `text-muted-foreground ${LABEL_CLS}`,
-  border: "border-violet-400/30",
-  bg: "bg-violet-50/20 dark:bg-violet-950/10",
-  text: "text-muted-foreground",
+  titleClass: `text-violet-700 dark:text-violet-300 ${LABEL_CLS}`,
+  border: "border-violet-400/60",
+  bg: "bg-violet-50 dark:bg-violet-950/30",
+  text: "text-violet-700 dark:text-violet-300",
 };
 
 const NOTE_VISUAL: MarkerVisual = {
@@ -142,8 +142,8 @@ const NOTE_VISUAL: MarkerVisual = {
   title: "Note",
   titleKey: "note",
   titleClass: `text-muted-foreground ${LABEL_CLS}`,
-  border: "border-border/60",
-  bg: "bg-muted/30",
+  border: "border-muted-foreground/40",
+  bg: "bg-muted/40",
   text: "text-muted-foreground",
 };
 
@@ -167,7 +167,7 @@ export function markerVisual(cls: MarkerClass): MarkerVisual {
 // inherited from the card (markerVisual.text).
 export function MarkerBody({ payload }: { payload: string }) {
   return (
-    <pre className="whitespace-pre-wrap [overflow-wrap:anywhere] font-mono text-[13px] leading-relaxed m-0">{payload}</pre>
+    <pre className="whitespace-pre-wrap [overflow-wrap:anywhere] font-mono text-[12px] leading-relaxed m-0">{payload}</pre>
   );
 }
 
@@ -191,10 +191,10 @@ function UnknownMarkerChip({ source, payload }: { source: string | null; payload
       <div className="text-[11px] font-mono uppercase tracking-widest mb-1">
         {t("unrecognized")}
       </div>
-      <div className="text-[11px] font-mono mb-1">
+      <div className="text-[11px] font-mono opacity-70 mb-1">
         source = {source === null ? "null" : JSON.stringify(source)}
       </div>
-      <pre className="whitespace-pre-wrap [overflow-wrap:anywhere] font-mono text-[13px] leading-relaxed m-0">{payload}</pre>
+      <pre className="whitespace-pre-wrap [overflow-wrap:anywhere] font-mono text-[12px] leading-relaxed m-0">{payload}</pre>
     </div>
   );
 }

@@ -1,19 +1,15 @@
 "use client";
 
-// Per-item card-config cache + the memoized card/flat row renderer.
+// Per-item card-config cache + the memoized row renderer. Split out of
+// index.tsx (outlier cleanup, task #1010) so the view file stays under the
+// 800-line budget; behavior is identical.
 
 import { memo, useCallback } from "react";
 
 import type { BackendTimelineItem } from "@/lib/types";
 
 import { CopyButton, ForkButton } from "./buttons";
-import {
-  type CardConfig,
-  CardHeader,
-  FlatRowHeader,
-  MessageCard,
-  messageCardConfig,
-} from "./card";
+import { type CardConfig, CardHeader, MessageCard, messageCardConfig } from "./card";
 import { ItemView } from "./item";
 import { ItemErrorBoundary } from "./item-error-boundary";
 
@@ -39,12 +35,11 @@ export function cardConfigFor(item: BackendTimelineItem): CardConfig | null {
 // unchanged item: `item` (store-preserved ref), `config` (WeakMap cache),
 // `expanded`/`streaming`/`showActions` (booleans), `onToggle` (parent's stable
 // useCallback), and `onFork`/`forkPending` (inert — null/false — for every row
-// except the single fork row), plus a primitive card/flat variant. config ===
-// null is the ephemeral system marker, which renders bare.
+// except the single fork row). config === null is the ephemeral system marker,
+// which renders bare (no card, not collapsible).
 export const TimelineRow = memo(function TimelineRow({
   item,
   config,
-  variant,
   streaming,
   expanded,
   showActions,
@@ -54,7 +49,6 @@ export const TimelineRow = memo(function TimelineRow({
 }: {
   item: BackendTimelineItem;
   config: CardConfig | null;
-  variant: "card" | "flat";
   streaming: boolean;
   expanded: boolean;
   showActions: boolean;
@@ -75,24 +69,6 @@ export const TimelineRow = memo(function TimelineRow({
       <div data-item-id={item.item_id} aria-live="off" className="timeline-item">
         <ItemErrorBoundary resetKey={item.payload}>
           <ItemView item={item} streaming={streaming} />
-        </ItemErrorBoundary>
-      </div>
-    );
-  }
-
-  if (variant === "flat") {
-    return (
-      <div
-        data-item-id={item.item_id}
-        data-row-variant="flat"
-        aria-live="off"
-        className="timeline-item"
-      >
-        <ItemErrorBoundary resetKey={item.payload}>
-          <FlatRowHeader item={item} config={config} />
-          <div className="pb-1 pl-5">
-            <ItemView item={item} streaming={streaming} />
-          </div>
         </ItemErrorBoundary>
       </div>
     );
