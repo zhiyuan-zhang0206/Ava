@@ -15,13 +15,13 @@ class WorkFailedIn(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    repo: str = Field(min_length=1)
-    ref: str = Field(min_length=1)
-    commit_sha: str = Field(min_length=1)
+    repo: str = Field(min_length=1, max_length=200)
+    ref: str = Field(min_length=1, max_length=255)
+    commit_sha: str = Field(min_length=1, max_length=64)
     stage: FailureStage
-    summary: str = Field(min_length=1)
+    summary: str = Field(min_length=1, max_length=2000)
     author_agent_id: int = Field(gt=0)
-    dedup_key: str = Field(min_length=1)
+    dedup_key: str = Field(min_length=1, max_length=255)
 
 
 class WorkFailedResult(BaseModel):
