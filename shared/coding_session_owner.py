@@ -191,12 +191,11 @@ def claim(
             and not current_owner_terminated
         ):
             return CodingSessionClaim(action="adopt", owner=current)
-        if (
-            current.status == "launching"
-            and not launch_is_stale(current, now=timestamp)
-            and not current_owner_terminated
-        ):
-            return CodingSessionClaim(action="busy", owner=current)
+        if current.status == "launching" and not current_owner_terminated:
+            if not launch_is_stale(current, now=timestamp):
+                return CodingSessionClaim(action="busy", owner=current)
+            if any(session_live(name) for name in _candidate_sessions(current, list_sessions)):
+                return CodingSessionClaim(action="busy", owner=current)
         if current.status != "inactive":
             _cleanup_unlocked(
                 current,

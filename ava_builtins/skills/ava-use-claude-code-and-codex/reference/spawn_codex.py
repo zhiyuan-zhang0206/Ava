@@ -95,8 +95,7 @@ def _watcher_path() -> Path:
 
 
 def _wait_for_ready(sid: int, timeout: float = 90.0) -> None:
-    """Wait until Codex has finished MCP startup; the owner remains
-    ``launching`` meanwhile.
+    """Wait until Codex has finished MCP startup after publishing its handle.
 
     len(output) > 50 alone is a FALSE ready signal: the TUI renders its frame
     during "Starting MCP servers (0/2)", and a message sent then has its Enter
@@ -369,20 +368,20 @@ def _launch(
         )
         sid = ava.shell.sessions.new(name=expected_suffix, ttl=ttl_seconds)
         full_name = coding_session_owner.full_session_name(owner_agent_id, sid, expected_suffix)
-        ava.shell.sessions.send(sid, _codex_command(owner, workspace, caller_instance))
-        _wait_for_ready(sid)
-        ava.shell.sessions.send(sid, _bootstrap_message(workspace, tasks_file, work_file))
-        _verify_submitted(sid, owner.state_dir)
         active = coding_session_owner.publish_active(
             key,
             generation,
             session_id=sid,
             session_name=full_name,
         )
+        ava.shell.sessions.send(sid, _codex_command(owner, workspace, caller_instance))
+        _wait_for_ready(sid)
+        ava.shell.sessions.send(sid, _bootstrap_message(workspace, tasks_file, work_file))
+        _verify_submitted(sid, owner.state_dir)
     except BaseException:
         # A replacement may own the canonical record by now, so its generation
-        # CAS cannot find this unpublished PTY. The old launcher still owns the
-        # numeric id and must reclaim it directly before rolling back its record.
+        # CAS cannot reclaim this PTY. The old launcher still owns the numeric id
+        # and must reclaim it directly before rolling back its record.
         if sid is not None:
             with contextlib.suppress(Exception):
                 ava.shell.sessions.kill(sid)
