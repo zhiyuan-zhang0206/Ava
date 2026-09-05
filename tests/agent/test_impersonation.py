@@ -304,13 +304,16 @@ async def test_held_host_wake_returns_before_runtime_or_slot(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from services.agent_host.host import AgentHost
+    from services.agent_host.runtime import _StoredConfig
 
     host = object.__new__(AgentHost)
     host._machine = "local"
     host._owner = uuid4()
     host._control_pool = MagicMock()
     host._read_stored_config = AsyncMock(
-        return_value=SimpleNamespace(machine="local", status="idling")
+        return_value=_StoredConfig(
+            machine="local", status="idling", config_overlay=None, birth_config=None
+        )
     )
     host._runtime_for = AsyncMock()
     monkeypatch.setattr("services.agent_host.host.active_lease", AsyncMock(return_value=True))
