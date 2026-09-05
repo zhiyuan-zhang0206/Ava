@@ -152,9 +152,6 @@ _OVERSIZE_ALLOWED: dict[str, tuple[str, int, str]] = {
     # The EVENTS registry — one flat name→spec dict emit() consults; grows
     # one entry per event. Schema-registry shard split tracked.
     "shared/events/contract.py": ("#405", 500, "2026-12-31"),
-    # Aggregate fetch + report assemblers + injected LokiBackend contract —
-    # one unit sharing the EventAggregate shape.
-    "shared/metrics_aggregate.py": ("#405", 500, "2026-12-31"),
     # Metric registry: MetricSpec schema + SQL-template whitelist + dialect
     # routing + template rendering — splitting forces a circular import.
     "shared/plugin_metrics.py": ("#405", 500, "2026-12-31"),
