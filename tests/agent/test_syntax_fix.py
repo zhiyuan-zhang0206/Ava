@@ -148,6 +148,23 @@ class TestFixChinesePunctuation:
 
 
 class TestDetectMissingImports:
+    def test_ruff_extracts_undefined_name_from_unicode_source(self):
+        code = 'print("\u4f60\u597d")\nprint(missing_name)\n'
+        assert _ruff_undefined_names(code) == {"missing_name"}
+
+    @patch("subprocess.run")
+    def test_ruff_undefined_names_uses_utf8_encoding(self, mock_run: MagicMock):
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=["ruff"],
+            returncode=1,
+            stdout='[{"code":"F821","message":"Undefined name `missing_name`"}]',
+            stderr="",
+        )
+        code = 'print("\u4f60\u597d")\nprint(missing_name)\n'
+
+        assert _ruff_undefined_names(code) == {"missing_name"}
+        assert mock_run.call_args.kwargs["encoding"] == "utf-8"
+
     def test_empty_code_returns_empty(self):
         assert _detect_missing_imports("") == []
 
@@ -318,11 +335,21 @@ class TestRuffFix:
     def test_ruff_available_runs_fix(self):
         """Verify ruff is actually called and returns fixed code."""
         # ruff should be available in dev env
-        code = "import os\nimport os\n"
+        code = 'import os\nimport os\nprint("\u4f60\u597d")\n'
         result = _ruff_fix(code)
-        # ruff should remove the duplicate import (output may differ, at least shouldn't crash)
+        # ruff should process Unicode source without crashing.
         assert isinstance(result, str)
-        assert len(result) > 0
+        assert "\u4f60\u597d" in result
+
+    @patch("subprocess.run")
+    def test_ruff_fix_uses_utf8_encoding(self, mock_run: MagicMock):
+        code = 'print("\u4f60\u597d")\n'
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=["ruff"], returncode=0, stdout=code, stderr=""
+        )
+
+        assert _ruff_fix(code) == code
+        assert mock_run.call_args.kwargs["encoding"] == "utf-8"
 
     @patch("subprocess.run")
     def test_ruff_not_found_returns_original(self, mock_run):
@@ -359,8 +386,18 @@ class TestRuffFix:
 class TestRuffFormat:
     def test_ruff_available_normalizes_style(self):
         """ruff format normalizes non-canonical style to canonical (ruff should be available in dev env)."""
-        result = _ruff_format("x=1\n")
-        assert result == "x = 1\n"
+        result = _ruff_format('message="\u4f60\u597d"\n')
+        assert result == 'message = "\u4f60\u597d"\n'
+
+    @patch("subprocess.run")
+    def test_ruff_format_uses_utf8_encoding(self, mock_run: MagicMock):
+        code = 'print("\u4f60\u597d")\n'
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=["ruff"], returncode=0, stdout=code, stderr=""
+        )
+
+        assert _ruff_format(code) == code
+        assert mock_run.call_args.kwargs["encoding"] == "utf-8"
 
     @patch("subprocess.run")
     def test_ruff_not_found_returns_original(self, mock_run):
@@ -394,6 +431,45 @@ class TestRuffFormat:
 
 
 class TestRuffGiveUpLogging:
+    @patch("subprocess.run")
+    def test_undefined_names_unicode_encode_error_returns_empty(
+        self, mock_run: MagicMock, loguru_records: list[dict[str, str]]
+    ):
+        code = 'print("\u4f60")\n'
+        mock_run.side_effect = UnicodeEncodeError(
+            "cp1252", "\u4f60", 0, 1, "character maps to <undefined>"
+        )
+
+        assert _ruff_undefined_names(code) == set()
+        msgs = [r["message"] for r in loguru_records]
+        assert any("UnicodeEncodeError" in m for m in msgs), msgs
+
+    @patch("subprocess.run")
+    def test_ruff_fix_unicode_encode_error_returns_original(
+        self, mock_run: MagicMock, loguru_records: list[dict[str, str]]
+    ):
+        code = 'print("\u4f60")\n'
+        mock_run.side_effect = UnicodeEncodeError(
+            "cp1252", "\u4f60", 0, 1, "character maps to <undefined>"
+        )
+
+        assert _ruff_fix(code) == code
+        msgs = [r["message"] for r in loguru_records]
+        assert any("UnicodeEncodeError" in m for m in msgs), msgs
+
+    @patch("subprocess.run")
+    def test_ruff_format_unicode_encode_error_returns_original(
+        self, mock_run: MagicMock, loguru_records: list[dict[str, str]]
+    ):
+        code = 'print("\u4f60")\n'
+        mock_run.side_effect = UnicodeEncodeError(
+            "cp1252", "\u4f60", 0, 1, "character maps to <undefined>"
+        )
+
+        assert _ruff_format(code) == code
+        msgs = [r["message"] for r in loguru_records]
+        assert any("UnicodeEncodeError" in m for m in msgs), msgs
+
     @patch("subprocess.run")
     def test_ruff_fix_timeout_logs_warning(self, mock_run, loguru_records):
         mock_run.side_effect = subprocess.TimeoutExpired("ruff", 5)

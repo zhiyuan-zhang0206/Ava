@@ -225,10 +225,11 @@ def _log_ruff_give_up(step: str, code: str, exc: BaseException) -> None:
 
     FileNotFoundError = the optional stage is skipped on a host without ruff —
     one line per process via _warn_ruff_missing_once. TimeoutExpired and
-    OSError are silent-failure smells (issue #159): the first logs the elapsed
-    budget and the input size (a timeout correlated with large inputs points at
-    the budget, not the host), the second logs the errno (usually a symptom of
-    something larger on the host).
+    OSError and UnicodeError are silent-failure smells (issue #159): the first
+    logs the elapsed budget and the input size (a timeout correlated with large
+    inputs points at the budget, not the host), the second logs the errno
+    (usually a symptom of something larger on the host), and the third logs the
+    text codec failure.
     """
     if isinstance(exc, subprocess.TimeoutExpired):
         logger.warning(
@@ -238,6 +239,11 @@ def _log_ruff_give_up(step: str, code: str, exc: BaseException) -> None:
         return
     if isinstance(exc, FileNotFoundError):  # OSError subclass — check first
         _warn_ruff_missing_once()
+        return
+    if isinstance(exc, UnicodeError):
+        logger.warning(
+            f"ruff {step} failed with {type(exc).__name__} ({exc}) — passing through unchanged"
+        )
         return
     if isinstance(exc, OSError):
         logger.warning(
@@ -282,10 +288,11 @@ def _ruff_undefined_names(code: str) -> set[str]:
             input=code,
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=_RUFF_TIMEOUT_SECONDS,
             check=False,
         )
-    except (FileNotFoundError, subprocess.TimeoutExpired, OSError) as exc:
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError, UnicodeError) as exc:
         # Same contract as _ruff_fix / _ruff_format (issue #159): a missing
         # ruff is logged once per process, a timeout / OS error at warning —
         # a detection stage that silently returns "no undefined names" would
