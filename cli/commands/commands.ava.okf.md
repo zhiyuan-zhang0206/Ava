@@ -24,9 +24,10 @@ Two kinds of module live here, distinguished by filename:
   `memory.py`, `presets.py`, `pty.py`, `schedules.py`, `trace.py`, `migrations.py`,
   `cluster_lifecycle.py`) — reachable from the command line.
 - **internal** (`_`-prefixed) — steps `start` / `update` call, never dispatched
-  directly: `_cluster_instance` (per-cluster pg+redis bring-up), `_converge` /
-  `_converge_spec` (the step contract) / `_converge_os_jobs` (the OS-scheduled
-  jobs) / `_converge_skills` / `_converge_firewall` (idempotent host wiring) /
+  directly: `_cluster_instance` (per-cluster pg+redis bring-up), `_converge`
+  (step-table aggregation and execution) / `_converge_spec` (the step contract) /
+  `_converge_steps` (early host and data-plane wiring) / `_converge_os_jobs`
+  (the OS-scheduled jobs) / `_converge_skills` / `_converge_firewall` (idempotent host wiring) /
   `_converge_legacy_permission_watcher` (one-shot cleanup of the removed
   permission-prompt watcher),
   `_update_git` /
