@@ -36,6 +36,7 @@ def _ruff_fix(code: str) -> str:
             input=code,
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=_RUFF_TIMEOUT_SECONDS,
             check=False,
         )
@@ -43,7 +44,7 @@ def _ruff_fix(code: str) -> str:
         if proc.returncode != 0 or not proc.stdout.strip():
             return code
         return proc.stdout
-    except (FileNotFoundError, subprocess.TimeoutExpired, OSError) as exc:
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError, UnicodeError) as exc:
         # FileNotFoundError: optional step skipped on a host without ruff —
         # one log line per process, then pass through. Timeout / OSError: a
         # repair step that gave up must be visible, not indistinguishable
@@ -68,13 +69,14 @@ def _ruff_format(code: str) -> str:
             input=code,
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=_RUFF_TIMEOUT_SECONDS,
             check=False,
         )
         if proc.returncode != 0 or not proc.stdout.strip():
             return code
         return proc.stdout
-    except (FileNotFoundError, subprocess.TimeoutExpired, OSError) as exc:
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError, UnicodeError) as exc:
         # Same contract as _ruff_fix (issue #159): a timeout or OS error is a
         # visible warning; a missing ruff is logged once per process. Pass
         # through either way — format only restyles, never fixes an error.
