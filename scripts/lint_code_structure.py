@@ -169,9 +169,6 @@ _OVERSIZE_ALLOWED: dict[str, tuple[str, int, str]] = {
     # Migration lifecycle: apply, rollback_to/apply_down, applied-set
     # bookkeeping — one invariant shared across all of them.
     "shared/migrations.py": ("#405", 500, "2026-12-31"),
-    # A flat name→spec model registry (one entry per model) — the one lookup
-    # surface build_chat_model consults. Schema-registry shard split tracked.
-    "shared/lm/registry.py": ("#405", 500, "2026-12-31"),
     # The whole ava.tasks SDK surface in one module: Task model,
     # create/get/list/update/log, validation, owner-notification helpers.
     "ava_builtins/plugins/ava_fleet/task_registry.py": ("#405", 500, "2026-12-31"),
