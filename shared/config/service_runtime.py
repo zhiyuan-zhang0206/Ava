@@ -8,6 +8,10 @@ from pydantic import AliasChoices, Field
 
 from shared.config._base import EnvSettings, _unit_home
 
+__all__ = [
+    "_ServiceRuntimeSettings",
+]
+
 
 class _ServiceRuntimeSettings(EnvSettings):
     browser_enabled: bool = Field(

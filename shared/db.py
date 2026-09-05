@@ -34,6 +34,7 @@ from shared.db_connections import (
 from shared.db_connections import (
     PG_STATEMENT_TIMEOUT_SET_SQL as PG_STATEMENT_TIMEOUT_SET_SQL,
 )
+from shared.db_connections import UNANCHORED_DB_SENTINEL as UNANCHORED_DB_SENTINEL
 from shared.db_connections import UnanchoredHomeError as UnanchoredHomeError
 from shared.db_connections import _guard_db_url as _guard_db_url
 from shared.db_connections import _restore_pooled_session as _restore_pooled_session
