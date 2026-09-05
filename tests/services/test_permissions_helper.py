@@ -1,10 +1,11 @@
 """Permissions helper: client wire-protocol contract + capability/lifecycle helpers.
 
 The Swift helper, code-signing, launchd, and TCC are macOS-host concerns and are
-not exercised here (CI is headless Linux). The native server additionally
-enforces owner-only socket mode and same-uid peers. What IS portable -- and what
-these tests pin -- is the JSON-line contract the client speaks, verified against
-a pure-Python fake server, plus the platform gate and the per-cluster naming.
+not exercised by this portable test module; a dedicated macOS CI lane covers the
+real native chain. The native server additionally enforces owner-only socket mode
+and same-uid peers. What IS portable -- and what these tests pin -- is the
+JSON-line contract the client speaks, verified against a pure-Python fake server,
+plus the platform gate and the per-cluster naming.
 """
 
 from __future__ import annotations
@@ -26,6 +27,7 @@ import pytest
 from services.permissions_helper import client
 from services.permissions_helper.client import PermissionsHelperError
 from shared.accessibility import AccessibilityState
+from shared.config import settings
 from shared.screen_capture import ScreenCaptureState
 
 
@@ -717,8 +719,10 @@ def _fake_tools(
     keychain_rc: int = 0,
     sign_rc: int = 0,
     acl_probe_rc: int = 0,
+    smoke_sign_rc: int = 0,
     verify_rc: int = 0,
     designated_requirement: str | None = None,
+    dr_streams: tuple[bytes, bytes] | None = None,
     identity_output: str | None = None,
     hang: tuple[str, ...] = (),
 ) -> list[_Call]:
@@ -759,6 +763,8 @@ def _fake_tools(
             shown = f"Authority={authority}\n" if authority else "Signature=adhoc\n"
             return subprocess.CompletedProcess(cmd, 0, b"", shown.encode())  # pyright: ignore[reportUnknownArgumentType]
         if cmd[:3] == ["codesign", "-d", "-r-"]:
+            if dr_streams is not None:
+                return subprocess.CompletedProcess(cmd, 0, *dr_streams)  # pyright: ignore[reportUnknownArgumentType]
             dr = designated_requirement or _test_dr()
             # Real codesign on current macOS emits the DR line on stdout
             # (stderr carries `Executable=...`); the reader accepts either.
@@ -771,7 +777,9 @@ def _fake_tools(
                 b"User interaction is not allowed.",  # pyright: ignore[reportUnknownArgumentType]
             )
         if cmd[:2] == ["codesign", "--sign"]:
-            return subprocess.CompletedProcess(cmd, acl_probe_rc, b"", b"probe")  # pyright: ignore[reportUnknownArgumentType]
+            scratch_name = Path(cmd[-1]).name  # pyright: ignore[reportUnknownArgumentType]
+            rc = smoke_sign_rc if scratch_name == "signing-smoke" else acl_probe_rc
+            return subprocess.CompletedProcess(cmd, rc, b"", b"errSecInternalComponent")  # pyright: ignore[reportUnknownArgumentType]
         if cmd[:2] == ["codesign", "--force"] and sign_rc != 0:
             return subprocess.CompletedProcess(cmd, sign_rc, b"", b"errSecInternalComponent")  # pyright: ignore[reportUnknownArgumentType]
         return subprocess.CompletedProcess(cmd, 0, b"", b"")  # pyright: ignore[reportUnknownArgumentType]
@@ -828,6 +836,46 @@ def test_current_stable_signed_bundle_is_not_resigned(
     assert not any(c[:2] == ["codesign", "--force"] for c in _argvs(recorded))
 
 
+def test_keychain_path_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    """AVA_PERMISSIONS_HELPER_KEYCHAIN routes signing to a CI-owned keychain."""
+    from services.permissions_helper import lifecycle
+
+    monkeypatch.setattr(
+        settings.services,
+        "permissions_helper_keychain",
+        "/tmp/ci-signing.keychain-db",  # noqa: S108
+    )
+    assert lifecycle._keychain_path() == Path("/tmp/ci-signing.keychain-db")  # noqa: S108
+    monkeypatch.setattr(settings.services, "permissions_helper_keychain", None)
+    assert lifecycle._keychain_path() == Path.home() / "Library" / "Keychains" / "login.keychain-db"
+
+
+def test_signing_cert_import_uses_supported_security_argv(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The macOS security import command must contain only supported flags."""
+    from services.permissions_helper import lifecycle
+
+    keychain = tmp_path / "ci-signing.keychain-db"
+    monkeypatch.setattr(lifecycle, "_keychain_path", lambda: keychain)
+    recorded = _fake_tools(monkeypatch, authority=None, identity_output="0 identities found\n")
+
+    lifecycle.ensure_signing_cert()
+
+    import_argv = next(argv for argv in _argvs(recorded) if argv[:2] == ["security", "import"])
+    assert import_argv[:2] == ["security", "import"]
+    assert import_argv[2].endswith("ident.p12")
+    assert import_argv[3:] == [
+        "-k",
+        str(keychain),
+        "-P",
+        "ava",
+        "-T",
+        "/usr/bin/codesign",
+        "-A",
+    ]
+
+
 def test_locked_keychain_does_not_fail_a_current_host(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -843,6 +891,21 @@ def test_locked_keychain_does_not_fail_a_current_host(
     assert lifecycle.build_and_sign() == (app, False)
     assert not any(c[:2] == ["security", "show-keychain-info"] for c in _argvs(recorded))
     assert not any(c[:2] == ["codesign", "--sign"] for c in _argvs(recorded))
+
+
+def test_current_stable_signed_bundle_skips_signing_smoke(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from services.permissions_helper import lifecycle
+
+    app = _stage_bundle(monkeypatch, tmp_path, exe_present=True)
+    _fake_tools(monkeypatch, authority=lifecycle._CERT_CN)
+    _write_current_build_state(app, lifecycle._source_content_hash())
+    smoke_calls: list[None] = []
+    monkeypatch.setattr(lifecycle, "preflight_signing_smoke", lambda: smoke_calls.append(None))
+
+    assert lifecycle.build_and_sign() == (app, False)
+    assert smoke_calls == []
 
 
 def test_fresh_build_signs_with_the_stable_certificate(
@@ -1068,7 +1131,7 @@ def test_codesign_failure_names_the_ad_hoc_refusal(
     assert "unlock-keychain" in str(err.value)
 
 
-# --- Bounded calls + the pre-sign ACL probe -------------------------------
+# --- Bounded calls + pre-sign probes --------------------------------------
 # Nothing in lifecycle.py touches a network, so a step that runs long is one
 # waiting on a human. On 2026-08-02 a headless rollout sat 67 minutes inside
 # `codesign --sign` on a SecurityAgent dialog nobody could answer -- the abort
@@ -1090,7 +1153,7 @@ def test_every_call_carries_its_declared_bound(
     for call in recorded:
         expected = (
             lifecycle._ACL_PROBE_TIMEOUT_S
-            if call.argv[:2] == ["codesign", "--sign"]
+            if call.argv[:2] == ["codesign", "--sign"] and Path(call.argv[-1]).name == "acl-probe"
             else lifecycle._TIMEOUTS_S[call.argv[0]]
         )
         assert call.timeout == expected, call.argv
@@ -1144,6 +1207,92 @@ def test_acl_probe_precedes_the_build_and_signs_a_scratch_file(
     # be able to leave the helper half-signed.
     assert str(app) not in probe[3]
     assert argvs.index(probe) < argvs.index(next(c for c in argvs if c[0] == "swiftc"))
+
+
+def test_signing_smoke_signs_scratch_and_reads_matching_requirement(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from services.permissions_helper import lifecycle
+
+    _stage_bundle(monkeypatch, tmp_path, exe_present=False)
+    recorded = _fake_tools(monkeypatch, authority=None)
+
+    lifecycle.preflight_signing_smoke()
+
+    argvs = _argvs(recorded)
+    sign = next(c for c in argvs if c[:2] == ["codesign", "--sign"])
+    scratch = Path(sign[-1])
+    assert sign[:-1] == [
+        "codesign",
+        "--sign",
+        lifecycle._CERT_CN,
+        "-v",
+        "--identifier",
+        lifecycle._BUNDLE_ID,
+        "--requirements",
+        f"=designated => {_test_dr()}",
+    ]
+    read = ["codesign", "-d", "-r-", str(scratch)]
+    assert argvs.index(sign) < argvs.index(read)
+    assert not scratch.exists()
+
+
+def test_signing_smoke_refuses_a_codesign_failure(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from services.permissions_helper import lifecycle
+
+    _stage_bundle(monkeypatch, tmp_path, exe_present=False)
+    _fake_tools(monkeypatch, authority=None, smoke_sign_rc=1)
+
+    with pytest.raises(lifecycle.PermissionsHelperBuildError) as err:
+        lifecycle.preflight_signing_smoke()
+    assert "signing smoke failed — refusing to rebuild/deploy" in str(err.value)
+    assert "errSecInternalComponent" in str(err.value)
+
+
+def test_signing_smoke_refuses_when_requirement_cannot_be_read(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from services.permissions_helper import lifecycle
+
+    _stage_bundle(monkeypatch, tmp_path, exe_present=False)
+    _fake_tools(
+        monkeypatch,
+        authority=None,
+        dr_streams=(b"", b"Executable=/tmp/signing-smoke\n"),
+    )
+
+    with pytest.raises(lifecycle.PermissionsHelperBuildError) as err:
+        lifecycle.preflight_signing_smoke()
+    assert "signing smoke failed — refusing to rebuild/deploy" in str(err.value)
+    assert "did not report a designated requirement" in str(err.value)
+
+
+def test_rebuild_runs_signing_smoke_after_acl_probe_before_compile(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from services.permissions_helper import lifecycle
+
+    app = _stage_bundle(monkeypatch, tmp_path, exe_present=False)
+    recorded = _fake_tools(monkeypatch, authority=None)
+    smoke_call_offsets: list[int] = []
+    monkeypatch.setattr(
+        lifecycle,
+        "preflight_signing_smoke",
+        lambda: smoke_call_offsets.append(len(recorded)),
+    )
+
+    assert lifecycle.build_and_sign() == (app, True)
+    argvs = _argvs(recorded)
+    acl_probe_index = next(
+        i
+        for i, cmd in enumerate(argvs)
+        if cmd[:2] == ["codesign", "--sign"] and Path(cmd[-1]).name == "acl-probe"
+    )
+    compile_index = next(i for i, cmd in enumerate(argvs) if cmd[0] == "swiftc")
+    assert smoke_call_offsets == [compile_index]
+    assert acl_probe_index < smoke_call_offsets[0]
 
 
 def test_acl_prompt_refuses_before_anything_is_built(
