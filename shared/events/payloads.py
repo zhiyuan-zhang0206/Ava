@@ -393,6 +393,14 @@ class DeliveryStalled(TypedDict):
     age_s: float
 
 
+class DeliveryPoisoned(TypedDict):
+    """`delivery_poisoned` payload — delivery watchdog dispatch guard."""
+
+    inbound_id: int
+    dispatch_count: int
+    age_s: float
+
+
 class FrontendInteraction(TypedDict):
     """`frontend_interaction` payload — gateway/routers/frontend_telemetry.py.
 

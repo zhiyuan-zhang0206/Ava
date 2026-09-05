@@ -170,6 +170,26 @@ def test_runner_mode_rejects_an_unknown_value() -> None:
         DaemonSettings.model_validate({"AVA_RUNNER_MODE": "hostd"})
 
 
+@pytest.mark.parametrize("raw", ["[1, 2.5]", "1,2.5"])
+def test_delivery_watchdog_backoff_accepts_json_or_comma_list(raw: str) -> None:
+    from shared.config.daemon import DaemonSettings
+
+    configured = DaemonSettings.model_validate(
+        {"AVA_DELIVERY_WATCHDOG_DISPATCH_BACKOFF_STEPS_S": raw}
+    )
+    assert configured.delivery_watchdog_dispatch_backoff_steps_s == [1.0, 2.5]
+
+
+@pytest.mark.parametrize("raw", ["", "[0]", "[-1, 2]"])
+def test_delivery_watchdog_backoff_rejects_empty_or_nonpositive_steps(raw: str) -> None:
+    import pydantic
+
+    from shared.config.daemon import DaemonSettings
+
+    with pytest.raises(pydantic.ValidationError):
+        DaemonSettings.model_validate({"AVA_DELIVERY_WATCHDOG_DISPATCH_BACKOFF_STEPS_S": raw})
+
+
 def test_current_field_values_coerces_secretstr(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     """A SecretStr field read from .env must come back a SecretStr, not a bare str
     — `.get_secret_value()` consumers crash on a plain str."""
@@ -596,8 +616,8 @@ def test_no_agent_scope_field_is_writable() -> None:
 
 @pytest.mark.parametrize("bad", ["inf", "-inf", "nan", "Infinity"])
 def test_update_quiesce_timeout_rejects_non_finite(
-    bad,
-) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    bad: str,
+) -> None:
     """The quiesce window must be finite at the parsing layer: an infinite
     value would make the force-reap backstop's deadline never fire and a
     rollout hang forever. `allow_inf_nan=False` rejects NaN/±Inf as they
@@ -1660,7 +1680,7 @@ def test_every_field_restart_required_names_a_kind_that_consumes_it() -> None:
     field's restart_required is in the value domain, and when it names a process
     kind, the field's domain is in that kind's profile (the profile sets ARE the
     consumption matrix — test_gateway_consumer_guard keeps them honest)."""
-    from typing import Any
+    from typing import Any, cast
 
     from shared.config import _FIELDS
     from shared.config.profiles import PROCESS_PROFILES
@@ -1669,7 +1689,7 @@ def test_every_field_restart_required_names_a_kind_that_consumes_it() -> None:
     def _extra(ref: object) -> dict[str, Any]:
         info = getattr(ref, "info", ref)
         extra = getattr(info, "json_schema_extra", None)
-        return extra if isinstance(extra, dict) else {}
+        return cast("dict[str, Any]", extra) if isinstance(extra, dict) else {}
 
     bad_value: list[tuple[str, str]] = [
         (name, str(_extra(ref).get("restart_required", ""))) for name, ref in _FIELDS.items()

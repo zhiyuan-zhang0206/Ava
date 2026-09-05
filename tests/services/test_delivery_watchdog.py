@@ -31,6 +31,8 @@ from shared.redis_listener import RedisInboundListener
 
 _THRESHOLD_S = 30.0
 _DISPATCH_THRESHOLD_S = 1.0
+_MAX_DISPATCH_COUNT = 5
+_DISPATCH_BACKOFF_STEPS_S = [1.0, 5.0, 30.0, 120.0, 300.0]
 
 
 @pytest.fixture
@@ -187,7 +189,7 @@ class TestScanOnce:
 
         from shared.paths import logs_dir
 
-        def _stalled() -> dict | None:
+        def _stalled() -> dict[str, object] | None:
             telemetry.flush()
             day = _dt.now(_UTC).strftime("%Y%m%d")
             path = logs_dir() / f"events-{day}.jsonl"
@@ -217,7 +219,9 @@ class TestScanOnce:
         assert ev["category"] == "telemetry"
         assert ev["event_name"] == "delivery_stalled"
         assert ev["level"] == "warning"
-        assert int(ev["attributes"]["inbound_id"]) == iid  # pyright: ignore[reportUnknownArgumentType, reportUnknownVariableType]
+        attributes = ev["attributes"]
+        assert isinstance(attributes, dict)
+        assert attributes["inbound_id"] == iid
 
 
 class TestSelectPendingForDispatch:
@@ -243,7 +247,12 @@ class TestSelectPendingForDispatch:
                 (_DISPATCH_THRESHOLD_S + 0.5, term_id),
             )
         db_conn.commit()
-        rows = select_pending_for_dispatch(pool, _DISPATCH_THRESHOLD_S)
+        rows = select_pending_for_dispatch(
+            pool,
+            _DISPATCH_THRESHOLD_S,
+            _MAX_DISPATCH_COUNT,
+            _DISPATCH_BACKOFF_STEPS_S,
+        )
         assert {r[0] for r in rows} == {old_chat, term_id}
         assert all(r[1] == aid for r in rows)
 
@@ -263,7 +272,15 @@ class TestSelectPendingForDispatch:
             cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (aid,))
         db_conn.commit()
         _insert_old_inbound(db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 1)
-        assert select_pending_for_dispatch(pool, _DISPATCH_THRESHOLD_S) == []
+        assert (
+            select_pending_for_dispatch(
+                pool,
+                _DISPATCH_THRESHOLD_S,
+                _MAX_DISPATCH_COUNT,
+                _DISPATCH_BACKOFF_STEPS_S,
+            )
+            == []
+        )
 
 
 class TestDispatchWakes:
@@ -283,7 +300,12 @@ class TestDispatchWakes:
             "publish_inbound_wake",
             lambda agent_id, payload: calls.append((agent_id, payload)),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
         )
-        dispatched = dispatch_wakes(pool, _DISPATCH_THRESHOLD_S)
+        dispatched = dispatch_wakes(
+            pool,
+            _DISPATCH_THRESHOLD_S,
+            _MAX_DISPATCH_COUNT,
+            _DISPATCH_BACKOFF_STEPS_S,
+        )
         assert dispatched == 1
         assert calls == [(aid, str(iid))]
 
@@ -301,7 +323,15 @@ class TestDispatchWakes:
             raise RuntimeError("redis down")
 
         monkeypatch.setattr(shared.db, "publish_inbound_wake", boom)  # pyright: ignore[reportUnknownArgumentType]
-        assert dispatch_wakes(pool, _DISPATCH_THRESHOLD_S) == 0
+        assert (
+            dispatch_wakes(
+                pool,
+                _DISPATCH_THRESHOLD_S,
+                _MAX_DISPATCH_COUNT,
+                _DISPATCH_BACKOFF_STEPS_S,
+            )
+            == 0
+        )
 
     async def test_dispatched_wake_reaches_the_listener(
         self,
@@ -321,11 +351,310 @@ class TestDispatchWakes:
         listener = RedisInboundListener(settings.data_plane.redis_url, aid)
         try:
             await listener.ensure_listening()
-            dispatched = dispatch_wakes(pool, _DISPATCH_THRESHOLD_S)
+            dispatched = dispatch_wakes(
+                pool,
+                _DISPATCH_THRESHOLD_S,
+                _MAX_DISPATCH_COUNT,
+                _DISPATCH_BACKOFF_STEPS_S,
+            )
             assert dispatched == 1
             await listener.wait_one(timeout=2.0)  # returns on the dispatched wake
         finally:
             await listener.close()
+
+
+class TestDispatchBackoffAndPoison:
+    @staticmethod
+    def _dispatch(pool: ConnectionPool) -> int:
+        return dispatch_wakes(
+            pool,
+            _DISPATCH_THRESHOLD_S,
+            _MAX_DISPATCH_COUNT,
+            _DISPATCH_BACKOFF_STEPS_S,
+        )
+
+    @staticmethod
+    def _set_last_dispatch_age(db: psycopg.Connection, inbound_id: int, age_s: float) -> None:
+        with db.cursor() as cur:
+            cur.execute(
+                "UPDATE inbound_messages "
+                "SET last_dispatch_at = clock_timestamp() - make_interval(secs => %s) "
+                "WHERE id = %s",
+                (age_s, inbound_id),
+            )
+        db.commit()
+
+    def test_first_dispatch_records_count_and_timestamp(
+        self,
+        db_conn: psycopg.Connection,
+        pool: ConnectionPool,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        aid = _make_idling_agent(db_conn)
+        iid = _insert_old_inbound(db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 1)
+        calls: list[tuple[int, str]] = []
+
+        def record_publish(agent_id: int, payload: str) -> None:
+            calls.append((agent_id, payload))
+
+        monkeypatch.setattr("shared.db.publish_inbound_wake", record_publish)
+
+        assert self._dispatch(pool) == 1
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "SELECT dispatch_count, last_dispatch_at IS NOT NULL "
+                "FROM inbound_messages WHERE id = %s",
+                (iid,),
+            )
+            row = cur.fetchone()
+        assert row == (1, True)
+        assert calls == [(aid, str(iid))]
+
+    def test_backoff_blocks_until_current_step_elapses(
+        self,
+        db_conn: psycopg.Connection,
+        pool: ConnectionPool,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        aid = _make_idling_agent(db_conn)
+        iid = _insert_old_inbound(db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 1)
+
+        def accept_publish(_agent_id: int, _payload: str) -> None:
+            return None
+
+        monkeypatch.setattr("shared.db.publish_inbound_wake", accept_publish)
+        assert self._dispatch(pool) == 1
+
+        assert (
+            select_pending_for_dispatch(
+                pool,
+                _DISPATCH_THRESHOLD_S,
+                _MAX_DISPATCH_COUNT,
+                _DISPATCH_BACKOFF_STEPS_S,
+            )
+            == []
+        )
+        self._set_last_dispatch_age(db_conn, iid, 5.5)
+        assert select_pending_for_dispatch(
+            pool,
+            _DISPATCH_THRESHOLD_S,
+            _MAX_DISPATCH_COUNT,
+            _DISPATCH_BACKOFF_STEPS_S,
+        ) == [(iid, aid)]
+        self._set_last_dispatch_age(db_conn, iid, 4.5)
+        assert (
+            select_pending_for_dispatch(
+                pool,
+                _DISPATCH_THRESHOLD_S,
+                _MAX_DISPATCH_COUNT,
+                _DISPATCH_BACKOFF_STEPS_S,
+            )
+            == []
+        )
+        self._set_last_dispatch_age(db_conn, iid, 1.5)
+        assert select_pending_for_dispatch(
+            pool,
+            _DISPATCH_THRESHOLD_S,
+            _MAX_DISPATCH_COUNT,
+            [1.0],
+        ) == [(iid, aid)]
+
+    def test_publish_failure_does_not_increment_count(
+        self,
+        db_conn: psycopg.Connection,
+        pool: ConnectionPool,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        aid = _make_idling_agent(db_conn)
+        iid = _insert_old_inbound(db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 1)
+
+        def fail_publish(*_args: object) -> None:
+            raise RuntimeError("redis unavailable")
+
+        monkeypatch.setattr("shared.db.publish_inbound_wake", fail_publish)
+        assert self._dispatch(pool) == 0
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "SELECT dispatch_count, last_dispatch_at FROM inbound_messages WHERE id = %s",
+                (iid,),
+            )
+            row = cur.fetchone()
+        assert row == (0, None)
+
+    def test_dispatch_cap_poisons_once_and_emits_event(
+        self,
+        db_conn: psycopg.Connection,
+        pool: ConnectionPool,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        import json
+        from datetime import UTC, datetime
+
+        from shared.paths import logs_dir
+
+        aid = _make_idling_agent(db_conn)
+        iid = _insert_old_inbound(db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 1)
+
+        def accept_publish(_agent_id: int, _payload: str) -> None:
+            return None
+
+        monkeypatch.setattr("shared.db.publish_inbound_wake", accept_publish)
+
+        for _ in range(_MAX_DISPATCH_COUNT):
+            self._set_last_dispatch_age(db_conn, iid, 1000.0)
+            assert self._dispatch(pool) == 1
+
+        assert (
+            select_pending_for_dispatch(
+                pool,
+                _DISPATCH_THRESHOLD_S,
+                _MAX_DISPATCH_COUNT,
+                _DISPATCH_BACKOFF_STEPS_S,
+            )
+            == []
+        )
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "SELECT dispatch_count, poisoned_at IS NOT NULL, status "
+                "FROM inbound_messages WHERE id = %s",
+                (iid,),
+            )
+            row = cur.fetchone()
+        assert row == (_MAX_DISPATCH_COUNT, True, "pending")
+
+        def poisoned_events() -> list[dict[str, object]]:
+            telemetry.flush()
+            day = datetime.now(UTC).strftime("%Y%m%d")
+            path = logs_dir() / f"events-{day}.jsonl"
+            if not path.exists():
+                return []
+            events: list[dict[str, object]] = []
+            for line in path.read_text(encoding="utf-8").splitlines():
+                try:
+                    event = json.loads(line)
+                except ValueError:
+                    continue
+                if (
+                    event.get("event_name") == "delivery_poisoned"
+                    and event.get("agent_id") == aid
+                    and event.get("category") == "telemetry"
+                ):
+                    events.append(event)
+            return events
+
+        events: list[dict[str, object]] = []
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline:
+            events = poisoned_events()
+            if events:
+                break
+            time.sleep(0.05)
+        assert len(events) == 1
+        assert events[0]["level"] == "warning"
+        attributes = events[0]["attributes"]
+        assert isinstance(attributes, dict)
+        assert attributes["inbound_id"] == iid
+        assert attributes["dispatch_count"] == _MAX_DISPATCH_COUNT
+
+        assert self._dispatch(pool) == 0
+        deadline = time.monotonic() + 0.5
+        while time.monotonic() < deadline:
+            telemetry.flush()
+            time.sleep(0.05)
+        assert len(poisoned_events()) == 1
+
+    def test_poisoned_row_is_not_dispatched_after_backoff(
+        self,
+        db_conn: psycopg.Connection,
+        pool: ConnectionPool,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        aid = _make_idling_agent(db_conn)
+        iid = _insert_old_inbound(db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 1)
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "UPDATE inbound_messages SET poisoned_at = clock_timestamp(), "
+                "last_dispatch_at = clock_timestamp() - interval '1000 seconds' "
+                "WHERE id = %s",
+                (iid,),
+            )
+        db_conn.commit()
+        calls: list[tuple[int, str]] = []
+
+        def record_unexpected_publish(agent_id: int, payload: str) -> None:
+            calls.append((agent_id, payload))
+
+        monkeypatch.setattr("shared.db.publish_inbound_wake", record_unexpected_publish)
+
+        assert self._dispatch(pool) == 0
+        assert calls == []
+
+    def test_manual_reset_restores_dispatch(
+        self,
+        db_conn: psycopg.Connection,
+        pool: ConnectionPool,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        aid = _make_idling_agent(db_conn)
+        iid = _insert_old_inbound(db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 1)
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "UPDATE inbound_messages SET dispatch_count = %s, "
+                "last_dispatch_at = clock_timestamp(), poisoned_at = clock_timestamp() "
+                "WHERE id = %s",
+                (_MAX_DISPATCH_COUNT, iid),
+            )
+            cur.execute(
+                "UPDATE inbound_messages SET dispatch_count = 0, "
+                "last_dispatch_at = NULL, poisoned_at = NULL WHERE id = %s",
+                (iid,),
+            )
+        db_conn.commit()
+        calls: list[tuple[int, str]] = []
+
+        def record_publish(agent_id: int, payload: str) -> None:
+            calls.append((agent_id, payload))
+
+        monkeypatch.setattr("shared.db.publish_inbound_wake", record_publish)
+
+        assert self._dispatch(pool) == 1
+        assert calls == [(aid, str(iid))]
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "SELECT dispatch_count, poisoned_at FROM inbound_messages WHERE id = %s",
+                (iid,),
+            )
+            row = cur.fetchone()
+        assert row == (1, None)
+
+    def test_dispatch_storm_is_bounded_by_cap(
+        self,
+        db_conn: psycopg.Connection,
+        pool: ConnectionPool,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        aid = _make_idling_agent(db_conn)
+        iid = _insert_old_inbound(db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 1)
+        calls: list[tuple[int, str]] = []
+
+        def record_publish(agent_id: int, payload: str) -> None:
+            calls.append((agent_id, payload))
+
+        monkeypatch.setattr("shared.db.publish_inbound_wake", record_publish)
+
+        for _ in range(20):
+            self._set_last_dispatch_age(db_conn, iid, 1000.0)
+            self._dispatch(pool)
+
+        assert len(calls) <= _MAX_DISPATCH_COUNT
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "SELECT dispatch_count, poisoned_at IS NOT NULL "
+                "FROM inbound_messages WHERE id = %s",
+                (iid,),
+            )
+            row = cur.fetchone()
+        assert row == (_MAX_DISPATCH_COUNT, True)
 
 
 class TestSelectPendingIds:

@@ -619,26 +619,29 @@ core_metrics.register_core_metric(
 
 # ── delivery health ──────────────────────────────────────────────────────────
 
-core_metrics.register_core_metric(
-    MetricSpec(
-        name="ava_obs_delivery_stalled_count",
-        title="Delivery stalled (window)",
-        description=(
-            "Windowed delivery_stalled total — the delivery watchdog's alert "
-            "signal for over-age pending inbound (a raw window count, not a "
-            "per-minute rate — explicit exception to the per-minute basis). "
-            "event_name='delivery_stalled', category='telemetry'."
-        ),
-        event_name="delivery_stalled",
-        category="telemetry",
-        unit="short",
-        panel="stat",
-        query_type="logql",
-        query=_count("category={category}", "$__range", matchers="event_name={event_name}"),
-        target_names=["stalled"],
-        output=["grafana"],
+for event_name, title, target_name in (
+    ("delivery_stalled", "Delivery stalled (window)", "stalled"),
+    ("delivery_poisoned", "Delivery poisoned (window)", "poisoned"),
+):
+    core_metrics.register_core_metric(
+        MetricSpec(
+            name=f"ava_obs_{event_name}_count",
+            title=title,
+            description=(
+                f"Windowed {event_name} total — a delivery-watchdog row signal "
+                "(a raw window count, not a per-minute rate). "
+                f"event_name='{event_name}', category='telemetry'."
+            ),
+            event_name=event_name,
+            category="telemetry",
+            unit="short",
+            panel="stat",
+            query_type="logql",
+            query=_count("category={category}", "$__range", matchers="event_name={event_name}"),
+            target_names=[target_name],
+            output=["grafana"],
+        )
     )
-)
 
 core_metrics.register_core_metric(
     MetricSpec(
