@@ -417,22 +417,9 @@ def _spawn_host(
     generation: str | None,
     cmd_b64: str,
 ) -> int:
-    """Launch the session's detached host via _reparent and wait for it to
-    answer. Returns the CLI exit code.
-
-    The record/socket/transcript paths are resolved HERE and passed on argv:
-    the host process never imports the Settings chain (`shared.paths`), which
-    is most of a python process's avoidable RSS — one host exists per live
-    session, so its import closure is the fleet's steady-state memory.
-    """
     log = host_log_path(name)
     log.parent.mkdir(parents=True, exist_ok=True)
-    argv = [
-        sys.executable,
-        "-m",
-        "shared._reparent",
-        str(log),
-        str(log),
+    host_argv = [
         sys.executable,
         "-m",
         "shared.pty_sessions.host",
@@ -444,27 +431,40 @@ def _spawn_host(
         str(transcript_path(name)),
         generation or "",
     ]
-    if cmd_b64:
-        argv.append(cmd_b64)
-    try:
-        spawned = subprocess.run(argv, capture_output=True, timeout=30.0, check=True)  # noqa: S603 — argv is repo-internal (interpreter + module names + validated session args)
-    except (OSError, subprocess.SubprocessError) as exc:
-        sys.stderr.write(f"cannot spawn pty session host for {name}: {exc}\n")
-        return 1
-    # _reparent hands the detached host's pid back on stdout — a host that
-    # died pre-socket (bad envfile, pty exhaustion) fails this fast instead
-    # of running out the ready wait.
-    try:
-        host_pid = int(spawned.stdout.strip())
-    except ValueError:
-        sys.stderr.write(
-            f"cannot establish spawned pty host identity for {name}: {spawned.stdout!r}\n"
-        )
+    host_argv.extend([cmd_b64] if cmd_b64 else [])
+    from shared.session_backend import helper_spawn_enabled
+
+    if helper_spawn_enabled():
         try:
-            _reap_orphaned_hosts(name, force_unresponsive=True)
-        except RuntimeError as exc:
-            sys.stderr.write(f"cannot reap unidentified pty host for {name}: {exc}\n")
-        return 1
+            from shared import helperproc, process_env
+
+            host_pid = helperproc.spawn_via_helper(
+                f"pty-host-{name}",
+                host_argv,
+                Path(cwd),
+                env=process_env.inherited_process_env(),
+                stdout=log,
+                stderr=log,
+            )
+        except (OSError, RuntimeError) as exc:
+            sys.stderr.write(f"cannot spawn pty session host for {name}: {exc}\n")
+            return 1
+    else:
+        argv = [sys.executable, "-m", "shared._reparent", str(log), str(log), *host_argv]
+        try:
+            spawned = subprocess.run(argv, capture_output=True, timeout=30.0, check=True)  # noqa: S603 — argv is repo-internal (interpreter + module names + validated session args)
+        except (OSError, subprocess.SubprocessError) as exc:
+            sys.stderr.write(f"cannot spawn pty session host for {name}: {exc}\n")
+            return 1
+        try:
+            host_pid = int(spawned.stdout.strip())
+        except ValueError:
+            sys.stderr.write(f"cannot establish pty host identity for {name}: {spawned.stdout!r}\n")
+            try:
+                _reap_orphaned_hosts(name, force_unresponsive=True)
+            except RuntimeError as exc:
+                sys.stderr.write(f"cannot reap unidentified pty host for {name}: {exc}\n")
+            return 1
     deadline = time.monotonic() + _SPAWN_READY_TIMEOUT_S
     while time.monotonic() < deadline:
         with contextlib.suppress(OSError, ValueError):

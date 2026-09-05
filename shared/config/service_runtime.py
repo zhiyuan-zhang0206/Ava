@@ -72,6 +72,23 @@ class _ServiceRuntimeSettings(EnvSettings):
         },
     )
 
+    # Gray rollout: installing the helper remains independent from entrusting
+    # every long-lived macOS process spawn to it. Operators enable this only
+    # after the helper nursery protocol is deployed and healthy on the host.
+    permissions_helper_spawn: bool = Field(
+        default=False,
+        alias="AVA_PERMISSIONS_HELPER_SPAWN",
+        description="Spawn macOS service, agent, and PTY-host processes directly through the permissions helper so they inherit its stable TCC identity.",
+        json_schema_extra={
+            "capability": "agent-runner",
+            "restart_required": "",
+            "writable": False,
+            "sensitive": False,
+            "scope": "host",
+            "remote_writable": True,
+        },
+    )
+
     permissions_helper_port: int = Field(
         default=9223,
         validation_alias=AliasChoices("AVA_PERMISSIONS_HELPER_PORT", "AVA_NATIVE_HELPER_PORT"),

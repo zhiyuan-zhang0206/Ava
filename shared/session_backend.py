@@ -4,17 +4,19 @@ sessions. Module-level ``get_backend()`` returns the platform-appropriate
 singleton; callers use the same ``SessionBackend`` protocol regardless of
 platform.
 
-- ``get_backend()`` — the **service/daemon** backend: ``PosixProcSessionBackend``
-  (``shared.posixproc``) on POSIX, ``WinprocSessionBackend`` on Windows. Every
-  long-running service session lives here: ``ava start`` launches, healthcheck
-  respawns, pause/unpause, and the orchestration sessions (updater / rollout /
-  cluster-restart — S7 moved them onto this backend).
+- ``get_backend()`` — the **service/daemon** backend: ``WinprocSessionBackend``
+  on Windows; ``HelperProcSessionBackend`` on macOS when helper spawning is
+  enabled; otherwise ``PosixProcSessionBackend`` (``shared.posixproc``) on
+  POSIX. Every long-running service session lives here: ``ava start`` launches,
+  healthcheck respawns, pause/unpause, and the orchestration sessions (updater /
+  rollout / cluster-restart — S7 moved them onto this backend).
 - ``get_shell_backend()`` — agent interactive shells / watchers:
   ``PtySessionBackend`` (one detached host per session) on POSIX, the native
   supervisor on Windows. Never addresses service or orchestration sessions.
 
 **Every import of a platform supervisor in this module is deliberately
-method-local** — `from shared import winproc` / `from shared import posixproc`
+method-local** — `from shared import winproc` / `from shared import posixproc` /
+`from shared.helperproc import HelperProcSessionBackend`
 inside method bodies, never at module scope: the agent-runner self-update
 (`cli/commands/_update_agent_runner.py`) calls `_do_stop` **in-process** after
 `git checkout` + `uv sync`, so the session-kill code stop runs is whatever
@@ -38,12 +40,13 @@ import subprocess
 import sys
 import uuid
 from pathlib import Path
-from types import ModuleType
+from typing import Protocol, cast
 
 from shared.paths import logs_dir, run_dir
 
 # ruff: noqa: S603 — subprocess calls use repo-internal literal args
 from shared.platform import (
+    IS_MACOS,
     IS_WINDOWS,
 )
 from shared.session_record import SessionRecord
@@ -218,6 +221,34 @@ class SessionBackend(abc.ABC):
         something).
         """
         raise NotImplementedError(f"{type(self).__name__} does not support kill verdicts")
+
+
+class NativeProcessSupervisor(Protocol):
+    """Agent-process surface shared by the platform modules and helper backend."""
+
+    __name__: str
+
+    def has_session(self, name: str) -> bool: ...
+
+    def new_session(
+        self,
+        name: str,
+        cmd: str | list[str],
+        cwd: Path,
+        *,
+        env: dict[str, str],
+        stderr_append: Path | None = None,
+    ) -> bool: ...
+
+    def kill_session(
+        self, name: str, *, graceful: bool = False, timeout: float = 15.0
+    ) -> tuple[bool, str]: ...
+
+    def graceful_signal(self, name: str, *, expected: SessionRecord | None = None) -> bool: ...
+
+    def list_sessions(self, prefix: str = "") -> list[str]: ...
+
+    def session_log_path(self, name: str) -> Path | None: ...
 
 
 # ── POSIX: native process supervisor ─────────────────────────────────────
@@ -591,21 +622,48 @@ class WinprocSessionBackend(SessionBackend):
 _backend: SessionBackend | None = None
 
 
+def helper_spawn_enabled() -> bool:
+    """Whether macOS process creation must route through the permissions helper.
+
+    Configuration failure keeps the legacy POSIX route. Choosing the helper is
+    a spawn-identity commitment, so actual helper-call failures remain loud and
+    never fall back after this decision.
+    """
+    if not IS_MACOS:
+        return False
+    try:
+        from shared.config import settings
+
+        return bool(
+            settings.services.permissions_helper_enabled
+            and settings.services.permissions_helper_spawn
+        )
+    except Exception:
+        return False
+
+
 def get_backend() -> SessionBackend:
     """Return the platform-appropriate ``SessionBackend`` singleton.
 
     This is the **service/daemon** backend — every long-running service session
     (`ava start` launches, healthcheck respawns, pause/unpause) and every
     orchestration session (updater / rollout / cluster-restart) lives here:
-    the native supervisor on POSIX (the migration's step 1; S7 moved the
-    orchestration sessions onto it too), the native supervisor on Windows
-    (which is native-only). Agent *processes* do NOT: they run under the same
-    native supervisor, reached via `native_proc()`. Agent shells / watchers use
-    the PTY backend (`get_shell_backend()`).
+    the helper-backed supervisor on opted-in macOS hosts, the native supervisor
+    on other POSIX hosts, and the native supervisor on Windows. Agent
+    *processes* do NOT call this function directly: `native_proc()` routes them
+    to the same selected process supervisor. Agent shells / watchers use the
+    PTY backend (`get_shell_backend()`).
     """
     global _backend  # noqa: PLW0603
     if _backend is None:
-        _backend = WinprocSessionBackend() if IS_WINDOWS else PosixProcSessionBackend()
+        if IS_WINDOWS:
+            _backend = WinprocSessionBackend()
+        elif helper_spawn_enabled():
+            from shared.helperproc import HelperProcSessionBackend
+
+            _backend = HelperProcSessionBackend()
+        else:
+            _backend = PosixProcSessionBackend()
     return _backend
 
 
@@ -625,26 +683,30 @@ def get_shell_backend() -> SessionBackend:
     return _shell_backend
 
 
-def native_proc() -> ModuleType:
+def native_proc() -> NativeProcessSupervisor:
     """The platform's native process supervisor for AGENT processes —
-    `shared.winproc` (Windows) or `shared.posixproc` (POSIX).
+    `shared.winproc` (Windows), the helper-backed service backend on opted-in
+    macOS hosts, or `shared.posixproc` (other POSIX routes).
 
     Both modules expose the same surface (`has_session` / `new_session` /
     `kill_session` / `list_sessions` / `session_log_path`), so `ops.agent_launch`
     (attempt launch) and the reap / force-terminate / status consumers
     dispatch to one of the two by platform. Agent processes always run here (a
     non-interactive agent needs no PTY, and the per-box PTY ceiling then stops
-    bounding agent count); daemons and the agents' persistent shells use
-    `get_backend()` instead.
+    bounding agent count); daemons use `get_backend()`, while agents'
+    persistent shells use `get_shell_backend()`.
 
-    Both imports are method-local for the same reason as `WinprocSessionBackend`'s:
+    Supervisor imports are method-local for the same reason as
+    `WinprocSessionBackend`'s:
     `ava stop`'s agent reap (`cli.commands.stop._reap_agent_sessions`) runs through
     here, and on the self-update path that reap must be the post-checkout code.
     """
     if IS_WINDOWS:
         from shared import winproc
 
-        return winproc
+        return cast("NativeProcessSupervisor", winproc)
+    if helper_spawn_enabled():
+        return cast("NativeProcessSupervisor", get_backend())
     from shared import posixproc
 
-    return posixproc
+    return cast("NativeProcessSupervisor", posixproc)

@@ -526,6 +526,7 @@ _REMOTE_WRITABLE_ALLOWLIST = frozenset(
         "heartbeat_enabled",
         "machine_description",
         "permissions_helper_enabled",
+        "permissions_helper_spawn",
         "ops_concurrency",
         "task_maintenance_enabled",
         "watchdog_interval_seconds",

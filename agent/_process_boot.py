@@ -75,6 +75,7 @@ import ava._boot
 from shared.config import settings
 from shared.config.turn_view import turn_settings
 from shared.event_publisher import AgentEventPublisher
+from shared.helper_chain_guard import parent_chain_intact
 from shared.lm.factory import build_chat_model
 from shared.log import init_agent_process, logger
 from shared.paths import workspace_dir
@@ -364,7 +365,19 @@ async def _boot_agent_process(
 
     llm = await boot_agent_scope(agent_id)
     _boot_timing.mark("sdk_mcp_model")
+    # The turn loop is outside this PR's allowed files; add the corresponding
+    # turn-boundary check when that scope is opened. This boot gate still keeps
+    # newly spawned process agents from accepting work on a broken chain.
+    _require_helper_parent_chain()
     return mcp_daemon, llm
+
+
+def _require_helper_parent_chain() -> None:
+    """Exit a helper-spawned agent whose direct-parent chain was broken."""
+    if parent_chain_intact():
+        return
+    logger.warning("permissions helper parent chain broken, self-terminating for helper respawn")
+    os._exit(70)
 
 
 async def _build_data_plane(agent_id: int) -> tuple[RedisInboundListener, AgentEventPublisher]:
