@@ -108,9 +108,9 @@ declared provider keys. Plugin config images never carry provider secrets.
 
 The builder is plain Python deliberately: provider wire behavior is the place
 where a closed schema becomes restrictive. It must return an unbound
-`BaseChatModel`, fail immediately on a missing key, clamp effort to the endpoint
-vocabulary, and honor the shared thinking switch according to provider
-capability.
+`BaseChatModel`, fail immediately on a missing key, preserve each provider's
+established effort behavior (including GPT's verbatim pass-through), and honor
+the shared thinking switch according to provider capability.
 
 ## Pricing catalog and runtime prices
 
@@ -125,8 +125,8 @@ registers a chat-model price, `pricing.py` removes the overlapping archive row
 from its in-memory runtime catalog view and uses the plugin's flat rate. The
 archive remains available for deterministic historical checks, price-window
 selection, and bot reconciliation. `pricing_catalog.json` is retained only as
-an empty valid schema-v2 shell (`"models": {}`). Runtime never scrapes a
-pricing page.
+an empty placeholder (`"models": {}`) that runtime never loads; `_load_catalog`
+reads `pricing_catalog_archive.json`. Runtime never scrapes a pricing page.
 
 The checked-in archive is also the scheduling ledger for automation. Future
 effective boundaries stay explicit there so the pricing bot can reconcile the

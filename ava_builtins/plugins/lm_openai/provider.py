@@ -6,7 +6,6 @@ from typing import Any
 
 from langchain_core.language_models.chat_models import BaseChatModel
 
-from shared.lm._effort import _clamp_effort
 from shared.lm.provider_api import (
     BuildContext,
     PriceRates,
@@ -15,7 +14,7 @@ from shared.lm.provider_api import (
     require_key,
 )
 from shared.lm.registry import ModelSpec, ModelTuning
-from shared.lm.stop import StopSpec
+from shared.lm.stop import StopCategory, StopSpec
 
 # Effort vocabulary shared by every GPT model — named once so the entries stay
 # readable; it remains per-model data.
@@ -47,12 +46,6 @@ def build(ctx: BuildContext) -> BaseChatModel:
     # so code rendering is unaffected by the API switch.
     thinking_disabled = ctx.thinking is not None and ctx.thinking.get("type") == "disabled"
     gpt_effort = ctx.resolved_effort or "medium"
-    if not thinking_disabled:
-        gpt_effort = _clamp_effort(
-            gpt_effort,
-            ctx.effort_levels if ctx.effort_levels is not None else _GPT_EFFORT,
-            target="gpt",
-        )
     gpt_reasoning: dict[str, Any] = (
         {"effort": "none"} if thinking_disabled else {"effort": gpt_effort, "summary": "auto"}
     )
@@ -79,6 +72,11 @@ register(
             "finish_reason",
             frozenset({"stop", "tool_calls", "function_call"}),
             frozenset({"length"}),
+            status_key="status",
+            status_map={
+                "completed": StopCategory.NORMAL,
+                "incomplete": StopCategory.TRUNCATED,
+            },
         ),
     ),
     models={

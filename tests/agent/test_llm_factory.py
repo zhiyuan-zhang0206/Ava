@@ -390,10 +390,10 @@ class TestBuildChatModel:
         assert m.use_responses_api is True
         assert m.reasoning == {"effort": "medium", "summary": "auto"}
 
-    def test_gpt_effort_clamps_to_plugin_vocabulary(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """OpenAI omits the cross-provider `minimal` rung, so the plugin
-        clamps it to its nearest supported wire value instead of sending an
-        invalid Responses API request."""
+    def test_gpt_effort_preserves_cross_provider_vocabulary(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """GPT preserves an explicitly selected cross-provider effort verbatim."""
         monkeypatch.setattr(settings.lm, "llm_override", "")
         monkeypatch.setattr(settings.lm, "reasoning_effort", "minimal")
         monkeypatch.setenv("OPENAI_API_KEY", "k")
@@ -401,7 +401,7 @@ class TestBuildChatModel:
 
         m = build_chat_model("gpt-5.6-sol")
         assert isinstance(m, ChatOpenAI)
-        assert m.reasoning == {"effort": "low", "summary": "auto"}
+        assert m.reasoning == {"effort": "minimal", "summary": "auto"}
 
     def test_gpt_thinking_disabled_drops_to_effort_none(
         self, monkeypatch: pytest.MonkeyPatch

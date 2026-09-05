@@ -14,6 +14,7 @@ them through their ProviderBinding, and an unknown provider fails fast.
 """
 
 import enum
+from collections.abc import Mapping
 from typing import NamedTuple
 
 from langchain_core.messages import AIMessage
@@ -39,13 +40,17 @@ class StopSpec(NamedTuple):
     `provider_key` is the emitted ``model_provider`` value. `key` is the
     response_metadata field that carries the terminal reason; a value in
     `normal` is a clean turn end, one in `truncated` is an output-budget
-    cutoff; anything else present is UNEXPECTED; the key missing is CORRUPTED.
+    cutoff; anything else present is UNEXPECTED. When `key` is missing, an
+    optional `status_key` + `status_map` can classify an alternate terminal
+    status representation; an absent or unknown alternate status is CORRUPTED.
     """
 
     provider_key: str
     key: str
     normal: frozenset[str]
     truncated: frozenset[str]
+    status_key: str | None = None
+    status_map: Mapping[str, StopCategory] | None = None
 
 
 _BY_PROVIDER: dict[str, StopSpec] = {}
@@ -88,16 +93,15 @@ def classify_stop(final_msg: AIMessage) -> tuple[StopCategory, str | None]:
         )
     raw = metadata.get(spec.key)
     if raw is None:
-        # OpenAI Responses API (use_responses_api=True) returns `status`
-        # (e.g. "completed") instead of `finish_reason`.  Map it to the
-        # same StopCategory so the validation path treats it as a clean
-        # turn end, not a corrupted protocol frame.
-        if provider == "openai" and "status" in metadata:
-            raw = metadata["status"]
-            if raw == "completed":
-                return StopCategory.NORMAL, raw
-            if raw == "incomplete":
-                return StopCategory.TRUNCATED, raw
+        if spec.status_key is not None and spec.status_key in metadata:
+            status = metadata[spec.status_key]
+            mapped = (
+                spec.status_map.get(status)
+                if spec.status_map is not None and isinstance(status, str)
+                else None
+            )
+            if mapped is not None:
+                return mapped, status
         return StopCategory.CORRUPTED, None
     if raw in spec.normal:
         return StopCategory.NORMAL, raw

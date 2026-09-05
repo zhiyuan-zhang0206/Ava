@@ -79,6 +79,7 @@ def ensure_provider_plugins_loaded() -> None:
             return
         from shared import paths, plugins_config
         from shared.lm import provider_api
+        from shared.lm import registry as model_registry
         from shared.lm.factory import _MODEL_KEY_MAP
 
         # Bootstrap can be the first provider consumer. Importing factory here
@@ -106,6 +107,13 @@ def ensure_provider_plugins_loaded() -> None:
                 "no provider plugins enabled — enable at least one provider plugin "
                 "(the repo ships the lm_* default set; check the plugin enable config)"
             )
+        anthropic_protocol_by_model = {
+            model_id: binding.anthropic_protocol
+            for prefix, binding in provider_api.REGISTRY.bindings.items()
+            for model_id in model_registry.MODELS
+            if model_id.startswith(prefix)
+        }
+        model_registry._validate_registry(anthropic_protocol_by_model=anthropic_protocol_by_model)
         _STATE.loaded = True
 
 

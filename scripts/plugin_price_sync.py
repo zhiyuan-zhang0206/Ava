@@ -4,6 +4,10 @@ Candidate provider files are parsed, never imported: the pricing workflow may
 resume an existing bot branch, so executing code from that branch would cross
 the workflow's trusted-main boundary. The parser accepts only the repository's
 literal ``register(models=..., pricing=...)`` shape and fails closed otherwise.
+
+Current synchronization selects only the zero-input base tier from the active
+period. BLOCK-1 will extend plugin pricing to preserve all periods, tiers, and
+recurring windows.
 """
 
 from __future__ import annotations

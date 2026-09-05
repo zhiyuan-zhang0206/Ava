@@ -126,6 +126,7 @@ _MODEL_LINE = """\"{model}\": ModelSpec(
             effort_levels=("low", "high"),
             tuning=ModelTuning(reasoning_effort="high"),
             media_types={model_media_types},
+            superseded_by={superseded_by!r},
         )"""
 
 _PRICE_LINE = """\"{model}\": PriceRates(
@@ -193,6 +194,7 @@ def provider_plugin() -> Generator[Callable[..., None], None, None]:
         model: str | None = "testp-1",
         with_price: bool = True,
         price_vendor: str | None = None,
+        superseded_by: str | None = None,
         dir_name: str = "test_provider",
     ) -> None:
         plugin_dir = paths.plugins_dir() / dir_name
@@ -203,6 +205,7 @@ def provider_plugin() -> Generator[Callable[..., None], None, None]:
                 model=model,
                 provider=prefix.rstrip("-"),
                 model_media_types='frozenset({"image"})' if model_vision else "frozenset()",
+                superseded_by=superseded_by,
             )
             if model
             else ""
@@ -468,6 +471,11 @@ def test_repo_openai_provider_is_enabled_and_registers_complete_contract() -> No
         "finish_reason",
         frozenset({"stop", "tool_calls", "function_call"}),
         frozenset({"length"}),
+        status_key="status",
+        status_map={
+            "completed": stop.StopCategory.NORMAL,
+            "incomplete": stop.StopCategory.TRUNCATED,
+        },
     )
 
 
@@ -855,6 +863,56 @@ def test_spawnable_model_without_price_rejected(provider_plugin: Callable[..., N
     with pytest.raises(RuntimeError) as excinfo:
         ensure_provider_plugins_loaded()
     assert "no current price" in str(excinfo.value.__cause__)
+
+
+@pytest.mark.usefixtures("provider_plugin")
+def test_model_validation_failure_leaves_registration_retryable() -> None:
+    binding = provider_api.ProviderBinding(
+        prefix="testp-",
+        display_name="TestProvider",
+        key_env="TESTP_API_KEY",
+        build=lambda _ctx: FakeListChatModel(responses=["x"]),
+    )
+    price = provider_api.PriceRates(
+        cache_miss=1.0,
+        cache_hit=0.1,
+        output=3.0,
+        source_url="https://example.com/pricing",
+        source_checked_at="2026-08-22",
+    )
+    invalid = ModelSpec(provider="testp", spawnable=True)
+
+    with pytest.raises(RuntimeError, match="missing registry facts"):
+        provider_api.register(binding, models={"testp-1": invalid}, pricing={"testp-1": price})
+
+    assert "testp-1" not in pricing._PLUGIN_PRICES
+    assert "testp-1" not in MODELS
+    assert "testp-" not in provider_api.REGISTRY.bindings
+
+    valid = ModelSpec(
+        provider="testp",
+        spawnable=True,
+        context_window=200_000,
+        knowledge_cutoff="2026-01",
+        effort_levels=("low", "high"),
+        tuning=ModelTuning(reasoning_effort="high"),
+    )
+    provider_api.register(binding, models={"testp-1": valid}, pricing={"testp-1": price})
+
+    assert "testp-1" in pricing._PLUGIN_PRICES
+    assert MODELS["testp-1"] == valid
+    assert provider_api.REGISTRY.bindings["testp-"] == binding
+
+
+def test_loader_revalidates_cross_model_constraints(
+    provider_plugin: Callable[..., None],
+) -> None:
+    provider_plugin(superseded_by="testp-missing")
+
+    with pytest.raises(RuntimeError, match="not in MODELS"):
+        ensure_provider_plugins_loaded()
+
+    assert not plugin_loader._STATE.loaded
 
 
 @pytest.mark.parametrize(

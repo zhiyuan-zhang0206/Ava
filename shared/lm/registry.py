@@ -47,7 +47,7 @@ code, an explicit user choice is ``.env``, a per-agent choice is the overlay.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 from dataclasses import fields as dataclass_fields
 from typing import Any
@@ -123,7 +123,13 @@ def _rebuild_derived_views() -> None:
     )
 
 
-def _validate_spec(model_id: str, spec: ModelSpec, *, anthropic_protocol: bool) -> None:
+def _validate_spec(
+    model_id: str,
+    spec: ModelSpec,
+    *,
+    anthropic_protocol: bool,
+    pending_price_models: Collection[str] = (),
+) -> None:
     """Fail fast on a registry gap for one spawnable model entry.
 
     A spawnable model missing a required fact would surface as a degraded UI row /
@@ -152,7 +158,7 @@ def _validate_spec(model_id: str, spec: ModelSpec, *, anthropic_protocol: bool) 
             f"spawnable model {model_id!r} is missing registry facts {missing} — "
             "fill them in its ModelSpec"
         )
-    if rates_at(model_id, input_tokens=0) is None:
+    if model_id not in pending_price_models and rates_at(model_id, input_tokens=0) is None:
         raise RuntimeError(
             f"spawnable model {model_id!r} has no current price — a catalog-priced "
             "model needs an archive entry; a plugin model needs a price in its "
@@ -183,6 +189,7 @@ def register_models(
     models: Mapping[str, ModelSpec],
     *,
     anthropic_protocol: bool = False,
+    pending_price_models: Collection[str] = (),
 ) -> None:
     """Merge a plugin provider's ModelSpec entries into MODELS.
 
@@ -191,6 +198,8 @@ def register_models(
     rebuilds the derived views in place; validates each new spawnable entry
     with the same facts/price/effort checks for every provider. A duplicate
     model id from another plugin is an error, never a precedence order.
+    `pending_price_models` names prices from the same provider registration
+    that are validated and installed immediately after this model pass.
     """
     for model_id, spec in models.items():
         if spec.provider != provider:
@@ -203,13 +212,18 @@ def register_models(
                 f"model id {model_id!r} is already registered by an earlier plugin — "
                 "model ids are flat and a duplicate is an error"
             )
-        _validate_spec(model_id, spec, anthropic_protocol=anthropic_protocol)
+        _validate_spec(
+            model_id,
+            spec,
+            anthropic_protocol=anthropic_protocol,
+            pending_price_models=pending_price_models,
+        )
     MODELS.update(models)
     _rebuild_derived_views()
 
 
-def _validate_registry() -> None:
-    """Validate core tuning defaults before plugins populate the model registry."""
+def _validate_registry(*, anthropic_protocol_by_model: Mapping[str, bool] | None = None) -> None:
+    """Validate shared defaults and the complete registered model graph."""
     for tuning_field in dataclass_fields(ModelTuning):
         if getattr(DEFAULT_TUNING, tuning_field.name) is None:
             raise RuntimeError(
@@ -220,7 +234,11 @@ def _validate_registry() -> None:
         _validate_spec(
             model_id,
             spec,
-            anthropic_protocol=False,
+            anthropic_protocol=(
+                False
+                if anthropic_protocol_by_model is None
+                else anthropic_protocol_by_model[model_id]
+            ),
         )
 
     # The supersession chain must stay coherent — a broken link would hide a
@@ -232,7 +250,7 @@ def _validate_registry() -> None:
         if replacement_id == model_id:
             raise RuntimeError(
                 f"model {model_id!r} lists itself as its own replacement — "
-                f"fix superseded_by in shared/lm/registry.py:MODELS"
+                "fix superseded_by in its provider plugin register() call"
             )
         if replacement_id not in MODELS:
             raise RuntimeError(

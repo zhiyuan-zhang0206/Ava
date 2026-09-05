@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 from langchain_core.messages import AIMessage
 
@@ -52,14 +54,45 @@ def test_openai_responses_status_incomplete_truncated():
     assert cat is StopCategory.TRUNCATED
 
 
+def test_openai_finish_reason_precedes_responses_status():
+    cat, raw = classify_stop(
+        _msg(
+            {
+                "model_provider": "openai",
+                "finish_reason": "length",
+                "status": "completed",
+            }
+        )
+    )
+    assert cat is StopCategory.TRUNCATED and raw == "length"
+
+
 def test_openai_responses_status_unknown_corrupted():
-    cat, _ = classify_stop(_msg({"model_provider": "openai", "status": "failed"}))
-    assert cat is StopCategory.CORRUPTED
+    cat, raw = classify_stop(_msg({"model_provider": "openai", "status": "failed"}))
+    assert cat is StopCategory.CORRUPTED and raw is None
 
 
 def test_openai_responses_no_status_no_finish_reason_corrupted():
-    cat, _ = classify_stop(_msg({"model_provider": "openai"}))
-    assert cat is StopCategory.CORRUPTED
+    cat, raw = classify_stop(_msg({"model_provider": "openai"}))
+    assert cat is StopCategory.CORRUPTED and raw is None
+
+
+def test_anthropic_ignores_openai_responses_status():
+    cat, raw = classify_stop(
+        _msg(
+            {
+                "model_provider": "anthropic",
+                "stop_reason": "end_turn",
+                "status": "incomplete",
+            }
+        )
+    )
+    assert cat is StopCategory.NORMAL and raw == "end_turn"
+
+
+def test_core_stop_classifier_has_no_openai_provider_branch():
+    source = (Path(__file__).resolve().parents[2] / "shared/lm/stop.py").read_text()
+    assert 'provider == "openai"' not in source
 
 
 def test_gemini_stop_normal():

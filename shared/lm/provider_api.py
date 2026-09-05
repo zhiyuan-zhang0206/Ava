@@ -34,9 +34,10 @@ Builder contract (plain Python, documented rather than schema'd — see
   history, or budget is visible.
 - Missing API key raises ``RuntimeError`` immediately (``require_key``) — a
   clear build-time error, not a server 401 mid-turn.
-- ``ctx.resolved_effort`` is clamped onto the endpoint's own vocabulary with
-  ``shared.lm._effort._clamp_effort`` before reaching the wire; unknown
-  strings must keep failing fast at build time.
+- ``ctx.resolved_effort`` keeps the provider's established wire semantics.
+  Builders with a constrained vocabulary clamp with
+  ``shared.lm._effort._clamp_effort``; the GPT builder preserves the resolved
+  cross-provider value verbatim.
 - ``thinking={"type": "disabled"}`` is honored per provider capability
   (mirror onto the local switch, or log-and-ignore like the Moonshot plugin)
   — the core dispatch resolves the cross-provider knobs first;
@@ -63,7 +64,7 @@ from shared.lm.stop import StopSpec, register_stop_spec
 # consumers of a *new* field must degrade when it is absent. (Mirrors the
 # plugin-spec-v2 ``engines.ava`` host-compatibility idea at the provider
 # contract level.)
-PROVIDER_API_VERSION = 1
+PROVIDER_API_VERSION = 2
 
 
 @dataclass(frozen=True)
@@ -215,11 +216,10 @@ def register(
     models: Mapping[str, ModelSpec],
     pricing: Mapping[str, PriceRates],
 ) -> None:
-    """The one entry point a provider.py calls. Order matters: prices land
-    first (model validation consults ``rates_at``), models second, then the
-    stop vocabulary, then the binding itself. Any failure propagates out of
-    the loader and fails the process — registration is fail-fast, not
-    best-effort.
+    """The one entry point a provider.py calls. Order matters: models validate
+    before prices mutate runtime state, then the stop vocabulary and binding
+    land. Any failure propagates out of the loader and fails the process —
+    registration is fail-fast, not best-effort.
     """
     plugin = _CURRENT_PLUGIN or "<unknown>"
     REGISTRY.ensure_available(binding, plugin=plugin)
@@ -244,6 +244,13 @@ def register(
                 f"implies {provider!r} — fix the ModelSpec.provider"
             )
 
+    register_models(
+        provider,
+        models,
+        anthropic_protocol=binding.anthropic_protocol,
+        pending_price_models=pricing.keys(),
+    )
+
     for model_id, price in pricing.items():
         register_plugin_price(
             model_id,
@@ -255,12 +262,6 @@ def register(
             vendor=price.vendor,
             plugin=plugin,
         )
-
-    register_models(
-        provider,
-        models,
-        anthropic_protocol=binding.anthropic_protocol,
-    )
 
     if binding.stop_spec is not None:
         register_stop_spec(binding.stop_spec, plugin=plugin)

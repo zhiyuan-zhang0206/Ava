@@ -4,7 +4,8 @@
 effective intervals, input-token tiers, recurring UTC windows, and provenance;
 provider plugins supply the current flat runtime rate for chat models, while
 catalog-only services such as embeddings continue to price directly from the
-archive. ``pricing_catalog.json`` is an empty schema-v2 compatibility shell.
+archive. ``pricing_catalog.json`` is an empty placeholder that runtime never
+loads; ``_load_catalog`` reads the archive.
 ``quote`` returns one selected rate triple with its cost atomically, and
 ``cost_usd`` remains the compatibility surface for existing readers. Schema v2
 requires each catalog entry to identify its vendor; the cross-line contract
