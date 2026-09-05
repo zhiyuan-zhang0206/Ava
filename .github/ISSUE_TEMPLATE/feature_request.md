@@ -5,6 +5,10 @@ labels: enhancement
 ---
 
 **Problem / use case**
+<!-- What you are trying to do today, and what is blocked or clumsy. -->
+
+**Desired behavior**
+<!-- What the feature should let you do, concretely. -->
 
 **Proposed direction**
 
