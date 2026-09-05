@@ -1,4 +1,4 @@
-# CI — the repo's only gate. GitHub-hosted ubuntu runners.
+# CI — the repo's only gate. GitHub-hosted runners.
 #
 # Hosted minutes are free and unmetered for public repos and public forks, so one
 # lane runs everywhere with no canonical-vs-fork gating — and the same economics
@@ -755,21 +755,94 @@ jobs:
       - name: Vendored PG + injected pgvector smoke (CREATE EXTENSION + query)
         run: uv run python scripts/pgvector_runtime_smoke.py
 
+  helper-signing-smoke:
+    name: permissions helper signing smoke (macOS)
+    runs-on: macos-15
+    timeout-minutes: 20
+    needs: [classify]
+    if: ${{ needs.classify.outputs.backend == 'true' }}
+    env:
+      AVA_DB_URL: ""
+      AVA_REDIS_URL: ""
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: 0.10.2
+          enable-cache: true
+
+      - name: Install Python deps
+        run: uv sync --frozen
+
+      - name: Create isolated Ava home
+        run: |
+          mkdir -p "$RUNNER_TEMP/ava-home"
+          echo "AVA_HOME=$RUNNER_TEMP/ava-home" >> "$GITHUB_ENV"
+
+      - name: Unlock login keychain
+        run: security unlock-keychain -p "" "$HOME/Library/Keychains/login.keychain-db"
+
+      - name: Real build + sign + DR verify
+        run: |
+          uv run python - <<'PY'
+          import json
+
+          from services.permissions_helper import client, lifecycle
+
+          lifecycle.ensure_signing_cert()
+
+          app, rebuilt = lifecycle.build_and_sign()
+          assert rebuilt is True, "the isolated first build must compile and sign"
+          first_dr = lifecycle._verify_dr(app)
+          assert first_dr == lifecycle._expected_dr()
+
+          same_app, rebuilt = lifecycle.build_and_sign()
+          assert same_app == app
+          assert rebuilt is False, "an unchanged signed build must be reused"
+
+          state_path = lifecycle._build_state_path()
+          state = json.loads(state_path.read_text())
+          state["source_hash"] = "ci-forced-rebuild"
+          state_path.write_text(json.dumps(state, indent=2, sort_keys=True) + "\n")
+
+          rebuilt_app, rebuilt = lifecycle.build_and_sign()
+          assert rebuilt_app == app
+          assert rebuilt is True, "a stale source hash must force a rebuild"
+          rebuilt_dr = lifecycle._verify_dr(rebuilt_app)
+          assert rebuilt_dr.encode() == first_dr.encode(), "the DR changed across re-signing"
+
+          # Bootstrap failure intentionally fails this lane: the hosted runner's
+          # user launchd chain is part of the production contract being tested.
+          lifecycle.install_and_load(rebuilt_app, rebuilt=True)
+          assert client.ping()["pong"] is True
+          PY
+
+      - name: Tear down helper launchd job
+        if: ${{ always() }}
+        run: |
+          export AVA_HOME="${AVA_HOME:-$RUNNER_TEMP/ava-home}"
+          label="$(uv run python -c 'from services.permissions_helper.lifecycle import _label; print(_label())' 2>/dev/null || true)"
+          if [[ -n "$label" ]]; then
+            launchctl bootout "gui/$(id -u)/$label" || true
+          fi
+
   backend:
     # The aggregator carrying the branch-protection check name:
     # skipped (= satisfied) when the diff has no backend side; otherwise green
-    # iff the static job and every pytest shard are green AND the combined
-    # coverage clears the gate.
+    # iff the static and native smoke jobs, every pytest shard, and the combined
+    # coverage gate are green.
     name: backend (pytest + pyright)
     runs-on: ubuntu-24.04
     timeout-minutes: 10
-    needs: [classify, backend-static, backend-structure, backend-shard, backend-serial, backend-pgvector-smoke]
+    needs: [classify, backend-static, backend-structure, backend-shard, backend-serial, backend-pgvector-smoke, helper-signing-smoke]
     if: ${{ always() && needs.classify.result == 'success' && needs.classify.outputs.backend == 'true' }}
     steps:
       - name: Verify shard results
-        if: ${{ needs.backend-static.result != 'success' || needs.backend-structure.result != 'success' || needs.backend-shard.result != 'success' || needs.backend-serial.result != 'success' || needs.backend-pgvector-smoke.result != 'success' }}
+        if: ${{ needs.backend-static.result != 'success' || needs.backend-structure.result != 'success' || needs.backend-shard.result != 'success' || needs.backend-serial.result != 'success' || needs.backend-pgvector-smoke.result != 'success' || needs.helper-signing-smoke.result != 'success' }}
         run: |
-          echo "a backend job did not succeed: static=${{ needs.backend-static.result }} structure=${{ needs.backend-structure.result }} shards=${{ needs.backend-shard.result }} serial=${{ needs.backend-serial.result }} pgvector-smoke=${{ needs.backend-pgvector-smoke.result }}"
+          echo "a backend job did not succeed: static=${{ needs.backend-static.result }} structure=${{ needs.backend-structure.result }} shards=${{ needs.backend-shard.result }} serial=${{ needs.backend-serial.result }} pgvector-smoke=${{ needs.backend-pgvector-smoke.result }} helper-signing-smoke=${{ needs.helper-signing-smoke.result }}"
           exit 1
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

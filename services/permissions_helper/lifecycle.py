@@ -314,6 +314,36 @@ def _verify_dr(app: Path) -> str:
     return actual
 
 
+def preflight_signing_smoke() -> None:
+    """Prove codesign and designated-requirement recovery before a rebuild."""
+    refusal = "signing smoke failed — refusing to rebuild/deploy; codesign or keychain unusable"
+    try:
+        expected_dr = _expected_dr()
+        with tempfile.TemporaryDirectory() as td:
+            scratch = Path(td) / "signing-smoke"
+            scratch.write_bytes(b"\x00")
+            _run(
+                [
+                    "codesign",
+                    "--sign",
+                    _CERT_CN,
+                    "--identifier",
+                    _BUNDLE_ID,
+                    "--requirements",
+                    f"=designated => {expected_dr}",
+                    str(scratch),
+                ]
+            )
+            actual_dr = _read_dr(scratch)
+    except (OSError, PermissionsHelperBuildError) as exc:
+        raise PermissionsHelperBuildError(f"{refusal}: {exc}") from exc
+    if actual_dr != expected_dr:
+        raise PermissionsHelperBuildError(
+            f"{refusal}: designated requirement mismatch "
+            f"(expected {expected_dr!r}, got {actual_dr!r})"
+        )
+
+
 def _build_state_path() -> Path:
     return _BUILD_DIR / _BUILD_STATE_NAME
 
@@ -508,6 +538,7 @@ def build_and_sign() -> tuple[Path, bool]:
         raise PermissionsHelperSigningUnavailableError(
             f"cannot sign the permissions helper as {_CERT_CN!r}: {blocked}. {_ACL_REMEDY}"
         )
+    preflight_signing_smoke()
 
     _BUILD_DIR.mkdir(parents=True, exist_ok=True)
     binary = _BUILD_DIR / "AvaPermissionsHelper"
