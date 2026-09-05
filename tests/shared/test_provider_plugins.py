@@ -103,7 +103,9 @@ def provider_plugin() -> Generator[Callable[..., None], None, None]:
     prices_snapshot = dict(pricing._PLUGIN_PRICES)
     stop_snapshot = dict(stop._BY_PROVIDER)
     for model_id in tuple(MODELS):
-        if model_id.startswith(("claude-", "deepseek-", "gemini-", "glm-", "gpt-", "qwen3.8-")):
+        if model_id.startswith(
+            ("claude-", "deepseek-", "gemini-", "glm-", "gpt-", "kimi-", "qwen3.8-")
+        ):
             MODELS.pop(model_id)
             pricing._PLUGIN_PRICES.pop(model_id, None)
     provider_api.REGISTRY.bindings.pop("claude-", None)
@@ -111,8 +113,10 @@ def provider_plugin() -> Generator[Callable[..., None], None, None]:
     provider_api.REGISTRY.bindings.pop("gemini-", None)
     provider_api.REGISTRY.bindings.pop("glm-", None)
     provider_api.REGISTRY.bindings.pop("gpt-", None)
+    provider_api.REGISTRY.bindings.pop("kimi-", None)
     provider_api.REGISTRY.bindings.pop("qwen3.8-", None)
     stop._BY_PROVIDER.pop("google_genai", None)
+    stop._BY_PROVIDER.pop("moonshot", None)
     _rebuild_derived_views()
     # Tests share one session AVA_HOME — remove anything this test created so
     # a later test's loader scan cannot see leftover plugin dirs.
@@ -379,6 +383,36 @@ def test_repo_zhipu_provider_is_enabled_and_registers_complete_contract() -> Non
     assert not binding.anthropic_protocol
     assert not binding.vision
     assert binding.stop_spec is None
+
+
+def test_repo_moonshot_provider_is_enabled_and_registers_complete_contract() -> None:
+    discovered = plugins_config._discover_plugins()
+    config = plugins_config.load_for_runtime(set(discovered))
+
+    assert config.plugins["lm_moonshot"].enabled
+    ensure_provider_plugins_loaded()
+
+    assert "kimi-k3" in MODELS
+    assert set(SUPPORTED_MODELS["kimi"]) == {"kimi-k3"}
+    assert pricing.model_vendor("kimi-k3") == "moonshot"
+
+    from shared.lm.factory import _MODEL_KEY_MAP, provider_key_map, provider_key_of_model
+
+    assert "kimi-" not in _MODEL_KEY_MAP
+    assert provider_key_map()["kimi-"] == ("Moonshot", None, "MOONSHOT_API_KEY")
+    assert provider_key_of_model("kimi-k3") == "kimi"
+    binding = provider_api.REGISTRY.bindings["kimi-"]
+    assert binding.prefix == "kimi-"
+    assert binding.provider_key is None
+    assert binding.effort_levels == ("low", "high", "max")
+    assert not binding.anthropic_protocol
+    assert binding.vision
+    assert binding.stop_spec == stop.StopSpec(
+        "moonshot",
+        "finish_reason",
+        frozenset({"stop", "tool_calls", "function_call"}),
+        frozenset({"length"}),
+    )
 
 
 def test_plugin_model_registers_and_builds(provider_plugin: Callable[..., None]) -> None:

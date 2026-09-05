@@ -440,7 +440,7 @@ class TestBuildChatModel:
         Reasoning streams in `additional_kwargs["reasoning_content"]` — the
         streaming fan-out and timeline handle both styles."""
         monkeypatch.setattr(settings.lm, "llm_override", "")
-        monkeypatch.setattr(settings.lm, "moonshot_api_key", SecretStr("sk-kimi"))
+        monkeypatch.setenv("MOONSHOT_API_KEY", "sk-kimi")
         from langchain_moonshot import ChatMoonshot
 
         m = build_chat_model("kimi-k3")
@@ -448,7 +448,8 @@ class TestBuildChatModel:
 
     def test_kimi_missing_key_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(settings.lm, "llm_override", "")
-        monkeypatch.setattr(settings.lm, "moonshot_api_key", None)
+        monkeypatch.setattr(settings.lm, "moonshot_api_key", SecretStr("legacy-settings-key"))
+        monkeypatch.delenv("MOONSHOT_API_KEY", raising=False)
         with pytest.raises(RuntimeError, match="MOONSHOT_API_KEY"):
             build_chat_model("kimi-k3")
 
@@ -565,7 +566,7 @@ class TestBuildChatModel:
         engine_overloaded_error (K3 measured: streaming ~40% 429 → non-streaming
         0% 429), so the construction-time default streams for progressive display."""
         monkeypatch.setattr(settings.lm, "llm_override", "")
-        monkeypatch.setattr(settings.lm, "moonshot_api_key", SecretStr("sk-test"))
+        monkeypatch.setenv("MOONSHOT_API_KEY", "sk-test")
         from langchain_moonshot import ChatMoonshot
 
         m = build_chat_model("kimi-k3")
@@ -577,7 +578,7 @@ class TestBuildChatModel:
         _consume_llm fallback. Model-level granularity lets us add or remove
         individual models without changing the prefix-wide logic."""
         monkeypatch.setattr(settings.lm, "llm_override", "")
-        monkeypatch.setattr(settings.lm, "moonshot_api_key", SecretStr("sk-test"))
+        monkeypatch.setenv("MOONSHOT_API_KEY", "sk-test")
         from langchain_moonshot import ChatMoonshot
 
         m = build_chat_model("kimi-k2.7-code")
@@ -672,7 +673,7 @@ class TestBuildChatModel:
         """Explicit streaming=True overrides the Kimi default (False).
         A caller that knows the endpoint is healthy can opt back in."""
         monkeypatch.setattr(settings.lm, "llm_override", "")
-        monkeypatch.setattr(settings.lm, "moonshot_api_key", SecretStr("sk-test"))
+        monkeypatch.setenv("MOONSHOT_API_KEY", "sk-test")
         from langchain_moonshot import ChatMoonshot
 
         m = build_chat_model("kimi-k3", streaming=True)
@@ -928,7 +929,7 @@ class TestReasoningEffortDispatch:
         """kimi-k3 defaults max (most expensive) and is non-streaming — effort is the
         only downgrade knob, via the top-level reasoning_effort body field (extra_body channel)."""
         monkeypatch.setattr(settings.lm, "llm_override", "")
-        monkeypatch.setattr(settings.lm, "moonshot_api_key", SecretStr("sk-kimi"))
+        monkeypatch.setenv("MOONSHOT_API_KEY", "sk-kimi")
         monkeypatch.setattr(settings.lm, "reasoning_effort", "low")
         from langchain_moonshot import ChatMoonshot
 
@@ -939,7 +940,7 @@ class TestReasoningEffortDispatch:
     def test_kimi_medium_clamps_to_high(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """kimi enum is low/high/max — medium is equidistant, ties round up to high."""
         monkeypatch.setattr(settings.lm, "llm_override", "")
-        monkeypatch.setattr(settings.lm, "moonshot_api_key", SecretStr("sk-kimi"))
+        monkeypatch.setenv("MOONSHOT_API_KEY", "sk-kimi")
         monkeypatch.setattr(settings.lm, "reasoning_effort", "medium")
         from langchain_moonshot import ChatMoonshot
 
@@ -953,7 +954,7 @@ class TestReasoningEffortDispatch:
         """K3 cannot disable thinking and does not accept the K2.x thinking parameter —
         a disabled request logs a warning and ignores, passing nothing (passing would 400)."""
         monkeypatch.setattr(settings.lm, "llm_override", "")
-        monkeypatch.setattr(settings.lm, "moonshot_api_key", SecretStr("sk-kimi"))
+        monkeypatch.setenv("MOONSHOT_API_KEY", "sk-kimi")
         monkeypatch.setattr(settings.lm, "reasoning_effort", "")
         from langchain_moonshot import ChatMoonshot
 
@@ -1286,6 +1287,7 @@ class TestValidateModelConfig:
         monkeypatch.delenv("OPENAI_API_KEY", raising=False)
         monkeypatch.delenv("GLM_API_KEY", raising=False)
         monkeypatch.delenv("DASHSCOPE_API_KEY", raising=False)
+        monkeypatch.delenv("MOONSHOT_API_KEY", raising=False)
 
     @staticmethod
     def _set_plugin_keys(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1298,6 +1300,7 @@ class TestValidateModelConfig:
                 "OPENAI_API_KEY": "sk-test",
                 "GLM_API_KEY": "sk-test",
                 "DASHSCOPE_API_KEY": "sk-test",
+                "MOONSHOT_API_KEY": "sk-test",
             },
         )
 
@@ -1372,7 +1375,6 @@ class TestValidateModelConfig:
             # Only testing name existence, not key (key validation is separate)
             self._set_plugin_keys(monkeypatch)
             monkeypatch.setattr(settings.lm, "xiaomi_api_key", SecretStr("sk-test-mimo"))
-            monkeypatch.setattr(settings.lm, "moonshot_api_key", SecretStr("sk-test-moonshot"))
             result = validate_model_config(model=m)
             assert result == m
 
@@ -1429,6 +1431,8 @@ class TestValidateModelConfig:
     def test_missing_kimi_key_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """MOONSHOT_API_KEY not set → ValueError."""
         self._clear_all_keys(monkeypatch)
+        monkeypatch.setattr(settings.lm, "moonshot_api_key", SecretStr("legacy-settings-key"))
+        monkeypatch.delenv("MOONSHOT_API_KEY", raising=False)
         with pytest.raises(ValueError, match="MOONSHOT_API_KEY"):
             validate_model_config(model="kimi-k3")
 
@@ -1541,6 +1545,7 @@ class TestThinkingDisabledAcrossRoster:
         monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
         monkeypatch.setenv("GLM_API_KEY", "sk-test")
         monkeypatch.setenv("DASHSCOPE_API_KEY", "sk-test")
+        monkeypatch.setenv("MOONSHOT_API_KEY", "sk-test")
 
     @pytest.mark.parametrize("model", [m for models in SUPPORTED_MODELS.values() for m in models])
     def test_roster_model_constructs_with_thinking_disabled(

@@ -877,6 +877,29 @@
           ]
         }
       ]
+    },
+    "kimi-k3": {
+      "vendor": "moonshot",
+      "source_url": "https://platform.moonshot.ai/docs/pricing",
+      "source_checked_at": "2026-07-25",
+      "periods": [
+        {
+          "effective_from": null,
+          "effective_until": null,
+          "tiers": [
+            {
+              "input_tokens_min": 0,
+              "input_tokens_max": null,
+              "rates": {
+                "input": "3.0",
+                "cache_read": "0.30",
+                "output": "15.0"
+              },
+              "utc_daily_overrides": []
+            }
+          ]
+        }
+      ]
     }
   }
 }

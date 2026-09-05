@@ -21,7 +21,7 @@ Current provider matrix:
 kimi uses `ChatMoonshot` (`langchain-moonshot`) and captures reasoning in
 `additional_kwargs["reasoning_content"]` (not canonical content blocks) — the
 streaming fan-out (`RedisStreamHandler`) and timeline (`shared/timeline.py`)
-handle that style. The pilot provider extraction's binding belongs in a plugin.
+handle that style. Its binding lives in `ava_builtins/plugins/lm_moonshot`.
 
 glm / mimo / qwen use `ReasoningContentChatModel` (`shared/lm/_reasoning_compat.py`), a
 ChatOpenAI subclass folding `reasoning_content` deltas into canonical
@@ -88,11 +88,7 @@ from shared.lm._effort import (
 from shared.lm._plugin_providers import (
     ensure_provider_plugins_loaded as ensure_provider_plugins_loaded,
 )  # re-exported (gateway entry points call it before reading the registry)
-from shared.lm._providers import (
-    ThinkingConfig,
-    _build_kimi_model,
-    _build_mimo_model,
-)
+from shared.lm._providers import ThinkingConfig, _build_mimo_model
 from shared.lm.registry import (
     MODEL_CONTEXT_WINDOW as MODEL_CONTEXT_WINDOW,  # re-exported catalog view
 )
@@ -124,18 +120,13 @@ class _LLMFactory(Protocol):
     def __call__(self, model: str) -> BaseChatModel: ...
 
 
-# Prefix fallback for UNREGISTERED model ids — registered ids are authoritative
-# in `ModelSpec.media_types` (see `model_supports_vision`). Kimi accepts image
-# input on its OpenAI-compatible endpoint, and every Qwen model in the registry
-# accepts native images. MiMo and GLM are text-only there, so a HumanMessage
-# carrying an image block would 400
-# (or be silently dropped) mid-turn. The message endpoint gates on this to 422 an
-# image addressed to a text-only agent up front, rather than letting the LLM call
-# fail after the inbound is already queued. A prefix is only correct while every
-# unregistered model under it shares one answer — the deepseek family no longer
-# does (v4-flash-vision-exp is multimodal, pro/flash are not), which is exactly
-# why the registered gate is per-model.
-_VISION_MODEL_PREFIXES: tuple[str, ...] = ("kimi-",)
+# Prefix fallback for UNREGISTERED core model ids — registered ids are
+# authoritative in `ModelSpec.media_types` (see `model_supports_vision`), and
+# provider plugins declare their fallback through `ProviderBinding.vision`.
+# No remaining core provider accepts image input. The message endpoint uses
+# this gate to reject an image for a text-only agent before the inbound is
+# queued and the provider call can fail or silently drop it.
+_VISION_MODEL_PREFIXES: tuple[str, ...] = ()
 
 
 def media_types_for_model(model: str) -> frozenset[str]:
@@ -229,7 +220,6 @@ def provider_key_of_model(model: str) -> str | None:
 #
 _MODEL_KEY_MAP: dict[str, tuple[str, str, str]] = {
     "mimo-": ("Xiaomi", "xiaomi_api_key", "MIMO_API_KEY"),
-    "kimi-": ("Moonshot", "moonshot_api_key", "MOONSHOT_API_KEY"),
 }
 
 # A plugin prefix may never shadow or nest inside a core prefix — provider_api
@@ -526,14 +516,6 @@ def build_chat_model(
 
     if model.startswith("mimo-"):
         return _build_mimo_model(
-            model,
-            thinking=thinking,
-            resolved_effort=resolved_effort,
-            disable_streaming=disable_streaming,
-            timeout=timeout,
-        )
-    if model.startswith("kimi-"):
-        return _build_kimi_model(
             model,
             thinking=thinking,
             resolved_effort=resolved_effort,

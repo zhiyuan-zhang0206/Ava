@@ -110,11 +110,9 @@ def test_pricing_catalog_schema_v2_vendor_lock() -> None:
     assert {
         "gemini-embedding-2": models["gemini-embedding-2"]["vendor"],
         "mimo-v2.5-pro": models["mimo-v2.5-pro"]["vendor"],
-        "kimi-k3": models["kimi-k3"]["vendor"],
     } == {
         "gemini-embedding-2": "google",
         "mimo-v2.5-pro": "xiaomi",
-        "kimi-k3": "moonshot",
     }
 
 
@@ -207,6 +205,15 @@ def test_glm_catalog_entries_live_only_in_the_archive() -> None:
         "glm-5.3",
         "glm-5.3-flash",
     }
+
+    assert expected.isdisjoint(runtime_models)
+    assert expected <= archive_models.keys()
+
+
+def test_kimi_catalog_entries_live_only_in_the_archive() -> None:
+    runtime_models = _pricing_catalog_models(_pricing_catalog_raw())
+    archive_models = _pricing_catalog_models(_pricing_archive_raw())
+    expected = {"kimi-k3"}
 
     assert expected.isdisjoint(runtime_models)
     assert expected <= archive_models.keys()
@@ -607,6 +614,25 @@ def test_glm_plugin_prices_equal_archive_current_base_tier(
             archive_models[model]["source_url"],
             archive_models[model]["source_checked_at"],
         )
+
+
+def test_kimi_plugin_prices_equal_archive_current_base_tier(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    model = "kimi-k3"
+    plugin_rates = pricing._PLUGIN_PRICES[model].rates
+    archive_raw = _pricing_archive_raw()
+    archive_models = _pricing_catalog_models(archive_raw)
+    monkeypatch.setattr(pricing, "_CATALOG", _parse_catalog(archive_raw))
+    current_instant = datetime(2026, 9, 5, tzinfo=UTC)
+
+    selected = rates_at(model, current_instant, input_tokens=0)
+    assert selected is not None
+    assert plugin_rates.as_tuple() == pytest.approx(selected.as_tuple())  # pyright: ignore[reportUnknownMemberType]
+    assert pricing.plugin_price_provenance(model) == (
+        archive_models[model]["source_url"],
+        archive_models[model]["source_checked_at"],
+    )
 
 
 @pytest.mark.parametrize(

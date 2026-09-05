@@ -36,8 +36,8 @@ Builder contract (plain Python, documented rather than schema'd — see
   ``shared.lm._effort._clamp_effort`` before reaching the wire; unknown
   strings must keep failing fast at build time.
 - ``thinking={"type": "disabled"}`` is honored per provider capability
-  (mirror onto the local switch, or log-and-ignore like the kimi core
-  branches) — the core dispatch resolves the cross-provider knobs first;
+  (mirror onto the local switch, or log-and-ignore like the Moonshot plugin)
+  — the core dispatch resolves the cross-provider knobs first;
   the builder owns only the wire shape.
 - A builder wrapping ``ChatAnthropic`` must set ``anthropic_protocol=True``
   so registration validates ``max_output_tokens`` on every spawnable model

@@ -64,13 +64,6 @@ _BY_PROVIDER: dict[str, StopSpec] = {
         frozenset({"stop", "tool_calls", "function_call"}),
         frozenset({"length"}),
     ),
-    # ChatMoonshot is OpenAI-compatible and uses this finish_reason vocabulary.
-    "moonshot": StopSpec(
-        "moonshot",
-        "finish_reason",
-        frozenset({"stop", "tool_calls", "function_call"}),
-        frozenset({"length"}),
-    ),
 }
 
 

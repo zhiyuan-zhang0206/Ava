@@ -33,7 +33,6 @@ from loguru import logger
 # the vocabulary is an endpoint contract shared by every model of the
 # provider.
 _PROVIDER_EFFORT_LEVELS: dict[str, tuple[str, ...]] = {
-    "kimi": ("low", "high", "max"),
     "mimo": ("none", "high"),
 }
 

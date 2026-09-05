@@ -223,7 +223,7 @@ def test_empty_and_all_skipped_entries_preserve_the_text_notice(tmp_path: Path) 
     assert "not delivered: your model cannot receive image" in pack.text
 
 
-def test_media_types_use_registry_plugin_then_vision_prefix_fallback(
+def test_media_types_use_registry_then_plugin_vision_fallback(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     binding = ProviderBinding(
@@ -233,7 +233,7 @@ def test_media_types_use_registry_plugin_then_vision_prefix_fallback(
         build=lambda _ctx: FakeListChatModel(responses=["unused"]),
         vision=True,
     )
-    monkeypatch.setattr(provider_api.REGISTRY, "bindings", {binding.prefix: binding})
+    monkeypatch.setitem(provider_api.REGISTRY.bindings, binding.prefix, binding)
 
     assert media_types_for_model("gemini-3.8-flash") == frozenset(
         {"image", "pdf", "audio", "video"}

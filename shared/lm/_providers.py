@@ -14,14 +14,9 @@ from __future__ import annotations
 from typing import Any, Literal, NotRequired, TypedDict
 
 from langchain_core.language_models.chat_models import BaseChatModel
-from loguru import logger
 
 from shared.config import settings
-from shared.lm._effort import (
-    _PROVIDER_EFFORT_LEVELS,
-    _clamp_effort,
-    mimo_extra_body,
-)
+from shared.lm._effort import mimo_extra_body
 
 
 class ThinkingConfig(TypedDict):
@@ -34,8 +29,8 @@ class ThinkingConfig(TypedDict):
     vs signature-only. Only the claude / deepseek branches pass the dict
     through on the wire; every other branch reads `type` and mirrors
     disabled onto its own switch (gemini thinking_level, gpt
-    reasoning.effort, mimo / glm body thinking) — kimi cannot
-    disable reasoning and log a warning instead.
+    reasoning.effort, mimo body thinking) — kimi cannot disable reasoning
+    and logs a warning instead.
     """
 
     type: Literal["enabled", "disabled", "adaptive"]
@@ -91,57 +86,4 @@ def _build_mimo_model(
         disable_streaming=disable_streaming,
         timeout=timeout,
         **mimo_kwargs,
-    )
-
-
-def _build_kimi_model(
-    model: str,
-    *,
-    thinking: ThinkingConfig | None,
-    resolved_effort: str,
-    disable_streaming: bool,
-    timeout: float | None = None,
-) -> BaseChatModel:
-    """kimi-* branch: ChatMoonshot (OpenAI-compatible). K3's thinking is
-    always on — a caller disabling it gets a warning. Reasoning effort
-    rides the top-level `reasoning_effort` body field via extra_body."""
-    from langchain_moonshot import ChatMoonshot
-
-    # Moonshot Kimi API is OpenAI-compatible (https://api.moonshot.ai/v1),
-    # standard `Authorization: Bearer` auth. K2.7 thinking is on by default,
-    # streamed in the delta's `reasoning_content` field. ChatMoonshot captures
-    # reasoning in `additional_kwargs["reasoning_content"]`; the streaming
-    # fan-out (`RedisStreamHandler`) and timeline (`shared/timeline.py`) both
-    # read that key so reasoning renders through the same path as every other
-    # provider.
-    if settings.lm.moonshot_api_key is None:
-        raise RuntimeError(
-            "MOONSHOT_API_KEY not set — kimi-* model needs this key; "
-            "configure in ~/.ava/.env or export before starting"
-        )
-    # K3's thinking is always on and cannot be turned off, and the
-    # K2.x-era `thinking` request parameter is not accepted by K3 — warn
-    # instead of silently dropping the caller's intent. (Do NOT wire
-    # ChatMoonshot's `thinking` field: it emits that K2.x parameter.)
-    if thinking is not None and thinking.get("type") == "disabled":
-        logger.warning(f"{model} cannot disable thinking; thinking={{'type': 'disabled'}} ignored")
-    # Reasoning effort rides the top-level `reasoning_effort` body field,
-    # delivered via extra_body (Kimi's enum is low/high/max, default max —
-    # the only way to run K3 below its most expensive tier).
-    kimi_kwargs: dict[str, Any] = {}
-    if resolved_effort:
-        kimi_kwargs["extra_body"] = {
-            "reasoning_effort": _clamp_effort(
-                resolved_effort,
-                _PROVIDER_EFFORT_LEVELS["kimi"],
-                target="kimi",
-            )
-        }
-    return ChatMoonshot(
-        model=model,  # type: ignore[call-arg]
-        api_key=settings.lm.moonshot_api_key.get_secret_value(),  # type: ignore[arg-type]
-        stream_usage=True,
-        disable_streaming=disable_streaming,
-        timeout=timeout,
-        **kimi_kwargs,
     )
