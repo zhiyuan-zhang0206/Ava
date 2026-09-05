@@ -2,10 +2,14 @@
 
 An ignore is a zombie whenever its effective diagnostic severity is not an
 error: it hides no merge-blocking finding and misstates the local type contract.
-Effective severity combines strict-mode defaults with the global and execution-
-environment overrides in ``pyproject.toml``. A bidirectional registry allows
-the existing debt while rejecting both new zombies and stale entries after a
-zombie is removed.
+This definition rests on the CI contract that only error-severity Pyright
+diagnostics gate merge (``uv run pyright`` and the pre-commit hook both exit 0
+on warnings — see the [tool.pyright] ladder comment in pyproject.toml); if
+warning-severity diagnostics ever become blocking, this classification must
+be revisited. Effective severity combines strict-mode defaults with the
+global and execution-environment overrides in ``pyproject.toml``. A
+bidirectional registry allows the existing debt while rejecting both new
+zombies and stale entries after a zombie is removed.
 
 Run ``--freeze`` only to establish a reviewed baseline. ``--check`` is the
 default CI path. ``--verify`` removes ignores in a temporary sibling and asks
@@ -604,7 +608,12 @@ def _build_parser() -> argparse.ArgumentParser:
     modes = parser.add_mutually_exclusive_group()
     modes.add_argument("--freeze", action="store_true", help="replace the registry")
     modes.add_argument("--check", action="store_true", help="check the registry (default)")
-    modes.add_argument("--verify", nargs="+", metavar="FILE", help="verify removable ignores")
+    modes.add_argument(
+        "--verify",
+        nargs="+",
+        metavar="FILE",
+        help="verify removable ignores (warning-severity release is tolerated; only new errors reject)",
+    )
     modes.add_argument("--strip", nargs="+", metavar="FILE", help="remove certified ignores")
     parser.add_argument(
         "--all-tier",
