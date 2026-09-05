@@ -24,6 +24,7 @@ from shared.events.payloads import (
     HeartbeatPaused,
     LlmProviderError,
     LlmUsage,
+    LokiWritePathProbeFailed,
     NodeExit,
     PluginActivation,
     RetentionClass,
@@ -409,6 +410,12 @@ _EVENTS_RUNTIME: dict[str, EventSpec] = {
     ),
     "delivery_stalled": _telemetry(
         "delivery_stalled", "delivery backlog", payload=DeliveryStalled, tier="anomaly"
+    ),
+    "loki_write_path_probe_failed": _telemetry(
+        "loki_write_path_probe_failed",
+        "Loki write-path probe failed",
+        payload=LokiWritePathProbeFailed,
+        tier="anomaly",
     ),
     "delivery_poisoned": _telemetry(
         "delivery_poisoned",

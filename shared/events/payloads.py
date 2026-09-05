@@ -393,6 +393,13 @@ class DeliveryStalled(TypedDict):
     age_s: float
 
 
+class LokiWritePathProbeFailed(TypedDict):
+    """`loki_write_path_probe_failed` payload — LGTM write-path healthcheck."""
+
+    consecutive_failures: int
+    reason: str
+
+
 class DeliveryPoisoned(TypedDict):
     """`delivery_poisoned` payload — delivery watchdog dispatch guard."""
 

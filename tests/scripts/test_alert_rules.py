@@ -50,6 +50,7 @@ _EXPECTED_UIDS = {
     "ava-ops-llm-latency-p95",
     "ava-ops-delivery-stalled-backlog",
     "ava-ops-events-freshness",
+    "ava-ops-events-low-water",
     "ava-ops-gateway-metrics-silent",
     "ava-ops-watchdog-tick-stale",
     "ava-ops-checkpoint-blobs-warning",
@@ -66,6 +67,8 @@ _EXPECTED_UIDS = {
     "ava-ops-host-cpu-saturated",
     "ava-ops-host-memory-pressure",
     "ava-ops-host-disk-watermark",
+    "ava-ops-host-disk-watermark-93",
+    "ava-ops-host-disk-watermark-95",
     "ava-ops-pg-connection-saturation",
     "ava-ops-redis-memory",
     # collector delivery layer
@@ -88,6 +91,8 @@ _INFRA_RULE_METRICS = {
     "ava-ops-host-cpu-saturated": "system_cpu_utilization_ratio",
     "ava-ops-host-memory-pressure": "system_memory_utilization_ratio",
     "ava-ops-host-disk-watermark": "system_filesystem_utilization_ratio",
+    "ava-ops-host-disk-watermark-93": "system_filesystem_utilization_ratio",
+    "ava-ops-host-disk-watermark-95": "system_filesystem_utilization_ratio",
     "ava-ops-pg-connection-saturation": "postgresql_backends",
     "ava-ops-redis-memory": "redis_memory_used_bytes",
 }
@@ -101,7 +106,7 @@ def _load_groups() -> list[dict[str, Any]]:
     assert [group["name"] for group in groups] == ["ava-ops", "ava-ops-slow"]
     assert [group["folder"] for group in groups] == ["Ava", "Ava"]
     assert [group["interval"] for group in groups] == ["1m", "5m"]
-    assert [len(group["rules"]) for group in groups] == [21, 9]
+    assert [len(group["rules"]) for group in groups] == [24, 9]
     return groups
 
 
@@ -283,6 +288,28 @@ def test_freshness_rule_is_absent_over_time() -> None:
     assert any("absent_over_time" in e for e in exprs)
     assert any("[5m]" in e for e in exprs)
     assert _threshold_params(rules["ava-ops-events-freshness"]) == [[0]]
+
+
+def test_events_low_water_rule_detects_partial_write_loss() -> None:
+    rules = {r["uid"]: r for r in _load_rules()}
+    rule = rules["ava-ops-events-low-water"]
+
+    assert _exprs(rule, "loki") == [
+        'sum(count_over_time({service_name="unknown_service"} | json | '
+        'cluster=".ava" [5m])) or vector(0)'
+    ]
+    assert rule["for"] == "10m"
+    assert rule["noDataState"] == "OK"
+    assert rule["execErrState"] == "OK"
+    assert rule["labels"] == {
+        "severity": "warning",
+        "ruleUID": "ava-ops-events-low-water",
+        "metric": "events_freshness",
+        "team": "ava-ops",
+    }
+    assert _threshold_params(rule) == [[150]]
+    threshold = next(d for d in rule["data"] if d["model"].get("type") == "threshold")
+    assert threshold["model"]["conditions"][0]["evaluator"]["type"] == "lt"
 
 
 def test_gateway_metrics_silence_rule_uses_heartbeat_counter() -> None:
@@ -470,26 +497,40 @@ def test_infra_rule_groups_by_machine_name(uid: str) -> None:
     assert "{{ $labels.machine_name }}" in rules[uid]["annotations"]["summary"]
 
 
-def test_disk_watermark_rule_is_per_mountpoint() -> None:
+@pytest.mark.parametrize(
+    "uid",
+    [
+        "ava-ops-host-disk-watermark",
+        "ava-ops-host-disk-watermark-93",
+        "ava-ops-host-disk-watermark-95",
+    ],
+)
+def test_disk_watermark_rule_is_per_mountpoint(uid: str) -> None:
     """The volume is the actionable unit: pg data, the traces mirror and the
     LGTM volumes can sit on different filesystems, and a max over all of them
     would name no path to clear."""
     rules = {r["uid"]: r for r in _load_rules()}
-    expr = _exprs(rules["ava-ops-host-disk-watermark"], "prometheus")[0]
+    expr = _exprs(rules[uid], "prometheus")[0]
     assert "by (machine_name, mountpoint)" in expr
-    assert (
-        "{{ $labels.mountpoint }}" in rules["ava-ops-host-disk-watermark"]["annotations"]["summary"]
-    )
+    assert "{{ $labels.mountpoint }}" in rules[uid]["annotations"]["summary"]
 
 
-def test_disk_watermark_rule_excludes_wsl_docker_desktop_mount() -> None:
+@pytest.mark.parametrize(
+    "uid",
+    [
+        "ava-ops-host-disk-watermark",
+        "ava-ops-host-disk-watermark-93",
+        "ava-ops-host-disk-watermark-95",
+    ],
+)
+def test_disk_watermark_rule_excludes_wsl_docker_desktop_mount(uid: str) -> None:
     """The wsl machine's docker-desktop VM image is a loop device mounted
     read-only under /mnt/wsl/docker-desktop/* and reports a constant 1.0
     utilization — a by-design non-Ava asset, not disk growth. The rule must
     never alert on it; the mountpoint prefix is WSL-specific, so the matcher
     cannot hide a real volume on any other machine (task #2024)."""
     rules = {r["uid"]: r for r in _load_rules()}
-    expr = _exprs(rules["ava-ops-host-disk-watermark"], "prometheus")[0]
+    expr = _exprs(rules[uid], "prometheus")[0]
     assert 'mountpoint!~"/mnt/wsl/docker-desktop.*"' in expr
     # the grouping contract survives the matcher: still per-machine, per-mount
     assert "by (machine_name, mountpoint)" in expr
@@ -504,6 +545,8 @@ def test_infra_ratio_rules_round_for_readability() -> None:
         "ava-ops-host-cpu-saturated",
         "ava-ops-host-memory-pressure",
         "ava-ops-host-disk-watermark",
+        "ava-ops-host-disk-watermark-93",
+        "ava-ops-host-disk-watermark-95",
         "ava-ops-pg-connection-saturation",
     ):
         expr = _exprs(rules[uid], "prometheus")[0]
@@ -519,8 +562,33 @@ def test_infra_rule_thresholds() -> None:
     assert _threshold_params(rules["ava-ops-host-cpu-saturated"]) == [[0.9]]
     assert _threshold_params(rules["ava-ops-host-memory-pressure"]) == [[0.9]]
     assert _threshold_params(rules["ava-ops-host-disk-watermark"]) == [[0.9]]
+    assert _threshold_params(rules["ava-ops-host-disk-watermark-93"]) == [[0.93]]
+    assert _threshold_params(rules["ava-ops-host-disk-watermark-95"]) == [[0.95]]
     assert _threshold_params(rules["ava-ops-pg-connection-saturation"]) == [[0.8]]
     assert _threshold_params(rules["ava-ops-redis-memory"]) == [[2147483648]]
+
+
+def test_disk_watermark_escalation_tiers() -> None:
+    rules = {r["uid"]: r for r in _load_rules()}
+    baseline_expr = _exprs(rules["ava-ops-host-disk-watermark"], "prometheus")
+    expectations = {
+        "ava-ops-host-disk-watermark-93": ("warning", "15m"),
+        "ava-ops-host-disk-watermark-95": ("critical", "5m"),
+    }
+
+    for uid, (severity, hold) in expectations.items():
+        rule = rules[uid]
+        assert _exprs(rule, "prometheus") == baseline_expr
+        assert rule["for"] == hold
+        assert rule["labels"] == {
+            "severity": severity,
+            "ruleUID": uid,
+            "metric": "host_disk",
+            "team": "ava-ops",
+        }
+        assert "{{ $labels.machine_name }}" in rule["annotations"]["summary"]
+        assert "{{ $labels.mountpoint }}" in rule["annotations"]["summary"]
+        assert "{{ $values.C }}" in rule["annotations"]["summary"]
 
 
 def test_collector_queue_pressure_is_current_and_per_exporter() -> None:
