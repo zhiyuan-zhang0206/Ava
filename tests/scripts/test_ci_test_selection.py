@@ -37,6 +37,7 @@ def test_shadow_jobs_are_non_gating_and_compare_matching_pytest_populations() ->
         "backend-shard",
         "backend-serial",
         "backend-pgvector-smoke",
+        "helper-signing-smoke",
     ]
     assert jobs["test-selection-shadow-report"]["needs"] == [
         "classify",
