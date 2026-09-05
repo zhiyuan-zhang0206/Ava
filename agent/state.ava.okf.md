@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Agent State
-description: "Ava agent's LangGraph state management system. Base `BaseAgentState` has seven top-level channels plus five nested sub-states: `compact` / `attach` / `memory` / `context_reset` / `capabilities`."
+description: "Ava agent's LangGraph conversation, lifecycle, takeover receipt, and plugin state channels."
 tags: []
 ---
 
@@ -9,11 +9,16 @@ tags: []
 
 ## What it is
 
-Ava agent's LangGraph state management system. Base `BaseAgentState` has seven top-level fields — `messages` (cross-turn LLM history, `add_messages` reducer wrapped by the append-only guard `guarded_add_messages`), `halted`, `turn_active`, `exit_requested`, `turn_idle`, `update_initiated`, and `active_task_id`; plus five nested sub-states — `compact` (`CompactState`: version and reminder bookkeeping), `attach` (`AttachState`: resolved files pending next-turn delivery), `memory` (`MemoryState`: recalled paths, union-reducer channel), `context_reset` (`ContextReset`: parked tail + resume target), and `capabilities` (`CapabilitiesState`: indexed skills). Plugins register whole Pydantic BaseModel chunks via `register_plugin_state(Cls)`, and the framework automatically merges them into `AgentState`.
+Ava agent's LangGraph state management system. Base `BaseAgentState` carries conversation and lifecycle channels, plus nested `compact`, `circuit`, `attach`, `memory`, `context_reset`, and `capabilities` state. Plugins register whole Pydantic BaseModel chunks via `register_plugin_state(Cls)`, and the framework automatically merges them into `AgentState`.
+
+`impersonation_request_id` records the last consent request and version across
+compaction. `impersonation_applied` records the external lease and plugin-log
+version applied in the same checkpoint as its delta; recovery uses it to avoid
+repeating reducers after an acknowledgement failure. See [[impersonation.ava.okf.md]].
 
 ## Core Responsibilities
 
-- **BaseAgentState**: seven top-level channels `messages` (guarded `add_messages` reducer) / `halted` / `turn_active` / `exit_requested` / `turn_idle` / `update_initiated` / `active_task_id`. Claim sets `active_task_id` only from an explicitly task-associated system note and clears it for chat or unassociated inbound work; a co-batched set of distinct task ids is likewise untagged because it drives one LLM turn. LLM usage attribution never follows task ownership. Nested last-value channels are `compact` (`CompactState`) / `attach` (`AttachState`) / `context_reset` (`ContextReset`) / `capabilities` (`CapabilitiesState`); `memory` (`MemoryState`) has its union reducer. `agent/state.py:_BASE_STATE_FIELDS` derives from `BaseAgentState.model_fields` (`state._BASE_FIELDS`), auto-syncing the plugin-write guard with base fields.
+- **BaseAgentState**: `messages` (guarded `add_messages` reducer), lifecycle and turn flags, takeover receipts, and `active_task_id`. Claim sets `active_task_id` only from an explicitly task-associated system note and clears it for chat or unassociated inbound work; a co-batched set of distinct task ids is likewise untagged because it drives one LLM turn. LLM usage attribution never follows task ownership. Nested last-value channels are `compact` (`CompactState`) / `circuit` (`CircuitState`) / `attach` (`AttachState`) / `context_reset` (`ContextReset`) / `capabilities` (`CapabilitiesState`); `memory` (`MemoryState`) has its union reducer. `agent/state.py:_BASE_STATE_FIELDS` derives from `BaseAgentState.model_fields` (`state._BASE_FIELDS`), auto-syncing the plugin-write guard with base fields.
 - **Plugin state registration**: `register_plugin_state(Cls) → PluginStateHandle[Cls]`
   - Field names overlapping with BaseAgentState → treated as modifying base fields, no prefix added, types must exactly match
   - Field names disjoint → automatically prefixed with `<plugin>__<field>`, becoming plugin-private channels

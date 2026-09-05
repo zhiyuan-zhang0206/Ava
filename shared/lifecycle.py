@@ -12,7 +12,13 @@ from __future__ import annotations
 
 from shared.exit_codes import IDLE_EXIT_CODE, SYSTEM_HALT_EXIT_CODE
 
-__all__ = ["AgentRestart", "AgentTermination", "_LifecycleExit", "_SystemHalt"]
+__all__ = [
+    "AgentImpersonation",
+    "AgentRestart",
+    "AgentTermination",
+    "_LifecycleExit",
+    "_SystemHalt",
+]
 
 
 class _LifecycleExit(SystemExit):
@@ -32,6 +38,13 @@ class AgentTermination(_LifecycleExit):
 class AgentRestart(_LifecycleExit):
     """Raised on the success path of `restart()` and `update()`. Your
     process exits and a fresh one comes up under the same agent id."""
+
+    def __init__(self) -> None:
+        super().__init__(IDLE_EXIT_CODE)
+
+
+class AgentImpersonation(_LifecycleExit):
+    """Acceptance ends this exec; takeover waits for the durable turn boundary."""
 
     def __init__(self) -> None:
         super().__init__(IDLE_EXIT_CODE)

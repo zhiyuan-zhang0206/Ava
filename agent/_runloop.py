@@ -39,12 +39,14 @@ from shared.config.turn_view import turn_settings
 from shared.db import PG_KEEPALIVE_KWARGS
 from shared.live_events import Error
 from shared.log import logger
+from shared.trace import turn_span
 
 from . import _trace_checkpoint
 from .graph._context import AvaContext
 from .graph._llm import FatalLLMStreamError, FatalProviderError
 from .graph._node_log import flush_node_exit_aggregate
 from .hooks.compact import CompactionFailedError
+from .impersonation import native_status, prepare_invocation, settle_checkpoint
 from .startup import (
     _reconcile_claimed_inbounds_at_startup,
     _repair_dangling_tool_use_at_startup,
@@ -372,8 +374,10 @@ async def _recover_from_db_outage(
     while True:
         await _wait_for_db_recovery(agent_id)
         try:
-            await _reconcile_claimed_inbounds_at_startup(ctx.ops_pool, checkpointer, agent_id)
-            await _repair_dangling_tool_use_at_startup(graph, agent_id)
+            takeover = await native_status(agent_id)
+            if takeover is None or takeover["status"] != "active":
+                await _reconcile_claimed_inbounds_at_startup(ctx.ops_pool, checkpointer, agent_id)
+                await _repair_dangling_tool_use_at_startup(graph, agent_id)
             break
         except (PoolTimeout, psycopg.OperationalError):
             logger.opt(exception=True).warning(
@@ -483,8 +487,6 @@ async def _invoke_graph_with_lifecycle_logging(
     # root; the root is a placeholder ended at turn START so the trace always
     # has its root even if this process dies mid-turn (#1964); session.id
     # groups an agent's turns on the viewer.
-    from shared.trace import turn_span
-
     # Track the input update to pass to graph.ainvoke. Starts empty; after
     # a FatalLLMStreamError / FatalProviderError we set halted=True so the claim
     # node actually waits for the next inbound instead of re-entering the LLM
@@ -497,6 +499,8 @@ async def _invoke_graph_with_lifecycle_logging(
         _require_helper_parent_chain()
         turn += 1
         try:
+            if await prepare_invocation(graph, agent_id, ctx):
+                return
             with turn_span(name=f"ava-agent-{agent_id}", session_id=str(agent_id), turn=turn):
                 # The input is a state UPDATE, not a full state — same semantics
                 # as a node's Command(update=...): each key present is folded into
@@ -554,6 +558,7 @@ async def _invoke_graph_with_lifecycle_logging(
             flush_node_exit_aggregate(agent_id)
             if result["exit_requested"]:
                 return
+            await settle_checkpoint(graph, agent_id)
             # Turn over — re-invoke on the same thread; the fresh invocation's
             # claim blocks for the next inbound.
             input_update = {}

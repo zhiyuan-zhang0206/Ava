@@ -32,6 +32,7 @@ from agent.db import (
     wait_for_inbound,
 )
 from agent.graph._context import AvaContext
+from agent.impersonation import control_ready
 from agent.inbound_ownership import RuntimeOwnershipLostError, lock_inbound_owner
 from shared.agents import AgentStatus
 from shared.db_transaction import async_write_transaction
@@ -55,6 +56,7 @@ class LifecycleCasLostError(Exception):
 async def _wait_for_batch(
     ctx: AvaContext,
     agent_id: int,
+    impersonation_request_id: str | None = None,
 ) -> list:
     """Enter IDLING wait loop, block until an inbound batch is claimable.
 
@@ -83,7 +85,15 @@ async def _wait_for_batch(
     try:
         with claim_idle_wait_span():
             while not batch:
-                await wait_for_inbound(pool, listener, agent_id=agent_id)
+
+                async def control_pending() -> bool:
+                    return await control_ready(agent_id, impersonation_request_id)
+
+                await wait_for_inbound(
+                    pool, listener, agent_id=agent_id, extra_ready=control_pending
+                )
+                if await control_pending():
+                    break
                 batch = await claim_inbound_batch(pool, agent_id)
     except RuntimeOwnershipLostError as exc:
         raise LifecycleCasLostError(str(exc)) from exc

@@ -221,6 +221,14 @@ def _noop_start_prechecks(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(_session_mod, "_ensure_frontend_deps", lambda _repo: None)  # pyright: ignore[reportUnknownArgumentType]
 
+    # These call-shape tests use the suite's owner DB URL, not an enrolled
+    # runner's bootstrap projection. Credential forwarding has its own tests
+    # in test_agent_profile_launch_env.py.
+    def _fixture_runner_url(_url: str) -> str:
+        return "postgresql://ava_runner:test-runner@127.0.0.1:1/ava_citest"
+
+    monkeypatch.setattr(_session_mod, "runner_db_url_projection", _fixture_runner_url)
+
 
 @pytest.fixture(autouse=True)
 def _hermetic_gateway_base(monkeypatch: pytest.MonkeyPatch) -> None:

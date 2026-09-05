@@ -39,6 +39,7 @@ timeout is a defensive SELECT recheck for the fire-and-forget channel.
 import asyncio
 import json
 import time
+from collections.abc import Awaitable, Callable
 from datetime import datetime
 from typing import Any, NamedTuple, TypeVar, cast
 
@@ -223,6 +224,8 @@ async def enqueue_fatal_provider_report_to_nearest_alive_ancestor(
 async def claim_inbound_batch(
     pool: AsyncConnectionPool,
     agent_id: int,
+    *,
+    lifecycle_only: bool = False,
 ) -> list[ClaimedInbound]:
     """Claim under current runtime ownership in one explicit write transaction.
 
@@ -298,10 +301,11 @@ async def claim_inbound_batch(
             "  SELECT id FROM inbound_messages "
             "  WHERE status = 'pending' AND agent_id = %s "
             "  AND (NOT %s OR kind NOT IN ('restart','terminate')) "
+            "  AND (NOT %s OR kind IN ('cancel','restart','terminate')) "
             "  ORDER BY created_at ASC, id ASC "
             "  FOR UPDATE SKIP LOCKED"
             ") RETURNING id, agent_id, content, kind, source, payload, created_at, claimed_at",
-            (agent_id, runtime_owned),
+            (agent_id, runtime_owned, lifecycle_only),
         )
         rows = await cur.fetchall()
     rows.sort(key=lambda r: r[6])  # created_at FIFO (index follows SELECT column count)
@@ -623,6 +627,8 @@ async def wait_for_inbound(
     listener: RedisInboundListener,
     agent_id: int | None = None,
     timeout_s: float = DEFAULT_WAIT_TIMEOUT_S,
+    *,
+    extra_ready: Callable[[], Awaitable[bool]] | None = None,
 ) -> None:
     """Async block until an inbound is available to claim.
 
@@ -653,6 +659,8 @@ async def wait_for_inbound(
     started = time.monotonic()
     rounds = 0
     while True:
+        if extra_ready is not None and await extra_ready():
+            return
         if agent_id is not None:
             await record_claim_loop_progress(pool, agent_id)
         if agent_id is not None and await _has_pending_inbound(pool, agent_id):

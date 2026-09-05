@@ -327,6 +327,11 @@ def wired(monkeypatch: pytest.MonkeyPatch, host_plugin: None) -> _Build:
     `turn_settings.lm.llm_model` exactly as the real one does, so a test can
     still tell whether the config bind was in effect when the model was built.
     """
+    # This suite's agents/ownership live exclusively in _FakePool. Real lease
+    # SQL is covered by takeover integration tests, so its no-lease baseline
+    # must be fake too instead of querying a second, empty database.
+    monkeypatch.setattr("services.agent_host.host.active_lease", AsyncMock(return_value=False))
+    monkeypatch.setattr("services.agent_host.host.settle_checkpoint", AsyncMock(return_value=False))
     import services.agent_host.host as host_mod
 
     async def _noop_reconcile(*_a: object, **_k: object) -> None:
@@ -411,7 +416,16 @@ class TestPendingInboundBackstop:
             (17, True),
             (23, False),
         ]
-        assert pool.params == (180.0, 180.0, host._owner, 180.0, 180.0, "this-box")
+        assert pool.params == (
+            180.0,
+            180.0,
+            host._owner,
+            host._owner,
+            180.0,
+            180.0,
+            "this-box",
+            host._owner,
+        )
         assert "m.runtime_owner=%s" in pool.sql
         assert "force.target_generation=m.runtime_generation" in pool.sql
         assert "m.status = 'idling'" in pool.sql

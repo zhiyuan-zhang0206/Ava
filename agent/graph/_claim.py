@@ -64,6 +64,7 @@ from agent.graph._claim_routing import ClaimGoto, resolve_routing
 from agent.graph._context import AvaContext, agent_id_from_config
 from agent.graph._node_log import flush_node_exit_aggregate, node_lifecycle
 from agent.graph._nodes import BEFORE_LLM, CLAIM, END
+from agent.impersonation import claim_gate
 from agent.inbound_ownership import RuntimeOwnershipLostError
 from agent.messages import has_conversation
 from shared.log import logger
@@ -95,6 +96,9 @@ async def _claim_node_impl(
         return Command[ClaimGoto](update={"halted": False}, goto=BEFORE_LLM)
 
     agent_id = agent_id_from_config(config)
+    control = await claim_gate(state, agent_id, ctx)
+    if control is not None:
+        return control  # pyright: ignore[reportReturnType]
 
     # ── First SELECT: try uncontended claim before pub/sub wait ──
     try:
@@ -137,7 +141,7 @@ async def _claim_node_impl(
                     update={"turn_active": False, "turn_idle": True}, goto=END
                 )
             try:
-                batch = await _wait_for_batch(ctx, agent_id)
+                batch = await _wait_for_batch(ctx, agent_id, state.impersonation_request_id)
             except LifecycleCasLostError as exc:
                 # Claim-time lifecycle race: between the idle flip and the
                 # IDLING→RUNNING flip, another op (terminate / reaper) took
@@ -158,6 +162,9 @@ async def _claim_node_impl(
                 update={"halted": False, "turn_active": True},
                 goto=BEFORE_LLM,
             )
+
+    if not batch:
+        return Command[ClaimGoto](goto=CLAIM)
 
     # ── Routing: resolve winner once ──
     routing = await resolve_routing(ctx, agent_id, batch)  # pyright: ignore[reportUnknownArgumentType]

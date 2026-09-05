@@ -592,7 +592,12 @@ def ensure_runner_role(identity: str, *, base_admin_url: str, runner_password: s
         )
         # SDK surfaces the runner process writes directly: ava.tasks,
         # ava.watcher, and the page close at exit.
-        for table in ("agent_tasks", "agent_watchers"):
+        for table in (
+            "agent_tasks",
+            "agent_watchers",
+            "agent_impersonations",
+            "agent_impersonation_messages",
+        ):
             conn.execute(
                 pgsql.SQL("GRANT INSERT, UPDATE ON {} TO {}").format(
                     pgsql.Identifier(table), pgsql.Identifier(RUNNER_ROLE)

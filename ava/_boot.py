@@ -38,6 +38,7 @@ it carries no `ava.help()` docstrings and is never imported by `ava/__init__`.
 from __future__ import annotations
 
 import os
+from collections.abc import Callable
 
 from shared.turn_identity import current_turn_agent_id
 
@@ -65,6 +66,15 @@ _owns_loop: bool = True
 # agent id calls `establish_actor` to set this so `ava.agents.*` can attribute
 # its spawns/messages without a malformed `agent:None`.
 _actor: str | None = None
+
+# An explicitly attached external controller revalidates its borrowed identity
+# at every SDK read. Unset in native runtimes and ordinary launched children.
+_external_identity: Callable[[], int] | None = None
+
+
+def validate_external_identity() -> int | None:
+    """Recheck an attached lease; no-op for the existing native runtime paths."""
+    return _external_identity() if _external_identity is not None else None
 
 
 def establish(agent_id: int, *, owns_loop: bool) -> None:
@@ -138,6 +148,9 @@ def agent_id() -> int:
     provides an identity (the pre-bootstrap placeholder). Callers that must
     tolerate the pre-bootstrap state check for `None` explicitly. A hosted
     turn context (turn contextvar bound) wins over both fallbacks."""
+    external = validate_external_identity()
+    if external is not None:
+        return external
     turn = current_turn_agent_id()
     if turn is not None:
         return turn
@@ -156,6 +169,9 @@ def require_agent_id() -> int:
         RuntimeError: ``establish`` was never called and ``AVA_AGENT_ID`` is
         not set in the environment.
     """
+    external = validate_external_identity()
+    if external is not None:
+        return external
     turn = current_turn_agent_id()
     if turn is not None:
         return turn
@@ -185,6 +201,9 @@ def require_actor() -> str:
     Raises:
         RuntimeError: neither an actor nor an agent identity was established.
     """
+    borrowed = validate_external_identity()
+    if borrowed is not None:
+        return f"agent:{borrowed}"
     turn = current_turn_agent_id()
     if turn is not None:
         return f"agent:{turn}"
@@ -211,6 +230,9 @@ def default_actor() -> str:
     non-raising: with no identity at all it returns the pre-actor
     ``agent:None`` sentinel, preserving the legacy default-source behavior rather
     than turning an unset identity into an error at these lower-stakes sites."""
+    borrowed = validate_external_identity()
+    if borrowed is not None:
+        return f"agent:{borrowed}"
     turn = current_turn_agent_id()
     if turn is not None:
         return f"agent:{turn}"

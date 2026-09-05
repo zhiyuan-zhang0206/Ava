@@ -47,6 +47,7 @@ from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from agent.state import checkpoint_msgpack_allowlist
 from shared.exec_process_domain import KILL_GRACE_S as KILL_GRACE_S
 from shared.log import logger
+from shared.runtime_incarnation import RuntimeIncarnation, current_incarnation
 
 # Envelope schema versions — bumped only on a breaking shape change.
 REQUEST_VERSION = 1
@@ -97,6 +98,7 @@ class RequestPayload:
     agent_id: int | None
     timeout_s: float
     state: dict[str, Any] | None  # typed-blob-decoded model dump
+    incarnation: RuntimeIncarnation | None = None
 
 
 @dataclass
@@ -172,6 +174,12 @@ def write_request(
         "agent_id": agent_id,
         "timeout_s": timeout_s,
     }
+    incarnation = current_incarnation(agent_id) if agent_id is not None else None
+    if incarnation is not None:
+        envelope["incarnation"] = {
+            "generation": str(incarnation.generation),
+            "owner": str(incarnation.owner),
+        }
     if state is not None:
         tag, blob = dumps_typed(state)
         envelope["state_tag"] = tag
@@ -196,11 +204,22 @@ def read_request(path: Path) -> RequestPayload:
             raise ValueError(
                 f"exec request state blob decoded to {type(state).__name__}, expected dict"
             )
+    from uuid import UUID
+
+    identity = envelope.get("incarnation")
+    incarnation = None
+    if identity is not None:
+        if envelope["agent_id"] is None:
+            raise ValueError("exec incarnation requires an agent id")
+        incarnation = RuntimeIncarnation(
+            int(envelope["agent_id"]), UUID(identity["generation"]), UUID(identity["owner"])
+        )
     payload = RequestPayload(
         code=str(envelope["code"]),
         agent_id=envelope.get("agent_id"),
         timeout_s=float(envelope["timeout_s"]),
         state=cast("dict[str, Any] | None", state),
+        incarnation=incarnation,
     )
     _log_envelope_transfer("request", "read", path, started_at)
     return payload

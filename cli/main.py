@@ -34,6 +34,7 @@ from cli.parsers.agents import (
     _h_agents_resurrect,
     _h_agents_send,
     _h_agents_terminate,
+    _h_agents_timeline,
     _h_notices_clear,
     _h_notices_list,
     _h_notices_resolve,
@@ -72,6 +73,7 @@ from cli.parsers.host import (
     _h_stop,
     _h_trace_ship,
 )
+from cli.parsers.impersonation import _h_impersonate, _h_impersonate_relay
 from cli.parsers.logs import _h_logs_retention
 from cli.parsers.management import (
     _h_config_get,
@@ -142,6 +144,7 @@ __all__ = [
     "_h_agents_resurrect",
     "_h_agents_send",
     "_h_agents_terminate",
+    "_h_agents_timeline",
     "_h_cluster_cancel",
     "_h_cluster_destroy",
     "_h_cluster_down",
@@ -170,6 +173,8 @@ __all__ = [
     "_h_converge",
     "_h_firewall_status",
     "_h_firewall_sync",
+    "_h_impersonate",
+    "_h_impersonate_relay",
     "_h_logs_retention",
     "_h_mcp_add",
     "_h_mcp_disable",
