@@ -243,8 +243,9 @@ async def test_mark_compact_boundary_stamps_newest(aops_pool: AsyncConnectionPoo
     assert stamped == [ids[-1]]  # exactly the newest, stamped once
 
 
-async def test_trim_prunes_old_compaction_boundary(aops_pool: AsyncConnectionPool) -> None:
-    """A boundary outside the newest keep window ages out like any row."""
+async def test_trim_keeps_compaction_boundary(aops_pool: AsyncConnectionPool) -> None:
+    """A boundary outside the newest keep window is exempt from trimming,
+    and its blob references survive with it."""
     ids = await _put_turns(aops_pool, "1", 8)
     # Stamp an old checkpoint as the boundary of an earlier compaction segment.
     async with aops_pool.connection() as conn, conn.cursor() as cur:
@@ -256,16 +257,17 @@ async def test_trim_prunes_old_compaction_boundary(aops_pool: AsyncConnectionPoo
 
     counts = await trim_checkpoints(aops_pool, "1", keep=3)
 
-    assert counts.checkpoints == 5
-    assert await _surviving_ids(aops_pool, "1") == set(ids[-3:])
-    assert ids[1] not in await _surviving_ids(aops_pool, "1")
+    # The boundary at ids[1] is exempt: only the other four out-of-window
+    # rows are doomed, and its (channel, version) blob refs are kept too.
+    assert counts.checkpoints == 4
+    assert await _surviving_ids(aops_pool, "1") == {ids[1], *ids[-3:]}
     async with aops_pool.connection() as conn, conn.cursor() as cur:
         await cur.execute(
             "SELECT count(*) FROM checkpoint_blobs WHERE thread_id = %s",
             ("1",),
         )
         row = await cur.fetchone()
-        assert row is not None and row[0] == 3
+        assert row is not None and row[0] == 4
 
 
 async def test_trim_noop_when_newest_messages_blob_is_missing(
