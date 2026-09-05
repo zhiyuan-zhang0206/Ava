@@ -283,6 +283,19 @@ class TestRegistryInvariants:
         finally:
             os.environ.pop("SYSTEMROOT", None)
 
+    def test_windows_child_env_sets_utf8_mode(self) -> None:
+        """Task #2540: the Windows positive allowlist wholesale-replaces the
+        child env, dropping ensure_utf8_stdio's PYTHONUTF8 seed — a daemon
+        (agent-host) and its in-process hosted agents then start on the legacy
+        code page and crash printing CJK (win agent 2528). The windows branch
+        must inject PYTHONUTF8=1 for every role; POSIX children are unchanged
+        (locale UTF-8)."""
+        from shared.env_registry import child_env
+
+        for role in ("agent", "runner", "gateway"):
+            assert child_env(role, "windows")["PYTHONUTF8"] == "1"
+            assert "PYTHONUTF8" not in child_env(role, "posix")
+
 
 def _all_aliases() -> frozenset[str]:
     return _aliases_with(scope=("cluster-pinned", "cluster-default", "host", "agent"))
