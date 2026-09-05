@@ -86,5 +86,5 @@ after seven days, only after state application and handoff consumption; the
 handoff inbound remains in normal history.
 
 See [[../ava/external.ava.okf.md]],
-[[../conventions/agent-impersonation.md]], and
-[[../conventions/agent-impersonation-hosts.md]].
+[external agent procedure](../conventions/agent-impersonation.md), and
+[host relay setup](../conventions/agent-impersonation-hosts.md).
