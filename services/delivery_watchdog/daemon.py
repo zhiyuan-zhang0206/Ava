@@ -38,15 +38,18 @@ in-flight turn is normal — the claim's turn-end SELECT picks it up. Boot state
    missed auto-resurrect must be retried, not just alerted. Per-agent cooldown
    (60s) + per-tick cap + concurrency semaphore keep a pile of dead letters
    (or an unreachable home machine) from spawning an LLM wake storm.
-4. **Stale-claimed dead-letter sweep** — every 30s, flip `claimed` chat
+4. **Stale-inbound dead-letter sweep** — every 30s, flip `claimed` chat
    inbounds of TERMINATED owners older than
-   `AVA_DELIVERY_WATCHDOG_STALE_CLAIMED_THRESHOLD_SECONDS` (default 24h) to
-   `done` (age from `claimed_at`, falling back to `created_at` for rows that
-   predate the column). Terminated agents leave claimed rows behind (reconcile
-   runs only at boot); a resurrect would otherwise flip them all to `pending`
-   and re-deliver ancient messages as fresh (Task #654). The reconcile-side
-   cutoff (`agent/db.py::reconcile_claimed_inbounds`) applies the same
-   threshold at boot, closing the resurrect race at the source.
+   `AVA_DELIVERY_WATCHDOG_STALE_CLAIMED_THRESHOLD_SECONDS` (default 24h), or
+   IDLING owners older than
+   `AVA_DELIVERY_WATCHDOG_STALE_CLAIMED_IDLING_THRESHOLD_SECONDS` (default 2h),
+   to `done` (age from `claimed_at`, falling back to `created_at`). Hosted
+   idling agents may never boot again to reconcile their completed claims;
+   running/restarting owners remain untouched. The same cadence also completes
+   stale pending `terminate`, `system_note`, and `restart_completed` rows of
+   terminated owners, which have no consumer. The reconcile-side cutoff
+   (`agent/db.py::reconcile_claimed_inbounds`) still closes the terminated-owner
+   resurrect race at boot.
 5. **Hosted-turn liveness recovery** — on the same watchdog tick, select hosted
    running rows whose DB activity is older than the 2400s wedged-agent budget,
    then confirm them against the agent-host's 15s Redis progress heartbeat
@@ -218,9 +221,12 @@ def select_terminated_owners_with_pending(pool: ConnectionPool) -> list[tuple[in
         return [(r[0], r[1]) for r in cur.fetchall()]
 
 
-def dead_letter_stale_claimed(pool: ConnectionPool, threshold_s: float) -> int:
-    """Flip 'claimed' chat inbounds of TERMINATED owners older than
-    `threshold_s` to 'done' (dead-letter), returning the number of rows.
+def dead_letter_stale_claimed(
+    pool: ConnectionPool,
+    threshold_s: float,
+    idling_threshold_s: float = 7200.0,
+) -> int:
+    """Dead-letter stale claimed chats of terminated or idling owners.
 
     Terminated agents leave 'claimed' rows behind: reconcile runs only at
     process boot, so a cleanly terminated (or long-dead) process never
@@ -236,19 +242,23 @@ def dead_letter_stale_claimed(pool: ConnectionPool, threshold_s: float) -> int:
     Age is measured from `claimed_at`, falling back to `created_at` for rows
     that predate the claimed_at column (2026-08-02): a NULL claimed_at means
     'claimed before the column existed', so created_at is the only age
-    evidence left. Live owners are never touched — a running/idling agent's
-    claimed rows are mid-flight and finalize at its next boot.
+    evidence left. Running owners are never touched; idling owners are swept
+    past the idling threshold because hosted agents may never boot again to
+    finalize their claims.
     """
     with write_transaction(pool) as conn, conn.cursor() as cur:
         cur.execute(
             "UPDATE inbound_messages m SET status = 'done' "
             "FROM agents_meta am "
             "WHERE m.agent_id = am.id "
-            "  AND am.status = 'terminated' "
             "  AND m.status = 'claimed' AND m.kind = 'chat' "
-            "  AND COALESCE(m.claimed_at, m.created_at) "
-            "      < now() - make_interval(secs => %s)",
-            (threshold_s,),
+            "  AND ((am.status = 'terminated' "
+            "        AND COALESCE(m.claimed_at, m.created_at) "
+            "            < now() - make_interval(secs => %s)) "
+            "       OR (am.status = 'idling' "
+            "           AND COALESCE(m.claimed_at, m.created_at) "
+            "               < now() - make_interval(secs => %s)))",
+            (threshold_s, idling_threshold_s),
         )
         return cur.rowcount
 
@@ -264,6 +274,26 @@ def dead_letter_stale_pending_resurrects(pool: ConnectionPool, threshold_s: floa
         cur.execute(
             "UPDATE inbound_messages m SET status = 'done', claimed_at = now() "
             "WHERE m.status = 'pending' AND m.kind = 'resurrect' "
+            "  AND m.created_at < now() - make_interval(secs => %s)",
+            (threshold_s,),
+        )
+        return cur.rowcount
+
+
+def dead_letter_stale_pending_terminated(pool: ConnectionPool, threshold_s: float) -> int:
+    """Complete stale lifecycle notices whose terminated owner cannot claim them.
+
+    Post-termination chats remain pending for the G4 resurrect-retry path; only
+    one-shot lifecycle notices with no remaining consumer are dead-lettered.
+    """
+    with write_transaction(pool) as conn, conn.cursor() as cur:
+        cur.execute(
+            "UPDATE inbound_messages m SET status = 'done', claimed_at = now() "
+            "FROM agents_meta am "
+            "WHERE m.agent_id = am.id "
+            "  AND am.status = 'terminated' "
+            "  AND m.status = 'pending' "
+            "  AND m.kind IN ('terminate', 'system_note', 'restart_completed') "
             "  AND m.created_at < now() - make_interval(secs => %s)",
             (threshold_s,),
         )
@@ -525,6 +555,7 @@ def _hosted_turn_threshold_seconds() -> float:
 def _maybe_sweep_stale_claimed(
     pool: ConnectionPool,
     threshold_s: float,
+    idling_threshold_s: float,
     last_sweep_at: float,
 ) -> float:
     """Run stale-inbound dead-letter sweeps on the configured cadence.
@@ -536,10 +567,10 @@ def _maybe_sweep_stale_claimed(
     if now_mono - last_sweep_at < _CLAIMED_SWEEP_INTERVAL_S:
         return last_sweep_at
     try:
-        dead_lettered = dead_letter_stale_claimed(pool, threshold_s)
+        dead_lettered = dead_letter_stale_claimed(pool, threshold_s, idling_threshold_s)
         if dead_lettered:
             _log.info(
-                "[delivery] dead-lettered %s stale claimed row(s) of terminated owner(s)",
+                "[delivery] dead-lettered %s stale claimed row(s)",
                 dead_lettered,
             )
         stale_resurrects = dead_letter_stale_pending_resurrects(pool, threshold_s)
@@ -547,6 +578,12 @@ def _maybe_sweep_stale_claimed(
             _log.info(
                 "[delivery] dead-lettered %s stale pending resurrect row(s)",
                 stale_resurrects,
+            )
+        stale_terminated = dead_letter_stale_pending_terminated(pool, threshold_s)
+        if stale_terminated:
+            _log.info(
+                "[delivery] dead-lettered %s stale pending terminated-owner row(s)",
+                stale_terminated,
             )
     except Exception:
         _log.exception("[delivery] stale-inbound dead-letter sweep failed")
@@ -567,6 +604,9 @@ async def _scan_loop(pool: ConnectionPool, liveness: Liveness) -> None:
     dispatch_threshold = settings.daemon.delivery_watchdog_dispatch_threshold_seconds
     alert_threshold = settings.daemon.delivery_watchdog_threshold_seconds
     stale_claimed_threshold = settings.daemon.delivery_watchdog_stale_claimed_threshold_seconds
+    stale_claimed_idling_threshold = (
+        settings.daemon.delivery_watchdog_stale_claimed_idling_threshold_seconds
+    )
     # This alias belongs to the agent-runner config projection and is removed
     # from the gateway process environment. Read the gateway-owned `.env`
     # snapshot so an operator override is preserved at this authority boundary.
@@ -574,6 +614,7 @@ async def _scan_loop(pool: ConnectionPool, liveness: Liveness) -> None:
     _log.info(
         "[delivery] watchdog started, pid=%s, interval=%.1fs, dispatch_threshold=%.1fs, "
         "alert_threshold=%.0fs, stale_claimed_threshold=%.0fs, "
+        "stale_claimed_idling_threshold=%.0fs, "
         "hosted_turn_threshold=%.0fs, hosted_turn_cooldown=%.0fs, "
         "alert set table-backed (reload per tick)",
         os.getpid(),
@@ -581,6 +622,7 @@ async def _scan_loop(pool: ConnectionPool, liveness: Liveness) -> None:
         dispatch_threshold,
         alert_threshold,
         stale_claimed_threshold,
+        stale_claimed_idling_threshold,
         hosted_turn_threshold,
         turn_liveness.HOSTED_TURN_RECOVERY_COOLDOWN_S,
     )
@@ -624,7 +666,10 @@ async def _scan_loop(pool: ConnectionPool, liveness: Liveness) -> None:
             _maybe_spawn_resurrects(pool, settings.daemon.delivery_watchdog_max_resurrect_per_tick)
             await turn_liveness.scan_hosted_turn_liveness(pool, hosted_turn_threshold)
             last_claimed_sweep = _maybe_sweep_stale_claimed(
-                pool, stale_claimed_threshold, last_claimed_sweep
+                pool,
+                stale_claimed_threshold,
+                stale_claimed_idling_threshold,
+                last_claimed_sweep,
             )
             if dispatched or newly_alerted:
                 _log.info(
