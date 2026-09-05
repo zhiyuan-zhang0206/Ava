@@ -1,5 +1,6 @@
-"""Real PostgreSQL consent, checkpoint hydration, and external plugin journaling."""
+"""Real PostgreSQL consent, checkpoint hydration, and external SDK effects."""
 
+from pathlib import Path
 from typing import Annotated, Any
 from uuid import uuid4
 
@@ -153,3 +154,89 @@ def test_borrowed_sender_reaches_peer_through_gateway_and_returns_real_provenanc
         "external_agent:codex:test",
     )
     assert handoff[3]["caller_identity"] == caller.model_dump()
+
+
+@pytest.mark.parametrize("store", ["personal", "shared"])
+@pytest.mark.parametrize("stale_process_identity", [False, True])
+def test_external_memory_write_uses_borrowed_identity(
+    native_checkpoint: tuple[RuntimeIncarnation, state_module.PluginStateHandle[IntegrationPlugin]],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    store: str,
+    stale_process_identity: bool,
+) -> None:
+    from ava_builtins.plugins.ava_memory import sdk as memory_sdk
+    from shared import paths
+
+    def workspace(agent_id: int) -> Path:
+        return tmp_path / str(agent_id)
+
+    owner, _ = native_checkpoint
+    stale_id = owner.agent_id + 1000
+    monkeypatch.setattr(_boot, "_agent_id", stale_id if stale_process_identity else None)
+    monkeypatch.setattr(_boot, "_owns_loop", False)
+    monkeypatch.setitem(vars(ava), "memory", memory_sdk)
+    monkeypatch.setattr(paths, "workspace_dir", workspace)
+    monkeypatch.setattr(paths, "memory_dir", lambda: tmp_path / "shared")
+    lease = leases.request(
+        owner.agent_id, caller=CallerIdentity(kind="external_agent", subject="codex")
+    )
+    leases.accept(lease["id"], owner.agent_id, owner)
+    leases.activate(lease["id"], owner)
+
+    with external.attach(lease["id"], token=lease["token"]):
+        entry = ava.memory.write("working-rule", "Verify current state.\n", store=store)
+
+    root = tmp_path / "shared" if store == "shared" else tmp_path / str(owner.agent_id) / "memory"
+    assert entry == root / "working-rule.md"
+    assert entry.read_text().endswith("Verify current state.\n")
+    assert (root / "MEMORY.md").read_text() == "- [working-rule](working-rule.md) — working-rule\n"
+    assert not (tmp_path / str(stale_id)).exists()
+    if store == "shared":
+        assert f"ava_agent: {owner.agent_id}\n" in entry.read_text()
+    # Memory files are immediate SDK effects, separate from checkpoint deltas.
+    assert leases.get(lease["id"], lease["token"])["delta_version"] == 0
+
+
+@pytest.mark.parametrize("operation", ["write", "note"])
+def test_external_memory_rechecks_lease_before_filesystem_effects(
+    native_checkpoint: tuple[RuntimeIncarnation, state_module.PluginStateHandle[IntegrationPlugin]],
+    db_conn: psycopg.Connection,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    operation: str,
+) -> None:
+    from ava_builtins.plugins.ava_memory import notes, sdk
+    from shared import paths
+
+    def workspace(agent_id: int) -> Path:
+        return tmp_path / str(agent_id)
+
+    owner, _ = native_checkpoint
+    monkeypatch.setattr(_boot, "_agent_id", owner.agent_id + 1000)
+    monkeypatch.setattr(_boot, "_owns_loop", False)
+    monkeypatch.setattr(paths, "workspace_dir", workspace)
+    monkeypatch.setattr(notes, "workspace_dir", workspace)
+    monkeypatch.setattr(settings.agent, "memory_per_agent_inject_enabled", True)
+    lease = leases.request(
+        owner.agent_id, caller=CallerIdentity(kind="external_agent", subject="codex")
+    )
+    leases.accept(lease["id"], owner.agent_id, owner)
+    leases.activate(lease["id"], owner)
+    attachment = external.attach(lease["id"], token=lease["token"])
+    try:
+        db_conn.execute(
+            "UPDATE agent_impersonations SET expires_at=clock_timestamp()-interval '1 second' "
+            "WHERE id=%s",
+            (lease["id"],),
+        )
+        db_conn.commit()
+        with pytest.raises(leases.ImpersonationError, match="expired"):
+            if operation == "write":
+                sdk.write("expired-note", "Must not be written.")
+            else:
+                notes.per_agent_memory_note()
+        assert not list(tmp_path.iterdir())
+    finally:
+        with pytest.raises(leases.ImpersonationError, match="expired"):
+            attachment.close()
