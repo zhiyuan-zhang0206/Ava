@@ -235,3 +235,9 @@ describe("display.inspector_open default (user ruling 2026-08-23: the side panel
     expect(entry?.default).toBe(false);
   });
 });
+
+describe("display.run_timeline_window_hours default", () => {
+  it("starts run timelines at the user-approved two-hour window", () => {
+    expect(USER_SETTING_DEFAULTS["display.run_timeline_window_hours"]).toBe(2);
+  });
+});
