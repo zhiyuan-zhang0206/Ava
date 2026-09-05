@@ -568,6 +568,14 @@ def child_env(role: ProcessRole, platform: str) -> dict[str, str]:
         if os.environ.get(key):
             env[key] = os.environ[key]
     if platform == "windows":
+        # UTF-8 mode for every Windows child interpreter (PEP 540): the
+        # positive allowlist wholesale-replaces the child env, which drops the
+        # PYTHONUTF8 seed ensure_utf8_stdio planted in the parent os.environ —
+        # so daemons (agent-host) and their in-process hosted agents would
+        # start on the legacy code page and crash printing CJK (task #2540,
+        # win agent 2528). Inject it here for every role, the same value
+        # ops/agent_launch already pins for detached agents.
+        env["PYTHONUTF8"] = "1"
         for key in WINDOWS_SYSTEM_ENV_KEYS:
             if os.environ.get(key):
                 env[key] = os.environ[key]

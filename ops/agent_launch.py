@@ -242,14 +242,8 @@ def agent_spawn_env_dict() -> dict[str, str]:
     # agent-runner keys that the agent needs to backfill from .env on a
     # single-box setup).
     env["AVA_PROCESS_PROFILE"] = "agent"
-    if IS_WINDOWS:
-        # UTF-8 mode: Python on Windows defaults text-mode pipes (subprocess
-        # input/output) to the ANSI code page (cp1252), so an agent feeding
-        # CJK code to a subprocess (ava_syntax_fix's ruff stdin) crashed with
-        # UnicodeEncodeError ('charmap' codec — win agent 2197, 2026-08-07).
-        # PYTHONUTF8=1 makes the interpreter use UTF-8 everywhere — the same
-        # default Python 3.15 moves to. POSIX already runs UTF-8 via locale.
-        env["PYTHONUTF8"] = "1"
+    # Windows UTF-8 mode needs no pin here: child_env's windows branch already
+    # injects PYTHONUTF8=1 for every role (task #2540).
     return env
 
 
