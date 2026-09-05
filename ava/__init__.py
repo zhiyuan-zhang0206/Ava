@@ -188,6 +188,12 @@ def _maybe_load_plugins_for_missing(name: str) -> bool:
 # settings.data_plane.db_url at runtime (test conftest, eval driver) is immediately
 # visible to `ava.DB_URL` readers without import-order gymnastics.
 def __getattr__(name: str) -> Any:
+    if name == "external":
+        import importlib
+
+        module = importlib.import_module("ava.external")
+        setattr(_sys.modules[__name__], name, module)
+        return module
     if name in ("DB_URL", "REDIS_URL", "GATEWAY_URL"):
         from . import _settings
 
@@ -210,6 +216,7 @@ from . import _attach as _attach
 from . import _extend as _extend
 from . import agents as agents
 from . import files as files
+from . import impersonation as impersonation
 from . import mcps as mcps
 from . import self as self
 from . import shell as shell
@@ -245,6 +252,7 @@ __all_for_ava__ = [
     "agents",
     "files",
     "help",
+    "impersonation",
     "mcps",
     "self",
     "shell",

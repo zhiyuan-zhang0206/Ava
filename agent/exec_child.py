@@ -332,6 +332,10 @@ def _run(request_path: str, result_path: str) -> None:
     overlay, birth = _pop_overlay_env()
     if request.agent_id is not None:
         _boot.establish(request.agent_id, owns_loop=True)
+        if request.incarnation is not None:
+            from shared.runtime_incarnation import bind_process_incarnation
+
+            bind_process_incarnation(request.incarnation)
         _init_logger(request.agent_id)
         from shared import telemetry_otlp
 

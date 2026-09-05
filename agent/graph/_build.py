@@ -28,6 +28,7 @@ from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import RetryPolicy
 
 from agent.hooks import make_hook_runner
+from agent.impersonation import protect_native_hooks
 from agent.state import BaseAgentState, build_agent_state
 from shared import paths
 from shared import plugins_config as plugins_cfg
@@ -534,14 +535,23 @@ def build_graph(
     register_capabilities_hooks()
 
     g = StateGraph(build_agent_state(), context_schema=AvaContext)
-    g.add_node(AFTER_INIT, make_hook_runner("after_init", default_next=INIT_CONTEXT))  # type: ignore[arg-type]
-    g.add_node(INIT_CONTEXT, init_context_node)  # type: ignore[arg-type]
+    g.add_node(  # type: ignore[arg-type]
+        AFTER_INIT, protect_native_hooks(make_hook_runner("after_init", default_next=INIT_CONTEXT))
+    )
+    g.add_node(INIT_CONTEXT, protect_native_hooks(init_context_node))  # type: ignore[arg-type]
     g.add_node(CLAIM, claim_node)  # type: ignore[arg-type]
-    g.add_node(BEFORE_LLM, make_hook_runner("before_llm", default_next=LLM))  # type: ignore[arg-type]
+    g.add_node(  # type: ignore[arg-type]
+        BEFORE_LLM, protect_native_hooks(make_hook_runner("before_llm", default_next=LLM))
+    )
     g.add_node(LLM, llm_node, retry_policy=_build_llm_retry())  # type: ignore[arg-type]
-    g.add_node(BEFORE_EXEC, make_hook_runner("before_exec", default_next=EXEC))  # type: ignore[arg-type]
-    g.add_node(EXEC, exec_node)  # type: ignore[arg-type]
-    g.add_node(AFTER_EXEC, make_hook_runner("after_exec", default_next=_after_exec_default_next))  # type: ignore[arg-type]
+    g.add_node(  # type: ignore[arg-type]
+        BEFORE_EXEC, protect_native_hooks(make_hook_runner("before_exec", default_next=EXEC))
+    )
+    g.add_node(EXEC, protect_native_hooks(exec_node))  # type: ignore[arg-type]
+    g.add_node(  # type: ignore[arg-type]
+        AFTER_EXEC,
+        protect_native_hooks(make_hook_runner("after_exec", default_next=_after_exec_default_next)),
+    )
     g.add_edge(START, AFTER_INIT)
     if checkpointer is None:
         checkpointer = MemorySaver()

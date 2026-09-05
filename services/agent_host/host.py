@@ -145,6 +145,7 @@ from agent.hosted_ownership import (
     renew_hosted_owner,
     settle_hosted_runtime,
 )
+from agent.impersonation import active_lease, settle_checkpoint
 from agent.startup import (
     _reconcile_claimed_inbounds_at_startup,
     _repair_dangling_tool_use_at_startup,
@@ -329,6 +330,12 @@ class AgentHost:
             return
         _active_turn_config_fingerprint.set(stored.fingerprint)
 
+        # An active external lease owns decisions; no native graph or plugin
+        # initialization may start on a dispatcher wake or a host restart.
+        if await active_lease(self._control_pool, agent_id):
+            await self._run_held_controls(agent_id, stored.status)
+            return
+
         # A new turn starts a fresh progress window the moment it is entered:
         # without this, a long-idle agent's stale clock entry would read as
         # "stalled" during this turn's runtime (re)build — whose startup
@@ -420,6 +427,25 @@ class AgentHost:
                     self._in_flight.discard(agent_id)
                     if not exited:
                         await settle_hosted_runtime(self._control_pool, incarnation)
+
+    async def _run_held_controls(self, agent_id: int, status: str) -> None:
+        """Maintain ownership and apply admin intent without touching the graph."""
+        from agent.db import claim_inbound_batch
+
+        incarnation = await admit_hosted_runtime(
+            self._control_pool, agent_id, self._machine, self._owner, expected_from=status
+        )
+        if incarnation is None:
+            return
+        with bind_turn_identity(agent_id, incarnation=incarnation):
+            batch = await claim_inbound_batch(self._control_pool, agent_id, lifecycle_only=True)
+            if len(batch) > 1 or any(not item.durable_lifecycle for item in batch):
+                raise RuntimeError("held control claim returned an unaccepted command")
+            kind = await apply_hosted_lifecycle(self._control_pool, incarnation)
+            if kind is None:
+                await settle_hosted_runtime(self._control_pool, incarnation)
+            else:
+                self.drop_agent(agent_id)
 
     # ── locality / runnability ───────────────────────────────────────────────
 
@@ -599,6 +625,10 @@ class AgentHost:
                     "FROM agents_meta m "
                     "WHERE ("
                     "    m.status = 'idling' "
+                    "    OR (m.status='running' AND m.runtime_owner IS DISTINCT FROM %s "
+                    "        AND EXISTS (SELECT 1 FROM agent_impersonations takeover "
+                    "          WHERE takeover.agent_id=m.id AND takeover.status IN "
+                    "          ('requested','accepted','active'))) "
                     "    OR (m.status='terminated' AND m.runtime_kind='hosted' "
                     "        AND m.runtime_owner=%s AND EXISTS ("
                     "          SELECT 1 FROM inbound_messages force "
@@ -621,14 +651,25 @@ class AgentHost:
                     "  AND (m.lifecycle_command_id IS NOT NULL OR EXISTS ("
                     "    SELECT 1 FROM inbound_messages pending "
                     "    WHERE pending.agent_id = m.id AND pending.status = 'pending'"
-                    "  ))",
+                    "  ) OR EXISTS (SELECT 1 FROM agent_impersonations lease "
+                    "    WHERE lease.agent_id=m.id AND (lease.status IN "
+                    "    ('requested','accepted','active') OR lease.delta_version>lease.applied_version))) "
+                    "  AND (m.runtime_owner IS DISTINCT FROM %s OR NOT EXISTS ("
+                    "    SELECT 1 FROM agent_impersonations held "
+                    "    WHERE held.agent_id=m.id AND held.status='active' "
+                    "    AND held.expires_at>clock_timestamp()) "
+                    "    OR EXISTS (SELECT 1 FROM inbound_messages control "
+                    "    WHERE control.agent_id=m.id AND control.status IN ('pending','claimed') "
+                    "    AND control.kind IN ('restart','terminate')))",
                     (
                         stale_after_s,
                         stale_after_s,
                         self._owner,
+                        self._owner,
                         stale_after_s,
                         stale_after_s,
                         self._machine,
+                        self._owner,
                     ),
                 )
             ).fetchall()
@@ -704,6 +745,7 @@ class AgentHost:
         config: RunnableConfig = _graph_config(agent_id, tags, metadata)
         turn = 0
         while True:
+            await settle_checkpoint(self._graph, agent_id, activate_accepted=False)
             turn += 1
             with turn_span(name=f"ava-agent-{agent_id}", session_id=str(agent_id), turn=turn):
                 result: dict[str, object] = await run_invocation_with_stall_guard(
@@ -743,6 +785,7 @@ class AgentHost:
                 )
                 return kind == "terminate"
             if result["turn_idle"]:
+                await settle_checkpoint(self._graph, agent_id)
                 return False
             # Turn boundary: go round again on the same checkpointer thread.
 

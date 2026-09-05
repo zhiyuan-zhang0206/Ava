@@ -427,7 +427,11 @@ async def _build_checkpointer(
     checkpointer = AsyncPostgresSaver(conn=saver_pool, serde=build_checkpoint_serde())
     _wrap_saver_writes_with_loud_failure(checkpointer, agent_id)
     _wrap_saver_writes_with_nstep_interval(checkpointer, turn_settings.agent.checkpoint_interval)
-    await _reconcile_claimed_inbounds_at_startup(db_pool, checkpointer, agent_id)
+    from agent.impersonation import native_status
+
+    takeover = await native_status(agent_id)
+    if takeover is None or takeover["status"] != "active":
+        await _reconcile_claimed_inbounds_at_startup(db_pool, checkpointer, agent_id)
     _boot_timing.mark("db_reconcile")
     return checkpointer
 
@@ -456,7 +460,11 @@ async def _build_graph(
     """
     graph = build_graph(checkpointer)
     _apply_per_agent_eval_isolation()
-    await _repair_dangling_tool_use_at_startup(graph, agent_id)
+    from agent.impersonation import native_status
+
+    takeover = await native_status(agent_id)
+    if takeover is None or takeover["status"] != "active":
+        await _repair_dangling_tool_use_at_startup(graph, agent_id)
     if config_overlay:
         from shared.plugin_config_registry import apply_config_overlay
 

@@ -27,6 +27,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from shared.lifecycle import (
+    AgentImpersonation,
     AgentRestart,
     AgentTermination,
     _LifecycleExit,
@@ -109,7 +110,7 @@ type _ExecResult = _ExecDone | _ExecCancelled | _ExecTimedOut | _ExecLifecycle |
 # parent turns a missing name into an ExecChildError crash; the dispatcher's
 # exhaustive TypeError separately guards any in-process `_LifecycleExit` callers.
 _LIFECYCLE_BY_NAME: dict[str, type[_LifecycleExit]] = {
-    cls.__name__: cls for cls in (AgentTermination, AgentRestart, _SystemHalt)
+    cls.__name__: cls for cls in (AgentTermination, AgentRestart, AgentImpersonation, _SystemHalt)
 }
 
 

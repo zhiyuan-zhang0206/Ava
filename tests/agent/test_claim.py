@@ -795,7 +795,8 @@ async def test_claim_unknown_kind_raises(
 
     tid = spawn_agent()
 
-    async def fake_claim(_db, _tid):
+    async def fake_claim(_db, _tid, *, lifecycle_only=False):
+        assert not lifecycle_only
         return [ClaimedInbound(id=99, agent_id=tid, content="x", kind="bogus", source="system")]
 
     monkeypatch.setattr("agent.graph._claim.claim_inbound_batch", fake_claim)  # pyright: ignore[reportUnknownArgumentType]
@@ -963,7 +964,9 @@ async def test_claim_fresh_invocation_waits_then_runs_turn(
     tid = spawn_agent()
     waited: list[int] = []
 
-    async def fake_wait(_ctx: object, agent_id: int) -> list[ClaimedInbound]:
+    async def fake_wait(
+        _ctx: object, agent_id: int, _request_id: str | None = None
+    ) -> list[ClaimedInbound]:
         waited.append(agent_id)
         return [ClaimedInbound(id=1, agent_id=tid, content="hi", kind="chat", source="user")]
 
@@ -1290,7 +1293,8 @@ async def test_claim_terminate_vetoed_by_pending_inbound_after_claim(
     chat_id = insert_inbound_message(db_conn, tid, "message after the claim", source="user")
     await _await_inbound_visible(aops_pool, chat_id)
 
-    async def fake_claim(_pool, _agent_id):
+    async def fake_claim(_pool, _agent_id, *, lifecycle_only=False):
+        assert not lifecycle_only
         # Faithful to claim_inbound_batch: the grab marks lifecycle rows 'done'
         # atomically, so the vetoed terminate is consumed and never retried.
         async with _pool.connection() as conn, conn.cursor() as cur:  # pyright: ignore[reportUnknownMemberType]
@@ -2193,6 +2197,7 @@ async def test_claim_auto_resurrect_chat_batch_wakes_and_keeps_chat(
     from shared.lifecycle_termination_observe import observe_applied_termination
     from shared.machine import machine_name
 
+    monkeypatch.setattr(settings.daemon, "runner_mode", "process")
     tid = running_agent()
     stop = _insert_inbound_kind(db_conn, tid, "", "terminate", source="user")
     assert (
@@ -2858,7 +2863,8 @@ async def test_wait_for_batch_retries_on_empty_claim(
     call_count = {"n": 0}
     real_claim = claim_module.claim_inbound_batch
 
-    async def flaky_claim(db, agent_id):
+    async def flaky_claim(db, agent_id, *, lifecycle_only=False):
+        assert not lifecycle_only
         # call 1 (claim_node top first SELECT): returns empty → enters wait
         # call 2 (_wait_for_batch loop iter 1): after waking claim still empty → wait again
         # call 3 (loop iter 2): obtains batch
@@ -2927,7 +2933,7 @@ async def test_wait_for_batch_resets_status_to_running_on_exception(
 
     boom = RuntimeError("simulated wait failure")
 
-    async def exploding_wait(pool, listener, *, agent_id):
+    async def exploding_wait(pool, listener, *, agent_id, extra_ready=None):
         raise boom
 
     monkeypatch.setattr("agent.graph._claim_batch.wait_for_inbound", exploding_wait)  # pyright: ignore[reportUnknownArgumentType]
@@ -2969,7 +2975,7 @@ async def test_wait_for_batch_records_wait_inside_claim_idle_wait_span(
         yield
         order.append("span-exit")
 
-    async def _fake_wait(pool, listener, *, agent_id):
+    async def _fake_wait(pool, listener, *, agent_id, extra_ready=None):
         order.append("wait")
 
     async def _fake_claim(pool, agent_id):

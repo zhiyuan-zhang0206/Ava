@@ -212,6 +212,9 @@ ignore_imports = [
     "services.agent_host.* -> agent.db",
     "services.agent_host.* -> agent.graph",
     "services.agent_host.* -> agent.hosted_ownership",
+    # The hosted invocation driver shares the native takeover boundary: it
+    # gates active leases and settles external state only after graph flush.
+    "services.agent_host.host -> agent.impersonation",
     "services.agent_host.* -> agent.startup",
     "services.agent_host.* -> agent.state",
 ]

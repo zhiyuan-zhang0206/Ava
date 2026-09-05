@@ -16,6 +16,12 @@ def _h_agents_ls(_args: argparse.Namespace) -> int:
     return cmd_agents_ls()
 
 
+def _h_agents_timeline(args: argparse.Namespace) -> int:
+    from cli.commands.agent_timeline import cmd_agents_timeline
+
+    return cmd_agents_timeline(args.agent_id, args.limit, args.before)
+
+
 def _h_agents_send(args: argparse.Namespace) -> int:
     from cli.commands.agents import cmd_agents_send
 
@@ -77,6 +83,18 @@ def _h_notices_clear(args: argparse.Namespace) -> int:
     return cmd_notices_clear(agent_id=args.agent, force=args.force, stale=args.stale)
 
 
+def _add_timeline_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    from cli.main import _h_agents_timeline
+
+    parser = sub.add_parser(
+        "timeline", aliases=["context"], help="read standing context and recent conversation"
+    )
+    parser.add_argument("agent_id", type=int)
+    parser.add_argument("--limit", type=int, default=50, help="recent items, 1..1000 (default 50)")
+    parser.add_argument("--before", help="exclusive item_id cursor for older history")
+    parser.set_defaults(func=_h_agents_timeline)
+
+
 def _add_agents_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     from cli.main import (
         _h_agents_cancel,
@@ -105,6 +123,8 @@ def _add_agents_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser])
         "ls", help="list all agents (id / status / machine / label) via GET /api/agents"
     )
     agents_ls_p.set_defaults(func=_h_agents_ls)
+
+    _add_timeline_parser(agents_sub)
 
     agents_send_p = agents_sub.add_parser(
         "send", help="deliver a chat message to an agent (auto-resurrects a terminated target)"
