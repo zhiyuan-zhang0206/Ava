@@ -121,6 +121,16 @@ packages = ["ava", "cli", "agent", "shared", "ops", "gateway", "services", "ava_
 [tool.uv]
 package = true
 
+# The single default package index, declared in-repo so `uv lock` resolves the
+# same registry URLs in every environment. Without this, a machine's user-level
+# uv.toml (e.g. the CN mirror on macmini) or its absence (CI runners) decides
+# the registry, and a regenerated uv.lock drifts pypi.org <-> mirror and breaks
+# deployment-side `uv sync --locked` validation (task #2528).
+[[tool.uv.index]]
+name = "tsinghua"
+url = "https://pypi.tuna.tsinghua.edu.cn/simple"
+default = true
+
 [dependency-groups]
 dev = [
     "import-linter>=2.0",
