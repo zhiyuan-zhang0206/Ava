@@ -788,7 +788,6 @@ jobs:
           export AVA_SIGNING_KEYCHAIN="$RUNNER_TEMP/ava-signing.keychain-db"
           security create-keychain -p ci-ava-signing "$AVA_SIGNING_KEYCHAIN"
           security unlock-keychain -p ci-ava-signing "$AVA_SIGNING_KEYCHAIN"
-          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k ci-ava-signing "$AVA_SIGNING_KEYCHAIN"
           security list-keychains -d user -s "$AVA_SIGNING_KEYCHAIN"
           security default-keychain -s "$AVA_SIGNING_KEYCHAIN"
           echo "AVA_PERMISSIONS_HELPER_KEYCHAIN=$AVA_SIGNING_KEYCHAIN" >> "$GITHUB_ENV"
@@ -801,7 +800,23 @@ jobs:
 
           from services.permissions_helper import client, lifecycle
 
+          # Import the signing identity into the isolated keychain.
           lifecycle.ensure_signing_cert()
+
+          # Grant codesign access to the imported private key.
+          subprocess.run(
+              [
+                  "security",
+                  "set-key-partition-list",
+                  "-S",
+                  "apple-tool:,apple:,codesign:",
+                  "-s",
+                  "-k",
+                  "ci-ava-signing",
+                  str(lifecycle._keychain_path()),
+              ],
+              check=True,
+          )
 
           # Report identities currently valid for codesigning.
           subprocess.run(["security", "find-identity", "-v", "-p", "codesigning"], check=True)
@@ -811,6 +826,23 @@ jobs:
           subprocess.run(["security", "dump-keychain", str(lifecycle._keychain_path())], check=True)
           # Show the keychain search list used by subsequent signing commands.
           subprocess.run(["security", "list-keychains"], check=True)
+
+          # Report the keychain lock state without failing the lane.
+          subprocess.run(
+              ["security", "show-keychain-info", str(lifecycle._keychain_path())],
+              check=False,
+          )
+          # Unlock again immediately before signing in case the import relocked it.
+          subprocess.run(
+              [
+                  "security",
+                  "unlock-keychain",
+                  "-p",
+                  "ci-ava-signing",
+                  str(lifecycle._keychain_path()),
+              ],
+              check=True,
+          )
 
           app, rebuilt = lifecycle.build_and_sign()
           assert rebuilt is True, "the isolated first build must compile and sign"
