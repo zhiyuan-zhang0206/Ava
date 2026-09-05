@@ -39,6 +39,7 @@ _SQL_OR_DYNAMIC_KINDS = frozenset(
     {
         # Positional emit calls from daemon alert paths, with no `event=` literal.
         "delivery_stalled",  # services/delivery_watchdog/daemon.py:_alert_stalled
+        "loki_write_path_probe_failed",  # services/healthchecks/lgtm.py write-path probe
         "delivery_poisoned",  # services/delivery_watchdog/dispatch_guard.py:_alert_poisoned
         "heartbeat_nudged",  # services/heartbeat/daemon.py:_alert_idle
         # Dynamic emit: positional-argument form, no `event=` literal.

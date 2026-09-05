@@ -24,7 +24,7 @@ generated from it and never hand-synced. event_names that violate the naming rul
 | mechanism | table/channel | registered event_names | destination |
 |------|------|-------------|------|
 | audit (category=audit) | `events` | 23 | events table |
-| telemetry (category=telemetry) | `events` | 151 | events table |
+| telemetry (category=telemetry) | `events` | 152 | events table |
 | log (category=log) | `events` | 9 | events table |
 | file-only (destination=file) | file log | 1 | file only (not the events table) |
 | SSE live | Redis → frontend (not persisted) | 28 role | live projection |
@@ -90,7 +90,7 @@ Emit sites and consumers: see the comments at each emit point.
 | `computer_session_end` | computer-use task session closed (idle timeout) | business | task_id, action_count, first_action_at, last_action_at, outcome | events |
 | `mcp_tool_call` | MCP tool invoked through the gateway /mcp endpoint (client-scoped, args redacted) | business | — | events |
 
-## 3. Telemetry events (category=telemetry, 151)
+## 3. Telemetry events (category=telemetry, 152)
 
 Telemetry-side event name resolution (`shared/log.py`): **explicit `event=` →
 `label=` fallback → default `"log"`**. Payload = logger extra fields + `msg`
@@ -154,6 +154,7 @@ consumers: see the comments at each emit point.
 | `task_reminder_digest` | overdue-task owner digest | noise | owner_id, task_count, task_ids | — | events |
 | `task_escalation` | stalled-task escalation | observation | owner_id, task_count, task_ids, leg | — | events |
 | `delivery_stalled` | delivery backlog | anomaly | inbound_id, age_s | — | events |
+| `loki_write_path_probe_failed` | Loki write-path probe failed | anomaly | consecutive_failures, reason | — | events |
 | `delivery_poisoned` | delivery backlog — permanently-failing inbound poisoned (dispatch cap reached) | anomaly | inbound_id, dispatch_count, age_s | — | events |
 | `claim_cas_lost` | claim CAS race lost — another lifecycle op owns the row | anomaly | — | — | events |
 | `claim_cas_lost_exit` | claim wait aborted by a lost CAS — process exiting cleanly | anomaly | — | — | events |
