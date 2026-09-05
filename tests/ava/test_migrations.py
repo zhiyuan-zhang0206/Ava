@@ -106,6 +106,16 @@ _FAILURE_FEEDBACK_UP = (
 _FAILURE_FEEDBACK_DOWN = (
     Path(__file__).resolve().parents[2] / "migrations" / "20260905T121043_failure-feedback.down.sql"
 )
+_FAILURE_FEEDBACK_BOUNDS_UP = (
+    Path(__file__).resolve().parents[2]
+    / "migrations"
+    / "20260905T140829_bound-failure-feedback.sql"
+)
+_FAILURE_FEEDBACK_BOUNDS_DOWN = (
+    Path(__file__).resolve().parents[2]
+    / "migrations"
+    / "20260905T140829_bound-failure-feedback.down.sql"
+)
 _RETIRED_SNAPSHOT_TABLES = (
     "fork_lineage_fix_backfill_agents_meta",
     "fork_lineage_fix_backfill_events",
@@ -1974,3 +1984,71 @@ def test_failure_feedback_migration_down_removes_additive_schema() -> None:
                 "'content_hash', 'source_assertion_match')"
             )
             assert cur.fetchall() == []
+
+
+def test_failure_feedback_bounds_migration_limits_facts_and_adds_attempts() -> None:
+    with _throwaway_database("failure-feedback-bounds-up") as url:
+        _run_sql(url, "CREATE TABLE inbound_messages (id BIGSERIAL PRIMARY KEY)")
+        _run_sql(url, _FAILURE_FEEDBACK_UP.read_text())
+        _run_sql(url, "INSERT INTO inbound_messages DEFAULT VALUES")
+        _run_sql(url, _FAILURE_FEEDBACK_BOUNDS_UP.read_text())
+
+        with psycopg.connect(url) as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT column_name, character_maximum_length "
+                "FROM information_schema.columns WHERE table_name = 'inbound_messages' "
+                "AND column_name IN ('source_verified_by', 'source_transport', 'content_hash')"
+            )
+            assert dict(cur.fetchall()) == {
+                "source_verified_by": 120,
+                "source_transport": 80,
+                "content_hash": 64,
+            }
+            cur.execute(
+                "SELECT source_verified_by, source_transport, content_hash FROM inbound_messages"
+            )
+            assert cur.fetchone() == (None, None, None)
+            cur.execute(
+                "INSERT INTO work_failed_events "
+                "(repo, ref, commit_sha, stage, summary, author_agent_id, dedup_key) "
+                "VALUES ('Ava', 'main', 'abc', 'qa', 'failed', 1, 'bounded') "
+                "RETURNING delivery_attempts"
+            )
+            assert cur.fetchone() == (0,)
+
+        with psycopg.connect(url, autocommit=True) as conn:
+            for column, maximum in (
+                ("source_verified_by", 120),
+                ("source_transport", 80),
+                ("content_hash", 64),
+            ):
+                statement = sql.SQL("INSERT INTO inbound_messages ({}) VALUES (%s)").format(
+                    sql.Identifier(column)
+                )
+                with pytest.raises(psycopg.errors.StringDataRightTruncation):
+                    conn.execute(statement, ("x" * (maximum + 1),))
+
+
+def test_failure_feedback_bounds_migration_down_restores_text_columns() -> None:
+    with _throwaway_database("failure-feedback-bounds-down") as url:
+        _run_sql(url, "CREATE TABLE inbound_messages (id BIGSERIAL PRIMARY KEY)")
+        _run_sql(url, _FAILURE_FEEDBACK_UP.read_text())
+        _run_sql(url, _FAILURE_FEEDBACK_BOUNDS_UP.read_text())
+        _run_sql(url, _FAILURE_FEEDBACK_BOUNDS_DOWN.read_text())
+
+        with psycopg.connect(url) as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT column_name, data_type, character_maximum_length "
+                "FROM information_schema.columns WHERE table_name = 'inbound_messages' "
+                "AND column_name IN ('source_verified_by', 'source_transport', 'content_hash')"
+            )
+            assert {(row[0], row[1], row[2]) for row in cur.fetchall()} == {
+                ("source_verified_by", "text", None),
+                ("source_transport", "text", None),
+                ("content_hash", "text", None),
+            }
+            cur.execute(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_name = 'work_failed_events' AND column_name = 'delivery_attempts'"
+            )
+            assert cur.fetchone() is None

@@ -7,7 +7,8 @@ makes a TTL **mandatory** for every persistent shell session created via
 idle-shell-reminder daemon is gone; TTL is the only reclamation mechanism).
 This loop is the enforcer, scanning
 ``agent_pages.expires_at``, ``agent_shell_ttls.expires_at``, and
-``web_sessions.expires_at`` for rows past their deadline:
+``web_sessions.expires_at`` for rows past their deadline, plus unfinished
+``work_failed_events`` older than their delivery grace window:
 
 - **Pages** — the row is terminalized with ``expired_at`` (the reverse proxy
   then answers the page's link with the friendly "page expired" notice), a
@@ -19,6 +20,9 @@ This loop is the enforcer, scanning
   gone. A row whose machine is unreachable is left for the next pass.
 - **Browser sessions** — expired rows are deleted in the gateway's periodic
   pass, so cleanup does not depend on the next login.
+- **Work failures** — a gateway crash after recording an event but before
+  finishing its route is retried through the original author/delegator/task
+  fallback chain.
 
 Owners are notified (inbound, source ``"system"``) only when the agent is
 running or idling — a terminated agent's page expiring is exactly the cleanup
@@ -44,6 +48,7 @@ from datetime import datetime
 import psycopg
 from psycopg_pool import ConnectionPool
 
+from gateway.routers import work_failed as work_failed_router
 from ops import cluster_rpc
 from shared import telemetry
 from shared.config import cluster_tz, settings
@@ -355,13 +360,16 @@ async def _reaper_loop(pool: ConnectionPool, stop: asyncio.Event) -> None:
             pages = await asyncio.to_thread(_reap_expired_pages_blocking, pool)
             shells = await _reap_expired_shells(pool)
             sessions = await asyncio.to_thread(_reap_expired_web_sessions_blocking, pool)
-            if pages or shells or sessions or impersonations:
+            failures = await work_failed_router.reconcile_stale_work_failures(pool)
+            if pages or shells or sessions or impersonations or failures:
                 _log.info(
-                    "[ttl-reaper] reclaimed %d page(s), %d shell(s), %d web session(s), %d impersonation(s)",
+                    "[ttl-reaper] reclaimed %d page(s), %d shell(s), %d web session(s), %d impersonation(s); "
+                    "completed %d stale work failure(s)",
                     len(pages),
                     len(shells),
                     sessions,
                     impersonations,
+                    failures,
                 )
         except Exception:
             _log.warning("[ttl-reaper] pass failed", exc_info=True)
