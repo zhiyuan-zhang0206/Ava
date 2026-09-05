@@ -347,9 +347,9 @@ CREATE TABLE inbound_messages (
     -- authenticated request/transport boundary; agent-side and legacy writers
     -- leave them NULL. The assertion comparison is informational and never
     -- rejects delivery.
-    source_verified_by TEXT,
-    source_transport TEXT,
-    content_hash TEXT,
+    source_verified_by VARCHAR(120),
+    source_transport VARCHAR(80),
+    content_hash VARCHAR(64),
     source_assertion_match BOOLEAN,
     -- Caller-generated identity for one logical chat delivery. NULL keeps
     -- internal / legacy writers unchanged; non-NULL keys are cluster-wide
@@ -432,6 +432,7 @@ CREATE TABLE work_failed_events (
     ),
     created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
     delivered_at        TIMESTAMPTZ,
+    delivery_attempts   INT NOT NULL DEFAULT 0,
     CONSTRAINT work_failed_events_delivery_complete CHECK (
         (delivered_to IS NULL AND delivery_kind IS NULL AND delivered_at IS NULL)
         OR (delivered_to IS NOT NULL AND delivery_kind IS NOT NULL AND delivered_at IS NOT NULL)
@@ -1425,3 +1426,7 @@ INSERT INTO schema_migrations (name) VALUES ('20260903T175722_add-born-spawner')
 -- Failure feedback is already represented above. Fresh DBs stamp it instead
 -- of replaying the strict ALTER/CREATE delta against the baseline schema.
 INSERT INTO schema_migrations (name) VALUES ('20260905T121043_failure-feedback');
+
+-- Failure-feedback bounds and retry accounting are represented above. Fresh
+-- DBs must not replay the strict ADD COLUMN against the baseline schema.
+INSERT INTO schema_migrations (name) VALUES ('20260905T140829_bound-failure-feedback');

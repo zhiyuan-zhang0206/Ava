@@ -2,20 +2,23 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
+from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 
 import httpx2
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
+from psycopg_pool import ConnectionPool
 from pydantic import SecretStr
 
 from gateway.app import app
 from gateway.routers import _delivery as delivery_router
 from gateway.routers import work_failed as work_failed_router
 from gateway.routers._delivery import ChatDelivery
-from gateway.schemas.work_failed import WorkFailedResult
+from gateway.schemas.work_failed import WorkFailedIn, WorkFailedResult
 from shared.agents import AgentStatus
 from shared.config import settings
 
@@ -90,6 +93,46 @@ def _stored_event_delivery(
     ).fetchone()
     assert row is not None
     return int(row[0]), row[1], row[2], row[3] is not None
+
+
+def _seed_unfinished_failure(
+    conn: psycopg.Connection,
+    author_agent_id: int,
+    *,
+    dedup_key: str,
+    age: timedelta,
+    delivery_attempts: int = 0,
+) -> tuple[int, WorkFailedIn]:
+    body = WorkFailedIn.model_validate(_payload(author_agent_id, dedup_key=dedup_key))
+    row = conn.execute(
+        "INSERT INTO work_failed_events "
+        "(repo, ref, commit_sha, stage, summary, author_agent_id, dedup_key, "
+        "created_at, delivery_attempts) "
+        "VALUES (%s, %s, %s, %s, %s, %s, %s, now() - %s::interval, %s) RETURNING id",
+        (
+            body.repo,
+            body.ref,
+            body.commit_sha,
+            body.stage,
+            body.summary,
+            body.author_agent_id,
+            body.dedup_key,
+            f"{age.total_seconds()} seconds",
+            delivery_attempts,
+        ),
+    ).fetchone()
+    conn.commit()
+    assert row is not None
+    return int(row[0]), body
+
+
+@pytest.fixture()
+def failure_pool() -> Iterator[ConnectionPool]:
+    import shared.db
+
+    pool = shared.db.pool(max_size=4)
+    yield pool
+    pool.close()
 
 
 @pytest.fixture(autouse=True)
@@ -285,6 +328,148 @@ def test_duplicate_dedup_key_never_delivers_twice(
     assert db_conn.execute(
         "SELECT count(*) FROM work_failed_events WHERE dedup_key = 'one-logical-failure'"
     ).fetchone() == (1,)
+
+
+async def test_reconcile_delivers_stale_unfinished_event(
+    db_conn: psycopg.Connection,
+    failure_pool: ConnectionPool,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    author = _seed_agent(db_conn, status=AgentStatus.IDLING)
+    event_id, _ = _seed_unfinished_failure(
+        db_conn,
+        author,
+        dedup_key="stale-retry",
+        age=timedelta(minutes=10),
+    )
+
+    async def _publish(*args: object, **kwargs: object) -> None:
+        return None
+
+    async def _keep_alive(*args: object, **kwargs: object) -> AgentStatus:
+        return AgentStatus.IDLING
+
+    monkeypatch.setattr(delivery_router._ops, "publish_inbound_arrived", _publish)
+    monkeypatch.setattr(delivery_router._ops, "resurrect_if_terminated", _keep_alive)
+
+    assert await work_failed_router.reconcile_stale_work_failures(failure_pool) == 1
+
+    event = db_conn.execute(
+        "SELECT delivered_to, delivery_kind, delivered_at IS NOT NULL, delivery_attempts "
+        "FROM work_failed_events WHERE id = %s",
+        (event_id,),
+    ).fetchone()
+    assert event == (f"agent:{author}", "author", True, 1)
+    inbound = db_conn.execute(
+        "SELECT source_verified_by, source_transport FROM inbound_messages "
+        "WHERE client_message_id = %s",
+        (f"work-failed:{event_id}:agent:{author}",),
+    ).fetchone()
+    assert inbound == (None, "reconcile")
+
+
+async def test_reconcile_sends_attempts_over_limit_directly_to_task_alert(
+    db_conn: psycopg.Connection,
+    failure_pool: ConnectionPool,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    author = _seed_agent(db_conn, status=AgentStatus.TERMINATED)
+    event_id, _ = _seed_unfinished_failure(
+        db_conn,
+        author,
+        dedup_key="retry-limit",
+        age=timedelta(minutes=10),
+        delivery_attempts=3,
+    )
+    db_conn.execute(
+        "INSERT INTO agent_tasks (title, description, status, created_by, is_root) "
+        "SELECT 'Root', 'root', 'ongoing', 'system', TRUE "
+        "WHERE NOT EXISTS (SELECT 1 FROM agent_tasks WHERE is_root)"
+    )
+    db_conn.commit()
+
+    async def _unexpected_delivery(*args: object, **kwargs: object) -> ChatDelivery:
+        pytest.fail("an exhausted event must not retry agent delivery")
+
+    monkeypatch.setattr(work_failed_router, "deliver_chat_inbound", _unexpected_delivery)
+
+    assert await work_failed_router.reconcile_stale_work_failures(failure_pool) == 1
+    event = db_conn.execute(
+        "SELECT delivered_to, delivery_kind, delivered_at IS NOT NULL, delivery_attempts "
+        "FROM work_failed_events WHERE id = %s",
+        (event_id,),
+    ).fetchone()
+    assert event is not None
+    assert event[0].startswith("task:")
+    assert event[1:] == ("task_alert", True, 4)
+
+
+async def test_reconcile_leaves_events_inside_grace_window_untouched(
+    db_conn: psycopg.Connection,
+    failure_pool: ConnectionPool,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    author = _seed_agent(db_conn, status=AgentStatus.IDLING)
+    event_id, _ = _seed_unfinished_failure(
+        db_conn,
+        author,
+        dedup_key="young-event",
+        age=timedelta(minutes=1),
+    )
+
+    async def _unexpected_delivery(*args: object, **kwargs: object) -> ChatDelivery:
+        pytest.fail("an event inside the grace window must not be delivered")
+
+    monkeypatch.setattr(work_failed_router, "deliver_chat_inbound", _unexpected_delivery)
+
+    assert await work_failed_router.reconcile_stale_work_failures(failure_pool) == 0
+    assert db_conn.execute(
+        "SELECT delivered_at, delivery_attempts FROM work_failed_events WHERE id = %s",
+        (event_id,),
+    ).fetchone() == (None, 0)
+
+
+async def test_concurrent_delivery_cas_deduplicates_the_agent_inbound(
+    db_conn: psycopg.Connection,
+    failure_pool: ConnectionPool,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    author = _seed_agent(db_conn, status=AgentStatus.IDLING)
+    event_id, body = _seed_unfinished_failure(
+        db_conn,
+        author,
+        dedup_key="concurrent-delivery",
+        age=timedelta(minutes=10),
+    )
+
+    async def _publish(*args: object, **kwargs: object) -> None:
+        return None
+
+    async def _keep_alive(*args: object, **kwargs: object) -> AgentStatus:
+        await asyncio.sleep(0)
+        return AgentStatus.IDLING
+
+    monkeypatch.setattr(delivery_router._ops, "publish_inbound_arrived", _publish)
+    monkeypatch.setattr(delivery_router._ops, "resurrect_if_terminated", _keep_alive)
+    provenance = work_failed_router.InboundProvenance(
+        source_verified_by="webhook:work_failed",
+        source_transport="http",
+    )
+
+    results = await asyncio.gather(
+        work_failed_router._deliver_failure(failure_pool, event_id, body, provenance),
+        work_failed_router._deliver_failure(failure_pool, event_id, body, provenance),
+    )
+
+    assert sorted(result.status for result in results) == ["delivered", "duplicate"]
+    assert db_conn.execute(
+        "SELECT count(*) FROM inbound_messages WHERE client_message_id = %s",
+        (f"work-failed:{event_id}:agent:{author}",),
+    ).fetchone() == (1,)
+    assert db_conn.execute(
+        "SELECT delivered_to, delivery_kind FROM work_failed_events WHERE id = %s",
+        (event_id,),
+    ).fetchone() == (f"agent:{author}", "author")
 
 
 def test_work_failed_rejects_unverified_remote_caller(

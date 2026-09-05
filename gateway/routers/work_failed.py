@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import Any, NamedTuple, cast
 
 from fastapi import APIRouter, HTTPException, Request
@@ -12,13 +13,17 @@ from gateway.routers._delivery import deliver_chat_inbound
 from gateway.routers._webhook_auth import authenticate_webhook
 from gateway.schemas.work_failed import FailureDeliveryKind, WorkFailedIn, WorkFailedResult
 from shared.agents import AgentStatus
+from shared.config import settings
 from shared.db import ALIVE_STATUSES, fetch_one
 from shared.db_transaction import write_transaction
 from shared.inbound_provenance import InboundProvenance
 
 router = APIRouter()
+_log = logging.getLogger(__name__)
 
 _MAX_SPAWNER_ANCESTOR_DEPTH = 32
+_MAX_REDELIVERY_ATTEMPTS = 3
+_RECONCILE_BATCH = 100
 
 
 class _StoredFailure(NamedTuple):
@@ -26,6 +31,12 @@ class _StoredFailure(NamedTuple):
     inserted: bool
     delivered_to: str | None
     delivery_kind: FailureDeliveryKind | None
+
+
+class _RetryFailure(NamedTuple):
+    event_id: int
+    body: WorkFailedIn
+    delivery_attempts: int
 
 
 def _register_failure(pool: ConnectionPool[Any], body: WorkFailedIn) -> _StoredFailure:
@@ -66,6 +77,46 @@ def _register_failure(pool: ConnectionPool[Any], body: WorkFailedIn) -> _StoredF
             delivered_to=existing[1],
             delivery_kind=cast(FailureDeliveryKind | None, existing[2]),
         )
+
+
+def _claim_stale_failures(
+    pool: ConnectionPool[Any],
+    *,
+    grace_seconds: float,
+) -> list[_RetryFailure]:
+    """Claim one bounded stale batch and count each redelivery attempt."""
+    with write_transaction(pool) as conn, conn.cursor() as cur:
+        cur.execute(
+            "WITH candidates AS ("
+            "  SELECT id FROM work_failed_events "
+            "  WHERE delivered_at IS NULL "
+            "    AND created_at < now() - make_interval(secs => %s) "
+            "  ORDER BY created_at, id LIMIT %s FOR UPDATE SKIP LOCKED"
+            ") "
+            "UPDATE work_failed_events AS event "
+            "SET delivery_attempts = event.delivery_attempts + 1 "
+            "FROM candidates WHERE event.id = candidates.id "
+            "  AND event.delivered_at IS NULL "
+            "RETURNING event.id, event.repo, event.ref, event.commit_sha, event.stage, "
+            "event.summary, event.author_agent_id, event.dedup_key, event.delivery_attempts",
+            (grace_seconds, _RECONCILE_BATCH),
+        )
+        return [
+            _RetryFailure(
+                event_id=int(row[0]),
+                body=WorkFailedIn(
+                    repo=row[1],
+                    ref=row[2],
+                    commit_sha=row[3],
+                    stage=row[4],
+                    summary=row[5],
+                    author_agent_id=row[6],
+                    dedup_key=row[7],
+                ),
+                delivery_attempts=int(row[8]),
+            )
+            for row in cur.fetchall()
+        ]
 
 
 def _agent_state(pool: ConnectionPool[Any], agent_id: int) -> tuple[AgentStatus, bool]:
@@ -118,15 +169,32 @@ def _finish_delivery(
     *,
     delivered_to: str,
     delivery_kind: FailureDeliveryKind,
-) -> None:
+) -> bool:
     with write_transaction(pool) as conn, conn.cursor() as cur:
         cur.execute(
             "UPDATE work_failed_events SET delivered_to = %s, delivery_kind = %s, "
             "delivered_at = now() WHERE id = %s AND delivered_at IS NULL",
             (delivered_to, delivery_kind, event_id),
         )
-        if cur.rowcount != 1:
-            raise RuntimeError(f"work failure {event_id} was already delivered")
+        return cur.rowcount == 1
+
+
+def _duplicate_delivery_result(pool: ConnectionPool[Any], event_id: int) -> WorkFailedResult:
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT delivered_to, delivery_kind, delivered_at "
+            "FROM work_failed_events WHERE id = %s",
+            (event_id,),
+        )
+        row = fetch_one(cur, "select completed work failure")
+    if row[2] is None:
+        raise RuntimeError(f"work failure {event_id} lost its delivery claim")
+    return WorkFailedResult(
+        event_id=event_id,
+        status="duplicate",
+        delivered_to=row[0],
+        delivery_kind=cast(FailureDeliveryKind, row[1]),
+    )
 
 
 def _create_task_alert(
@@ -135,6 +203,19 @@ def _create_task_alert(
     """Persist the no-live-lineage outcome in the existing task registry."""
     description = f"repo={body.repo} commit={body.commit_sha} stage={body.stage}\n\n{body.summary}"
     with write_transaction(pool) as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT delivered_to, delivery_kind, delivered_at "
+            "FROM work_failed_events WHERE id = %s FOR UPDATE",
+            (event_id,),
+        )
+        existing = fetch_one(cur, "lock work failure for task alert")
+        if existing[2] is not None:
+            return WorkFailedResult(
+                event_id=event_id,
+                status="duplicate",
+                delivered_to=existing[0],
+                delivery_kind=cast(FailureDeliveryKind, existing[1]),
+            )
         cur.execute("SELECT id FROM agent_tasks WHERE is_root ORDER BY id LIMIT 1")
         root_id = int(fetch_one(cur, "select task registry root")[0])
         cur.execute(
@@ -156,7 +237,7 @@ def _create_task_alert(
             (delivered_to, event_id),
         )
         if cur.rowcount != 1:
-            raise RuntimeError(f"work failure {event_id} was already delivered")
+            raise RuntimeError(f"work failure {event_id} lost its locked delivery claim")
     return WorkFailedResult(
         event_id=event_id,
         status="task_alerted",
@@ -178,6 +259,7 @@ async def _deliver_failure(
         body.author_agent_id,
         prepare=lambda _conn: message,
         source="system",
+        client_message_id=f"work-failed:{event_id}:agent:{body.author_agent_id}",
         provenance=provenance,
     )
     _, author_alive = await asyncio.to_thread(_agent_state, pool, body.author_agent_id)
@@ -186,13 +268,15 @@ async def _deliver_failure(
             "author_resurrected" if initial_status is AgentStatus.TERMINATED else "author"
         )
         delivered_to = f"agent:{body.author_agent_id}"
-        await asyncio.to_thread(
+        completed = await asyncio.to_thread(
             _finish_delivery,
             pool,
             event_id,
             delivered_to=delivered_to,
             delivery_kind=delivery_kind,
         )
+        if not completed:
+            return await asyncio.to_thread(_duplicate_delivery_result, pool, event_id)
         return WorkFailedResult(
             event_id=event_id,
             status="delivered",
@@ -207,19 +291,22 @@ async def _deliver_failure(
             ancestor_id,
             prepare=lambda _conn: message,
             source="system",
+            client_message_id=f"work-failed:{event_id}:agent:{ancestor_id}",
             provenance=provenance,
         )
         _, ancestor_alive = await asyncio.to_thread(_agent_state, pool, ancestor_id)
         if not ancestor_alive:
             continue
         delivered_to = f"agent:{ancestor_id}"
-        await asyncio.to_thread(
+        completed = await asyncio.to_thread(
             _finish_delivery,
             pool,
             event_id,
             delivered_to=delivered_to,
             delivery_kind="delegator",
         )
+        if not completed:
+            return await asyncio.to_thread(_duplicate_delivery_result, pool, event_id)
         return WorkFailedResult(
             event_id=event_id,
             status="delivered",
@@ -228,6 +315,42 @@ async def _deliver_failure(
         )
 
     return await asyncio.to_thread(_create_task_alert, pool, event_id, body)
+
+
+async def reconcile_stale_work_failures(pool: ConnectionPool[Any]) -> int:
+    """Retry stale unfinished deliveries; isolate one bad event from the batch."""
+    failures = await asyncio.to_thread(
+        _claim_stale_failures,
+        pool,
+        grace_seconds=settings.gateway.work_failed_retry_grace_seconds,
+    )
+    completed = 0
+    for failure in failures:
+        try:
+            if failure.delivery_attempts > _MAX_REDELIVERY_ATTEMPTS:
+                result = await asyncio.to_thread(
+                    _create_task_alert, pool, failure.event_id, failure.body
+                )
+            else:
+                result = await _deliver_failure(
+                    pool,
+                    failure.event_id,
+                    failure.body,
+                    InboundProvenance(
+                        source_verified_by=None,
+                        source_transport="reconcile",
+                    ),
+                )
+            if result.status != "duplicate":
+                completed += 1
+        except Exception:
+            _log.warning(
+                "[work-failed-reconcile] delivery failed for event %s on attempt %s",
+                failure.event_id,
+                failure.delivery_attempts,
+                exc_info=True,
+            )
+    return completed
 
 
 @router.post("/api/work-failed")

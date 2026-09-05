@@ -11,6 +11,7 @@ interrupted a running job; an idle or already-absent shell's reaping is silent.
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 
@@ -23,6 +24,7 @@ from gateway.ttl_reaper import (
     _reap_expired_pages_blocking,
     _reap_expired_shells,
     _reap_expired_web_sessions_blocking,
+    _reaper_loop,
 )
 from ops.rpc_schemas import ShellKillResult
 from shared.db import create_agent
@@ -36,6 +38,14 @@ def reaper_pool() -> Iterator[ConnectionPool]:
     pool = shared.db.pool(max_size=2)
     yield pool
     pool.close()
+
+
+def _empty_page_reap(_pool: ConnectionPool) -> list[tuple[int, str, int]]:
+    return []
+
+
+def _empty_web_session_reap(_pool: ConnectionPool) -> int:
+    return 0
 
 
 def _open_page(
@@ -179,6 +189,45 @@ def test_reap_expired_pages_skips_already_terminal(
     assert _reap_expired_pages_blocking(reaper_pool) == []
 
 
+async def test_reaper_reconciles_stale_work_failures_on_its_startup_pass(
+    reaper_pool: ConnectionPool,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stop = asyncio.Event()
+    calls: list[ConnectionPool] = []
+
+    monkeypatch.setattr(ttl_reaper, "_reap_expired_pages_blocking", _empty_page_reap)
+    monkeypatch.setattr(ttl_reaper, "_reap_expired_shells", _empty_shell_reap)
+    monkeypatch.setattr(
+        ttl_reaper,
+        "_reap_expired_web_sessions_blocking",
+        _empty_web_session_reap,
+    )
+
+    async def _reconcile(pool: ConnectionPool) -> int:
+        calls.append(pool)
+        stop.set()
+        return 0
+
+    monkeypatch.setattr(
+        ttl_reaper.work_failed_router,
+        "reconcile_stale_work_failures",
+        _reconcile,
+    )
+
+    reaper_task = asyncio.create_task(_reaper_loop(reaper_pool, stop))
+    done, _ = await asyncio.wait([reaper_task], timeout=0.2)
+    if reaper_task not in done:
+        stop.set()
+        await reaper_task
+
+    assert calls == [reaper_pool]
+
+
+async def _empty_shell_reap(_pool: ConnectionPool) -> list[tuple[int, int]]:
+    return []
+
+
 def test_reap_expired_pages_notifies_only_live_agents(
     db_conn: psycopg.Connection, reaper_pool: ConnectionPool
 ) -> None:
@@ -214,7 +263,9 @@ async def test_reap_expired_shells_deletes_on_killed(
         cur.execute("UPDATE agents_meta SET machine = 'macmini' WHERE id = %s", (aid,))
     db_conn.commit()
 
-    async def _dispatch(machine: str, kind: str, payload: dict, **kwargs: object) -> dict:
+    async def _dispatch(
+        machine: str, kind: str, payload: dict[str, object], **kwargs: object
+    ) -> dict[str, object]:
         assert machine == "macmini"
         assert kind == "shell_kill"
         assert payload == {"agent_id": aid, "session_id": 3}
@@ -252,7 +303,9 @@ async def test_reap_expired_shells_keeps_row_on_unreachable(
         cur.execute("UPDATE agents_meta SET machine = 'macmini' WHERE id = %s", (aid,))
     db_conn.commit()
 
-    async def _dispatch(machine: str, kind: str, payload: dict, **kwargs: object) -> dict:
+    async def _dispatch(
+        machine: str, kind: str, payload: dict[str, object], **kwargs: object
+    ) -> dict[str, object]:
         raise ttl_reaper.cluster_rpc.ClusterOpUnreachable("boom")
 
     monkeypatch.setattr(
@@ -305,7 +358,9 @@ async def test_reap_expired_shells_idle_reaping_is_silent(
         cur.execute("UPDATE agents_meta SET machine = 'macmini' WHERE id = %s", (aid,))
     db_conn.commit()
 
-    async def _dispatch(machine: str, kind: str, payload: dict, **kwargs: object) -> dict:
+    async def _dispatch(
+        machine: str, kind: str, payload: dict[str, object], **kwargs: object
+    ) -> dict[str, object]:
         return ShellKillResult(mode="killed", interrupted=False).model_dump()
 
     monkeypatch.setattr(
@@ -339,7 +394,9 @@ async def test_reap_expired_shells_absent_reaping_is_silent(
         cur.execute("UPDATE agents_meta SET machine = 'macmini' WHERE id = %s", (aid,))
     db_conn.commit()
 
-    async def _dispatch(machine: str, kind: str, payload: dict, **kwargs: object) -> dict:
+    async def _dispatch(
+        machine: str, kind: str, payload: dict[str, object], **kwargs: object
+    ) -> dict[str, object]:
         return ShellKillResult(mode="absent").model_dump()
 
     monkeypatch.setattr(
@@ -373,7 +430,9 @@ async def test_reap_expired_shells_missing_interrupted_field_notifies(
         cur.execute("UPDATE agents_meta SET machine = 'macmini' WHERE id = %s", (aid,))
     db_conn.commit()
 
-    async def _dispatch(machine: str, kind: str, payload: dict, **kwargs: object) -> dict:
+    async def _dispatch(
+        machine: str, kind: str, payload: dict[str, object], **kwargs: object
+    ) -> dict[str, object]:
         return {"mode": "killed"}  # old runner: no interrupted field
 
     monkeypatch.setattr(
