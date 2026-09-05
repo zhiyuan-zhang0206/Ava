@@ -506,6 +506,7 @@ def ensure_signing_cert() -> None:
                 "-T",
                 "/usr/bin/codesign",
                 "-A",
+                "-v",
             ]
         )
 

@@ -788,6 +788,7 @@ jobs:
           export AVA_SIGNING_KEYCHAIN="$RUNNER_TEMP/ava-signing.keychain-db"
           security create-keychain -p ci-ava-signing "$AVA_SIGNING_KEYCHAIN"
           security unlock-keychain -p ci-ava-signing "$AVA_SIGNING_KEYCHAIN"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k ci-ava-signing "$AVA_SIGNING_KEYCHAIN"
           security list-keychains -d user -s "$AVA_SIGNING_KEYCHAIN"
           security default-keychain -s "$AVA_SIGNING_KEYCHAIN"
           echo "AVA_PERMISSIONS_HELPER_KEYCHAIN=$AVA_SIGNING_KEYCHAIN" >> "$GITHUB_ENV"
@@ -802,25 +803,14 @@ jobs:
 
           lifecycle.ensure_signing_cert()
 
-          # Grant codesign access to the freshly imported key: the isolated
-          # keychain's partition list otherwise omits codesign (find-identity
-          # sees the cert, signing fails with errSecItemNotFound). Its password
-          # is known here -- the runner login keychain's is not.
-          subprocess.run(
-              [
-                  "security",
-                  "set-key-partition-list",
-                  "-S",
-                  "apple-tool:,apple:,codesign:",
-                  "-s",
-                  "-k",
-                  "ci-ava-signing",
-                  str(lifecycle._keychain_path()),
-              ],
-              check=True,
-          )
-          subprocess.run(["security", "list-keychains"], check=True)
+          # Report identities currently valid for codesigning.
           subprocess.run(["security", "find-identity", "-v", "-p", "codesigning"], check=True)
+          # Report all codesigning identities, including invalid ones.
+          subprocess.run(["security", "find-identity", "-p", "codesigning"], check=True)
+          # Show whether the imported key and certificate are registered.
+          subprocess.run(["security", "dump-keychain", str(lifecycle._keychain_path())], check=True)
+          # Show the keychain search list used by subsequent signing commands.
+          subprocess.run(["security", "list-keychains"], check=True)
 
           app, rebuilt = lifecycle.build_and_sign()
           assert rebuilt is True, "the isolated first build must compile and sign"
