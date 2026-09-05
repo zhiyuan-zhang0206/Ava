@@ -1,9 +1,12 @@
 """Plugin provider key validation and model media capability tests.
 
 Anthropic, DeepSeek, Gemini, Kimi, MIMO, OpenAI, Qwen, and Zhipu are provider plugins, so
-their key declarations are plugin-owned and the cluster's `.env` file is the
-only spawn-validation source. The legacy Settings fields stay for
-configuration compatibility but no longer authorize a spawn.
+their key declarations are plugin-owned. Spawn validation reads the unit's
+effective channel — os.environ first (bootstrap-injected on pure runners,
+dotenv-loaded on the gateway), then the local `.env` file fallback for the
+gateway profile that pops provider keys from the process env. The legacy
+Settings fields stay for configuration compatibility but no longer authorize
+a spawn.
 """
 
 from __future__ import annotations
@@ -30,9 +33,34 @@ def env_file(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     return env_path
 
 
+def test_plugin_key_env_injection_authorizes_without_env_file(
+    monkeypatch: pytest.MonkeyPatch, env_file: Path
+) -> None:
+    """Runner topology: the key arrives in os.environ only (bootstrap
+    injection; cluster facts are not materialized into the runner's .env)."""
+    env_file.write_text("")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-env")
+    ensure_provider_plugins_loaded()
+
+    assert validate_model_config(model="deepseek-v4-pro", config={}) == "deepseek-v4-pro"
+
+
+def test_plugin_key_missing_in_both_channels_raises(
+    monkeypatch: pytest.MonkeyPatch, env_file: Path
+) -> None:
+    """Neither the process env nor the .env file carries the key — fail fast."""
+    env_file.write_text("")
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+    ensure_provider_plugins_loaded()
+
+    with pytest.raises(ValueError, match="DEEPSEEK_API_KEY"):
+        validate_model_config(model="deepseek-v4-pro", config={})
+
+
 def test_plugin_key_ignores_legacy_settings_field(monkeypatch: pytest.MonkeyPatch) -> None:
     """Provider plugins use their declared env channel, never the Settings alias."""
     monkeypatch.setattr(settings.lm, "deepseek_api_key", "sk-test")
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
     monkeypatch.setattr(settings.lm, "llm_override", "")
     monkeypatch.setattr("shared.runtime_config.read_env_aliases", dict)
     ensure_provider_plugins_loaded()
@@ -47,6 +75,7 @@ def test_gemini_plugin_key_ignores_legacy_settings_field(
 ) -> None:
     """The migrated Gemini binding also reads only its declared env channel."""
     monkeypatch.setattr(settings.lm, "gemini_api_key", "sk-test")
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     monkeypatch.setattr(settings.lm, "llm_override", "")
     monkeypatch.setattr("shared.runtime_config.read_env_aliases", dict)
     ensure_provider_plugins_loaded()
@@ -61,6 +90,7 @@ def test_anthropic_plugin_key_ignores_legacy_settings_field(
 ) -> None:
     """The migrated Anthropic binding also reads only its declared env channel."""
     monkeypatch.setattr(settings.lm, "anthropic_api_key", "sk-test")
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.setattr(settings.lm, "llm_override", "")
     monkeypatch.setattr("shared.runtime_config.read_env_aliases", dict)
     ensure_provider_plugins_loaded()
@@ -75,6 +105,7 @@ def test_openai_plugin_key_ignores_legacy_settings_field(
 ) -> None:
     """The migrated OpenAI binding also reads only its declared env channel."""
     monkeypatch.setattr(settings.lm, "openai_api_key", "sk-test")
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.setattr(settings.lm, "llm_override", "")
     monkeypatch.setattr("shared.runtime_config.read_env_aliases", dict)
     ensure_provider_plugins_loaded()
@@ -89,6 +120,7 @@ def test_qwen_plugin_key_ignores_legacy_settings_field(
 ) -> None:
     """The migrated Qwen binding also reads only its declared env channel."""
     monkeypatch.setattr(settings.lm, "dashscope_api_key", "sk-test")
+    monkeypatch.delenv("DASHSCOPE_API_KEY", raising=False)
     monkeypatch.setattr(settings.lm, "llm_override", "")
     monkeypatch.setattr("shared.runtime_config.read_env_aliases", dict)
     ensure_provider_plugins_loaded()
@@ -103,6 +135,7 @@ def test_glm_plugin_key_ignores_legacy_settings_field(
 ) -> None:
     """The migrated Zhipu binding also reads only its declared env channel."""
     monkeypatch.setattr(settings.lm, "zhipu_api_key", "sk-test")
+    monkeypatch.delenv("GLM_API_KEY", raising=False)
     monkeypatch.setattr(settings.lm, "llm_override", "")
     monkeypatch.setattr("shared.runtime_config.read_env_aliases", dict)
     ensure_provider_plugins_loaded()
@@ -117,6 +150,7 @@ def test_kimi_plugin_key_ignores_legacy_settings_field(
 ) -> None:
     """The migrated Moonshot binding also reads only its declared env channel."""
     monkeypatch.setattr(settings.lm, "moonshot_api_key", "sk-test")
+    monkeypatch.delenv("MOONSHOT_API_KEY", raising=False)
     monkeypatch.setattr(settings.lm, "llm_override", "")
     monkeypatch.setattr("shared.runtime_config.read_env_aliases", dict)
     ensure_provider_plugins_loaded()
@@ -131,6 +165,7 @@ def test_mimo_plugin_key_ignores_legacy_settings_field(
 ) -> None:
     """The migrated Xiaomi binding also reads only its declared env channel."""
     monkeypatch.setattr(settings.lm, "xiaomi_api_key", "sk-test")
+    monkeypatch.delenv("MIMO_API_KEY", raising=False)
     monkeypatch.setattr(settings.lm, "llm_override", "")
     monkeypatch.setattr("shared.runtime_config.read_env_aliases", dict)
     ensure_provider_plugins_loaded()
@@ -146,9 +181,10 @@ def test_file_fallback_allows_key_after_gateway_pop(env_file: Path) -> None:
     assert validate_model_config(model="deepseek-v4-pro", config={}) == "deepseek-v4-pro"
 
 
-def test_missing_key_still_fails(env_file: Path) -> None:
-    """Neither settings nor the .env file has the key → the 400 intent holds."""
+def test_missing_key_still_fails(env_file: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Neither channel (os.environ nor the .env file) has the key → the 400 intent holds."""
     env_file.write_text("SOME_OTHER_KEY=x\n")
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
     with pytest.raises(ValueError, match="DEEPSEEK_API_KEY"):
         validate_model_config(model="deepseek-v4-pro", config={})
 

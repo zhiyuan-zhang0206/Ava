@@ -318,16 +318,22 @@ def _ensure_provider_key(effective_model: str) -> None:
         if not effective_model.startswith(prefix):
             continue
         if attr is None:
-            # Plugin provider: the key lives in the cluster's `.env` file
-            # only (it has no Settings field).
+            # Plugin provider: the key has no Settings field. It arrives on
+            # this unit's effective channel: a pure agent-runner receives it
+            # from /api/bootstrap injected into os.environ (no materialized
+            # .env cache of cluster facts since 2026-08-01), the gateway
+            # loads its own .env into the process env at boot. The file
+            # fallback covers the gateway profile that pops provider keys
+            # from os.environ (Task #856 / regression #1562).
             from shared.runtime_config import read_env_aliases
 
-            if env_var in read_env_aliases():
+            if provider_api.provider_key_present(env_var) or env_var in read_env_aliases():
                 return
             raise ValueError(
                 f"{effective_model} requires {env_var} which is not "
-                "configured — set it in ~/.ava/.env or export before "
-                "spawning"
+                "configured on this unit — set it in the cluster .env "
+                "(gateway unit) or restart the runner daemon so its "
+                "bootstrap fetch delivers it"
             )
         key = get_field(attr)
         if key is None:
