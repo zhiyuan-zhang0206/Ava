@@ -103,6 +103,21 @@ class _ServiceRuntimeSettings(EnvSettings):
         },
     )
 
+    permissions_helper_keychain: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("AVA_PERMISSIONS_HELPER_KEYCHAIN"),
+        serialization_alias="AVA_PERMISSIONS_HELPER_KEYCHAIN",
+        description="Optional keychain path override for the permissions helper's signing identity. None = the user's login keychain; CI sets this to an isolated keychain it owns.",
+        json_schema_extra={
+            "capability": "agent-runner",
+            "restart_required": "",
+            "writable": False,
+            "sensitive": False,
+            "scope": "host",
+            "remote_writable": False,
+        },
+    )
+
     project_root: Path | None = Field(
         default=None,
         alias="AVA_PROJECT_ROOT",

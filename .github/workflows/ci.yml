@@ -1,4 +1,4 @@
-# CI — the repo's only gate. GitHub-hosted ubuntu runners.
+# CI — the repo's only gate. GitHub-hosted runners.
 #
 # Hosted minutes are free and unmetered for public repos and public forks, so one
 # lane runs everywhere with no canonical-vs-fork gating — and the same economics
@@ -755,21 +755,170 @@ jobs:
       - name: Vendored PG + injected pgvector smoke (CREATE EXTENSION + query)
         run: uv run python scripts/pgvector_runtime_smoke.py
 
+  helper-signing-smoke:
+    name: permissions helper signing smoke (macOS)
+    runs-on: macos-15
+    timeout-minutes: 20
+    needs: [classify]
+    if: ${{ needs.classify.outputs.backend == 'true' }}
+    env:
+      AVA_DB_URL: ""
+      AVA_REDIS_URL: ""
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: 0.10.2
+          enable-cache: true
+
+      - name: Install Python deps
+        run: uv sync --frozen
+
+      - name: Create isolated Ava home
+        run: |
+          mkdir -p "$RUNNER_TEMP/ava-home"
+          echo "AVA_HOME=$RUNNER_TEMP/ava-home" >> "$GITHUB_ENV"
+
+      - name: Create isolated signing keychain
+        run: |
+          # CI-only throwaway keychain; the password protects nothing (the lane's
+          # self-signed CI cert lives in it for minutes and is deleted in teardown).
+          export AVA_SIGNING_KEYCHAIN="$RUNNER_TEMP/ava-signing.keychain-db"
+          security create-keychain -p ci-ava-signing "$AVA_SIGNING_KEYCHAIN"
+          security unlock-keychain -p ci-ava-signing "$AVA_SIGNING_KEYCHAIN"
+          security list-keychains -d user -s "$AVA_SIGNING_KEYCHAIN"
+          security default-keychain -s "$AVA_SIGNING_KEYCHAIN"
+          echo "AVA_PERMISSIONS_HELPER_KEYCHAIN=$AVA_SIGNING_KEYCHAIN" >> "$GITHUB_ENV"
+
+      - name: Real build + ad-hoc sign + DR readback + launchd ping
+        run: |
+          # Hosted macOS runners cannot codesign with an imported identity (platform
+          # limitation, runner-images#13884 family; all lookup paths return
+          # errSecItemNotFound). Real signing verification is carried by the production
+          # preflight hard gate on real hosts. This lane signs ad-hoc so the
+          # build/identity/partition/launchd/ping chain stays real.
+          uv run python - <<'PY'
+          import subprocess
+
+          from services.permissions_helper import client, lifecycle
+
+          # Import the signing identity into the isolated keychain.
+          lifecycle.ensure_signing_cert()
+
+          # Grant codesign access to the imported private key.
+          subprocess.run(
+              [
+                  "security",
+                  "set-key-partition-list",
+                  "-S",
+                  "apple-tool:,apple:,codesign:",
+                  "-s",
+                  "-k",
+                  "ci-ava-signing",
+                  str(lifecycle._keychain_path()),
+              ],
+              check=True,
+          )
+
+          # Report identities currently valid for codesigning.
+          subprocess.run(["security", "find-identity", "-v", "-p", "codesigning"], check=True)
+          # Report all codesigning identities, including invalid ones.
+          subprocess.run(["security", "find-identity", "-p", "codesigning"], check=True)
+          # Show whether the imported key and certificate are registered.
+          subprocess.run(["security", "dump-keychain", str(lifecycle._keychain_path())], check=True)
+          # Show the keychain search list used by subsequent signing commands.
+          subprocess.run(["security", "list-keychains"], check=True)
+
+          # Report the keychain lock state without failing the lane.
+          subprocess.run(
+              ["security", "show-keychain-info", str(lifecycle._keychain_path())],
+              check=False,
+          )
+          # Unlock again immediately before signing in case the import relocked it.
+          subprocess.run(
+              [
+                  "security",
+                  "unlock-keychain",
+                  "-p",
+                  "ci-ava-signing",
+                  str(lifecycle._keychain_path()),
+              ],
+              check=True,
+          )
+
+          # Compile and assemble the real helper app bundle.
+          app = lifecycle._BUILD_DIR / "AvaPermissionsHelper.app"
+          lifecycle._BUILD_DIR.mkdir(parents=True, exist_ok=True)
+          binary = lifecycle._BUILD_DIR / "AvaPermissionsHelper"
+          lifecycle._run(["swiftc", "-O", str(lifecycle._SOURCE), "-o", str(binary)])
+          lifecycle._remove_app(app)
+          exe = lifecycle._app_executable(app)
+          exe.parent.mkdir(parents=True, exist_ok=True)
+          (app / "Contents" / "Info.plist").write_bytes(lifecycle._INFO_PLIST.read_bytes())
+          exe.write_bytes(binary.read_bytes())
+          exe.chmod(0o755)
+
+          # Sign ad-hoc without asking the hosted runner to resolve the imported identity.
+          lifecycle._run(
+              [
+                  "codesign",
+                  "--force",
+                  "--sign",
+                  "-",
+                  "--identifier",
+                  lifecycle._BUNDLE_ID,
+                  str(app),
+              ]
+          )
+
+          # Keep designated-requirement readback on the real macOS codesign path. The
+          # ad-hoc signature's DR has no "designated =>" line, so assert on the raw
+          # readback (lifecycle._read_dr parses the stable-identity DR shape and is
+          # covered by unit tests + the production preflight gate).
+          dr_result = subprocess.run(
+              ["codesign", "-d", "-r-", str(app)],
+              capture_output=True,
+              check=False,
+              text=True,
+          )
+          dr_text = (dr_result.stdout or "") + (dr_result.stderr or "")
+          print(f"DR readback: {dr_text[:500]}")
+          assert dr_result.returncode == 0, f"codesign -d -r- failed: {dr_text[:500]}"
+          assert "cdhash" in dr_text, f"no cdhash in designated requirement output: {dr_text[:500]}"
+
+          # Bootstrap failure intentionally fails this lane: the hosted runner's
+          # user launchd chain is part of the production contract being tested.
+          lifecycle.install_and_load(app, rebuilt=True)
+          assert client.ping()["pong"] is True
+          PY
+
+      - name: Tear down helper launchd job
+        if: ${{ always() }}
+        run: |
+          export AVA_HOME="${AVA_HOME:-$RUNNER_TEMP/ava-home}"
+          label="$(uv run python -c 'from services.permissions_helper.lifecycle import _label; print(_label())' 2>/dev/null || true)"
+          if [[ -n "$label" ]]; then
+            launchctl bootout "gui/$(id -u)/$label" || true
+          fi
+          security delete-keychain "$RUNNER_TEMP/ava-signing.keychain-db" || true
+
   backend:
     # The aggregator carrying the branch-protection check name:
     # skipped (= satisfied) when the diff has no backend side; otherwise green
-    # iff the static job and every pytest shard are green AND the combined
-    # coverage clears the gate.
+    # iff the static and native smoke jobs, every pytest shard, and the combined
+    # coverage gate are green.
     name: backend (pytest + pyright)
     runs-on: ubuntu-24.04
     timeout-minutes: 10
-    needs: [classify, backend-static, backend-structure, backend-shard, backend-serial, backend-pgvector-smoke]
+    needs: [classify, backend-static, backend-structure, backend-shard, backend-serial, backend-pgvector-smoke, helper-signing-smoke]
     if: ${{ always() && needs.classify.result == 'success' && needs.classify.outputs.backend == 'true' }}
     steps:
       - name: Verify shard results
-        if: ${{ needs.backend-static.result != 'success' || needs.backend-structure.result != 'success' || needs.backend-shard.result != 'success' || needs.backend-serial.result != 'success' || needs.backend-pgvector-smoke.result != 'success' }}
+        if: ${{ needs.backend-static.result != 'success' || needs.backend-structure.result != 'success' || needs.backend-shard.result != 'success' || needs.backend-serial.result != 'success' || needs.backend-pgvector-smoke.result != 'success' || needs.helper-signing-smoke.result != 'success' }}
         run: |
-          echo "a backend job did not succeed: static=${{ needs.backend-static.result }} structure=${{ needs.backend-structure.result }} shards=${{ needs.backend-shard.result }} serial=${{ needs.backend-serial.result }} pgvector-smoke=${{ needs.backend-pgvector-smoke.result }}"
+          echo "a backend job did not succeed: static=${{ needs.backend-static.result }} structure=${{ needs.backend-structure.result }} shards=${{ needs.backend-shard.result }} serial=${{ needs.backend-serial.result }} pgvector-smoke=${{ needs.backend-pgvector-smoke.result }} helper-signing-smoke=${{ needs.helper-signing-smoke.result }}"
           exit 1
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
