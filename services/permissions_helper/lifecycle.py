@@ -86,6 +86,11 @@ _ACL_REMEDY = (
     f"`security set-key-partition-list -S apple-tool:,apple: -s -l {_CERT_CN!r}` "
     "(it prompts once for the login password). Then re-run `ava converge`."
 )
+_SIGNING_REACH_REMEDY = (
+    "Align the signing keychain with the user search list. From a local Terminal.app, run "
+    "`security list-keychains -d user -s <signing keychain path>`. Use the login keychain "
+    f"path by default. {_ACL_REMEDY}"
+)
 
 # Every tool below is local and has no network leg, so the only way one runs long
 # is that it stopped to ask a human. That is not hypothetical: on 2026-08-02 a
@@ -210,6 +215,23 @@ def _keychain_path() -> Path:
     return Path.home() / "Library" / "Keychains" / "login.keychain-db"
 
 
+def _signing_keychain_search_list_note() -> str:
+    """Describe whether the signing keychain is in the user search list."""
+    try:
+        keychain = str(_keychain_path())
+        proc = _probe(["security", "list-keychains", "-d", "user"])
+        if proc.returncode != 0:
+            return "The user keychain search list is unreadable."
+        listed = {
+            line.strip().strip("\"'").strip()
+            for line in proc.stdout.decode(errors="replace").splitlines()
+        }
+    except Exception:  # This diagnostic must never replace the signing refusal.
+        return "The user keychain search list is unreadable."
+    location = "present in" if keychain in listed else "missing from"
+    return f"The signing keychain {keychain!r} is {location} the user keychain search list."
+
+
 def _keychain_lock_reason() -> str | None:
     """Return why the login keychain cannot serve the signing key, or None.
 
@@ -332,19 +354,28 @@ def preflight_signing_smoke() -> None:
         with tempfile.TemporaryDirectory() as td:
             scratch = Path(td) / "signing-smoke"
             scratch.write_bytes(b"\x00")
-            _run(
-                [
-                    "codesign",
-                    "--sign",
-                    _CERT_CN,
-                    "-v",
-                    "--identifier",
-                    _BUNDLE_ID,
-                    "--requirements",
-                    f"=designated => {expected_dr}",
-                    str(scratch),
-                ]
-            )
+            try:
+                _run(
+                    [
+                        "codesign",
+                        "--sign",
+                        _CERT_CN,
+                        "-v",
+                        "--identifier",
+                        _BUNDLE_ID,
+                        "--requirements",
+                        f"=designated => {expected_dr}",
+                        str(scratch),
+                    ]
+                )
+            except PermissionsHelperBuildError as exc:
+                detail = str(exc).lower()
+                if "-25300" in detail or "errsecitemnotfound" in detail:
+                    search_list_note = _signing_keychain_search_list_note()
+                    raise PermissionsHelperBuildError(
+                        f"{exc}. {_SIGNING_REACH_REMEDY} {search_list_note}"
+                    ) from exc
+                raise
             actual_dr = _read_dr(scratch)
     except (OSError, PermissionsHelperBuildError) as exc:
         raise PermissionsHelperBuildError(f"{refusal}: {exc}") from exc
