@@ -169,6 +169,37 @@ def test_alive_author_receives_failure_with_webhook_provenance(
     assert row[4] == hashlib.sha256(row[0].encode()).hexdigest()
 
 
+@pytest.mark.parametrize(
+    ("field", "oversize"),
+    [
+        ("repo", "x" * 201),
+        ("ref", "x" * 256),
+        ("commit_sha", "x" * 65),
+        ("summary", "x" * 2001),
+        ("dedup_key", "x" * 256),
+    ],
+)
+def test_work_failed_rejects_oversize_text_fields(
+    db_conn: psycopg.Connection, field: str, oversize: str
+) -> None:
+    """Task #2531: unbounded webhook text could inject megabyte-scale content
+    into agent chat / task descriptions. The schema bounds reject oversize
+    payloads before any row or delivery effect."""
+    author = _seed_agent(db_conn, status=AgentStatus.IDLING)
+
+    with TestClient(app) as client:
+        payload = _payload(author, dedup_key=f"oversize-{field}")
+        payload[field] = oversize
+        response = _post(client, payload)
+
+    assert response.status_code == 422
+    row = db_conn.execute(
+        "SELECT COUNT(*) FROM work_failed_events WHERE dedup_key = %s",
+        (f"oversize-{field}",),
+    ).fetchone()
+    assert row is not None and row[0] == 0
+
+
 def test_cluster_bearer_is_accepted_and_recorded(
     db_conn: psycopg.Connection,
     monkeypatch: pytest.MonkeyPatch,
