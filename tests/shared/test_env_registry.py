@@ -23,11 +23,11 @@ os.environ["AVA_CONFIG_FETCH"] = (
 )
 
 
-def _fields() -> dict:  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+def _fields() -> dict:
     """The raw flat field registry (name -> _FieldRef with scope/capability)."""
     from shared.config import _FIELDS, _schema_extra, field_alias
 
-    return {  # pyright: ignore[reportUnknownVariableType]
+    return {
         name: {
             "alias": field_alias(name),
             "scope": _schema_extra(ref.info).get("scope"),
@@ -41,8 +41,8 @@ def _aliases_with(
     *, scope: tuple[str, ...] | None = None, capability: str | None = None
 ) -> frozenset[str]:
     """Independent recomputation of a scope/capability slice of the registry."""
-    out = set()  # pyright: ignore[reportUnknownVariableType]
-    for _name, meta in _fields().items():  # pyright: ignore[reportUnknownVariableType]
+    out = set()
+    for _name, meta in _fields().items():
         if scope is not None and meta["scope"] not in scope:
             continue
         if capability is not None and meta["capability"] != capability:
@@ -216,7 +216,7 @@ class TestConsumptionMatrixDeclarations:
             "gateway_watchdog",
             "agent_runner_watchdog",
         }
-        meta = _fields()  # pyright: ignore[reportUnknownVariableType]
+        meta = _fields()
         for svc, alias in aliases.items():
             assert meta[f"{svc}_health_port"]["alias"] == alias
             assert meta[f"{svc}_health_port"]["scope"] == "host"

@@ -46,13 +46,13 @@ def _wait(predicate, timeout: float = 30.0, interval: float = 0.05) -> bool:
     # 30s default (2026-09-03): process-lifetime waits (group kill reaping a
     # late-spawned child, posixproc task #2249 regression test) tripped their
     # old 5s budget under CI runner oversubscription — same failure mode the
-    # pty-sessions suite already sized for on 2026-08-09.  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    # pty-sessions suite already sized for on 2026-08-09.
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if predicate():
             return True
         time.sleep(interval)
-    return predicate()  # pyright: ignore[reportUnknownVariableType]
+    return predicate()
 
 
 def _no_new_direct_children(spawner: psutil.Process, before: set[psutil.Process]) -> bool:
@@ -133,7 +133,7 @@ def test_process_is_live_treats_zombie_as_dead() -> None:
 
 
 def test_new_session_reparents_to_init_no_zombie(
-    unit_home,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    unit_home,
     record_property: Callable[[str, object], None],
 ) -> None:
     """The launched child double-forks to init or an ancestor subreaper,
@@ -190,7 +190,7 @@ def test_new_session_reparents_to_init_no_zombie(
         posixproc.kill_session(name, graceful=False)
 
 
-def test_graceful_signal_terminates(unit_home) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_graceful_signal_terminates(unit_home) -> None:
     """graceful_signal sends SIGTERM; a default-disposition child dies, so the
     session goes away (the reap's O(slowest-agent) shared-deadline path)."""
     name = "ava-test-agent-2"
@@ -220,7 +220,7 @@ def test_kill_session_force_kills_sigterm_ignoring_survivor(unit_home: Path) -> 
         f"open({str(marker)!r}, 'w').close();"
         "time.sleep(300)",
     ]
-    _new(name, argv, unit_home)  # pyright: ignore[reportUnknownArgumentType]
+    _new(name, argv, unit_home)
     pid = _pid(name)
     assert _wait(lambda: psutil.pid_exists(pid))
     assert _wait(marker.exists), "child never installed SIG_IGN"
@@ -232,7 +232,7 @@ def test_kill_session_force_kills_sigterm_ignoring_survivor(unit_home: Path) -> 
     assert not posixproc._record_path(name).exists()
 
 
-def test_kill_session_reaps_process_tree(unit_home) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_kill_session_reaps_process_tree(unit_home) -> None:
     """A force kill takes down the child's own descendants too (Claude Code /
     subprocesses an agent spawns), not just the top process."""
     name = "ava-test-agent-4"
@@ -255,7 +255,7 @@ def test_kill_session_reaps_process_tree(unit_home) -> None:  # pyright: ignore[
     assert _wait(lambda: _pid_gone_or_zombie(child_pid)), "child sleep should be reaped with tree"
 
 
-def test_has_session_false_when_process_gone(unit_home) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_has_session_false_when_process_gone(unit_home) -> None:
     name = "ava-test-agent-5"
     _new(name, list(_SLEEP), unit_home)  # pyright: ignore[reportUnknownArgumentType]
     pid = _pid(name)
@@ -267,7 +267,7 @@ def test_has_session_false_when_process_gone(unit_home) -> None:  # pyright: ign
     assert posixproc.has_session(name) is False
 
 
-def test_list_sessions_reaps_dead_record(unit_home) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_list_sessions_reaps_dead_record(unit_home) -> None:
     """A record whose process is gone is unlinked as list_sessions walks it, so the
     listing reflects reality (mirrors winproc)."""
     name = "ava-test-agent-6"
@@ -359,7 +359,7 @@ def test_list_sessions_keeps_live_legacy_record_with_clock_drift(
     )
 
 
-def test_new_session_idempotent_when_live(unit_home) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_new_session_idempotent_when_live(unit_home) -> None:
     """A second new_session for a still-live name is a no-op (returns True without
     relaunching) — matching winproc + the has-session guard at the call site."""
     name = "ava-test-agent-7"
@@ -372,14 +372,14 @@ def test_new_session_idempotent_when_live(unit_home) -> None:  # pyright: ignore
         posixproc.kill_session(name, graceful=False)
 
 
-def test_kill_session_noop_on_absent(unit_home) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_kill_session_noop_on_absent(unit_home) -> None:
     assert posixproc.kill_session("ava-test-agent-does-not-exist") == (True, "noop")
     assert posixproc.graceful_signal("ava-test-agent-does-not-exist") is False
 
 
 def test_kill_session_survivor_reports_and_keeps_record(
-    unit_home,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-    monkeypatch: pytest.MonkeyPatch,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    unit_home,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A kill that fails to take the process down returns (False, mode) and
     KEEPS the record — the no-DB reap's only view of the survivor (audit
@@ -394,7 +394,7 @@ def test_kill_session_survivor_reports_and_keeps_record(
 
     # Simulate a kill that achieves nothing (SIGKILL raced a D-state process,
     # or AccessDenied skipped _terminate_tree's whole body).
-    def _noop_kill(*_args, **_kwargs):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    def _noop_kill(*_args, **_kwargs):
         return None
 
     _real_terminate_tree = posixproc._terminate_tree
@@ -416,8 +416,8 @@ def test_kill_session_survivor_reports_and_keeps_record(
 
 
 def test_kill_session_terminate_error_keeps_record(
-    unit_home,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-    monkeypatch: pytest.MonkeyPatch,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    unit_home,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """_terminate_tree raising (not just failing silently) must also report
     False and keep the record — the raise path is the same lie, one line up."""
@@ -427,7 +427,7 @@ def test_kill_session_terminate_error_keeps_record(
     pid = _pid(name)
     assert _wait(lambda: psutil.pid_exists(pid))
 
-    def boom(*a, **k):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    def boom(*a, **k):
         raise OSError("kill failed")
 
     _real_terminate_tree = posixproc._terminate_tree
@@ -444,8 +444,8 @@ def test_kill_session_terminate_error_keeps_record(
 
 
 def test_new_session_dead_child_records_sentinel(
-    unit_home,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-    monkeypatch: pytest.MonkeyPatch,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    unit_home,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A child whose create_time cannot be read — it died at spawn, freeing
     the pid at its most reusable moment — gets a sentinel that can never
@@ -479,7 +479,7 @@ def test_new_session_dead_child_records_sentinel(
 
 
 def test_kill_session_group_kill_reaps_late_spawned_child(
-    unit_home,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    unit_home,
     tmp_path: Path,
     record_property: Callable[[str, object], None],
 ) -> None:
@@ -538,7 +538,7 @@ def test_kill_session_group_kill_reaps_late_spawned_child(
 
 
 def test_kill_session_group_kill_reaps_sigterm_ignoring_wrapper(
-    unit_home,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    unit_home,
 ) -> None:
     """A bash wrapper that ignores SIGTERM (it waits for its foreground
     command) and its background child are both taken down by the group signals:
@@ -566,8 +566,8 @@ def test_kill_session_group_kill_reaps_sigterm_ignoring_wrapper(
 
 
 def test_kill_session_signals_the_process_group(
-    unit_home,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-    monkeypatch: pytest.MonkeyPatch,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    unit_home,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The TTL path's final executor (posixproc.kill_session, reached from the
     page-server daemon's TTL reconcile) signals the session's process GROUP,
@@ -594,7 +594,7 @@ def test_kill_session_signals_the_process_group(
 
 
 def test_kill_session_group_kill_reaps_detached_descendant(
-    unit_home,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    unit_home,
     tmp_path: Path,
 ) -> None:
     """A descendant that deliberately left the session's process group (a

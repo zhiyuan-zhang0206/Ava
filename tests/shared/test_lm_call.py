@@ -101,7 +101,7 @@ def test_invoke_text_emits_chat_billing_span_from_llm_model_name(
     tracer = _Tracer()
     monkeypatch.setattr("shared.config.settings.observability.trace_enabled", True)
     monkeypatch.setitem(trace_mod._state, "initialized", True)
-    monkeypatch.setattr(otel_trace, "get_tracer", lambda _name: tracer)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(otel_trace, "get_tracer", lambda _name: tracer)  # pyright: ignore[reportUnknownArgumentType]
     llm = _FakeLLM(
         AIMessage(
             content="answer",
@@ -298,9 +298,9 @@ def test_invoke_text_retries_transient_then_succeeds(
     `retry_attempts` allows, and a later success returns normally."""
     import httpx
 
-    monkeypatch.setattr("time.sleep", lambda _: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-    monkeypatch.setattr("random.uniform", lambda *_: 0.0)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-    monkeypatch.setattr("shared.resilience._agent_phase", lambda _span: 0.0)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr("time.sleep", lambda _: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("random.uniform", lambda *_: 0.0)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("shared.resilience._agent_phase", lambda _span: 0.0)  # pyright: ignore[reportUnknownArgumentType]
     calls = {"n": 0}
 
     class _Flaky:
@@ -329,9 +329,9 @@ def test_invoke_text_retry_exhausted_raises_error_type(
     error type with the attempt count in the message."""
     import httpx
 
-    monkeypatch.setattr("time.sleep", lambda _: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-    monkeypatch.setattr("random.uniform", lambda *_: 0.0)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-    monkeypatch.setattr("shared.resilience._agent_phase", lambda _span: 0.0)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr("time.sleep", lambda _: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("random.uniform", lambda *_: 0.0)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("shared.resilience._agent_phase", lambda _span: 0.0)  # pyright: ignore[reportUnknownArgumentType]
 
     class _Always:
         def invoke(self, messages: list[Any]) -> Any:
@@ -357,8 +357,8 @@ def test_invoke_text_retry_uses_exponential_backoff(
 
     sleeps: list[float] = []
     monkeypatch.setattr("time.sleep", sleeps.append)
-    monkeypatch.setattr("random.uniform", lambda *_: 0.0)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-    monkeypatch.setattr("shared.resilience._agent_phase", lambda _span: 0.0)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr("random.uniform", lambda *_: 0.0)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("shared.resilience._agent_phase", lambda _span: 0.0)  # pyright: ignore[reportUnknownArgumentType]
 
     class _Always:
         def invoke(self, messages: list[Any]) -> Any:
@@ -383,8 +383,8 @@ def test_invoke_text_retry_backoff_capped(monkeypatch: pytest.MonkeyPatch) -> No
 
     sleeps: list[float] = []
     monkeypatch.setattr("time.sleep", sleeps.append)
-    monkeypatch.setattr("random.uniform", lambda *_: 0.0)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-    monkeypatch.setattr("shared.resilience._agent_phase", lambda _span: 0.0)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr("random.uniform", lambda *_: 0.0)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("shared.resilience._agent_phase", lambda _span: 0.0)  # pyright: ignore[reportUnknownArgumentType]
 
     class _Always:
         def invoke(self, messages: list[Any]) -> Any:
@@ -435,8 +435,8 @@ def test_invoke_text_retry_respects_retry_after(
     120s), plus jitter — mirroring the SDKs' own header reading at our layer."""
     sleeps: list[float] = []
     monkeypatch.setattr("time.sleep", sleeps.append)
-    monkeypatch.setattr("random.uniform", lambda *_: 0.0)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-    monkeypatch.setattr("shared.resilience._agent_phase", lambda _span: 0.0)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr("random.uniform", lambda *_: 0.0)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("shared.resilience._agent_phase", lambda _span: 0.0)  # pyright: ignore[reportUnknownArgumentType]
 
     with pytest.raises(ValueError, match="429"):
         invoke_text(
@@ -458,8 +458,8 @@ def test_invoke_text_retry_after_capped_at_120(
     sequence applies instead."""
     sleeps: list[float] = []
     monkeypatch.setattr("time.sleep", sleeps.append)
-    monkeypatch.setattr("random.uniform", lambda *_: 0.0)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-    monkeypatch.setattr("shared.resilience._agent_phase", lambda _span: 0.0)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr("random.uniform", lambda *_: 0.0)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("shared.resilience._agent_phase", lambda _span: 0.0)  # pyright: ignore[reportUnknownArgumentType]
 
     with pytest.raises(ValueError, match="429"):
         invoke_text(
@@ -479,8 +479,8 @@ def test_invoke_text_retry_after_ms_header(
     """`retry-after-ms` (the SDKs' non-standard precision header) is honored."""
     sleeps: list[float] = []
     monkeypatch.setattr("time.sleep", sleeps.append)
-    monkeypatch.setattr("random.uniform", lambda *_: 0.0)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-    monkeypatch.setattr("shared.resilience._agent_phase", lambda _span: 0.0)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr("random.uniform", lambda *_: 0.0)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("shared.resilience._agent_phase", lambda _span: 0.0)  # pyright: ignore[reportUnknownArgumentType]
 
     with pytest.raises(ValueError, match="429"):
         invoke_text(

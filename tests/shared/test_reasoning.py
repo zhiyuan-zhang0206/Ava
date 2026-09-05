@@ -88,7 +88,7 @@ def test_signature_only_thinking_passthrough():
 def test_text_and_tool_blocks_passthrough():
     """Non-reasoning blocks (text, openai function_call, anthropic tool_use)
     pass through verbatim."""
-    blocks = [  # pyright: ignore[reportUnknownVariableType]
+    blocks = [
         {"type": "text", "text": "hello", "index": 1},
         {"type": "function_call", "name": "execute_code", "arguments": "{}", "index": 2},
         {"type": "tool_use", "id": "tu_1", "name": "execute_code", "input": {}},

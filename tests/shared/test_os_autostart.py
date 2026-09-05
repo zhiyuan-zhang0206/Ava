@@ -62,8 +62,8 @@ def test_register_macos_writes_plist_but_never_bootstraps(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
-    called: list = []  # pyright: ignore[reportMissingTypeArgument, reportUnknownVariableType]
-    monkeypatch.setattr(os_autostart.subprocess, "run", lambda *a, **_k: called.append(a))  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType, reportUnknownMemberType]
+    called: list = []
+    monkeypatch.setattr(os_autostart.subprocess, "run", lambda *a, **_k: called.append(a))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
     rc = os_autostart._register_macos()
     assert rc == 0
     plist = tmp_path / "Library" / "LaunchAgents" / "com.ava.ava-t-cafe0123.autostart.plist"
@@ -76,7 +76,7 @@ def test_register_macos_writes_plist_but_never_bootstraps(
 def test_register_macos_idempotent_no_rewrite(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
-    capsys,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    capsys,
 ) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
     os_autostart._register_macos()
@@ -85,13 +85,13 @@ def test_register_macos_idempotent_no_rewrite(
     assert rc == 0
     assert (
         "wrote" not in capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
-    )  # unchanged -> not rewritten  # pyright: ignore[reportUnknownMemberType]
+    )  # unchanged -> not rewritten
 
 
 def test_register_linux_adds_reboot_entry(monkeypatch: pytest.MonkeyPatch) -> None:
-    captured: dict = {}  # pyright: ignore[reportMissingTypeArgument, reportUnknownVariableType]
+    captured: dict = {}
 
-    def fake_run(cmd, **kw):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    def fake_run(cmd, **kw):
         if cmd[:2] == ["crontab", "-l"]:
             return types.SimpleNamespace(returncode=1, stdout="", stderr="no crontab for u")
         if cmd == ["crontab", "-"]:
@@ -99,7 +99,7 @@ def test_register_linux_adds_reboot_entry(monkeypatch: pytest.MonkeyPatch) -> No
             return types.SimpleNamespace(returncode=0, stderr="")
         return types.SimpleNamespace(returncode=0, stdout="", stderr="")
 
-    monkeypatch.setattr(os_autostart.shutil, "which", lambda _name: "/usr/bin/crontab")  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(os_autostart.shutil, "which", lambda _name: "/usr/bin/crontab")  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(os_autostart.subprocess, "run", fake_run)  # pyright: ignore[reportUnknownArgumentType]
     rc = os_autostart._register_linux()
     assert rc == 0
@@ -112,10 +112,10 @@ def test_register_linux_adds_reboot_entry(monkeypatch: pytest.MonkeyPatch) -> No
 def test_register_linux_replaces_legacy_cluster_entry(monkeypatch: pytest.MonkeyPatch) -> None:
     """A pre-path-only crontab entry (marker token = the old cluster name this
     home mapped to) is removed when the slug-marked entry is written."""
-    captured: dict = {}  # pyright: ignore[reportMissingTypeArgument, reportUnknownVariableType]
+    captured: dict = {}
     legacy_line = "@reboot /old/ava start --cluster t  # ava-autostart.t"
 
-    def fake_run(cmd, **kw):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    def fake_run(cmd, **kw):
         if cmd[:2] == ["crontab", "-l"]:
             return types.SimpleNamespace(returncode=0, stdout=legacy_line + "\n")
         if cmd == ["crontab", "-"]:
@@ -123,7 +123,7 @@ def test_register_linux_replaces_legacy_cluster_entry(monkeypatch: pytest.Monkey
             return types.SimpleNamespace(returncode=0, stderr="")
         return types.SimpleNamespace(returncode=0, stdout="", stderr="")
 
-    monkeypatch.setattr(os_autostart.shutil, "which", lambda _name: "/usr/bin/crontab")  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(os_autostart.shutil, "which", lambda _name: "/usr/bin/crontab")  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(os_autostart.subprocess, "run", fake_run)  # pyright: ignore[reportUnknownArgumentType]
     assert os_autostart._register_linux() == 0
     assert "ava-autostart.ava-t-cafe0123" in captured["input"]
@@ -131,7 +131,7 @@ def test_register_linux_replaces_legacy_cluster_entry(monkeypatch: pytest.Monkey
 
 
 def test_register_linux_skips_when_no_crontab(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(os_autostart.shutil, "which", lambda _name: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(os_autostart.shutil, "which", lambda _name: None)  # pyright: ignore[reportUnknownArgumentType]
     # No crontab binary -> degrade to a warning, not a failure.
     assert os_autostart._register_linux() == 0
 
@@ -176,15 +176,15 @@ def test_the_job_retries_on_linux_via_ava_boot(monkeypatch: pytest.MonkeyPatch) 
     from `os_cron.cron_env_prefix`, the verb from this change — and nothing else
     in the suite asserts their order.
     """
-    captured: dict = {}  # pyright: ignore[reportMissingTypeArgument, reportUnknownVariableType]
+    captured: dict = {}
 
-    def fake_run(cmd, **kw):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    def fake_run(cmd, **kw):
         if cmd[:2] == ["crontab", "-l"]:
             return types.SimpleNamespace(returncode=1, stdout="", stderr="no crontab for u")
         captured["input"] = kw.get("input")  # pyright: ignore[reportUnknownMemberType]
         return types.SimpleNamespace(returncode=0, stderr="")
 
-    monkeypatch.setattr(os_autostart.shutil, "which", lambda _name: "/usr/bin/crontab")  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(os_autostart.shutil, "which", lambda _name: "/usr/bin/crontab")  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(os_autostart.subprocess, "run", fake_run)  # pyright: ignore[reportUnknownArgumentType]
     assert os_autostart._register_linux() == 0
     assert re.search(
@@ -204,7 +204,7 @@ def test_the_job_retries_on_windows_via_ava_boot(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setattr(
         os_schtasks,
         "create_logon_task",
-        lambda kind, args, *, time_limit_s: seen.append((kind, tuple(args), time_limit_s)),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda kind, args, *, time_limit_s: seen.append((kind, tuple(args), time_limit_s)),  # pyright: ignore[reportUnknownArgumentType]
     )
     assert os_autostart._register_windows() is None
     # Unbounded on purpose: `ava boot` retries with no attempt cap, matching what

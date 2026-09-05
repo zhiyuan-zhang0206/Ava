@@ -186,18 +186,18 @@ def test_init_gateway_process_emits_service_started() -> None:
     init guard makes repeat calls silent skips), and the payload carries the
     daemon identity + pid + loaded commit + host so restarts are attributable.
     """
-    infos: list[dict] = []  # pyright: ignore[reportMissingTypeArgument, reportUnknownVariableType]
+    infos: list[dict] = []
     with (
         patch.object(slog.logger, "add"),
         patch.object(slog, "_add_file_sink"),
         patch.object(slog, "_add_postgres_sink"),
-        patch.object(slog.logger, "info", side_effect=lambda _msg, **kw: infos.append(kw)),  # pyright: ignore[reportUnknownLambdaType, reportUnknownMemberType]
+        patch.object(slog.logger, "info", side_effect=lambda _msg, **kw: infos.append(kw)),  # pyright: ignore[reportUnknownMemberType]
     ):
         slog.init_gateway_process(name="restarter")
         slog.init_gateway_process(name="restarter")  # idempotent — still one row
 
     assert len(infos) == 1  # pyright: ignore[reportUnknownArgumentType]
-    kw = infos[0]  # pyright: ignore[reportUnknownVariableType]
+    kw = infos[0]
     assert kw["event"] == "service_started"
     assert kw["name"] == "restarter"
     assert isinstance(kw["pid"], int) and kw["pid"] > 0

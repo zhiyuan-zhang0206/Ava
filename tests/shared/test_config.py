@@ -511,7 +511,7 @@ def test_cluster_default_iff_per_agent() -> None:
     for name, field in FIELD_INFOS.items():
         extra = field.json_schema_extra
         assert isinstance(extra, dict), f"{name}: json_schema_extra must be a dict"
-        is_default = extra.get("scope") == "cluster-default"  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+        is_default = extra.get("scope") == "cluster-default"  # pyright: ignore[reportUnknownMemberType]
         is_per_agent = extra.get("per_agent") is True  # pyright: ignore[reportUnknownMemberType]
         if is_default:
             assert is_per_agent, (
@@ -739,7 +739,7 @@ def test_communication_style_defaults_to_off(monkeypatch: pytest.MonkeyPatch) ->
 
 
 @pytest.mark.parametrize("style", ["oriented", "concise", "silent", "off"])
-def test_communication_style_accepts_each_member(monkeypatch: pytest.MonkeyPatch, style) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_communication_style_accepts_each_member(monkeypatch: pytest.MonkeyPatch, style) -> None:
     assert _style_from_env(monkeypatch, AVA_AGENT_COMMUNICATION_STYLE=style) == style  # pyright: ignore[reportUnknownArgumentType]
 
 
@@ -757,8 +757,8 @@ def test_communication_style_accepts_each_member(monkeypatch: pytest.MonkeyPatch
 )
 def test_legacy_progress_boolean_maps_to_a_style(
     monkeypatch: pytest.MonkeyPatch,
-    legacy,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-    expected,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    legacy,
+    expected,
 ) -> None:
     """A `.env` written before the enum existed keeps meaning what it meant:
     the old off-state (no narration section) is `silent`, the old default is
@@ -790,7 +790,7 @@ def test_new_env_var_wins_over_legacy_boolean(monkeypatch: pytest.MonkeyPatch) -
 
 
 @pytest.mark.parametrize("bad", ["loud", "", "verbose", "2"])
-def test_unknown_communication_style_fails_fast(monkeypatch: pytest.MonkeyPatch, bad) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_unknown_communication_style_fails_fast(monkeypatch: pytest.MonkeyPatch, bad) -> None:
     """Only the documented boolean spellings are translated; anything else
     reaches Literal validation and raises rather than being guessed at."""
     from pydantic import ValidationError

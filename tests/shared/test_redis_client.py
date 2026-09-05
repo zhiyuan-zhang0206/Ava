@@ -39,16 +39,16 @@ async def test_open_async_redis_pins_socket_timeout_none() -> None:
     kwargs = client.connection_pool.connection_kwargs  # pyright: ignore[reportUnknownMemberType]
     # `in + is None`, not `.get()`: a MISSING key would silently pass the same
     # assertion while the redis-py 5s default quietly applies.
-    assert "socket_timeout" in kwargs  # pyright: ignore[reportUnknownMemberType]
-    assert kwargs["socket_timeout"] is None  # pyright: ignore[reportUnknownMemberType]
+    assert "socket_timeout" in kwargs
+    assert kwargs["socket_timeout"] is None
     await client.aclose()
 
 
 async def test_uses_settings_redis_url() -> None:
     client = mod.get_async_redis()
     pool = client.connection_pool
-    parsed_host = pool.connection_kwargs.get("host")  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
-    parsed_port = pool.connection_kwargs.get("port")  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+    parsed_host = pool.connection_kwargs.get("host")  # pyright: ignore[reportUnknownMemberType]
+    parsed_port = pool.connection_kwargs.get("port")  # pyright: ignore[reportUnknownMemberType]
     assert parsed_host is not None
     assert parsed_port is not None
     assert str(parsed_port) in settings.data_plane.redis_url  # pyright: ignore[reportUnknownArgumentType]
@@ -200,7 +200,7 @@ async def test_different_loops_get_different_clients() -> None:
 # hanging publish to the OS default TCP timeout (minutes). See F2. ──
 
 
-def _assert_resilient_kwargs(kwargs: dict) -> None:  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+def _assert_resilient_kwargs(kwargs: dict) -> None:
     # TCP keepalive: probe a half-dead link in tens of seconds, not minutes.
     assert kwargs.get("socket_keepalive") is True  # pyright: ignore[reportUnknownMemberType]
     # health_check_interval: PING an idle conn before reuse so a stale pubsub /
@@ -212,8 +212,8 @@ def _assert_resilient_kwargs(kwargs: dict) -> None:  # pyright: ignore[reportMis
     # would periodically cut pubsub.listen()'s long blocking read (e.g. the
     # SSE event stream). `in + is None`, not `.get()`: a missing key would
     # silently pass while the redis-py 5s default quietly applies.
-    assert "socket_timeout" in kwargs  # pyright: ignore[reportUnknownMemberType]
-    assert kwargs["socket_timeout"] is None  # pyright: ignore[reportUnknownMemberType]
+    assert "socket_timeout" in kwargs
+    assert kwargs["socket_timeout"] is None
 
 
 async def test_async_client_weak_network_resilient() -> None:
@@ -393,7 +393,7 @@ class TestDeadTransportRecovery:
         conn.next_health_check = 0.0
 
         # Must not raise TypeError — before the fix this was the crash.
-        msg = await asyncio.wait_for(pubsub.get_message(timeout=1.0), timeout=10)  # pyright: ignore[reportUnknownArgumentType, reportUnknownVariableType]
+        msg = await asyncio.wait_for(pubsub.get_message(timeout=1.0), timeout=10)  # pyright: ignore[reportUnknownArgumentType]
         assert msg is None  # timeout, cleanly — reconnect happened internally
 
         # Recovery: a publish now reaches the (re-subscribed) pubsub. Read in
@@ -403,7 +403,7 @@ class TestDeadTransportRecovery:
         await publisher.publish("ava:test:dead-transport-pubsub", "wake!")  # pyright: ignore[reportUnknownMemberType]
         msg = None
         for _ in range(5):
-            msg = await asyncio.wait_for(pubsub.get_message(timeout=1.0), timeout=10)  # pyright: ignore[reportUnknownArgumentType, reportUnknownVariableType]
+            msg = await asyncio.wait_for(pubsub.get_message(timeout=1.0), timeout=10)  # pyright: ignore[reportUnknownArgumentType]
             if msg is not None and msg.get("data") == "wake!":  # pyright: ignore[reportUnknownMemberType]
                 break
         assert msg is not None and msg.get("data") == "wake!", (  # pyright: ignore[reportUnknownMemberType]

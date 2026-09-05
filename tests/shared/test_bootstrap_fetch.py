@@ -13,8 +13,8 @@ from shared import bootstrap, config
 
 
 def test_fetch_bootstrap_config_against_live_endpoint(
-    db_conn,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-    monkeypatch: pytest.MonkeyPatch,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    db_conn,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # Suite runs multi-host on: the gateway requires the cluster secret, and the
     # fetch reads it from os.environ. Set both ends so the live fetch authenticates.
@@ -23,7 +23,7 @@ def test_fetch_bootstrap_config_against_live_endpoint(
 
     # Route shared.bootstrap's dial_get (shared.http_dial.get) through the
     # in-process ASGI app.
-    def fake_get(url, **kw):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    def fake_get(url, **kw):
         with TestClient(app) as c:
             return c.get(url.replace("http://cp", ""), **kw)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
 
@@ -75,7 +75,7 @@ def test_inject_config_updates_environ(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         bootstrap,
         "fetch_bootstrap_config",
-        lambda *_a, **_k: {"AVA_DB_URL": "postgresql://injected/x"},  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda *_a, **_k: {"AVA_DB_URL": "postgresql://injected/x"},  # pyright: ignore[reportUnknownArgumentType]
     )
     monkeypatch.delitem(os.environ, "AVA_DB_URL", raising=False)
     bootstrap.inject_config_from_gateway()
@@ -90,7 +90,7 @@ def test_inject_derives_missing_gateway_health_url(monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(
         bootstrap,
         "fetch_bootstrap_config",
-        lambda *_a, **_k: {},  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda *_a, **_k: {},  # pyright: ignore[reportUnknownArgumentType]
     )
 
     bootstrap.inject_config_from_gateway()
@@ -104,7 +104,7 @@ def test_inject_preserves_explicit_gateway_health_url(monkeypatch: pytest.Monkey
     monkeypatch.setattr(
         bootstrap,
         "fetch_bootstrap_config",
-        lambda *_a, **_k: {},  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda *_a, **_k: {},  # pyright: ignore[reportUnknownArgumentType]
     )
 
     bootstrap.inject_config_from_gateway()
@@ -124,7 +124,7 @@ def test_inject_overwrites_existing_env(monkeypatch: pytest.MonkeyPatch) -> None
     monkeypatch.setattr(
         bootstrap,
         "fetch_bootstrap_config",
-        lambda *_a, **_k: {  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda *_a, **_k: {  # pyright: ignore[reportUnknownArgumentType]
             "AVA_DB_URL": "postgresql://gateway/current",
             "DEEPSEEK_API_KEY": "fetched-key",
         },
@@ -144,7 +144,7 @@ def test_inject_without_gateway_url_fails_fast(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr(
         bootstrap,
         "fetch_bootstrap_config",
-        lambda *_a, **_k: called.append("fetch"),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda *_a, **_k: called.append("fetch"),  # pyright: ignore[reportUnknownArgumentType]
     )
     with pytest.raises(bootstrap.BootstrapFetchError, match="ava enroll"):
         bootstrap.inject_config_from_gateway()
@@ -156,7 +156,7 @@ def test_inject_wraps_fetch_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     # must not start with no config.
     monkeypatch.setitem(os.environ, "AVA_GATEWAY_URL", "http://gw:8000")
 
-    def _boom(*_a, **_k):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    def _boom(*_a, **_k):
         raise httpx.ConnectError("connection refused")
 
     monkeypatch.setattr(bootstrap, "fetch_bootstrap_config", _boom)  # pyright: ignore[reportUnknownArgumentType]
@@ -172,7 +172,7 @@ def test_inject_treats_blank_as_absent(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         bootstrap,
         "fetch_bootstrap_config",
-        lambda *_a, **_k: {"DEEPSEEK_API_KEY": "real-fetched-key"},  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda *_a, **_k: {"DEEPSEEK_API_KEY": "real-fetched-key"},  # pyright: ignore[reportUnknownArgumentType]
     )
     bootstrap.inject_config_from_gateway()
     assert os.environ["DEEPSEEK_API_KEY"] == "real-fetched-key"
@@ -186,9 +186,9 @@ def test_inject_uses_deprecated_gateway_url_alias(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setitem(os.environ, "AVA_PRIMARY_GATEWAY_URL", "http://legacy-gw")
     captured: dict[str, str] = {}
 
-    def fake_fetch(base_url, **_k):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    def fake_fetch(base_url, **_k):
         captured["url"] = base_url
-        return {}  # pyright: ignore[reportUnknownVariableType]
+        return {}
 
     monkeypatch.setattr(bootstrap, "fetch_bootstrap_config", fake_fetch)  # pyright: ignore[reportUnknownArgumentType]
     bootstrap.inject_config_from_gateway()
@@ -196,7 +196,7 @@ def test_inject_uses_deprecated_gateway_url_alias(monkeypatch: pytest.MonkeyPatc
 
 
 def test_fetch_retries_transient_then_succeeds(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(bootstrap.time, "sleep", lambda *_a: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(bootstrap.time, "sleep", lambda *_a: None)  # pyright: ignore[reportUnknownArgumentType]
     calls = {"n": 0}
 
     class _Resp:
@@ -204,7 +204,7 @@ def test_fetch_retries_transient_then_succeeds(monkeypatch: pytest.MonkeyPatch) 
         def json(self) -> dict[str, str]:
             return {"AVA_DB_URL": "postgresql://ok/x"}
 
-    def flaky_get(_url, **_k):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    def flaky_get(_url, **_k):
         calls["n"] += 1
         if calls["n"] < 2:
             raise httpx.ConnectError("gateway mid-restart")
@@ -221,7 +221,7 @@ def test_fetch_does_not_retry_readtimeout(monkeypatch: pytest.MonkeyPatch) -> No
     # timeout would blow past the spawn launch-confirm window.
     calls = {"n": 0}
 
-    def slow_get(*_a, **_k):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    def slow_get(*_a, **_k):
         calls["n"] += 1
         raise httpx.ReadTimeout("slow gateway")
 

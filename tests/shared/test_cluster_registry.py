@@ -171,7 +171,7 @@ def test_pre_cutover_reader_can_still_parse_the_persisted_file(
     class LegacyRecord:  # the pre-path-only required shape
         name: str
         db_name: str
-        ports: dict  # pyright: ignore[reportMissingTypeArgument]
+        ports: dict
         gateway_home: str
         created_at: str
 
@@ -314,7 +314,7 @@ def test_expected_cluster_ports_derives_full_block_from_record(
         gateway_home=str(home),
         created_at="2026-07-01T00:00:00Z",
     )
-    monkeypatch.setattr(port_preflight, "get_record", lambda _home: rec)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(port_preflight, "get_record", lambda _home: rec)  # pyright: ignore[reportUnknownArgumentType]
 
     ports = dict(port_preflight.expected_cluster_ports(home))
     assert ports["gateway"] == 18032 and ports["frontend"] == 18033
@@ -333,7 +333,7 @@ def test_expected_cluster_ports_falls_back_to_legacy_without_record(
 ):
     """A record-less default home (a pre-registry install) binds the fixed legacy
     block — its ports ARE its record."""
-    monkeypatch.setattr(port_preflight, "get_record", lambda _home: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(port_preflight, "get_record", lambda _home: None)  # pyright: ignore[reportUnknownArgumentType]
     assert port_preflight.expected_cluster_ports(tmp_path / "x") == port_preflight.LEGACY_AVA_PORTS
 
 
@@ -479,10 +479,10 @@ def test_unit_port_map_overlays_health_ports(monkeypatch: pytest.MonkeyPatch, tm
     import shared.daemon_health as _dh
     import shared.port_preflight as pp
 
-    monkeypatch.setattr(pp, "get_record", lambda _home: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(pp, "get_record", lambda _home: None)  # pyright: ignore[reportUnknownArgumentType]
     base = 18100
     # unit_port_map reads health_port from shared.daemon_health (lazy import)
-    monkeypatch.setattr(_dh, "health_port", lambda svc: base + len(svc))  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(_dh, "health_port", lambda svc: base + len(svc))  # pyright: ignore[reportUnknownArgumentType]
 
     ports = pp.unit_port_map(tmp_path / "x")
 

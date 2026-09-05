@@ -178,7 +178,7 @@ def test_deactivate_drops_the_ambient_collector() -> None:
         pass
     # No collector: the stage printed but nothing was aggregated (nothing to
     # assert on except that no other call raises).
-    assert rt._active.value is None  # pyright: ignore[reportPrivateUsage]
+    assert rt._active.value is None
 
 
 def test_rollout_telemetry_record_rounds_to_tenths() -> None:

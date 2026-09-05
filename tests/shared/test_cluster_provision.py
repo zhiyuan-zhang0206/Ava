@@ -215,7 +215,7 @@ class _FakePgConn:
     def __exit__(self, *_a: object) -> bool:
         return False
 
-    def execute(self, sql: str, params: tuple[object, ...] | None = None) -> _FakePgConn:  # pyright: ignore[reportUnusedParameter]
+    def execute(self, sql: str, params: tuple[object, ...] | None = None) -> _FakePgConn:
         self.executed.append(sql)
         return self
 

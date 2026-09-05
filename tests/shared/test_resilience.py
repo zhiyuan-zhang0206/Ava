@@ -63,7 +63,7 @@ def _no_sleep(monkeypatch: pytest.MonkeyPatch) -> None:
     async def _no_asleep(_s: float) -> None:
         pass
 
-    monkeypatch.setattr("shared.resilience._sleep", lambda _s: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr("shared.resilience._sleep", lambda _s: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr("shared.resilience._asleep", _no_asleep)
 
 

@@ -43,7 +43,7 @@ def _reset_touched_logger_levels() -> Iterator[None]:
     logging.getLogger("httpx").setLevel(logging.NOTSET)
 
 
-def test_first_party_controller_debug_reaches_loguru(loguru_records: list[dict]) -> None:  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+def test_first_party_controller_debug_reaches_loguru(loguru_records: list[dict]) -> None:
     """A DEBUG record from a stdlib logger under a first-party namespace
     (e.g. `ops.controllers.respawn`) now flows through to loguru — the exact
     shape of the dropped "gateway not healthy, deferring respawn" line."""
@@ -53,12 +53,12 @@ def test_first_party_controller_debug_reaches_loguru(loguru_records: list[dict])
     )
     assert any(
         r["level"].name == "DEBUG" and "deferring respawn of 3 agent(s)" in r["message"]  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
-        for r in loguru_records  # pyright: ignore[reportUnknownVariableType]
+        for r in loguru_records
     )
 
 
 @pytest.mark.parametrize("prefix", _FIRST_PARTY_LOGGER_NAMES)
-def test_every_first_party_prefix_passes_debug(prefix: str, loguru_records: list[dict]) -> None:  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+def test_every_first_party_prefix_passes_debug(prefix: str, loguru_records: list[dict]) -> None:
     """Every listed first-party namespace gets the same DEBUG passthrough —
     not just ops.controllers.*, but services / shared / gateway / agent /
     ava_builtins daemons and controllers."""
@@ -66,11 +66,11 @@ def test_every_first_party_prefix_passes_debug(prefix: str, loguru_records: list
     logging.getLogger(f"{prefix}.some_module").debug("marker-%s", prefix)
     assert any(
         r["level"].name == "DEBUG" and f"marker-{prefix}" in r["message"]  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
-        for r in loguru_records  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType, reportUnknownVariableType]
+        for r in loguru_records
     )
 
 
-def test_third_party_logger_debug_still_gated(loguru_records: list[dict]) -> None:  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+def test_third_party_logger_debug_still_gated(loguru_records: list[dict]) -> None:
     """A non-first-party stdlib logger (httpx stand-in) stays gated at DEBUG —
     the noise the INFO floor exists to keep out. A long-lived gateway.log
     already grew unbounded once from unfiltered volume (see
@@ -78,8 +78,8 @@ def test_third_party_logger_debug_still_gated(loguru_records: list[dict]) -> Non
     the floor for everyone, only for our own code."""
     _install_stdlib_intercept()
     logging.getLogger("httpx").debug("connection pool churn")
-    assert not any("connection pool churn" in r["message"] for r in loguru_records)  # pyright: ignore[reportUnknownVariableType]
+    assert not any("connection pool churn" in r["message"] for r in loguru_records)
 
     # Sanity: the floor is INFO, not OFF — the same logger's INFO still gets through.
     logging.getLogger("httpx").info("request completed")
-    assert any("request completed" in r["message"] for r in loguru_records)  # pyright: ignore[reportUnknownVariableType]
+    assert any("request completed" in r["message"] for r in loguru_records)

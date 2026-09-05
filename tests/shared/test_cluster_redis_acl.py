@@ -23,7 +23,7 @@ _SECRET = "redisacltestsecret"  # noqa: S105 — test fixture, not a real creden
 
 def _acl_users(admin_url: str) -> list[str]:
     with redis.Redis.from_url(admin_url, decode_responses=True) as r:  # pyright: ignore[reportUnknownMemberType]
-        return r.execute_command("ACL", "LIST")  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+        return r.execute_command("ACL", "LIST")  # pyright: ignore[reportUnknownMemberType]
 
 
 def test_ensure_creates_enabled_channel_scoped_user() -> None:
@@ -45,7 +45,7 @@ def test_ensure_creates_enabled_channel_scoped_user() -> None:
         with redis.Redis.from_url(user_url, decode_responses=True) as r:  # pyright: ignore[reportUnknownMemberType]
             assert (
                 r.publish("ava:feat-x:events", "ok") == 0  # pyright: ignore[reportUnknownMemberType]
-            )  # delivered to 0 subscribers, allowed  # pyright: ignore[reportUnknownMemberType]
+            )  # delivered to 0 subscribers, allowed
             with pytest.raises(NoPermissionError):
                 r.publish("ava:other:events", "denied")  # pyright: ignore[reportUnknownMemberType]
 
@@ -65,7 +65,7 @@ def test_ensure_grants_the_hosted_dispatcher_psubscribe_pattern() -> None:
         )
         with redis.Redis.from_url(admin_url, decode_responses=True) as admin:  # pyright: ignore[reportUnknownMemberType]
             assert (
-                admin.execute_command(  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+                admin.execute_command(  # pyright: ignore[reportUnknownMemberType]
                     "ACL", "DRYRUN", "ava_feat_x", "PSUBSCRIBE", "ava:feat-x:inbound:*"
                 )
                 == "OK"
@@ -73,7 +73,7 @@ def test_ensure_grants_the_hosted_dispatcher_psubscribe_pattern() -> None:
             # The per-agent literal channel the process-mode listener uses keeps
             # working under the same grant.
             assert (
-                admin.execute_command(  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+                admin.execute_command(  # pyright: ignore[reportUnknownMemberType]
                     "ACL", "DRYRUN", "ava_feat_x", "SUBSCRIBE", "ava:feat-x:inbound:42"
                 )
                 == "OK"

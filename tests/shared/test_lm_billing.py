@@ -47,7 +47,7 @@ def _enable_tracing(monkeypatch: pytest.MonkeyPatch) -> _RecordingTracer:
     tracer = _RecordingTracer()
     monkeypatch.setattr("shared.config.settings.observability.trace_enabled", True)
     monkeypatch.setitem(trace_mod._state, "initialized", True)
-    monkeypatch.setattr("opentelemetry.trace.get_tracer", lambda _name: tracer)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr("opentelemetry.trace.get_tracer", lambda _name: tracer)  # pyright: ignore[reportUnknownArgumentType]
     return tracer
 
 
@@ -190,7 +190,7 @@ def test_emit_billing_event_is_noop_when_tracing_is_disabled(
 
     tracer = _RecordingTracer()
     monkeypatch.setattr("shared.config.settings.observability.trace_enabled", False)
-    monkeypatch.setattr("opentelemetry.trace.get_tracer", lambda _name: tracer)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr("opentelemetry.trace.get_tracer", lambda _name: tracer)  # pyright: ignore[reportUnknownArgumentType]
 
     emit_billing_event(
         vendor="deepseek",

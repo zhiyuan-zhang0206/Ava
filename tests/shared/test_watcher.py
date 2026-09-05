@@ -291,7 +291,7 @@ def _exec_watcher(
     monkeypatch.setattr(
         _gateway_client,
         "send_message",
-        lambda *a, **k: sent.append((a, k)),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda *a, **k: sent.append((a, k)),  # pyright: ignore[reportUnknownArgumentType]
     )
     monkeypatch.setenv("AVA_WATCHER_SESSION_ID", "77")
     exec(script, {"__name__": "__watcher__", "_FakeDT": _FakeDT, "_fake_time": fake_time})

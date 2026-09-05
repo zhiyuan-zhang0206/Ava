@@ -191,11 +191,11 @@ def test_queue_is_bounded_and_counts_what_it_sheds(
         time.sleep(5.0)
         blocked(batch)
 
-    reports: list[dict] = []  # pyright: ignore[reportMissingTypeArgument, reportUnknownVariableType]
+    reports: list[dict] = []
     monkeypatch.setattr(
         slog.logger,
         "warning",
-        lambda _msg, **kw: reports.append(kw) if kw.get("event") == "event_log_drop" else None,  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType, reportUnknownMemberType]
+        lambda _msg, **kw: reports.append(kw) if kw.get("event") == "event_log_drop" else None,  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
     )
     # Not stopped in a finally: stop() joins, and this writer sleeps 5s by
     # design. The drain thread is already a daemon, so it cannot hold the
@@ -208,7 +208,7 @@ def test_queue_is_bounded_and_counts_what_it_sheds(
         time.sleep(0.01)
 
     assert reports, "expected an event_log_drop report after shedding records"
-    assert all(r["event"] == "event_log_drop" for r in reports)  # pyright: ignore[reportUnknownArgumentType, reportUnknownVariableType]
+    assert all(r["event"] == "event_log_drop" for r in reports)  # pyright: ignore[reportUnknownArgumentType]
     assert reports[0]["n"] > 0
     assert sink._queue.qsize() <= 20, "queue grew past its bound"
 
@@ -361,11 +361,11 @@ def test_shed_records_report_one_event_log_drop(
     tuned(batch=10, interval=0.05, maxsize=100)
     recorder = _Recorder()
     sink = _make_sink(recorder, batch=10, interval=0.05, maxsize=100)
-    reports: list[dict] = []  # pyright: ignore[reportMissingTypeArgument, reportUnknownVariableType]
+    reports: list[dict] = []
     monkeypatch.setattr(
         slog.logger,
         "warning",
-        lambda _msg, **kw: reports.append(kw) if kw.get("event") == "event_log_drop" else None,  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType, reportUnknownMemberType]
+        lambda _msg, **kw: reports.append(kw) if kw.get("event") == "event_log_drop" else None,  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
     )
     # Overfill the queue: producer sheds, drain keeps flushing.
     for i in range(500):
@@ -377,11 +377,11 @@ def test_shed_records_report_one_event_log_drop(
     sink.stop()
 
     assert reports, "expected at least one event_log_drop report"
-    assert all(r["event"] == "event_log_drop" for r in reports)  # pyright: ignore[reportUnknownArgumentType, reportUnknownVariableType]
+    assert all(r["event"] == "event_log_drop" for r in reports)  # pyright: ignore[reportUnknownArgumentType]
     assert reports[0]["n"] > 0
     # Every shed record is accounted for across the reports (a later report
     # may carry sheds that happened after the first).
-    assert sum(r["n"] for r in reports) <= 500  # pyright: ignore[reportUnknownArgumentType, reportUnknownVariableType]
+    assert sum(r["n"] for r in reports) <= 500  # pyright: ignore[reportUnknownArgumentType]
 
 
 # ── emitter self-diagnostics (audit-round2 events-obs P2) ────────────────────

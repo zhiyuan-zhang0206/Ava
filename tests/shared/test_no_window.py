@@ -36,7 +36,7 @@ def test_ava_shell_run_passes_creationflags(monkeypatch: pytest.MonkeyPatch) -> 
     """ava.shell.run forwards CREATE_NO_WINDOW to subprocess.run."""
     import ava.shell as shell_mod
 
-    captured: dict = {}  # pyright: ignore[reportMissingTypeArgument, reportUnknownVariableType]
+    captured: dict = {}
 
     def fake_run(cmd, **kwargs):  # type: ignore[no-untyped-def]
         captured.update(kwargs)  # pyright: ignore[reportUnknownMemberType]
@@ -51,7 +51,7 @@ def test_run_bounded_defaults_creationflags(monkeypatch: pytest.MonkeyPatch) -> 
     """shared.proc.run_bounded injects CREATE_NO_WINDOW when the caller did not."""
     from shared import proc as proc_mod
 
-    captured: dict = {}  # pyright: ignore[reportMissingTypeArgument, reportUnknownVariableType]
+    captured: dict = {}
 
     class FakePopen:
         def __init__(self, argv, **kwargs):  # type: ignore[no-untyped-def]
@@ -76,7 +76,7 @@ def test_run_bounded_respects_caller_creationflags(
     """A caller-supplied creationflags wins over the default."""
     from shared import proc as proc_mod
 
-    captured: dict = {}  # pyright: ignore[reportMissingTypeArgument, reportUnknownVariableType]
+    captured: dict = {}
 
     class FakePopen:
         def __init__(self, argv, **kwargs):  # type: ignore[no-untyped-def]
@@ -105,7 +105,7 @@ def test_memory_repo_git_passes_creationflags(monkeypatch: pytest.MonkeyPatch) -
     """
     from shared import memory_repo as mr
 
-    captured: dict = {}  # pyright: ignore[reportMissingTypeArgument, reportUnknownVariableType]
+    captured: dict = {}
 
     def fake_run(argv, **kwargs):  # type: ignore[no-untyped-def]
         captured.update(kwargs)  # pyright: ignore[reportUnknownMemberType]

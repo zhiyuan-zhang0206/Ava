@@ -97,7 +97,7 @@ def test_failure_before_any_pg_log_still_writes_an_artifact(
     monkeypatch.setattr(
         pg_tools,
         "pg_tool",
-        lambda name: stub_initdb if name == "initdb" else real_pg_tool(name),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda name: stub_initdb if name == "initdb" else real_pg_tool(name),  # pyright: ignore[reportUnknownArgumentType]
     )
 
     with pytest.raises(subprocess.CalledProcessError) as excinfo:

@@ -218,7 +218,7 @@ class TestWaitOneBudgetAndCancel:
     async def test_wait_one_returns_within_budget_when_open_wedges(
         self,
         monkeypatch: pytest.MonkeyPatch,
-        loguru_records: list[dict],  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+        loguru_records: list[dict],
     ) -> None:
         """When open/subscribe wedges (a connect into a black-holed network sits
         in kernel SYN retries far past any caller timeout), `wait_one` must still
@@ -239,13 +239,13 @@ class TestWaitOneBudgetAndCancel:
 
         assert opened.is_set(), "the open attempt must actually have started"
         assert elapsed < 2.0, f"wait_one took {elapsed:.2f}s for a 0.3s budget — contract violated"
-        assert any("did not complete within" in r["message"] for r in loguru_records)  # pyright: ignore[reportUnknownVariableType]
+        assert any("did not complete within" in r["message"] for r in loguru_records)
         await asyncio.sleep(0)  # let the cancelled open task unwind before loop close
 
     async def test_wait_one_abandons_and_warns_when_consume_never_ticks(
         self,
         monkeypatch: pytest.MonkeyPatch,
-        loguru_records: list[dict],  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+        loguru_records: list[dict],
     ) -> None:
         """A consume that never starts its own get_message timer (parked before
         it can tick) is abandoned within budget + `_CONSUME_ABANDON_GRACE`, with a
@@ -275,7 +275,7 @@ class TestWaitOneBudgetAndCancel:
         assert elapsed < 5.0, f"wait_one took {elapsed:.2f}s for a 0.3s budget + 2s grace"
         assert any(
             "consume never started its timer" in r["message"] and r["level"].no >= 30  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
-            for r in loguru_records  # pyright: ignore[reportUnknownVariableType]
+            for r in loguru_records
         )
         await asyncio.sleep(0)  # let the cancelled consume task unwind before loop close
 
@@ -325,7 +325,7 @@ class TestWakeHealth:
 
     async def test_clean_idle_timeout_stays_healthy(
         self,
-        loguru_records: list[dict],  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+        loguru_records: list[dict],
     ) -> None:
         """An ordinary idle timeout does not start a wake-degradation episode.
 
@@ -340,15 +340,12 @@ class TestWakeHealth:
             assert listener.wake_degraded_s is None
         finally:
             await listener.close()
-        assert not any(
-            "wake path degraded" in record["message"]
-            for record in loguru_records  # pyright: ignore[reportUnknownVariableType]
-        )
+        assert not any("wake path degraded" in record["message"] for record in loguru_records)
 
     async def test_getdel_timeout_degrades_drops_and_recovers(
         self,
         monkeypatch: pytest.MonkeyPatch,
-        loguru_records: list[dict],  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+        loguru_records: list[dict],
     ) -> None:
         """A stuck GETDEL drops stale handles, re-delivers the wake key, and recovers.
 
@@ -392,12 +389,9 @@ class TestWakeHealth:
 
         assert any(
             "wake path degraded (getdel_timeout)" in record["message"] and record["level"].no >= 30  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
-            for record in loguru_records  # pyright: ignore[reportUnknownVariableType]
+            for record in loguru_records
         )
-        assert any(
-            "wake path recovered" in record["message"]
-            for record in loguru_records  # pyright: ignore[reportUnknownVariableType]
-        )
+        assert any("wake path recovered" in record["message"] for record in loguru_records)
 
     async def test_consume_abandon_degrades_and_drops_connection(
         self,
@@ -496,7 +490,7 @@ def _make_scoped_user(user: str, channel_grant: str) -> None:
 
     r = sync_redis()
     try:
-        r.execute_command(  # pyright: ignore[reportUnknownMemberType]
+        r.execute_command(
             "ACL",
             "SETUSER",
             user,
@@ -563,7 +557,7 @@ class TestAclScopedChannel:
     async def test_listener_degrades_when_subscribe_denied(
         self,
         monkeypatch: pytest.MonkeyPatch,
-        loguru_records: list[dict],  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+        loguru_records: list[dict],
     ) -> None:
         """When subscribe is NOPERM (the ACL grants a DIFFERENT prefix), neither
         `ensure_listening` nor `wait_one` raises `NoPermissionError` — the listener
@@ -588,7 +582,7 @@ class TestAclScopedChannel:
             assert listener.wake_degrade_reason == WakeFailure.ACL_DENIED.value
         finally:
             await listener.close()
-        assert any("rejected by redis" in r["message"] for r in loguru_records), (  # pyright: ignore[reportUnknownVariableType]
+        assert any("rejected by redis" in r["message"] for r in loguru_records), (
             "expected an ACL-denial WARNING to be logged"
         )
 
@@ -738,7 +732,7 @@ class TestDeadTransportSurvival:
     async def test_wait_one_treats_typeerror_as_conn_lost(
         self,
         monkeypatch: pytest.MonkeyPatch,
-        loguru_records: list[dict],  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+        loguru_records: list[dict],
     ) -> None:
         """Defence in depth: even if redis-py surfaces the dead-transport
         TypeError again (the is_connected check -> write race window),
@@ -761,6 +755,6 @@ class TestDeadTransportSurvival:
         finally:
             await listener.close()
         assert calls["n"] >= 2, "listener should have retried after the TypeError"
-        assert any("conn lost / open failed" in r["message"] for r in loguru_records), (  # pyright: ignore[reportUnknownVariableType]
+        assert any("conn lost / open failed" in r["message"] for r in loguru_records), (
             "expected a conn-lost WARNING for the TypeError"
         )

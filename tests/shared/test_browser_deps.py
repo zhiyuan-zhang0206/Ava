@@ -45,11 +45,11 @@ def test_node_install_command_explains_the_macos_keg_only_fallback(
 
 def test_install_nodejs_short_circuits_when_npx_is_present(monkeypatch: pytest.MonkeyPatch) -> None:
     """An already-capable host never reruns the provisioner."""
-    monkeypatch.setattr(browser_deps.shutil, "which", lambda _name: "/usr/bin/npx")  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(browser_deps.shutil, "which", lambda _name: "/usr/bin/npx")  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
         browser_deps.subprocess,
         "run",
-        lambda *_args, **_kwargs: pytest.fail("provisioner ran despite npx on PATH"),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda *_args, **_kwargs: pytest.fail("provisioner ran despite npx on PATH"),  # pyright: ignore[reportUnknownArgumentType]
     )
     assert browser_deps.install_nodejs() is True
 
@@ -65,7 +65,7 @@ def test_install_nodejs_runs_the_shared_provisioner_and_rechecks_npx(
     monkeypatch.setattr(
         browser_deps.shutil,
         "which",
-        lambda _name: "/usr/bin/npx" if npx_available else None,  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda _name: "/usr/bin/npx" if npx_available else None,  # pyright: ignore[reportUnknownArgumentType]
     )
 
     def run(argv: list[str], **kwargs: object) -> None:
@@ -88,11 +88,11 @@ def test_install_nodejs_does_not_silently_elevate_on_windows(
 ) -> None:
     """Windows repair remains explicit because winget may require elevation."""
     monkeypatch.setattr(browser_deps, "sys", SimpleNamespace(platform="win32"))
-    monkeypatch.setattr(browser_deps.shutil, "which", lambda _name: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(browser_deps.shutil, "which", lambda _name: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
         browser_deps.subprocess,
         "run",
-        lambda *_args, **_kwargs: pytest.fail("Windows must not run a silent installer"),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda *_args, **_kwargs: pytest.fail("Windows must not run a silent installer"),  # pyright: ignore[reportUnknownArgumentType]
     )
     assert browser_deps.install_nodejs() is False
 
@@ -153,7 +153,7 @@ def test_runtime_and_settings_free_probes_share_the_npx_reason(
     monkeypatch.setattr(
         platform_probes.shutil,
         "which",
-        lambda _name: None,  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda _name: None,  # pyright: ignore[reportUnknownArgumentType]
     )
     assert platform_probes.browser_incapability() == platform_probes.NPX_INCAPABILITY_REASON
     assert platform_probes.browser_deps_incapability() == platform_probes.NPX_INCAPABILITY_REASON

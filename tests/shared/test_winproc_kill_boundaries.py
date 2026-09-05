@@ -65,9 +65,9 @@ class _FakeProc:
     """
 
     pid: int
-    kids: list[_FakeProc] = field(default_factory=list)  # pyright: ignore[reportUnknownVariableType]
+    kids: list[_FakeProc] = field(default_factory=list)
     killed: bool = False
-    signals: list[int] = field(default_factory=list)  # pyright: ignore[reportUnknownVariableType]
+    signals: list[int] = field(default_factory=list)
     # Liveness polls this process still answers True for *after* `.kill()`.
     # 0 = the kill takes at once (a normal process, and every tree node below
     # that is not deliberately made stubborn). A positive N = a straggler that
@@ -156,7 +156,7 @@ def fleet(unit_home: Path, monkeypatch: pytest.MonkeyPatch) -> _Fleet:
     monkeypatch.setattr(winproc, "_process_for_record", _for_record)
     waited: list[list[_FakeProc]] = []
 
-    def _wait_procs(items: list[_FakeProc], timeout: float | None = None) -> tuple[list, list]:  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+    def _wait_procs(items: list[_FakeProc], timeout: float | None = None) -> tuple[list, list]:
         """One tick of `psutil.wait_procs`' poll loop.
 
         Real `wait_procs` re-checks each process until it is gone or `timeout`
@@ -168,7 +168,7 @@ def fleet(unit_home: Path, monkeypatch: pytest.MonkeyPatch) -> _Fleet:
         gone, alive = [], []
         for p in items:
             (alive if p.is_running() else gone).append(p)  # pyright: ignore[reportUnknownMemberType]
-        return gone, alive  # pyright: ignore[reportUnknownVariableType]
+        return gone, alive
 
     monkeypatch.setattr(psutil, "wait_procs", _wait_procs)  # pyright: ignore[reportUnknownArgumentType]
 
@@ -271,7 +271,7 @@ def test_killing_a_session_does_not_kill_the_process_doing_the_killing(
         pid=target.pid, create_time=1.0, cmd="ava-ops", cwd=str(unit_home), started_at=time.time()
     ).write(winproc._record_path("ava-ops"))
     monkeypatch.setattr(winproc, "_process_for_record", lambda rec: procs.get(rec.pid))  # type: ignore[arg-type]
-    monkeypatch.setattr(psutil, "wait_procs", lambda _items, timeout=None: ([], []))  # noqa: ARG005  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(psutil, "wait_procs", lambda _items, timeout=None: ([], []))  # noqa: ARG005  # pyright: ignore[reportUnknownArgumentType]
 
     winproc.kill_session("ava-ops", graceful=False)
 
@@ -425,14 +425,14 @@ def test_the_caller_does_not_relaunch_into_the_held_port(
 def test_the_survivor_is_named_in_the_log(
     fleet: _Fleet,
     survivor: _FakeProc,
-    loguru_records: list[dict],  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+    loguru_records: list[dict],
 ) -> None:
     """A failed stop that is only a False in a return value is a failed stop
     nobody reads. The pid is the operator's only lead on what to kill by hand."""
     winproc.kill_session("ava-ops", graceful=False)
 
-    errors = [r for r in loguru_records if r["level"].name == "ERROR"]  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
-    assert any(str(survivor.pid) in r["message"] for r in errors), errors  # pyright: ignore[reportUnknownVariableType]
+    errors = [r for r in loguru_records if r["level"].name == "ERROR"]  # pyright: ignore[reportUnknownMemberType]
+    assert any(str(survivor.pid) in r["message"] for r in errors), errors
 
 
 def test_a_straggler_that_dies_during_the_teardown_wait_is_confirmed(fleet: _Fleet) -> None:

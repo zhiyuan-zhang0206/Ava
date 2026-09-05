@@ -150,7 +150,7 @@ def test_assert_schema_current_fails_fast(silent_peer_url: str) -> None:
 def test_ava_db_connect_fails_fast(silent_peer_url: str, monkeypatch: pytest.MonkeyPatch) -> None:
     """`ava.DB` is dialled from inside the agent's exec sandbox — an unbounded
     connect freezes the agent's tool call, not just a daemon's boot."""
-    from ava._settings import _connect_db  # pyright: ignore[reportUnknownVariableType]
+    from ava._settings import _connect_db
 
     monkeypatch.setattr(settings.data_plane, "db_url", silent_peer_url)
     _assert_fails_fast(_connect_db)  # pyright: ignore[reportUnknownArgumentType]

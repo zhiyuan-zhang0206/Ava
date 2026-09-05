@@ -84,7 +84,7 @@ def test_respawn_kills_stale_session_then_starts(monkeypatch: pytest.MonkeyPatch
     is pinned: single kill, single launch, env = forward_env_dict() + extra_env.
     """
     # Pin the composer so the test does not depend on dev host machine_name.
-    monkeypatch.setattr(_sr_mod, "session_name", lambda svc: f"t-{svc}")  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(_sr_mod, "session_name", lambda svc: f"t-{svc}")  # pyright: ignore[reportUnknownArgumentType]
     service = _FakeBackend("service")
     monkeypatch.setattr("shared.session_backend.get_backend", lambda: service)
 
@@ -111,7 +111,7 @@ def test_respawn_can_give_a_session_a_bounded_graceful_stop(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The collector can request a short SIGTERM window before the backend escalates."""
-    monkeypatch.setattr(_sr_mod, "session_name", lambda svc: f"t-{svc}")  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(_sr_mod, "session_name", lambda svc: f"t-{svc}")  # pyright: ignore[reportUnknownArgumentType]
     service = _FakeBackend("service")
     monkeypatch.setattr("shared.session_backend.get_backend", lambda: service)
 
@@ -133,7 +133,7 @@ def test_respawn_holds_back_while_source_is_mid_switch(
     respawn holds back (False) and the backend is not even touched; the update's
     own `ava start` relaunches the service, and the caller's probe retries next
     round if it did not."""
-    monkeypatch.setattr(_sr_mod, "session_name", lambda svc: f"t-{svc}")  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(_sr_mod, "session_name", lambda svc: f"t-{svc}")  # pyright: ignore[reportUnknownArgumentType]
     service = _FakeBackend("service")
     monkeypatch.setattr("shared.session_backend.get_backend", lambda: service)
     monkeypatch.setattr(_sr_mod, "is_switching", lambda: True)
@@ -151,7 +151,7 @@ def test_respawn_force_ignores_the_source_switch_window(
     (cli/commands/_cluster_watchdog_probe.py passes force=True) — a dead
     watchdog must be revived even mid-update, or the host loses supervision
     for the whole window."""
-    monkeypatch.setattr(_sr_mod, "session_name", lambda svc: f"t-{svc}")  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(_sr_mod, "session_name", lambda svc: f"t-{svc}")  # pyright: ignore[reportUnknownArgumentType]
     service = _FakeBackend("service")
     monkeypatch.setattr("shared.session_backend.get_backend", lambda: service)
     monkeypatch.setattr(_sr_mod, "is_switching", lambda: True)
@@ -173,7 +173,7 @@ def test_respawn_proceeds_when_no_switch_is_in_flight(
     """The marker is absent in the normal case — the guard must be a no-op then
     (the existing respawn tests already exercise this through the real marker
     path; this pins the False branch explicitly)."""
-    monkeypatch.setattr(_sr_mod, "session_name", lambda svc: f"t-{svc}")  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(_sr_mod, "session_name", lambda svc: f"t-{svc}")  # pyright: ignore[reportUnknownArgumentType]
     service = _FakeBackend("service")
     monkeypatch.setattr("shared.session_backend.get_backend", lambda: service)
     monkeypatch.setattr(_sr_mod, "is_switching", lambda: False)
@@ -185,7 +185,7 @@ def test_respawn_proceeds_when_no_switch_is_in_flight(
 
 def test_respawn_returns_false_when_backend_launch_fails(monkeypatch: pytest.MonkeyPatch) -> None:
     """The backend refusing the launch → returns False, does not raise."""
-    monkeypatch.setattr(_sr_mod, "session_name", lambda svc: f"t-{svc}")  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(_sr_mod, "session_name", lambda svc: f"t-{svc}")  # pyright: ignore[reportUnknownArgumentType]
     service = _FakeBackend("service")
     service.new_ok = False
     monkeypatch.setattr("shared.session_backend.get_backend", lambda: service)
@@ -202,7 +202,7 @@ def test_respawn_and_verify_reports_the_probe_not_the_spawn(
     process already holding the port, import error, schema-drift exit), which is
     exactly what happened nine times in a row on 2026-07-24 while the healthcheck
     logged "restarted successfully" each time."""
-    monkeypatch.setattr(_sr_mod, "respawn_service", lambda *_a, **_kw: True)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(_sr_mod, "respawn_service", lambda *_a, **_kw: True)  # pyright: ignore[reportUnknownArgumentType]
     result = _sr_mod.respawn_and_verify(
         "restarter",
         "cmd",
@@ -219,7 +219,7 @@ def test_respawn_and_verify_returns_alive_once_the_probe_confirms(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Polls until the daemon answers — a daemon needs a moment to bind."""
-    monkeypatch.setattr(_sr_mod, "respawn_service", lambda *_a, **_kw: True)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(_sr_mod, "respawn_service", lambda *_a, **_kw: True)  # pyright: ignore[reportUnknownArgumentType]
     attempts = {"n": 0}
 
     def verify() -> DaemonProbe:
@@ -237,8 +237,8 @@ def test_respawn_and_verify_skips_probing_when_the_spawn_fails(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """the spawn itself refused → report that, and do not spend the verify deadline."""
-    monkeypatch.setattr(_sr_mod, "respawn_service", lambda *_a, **_kw: False)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-    monkeypatch.setattr(_sr_mod, "session_name", lambda svc: f"t-{svc}")  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(_sr_mod, "respawn_service", lambda *_a, **_kw: False)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_sr_mod, "session_name", lambda svc: f"t-{svc}")  # pyright: ignore[reportUnknownArgumentType]
     probed = {"n": 0}
 
     def verify() -> DaemonProbe:
@@ -261,7 +261,7 @@ def test_respawn_and_verify_stops_polling_on_a_terminal_verdict(
     The respawned daemon has already died on the bound port, so the rest of the
     20s deadline is spent waiting for a process that will not yield — ~45s per
     round of exactly that is what set a Windows box's 2-minute watchdog cadence."""
-    monkeypatch.setattr(_sr_mod, "respawn_service", lambda *_a, **_kw: True)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(_sr_mod, "respawn_service", lambda *_a, **_kw: True)  # pyright: ignore[reportUnknownArgumentType]
 
     attempts = {"n": 0}
 
@@ -355,7 +355,7 @@ def test_run_keepalive_success_resets_consecutive_failure_count() -> None:
     assert respawns == []
 
 
-def test_run_keepalive_does_not_respawn_a_terminal_verdict(caplog) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_run_keepalive_does_not_respawn_a_terminal_verdict(caplog) -> None:
     """Loud and stop, not silent give-up: ERROR + the distinct exit code, no
     respawn. A healthcheck that quietly declines to heal is the 98-minute outage's
     shape, so the report is the non-negotiable half of "stop retrying"."""
@@ -450,7 +450,7 @@ def test_run_keepalive_separates_the_two_failure_exit_codes(
 def test_respawn_is_native_only(monkeypatch: pytest.MonkeyPatch) -> None:
     """Post-switch the service respawn is native; there is no shell-backend
     cleanup leg at all — the native path has no legacy dependency."""
-    monkeypatch.setattr(_sr_mod, "session_name", lambda svc: f"t-{svc}")  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(_sr_mod, "session_name", lambda svc: f"t-{svc}")  # pyright: ignore[reportUnknownArgumentType]
     service = _FakeBackend("service")
 
     monkeypatch.setattr("shared.session_backend.get_backend", lambda: service)
@@ -468,7 +468,7 @@ def test_respawn_judges_the_checkout_not_the_working_directory(
     checkout, not that working directory. Judging the working directory read the
     prod home's OWN frontend as a foreign checkout and refused every legitimate
     restart, leaving the frontend the one service that could not self-heal."""
-    monkeypatch.setattr(_sr_mod, "session_name", lambda svc: f"t-{svc}")  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(_sr_mod, "session_name", lambda svc: f"t-{svc}")  # pyright: ignore[reportUnknownArgumentType]
     service = _FakeBackend("service")
     monkeypatch.setattr("shared.session_backend.get_backend", lambda: service)
     from shared import paths as _paths
@@ -488,12 +488,12 @@ def test_respawn_judges_the_checkout_not_the_working_directory(
 
 def test_respawn_checkout_arg_cannot_launder_a_dev_checkout(
     monkeypatch: pytest.MonkeyPatch,
-    caplog,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    caplog,
 ) -> None:
     """``checkout`` names the checkout being judged; it does not exempt anything.
     A dev checkout is refused whether or not the working directory sits inside
     it, so the frontend fix cannot become a way around Task #966."""
-    monkeypatch.setattr(_sr_mod, "session_name", lambda svc: f"t-{svc}")  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(_sr_mod, "session_name", lambda svc: f"t-{svc}")  # pyright: ignore[reportUnknownArgumentType]
     from shared import paths as _paths
 
     monkeypatch.setattr(_paths, "ava_home", lambda: Path.home() / ".ava")
@@ -506,7 +506,7 @@ def test_respawn_checkout_arg_cannot_launder_a_dev_checkout(
 
 def test_respawn_refuses_prod_home_from_a_dev_checkout(
     monkeypatch: pytest.MonkeyPatch,
-    caplog,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    caplog,
 ) -> None:
     """Task #966, respawn side: a prod-home unit must never respawn a daemon
     from a dev checkout's code — the respawn would re-bind the daemon to a
@@ -602,9 +602,9 @@ def test_run_keepalive_backs_off_exponentially_and_holds_after_breaker(
       before it.
     """
     clock = _FakeClock()
-    monkeypatch.setattr(_sr_mod, "_monotonic", clock)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(_sr_mod, "_monotonic", clock)
     recorder = _AlertRecorder()
-    monkeypatch.setattr(_shared_log, "logger", recorder)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(_shared_log, "logger", recorder)
     monkeypatch.setattr(_sr_mod.settings.services, "watchdog_respawn_backoff_cap_seconds", 10000.0)
     respawns: list[float] = []
     fallbacks: list[str] = []
@@ -640,9 +640,9 @@ def test_run_keepalive_alive_round_resets_backoff_counter_and_breaker(
     the second failure episode starts the backoff from the base (no stale delay
     from the first episode) and earns its own hold alert when its breaker trips."""
     clock = _FakeClock()
-    monkeypatch.setattr(_sr_mod, "_monotonic", clock)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(_sr_mod, "_monotonic", clock)
     recorder = _AlertRecorder()
-    monkeypatch.setattr(_shared_log, "logger", recorder)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(_shared_log, "logger", recorder)
     monkeypatch.setattr(_sr_mod.settings.services, "watchdog_respawn_backoff_cap_seconds", 10000.0)
     respawns: list[float] = []
     fallbacks: list[str] = []
@@ -681,7 +681,7 @@ def test_run_keepalive_backoff_delay_is_capped(
     third respawn lands at t=160 (60+100), not t=180 (60+120) as uncapped growth
     would."""
     clock = _FakeClock()
-    monkeypatch.setattr(_sr_mod, "_monotonic", clock)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(_sr_mod, "_monotonic", clock)
     monkeypatch.setattr(_sr_mod.settings.services, "watchdog_respawn_backoff_cap_seconds", 100.0)
     respawns: list[float] = []
     fallbacks: list[str] = []
@@ -699,7 +699,7 @@ def test_run_keepalive_verified_alive_respawn_resets_backoff(
     round: the backoff deadline set by an earlier failed respawn must not delay
     the next episode's first respawn."""
     clock = _FakeClock()
-    monkeypatch.setattr(_sr_mod, "_monotonic", clock)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(_sr_mod, "_monotonic", clock)
     monkeypatch.setattr(_sr_mod.settings.services, "watchdog_respawn_backoff_cap_seconds", 10000.0)
     respawns: list[float] = []
     fallbacks: list[str] = []

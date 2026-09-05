@@ -48,13 +48,13 @@ def _pid(name: str) -> int:
     return rec.pid
 
 
-def _wait(predicate, timeout: float = 5.0, interval: float = 0.05) -> bool:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def _wait(predicate, timeout: float = 5.0, interval: float = 0.05) -> bool:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if predicate():
             return True
         time.sleep(interval)
-    return predicate()  # pyright: ignore[reportUnknownVariableType]
+    return predicate()
 
 
 # ---------------------------------------------------------------------------
@@ -62,13 +62,13 @@ def _wait(predicate, timeout: float = 5.0, interval: float = 0.05) -> bool:  # p
 # ---------------------------------------------------------------------------
 
 
-def test_new_session_login_shell_wraps(monkeypatch: pytest.MonkeyPatch, unit_home):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_new_session_login_shell_wraps(monkeypatch: pytest.MonkeyPatch, unit_home):
     """login_shell=True (the default) builds the bash -lc / cd / venv shape,
     while the env rides a real dict — no 0600 sourced-file prefix, no secret
     on any argv."""
-    calls: list[tuple] = []  # pyright: ignore[reportMissingTypeArgument, reportUnknownVariableType]
+    calls: list[tuple] = []
 
-    def fake_new(name, cmd, cwd, *, env, stderr_append=None):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    def fake_new(name, cmd, cwd, *, env, stderr_append=None):
         calls.append((name, cmd, cwd, env))  # pyright: ignore[reportUnknownMemberType]
         return True
 
@@ -84,7 +84,7 @@ def test_new_session_login_shell_wraps(monkeypatch: pytest.MonkeyPatch, unit_hom
     )
     assert ok is True
     assert len(calls) == 1  # pyright: ignore[reportUnknownArgumentType]
-    name, cmd, cwd, got_env = calls[0]  # pyright: ignore[reportUnknownVariableType]
+    name, cmd, cwd, got_env = calls[0]
     assert name == "ava-main-gateway"
     assert cwd == Path("/repo")
     # env passes through untouched — the child inherits it as its real
@@ -115,7 +115,7 @@ def test_new_session_no_login_shell_passthrough(monkeypatch: pytest.MonkeyPatch)
     caller owns PATH/venv semantics, same as the legacy backend's no-login path."""
     captured: dict[str, object] = {}
 
-    def fake_new(name, cmd, cwd, *, env, stderr_append=None):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    def fake_new(name, cmd, cwd, *, env, stderr_append=None):
         captured["cmd"] = cmd
         return True
 
@@ -143,7 +143,7 @@ def test_posix_backend_keeps_its_own_log_file():
 # ---------------------------------------------------------------------------
 
 
-def test_spawn_and_kill_idempotent(unit_home):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_spawn_and_kill_idempotent(unit_home):
     """new_session twice on a live name is a no-op (same pid); kill confirms
     the session gone; a second kill is a noop."""
     backend = _backend()
@@ -166,7 +166,7 @@ def test_spawn_and_kill_idempotent(unit_home):  # pyright: ignore[reportMissingP
         backend.kill_session(name, graceful=False)
 
 
-def test_kill_session_accepts_expected_for_interface_parity(unit_home):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_kill_session_accepts_expected_for_interface_parity(unit_home):
     """kill_session takes the `expected` kwarg callers pass on rollout/stop
     paths (the ABC requires it) and ignores it — the native supervisor has no
     force-kill escalation to quieten."""
@@ -174,10 +174,10 @@ def test_kill_session_accepts_expected_for_interface_parity(unit_home):  # pyrig
     assert ok is True and mode == "noop"
 
 
-def test_tree_kill_leaves_no_orphans(unit_home):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_tree_kill_leaves_no_orphans(unit_home):
     """A force kill takes down the session's own descendants too, not just the
     top process — the tree kill the legacy SIGKILL escalation used to provide."""
-    script = unit_home / "spawn_child.py"  # pyright: ignore[reportUnknownVariableType]
+    script = unit_home / "spawn_child.py"
     script.write_text(  # pyright: ignore[reportUnknownMemberType]
         "import subprocess, time\nsubprocess.Popen(['sleep', '300'])\ntime.sleep(300)\n"
     )
@@ -218,7 +218,7 @@ def test_tree_kill_leaves_no_orphans(unit_home):  # pyright: ignore[reportMissin
     assert _wait(lambda: not psutil.pid_exists(child_pid)), "child sleep should die with the tree"
 
 
-def test_pid_reuse_protection(unit_home):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_pid_reuse_protection(unit_home):
     """A record whose pid now belongs to a DIFFERENT process (stale
     create_time) is not a live session — the liveness check defeats pid
     recycling by the OS."""
@@ -233,7 +233,7 @@ def test_pid_reuse_protection(unit_home):  # pyright: ignore[reportMissingParame
             create_time=1.0,
             cmd="sleep",
             cwd=str(unit_home),  # pyright: ignore[reportUnknownArgumentType]
-            started_at=1.0,  # pyright: ignore[reportUnknownArgumentType]
+            started_at=1.0,
         )
         rec.write(posixproc._record_path(name))
         assert backend.has_session(name) is False
@@ -243,7 +243,7 @@ def test_pid_reuse_protection(unit_home):  # pyright: ignore[reportMissingParame
         proc.wait(timeout=5)
 
 
-def test_session_record_reclaimed(unit_home):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_session_record_reclaimed(unit_home):
     """A record whose process died out from under it is unlinked as
     list_sessions walks, so the listing reflects reality."""
     backend = _backend()
@@ -264,13 +264,13 @@ def test_session_record_reclaimed(unit_home):  # pyright: ignore[reportMissingPa
 # ---------------------------------------------------------------------------
 
 
-def test_login_shell_rebuilds_path_with_venv_prefix(unit_home):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_login_shell_rebuilds_path_with_venv_prefix(unit_home):
     """With login_shell=True the command runs under bash -lc: the login
     profile rebuilds PATH (the forwarded PATH is NOT authoritative), and the
     venv bin dir is re-added inside the command — the exact PATH/venv semantics
     the legacy path provided."""
     backend = _backend()
-    out = unit_home / "path-login.txt"  # pyright: ignore[reportUnknownVariableType]
+    out = unit_home / "path-login.txt"
     out.unlink(missing_ok=True)  # pyright: ignore[reportUnknownMemberType]
     env = dict(os.environ)
     # A marker prefix on a still-working PATH: the login profile must DROP the
@@ -279,12 +279,12 @@ def test_login_shell_rebuilds_path_with_venv_prefix(unit_home):  # pyright: igno
     name = "ava-test-posixbe-path1"
     # Write via tmp + rename: `>` creates the file empty before echo fills it,
     # so a bare redirect lets _wait(out.exists) observe an empty window.
-    tmp = out.with_suffix(".tmp")  # pyright: ignore[reportUnknownVariableType, reportUnknownMemberType]
+    tmp = out.with_suffix(".tmp")  # pyright: ignore[reportUnknownMemberType]
     cmd = f'echo "$PATH" > {shlex.quote(str(tmp))} && exec /bin/mv {shlex.quote(str(tmp))} {shlex.quote(str(out))}'  # pyright: ignore[reportUnknownArgumentType]
     assert backend.new_session(name, cmd, unit_home, env=env) is True  # pyright: ignore[reportUnknownArgumentType]
     try:
         assert _wait(out.exists)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
-        path = out.read_text().strip()  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+        path = out.read_text().strip()  # pyright: ignore[reportUnknownMemberType]
         # the venv was re-activated after the profile ran
         assert ".venv/bin" in path, f"venv bin missing from login-shell PATH: {path!r}"
         # the login profile actually ran (path_helper / /etc/profile dirs)
@@ -295,17 +295,17 @@ def test_login_shell_rebuilds_path_with_venv_prefix(unit_home):  # pyright: igno
         backend.kill_session(name, graceful=False)
 
 
-def test_no_login_shell_preserves_env_path_exactly(unit_home):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_no_login_shell_preserves_env_path_exactly(unit_home):
     """With login_shell=False the command runs through plain sh -c with the
     caller's env authoritative — no profile sourcing, no PATH rewrite."""
     backend = _backend()
-    out = unit_home / "path-nologin.txt"  # pyright: ignore[reportUnknownVariableType]
+    out = unit_home / "path-nologin.txt"
     out.unlink(missing_ok=True)  # pyright: ignore[reportUnknownMemberType]
     env = dict(os.environ)
     env["PATH"] = "/custom-only/bin"
     name = "ava-test-posixbe-path2"
     # tmp + rename for the same empty-window reason as the login-shell test
-    tmp = out.with_suffix(".tmp")  # pyright: ignore[reportUnknownVariableType, reportUnknownMemberType]
+    tmp = out.with_suffix(".tmp")  # pyright: ignore[reportUnknownMemberType]
     cmd = f'echo "$PATH" > {shlex.quote(str(tmp))} && exec /bin/mv {shlex.quote(str(tmp))} {shlex.quote(str(out))}'  # pyright: ignore[reportUnknownArgumentType]
     assert (
         backend.new_session(
@@ -313,7 +313,7 @@ def test_no_login_shell_preserves_env_path_exactly(unit_home):  # pyright: ignor
             cmd,
             unit_home,  # pyright: ignore[reportUnknownArgumentType]
             env=env,
-            login_shell=False,  # pyright: ignore[reportUnknownArgumentType]
+            login_shell=False,
         )
         is True
     )
@@ -342,7 +342,7 @@ def test_backend_is_a_session_backend():
     assert isinstance(_backend(), SessionBackend)
 
 
-def test_has_session_false_for_unknown(unit_home):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_has_session_false_for_unknown(unit_home):
     assert _backend().has_session("ava-test-posixbe-unknown") is False
 
 
