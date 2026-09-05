@@ -26,7 +26,8 @@ def trusted_queue_pr(pr: dict[str, Any]) -> bool:
         and pr["base"]["repo"]["full_name"] == REPOSITORY
         and pr["base"]["ref"] == "main"
         and pr["draft"] is True
-        and re.fullmatch(r"trunk-merge/pr-[0-9]+/[0-9a-f-]{36}", pr["head"]["ref"]) is not None
+        and re.fullmatch(r"trunk-merge/pr-[0-9]+/[0-9a-f-]{36}(?:-bisection)?", pr["head"]["ref"])
+        is not None
     )
 
 
