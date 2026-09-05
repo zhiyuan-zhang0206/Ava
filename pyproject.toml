@@ -329,8 +329,9 @@ ignore = [
 # print() is their output contract (T20). Reference modules are historical /
 # example code (e.g. low-level ctypes + subprocess probes) the agent reads and
 # adapts, not the maintained live path, so the subprocess/security heuristics,
-# bugbear, pylint-refactor and naming nits are noise here.
-"ava_builtins/skills/*/reference/*.py" = ["ERA001", "T20", "B904", "F841", "RUF059", "PLW1510", "S110", "S112", "S603", "C401", "PLR0915", "N806"]
+# bugbear, pylint-refactor, naming, annotation (ANN201), naive-datetime
+# (DTZ005) and pathlib-idiom (PTH123) nits are noise here.
+"ava_builtins/skills/*/reference/*.py" = ["ERA001", "T20", "B904", "F841", "RUF059", "PLW1510", "S110", "S112", "S603", "C401", "PLR0915", "N806", "ANN201", "DTZ005", "PTH123"]
 # .agents/skills (the kernel-contributor project skills) carry the same kind of
 # runnable reference CLIs (e.g. ava-self-development's changelog generator).
 ".agents/skills/*/reference/*.py" = ["ERA001", "T20", "B904", "F841", "RUF059", "PLW1510", "S110", "S112", "S603", "C401", "PLR0915", "N806"]

@@ -1,4 +1,3 @@
-# ruff: noqa: ANN201, DTZ005, PTH123
 """
 Deep Research: AI Coding Agent 2026 Competitive Landscape
 ========================================================
