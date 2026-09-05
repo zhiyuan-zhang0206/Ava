@@ -174,8 +174,8 @@ repos:
         pass_filenames: false
 
       # Structural lints for agent legibility — bans `if TYPE_CHECKING:` import
-      # folding and enforces a 500-line per-file ceiling. Rules + the
-      # _OVERSIZE_ALLOWED / _TYPE_CHECKING_ALLOWED lists live in
+      # folding and enforces the 800-line per-file ceiling (600-800 = nudge).
+      # Rules + the _TYPE_CHECKING_ALLOWED list live in
       # scripts/lint_code_structure.py header. (print() bans are enforced by
       # ruff T20, not here.)
       - id: lint-code-structure

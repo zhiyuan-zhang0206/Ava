@@ -58,7 +58,7 @@ Layout redesign goes from "edit classNames in 6 files" to "change one primitive'
 
 ## Line-budget discipline (design constraint)
 
-The whole-repo outlier-zeroing ruling (2026-08-07) applies to the R4 domain: every file the design touches must land ≤500 soft / 800 hard (today: agent-sidebar 1122, timeline/index 935, inbox-queue 796, timeline-store 696, use-agents 613). If a refactored file still exceeds the limit, the design split is incomplete — back to the concept model, not an exemption.
+The whole-repo outlier-zeroing ruling (2026-08-07) applies to the R4 domain: every file the design touches must land ≤600 soft / 800 hard (today: agent-sidebar 1122, timeline/index 935, inbox-queue 796, timeline-store 696, use-agents 613). If a refactored file still exceeds the limit, the design split is incomplete — back to the concept model, not an exemption.
 
 ## Open decision points
 
