@@ -42,7 +42,6 @@ import shlex
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from ops.roster import build_services as build_services  # re-export: legacy roster importers
 from ops.runner_mode import runner_mode
 from ops.service_spec import ServiceSpec as ServiceSpec  # re-export: generated plugin fixtures
 from shared.config import settings
@@ -341,3 +340,14 @@ class Spec:
         from shared.cluster_pin import get_cluster_target_sha
 
         return get_cluster_target_sha()
+
+
+# Compatibility re-export: legacy importers (`from ops.spec import
+# build_services`, scripts/prepare_plugin_fixture.py's generated
+# `services.py` template, tests) take the canonical roster from this module.
+# Placed at the BOTTOM deliberately: roster's build_services calls back into
+# this module's helpers (_bind_runtime_command / _plugin_services /
+# _assert_unique_sessions) lazily, so this edge must not run while this module
+# is partially initialized (spec → roster at the top would be a load-time
+# edge in the opposite direction of the call-time edge — keep both lazy).
+from ops.roster import build_services as build_services  # noqa: E402 — deliberate bottom re-export
