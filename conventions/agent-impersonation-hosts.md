@@ -17,6 +17,48 @@ on PATH can point to production even when the current directory is a worktree.
 
 ## Codex CLI
 
+Give the interactive host a live PTY and keep its stdin open through workspace
+trust confirmation. An unattended launch with closed stdin can leave an accepted
+AVA lease active without a usable Codex session.
+
+Pass the token through the host's environment, with an explicit shell policy.
+This recipe was verified with Codex 0.153.4; its
+[environment filtering order](https://github.com/openai/codex/blob/rust-v0.153.4/codex-rs/protocol/src/shell_environment.rs)
+and [snapshot implementation](https://github.com/openai/codex/blob/rust-v0.153.4/codex-rs/core/src/shell_snapshot.rs)
+explain the required settings:
+
+```sh
+codex --disable shell_snapshot \
+  -c 'shell_environment_policy.inherit="all"' \
+  -c 'shell_environment_policy.ignore_default_excludes=true' \
+  -c 'shell_environment_policy.include_only=["PATH","HOME","USER","LOGNAME","SHELL","TERM","LANG","LC_ALL","TMPDIR","AVA_IMPERSONATION_TOKEN","CODEX_THREAD_ID"]'
+```
+
+Use these options together. `inherit="core"` removes the token before
+`include_only` runs, so an allowlist alone cannot restore it. Default secret-name
+exclusions also remove the token; disabling those exclusions requires the strict
+allowlist above. Add other environment names only when the host needs them.
+Keep shell snapshots disabled: a snapshot can persist the inherited credential
+and hide a missing subprocess environment until the working directory changes.
+
+Before requesting a live lease, test the policy with a harmless sentinel value
+for `AVA_IMPERSONATION_TOKEN`. Have Codex run this presence check through its own
+shell tool both in the agent workspace and in the intended AVA checkout; repeat
+it with the real inherited credential before AVA work:
+
+```sh
+python3 -c 'import os; assert os.environ.get("AVA_IMPERSONATION_TOKEN"), "AVA impersonation token missing"'
+```
+
+The check must succeed in both directories without printing the token. Capture
+the request response in the supervisor; keep the credential out of prompts,
+command arguments, logs and token files. Retain that in-memory copy until handoff
+completes, so `finally` cleanup can release an active lease through the AVA CLI
+even if the host never starts, loses stdin or cannot inherit the token.
+Stop external work and close attachments before releasing; verify the terminal
+lease status before discarding the supervisor's credential. TTL remains the
+recovery path if the supervisor dies.
+
 Start the relay as a background shell process owned by the external session:
 
 ```sh
