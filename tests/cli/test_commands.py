@@ -179,6 +179,13 @@ def _noop_start_prechecks(monkeypatch: pytest.MonkeyPatch) -> None:
     from cli.commands import start as _start_mod
 
     monkeypatch.setattr(_start_mod, "_ensure_gateway_data_plane", lambda: 0)
+
+    # Source-integrity tests cover repair separately. A prior rollout's fake
+    # installed SHA must not make these call-shape tests run a real uv sync.
+    def _skip_source_integrity(_repo: Path) -> int:
+        return 0
+
+    monkeypatch.setattr(_start_mod, "_verify_source_integrity", _skip_source_integrity)
     # _roles_or_none (stop/status/converge) + machine_role (cmd_start service
     # resolution) both read settings + the machine_serve_* files; test env has
     # no file → empty/Missing. Pin both to gateway so the default path is the
