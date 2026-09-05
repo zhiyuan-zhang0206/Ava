@@ -18,7 +18,7 @@ tags:
 
 - **LLM provider abstraction** (`shared/lm/`): model construction, billing, content normalization, and stop classification for Anthropic / DeepSeek / Google / OpenAI / Xiaomi / Moonshot / Zhipu / Alibaba. Validates model/key configuration and resolves explicit temporary withdrawals at spawn boundaries.
 - **Agent cross-process contract** (`shared/agents.py`): AgentStatus enum, exception hierarchy, wire error protocol (HTTP error transmission between gateway ↔ agent SDK).
-- **Message-level contract** (`shared/message_kwargs.py`): supplements the above — `AvaMsgType`/`AvaMessageKwargs` (strongly-typed view of `ava_*` metadata in `additional_kwargs`).
+- **Message-level contract** (`shared/message_kwargs.py`): supplements the above — `AvaMsgType`/`AvaMessageKwargs` (strongly-typed view of `ava_*` metadata in `additional_kwargs`). Gateway message inserts also carry nullable server-owned audit facts — [[inbound-provenance.ava.okf.md]].
 - **Structured logging + metrics** (`shared/log.py`, `shared/metrics.py`): one loguru singleton over stderr / JSONL file / the unified event pipeline, plus the metrics core (`shared/metrics_aggregate.py`) — the digest behind `/api/metrics` reads Loki aggregates via `gateway.loki_events` since the LGTM cutover (task #1197; the PG read path was retired). The unified emitter (`shared/telemetry.py`) writes every event to the local JSONL mirror and, while enabled, dual-writes to OTLP ([[shared/telemetry-otlp/telemetry-otlp.ava.okf.md|OTLP exporter]] — Loki logs + Prometheus metrics); the PG `events` table is a read-only archive. `shared/audit_events.py` is the audit entry point.
 - **Cluster management** (`shared/cluster*.py`): **path-only identity** — clusters have no name, identity is the `$AVA_HOME` path (label = its basename, display only). Home-keyed registry (`~/.ava/clusters.json`), auth, drift detection, lock, pin. New clusters take the fixed `DATA_PLANE_IDENTITY` (`"ava"`); existing ones keep their historical identifier, never re-derived.
 - **Deploy state & liveness (R1)** — the explicit-model tables + lease APIs (deployment_state, host_deploy_state, Gate owner, pause capability, updater handoff, agent alive predicate, watcher registry): [[deploy-state.ava.okf.md]].
@@ -39,6 +39,7 @@ tags:
 - [[shared/lm/lm.ava.okf.md]] — LLM provider abstraction layer, used by agent/graph/_llm.py via factory to build chat models
 - [[agents-contract.ava.okf.md]] — agent ↔ gateway state/exception/wire protocol contract
 - [[shared/message_kwargs.ava.okf.md]] — typed `ava_*` metadata inside a message's `additional_kwargs`
+- [[inbound-provenance.ava.okf.md]] — non-enforcing credential, transport, content-hash, and source-assertion facts on gateway inbounds
 - [[log.ava.okf.md]] — structured logging, feeds the unified event emitter (`shared/telemetry.py`) which writes `events` + the `agent_events` mirror
 - [[metrics.ava.okf.md]] — system-level metrics computation core
 - [[db.ava.okf.md]] — shared/db.py provides database connection pool, depended on by services and gateway

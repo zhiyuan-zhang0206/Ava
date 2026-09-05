@@ -55,6 +55,7 @@ from shared.audit_events import insert_event_log
 from shared.caller_identity import CallerIdentity
 from shared.chat_delivery import ClientMessageConflictError
 from shared.checkpoint import CheckpointReadError, load_checkpoint_messages
+from shared.inbound_provenance import InboundProvenance
 from shared.machine import machine_name
 
 # Provenance of everything this surface creates. `spawner` groups the agents
@@ -362,19 +363,16 @@ async def _mcp_deliver_send_message(
     """
     from mcp.server.mcpserver.exceptions import ToolError
 
+    client = _CURRENT_MCP_CLIENT.get()
+    if client is None:
+        raise ToolError("authenticated MCP client context is missing")
     source = _MESSAGE_SOURCE
     if caller_protocol == "v1":
-        client = _CURRENT_MCP_CLIENT.get()
-        if client is None:
-            raise ToolError("authenticated MCP client context is missing")
         source = CallerIdentity(
             kind="external_agent", subject="mcp", instance=str(client["id"])
         ).source()
     stored_key = None
     if idempotency_key is not None:
-        client = _CURRENT_MCP_CLIENT.get()
-        if client is None:
-            raise ToolError("authenticated MCP client context is missing")
         try:
             stored_key = principal_key(
                 AuthPrincipal("mcp_client", str(client["id"])),
@@ -395,6 +393,10 @@ async def _mcp_deliver_send_message(
             source=source,
             payload=None,
             client_message_id=stored_key,
+            provenance=InboundProvenance(
+                source_verified_by=f"mcp_client:{client['id']}",
+                source_transport="http",
+            ),
         )
     except (AvaAgentError, ClientMessageConflictError) as exc:
         raise ToolError(str(exc)) from exc

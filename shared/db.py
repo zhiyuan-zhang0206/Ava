@@ -45,6 +45,7 @@ from shared.db_connections import connect as connect
 from shared.db_connections import direct_db_url as direct_db_url
 from shared.db_connections import pool as pool
 from shared.db_transaction import write_transaction
+from shared.inbound_provenance import InboundProvenance, content_sha256, source_assertion_match
 from shared.log import logger
 
 
@@ -173,6 +174,7 @@ def insert_inbound_message(
     source: str,
     kind: str = "chat",
     payload: dict[str, object] | None = None,
+    provenance: InboundProvenance | None = None,
 ) -> int:
     """UI / gateway call: INSERT one inbound; the agent's claim node
     fetches and dispatches.
@@ -215,6 +217,10 @@ def insert_inbound_message(
 
     reject_unnegotiated_caller(source)
     payload = caller_payload(source, payload)
+    source_verified_by = provenance.source_verified_by if provenance is not None else None
+    source_transport = provenance.source_transport if provenance is not None else None
+    content_hash = content_sha256(content) if provenance is not None else None
+    assertion_match = source_assertion_match(source, provenance) if provenance is not None else None
     # Map inbound kind → lifecycle event_type. Only chat messages between
     # agents produce a 'send_message' event; user→agent chat is not an
     # inter-agent event. Lifecycle kinds map 1:1 except compact_summary /
@@ -249,9 +255,21 @@ def insert_inbound_message(
 
     with db.cursor() as cur:
         cur.execute(
-            "INSERT INTO inbound_messages (agent_id, content, kind, source, payload) "
-            "VALUES (%s, %s, %s, %s, %s::jsonb) RETURNING id",
-            (agent_id, content, kind, source, json.dumps(payload) if payload else None),
+            "INSERT INTO inbound_messages "
+            "(agent_id, content, kind, source, payload, source_verified_by, "
+            "source_transport, content_hash, source_assertion_match) "
+            "VALUES (%s, %s, %s, %s, %s::jsonb, %s, %s, %s, %s) RETURNING id",
+            (
+                agent_id,
+                content,
+                kind,
+                source,
+                json.dumps(payload) if payload else None,
+                source_verified_by,
+                source_transport,
+                content_hash,
+                assertion_match,
+            ),
         )
         new_id = fetch_one(cur, "insert inbound message")[0]
         if event_type is not None:

@@ -27,6 +27,7 @@ Ava's Postgres persistence layer—responsible for agent message history storage
   - `fork` — Fork identity marker
 - **In-flight interrupt (not via claim)**: `has_pending_interrupt` (`agent/db.py:306`) performs a read-only peek on an additional channel—limited to `status='pending'` and `kind ∈ {cancel, terminate}` and `source ≠ 'self'`—to allow in-flight llm/exec nodes to instantly abort the current action; **dispatch semantics remain exclusive to claim** (all 10 kinds are dispatched in claim, cancel→idle / terminate→END)
 - **Redis pub/sub wake-up**: Each INSERT publishes via `insert_inbound_message` to `<prefix>:inbound:<agent_id>` (`shared.cluster.inbound_channel`); the agent's `RedisInboundListener` blocks on it, avoiding polling
+- **Provenance compatibility**: agent-side queue writers remain unchanged and leave the nullable gateway credential, transport, content-hash, and source-assertion columns `NULL`; absence means legacy or no gateway credential boundary, not a failed verification
 - **Connection pool management**: `AsyncConnectionPool(max_size=2)` shared between the LangGraph checkpoint saver and kernel SQL
 - **Health check**: The pool's `check_connection` runs `SELECT 1` on each connection acquisition, with transparent reconnection
 

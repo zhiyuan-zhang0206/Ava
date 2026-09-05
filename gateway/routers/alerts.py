@@ -32,7 +32,6 @@ Auth split by consumer:
 
 from __future__ import annotations
 
-import hmac
 import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -42,6 +41,7 @@ from fastapi.responses import StreamingResponse
 from psycopg.rows import dict_row
 from pydantic import TypeAdapter
 
+from gateway.routers._webhook_auth import authenticate_webhook
 from gateway.schemas.alerts import (
     AlertIngestResult,
     AlertRow,
@@ -60,7 +60,6 @@ from shared.alerts import (
     stamp_notified,
     upsert_alert,
 )
-from shared.cluster_auth import verify_bearer
 from shared.config import settings
 from shared.db_transaction import write_transaction
 from shared.redis_client import sync_redis
@@ -106,29 +105,7 @@ def _ingest_authorized(request: Request) -> bool:
     enough: the token is the contract.
     """
 
-    token = settings.alerts.webhook_token
-    token_value = token.get_secret_value() if token is not None else ""
-    if token_value:
-        presented = request.headers.get("X-Alerts-Token") or request.headers.get(
-            "X-Ops-Alerts-Token"
-        )
-        if presented and hmac.compare_digest(presented, token_value):
-            return True
-        # Grafana 13 webhook contact points can only authenticate through the
-        # notifier-native Authorization fields (custom headers are stored in
-        # plaintext by the 13 provisioning schema), so accept the webhook
-        # token as a Bearer credential too. Same privilege as the
-        # X-Alerts-Token header — scoped to alert ingestion, unlike the
-        # cluster secret.
-        if verify_bearer(request.headers.get("Authorization"), token_value):
-            return True
-    if verify_bearer(request.headers.get("Authorization"), settings.data_plane.cluster_secret):
-        return True
-    if not token_value:
-        host = request.client.host if request.client else ""
-        if host in ("127.0.0.1", "::1"):
-            return True
-    return False
+    return authenticate_webhook(request, provider="alerts").authorized
 
 
 # -- ingest ------------------------------------------------------------------

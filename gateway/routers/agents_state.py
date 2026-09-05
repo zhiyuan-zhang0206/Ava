@@ -16,6 +16,7 @@ from typing import Any, cast
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from psycopg_pool import ConnectionPool
 
+from gateway.inbound_provenance import request_inbound_provenance
 from gateway.routers._delivery import deliver_chat_inbound, reconcile_chat_delivery
 from gateway.routers._eval_guard import caller_eval_isolation, deny_isolated_result_read
 from gateway.schemas import (
@@ -44,6 +45,7 @@ from shared.config import settings
 from shared.db import agent_exists, insert_inbound_message, list_pending_inbounds
 from shared.db_transaction import write_transaction
 from shared.inbound import InboundKind
+from shared.inbound_provenance import InboundProvenance
 from shared.uploads import image_mime_for, parse_upload_url, resolve_upload_path
 
 router = APIRouter()
@@ -190,6 +192,7 @@ async def post_agent_message(
     413: message content exceeds the 1 MiB transport limit.
     422: a block list gated out (non-vision model) or referencing a bad upload.
     """
+    provenance = request_inbound_provenance(request)
     if idempotency_key is not None:
         idempotency_key = _scoped_message_key(request, agent_id, idempotency_key)
     if _message_content_size_bytes(body.content) > _MAX_MESSAGE_CONTENT_BYTES:
@@ -238,6 +241,7 @@ async def post_agent_message(
             source=body.source,
             payload=payload,
             client_message_id=idempotency_key,
+            provenance=provenance,
         )
     except ClientMessageConflictError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -251,6 +255,7 @@ def _system_note_blocking(
     source: str,
     note_tag: str,
     task_id: int | None,
+    provenance: InboundProvenance | None = None,
 ) -> int:
     """Sync system-note INSERT — via to_thread (pool work off the event loop)."""
     with write_transaction(pool) as conn:
@@ -268,13 +273,27 @@ def _system_note_blocking(
                     status_code=422,
                     detail=f"task_id {task_id} is not owned by agent {agent_id}",
                 )
+        payload: dict[str, object] = {
+            "note_tag": note_tag,
+            **({"task_id": task_id} if task_id is not None else {}),
+        }
+        if provenance is None:
+            return insert_inbound_message(
+                conn,
+                agent_id,
+                content=content,
+                source=source,
+                kind=InboundKind.SYSTEM_NOTE.value,
+                payload=payload,
+            )
         return insert_inbound_message(
             conn,
             agent_id,
             content=content,
             source=source,
             kind=InboundKind.SYSTEM_NOTE.value,
-            payload={"note_tag": note_tag, **({"task_id": task_id} if task_id is not None else {})},
+            payload=payload,
+            provenance=provenance,
         )
 
 
@@ -318,6 +337,7 @@ async def post_agent_system_note(
         body.source,
         body.note_tag,
         body.task_id,
+        request_inbound_provenance(request),
     )
     # Announce for the live UI (frontend badge / turn active), like chat.
     await _ops.publish_inbound_arrived(

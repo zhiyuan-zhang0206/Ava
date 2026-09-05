@@ -27,6 +27,7 @@ from shared.chat_delivery import (
     reconcile_chat_inbound,
 )
 from shared.db import publish_inbound_wake
+from shared.inbound_provenance import InboundProvenance
 from shared.live_announce import publish_agent_updated_sync
 from shared.log import logger
 
@@ -61,6 +62,7 @@ async def deliver_chat_inbound(
     refresh_badge: bool = False,
     payload: dict[str, object] | None = None,
     client_message_id: str | None = None,
+    provenance: InboundProvenance | None = None,
 ) -> ChatDelivery:
     """Deliver one 'chat' inbound to `agent_id` and announce it for the live UI.
 
@@ -86,7 +88,14 @@ async def deliver_chat_inbound(
     """
     try:
         inbound: tuple[int, str, bool, bool] | None = await asyncio.to_thread(
-            _deliver_blocking, pool, agent_id, prepare, source, payload, client_message_id
+            _deliver_blocking,
+            pool,
+            agent_id,
+            prepare,
+            source,
+            payload,
+            client_message_id,
+            provenance,
         )
     except CallerProtocolUnavailableError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -198,6 +207,7 @@ def _deliver_blocking(
     source: str,
     payload: dict[str, object] | None,
     client_message_id: str | None,
+    provenance: InboundProvenance | None,
 ) -> tuple[int, str, bool, bool] | None:
     """Sync delivery transaction — via to_thread: `prepare` runs inside it (it
     may execute its own DB statements), then the inbound INSERT. Returns
@@ -212,6 +222,7 @@ def _deliver_blocking(
                 source=source,
                 payload=payload,
                 client_message_id=client_message_id,
+                provenance=provenance,
             )
             return (receipt.inbound_id, content, receipt.inserted, receipt.pending)
     return None
