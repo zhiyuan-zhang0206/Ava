@@ -22,6 +22,19 @@ sibling of `.env` that every `ava` command loads (precedence: real env > `.env`
 > `mirror.env`). That sibling is what makes the deferred `npm ci` at `ava start`
 use the mirror too; hand-copying `.env.example` over `~/.ava/.env` never touches it.
 
+The shared `uv.lock` uses PyPI and `files.pythonhosted.org`, including on
+GitHub-hosted CI runners. Do not commit a host's mirror-resolved lock. The
+`lint-python-lock` pre-commit hook and CI's dependency-free source check enforce
+that boundary; a CI environment index override cannot replace artifact URLs
+already embedded in a frozen lock.
+
+Production updates use `uv sync --locked`. With uv 0.10.2, a canonical PyPI
+lock plus a different `UV_DEFAULT_INDEX` fails the freshness check because the
+index change requires a lock update. The install-time mirror path below does
+not establish mirrored production-update compatibility. That transport gap
+must be resolved before updating a mirror-enabled production host, while
+preserving the committed versions, hashes, and freshness validation.
+
 Two implementation details worth knowing:
 
 - **`uv sync` re-resolves under a mirror** (the flag drops `--frozen`). The
