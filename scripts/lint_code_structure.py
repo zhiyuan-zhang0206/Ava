@@ -171,11 +171,6 @@ _OVERSIZE_ALLOWED: dict[str, tuple[str, int, str]] = {
     # Kernel inbound queue + lifecycle SQL (claim / restart helpers) — one
     # cohesive kernel-DB module; the #1587 fatal-provider heartbeat throttle
     # (last_heartbeat_at + pending-wake accounting) regrew it past the ceiling
-    # Hosted boot orchestration: converge preflight, N-step checkpoint throttle
-    # wrapper, startup repair paths — one cohesive boot sequence; the #1584
-    # per-thread throttle + blob-persistence fix regrew it past 800 on the
-    # merged tree (main-side notify evolution included). Split tracked.
-    "agent/startup.py": ("#5770", 800, "2026-12-31"),
 }
 
 
