@@ -239,11 +239,9 @@ def write(
     description = coerce_str(description, "description", allow_none=True)
     tags = coerce_typed(tags, "tags", (list, tuple), allow_none=True)
     store = coerce_str(store, "store")
-    from ava._boot import _agent_id
+    from ava._boot import require_agent_id
 
-    agent_id = _agent_id
-    if agent_id is None:
-        raise RuntimeError("ava.memory.write requires an established agent id")
+    agent_id = require_agent_id()
     entry, is_shared = _entry_path(slug, store, agent_id)
     values = _validated_tags(tags)
     note_title = title or slug

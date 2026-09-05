@@ -30,6 +30,12 @@ Two types of memory, each serving different audiences:
 - `write(slug, content, *, title=None, description=None, tags=None, store="personal") → Path` — writes an absolute personal or shared entry with generated frontmatter and upserts its `MEMORY.md` pointer; the canonical writer, immune to `ava.cwd` drift
 - `IndexerUnavailable` — exception when the indexer service is unavailable
 
+Memory authoring and personal-index injection resolve the current SDK identity:
+an attached external lease takes precedence over a hosted turn, then the process
+identity. External lease validity is checked before reading or creating memory
+files. Writes take effect on the filesystem immediately; they are not plugin
+state journal entries and do not wait for the impersonation handoff.
+
 ## Note Format
 
 ```markdown
