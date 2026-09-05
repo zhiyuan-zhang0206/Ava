@@ -104,7 +104,16 @@ def provider_plugin() -> Generator[Callable[..., None], None, None]:
     stop_snapshot = dict(stop._BY_PROVIDER)
     for model_id in tuple(MODELS):
         if model_id.startswith(
-            ("claude-", "deepseek-", "gemini-", "glm-", "gpt-", "kimi-", "qwen3.8-")
+            (
+                "claude-",
+                "deepseek-",
+                "gemini-",
+                "glm-",
+                "gpt-",
+                "kimi-",
+                "mimo-",
+                "qwen3.8-",
+            )
         ):
             MODELS.pop(model_id)
             pricing._PLUGIN_PRICES.pop(model_id, None)
@@ -114,6 +123,7 @@ def provider_plugin() -> Generator[Callable[..., None], None, None]:
     provider_api.REGISTRY.bindings.pop("glm-", None)
     provider_api.REGISTRY.bindings.pop("gpt-", None)
     provider_api.REGISTRY.bindings.pop("kimi-", None)
+    provider_api.REGISTRY.bindings.pop("mimo-", None)
     provider_api.REGISTRY.bindings.pop("qwen3.8-", None)
     stop._BY_PROVIDER.pop("google_genai", None)
     stop._BY_PROVIDER.pop("moonshot", None)
@@ -415,6 +425,35 @@ def test_repo_moonshot_provider_is_enabled_and_registers_complete_contract() -> 
     )
 
 
+def test_repo_xiaomi_provider_is_enabled_and_registers_complete_contract() -> None:
+    discovered = plugins_config._discover_plugins()
+    config = plugins_config.load_for_runtime(set(discovered))
+
+    assert config.plugins["lm_xiaomi"].enabled
+    ensure_provider_plugins_loaded()
+
+    mimo_models = {
+        "mimo-v2.5-pro",
+        "mimo-v2.5-pro-ultraspeed",
+    }
+    assert mimo_models <= MODELS.keys()
+    assert set(SUPPORTED_MODELS["mimo"]) == mimo_models
+    assert pricing.model_vendor("mimo-v2.5-pro") == "xiaomi"
+
+    from shared.lm.factory import _MODEL_KEY_MAP, provider_key_map, provider_key_of_model
+
+    assert _MODEL_KEY_MAP == {}
+    assert provider_key_map()["mimo-"] == ("Xiaomi", None, "MIMO_API_KEY")
+    assert provider_key_of_model("mimo-v2.5-pro") == "mimo"
+    binding = provider_api.REGISTRY.bindings["mimo-"]
+    assert binding.prefix == "mimo-"
+    assert binding.provider_key is None
+    assert binding.effort_levels == ("none", "high")
+    assert not binding.anthropic_protocol
+    assert not binding.vision
+    assert binding.stop_spec is None
+
+
 def test_plugin_model_registers_and_builds(provider_plugin: Callable[..., None]) -> None:
     provider_plugin()
     ensure_provider_plugins_loaded()
@@ -581,26 +620,34 @@ def test_nested_prefix_rejected(provider_plugin: Callable[..., None]) -> None:
 
 
 def test_core_prefix_cannot_be_shadowed(provider_plugin: Callable[..., None]) -> None:
-    with pytest.raises(ValueError, match="already claimed"):
-        provider_api.register(
-            provider_api.ProviderBinding(
-                prefix="mimo-",
-                display_name="Shadow",
-                key_env="X",
-                build=lambda _ctx: FakeListChatModel(responses=["x"]),
-            ),
-            models={},
-            pricing={},
-        )
+    reserved = set(provider_api.REGISTRY._reserved_prefixes)
+    provider_api.REGISTRY.reserve_core_prefixes({"core-"})
+    try:
+        with pytest.raises(ValueError, match="already claimed"):
+            provider_api.register(
+                provider_api.ProviderBinding(
+                    prefix="core-",
+                    display_name="Shadow",
+                    key_env="X",
+                    build=lambda _ctx: FakeListChatModel(responses=["x"]),
+                ),
+                models={},
+                pricing={},
+            )
+    finally:
+        provider_api.REGISTRY.reserve_core_prefixes(reserved)
 
 
 def test_loader_reserves_core_prefixes_before_bootstrap_can_load_a_plugin(
-    provider_plugin: Callable[..., None],
+    provider_plugin: Callable[..., None], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Bootstrap may be the first provider consumer, before factory import setup."""
+    from shared.lm import factory
+
     reserved = set(provider_api.REGISTRY._reserved_prefixes)
     provider_api.REGISTRY._reserved_prefixes.clear()
-    provider_plugin(prefix="mimo-", model="mimo-test")
+    monkeypatch.setattr(factory, "_MODEL_KEY_MAP", {"core-": ("Core", "core_key", "CORE_KEY")})
+    provider_plugin(prefix="core-", model="core-test")
     try:
         with pytest.raises(RuntimeError) as excinfo:
             ensure_provider_plugins_loaded()

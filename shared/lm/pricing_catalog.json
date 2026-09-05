@@ -27,52 +27,6 @@
           ]
         }
       ]
-    },
-    "mimo-v2.5-pro": {
-      "vendor": "xiaomi",
-      "source_url": "https://platform.xiaomimimo.com",
-      "source_checked_at": "2026-06-27",
-      "periods": [
-        {
-          "effective_from": null,
-          "effective_until": null,
-          "tiers": [
-            {
-              "input_tokens_min": 0,
-              "input_tokens_max": null,
-              "rates": {
-                "input": "0.435",
-                "cache_read": "0.0036",
-                "output": "0.87"
-              },
-              "utc_daily_overrides": []
-            }
-          ]
-        }
-      ]
-    },
-    "mimo-v2.5-pro-ultraspeed": {
-      "vendor": "xiaomi",
-      "source_url": "https://platform.xiaomimimo.com",
-      "source_checked_at": "2026-06-27",
-      "periods": [
-        {
-          "effective_from": null,
-          "effective_until": null,
-          "tiers": [
-            {
-              "input_tokens_min": 0,
-              "input_tokens_max": null,
-              "rates": {
-                "input": "1.305",
-                "cache_read": "0.0108",
-                "output": "2.61"
-              },
-              "utc_daily_overrides": []
-            }
-          ]
-        }
-      ]
     }
   }
 }

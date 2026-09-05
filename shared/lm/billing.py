@@ -18,7 +18,7 @@ AVA_BILLING_ATTR_TS = "ava.billing.ts"
 AVA_BILLING_ATTR_CACHE_READ_TOKENS = "ava.billing.cache_read_tokens"
 AVA_BILLING_ATTR_UNPRICED = "ava.billing.unpriced"
 
-_CORE_VENDOR_PREFIXES: tuple[tuple[str, str], ...] = (("mimo-", "xiaomi"),)
+_CORE_VENDOR_PREFIXES: tuple[tuple[str, str], ...] = ()
 
 
 def _is_qwen_family(model: str) -> bool:

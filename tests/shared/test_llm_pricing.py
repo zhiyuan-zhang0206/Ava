@@ -109,10 +109,8 @@ def test_pricing_catalog_schema_v2_vendor_lock() -> None:
     }
     assert {
         "gemini-embedding-2": models["gemini-embedding-2"]["vendor"],
-        "mimo-v2.5-pro": models["mimo-v2.5-pro"]["vendor"],
     } == {
         "gemini-embedding-2": "google",
-        "mimo-v2.5-pro": "xiaomi",
     }
 
 
@@ -219,6 +217,18 @@ def test_kimi_catalog_entries_live_only_in_the_archive() -> None:
     assert expected <= archive_models.keys()
 
 
+def test_mimo_catalog_entries_live_only_in_the_archive() -> None:
+    runtime_models = _pricing_catalog_models(_pricing_catalog_raw())
+    archive_models = _pricing_catalog_models(_pricing_archive_raw())
+    expected = {
+        "mimo-v2.5-pro",
+        "mimo-v2.5-pro-ultraspeed",
+    }
+
+    assert expected.isdisjoint(runtime_models)
+    assert expected <= archive_models.keys()
+
+
 def test_model_vendor_returns_catalog_vendor_or_none() -> None:
     assert model_vendor("claude-sonnet-5") == "anthropic"
     assert model_vendor("deepseek-v4-pro") == "deepseek"
@@ -241,13 +251,13 @@ def test_parse_catalog_v2_rejects_missing_or_empty_vendor(vendor: str | None) ->
     raw = copy.deepcopy(_pricing_catalog_raw())
     raw["schema_version"] = 2
     models = _pricing_catalog_models(raw)
-    entry = models["mimo-v2.5-pro"]
+    entry = models["gemini-embedding-2"]
     if vendor is None:
         entry.pop("vendor", None)
     else:
         entry["vendor"] = vendor
 
-    with pytest.raises(RuntimeError, match=r"mimo-v2\.5-pro"):
+    with pytest.raises(RuntimeError, match=r"gemini-embedding-2"):
         _parse_catalog(raw)
 
 
@@ -260,7 +270,7 @@ def test_parse_catalog_v1_allows_missing_vendor() -> None:
 
     catalog = _parse_catalog(raw)
 
-    assert catalog["mimo-v2.5-pro"].vendor is None
+    assert catalog["gemini-embedding-2"].vendor is None
 
 
 def test_parse_catalog_rejects_empty_models_mapping() -> None:
@@ -633,6 +643,29 @@ def test_kimi_plugin_prices_equal_archive_current_base_tier(
         archive_models[model]["source_url"],
         archive_models[model]["source_checked_at"],
     )
+
+
+def test_mimo_plugin_prices_equal_archive_current_base_tier(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    model_ids = (
+        "mimo-v2.5-pro",
+        "mimo-v2.5-pro-ultraspeed",
+    )
+    plugin_rates = {model: pricing._PLUGIN_PRICES[model].rates for model in model_ids}
+    archive_raw = _pricing_archive_raw()
+    archive_models = _pricing_catalog_models(archive_raw)
+    monkeypatch.setattr(pricing, "_CATALOG", _parse_catalog(archive_raw))
+    current_instant = datetime(2026, 9, 5, tzinfo=UTC)
+
+    for model in model_ids:
+        selected = rates_at(model, current_instant, input_tokens=0)
+        assert selected is not None
+        assert plugin_rates[model].as_tuple() == pytest.approx(selected.as_tuple())  # pyright: ignore[reportUnknownMemberType]
+        assert pricing.plugin_price_provenance(model) == (
+            archive_models[model]["source_url"],
+            archive_models[model]["source_checked_at"],
+        )
 
 
 @pytest.mark.parametrize(

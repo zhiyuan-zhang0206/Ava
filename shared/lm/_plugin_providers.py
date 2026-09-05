@@ -76,8 +76,8 @@ def ensure_provider_plugins_loaded() -> None:
         from shared.lm.factory import _MODEL_KEY_MAP
 
         # Bootstrap can be the first provider consumer. Importing factory here
-        # establishes its core-prefix reservation before any plugin registers;
-        # otherwise bootstrap-first startup could let a plugin claim `mimo-`.
+        # applies the same core-prefix reservation contract before any plugin
+        # registers; the set is empty once every provider is plugin-owned.
         provider_api.REGISTRY.reserve_core_prefixes(set(_MODEL_KEY_MAP))
 
         discovered = plugins_config._discover_plugins()

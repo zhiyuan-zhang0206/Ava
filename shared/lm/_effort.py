@@ -1,40 +1,22 @@
-"""Per-provider reasoning-effort dispatch for build_chat_model.
+"""Cross-provider reasoning-effort vocabulary and clamping.
 
 Split out of `shared/lm/factory.py` (its companion module — factory re-exports
-these names, so callers and tests keep importing from factory). Per-MODEL facts
-(output caps, per-model effort vocabularies, the extended-thinking-only flag)
-live in `shared/lm/registry.py`; this module keeps the per-PROVIDER wire
-concerns:
-
-- **Effort dispatch** (`_clamp_effort` + `_PROVIDER_EFFORT_LEVELS`): the
-  cross-provider `AVA_REASONING_EFFORT` vocabulary is mapped onto what each
-  provider's endpoint actually accepts; out-of-range values clamp (logged),
-  unknown strings fail fast at build time instead of surfacing as a provider
-  400 after the agent is already running.
-- **Binary-thinking resolver** (`mimo_extra_body`): for a provider with no
-  graded effort field, only a thinking on/off switch, this folds the clamp +
-  switch-selection logic that build_chat_model's branch would otherwise inline.
+these names, so callers and tests keep importing from factory). Provider plugins
+own endpoint vocabularies and wire switches. This module keeps only the shared
+``AVA_REASONING_EFFORT`` vocabulary, its public SDK enum/coercion surface, and
+the clamp that maps a cross-provider value onto a plugin's declared levels.
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from enum import StrEnum
-from typing import Any
 
 from loguru import logger
 
-# Per-provider clamp targets for the cross-provider AVA_REASONING_EFFORT knob
-# on the remaining core OpenAI-style branches. MiMo's official chat-completions
-# reference documents no reasoning_effort field, only a body-level
-# thinking.type enabled/disabled toggle — so its tuple is a binary
-# "none"/"high": "none" sends thinking.type=disabled, anything else leaves the
-# provider default (thinking already on) untouched. Keyed by provider because
-# the vocabulary is an endpoint contract shared by every model of the
-# provider.
-_PROVIDER_EFFORT_LEVELS: dict[str, tuple[str, ...]] = {
-    "mimo": ("none", "high"),
-}
+# Core owns no provider-specific effort vocabularies; plugins declare them on
+# their bindings. The empty compatibility table remains as a cross-provider
+# import surface.
+_PROVIDER_EFFORT_LEVELS: dict[str, tuple[str, ...]] = {}
 
 # The cross-provider AVA_REASONING_EFFORT vocabulary, ordered weakest →
 # strongest. Superset of the public `ReasoningEffort` enum — the extra
@@ -120,21 +102,3 @@ def _clamp_effort(effort: str, allowed: tuple[str, ...], *, target: str) -> str:
         clamped=clamped,
     )
     return clamped
-
-
-def mimo_extra_body(*, thinking: Mapping[str, Any] | None, reasoning_effort: str) -> dict[str, Any]:
-    """Resolve the mimo branch's `extra_body` kwarg.
-
-    Caller-explicit `thinking={"type":"disabled"}` (short-text paths) wins
-    outright. Otherwise `reasoning_effort` clamped onto
-    `_PROVIDER_EFFORT_LEVELS["mimo"]` toggles the same body switch: "none"
-    disables thinking, "high" is the provider default (already on — nothing
-    to send). Empty dict = no override, provider default applies.
-    """
-    if thinking is not None and thinking.get("type") == "disabled":
-        return {"thinking": {"type": "disabled"}}
-    if reasoning_effort:
-        tier = _clamp_effort(reasoning_effort, _PROVIDER_EFFORT_LEVELS["mimo"], target="mimo")
-        if tier == "none":
-            return {"thinking": {"type": "disabled"}}
-    return {}

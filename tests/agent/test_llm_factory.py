@@ -422,7 +422,7 @@ class TestBuildChatModel:
         subclass recovers the `reasoning_content` delta that the base drops.
         base_url + api-key header target the Xiaomi OpenAI-compatible endpoint."""
         monkeypatch.setattr(settings.lm, "llm_override", "")
-        monkeypatch.setattr(settings.lm, "xiaomi_api_key", SecretStr("sk-mimo"))
+        monkeypatch.setenv("MIMO_API_KEY", "sk-mimo")
         from shared.lm._reasoning_compat import ReasoningContentChatModel
 
         m = build_chat_model("mimo-v2.5-pro")
@@ -431,7 +431,8 @@ class TestBuildChatModel:
 
     def test_mimo_missing_key_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(settings.lm, "llm_override", "")
-        monkeypatch.setattr(settings.lm, "xiaomi_api_key", None)
+        monkeypatch.setattr(settings.lm, "xiaomi_api_key", SecretStr("legacy-settings-key"))
+        monkeypatch.delenv("MIMO_API_KEY", raising=False)
         with pytest.raises(RuntimeError, match="MIMO_API_KEY"):
             build_chat_model("mimo-v2.5-pro")
 
@@ -588,7 +589,7 @@ class TestBuildChatModel:
     def test_mimo_defaults_to_streaming(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """mimo-* carries no registry streaming opt-out → default streaming=True."""
         monkeypatch.setattr(settings.lm, "llm_override", "")
-        monkeypatch.setattr(settings.lm, "xiaomi_api_key", SecretStr("sk-test"))
+        monkeypatch.setenv("MIMO_API_KEY", "sk-test")
         from shared.lm._reasoning_compat import ReasoningContentChatModel
 
         m = build_chat_model("mimo-v2.5-pro")
@@ -1088,7 +1089,7 @@ class TestReasoningEffortDispatch:
         body top-level thinking (previously silently swallowed, F5). effort is not mentioned
         in the official reference, so it is not connected."""
         monkeypatch.setattr(settings.lm, "llm_override", "")
-        monkeypatch.setattr(settings.lm, "xiaomi_api_key", SecretStr("sk-mimo"))
+        monkeypatch.setenv("MIMO_API_KEY", "sk-mimo")
         from shared.lm._reasoning_compat import ReasoningContentChatModel
 
         m = build_chat_model("mimo-v2.5-pro", thinking={"type": "disabled"})
@@ -1100,7 +1101,7 @@ class TestReasoningEffortDispatch:
         two-value ('none', 'high') table's 'high' tier, which is the provider
         default (thinking already on) and needs no extra_body at all."""
         monkeypatch.setattr(settings.lm, "llm_override", "")
-        monkeypatch.setattr(settings.lm, "xiaomi_api_key", SecretStr("sk-mimo"))
+        monkeypatch.setenv("MIMO_API_KEY", "sk-mimo")
         monkeypatch.setattr(settings.lm, "reasoning_effort", "max")
         from shared.lm._reasoning_compat import ReasoningContentChatModel
 
@@ -1114,7 +1115,7 @@ class TestReasoningEffortDispatch:
         only tier that differs from the provider default — and maps onto the
         same body thinking.type=disabled switch as an explicit thinking arg."""
         monkeypatch.setattr(settings.lm, "llm_override", "")
-        monkeypatch.setattr(settings.lm, "xiaomi_api_key", SecretStr("sk-mimo"))
+        monkeypatch.setenv("MIMO_API_KEY", "sk-mimo")
         monkeypatch.setattr(settings.lm, "reasoning_effort", "none")
         from shared.lm._reasoning_compat import ReasoningContentChatModel
 
@@ -1127,7 +1128,7 @@ class TestReasoningEffortDispatch:
         clamp ties round up, so it lands on 'high' (provider default, no-op),
         not 'none' (which would silently disable thinking)."""
         monkeypatch.setattr(settings.lm, "llm_override", "")
-        monkeypatch.setattr(settings.lm, "xiaomi_api_key", SecretStr("sk-mimo"))
+        monkeypatch.setenv("MIMO_API_KEY", "sk-mimo")
         monkeypatch.setattr(settings.lm, "reasoning_effort", "low")
         from shared.lm._reasoning_compat import ReasoningContentChatModel
 
@@ -1141,7 +1142,7 @@ class TestReasoningEffortDispatch:
         """Caller-explicit thinking={'type':'disabled'} (short-text paths) wins
         outright — reasoning_effort is not even consulted."""
         monkeypatch.setattr(settings.lm, "llm_override", "")
-        monkeypatch.setattr(settings.lm, "xiaomi_api_key", SecretStr("sk-mimo"))
+        monkeypatch.setenv("MIMO_API_KEY", "sk-mimo")
         monkeypatch.setattr(settings.lm, "reasoning_effort", "high")
         from shared.lm._reasoning_compat import ReasoningContentChatModel
 
@@ -1288,6 +1289,7 @@ class TestValidateModelConfig:
         monkeypatch.delenv("GLM_API_KEY", raising=False)
         monkeypatch.delenv("DASHSCOPE_API_KEY", raising=False)
         monkeypatch.delenv("MOONSHOT_API_KEY", raising=False)
+        monkeypatch.delenv("MIMO_API_KEY", raising=False)
 
     @staticmethod
     def _set_plugin_keys(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1301,6 +1303,7 @@ class TestValidateModelConfig:
                 "GLM_API_KEY": "sk-test",
                 "DASHSCOPE_API_KEY": "sk-test",
                 "MOONSHOT_API_KEY": "sk-test",
+                "MIMO_API_KEY": "sk-test",
             },
         )
 
@@ -1374,7 +1377,6 @@ class TestValidateModelConfig:
         for m in all_models:
             # Only testing name existence, not key (key validation is separate)
             self._set_plugin_keys(monkeypatch)
-            monkeypatch.setattr(settings.lm, "xiaomi_api_key", SecretStr("sk-test-mimo"))
             result = validate_model_config(model=m)
             assert result == m
 
@@ -1425,6 +1427,8 @@ class TestValidateModelConfig:
     def test_missing_mimo_key_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """MIMO_API_KEY not set → ValueError."""
         self._clear_all_keys(monkeypatch)
+        monkeypatch.setattr(settings.lm, "xiaomi_api_key", SecretStr("legacy-settings-key"))
+        monkeypatch.delenv("MIMO_API_KEY", raising=False)
         with pytest.raises(ValueError, match="MIMO_API_KEY"):
             validate_model_config(model="mimo-v2.5-pro")
 
@@ -1546,6 +1550,7 @@ class TestThinkingDisabledAcrossRoster:
         monkeypatch.setenv("GLM_API_KEY", "sk-test")
         monkeypatch.setenv("DASHSCOPE_API_KEY", "sk-test")
         monkeypatch.setenv("MOONSHOT_API_KEY", "sk-test")
+        monkeypatch.setenv("MIMO_API_KEY", "sk-test")
 
     @pytest.mark.parametrize("model", [m for models in SUPPORTED_MODELS.values() for m in models])
     def test_roster_model_constructs_with_thinking_disabled(

@@ -29,6 +29,7 @@ ChatOpenAI subclass folding `reasoning_content` deltas into canonical
 (`langchain-zhipuai` unmaintained; `langchain_zhipu` needs `langchain<0.3.0`;
 MiMo has none at all; Alibaba ships a `dashscope` SDK that is not a LangChain
 client and its own docs drive the OpenAI-compatible endpoint with the OpenAI SDK).
+Their bindings live in the corresponding provider plugins.
 
 **deepseek-* goes through ChatAnthropic, not langchain-deepseek**:
 langchain-deepseek 1.0.1 on the thinking + tool calls + streaming path
@@ -70,7 +71,7 @@ entering state guards that metadata is not empty.
 from __future__ import annotations
 
 import importlib
-from typing import Any, Protocol
+from typing import Protocol
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from loguru import logger
@@ -88,7 +89,7 @@ from shared.lm._effort import (
 from shared.lm._plugin_providers import (
     ensure_provider_plugins_loaded as ensure_provider_plugins_loaded,
 )  # re-exported (gateway entry points call it before reading the registry)
-from shared.lm._providers import ThinkingConfig, _build_mimo_model
+from shared.lm._providers import ThinkingConfig
 from shared.lm.registry import (
     MODEL_CONTEXT_WINDOW as MODEL_CONTEXT_WINDOW,  # re-exported catalog view
 )
@@ -213,18 +214,14 @@ def provider_key_of_model(model: str) -> str | None:
 
 
 # Core model prefix → (provider display name, settings attribute, env var name).
-# Single-source mapping used by both build_chat_model and validate_model_config
-# for providers that have not migrated to plugins yet. Plugin providers declare
-# the corresponding prefix, display name, and environment variable in their
-# ProviderBinding instead.
-#
-_MODEL_KEY_MAP: dict[str, tuple[str, str, str]] = {
-    "mimo-": ("Xiaomi", "xiaomi_api_key", "MIMO_API_KEY"),
-}
+# All providers are plugin-owned now, so this compatibility map stays empty;
+# plugins declare their prefix, display name, and environment variable in
+# ProviderBinding.
+_MODEL_KEY_MAP: dict[str, tuple[str, str, str]] = {}
 
 # A plugin prefix may never shadow or nest inside a core prefix — provider_api
 # checks new registrations against this reserved set (populated once, here).
-provider_api.REGISTRY.reserve_core_prefixes(set(_MODEL_KEY_MAP))
+provider_api.REGISTRY.reserve_core_prefixes(set())
 
 
 def provider_key_map() -> dict[str, tuple[str, str | None, str]]:
@@ -410,9 +407,8 @@ def build_chat_model(
     at use site via `llm.bind_tools([execute_code])`. This way paths that
     don't need tools (compaction etc.) can use the same ChatModel instance.
 
-    Dispatches to the remaining core `_build_*_model` helpers in
-    `shared/lm/_providers.py` or a registered provider-plugin binding (each
-    documents its own key / thinking / reasoning-effort wiring). The
+    Dispatches to a registered provider-plugin binding (each documents its own
+    key / thinking / reasoning-effort wiring). The
     cross-provider resolution shared by every branch happens here:
     `AVA_LLM_OVERRIDE`, the streaming default, and the reasoning-effort knob
     (`resolved_effort` — explicit env/.env/overlay value wins, else the model's
@@ -494,12 +490,6 @@ def build_chat_model(
             f"{requested_model} is temporarily unavailable; using its registered fallback {model}"
         )
 
-    # Start from the caller's thinking dict when given; provider branches may
-    # still rewrite it (claude display=summarized opt-in / haiku budget opt-in).
-    extra_kwargs: dict[str, Any] = {}
-    if thinking is not None:
-        extra_kwargs["thinking"] = thinking
-
     # Resolve streaming: explicit kwarg overrides model default, model default
     # overrides the fallback True (kimi defaults to True — streaming-first with
     # a non-streaming fallback on 429).
@@ -507,21 +497,11 @@ def build_chat_model(
     if streaming is None:
         streaming = spec.streaming if spec is not None else True
     disable_streaming = not streaming
-    if disable_streaming:
-        extra_kwargs["disable_streaming"] = True
 
     # The cross-provider reasoning-effort knob, resolved per model: explicit
     # env/.env/overlay value wins, else the model's registry default, else "".
     resolved_effort: str = resolve_setting("reasoning_effort", model=model)
 
-    if model.startswith("mimo-"):
-        return _build_mimo_model(
-            model,
-            thinking=thinking,
-            resolved_effort=resolved_effort,
-            disable_streaming=disable_streaming,
-            timeout=timeout,
-        )
     # Plugin providers: flat prefix map (no nesting, collisions rejected at
     # registration), so at most one binding matches. The builder gets the same
     # cross-provider resolution every core branch gets — the contract is
@@ -545,6 +525,5 @@ def build_chat_model(
 
     raise ValueError(
         f"Unknown model {model!r} — add a {model.split('-', maxsplit=1)[0]}-* "
-        "prefix branch in `shared/lm/_providers.py`, or a provider plugin "
-        "(shared/lm/provider_api.py)"
+        "provider plugin (shared/lm/provider_api.py)"
     )
