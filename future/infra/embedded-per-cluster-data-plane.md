@@ -185,9 +185,10 @@ The "What it deletes" list above describes the end state, now reached in slices 
 - Migrations are unaffected in shape (each cluster still runs the same schema);
   only *where* they run (per-cluster instance) changes.
 
-## redis-bridge external-migration registration (task #1945, WP3 — documentation only, bridge behavior unchanged)
+## redis-bridge external-migration boundary (task #1945, WP3)
 
-The `com.ava.redis-bridge` relay (`/usr/bin/python3 relay.py`, per host) is
+The `com.ava.redis-bridge` relay (`/usr/bin/python3
+$AVA_HOME/redis-bridge/relay.py`, per host) is
 the off-loopback Redis inbound mechanism: Redis always binds loopback-only
 (see `docs/history/2026-08-24/redis-loopback-only.md`), and the bridge
 forwards the host's private-network address + Redis port to `127.0.0.1`, so a
@@ -205,10 +206,15 @@ Redis ever listening off-loopback. Facts registered here:
   (tailnet) address, so the bridge is what makes `redis://<tailnet-ip>:6380`
   work for runners; it is per-cluster-port and per-host, never a shared
   listener.
+- **Completed 2026-09-05: repository ownership and recovery** — prod gateway
+  converge installs the repository source and launchd desired state. The relay
+  recreates a failed listener, while status and the periodic health probe issue
+  an authenticated Redis PING through the bridge; process liveness alone is not
+  treated as serving health.
 - **Future external-migration direction** — when Redis is externalized (a
   SaaS or a foreign host named by the data-plane `redis_url`), the cluster
   treats the data plane as remote-managed: local bring-up, ACL provisioning,
   and the loopback bind are skipped, so the bridge is bypassed by the URL
   swap, not by changing the bridge. Its retirement is then per-host cleanup
   (stop the OS job on hosts whose clusters all name a foreign Redis). No
-  code change to the bridge is planned; the migration surface is the URL.
+  bridge behavior changes for that migration; the migration surface is the URL.
