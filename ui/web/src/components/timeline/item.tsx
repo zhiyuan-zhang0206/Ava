@@ -191,7 +191,7 @@ function AttachContent({
           className={cn(
             "whitespace-pre-wrap [overflow-wrap:anywhere] font-mono leading-relaxed m-0",
             isNotice
-              ? "text-[11px] text-muted-foreground"
+              ? "text-[11px] text-muted-foreground/70"
               : "text-[13px] text-foreground/90",
           )}
         >
@@ -303,7 +303,7 @@ function EnvelopeContent({
 function InterruptedNotice() {
   const t = useTranslations("timeline");
   return (
-    <div className="mt-1 text-xs text-amber-700 dark:text-amber-400 font-mono select-none">
+    <div className="mt-1 text-[11px] text-amber-700 dark:text-amber-400 font-mono select-none">
       {t("streamingInterrupted")}
     </div>
   );
@@ -397,7 +397,7 @@ export const ItemView = memo(function ItemView({
         <>
           <pre
             className={cn(
-              "whitespace-pre-wrap [overflow-wrap:anywhere] font-mono text-[13px] leading-relaxed text-muted-foreground m-0",
+              "whitespace-pre-wrap [overflow-wrap:anywhere] font-mono text-[12px] leading-relaxed text-muted-foreground/90 m-0",
               item.partial && "italic opacity-75",
               item.interrupted && "border-b border-dashed border-amber-500/60 pb-1",
             )}
@@ -416,7 +416,7 @@ export const ItemView = memo(function ItemView({
       // The agent's system prompt (state.messages[0]) — thousands of lines, so it
       // stays collapsed by default. Body-only monospace dump.
       return (
-        <pre className="whitespace-pre-wrap [overflow-wrap:anywhere] font-mono text-[13px] leading-relaxed text-muted-foreground m-0">
+        <pre className="whitespace-pre-wrap [overflow-wrap:anywhere] font-mono text-[12px] leading-relaxed text-muted-foreground/90 m-0">
           {item.payload}
         </pre>
       );

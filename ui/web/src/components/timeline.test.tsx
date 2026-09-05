@@ -110,7 +110,6 @@ vi.mock("@/lib/use-user-settings", () => ({
 
 import { TimelineView } from "./timeline";
 import { LIFECYCLE_TAGS, MEMORY_SOURCES, NOTE_SOURCES } from "./timeline/markers";
-import { formatItemTime } from "./timeline/timestamp";
 
 afterEach(() => {
   cleanup();
@@ -139,7 +138,6 @@ function makeItem(overrides: Partial<BackendTimelineItem> & Pick<BackendTimeline
     codeStartedAt: overrides.codeStartedAt,
     codeElapsedMs: overrides.codeElapsedMs,
     code_elapsed_ms: overrides.code_elapsed_ms,
-    sdk_calls: overrides.sdk_calls,
     execStartedAt: overrides.execStartedAt,
     exec_ms: overrides.exec_ms,
     images: overrides.images ?? null,
@@ -344,9 +342,7 @@ describe("ItemView: agent_code + agent_reasoning", () => {
       />,
     );
     expect(screen.queryByTestId("chat-markdown")).toBeNull();
-    const reasoning = screen.getByText("raw thinking");
-    expect(reasoning.tagName).toBe("PRE");
-    expect(reasoning.className).toContain("text-[13px]");
+    expect(screen.getByText("raw thinking").tagName).toBe("PRE");
   });
 });
 
@@ -368,17 +364,22 @@ describe("ItemView: system_prompt", () => {
     expect(screen.queryByText("· 3 lines")).toBeNull();
   });
 
-  it("clicking the turn toggle expands the flat prompt body in one click", () => {
+  it("clicking the turn toggle expands the turn AND the card body in one click", () => {
     setToggleState({ detailsMode: "none" });
     render(
       <TimelineView
         items={[makeItem({ kind: "system_prompt", payload: PROMPT, created_at: null })]}
       />,
     );
+    // Bug regression (#659): a detail block must expand ALL its inner content
+    // together — no per-category second click.
     fireEvent.click(screen.getByTestId("turn-toggle"));
     expect(screen.getByText("· 3 lines")).toBeTruthy();
     expect(screen.getByText(/Act via execute_code/)).toBeTruthy();
-    expect(screen.queryByTestId("card-toggle")).toBeNull();
+    // Per-card collapse is still available: clicking the inner card header
+    // pins that one card closed.
+    fireEvent.click(screen.getByTestId("card-toggle"));
+    expect(screen.queryByText(/Act via execute_code/)).toBeNull();
   });
 
   it("singular 'line' for a one-line prompt", () => {
@@ -410,7 +411,7 @@ describe("toggle chip: summary on expanded items", () => {
     );
     // getByText throws on multiple matches — also pins down that the duration
     // is no longer duplicated inside the expanded content.
-    expect(screen.getAllByText(/Thought for 8s/)).toHaveLength(1);
+    expect(screen.getAllByText(/Thought for 8s/)).toHaveLength(2);
     expect(screen.getByText(/1\.2k tokens/)).toBeTruthy();
     expect(screen.getByText("ponder")).toBeTruthy();
   });
@@ -448,7 +449,7 @@ describe("toggle chip: summary on expanded items", () => {
         ]}
       />,
     );
-    expect(screen.getAllByText(/Thought for 4s/)).toHaveLength(1);
+    expect(screen.getAllByText(/Thought for 4s/)).toHaveLength(2);
     expect(screen.queryByText(/Thinking for/)).toBeNull();
   });
 
@@ -556,16 +557,25 @@ describe("toggle chip: summary on expanded items", () => {
   });
 });
 
-describe("ItemView: inbound_chat source-driven presentation", () => {
-  function getItemRow(payloadText: string) {
+// inbound_chat colors border / bg by source:
+// - "agent:N" → violet (from another agent)
+// - "user"    → gray   (sent by the user from the frontend)
+// - other (e.g. "kernel" / null) → sky (system-injected)
+// Test point: border color className truly tracks source.
+describe("ItemView: inbound_chat source-driven color", () => {
+  function getBorderEl(payloadText: string) {
+    // Inter-agent / system inbound default collapsed now; reveal the body so it
+    // can be located (the border container is the same either way).
     revealCollapsedCards();
     const txt = screen.getByText(payloadText);
-    const row = txt.closest<HTMLElement>("[data-item-id]");
-    if (!row) throw new Error("no timeline item row");
-    return row;
+    // Find the nearest border-l-2 ancestor div (EnvelopeBlock container)
+    let cur: HTMLElement | null = txt.parentElement;
+    while (cur && !cur.className.includes("border-l-2")) cur = cur.parentElement;
+    if (!cur) throw new Error("no border-l-2 ancestor");
+    return cur;
   }
 
-  it("source='agent:5' → flat secondary row (from another agent)", () => {
+  it("source='agent:5' → violet border (from another agent)", () => {
     render(
       <TimelineView
         items={[
@@ -577,7 +587,7 @@ describe("ItemView: inbound_chat source-driven presentation", () => {
         ]}
       />,
     );
-    expect(getItemRow("from agent 5").dataset.rowVariant).toBe("flat");
+    expect(getBorderEl("from agent 5").className).toContain("border-violet");
   });
 
   it("source='user' → gray border (frontend user)", () => {
@@ -592,14 +602,10 @@ describe("ItemView: inbound_chat source-driven presentation", () => {
         ]}
       />,
     );
-    expect(
-      Array.from(getItemRow("from web").querySelectorAll("div")).some((node) =>
-        node.className.includes("border-gray"),
-      ),
-    ).toBe(true);
+    expect(getBorderEl("from web").className).toContain("border-gray");
   });
 
-  it("source='kernel' → flat secondary row (system-injected)", () => {
+  it("source='kernel' → sky border (system-injected)", () => {
     render(
       <TimelineView
         items={[
@@ -611,10 +617,10 @@ describe("ItemView: inbound_chat source-driven presentation", () => {
         ]}
       />,
     );
-    expect(getItemRow("from kernel").dataset.rowVariant).toBe("flat");
+    expect(getBorderEl("from kernel").className).toContain("border-sky");
   });
 
-  it("source=null → flat secondary row (default branch)", () => {
+  it("source=null → sky border (default branch)", () => {
     render(
       <TimelineView
         items={[
@@ -622,7 +628,7 @@ describe("ItemView: inbound_chat source-driven presentation", () => {
         ]}
       />,
     );
-    expect(getItemRow("no source").dataset.rowVariant).toBe("flat");
+    expect(getBorderEl("no source").className).toContain("border-sky");
   });
 });
 
@@ -669,7 +675,7 @@ describe("ItemView: code_output", () => {
       />,
     );
     expect(screen.getByText(/Code execution output/)).toBeTruthy();
-    expect(screen.getByText(/stdout: hi/).className).toContain("text-[13px]");
+    expect(screen.getByText(/stdout: hi/)).toBeTruthy();
   });
 });
 
@@ -1105,8 +1111,6 @@ describe("Scroll-to-bottom button + multi-item render order", () => {
       <TimelineView items={[makeItem({ kind: "agent_chat", payload: "x" })]} />,
     );
     expect(screen.getByTestId("scroll-area")).toBeTruthy();
-    expect(screen.getByTestId("scroll-area").className).toContain("text-sm");
-    expect(screen.getByTestId("scroll-area").className).not.toContain("text-[13px]");
   });
 
   // Item 6: the timeline viewport must disable Chrome scroll anchoring so the
@@ -1127,43 +1131,9 @@ describe("Scroll-to-bottom button + multi-item render order", () => {
     expect(screen.getByTestId("scroll-viewport").className).toContain("overscroll-y-contain");
   });
 
-  it("Scroll-to-bottom button always keeps a short visible label in its DOM", () => {
+  it("Scroll-to-bottom arrow button always in DOM (visibility controlled by opacity)", () => {
     render(<TimelineView items={[]} />);
-    const button = screen.getByLabelText("Scroll to bottom");
-    expect(button.textContent).toContain("Latest");
-    expect(button.className).toContain("rounded-full");
-    expect(button.className).not.toContain("size-9");
-  });
-
-  it("counts items that arrive while the reader is away and clears at the bottom", () => {
-    const first = makeItem({ item_id: "1", kind: "agent_chat", payload: "first" });
-    const second = makeItem({ item_id: "2", kind: "agent_chat", payload: "second" });
-    const third = makeItem({ item_id: "3", kind: "agent_chat", payload: "third" });
-    const fourth = makeItem({ item_id: "4", kind: "agent_chat", payload: "fourth" });
-    const { rerender } = render(<TimelineView items={[first]} />);
-    const viewport = screen.getByTestId("scroll-viewport");
-    Object.defineProperty(viewport, "scrollHeight", { value: 1000, configurable: true });
-    Object.defineProperty(viewport, "clientHeight", { value: 600, configurable: true });
-    Object.defineProperty(viewport, "scrollTo", { value: vi.fn(), configurable: true });
-
-    viewport.scrollTop = 100;
-    fireEvent.scroll(viewport);
-    expect(screen.getByLabelText("Scroll to bottom").textContent).toContain("Latest");
-
-    rerender(<TimelineView items={[first, second, third]} />);
-    expect(screen.getByLabelText("Scroll to bottom").textContent).toContain("2 new");
-
-    viewport.scrollTop = 400;
-    fireEvent.scroll(viewport);
-    expect(screen.getByLabelText("Scroll to bottom").textContent).toContain("Latest");
-
-    viewport.scrollTop = 100;
-    fireEvent.scroll(viewport);
-    rerender(<TimelineView items={[first, second, third, fourth]} />);
-    const button = screen.getByLabelText("Scroll to bottom");
-    expect(button.textContent).toContain("1 new");
-    fireEvent.click(button);
-    expect(button.textContent).toContain("Latest");
+    expect(screen.getByLabelText("Scroll to bottom")).toBeTruthy();
   });
 });
 
@@ -1858,7 +1828,8 @@ describe("CopyButton click behavior", () => {
 // Details mode ("all" / "last" / "none") controls the default expanded
 // state for every block across all message kinds. Secondary items (thinking,
 // code, output, system prompts) are grouped into turn blocks — the turn header
-// shows an aggregate summary; expanded members use flat labels and bodies.
+// shows an aggregate summary; individual cards are only visible when the turn
+// is expanded.
 describe("Details mode — collapse/expand", () => {
   it('detailsMode="none" → detail blocks collapsed, primary content visible, turn headers show summaries', () => {
     setToggleState({ detailsMode: "none" });
@@ -1879,8 +1850,8 @@ describe("Details mode — collapse/expand", () => {
     // In "none" mode, detail blocks collapse but primary content stays visible
     expect(screen.queryByText("hidden thought")).toBeNull();
     expect(screen.getByText("visible chat")).toBeTruthy();
-    // Timing detail lives on the flat label, so a collapsed turn shows counts.
-    expect(screen.getByTestId("turn-toggle").textContent).toContain("1 thinking");
+    // Turn header is visible with summary (formatTurnTiming uses lowercase)
+    expect(screen.getByText(/thought for 8s/i)).toBeTruthy();
   });
 
   it('settings still loading (isLoading) → detail blocks collapsed, no "all"-default flash', () => {
@@ -2145,19 +2116,9 @@ describe("UnknownMarkerChip console.warn", () => {
   });
 });
 
-// formatItemTime / ItemTimestamp — compact local time in the row, full local
-// absolute time in the native title metadata.
+// formatItemTime / ItemTimestamp — render a local-timezone timestamp from the iso string.
+// Test points: invalid iso → no timestamp rendered; valid iso → renders `[YYYY-MM-DD HH:MM:SS TZ]` format.
 describe("ItemTimestamp", () => {
-  it("formats same-day as HH:MM and other-day as MM-DD HH:MM", () => {
-    const now = new Date(2026, 4, 15, 16, 30);
-    const sameDay = new Date(2026, 4, 15, 9, 7).toISOString();
-    const otherDay = new Date(2026, 4, 14, 9, 7).toISOString();
-
-    expect(formatItemTime(sameDay, false, now)).toBe("09:07");
-    expect(formatItemTime(otherDay, false, now)).toBe("05-14 09:07");
-    expect(formatItemTime(otherDay, true, now)).toMatch(/^05-14 [A-Z][a-z]{2} 09:07$/);
-  });
-
   it("invalid iso → no timestamp span rendered (Number.isNaN(d.getTime()) guard)", () => {
     render(
       <TimelineView
@@ -2170,10 +2131,11 @@ describe("ItemTimestamp", () => {
         ]}
       />,
     );
-    expect(screen.queryByTitle(/\d{4}-\d{2}-\d{2}/)).toBeNull();
+    // No timestamp block starting with `[` should appear in the DOM
+    expect(screen.queryByText(/\[\d{4}-\d{2}-\d{2}/)).toBeNull();
   });
 
-  it("valid iso → compact row stamp stays visible on mobile and full time is in title", () => {
+  it("valid iso → renders [YYYY-MM-DD DayOfWeek HH:MM:SS TZ] format, no hover tooltip", () => {
     render(
       <TimelineView
         items={[
@@ -2185,19 +2147,12 @@ describe("ItemTimestamp", () => {
         ]}
       />,
     );
-    // The fixed timestamp is on another date than the test run, so the compact
-    // form includes month/day and the enabled weekday. Do not pin timezone.
-    const stamp = screen.getByText(/\d{2}-\d{2}( [A-Z][a-z]{2})? \d{2}:\d{2}/);
+    // bracket + 4-digit year + dash + 2-digit month + 2-digit day + optional weekday + space + HH:MM:SS + space + TZ.
+    // Don't pin timezone (differs CI vs local) — verify structure only.
+    const stamp = screen.getByText(/\[\d{4}-\d{2}-\d{2}( [A-Z][a-z]{2})? \d{2}:\d{2}:\d{2} [A-Z]+\]/);
     expect(stamp).toBeTruthy();
-    expect(stamp.textContent).not.toContain("[");
-    expect(stamp.textContent).not.toMatch(/\d{2}:\d{2}:\d{2}/);
-    expect(stamp.getAttribute("title")).toMatch(
-      /^\d{4}-\d{2}-\d{2}( [A-Z][a-z]{2})? \d{2}:\d{2}:\d{2} .+$/,
-    );
-    expect(stamp.className).toContain("text-[11px]");
-    expect(stamp.className).toContain("text-muted-foreground");
-    expect(stamp.className).not.toContain("text-muted-foreground/");
-    expect(stamp.parentElement?.className).not.toContain("hidden");
+    // No title attribute — no native hover tooltip on the timestamp.
+    expect(stamp.getAttribute("title")).toBeNull();
   });
 
   it("empty iso (created_at='') → no timestamp rendered", () => {
@@ -2212,7 +2167,7 @@ describe("ItemTimestamp", () => {
         ]}
       />,
     );
-    expect(screen.queryByTitle(/\d{4}-\d{2}-\d{2}/)).toBeNull();
+    expect(screen.queryByText(/\[\d{4}-\d{2}-\d{2}/)).toBeNull();
   });
 });
 
@@ -2311,13 +2266,13 @@ describe("block-level copy/fork actions (MessageCard overlay)", () => {
     expect(screen.getByLabelText("Copy message")).toBeTruthy();
   });
 
-  it("agent_reasoning inside a turn has no card-level actions overlay", () => {
+  it("agent_reasoning shows the block-level copy button once expanded", () => {
     render(
       <TimelineView
         items={[makeItem({ kind: "agent_reasoning", payload: "thinking" })]}
       />,
     );
-    expect(screen.queryByLabelText("Copy message")).toBeNull();
+    expect(screen.getByLabelText("Copy message")).toBeTruthy();
   });
 
   it("agent_code has only the icon-only body copy (card-level duplicate suppressed)", () => {
@@ -2338,16 +2293,20 @@ describe("block-level copy/fork actions (MessageCard overlay)", () => {
     expect(screen.queryByLabelText("Copy message")).toBeNull();
   });
 
-  it("system_prompt stays free of card actions after its turn expands", () => {
+  it("collapsed-by-default card (system_prompt) shows no copy button until the turn is expanded", () => {
     setToggleState({ detailsMode: "none" });
     render(
       <TimelineView items={[makeItem({ kind: "system_prompt", payload: "line1\nline2" })]} />,
     );
     // Turn is collapsed → no copy button anywhere
     expect(screen.queryByLabelText("Copy message")).toBeNull();
+    // Expanding the turn expands the inner card too (bug #659) — the copy
+    // button appears in the same click.
     fireEvent.click(screen.getByTestId("turn-toggle"));
+    expect(screen.getByLabelText("Copy message")).toBeTruthy();
+    // Collapsing the inner card hides the copy button again.
+    fireEvent.click(screen.getByTestId("card-toggle"));
     expect(screen.queryByLabelText("Copy message")).toBeNull();
-    expect(screen.queryByTestId("card-toggle")).toBeNull();
   });
 
   it("action row renders fork before copy — copy is always the rightmost action", () => {
@@ -2554,7 +2513,7 @@ describe("ContentToggle deps completeness (mid-mount toggle)", () => {
     expect(screen.queryByText("deep thought")).toBeNull();
   });
 
-  it('rerender with detailsMode "last" → primary and latest completed detail turn stay visible', () => {
+  it('rerender with detailsMode "last" → primary items always visible, detail turn collapsed without turnActive', () => {
     setToggleState({ detailsMode: "all" });
     const items = [
       makeItem({ item_id: "1", kind: "agent_chat", payload: "first" }),
@@ -2567,7 +2526,8 @@ describe("ContentToggle deps completeness (mid-mount toggle)", () => {
     rerender(<TimelineView items={items} />);
     // Primary items (agent_chat) always visible in all modes.
     expect(screen.getByText("first")).toBeTruthy();
-    expect(screen.getByTestId("python-code")).toBeTruthy();
+    // Detail turn collapsed in "last" mode without turnActive — turn not expanded.
+    expect(screen.queryByTestId("python-code")).toBeNull();
   });
 
   it('detailsMode="last" with turnActive → last detail turn auto-expanded', () => {
@@ -3082,87 +3042,6 @@ describe("turn-collapse (always on — Turns toggle controls expand/collapse)", 
 
   const runToggle = () => screen.getByTestId("turn-toggle");
 
-  it("renders expanded turn members as flat labeled rows with no nested disclosures", () => {
-    const { container } = render(
-      <TimelineView
-        items={[
-          makeItem({ item_id: "1.0", kind: "agent_reasoning", payload: "thinking", reasoning_ms: 8_000, reasoning_tokens: 2_100 }),
-          makeItem({ item_id: "1.1", kind: "agent_code", payload: "ava.files.read('x')", code_elapsed_ms: 1_000, sdk_calls: [{ method: "files.read", count: 1 }] }),
-          makeItem({ item_id: "1.2", kind: "code_output", payload: "ValueError: broken", exec_ms: 3_000 }),
-          makeItem({ item_id: "1.3", kind: "system_prompt", payload: "one\ntwo" }),
-        ]}
-      />,
-    );
-    expect(screen.getAllByTestId("flat-row-label")).toHaveLength(4);
-    expect(screen.queryByTestId("card-toggle")).toBeNull();
-    expect(container.querySelector('[data-item-id="1.1"][data-row-variant="flat"]')).toBeTruthy();
-    expect(screen.getByText(/Thought for 8s/).textContent).toContain("2.1k tokens");
-    expect(screen.getByText(/Wrote code for 1s/).textContent).toContain("files.read × 1");
-    expect(screen.getByText(/Ran in 3s/).textContent).toContain("Error");
-    expect(screen.getByText(/System prompt/).textContent).toContain("2 lines");
-  });
-
-  it("renders lifecycle cards collapsed between separate turns even in All mode", () => {
-    render(
-      <TimelineView
-        items={[
-          makeItem({ item_id: "1.0", kind: "agent_reasoning", payload: "before" }),
-          makeItem({ item_id: "2.0", kind: "system_marker", source: "lifecycle_restart", payload: "restart detail" }),
-          makeItem({ item_id: "3.0", kind: "agent_code", payload: "after" }),
-        ]}
-      />,
-    );
-    expect(screen.getAllByTestId("turn-toggle")).toHaveLength(2);
-    expect(screen.getByText("Restarted")).toBeTruthy();
-    expect(screen.getByTestId("card-toggle").getAttribute("aria-expanded")).toBe("false");
-    expect(screen.queryByText("restart detail")).toBeNull();
-  });
-
-  it("shows SDK actions, attachments, failure, and one merged duration in a two-line turn header", () => {
-    render(
-      <TimelineView
-        items={[
-          makeItem({ item_id: "1.0", kind: "agent_code", payload: "code", code_elapsed_ms: 1_000, sdk_calls: [{ method: "files.read", count: 3 }] }),
-          makeItem({ item_id: "1.1", kind: "code_output", payload: "ValueError: broken", exec_ms: 2_000 }),
-          makeItem({ item_id: "1.2", kind: "attach", payload: "a" }),
-          makeItem({ item_id: "1.3", kind: "attach", payload: "b" }),
-        ]}
-      />,
-    );
-    const header = runToggle();
-    expect(header.textContent).toContain("Execution failed");
-    expect(header.textContent).toContain("files.read × 3");
-    expect(header.textContent).toContain("2 attachments");
-    expect(header.textContent).toContain("Worked for 3s");
-    expect(header.textContent).not.toContain("Wrote code for");
-    expect(header.textContent).not.toContain("Ran for");
-    expect(header.querySelectorAll('[data-testid="turn-summary-line"]')).toHaveLength(2);
-  });
-
-  it("Last mode keeps the latest completed work expanded until a new turn begins", () => {
-    setToggleState({ detailsMode: "last" });
-    const completed = [
-      makeItem({ item_id: "1.0", kind: "agent_reasoning", payload: "completed work" }),
-      makeItem({ item_id: "2.0", kind: "agent_chat", payload: "reply" }),
-    ];
-    const { rerender } = render(<TimelineView items={completed} />);
-    expect(runToggle().getAttribute("aria-expanded")).toBe("true");
-    expect(screen.getByText("completed work")).toBeTruthy();
-
-    rerender(
-      <TimelineView
-        items={[
-          ...completed,
-          makeItem({ item_id: "3.0", kind: "inbound_chat", source: "system", payload: "next turn" }),
-        ]}
-      />,
-    );
-    const headers = screen.getAllByTestId("turn-toggle");
-    expect(headers.map((header) => header.getAttribute("aria-expanded"))).toEqual(["false", "true"]);
-    expect(screen.queryByText("completed work")).toBeNull();
-    expect(screen.getByText("next turn")).toBeTruthy();
-  });
-
   it("drops a pinned turn expansion when the timeline thread changes", () => {
     setToggleState({ detailsMode: "none" });
     const threadAItems = [
@@ -3205,7 +3084,7 @@ describe("turn-collapse (always on — Turns toggle controls expand/collapse)", 
     expect(screen.queryByTestId("python-code")).toBeNull();
   });
 
-  it("keeps expanded turn members flat when the timeline thread changes", () => {
+  it("drops a pinned inner-card collapse when the timeline thread changes", () => {
     setToggleState({ detailsMode: "all" });
     const { rerender } = render(
       <TimelineView
@@ -3219,7 +3098,8 @@ describe("turn-collapse (always on — Turns toggle controls expand/collapse)", 
 
     expect(runToggle().getAttribute("aria-expanded")).toBe("true");
     expect(screen.getByTestId("python-code").textContent).toBe("thread A code");
-    expect(screen.queryByTestId("card-toggle")).toBeNull();
+    fireEvent.click(screen.getAllByTestId("card-toggle")[1]);
+    expect(screen.queryByTestId("python-code")).toBeNull();
 
     rerender(
       <TimelineView
@@ -3232,7 +3112,6 @@ describe("turn-collapse (always on — Turns toggle controls expand/collapse)", 
     );
     expect(runToggle().getAttribute("aria-expanded")).toBe("true");
     expect(screen.getByTestId("python-code").textContent).toBe("thread B code");
-    expect(screen.queryByTestId("card-toggle")).toBeNull();
   });
 
   it("folds a run of ≥2 secondary items into an expanded turn block by default", () => {
@@ -3298,7 +3177,7 @@ describe("turn-collapse (always on — Turns toggle controls expand/collapse)", 
     // The lone inter-agent message is wrapped in a work block.
     const runHeader = runToggle();
     expect(runHeader.textContent).toContain("1 agent message");
-    // The flat member still renders its semantic label ("Agent 7").
+    // The inner card still renders its header ("Agent 7").
     expect(screen.getByText("Agent 7")).toBeTruthy();
   });
 
@@ -3433,7 +3312,7 @@ describe("turn-collapse (always on — Turns toggle controls expand/collapse)", 
     );
     // The run's first member moved to the newly-prepended older item.
     // When expanded, individual items inside the run still carry their
-    // data-item-id, so "3.0" is found as an inner flat row.
+    // data-item-id, so "3.0" is found as an inner card.
     expect(container.querySelector('[data-item-id="2.0"]')).toBeTruthy();
     // The run wrapper carries data-turn-member-ids for EVERY member.
     const run = container.querySelector('[data-turn-member-ids~="3.0"]');
@@ -3468,7 +3347,13 @@ describe("turn-collapse (always on — Turns toggle controls expand/collapse)", 
     expect(screen.getByTestId("python-code").textContent).toBe("x=1");
   });
 
-  it('detailsMode="last" — the completed latest turn starts expanded and remains toggleable', () => {
+  // Bug regression (#510): the last turn auto-expands while streaming and
+  // auto-collapses once the agent goes idle. Clicking its header AFTER
+  // streaming completes must expand it again. The old override convention
+  // ("membership = opposite of the default") broke exactly here: the last
+  // turn's default itself flips when turnActive ends, so the formula
+  // hardcoded the override to collapsed and every click did nothing.
+  it('detailsMode="last" — clicking the last turn header after streaming completes expands it', () => {
     setToggleState({ detailsMode: "last" });
     render(
       <TimelineView
@@ -3478,17 +3363,19 @@ describe("turn-collapse (always on — Turns toggle controls expand/collapse)", 
         ]}
       />,
     );
+    // No turnActive → the last turn auto-collapsed.
     const runHeader = runToggle();
-    expect(runHeader.getAttribute("aria-expanded")).toBe("true");
-    expect(screen.getByTestId("python-code").textContent).toBe("x=1");
-
-    // Explicit pins still override the Last-mode default in both directions.
-    fireEvent.click(runToggle());
     expect(runHeader.getAttribute("aria-expanded")).toBe("false");
     expect(screen.queryByTestId("python-code")).toBeNull();
 
+    // Click to expand the completed turn — the reported bug: this did nothing.
     fireEvent.click(runToggle());
     expect(runHeader.getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByTestId("python-code").textContent).toBe("x=1");
+
+    // Click again to collapse it.
+    fireEvent.click(runToggle());
+    expect(runHeader.getAttribute("aria-expanded")).toBe("false");
   });
 
   // Bug regression (#510): a user who collapses the streaming last turn
@@ -3545,8 +3432,9 @@ describe("turn-collapse (always on — Turns toggle controls expand/collapse)", 
   // from the click case so a user-clicked middle turn revealed only its child
   // summaries (each inner block stayed collapsed for a second click) — the
   // "detail block only expands specific categories" complaint. Re-unified:
-  // any expanded turn — Last-mode default or a user click — opens every flat
-  // member body in one step.
+  // any expanded turn — streaming auto-expand or a user click — opens its
+  // inner blocks too; per-card collapse remains available via an inner
+  // header click.
   it('detailsMode="last" — clicking a middle turn opens it with ALL inner blocks expanded', () => {
     setToggleState({ detailsMode: "last" });
     render(
@@ -3584,10 +3472,11 @@ describe("turn-collapse (always on — Turns toggle controls expand/collapse)", 
     // The streaming last turn is untouched by the middle-turn click.
     expect(runHeaders[1].getAttribute("aria-expanded")).toBe("true");
 
-    expect(
-      runHeaders[0].closest('[data-turn-member-ids]')?.querySelector('[data-testid="card-toggle"]'),
-    ).toBeNull();
-    expect(screen.getByText("older-think")).toBeTruthy();
+    // Per-card collapse still works: clicking one inner header closes just
+    // that card.
+    fireEvent.click(screen.getAllByTestId("card-toggle")[0]); // older-think
+    expect(screen.queryByText("older-think")).toBeNull();
+    expect(screen.getAllByTestId("python-code")).toHaveLength(2); // both code cards
   });
 });
 
@@ -3654,7 +3543,10 @@ describe("detail-block duration display (Last mode)", () => {
     expect(runToggle().textContent).toContain("Working for");
   });
 
-  it("completed single-code-block turn keeps only merged timing in its header", () => {
+  // Symptom 3 (completed half): a turn that was one continuous code block
+  // shows both "Worked for" (from the block's own committed duration) and
+  // "Wrote code for" (from the backend code_elapsed_ms).
+  it("completed single-code-block turn shows 'Worked for' and 'Wrote code for'", () => {
     setToggleState({ detailsMode: "last" });
     render(
       <TimelineView
@@ -3672,9 +3564,7 @@ describe("detail-block duration display (Last mode)", () => {
     );
     const header = runToggle();
     expect(header.textContent).toContain("Worked for 5s");
-    expect(header.textContent).not.toContain("Wrote code for 5s");
-    expect(screen.getByText(/Wrote code for 5s/)).toBeTruthy();
-    expect(header.querySelector(".opacity-70")).toBeNull();
+    expect(header.textContent).toContain("Wrote code for 5s");
   });
 
   // Symptom 4: a turn holding only a system note must never render a blank
@@ -3732,9 +3622,9 @@ describe("detail-block duration display (Last mode)", () => {
     expect(runToggle().textContent).toContain("Worked for 17s");
   });
 
-  // The live half is committed work plus the streaming block's elapsed. The
-  // aggregate header keeps only that merged clock; block timing stays on each
-  // flat member label.
+  // The live half is committed work PLUS the streaming block's elapsed, and
+  // that elapsed is the very value the sub-block line already shows — so the
+  // header is always the sum of the line beneath it.
   it("live timer adds the streaming block's elapsed to the committed total", () => {
     setToggleState({ detailsMode: "last" });
     const now = Date.now();
@@ -3763,10 +3653,8 @@ describe("detail-block duration display (Last mode)", () => {
     // 10s committed thinking + 3s of code still being written.
     const header = runToggle().textContent;
     expect(header).toContain("Working for 13s");
-    expect(header).not.toContain("Thought for 10s");
-    expect(header).not.toContain("Writing code for 3s");
-    expect(screen.getByText(/Thought for 10s/)).toBeTruthy();
-    expect(screen.getByText(/Writing code for 3s/)).toBeTruthy();
+    expect(header).toContain("Thought for 10s");
+    expect(header).toContain("Wrote code for 3s");
   });
 
   // The live gate no longer keys on the turn's first stamped created_at: the
@@ -3795,8 +3683,8 @@ describe("detail-block duration display (Last mode)", () => {
 
   // Symptom 2 (jitter): with a steady mid-turn signal the expanded last turn
   // must not collapse when only its content grows across commits; it
-  // remains the latest work block after a primary reply lands below it.
-  it("active last turn stays expanded across streaming commits and after its reply lands", () => {
+  // collapses once a primary reply lands below it (turn over in the data).
+  it("active last turn stays expanded across streaming commits; collapses when a reply lands below", () => {
     setToggleState({ detailsMode: "last" });
     const base = [
       makeItem({ item_id: "1.0", kind: "agent_chat", payload: "hi" }),
@@ -3812,8 +3700,8 @@ describe("detail-block duration display (Last mode)", () => {
       />,
     );
     expect(runToggle().getAttribute("aria-expanded")).toBe("true");
-    // The final reply lands below the turn; Last mode keeps the latest work
-    // visible until another turn begins.
+    // The final reply lands below the turn → the turn is no longer the last
+    // group and auto-collapses even while turnActive is still winding down.
     rerender(
       <TimelineView
         turnActive
@@ -3824,7 +3712,7 @@ describe("detail-block duration display (Last mode)", () => {
         ]}
       />,
     );
-    expect(runToggle().getAttribute("aria-expanded")).toBe("true");
+    expect(runToggle().getAttribute("aria-expanded")).toBe("false");
   });
 });
 

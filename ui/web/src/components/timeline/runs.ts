@@ -3,19 +3,22 @@
 // drives them directly:
 //
 // 1. classifyItem — splits every timeline item into the human-readable backbone
-//    (primary) from foldable secondary work/context, standalone lifecycle
-//    breakers, and bare ephemeral markers. Classification derives from the SAME
-//    source model the cards use (inboundKind/classifyMarker), so membership and
-//    card identity cannot disagree.
+//    (primary: kept always visible, breaks a turn) vs the secondary chatter the
+//    agent emits during a turn (thinking / code / output / inter-agent /
+//    system notes: foldable). The `bare` class is the ephemeral system_marker
+//    that has no card (messageCardConfig → null); it never joins a turn and
+//    renders as-is. Classification is derived from the SAME source model the
+//    cards use (inboundKind for inbound_chat, classifyMarker for system_marker),
+//    so a turn's membership and a card's identity can never disagree.
 //
 // 2. groupIntoTurns — folds each maximal stretch of adjacent secondary items
 //    into one turn group (a work block under a single "Details" header); primary
-//    / breaker / bare items pass through as single groups. Every secondary run — even a
+//    / bare items pass through as single groups. Every secondary run — even a
 //    single item — becomes a turn group so it can be collapsed. Streaming
 //    secondary items are always groupable so the first streaming chunk
 //    immediately lands inside a work block (no bare-then-wrap layout shift).
 
-import { summarizeOutput, type SdkCall } from "@/lib/item-summary";
+import { formatDuration, type SdkCall } from "@/lib/item-summary";
 import type { BackendTimelineItem } from "@/lib/types";
 import enMessages from "../../../messages/en.json";
 
@@ -60,11 +63,12 @@ export function inboundKind(source: string | null): "human" | "agent" | "system"
   return "system";
 }
 
-// primary: the human-readable backbone — Ava's text replies and human inbound.
-// secondary: foldable work, context, and framework notes.
-// breaker: a card-rendered lifecycle boundary; standalone between turns.
-// bare: an ephemeral system_marker (no card); standalone with no card chrome.
-export type ItemClass = "primary" | "secondary" | "breaker" | "bare";
+// primary: the human-readable backbone — Ava's text replies and human inbound
+//   messages. Always rendered; never folded into a turn.
+// secondary: foldable chatter — thinking / code / output, inter-agent messages,
+//   system inbound, compaction, the system prompt, and framework note markers.
+// bare: an ephemeral system_marker (no card); rendered as-is, never in a turn.
+export type ItemClass = "primary" | "secondary" | "bare";
 
 export function classifyItem(item: BackendTimelineItem): ItemClass {
   switch (item.kind) {
@@ -85,17 +89,9 @@ export function classifyItem(item: BackendTimelineItem): ItemClass {
     case "system_prompt":
       return "secondary";
     case "system_marker":
-      // Lifecycle events change how surrounding work should be interpreted, so
-      // they remain visible as standalone card rows and split adjacent turns.
-      switch (classifyMarker(item.source).kind) {
-        case "lifecycle":
-          return "breaker";
-        case "ephemeral":
-          return "bare";
-        case "memory":
-        case "note":
-          return "secondary";
-      }
+      // The card-rendered marker families (lifecycle / memory / note) fold like
+      // any note; the ephemeral markers have no card and stay bare.
+      return classifyMarker(item.source).kind === "ephemeral" ? "bare" : "secondary";
   }
   // Exhaustiveness guard: TS narrows to never; a new kind lands here as bare.
   /* v8 ignore next 3 */
@@ -117,16 +113,13 @@ export interface TurnSummary {
   readonly compactSummaries: number;
   readonly memories: number;
   readonly agentMessages: number;
-  // Delivered artifacts are first-class turn outcomes, not system notes.
-  readonly attachments: number;
-  // Catch-all for the remaining secondary chatter: guidance-note markers and
+  // Catch-all for the remaining secondary chatter: card-family system_marker
+  // notes that are not memories (lifecycle events, guidance notes) and
   // system-sourced inbound messages (wake-ups / framework notices). Every
   // secondary kind lands in SOME count, so formatTurnSummary is never empty
   // for a non-empty turn — a turn of one system note reads "1 system note"
   // instead of rendering a blank header.
   readonly systemNotes: number;
-  // True when any output payload carries a traceback or terminal error line.
-  readonly failedOutput: boolean;
   // Aggregate wall-clock, both backend-authoritative and both zero-able (a turn
   // with no reasoning items has thinkingMs 0; no execution has execMs 0):
   // - thinkingMs: sum of each `agent_reasoning` item's committed `reasoning_ms`,
@@ -171,8 +164,10 @@ export interface TurnSummary {
   readonly workedMs: number;
   // Live-timing info for the collapsed turn header clock. When the last
   // item in the turn is still streaming (not yet committed), these fields
-  // record its kind and start timestamp so TurnBlock can add the live delta to
-  // the committed merged duration while the "Working for Xs" clock ticks.
+  // record its kind and start timestamp so TurnBlock can add the live delta
+  // to the committed aggregate durations — without them the sub-block timing
+  // line ("Thought for Xs · Wrote code for Xs · Ran for Xs") stays frozen
+  // at the committed values while the "Working for Xs" clock ticks.
   readonly lastLiveKind: "reasoning" | "code" | "output" | null;
   readonly lastLiveStartedAt: number;
   readonly sdkCalls: readonly SdkCall[];
@@ -205,9 +200,7 @@ export function summarizeTurn(items: readonly BackendTimelineItem[]): TurnSummar
   let compactSummaries = 0;
   let memories = 0;
   let agentMessages = 0;
-  let attachments = 0;
   let systemNotes = 0;
-  let failedOutput = false;
   const sdkCounts = new Map<string, number>();
   for (const it of items) {
     if (it.kind === "agent_reasoning") {
@@ -224,12 +217,6 @@ export function summarizeTurn(items: readonly BackendTimelineItem[]): TurnSummar
     } else if (it.kind === "code_output") {
       output += 1;
       execMs += itemOwnMs(it);
-      // Do not rescan the full growing payload on every SSE chunk. The flat
-      // item label owns throttled live parsing; the turn-level failure state
-      // settles once the output commits or is interrupted.
-      failedOutput ||= !isLiveExecution(it) && summarizeOutput(it.payload).hasError;
-    } else if (it.kind === "attach") {
-      attachments += 1;
     } else if (it.kind === "system_prompt") {
       systemPrompts += 1;
     } else if (it.kind === "inbound_compact_summary" || it.kind === "inbound_compact_request") {
@@ -239,12 +226,12 @@ export function summarizeTurn(items: readonly BackendTimelineItem[]): TurnSummar
       if (inboundKind(it.source) === "agent") agentMessages += 1;
       else systemNotes += 1;
     } else if (it.kind === "system_marker") {
-      const markerKind = classifyMarker(it.source).kind;
-      if (markerKind === "memory") memories += 1;
-      else if (markerKind === "note") systemNotes += 1;
+      if (classifyMarker(it.source).kind === "memory") memories += 1;
+      else systemNotes += 1; // lifecycle events + guidance notes
     } else {
-      // Defensive agent_chat case: primary items never reach a turn, but keep
-      // the summary non-empty if a caller hands one to summarizeTurn directly.
+      // attach (secondary since 2026-08-30) and the defensive agent_chat
+      // (primary, never reaches a turn) land here so the "every member is
+      // counted somewhere" invariant holds regardless.
       systemNotes += 1;
     }
   }
@@ -277,26 +264,17 @@ export function summarizeTurn(items: readonly BackendTimelineItem[]): TurnSummar
       lastLiveStartedAt = last.execStartedAt ?? 0;
     }
   }
-  return {
-    total: items.length,
-    thinking,
-    code,
-    output,
-    systemPrompts,
-    compactSummaries,
-    memories,
-    agentMessages,
-    attachments,
-    systemNotes,
-    failedOutput,
-    thinkingMs,
-    codeMs,
-    execMs,
-    sdkCalls,
-    workedMs,
-    lastLiveKind,
-    lastLiveStartedAt,
-  };
+  return { total: items.length, thinking, code, output, systemPrompts, compactSummaries, memories, agentMessages, systemNotes, thinkingMs, codeMs, execMs, sdkCalls, workedMs, lastLiveKind, lastLiveStartedAt };
+}
+
+// "Thought for 15m · Wrote code for 3m · Ran for 2s" — in chronological
+// agent-work order. Omits any side when zero; null when all three are zero.
+export function formatTurnTiming(summary: TurnSummary, t: TurnTranslator = EN_TURN): string | null {
+  const parts: string[] = [];
+  if (summary.thinkingMs > 0) parts.push(t("thoughtFor", { duration: formatDuration(summary.thinkingMs) }));
+  if (summary.codeMs > 0) parts.push(t("wroteCodeFor", { duration: formatDuration(summary.codeMs) }));
+  if (summary.execMs > 0) parts.push(t("ranFor", { duration: formatDuration(summary.execMs) }));
+  return parts.length > 0 ? parts.join(" · ") : null;
 }
 
 // Action-item display order for the turn summary header.
@@ -304,11 +282,6 @@ const ACTION_ORDER = ["thinking", "code", "output"] as const;
 
 export function formatTurnSummary(summary: TurnSummary, t: TurnTranslator = EN_TURN): string {
   const parts: string[] = [];
-  if (summary.sdkCalls.length > 0) {
-    for (const call of summary.sdkCalls) {
-      parts.push(`${call.method} × ${call.count}`);
-    }
-  }
   // Non-work items first (context + chatter). Sentence case throughout — these
   // fragments join into one status line ("system prompt · 2 compact summaries ·
   // 1 memory · 2 system notes · 1 agent message · 2 thinking"), so every label
@@ -316,7 +289,7 @@ export function formatTurnSummary(summary: TurnSummary, t: TurnTranslator = EN_T
   // Singular system prompts / compact summaries drop the count prefix
   // ("system prompt · 2 compact summaries …"), mirroring the original English
   // copy — the singular label stands alone.
-  if (summary.sdkCalls.length === 0 && summary.systemPrompts > 0) {
+  if (summary.systemPrompts > 0) {
     parts.push(
       summary.systemPrompts === 1
         ? t("systemPromptSingular")
@@ -326,7 +299,7 @@ export function formatTurnSummary(summary: TurnSummary, t: TurnTranslator = EN_T
           }),
     );
   }
-  if (summary.sdkCalls.length === 0 && summary.compactSummaries > 0) {
+  if (summary.compactSummaries > 0) {
     parts.push(
       summary.compactSummaries === 1
         ? t("compactSummarySingular")
@@ -336,7 +309,7 @@ export function formatTurnSummary(summary: TurnSummary, t: TurnTranslator = EN_T
           }),
     );
   }
-  if (summary.sdkCalls.length === 0 && summary.memories > 0) {
+  if (summary.memories > 0) {
     parts.push(
       t("memories", {
         count: summary.memories,
@@ -344,7 +317,7 @@ export function formatTurnSummary(summary: TurnSummary, t: TurnTranslator = EN_T
       }),
     );
   }
-  if (summary.sdkCalls.length === 0 && summary.systemNotes > 0) {
+  if (summary.systemNotes > 0) {
     parts.push(
       t("systemNotes", {
         count: summary.systemNotes,
@@ -352,7 +325,7 @@ export function formatTurnSummary(summary: TurnSummary, t: TurnTranslator = EN_T
       }),
     );
   }
-  if (summary.sdkCalls.length === 0 && summary.agentMessages > 0) {
+  if (summary.agentMessages > 0) {
     parts.push(
       t("agentMessages", {
         count: summary.agentMessages,
@@ -361,31 +334,14 @@ export function formatTurnSummary(summary: TurnSummary, t: TurnTranslator = EN_T
     );
   }
   // Work items — action names are translated ("thinking" → the zh label etc.).
-  if (summary.sdkCalls.length === 0) {
-    const counts: Record<string, number> = {
-      thinking: summary.thinking,
-      code: summary.code,
-      output: summary.output,
-    };
-    for (const key of ACTION_ORDER) {
-      const n = counts[key];
-      if (n > 0) {
-        parts.push(
-          t("actionCount", {
-            count: n,
-            action: t(`action${key[0].toUpperCase()}${key.slice(1)}`),
-          }),
-        );
-      }
+  const counts: Record<string, number> = { thinking: summary.thinking, code: summary.code, output: summary.output };
+  for (const key of ACTION_ORDER) {
+    const n = counts[key];
+    if (n > 0) {
+      parts.push(
+        t("actionCount", { count: n, action: t(`action${key[0].toUpperCase()}${key.slice(1)}`) }),
+      );
     }
-  }
-  if (summary.attachments > 0) {
-    parts.push(
-      t("attachments", {
-        count: summary.attachments,
-        unit: t(summary.attachments === 1 ? "attachmentSingular" : "attachmentsPlural"),
-      }),
-    );
   }
   return parts.join(" · ");
 }
@@ -412,9 +368,9 @@ export type TimelineGroup =
  *   (no bare-then-wrap layout shift). Primary items and bare markers break the
  *   run as before.
  * - Every non-empty secondary run becomes a turn group (even a single item).
- *   Context-only items (system_prompt, compaction events, memory/note markers)
- *   fold like any other secondary item. Lifecycle cards split turns and pass
- *   through as standalone rows.
+ *   Context-only items (system_prompt, compaction events, lifecycle markers)
+ *   fold like any other secondary item — including at the very front of the
+ *   timeline (the initial context lands inside the first detail block).
  */
 export function groupIntoTurns(
   items: readonly BackendTimelineItem[],

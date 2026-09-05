@@ -30,7 +30,7 @@ export function LoadingOlderBadge({ loadingOlder }: { loadingOlder: boolean }) {
         "absolute top-2 left-1/2 -translate-x-1/2 z-10 pointer-events-none",
         "items-center gap-1.5 px-2.5 py-1 rounded-full",
         "bg-background border border-border shadow-sm",
-        "text-xs text-muted-foreground",
+        "text-[11px] text-muted-foreground",
         "transition-opacity duration-200",
         loadingOlder ? "opacity-100" : "opacity-0",
         FLEX
@@ -59,16 +59,12 @@ export function ColdLoadSpinner({ show }: { show: boolean }) {
 // measured away from the bottom; clicking smooth-scrolls back.
 export function ScrollToBottomButton({
   atBottom,
-  unseenItemCount,
   onClick,
 }: {
   atBottom: boolean;
-  unseenItemCount: number;
   onClick: () => void;
 }) {
   const t = useTranslations("timeline");
-  const label =
-    unseenItemCount > 0 ? t("newItems", { count: unseenItemCount }) : t("latest");
   return (
     <button
       type="button"
@@ -76,7 +72,7 @@ export function ScrollToBottomButton({
       aria-label={t("scrollToBottom")}
       className={cn(
         "absolute bottom-4 left-1/2 -translate-x-1/2 z-30",
-        "h-9 min-w-9 rounded-full px-3 gap-1.5",
+        "size-9 rounded-full",
         // Solid bg, no backdrop-blur: backdrop-filter over the scroll
         // area forces iOS WebKit to re-sample the content behind it,
         // a known repaint-cost / blank-tile aggravator during streaming.
@@ -92,7 +88,6 @@ export function ScrollToBottomButton({
       )}
     >
       <ArrowDown className="size-4" />
-      <span className="text-xs font-medium whitespace-nowrap">{label}</span>
     </button>
   );
 }

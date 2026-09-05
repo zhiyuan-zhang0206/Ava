@@ -2,21 +2,26 @@
 
 // TurnBlock — the aggregate collapse for a turn of adjacent secondary items. It is
 // a presentational shell around the same clickable summary-header pattern the
-// cards use (HEADER_CLS). Its first line leads with SDK actions (or action/context
-// counts), delivered attachments, and failure state; its second line carries one
-// merged work duration. Expanded children are flat chronological rows with no
-// nested disclosure. TimelineView owns expansion and mounts children only while
-// open, so collapsed turns still avoid their markdown/code rendering cost.
+// cards use (HEADER_CLS): collapsed it shows "worked for X" plus the action
+// counts ("1 thinking · 1 code · 1 output") and, when the turn has anything worth
+// surfacing, a second wrapping line of aggregate wall-clock ("thought 15m · ran
+// 3m") and SDK call names × counts ("files.read × 3 · shell.run × 2") — enough
+// for "did the agent think a lot, run a lot of commands, or mostly talk to other
+// agents" at a glance without expanding. Expanded it reveals its children — the
+// individual TimelineRows, each still its own collapsible card. The parent
+// (TimelineView) owns the expanded state and builds the children only when
+// expanded, so a collapsed turn never mounts its inner rows (and never re-parses
+// their markdown / code on a streaming chunk).
 
 import { ChevronDown, ChevronRight, Layers } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { type ReactNode, useEffect, useState } from "react";
 
-import { formatDuration } from "@/lib/item-summary";
+import { formatDuration, type SdkCall } from "@/lib/item-summary";
 import { cn } from "@/lib/utils";
 
-import { HEADER_CLS } from "./card";
-import { formatTurnSummary, type TurnSummary } from "./runs";
+import { CallBadge, HEADER_CLS } from "./card";
+import { formatTurnSummary, formatTurnTiming, type TurnSummary } from "./runs";
 import { FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0, OVERFLOW_HIDDEN } from "@/lib/layout";
 
 const LIVE_CLOCK_INTERVAL_MS = 100;
@@ -75,7 +80,9 @@ export function TurnBlock({
   }, [liveBlockStartedAt]);
 
   // How long the block that is streaming right now has been running. Zero when
-  // the turn is idle or its last item is already committed.
+  // the turn is idle or its last item is already committed. One value, read by
+  // both the header clock and the sub-block timing line below, so the two
+  // cannot disagree about the block in flight.
   const liveDelta = liveBlockStartedAt > 0 ? Math.max(liveNow - liveBlockStartedAt, 0) : 0;
 
   // The header timer, two states over ONE basis — the sum of the turn's block
@@ -93,14 +100,41 @@ export function TurnBlock({
   //   notes are instantaneous inserts, not work).
   const hasWork = summary.thinking > 0 || summary.code > 0 || summary.output > 0;
   const workedLabel = turnActive
-    ? t("workingFor", { duration: formatDuration(summary.workedMs + liveDelta) })
+    ? `Working for ${formatDuration(summary.workedMs + liveDelta)}`
     : hasWork && summary.workedMs > 0
-      ? t("workedFor", { duration: formatDuration(summary.workedMs) })
+      ? `Worked for ${formatDuration(summary.workedMs)}`
       : null;
 
-  const actionSummary = formatTurnSummary(summary, (key, values) =>
-    t(key as Parameters<typeof t>[0], values),
-  );
+  const actionSummary = formatTurnSummary(summary);
+
+  // Build the header line: "Worked for Xs · 1 thinking · 1 code · 1 output".
+  // actionSummary is non-empty for every non-empty turn (summarizeTurn counts
+  // every member kind), so the header never renders blank.
+  const headerParts: string[] = [];
+  if (workedLabel) headerParts.push(workedLabel);
+  if (actionSummary) headerParts.push(actionSummary);
+
+  // Live sub-block timing: while a block is streaming, add the same live delta
+  // the header clock uses to the committed aggregate, so the "Thought for Xs ·
+  // Wrote code for Xs · Ran for Xs" line ticks in sync with "Working for Xs" —
+  // even while collapsed. With no block in flight, fall back to the static
+  // committed values (same as formatTurnTiming).
+  const timing = (() => {
+    if (liveBlockStartedAt > 0) {
+      const parts: string[] = [];
+      const thinkingMs = summary.thinkingMs + (summary.lastLiveKind === "reasoning" ? liveDelta : 0);
+      const codeMs = summary.codeMs + (summary.lastLiveKind === "code" ? liveDelta : 0);
+      const execMs = summary.execMs + (summary.lastLiveKind === "output" ? liveDelta : 0);
+      if (thinkingMs > 0) parts.push(`Thought for ${formatDuration(thinkingMs)}`);
+      if (codeMs > 0) parts.push(`Wrote code for ${formatDuration(codeMs)}`);
+      if (execMs > 0) parts.push(`Ran for ${formatDuration(execMs)}`);
+      return parts.length > 0 ? parts.join(" · ") : null;
+    }
+    return formatTurnTiming(summary, (key, values) =>
+      t(key as Parameters<typeof t>[0], values),
+    );
+  })();
+  const hasSdkCalls = summary.sdkCalls.length > 0;
 
   return (
     <div
@@ -126,27 +160,23 @@ export function TurnBlock({
           <ChevronRight className="size-3 shrink-0 opacity-60 mt-0.5" />
         )}
         <span className={cn("gap-0.5", FLEX, FLEX_COL, MIN_W_0, FLEX_1)}>
-          <span
-            data-testid="turn-summary-line"
-            className={cn("items-center gap-1.5", FLEX, MIN_W_0)}
-          >
+          {/* Line 1: Worked for Xs · N thinking · M code · K output · ...
+              tabular-nums: the live clock rewrites the digits ~10x/s; fixed-
+              width numerals keep the line from wobbling as digits change. */}
+          <span className={cn("items-center gap-1.5", FLEX, MIN_W_0)}>
             <Layers className="size-3.5 shrink-0" />
-            <span className="break-words tabular-nums">
-              {summary.failedOutput ? (
-                <>
-                  <span className="text-destructive">{t("executionFailed")}</span>
-                  {actionSummary ? <span className="opacity-50"> · </span> : null}
-                </>
-              ) : null}
-              {actionSummary}
-            </span>
+            <span className="break-all tabular-nums">{headerParts.join(" · ") || ""}</span>
           </span>
-          {workedLabel ? (
-            <span
-              data-testid="turn-summary-line"
-              className="pl-5 text-muted-foreground tabular-nums"
-            >
-              {workedLabel}
+          {/* Line 2: Thought for Xs · Wrote code for Xs · Ran for Xs */}
+          {timing ? (
+            <span className="pl-5 opacity-70 break-all tabular-nums">{timing}</span>
+          ) : null}
+          {/* Line 3: SDK calls — full list, natural word wrap */}
+          {hasSdkCalls ? (
+            <span className={cn("flex-wrap items-center gap-x-1.5 gap-y-0.5 pl-5 opacity-70", FLEX)}>
+              {summary.sdkCalls.map((c, i) => (
+                <TurnCallChip key={c.method} call={c} showDot={i > 0} />
+              ))}
             </span>
           ) : null}
         </span>
@@ -158,9 +188,18 @@ export function TurnBlock({
         )}
       >
         <div className={cn(OVERFLOW_HIDDEN, MIN_H_0)}>
-          <div className="px-3 pb-2 pt-0.5 space-y-2">{children}</div>
+          <div className="px-2 pb-2 pt-0.5 space-y-3">{children}</div>
         </div>
       </div>
     </div>
+  );
+}
+
+function TurnCallChip({ call, showDot }: { call: SdkCall; showDot: boolean }) {
+  return (
+    <span>
+      {showDot ? <span className="opacity-50">{"· "}</span> : null}
+      <CallBadge call={call} />
+    </span>
   );
 }
