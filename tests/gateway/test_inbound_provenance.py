@@ -7,8 +7,10 @@ import hashlib
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
+from starlette.requests import Request
 
 from gateway.app import app
+from gateway.inbound_provenance import request_inbound_provenance
 from shared.chat_delivery import insert_chat_inbound_once
 from shared.config import settings
 from shared.db import create_agent, insert_inbound_message
@@ -105,6 +107,31 @@ def test_source_assertion_match_is_a_non_blocking_three_state_fact(
     )
 
     assert source_assertion_match(source, provenance) is expected
+
+
+@pytest.mark.parametrize(
+    ("verified_by", "transport", "error"),
+    [
+        ("v" * 121, "http", "source_verified_by"),
+        (None, "t" * 81, "source_transport"),
+    ],
+)
+def test_provenance_rejects_facts_over_the_persistence_limits(
+    verified_by: str | None, transport: str, error: str
+) -> None:
+    with pytest.raises(ValueError, match=error):
+        InboundProvenance(
+            source_verified_by=verified_by,
+            source_transport=transport,
+        )
+
+
+def test_gateway_request_provenance_applies_the_same_length_gate() -> None:
+    request = Request({"type": "http", "headers": []})
+    request.state.source_verified_by = "v" * 121
+
+    with pytest.raises(ValueError, match="source_verified_by"):
+        request_inbound_provenance(request)
 
 
 @pytest.mark.parametrize(

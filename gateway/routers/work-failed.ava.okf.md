@@ -38,4 +38,15 @@ The final target is written back as `delivered_to`, `delivery_kind`, and
 `delivered_at`. Liveness is always the shared status-plus-lease predicate;
 delivery return values do not invent a second liveness truth.
 
+The gateway TTL reaper also reconciles unfinished events once at startup and
+on every periodic pass. Only rows older than
+`AVA_WORK_FAILED_RETRY_GRACE_SECONDS` (default five minutes) are eligible, so
+the recovery pass does not collide with a normal request still finishing its
+route. Each claimed retry increments `delivery_attempts`; attempts one through
+three repeat the same fallback chain, while the next pass creates the task
+alert directly. A deterministic client-message key per event and target makes
+concurrent agent delivery idempotent, and the final row update is a compare-and-
+set whose loser reads the winning outcome instead of raising. Task-alert
+creation locks the event row, so competing fallbacks cannot create two tasks.
+
 Parent: [[routers.ava.okf.md]].

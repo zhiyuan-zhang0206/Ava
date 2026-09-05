@@ -234,6 +234,20 @@ class GatewaySettings(EnvSettings):
         },
     )
 
+    work_failed_retry_grace_seconds: float = Field(
+        default=300.0,
+        gt=0,
+        allow_inf_nan=False,
+        alias="AVA_WORK_FAILED_RETRY_GRACE_SECONDS",
+        description="Minimum age in seconds before the gateway retries an unfinished work-failure delivery. The grace keeps the startup/periodic reconciler from racing the request that registered the event.",
+        json_schema_extra={
+            "restart_required": "gateway",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
     gateway_reload: bool = Field(
         default=False,
         alias="AVA_GATEWAY_RELOAD",

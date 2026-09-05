@@ -21,6 +21,12 @@ passes to the durable inbound insert:
   `source_verified_by=agent_token:M`. It is true or false only when both sides
   have that exact form; all unknown cases remain `NULL`.
 
+The application rejects credential identities longer than 120 characters and
+transport names longer than 80 characters before persistence; SHA-256 output
+is asserted to be exactly 64 hexadecimal characters. The matching database
+columns are `VARCHAR(120)`, `VARCHAR(80)`, and `VARCHAR(64)`, respectively, so
+writers that bypass the application cannot store an oversized audit fact.
+
 These columns are evidence, not authorization input. A mismatch is persisted
 and delivery continues. Credential changes on a same-body idempotent retry do
 not conflict with the first durable receipt; the original row retains the facts
