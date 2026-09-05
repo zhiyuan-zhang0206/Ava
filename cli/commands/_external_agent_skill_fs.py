@@ -14,6 +14,22 @@ from pathlib import Path
 from typing import Any
 
 _MARKER_NAME = ".ava-managed.json"
+_POSIX = os.name != "nt"
+
+
+def _platform_mode(mode: int, *, is_dir: bool) -> int:
+    """Normalize a filesystem mode for cross-platform manifest comparison.
+
+    NTFS does not store POSIX permission bits; lstat reports synthetic modes
+    (0o666 writable files / 0o777 writable dirs) that never match the mode
+    requested at creation.  The bridge's manifest mode field is a POSIX
+    security-audit signal, so on non-POSIX platforms it is normalized to the
+    pipeline's canonical private modes (0o600 / 0o700).  POSIX is authoritative
+    and passed through unchanged.
+    """
+    if _POSIX:
+        return mode
+    return 0o700 if is_dir else 0o600
 
 
 class _SourceIntegrityError(RuntimeError):
@@ -139,7 +155,7 @@ def _read_regular(path: Path, *, source: bool) -> tuple[bytes, int]:
     after = inspect(path)
     if _signature(after) != _signature(before) or not _same_identity(after, opened_after):
         raise error("operator skill tree changed while being read")
-    return data, stat.S_IMODE(before.st_mode)
+    return data, _platform_mode(stat.S_IMODE(before.st_mode), is_dir=False)
 
 
 def _source_snapshot(root: Path) -> _SourceSnapshot:
@@ -147,7 +163,9 @@ def _source_snapshot(root: Path) -> _SourceSnapshot:
     root_before = _source_lstat(root)
     if not stat.S_ISDIR(root_before.st_mode):
         raise _SourceIntegrityError("operator skill tree root is not a directory")
-    directories: list[tuple[str, int]] = [(".", stat.S_IMODE(root_before.st_mode))]
+    directories: list[tuple[str, int]] = [
+        (".", _platform_mode(stat.S_IMODE(root_before.st_mode), is_dir=True))
+    ]
     files: list[_SourceFile] = []
     source_stats: dict[str, os.stat_result] = {".": root_before}
 
@@ -165,7 +183,12 @@ def _source_snapshot(root: Path) -> _SourceSnapshot:
             relative = child.relative_to(root).as_posix()
             source_stats[relative] = current
             if stat.S_ISDIR(current.st_mode):
-                directories.append((relative, stat.S_IMODE(current.st_mode)))
+                directories.append(
+                    (
+                        relative,
+                        _platform_mode(stat.S_IMODE(current.st_mode), is_dir=True),
+                    )
+                )
                 visit(child)
             elif stat.S_ISREG(current.st_mode):
                 data, mode = _read_regular(child, source=True)
@@ -208,7 +231,11 @@ def _tree_manifest(
     if not stat.S_ISDIR(root_before.st_mode):
         raise error("operator skill tree root is not a directory")
     manifest: list[dict[str, Any]] = [
-        {"kind": "directory", "mode": stat.S_IMODE(root_before.st_mode), "path": "."}
+        {
+            "kind": "directory",
+            "mode": _platform_mode(stat.S_IMODE(root_before.st_mode), is_dir=True),
+            "path": ".",
+        }
     ]
 
     def visit(directory: Path) -> None:
@@ -226,7 +253,7 @@ def _tree_manifest(
                 manifest.append(
                     {
                         "kind": "directory",
-                        "mode": stat.S_IMODE(current.st_mode),
+                        "mode": _platform_mode(stat.S_IMODE(current.st_mode), is_dir=True),
                         "path": relative,
                     }
                 )
@@ -268,7 +295,7 @@ def _validate_manifest_subset(
         allowed_modes = {expected_mode, cleanup_mode}
         if item["kind"] == "directory":
             allowed_modes.add(stat.S_IRWXU)
-        if int(item["mode"]) not in allowed_modes:
+        if _POSIX and int(item["mode"]) not in allowed_modes:
             raise _ClientConflictError("transaction residue metadata was modified")
         if item["kind"] == "file" and item["sha256"] != wanted["sha256"]:
             raise _ClientConflictError("transaction residue content was modified")
@@ -276,7 +303,9 @@ def _validate_manifest_subset(
 
 def _verify_cleanup_file(path: Path, expected: dict[str, Any]) -> None:
     data, mode = _read_regular(path, source=False)
-    if mode != int(expected["mode"]) or hashlib.sha256(data).hexdigest() != expected["sha256"]:
+    if hashlib.sha256(data).hexdigest() != expected["sha256"] or (
+        _POSIX and mode != int(expected["mode"])
+    ):
         raise _ClientConflictError("transaction residue file changed during cleanup")
 
 
