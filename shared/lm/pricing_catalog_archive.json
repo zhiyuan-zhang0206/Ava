@@ -1,0 +1,976 @@
+{
+  "schema_version": 2,
+  "catalog_version": "2026-09-05.1",
+  "currency": "USD",
+  "unit_tokens": 1000000,
+  "models": {
+    "deepseek-v4-pro": {
+      "vendor": "deepseek",
+      "source_url": "https://api-docs.deepseek.com/quick_start/pricing/",
+      "source_checked_at": "2026-08-18",
+      "periods": [
+        {
+          "effective_from": null,
+          "effective_until": "2026-08-16T16:00:00Z",
+          "tiers": [
+            {
+              "input_tokens_min": 0,
+              "input_tokens_max": null,
+              "rates": {
+                "input": "0.435",
+                "cache_read": "0.003625",
+                "output": "0.87"
+              },
+              "utc_daily_overrides": []
+            }
+          ]
+        },
+        {
+          "effective_from": "2026-08-16T16:00:00Z",
+          "effective_until": null,
+          "tiers": [
+            {
+              "input_tokens_min": 0,
+              "input_tokens_max": null,
+              "rates": {
+                "input": "0.66",
+                "cache_read": "0.022",
+                "output": "1.98"
+              },
+              "utc_daily_overrides": [
+                {
+                  "start": "01:00:00",
+                  "end": "04:00:00",
+                  "rates": {
+                    "input": "1.32",
+                    "cache_read": "0.044",
+                    "output": "3.96"
+                  }
+                },
+                {
+                  "start": "06:00:00",
+                  "end": "10:00:00",
+                  "rates": {
+                    "input": "1.32",
+                    "cache_read": "0.044",
+                    "output": "3.96"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "deepseek-v4-flash": {
+      "vendor": "deepseek",
+      "source_url": "https://api-docs.deepseek.com/quick_start/pricing/",
+      "source_checked_at": "2026-08-18",
+      "periods": [
+        {
+          "effective_from": null,
+          "effective_until": "2026-08-16T16:00:00Z",
+          "tiers": [
+            {
+              "input_tokens_min": 0,
+              "input_tokens_max": null,
+              "rates": {
+                "input": "0.14",
+                "cache_read": "0.0028",
+                "output": "0.28"
+              },
+              "utc_daily_overrides": []
+            }
+          ]
+        },
+        {
+          "effective_from": "2026-08-16T16:00:00Z",
+          "effective_until": null,
+          "tiers": [
+            {
+              "input_tokens_min": 0,
+              "input_tokens_max": null,
+              "rates": {
+                "input": "0.22",
+                "cache_read": "0.007",
+                "output": "0.66"
+              },
+              "utc_daily_overrides": [
+                {
+                  "start": "01:00:00",
+                  "end": "04:00:00",
+                  "rates": {
+                    "input": "0.44",
+                    "cache_read": "0.014",
+                    "output": "1.32"
+                  }
+                },
+                {
+                  "start": "06:00:00",
+                  "end": "10:00:00",
+                  "rates": {
+                    "input": "0.44",
+                    "cache_read": "0.014",
+                    "output": "1.32"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "deepseek-v4-flash-vision-exp": {
+      "vendor": "deepseek",
+      "source_url": "https://api-docs.deepseek.com/quick_start/pricing/",
+      "source_checked_at": "2026-08-21",
+      "periods": [
+        {
+          "effective_from": null,
+          "effective_until": "2026-08-16T16:00:00Z",
+          "tiers": [
+            {
+              "input_tokens_min": 0,
+              "input_tokens_max": null,
+              "rates": {
+                "input": "0.14",
+                "cache_read": "0.0028",
+                "output": "0.28"
+              },
+              "utc_daily_overrides": []
+            }
+          ]
+        },
+        {
+          "effective_from": "2026-08-16T16:00:00Z",
+          "effective_until": null,
+          "tiers": [
+            {
+              "input_tokens_min": 0,
+              "input_tokens_max": null,
+              "rates": {
+                "input": "0.22",
+                "cache_read": "0.007",
+                "output": "0.66"
+              },
+              "utc_daily_overrides": [
+                {
+                  "start": "01:00:00",
+                  "end": "04:00:00",
+                  "rates": {
+                    "input": "0.44",
+                    "cache_read": "0.014",
+                    "output": "1.32"
+                  }
+                },
+                {
+                  "start": "06:00:00",
+                  "end": "10:00:00",
+                  "rates": {
+                    "input": "0.44",
+                    "cache_read": "0.014",
+                    "output": "1.32"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "gemini-3.8-flash": {
+      "vendor": "google",
+      "source_url": "https://ai.google.dev/gemini-api/docs/pricing",
+      "source_checked_at": "2026-09-03",
+      "effective_time_note": "Google publishes a calendar date without a timezone; Ava activates the increase at the earliest global occurrence of 2027-01-01 (UTC+14) to avoid underestimating cost.",
+      "periods": [
+        {
+          "effective_from": null,
+          "effective_until": "2026-12-31T10:00:00Z",
+          "tiers": [
+            {
+              "input_tokens_min": 0,
+              "input_tokens_max": null,
+              "rates": {
+                "input": "0.75",
+                "cache_read": "0.075",
+                "output": "3.75"
+              },
+              "utc_daily_overrides": []
+            }
+          ]
+        },
+        {
+          "effective_from": "2026-12-31T10:00:00Z",
+          "effective_until": null,
+          "tiers": [
+            {
+              "input_tokens_min": 0,
+              "input_tokens_max": null,
+              "rates": {
+                "input": "1.50",
+                "cache_read": "0.15",
+                "output": "7.50"
+              },
+              "utc_daily_overrides": []
+            }
+          ]
+        }
+      ]
+    },
+    "gemini-3.7-flash": {
+      "vendor": "google",
+      "source_url": "https://ai.google.dev/gemini-api/docs/pricing",
+      "source_checked_at": "2026-08-18",
+      "effective_time_note": "Google publishes a calendar date without a timezone; Ava activates the increase at the earliest global occurrence of 2027-01-01 (UTC+14) to avoid underestimating cost.",
+      "periods": [
+        {
+          "effective_from": null,
+          "effective_until": "2026-12-31T10:00:00Z",
+          "tiers": [
+            {
+              "input_tokens_min": 0,
+              "input_tokens_max": null,
+              "rates": {
+                "input": "0.75",
+                "cache_read": "0.075",
+                "output": "3.75"
+              },
+              "utc_daily_overrides": []
+            }
+          ]
+        },
+        {
+          "effective_from": "2026-12-31T10:00:00Z",
+          "effective_until": null,
+          "tiers": [
+            {
+              "input_tokens_min": 0,
+              "input_tokens_max": null,
+              "rates": {
+                "input": "1.50",
+                "cache_read": "0.15",
+                "output": "7.50"
+              },
+              "utc_daily_overrides": []
+            }
+          ]
+        }
+      ]
+    },
+    "gemini-3.5-flash": {
+      "vendor": "google",
+      "source_url": "https://ai.google.dev/gemini-api/docs/pricing",
+      "source_checked_at": "2026-06-27",
+      "periods": [
+        {
+          "effective_from": null,
+          "effective_until": null,
+          "tiers": [
+            {
+              "input_tokens_min": 0,
+              "input_tokens_max": null,
+              "rates": {
+                "input": "1.5",
+                "cache_read": "0.15",
+                "output": "9.0"
+              },
+              "utc_daily_overrides": []
+            }
+          ]
+        }
+      ]
+    },
+    "gemini-3.1-pro-preview": {
+      "vendor": "google",
+      "source_url": "https://ai.google.dev/gemini-api/docs/pricing",
+      "source_checked_at": "2026-06-27",
+      "periods": [
+        {
+          "effective_from": null,
+          "effective_until": null,
+          "tiers": [
+            {
+              "input_tokens_min": 0,
+              "input_tokens_max": 200000,
+              "rates": {
+                "input": "2.0",
+                "cache_read": "0.2",
+                "output": "12.0"
+              },
+              "utc_daily_overrides": []
+            },
+            {
+              "input_tokens_min": 200001,
+              "input_tokens_max": null,
+              "rates": {
+                "input": "4.0",
+                "cache_read": "0.4",
+                "output": "18.0"
+              },
+              "utc_daily_overrides": []
+            }
+          ]
+        }
+      ]
+    },
+    "gemini-2.5-pro": {
+      "vendor": "google",
+      "source_url": "https://ai.google.dev/gemini-api/docs/pricing",
+      "source_checked_at": "2026-06-27",
+      "periods": [
+        {
+          "effective_from": null,
+          "effective_until": null,
+          "tiers": [
+            {
+              "input_tokens_min": 0,
+              "input_tokens_max": null,
+              "rates": {
+                "input": "1.25",
+                "cache_read": "0.125",
+                "output": "10.0"
+              },
+              "utc_daily_overrides": []
+            }
+          ]
+        }
+      ]
+    },
+    "gemini-2.5-flash": {
+      "vendor": "google",
+      "source_url": "https://ai.google.dev/gemini-api/docs/pricing",
+      "source_checked_at": "2026-06-27",
+      "periods": [
+        {
+          "effective_from": null,
+          "effective_until": null,
+          "tiers": [
+            {
+              "input_tokens_min": 0,
+              "input_tokens_max": null,
+              "rates": {
+                "input": "0.30",
+                "cache_read": "0.03",
+                "output": "2.50"
+              },
+              "utc_daily_overrides": []
+            }
+          ]
+        }
+      ]
+    },
+    "gemini-embedding-2": {
+      "vendor": "google",
+      "source_url": "https://ai.google.dev/gemini-api/docs/pricing",
+      "source_checked_at": "2026-08-28",
+      "effective_time_note": "Embedding-service price with no chat ProviderBinding; retained in the archive as a catalog-priced runtime model.",
+      "periods": [
+        {
+          "effective_from": null,
+          "effective_until": null,
+          "tiers": [
+            {
+              "input_tokens_min": 0,
+              "input_tokens_max": null,
+              "rates": {
+                "input": "0.20",
+                "cache_read": "0",
+                "output": "0",
+                "image_input": "0.45"
+              },
+              "utc_daily_overrides": []
+            }
+          ]
+        }
+      ]
+    },
+    "claude-sonnet-5": {
+      "vendor": "anthropic",
+      "source_url": "https://www.anthropic.com/pricing",
+      "source_checked_at": "2026-06-27",
+      "periods": [
+        {
+          "effective_from": null,
+          "effective_until": null,
+          "tiers": [
+            {
+              "input_tokens_min": 0,
+              "input_tokens_max": null,
+              "rates": {
+                "input": "2.0",
+                "cache_read": "0.20",
+                "output": "10.0"
+              },
+              "utc_daily_overrides": []
+            }
+          ]
+        }
+      ]
+    },
+    "claude-haiku-4-5-20251001": {
+      "vendor": "anthropic",
+      "source_url": "https://www.anthropic.com/pricing",
+      "source_checked_at": "2026-06-27",
+      "periods": [
+        {
+          "effective_from": null,
+          "effective_until": null,
+          "tiers": [
+            {
+              "input_tokens_min": 0,
+              "input_tokens_max": null,
+              "rates": {
+                "input": "1.0",
+                "cache_read": "0.10",
+                "output": "5.0"
+              },
+              "utc_daily_overrides": []
+            }
+          ]
+        }
+      ]
+    },
+    "claude-opus-5": {
+      "vendor": "anthropic",
+      "source_url": "https://www.anthropic.com/pricing",
+      "source_checked_at": "2026-06-27",
+      "periods": [
+        {
+          "effective_from": null,
+          "effective_until": null,
+          "tiers": [
+            {
+              "input_tokens_min": 0,
+              "input_tokens_max": null,
+              "rates": {
+                "input": "5.0",
+                "cache_read": "0.50",
+                "output": "25.0"
+              },
+              "utc_daily_overrides": []
+            }
+          ]
+        }
+      ]
+    },
+    "claude-fable-5": {
+      "vendor": "anthropic",
+      "source_url": "https://www.anthropic.com/pricing",
+      "source_checked_at": "2026-06-27",
+      "periods": [
+        {
+          "effective_from": null,
+          "effective_until": null,
+          "tiers": [
+            {
+              "input_tokens_min": 0,
+              "input_tokens_max": null,
+              "rates": {
+                "input": "10.0",
+                "cache_read": "1.0",
+                "output": "50.0"
+              },
+              "utc_daily_overrides": []
+            }
+          ]
+        }
+      ]
+    },
+    "claude-fable-5-1": {
+      "vendor": "anthropic",
+      "source_url": "https://www.anthropic.com/pricing",
+      "source_checked_at": "2026-09-02",
+      "periods": [
+        {
+          "effective_from": null,
+          "effective_until": null,
+          "tiers": [
+            {
+              "input_tokens_min": 0,
+              "input_tokens_max": null,
+              "rates": {
+                "input": "10.0",
+                "cache_read": "0.25",
+                "output": "50.0"
+              },
+              "utc_daily_overrides": []
+            }
+          ]
+        }
+      ]
+    },
+    "claude-opus-4-8": {
+      "vendor": "anthropic",
+      "source_url": "https://www.anthropic.com/pricing",
+      "source_checked_at": "2026-06-27",
+      "periods": [
+        {
+          "effective_from": null,
+          "effective_until": null,
+          "tiers": [
+            {
+              "input_tokens_min": 0,
+              "input_tokens_max": null,
+              "rates": {
+                "input": "5.0",
+                "cache_read": "0.50",
+                "output": "25.0"
+              },
+              "utc_daily_overrides": []
+            }
+          ]
+        }
+      ]
+    },
+    "claude-sonnet-4-6": {
+      "vendor": "anthropic",
+      "source_url": "https://www.anthropic.com/pricing",
+      "source_checked_at": "2026-06-27",
+      "periods": [
+        {
+          "effective_from": null,
+          "effective_until": null,
+          "tiers": [
+            {
+              "input_tokens_min": 0,
+              "input_tokens_max": null,
+              "rates": {
+                "input": "3.0",
+                "cache_read": "0.30",
+                "output": "15.0"
+              },
+              "utc_daily_overrides": []
+            }
+          ]
+        }
+      ]
+    },
+    "claude-opus-4-7": {
+      "vendor": "anthropic",
+      "source_url": "https://www.anthropic.com/pricing",
+      "source_checked_at": "2026-06-27",
+      "periods": [
+        {
+          "effective_from": null,
+          "effective_until": null,
+          "tiers": [
+            {
+              "input_tokens_min": 0,
+              "input_tokens_max": null,
+              "rates": {
+                "input": "5.0",
+                "cache_read": "0.50",
+                "output": "25.0"
+              },
+              "utc_daily_overrides": []
+            }
+          ]
+        }
+      ]
+    },
+    "claude-opus-4-6": {
+      "vendor": "anthropic",
+      "source_url": "https://www.anthropic.com/pricing",
+      "source_checked_at": "2026-06-27",
+      "periods": [
+        {
+          "effective_from": null,
+          "effective_until": null,
+          "tiers": [
+            {
+              "input_tokens_min": 0,
+              "input_tokens_max": null,
+              "rates": {
+                "input": "5.0",
+                "cache_read": "0.50",
+                "output": "25.0"
+              },
+              "utc_daily_overrides": []
+            }
+          ]
+        }
+      ]
+    },
+    "claude-haiku-4-5": {
+      "vendor": "anthropic",
+      "source_url": "https://www.anthropic.com/pricing",
+      "source_checked_at": "2026-06-27",
+      "periods": [
+        {
+          "effective_from": null,
+          "effective_until": null,
+          "tiers": [
+            {
+              "input_tokens_min": 0,
+              "input_tokens_max": null,
+              "rates": {
+                "input": "1.0",
+                "cache_read": "0.10",
+                "output": "5.0"
+              },
+              "utc_daily_overrides": []
+            }
+          ]
+        }
+      ]
+    },
+    "gpt-5.6-sol": {
+      "vendor": "openai",
+      "source_url": "https://openai.com/api/pricing/",
+      "source_checked_at": "2026-06-27",
+      "periods": [
+        {
+          "effective_from": null,
+          "effective_until": null,
+          "tiers": [
+            {
+              "input_tokens_min": 0,
+              "input_tokens_max": null,
+              "rates": {
+                "input": "5.0",
+                "cache_read": "0.5",
+                "output": "30.0"
+              },
+              "utc_daily_overrides": []
+            }
+          ]
+        }
+      ]
+    },
+    "gpt-5.6-terra": {
+      "vendor": "openai",
+      "source_url": "https://developers.openai.com/api/docs/models/gpt-5.6-terra",
+      "source_checked_at": "2026-07-30",
+      "periods": [
+        {
+          "effective_from": null,
+          "effective_until": null,
+          "tiers": [
+            {
+              "input_tokens_min": 0,
+              "input_tokens_max": null,
+              "rates": {
+                "input": "2.0",
+                "cache_read": "0.20",
+                "output": "12.0"
+              },
+              "utc_daily_overrides": []
+            }
+          ]
+        }
+      ]
+    },
+    "gpt-5.6-luna": {
+      "vendor": "openai",
+      "source_url": "https://developers.openai.com/api/docs/models/gpt-5.6-luna",
+      "source_checked_at": "2026-07-30",
+      "periods": [
+        {
+          "effective_from": null,
+          "effective_until": null,
+          "tiers": [
+            {
+              "input_tokens_min": 0,
+              "input_tokens_max": null,
+              "rates": {
+                "input": "0.20",
+                "cache_read": "0.02",
+                "output": "1.20"
+              },
+              "utc_daily_overrides": []
+            }
+          ]
+        }
+      ]
+    },
+    "gpt-5.5": {
+      "vendor": "openai",
+      "source_url": "https://openai.com/api/pricing/",
+      "source_checked_at": "2026-06-27",
+      "periods": [
+        {
+          "effective_from": null,
+          "effective_until": null,
+          "tiers": [
+            {
+              "input_tokens_min": 0,
+              "input_tokens_max": null,
+              "rates": {
+                "input": "5.0",
+                "cache_read": "0.5",
+                "output": "30.0"
+              },
+              "utc_daily_overrides": []
+            }
+          ]
+        }
+      ]
+    },
+    "gpt-5.4-mini": {
+      "vendor": "openai",
+      "source_url": "https://openai.com/api/pricing/",
+      "source_checked_at": "2026-06-27",
+      "periods": [
+        {
+          "effective_from": null,
+          "effective_until": null,
+          "tiers": [
+            {
+              "input_tokens_min": 0,
+              "input_tokens_max": null,
+              "rates": {
+                "input": "0.75",
+                "cache_read": "0.075",
+                "output": "4.5"
+              },
+              "utc_daily_overrides": []
+            }
+          ]
+        }
+      ]
+    },
+    "qwen3.8-max": {
+      "vendor": "alibaba",
+      "source_url": "https://www.alibabacloud.com/help/en/model-studio/qwen3-8-max",
+      "source_checked_at": "2026-08-20",
+      "periods": [
+        {
+          "effective_from": null,
+          "effective_until": null,
+          "tiers": [
+            {
+              "input_tokens_min": 0,
+              "input_tokens_max": null,
+              "rates": {
+                "input": "1.65",
+                "cache_read": "0.206",
+                "output": "4.951"
+              },
+              "utc_daily_overrides": []
+            }
+          ]
+        }
+      ]
+    },
+    "qwen3.8-27b": {
+      "vendor": "alibaba",
+      "source_url": "https://www.alibabacloud.com/help/en/model-studio/qwen3-8-27b",
+      "source_checked_at": "2026-08-20",
+      "periods": [
+        {
+          "effective_from": null,
+          "effective_until": null,
+          "tiers": [
+            {
+              "input_tokens_min": 0,
+              "input_tokens_max": null,
+              "rates": {
+                "input": "0.424",
+                "cache_read": "0.085",
+                "output": "1.696"
+              },
+              "utc_daily_overrides": []
+            }
+          ]
+        }
+      ]
+    },
+    "qwen3.8-flash": {
+      "vendor": "alibaba",
+      "source_url": "https://www.alibabacloud.com/help/en/model-studio/qwen3-8-flash",
+      "source_checked_at": "2026-09-02",
+      "effective_time_note": "The Model Studio EN page landed (checked 2026-09-02); this entry uses its published Beijing USD column. Earlier QwenCloud figures tracked the Singapore column, overstated Beijing cost, and are retired.",
+      "periods": [
+        {
+          "effective_from": null,
+          "effective_until": null,
+          "tiers": [
+            {
+              "input_tokens_min": 0,
+              "input_tokens_max": null,
+              "rates": {
+                "input": "0.113",
+                "cache_read": "0.014",
+                "output": "0.382"
+              },
+              "utc_daily_overrides": []
+            }
+          ]
+        }
+      ]
+    },
+    "glm-5.2": {
+      "vendor": "zhipu",
+      "source_url": "https://docs.z.ai/guides/overview/pricing",
+      "source_checked_at": "2026-08-23",
+      "effective_time_note": "Zhipu published only the GLM-5.3 launch date without a timezone; Ava activates the GLM-5 series price change at the earliest global occurrence of 2026-08-14 (UTC+14).",
+      "periods": [
+        {
+          "effective_from": null,
+          "effective_until": "2026-08-13T10:00:00Z",
+          "tiers": [
+            {
+              "input_tokens_min": 0,
+              "input_tokens_max": null,
+              "rates": {
+                "input": "1.10",
+                "cache_read": "0.55",
+                "output": "3.86"
+              },
+              "utc_daily_overrides": []
+            }
+          ]
+        },
+        {
+          "effective_from": "2026-08-13T10:00:00Z",
+          "effective_until": null,
+          "tiers": [
+            {
+              "input_tokens_min": 0,
+              "input_tokens_max": null,
+              "rates": {
+                "input": "1.40",
+                "cache_read": "0.26",
+                "output": "4.40"
+              },
+              "utc_daily_overrides": []
+            }
+          ]
+        }
+      ]
+    },
+    "glm-5.3": {
+      "vendor": "zhipu",
+      "source_url": "https://docs.z.ai/guides/overview/pricing",
+      "source_checked_at": "2026-08-23",
+      "periods": [
+        {
+          "effective_from": null,
+          "effective_until": null,
+          "tiers": [
+            {
+              "input_tokens_min": 0,
+              "input_tokens_max": null,
+              "rates": {
+                "input": "1.40",
+                "cache_read": "0.26",
+                "output": "4.40"
+              },
+              "utc_daily_overrides": []
+            }
+          ]
+        }
+      ]
+    },
+    "glm-5.3-flash": {
+      "vendor": "zhipu",
+      "source_url": "https://docs.z.ai/guides/overview/pricing",
+      "source_checked_at": "2026-08-27",
+      "effective_time_note": "GLM-5.3-Flash ships with a 50% launch discount (docs.z.ai pricing page: strikethrough figures are list prices). The promotion ends at 24:00 on 2026-09-09 (UTC+8, per the page) = 2026-09-09T16:00:00Z; list rates apply after.",
+      "periods": [
+        {
+          "effective_from": null,
+          "effective_until": "2026-09-09T16:00:00Z",
+          "tiers": [
+            {
+              "input_tokens_min": 0,
+              "input_tokens_max": null,
+              "rates": {
+                "input": "0.075",
+                "cache_read": "0.015",
+                "output": "0.25"
+              },
+              "utc_daily_overrides": []
+            }
+          ]
+        },
+        {
+          "effective_from": "2026-09-09T16:00:00Z",
+          "effective_until": null,
+          "tiers": [
+            {
+              "input_tokens_min": 0,
+              "input_tokens_max": null,
+              "rates": {
+                "input": "0.15",
+                "cache_read": "0.03",
+                "output": "0.50"
+              },
+              "utc_daily_overrides": []
+            }
+          ]
+        }
+      ]
+    },
+    "kimi-k3": {
+      "vendor": "moonshot",
+      "source_url": "https://platform.moonshot.ai/docs/pricing",
+      "source_checked_at": "2026-07-25",
+      "periods": [
+        {
+          "effective_from": null,
+          "effective_until": null,
+          "tiers": [
+            {
+              "input_tokens_min": 0,
+              "input_tokens_max": null,
+              "rates": {
+                "input": "3.0",
+                "cache_read": "0.30",
+                "output": "15.0"
+              },
+              "utc_daily_overrides": []
+            }
+          ]
+        }
+      ]
+    },
+    "mimo-v2.5-pro": {
+      "vendor": "xiaomi",
+      "source_url": "https://platform.xiaomimimo.com",
+      "source_checked_at": "2026-06-27",
+      "periods": [
+        {
+          "effective_from": null,
+          "effective_until": null,
+          "tiers": [
+            {
+              "input_tokens_min": 0,
+              "input_tokens_max": null,
+              "rates": {
+                "input": "0.435",
+                "cache_read": "0.0036",
+                "output": "0.87"
+              },
+              "utc_daily_overrides": []
+            }
+          ]
+        }
+      ]
+    },
+    "mimo-v2.5-pro-ultraspeed": {
+      "vendor": "xiaomi",
+      "source_url": "https://platform.xiaomimimo.com",
+      "source_checked_at": "2026-06-27",
+      "periods": [
+        {
+          "effective_from": null,
+          "effective_until": null,
+          "tiers": [
+            {
+              "input_tokens_min": 0,
+              "input_tokens_max": null,
+              "rates": {
+                "input": "1.305",
+                "cache_read": "0.0108",
+                "output": "2.61"
+              },
+              "utc_daily_overrides": []
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

@@ -14,28 +14,32 @@ from __future__ import annotations
 
 import pytest
 from langchain_anthropic import ChatAnthropic
-from pydantic import SecretStr
 
-from shared.config import settings
+from shared.lm._plugin_providers import ensure_provider_plugins_loaded
 from shared.lm.factory import MODEL_CONTEXT_WINDOW, build_chat_model
 from shared.lm.registry import MODEL_IDENTITY
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _load_provider_plugins() -> None:
+    ensure_provider_plugins_loaded()
 
 
 class TestDeepseekMaxTokens:
     """Per-model output cap dispatch. v4-pro and v4-flash both 384K today (same
     1M context / 384K output), but the value is looked up per model name so a
-    future deepseek model with a different cap drops into _DEEPSEEK_MAX_TOKENS
-    without touching build_chat_model — and an unregistered one fails fast
-    rather than borrowing a wrong cap and 400-ing the server."""
+    future deepseek model with a different cap changes only its plugin ModelSpec,
+    while an unregistered one fails fast rather than borrowing a wrong cap and
+    400-ing the server."""
 
     def test_pro_max_tokens(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(settings.lm, "deepseek_api_key", SecretStr("sk-test-deepseek"))
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test-deepseek")
         llm = build_chat_model("deepseek-v4-pro")
         assert isinstance(llm, ChatAnthropic)
         assert llm.max_tokens == 384_000
 
     def test_flash_max_tokens(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(settings.lm, "deepseek_api_key", SecretStr("sk-test-deepseek"))
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test-deepseek")
         llm = build_chat_model("deepseek-v4-flash")
         assert isinstance(llm, ChatAnthropic)
         assert llm.max_tokens == 384_000
@@ -44,17 +48,17 @@ class TestDeepseekMaxTokens:
         """The vision variant rides the same deepseek branch — ChatAnthropic on the
         anthropic-compatible endpoint (which speaks image blocks for this model per
         api-docs.deepseek.com/guides/vision) — with the same 384K output cap."""
-        monkeypatch.setattr(settings.lm, "deepseek_api_key", SecretStr("sk-test-deepseek"))
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test-deepseek")
         llm = build_chat_model("deepseek-v4-flash-vision-exp")
         assert isinstance(llm, ChatAnthropic)
         assert llm.max_tokens == 384_000
         assert "deepseek.com" in str(llm.anthropic_api_url)
 
     def test_unknown_deepseek_model_fails_fast(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """A deepseek-prefixed model not in _DEEPSEEK_MAX_TOKENS raises rather
+        """A deepseek-prefixed model without a registered ModelSpec raises rather
         than silently borrowing some other model's cap (fail-fast: an unknown
         cap is a registration bug, surface it at build time)."""
-        monkeypatch.setattr(settings.lm, "deepseek_api_key", SecretStr("sk-test-deepseek"))
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test-deepseek")
         with pytest.raises(ValueError, match="Unknown deepseek model") as exc_info:
             build_chat_model("deepseek-v4-nonexistent")
 

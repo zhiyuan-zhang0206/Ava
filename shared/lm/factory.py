@@ -21,7 +21,7 @@ Current provider matrix:
 kimi uses `ChatMoonshot` (`langchain-moonshot`) and captures reasoning in
 `additional_kwargs["reasoning_content"]` (not canonical content blocks) — the
 streaming fan-out (`RedisStreamHandler`) and timeline (`shared/timeline.py`)
-handle that style. The pilot provider extraction's binding belongs in a plugin.
+handle that style. Its binding lives in `ava_builtins/plugins/lm_moonshot`.
 
 glm / mimo / qwen use `ReasoningContentChatModel` (`shared/lm/_reasoning_compat.py`), a
 ChatOpenAI subclass folding `reasoning_content` deltas into canonical
@@ -29,6 +29,7 @@ ChatOpenAI subclass folding `reasoning_content` deltas into canonical
 (`langchain-zhipuai` unmaintained; `langchain_zhipu` needs `langchain<0.3.0`;
 MiMo has none at all; Alibaba ships a `dashscope` SDK that is not a LangChain
 client and its own docs drive the OpenAI-compatible endpoint with the OpenAI SDK).
+Their bindings live in the corresponding provider plugins.
 
 **deepseek-* goes through ChatAnthropic, not langchain-deepseek**:
 langchain-deepseek 1.0.1 on the thinking + tool calls + streaming path
@@ -41,7 +42,9 @@ the Anthropic Messages protocol instead (thinking in `content[type=thinking]`
 blocks with signature, echoed transparently) — ChatAnthropic handles it out
 of the box, bypassing the broken reasoning_content roundtrip entirely.
 
-Adding a provider just adds one `_build_*_model` helper in `shared/lm/_providers.py` + one dispatch line in `build_chat_model` — or, as a plugin, a `provider.py` beside a plugin's `plugin.py` (`shared/lm/model-providers-as-plugins.md`; contract in `shared/lm/provider_api.py`, loaded by `shared/lm/_plugin_providers.py`).
+Adding a provider means adding a `provider.py` beside a plugin's `plugin.py`
+(`shared/lm/model-providers-as-plugins.md`; contract in
+`shared/lm/provider_api.py`, loaded by `shared/lm/_plugin_providers.py`).
 
 **`max_tokens` + reasoning effort dispatching** — per-model facts (output caps,
 effort vocabularies) live in `shared/lm/registry.py` (`MODELS`); the
@@ -68,7 +71,7 @@ entering state guards that metadata is not empty.
 from __future__ import annotations
 
 import importlib
-from typing import Any, Protocol
+from typing import Protocol
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from loguru import logger
@@ -86,17 +89,7 @@ from shared.lm._effort import (
 from shared.lm._plugin_providers import (
     ensure_provider_plugins_loaded as ensure_provider_plugins_loaded,
 )  # re-exported (gateway entry points call it before reading the registry)
-from shared.lm._providers import (
-    ThinkingConfig,
-    _build_claude_model,
-    _build_deepseek_model,
-    _build_gemini_model,
-    _build_glm_model,
-    _build_gpt_model,
-    _build_kimi_model,
-    _build_mimo_model,
-    _build_qwen_model,
-)
+from shared.lm._providers import ThinkingConfig
 from shared.lm.registry import (
     MODEL_CONTEXT_WINDOW as MODEL_CONTEXT_WINDOW,  # re-exported catalog view
 )
@@ -128,34 +121,18 @@ class _LLMFactory(Protocol):
     def __call__(self, model: str) -> BaseChatModel: ...
 
 
-# Prefix fallback for UNREGISTERED model ids — registered ids are authoritative
-# in `ModelSpec.media_types` (see `model_supports_vision`). claude / gemini / gpt
-# are multimodal on the endpoints Ava binds; kimi accepts image input on its
-# OpenAI-compatible endpoint, and every Qwen model in the registry accepts native
-# images. deepseek (bound to its anthropic-compatible endpoint above), mimo, and
-# glm are text-only there, so a HumanMessage carrying an image block would 400
-# (or be silently dropped) mid-turn. The message endpoint gates on this to 422 an
-# image addressed to a text-only agent up front, rather than letting the LLM call
-# fail after the inbound is already queued. A prefix is only correct while every
-# unregistered model under it shares one answer — the deepseek family no longer
-# does (v4-flash-vision-exp is multimodal, pro/flash are not), which is exactly
-# why the registered gate is per-model.
-_VISION_MODEL_PREFIXES: tuple[str, ...] = (
-    "claude-",
-    "gemini-",
-    "gpt-",
-    "kimi-",
-    "qwen",
-)
+# The legacy core vision-prefix fallback is empty. Registered plugin models are
+# authoritative through `ModelSpec.media_types`; unregistered ids under a
+# plugin prefix use `ProviderBinding.vision`.
+_VISION_MODEL_PREFIXES: tuple[str, ...] = ()
 
 
 def media_types_for_model(model: str) -> frozenset[str]:
     """Native media capability for `model` across the three provider tiers.
 
-    Core and registered plugin models use their per-model
-    ``ModelSpec.media_types``. An unregistered plugin id gets the plugin
-    binding's v1 image-only ``vision`` capability; other unregistered ids use
-    the core prefix fallback. No match means text-only.
+    Registered plugin models use their per-model ``ModelSpec.media_types``. An
+    unregistered id under a plugin prefix gets the binding's v1 image-only
+    ``vision`` capability. No match means text-only.
     """
     ensure_provider_plugins_loaded()
     spec = MODELS.get(model)
@@ -217,52 +194,33 @@ def vision_capable_provider_names() -> list[str]:
 def provider_key_of_model(model: str) -> str | None:
     """Provider key for a model name, or None for an unregistered prefix.
 
-    Keys are the core `_MODEL_KEY_MAP` prefixes plus registered plugin
-    prefixes, with a trailing dash stripped when present — the same keys
-    `AVA_LLM_MAX_CONCURRENT` accepts (`shared/lm/_concurrency.py`). None
-    means the limiter passes through.
+    Keys are the core `_MODEL_KEY_MAP` prefixes with a trailing dash stripped,
+    plus each registered plugin's explicit provider key or stripped dispatch
+    prefix — the same keys `AVA_LLM_MAX_CONCURRENT` accepts
+    (`shared/lm/_concurrency.py`). None means the limiter passes through.
     """
+    ensure_provider_plugins_loaded()
     for prefix in _MODEL_KEY_MAP:
         if model.startswith(prefix):
             return prefix.rstrip("-")
-    for prefix in provider_api.REGISTRY.bindings:
+    for prefix, binding in provider_api.REGISTRY.bindings.items():
         if model.startswith(prefix):
-            return prefix.rstrip("-")
+            return binding.provider_key or prefix.rstrip("-")
     return None
 
 
-# Model prefix → (provider display name, settings attribute, env var name).
-# Single-source mapping used by both build_chat_model and validate_model_config.
-# An entry here plus a build_chat_model branch is the dispatch half only — a new
-# vendor also needs a registry.py MODELS entry, a _providers.py builder, a
-# config/lm.py key field, usually an _effort.py vocabulary, and a stop.py entry
-# when its client emits a model_provider string stop.py does not already carry.
-# The full per-vendor cost, and the plan to make it a plugin concern instead, are
-# in shared/lm/model-providers-as-plugins.md (summarized in
-# shared/lm/lm.ava.okf.md).
-#
-# Prefixes usually carry the trailing dash of the id they match; `qwen` does not,
-# because Alibaba versions inside the family name (`qwen3.8-max`). The provider
-# key is the prefix with a trailing dash stripped IF it has one, so `qwen` reads
-# as `qwen` rather than a truncated `qwe`.
-_MODEL_KEY_MAP: dict[str, tuple[str, str, str]] = {
-    "claude-": ("Anthropic", "anthropic_api_key", "ANTHROPIC_API_KEY"),
-    "deepseek-": ("DeepSeek", "deepseek_api_key", "DEEPSEEK_API_KEY"),
-    "gemini-": ("Google", "gemini_api_key", "GEMINI_API_KEY"),
-    "gpt-": ("OpenAI", "openai_api_key", "OPENAI_API_KEY"),
-    "mimo-": ("Xiaomi", "xiaomi_api_key", "MIMO_API_KEY"),
-    "kimi-": ("Moonshot", "moonshot_api_key", "MOONSHOT_API_KEY"),
-    "glm-": ("Zhipu", "zhipu_api_key", "GLM_API_KEY"),
-    "qwen": ("Alibaba", "dashscope_api_key", "DASHSCOPE_API_KEY"),
-}
+# Core model prefix → (provider display name, settings attribute, env var name).
+# All providers are plugin-owned now, so this compatibility map stays empty;
+# plugins declare their prefix, display name, and environment variable in
+# ProviderBinding.
+_MODEL_KEY_MAP: dict[str, tuple[str, str, str]] = {}
 
-# A plugin prefix may never shadow or nest inside a core prefix — provider_api
-# checks new registrations against this reserved set (populated once, here).
-provider_api.REGISTRY.reserve_core_prefixes(set(_MODEL_KEY_MAP))
+# The legacy reserved-prefix seam remains, but core owns no provider prefixes.
+provider_api.REGISTRY.reserve_core_prefixes(set())
 
 
 def provider_key_map() -> dict[str, tuple[str, str | None, str]]:
-    """Core + plugin prefix → (display name, settings attr | None, env var).
+    """Provider dispatch prefix/key → key-source metadata.
 
     The merged single source for `_ensure_provider_key` and the concurrency
     limiter's known-key set. Plugin entries carry None for the settings attr —
@@ -275,7 +233,7 @@ def provider_key_map() -> dict[str, tuple[str, str | None, str]]:
     }
     merged.update(
         {
-            prefix: (binding.display_name, None, binding.key_env)
+            binding.provider_key or prefix: (binding.display_name, None, binding.key_env)
             for prefix, binding in provider_api.REGISTRY.bindings.items()
         }
     )
@@ -350,19 +308,18 @@ def validate_model_config(
 def _ensure_provider_key(effective_model: str) -> None:
     """Fail fast when the effective model's provider API key is not configured.
 
-    Drives the lookup from `provider_key_map()` — core entries read the
-    settings field first (with the `.env`-file fallback, regression #1562);
-    plugin entries read the `.env` file only (their key has no settings
-    field). An unregistered model that slipped past SUPPORTED_MODELS raises
-    with a pointer to the map.
+    Drives the lookup from `provider_key_map()`. Provider-plugin entries read
+    the `.env` file directly because their keys have no Settings field. The
+    settings-backed branch remains only for compatibility with the empty core
+    map. An unregistered model that slipped past SUPPORTED_MODELS raises with a
+    pointer to the map.
     """
     for prefix, (_provider, attr, env_var) in provider_key_map().items():
         if not effective_model.startswith(prefix):
             continue
         if attr is None:
             # Plugin provider: the key lives in the cluster's `.env` file
-            # only (it has no Settings field). Same read_env_aliases fallback
-            # posture as the core branch below.
+            # only (it has no Settings field).
             from shared.runtime_config import read_env_aliases
 
             if env_var in read_env_aliases():
@@ -444,12 +401,12 @@ def build_chat_model(
     at use site via `llm.bind_tools([execute_code])`. This way paths that
     don't need tools (compaction etc.) can use the same ChatModel instance.
 
-    Dispatches to the per-provider `_build_*_model` helpers in
-    `shared/lm/_providers.py` (each documents its own key / thinking /
-    reasoning-effort wiring). The cross-provider resolution shared by every
-    branch happens here: `AVA_LLM_OVERRIDE`, the streaming default, and the
-    reasoning-effort knob (`resolved_effort` — explicit env/.env/overlay
-    value wins, else the model's registry default, else the provider default).
+    Dispatches to a registered provider-plugin binding (each documents its own
+    key / thinking / reasoning-effort wiring). The
+    cross-provider resolution shared by every branch happens here:
+    `AVA_LLM_OVERRIDE`, the streaming default, and the reasoning-effort knob
+    (`resolved_effort` — explicit env/.env/overlay value wins, else the model's
+    registry default, else the provider default).
 
     Args:
         model: e.g. `claude-sonnet-5` / `deepseek-v4-pro`.
@@ -527,12 +484,6 @@ def build_chat_model(
             f"{requested_model} is temporarily unavailable; using its registered fallback {model}"
         )
 
-    # Start from the caller's thinking dict when given; provider branches may
-    # still rewrite it (claude display=summarized opt-in / haiku budget opt-in).
-    extra_kwargs: dict[str, Any] = {}
-    if thinking is not None:
-        extra_kwargs["thinking"] = thinking
-
     # Resolve streaming: explicit kwarg overrides model default, model default
     # overrides the fallback True (kimi defaults to True — streaming-first with
     # a non-streaming fallback on 429).
@@ -540,84 +491,14 @@ def build_chat_model(
     if streaming is None:
         streaming = spec.streaming if spec is not None else True
     disable_streaming = not streaming
-    if disable_streaming:
-        extra_kwargs["disable_streaming"] = True
 
     # The cross-provider reasoning-effort knob, resolved per model: explicit
     # env/.env/overlay value wins, else the model's registry default, else "".
     resolved_effort: str = resolve_setting("reasoning_effort", model=model)
 
-    if model.startswith("claude-"):
-        return _build_claude_model(
-            model, spec, thinking, resolved_effort, extra_kwargs, timeout=timeout
-        )
-    if model.startswith("deepseek-"):
-        return _build_deepseek_model(
-            model,
-            spec,
-            thinking,
-            reasoning_effort,
-            resolved_effort,
-            extra_kwargs,
-            timeout=timeout,
-        )
-    if model.startswith("gemini-"):
-        return _build_gemini_model(
-            model,
-            thinking=thinking,
-            resolved_effort=resolved_effort,
-            disable_streaming=disable_streaming,
-            timeout=timeout,
-            media_resolution=media_resolution,
-            media_thinking_level=media_thinking_level,
-            base_url=base_url,
-        )
-    if model.startswith("gpt-"):
-        return _build_gpt_model(
-            model,
-            thinking=thinking,
-            resolved_effort=resolved_effort,
-            disable_streaming=disable_streaming,
-            timeout=timeout,
-        )
-    if model.startswith("mimo-"):
-        return _build_mimo_model(
-            model,
-            thinking=thinking,
-            resolved_effort=resolved_effort,
-            disable_streaming=disable_streaming,
-            timeout=timeout,
-        )
-    if model.startswith("kimi-"):
-        return _build_kimi_model(
-            model,
-            thinking=thinking,
-            resolved_effort=resolved_effort,
-            disable_streaming=disable_streaming,
-            timeout=timeout,
-        )
-    if model.startswith("glm-"):
-        return _build_glm_model(
-            model,
-            spec,
-            thinking=thinking,
-            resolved_effort=resolved_effort,
-            disable_streaming=disable_streaming,
-            timeout=timeout,
-        )
-    if model.startswith("qwen"):
-        return _build_qwen_model(
-            model,
-            thinking=thinking,
-            resolved_effort=resolved_effort,
-            disable_streaming=disable_streaming,
-            timeout=timeout,
-        )
-
-    # Plugin providers: flat prefix map (no nesting, collisions rejected at
-    # registration), so at most one binding matches. The builder gets the same
-    # cross-provider resolution every core branch gets — the contract is
-    # shared/lm/provider_api.py.
+    # The prefix map is flat (no nesting, collisions rejected at registration),
+    # so at most one binding matches. Every builder receives the shared
+    # cross-provider context defined in provider_api.py.
     for prefix, binding in provider_api.REGISTRY.bindings.items():
         if model.startswith(prefix):
             return binding.build(
@@ -625,14 +506,17 @@ def build_chat_model(
                     model=model,
                     spec=spec,
                     thinking=thinking,
-                    resolved_effort=resolved_effort,
+                    resolved_effort=reasoning_effort or resolved_effort,
                     disable_streaming=disable_streaming,
                     timeout=timeout,
+                    effort_levels=binding.effort_levels,
+                    media_resolution=media_resolution,
+                    media_thinking_level=media_thinking_level,
+                    base_url=base_url,
                 )
             )
 
     raise ValueError(
         f"Unknown model {model!r} — add a {model.split('-', maxsplit=1)[0]}-* "
-        "prefix branch in `shared/lm/_providers.py`, or a provider plugin "
-        "(shared/lm/provider_api.py)"
+        "provider plugin (shared/lm/provider_api.py)"
     )

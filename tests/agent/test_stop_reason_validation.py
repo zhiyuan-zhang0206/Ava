@@ -32,6 +32,9 @@ from agent.graph._llm import (
     LLMStreamUnexpectedStopReasonError,
     _validate_stop_reason,
 )
+from shared.lm._plugin_providers import ensure_provider_plugins_loaded
+
+ensure_provider_plugins_loaded()
 
 
 def test_validate_passes_on_end_turn() -> None:

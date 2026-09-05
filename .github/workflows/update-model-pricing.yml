@@ -65,29 +65,38 @@ jobs:
       - name: Reconcile official pricing
         env:
           CANDIDATE: ${{ steps.candidate.outputs.path }}
-          CATALOG: ${{ steps.candidate.outputs.path }}/shared/lm/pricing_catalog.json
+          ARCHIVE: ${{ steps.candidate.outputs.path }}/shared/lm/pricing_catalog_archive.json
         run: |
-          if [ ! -f "$CATALOG" ] || [ -L "$CATALOG" ]; then
-            echo "Candidate catalog must be a regular, non-symlink file" >&2
+          if [ ! -f "$ARCHIVE" ] || [ -L "$ARCHIVE" ]; then
+            echo "Candidate archive must be a regular, non-symlink file" >&2
             exit 1
           fi
           CANDIDATE_REAL="$(realpath "$CANDIDATE")"
-          CATALOG_REAL="$(realpath "$CATALOG")"
-          case "$CATALOG_REAL" in
+          ARCHIVE_REAL="$(realpath "$ARCHIVE")"
+          case "$ARCHIVE_REAL" in
             "$CANDIDATE_REAL"/*) ;;
             *)
-              echo "Candidate catalog resolves outside its isolated worktree" >&2
+              echo "Candidate archive resolves outside its isolated worktree" >&2
               exit 1
               ;;
           esac
-          uv run python scripts/update_model_pricing.py --catalog "$CATALOG" --write
+          uv run python scripts/update_model_pricing.py --catalog "$ARCHIVE" --write
 
-      - name: Detect a catalog change
+      - name: Sync plugin runtime prices
+        env:
+          CANDIDATE: ${{ steps.candidate.outputs.path }}
+        run: |
+          uv run python scripts/update_model_pricing.py --sync-plugins --write --repo-root "$CANDIDATE" \
+            2> >(tee "$RUNNER_TEMP/model-pricing-future-windows.md" >&2)
+
+      - name: Detect a pricing change
         id: diff
         env:
           CANDIDATE: ${{ steps.candidate.outputs.path }}
         run: |
-          if git -C "$CANDIDATE" diff --quiet -- shared/lm/pricing_catalog.json; then
+          if git -C "$CANDIDATE" diff --quiet -- \
+            shared/lm/pricing_catalog_archive.json \
+            ':(glob)ava_builtins/plugins/lm_*/provider.py'; then
             echo 'changed=false' >> "$GITHUB_OUTPUT"
           else
             echo 'changed=true' >> "$GITHUB_OUTPUT"
@@ -101,8 +110,10 @@ jobs:
         run: |
           git -C "$CANDIDATE" config user.name 'ava-pricing-bot'
           git -C "$CANDIDATE" config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git -C "$CANDIDATE" add shared/lm/pricing_catalog.json
-          git -C "$CANDIDATE" commit -m 'fix: update model pricing catalog'
+          git -C "$CANDIDATE" add \
+            shared/lm/pricing_catalog_archive.json \
+            ':(glob)ava_builtins/plugins/lm_*/provider.py'
+          git -C "$CANDIDATE" commit -m 'fix: update model pricing'
           git -C "$CANDIDATE" push --force-with-lease origin "HEAD:refs/heads/$BRANCH"
 
       - name: Open or update the pricing PR
@@ -112,34 +123,55 @@ jobs:
           BRANCH: ava-bot/model-pricing
         run: |
           PR_NUMBER="$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number // empty')"
-          if [ -z "$PR_NUMBER" ]; then
-            gh pr create \
-              --base main \
-              --head "$BRANCH" \
-              --title 'fix: update model pricing catalog' \
-              --body '## Summary
+          PR_BODY="$RUNNER_TEMP/model-pricing-pr.md"
+          FUTURE_WINDOWS="$RUNNER_TEMP/model-pricing-future-windows.md"
+          cat > "$PR_BODY" <<'EOF'
+          ## Summary
 
-          An official provider pricing source differs from Ava’s reviewed catalog.
-          The source adapter appended a new period; its provisional
-          `effective_from` is the detection time and must be checked against the
-          provider announcement before merge.
+          Ava’s reviewed archive or runtime plugin rates differ from the current
+          checked-in pricing state. A source adapter may have appended a provisional
+          period, or a previously reviewed scheduled period may now be active.
+          Runtime plugin rates are synchronized to the archive period covering the
+          workflow run.
 
           ## File tree
 
           ```text
-          shared/lm/pricing_catalog.json  (M) ★ effective-dated rates and provenance
+          shared/lm/pricing_catalog_archive.json      (M when changed) ★ effective-dated rates and provenance
+          ava_builtins/plugins/lm_*/provider.py       (M when changed) ★ synchronized runtime PriceRates
           ```
 
           ## Data flow
 
           Official source → strict provider adapter → normalized rate invariants
-          → append-only catalog period → CI + human review → runtime `quote()`.
+          → append-only archive period → bot sync → human review of the PR.
+
+          ## Upcoming effective windows
+
+          EOF
+          if [ -s "$FUTURE_WINDOWS" ]; then
+            cat "$FUTURE_WINDOWS" >> "$PR_BODY"
+          else
+            echo 'No future rate window differs from the current flat plugin rates.' >> "$PR_BODY"
+          fi
+          cat >> "$PR_BODY" <<'EOF'
 
           ## Not tested automatically
 
-          The provider announcement’s exact effective instant still requires
-          human verification; detection time is deliberately only provisional.
+          For a newly detected source change, the provider announcement’s exact
+          effective instant still requires human verification; detection time is
+          deliberately only provisional. Scheduled archive windows already carry
+          their reviewed boundary.
 
-          This PR is never auto-merged.'
+          This PR is never auto-merged.
+          EOF
+          if [ -z "$PR_NUMBER" ]; then
+            gh pr create \
+              --base main \
+              --head "$BRANCH" \
+              --title 'fix: update model pricing' \
+              --body-file "$PR_BODY"
+          else
+            gh pr edit "$PR_NUMBER" --body-file "$PR_BODY"
           fi
           gh workflow run ci.yml --ref "$BRANCH"

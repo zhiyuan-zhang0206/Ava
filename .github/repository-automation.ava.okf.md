@@ -20,13 +20,16 @@ returns to normal maintainer triage.
 
 A daily schedule (plus manual dispatch) runs the strict provider adapters in
 `scripts/update_model_pricing.py`. No change is a no-op. A verified source change
-appends an effective-dated period on the fixed `ava-bot/model-pricing` branch and
-opens or updates a review-only PR, then explicitly dispatches `ci.yml` because
-GitHub suppresses recursive workflow events created by `GITHUB_TOKEN`.
+appends an effective-dated period and synchronizes each provider plugin's flat
+runtime rate to the period covering the run. The fixed
+`ava-bot/model-pricing` branch opens or updates a review-only PR, then explicitly
+dispatches `ci.yml` because GitHub suppresses recursive workflow events created
+by `GITHUB_TOKEN`.
 
 The write-enabled job executes updater code from protected `main`; the mutable bot
-branch is mounted only as an isolated candidate worktree, and only its catalog
-file is passed as data to the trusted updater.
+branch is mounted only as an isolated candidate worktree. Its archive and
+provider sources are parsed as data by the trusted updater, never imported or
+executed. Future effective windows are copied into the PR body for review.
 
 ## `workflows/audit-branch-protection.yml`
 

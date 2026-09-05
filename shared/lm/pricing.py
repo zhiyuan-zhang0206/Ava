@@ -1,11 +1,16 @@
-"""Versioned LLM pricing catalog + deterministic quote selection.
+"""Versioned LLM pricing archive + deterministic quote selection.
 
-``pricing_catalog.json`` is the reviewed source of truth. Its effective
-intervals, input-token tiers, and recurring UTC windows select one exact rate
-triple for a call; ``quote`` returns that triple with its cost atomically.
+``pricing_catalog_archive.json`` is the reviewed catalog source. It preserves
+effective intervals, input-token tiers, recurring UTC windows, and provenance;
+provider plugins mirror that complete shape for chat models, while catalog-only
+services such as embeddings continue to price directly from the archive. Both
+sources use the same parser and deterministic selection path.
+``pricing_catalog.json`` is an empty placeholder that runtime never loads;
+``_load_catalog`` reads the archive.
+``quote`` returns one selected rate triple with its cost atomically, and
 ``cost_usd`` remains the compatibility surface for existing readers. Schema v2
-requires each model entry to identify its vendor; the cross-line contract lives
-in ``pricing_catalog_schema.md``.
+requires each catalog entry to identify its vendor; the cross-line contract
+lives in ``pricing_catalog_schema.md``.
 
 ## Cache hit vs miss must be computed separately
 
@@ -153,6 +158,17 @@ class _ModelPrice:
     effective_time_note: str | None
     periods: tuple[_EffectivePeriod, ...]
 
+    def rates_at(self, instant: datetime, input_tokens: int | None) -> Rates | None:
+        """Select one rate triple from this model's validated pricing lattice."""
+        for period in self.periods:
+            if not period.contains(instant):
+                continue
+            for tier in period.tiers:
+                if tier.contains(input_tokens):
+                    return tier.rates_at(instant)
+            return None
+        return None
+
 
 def _instant(value: str | None, *, field: str) -> datetime | None:
     if value is None:
@@ -265,7 +281,7 @@ def _parse_periods(model: str, raw_periods: list[dict[str, Any]]) -> tuple[_Effe
 
 
 def _load_catalog() -> dict[str, _ModelPrice]:
-    path = Path(__file__).with_name("pricing_catalog.json")
+    path = Path(__file__).with_name("pricing_catalog_archive.json")
     raw = cast(dict[str, Any], json.loads(path.read_text(encoding="utf-8")))
     return _parse_catalog(raw)
 
@@ -308,27 +324,15 @@ _CATALOG = _load_catalog()
 
 
 def model_vendor(model: str) -> str | None:
-    """Vendor recorded for a catalog model, or None when not available."""
+    """Vendor recorded by the catalog or a plugin, or None when unavailable."""
     entry = _CATALOG.get(model)
-    return None if entry is None else entry.vendor
+    if entry is not None:
+        return entry.vendor
+    plugin_price = _PLUGIN_PRICES.get(model)
+    return None if plugin_price is None else plugin_price.vendor
 
 
-@dataclass(frozen=True)
-class _PluginPrice:
-    """A plugin-declared price: flat Rates + provenance (no periods/tiers).
-
-    Plugin prices live in plugin code — the plugin is the reviewed object;
-    its freshness signal is ``source_checked_at``. The core catalog keeps its
-    own stricter discipline (effective periods, tiers, windows). Runtime never
-    scrapes either source.
-    """
-
-    rates: Rates
-    source_url: str
-    source_checked_at: str
-
-
-_PLUGIN_PRICES: dict[str, _PluginPrice] = {}
+_PLUGIN_PRICES: dict[str, _ModelPrice] = {}
 
 
 def register_plugin_price(
@@ -339,19 +343,18 @@ def register_plugin_price(
     output: float,
     source_url: str,
     source_checked_at: str,
+    vendor: str | None = None,
+    periods: tuple[Any, ...] = (),
     plugin: str = "<unknown>",
 ) -> None:
     """Register a plugin provider's per-model price (shared/lm/provider_api.py).
 
-    A duplicate model id is an error, whatever the source: the catalog owns
-    core models, plugin prices own plugin models, and a collision is a typo or
-    a rebinding — never a precedence order.
+    The archive intentionally contains the same chat-model ids for history and
+    scheduled windows. A successful plugin price registration removes that
+    model from the in-memory catalog view. Full and flat-compatible plugin
+    declarations both become ``_ModelPrice`` values and use the archive parser
+    and runtime selector. A second plugin price for one id is still an error.
     """
-    if model in _CATALOG:
-        raise ValueError(
-            f"provider plugin {plugin!r}: model {model!r} is priced by the core "
-            "catalog — plugin pricing cannot override it"
-        )
     if model in _PLUGIN_PRICES:
         raise ValueError(
             f"provider plugin {plugin!r}: model {model!r} already has a plugin "
@@ -378,11 +381,66 @@ def register_plugin_price(
             raise ValueError(
                 f"provider plugin {plugin!r}: {model!r} price {name} must be finite and non-negative"
             )
-    _PLUGIN_PRICES[model] = _PluginPrice(
-        rates=Rates(cache_miss, cache_hit, output),
-        source_url=source_url,
-        source_checked_at=source_checked_at,
+    raw_periods: list[dict[str, Any]] = (
+        [
+            {
+                "effective_from": period.effective_from,
+                "effective_until": period.effective_until,
+                "tiers": [
+                    {
+                        "input_tokens_min": tier.input_tokens_min,
+                        "input_tokens_max": tier.input_tokens_max,
+                        "rates": {
+                            "input": tier.cache_miss,
+                            "cache_read": tier.cache_hit,
+                            "output": tier.output,
+                        },
+                        "utc_daily_overrides": [
+                            {
+                                "start": window.start,
+                                "end": window.end,
+                                "rates": {
+                                    "input": window.cache_miss,
+                                    "cache_read": window.cache_hit,
+                                    "output": window.output,
+                                },
+                            }
+                            for window in tier.windows
+                        ],
+                    }
+                    for tier in period.tiers
+                ],
+            }
+            for period in periods
+        ]
+        if periods
+        else [
+            {
+                "effective_from": None,
+                "effective_until": None,
+                "tiers": [
+                    {
+                        "input_tokens_min": 0,
+                        "input_tokens_max": None,
+                        "rates": {
+                            "input": cache_miss,
+                            "cache_read": cache_hit,
+                            "output": output,
+                        },
+                        "utc_daily_overrides": [],
+                    }
+                ],
+            }
+        ]
     )
+    _PLUGIN_PRICES[model] = _ModelPrice(
+        vendor=vendor,
+        source_url=source_url,
+        source_checked_at=checked_at,
+        effective_time_note=None,
+        periods=_parse_periods(model, raw_periods),
+    )
+    _CATALOG.pop(model, None)
 
 
 def plugin_price_provenance(model: str) -> tuple[str, str] | None:
@@ -395,7 +453,7 @@ def plugin_price_provenance(model: str) -> tuple[str, str] | None:
     entry = _PLUGIN_PRICES.get(model)
     if entry is None:
         return None
-    return (entry.source_url, entry.source_checked_at)
+    return (entry.source_url, entry.source_checked_at.isoformat())
 
 
 # Retired models — their FINAL published rate, frozen at retirement (add-only
@@ -446,18 +504,10 @@ def rates_at(
         raise ValueError("input_tokens must be non-negative")
     instant = _aware_utc(at)
     entry = _CATALOG.get(model)
+    if entry is None:
+        entry = _PLUGIN_PRICES.get(model)
     if entry is not None:
-        for period in entry.periods:
-            if not period.contains(instant):
-                continue
-            for tier in period.tiers:
-                if tier.contains(input_tokens):
-                    return tier.rates_at(instant)
-            return None
-        return None
-    plugin_price = _PLUGIN_PRICES.get(model)
-    if plugin_price is not None:
-        return plugin_price.rates
+        return entry.rates_at(instant, input_tokens)
     retired = RETIRED_MODEL_PRICING.get(model)
     return Rates(*retired) if retired is not None else None
 

@@ -8,6 +8,8 @@ once per process, before the first build / spawn validation / model list
 (``shared/lm/_plugin_providers.py`` loads every enabled plugin's
 ``provider.py``); the prefix map is flat — a duplicate prefix, or one that
 nests inside another (``foo-`` vs ``foo-bar-``), fails fast at registration.
+Core registers no providers; enabled plugins are the sole source of bindings,
+chat-model rows, provider vocabularies, media fallbacks, keys, and live prices.
 
 A ``provider.py`` module may import ``shared`` and LangChain packages only —
 never ``ava`` / ``agent`` (the gateway, the labeler daemon, and the eval
@@ -32,12 +34,13 @@ Builder contract (plain Python, documented rather than schema'd — see
   history, or budget is visible.
 - Missing API key raises ``RuntimeError`` immediately (``require_key``) — a
   clear build-time error, not a server 401 mid-turn.
-- ``ctx.resolved_effort`` is clamped onto the endpoint's own vocabulary with
-  ``shared.lm._effort._clamp_effort`` before reaching the wire; unknown
-  strings must keep failing fast at build time.
+- ``ctx.resolved_effort`` keeps the provider's established wire semantics.
+  Builders with a constrained vocabulary clamp with
+  ``shared.lm._effort._clamp_effort``; the GPT builder preserves the resolved
+  cross-provider value verbatim.
 - ``thinking={"type": "disabled"}`` is honored per provider capability
-  (mirror onto the local switch, or log-and-ignore like the kimi core
-  branches) — the core dispatch resolves the cross-provider knobs first;
+  (mirror onto the local switch, or log-and-ignore like the Moonshot plugin)
+  — the core dispatch resolves the cross-provider knobs first;
   the builder owns only the wire shape.
 - A builder wrapping ``ChatAnthropic`` must set ``anthropic_protocol=True``
   so registration validates ``max_output_tokens`` on every spawnable model
@@ -48,6 +51,8 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from decimal import Decimal
+from typing import NamedTuple
 
 from langchain_core.language_models.chat_models import BaseChatModel
 
@@ -56,24 +61,52 @@ from shared.lm.pricing import register_plugin_price
 from shared.lm.registry import ModelSpec, register_models
 from shared.lm.stop import StopSpec, register_stop_spec
 
-# Bump on any contract shape change; changes are additive-only. A plugin
-# written against an older version keeps working across a new version —
-# consumers of a *new* field must degrade when it is absent. (Mirrors the
-# plugin-spec-v2 ``engines.ava`` host-compatibility idea at the provider
-# contract level.)
-PROVIDER_API_VERSION = 1
+# Increment for breaking contract changes; additive optional fields stay on the
+# current version. A plugin written against an older shape keeps working —
+# consumers of a new field must degrade when it is absent. (Mirrors the
+# plugin-spec-v2 ``engines.ava`` host-compatibility idea.)
+PROVIDER_API_VERSION = 2
+
+
+class PriceWindow(NamedTuple):
+    """One recurring UTC rate override within a token tier."""
+
+    start: str
+    end: str
+    cache_miss: str | Decimal
+    cache_hit: str | Decimal
+    output: str | Decimal
+
+
+class PriceTier(NamedTuple):
+    """One gapless input-token band and its optional daily overrides."""
+
+    input_tokens_min: int
+    input_tokens_max: int | None
+    cache_miss: str | Decimal
+    cache_hit: str | Decimal
+    output: str | Decimal
+    windows: tuple[PriceWindow, ...] = ()
+
+
+class PricePeriod(NamedTuple):
+    """One half-open effective interval containing all input-token tiers."""
+
+    effective_from: str | None
+    effective_until: str | None
+    tiers: tuple[PriceTier, ...]
 
 
 @dataclass(frozen=True)
 class PriceRates:
-    """One model's static price declaration (USD per 1M tokens).
+    """One model's complete price and vendor declaration (USD per 1M tokens).
 
     Plugins declare prices in code — the plugin is itself the reviewed object
     (``decisions/2026-07-29-skill-trust-tiers-and-install-scan.md``). The
-    versioned catalog in ``shared/lm/pricing_catalog.json`` keeps its own,
-    stricter discipline (effective periods, tiers, windows — see
-    ``decisions/2026-08-18-versioned-model-pricing-catalog.md``); plugin prices
-    are flat and their freshness is carried by ``source_checked_at``.
+    flat fields are a readable shortcut for one unbounded base tier. ``periods``
+    carries history, tiers, and recurring windows when present; its shape mirrors
+    ``shared/lm/pricing_catalog_archive.json`` so runtime and archive selection
+    share one parser (``decisions/2026-08-18-versioned-model-pricing-catalog.md``).
     """
 
     cache_miss: float  # input tokens not served from cache
@@ -81,11 +114,13 @@ class PriceRates:
     output: float
     source_url: str  # HTTPS official pricing page
     source_checked_at: str  # YYYY-MM-DD
+    vendor: str | None = None  # stable billing vocabulary; absent for older plugins
+    periods: tuple[PricePeriod, ...] = ()
 
 
 @dataclass(frozen=True)
 class BuildContext:
-    """Everything a provider builder is allowed to see for one construction."""
+    """Construction inputs, including optional effort and media-provider knobs."""
 
     model: str
     spec: ModelSpec | None  # the registered ModelSpec for `model` (None = unregistered id)
@@ -93,28 +128,35 @@ class BuildContext:
     resolved_effort: str  # explicit env/overlay wins, else per-model default, else ""
     disable_streaming: bool
     timeout: float | None
+    effort_levels: tuple[str, ...] | None = None
+    media_resolution: str | None = None
+    media_thinking_level: str | None = None
+    base_url: str | None = None
 
 
 @dataclass(frozen=True)
 class ProviderBinding:
-    """One provider prefix's binding: how the vendor's client is constructed."""
+    """One dispatch prefix's client binding and optional provider-key override."""
 
     prefix: str  # e.g. "foo-"; dispatch is `model.startswith(prefix)`
     display_name: str  # human-facing provider name (errors, UI text)
     key_env: str  # the API key env var, e.g. "FOO_API_KEY"
     build: Callable[[BuildContext], BaseChatModel]
+    effort_levels: tuple[str, ...] | None = None
     vision: bool = False  # the bound endpoint accepts native image content blocks
     anthropic_protocol: bool = False  # ChatAnthropic binding — see module docstring
-    stop_spec: StopSpec | None = None  # only when the client emits a model_provider
-    # string stop.py does not already carry (a client class already in the
-    # table — e.g. anything OpenAI-compatible — inherits its entry)
+    stop_spec: StopSpec | None = None  # set by the plugin that owns the client
+    # class's emitted model_provider string; compatible bindings share its entry
+    # Usually derived from prefix.rstrip("-"); set only when a narrower legal
+    # dispatch prefix differs from the stable public provider identity.
+    provider_key: str | None = None
 
 
 class _ProviderRegistry:
     """Plugin-side registration state; consulted by ``shared/lm/factory.py``.
 
-    Core prefixes are not here — factory keeps them and reserves them via
-    ``reserve_core_prefixes`` so a plugin cannot shadow a core binding.
+    Core registers no bindings. The reserved-prefix seam remains for contract
+    compatibility, but the production reserved set is empty.
     """
 
     def __init__(self) -> None:
@@ -205,15 +247,14 @@ def register(
     models: Mapping[str, ModelSpec],
     pricing: Mapping[str, PriceRates],
 ) -> None:
-    """The one entry point a provider.py calls. Order matters: prices land
-    first (model validation consults ``rates_at``), models second, then the
-    stop vocabulary, then the binding itself. Any failure propagates out of
-    the loader and fails the process — registration is fail-fast, not
-    best-effort.
+    """The one entry point a provider.py calls. Order matters: models validate
+    before prices mutate runtime state, then the stop vocabulary and binding
+    land. Any failure propagates out of the loader and fails the process —
+    registration is fail-fast, not best-effort.
     """
     plugin = _CURRENT_PLUGIN or "<unknown>"
     REGISTRY.ensure_available(binding, plugin=plugin)
-    provider = binding.prefix.rstrip("-")
+    provider = binding.provider_key or binding.prefix.rstrip("-")
 
     extra_prices = set(pricing) - set(models)
     if extra_prices:
@@ -234,6 +275,13 @@ def register(
                 f"implies {provider!r} — fix the ModelSpec.provider"
             )
 
+    register_models(
+        provider,
+        models,
+        anthropic_protocol=binding.anthropic_protocol,
+        pending_price_models=pricing.keys(),
+    )
+
     for model_id, price in pricing.items():
         register_plugin_price(
             model_id,
@@ -242,14 +290,10 @@ def register(
             output=price.output,
             source_url=price.source_url,
             source_checked_at=price.source_checked_at,
+            vendor=price.vendor,
+            periods=price.periods,
             plugin=plugin,
         )
-
-    register_models(
-        provider,
-        models,
-        anthropic_protocol=binding.anthropic_protocol,
-    )
 
     if binding.stop_spec is not None:
         register_stop_spec(binding.stop_spec, plugin=plugin)
