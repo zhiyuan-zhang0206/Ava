@@ -308,9 +308,12 @@ _CATALOG = _load_catalog()
 
 
 def model_vendor(model: str) -> str | None:
-    """Vendor recorded for a catalog model, or None when not available."""
+    """Vendor recorded by the catalog or a plugin, or None when unavailable."""
     entry = _CATALOG.get(model)
-    return None if entry is None else entry.vendor
+    if entry is not None:
+        return entry.vendor
+    plugin_price = _PLUGIN_PRICES.get(model)
+    return None if plugin_price is None else plugin_price.vendor
 
 
 @dataclass(frozen=True)
@@ -326,6 +329,7 @@ class _PluginPrice:
     rates: Rates
     source_url: str
     source_checked_at: str
+    vendor: str | None
 
 
 _PLUGIN_PRICES: dict[str, _PluginPrice] = {}
@@ -339,6 +343,7 @@ def register_plugin_price(
     output: float,
     source_url: str,
     source_checked_at: str,
+    vendor: str | None = None,
     plugin: str = "<unknown>",
 ) -> None:
     """Register a plugin provider's per-model price (shared/lm/provider_api.py).
@@ -382,6 +387,7 @@ def register_plugin_price(
         rates=Rates(cache_miss, cache_hit, output),
         source_url=source_url,
         source_checked_at=source_checked_at,
+        vendor=vendor,
     )
 
 

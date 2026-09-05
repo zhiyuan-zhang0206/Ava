@@ -66,7 +66,7 @@ PROVIDER_API_VERSION = 1
 
 @dataclass(frozen=True)
 class PriceRates:
-    """One model's static price declaration (USD per 1M tokens).
+    """One model's static price and vendor declaration (USD per 1M tokens).
 
     Plugins declare prices in code — the plugin is itself the reviewed object
     (``decisions/2026-07-29-skill-trust-tiers-and-install-scan.md``). The
@@ -81,11 +81,12 @@ class PriceRates:
     output: float
     source_url: str  # HTTPS official pricing page
     source_checked_at: str  # YYYY-MM-DD
+    vendor: str | None = None  # stable billing vocabulary; absent for older plugins
 
 
 @dataclass(frozen=True)
 class BuildContext:
-    """Everything a provider builder is allowed to see for one construction."""
+    """Construction inputs, including the binding's optional effort vocabulary."""
 
     model: str
     spec: ModelSpec | None  # the registered ModelSpec for `model` (None = unregistered id)
@@ -93,16 +94,18 @@ class BuildContext:
     resolved_effort: str  # explicit env/overlay wins, else per-model default, else ""
     disable_streaming: bool
     timeout: float | None
+    effort_levels: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True)
 class ProviderBinding:
-    """One provider prefix's binding: how the vendor's client is constructed."""
+    """One provider prefix's client binding and optional effort vocabulary."""
 
     prefix: str  # e.g. "foo-"; dispatch is `model.startswith(prefix)`
     display_name: str  # human-facing provider name (errors, UI text)
     key_env: str  # the API key env var, e.g. "FOO_API_KEY"
     build: Callable[[BuildContext], BaseChatModel]
+    effort_levels: tuple[str, ...] | None = None
     vision: bool = False  # the bound endpoint accepts native image content blocks
     anthropic_protocol: bool = False  # ChatAnthropic binding — see module docstring
     stop_spec: StopSpec | None = None  # only when the client emits a model_provider
@@ -242,6 +245,7 @@ def register(
             output=price.output,
             source_url=price.source_url,
             source_checked_at=price.source_checked_at,
+            vendor=price.vendor,
             plugin=plugin,
         )
 

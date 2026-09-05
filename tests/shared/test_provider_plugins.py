@@ -83,6 +83,7 @@ _PRICE_LINE = """\"{model}\": PriceRates(
             cache_miss=1.0, cache_hit=0.1, output=3.0,
             source_url="https://example.com/pricing",
             source_checked_at="2026-08-22",
+            vendor={vendor!r},
         )"""
 
 
@@ -112,6 +113,7 @@ def provider_plugin() -> Generator[Callable[..., None], None, None]:
         stop_spec: str | None = None,
         model: str | None = "testp-1",
         with_price: bool = True,
+        price_vendor: str | None = None,
         dir_name: str = "test_provider",
     ) -> None:
         plugin_dir = paths.plugins_dir() / dir_name
@@ -126,7 +128,9 @@ def provider_plugin() -> Generator[Callable[..., None], None, None]:
             if model
             else ""
         )
-        pricing_line = _PRICE_LINE.format(model=model) if model and with_price else ""
+        pricing_line = (
+            _PRICE_LINE.format(model=model, vendor=price_vendor) if model and with_price else ""
+        )
         source = _PLUGIN_SOURCE.format(
             prefix=prefix,
             display=display,
@@ -184,6 +188,45 @@ def test_plugin_model_registers_and_builds(provider_plugin: Callable[..., None])
     # spec=None and decides its own posture.
     llm2 = build_chat_model("testp-2")
     assert isinstance(llm2, FakeListChatModel)
+
+
+@pytest.mark.parametrize(
+    ("price_vendor", "expected"), [("test-vendor", "test-vendor"), (None, None)]
+)
+def test_plugin_price_vendor_reaches_pricing_lookup(
+    provider_plugin: Callable[..., None],
+    price_vendor: str | None,
+    expected: str | None,
+) -> None:
+    provider_plugin(price_vendor=price_vendor)
+    ensure_provider_plugins_loaded()
+
+    assert pricing._PLUGIN_PRICES["testp-1"].vendor == expected
+    assert pricing.model_vendor("testp-1") == expected
+    assert pricing.model_vendor("testp-unpriced") is None
+
+
+def test_plugin_binding_effort_levels_reach_build_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    contexts: list[provider_api.BuildContext] = []
+
+    def _build(ctx: provider_api.BuildContext) -> FakeListChatModel:
+        contexts.append(ctx)
+        return FakeListChatModel(responses=["hello"])
+
+    binding = provider_api.ProviderBinding(
+        prefix="testctx-",
+        display_name="Test Context",
+        key_env="TESTCTX_API_KEY",
+        build=_build,
+        effort_levels=("low", "high"),
+    )
+    monkeypatch.setitem(provider_api.REGISTRY.bindings, binding.prefix, binding)
+    monkeypatch.setattr("shared.lm.factory.ensure_provider_plugins_loaded", lambda: None)
+
+    assert isinstance(build_chat_model("testctx-model"), FakeListChatModel)
+    assert contexts[0].effort_levels == ("low", "high")
 
 
 def test_plugin_model_validation_and_key_check(

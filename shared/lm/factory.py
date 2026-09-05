@@ -628,6 +628,7 @@ def build_chat_model(
                     resolved_effort=resolved_effort,
                     disable_streaming=disable_streaming,
                     timeout=timeout,
+                    effort_levels=binding.effort_levels,
                 )
             )
 
