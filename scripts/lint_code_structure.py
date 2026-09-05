@@ -149,9 +149,6 @@ _OVERSIZE_ALLOWED: dict[str, tuple[str, int, str]] = {
     # process-local module; crossed 800 when the hosted lifecycle
     # settlement commits landed (#1530). Split tracked as follow-up.
     "services/agent_host/host.py": ("#405", 800, "2026-12-31"),
-    # The EVENTS registry — one flat name→spec dict emit() consults; grows
-    # one entry per event. Schema-registry shard split tracked.
-    "shared/events/contract.py": ("#405", 500, "2026-12-31"),
     # Migration lifecycle: apply, rollback_to/apply_down, applied-set
     # bookkeeping — one invariant shared across all of them.
     "shared/migrations.py": ("#405", 500, "2026-12-31"),
