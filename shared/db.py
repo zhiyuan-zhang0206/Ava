@@ -126,7 +126,8 @@ def publish_inbound_wake(agent_id: int, payload: str) -> bool:
     Redis. Returns True when the wake reached Redis, False when the publish
     was rejected or skipped — callers that meter delivery (the delivery
     watchdog's dispatch counter) must read the return value, never assume
-    success. Ignoring the return value stays backward compatible. But the failure is NOT swallowed blindly — a `NoPermissionError`
+    success. Ignoring the return value stays backward compatible.
+    But the failure is NOT swallowed blindly — a `NoPermissionError`
     (a `ResponseError`) means the publisher's redis ACL user is not granted this
     cluster's `<prefix>:inbound:*` channel (a channel-prefix or ACL misconfig),
     which would silently disable instant wake fleet-wide, so it is logged at
