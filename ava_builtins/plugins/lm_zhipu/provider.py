@@ -10,7 +10,9 @@ from loguru import logger
 from shared.lm._effort import _clamp_effort
 from shared.lm.provider_api import (
     BuildContext,
+    PricePeriod,
     PriceRates,
+    PriceTier,
     ProviderBinding,
     register,
     require_key,
@@ -166,6 +168,34 @@ register(
             source_url="https://docs.z.ai/guides/overview/pricing",
             source_checked_at="2026-08-23",
             vendor="zhipu",
+            periods=(
+                PricePeriod(
+                    effective_from=None,
+                    effective_until="2026-08-13T10:00:00Z",
+                    tiers=(
+                        PriceTier(
+                            input_tokens_min=0,
+                            input_tokens_max=None,
+                            cache_miss="1.10",
+                            cache_hit="0.55",
+                            output="3.86",
+                        ),
+                    ),
+                ),
+                PricePeriod(
+                    effective_from="2026-08-13T10:00:00Z",
+                    effective_until=None,
+                    tiers=(
+                        PriceTier(
+                            input_tokens_min=0,
+                            input_tokens_max=None,
+                            cache_miss="1.40",
+                            cache_hit="0.26",
+                            output="4.40",
+                        ),
+                    ),
+                ),
+            ),
         ),
         "glm-5.3": PriceRates(
             cache_miss=1.40,
@@ -174,6 +204,21 @@ register(
             source_url="https://docs.z.ai/guides/overview/pricing",
             source_checked_at="2026-08-23",
             vendor="zhipu",
+            periods=(
+                PricePeriod(
+                    effective_from=None,
+                    effective_until=None,
+                    tiers=(
+                        PriceTier(
+                            input_tokens_min=0,
+                            input_tokens_max=None,
+                            cache_miss="1.40",
+                            cache_hit="0.26",
+                            output="4.40",
+                        ),
+                    ),
+                ),
+            ),
         ),
         "glm-5.3-flash": PriceRates(
             cache_miss=0.075,
@@ -182,6 +227,34 @@ register(
             source_url="https://docs.z.ai/guides/overview/pricing",
             source_checked_at="2026-08-27",
             vendor="zhipu",
+            periods=(
+                PricePeriod(
+                    effective_from=None,
+                    effective_until="2026-09-09T16:00:00Z",
+                    tiers=(
+                        PriceTier(
+                            input_tokens_min=0,
+                            input_tokens_max=None,
+                            cache_miss="0.075",
+                            cache_hit="0.015",
+                            output="0.25",
+                        ),
+                    ),
+                ),
+                PricePeriod(
+                    effective_from="2026-09-09T16:00:00Z",
+                    effective_until=None,
+                    tiers=(
+                        PriceTier(
+                            input_tokens_min=0,
+                            input_tokens_max=None,
+                            cache_miss="0.15",
+                            cache_hit="0.03",
+                            output="0.50",
+                        ),
+                    ),
+                ),
+            ),
         ),
     },
 )

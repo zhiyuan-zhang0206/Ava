@@ -47,7 +47,7 @@ LangChain types `AIMessage(Chunk).content` weakly as `str | list[str | dict[str,
 
 ### billing (`billing.py` + `pricing.py` + `pricing_catalog_archive.json`) — [[pricing.ava.okf.md]]
 - `billing.py` records one `ava.billing.call` span for each completed provider call. Its v1 attributes use the `ava.billing.*` ledger schema and deliberately carry no task dimension; task budgets instead consume explicit `task_id` on `llm_usage` events. Core/provider-plugin manufacturer resolution, catalog pricing, and tracing guards are centralized so call sites only provide the response and usage kind.
-- Plugin `PriceRates` are live for chat. The archive owns history, scheduled windows, bot reconciliation, and catalog-only services; `pricing_catalog.json` is an empty shell. `quote()` returns rates and cost atomically; selection and sourcing rules live in the child node.
+- Plugin `PriceRates` are the live chat source and carry full history, tiers, windows, and future periods. The archive is their reconciliation ledger, live only for catalog-only services; `pricing_catalog.json` is an empty shell. `quote()` returns rates and cost atomically; both sources share the child node's parser and selector.
 
 ### durable usage — [[usage.ava.okf.md]]
 

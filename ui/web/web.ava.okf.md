@@ -77,7 +77,7 @@ security boundary — the trust decision is the install scan gate — so what it
 buys is that a broken plugin page fails alone and no third-party code enters
 this bundle. Icon names map to lucide components the console imports
 (`components/plugin-nav-icon.ts`), locked against the validator's vocabulary by
-its test. Design: [[future/frontend-plugin-contributions.md]].
+its test. Design: [frontend-plugin-contributions.md](../../future/frontend-plugin-contributions.md).
 
 ## Sub-concepts
 

@@ -51,6 +51,8 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from decimal import Decimal
+from typing import NamedTuple
 
 from langchain_core.language_models.chat_models import BaseChatModel
 
@@ -59,24 +61,52 @@ from shared.lm.pricing import register_plugin_price
 from shared.lm.registry import ModelSpec, register_models
 from shared.lm.stop import StopSpec, register_stop_spec
 
-# Bump on any contract shape change; changes are additive-only. A plugin
-# written against an older version keeps working across a new version —
-# consumers of a *new* field must degrade when it is absent. (Mirrors the
-# plugin-spec-v2 ``engines.ava`` host-compatibility idea at the provider
-# contract level.)
+# Increment for breaking contract changes; additive optional fields stay on the
+# current version. A plugin written against an older shape keeps working —
+# consumers of a new field must degrade when it is absent. (Mirrors the
+# plugin-spec-v2 ``engines.ava`` host-compatibility idea.)
 PROVIDER_API_VERSION = 2
+
+
+class PriceWindow(NamedTuple):
+    """One recurring UTC rate override within a token tier."""
+
+    start: str
+    end: str
+    cache_miss: str | Decimal
+    cache_hit: str | Decimal
+    output: str | Decimal
+
+
+class PriceTier(NamedTuple):
+    """One gapless input-token band and its optional daily overrides."""
+
+    input_tokens_min: int
+    input_tokens_max: int | None
+    cache_miss: str | Decimal
+    cache_hit: str | Decimal
+    output: str | Decimal
+    windows: tuple[PriceWindow, ...] = ()
+
+
+class PricePeriod(NamedTuple):
+    """One half-open effective interval containing all input-token tiers."""
+
+    effective_from: str | None
+    effective_until: str | None
+    tiers: tuple[PriceTier, ...]
 
 
 @dataclass(frozen=True)
 class PriceRates:
-    """One model's static price and vendor declaration (USD per 1M tokens).
+    """One model's complete price and vendor declaration (USD per 1M tokens).
 
     Plugins declare prices in code — the plugin is itself the reviewed object
     (``decisions/2026-07-29-skill-trust-tiers-and-install-scan.md``). The
-    versioned archive in ``shared/lm/pricing_catalog_archive.json`` keeps its own,
-    stricter discipline (effective periods, tiers, windows — see
-    ``decisions/2026-08-18-versioned-model-pricing-catalog.md``); plugin prices
-    are flat and their freshness is carried by ``source_checked_at``.
+    flat fields are a readable shortcut for one unbounded base tier. ``periods``
+    carries history, tiers, and recurring windows when present; its shape mirrors
+    ``shared/lm/pricing_catalog_archive.json`` so runtime and archive selection
+    share one parser (``decisions/2026-08-18-versioned-model-pricing-catalog.md``).
     """
 
     cache_miss: float  # input tokens not served from cache
@@ -85,6 +115,7 @@ class PriceRates:
     source_url: str  # HTTPS official pricing page
     source_checked_at: str  # YYYY-MM-DD
     vendor: str | None = None  # stable billing vocabulary; absent for older plugins
+    periods: tuple[PricePeriod, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -260,6 +291,7 @@ def register(
             source_url=price.source_url,
             source_checked_at=price.source_checked_at,
             vendor=price.vendor,
+            periods=price.periods,
             plugin=plugin,
         )
 

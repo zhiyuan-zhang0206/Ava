@@ -10,9 +10,9 @@ Replaces the parallel per-model-id tables that had accumulated across
 meant editing up to a dozen dicts. Here a model is one entry; the legacy table
 names survive as derived views (below) so existing import sites keep working.
 Core registers no provider or model rows: provider plugins are the sole source
-of chat ``ModelSpec`` entries and per-provider bindings. Current chat prices
-live with those plugins; the reviewed historical and scheduled periods live in
-``pricing_catalog_archive.json`` and are selected through ``shared.lm.pricing``.
+of chat ``ModelSpec`` entries, per-provider bindings, and complete runtime price
+lattices. ``pricing_catalog_archive.json`` is the reviewed reconciliation ledger
+and catalog-only source; selection lives in ``shared.lm.pricing``.
 
 ## Config layering — how a per-model default takes effect
 

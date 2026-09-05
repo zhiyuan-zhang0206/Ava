@@ -267,7 +267,7 @@ def sync_plugin_rates(
     *,
     write: bool = True,
 ) -> PluginSyncResult:
-    """Synchronize built-in provider rates to the archive period covering now."""
+    """Synchronize built-in providers to the archive's complete price semantics."""
     return _sync_plugin_rates(archive_path, repo_root, now=_now_utc(), write=write)
 
 
@@ -333,7 +333,7 @@ def main(argv: list[str] | None = None) -> int:
         if result.changed_files:
             print(f"Synchronized plugin rates in {len(result.changed_files)} provider file(s).")
         else:
-            print("Plugin prices match the archive period covering now.")
+            print("Plugin prices match the archive's full period/tier/window semantics.")
         return 0
 
     html = (

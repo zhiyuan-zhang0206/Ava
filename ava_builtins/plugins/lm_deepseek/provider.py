@@ -9,7 +9,10 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from shared.lm._effort import _clamp_effort
 from shared.lm.provider_api import (
     BuildContext,
+    PricePeriod,
     PriceRates,
+    PriceTier,
+    PriceWindow,
     ProviderBinding,
     register,
     require_key,
@@ -221,6 +224,50 @@ register(
             source_url="https://api-docs.deepseek.com/quick_start/pricing/",
             source_checked_at="2026-08-18",
             vendor="deepseek",
+            periods=(
+                PricePeriod(
+                    effective_from=None,
+                    effective_until="2026-08-16T16:00:00Z",
+                    tiers=(
+                        PriceTier(
+                            input_tokens_min=0,
+                            input_tokens_max=None,
+                            cache_miss="0.435",
+                            cache_hit="0.003625",
+                            output="0.87",
+                        ),
+                    ),
+                ),
+                PricePeriod(
+                    effective_from="2026-08-16T16:00:00Z",
+                    effective_until=None,
+                    tiers=(
+                        PriceTier(
+                            input_tokens_min=0,
+                            input_tokens_max=None,
+                            cache_miss="0.66",
+                            cache_hit="0.022",
+                            output="1.98",
+                            windows=(
+                                PriceWindow(
+                                    start="01:00:00",
+                                    end="04:00:00",
+                                    cache_miss="1.32",
+                                    cache_hit="0.044",
+                                    output="3.96",
+                                ),
+                                PriceWindow(
+                                    start="06:00:00",
+                                    end="10:00:00",
+                                    cache_miss="1.32",
+                                    cache_hit="0.044",
+                                    output="3.96",
+                                ),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
         ),
         "deepseek-v4-flash": PriceRates(
             cache_miss=0.22,
@@ -229,6 +276,50 @@ register(
             source_url="https://api-docs.deepseek.com/quick_start/pricing/",
             source_checked_at="2026-08-18",
             vendor="deepseek",
+            periods=(
+                PricePeriod(
+                    effective_from=None,
+                    effective_until="2026-08-16T16:00:00Z",
+                    tiers=(
+                        PriceTier(
+                            input_tokens_min=0,
+                            input_tokens_max=None,
+                            cache_miss="0.14",
+                            cache_hit="0.0028",
+                            output="0.28",
+                        ),
+                    ),
+                ),
+                PricePeriod(
+                    effective_from="2026-08-16T16:00:00Z",
+                    effective_until=None,
+                    tiers=(
+                        PriceTier(
+                            input_tokens_min=0,
+                            input_tokens_max=None,
+                            cache_miss="0.22",
+                            cache_hit="0.007",
+                            output="0.66",
+                            windows=(
+                                PriceWindow(
+                                    start="01:00:00",
+                                    end="04:00:00",
+                                    cache_miss="0.44",
+                                    cache_hit="0.014",
+                                    output="1.32",
+                                ),
+                                PriceWindow(
+                                    start="06:00:00",
+                                    end="10:00:00",
+                                    cache_miss="0.44",
+                                    cache_hit="0.014",
+                                    output="1.32",
+                                ),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
         ),
         "deepseek-v4-flash-vision-exp": PriceRates(
             cache_miss=0.22,
@@ -237,6 +328,50 @@ register(
             source_url="https://api-docs.deepseek.com/quick_start/pricing/",
             source_checked_at="2026-08-21",
             vendor="deepseek",
+            periods=(
+                PricePeriod(
+                    effective_from=None,
+                    effective_until="2026-08-16T16:00:00Z",
+                    tiers=(
+                        PriceTier(
+                            input_tokens_min=0,
+                            input_tokens_max=None,
+                            cache_miss="0.14",
+                            cache_hit="0.0028",
+                            output="0.28",
+                        ),
+                    ),
+                ),
+                PricePeriod(
+                    effective_from="2026-08-16T16:00:00Z",
+                    effective_until=None,
+                    tiers=(
+                        PriceTier(
+                            input_tokens_min=0,
+                            input_tokens_max=None,
+                            cache_miss="0.22",
+                            cache_hit="0.007",
+                            output="0.66",
+                            windows=(
+                                PriceWindow(
+                                    start="01:00:00",
+                                    end="04:00:00",
+                                    cache_miss="0.44",
+                                    cache_hit="0.014",
+                                    output="1.32",
+                                ),
+                                PriceWindow(
+                                    start="06:00:00",
+                                    end="10:00:00",
+                                    cache_miss="0.44",
+                                    cache_hit="0.014",
+                                    output="1.32",
+                                ),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
         ),
     },
 )

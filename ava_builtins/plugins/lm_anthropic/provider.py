@@ -11,7 +11,9 @@ from loguru import logger
 from shared.lm._effort import _clamp_effort
 from shared.lm.provider_api import (
     BuildContext,
+    PricePeriod,
     PriceRates,
+    PriceTier,
     ProviderBinding,
     register,
     require_key,
@@ -344,6 +346,21 @@ register(
             source_url="https://www.anthropic.com/pricing",
             source_checked_at="2026-06-27",
             vendor="anthropic",
+            periods=(
+                PricePeriod(
+                    effective_from=None,
+                    effective_until=None,
+                    tiers=(
+                        PriceTier(
+                            input_tokens_min=0,
+                            input_tokens_max=None,
+                            cache_miss="2.0",
+                            cache_hit="0.20",
+                            output="10.0",
+                        ),
+                    ),
+                ),
+            ),
         ),
         "claude-haiku-4-5-20251001": PriceRates(
             cache_miss=1.0,
@@ -352,6 +369,21 @@ register(
             source_url="https://www.anthropic.com/pricing",
             source_checked_at="2026-06-27",
             vendor="anthropic",
+            periods=(
+                PricePeriod(
+                    effective_from=None,
+                    effective_until=None,
+                    tiers=(
+                        PriceTier(
+                            input_tokens_min=0,
+                            input_tokens_max=None,
+                            cache_miss="1.0",
+                            cache_hit="0.10",
+                            output="5.0",
+                        ),
+                    ),
+                ),
+            ),
         ),
         "claude-opus-5": PriceRates(
             cache_miss=5.0,
@@ -360,6 +392,21 @@ register(
             source_url="https://www.anthropic.com/pricing",
             source_checked_at="2026-06-27",
             vendor="anthropic",
+            periods=(
+                PricePeriod(
+                    effective_from=None,
+                    effective_until=None,
+                    tiers=(
+                        PriceTier(
+                            input_tokens_min=0,
+                            input_tokens_max=None,
+                            cache_miss="5.0",
+                            cache_hit="0.50",
+                            output="25.0",
+                        ),
+                    ),
+                ),
+            ),
         ),
         "claude-fable-5": PriceRates(
             cache_miss=10.0,
@@ -368,6 +415,21 @@ register(
             source_url="https://www.anthropic.com/pricing",
             source_checked_at="2026-06-27",
             vendor="anthropic",
+            periods=(
+                PricePeriod(
+                    effective_from=None,
+                    effective_until=None,
+                    tiers=(
+                        PriceTier(
+                            input_tokens_min=0,
+                            input_tokens_max=None,
+                            cache_miss="10.0",
+                            cache_hit="1.0",
+                            output="50.0",
+                        ),
+                    ),
+                ),
+            ),
         ),
         "claude-fable-5-1": PriceRates(
             cache_miss=10.0,
@@ -376,6 +438,21 @@ register(
             source_url="https://www.anthropic.com/pricing",
             source_checked_at="2026-09-02",
             vendor="anthropic",
+            periods=(
+                PricePeriod(
+                    effective_from=None,
+                    effective_until=None,
+                    tiers=(
+                        PriceTier(
+                            input_tokens_min=0,
+                            input_tokens_max=None,
+                            cache_miss="10.0",
+                            cache_hit="0.25",
+                            output="50.0",
+                        ),
+                    ),
+                ),
+            ),
         ),
         "claude-opus-4-8": PriceRates(
             cache_miss=5.0,
@@ -384,6 +461,21 @@ register(
             source_url="https://www.anthropic.com/pricing",
             source_checked_at="2026-06-27",
             vendor="anthropic",
+            periods=(
+                PricePeriod(
+                    effective_from=None,
+                    effective_until=None,
+                    tiers=(
+                        PriceTier(
+                            input_tokens_min=0,
+                            input_tokens_max=None,
+                            cache_miss="5.0",
+                            cache_hit="0.50",
+                            output="25.0",
+                        ),
+                    ),
+                ),
+            ),
         ),
         "claude-sonnet-4-6": PriceRates(
             cache_miss=3.0,
@@ -392,6 +484,21 @@ register(
             source_url="https://www.anthropic.com/pricing",
             source_checked_at="2026-06-27",
             vendor="anthropic",
+            periods=(
+                PricePeriod(
+                    effective_from=None,
+                    effective_until=None,
+                    tiers=(
+                        PriceTier(
+                            input_tokens_min=0,
+                            input_tokens_max=None,
+                            cache_miss="3.0",
+                            cache_hit="0.30",
+                            output="15.0",
+                        ),
+                    ),
+                ),
+            ),
         ),
         "claude-opus-4-7": PriceRates(
             cache_miss=5.0,
@@ -400,6 +507,21 @@ register(
             source_url="https://www.anthropic.com/pricing",
             source_checked_at="2026-06-27",
             vendor="anthropic",
+            periods=(
+                PricePeriod(
+                    effective_from=None,
+                    effective_until=None,
+                    tiers=(
+                        PriceTier(
+                            input_tokens_min=0,
+                            input_tokens_max=None,
+                            cache_miss="5.0",
+                            cache_hit="0.50",
+                            output="25.0",
+                        ),
+                    ),
+                ),
+            ),
         ),
         "claude-opus-4-6": PriceRates(
             cache_miss=5.0,
@@ -408,6 +530,21 @@ register(
             source_url="https://www.anthropic.com/pricing",
             source_checked_at="2026-06-27",
             vendor="anthropic",
+            periods=(
+                PricePeriod(
+                    effective_from=None,
+                    effective_until=None,
+                    tiers=(
+                        PriceTier(
+                            input_tokens_min=0,
+                            input_tokens_max=None,
+                            cache_miss="5.0",
+                            cache_hit="0.50",
+                            output="25.0",
+                        ),
+                    ),
+                ),
+            ),
         ),
         "claude-haiku-4-5": PriceRates(
             cache_miss=1.0,
@@ -416,6 +553,21 @@ register(
             source_url="https://www.anthropic.com/pricing",
             source_checked_at="2026-06-27",
             vendor="anthropic",
+            periods=(
+                PricePeriod(
+                    effective_from=None,
+                    effective_until=None,
+                    tiers=(
+                        PriceTier(
+                            input_tokens_min=0,
+                            input_tokens_max=None,
+                            cache_miss="1.0",
+                            cache_hit="0.10",
+                            output="5.0",
+                        ),
+                    ),
+                ),
+            ),
         ),
     },
 )

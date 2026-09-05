@@ -15,7 +15,9 @@ from loguru import logger
 from shared.lm._effort import _clamp_effort
 from shared.lm.provider_api import (
     BuildContext,
+    PricePeriod,
     PriceRates,
+    PriceTier,
     ProviderBinding,
     register,
     require_key,
@@ -128,6 +130,21 @@ register(
             source_url="https://platform.moonshot.ai/docs/pricing",
             source_checked_at="2026-07-25",
             vendor="moonshot",
+            periods=(
+                PricePeriod(
+                    effective_from=None,
+                    effective_until=None,
+                    tiers=(
+                        PriceTier(
+                            input_tokens_min=0,
+                            input_tokens_max=None,
+                            cache_miss="3.0",
+                            cache_hit="0.30",
+                            output="15.0",
+                        ),
+                    ),
+                ),
+            ),
         ),
     },
 )

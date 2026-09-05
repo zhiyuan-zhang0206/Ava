@@ -62,6 +62,12 @@ def _runtime_pricing_catalog_raw() -> dict[str, Any]:
     )
 
 
+def _plugin_rates(model: str, at: datetime) -> Rates:
+    selected = pricing._PLUGIN_PRICES[model].rates_at(at, input_tokens=0)
+    assert selected is not None
+    return selected
+
+
 @pytest.fixture
 def deepseek_archive_catalog(monkeypatch: pytest.MonkeyPatch) -> None:
     """Route explicit DeepSeek history checks through the archived periods."""
@@ -476,11 +482,11 @@ def test_deepseek_plugin_prices_equal_archive_current_base_tier(
         "deepseek-v4-flash",
         "deepseek-v4-flash-vision-exp",
     )
-    plugin_rates = {model: pricing._PLUGIN_PRICES[model].rates for model in model_ids}
+    outside_daily_override = datetime(2026, 9, 5, tzinfo=UTC)
+    plugin_rates = {model: _plugin_rates(model, outside_daily_override) for model in model_ids}
     archive_raw = _pricing_catalog_raw()
     archive_models = _pricing_catalog_models(archive_raw)
     monkeypatch.setattr(pricing, "_CATALOG", _parse_catalog(archive_raw))
-    outside_daily_override = datetime(2026, 9, 5, tzinfo=UTC)
 
     for model in model_ids:
         selected = rates_at(model, outside_daily_override, input_tokens=0)
@@ -504,11 +510,11 @@ def test_gemini_plugin_prices_equal_archive_current_base_tier(
         "gemini-2.5-pro",
         "gemini-2.5-flash",
     )
-    plugin_rates = {model: pricing._PLUGIN_PRICES[model].rates for model in model_ids}
+    current_instant = datetime(2026, 9, 5, tzinfo=UTC)
+    plugin_rates = {model: _plugin_rates(model, current_instant) for model in model_ids}
     archive_raw = _pricing_catalog_raw()
     archive_models = _pricing_catalog_models(archive_raw)
     monkeypatch.setattr(pricing, "_CATALOG", _parse_catalog(archive_raw))
-    current_instant = datetime(2026, 9, 5, tzinfo=UTC)
 
     for model in model_ids:
         selected = rates_at(model, current_instant, input_tokens=0)
@@ -535,11 +541,11 @@ def test_anthropic_plugin_prices_equal_archive_current_base_tier(
         "claude-opus-4-6",
         "claude-haiku-4-5",
     )
-    plugin_rates = {model: pricing._PLUGIN_PRICES[model].rates for model in model_ids}
+    current_instant = datetime(2026, 9, 5, tzinfo=UTC)
+    plugin_rates = {model: _plugin_rates(model, current_instant) for model in model_ids}
     archive_raw = _pricing_catalog_raw()
     archive_models = _pricing_catalog_models(archive_raw)
     monkeypatch.setattr(pricing, "_CATALOG", _parse_catalog(archive_raw))
-    current_instant = datetime(2026, 9, 5, tzinfo=UTC)
 
     for model in model_ids:
         selected = rates_at(model, current_instant, input_tokens=0)
@@ -561,11 +567,11 @@ def test_openai_plugin_prices_equal_archive_current_base_tier(
         "gpt-5.5",
         "gpt-5.4-mini",
     )
-    plugin_rates = {model: pricing._PLUGIN_PRICES[model].rates for model in model_ids}
+    current_instant = datetime(2026, 9, 5, tzinfo=UTC)
+    plugin_rates = {model: _plugin_rates(model, current_instant) for model in model_ids}
     archive_raw = _pricing_catalog_raw()
     archive_models = _pricing_catalog_models(archive_raw)
     monkeypatch.setattr(pricing, "_CATALOG", _parse_catalog(archive_raw))
-    current_instant = datetime(2026, 9, 5, tzinfo=UTC)
 
     for model in model_ids:
         selected = rates_at(model, current_instant, input_tokens=0)
@@ -585,11 +591,11 @@ def test_qwen_plugin_prices_equal_archive_current_base_tier(
         "qwen3.8-27b",
         "qwen3.8-flash",
     )
-    plugin_rates = {model: pricing._PLUGIN_PRICES[model].rates for model in model_ids}
+    current_instant = datetime(2026, 9, 5, tzinfo=UTC)
+    plugin_rates = {model: _plugin_rates(model, current_instant) for model in model_ids}
     archive_raw = _pricing_catalog_raw()
     archive_models = _pricing_catalog_models(archive_raw)
     monkeypatch.setattr(pricing, "_CATALOG", _parse_catalog(archive_raw))
-    current_instant = datetime(2026, 9, 5, tzinfo=UTC)
 
     for model in model_ids:
         selected = rates_at(model, current_instant, input_tokens=0)
@@ -609,11 +615,11 @@ def test_glm_plugin_prices_equal_archive_current_base_tier(
         "glm-5.3",
         "glm-5.3-flash",
     )
-    plugin_rates = {model: pricing._PLUGIN_PRICES[model].rates for model in model_ids}
+    current_instant = datetime(2026, 9, 5, tzinfo=UTC)
+    plugin_rates = {model: _plugin_rates(model, current_instant) for model in model_ids}
     archive_raw = _pricing_catalog_raw()
     archive_models = _pricing_catalog_models(archive_raw)
     monkeypatch.setattr(pricing, "_CATALOG", _parse_catalog(archive_raw))
-    current_instant = datetime(2026, 9, 5, tzinfo=UTC)
 
     for model in model_ids:
         selected = rates_at(model, current_instant, input_tokens=0)
@@ -629,11 +635,11 @@ def test_kimi_plugin_prices_equal_archive_current_base_tier(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     model = "kimi-k3"
-    plugin_rates = pricing._PLUGIN_PRICES[model].rates
+    current_instant = datetime(2026, 9, 5, tzinfo=UTC)
+    plugin_rates = _plugin_rates(model, current_instant)
     archive_raw = _pricing_catalog_raw()
     archive_models = _pricing_catalog_models(archive_raw)
     monkeypatch.setattr(pricing, "_CATALOG", _parse_catalog(archive_raw))
-    current_instant = datetime(2026, 9, 5, tzinfo=UTC)
 
     selected = rates_at(model, current_instant, input_tokens=0)
     assert selected is not None
@@ -651,11 +657,11 @@ def test_mimo_plugin_prices_equal_archive_current_base_tier(
         "mimo-v2.5-pro",
         "mimo-v2.5-pro-ultraspeed",
     )
-    plugin_rates = {model: pricing._PLUGIN_PRICES[model].rates for model in model_ids}
+    current_instant = datetime(2026, 9, 5, tzinfo=UTC)
+    plugin_rates = {model: _plugin_rates(model, current_instant) for model in model_ids}
     archive_raw = _pricing_catalog_raw()
     archive_models = _pricing_catalog_models(archive_raw)
     monkeypatch.setattr(pricing, "_CATALOG", _parse_catalog(archive_raw))
-    current_instant = datetime(2026, 9, 5, tzinfo=UTC)
 
     for model in model_ids:
         selected = rates_at(model, current_instant, input_tokens=0)

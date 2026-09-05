@@ -315,11 +315,12 @@ def test_repo_plugin_prices_equal_archive_at_frozen_instant(
 
     assert set(plugin_prices) == _REPO_MODEL_VENDORS.keys()
     for model, plugin_price in plugin_prices.items():
+        plugin_rates = plugin_price.rates_at(frozen_instant, input_tokens=0)
         archive_rates = pricing.rates_at(model, frozen_instant, input_tokens=0)
-        assert archive_rates is not None
-        assert plugin_price.rates.as_tuple() == pytest.approx(archive_rates.as_tuple())  # pyright: ignore[reportUnknownMemberType]
+        assert plugin_rates is not None and archive_rates is not None
+        assert plugin_rates.as_tuple() == pytest.approx(archive_rates.as_tuple())  # pyright: ignore[reportUnknownMemberType]
         assert plugin_price.vendor == archive_models[model]["vendor"]
-        assert (plugin_price.source_url, plugin_price.source_checked_at) == (
+        assert (plugin_price.source_url, plugin_price.source_checked_at.isoformat()) == (
             archive_models[model]["source_url"],
             archive_models[model]["source_checked_at"],
         )

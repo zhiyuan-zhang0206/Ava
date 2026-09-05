@@ -10,7 +10,9 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from shared.lm._effort import _clamp_effort
 from shared.lm.provider_api import (
     BuildContext,
+    PricePeriod,
     PriceRates,
+    PriceTier,
     ProviderBinding,
     register,
     require_key,
@@ -143,6 +145,21 @@ register(
             source_url="https://platform.xiaomimimo.com",
             source_checked_at="2026-06-27",
             vendor="xiaomi",
+            periods=(
+                PricePeriod(
+                    effective_from=None,
+                    effective_until=None,
+                    tiers=(
+                        PriceTier(
+                            input_tokens_min=0,
+                            input_tokens_max=None,
+                            cache_miss="0.435",
+                            cache_hit="0.0036",
+                            output="0.87",
+                        ),
+                    ),
+                ),
+            ),
         ),
         "mimo-v2.5-pro-ultraspeed": PriceRates(
             cache_miss=1.305,
@@ -151,6 +168,21 @@ register(
             source_url="https://platform.xiaomimimo.com",
             source_checked_at="2026-06-27",
             vendor="xiaomi",
+            periods=(
+                PricePeriod(
+                    effective_from=None,
+                    effective_until=None,
+                    tiers=(
+                        PriceTier(
+                            input_tokens_min=0,
+                            input_tokens_max=None,
+                            cache_miss="1.305",
+                            cache_hit="0.0108",
+                            output="2.61",
+                        ),
+                    ),
+                ),
+            ),
         ),
     },
 )

@@ -95,8 +95,9 @@ A `provider.py` calls `register(binding, models=..., pricing=...)` once:
   `StopSpec`, and an optional stable provider-key override.
 - Each `ModelSpec` owns model-specific availability, context, output cap,
   knowledge cutoff, effort ladder, tuning defaults, identity, and media types.
-- Each `PriceRates` owns the current flat cache-miss, cache-hit, and output rate
-  plus official-source provenance and vendor vocabulary.
+- Each `PriceRates` owns the complete effective-period, input-tier, and daily-
+  window pricing lattice plus official-source provenance and vendor vocabulary.
+  Its flat fields remain the current base-tier shortcut for older plugins.
 - Registration validates prefix ownership, model-prefix/provider agreement,
   spawnable facts, current prices, effort defaults, and Anthropic-protocol
   output caps before the binding becomes available.
@@ -114,7 +115,7 @@ the shared thinking switch according to provider capability.
 
 ## Pricing catalog and runtime prices
 
-`pricing_catalog_archive.json` is the single complete catalog source. It keeps
+`pricing_catalog_archive.json` is the complete reconciliation ledger. It keeps
 official provenance, historical effective periods, token tiers, recurring UTC
 windows, and scheduled future price windows for all repository chat models and
 catalog-priced services. `gemini-embedding-2` remains catalog-priced because it
@@ -122,16 +123,16 @@ has no chat `ProviderBinding`.
 
 Provider `PriceRates` are the runtime source for chat models. When a plugin
 registers a chat-model price, `pricing.py` removes the overlapping archive row
-from its in-memory runtime catalog view and uses the plugin's flat rate. The
-archive remains available for deterministic historical checks, price-window
-selection, and bot reconciliation. `pricing_catalog.json` is retained only as
-an empty placeholder (`"models": {}`) that runtime never loads; `_load_catalog`
-reads `pricing_catalog_archive.json`. Runtime never scrapes a pricing page.
+from its in-memory runtime catalog view and uses the plugin's complete lattice.
+Both declarations pass through the same parser and selection code; the archive
+remains available for independent equivalence tests and bot reconciliation.
+`pricing_catalog.json` is retained only as an empty placeholder (`"models": {}`)
+that runtime never loads; `_load_catalog` reads `pricing_catalog_archive.json`.
+Runtime never scrapes a pricing page.
 
-The checked-in archive is also the scheduling ledger for automation. Future
-effective boundaries stay explicit there so the pricing bot can reconcile the
-currently active period and reviewers can see upcoming changes before they
-take effect.
+Future effective boundaries stay explicit in both the archive and generated
+plugin declarations. The bot reports upcoming changes, and runtime switches at
+the declared instant without waiting for another bot run.
 
 ## Boundary rationale
 

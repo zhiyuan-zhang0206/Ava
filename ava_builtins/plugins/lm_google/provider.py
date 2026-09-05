@@ -10,7 +10,9 @@ from loguru import logger
 from shared.lm._effort import _clamp_effort
 from shared.lm.provider_api import (
     BuildContext,
+    PricePeriod,
     PriceRates,
+    PriceTier,
     ProviderBinding,
     register,
     require_key,
@@ -248,6 +250,34 @@ register(
             source_url="https://ai.google.dev/gemini-api/docs/pricing",
             source_checked_at="2026-09-03",
             vendor="google",
+            periods=(
+                PricePeriod(
+                    effective_from=None,
+                    effective_until="2026-12-31T10:00:00Z",
+                    tiers=(
+                        PriceTier(
+                            input_tokens_min=0,
+                            input_tokens_max=None,
+                            cache_miss="0.75",
+                            cache_hit="0.075",
+                            output="3.75",
+                        ),
+                    ),
+                ),
+                PricePeriod(
+                    effective_from="2026-12-31T10:00:00Z",
+                    effective_until=None,
+                    tiers=(
+                        PriceTier(
+                            input_tokens_min=0,
+                            input_tokens_max=None,
+                            cache_miss="1.50",
+                            cache_hit="0.15",
+                            output="7.50",
+                        ),
+                    ),
+                ),
+            ),
         ),
         "gemini-3.7-flash": PriceRates(
             cache_miss=0.75,
@@ -256,6 +286,34 @@ register(
             source_url="https://ai.google.dev/gemini-api/docs/pricing",
             source_checked_at="2026-08-18",
             vendor="google",
+            periods=(
+                PricePeriod(
+                    effective_from=None,
+                    effective_until="2026-12-31T10:00:00Z",
+                    tiers=(
+                        PriceTier(
+                            input_tokens_min=0,
+                            input_tokens_max=None,
+                            cache_miss="0.75",
+                            cache_hit="0.075",
+                            output="3.75",
+                        ),
+                    ),
+                ),
+                PricePeriod(
+                    effective_from="2026-12-31T10:00:00Z",
+                    effective_until=None,
+                    tiers=(
+                        PriceTier(
+                            input_tokens_min=0,
+                            input_tokens_max=None,
+                            cache_miss="1.50",
+                            cache_hit="0.15",
+                            output="7.50",
+                        ),
+                    ),
+                ),
+            ),
         ),
         "gemini-3.5-flash": PriceRates(
             cache_miss=1.5,
@@ -264,6 +322,21 @@ register(
             source_url="https://ai.google.dev/gemini-api/docs/pricing",
             source_checked_at="2026-06-27",
             vendor="google",
+            periods=(
+                PricePeriod(
+                    effective_from=None,
+                    effective_until=None,
+                    tiers=(
+                        PriceTier(
+                            input_tokens_min=0,
+                            input_tokens_max=None,
+                            cache_miss="1.5",
+                            cache_hit="0.15",
+                            output="9.0",
+                        ),
+                    ),
+                ),
+            ),
         ),
         "gemini-3.1-pro-preview": PriceRates(
             cache_miss=2.0,
@@ -272,6 +345,28 @@ register(
             source_url="https://ai.google.dev/gemini-api/docs/pricing",
             source_checked_at="2026-06-27",
             vendor="google",
+            periods=(
+                PricePeriod(
+                    effective_from=None,
+                    effective_until=None,
+                    tiers=(
+                        PriceTier(
+                            input_tokens_min=0,
+                            input_tokens_max=200000,
+                            cache_miss="2.0",
+                            cache_hit="0.2",
+                            output="12.0",
+                        ),
+                        PriceTier(
+                            input_tokens_min=200001,
+                            input_tokens_max=None,
+                            cache_miss="4.0",
+                            cache_hit="0.4",
+                            output="18.0",
+                        ),
+                    ),
+                ),
+            ),
         ),
         "gemini-2.5-pro": PriceRates(
             cache_miss=1.25,
@@ -280,6 +375,21 @@ register(
             source_url="https://ai.google.dev/gemini-api/docs/pricing",
             source_checked_at="2026-06-27",
             vendor="google",
+            periods=(
+                PricePeriod(
+                    effective_from=None,
+                    effective_until=None,
+                    tiers=(
+                        PriceTier(
+                            input_tokens_min=0,
+                            input_tokens_max=None,
+                            cache_miss="1.25",
+                            cache_hit="0.125",
+                            output="10.0",
+                        ),
+                    ),
+                ),
+            ),
         ),
         "gemini-2.5-flash": PriceRates(
             cache_miss=0.30,
@@ -288,6 +398,21 @@ register(
             source_url="https://ai.google.dev/gemini-api/docs/pricing",
             source_checked_at="2026-06-27",
             vendor="google",
+            periods=(
+                PricePeriod(
+                    effective_from=None,
+                    effective_until=None,
+                    tiers=(
+                        PriceTier(
+                            input_tokens_min=0,
+                            input_tokens_max=None,
+                            cache_miss="0.30",
+                            cache_hit="0.03",
+                            output="2.50",
+                        ),
+                    ),
+                ),
+            ),
         ),
     },
 )

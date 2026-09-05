@@ -8,7 +8,9 @@ from langchain_core.language_models.chat_models import BaseChatModel
 
 from shared.lm.provider_api import (
     BuildContext,
+    PricePeriod,
     PriceRates,
+    PriceTier,
     ProviderBinding,
     register,
     require_key,
@@ -137,6 +139,21 @@ register(
             source_url="https://openai.com/api/pricing/",
             source_checked_at="2026-06-27",
             vendor="openai",
+            periods=(
+                PricePeriod(
+                    effective_from=None,
+                    effective_until=None,
+                    tiers=(
+                        PriceTier(
+                            input_tokens_min=0,
+                            input_tokens_max=None,
+                            cache_miss="5.0",
+                            cache_hit="0.5",
+                            output="30.0",
+                        ),
+                    ),
+                ),
+            ),
         ),
         "gpt-5.6-terra": PriceRates(
             cache_miss=2.0,
@@ -145,6 +162,21 @@ register(
             source_url="https://developers.openai.com/api/docs/models/gpt-5.6-terra",
             source_checked_at="2026-07-30",
             vendor="openai",
+            periods=(
+                PricePeriod(
+                    effective_from=None,
+                    effective_until=None,
+                    tiers=(
+                        PriceTier(
+                            input_tokens_min=0,
+                            input_tokens_max=None,
+                            cache_miss="2.0",
+                            cache_hit="0.20",
+                            output="12.0",
+                        ),
+                    ),
+                ),
+            ),
         ),
         "gpt-5.6-luna": PriceRates(
             cache_miss=0.20,
@@ -153,6 +185,21 @@ register(
             source_url="https://developers.openai.com/api/docs/models/gpt-5.6-luna",
             source_checked_at="2026-07-30",
             vendor="openai",
+            periods=(
+                PricePeriod(
+                    effective_from=None,
+                    effective_until=None,
+                    tiers=(
+                        PriceTier(
+                            input_tokens_min=0,
+                            input_tokens_max=None,
+                            cache_miss="0.20",
+                            cache_hit="0.02",
+                            output="1.20",
+                        ),
+                    ),
+                ),
+            ),
         ),
         "gpt-5.5": PriceRates(
             cache_miss=5.0,
@@ -161,6 +208,21 @@ register(
             source_url="https://openai.com/api/pricing/",
             source_checked_at="2026-06-27",
             vendor="openai",
+            periods=(
+                PricePeriod(
+                    effective_from=None,
+                    effective_until=None,
+                    tiers=(
+                        PriceTier(
+                            input_tokens_min=0,
+                            input_tokens_max=None,
+                            cache_miss="5.0",
+                            cache_hit="0.5",
+                            output="30.0",
+                        ),
+                    ),
+                ),
+            ),
         ),
         "gpt-5.4-mini": PriceRates(
             cache_miss=0.75,
@@ -169,6 +231,21 @@ register(
             source_url="https://openai.com/api/pricing/",
             source_checked_at="2026-06-27",
             vendor="openai",
+            periods=(
+                PricePeriod(
+                    effective_from=None,
+                    effective_until=None,
+                    tiers=(
+                        PriceTier(
+                            input_tokens_min=0,
+                            input_tokens_max=None,
+                            cache_miss="0.75",
+                            cache_hit="0.075",
+                            output="4.5",
+                        ),
+                    ),
+                ),
+            ),
         ),
     },
 )
