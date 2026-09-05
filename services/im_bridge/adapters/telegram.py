@@ -24,7 +24,7 @@ from typing import Any
 
 import httpx
 
-from services.im_bridge.core import IMAdapter, InboundMessage
+from services.im_bridge.types import IMAdapter, InboundMessage
 from shared.config import settings
 from shared.log import logger
 

@@ -726,7 +726,9 @@ def test_service_probes_skips_gated_and_probeless_specs(
     the sessions whose probe is False (None = no probe available, skipped)."""
     import cli.commands as _ns
     from cli.commands import ServiceSpec
-    from ops.spec import _GATEWAY  # typed frozenset[MachineRole]; value irrelevant (roster stubbed)
+    from ops.service_spec import (
+        _GATEWAY,  # typed frozenset[MachineRole]; value irrelevant (roster stubbed)
+    )
 
     # requires_db is irrelevant here (no watchdog round involved), so it is uniform.
     def _spec(session: str) -> ServiceSpec:
@@ -834,7 +836,7 @@ def test_service_probes_carry_the_failing_fact(monkeypatch: pytest.MonkeyPatch) 
     no amount of waiting fixes."""
     import cli.commands as _ns
     from cli.commands import ServiceSpec
-    from ops.spec import _GATEWAY
+    from ops.service_spec import _GATEWAY
 
     spec = ServiceSpec(session="ops", cmd="x", capabilities=_GATEWAY, requires_db=True)
     monkeypatch.setattr(_ns, "_roles_or_none", lambda: frozenset({"gateway"}))

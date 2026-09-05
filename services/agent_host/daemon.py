@@ -68,12 +68,8 @@ import shared.redis_client
 from agent._turn_progress import turn_progress_age_s, turn_progress_snapshot
 from services._pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 from services.agent_host.dispatcher import InboundWakeDispatcher, TurnScheduler
-from services.agent_host.host import (
-    AgentHost,
-    build_control_pool,
-    build_shared_pool,
-    settle_stale_running_rows,
-)
+from services.agent_host.host import AgentHost, settle_stale_running_rows
+from services.agent_host.pools import build_control_pool, build_shared_pool
 from shared import paths
 from shared.config import settings
 from shared.daemon_health import Liveness, health_port, start_health_server, stop_health_server

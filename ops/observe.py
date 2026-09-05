@@ -24,7 +24,8 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
-from ops.spec import ServiceSpec, services_for_capabilities_annotated
+from ops.service_spec import ServiceSpec
+from ops.spec import services_for_capabilities_annotated
 from shared.machine import MachineRoles
 from shared.proc import process_alive
 from shared.resilience import ExponentialBackoff, Policy, http_classifier, retry

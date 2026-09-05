@@ -25,7 +25,7 @@ import threading
 from collections import deque
 from typing import Any
 
-from services.im_bridge.core import IMAdapter, InboundMessage
+from services.im_bridge.types import IMAdapter, InboundMessage
 from shared.log import logger
 
 # Feishu caps a text message around 30KB of characters; segment conservatively.

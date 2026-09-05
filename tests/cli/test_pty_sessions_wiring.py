@@ -9,7 +9,7 @@ the ABSENCE half — the roster, the stop scope, and the converge migration.
 
 from __future__ import annotations
 
-import ops.spec as spec_mod
+import ops.roster as spec_mod
 from cli.commands._converge import _RENAMED_AWAY_SERVICES
 
 

@@ -85,7 +85,7 @@ async def hint_recovered(core: Any, msg: Any) -> None:
         return
     if time.time() - recovered_at > PUSH_RECOVERED_HINT_SECONDS:
         return
-    from services.im_bridge.core import Reply  # local import avoids a cycle
+    from services.im_bridge.types import Reply
 
     try:
         await core._send(

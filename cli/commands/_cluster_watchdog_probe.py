@@ -19,7 +19,8 @@ from __future__ import annotations
 
 import sys
 
-from ops.spec import ServiceSpec, build_services
+from ops.roster import build_services
+from ops.service_spec import ServiceSpec
 from shared.log import logger
 from shared.machine import MachineRole
 from shared.proc import process_alive
@@ -28,7 +29,7 @@ from shared.proc import process_alive
 def _watchdog_spec(role: MachineRole) -> ServiceSpec:
     """This capability's watchdog ServiceSpec from the ops roster.
 
-    Read from ``ops.spec`` rather than hardcoded here so the session name, the
+    Read from ``ops.roster`` rather than hardcoded here so the session name, the
     launch command and the pidfile stay in ONE place — the same roster
     ``ava start`` and the watchdog's own keepalive list are derived from.
     """

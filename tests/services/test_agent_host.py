@@ -38,7 +38,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 import ava._boot
 from services.agent_host.dispatcher import TurnScheduler
-from services.agent_host.host import AgentHost, _config_fingerprint
+from services.agent_host.host import AgentHost
+from services.agent_host.runtime import _config_fingerprint
 from shared.config import settings
 from shared.config.turn_view import turn_settings
 from shared.context import AvaContext
@@ -441,7 +442,7 @@ class TestPendingInboundBackstop:
 class TestPoolIsolation:
     def test_control_pool_has_reserved_capacity(self) -> None:
         """The control boundary is a distinct fixed-capacity client pool."""
-        from services.agent_host.host import build_control_pool, build_shared_pool
+        from services.agent_host.pools import build_control_pool, build_shared_pool
 
         workload_pool = build_shared_pool("postgresql://unused")
         control_pool = build_control_pool("postgresql://unused")
