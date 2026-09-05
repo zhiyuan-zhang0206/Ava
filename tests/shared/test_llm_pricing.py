@@ -78,6 +78,14 @@ def gemini_archive_catalog(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(pricing, "_CATALOG", merged)
 
 
+@pytest.fixture
+def glm_archive_catalog(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Route explicit GLM period/tier history checks through the archive."""
+    merged = dict(pricing._CATALOG)
+    merged.update(_parse_catalog(_pricing_archive_raw()))
+    monkeypatch.setattr(pricing, "_CATALOG", merged)
+
+
 def test_pricing_catalog_schema_v2_vendor_lock() -> None:
     raw = _pricing_catalog_raw()
     models = _pricing_catalog_models(raw)
@@ -103,12 +111,10 @@ def test_pricing_catalog_schema_v2_vendor_lock() -> None:
         "gemini-embedding-2": models["gemini-embedding-2"]["vendor"],
         "mimo-v2.5-pro": models["mimo-v2.5-pro"]["vendor"],
         "kimi-k3": models["kimi-k3"]["vendor"],
-        "glm-5.3": models["glm-5.3"]["vendor"],
     } == {
         "gemini-embedding-2": "google",
         "mimo-v2.5-pro": "xiaomi",
         "kimi-k3": "moonshot",
-        "glm-5.3": "zhipu",
     }
 
 
@@ -187,6 +193,19 @@ def test_qwen_catalog_entries_live_only_in_the_archive() -> None:
         "qwen3.8-max",
         "qwen3.8-27b",
         "qwen3.8-flash",
+    }
+
+    assert expected.isdisjoint(runtime_models)
+    assert expected <= archive_models.keys()
+
+
+def test_glm_catalog_entries_live_only_in_the_archive() -> None:
+    runtime_models = _pricing_catalog_models(_pricing_catalog_raw())
+    archive_models = _pricing_catalog_models(_pricing_archive_raw())
+    expected = {
+        "glm-5.2",
+        "glm-5.3",
+        "glm-5.3-flash",
     }
 
     assert expected.isdisjoint(runtime_models)
@@ -351,7 +370,7 @@ def test_deepseek_v4_effective_interval_boundary(deepseek_archive_catalog: None)
     assert rates_at("deepseek-v4-pro", cutover, _M) == Rates(0.66, 0.022, 1.98)
 
 
-def test_glm_5_pricing_effective_interval_boundary() -> None:
+def test_glm_5_pricing_effective_interval_boundary(glm_archive_catalog: None) -> None:
     """GLM-5.2 preserves its prior rate before the GLM-5.3 launch cutover."""
     before = datetime(2026, 8, 13, 9, 59, 59, 999999, tzinfo=UTC)
     cutover = datetime(2026, 8, 13, 10, 0, tzinfo=UTC)
@@ -361,7 +380,7 @@ def test_glm_5_pricing_effective_interval_boundary() -> None:
     assert rates_at("glm-5.3", cutover, _M) == Rates(1.40, 0.26, 4.40)
 
 
-def test_glm_5_3_flash_launch_discount_boundary() -> None:
+def test_glm_5_3_flash_launch_discount_boundary(glm_archive_catalog: None) -> None:
     """GLM-5.3-Flash ships at a 50% launch discount (docs.z.ai pricing page)
     ending 24:00 2026-09-09 UTC+8 = 2026-09-09T16:00:00Z; list rates follow."""
     before = datetime(2026, 9, 9, 15, 59, 59, 999999, tzinfo=UTC)
@@ -549,6 +568,30 @@ def test_qwen_plugin_prices_equal_archive_current_base_tier(
         "qwen3.8-max",
         "qwen3.8-27b",
         "qwen3.8-flash",
+    )
+    plugin_rates = {model: pricing._PLUGIN_PRICES[model].rates for model in model_ids}
+    archive_raw = _pricing_archive_raw()
+    archive_models = _pricing_catalog_models(archive_raw)
+    monkeypatch.setattr(pricing, "_CATALOG", _parse_catalog(archive_raw))
+    current_instant = datetime(2026, 9, 5, tzinfo=UTC)
+
+    for model in model_ids:
+        selected = rates_at(model, current_instant, input_tokens=0)
+        assert selected is not None
+        assert plugin_rates[model].as_tuple() == pytest.approx(selected.as_tuple())  # pyright: ignore[reportUnknownMemberType]
+        assert pricing.plugin_price_provenance(model) == (
+            archive_models[model]["source_url"],
+            archive_models[model]["source_checked_at"],
+        )
+
+
+def test_glm_plugin_prices_equal_archive_current_base_tier(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    model_ids = (
+        "glm-5.2",
+        "glm-5.3",
+        "glm-5.3-flash",
     )
     plugin_rates = {model: pricing._PLUGIN_PRICES[model].rates for model in model_ids}
     archive_raw = _pricing_archive_raw()

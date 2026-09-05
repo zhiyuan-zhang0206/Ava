@@ -90,7 +90,6 @@ from shared.lm._plugin_providers import (
 )  # re-exported (gateway entry points call it before reading the registry)
 from shared.lm._providers import (
     ThinkingConfig,
-    _build_glm_model,
     _build_kimi_model,
     _build_mimo_model,
 )
@@ -231,7 +230,6 @@ def provider_key_of_model(model: str) -> str | None:
 _MODEL_KEY_MAP: dict[str, tuple[str, str, str]] = {
     "mimo-": ("Xiaomi", "xiaomi_api_key", "MIMO_API_KEY"),
     "kimi-": ("Moonshot", "moonshot_api_key", "MOONSHOT_API_KEY"),
-    "glm-": ("Zhipu", "zhipu_api_key", "GLM_API_KEY"),
 }
 
 # A plugin prefix may never shadow or nest inside a core prefix — provider_api
@@ -537,15 +535,6 @@ def build_chat_model(
     if model.startswith("kimi-"):
         return _build_kimi_model(
             model,
-            thinking=thinking,
-            resolved_effort=resolved_effort,
-            disable_streaming=disable_streaming,
-            timeout=timeout,
-        )
-    if model.startswith("glm-"):
-        return _build_glm_model(
-            model,
-            spec,
             thinking=thinking,
             resolved_effort=resolved_effort,
             disable_streaming=disable_streaming,

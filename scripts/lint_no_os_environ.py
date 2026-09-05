@@ -80,6 +80,7 @@ _PROVIDER_KEY_ENV_VARS = frozenset(
         "GEMINI_API_KEY",  # ava_builtins/plugins/lm_google
         "OPENAI_API_KEY",  # ava_builtins/plugins/lm_openai
         "DASHSCOPE_API_KEY",  # ava_builtins/plugins/lm_alibaba
+        "GLM_API_KEY",  # ava_builtins/plugins/lm_zhipu
     }
 )
 

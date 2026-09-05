@@ -22,7 +22,6 @@ from shared.lm._effort import (
     _clamp_effort,
     mimo_extra_body,
 )
-from shared.lm.registry import ModelSpec
 
 
 class ThinkingConfig(TypedDict):
@@ -145,67 +144,4 @@ def _build_kimi_model(
         disable_streaming=disable_streaming,
         timeout=timeout,
         **kimi_kwargs,
-    )
-
-
-def _build_glm_model(
-    model: str,
-    spec: ModelSpec | None,
-    *,
-    thinking: ThinkingConfig | None,
-    resolved_effort: str,
-    disable_streaming: bool,
-    timeout: float | None = None,
-) -> BaseChatModel:
-    """glm-* branch: ReasoningContentChatModel (OpenAI-compatible).
-    Thinking off rides top-level `thinking` via extra_body; otherwise
-    reasoning effort rides the `reasoning_effort` constructor field.
-    Models whose reasoning is always on (glm-5.3 / glm-5.3-flash,
-    `ModelSpec.thinking_always_on`) get a warning instead — their endpoint
-    rejects thinking.type=disabled with a 400 (error code 1210), so sending
-    the body would fail the call rather than honor the intent."""
-    from shared.lm._reasoning_compat import ReasoningContentChatModel
-
-    # Zhipu GLM API is OpenAI-compatible (https://open.bigmodel.cn/api/paas/v4),
-    # standard `Authorization: Bearer` auth. GLM 5.2 streams thinking in the
-    # delta's `reasoning_content` field — same ReasoningContentChatModel recovers
-    # it into canonical thinking blocks.
-    if settings.lm.zhipu_api_key is None:
-        raise RuntimeError(
-            "GLM_API_KEY not set — glm-* model needs this key; "
-            "configure in ~/.ava/.env or export before starting"
-        )
-    # GLM natively supports turning thinking off — top-level `thinking` in
-    # the POST body via extra_body. Disabled thinking skips effort
-    # injection (deepseek-style: the caller asked for the cheap path).
-    # Otherwise reasoning effort rides the OpenAI-standard
-    # `reasoning_effort` payload field, a declared ChatOpenAI constructor
-    # field (GLM's enum is low/high/max, default max — `low` and `high` are
-    # the cheaper tiers; checked 2026-08-23 for GLM-5.3).
-    glm_kwargs: dict[str, Any] = {}
-    if thinking is not None and thinking.get("type") == "disabled":
-        if spec is not None and spec.thinking_always_on:
-            # glm-5.3 / glm-5.3-flash always think — the endpoint rejects
-            # thinking.type=disabled (400, error code 1210, live-checked
-            # 2026-08-27). Warn like the kimi branch instead of sending a
-            # body that fails the call.
-            logger.warning(
-                f"{model} cannot disable thinking; thinking={{'type': 'disabled'}} ignored"
-            )
-        else:
-            glm_kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
-    elif resolved_effort:
-        glm_kwargs["reasoning_effort"] = _clamp_effort(
-            resolved_effort,
-            _PROVIDER_EFFORT_LEVELS["glm"],
-            target="glm",
-        )
-    return ReasoningContentChatModel(
-        model=model,  # type: ignore[call-arg]
-        api_key=settings.lm.zhipu_api_key.get_secret_value(),  # type: ignore[arg-type]
-        base_url="https://open.bigmodel.cn/api/paas/v4",
-        stream_usage=True,
-        disable_streaming=disable_streaming,
-        timeout=timeout,
-        **glm_kwargs,
     )

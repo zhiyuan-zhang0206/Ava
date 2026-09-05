@@ -25,7 +25,7 @@ from typing import Any
 from loguru import logger
 
 # Per-provider clamp targets for the cross-provider AVA_REASONING_EFFORT knob
-# on the remaining core OpenAI-style branches. mimo's official chat-completions
+# on the remaining core OpenAI-style branches. MiMo's official chat-completions
 # reference documents no reasoning_effort field, only a body-level
 # thinking.type enabled/disabled toggle — so its tuple is a binary
 # "none"/"high": "none" sends thinking.type=disabled, anything else leaves the
@@ -34,7 +34,6 @@ from loguru import logger
 # provider.
 _PROVIDER_EFFORT_LEVELS: dict[str, tuple[str, ...]] = {
     "kimi": ("low", "high", "max"),
-    "glm": ("low", "high", "max"),
     "mimo": ("none", "high"),
 }
 

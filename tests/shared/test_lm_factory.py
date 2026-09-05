@@ -1,9 +1,9 @@
 """Plugin provider key validation and model media capability tests.
 
-Anthropic, DeepSeek, Gemini, OpenAI, and Qwen are provider plugins, so their
-key declarations are plugin-owned and the cluster's `.env` file is the only
-spawn-validation source. The legacy Settings fields stay for configuration
-compatibility but no longer authorize a spawn.
+Anthropic, DeepSeek, Gemini, OpenAI, Qwen, and Zhipu are provider plugins, so
+their key declarations are plugin-owned and the cluster's `.env` file is the
+only spawn-validation source. The legacy Settings fields stay for
+configuration compatibility but no longer authorize a spawn.
 """
 
 from __future__ import annotations
@@ -96,6 +96,20 @@ def test_qwen_plugin_key_ignores_legacy_settings_field(
     assert provider_key_map()["qwen"] == ("Alibaba", None, "DASHSCOPE_API_KEY")
     with pytest.raises(ValueError, match="DASHSCOPE_API_KEY"):
         validate_model_config(model="qwen3.8-max", config={})
+
+
+def test_glm_plugin_key_ignores_legacy_settings_field(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The migrated Zhipu binding also reads only its declared env channel."""
+    monkeypatch.setattr(settings.lm, "zhipu_api_key", "sk-test")
+    monkeypatch.setattr(settings.lm, "llm_override", "")
+    monkeypatch.setattr("shared.runtime_config.read_env_aliases", dict)
+    ensure_provider_plugins_loaded()
+
+    assert provider_key_map()["glm-"] == ("Zhipu", None, "GLM_API_KEY")
+    with pytest.raises(ValueError, match="GLM_API_KEY"):
+        validate_model_config(model="glm-5.2", config={})
 
 
 def test_file_fallback_allows_key_after_gateway_pop(env_file: Path) -> None:

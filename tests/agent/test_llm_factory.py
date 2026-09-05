@@ -468,7 +468,7 @@ class TestBuildChatModel:
         Zhipu OpenAI-compatible endpoint — GLM 5.2 streams its thinking in the
         `reasoning_content` delta, which the subclass recovers into thinking blocks."""
         monkeypatch.setattr(settings.lm, "llm_override", "")
-        monkeypatch.setattr(settings.lm, "zhipu_api_key", SecretStr("sk-glm"))
+        monkeypatch.setenv("GLM_API_KEY", "sk-glm")
         from shared.lm._reasoning_compat import ReasoningContentChatModel
 
         m = build_chat_model("glm-5.2")
@@ -481,7 +481,7 @@ class TestBuildChatModel:
         """glm-5.3-flash dispatches through the same glm branch — Zhipu
         OpenAI-compatible endpoint, ReasoningContentChatModel."""
         monkeypatch.setattr(settings.lm, "llm_override", "")
-        monkeypatch.setattr(settings.lm, "zhipu_api_key", SecretStr("sk-glm"))
+        monkeypatch.setenv("GLM_API_KEY", "sk-glm")
         from shared.lm._reasoning_compat import ReasoningContentChatModel
 
         m = build_chat_model("glm-5.3-flash")
@@ -490,7 +490,8 @@ class TestBuildChatModel:
 
     def test_glm_missing_key_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(settings.lm, "llm_override", "")
-        monkeypatch.setattr(settings.lm, "zhipu_api_key", None)
+        monkeypatch.setattr(settings.lm, "zhipu_api_key", SecretStr("legacy-settings-key"))
+        monkeypatch.delenv("GLM_API_KEY", raising=False)
         with pytest.raises(RuntimeError, match="GLM_API_KEY"):
             build_chat_model("glm-5.2")
 
@@ -596,7 +597,7 @@ class TestBuildChatModel:
     def test_glm_defaults_to_streaming(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """glm-* carries no registry streaming opt-out → default streaming=True."""
         monkeypatch.setattr(settings.lm, "llm_override", "")
-        monkeypatch.setattr(settings.lm, "zhipu_api_key", SecretStr("sk-test"))
+        monkeypatch.setenv("GLM_API_KEY", "sk-test")
         from shared.lm._reasoning_compat import ReasoningContentChatModel
 
         m = build_chat_model("glm-5.2")
@@ -968,7 +969,7 @@ class TestReasoningEffortDispatch:
         directly using ChatOpenAI's declared field (stuffing into model_kwargs is rejected
         by langchain)."""
         monkeypatch.setattr(settings.lm, "llm_override", "")
-        monkeypatch.setattr(settings.lm, "zhipu_api_key", SecretStr("sk-glm"))
+        monkeypatch.setenv("GLM_API_KEY", "sk-glm")
         monkeypatch.setattr(settings.lm, "reasoning_effort", "high")
         from shared.lm._reasoning_compat import ReasoningContentChatModel
 
@@ -979,7 +980,7 @@ class TestReasoningEffortDispatch:
     def test_glm_5_3_low_effort_is_passed_through(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """GLM-5.3 documents low as a native reasoning-effort rung."""
         monkeypatch.setattr(settings.lm, "llm_override", "")
-        monkeypatch.setattr(settings.lm, "zhipu_api_key", SecretStr("sk-glm"))
+        monkeypatch.setenv("GLM_API_KEY", "sk-glm")
         monkeypatch.setattr(settings.lm, "reasoning_effort", "low")
         from shared.lm._reasoning_compat import ReasoningContentChatModel
 
@@ -994,7 +995,7 @@ class TestReasoningEffortDispatch:
         previously silently swallowed (F5). disabled also skips effort injection (caller wants
         the money-saving path)."""
         monkeypatch.setattr(settings.lm, "llm_override", "")
-        monkeypatch.setattr(settings.lm, "zhipu_api_key", SecretStr("sk-glm"))
+        monkeypatch.setenv("GLM_API_KEY", "sk-glm")
         monkeypatch.setattr(settings.lm, "reasoning_effort", "high")
         from shared.lm._reasoning_compat import ReasoningContentChatModel
 
@@ -1012,7 +1013,7 @@ class TestReasoningEffortDispatch:
         2026-08-27), so the builder drops the disabled body and warns (the kimi
         branch's pattern) instead of sending a body that fails every call."""
         monkeypatch.setattr(settings.lm, "llm_override", "")
-        monkeypatch.setattr(settings.lm, "zhipu_api_key", SecretStr("sk-glm"))
+        monkeypatch.setenv("GLM_API_KEY", "sk-glm")
         monkeypatch.setattr(settings.lm, "reasoning_effort", "high")
         from shared.lm._reasoning_compat import ReasoningContentChatModel
 
@@ -1283,6 +1284,7 @@ class TestValidateModelConfig:
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
         monkeypatch.delenv("GEMINI_API_KEY", raising=False)
         monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        monkeypatch.delenv("GLM_API_KEY", raising=False)
         monkeypatch.delenv("DASHSCOPE_API_KEY", raising=False)
 
     @staticmethod
@@ -1294,6 +1296,7 @@ class TestValidateModelConfig:
                 "DEEPSEEK_API_KEY": "sk-test",
                 "GEMINI_API_KEY": "sk-test",
                 "OPENAI_API_KEY": "sk-test",
+                "GLM_API_KEY": "sk-test",
                 "DASHSCOPE_API_KEY": "sk-test",
             },
         )
@@ -1370,7 +1373,6 @@ class TestValidateModelConfig:
             self._set_plugin_keys(monkeypatch)
             monkeypatch.setattr(settings.lm, "xiaomi_api_key", SecretStr("sk-test-mimo"))
             monkeypatch.setattr(settings.lm, "moonshot_api_key", SecretStr("sk-test-moonshot"))
-            monkeypatch.setattr(settings.lm, "zhipu_api_key", SecretStr("sk-test-zhipu"))
             result = validate_model_config(model=m)
             assert result == m
 
@@ -1383,7 +1385,7 @@ class TestValidateModelConfig:
         from shared.lm.registry import MODELS
 
         self._clear_all_keys(monkeypatch)
-        monkeypatch.setattr(settings.lm, "zhipu_api_key", SecretStr("sk-test"))
+        self._set_plugin_keys(monkeypatch)
         monkeypatch.setitem(MODELS, "glm-5.2", replace(MODELS["glm-5.2"], superseded_by="kimi-k3"))
         result = validate_model_config(model="glm-5.2", config={"llm_model": "glm-5.2"})
         assert result == "glm-5.2"
@@ -1537,6 +1539,7 @@ class TestThinkingDisabledAcrossRoster:
         monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test")
         monkeypatch.setenv("GEMINI_API_KEY", "sk-test")
         monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+        monkeypatch.setenv("GLM_API_KEY", "sk-test")
         monkeypatch.setenv("DASHSCOPE_API_KEY", "sk-test")
 
     @pytest.mark.parametrize("model", [m for models in SUPPORTED_MODELS.values() for m in models])
