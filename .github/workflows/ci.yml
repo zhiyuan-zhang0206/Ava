@@ -796,7 +796,10 @@ jobs:
         run: |
           uv run python - <<'PY'
           import json
+          import re
           import subprocess
+          import tempfile
+          from pathlib import Path
 
           from services.permissions_helper import client, lifecycle
 
@@ -843,6 +846,75 @@ jobs:
               ],
               check=True,
           )
+
+          def report_probe(name, result):
+              print(f"PROBE {name} rc={result.returncode}")
+              print(f"PROBE {name} stdout={result.stdout[:500]}")
+              print(f"PROBE {name} stderr={result.stderr[:500]}")
+
+
+          probe_dir = Path(tempfile.mkdtemp())
+          keychain_scratch = probe_dir / "keychain-signing-scratch"
+          keychain_scratch.write_bytes(b"\x00")
+
+          # Test whether codesign can find the identity in an explicit keychain.
+          explicit_keychain = subprocess.run(
+              [
+                  "codesign",
+                  "--keychain",
+                  str(lifecycle._keychain_path()),
+                  "--sign",
+                  "Ava Permissions Helper Code Signing",
+                  str(keychain_scratch),
+              ],
+              capture_output=True,
+              check=False,
+              text=True,
+          )
+          report_probe("codesign-explicit-keychain", explicit_keychain)
+
+          # Resolve the identity hash used by the direct-SHA1 signing probe.
+          identity_lookup = subprocess.run(
+              ["security", "find-identity", "-p", "codesigning"],
+              capture_output=True,
+              check=False,
+              text=True,
+          )
+          report_probe("sha1-identity-lookup", identity_lookup)
+          identity_match = re.search(
+              r"^\s*\d+\)\s+([0-9A-F]{40})\s+",
+              identity_lookup.stdout,
+              re.MULTILINE,
+          )
+          identity_sha1 = identity_match.group(1) if identity_match else ""
+          if identity_match is None:
+              print(f"PROBE sha1-identity-unmatched stdout={identity_lookup.stdout[:500]}")
+
+          sha1_scratch = probe_dir / "sha1-signing-scratch"
+          sha1_scratch.write_bytes(b"\x00")
+          direct_sha1 = subprocess.run(
+              ["codesign", "--sign", identity_sha1, str(sha1_scratch)],
+              capture_output=True,
+              check=False,
+              text=True,
+          )
+          report_probe("codesign-direct-sha1", direct_sha1)
+
+          # Ask security whether this keychain contains a valid identity.
+          explicit_find_identity = subprocess.run(
+              [
+                  "security",
+                  "find-identity",
+                  "-v",
+                  "-p",
+                  "codesigning",
+                  str(lifecycle._keychain_path()),
+              ],
+              capture_output=True,
+              check=False,
+              text=True,
+          )
+          report_probe("find-identity-explicit-keychain", explicit_find_identity)
 
           app, rebuilt = lifecycle.build_and_sign()
           assert rebuilt is True, "the isolated first build must compile and sign"
