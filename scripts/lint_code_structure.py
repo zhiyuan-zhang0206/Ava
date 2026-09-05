@@ -164,10 +164,6 @@ _OVERSIZE_ALLOWED: dict[str, tuple[str, int, str]] = {
     # Migration lifecycle: apply, rollback_to/apply_down, applied-set
     # bookkeeping — one invariant shared across all of them.
     "shared/migrations.py": ("#405", 500, "2026-12-31"),
-    # The converge step table — one aggregation of every bring-up step; the
-    # source-tree guard step (Task #1905) pushed it over the ceiling. The
-    # step-split refactor is tracked, not forgotten.
-    "cli/commands/_converge.py": ("#405", 800, "2026-12-31"),
     # Kernel inbound queue + lifecycle SQL (claim / restart helpers) — one
     # cohesive kernel-DB module; the #1587 fatal-provider heartbeat throttle
     # (last_heartbeat_at + pending-wake accounting) regrew it past the ceiling
