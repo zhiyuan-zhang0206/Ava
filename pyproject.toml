@@ -309,7 +309,7 @@ ignore = [
 # telemetry / retry-policy readers sit outside node signatures, so a blanket
 # ban is not possible. New uses need a written justification in the PR
 # description before joining the per-file-ignores allowlist below.
-"contextvars" = { msg = "contextvars is allowlisted only — owners: shared/turn_identity.py, shared/config/turn_view.py, shared/plugin_config_view.py, shared/plugin_context.py, shared/redis_client.py, gateway/mcp_endpoint.py, ava/_exports/help.py (audit 2026-08-27). New use needs a written justification in the PR description." }
+"contextvars" = { msg = "contextvars is allowlisted only — owners: shared/turn_identity.py, shared/config/turn_view.py, shared/plugin_config_view.py, shared/plugin_context.py, shared/redis_client.py, gateway/mcp_endpoint.py, ava/_exports/help.py, services/agent_host/runtime.py (audit 2026-08-27). New use needs a written justification in the PR description." }
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["S101", "PLR2004", "SLF001", "ARG001", "ARG002", "ANN", "FBT", "RUF001", "RUF002", "RUF003"]
@@ -376,6 +376,7 @@ ignore = [
 "gateway/mcp_endpoint.py" = ["TID251"]
 "ava/_exports/help.py" = ["TID251"]
 "ava/_exports/discovery.py" = ["TID251"]
+"services/agent_host/runtime.py" = ["TID251"]
 # tests may import contextvars to exercise the propagation contracts
 "tests/shared/test_turn_identity.py" = ["TID251"]
 "tests/agent/test_turn_scoped_retry.py" = ["TID251"]

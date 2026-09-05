@@ -54,6 +54,7 @@ from datetime import UTC, datetime
 from typing import Protocol, cast
 
 from agent._turn_progress import turn_progress_age_s
+from services.agent_host.runtime import _active_turn_config_fingerprint
 from shared.log import logger
 from shared.stop_timing import CANCEL_UNWIND_TIMEOUT_S, CLOCK_READ_TIMEOUT_S
 
@@ -221,15 +222,18 @@ class TurnScheduler:
                 event="host_turn_stall_aborted",
                 agent_id=agent_id,
             )
-        except Exception:
+        except Exception as exc:
             # One agent's failed turn must not take the host down or wedge
             # that agent: log it, drop the task, and let the next wake start a
             # fresh one. The turn's own state is checkpointed, so the retry
             # resumes rather than restarts.
+            fingerprint = _active_turn_config_fingerprint.get()
             logger.exception(
                 "hosted turn crashed — dropping the task; the next wake retries",
                 event="host_turn_crashed",
                 agent_id=agent_id,
+                exception_type=type(exc).__name__,
+                **({"config_fingerprint": fingerprint} if fingerprint is not None else {}),
             )
         finally:
             if self._tasks.get(agent_id) is asyncio.current_task():
