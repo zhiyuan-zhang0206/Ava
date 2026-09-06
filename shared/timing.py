@@ -40,8 +40,10 @@ WEDGED / NO_PROGRESS / LOCK_TTL / UPDATER_LEASE / SCAN_INTERVAL / ...).
 ## Adding a clock
 
 1. Define its value in its family module (`shared/boot_timing.py` for the boot
-   family, `shared/deploy_timing.py` for the deploy family) or as a settings
-   field when the operator must be able to override it.
+   family, `shared/deploy_timing.py` for the deploy family,
+   `shared/stop_timing.py` for the stop family, `shared/schedule_timing.py` for
+   the schedule-supervision family) or as a settings field when the operator
+   must be able to override it.
 2. Register it in `CLOCKS` with a one-line `doc`.
 3. Declare every ordering it participates in as a `Constraint`, with the intent
    in `doc` — if it has no neighbours, it does not belong in the lattice.
@@ -72,6 +74,7 @@ import shared.stop_timing as stop
 from shared import cluster_lock
 from shared.config import settings
 from shared.host_deploy_state import UPDATER_LEASE_TTL_S
+from shared.schedule_timing import SCHEDULE_STALL_ALERT_AFTER_S
 
 # --- restarter family: the controller scan cadence ---------------------------
 # Shared by the three restarter controllers that scan agents (respawn reaper /
@@ -83,10 +86,10 @@ CONTROLLER_SCAN_INTERVAL_S = 30.0
 
 
 # --- schedule supervision family ---------------------------------------------
-# The manager's missing-session alert must outlive a legitimate cluster
-# rollout's no-progress window. Otherwise an ordinary rollout could produce a
-# schedule-stalled alert before the updater itself is judged stuck.
-SCHEDULE_STALL_ALERT_AFTER_S = 2 * 60 * 60
+# Value lives in shared/schedule_timing.py: the gateway's schedule manager
+# imports it from there directly, without the lattice module's agent/sandbox
+# settings reads. The NO_PROGRESS_TIMEOUT_S ordering is declared in
+# CONSTRAINTS below.
 
 
 # --- wedged family: the derivation's components ------------------------------

@@ -61,9 +61,9 @@ from shared.cluster import session_name
 from shared.config import settings
 from shared.db_transaction import write_transaction
 from shared.paths import ava_home, prod_service_checkout_error
+from shared.schedule_timing import SCHEDULE_STALL_ALERT_AFTER_S
 from shared.session_backend import get_shell_backend
 from shared.session_env import forward_env_dict
-from shared.timing import SCHEDULE_STALL_ALERT_AFTER_S
 
 _log = logging.getLogger(__name__)
 
