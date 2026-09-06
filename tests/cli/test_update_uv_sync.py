@@ -155,9 +155,10 @@ def test_prod_sync_reinstalls_a_requested_package(
     monkeypatch.setattr(_native_sync, "run_bounded", run_uv)
 
     assert _native_sync.run_uv_sync(repo, reinstall_package="ava").returncode == 0
-    assert argv_calls == [
-        [*_expected_args(repo), "--reinstall-package", "ava"],
-    ]
+    assert len(argv_calls) == 2
+    assert argv_calls[0][:2] == ["uv", "export"]
+    assert "--locked" in argv_calls[0] and "--offline" in argv_calls[0]
+    assert argv_calls[1] == [*_expected_args(repo), "--reinstall-package", "ava"]
 
 
 def test_timeout_becomes_a_failed_result_with_a_diagnosable_reason(
@@ -307,7 +308,9 @@ def test_preflight_success_starts_uv(monkeypatch: pytest.MonkeyPatch, tmp_path: 
     monkeypatch.setattr(_native_sync, "run_bounded", run_uv)
 
     assert _native_sync.run_uv_sync(repo).returncode == 0
-    assert calls == [_expected_args(repo)]
+    assert len(calls) == 2
+    assert calls[0][:2] == ["uv", "export"]
+    assert calls[1] == _expected_args(repo)
     assert list(site_packages.iterdir()) == []
 
 

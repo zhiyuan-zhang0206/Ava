@@ -27,6 +27,14 @@ def _canonical_sync_inputs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> N
         (repo / "uv.lock").write_text("version = 1\npackage = []\n")
 
 
+def _uv_step(args: list[str]) -> str:
+    if args[:2] == ["uv", "export"]:
+        assert "--locked" in args and "--offline" in args
+        return "export"
+    assert args == _native_sync._PROD_SYNC_ARGS
+    return "sync"
+
+
 def _read_mode(path: Path) -> int:
     return stat.S_IMODE(path.stat().st_mode)
 
@@ -56,7 +64,7 @@ def test_gateway_update_makes_pth_writable_only_while_uv_sync_runs(
     modes_during_sync: list[int] = []
 
     def sync_run(args: list[str], **_kwargs: object) -> SimpleNamespace:
-        assert args == _native_sync._PROD_SYNC_ARGS
+        _uv_step(args)
         modes_during_sync.append(_read_mode(pth))
         return SimpleNamespace(returncode=0)
 
@@ -79,7 +87,7 @@ def test_gateway_update_makes_pth_writable_only_while_uv_sync_runs(
     )
 
     assert result is None
-    assert modes_during_sync == [0o644]
+    assert modes_during_sync == [0o644, 0o644]
     assert _read_mode(pth) == 0o444
 
 
@@ -97,7 +105,7 @@ def test_start_source_integrity_sync_restores_read_only_pth(
         return SimpleNamespace(returncode=0, stdout="target-sha\n")
 
     def sync_run(args: list[str], **_kwargs: object) -> SimpleNamespace:
-        assert args == _native_sync._PROD_SYNC_ARGS
+        _uv_step(args)
         modes_during_sync.append(_read_mode(pth))
         return SimpleNamespace(returncode=0)
 
@@ -108,7 +116,7 @@ def test_start_source_integrity_sync_restores_read_only_pth(
 
     assert _start._verify_source_integrity(repo) == 0
 
-    assert modes_during_sync == [0o644]
+    assert modes_during_sync == [0o644, 0o644]
     assert _read_mode(pth) == 0o444
     assert installed == ["target-sha"]
 
@@ -122,8 +130,7 @@ def test_gateway_recovery_restores_pth_before_start(
     observed: list[tuple[str, int]] = []
 
     def sync_run(args: list[str], **_kwargs: object) -> SimpleNamespace:
-        assert args == _native_sync._PROD_SYNC_ARGS
-        observed.append(("sync", _read_mode(pth)))
+        observed.append((_uv_step(args), _read_mode(pth)))
         return SimpleNamespace(returncode=0)
 
     def start_run(args: list[str], **_kwargs: object) -> SimpleNamespace:
@@ -149,7 +156,7 @@ def test_gateway_recovery_restores_pth_before_start(
     )
 
     assert result == 0
-    assert observed == [("sync", 0o644), ("start", 0o444)]
+    assert observed == [("export", 0o644), ("sync", 0o644), ("start", 0o444)]
     assert _read_mode(pth) == 0o444
 
 
@@ -162,9 +169,9 @@ def test_agent_runner_failed_sync_still_restores_read_only_pth(
     modes_during_sync: list[int] = []
 
     def sync_run(args: list[str], **_kwargs: object) -> SimpleNamespace:
-        assert args == _native_sync._PROD_SYNC_ARGS
+        _uv_step(args)
         modes_during_sync.append(_read_mode(pth))
-        return SimpleNamespace(returncode=1)
+        return SimpleNamespace(returncode=int(args[1] == "sync"))
 
     def checkout(_sha: str) -> str:
         return "from-sha"
@@ -181,7 +188,7 @@ def test_agent_runner_failed_sync_still_restores_read_only_pth(
     )
 
     assert result == 1
-    assert modes_during_sync == [0o644]
+    assert modes_during_sync == [0o644, 0o644]
     assert _read_mode(pth) == 0o444
 
 
@@ -195,12 +202,12 @@ def test_native_update_sync_entry_restores_read_only_pth(
     monkeypatch.setattr(_native_sync, "_repo_root", lambda: repo)
 
     def sync_run(args: list[str], **_kwargs: object) -> SimpleNamespace:
-        assert args == _native_sync._PROD_SYNC_ARGS
+        _uv_step(args)
         modes_during_sync.append(_read_mode(pth))
         return SimpleNamespace(returncode=0)
 
     monkeypatch.setattr(_native_sync, "run_bounded", sync_run)
     assert _native_sync._main() == 0
 
-    assert modes_during_sync == [0o644]
+    assert modes_during_sync == [0o644, 0o644]
     assert _read_mode(pth) == 0o444

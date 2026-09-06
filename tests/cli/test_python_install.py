@@ -139,6 +139,57 @@ def test_stale_manifest_is_refused_before_environment_creation(python_mirror: Py
     assert (python_mirror.repo / "uv.lock").read_bytes() == python_mirror.lock
 
 
+@pytest.mark.parametrize("official_index", [False, True])
+def test_stale_lock_preserves_runtime_when_python_version_has_changed(
+    python_mirror: PythonMirror, official_index: bool
+) -> None:
+    import re
+    import subprocess
+    import sys
+
+    assert python_mirror.install("--no-dev").returncode == 0
+    before = python_mirror.inspect()
+    venv = python_mirror.repo / ".venv"
+    interpreter = venv / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
+    config = venv / "pyvenv.cfg"
+    # Reproduce a managed interpreter alias advancing while this existing venv
+    # still records its old patch version. Actual uv detects the mismatch.
+    drifted, count = re.subn(
+        r"(?m)^version_info = .+$", "version_info = 3.12.0", config.read_text()
+    )
+    assert count == 1
+    config.write_text(drifted)
+    manifest = python_mirror.repo / "pyproject.toml"
+    manifest.write_text(
+        manifest.read_text().replace("probe-runtime==1.0.0", "probe-runtime==2.0.0")
+    )
+    python_mirror.env["UV_OFFLINE"] = "true"
+    if official_index:
+        python_mirror.env["UV_DEFAULT_INDEX"] = "https://pypi.org/simple"
+    python_mirror.requests.clear()
+
+    result = python_mirror.install("--no-dev", "--verbose", "--python", str(interpreter))
+
+    assert result.returncode != 0
+    imported = subprocess.run(  # noqa: S603 — the disposable virtualenv interpreter
+        [
+            str(interpreter),
+            "-c",
+            "import probe_runtime, probe_transitive; assert probe_runtime.VALUE == probe_transitive.VALUE == 1",
+        ],
+        env=python_mirror.env,
+        capture_output=True,
+        text=True,
+        timeout=20,
+        check=False,
+    )
+    assert imported.returncode == 0, imported.stderr
+    assert config.read_text() == drifted
+    assert python_mirror.inspect() == before
+    assert python_mirror.requests == []
+    assert (python_mirror.repo / "uv.lock").read_bytes() == python_mirror.lock
+
+
 def test_contaminated_lock_is_refused_before_export_or_install(python_mirror: PythonMirror) -> None:
     contaminated = python_mirror.lock.replace(
         b"https://pypi.org/simple", python_mirror.index.encode()
