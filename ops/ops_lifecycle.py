@@ -27,7 +27,7 @@ from psycopg_pool import ConnectionPool
 
 import shared.db
 from ops import cluster_rpc as _cluster_rpc
-from ops import runner_mode
+from ops import ops_exit, runner_mode
 from ops.agent_identity import RESIDENT_IDENTITIES, probe_agent_process
 from ops.agent_wake import ResurrectTriggerStaleError
 from ops.agents import (
@@ -217,6 +217,7 @@ def _terminate_force_blocking(
         db_pool,
         source=body.source,
         kill_process=kill_process,
+        message=body.message,
     )
     _publish_force_terminate_inbound(agent_id, inbound_id, body.source)
     with db_pool.connection() as conn:
@@ -236,12 +237,21 @@ def _terminate_graceful_blocking(
         row = cur.fetchone()
     pid = row[0] if row else None
     if pid is not None and probe_agent_process(pid, agent_id) not in RESIDENT_IDENTITIES:
-        zombie_closed_page_names = _force_mark_terminated(agent_id, db_pool, source=body.source)
+        zombie_closed_page_names = _force_mark_terminated(
+            agent_id,
+            db_pool,
+            source=body.source,
+            message=body.message,
+        )
         with db_pool.connection() as conn:
             publish_agent_updated_sync(conn, agent_id)
         return "already_terminated", None, zombie_closed_page_names
-    with db_pool.connection() as conn:
-        iid = insert_inbound_message(conn, agent_id, "", source=body.source, kind="terminate")
+    iid = ops_exit._enqueue_termination_inbounds(
+        agent_id,
+        db_pool,
+        source=body.source,
+        message=body.message,
+    )
     return "enqueued", iid, []
 
 

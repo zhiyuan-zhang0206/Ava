@@ -847,6 +847,81 @@ async def test_claim_terminate_kind_appends_lifecycle_marker_and_routes_to_end(
     assert lifecycle.additional_kwargs.get("ava_note_tag") == "lifecycle_terminate"  # pyright: ignore[reportUnknownMemberType]
 
 
+async def test_terminate_message_exits_without_llm_and_waits_for_resurrection(
+    running_agent: Callable[[], int],
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    aredis_inbound_listener: RedisInboundListener,
+) -> None:
+    """The accepted terminate is the whole exit claim; its co-committed chat
+    stays pending, then a resurrected claim delivers both retained messages."""
+    from ops import ops_exit
+
+    tid = running_agent()
+    message_id, terminate_id = ops_exit._insert_termination_inbounds(
+        db_conn,
+        tid,
+        source="user",
+        message="preserve this final note",
+    )
+    db_conn.commit()
+    assert message_id is not None and message_id < terminate_id
+    llm = _fake_llm()
+
+    terminated = await claim_node(
+        AgentState(messages=[SystemMessage(content="sys")]),
+        _make_runtime(
+            ops_pool=aops_pool,
+            inbound_listener=aredis_inbound_listener,
+            llm=llm,
+        ),
+        _config(tid),
+    )
+
+    assert terminated.goto == END
+    assert terminated.update is not None
+    assert terminated.update["exit_requested"] is True
+    assert llm.bind_tools.call_count == 0
+    termination_messages = cast(list[AnyMessage], terminated.update["messages"])
+    assert len(termination_messages) == 1
+    termination_content = termination_messages[0].content  # pyright: ignore[reportUnknownMemberType]
+    assert isinstance(termination_content, str)
+    assert "Termination was accepted from user" in termination_content
+    assert db_conn.execute(
+        "SELECT status FROM inbound_messages WHERE id=%s", (message_id,)
+    ).fetchone() == ("pending",)
+
+    db_conn.execute(
+        "UPDATE inbound_messages SET status='done',observed_at=clock_timestamp() WHERE id=%s",
+        (terminate_id,),
+    )
+    db_conn.execute(
+        "UPDATE agents_meta SET status='running',lifecycle_command_id=NULL WHERE id=%s",
+        (tid,),
+    )
+    resurrect_id = _insert_inbound_kind(db_conn, tid, "", "resurrect", source="user")
+    resurrected = await claim_node(
+        AgentState(messages=[SystemMessage(content="sys"), *termination_messages]),
+        _make_runtime(ops_pool=aops_pool, inbound_listener=aredis_inbound_listener),
+        _config(tid),
+    )
+
+    assert resurrected.goto == "before_llm"
+    assert resurrected.update is not None
+    delivered = cast(list[AnyMessage], resurrected.update["messages"])
+    assert len(delivered) == 2
+    message_content = delivered[0].content  # pyright: ignore[reportUnknownMemberType]
+    resurrection_content = delivered[1].content  # pyright: ignore[reportUnknownMemberType]
+    assert isinstance(message_content, str)
+    assert isinstance(resurrection_content, str)
+    assert "preserve this final note" in message_content
+    assert "resurrected" in resurrection_content
+    assert db_conn.execute(
+        "SELECT id,status FROM inbound_messages WHERE id IN (%s,%s) ORDER BY id",
+        (message_id, resurrect_id),
+    ).fetchall() == [(message_id, "claimed"), (resurrect_id, "done")]
+
+
 async def test_claim_turn_boundary_ends_invocation_instead_of_waiting(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,

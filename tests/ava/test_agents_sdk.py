@@ -312,6 +312,37 @@ class TestSpawnFork:
         ]
 
 
+class TestTerminate:
+    def test_message_is_queued_before_terminate_with_agent_source(
+        self, db_conn: psycopg.Connection
+    ) -> None:
+        ava._boot._agent_id = _spawn_agent()
+        peer_id = ava.agents.spawn()
+
+        result = ava.agents.terminate(peer_id, message="record the partial result")
+
+        assert result == "enqueued"
+        assert _inbound_rows(db_conn, peer_id) == [
+            ("record the partial result", "chat", f"agent:{ava.self.AGENT_ID}"),
+            ("", "terminate", f"agent:{ava.self.AGENT_ID}"),
+        ]
+
+    def test_rejects_non_string_message_before_gateway_call(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        called = False
+
+        def _terminate(*_args: object, **_kwargs: object) -> str:
+            nonlocal called
+            called = True
+            return "enqueued"
+
+        monkeypatch.setattr(ava.agents._client, "terminate", _terminate)
+        with pytest.raises(TypeError, match="message must be a string, got int"):
+            ava.agents.terminate(7, message=42)  # pyright: ignore[reportArgumentType]
+        assert not called
+
+
 class TestSendMessage:
     def test_send_message_inserts_chat_inbound_with_agent_source(
         self, db_conn: psycopg.Connection

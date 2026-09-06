@@ -34,11 +34,12 @@ Creates a new agent, returns its agent_id.
 
 `fork_from` is a parameter of `spawn`, not a standalone function. Pass the id of an existing agent, and the new agent will copy its full conversation state — suitable for splitting work: after the parent agent accumulates context, fork a child agent to continue a specific subtask.
 
-### `ava.agents.terminate(agent_id: int, *, force: bool = False) -> TerminateResult`
+### `ava.agents.terminate(agent_id: int, *, message: str | None = None, force: bool = False) -> TerminateResult`
 
 Terminates an agent.
 
 - Default: agent exits after completing the current turn
+- `message`: retain a final message for the next resurrection without another response
 - `force=True`: immediately kill the process
 
 ### `ava.agents.restart(agent_id: int) -> RestartResult`

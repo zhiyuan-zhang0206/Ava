@@ -18,7 +18,7 @@ tags:
 
 ### Lifecycle
 - `spawn(prompt=None, fork_from=None, machine=None, config_overlay=None, preset=None) → int` — start a new agent, returns agent ID, non-blocking. `prompt` is the first message (should be self-contained); `fork_from` copies the parent agent's conversation state; `machine` defaults to self; `preset` loads config from a preset template, when passed with `config_overlay` the latter overrides field-by-field. `config_overlay={"eval_isolation": true}` starts an eval-isolated agent; `eval_network_allowlist` can explicitly retain `web` or `understand`, while `mcps` and `ui` have no allowlist. Identity-class config you do NOT name (model, reasoning effort, skill set, prompt shaping) is resolved from the cluster default at spawn and frozen onto the new agent for its life — a later default change never re-brains it. (The `ava_fleet` plugin appends `label=` parameter to `spawn` to set initial role label.)
-- `terminate(agent_id, *, force=False) → TerminateResult` — agent exits after completing the current turn; `force=True` kills the process immediately.
+- `terminate(agent_id, *, message=None, force=False) → TerminateResult` — agent exits after completing the current turn; `message` is retained without another response and is visible after resurrection; `force=True` kills the process immediately.
 - `restart(agent_id) → RestartResult` — agent restarts as a fresh process with the same ID after completing the current turn.
 - `resurrect(agent_id, prompt) → ResurrectResult` — wake up a terminated agent, preserving its conversation state; `prompt` required.
 

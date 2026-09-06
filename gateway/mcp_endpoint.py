@@ -527,7 +527,12 @@ def _register_fleet_tools(
         }
 
     @typed_server.tool()
-    async def terminate_agent(agent_id: int, *, force: bool = False) -> dict[str, Any]:
+    async def terminate_agent(
+        agent_id: int,
+        *,
+        message: str | None = None,
+        force: bool = False,
+    ) -> dict[str, Any]:
         """DESTRUCTIVE. End an agent: it stops working and its process exits.
 
         The agent finishes its current step first, so work in flight is not
@@ -537,11 +542,15 @@ def _register_fleet_tools(
 
         The agent's history survives either way, and `send_message` revives
         it, so this is reversible; it is destructive in that it stops running
-        work.
+        work. `message` saves a final instruction for that later revival
+        without asking the agent to respond before exiting.
         """
         _require_write_scope("terminate_agent")
         try:
-            result = await post_agent_terminate(agent_id, TerminateAgentRequest(force=force))
+            result = await post_agent_terminate(
+                agent_id,
+                TerminateAgentRequest(message=message, force=force),
+            )
         except AvaAgentError as exc:
             raise ToolError(str(exc)) from exc
         return result.model_dump(mode="json")

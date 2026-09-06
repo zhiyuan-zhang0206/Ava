@@ -33,7 +33,7 @@ enough that an external model can hold the whole surface.
 | `list_agents` | `GET /api/agents?fields=summary` | every agent, compacted to the fields a caller steers by |
 | `get_agent` | `GET /api/agents/{id}` | one agent's full state, incl. blocking questions |
 | `get_messages` | `GET /api/agents/{id}/messages` | transcript as role + text + the code it ran |
-| `terminate_agent` | `POST /api/agents/{id}/terminate` | destructive: end the agent (`force` kills mid-step) |
+| `terminate_agent` | `POST /api/agents/{id}/terminate` | destructive: end the agent; `message` is retained for resurrection (`force` kills mid-step) |
 | `cluster_status` | `GET /api/cluster/status` | is the cluster up, and is it paused |
 
 `list_agents` and `get_messages` project rather than forward: the raw rows carry
