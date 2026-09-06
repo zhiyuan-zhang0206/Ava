@@ -88,11 +88,8 @@ _PIDFILE = settings.services.agent_host_pidfile
 _LIVENESS_TIMEOUT_S = 60.0
 _LIVENESS_BEAT_STEP_S = 15.0
 _OWNERSHIP_RENEW_TIMEOUT_S = 10.0
-# The gateway treats key presence as proof that this 15-second host loop still
-# runs. Four missed beats expire the proof without adding another probe process.
+# Gateway key presence proves the 15s host loop runs; four missed beats expire it.
 _TURN_PROGRESS_HEARTBEAT_TTL_S = 60
-# Bound this best-effort SET separately from the shared client's intentionally
-# unbounded pub/sub socket reads. It must not starve ownership renewal.
 _TURN_PROGRESS_PUBLISH_TIMEOUT_S = 3.0
 
 # The launcher redirects fd 1/2 straight at $AVA_HOME/logs/ava-agent-host.out.log
@@ -314,13 +311,11 @@ async def _publish_turn_progress_heartbeat(
             )
     except TimeoutError:
         _log.warning(
-            "[agent-host] turn-progress heartbeat publish exceeded %.1fs; "
-            "ownership renewal continues",
+            "[agent-host] turn-progress heartbeat publish exceeded %.1fs",
             _TURN_PROGRESS_PUBLISH_TIMEOUT_S,
         )
     except Exception:
-        # This signal is defensive evidence, not ownership authority. A Redis
-        # outage must not stop lease renewal or make /healthz stale.
+        # Defensive evidence only: a Redis outage must not stall renewal.
         _log.debug("[agent-host] turn-progress heartbeat publish failed", exc_info=True)
 
 
@@ -330,17 +325,15 @@ async def _beat_forever(
     scheduler: TurnScheduler,
     machine: str,
 ) -> None:
-    """Keep /healthz fresh and ownership renewed independently of the idle
-    dispatcher subscription — the dispatcher can block indefinitely on a quiet
-    cluster. liveness.beat() precedes DB renewal: process health must not
-    depend on DB availability; a hung renewal is bounded and retried next beat."""
+    """Liveness and ownership renewal, independent of the idle dispatcher.
+    beat() precedes DB renewal — process health must not depend on the DB."""
     while True:
         _require_helper_parent_chain()
         liveness.beat()
         try:
             await asyncio.wait_for(host.renew_ownership(), timeout=_OWNERSHIP_RENEW_TIMEOUT_S)
-        except TimeoutError as err:
-            _log.warning("[agent-host] ownership renewal timed out: %r", err)
+        except TimeoutError:
+            _log.warning("[agent-host] ownership renewal timed out")
         except Exception:
             _log.exception("[agent-host] ownership renewal failed — retrying next beat")
         await _publish_turn_progress_heartbeat(machine, scheduler.active_agents)
@@ -348,7 +341,6 @@ async def _beat_forever(
 
 
 async def _stop_ownership_beat(beat: asyncio.Task[None] | None) -> None:
-    """Stop renewal before releasing any hosted owner leases."""
     if beat is not None:
         beat.cancel()
         with contextlib.suppress(asyncio.CancelledError):

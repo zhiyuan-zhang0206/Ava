@@ -133,7 +133,9 @@ async def test_hung_progress_set_does_not_stop_repeated_ownership_renewal(
             with pytest.raises(asyncio.CancelledError):
                 await task
 
-    assert calls == ["renew", "beat", "set", "set_cancelled"] * 3
+    # Canonical order after #1856: liveness first, then DB renewal, then the
+    # best-effort Redis snapshot. A hung progress SET must not stop either.
+    assert calls == ["beat", "renew", "set", "set_cancelled"] * 3
     warnings = [record for record in caplog.records if record.name == host_daemon._log.name]
     assert len(warnings) == 2
     assert all("turn-progress heartbeat publish exceeded" in record.message for record in warnings)
