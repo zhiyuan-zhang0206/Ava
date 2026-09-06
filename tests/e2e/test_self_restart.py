@@ -8,8 +8,6 @@ it must not borrow process completion language or manufacture an exit event.
 
 from __future__ import annotations
 
-import time
-
 import httpx
 import psycopg
 import pytest
@@ -20,6 +18,7 @@ from shared.config import settings
 from tests.e2e._db import wait_for_status
 from tests.e2e._env import E2EEnv
 from tests.e2e.conftest import _HOSTED
+from tests.shared.poll_until import poll_until
 
 
 @pytest.mark.scenario("tests.e2e.fakes.scenarios.lifecycle_restart:build")
@@ -47,11 +46,13 @@ def test_self_restart_respawns_process_with_new_pid(e2e_env: E2EEnv, restarter_p
     # typical total time 2-5s; 90s ceiling same as tests/e2e/_db.py wait_for_status —
     # pure headroom, not a tight bound (e2e runs serial on dedicated box, see _db.py
     # "Why 90s"). A real hang (status never flips) still fails, just later.
-    deadline = time.monotonic() + 90.0
     last_completed = False
     last_status: str | None = None
     last_pid: int | None = None
-    while time.monotonic() < deadline:
+    successor_pid: int | None = None
+
+    def restart_cycle_completed() -> tuple[bool, object]:
+        nonlocal last_completed, last_status, last_pid, successor_pid
         with psycopg.connect(settings.data_plane.db_url) as conn, conn.cursor() as cur:
             cur.execute(
                 "SELECT 1 FROM inbound_messages "
@@ -64,28 +65,40 @@ def test_self_restart_respawns_process_with_new_pid(e2e_env: E2EEnv, restarter_p
             if row:
                 last_status, last_pid = row
         # New PID alone cannot discharge the durable command or prove completion.
-        if (
+        reached = (
             last_completed
             and last_status == AgentStatus.IDLING.value
             and last_pid is not None
             and last_pid != first_pid
-        ):
-            _assert_successor_consumes_next_message(e2e_env, last_pid)
-            return
-        time.sleep(0.5)
-    raise RuntimeError(
-        f"agent {agent_id} did not complete restart cycle within 90s: "
-        f"first_pid={first_pid} completed={last_completed} "
-        f"status={last_status!r} pid={last_pid}; evidence={_restart_evidence(agent_id)!r}"
+        )
+        state: dict[str, object] = {
+            "first_pid": first_pid,
+            "completed": last_completed,
+            "status": last_status,
+            "pid": last_pid,
+        }
+        if reached:
+            successor_pid = last_pid
+        else:
+            state["evidence"] = _restart_evidence(agent_id)
+        return reached, state
+
+    poll_until(
+        restart_cycle_completed,
+        timeout=90.0,
+        interval=0.5,
+        what=f"agent {agent_id} completes its restart cycle with a new process",
     )
+    assert successor_pid is not None
+    _assert_successor_consumes_next_message(e2e_env, successor_pid)
 
 
 def _assert_successor_consumes_next_message(env: E2EEnv, successor_pid: int) -> None:
     """Real UI -> queue -> admitted successor, with no second self restart."""
     env.page.fill('[data-testid="composer-input"]', "continue after verified restart")
     env.page.click('[data-testid="composer-send"]')
-    deadline = time.monotonic() + 90
-    while True:
+
+    def successor_processed_follow_up() -> tuple[bool, object]:
         with psycopg.connect(settings.data_plane.db_url) as conn:
             row = conn.execute(
                 "SELECT status,pid,lifecycle_command_id FROM agents_meta WHERE id=%s",
@@ -111,6 +124,8 @@ def _assert_successor_consumes_next_message(env: E2EEnv, successor_pid: int) -> 
         # Ordinary chat is checkpoint-backed: done is reconciled on restart or
         # compaction, not at each idle transition. Claim alone is insufficient;
         # require the persisted answer below while the same successor is idle.
+        reply_seen = False
+        timeline_kinds: list[str] = []
         if row == ("idling", successor_pid, None) and chats in (
             [("claimed", True)],
             [("done", True)],
@@ -118,14 +133,27 @@ def _assert_successor_consumes_next_message(env: E2EEnv, successor_pid: int) -> 
             items = httpx.get(
                 f"{env.gateway_url}/api/agents/{env.agent_id}/timeline?limit=1000", timeout=30
             ).json()["items"]
-            if any(
+            timeline_kinds = [item["kind"] for item in items]
+            reply_seen = any(
                 item["kind"] == "agent_chat"
                 and "Follow-up processed by successor." in item["payload"]
                 for item in items
-            ):
-                return
-        assert time.monotonic() < deadline, (row, chats, commands, completions)
-        time.sleep(0.5)
+            )
+        return reply_seen, {
+            "agent": row,
+            "chats": chats,
+            "commands": commands,
+            "completions": completions,
+            "timeline_kinds": timeline_kinds,
+            "reply_seen": reply_seen,
+        }
+
+    poll_until(
+        successor_processed_follow_up,
+        timeout=90,
+        interval=0.5,
+        what=f"successor process {successor_pid} answers the follow-up message",
+    )
 
 
 def _restart_evidence(agent_id: int) -> dict[str, object]:
@@ -165,9 +193,7 @@ def _assert_hosted_self_restart(e2e_env: E2EEnv, page: Page, agent_id: int) -> N
     page.fill('[data-testid="composer-input"]', "\u91cd\u542f")
     page.click('[data-testid="composer-send"]')
 
-    deadline = time.monotonic() + 90.0
-    seen_marker = False
-    while True:
+    def restart_marker_reached_timeline() -> tuple[bool, object]:
         items = httpx.get(
             f"{e2e_env.gateway_url}/api/agents/{agent_id}/timeline?limit=1000", timeout=90.0
         ).json()["items"]
@@ -176,10 +202,14 @@ def _assert_hosted_self_restart(e2e_env: E2EEnv, page: Page, agent_id: int) -> N
             and "Restart was accepted" in (it.get("payload") or "")
             for it in items
         )
-        if seen_marker or time.monotonic() > deadline:
-            break
-        time.sleep(0.5)
-    assert seen_marker, "hosted restart marker never reached the timeline"
+        return seen_marker, {"timeline_kinds": [it.get("kind") for it in items]}
+
+    poll_until(
+        restart_marker_reached_timeline,
+        timeout=90.0,
+        interval=0.5,
+        what=f"hosted restart marker reaches agent {agent_id} timeline",
+    )
     wait_for_status(agent_id, AgentStatus.IDLING.value)
 
     with psycopg.connect(settings.data_plane.db_url) as conn, conn.cursor() as cur:
