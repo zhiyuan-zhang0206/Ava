@@ -28,6 +28,7 @@ from cli.commands._converge_os_jobs import (
     reap_stale_schtasks,
 )
 from cli.commands._converge_pitr import converge_pitr_foundation
+from cli.commands._converge_redis_bridge import ensure_redis_bridge
 from cli.commands._converge_source_tree import ensure_source_tree_integrity
 
 # The step contract lives in _converge_spec so step implementations can span
@@ -474,6 +475,17 @@ CONVERGE_STEPS: tuple[ConvergeStep, ...] = (
         "redis URL identity backfill",
         _ensure_redis_url_identity_step,
         roles=frozenset({"gateway"}),
+    ),
+    # Redis itself stays loopback-only. The host-global launchd relay is the
+    # authenticated off-box ingress for a split macOS gateway; converge owns
+    # both its installed source and job so a fresh host and an upgraded host
+    # receive the same implementation.
+    ConvergeStep(
+        "Redis private-network bridge",
+        ensure_redis_bridge,
+        roles=frozenset({"gateway"}),
+        host_global=True,
+        requires_unit_config=True,
     ),
     # The frontend session (and its `npm run build`) runs on gateway hosts, so
     # the guard gates exactly the hosts whose bundle could go stale.

@@ -15,6 +15,7 @@ import asyncio
 import os
 import re
 import subprocess as _subprocess
+import sys
 from collections.abc import Iterable
 from pathlib import Path
 from typing import cast
@@ -1489,6 +1490,27 @@ def test_status_shows_the_gate_entry_row(monkeypatch: pytest.MonkeyPatch, capsys
     assert "entry :3000 not answering" in out
 
 
+def test_status_shows_the_end_to_end_redis_bridge_row(
+    monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    """The host-level relay must not disappear behind healthy service rows."""
+    import cli.commands.status as status_mod
+
+    monkeypatch.setattr(_cli, "_roles_or_none", lambda: frozenset({"gateway"}))
+    monkeypatch.setattr(_cli, "_has_session", lambda _s: False)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_cli, "_curl_ok", lambda _u: False)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(
+        status_mod,
+        "print_redis_bridge_status",
+        lambda: sys.stdout.write("  ✗ 10.64.0.7:6380 Redis PING: connection refused\n"),
+    )
+
+    assert _cli.cmd_status() == 0
+    out = capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
+    assert "redis bridge (private-network ingress):" in out
+    assert "Redis PING: connection refused" in out
+
+
 def test_status_runner_only_has_no_gate_section(monkeypatch: pytest.MonkeyPatch, capsys) -> None:
     """A pure agent-runner owns no entry port — same rule as the pg/redis section."""
     monkeypatch.setattr(_cli, "_roles_or_none", lambda: frozenset({"agent-runner"}))
@@ -1497,7 +1519,9 @@ def test_status_runner_only_has_no_gate_section(monkeypatch: pytest.MonkeyPatch,
 
     rc = _cli.cmd_status()
     assert rc == 0
-    assert "gate (fleet UI entry):" not in capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
+    out = capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
+    assert "gate (fleet UI entry):" not in out
+    assert "redis bridge (private-network ingress):" not in out
 
 
 def test_start_prints_browser_skip_reason(monkeypatch, capsys, tmp_path) -> None:

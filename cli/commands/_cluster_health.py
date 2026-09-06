@@ -20,9 +20,10 @@ Checks (all must pass for exit 0):
    unit* (`cli.commands._probe`: identity where the endpoint carries one, plain
    liveness where it cannot). A daemon of another cluster holding this unit's
    port is the condition this check exists to make visible; it used to satisfy
-   the check with a bare 2xx. The fleet UI entry port rides here too
-   (`_gate_probe`) — it is not a service session, and it was the one user-facing
-   port with no monitor at all. Alert-only: it fails the probe (exit 1) but never
+   the check with a bare 2xx. The fleet UI entry port (`_gate_probe`) and the
+   authenticated private-network Redis relay (`_redis_bridge_probe`) ride here
+   too — neither is a service session, and process liveness cannot certify either
+   serving path. Alert-only: a failure exits 1 but never
    feeds the auto-rollback counter — a dead frontend session is an outage worth
    waking the owner for, but not proof the cluster code is bad, and a rollback
    would not necessarily fix it (checks 1-4 are the rollback-gating signals).
@@ -432,6 +433,36 @@ def _gate_probe() -> str | None:
     return None
 
 
+def _redis_bridge_probe() -> str | None:
+    """End-to-end Redis relay failure text, or None when healthy/not required.
+
+    Gateway-only and alert-only, like the gate: a failed host listener is an
+    infrastructure outage, not evidence that rolling application code back is
+    safe or useful.  The probe authenticates and PINGs through the off-box
+    endpoint; a loaded launchd label or open TCP port alone cannot certify the
+    forwarding path.
+    """
+    import cli.commands as _ns
+
+    roles = _ns._roles_or_none()
+    if roles is None or "gateway" not in roles:
+        return None
+    from cli.commands._converge_redis_bridge import probe_redis_bridge
+
+    status = probe_redis_bridge()
+    if not status.required:
+        return None
+    if not status.serving:
+        endpoint = f" {status.endpoint}" if status.endpoint else ""
+        return f"Redis bridge{endpoint} failed authenticated PING ({status.detail})"
+    if not status.supervised:
+        return (
+            f"Redis bridge {status.endpoint} serves PING but is unsupervised "
+            "(launchd job com.ava.redis-bridge is absent)"
+        )
+    return None
+
+
 def _disk_usage_fraction() -> float | None:
     """Used fraction of the data volume, df-style, or None when unmeasurable.
 
@@ -660,7 +691,7 @@ def run_health_probe(
         print("  ✓ schema health")
 
     # Checks 1-4 — the rollback-gating set — all passed. Reset the consecutive-
-    # failure counter BEFORE the alert-only check 5 runs: a service/gate probe
+    # failure counter BEFORE the alert-only check 5 runs: a service/host probe
     # failure is not rollback evidence, and a stale count left in place would let
     # non-adjacent gating failures accumulate into an unattended rollback (the
     # same adjacency rule the deploy suppression applies — a run that is healthy
@@ -670,13 +701,12 @@ def run_health_probe(
         _reset_failure_count(home)
     _advance_pending_lkg(home)
 
-    # 5. Per-service health + the fleet UI entry port — alert-only: fails the probe
-    # but does NOT feed the auto-rollback counter (see module docstring), so it
-    # bypasses _unhealthy and alerts directly.
-    failing = _service_probes()
-    gate_failure = _gate_probe()
-    if gate_failure is not None:
-        failing.append(gate_failure)
+    # 5. Per-service health + host-level gate / Redis bridge — alert-only: fails
+    # the probe but does NOT feed the auto-rollback counter (see module
+    # docstring), so it bypasses _unhealthy and alerts directly.
+    failing = _service_probes() + [
+        failure for failure in (_gate_probe(), _redis_bridge_probe()) if failure is not None
+    ]
     if failing:
         message = f"FAIL: service probe — not healthy: {', '.join(sorted(failing))}"
         print(message, file=sys.stderr)
