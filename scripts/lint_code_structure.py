@@ -94,6 +94,7 @@ _SCAN_DIRS = (
 # A call site not listed here fails the lint; a listed module whose calls
 # disappear fails too (stale entry). See the module docstring.
 _MACHINE_ROLE_ALLOWED: dict[str, str] = {
+    "cli/commands/_maintenance.py": "Which services/data plane does this explicitly local, DB-offline-capable stop/start own? Fleet transport is operator-coordinated.",
     "shared/machine.py": "defines machine_role() and its capability wrappers is_gateway()/is_agent_runner() — the implementation itself",
     "shared/observability.py": "does this process serve the gateway capability whose LGTM marker governs telemetry (what do I serve)",
     "services/healthchecks/otel_collector.py": "does this unit own the LGTM collector healthcheck, preserving pure-runner relay behavior (what do I serve)",

@@ -104,7 +104,11 @@ def is_paused() -> bool:
     reads only ``paused`` — the data plane is a gateway-host concern and a
     gateway host never runs an updater session.)
     """
+    from shared import maintenance
     from shared.host_deploy_state import read
+
+    if maintenance.held():
+        return True
 
     try:
         state = read()
@@ -162,6 +166,10 @@ def _pause_owner(
     make — which is why `machine_name()` is inside the guarded read too. Not knowing
     which host this is means not knowing whether a hold names it.
     """
+    from shared import maintenance
+
+    if maintenance.held():
+        return "explicit maintenance hold (no automatic expiry)"
     handoff = updater_handoff.read() if handoff is None else handoff
     if handoff.status == "invalid":
         return "updater handoff is unreadable"

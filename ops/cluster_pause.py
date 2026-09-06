@@ -135,7 +135,9 @@ def unpause_local_cluster() -> None:
     # disposable code (the 2026-07-24 outage class) — refuse before the
     # posture write or the respawn.
     from ops.deploy_spawn import assert_prod_home_has_its_own_checkout
+    from shared import maintenance
 
+    maintenance.require_start_allowed()
     assert_prod_home_has_its_own_checkout()
     # R1 (Task #1021): unpause owns host posture only. The cluster UI marker is
     # deliberately separate and spans local pause/start plus the full Phase-B

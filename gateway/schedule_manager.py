@@ -150,6 +150,10 @@ class ScheduleManager:
         await asyncio.to_thread(self._sync_blocking, schedule_id)
 
     def _sync_blocking(self, schedule_id: int) -> None:
+        from shared import maintenance
+
+        if maintenance.held():
+            return
         with self._lock:
             self._backoff.pop(schedule_id, None)
             if not self._reap(schedule_id):
@@ -190,6 +194,10 @@ class ScheduleManager:
             self._reconcile_locked()
 
     def _reconcile_locked(self) -> None:
+        from shared import maintenance
+
+        if maintenance.held():
+            return
         # Read liveness before status: on a clean exit the runner commits
         # status='completed' before its process exits (and the session dies), so a
         # session seen dead here is guaranteed to already carry its terminal status.
@@ -381,6 +389,10 @@ class ScheduleManager:
                 self._close_null_runs(sid)
 
     def _launch(self, schedule_id: int) -> None:
+        from shared import maintenance
+
+        if maintenance.held():
+            return
         name = session_name(f"schedule-{schedule_id}")
         backend = get_shell_backend()
         # A gateway restart (rollout / crash) can leave the previous run's

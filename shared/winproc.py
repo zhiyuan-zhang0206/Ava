@@ -9,6 +9,7 @@ still preserves unrelated recorded sessions and the caller ancestry.
 from __future__ import annotations
 
 import contextlib
+import math
 import os
 import shlex
 import subprocess
@@ -293,7 +294,9 @@ def new_session(
     return True
 
 
-def graceful_signal(name: str) -> bool:
+def graceful_signal(
+    name: str, *, expected: SessionRecord | None = None, timeout: float = 5.0
+) -> bool:
     """Request Ctrl-Break in a verified private console without force-killing.
 
     The Windows analog of posixproc.graceful_signal: the agent maps Ctrl-Break to
@@ -303,11 +306,19 @@ def graceful_signal(name: str) -> bool:
     `ava stop`'s reap uses this to signal every agent, then wait on all of them
     under one shared deadline before force-killing stragglers.
     """
+    if not math.isfinite(timeout) or timeout <= 0:
+        raise ValueError("private console delivery timeout must be finite and positive")
+    budget = min(timeout, 5.0)
+    deadline = time.monotonic() + budget
     rec = _read_record(name)
-    if rec is None:
+    if rec is None or (expected is not None and rec != expected):
         return False
     proc = _process_for_record(rec)
     if proc is None:
+        return False
+    if expected is not None and (
+        proc.create_time() != expected.create_time or _read_record(name) != expected
+    ):
         return False
     if rec.control_mode != "private-console-v1":
         raise RuntimeError("graceful delivery requires a verified private-console session")
@@ -320,10 +331,12 @@ def graceful_signal(name: str) -> bool:
             str(_record_path(name)),
             str(rec.pid),
             str(rec.create_time),
-            str(time.monotonic() + 5),
+            str(deadline),
         ],
-        timeout=5,
+        timeout=budget,
     )
+    if time.monotonic() >= deadline:
+        raise TimeoutError("private console delivery exceeded its deadline")
     if result.returncode:
         raise RuntimeError(
             f"private console delivery failed (exit {result.returncode}): {result.stderr.strip()}"

@@ -750,13 +750,7 @@ def _cancel_turn_route(scheduler: TurnScheduler, host: AgentHost):  # noqa: ANN2
 
 
 def _stats_route(host: AgentHost, scheduler: TurnScheduler):  # noqa: ANN202 — RouteHandler, declared in shared.daemon_health
-    """A `/stats` handler exposing the cache counters and who is running.
-
-    Cheap to serve and the only place the cold-build hit/miss ratio is
-    observable as a level rather than as a stream of events — a host whose
-    misses track its turns is thrashing its cache, which the events alone make
-    you count.
-    """
+    """Expose cache/activity counters and this running boot's maintenance identity."""
     import json
 
     async def handler(_body: bytes) -> tuple[int, bytes, str]:
@@ -772,6 +766,10 @@ def _stats_route(host: AgentHost, scheduler: TurnScheduler):  # noqa: ANN202 —
                 active_progress[agent_id] = round(age, 1)
         payload = {
             **host.stats.as_payload(),
+            "maintenance_protocol": 1,
+            "runtime_owner": str(host._owner),
+            "home": str(paths.ava_home()),
+            "pid": os.getpid(),
             "active_agents": sorted(scheduler.active_agents),
             "active_progress": active_progress,
         }

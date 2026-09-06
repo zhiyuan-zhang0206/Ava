@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Literal, Never, cast
 
 import shared.paths
+from shared.maintenance_state import MaintenanceHold
 from shared.platform import file_lock
 
 _LOCK_TIMEOUT_S = 5.0
@@ -35,13 +36,16 @@ class PauseOwnerSnapshot:
     status: Literal["inactive", "paused", "resumed", "legacy-resumed", "invalid"]
     holder: str | None = None
     acquired_at: dt.datetime | None = None
+    maintenance: MaintenanceHold | None = None
 
     def matches(self, holder: str, acquired_at: dt.datetime) -> bool:
         return self.holder == holder and self.acquired_at == acquired_at
 
 
 def state_path() -> Path:
-    return shared.paths.run_dir() / "deploy-pause-owner.json"
+    # Admission/status reads must not create a home before setup validation.
+    # Writers create the parent through lock_path() and _write_atomic().
+    return shared.paths.ava_home() / "run" / "deploy-pause-owner.json"
 
 
 def lock_path() -> Path:
@@ -68,6 +72,7 @@ def _read_unlocked(path: Path) -> PauseOwnerSnapshot:
         acquired_at = dt.datetime.fromisoformat(acquired_raw.replace("Z", "+00:00"))
         if acquired_at.tzinfo is None:
             _invalid("acquired_at must carry a timezone")
+        maintenance = MaintenanceHold.decode(raw["maintenance"]) if "maintenance" in raw else None
     except FileNotFoundError:
         return PauseOwnerSnapshot(status="inactive")
     except (KeyError, OSError, TypeError, ValueError) as exc:
@@ -77,6 +82,7 @@ def _read_unlocked(path: Path) -> PauseOwnerSnapshot:
         status=state,
         holder=holder,
         acquired_at=acquired_at.astimezone(dt.UTC),
+        maintenance=maintenance,
     )
 
 
@@ -94,7 +100,7 @@ def _fsync_parent(path: Path) -> None:
         os.close(fd)
 
 
-def _write_atomic(path: Path, payload: dict[str, str]) -> None:
+def _write_atomic(path: Path, payload: dict[str, object]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, raw_tmp = tempfile.mkstemp(dir=path.parent, prefix=".pause-owner-", suffix=".tmp")
     if os.name != "nt":
@@ -121,6 +127,7 @@ def mark_paused(holder: str, acquired_at: dt.datetime) -> PauseOwnerSnapshot:
         raise ValueError("holder and timezone-aware acquired_at are required")
     path = state_path()
     with file_lock(lock_path(), timeout_s=_LOCK_TIMEOUT_S):
+        _refuse_maintenance(_read_unlocked(path))
         _write_atomic(
             path,
             {
@@ -137,6 +144,8 @@ def mark_resumed(holder: str, acquired_at: dt.datetime) -> bool:
     path = state_path()
     with file_lock(lock_path(), timeout_s=_LOCK_TIMEOUT_S):
         current = _read_unlocked(path)
+        if current.maintenance is not None:
+            return False
         if not current.matches(holder, acquired_at):
             return False
         if current.status == "resumed":
@@ -189,7 +198,12 @@ def finalize_natural_resume() -> bool:
     path = state_path()
     with file_lock(lock_path(), timeout_s=_LOCK_TIMEOUT_S):
         current = _read_unlocked(path)
-        if current.status != "paused" or current.holder is None or current.acquired_at is None:
+        if (
+            current.maintenance is not None
+            or current.status != "paused"
+            or current.holder is None
+            or current.acquired_at is None
+        ):
             return False
         _write_atomic(
             path,
@@ -207,6 +221,8 @@ def clear(holder: str, acquired_at: dt.datetime) -> bool:
     path = state_path()
     with file_lock(lock_path(), timeout_s=_LOCK_TIMEOUT_S):
         current = _read_unlocked(path)
+        if current.maintenance is not None:
+            return False
         if not current.matches(holder, acquired_at):
             return False
         path.unlink(missing_ok=True)
@@ -219,9 +235,63 @@ def force_clear() -> bool:
     """Explicit recovery of malformed state after its no-live-owner proof."""
     path = state_path()
     with file_lock(lock_path(), timeout_s=_LOCK_TIMEOUT_S):
+        _refuse_maintenance(_read_unlocked(path))
         existed = path.exists()
         path.unlink(missing_ok=True)
         if existed:
             with contextlib.suppress(OSError):
                 _fsync_parent(path)
         return existed
+
+
+def _refuse_maintenance(current: PauseOwnerSnapshot) -> None:
+    if current.status == "paused" and current.maintenance is not None:
+        raise RuntimeError("maintenance requires its exact operation's explicit resume")
+
+
+def begin_maintenance(holder: str, acquired_at: dt.datetime) -> PauseOwnerSnapshot:
+    """Close admission durably; a new deploy cannot overwrite this capability."""
+    if not holder or acquired_at.tzinfo is None:
+        raise ValueError("holder and timezone-aware acquired_at are required")
+    with file_lock(lock_path(), timeout_s=_LOCK_TIMEOUT_S):
+        current = _read_unlocked(state_path())
+        if current.matches(holder, acquired_at) and current.maintenance is not None:
+            return current
+        if current.status in ("paused", "invalid"):
+            raise RuntimeError("another or unreadable pause owner must be resolved first")
+        return _write_maintenance(holder, acquired_at, MaintenanceHold())
+
+
+def _write_maintenance(
+    holder: str, acquired_at: dt.datetime, hold: MaintenanceHold, *, resumed: bool = False
+) -> PauseOwnerSnapshot:
+    _write_atomic(
+        state_path(),
+        {
+            "state": "resumed" if resumed else "paused",
+            "holder": holder,
+            "acquired_at": acquired_at.astimezone(dt.UTC).isoformat(),
+            "maintenance": hold.encode(),
+        },
+    )
+    return _read_unlocked(state_path())
+
+
+def change_maintenance(
+    holder: str,
+    acquired_at: dt.datetime,
+    expected: MaintenanceHold,
+    replacement: MaintenanceHold,
+    *,
+    resumed: bool = False,
+) -> PauseOwnerSnapshot:
+    """CAS a caller-validated maintenance transition without losing receipts."""
+    with file_lock(lock_path(), timeout_s=_LOCK_TIMEOUT_S):
+        current = _read_unlocked(state_path())
+        if (
+            current.status != "paused"
+            or not current.matches(holder, acquired_at)
+            or current.maintenance != expected
+        ):
+            raise RuntimeError("maintenance operation or progress changed; reread before retry")
+        return _write_maintenance(holder, acquired_at, replacement, resumed=resumed)
