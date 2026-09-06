@@ -286,14 +286,14 @@ def test_db_size_breakdown_format(monkeypatch: pytest.MonkeyPatch) -> None:
     def _fake_connect(**_: object) -> _FakeConn:
         return _FakeConn()
 
-    monkeypatch.setattr(backup, "connect", _fake_connect)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(backup, "connect", _fake_connect)
     line = backup._db_size_breakdown()
     assert line == "db=4044MiB checkpoint=1335MiB rest=2708MiB"
 
     def _boom(**_: object) -> object:
         raise RuntimeError("db down")
 
-    monkeypatch.setattr(backup, "connect", _boom)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(backup, "connect", _boom)
     assert backup._db_size_breakdown() == "unavailable"
 
 
@@ -487,7 +487,7 @@ def test_run_backup_failure_leaves_no_files(bdir: Path, monkeypatch: pytest.Monk
         returncode = 1
         stderr = "connection refused"
 
-    monkeypatch.setattr(backup.subprocess, "run", lambda *_a, **_kw: _Failed())  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(backup.subprocess, "run", lambda *_a, **_kw: _Failed())  # pyright: ignore[reportUnknownArgumentType]
     with pytest.raises(RuntimeError, match="pg_dump exited 1"):
         backup.run_backup(_dt(2026, 6, 10, 3, 0), db_url="dbname=whatever")
     assert list(bdir.iterdir()) == []  # no .dump, no .partial
@@ -504,7 +504,7 @@ def test_run_backup_sweeps_stale_partials(bdir: Path, monkeypatch: pytest.Monkey
         returncode = 1
         stderr = "connection refused"
 
-    monkeypatch.setattr(backup.subprocess, "run", lambda *_a, **_kw: _Failed())  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(backup.subprocess, "run", lambda *_a, **_kw: _Failed())  # pyright: ignore[reportUnknownArgumentType]
     with pytest.raises(RuntimeError, match="pg_dump exited 1"):
         backup.run_backup(_dt(2026, 8, 2, 3, 0), db_url="dbname=whatever")
     assert not list(bdir.glob("*.partial"))  # both stale partials swept

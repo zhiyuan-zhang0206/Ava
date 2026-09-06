@@ -241,7 +241,7 @@ def test_disabled_pooler_is_skipped(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = _Calls(listener=[False], public=[True])
     _wire(monkeypatch, calls)
     monkeypatch.setattr(hc.settings.data_plane, "pgbouncer_enabled", False)
-    monkeypatch.setattr(hc, "init_gateway_process", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(hc, "init_gateway_process", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
 
     hc.main()
 
@@ -257,8 +257,8 @@ def test_missing_registry_record_is_skipped_not_guessed(monkeypatch: pytest.Monk
     calls = _Calls(listener=[False], public=[True])
     _wire(monkeypatch, calls)
     monkeypatch.setattr(hc.settings.data_plane, "pgbouncer_enabled", True)
-    monkeypatch.setattr(hc, "init_gateway_process", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-    monkeypatch.setattr(hc, "get_record", lambda _home: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(hc, "init_gateway_process", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(hc, "get_record", lambda _home: None)  # pyright: ignore[reportUnknownArgumentType]
 
     hc.main()
 
@@ -274,8 +274,8 @@ def test_identity_less_db_url_is_skipped(monkeypatch: pytest.MonkeyPatch) -> Non
     calls = _Calls(listener=[False], public=[True])
     _wire(monkeypatch, calls)
     monkeypatch.setattr(hc.settings.data_plane, "pgbouncer_enabled", True)
-    monkeypatch.setattr(hc, "init_gateway_process", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-    monkeypatch.setattr(hc, "get_record", lambda _home: object())  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(hc, "init_gateway_process", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(hc, "get_record", lambda _home: object())  # pyright: ignore[reportUnknownArgumentType]
 
     def _no_identity() -> str:
         raise ValueError("db_url carries no username")

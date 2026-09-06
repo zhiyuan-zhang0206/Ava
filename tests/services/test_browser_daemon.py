@@ -57,7 +57,7 @@ def test_main_asserts_capable_then_execvps_chrome(
     monkeypatch.setattr(
         bd,
         "_cdp_reachable",
-        lambda _p: (order.append("port"), False)[1],  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda _p: (order.append("port"), False)[1],  # pyright: ignore[reportUnknownArgumentType]
     )
     monkeypatch.setattr(bd, "resolve_chrome_binary", lambda: "/chrome")
 
@@ -72,14 +72,14 @@ def test_main_asserts_capable_then_execvps_chrome(
     monkeypatch.setattr(
         bd.browser_profile,
         "validate_local_state",
-        lambda _profile: None,  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda _profile: None,  # pyright: ignore[reportUnknownArgumentType]
     )
     monkeypatch.setattr(bd, "logs_dir", lambda: tmp_path)
     monkeypatch.setattr(settings.services, "app_port", 3001)
     monkeypatch.setattr(settings.gateway, "gateway_url", "http://10.0.0.72:8000")
-    monkeypatch.setattr(bd.os, "open", lambda *_a, **_k: 99)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-    monkeypatch.setattr(bd.os, "dup2", lambda *_a: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-    monkeypatch.setattr(bd.os, "close", lambda *_a: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(bd.os, "open", lambda *_a, **_k: 99)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(bd.os, "dup2", lambda *_a: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(bd.os, "close", lambda *_a: None)  # pyright: ignore[reportUnknownArgumentType]
     captured_file = ""
     captured_args: list[str] = []
 
@@ -113,7 +113,7 @@ def test_cdp_reachable_true_on_200(monkeypatch: pytest.MonkeyPatch) -> None:
     resp = MagicMock(status=200)
     cm = MagicMock()
     cm.__enter__.return_value = resp
-    monkeypatch.setattr(bd.urllib.request, "urlopen", lambda *_a, **_k: cm)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(bd.urllib.request, "urlopen", lambda *_a, **_k: cm)  # pyright: ignore[reportUnknownArgumentType]
     assert bd._cdp_reachable(9222) is True
 
 
@@ -134,8 +134,8 @@ def test_cdp_confirmed_gone_false_on_first_reachable_probe(
     """A live CDP endpoint ends the confirmation immediately — no sleeping, no
     further probes. This is the handoff verdict: Chrome is alive."""
     probes: list[int] = []
-    monkeypatch.setattr(bd, "_cdp_reachable", lambda p: probes.append(p) or True)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-    monkeypatch.setattr(bd.time, "sleep", lambda _s: pytest.fail("must not sleep when CDP is up"))  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(bd, "_cdp_reachable", lambda p: probes.append(p) or True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(bd.time, "sleep", lambda _s: pytest.fail("must not sleep when CDP is up"))  # pyright: ignore[reportUnknownArgumentType]
     assert bd._cdp_confirmed_gone(9222) is False
     assert probes == [9222]
 
@@ -146,8 +146,8 @@ def test_cdp_confirmed_gone_tolerates_a_gap_before_the_port_is_rebound(
     """A detached Chrome may need a moment to rebind the port after its launcher
     exits, so a single refused probe must not be the verdict."""
     answers = iter([False, False, True])
-    monkeypatch.setattr(bd, "_cdp_reachable", lambda _p: next(answers))  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-    monkeypatch.setattr(bd.time, "sleep", lambda _s: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(bd, "_cdp_reachable", lambda _p: next(answers))  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(bd.time, "sleep", lambda _s: None)  # pyright: ignore[reportUnknownArgumentType]
     assert bd._cdp_confirmed_gone(9222) is False
 
 
@@ -155,7 +155,7 @@ def test_cdp_confirmed_gone_true_after_bounded_attempts(monkeypatch: pytest.Monk
     """Fail fast: a permanently dead endpoint is confirmed gone after at most
     `_CDP_CONFIRM_ATTEMPTS` probes, never retried forever."""
     probes: list[int] = []
-    monkeypatch.setattr(bd, "_cdp_reachable", lambda p: bool(probes.append(p)))  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(bd, "_cdp_reachable", lambda p: bool(probes.append(p)))  # pyright: ignore[reportUnknownArgumentType]
     slept: list[float] = []
     monkeypatch.setattr(bd.time, "sleep", slept.append)
     assert bd._cdp_confirmed_gone(9222) is True
@@ -175,11 +175,11 @@ def test_cdp_confirmed_gone_stops_at_the_wall_clock_deadline(
 
     monkeypatch.setattr(bd.time, "monotonic", _clock)
     probes: list[int] = []
-    monkeypatch.setattr(bd, "_cdp_reachable", lambda p: bool(probes.append(p)))  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(bd, "_cdp_reachable", lambda p: bool(probes.append(p)))  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
         bd.time,
         "sleep",
-        lambda _s: pytest.fail("deadline reached: no more waiting"),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda _s: pytest.fail("deadline reached: no more waiting"),  # pyright: ignore[reportUnknownArgumentType]
     )
     assert bd._cdp_confirmed_gone(9222) is True
     assert probes == [9222]  # one probe, then the deadline ends it
@@ -191,7 +191,7 @@ def test_watch_cdp_returns_only_once_chrome_is_confirmed_gone(
     """The post-handoff stand-in for `proc.wait()`: it blocks while CDP answers
     and returns when it stops — one exit, and that exit is "browser gone"."""
     verdicts = iter([False, False, True])
-    monkeypatch.setattr(bd, "_cdp_confirmed_gone", lambda _p: next(verdicts))  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(bd, "_cdp_confirmed_gone", lambda _p: next(verdicts))  # pyright: ignore[reportUnknownArgumentType]
     slept: list[float] = []
     monkeypatch.setattr(bd.time, "sleep", slept.append)
     bd._watch_cdp(9222)
@@ -205,10 +205,10 @@ def test_launch_execs_in_place_on_posix(monkeypatch: pytest.MonkeyPatch) -> None
     monkeypatch.setattr(
         bd.subprocess,
         "Popen",
-        lambda *_a, **_k: pytest.fail("POSIX must exec, not spawn"),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda *_a, **_k: pytest.fail("POSIX must exec, not spawn"),  # pyright: ignore[reportUnknownArgumentType]
     )
     captured: list[tuple[str, list[str]]] = []
-    monkeypatch.setattr(bd.os, "execvp", lambda f, a: captured.append((f, a)))  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(bd.os, "execvp", lambda f, a: captured.append((f, a)))  # pyright: ignore[reportUnknownArgumentType]
     bd._launch("/chrome", ["/chrome", "--remote-debugging-port=9222"], 9222)
     assert captured == [("/chrome", ["/chrome", "--remote-debugging-port=9222"])]
 
@@ -224,9 +224,9 @@ def _windows_branch(monkeypatch: pytest.MonkeyPatch, *, cdp_gone: bool) -> None:
     monkeypatch.setattr(
         bd.os,
         "execvp",
-        lambda *_a: pytest.fail("Windows must not exec (pid would change)"),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda *_a: pytest.fail("Windows must not exec (pid would change)"),  # pyright: ignore[reportUnknownArgumentType]
     )
-    monkeypatch.setattr(bd, "_cdp_confirmed_gone", lambda _p: cdp_gone)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(bd, "_cdp_confirmed_gone", lambda _p: cdp_gone)  # pyright: ignore[reportUnknownArgumentType]
 
 
 def test_launch_supervises_on_windows(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -266,7 +266,7 @@ def test_launch_on_windows_propagates_chrome_exit_code(monkeypatch: pytest.Monke
     _windows_branch(monkeypatch, cdp_gone=True)
     proc = MagicMock()
     proc.wait.return_value = 9
-    monkeypatch.setattr(bd.subprocess, "Popen", lambda *_a, **_k: proc)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(bd.subprocess, "Popen", lambda *_a, **_k: proc)  # pyright: ignore[reportUnknownArgumentType]
     with pytest.raises(SystemExit) as exc:
         bd._launch("C:\\chrome.exe", ["C:\\chrome.exe"], 9222)
     assert exc.value.code == 9
@@ -283,7 +283,7 @@ def test_launch_on_windows_stays_up_when_chrome_hands_off(monkeypatch: pytest.Mo
     _windows_branch(monkeypatch, cdp_gone=False)
     proc = MagicMock()
     proc.wait.return_value = 0
-    monkeypatch.setattr(bd.subprocess, "Popen", lambda *_a, **_k: proc)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(bd.subprocess, "Popen", lambda *_a, **_k: proc)  # pyright: ignore[reportUnknownArgumentType]
     watched: list[int] = []
 
     def _watch(port: int) -> None:
@@ -307,11 +307,11 @@ def test_launch_on_windows_never_returns_while_cdp_answers(
     monkeypatch.setattr(
         bd,
         "_cdp_reachable",
-        lambda _p: True,  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-    )  # a healthy browser, always  # pyright: ignore[reportUnknownArgumentType]
+        lambda _p: True,  # pyright: ignore[reportUnknownArgumentType]
+    )  # a healthy browser, always
     proc = MagicMock()
     proc.wait.return_value = 0
-    monkeypatch.setattr(bd.subprocess, "Popen", lambda *_a, **_k: proc)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(bd.subprocess, "Popen", lambda *_a, **_k: proc)  # pyright: ignore[reportUnknownArgumentType]
 
     class _StopWatchingError(Exception):
         pass
@@ -332,11 +332,11 @@ def test_launch_on_windows_kills_chrome_on_ctrl_break(monkeypatch: pytest.Monkey
     monkeypatch.setattr(
         bd,
         "_cdp_confirmed_gone",
-        lambda _p: pytest.fail("a Ctrl-Break stop must not probe CDP"),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda _p: pytest.fail("a Ctrl-Break stop must not probe CDP"),  # pyright: ignore[reportUnknownArgumentType]
     )
     proc = MagicMock()
     proc.wait.side_effect = [KeyboardInterrupt(), 0]
-    monkeypatch.setattr(bd.subprocess, "Popen", lambda *_a, **_k: proc)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(bd.subprocess, "Popen", lambda *_a, **_k: proc)  # pyright: ignore[reportUnknownArgumentType]
     with pytest.raises(SystemExit):
         bd._launch("C:\\chrome.exe", ["C:\\chrome.exe"], 9222)
     proc.terminate.assert_called_once()
@@ -350,7 +350,7 @@ def test_launch_on_windows_leaves_on_ctrl_break_during_handoff_watch(
     _windows_branch(monkeypatch, cdp_gone=False)
     proc = MagicMock()
     proc.wait.return_value = 0
-    monkeypatch.setattr(bd.subprocess, "Popen", lambda *_a, **_k: proc)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(bd.subprocess, "Popen", lambda *_a, **_k: proc)  # pyright: ignore[reportUnknownArgumentType]
 
     def _interrupted(_port: int) -> None:
         raise KeyboardInterrupt
@@ -367,7 +367,7 @@ def test_launch_on_windows_exits_127_when_spawn_fails(monkeypatch: pytest.Monkey
     monkeypatch.setattr(
         bd,
         "_cdp_confirmed_gone",
-        lambda _p: pytest.fail("a failed spawn must not probe CDP"),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda _p: pytest.fail("a failed spawn must not probe CDP"),  # pyright: ignore[reportUnknownArgumentType]
     )
 
     def _boom(*_a: object, **_k: object) -> None:
@@ -387,12 +387,12 @@ def test_main_refuses_when_cdp_port_already_served(
     colliding second Chrome — so the healthcheck/watchdog don't churn a
     profile-lock crash."""
     monkeypatch.setattr(bd, "assert_browser_capable", lambda: None)
-    monkeypatch.setattr(bd, "_cdp_reachable", lambda _p: True)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(bd, "_cdp_reachable", lambda _p: True)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(bd, "_profile_dir", lambda: Path("/x/chrome-profile"))
     monkeypatch.setattr(
         bd.os,
         "execvp",
-        lambda *_a: pytest.fail("execvp must not run when the port is taken"),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda *_a: pytest.fail("execvp must not run when the port is taken"),  # pyright: ignore[reportUnknownArgumentType]
     )
     with pytest.raises(SystemExit) as exc:
         bd.main()

@@ -37,7 +37,7 @@ def counted_checks(monkeypatch: pytest.MonkeyPatch) -> list[str]:
         wd._Check(n, _make(n), requires_db=n != "frontend")
         for n in ("gateway", "labeler", "frontend")
     ]
-    monkeypatch.setattr(wd, "_checks_for_capability", lambda _role: fake_checks)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(wd, "_checks_for_capability", lambda _role: fake_checks)  # pyright: ignore[reportUnknownArgumentType]
     return calls
 
 
@@ -235,7 +235,7 @@ async def test_run_exposes_the_last_completed_tick_through_role_healthz(
     and receives the same liveness clock the deadline advances."""
     pid_path = tmp_path / "gateway-watchdog.pid"
     monkeypatch.setattr(wd.settings.services, "gateway_watchdog_pidfile", pid_path)
-    monkeypatch.setattr(wd, "_is_running", lambda _pidfile: False)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(wd, "_is_running", lambda _pidfile: False)  # pyright: ignore[reportUnknownArgumentType]
     health_calls: list[tuple[str, object, object]] = []
     stopped: list[object] = []
 
@@ -298,7 +298,7 @@ async def test_healthcheck_sys_exit_does_not_kill_the_watchdog(
     monkeypatch.setattr(
         wd,
         "_checks_for_capability",
-        lambda _r: [  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda _r: [  # pyright: ignore[reportUnknownArgumentType]
             wd._Check("boom", _boom, requires_db=False),
             wd._Check("after", _after, requires_db=False),
         ],
@@ -318,7 +318,7 @@ async def test_healthcheck_exception_does_not_kill_the_watchdog(
     monkeypatch.setattr(
         wd,
         "_checks_for_capability",
-        lambda _r: [  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda _r: [  # pyright: ignore[reportUnknownArgumentType]
             wd._Check(
                 "boom", lambda: (_ for _ in ()).throw(RuntimeError("nope")), requires_db=False
             ),
@@ -340,7 +340,7 @@ async def test_run_loop_sleeps_before_first_tick(
     calls: list[str] = []
     pid_path = tmp_path / "gateway-watchdog.pid"
     monkeypatch.setattr(wd.settings.services, "gateway_watchdog_pidfile", pid_path)
-    monkeypatch.setattr(wd, "_is_running", lambda _pidfile: False)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(wd, "_is_running", lambda _pidfile: False)  # pyright: ignore[reportUnknownArgumentType]
 
     async def fake_tick(_role: str) -> None:
         calls.append("tick")

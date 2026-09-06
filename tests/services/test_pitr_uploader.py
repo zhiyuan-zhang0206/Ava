@@ -235,7 +235,7 @@ def test_ack_fast_path_reconciles_every_cleanup_crash_point(
 ) -> None:
     store = FakeStore()
     uploader, source = _uploader(tmp_path, store)
-    original_write_ack = uploader._write_ack  # pyright: ignore[reportPrivateUsage]
+    original_write_ack = uploader._write_ack
 
     def crash_after_ack(ack: AckManifest, destination: Path) -> None:
         original_write_ack(ack, destination)
@@ -337,7 +337,7 @@ class _ResumableFakeBlob:
         self.crc32c = base64.b64encode(google_crc32c.Checksum(self.data).digest()).decode()
         self.generation = 1
 
-    def reload(self, **kwargs) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    def reload(self, **kwargs) -> None:
         return None
 
 
@@ -379,12 +379,12 @@ def test_filename_adapter_uses_seekable_16mib_ciphertext(
     monkeypatch.setattr(
         gcs_store_module.storage,
         "Client",
-        lambda *_a, **_k: client,  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda *_a, **_k: client,  # pyright: ignore[reportUnknownArgumentType]
     )
     monkeypatch.setattr(
         gcs_store_module.service_account.Credentials,
         "from_service_account_file",
-        lambda *_a, **_k: None,  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda *_a, **_k: None,  # pyright: ignore[reportUnknownArgumentType]
     )
     creds = tmp_path / "creds.json"
     creds.write_text("{}")

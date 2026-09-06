@@ -64,7 +64,7 @@ def _probes(
     monkeypatch.setattr(hc, "_probe", lambda: probe)
     monkeypatch.setattr(hc, "_session_alive", lambda: session)
     monkeypatch.setattr(hc.macos_readiness, "degraded_wait_reason", lambda: None)
-    monkeypatch.setattr(hc, "init_gateway_process", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(hc, "init_gateway_process", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(hc, "_restart_daemon", _restart)
     monkeypatch.setattr(hc, "reap_cluster_chrome", _reap)
     monkeypatch.setattr(hc, "_episode_reporter", lambda: episode)

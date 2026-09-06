@@ -41,7 +41,7 @@ async def daemon_sock(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
             Path(sock).unlink()
 
 
-async def test_probe_alive(daemon_sock) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+async def test_probe_alive(daemon_sock) -> None:
     # The blocking probe would deadlock the loop the fixture's server runs
     # on; bounce it to a worker thread.
     assert await asyncio.to_thread(hc._is_alive) is True

@@ -558,9 +558,9 @@ class TestConcurrentAgentIsolation:
         assert seen[22].plugin_marker == "plug-for-22"
         # Per-agent handles, not one shared object.
         assert seen[11].llm is not seen[22].llm
-        assert seen[11].llm.name == "model-for-11"  # pyright: ignore[reportAttributeAccessIssue]
-        assert seen[11].publisher.agent_id == 11  # pyright: ignore[reportAttributeAccessIssue]
-        assert seen[22].publisher.agent_id == 22  # pyright: ignore[reportAttributeAccessIssue]
+        assert seen[11].llm.name == "model-for-11"
+        assert seen[11].publisher.agent_id == 11
+        assert seen[22].publisher.agent_id == 22
 
     async def test_nothing_leaks_after_a_turn_ends(self, wired: _Build) -> None:
         """The binds are scoped to the turn, so the host itself is never left
@@ -606,7 +606,7 @@ class TestConfigRebind:
         await asyncio.wait_for(host.run_turn(1), 2)
 
         assert graph.observations[-1].model == "after"
-        assert graph.observations[-1].llm.name == "after", (  # pyright: ignore[reportAttributeAccessIssue]
+        assert graph.observations[-1].llm.name == "after", (
             "the model must be REBUILT, not just re-read from settings"
         )
         assert host.stats.cache_misses == 2, "a changed config must miss the cache"
@@ -701,7 +701,7 @@ class TestTurnLoop:
 
         _stub_host_transitions(monkeypatch, _flip)
         host, graph, _ = wired({1: _Row(status="idling")})
-        graph.ainvoke = _boom  # pyright: ignore[reportAttributeAccessIssue]
+        graph.ainvoke = _boom
 
         with pytest.raises(RuntimeError, match="turn exploded"):
             await asyncio.wait_for(host.run_turn(1), 2)
@@ -905,7 +905,7 @@ class TestTurnLoop:
 
         await asyncio.wait_for(host.run_turn(1), 2)
         assert 1 in host._runtimes
-        graph.ainvoke = _boom  # pyright: ignore[reportAttributeAccessIssue]
+        graph.ainvoke = _boom
         with pytest.raises(RuntimeError, match="turn exploded"):
             await asyncio.wait_for(host.run_turn(1), 2)
         assert 1 not in host._runtimes

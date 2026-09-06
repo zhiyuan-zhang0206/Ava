@@ -203,16 +203,16 @@ def _wire_copy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> list[tuple[Pa
     src.mkdir()
     monkeypatch.setattr(bp, "profile_dir", lambda: dst)
     monkeypatch.setattr(bp, "default_chrome_user_data_dir", lambda: src)
-    monkeypatch.setattr(bp, "_running_chrome_pid", lambda _s: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-    monkeypatch.setattr(bp, "_dir_size_bytes", lambda _s: 1234)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(bp, "_running_chrome_pid", lambda _s: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(bp, "_dir_size_bytes", lambda _s: 1234)  # pyright: ignore[reportUnknownArgumentType]
     calls: list[tuple[Path, Path]] = []
-    monkeypatch.setattr(bp, "_copy_default_profile", lambda s, d: calls.append((s, d)))  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(bp, "_copy_default_profile", lambda s, d: calls.append((s, d)))  # pyright: ignore[reportUnknownArgumentType]
     return calls
 
 
 def test_choice_new_does_not_copy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     calls = _wire_copy(tmp_path, monkeypatch)
-    monkeypatch.setattr("builtins.input", lambda *_a: "new")  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr("builtins.input", lambda *_a: "new")  # pyright: ignore[reportUnknownArgumentType]
     bp.ensure_browser_profile(interactive=True)
     assert calls == []
 
@@ -220,7 +220,7 @@ def test_choice_new_does_not_copy(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
 def test_choice_copy_confirmed_copies(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     calls = _wire_copy(tmp_path, monkeypatch)
     answers = iter(["copy", "yes"])
-    monkeypatch.setattr("builtins.input", lambda *_a: next(answers))  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr("builtins.input", lambda *_a: next(answers))  # pyright: ignore[reportUnknownArgumentType]
     bp.ensure_browser_profile(interactive=True)
     assert len(calls) == 1
 
@@ -228,7 +228,7 @@ def test_choice_copy_confirmed_copies(tmp_path: Path, monkeypatch: pytest.Monkey
 def test_choice_copy_declined_at_confirm(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     calls = _wire_copy(tmp_path, monkeypatch)
     answers = iter(["copy", "no"])
-    monkeypatch.setattr("builtins.input", lambda *_a: next(answers))  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr("builtins.input", lambda *_a: next(answers))  # pyright: ignore[reportUnknownArgumentType]
     bp.ensure_browser_profile(interactive=True)
     assert calls == []
 
@@ -238,10 +238,10 @@ def test_copy_aborts_when_chrome_running(tmp_path: Path, monkeypatch: pytest.Mon
     monkeypatch.setattr(
         bp,
         "_running_chrome_pid",
-        lambda _s: 4242,  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-    )  # never quits  # pyright: ignore[reportUnknownArgumentType]
+        lambda _s: 4242,  # pyright: ignore[reportUnknownArgumentType]
+    )  # never quits
     answers = iter(["copy", "new"])  # choose copy, then bail out of the retry loop
-    monkeypatch.setattr("builtins.input", lambda *_a: next(answers))  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr("builtins.input", lambda *_a: next(answers))  # pyright: ignore[reportUnknownArgumentType]
     bp.ensure_browser_profile(interactive=True)
     assert calls == []
 
@@ -249,8 +249,8 @@ def test_copy_aborts_when_chrome_running(tmp_path: Path, monkeypatch: pytest.Mon
 def test_copy_proceeds_after_chrome_quits(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     calls = _wire_copy(tmp_path, monkeypatch)
     pids = iter([4242, None])  # running on first probe, quit by the second
-    monkeypatch.setattr(bp, "_running_chrome_pid", lambda _s: next(pids))  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(bp, "_running_chrome_pid", lambda _s: next(pids))  # pyright: ignore[reportUnknownArgumentType]
     answers = iter(["copy", "", "yes"])  # copy; Enter to retry; confirm
-    monkeypatch.setattr("builtins.input", lambda *_a: next(answers))  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr("builtins.input", lambda *_a: next(answers))  # pyright: ignore[reportUnknownArgumentType]
     bp.ensure_browser_profile(interactive=True)
     assert len(calls) == 1

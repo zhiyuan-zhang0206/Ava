@@ -104,14 +104,14 @@ def test_empty_output_is_empty_list(fake_bin: Path, monkeypatch: pytest.MonkeyPa
 
 def test_missing_swiftc_raises(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _force_rebuild(monkeypatch, tmp_path, "rebuild1")
-    monkeypatch.setattr(ocr_mod.shutil, "which", lambda _name: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(ocr_mod.shutil, "which", lambda _name: None)  # pyright: ignore[reportUnknownArgumentType]
     with pytest.raises(OcrError, match="swiftc"):
         ocr_image("/tmp/x.png")  # noqa: S108
 
 
 def test_swiftc_failure_raises(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _force_rebuild(monkeypatch, tmp_path, "rebuild2")
-    monkeypatch.setattr(ocr_mod.shutil, "which", lambda _name: "/usr/bin/swiftc")  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(ocr_mod.shutil, "which", lambda _name: "/usr/bin/swiftc")  # pyright: ignore[reportUnknownArgumentType]
 
     def _run(cmd: list[str], **kw: Any) -> _FakeCompleted:
         return _FakeCompleted(returncode=1, stderr="compile error")

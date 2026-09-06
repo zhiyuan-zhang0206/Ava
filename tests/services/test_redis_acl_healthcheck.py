@@ -171,22 +171,22 @@ def test_failing_repair_raises() -> None:
             _check(cluster_url, bad_admin)
 
 
-def test_main_skips_when_url_carries_no_username(monkeypatch: pytest.MonkeyPatch, caplog) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_main_skips_when_url_carries_no_username(monkeypatch: pytest.MonkeyPatch, caplog) -> None:
     """The legacy .env shape (`redis://:<secret>@host/0`): the runtime dials as the
     redis `default` user (requirepass persists across restarts), so no ACL identity
     can be dropped and the check must SKIP with a warning — not raise a traceback
     every watchdog round (the 4.5k-ERROR flood this regression test pins)."""
     from services.healthchecks import redis_acl
 
-    monkeypatch.setattr(redis_acl, "init_gateway_process", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(redis_acl, "init_gateway_process", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(redis_acl.settings.data_plane, "redis_url", "redis://:sek@127.0.0.1:6380/0")
     # the legacy .env shape implies a cluster with a secret — the no-secret
     # skip must not pre-empt the legacy-URL skip
     monkeypatch.setattr(redis_acl.settings.data_plane, "cluster_secret", "sek")
-    monkeypatch.setattr(redis_acl, "get_record", _registry_record)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(redis_acl, "record_redis_port", _registry_redis_port)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(redis_acl, "get_record", _registry_record)
+    monkeypatch.setattr(redis_acl, "record_redis_port", _registry_redis_port)
     calls = []
-    monkeypatch.setattr(redis_acl, "check", lambda *a, **k: calls.append((a, k)))  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType, reportUnknownMemberType]
+    monkeypatch.setattr(redis_acl, "check", lambda *a, **k: calls.append((a, k)))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
     with caplog.at_level(logging.WARNING, logger="services.healthchecks.redis_acl"):  # pyright: ignore[reportUnknownMemberType]
         redis_acl.main()
     assert calls == []
@@ -194,21 +194,21 @@ def test_main_skips_when_url_carries_no_username(monkeypatch: pytest.MonkeyPatch
     assert "127.0.0.1:6380" in caplog.text  # pyright: ignore[reportUnknownMemberType]
     assert (
         "sek" not in caplog.text  # pyright: ignore[reportUnknownMemberType]
-    )  # the credential never reaches a log line  # pyright: ignore[reportUnknownMemberType]
+    )  # the credential never reaches a log line
 
 
 def test_main_runs_check_with_the_url_identity(monkeypatch: pytest.MonkeyPatch) -> None:
     """A URL carrying a username goes to check() with the identity read from the
     URL as data (names-as-data), not a re-derived one."""
-    monkeypatch.setattr(redis_acl, "init_gateway_process", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-    monkeypatch.setattr(redis_acl, "get_record", _registry_record)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(redis_acl, "record_redis_port", _registry_redis_port)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(redis_acl, "init_gateway_process", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(redis_acl, "get_record", _registry_record)
+    monkeypatch.setattr(redis_acl, "record_redis_port", _registry_redis_port)
     monkeypatch.setattr(redis_acl.settings.data_plane, "cluster_secret", "sek")
     monkeypatch.setattr(
         redis_acl.settings.data_plane, "redis_url", "redis://ava_main:sek@127.0.0.1:6380/0"
     )
     calls = []
-    monkeypatch.setattr(redis_acl, "check", lambda *a, **k: calls.append((a, k)))  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType, reportUnknownMemberType]
+    monkeypatch.setattr(redis_acl, "check", lambda *a, **k: calls.append((a, k)))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
     redis_acl.main()
     assert len(calls) == 1  # pyright: ignore[reportUnknownArgumentType]
     assert calls[0][0][0] == "ava_main"
@@ -220,14 +220,14 @@ def test_main_runs_check_with_the_url_identity(monkeypatch: pytest.MonkeyPatch) 
 def test_main_without_secret_runs_the_liveness_check(monkeypatch: pytest.MonkeyPatch) -> None:
     """No-secret clusters have no ACL re-affirmation, but their local Redis is
     still the message bus and must be restarted when it dies."""
-    monkeypatch.setattr(redis_acl, "init_gateway_process", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-    monkeypatch.setattr(redis_acl, "get_record", _registry_record)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(redis_acl, "record_redis_port", _registry_redis_port)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(redis_acl, "init_gateway_process", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(redis_acl, "get_record", _registry_record)
+    monkeypatch.setattr(redis_acl, "record_redis_port", _registry_redis_port)
     monkeypatch.setattr(settings.data_plane, "cluster_secret", "")
     monkeypatch.setattr(settings.data_plane, "redis_url", "redis://ava_no_auth@127.0.0.1:6380/0")
     calls = []
 
-    monkeypatch.setattr(redis_acl, "check", lambda *a, **k: calls.append((a, k)))  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType, reportUnknownMemberType]
+    monkeypatch.setattr(redis_acl, "check", lambda *a, **k: calls.append((a, k)))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
     redis_acl.main()
 
     assert len(calls) == 1  # pyright: ignore[reportUnknownArgumentType]

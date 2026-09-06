@@ -57,7 +57,7 @@ def _quiet_and_inert(monkeypatch: pytest.MonkeyPatch) -> None:
     """`main()` calls init_gateway_process() and (restarter only) the DB-touching
     stand-in dispatch; neither is what these tests are about."""
     for mod in (restarter_hc, ops_hc):
-        monkeypatch.setattr(mod, "init_gateway_process", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        monkeypatch.setattr(mod, "init_gateway_process", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(restarter_hc, "_standin_dispatch", lambda: None)
 
 

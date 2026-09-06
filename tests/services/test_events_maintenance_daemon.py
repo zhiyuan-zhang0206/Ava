@@ -75,7 +75,7 @@ def test_wedged_pass_fails_without_beating_in_flight(monkeypatch: pytest.MonkeyP
             daemon._maintenance_with_liveness(
                 _FAKE_POOL,
                 progress,
-                run=lambda _pool: time.sleep(0.05),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+                run=lambda _pool: time.sleep(0.05),
             )
         )
 
