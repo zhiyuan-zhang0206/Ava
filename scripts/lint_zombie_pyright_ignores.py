@@ -13,7 +13,7 @@ zombies and stale entries after a zombie is removed.
 
 Run ``--freeze`` only to establish a reviewed baseline. ``--check`` is the
 default CI path. ``--verify`` removes ignores in a temporary sibling and asks
-Pyright whether any same-line, same-rule errors appear. ``--strip`` applies
+Pyright whether any errors appear beyond the original baseline. ``--strip`` applies
 only those certified removals; ``--strip --all-tier`` skips Pyright and removes
 the statically known warning-tier family rules.
 """
@@ -550,6 +550,7 @@ def _pyright_errors(path: Path) -> frozenset[tuple[int, str]]:
 
 def verify_file(path: Path, candidates: frozenset[PyrightIgnore]) -> Verification:
     baseline_errors = _pyright_errors(path)
+    source = path.read_text(encoding="utf-8")
     with tempfile.NamedTemporaryFile(
         mode="w",
         encoding="utf-8",
@@ -559,18 +560,22 @@ def verify_file(path: Path, candidates: frozenset[PyrightIgnore]) -> Verificatio
         delete=False,
     ) as temporary:
         temporary_path = Path(temporary.name)
-        temporary.write(path.read_text(encoding="utf-8"))
+    rejected: set[PyrightIgnore] = set()
     try:
-        strip_file(temporary_path, candidates, preserve_line_numbers=True)
-        stripped_errors = _pyright_errors(temporary_path)
+        for candidate in sorted(candidates):
+            temporary_path.write_text(source, encoding="utf-8")
+            strip_file(
+                temporary_path,
+                frozenset({candidate}),
+                preserve_line_numbers=True,
+            )
+            if _pyright_errors(temporary_path) - baseline_errors:
+                rejected.add(candidate)
     finally:
         temporary_path.unlink(missing_ok=True)
 
-    new_errors = stripped_errors - baseline_errors
-    rejected = frozenset(
-        candidate for candidate in candidates if (candidate.line, candidate.rule) in new_errors
-    )
-    return Verification(candidates - rejected, rejected)
+    rejected_candidates = frozenset(rejected)
+    return Verification(candidates - rejected_candidates, rejected_candidates)
 
 
 def _verification_json(results: Mapping[str, Verification]) -> str:

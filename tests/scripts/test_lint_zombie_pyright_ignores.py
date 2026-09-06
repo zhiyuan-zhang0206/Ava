@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import json
-import subprocess
 from pathlib import Path
 
 import pytest
@@ -52,22 +50,6 @@ def _write(repo: Path, rel_path: str, content: str) -> Path:
 
 def _ignore(path: str, line: int, rule: str) -> gate.PyrightIgnore:
     return gate.PyrightIgnore(path=path, line=line, rule=rule)
-
-
-def _pyright_result(
-    diagnostics: list[tuple[int, str, str]],
-) -> subprocess.CompletedProcess[str]:
-    payload = {
-        "generalDiagnostics": [
-            {
-                "severity": severity,
-                "rule": rule,
-                "range": {"start": {"line": line - 1, "character": 0}},
-            }
-            for line, rule, severity in diagnostics
-        ]
-    }
-    return subprocess.CompletedProcess([], 1, stdout=json.dumps(payload), stderr="")
 
 
 def test_tier_config_uses_longest_environment_root(tier_config: gate.TierConfig) -> None:
@@ -249,63 +231,85 @@ def test_strip_multiple_rules_removes_only_selected_rule(tmp_path: Path) -> None
     )
 
 
-def test_verify_rejects_only_new_same_line_rule_errors(
+def test_verify_multiline_call_rejects_load_bearing_rule_at_call_line(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     path = _write(
         tmp_path,
         "agent/a.py",
-        "one = missing  # pyright: ignore[reportUnknownMemberType]\n"
-        "two = missing  # pyright: ignore[reportUnknownArgumentType]\n",
+        "monkeypatch.setattr(\n"
+        "    target,\n"
+        "    'attribute',\n"
+        "    lambda value: value,\n"
+        ")  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]\n",
     )
-    candidates = frozenset(
-        {
-            _ignore("agent/a.py", 1, "reportUnknownMemberType"),
-            _ignore("agent/a.py", 2, "reportUnknownArgumentType"),
-        }
-    )
-    results = iter(
-        [
-            _pyright_result([(9, "reportAssignmentType", "error")]),
-            _pyright_result(
-                [
-                    (9, "reportAssignmentType", "error"),
-                    (1, "reportUnknownMemberType", "error"),
-                    (2, "reportUnknownArgumentType", "warning"),
-                ]
-            ),
-        ]
-    )
+    candidates = frozenset(gate.scan_file(path, "agent/a.py"))
 
-    def fake_run(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
-        return next(results)
+    def fake_pyright_errors(candidate_path: Path) -> frozenset[tuple[int, str]]:
+        errors = {(9, "reportAssignmentType")}
+        if "reportUnknownArgumentType" not in candidate_path.read_text(encoding="utf-8"):
+            errors.add((1, "reportUnknownArgumentType"))
+        return frozenset(errors)
 
-    monkeypatch.setattr(gate.subprocess, "run", fake_run)
+    monkeypatch.setattr(gate, "_pyright_errors", fake_pyright_errors)
 
     verification = gate.verify_file(path, candidates)
+    gate.strip_file(path, verification.certified)
 
-    assert verification.rejected == frozenset({next(iter(sorted(candidates)))})
-    assert verification.certified == candidates - verification.rejected
-    assert path.read_text(encoding="utf-8").count("pyright: ignore") == 2
+    assert verification.rejected == frozenset(
+        {_ignore("agent/a.py", 5, "reportUnknownArgumentType")}
+    )
+    assert verification.certified == frozenset(
+        {_ignore("agent/a.py", 5, "reportUnknownLambdaType")}
+    )
+    assert path.read_text(encoding="utf-8").endswith(
+        ")  # pyright: ignore[reportUnknownArgumentType]\n"
+    )
 
 
-def test_verify_certifies_when_no_new_error(
+def test_verify_single_line_still_rejects_load_bearing_rule(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     path = _write(
         tmp_path,
         "agent/a.py",
-        "value = missing  # pyright: ignore[reportAssignmentType]\n",
+        "call(value)  # pyright: ignore[reportUnknownArgumentType]\n",
     )
-    candidate = _ignore("agent/a.py", 1, "reportAssignmentType")
-    results = iter([_pyright_result([]), _pyright_result([])])
+    candidate = _ignore("agent/a.py", 1, "reportUnknownArgumentType")
 
-    def fake_run(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
-        return next(results)
+    def fake_pyright_errors(candidate_path: Path) -> frozenset[tuple[int, str]]:
+        if "reportUnknownArgumentType" in candidate_path.read_text(encoding="utf-8"):
+            return frozenset()
+        return frozenset({(1, "reportUnknownArgumentType")})
 
-    monkeypatch.setattr(gate.subprocess, "run", fake_run)
+    monkeypatch.setattr(gate, "_pyright_errors", fake_pyright_errors)
 
     verification = gate.verify_file(path, frozenset({candidate}))
 
-    assert verification.certified == frozenset({candidate})
+    assert verification.certified == frozenset()
+    assert verification.rejected == frozenset({candidate})
+
+
+def test_verify_multiline_call_strips_all_warning_rules(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = _write(
+        tmp_path,
+        "agent/a.py",
+        "call(\n"
+        "    lambda value: value,\n"
+        ")  # pyright: ignore[reportUnknownLambdaType, reportUnusedCallResult]\n",
+    )
+    candidates = frozenset(gate.scan_file(path, "agent/a.py"))
+
+    def no_pyright_errors(_path: Path) -> frozenset[tuple[int, str]]:
+        return frozenset()
+
+    monkeypatch.setattr(gate, "_pyright_errors", no_pyright_errors)
+
+    verification = gate.verify_file(path, candidates)
+    gate.strip_file(path, verification.certified)
+
+    assert verification.certified == candidates
     assert verification.rejected == frozenset()
+    assert path.read_text(encoding="utf-8") == "call(\n    lambda value: value,\n)\n"
