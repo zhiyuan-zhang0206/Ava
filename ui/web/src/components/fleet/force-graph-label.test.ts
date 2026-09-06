@@ -1,6 +1,27 @@
 import { describe, expect, it } from "vitest";
 
-import { GLYPH_WIDTH_FULL, LABEL_LINE_HEIGHT, wrapLabel } from "./force-graph";
+import {
+  GLYPH_WIDTH_FULL,
+  LABEL_LINE_HEIGHT,
+  linkStrengthForWeight,
+  wrapLabel,
+} from "./force-graph";
+
+describe("linkStrengthForWeight", () => {
+  it("maps edge weight monotonically into the configured strength", () => {
+    expect(linkStrengthForWeight(0, 100, 0.4)).toBeCloseTo(0.1);
+    expect(linkStrengthForWeight(25, 100, 0.4)).toBeCloseTo(0.175);
+    expect(linkStrengthForWeight(100, 100, 0.4)).toBeCloseTo(0.4);
+  });
+
+  it("clamps malformed or out-of-range weights", () => {
+    expect(linkStrengthForWeight(-1, 100, 0.4)).toBeCloseTo(0.1);
+    expect(linkStrengthForWeight(200, 100, 0.4)).toBeCloseTo(0.4);
+    expect(() => linkStrengthForWeight(1, 0, 0.4)).toThrow(
+      "Maximum edge weight must be positive",
+    );
+  });
+});
 
 describe("wrapLabel", () => {
   it("returns one label-only line for a short label", () => {

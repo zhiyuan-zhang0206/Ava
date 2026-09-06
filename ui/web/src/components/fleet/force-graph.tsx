@@ -77,6 +77,24 @@ export interface ForceGraphEdge {
   readonly dashed?: boolean;
 }
 
+function edgeKey(edge: ForceGraphEdge, index: number): string {
+  return `${edge.from}-${edge.to}-${edge.kind}-${index}`;
+}
+
+// Keep every structural spring connected at no less than 25% of the user's
+// configured strength, then linearly scale the remaining 75% by normalized
+// tie weight. This preserves layout recoverability for weak ties while making
+// the strongest relationship use the exact strength restored by Reset all.
+export function linkStrengthForWeight(
+  weight: number,
+  maxWeight: number,
+  configuredStrength: number,
+): number {
+  if (maxWeight <= 0) throw new Error("Maximum edge weight must be positive");
+  const normalizedWeight = Math.min(Math.max(weight / maxWeight, 0), 1);
+  return configuredStrength * (0.25 + 0.75 * normalizedWeight);
+}
+
 // Node size: radius = minR + (maxR - minR) * sqrt(score / maxScore). sqrt
 // spreads the mid-range evenly; a node with score 0 sits at minR.
 export function radiusOf(score: number, maxScore: number, minR: number, maxR: number): number {
@@ -204,6 +222,8 @@ export const ForceGraph = memo(function ForceGraph({
   overlayLeft,
   hoverCard,
   ariaLabel,
+  edgeWeightEnabled = true,
+  onEdgeWeightEnabledChange,
 }: {
   nodes: readonly ForceGraphNode[];
   edges: readonly ForceGraphEdge[];
@@ -227,6 +247,9 @@ export const ForceGraph = memo(function ForceGraph({
   /** Instant hover detail card; see HoverCard. Absent → native <title> tooltip. */
   hoverCard?: HoverCard;
   ariaLabel?: string;
+  /** Whether edge strokes add their tie-weight width above the base width. */
+  edgeWeightEnabled?: boolean;
+  onEdgeWeightEnabledChange?: (enabled: boolean) => void;
 }) {
   const t = useTranslations("fleet.forceGraph");
   const graphAriaLabel = ariaLabel ?? t("defaultAriaLabel");
@@ -252,10 +275,32 @@ export const ForceGraph = memo(function ForceGraph({
     [nodes, maxScore, params.nodeSizeMin, params.nodeSizeMax, shape],
   );
   const simLinks = useMemo<SimLink[]>(
-    () => edges.map((e) => ({ source: e.from, target: e.to })),
+    () => edges.map((e, i) => ({
+      source: e.from,
+      target: e.to,
+      key: edgeKey(e, i),
+    })),
     [edges],
   );
-  const { positions, layout } = useForceLayout(simNodes, simLinks, params);
+  const edgeWeightByKey = useMemo(
+    () => new Map(edges.map((e, i) => [edgeKey(e, i), e.weight])),
+    [edges],
+  );
+  const linkStrength = useCallback(
+    (link: SimLink) => {
+      if (link.key === undefined) throw new Error("Weighted link is missing its key");
+      const weight = edgeWeightByKey.get(link.key);
+      if (weight === undefined) throw new Error(`Unknown weighted link: ${link.key}`);
+      return linkStrengthForWeight(weight, maxEdgeWeight, params.linkStrength);
+    },
+    [edgeWeightByKey, maxEdgeWeight, params.linkStrength],
+  );
+  const { positions, layout } = useForceLayout(
+    simNodes,
+    simLinks,
+    params,
+    { linkStrength },
+  );
 
   // Hover anchor: the node id plus the node's on-screen box captured at
   // mouseenter. The card is pinned there for the whole hover — it never
@@ -608,10 +653,10 @@ export const ForceGraph = memo(function ForceGraph({
                   : isMessage
                     ? 0.24 + 0.61 * normalizedWeight
                     : 0.72;
-              // Stroke width scales with weight (log-compressed so high-weight
-              // edges don't overwhelm). Base width depends on edge type, then
-              // weight adds on top.
-              const weightSw = Math.sqrt(e.weight) * 1.2;
+              // Optional stroke-width scaling stays visual only: turning it
+              // off removes the weight add-on but leaves base widths and the
+              // weight-aware spring attraction unchanged.
+              const weightSw = edgeWeightEnabled ? Math.sqrt(e.weight) * 1.2 : 0;
               const sw = isIncident
                 ? (isMessage ? 2.0 : 2.8) + weightSw
                 : (isMessage ? 0.6 : 1.2) + weightSw;
@@ -621,7 +666,7 @@ export const ForceGraph = memo(function ForceGraph({
               // (stale edges accumulate in space).
               return (
                 <line
-                  key={`${e.from}-${e.to}-${e.kind}-${i}`}
+                  key={edgeKey(e, i)}
                   x1={a.x}
                   y1={a.y}
                   x2={b.x}
@@ -855,7 +900,14 @@ export const ForceGraph = memo(function ForceGraph({
           fit-to-content frame. Order (user ruling 2026-08-06): settings,
           reset zoom, then view extras (the time-window selector). */}
       <div className={cn("pointer-events-auto absolute left-3 top-3 items-center gap-1", FLEX)}>
-        <ForceControls params={params} setParams={setParams} reset={resetParams} groups={groups} />
+        <ForceControls
+          params={params}
+          setParams={setParams}
+          reset={resetParams}
+          groups={groups}
+          edgeWeightEnabled={edgeWeightEnabled}
+          onEdgeWeightEnabledChange={onEdgeWeightEnabledChange}
+        />
         <button
           type="button"
           className={cn("size-6 items-center justify-center rounded border border-border bg-background/80 text-2xs text-muted-foreground backdrop-blur hover:bg-sidebar-accent hover:text-foreground", FLEX)}

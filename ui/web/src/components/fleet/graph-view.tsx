@@ -23,6 +23,7 @@ import { WindowSelect } from "@/components/window-select";
 import { STATS_WINDOW_LABELS, STATS_WINDOWS, type StatsWindowHours } from "@/lib/sidebar";
 import type { PublicAgentStatus } from "@/lib/types";
 import { useFleetGraph } from "@/lib/use-fleet-graph";
+import { useUserSettings } from "@/lib/use-user-settings";
 
 import {
   FORCE_DEFAULTS,
@@ -61,6 +62,8 @@ const DECAY_LAMBDA = 0.5;
 // DB-backed user settings key for this view's force knobs — the Task Graph
 // keeps its own key so the two graphs' tunings stay independent.
 const FORCE_PARAMS_KEY = "display.graph_force_params";
+const EDGE_WEIGHT_KEY = "display.graph_edge_weight";
+const EDGE_WEIGHT_DEFAULT = true;
 
 type SnapshotAge =
   | { unit: "now" }
@@ -96,6 +99,16 @@ export function GraphView({
   // User-tunable force-layout knobs (DB-backed: display.graph_force_params).
   const { params: forceParams, setParams: setForceParams, reset: resetForceParams } =
     useForceParams(FORCE_PARAMS_KEY, FORCE_DEFAULTS);
+  const { settings, setSetting } = useUserSettings();
+  // This view owns the boolean's default just as useForceParams owns its
+  // object defaults; the opaque DB value overrides it when present.
+  const storedEdgeWeight = settings[EDGE_WEIGHT_KEY];
+  const edgeWeightEnabled =
+    typeof storedEdgeWeight === "boolean" ? storedEdgeWeight : EDGE_WEIGHT_DEFAULT;
+  const resetGraphSettings = useCallback(() => {
+    resetForceParams();
+    setSetting(EDGE_WEIGHT_KEY, EDGE_WEIGHT_DEFAULT);
+  }, [resetForceParams, setSetting]);
 
   // Liveness filter FIRST (user ruling 2026-08-09 #1104): terminated agents
   // never appear in the graph — mirroring the sidebar's agent tree
@@ -168,6 +181,8 @@ export function GraphView({
       liveNodes.map((n) => ({
         id: n.agent_id,
         label: n.label,
+        // Offline is a projected display state from the gateway's machine and
+        // process liveness probes, not an agent lifecycle status.
         status: n.liveness_state === "offline" ? OFFLINE_STATUS : n.status,
         score: n.node_score,
         pulse: STATUS_PULSE[n.status],
@@ -195,7 +210,7 @@ export function GraphView({
             {statusLabels[node.status as GraphDisplayStatus]}
           </p>
           <p className="text-muted-foreground">
-            {t("activityScore", { score: Math.round(node.score).toLocaleString() })}
+            {t("activityScore", { score: `${(node.score / 1_000_000).toFixed(2)}M` })}
           </p>
         </div>
       </div>
@@ -210,7 +225,11 @@ export function GraphView({
   // stale copies of the same edge accumulate at old coordinates, floating in
   // space and overlapping (the "extra dangling edges" bug). Merge the lineage
   // family into one edge per pair — strongest weight wins, fork styling wins
-  // if any member was a fork.
+  // if any member was a fork. Degree-0 live nodes remain valid: the endpoint's
+  // edge telemetry is time-windowed and excludes terminated endpoints, while
+  // the live-node set is not connectivity-filtered; older lineage can also
+  // predate retained edge events. They therefore float by data design rather
+  // than from a missing render edge.
   const edges = useMemo<ForceGraphEdge[]>(() => {
     const byPair = new Map<string, ForceGraphEdge>();
     for (const e of graph.edges) {
@@ -255,7 +274,9 @@ export function GraphView({
         onOpen={(id) => router.push(`/?agent_id=${id}`)}
         params={forceParams}
         setParams={setForceParams}
-        resetParams={resetForceParams}
+        resetParams={resetGraphSettings}
+        edgeWeightEnabled={edgeWeightEnabled}
+        onEdgeWeightEnabledChange={(enabled) => setSetting(EDGE_WEIGHT_KEY, enabled)}
         hoverCard={agentHoverCard}
         statsText={t("stats", { nodes: nodes.length, edges: edges.length })}
         legend={
@@ -273,7 +294,6 @@ export function GraphView({
                 </span>
               ))}
             </div>
-            <p>{t("sizeActivity", { window: "24h" })}</p>
           </div>
         }
         ariaLabel={t("ariaLabel")}
