@@ -390,6 +390,31 @@ class HeartbeatBackoffReset(TypedDict):
     reason: str
 
 
+class CiUsageDaily(TypedDict):
+    """`ci_usage_daily` payload — schedules/c9-daily-report-schedule.py.
+
+    One event per reconciliation day (05:00-05:00 cluster time): the CI
+    workflow's runs and ceil-billed minutes for the window, split by
+    attribution (PR-title [Ava-<id>] convention) and OS. `est_usd` is the
+    private-repo overage equivalent at the GitHub-hosted rates — the repo is
+    currently public, so minutes are the billing fact (scripts/ci_accounting.py).
+    Per-agent detail lives in the attribution ledger, not here.
+    """
+
+    day: str  # cluster-tz date of the window end
+    window_start: str  # UTC ISO
+    window_end: str  # UTC ISO
+    runs: int
+    attributed_runs: int
+    unattributed_runs: int
+    total_minutes: int
+    attributed_minutes: int
+    linux_minutes: int
+    macos_minutes: int
+    appended_runs: int  # new ledger rows this reconciliation (0 = re-fire no-op)
+    est_usd: float
+
+
 class TaskReminderDigest(TypedDict):
     """`task_reminder_digest` payload — task-maintenance daemon."""
 

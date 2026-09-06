@@ -144,9 +144,10 @@ def test_category_projection_matches_telemetry_whitelist() -> None:
     # resurrection-failure suppressor raises it to 153; schedule_stalled
     # (Task #2492's two-hour session-silence alert) raises the current total to 154;
     # heartbeat_backoff_raised + heartbeat_backoff_reset (Task #2574's B7
-    # platform-side nudge backoff) raise it to 156.
+    # platform-side nudge backoff) raise it to 156; ci_usage_daily (Task
+    # #2579's C9 daily reconciliation) raises it to 157.
     assert "restart_cas_lost" not in _TELEMETRY_KINDS
-    assert len(_TELEMETRY_KINDS) == 156
+    assert len(_TELEMETRY_KINDS) == 157
 
 
 def test_delivery_wake_suppressed_payload_names_escalation_evidence() -> None:
