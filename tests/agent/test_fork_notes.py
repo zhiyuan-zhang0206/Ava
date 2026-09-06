@@ -109,7 +109,7 @@ async def test_fork_end_to_end_single_copy_each_note(
     tid = spawn_agent()
     _insert_inbound_kind(db_conn, tid, "", "fork", source="agent:7")
 
-    def _tagged(tag: NoteTag, content: str, id: str) -> HumanMessage:  # pyright: ignore[reportShadowedBuiltins]
+    def _tagged(tag: NoteTag, content: str, id: str) -> HumanMessage:
         return HumanMessage(
             content=f"[system] {content}",
             id=id,
