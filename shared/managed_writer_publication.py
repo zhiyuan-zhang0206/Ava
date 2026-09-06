@@ -7,6 +7,7 @@ unregistered credential holders, or activate caller protocol support by themselv
 
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import dataclass
 from typing import Literal, Self
@@ -28,6 +29,7 @@ from shared.managed_writer_barrier import (
     lock_rollout,
     validate_collection_for_write,
 )
+from shared.managed_writer_observation import ExpectedProcess
 
 
 @dataclass(frozen=True)
@@ -65,11 +67,104 @@ class PublishedUnit(ManagedUnit):
     manifest_digest: Digest
 
 
+class NormalService(EvidenceModel):
+    session: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
+    module: str | None = Field(default=None, min_length=1, max_length=512)
+    executable: str = Field(min_length=1, max_length=4096)
+    entrypoint: str = Field(min_length=1, max_length=4096)
+    command_digest: Digest
+
+
+class CandidateUnitPlan(EvidenceModel):
+    unit: PublishedUnit
+    services: tuple[NormalService, ...] = Field(min_length=1)
+    previous_selector_digest: Digest | None
+    selector_digest: Digest
+
+    @model_validator(mode="after")
+    def ordered_services(self) -> Self:
+        names = [service.session for service in self.services]
+        if names != sorted(set(names)):
+            raise ValueError("normal services must be unique and sorted")
+        root = self.unit.home + "/releases/" + self.unit.artifact_digest + "/"
+        if not self.unit.home.startswith("/"):
+            raise ValueError("normal candidate startup has no Windows platform adapter")
+        for service in self.services:
+            if service.session.startswith("ava-agent-") and service.session != "ava-agent-host":
+                raise ValueError("normal service startup cannot authorize an agent session")
+            for path in (service.executable, service.entrypoint):
+                if not path.startswith(root) or ".." in path.split("/"):
+                    raise ValueError("normal service command must belong to its retained image")
+        selector = {
+            "version": 2,
+            "artifact_digest": self.unit.artifact_digest,
+            "manifest_digest": self.unit.manifest_digest,
+            "prepared_receipt_digest": self.unit.prepared_receipt_digest,
+        }
+        encoded = (json.dumps(selector, sort_keys=True, separators=(",", ":")) + "\n").encode()
+        if hashlib.sha256(encoded).hexdigest() != self.selector_digest:
+            raise ValueError("selector digest does not encode the exact v2 unit tuple")
+        return self
+
+
+class NormalStartPlan(EvidenceModel):
+    schema_digest: Digest
+    applied_names: tuple[str, ...]
+    units: tuple[CandidateUnitPlan, ...] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def ordered_inventory(self) -> Self:
+        keys = [(entry.unit.machine, entry.unit.home) for entry in self.units]
+        if keys != sorted(set(keys)) or list(self.applied_names) != sorted(set(self.applied_names)):
+            raise ValueError("normal startup inventory and migration names must be sorted sets")
+        return self
+
+
+class PendingMigrationReceipt(EvidenceModel):
+    operation: RolloutIdentity
+    challenge: UUID
+    schema_digest: Digest
+    applied_names: tuple[str, ...]
+    verified_at: AwareDatetime
+
+
+class SelectorReadback(EvidenceModel):
+    unit: PublishedUnit
+    challenge: UUID
+    previous_digest: Digest | None
+    current_digest: Digest
+    observed_at: AwareDatetime
+    valid_until: AwareDatetime
+
+
+class NormalServiceReadback(EvidenceModel):
+    service: NormalService
+    supervisor: ExpectedProcess
+    child: ExpectedProcess
+    loaded_module: str | None = Field(default=None, min_length=1, max_length=4096)
+    executable: str = Field(min_length=1, max_length=4096)
+    entrypoint: str = Field(min_length=1, max_length=4096)
+    artifact_digest: Digest
+    manifest_digest: Digest
+    readiness: Literal["normal"]
+    challenge: UUID
+    observed_at: AwareDatetime
+    valid_until: AwareDatetime
+    observation_digest: Digest
+
+
+class UnitActivationReadback(EvidenceModel):
+    selector: SelectorReadback
+    services: tuple[NormalServiceReadback, ...] = Field(min_length=1)
+
+
 class CommittedPublication(EvidenceModel):
     publication_id: UUID
     operation: RolloutIdentity
     committed_at: AwareDatetime
     units: tuple[PublishedUnit, ...] = Field(min_length=1)
+    activation_digest: Digest | None = None
+    activation_challenge: UUID | None = None
 
 
 class PendingPublication(EvidenceModel):
@@ -79,6 +174,9 @@ class PendingPublication(EvidenceModel):
     challenge: UUID
     units: tuple[PublishedUnit, ...] = Field(min_length=1)
     collection: ManagedWriterCollection | None = None
+    normal_start_plan: NormalStartPlan | None = None
+    migration: PendingMigrationReceipt | None = None
+    unit_readbacks: tuple[UnitActivationReadback, ...] = ()
 
 
 class WriterPublication(EvidenceModel):
@@ -98,6 +196,15 @@ class WriterPublication(EvidenceModel):
             predecessor = self.current.publication_id if self.current is not None else None
             if self.pending.predecessor != predecessor:
                 raise ValueError("pending publication has a different predecessor")
+            plan = self.pending.normal_start_plan
+            if plan is not None and tuple(entry.unit for entry in plan.units) != self.pending.units:
+                raise ValueError("normal startup plan must cover the exact prepared units")
+            readback_units = [item.selector.unit for item in self.pending.unit_readbacks]
+            keys = [(unit.machine, unit.home) for unit in readback_units]
+            if keys != sorted(set(keys)) or any(
+                unit not in self.pending.units for unit in readback_units
+            ):
+                raise ValueError("pending readbacks must be an ordered unique prepared-unit subset")
             collection = self.pending.collection
             if collection is not None and (
                 collection.operation != self.pending.operation
@@ -141,7 +248,7 @@ def begin_pending_publication(
     A crash leaves pending in place even after lease expiry; only explicit
     verified completion/recovery may clear it. A new holder cannot overwrite it.
     """
-    if pending.collection is not None:
+    if pending.collection is not None or pending.migration is not None or pending.unit_readbacks:
         raise ManagedWriterBarrierError("prepare cannot import a cached collection")
     lock_rollout(conn, pending.operation)
     state = _locked_publication(conn)
@@ -151,7 +258,12 @@ def begin_pending_publication(
     if {(unit.machine, unit.home) for unit in pending.units} != registered:
         raise ManagedWriterBarrierError("prepared publication omits registered units")
     if state.pending is not None:
-        if state.pending.model_copy(update={"collection": None}) != pending:
+        if (
+            state.pending.model_copy(
+                update={"collection": None, "migration": None, "unit_readbacks": ()}
+            )
+            != pending
+        ):
             raise ManagedWriterBarrierError(
                 "another pending publication requires explicit recovery"
             )
@@ -212,7 +324,12 @@ def recover_pending_publication(
     and positively establish its exit before acquiring its replacement lease.
     Recovery preserves current and keeps births frozen; it does not publish.
     """
-    if replacement.collection is not None or replacement.operation == abandoned:
+    if (
+        replacement.collection is not None
+        or replacement.migration is not None
+        or replacement.unit_readbacks
+        or replacement.operation == abandoned
+    ):
         raise ManagedWriterBarrierError("recovery requires a new operation and fresh collection")
     lock_rollout(conn, replacement.operation)
     state = _locked_publication(conn)

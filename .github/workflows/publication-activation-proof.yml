@@ -1,0 +1,34 @@
+name: Pending publication activation contracts
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+permissions:
+  contents: read
+jobs:
+  real-pg:
+    if: github.head_ref == 'codex/rebuild-pr-1562'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      AVA_DB_URL: postgresql://unused@127.0.0.1:1/unused
+      AVA_REDIS_URL: redis://127.0.0.1:1/0
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d
+        with:
+          version: 0.10.2
+      - uses: ./.github/actions/install-pg-redis
+      - run: uv sync --frozen
+      - name: Actual PG stage, schema and publication fences
+        run: |
+          mkdir -p proof
+          timeout --kill-after=15 600 uv run pytest tests/shared/test_managed_writer_publication.py tests/shared/test_publication_admission.py tests/shared/test_managed_writer_barrier.py -vv -o faulthandler_timeout=120 --junitxml=proof/publication.xml
+      - run: uv run pyright shared/managed_writer_activation.py shared/managed_writer_publication.py tests/shared/test_managed_writer_publication.py
+      - if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: publication-activation-${{ github.event.pull_request.head.sha }}
+          path: proof/
+          if-no-files-found: error
