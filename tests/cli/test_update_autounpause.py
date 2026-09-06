@@ -99,6 +99,21 @@ def test_gateway_local_finally_finalizes_the_pause_journal(
     monkeypatch.setattr(pause_owner, "state_path", lambda: owner_path)
     monkeypatch.setattr(pause_owner, "lock_path", lambda: lock_path)
     acquired = datetime(2026, 8, 26, 14, 14, 42, tzinfo=UTC)
+    from shared.cluster_lock import DeployLease
+
+    monkeypatch.setattr(_up, "self_holder", lambda: "macmini:pid65276")
+    monkeypatch.setattr(
+        _up,
+        "read_update_lease",
+        lambda: DeployLease(
+            holder="macmini:pid65276",
+            held_for_s=0,
+            expires_in_s=60,
+            note=None,
+            kind="rollout",
+            acquired_at=acquired,
+        ),
+    )
     pause_owner.mark_paused("macmini:pid65276", acquired)
 
     monkeypatch.setattr(_cli, "_changed_paths_vs_origin", lambda: ["gateway/app.py"])
@@ -135,6 +150,21 @@ def test_gateway_local_finally_finalizes_the_journal_on_abort(
     monkeypatch.setattr(pause_owner, "state_path", lambda: owner_path)
     monkeypatch.setattr(pause_owner, "lock_path", lambda: lock_path)
     acquired = datetime(2026, 8, 26, 14, 14, 42, tzinfo=UTC)
+    from shared.cluster_lock import DeployLease
+
+    monkeypatch.setattr(_up, "self_holder", lambda: "macmini:pid65276")
+    monkeypatch.setattr(
+        _up,
+        "read_update_lease",
+        lambda: DeployLease(
+            holder="macmini:pid65276",
+            held_for_s=0,
+            expires_in_s=60,
+            note=None,
+            kind="rollout",
+            acquired_at=acquired,
+        ),
+    )
     pause_owner.mark_paused("macmini:pid65276", acquired)
 
     monkeypatch.setattr(_cli, "_changed_paths_vs_origin", lambda: ["gateway/app.py"])

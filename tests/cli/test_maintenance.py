@@ -20,7 +20,7 @@ def cli_dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(command, "host_identity", lambda: HostIdentity(uuid4(), frozenset()))
     monkeypatch.setattr(command, "connect", MagicMock())
     monkeypatch.setattr(command.maintenance_cohort, "verify_drained", MagicMock())
-    monkeypatch.setattr(command, "_wake", MagicMock())
+    monkeypatch.setattr("ops.agent_pause._wake", MagicMock())
     monkeypatch.setattr("shared.host_deploy_state.set_posture", MagicMock())
     monkeypatch.setattr(command, "ops_quiescent", MagicMock())
 
@@ -73,8 +73,11 @@ def test_start_keeps_hold_until_explicit_resume(monkeypatch: pytest.MonkeyPatch)
         return 0
 
     def unpause() -> None:
+        from ops.agent_pause import resume_agents
+
         maintenance.require_start_allowed()
         assert maintenance.held()
+        resume_agents()
 
     monkeypatch.setattr("cli.commands.start.cmd_start", start)
     monkeypatch.setattr("ops.cluster_pause.unpause_local_cluster", unpause)
@@ -127,7 +130,9 @@ def test_cancel_can_abandon_drain_before_service_stop(
     monkeypatch: pytest.MonkeyPatch, value: str
 ) -> None:
     phase(value)
-    unpause = MagicMock()
+    from ops.agent_pause import resume_agents
+
+    unpause = MagicMock(side_effect=resume_agents)
     monkeypatch.setattr("ops.cluster_pause.unpause_local_cluster", unpause)
     command._resume("local", WHEN, cancel=True)
     unpause.assert_called_once()

@@ -8,13 +8,8 @@ _SENTINEL = "<!-- lint:roster-table -->"
 
 
 def _roster_table(*services: str) -> str:
-    """Build a synthetic runbook fragment: a sentinel + a roster table whose
-    first column is a `` `service` `` code span per row. Includes the
-    `agent-{N}` non-service row to exercise the _NON_SERVICE_ROWS exemption."""
-    rows = [
-        "| `agent-{N}` | one session per agent | restarter |",
-    ]
-    rows += [f"| `{name}` | runs {name} | healthcheck |" for name in services]
+    """Build a synthetic service roster with the required sentinel."""
+    rows = [f"| `{name}` | runs {name} | healthcheck |" for name in services]
     return (
         "Some preamble prose.\n\n"
         f"{_SENTINEL}\n"
@@ -87,7 +82,7 @@ def test_parse_roster_extracts_first_column_only():
     text = _roster_table("gateway", "labeler")
     parsed = lint.parse_roster(text)
     # First column only: code spans in later columns must not leak in.
-    assert parsed == {"agent-{N}", "gateway", "labeler"}
+    assert parsed == {"gateway", "labeler"}
 
 
 # ─── healthcheck roster (issue #192) ────────────────────────────────────────

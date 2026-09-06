@@ -49,7 +49,7 @@ def _stub_full_orchestration(monkeypatch: pytest.MonkeyPatch, order: list[str]) 
     monkeypatch.setattr(_up, "_resolve_rollout_target", lambda **_kw: "deadbeefcafe")  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_cli, "_list_agent_runners", list)
     monkeypatch.setattr("ops.cluster.pause_local_cluster", lambda: order.append("pause_local"))
-    monkeypatch.setattr(_cli, "_quiesce_all_agents", lambda **_: order.append("quiesce"))  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_cli, "_quiesce_all_agents", lambda **_: order.append("quiesce") or True)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
         _cli,
         "_run_gateway_local_update",

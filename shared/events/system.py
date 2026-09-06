@@ -9,14 +9,14 @@ from shared.events.payloads import Category, EventTier, RetentionClass
 
 
 class ProcessExit(TypedDict):
-    """`process_exit` payload — agent/loop.py."""
+    """`process_exit` payload retained for historical process-runner events."""
 
     reason: str  # normal | signal:<name> | exception:<Type>
     pid: int
 
 
 class AgentBootFailed(TypedDict):
-    """`agent_boot_failed` payload — agent/loop.py."""
+    """`agent_boot_failed` payload retained for historical process-runner events."""
 
     model: str
     error_type: str

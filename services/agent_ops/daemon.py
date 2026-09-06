@@ -2,7 +2,7 @@
 
 The agent-runner's inbound ops service — the ONLY long-running ava process on
 an agent-runner that the gateway dials DIRECTLY over the private network
-(the runner's other services — restarter, watchdog, browser, mcp-daemon — are
+(the runner's other services — agent-host, watchdog, browser, mcp-daemon — are
 local or health-checked, not gateway-facing). Serves an inbound HTTP
 endpoint the gateway dials to run a cluster op on this host. Each request executes **in-process** by calling free
 functions in `ops/ops_*.py` and returns the result in the HTTP

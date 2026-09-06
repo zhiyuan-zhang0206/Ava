@@ -266,7 +266,7 @@ def _drive_rollout(
     monkeypatch.setattr(_cli, "_changed_paths_vs_origin", lambda: ["gateway/app.py"])
     monkeypatch.setattr(_cli, "_list_agent_runners", lambda: [("a", None), ("b", None)])
     monkeypatch.setattr(_cli, "_fan_out", _fan_out)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_quiesce_all_agents", lambda **_: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_cli, "_quiesce_all_agents", lambda **_: True)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_cli, "_run_gateway_local_update", lambda _repo, **_kw: 0)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_cli, "_await_gateway_serving", lambda **_kw: readiness)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
@@ -355,7 +355,7 @@ def test_ready_gateway_proceeds_to_phase_b_in_order(monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(_cli, "_changed_paths_vs_origin", lambda: ["gateway/app.py"])
     monkeypatch.setattr(_cli, "_list_agent_runners", lambda: [("a", None)])
     monkeypatch.setattr(_cli, "_fan_out", _fan_out)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_quiesce_all_agents", lambda **_: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_cli, "_quiesce_all_agents", lambda **_: True)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
         _cli,
         "_run_gateway_local_update",
@@ -389,7 +389,7 @@ def test_single_host_cluster_skips_the_gate(monkeypatch: pytest.MonkeyPatch) -> 
     no dependents must not be able to fail a rollout on its own readiness."""
     monkeypatch.setattr(_cli, "_changed_paths_vs_origin", lambda: ["gateway/app.py"])
     monkeypatch.setattr(_cli, "_list_agent_runners", list)
-    monkeypatch.setattr(_cli, "_quiesce_all_agents", lambda **_: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_cli, "_quiesce_all_agents", lambda **_: True)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_cli, "_run_gateway_local_update", lambda _repo, **_kw: 0)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
         _cli,

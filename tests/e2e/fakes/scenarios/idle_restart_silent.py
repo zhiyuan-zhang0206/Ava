@@ -77,7 +77,7 @@ def _is_post_restart_process() -> bool:
     with psycopg.connect(settings.data_plane.db_url) as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT 1 FROM inbound_messages "
-            "WHERE agent_id = %s AND kind = 'restart_completed' LIMIT 1",
+            "WHERE agent_id = %s AND kind = 'restart' AND applied_at IS NOT NULL LIMIT 1",
             (ava.self.AGENT_ID,),
         )
         return cur.fetchone() is not None

@@ -111,6 +111,7 @@ async def test_original_idle_cohort_preserves_pending_messages_and_rejects_succe
     ).fetchone() == ("pending",)
 
 
+@pytest.mark.real_cluster_spawn
 async def test_admitted_model_finishes_real_exec_and_after_exec_before_drain_receipt(  # noqa: PLR0915 — one real graph/exec/DB boundary
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
@@ -187,7 +188,7 @@ async def test_admitted_model_finishes_real_exec_and_after_exec_before_drain_rec
     await graph.aupdate_state(
         config, {"messages": [HumanMessage(content="Do the action")], "halted": False}
     )
-    ctx = AvaContext(ops_pool=aops_pool, hosted=True, event_publisher=MagicMock(), llm=MagicMock())
+    ctx = AvaContext(ops_pool=aops_pool, event_publisher=MagicMock(), llm=MagicMock())
     host = AgentHost(pool=aops_pool, checkpointer=saver, graph=graph, machine=machine_name())
     monkeypatch.setattr(host, "_runtime_for", AsyncMock(return_value=object()))
     monkeypatch.setattr("services.agent_host.host.validate_model_config", MagicMock())
@@ -224,9 +225,20 @@ async def test_admitted_model_finishes_real_exec_and_after_exec_before_drain_rec
         # Drop the old host's in-memory graph/cache: recovery consumes the
         # durable restart pointer and real cold checkpoint after explicit release.
         assert current.maintenance is not None
-        pause_owner.change_maintenance(
-            "move", WHEN, current.maintenance, current.maintenance, resumed=True
-        )
+        from cli.commands._pause_resume import resume_after_start
+        from shared import start_serving
+
+        monkeypatch.setattr("ops.cluster_pause._unpause_local_cluster", MagicMock())
+        monkeypatch.setattr("ops.agent_pause._wake", MagicMock())
+        monkeypatch.setattr(start_serving, "is_serving", lambda: True)
+
+        @resume_after_start
+        def ready_start() -> int:
+            maintenance.require_start_allowed()
+            return 0
+
+        assert ready_start() == 0
+        assert not maintenance.held()
         successor = AgentHost(
             pool=aops_pool,
             checkpointer=AsyncPostgresSaver(aops_pool),

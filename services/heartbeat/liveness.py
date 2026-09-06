@@ -37,8 +37,8 @@ Per-agent merge (`liveness_state`):
   observation freshness separately from lifecycle intent.
 
 `status` stays lifecycle intent — the pass never transitions it (R1 invariant
-#1). A machine coming back is self-healing: its restarter revives the rows
-(G5) and the next pass re-marks them online.
+#1). A machine coming back is self-healing: its host resumes pending work
+and the next pass re-marks the identities online.
 
 Machine alerting uses a separate episode clock: `machine_probe.transition_since`
 is set on the first failed probe and cleared on success. The shared transition

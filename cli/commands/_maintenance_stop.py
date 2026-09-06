@@ -186,12 +186,17 @@ def service_names(backend: SessionBackend, *, keep_terminals: bool = False) -> l
     return sorted(names)
 
 
-def _validate_service_records(backend: SessionBackend, *, keep_terminals: bool) -> None:
+def _validate_service_records(
+    backend: SessionBackend, *, keep_terminals: bool, selected: frozenset[str] | None = None
+) -> None:
     # List APIs may discard malformed or stale records; do not let that erase
     # an identity uncertainty before strict preflight has examined it.
     for path in (run_dir() / "sessions").glob("*.json"):
+        if selected is not None and path.stem not in selected:
+            continue
         if (
             keep_terminals
+            and selected is None
             and isinstance(backend, WinprocSessionBackend)
             and _TERMINAL_NAME.match(path.stem)
         ):
@@ -209,7 +214,9 @@ def _validate_service_records(backend: SessionBackend, *, keep_terminals: bool) 
                 raise RuntimeError(f"service identity changed before stop: {path.stem}")
 
 
-def stop_services(timeout: float, *, keep_terminals: bool = False) -> list[str]:
+def stop_services(
+    timeout: float, *, keep_terminals: bool = False, selected: frozenset[str] | None = None
+) -> list[str]:
     """Signal captured service identities; a survivor leaves maintenance held.
 
     No kill_session fallback is allowed. Windows uses the existing private
@@ -225,8 +232,13 @@ def stop_services(timeout: float, *, keep_terminals: bool = False) -> list[str]:
     if not keep_terminals:
         require_no_terminals()
     backend = get_backend()
-    _validate_service_records(backend, keep_terminals=keep_terminals)
-    names = service_names(backend, keep_terminals=keep_terminals)
+    _validate_service_records(backend, keep_terminals=keep_terminals, selected=selected)
+
+    def current_names() -> list[str]:
+        names = service_names(backend, keep_terminals=keep_terminals and selected is None)
+        return names if selected is None else [name for name in names if name in selected]
+
+    names = current_names()
     records: dict[str, SessionRecord] = {}
     tracked: set[OwnedProcess] = set()
     ancestors = {os.getpid(), *(process.pid for process in psutil.Process().parents())}
@@ -249,9 +261,9 @@ def stop_services(timeout: float, *, keep_terminals: bool = False) -> list[str]:
     # Complete every identity/preflight check before delivering the first signal.
     if not keep_terminals:
         require_no_terminals()
-    if service_names(backend, keep_terminals=keep_terminals) != names:
+    if current_names() != names:
         raise RuntimeError("service roster changed before held stop")
-    ordered = sorted(names, key=lambda name: not name.endswith(("watchdog", "restarter")))
+    ordered = sorted(names, key=lambda name: not name.endswith("watchdog"))
     for name in ordered:
         remaining(deadline)
         if isinstance(backend, WinprocSessionBackend):
@@ -269,13 +281,13 @@ def stop_services(timeout: float, *, keep_terminals: bool = False) -> list[str]:
     remaining(deadline)
     if not keep_terminals:
         require_no_terminals()
-    if service_names(backend, keep_terminals=keep_terminals):
+    if current_names():
         raise RuntimeError("services appeared during held stop")
     return names
 
 
-def stop_data_plane(timeout: float) -> list[str]:
+def stop_data_plane(timeout: float, *, save: bool = True) -> list[str]:
     """Stop this home's native data plane; never stop a remote-managed plane."""
     from cli.commands._maintenance_data_plane import stop
 
-    return stop(timeout)
+    return stop(timeout, save=save)

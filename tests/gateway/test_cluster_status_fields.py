@@ -11,7 +11,6 @@ import gateway.routers.status as status_mod
 from ops import cluster_status
 from ops.cluster import (
     _check_pidfile,
-    _count_agent_processes,
     _count_agent_shells,
     agent_shell_sessions,
 )
@@ -295,29 +294,6 @@ def test_capture_shell_capture_failure_raises(monkeypatch: pytest.MonkeyPatch):
         cluster_status.capture_shell(7, 1)
 
 
-def test_count_agent_processes(monkeypatch: pytest.MonkeyPatch):
-    """agent_count is the native supervisor's live agent PROCESS records
-    (native), one per `ava-<cluster>-agent-<id>`. The proc-name regex excludes
-    a `-shell-` record (shells live in the PTY supervisor, but guard the filter
-    regardless)."""
-
-    class _FakeNative:
-        @staticmethod
-        def list_sessions(prefix=""):
-            return [f"{prefix}7", f"{prefix}12", f"{prefix}15", f"{prefix}9-shell-0"]
-
-    monkeypatch.setattr("shared.session_backend.native_proc", lambda: _FakeNative)
-    assert _count_agent_processes() == 3  # 7, 12, 15 — the shell-looking record excluded
-
-
-def test_count_agent_processes_empty(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setattr(
-        "shared.session_backend.native_proc",
-        lambda: type("N", (), {"list_sessions": staticmethod(lambda **_kw: [])}),  # pyright: ignore[reportUnknownArgumentType]
-    )
-    assert _count_agent_processes() == 0
-
-
 def test_check_pidfile_alive(tmp_path: Path):
     pf = tmp_path / "live.pid"
     pf.write_text(str(os.getpid()))
@@ -373,7 +349,7 @@ def test_gather_cluster_status_local_agent_runner_probed(monkeypatch: pytest.Mon
             "head_sha": "abc123",
             "running_sha": "def456",
             "shell_count": 4,
-            "restarter_online": True,
+            "agent_host_online": True,
             "watchdog_online": False,
         }
 
@@ -399,7 +375,7 @@ def test_gather_cluster_status_local_agent_runner_probed(monkeypatch: pytest.Mon
     assert m.head_sha == "abc123"
     assert m.running_sha == "def456"
     assert m.shell_count == 4
-    assert m.restarter_online is True
+    assert m.agent_host_online is True
     assert m.watchdog_online is False
 
 
@@ -472,7 +448,7 @@ def test_gather_cluster_status_local_pure_gateway_lightweight(monkeypatch: pytes
     assert m.paused is True
     assert m.head_sha == "abc123"
     assert m.shell_count == 0
-    assert m.restarter_online is None
+    assert m.agent_host_online is None
     assert m.watchdog_online is None
 
 

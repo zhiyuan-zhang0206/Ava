@@ -54,7 +54,7 @@ heuristic. Cold-loaded pre-compact history never enters the SSE merge path; it
 prefixes the local position with `s<rank>.<boundary_checkpoint_id>.` so retained
 segments stay globally distinct.
 
-### Turn lifecycle (`agent/loop.py`, `agent/graph/_claim.py`)
+### Turn lifecycle (`services/agent_host/host.py`, `agent/graph/_claim.py`)
 
 | Role | When | Extra fields |
 |---|---|---|

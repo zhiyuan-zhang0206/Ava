@@ -42,7 +42,7 @@ class ClusterPorts(TypedDict):
     frontend: int
     app: NotRequired[int]
     heartbeat: NotRequired[int]
-    restarter: int
+    restarter: int  # Retired registry slot, retained for existing home records.
     labeler: int
     task_maintenance: NotRequired[int]
     memory_indexer: int

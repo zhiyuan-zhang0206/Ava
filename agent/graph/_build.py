@@ -1,6 +1,6 @@
 """build_graph: assemble 8-Node self-cycling topology, all Command(goto=) routing.
 
-Deps (ops_pool / inbound_listener / llm / redis_client) are injected via `Runtime[AvaContext]` —
+Deps (ops_pool / llm / event_publisher) are injected via `Runtime[AvaContext]` —
 build_graph does not take them; the caller passes them via
 `graph.ainvoke(..., context=AvaContext(...))`. Node functions access them via
 `runtime.context.X`.
@@ -8,7 +8,7 @@ build_graph does not take them; the caller passes them via
 At startup, `_load_extensions()` reads `$AVA_HOME/plugins.json` and imports the
 `plugin.py` of every enabled plugin itself, by path — builtin and external alike,
 one loop, no delegation to `ava._extend.scan_and_load` (that loader is
-external-only and is called once from `agent/loop.py`). A repeat call re-executes
+external-only and is called once at host boot). A repeat call re-executes
 the module already in `sys.modules` rather than binding a new one, so a plugin
 module's identity is stable for the life of the process. Layer A wrap
 monkey-patches the process's ava module; the exec child re-runs plugin loading
@@ -116,9 +116,9 @@ def _retry_phase_jitter() -> float:
     due-time jitter: correlated failures hit the whole fleet at once, so an
     identical retry schedule makes every agent retry at the same instants.
     Offsetting the schedule start by a stable per-agent amount (derived from
-    AVA_AGENT_ID, set by agent/loop.py at boot) spreads the retry waves; the
+    the bound turn identity) spreads the retry waves; the
     offset is deterministic so an agent keeps its own phase across restarts.
-    Absent the env var (tests, non-agent entry points) → 0 (no offset).
+    Absent an identity (tests, non-agent entry points) → 0 (no offset).
     """
     from shared.turn_identity import effective_agent_id
 
@@ -131,9 +131,7 @@ def _retry_phase_jitter() -> float:
 class _TurnScopedRetryPolicy(RetryPolicy):
     """A `RetryPolicy` whose two per-agent fields resolve when they are READ.
 
-    In process mode the graph is built once per agent, so baking the per-agent
-    values in at build time is exact. The hosted agent-runner
-    (`future/infra/agent-runner-as-server.md`) builds ONE graph for every local
+    The agent host builds ONE graph for every local
     agent — it has to, because `build_graph` mutates process-global plugin
     registration — so a baked value would give every hosted agent whichever
     agent's context happened to be current at daemon boot. That silently costs
@@ -149,8 +147,8 @@ class _TurnScopedRetryPolicy(RetryPolicy):
       error at a 30s initial interval).
 
     Both properties read the turn contextvars, so under the host's per-turn bind
-    they resolve to the running agent's values, and in process mode — where
-    nothing binds them — they read exactly what the build-time call would have.
+    they resolve to the running agent's values. Outside a turn they read the
+    cluster defaults.
 
     ## Why this works, and what would break it
 

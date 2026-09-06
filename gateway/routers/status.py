@@ -237,7 +237,7 @@ def get_stats_dashboard(
 def _get_services_status() -> ServicesStatus:
     """Gateway-only daemon health (pidfile + signal).
 
-    Per-host daemons (restarter, watchdog) are not here — they ride each
+    Per-host daemons (agent-host, watchdog) are not here — they ride each
     machine's ClusterStatus probe and render in the roster. This block is the
     daemons that only run on the gateway."""
     items: list[ServiceItem] = []
@@ -424,7 +424,7 @@ async def _probe_agent_runner(
         head_sha=status.head_sha,
         running_sha=status.running_sha,
         shell_count=status.shell_count,
-        restarter_online=status.restarter_online,
+        agent_host_online=status.agent_host_online,
         watchdog_online=status.watchdog_online,
         agent_count=status.agent_count,
         session_count=status.session_count,

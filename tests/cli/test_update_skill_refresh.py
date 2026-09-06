@@ -35,7 +35,7 @@ def test_gateway_leg_refreshes_on_pull_path(monkeypatch: pytest.MonkeyPatch, rep
     monkeypatch.setattr(_local, "_checkout_and_sync", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_local, "_boot_gateway_fresh", lambda *_a, **_kw: 0)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_local, "_refresh_builtin_skills", refresh_calls.append)
-    monkeypatch.setattr(_cli, "_do_stop", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_cli, "_do_stop", lambda *_a, **_kw: 0)  # pyright: ignore[reportUnknownArgumentType]
 
     assert (
         _local._run_gateway_local_update(
@@ -52,7 +52,7 @@ def test_gateway_leg_skips_refresh_on_restart_only(
     refresh_calls: list[Path] = []
     monkeypatch.setattr(_local, "_boot_gateway_fresh", lambda *_a, **_kw: 0)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_local, "_refresh_builtin_skills", refresh_calls.append)
-    monkeypatch.setattr(_cli, "_do_stop", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_cli, "_do_stop", lambda *_a, **_kw: 0)  # pyright: ignore[reportUnknownArgumentType]
 
     assert _local._run_gateway_local_update(repo, pull=False) == 0
     assert refresh_calls == []
@@ -104,7 +104,7 @@ def test_runner_leg_refreshes_after_checkout(monkeypatch: pytest.MonkeyPatch, re
     monkeypatch.setattr(_runner, "platform_backend", _FakeBackend)
     monkeypatch.setattr(_runner, "_refresh_builtin_skills", _record)
     monkeypatch.setattr(_cli, "_preflight_probes", lambda: 0)
-    monkeypatch.setattr(_cli, "_do_stop", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_cli, "_do_stop", lambda *_a, **_kw: 0)  # pyright: ignore[reportUnknownArgumentType]
 
     class _FakeSubprocess:
         def run(self, *_a, **_kw):
@@ -153,7 +153,7 @@ def test_runner_leg_skips_refresh_on_restart_only(
     monkeypatch.setattr(_runner, "platform_backend", _FakeBackend)
     monkeypatch.setattr(_runner, "_refresh_builtin_skills", _record)
     monkeypatch.setattr(_cli, "_preflight_probes", lambda: 0)
-    monkeypatch.setattr(_cli, "_do_stop", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_cli, "_do_stop", lambda *_a, **_kw: 0)  # pyright: ignore[reportUnknownArgumentType]
 
     class _FakeSubprocess:
         def run(self, *_a, **_kw):

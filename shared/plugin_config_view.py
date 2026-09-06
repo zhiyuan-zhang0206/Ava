@@ -129,8 +129,16 @@ def bind_agent_plugin_config(
 
 
 def current_plugin_config_view() -> _PluginConfigView | None:
-    """The view bound in the current context, or None (process mode)."""
+    """The view bound in the current context, or None outside an agent turn."""
     return _AGENT_PLUGIN_CONFIG.get()
+
+
+def current_agent_plugin_pins() -> dict[str, Any]:
+    """Copy the bound plugin overrides as the flat execution-child overlay."""
+    view = _AGENT_PLUGIN_CONFIG.get()
+    if view is None:
+        return {}
+    return {key: value for fields in view._overrides.values() for key, value in fields.items()}
 
 
 def turn_plugin_config(plugin: str) -> BaseModel:

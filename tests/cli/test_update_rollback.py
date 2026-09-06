@@ -235,10 +235,9 @@ def test_recover_happy_path_orders_rollback_before_reset(
     rc = _rec._recover_gateway_local(Path("/repo"), "FROMSHA", _SNAP, preserve_sessions=frozenset())
     assert rc == 0
     assert order == ["rollback", "reset:FROMSHA", "uv-sync", "ava-start"]
-    # Recovery is inside the rollout pause window: gateway comes back, while
-    # restarter remains down until the orchestration's final unpause.
+    # The ordinary restart keeps the existing admission hold until readiness.
     start = next(c for c in fake.calls if _is_ava_start(c))
-    assert start[-2:] == ["--disable-service", "restarter"]
+    assert start[-2:] == ["start", "--persist-services"]
 
 
 def test_recover_forwards_preserve_sessions(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -250,11 +249,9 @@ def test_recover_forwards_preserve_sessions(monkeypatch: pytest.MonkeyPatch) -> 
     )
     assert rc == 0
     start = next(c for c in fake.calls if _is_ava_start(c))
-    assert start[-4:] == [
+    assert start[-2:] == [
         "--disable-service",
         "frontend",
-        "--disable-service",
-        "restarter",
     ]
 
 
@@ -424,7 +421,7 @@ def _patch_local_update(
     order: list[str] = []
     recover_calls: list[tuple[str, set[str], frozenset[str], Path | None]] = []
 
-    monkeypatch.setattr(_up, "_do_stop", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_up, "_do_stop", lambda *_a, **_k: 0)  # pyright: ignore[reportUnknownArgumentType]
 
     def _checkout(sha):  # type: ignore[no-untyped-def]
         order.append(f"checkout:{sha}")
@@ -528,7 +525,7 @@ def test_local_update_stops_after_orchestration_prepared_recovery(
 ) -> None:
     """The local leg consumes prebuilt recovery evidence after its stop begins."""
     order, _recover_calls = _patch_local_update(monkeypatch)
-    monkeypatch.setattr(_up, "_do_stop", lambda *_a, **_k: order.append("stop"))  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_up, "_do_stop", lambda *_a, **_k: order.append("stop") or 0)  # pyright: ignore[reportUnknownArgumentType]
 
     rc = _up._run_gateway_local_update(
         Path("/repo"), target_sha="TARGETSHA", pull_recover=_prepared_recover(), pull=True
@@ -542,7 +539,7 @@ def test_local_update_requires_prepared_recovery_before_stopping(
 ) -> None:
     """Pull mode refuses before stop when orchestration did not provide recovery evidence."""
     order, recover_calls = _patch_local_update(monkeypatch)
-    monkeypatch.setattr(_up, "_do_stop", lambda *_a, **_k: order.append("stop"))  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_up, "_do_stop", lambda *_a, **_k: order.append("stop") or 0)  # pyright: ignore[reportUnknownArgumentType]
 
     with pytest.raises(ValueError, match="requires pull_recover"):
         _up._run_gateway_local_update(Path("/repo"), target_sha="TARGETSHA", pull=True)

@@ -7,8 +7,6 @@ a backup, and proves only this home's declared services and owned descendants.
 
 import argparse
 import json
-import math
-import time
 from datetime import datetime
 
 from cli.commands._maintenance_probe import host_identity, ops_quiescent
@@ -20,85 +18,11 @@ from cli.commands._maintenance_stop import (
     stop_data_plane,
     stop_services,
 )
+from cli.commands._pause_resume import exclusive_resources
+from ops.agent_pause import _drain, _hold, _prepare
 from shared import maintenance, maintenance_cohort, pause_owner
-from shared.db import connect, publish_inbound_wake
-from shared.machine import machine_name, machine_role
-from shared.maintenance_state import MaintenanceHold
-
-
-def _hold(holder: str, at: datetime) -> MaintenanceHold:
-    current = maintenance.require_operation(holder, at)
-    assert current.maintenance is not None  # noqa: S101
-    return current.maintenance
-
-
-def _wake(hold: MaintenanceHold) -> None:
-    for agent in hold.commands:
-        publish_inbound_wake(agent, "maintenance")
-
-
-def _prepare(holder: str, at: datetime) -> None:
-    from ops.runner_mode import is_hosted
-
-    if not is_hosted():
-        raise RuntimeError("maintenance currently requires hosted runner mode")
-    roles = machine_role()
-    identity = host_identity() if "agent-runner" in roles else None
-    # The actual running daemon, not the checked-out source, must support the
-    # admission fence. First deployment of this protocol needs separate proof.
-    pause_owner.begin_maintenance(holder, at)
-    if identity is None:
-        with connect() as conn:
-            row = conn.execute(
-                "SELECT 1 FROM agents_meta WHERE machine=%s AND status<>'terminated' LIMIT 1",
-                (machine_name(),),
-            ).fetchone()
-        if row is not None:
-            raise RuntimeError("unit has native agents but no running hosted owner")
-        current = _hold(holder, at)
-        if current.phase == "preparing":
-            pause_owner.change_maintenance(holder, at, current, MaintenanceHold("draining"))
-        return
-    with connect() as conn:
-        hold = maintenance_cohort.prepare(
-            conn,
-            machine=machine_name(),
-            host_owner=identity.owner,
-            holder=holder,
-            acquired_at=at,
-        )
-    if host_identity().owner != identity.owner:
-        raise RuntimeError("agent-host changed boot during preparation; hold retained")
-    _wake(hold)
-
-
-def _drain(holder: str, at: datetime, timeout: float) -> None:
-    if not math.isfinite(timeout) or timeout <= 0:
-        raise ValueError("drain timeout must be finite and positive")
-    deadline = time.monotonic() + timeout
-    while True:
-        hold = _hold(holder, at)
-        if hold.phase == "preparing":
-            raise RuntimeError(
-                "preparation is incomplete; repeat prepare or explicitly resume --cancel"
-            )
-        if hold.failures:
-            raise RuntimeError(f"continuations failed; hold retained: {sorted(hold.failures)}")
-        if set(hold.drained) == set(hold.commands):
-            with connect() as conn:
-                maintenance_cohort.verify_drained(conn, hold)
-            if "agent-runner" in machine_role() and host_identity().active:
-                raise RuntimeError("agent-host still has active continuations; hold retained")
-            if hold.phase == "draining":
-                maintenance.set_phase(holder, at, "drained")
-            if time.monotonic() > deadline:
-                raise TimeoutError("drain verification exceeded its deadline; hold retained")
-            return
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            pending = sorted(set(hold.commands) - set(hold.drained))
-            raise TimeoutError(f"drain timed out without force; hold retained for agents {pending}")
-        time.sleep(min(0.2, remaining))
+from shared.db import connect
+from shared.machine import machine_role
 
 
 def _gateway_last(*, confirmed: bool) -> None:
@@ -109,6 +33,7 @@ def _gateway_last(*, confirmed: bool) -> None:
         )
 
 
+@exclusive_resources
 def _stop(
     holder: str, at: datetime, timeout: float, *, gateway_last: bool, keep_terminals: bool = False
 ) -> None:
@@ -169,10 +94,9 @@ def _resume(holder: str, at: datetime, *, cancel: bool) -> None:
     # its release is recovered by existing durable restart-pointer scanning.
     with maintenance.authorized_start(holder, at):
         unpause_local_cluster()
-    pause_owner.change_maintenance(holder, at, hold, hold, resumed=True)
-    _wake(hold)
 
 
+@exclusive_resources
 def _stop_data(
     holder: str, at: datetime, timeout: float, *, gateway_last: bool, keep_terminals: bool = False
 ) -> None:

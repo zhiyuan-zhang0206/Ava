@@ -56,12 +56,12 @@ async def _http_get(port: int, path: str) -> tuple[int, bytes]:
 @pytest.mark.asyncio
 async def test_healthz_returns_200_with_json_body() -> None:
     port = _find_free_port()
-    server = await daemon_health.start_health_server("restarter", port=port)
+    server = await daemon_health.start_health_server("agent_host", port=port)
     try:
         status, body = await _http_get(port, "/healthz")
         assert status == 200
         payload = json.loads(body)
-        assert payload["name"] == "restarter"
+        assert payload["name"] == "agent_host"
         assert isinstance(payload["pid"], int)
         assert isinstance(payload["started_at"], float)
         assert payload["status"] == "ok"
@@ -186,12 +186,12 @@ async def test_healthz_503_when_liveness_stale() -> None:
     timeout_s=-1.0 keeps stale_for() (always >= 0) permanently over the bound."""
     port = _find_free_port()
     stale = daemon_health.Liveness(timeout_s=-1.0)
-    server = await daemon_health.start_health_server("restarter", port=port, liveness=stale)
+    server = await daemon_health.start_health_server("agent_host", port=port, liveness=stale)
     try:
         status, body = await _http_get(port, "/healthz")
         assert status == 503
         payload = json.loads(body)
-        assert payload["name"] == "restarter"
+        assert payload["name"] == "agent_host"
         assert "stale_for" in payload
         assert payload["liveness"] == "stale"
         assert payload["components"][0]["status"] == "stale"
@@ -205,7 +205,7 @@ async def test_healthz_200_when_liveness_fresh() -> None:
     """A beating loop keeps /healthz at 200, with stale_for reported."""
     port = _find_free_port()
     fresh = daemon_health.Liveness(timeout_s=1e9)
-    server = await daemon_health.start_health_server("restarter", port=port, liveness=fresh)
+    server = await daemon_health.start_health_server("agent_host", port=port, liveness=fresh)
     try:
         status, body = await _http_get(port, "/healthz")
         assert status == 200
@@ -218,7 +218,7 @@ async def test_healthz_200_when_liveness_fresh() -> None:
 async def test_healthz_component_failure_surfaces_the_component_reason() -> None:
     port = _find_free_port()
     server = await daemon_health.start_health_server(
-        "restarter",
+        "agent_host",
         port=port,
         components=[component("worker", DEGRADED, detail="job stuck")],
     )
@@ -244,7 +244,7 @@ async def test_healthz_evaluates_component_provider_for_each_request() -> None:
 
     port = _find_free_port()
     server = await daemon_health.start_health_server(
-        "restarter",
+        "agent_host",
         port=port,
         components=components,
         extra=lambda: {"saturation": calls},
@@ -365,7 +365,7 @@ def test_health_port_default(monkeypatch: pytest.MonkeyPatch) -> None:
     or probe a prod default. Stubbing the settings lookup is what "unconfigured"
     means to `health_port`."""
     monkeypatch.setattr(daemon_health, "get_field", lambda _name: None)  # pyright: ignore[reportUnknownArgumentType]
-    assert daemon_health.health_port("restarter") == 8102
+    assert daemon_health.health_port("agent_host") == 8114
     assert daemon_health.health_port("labeler") == 8103
     assert daemon_health.health_port("memory_indexer") == 8105
     assert daemon_health.health_port("heartbeat") == 8107
@@ -435,7 +435,7 @@ async def _probe(name: str, port: int, pidfile: Path, **kw: object) -> daemon_he
 async def test_healthz_body_carries_home(tmp_path: Path) -> None:
     """`home` is in the payload at all — the field the cross-cluster check reads."""
     port = _find_free_port()
-    server = await daemon_health.start_health_server("restarter", port=port)
+    server = await daemon_health.start_health_server("agent_host", port=port)
     try:
         _status, body = await _http_get(port, "/healthz")
         assert json.loads(body)["home"] == str(ava_home())
@@ -451,7 +451,7 @@ async def test_healthz_body_carries_the_daemons_own_commit(monkeypatch: pytest.M
     whichever process answers the status probe)."""
     monkeypatch.setattr(daemon_health.process_sha, "get", lambda: "c0ffee1234")
     port = _find_free_port()
-    server = await daemon_health.start_health_server("restarter", port=port)
+    server = await daemon_health.start_health_server("agent_host", port=port)
     try:
         _status, body = await _http_get(port, "/healthz")
         assert json.loads(body)["sha"] == "c0ffee1234"
@@ -468,7 +468,7 @@ async def test_healthz_reports_an_unfrozen_process_as_unknown(
     a null reads as "this process cannot vouch for its code"."""
     monkeypatch.setattr(daemon_health.process_sha, "get", lambda: None)
     port = _find_free_port()
-    server = await daemon_health.start_health_server("restarter", port=port)
+    server = await daemon_health.start_health_server("agent_host", port=port)
     try:
         _status, body = await _http_get(port, "/healthz")
         assert json.loads(body)["sha"] is None
@@ -487,11 +487,11 @@ async def test_probe_reports_the_commit_without_judging_it(
     the checkout, racing the orchestrated restart it is supposed to leave alone."""
     monkeypatch.setattr(daemon_health.process_sha, "get", lambda: "c0ffee1234")
     port = _find_free_port()
-    pidfile = tmp_path / "restarter.pid"
+    pidfile = tmp_path / "agent_host.pid"
     pidfile.write_text(str(os.getpid()))
-    server = await daemon_health.start_health_server("restarter", port=port)
+    server = await daemon_health.start_health_server("agent_host", port=port)
     try:
-        probe = await _probe("restarter", port, pidfile)
+        probe = await _probe("agent_host", port, pidfile)
         assert probe.alive is True, probe.detail
         assert "c0ffee1" in probe.detail
     finally:
@@ -502,11 +502,11 @@ async def test_probe_reports_the_commit_without_judging_it(
 async def test_probe_alive_when_name_home_and_pid_all_match(tmp_path: Path) -> None:
     """The happy path: our own daemon, its own pidfile → alive."""
     port = _find_free_port()
-    pidfile = tmp_path / "restarter.pid"
+    pidfile = tmp_path / "agent_host.pid"
     pidfile.write_text(str(os.getpid()))
-    server = await daemon_health.start_health_server("restarter", port=port)
+    server = await daemon_health.start_health_server("agent_host", port=port)
     try:
-        probe = await _probe("restarter", port, pidfile)
+        probe = await _probe("agent_host", port, pidfile)
         assert probe.alive is True, probe.detail
     finally:
         await daemon_health.stop_health_server(server)
@@ -520,13 +520,13 @@ async def test_probe_rejects_200_from_a_process_that_is_not_ours(tmp_path: Path)
 
     Verdict DOWN, not terminal: name and home already matched, so the stray belongs
     to THIS cluster and this daemon kind — `respawn_service` kills our own
-    `ava-restarter` session first, which does free the port."""
+    `ava-agent-host` session first, which does free the port."""
     port = _find_free_port()
-    pidfile = tmp_path / "restarter.pid"
+    pidfile = tmp_path / "agent_host.pid"
     pidfile.write_text(str(os.getpid() + 1))  # our daemon's pid, not the responder's
-    server = await daemon_health.start_health_server("restarter", port=port)
+    server = await daemon_health.start_health_server("agent_host", port=port)
     try:
-        probe = await _probe("restarter", port, pidfile)
+        probe = await _probe("agent_host", port, pidfile)
         assert probe.verdict is daemon_health.ProbeVerdict.DOWN
         assert probe.terminal is False
         assert "pid" in probe.detail
@@ -548,14 +548,14 @@ async def test_probe_rejects_daemon_from_another_home(
     why the detail must say unit — and why the sentence is asserted here, on the
     string the probe really emits, rather than only where a stub fabricates it."""
     port = _find_free_port()
-    pidfile = tmp_path / "restarter.pid"
+    pidfile = tmp_path / "agent_host.pid"
     pidfile.write_text(str(os.getpid()))
-    server = await daemon_health.start_health_server("restarter", port=port)
+    server = await daemon_health.start_health_server("agent_host", port=port)
     try:
         # The server answered with the real home; make the PROBE side believe it
         # belongs to a different unit — the same asymmetry a foreign daemon has.
         monkeypatch.setattr(daemon_health, "ava_home", lambda: tmp_path / "other-home")
-        probe = await _probe("restarter", port, pidfile)
+        probe = await _probe("agent_host", port, pidfile)
         assert probe.verdict is daemon_health.ProbeVerdict.PORT_TAKEN
         assert probe.terminal is True
         assert "home=" in probe.detail
@@ -566,15 +566,15 @@ async def test_probe_rejects_daemon_from_another_home(
 
 @pytest.mark.asyncio
 async def test_probe_rejects_a_different_daemon_kind(tmp_path: Path) -> None:
-    """A labeler squatting on the restarter's port is not a live restarter — and
-    terminal, because killing `ava-restarter` does not free a port `ava-labeler`
+    """A labeler squatting on the agent host's port is not a live agent host — and
+    terminal, because killing `ava-agent-host` does not free a port `ava-labeler`
     holds."""
     port = _find_free_port()
-    pidfile = tmp_path / "restarter.pid"
+    pidfile = tmp_path / "agent_host.pid"
     pidfile.write_text(str(os.getpid()))
     server = await daemon_health.start_health_server("labeler", port=port)
     try:
-        probe = await _probe("restarter", port, pidfile)
+        probe = await _probe("agent_host", port, pidfile)
         assert probe.verdict is daemon_health.ProbeVerdict.PORT_TAKEN
         assert "name=" in probe.detail
     finally:
@@ -590,9 +590,9 @@ async def test_probe_rejects_200_when_no_pidfile_exists(tmp_path: Path) -> None:
     DOWN rather than terminal: name and home matched first, so the answerer is a
     stray of this same cluster, which the respawn's kill-session clears."""
     port = _find_free_port()
-    server = await daemon_health.start_health_server("restarter", port=port)
+    server = await daemon_health.start_health_server("agent_host", port=port)
     try:
-        probe = await _probe("restarter", port, tmp_path / "absent.pid")
+        probe = await _probe("agent_host", port, tmp_path / "absent.pid")
         assert probe.verdict is daemon_health.ProbeVerdict.DOWN
         assert "pidfile" in probe.detail
     finally:
@@ -613,10 +613,10 @@ async def test_probe_rejects_non_json_responder(tmp_path: Path) -> None:
 
     port = _find_free_port()
     server = await asyncio.start_server(_handle, host="127.0.0.1", port=port)
-    pidfile = tmp_path / "restarter.pid"
+    pidfile = tmp_path / "agent_host.pid"
     pidfile.write_text(str(os.getpid()))
     try:
-        probe = await _probe("restarter", port, pidfile)
+        probe = await _probe("agent_host", port, pidfile)
         assert probe.verdict is daemon_health.ProbeVerdict.PORT_TAKEN
         assert "not JSON" in probe.detail
     finally:
@@ -624,10 +624,10 @@ async def test_probe_rejects_non_json_responder(tmp_path: Path) -> None:
 
 
 def test_probe_dead_when_nothing_listens(tmp_path: Path) -> None:
-    pidfile = tmp_path / "restarter.pid"
+    pidfile = tmp_path / "agent_host.pid"
     pidfile.write_text(str(os.getpid()))
     probe = daemon_health.probe_daemon(
-        "restarter", _probe_url(_find_free_port()), pidfile=pidfile, timeout_s=1.0
+        "agent_host", _probe_url(_find_free_port()), pidfile=pidfile, timeout_s=1.0
     )
     assert probe.verdict is daemon_health.ProbeVerdict.DOWN
     assert probe.terminal is False, "a free port is the respawnable case"
@@ -641,12 +641,12 @@ async def test_probe_dead_when_liveness_is_stale(tmp_path: Path) -> None:
     DOWN, so the respawn still runs — a wedged loop in our own daemon is exactly
     what a respawn cures."""
     port = _find_free_port()
-    pidfile = tmp_path / "restarter.pid"
+    pidfile = tmp_path / "agent_host.pid"
     pidfile.write_text(str(os.getpid()))
     stale = daemon_health.Liveness(timeout_s=-1.0)
-    server = await daemon_health.start_health_server("restarter", port=port, liveness=stale)
+    server = await daemon_health.start_health_server("agent_host", port=port, liveness=stale)
     try:
-        probe = await _probe("restarter", port, pidfile)
+        probe = await _probe("agent_host", port, pidfile)
         assert probe.verdict is daemon_health.ProbeVerdict.DOWN
     finally:
         await daemon_health.stop_health_server(server)
@@ -656,15 +656,15 @@ async def test_probe_dead_when_liveness_is_stale(tmp_path: Path) -> None:
 async def test_probe_includes_degraded_component_reasons(tmp_path: Path) -> None:
     """A watchdog failure names the stuck component rather than an opaque 503."""
     port = _find_free_port()
-    pidfile = tmp_path / "restarter.pid"
+    pidfile = tmp_path / "agent_host.pid"
     pidfile.write_text(str(os.getpid()))
     server = await daemon_health.start_health_server(
-        "restarter",
+        "agent_host",
         port=port,
         components=[component("ops", DEGRADED, detail="update-lock held 7200s")],
     )
     try:
-        probe = await _probe("restarter", port, pidfile)
+        probe = await _probe("agent_host", port, pidfile)
         assert probe.verdict is daemon_health.ProbeVerdict.DOWN
         assert probe.detail == "healthz returned HTTP 503; degraded: ops: update-lock held 7200s"
     finally:
@@ -673,13 +673,13 @@ async def test_probe_includes_degraded_component_reasons(tmp_path: Path) -> None
 
 def test_health_port_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
     # Settings is a one-shot BaseSettings loaded at module import; monkeypatch.setenv
-    # cannot change the already-imported settings.services.restarter_health_port — use
+    # cannot change the already-imported settings.services.agent_host_health_port — use
     # monkeypatch.setattr directly on the Settings instance field, consistent with other
     # tests that migrated to Settings (see tests/ava/test_web.py, test_vision.py for the same pattern).
     from shared.config import settings
 
-    monkeypatch.setattr(settings.services, "restarter_health_port", 9999)
-    assert daemon_health.health_port("restarter") == 9999
+    monkeypatch.setattr(settings.services, "agent_host_health_port", 9999)
+    assert daemon_health.health_port("agent_host") == 9999
 
 
 def test_health_port_unknown_raises_key_error() -> None:
@@ -694,7 +694,7 @@ def test_health_port_unknown_raises_key_error() -> None:
 # it just meant the service was never judged alive-or-dead, so NO RESTART was
 # ever attempted, while every 60s round wrote a fresh multi-KB traceback. Six
 # healthchecks route through probe_daemon (heartbeat, labeler, memory-indexer,
-# ops, events-maintenance, restarter), so one escaping exception type silences
+# ops, events-maintenance, agent_host), so one escaping exception type silences
 # six services' revival at once.
 
 
@@ -710,10 +710,10 @@ def test_probe_daemon_survives_an_http_exception(
         raise http.client.BadStatusLine("garbage on the wire")
 
     monkeypatch.setattr(daemon_health.urllib.request, "urlopen", _boom)
-    pidfile = tmp_path / "restarter.pid"
+    pidfile = tmp_path / "agent_host.pid"
     pidfile.write_text(str(os.getpid()))
     with caplog.at_level(logging.ERROR, logger="shared.daemon_health"):
-        probe = daemon_health.probe_daemon("restarter", _probe_url(9), pidfile=pidfile)
+        probe = daemon_health.probe_daemon("agent_host", _probe_url(9), pidfile=pidfile)
     assert probe.alive is False
     assert "BadStatusLine" in probe.detail
     assert any("raised unexpectedly" in r.getMessage() for r in caplog.records)
@@ -730,7 +730,7 @@ def test_probe_daemon_survives_a_pidfile_oserror(
         "_probe_daemon",
         lambda *_a, **_k: (_ for _ in ()).throw(PermissionError("pidfile unreadable")),  # pyright: ignore[reportUnknownArgumentType]
     )
-    probe = daemon_health.probe_daemon("restarter", _probe_url(9), pidfile=tmp_path / "x.pid")
+    probe = daemon_health.probe_daemon("agent_host", _probe_url(9), pidfile=tmp_path / "x.pid")
     assert probe.alive is False
     assert "PermissionError" in probe.detail
 

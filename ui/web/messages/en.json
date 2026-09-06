@@ -617,7 +617,7 @@
       "offPinBadge": "off-pin",
       "settleHold": "A deploy's settle hold is still waiting on this host: it acked its self-update and had not converged when the rollout exited. Recorded by the lease, not a live check — the off-pin / code badges are the live verdicts. While the hold stands, deploys are refused and auto-rollback is suppressed.",
       "settleHoldBadge": "settle-hold",
-      "daemonHealth": "restarter {restarter} · watchdog {watchdog}",
+      "daemonHealth": "agent host {agentHost} · watchdog {watchdog}",
       "degraded": "degraded",
       "healthy": "healthy",
       "stoppedAt": "stopped {time}",

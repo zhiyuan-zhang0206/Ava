@@ -1,8 +1,8 @@
 """Admission and exact-generation progress for an explicitly held unit.
 
 The existing pause-owner file is authoritative even when Postgres is offline.
-Its maintenance payload has no expiry and is never cleared by normal startup
-or stranded-rollout recovery. Business API calls remain available while an
+Its maintenance payload has no expiry. Ordinary startup releases it only after
+readiness; stranded-rollout recovery cannot override an incomplete service stop. Business API calls remain available while an
 already admitted model/action finishes; this gate only controls new work.
 """
 
@@ -39,14 +39,21 @@ def held() -> bool:
 def require_released(action: str) -> None:
     if held():
         raise RuntimeError(
-            f"{action} cannot override maintenance; use the exact operation's start/resume"
+            f"{action} cannot override maintenance; run ava start to resume this unit first"
         )
+
+
+def start_authorized() -> bool:
+    current = snapshot()
+    return current is not None and _authorized_start.get() == (current.holder, current.acquired_at)
 
 
 def require_start_allowed() -> None:
     current = snapshot()
     if current is not None and _authorized_start.get() != (current.holder, current.acquired_at):
-        raise RuntimeError("normal start cannot release maintenance; use ava maintenance start")
+        raise RuntimeError(
+            "service startup cannot release maintenance without the authorized ava start boundary"
+        )
 
 
 @contextmanager

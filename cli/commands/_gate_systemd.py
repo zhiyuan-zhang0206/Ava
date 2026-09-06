@@ -73,6 +73,7 @@ ExecStart=:{command}
 Restart=always
 RestartSec=2
 TimeoutStopSec=15
+SendSIGKILL=no
 KillMode=control-group
 StandardOutput=append:{log}
 StandardError=inherit
@@ -82,7 +83,7 @@ WantedBy=default.target
 """
 
 
-def _systemctl(*args: str) -> subprocess.CompletedProcess[str]:
+def _systemctl(*args: str, timeout: float = 30) -> subprocess.CompletedProcess[str]:
     """One bounded seam, including cron callers without a login-shell bus env."""
     runtime = f"/run/user/{os.getuid()}"
     env = {
@@ -94,7 +95,7 @@ def _systemctl(*args: str) -> subprocess.CompletedProcess[str]:
         ["systemctl", "--user", *args],
         capture_output=True,
         text=True,
-        timeout=30,
+        timeout=timeout,
         env=env,
         check=False,
     )

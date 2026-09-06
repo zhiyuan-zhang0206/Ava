@@ -205,7 +205,7 @@ async def test_managed_exec_streams_output_and_keepalive_before_completion(
                 await task
 
 
-async def test_process_mode_cancellation_consumes_exact_owner_receipt(
+async def test_execution_domain_cancellation_consumes_exact_owner_receipt(
     db_conn: psycopg.Connection,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -263,7 +263,7 @@ async def test_process_mode_cancellation_consumes_exact_owner_receipt(
     assert resources.requests == {}
 
 
-async def test_process_mode_cancellation_waits_for_inflight_registration(
+async def test_execution_domain_cancellation_waits_for_inflight_registration(
     db_conn: psycopg.Connection,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

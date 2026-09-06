@@ -22,37 +22,24 @@ def test_probe_set_gateway_classifies_signal_types() -> None:
     assert views["gateway-watchdog"].healthcheck_module is None  # the monitor itself
 
 
-def test_probe_set_agent_runner_membership(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The agent-runner probe set is exactly the agent-runner-capability services."""
-    # This test models the code-DEFAULT shape (hosted since 2026-09). The CI
-    # backend shards export AVA_RUNNER_MODE=process for the process-shaped
-    # lifecycle suites, so pin the mode here instead of inheriting the job env.
-    monkeypatch.setattr("ops.spec.runner_mode", lambda: "hosted")
-    sessions = {v.session for v in observe.probe_set(frozenset({"agent-runner"}))}
-    assert {
+def test_probe_set_agent_runner_membership() -> None:
+    """Every runner reports its single agent host and shared local services."""
+    views = {v.session: v for v in observe.probe_set(frozenset({"agent-runner"}))}
+    assert set(views) == {
         "ops",
-        "restarter",
         "page-server",
         "agent-runner-watchdog",
-        # Present but gated: probe_set is the ANNOTATED view, which keeps a
-        # gated-out service and its reason so an operator sees why it is absent
-        # rather than watching the roster silently shrink.
         "agent-host",
         "browser",
         "browser-mcp",
         "mcp-daemon",
         "computer-mcp",
         "otel-collector",
-    } == sessions
-    views = {v.session: v for v in observe.probe_set(frozenset({"agent-runner"}))}
-    assert views["browser-mcp"].kind == "none"  # MCP over a unix socket — no HTTP/TCP probe
-    # Default shape since 2026-09: hosted — the agent-host is ungated and the
-    # restarter carries the mode reason (the annotated view keeps gated-out
-    # services so an operator sees why they are absent).
+    }
+    assert views["browser-mcp"].kind == "none"
     assert views["agent-host"].gate_reason is None
-    assert views["restarter"].gate_reason == (
-        "disabled (AVA_RUNNER_MODE is hosted — per-agent process supervision retired)"
-    )
+    assert views["agent-host"].kind == "identity"
+    assert views["agent-host"].healthcheck_module == "services.healthchecks.agent_host"
 
 
 def test_observe_gated_service_reports_na_with_reason(monkeypatch: pytest.MonkeyPatch) -> None:

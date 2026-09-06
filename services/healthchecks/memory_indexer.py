@@ -4,9 +4,7 @@ Restart if dead; no-op if alive; report-and-stop when another unit's daemon
 holds the port (`shared.service_respawn.run_keepalive`). The index is not lost on restart:
 the sqlite db is persistent, and on daemon start the cold-start
 reconcile catches up missed fs changes during downtime — so **no
-catchup dispatch is needed** (in contrast to the restarter healthcheck,
-where 'restarting' agents missed during daemon downtime need
-healthcheck-assisted respawn).
+catchup dispatch is needed** in the healthcheck.
 
 Switched to HTTP `/healthz` probe (same pattern as the 4 daemons in
 #254); using pidfile would let watchdog mis-judge dead within the short

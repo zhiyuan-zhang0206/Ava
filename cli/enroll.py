@@ -382,7 +382,7 @@ def run_enroll(argv: list[str]) -> int:
         type=int,
         default=None,
         help="this unit's own daemon health-port block base, on the allocator's grid "
-        "(18000 + k*16, e.g. 18112 -> restarter 18115, ops 18119). Pass it when another Ava "
+        "(18000 + k*16, e.g. 18112 -> ops 18119). Pass it when another Ava "
         "unit shares this machine's localhost namespace — a second install, or a WSL2 distro "
         "whose loopback Windows can reach — since both units otherwise take the same shared "
         "defaults (the shared 8102-8111 segment). Pick a base no local cluster already owns (`ava cluster ls`); "

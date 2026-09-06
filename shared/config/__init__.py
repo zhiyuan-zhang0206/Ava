@@ -83,10 +83,9 @@ Resolution + stamping mechanics: `shared/birth_config.py`.
 
 Turn-scoped code (`agent/`, `ava/`, `ava_builtins/`, `shared/lm/`) reads
 `per_agent` fields through the per-turn view — `turn_settings.<domain>.<field>`
-(`shared/config/turn_view.py`) — never the bare singleton. In process mode the
-view IS the singleton (boot applies the overlay onto it); in the hosted runner
-(future/infra/agent-runner-as-server.md) the view resolves the agent's
-contextvar-bound pins while the singleton holds only the cluster default.
+(`shared/config/turn_view.py`) — never the bare singleton. The view resolves
+the agent's contextvar-bound pins while the singleton holds the cluster
+default. Outside an agent turn the view reads that live default.
 Enforced by `scripts/lint_turn_scoped_config.py`.
 """
 

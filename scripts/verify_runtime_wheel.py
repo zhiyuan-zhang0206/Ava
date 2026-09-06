@@ -21,7 +21,6 @@ REQUIRED = (
     "agent/exec_child.py",
     "agent/graph/_exec_subprocess.py",
     "services/agent_host/daemon.py",
-    "services/restarter/daemon.py",
     "gateway/app.py",
     "ops/spec.py",
     "shared/dotenv_boot.py",

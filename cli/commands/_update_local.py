@@ -22,9 +22,8 @@ frontend-only fast path and the frontend session relaunch it shares:
 - `_boot_gateway_fresh` — `ava start` in a fresh subprocess so start loads the
   synced revision, not this stale interpreter (start applies pending migrations
   itself early in boot).
-- `_restart_schedule_sessions` — after a code-change boot, bounce the old
-  checkout's schedule runner sessions through a fresh interpreter so the fresh
-  gateway's ScheduleManager relaunches them on the new code.
+- `_restart_schedule_sessions` — compatibility no-op for an already running
+  older updater; persistent schedule terminals remain intact.
 - `_adopt_child_data_plane_credentials` — refresh the surviving orchestrator's
   credential view after that child returns, before any pin or recovery DB write.
 - `_run_gateway_local_update` — the composed local leg; every failure recovers
@@ -39,7 +38,6 @@ so `cli.commands(.update)._run_gateway_local_update` / `._run_frontend_only_upda
 from __future__ import annotations
 
 import shlex
-import subprocess
 import sys
 from pathlib import Path
 
@@ -65,7 +63,6 @@ from shared.rollout_telemetry import stage as _stage_telemetry
 # preflight shares one source of truth.
 
 _FRONTEND_SESSION = "frontend"
-_RESTARTER_SESSION = "restarter"
 
 
 def _adopt_child_data_plane_credentials() -> None:
@@ -141,78 +138,12 @@ def _restart_frontend_session(repo: Path) -> bool:
 
 
 def _restart_schedule_sessions() -> None:
-    """Bounce gateway-hosted schedule runner sessions after a code-change rollout.
+    """Keep schedule terminals across the same pause boundary as agent terminals.
 
-    The fresh gateway's ScheduleManager re-adopts live ``ava-schedule-<id>``
-    sessions at boot (liveness is the session name), so without this step the
-    runners launched from the OLD checkout keep serving — old runner code AND
-    old materialized script text — until the session is killed. 2026-08-27
-    (Task #1746): schedules 1/2/3/5/6/7/8 still ran 08-25 code after two
-    rollouts. Killing the sessions here lets the new manager's reconcile loop
-    relaunch them on the new checkout within one poll interval; a killed
-    runner is a deliberate bounce, not a crash — no 'completed' marker, no
-    breaker count, and a schedule that was running stably has no backoff entry,
-    so the relaunch is immediate.
-
-    Never fatal: a kill failure leaves the old runner serving and must not
-    fail the rollout — the post-rollout checklist's leftover-schedule_runner
-    check is the backstop. Callers only invoke it on the pull path after a
-    successful boot, so sessions are never bounced for a restart-only bounce
-    (same code) or when the rollout is recovering to last-known-good.
-
-    This helper runs behind this module's ``--bounce-schedule-sessions`` entry:
-    after a gateway checkout, this rollout interpreter could otherwise retain an
-    old ``shared.session_backend`` while importing the new helper. That is the
-    module-cache skew the agent-runner leg prevents with its post-checkout exec.
+    Their currently executing Python frame cannot be upgraded in place. A full
+    stop or explicit schedule restart adopts new code at its own work boundary.
     """
-    from shared.session_backend import get_shell_backend
-
-    prefix = session_name("schedule-")
-    backend = get_shell_backend()
-    try:
-        names = backend.list_sessions(prefix=prefix)
-    except Exception as exc:
-        print(f"  ! schedule session scan failed (non-fatal): {exc}", file=sys.stderr)
-        return
-    if not names:
-        print("  · no schedule runner sessions to restart")
-        return
-    print(f"\n→ restart schedule runner session(s): {', '.join(names)} (new code)")
-    for name in names:
-        try:
-            ok, _detail = backend.kill_session(name)
-        except Exception as exc:
-            print(f"  ! schedule session {name} kill failed (non-fatal): {exc}", file=sys.stderr)
-            continue
-        if not ok:
-            print(f"  ! schedule session {name} kill failed (non-fatal)", file=sys.stderr)
-            continue
-        print(f"  ✓ {name} killed — the schedule manager relaunches it on the new code")
-
-
-def _bounce_schedule_sessions_fresh(repo: Path) -> None:
-    """Ask a fresh post-checkout interpreter to bounce schedule runner sessions.
-
-    This is never fatal: a non-zero child outcome or launch failure leaves the
-    old runner serving, and the post-rollout leftover-schedule_runner check is the
-    backstop.
-    """
-    try:
-        rc = subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "cli.commands._update_local",
-                "--bounce-schedule-sessions",
-            ],
-            cwd=repo,
-            check=False,
-        ).returncode
-    except OSError as exc:
-        print(f"  ! schedule session bounce failed (non-fatal): {exc}", file=sys.stderr)
-    else:
-        if rc != 0:
-            print(f"  ! schedule session bounce failed (non-fatal): rc={rc}", file=sys.stderr)
+    print("  · persistent schedule terminals retained across update")
 
 
 def _run_frontend_only_update(repo: Path, origin: str) -> int:
@@ -348,16 +279,9 @@ def _boot_gateway_fresh(repo: Path, preserve_frontend: frozenset[str]) -> int:
     (and left running) on a backend-only change (restart_frontend=False),
     forwarded as `--disable-service` to the child.
 
-    --persist-services: both the frontend preservation and the deferred restarter
-    are transient skips for this restart, not durable operator disables — don't
-    let them rewrite the watchdog's --disable-service marker (which would wrongly
-    re-enable the operator's durably-skipped services).
-
-    The restarter stays down until the orchestration's existing ``finally`` calls
-    ``unpause_local_cluster``. Starting it here lets agents marked ``restarting``
-    relaunch before the parent has verified gateway readiness, advanced the pin,
-    or completed Phase B. The gateway itself must start now so the readiness probe
-    can pass; deferring only the restarter separates those two boundaries.
+    --persist-services keeps frontend preservation transient without rewriting
+    the operator's disabled-service choices. The existing maintenance hold
+    keeps agent admission closed until the orchestration completes readiness.
 
     --no-readiness-gate: this leg's readiness question is answered at step 6.5 by
     `_gateway_ready.await_gateway_serving`, which asks it better — off-box,
@@ -373,7 +297,7 @@ def _boot_gateway_fresh(repo: Path, preserve_frontend: frozenset[str]) -> int:
     from cli.commands import update as _up_mod
 
     start_args = "start --persist-services --no-readiness-gate"
-    for session in sorted(preserve_frontend | {_RESTARTER_SESSION}):
+    for session in sorted(preserve_frontend):
         start_args += f" --disable-service {session}"
     ava_bin = str(repo / ".venv" / "bin" / "ava")
     child_env = child_process_env()
@@ -472,14 +396,19 @@ def _run_gateway_local_update(
     if not restart_frontend:
         print("  · keeping frontend up (backend-only change, no UI rebuild)")
     with _stage_telemetry("stop"):
-        _up_mod._do_stop(
+        stop_rc = _up_mod._do_stop(
             repo,
             graceful=True,
             require_confirmation=False,
             keep_infra=not _pitr_restart(origin),
             preserve_sessions=preserve_frontend,
             force_reap_agents=force_reap_agents,
+            **({"force": True} if force_reap_agents else {}),
         )
+        if stop_rc != 0:
+            from shared.exit_codes import STOP_INCOMPLETE_EXIT_CODE
+
+            return STOP_INCOMPLETE_EXIT_CODE
 
     # The stop above took the gateway down too, so ANY failure below leaves the
     # gateway offline — and the orchestration's compensating cluster/resume rows
@@ -569,26 +498,20 @@ def _run_gateway_local_update(
     if pull_recover is not None and start_rc != 0:
         print("  ✗ ava start failed", file=sys.stderr)
         return _recover_rc(repo, pull_recover, preserve_frontend)
-    if pull and start_rc == 0 and pull_recover is not None and pull_recover[0] != target_sha:
-        # Code changed (the rollout landed a different commit than the host was
-        # on): the fresh gateway re-adopted the old checkout's live schedule
-        # sessions, so bounce them — its reconcile loop relaunches them on the
-        # new code within a poll interval (Task #1746). A no-op update
-        # (from == target) changes no code and must not interrupt in-flight
-        # fires for nothing (review, PR #713).
-        _bounce_schedule_sessions_fresh(repo)
+    # Persistent terminals, including schedule runners, retain their work across
+    # pause/update. Their explicit restart owns code adoption at a work boundary.
     return start_rc
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Run the post-checkout schedule-session bounce in a fresh interpreter."""
+    """Accept the previous updater entry without disrupting persistent terminals."""
     import argparse
 
     parser = argparse.ArgumentParser(prog="python -m cli.commands._update_local")
     parser.add_argument(
         "--bounce-schedule-sessions",
         action="store_true",
-        help="restart gateway schedule runner sessions after a code-change rollout",
+        help="legacy updater compatibility; persistent schedule sessions are retained",
     )
     args = parser.parse_args(argv)
     if args.bounce_schedule_sessions:

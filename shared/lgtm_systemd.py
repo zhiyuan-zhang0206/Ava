@@ -65,7 +65,7 @@ def render_unit(home: Path, name: str, command: Command) -> str:
         f"WorkingDirectory={_path_value(str(native))}\n"
         f"ExecStart=:{' '.join(_quote(arg) for arg in command.argv)}\n"
         f"{environment}\nRestart=on-failure\nRestartSec=10\nTimeoutStopSec=30\n"
-        "KillMode=control-group\nUMask=0077\n"
+        "SendSIGKILL=no\nKillMode=control-group\nUMask=0077\n"
         f"StandardOutput={_path_value('append:' + str(native / 'logs' / (name + '.log')))}\n"
         f"StandardError={_path_value('append:' + str(native / 'logs' / (name + '.log')))}\n"
         "\n[Install]\nWantedBy=default.target\n"

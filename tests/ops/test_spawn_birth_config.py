@@ -17,11 +17,9 @@ from typing import Any
 import psycopg
 import pytest
 
-from ops import agent_launch
 from ops.agent_spawn import create_agent_row
 from shared.birth_config import set_cluster_default_model
 from shared.config import frozen_field_names
-from tests.conftest import LaunchCall
 
 
 def _spawn_agent(
@@ -36,11 +34,8 @@ def _spawn_agent(
     the stamp rides out to the child)."""
     from shared.machine import machine_name
 
-    agent_id, birth_config = create_agent_row(
+    agent_id, _birth_config = create_agent_row(
         spawner=spawner, machine=machine_name(), config=config, **kw
-    )
-    agent_launch._launch_agent_process(
-        agent_id, config_overlay=config, birth_config=birth_config, confirm=False
     )
     return agent_id
 
@@ -104,21 +99,12 @@ class TestSpawnStamping:
         assert (_birth_config(db_conn, agent_id) or {})["llm_model"] == born_with
         assert born_with != "claude-sonnet-5"
 
-    def test_the_stamp_rides_out_to_the_launched_child(
-        self, db_conn: psycopg.Connection, launched_agents: list[LaunchCall]
-    ) -> None:
-        agent_id = _spawn_agent(spawner="test")
-        call = next(c for c in launched_agents if c.agent_id == agent_id)
-        assert call.birth_config == _birth_config(db_conn, agent_id)
-
 
 class TestReplayOnWake:
     """ "Replayed on every restart / respawn / resurrect" — the wake paths read the
     stamp off the row and hand it to the same launch channel spawn used."""
 
-    def test_resurrect_replays_the_stamp(
-        self, db_conn: psycopg.Connection, launched_agents: list[LaunchCall]
-    ) -> None:
+    def test_resurrect_replays_the_stamp(self, db_conn: psycopg.Connection) -> None:
         from ops.agent_wake import resurrect_agent
 
         agent_id = _spawn_agent(spawner="test")
@@ -131,7 +117,7 @@ class TestReplayOnWake:
             )
         db_conn.commit()
         resurrect_agent(agent_id, resurrected_by="user")
-        assert launched_agents[-1].birth_config == stamp
+        assert _birth_config(db_conn, agent_id) == stamp
 
 
 class TestForkInheritance:

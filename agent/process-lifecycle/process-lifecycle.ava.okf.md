@@ -1,55 +1,22 @@
 ---
 type: doc
-title: Process Lifecycle
-description: "Agent process lifecycle: spawn to terminate, signal handling, exit tracking, gateway notification."
+title: Hosted Lifecycle Boundaries
+description: Agent identity and turn lifetime are independent of the host process.
 tags: []
 ---
 
-# Process Lifecycle
+# Hosted Lifecycle Boundaries
 
-## Lifecycle State Machine
-Main path:
-```
-idling (unclaimed) ─claim→ running ⇄ idling → terminated
-```
-- `idling (unclaimed) → terminated`: legacy boot rejection and launcher confirmation cleanup require absent runtime ownership and lifecycle command, in addition to `status='idling' AND pid IS NULL`. Owned attempts leave settlement to the fixed-command controller. Legacy retry's canonical-session cleanup still requires separate process-identity audit before activation.
-- **launch confirm** (`ops/agent_launch.py:_wait_for_agent_claim`): the launcher polls the row for `AVA_LAUNCH_CONFIRM_TIMEOUT_SECONDS` (45s) waiting for a non-NULL pid. The pre-claim segment (python start, imports, schema assert, placement SELECT) is invisible in the row, so the launcher asks the **supervisor's session record** whether the process is alive — every ~1s, and again at the deadline: alive → ONE extension to `boot_reap_grace_seconds` (120s, configured through the retained `AVA_ALLOCATED_REAP_GRACE_SECONDS` alias, where the dead-birth reaper takes over); dead → fail now (after re-reading the row, so a child that claimed and exited inside the probe interval still counts as started). `termination_source='launch-confirm'` either way, so a genuine failure is crash-resurrect-eligible.
-- **boot deadline** (`agent/_boot_deadline.py`): what makes the liveness answer above worth reading. The child arms a watchdog before its import chain and exits on whichever bound trips first — stall (30s, reset by every `_boot_timing` phase) or budget (90s, never reset) — so in the pre-flip window **alive ⇒ progressing**. The bounds arrive as `--boot-stall-seconds` / `--boot-budget-seconds` **argv**; the `AVA_AGENT_BOOT_*` env names are launcher-side settings aliases — setting them on the agent process env has no effect. Ordering pinned in `tests/shared/test_config.py`: stall (30) < confirm (45) < budget (90) < reap grace (120); the first makes the launcher's probe decisive, the last keeps the reaper from ever meeting a live child (its clock `status_changed_at` resets only on a status flip, so pre-flip progress cannot hold it off). The child does **not** write its own row on overrun — a boot wedged on the data plane cannot be relied on to reach it.
-- `running/idling → terminated`: signal / exit (gateway `/exited` finalize, `WHERE status IN ('running','idling')`)
-- **re-entry paths** (restart / resurrect) — the two ways a row re-enters the running state, plus the operation-by-operation comparison table: [[agent/process-lifecycle/reentry-paths.ava.okf.md]].
+An agent is a durable identity, not an OS process. The host schedules its turns;
+idle has no task. Native restart replaces the agent's runtime incarnation and
+cached runtime while retaining its ID, checkpoint, workspace and shells.
+Terminate changes the agent's lifecycle intent, not the daemon's lifetime.
 
-## Signal Handling (`agent/lifecycle.py:_install_lifecycle_signal_handlers()`)
-- **SIGHUP** → `SystemExit("signal:SIGHUP")`: kept as a **defensive** catch — agents are detached native processes, so the old session-close SIGHUP no longer exists; a stray one still exits cleanly through the normal tracking path
-- **SIGTERM** → `SystemExit("signal:SIGTERM")`: external kill
-- Both → `SystemExit`, ensuring `main()`'s `finally` executes.
+The host process has its own health, shutdown and crash recovery. It must finish
+checkpoint and resource settlement before a normal maintenance stop can report
+success. Explicit force can interrupt execution but cannot promise persistence
+of an arbitrary in-flight external effect.
 
-## Exit Reason Tracking (`agent/lifecycle.py:_exit_reason()`)
-Called in `main()` finally, derives from `sys.exc_info()`:
-- `signal:SIGHUP` / `signal:SIGTERM` — signal-triggered
-- normal exit — no exception
-- other exceptions — exception type name
-
-## Gateway Notification (`agent/lifecycle.py:_notify_exit()`)
-Notifies gateway on exit: gateway updates agents_meta to 'terminated', closes only agent-owned `ava.ui.show()` pages, and leaves daemon-supervised `ava.ui.serve()` pages serving. Agent only notifies; gateway owns writes.
-
-## Session Retention (shell sub-sessions only)
-Shell sub-sessions (`ava-agent-<id>-shell-<n>[-<name>]`) survive lifecycles; the **main process is a plain native process** (native supervisor) — retention rules + the session-record model live in [[sessions.ava.okf.md]]. Silent death = wedged/killed process, reaped by the restarter and crash-resurrected.
-
-## Restart vs Terminate vs Resurrect
-The operation-by-operation comparison table: [[agent/process-lifecycle/reentry-paths.ava.okf.md]].
-
-## Key Dependencies
-- [[sessions.ava.okf.md]] — session retention
-- [[db.ava.okf.md]] — agents_meta updates
-- [[loop.ava.okf.md]] — main() finally calls lifecycle hooks
-
-## Entry Points
-- `agent/lifecycle.py:_install_lifecycle_signal_handlers()` — signals → SystemExit
-- `agent/lifecycle.py:_exit_reason()` — exit reason tag
-- `agent/lifecycle.py:_notify_exit()` — gateway `/exited` → terminated
-- `agent/loop.py:_route_process_end_notify()` — finally routes to exit
-- `ava.self.terminate()` / `ava.self.restart()` — SDK
-
-## Notes
-- All lifecycle hooks called from `main()`'s `finally` — even silent deaths leave a trace
-- `resurrect()` recovers from terminated, not cold start — memory and workspace survive
+The authoritative contracts are [[../lifecycle.ava.okf.md|Agent Lifecycle]],
+[[reentry-paths.ava.okf.md|Re-entry Paths]] and
+[[../startup/admission.ava.okf.md|Hosted Runtime Admission]].

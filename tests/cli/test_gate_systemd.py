@@ -13,13 +13,14 @@ from shared.config import settings
 
 class Manager:
     def __init__(self) -> None:
+        self.home = Path()
         self.calls: list[tuple[str, ...]] = []
         self.loaded = False
         self.active = False
         self.enabled = False
         self.fail = ""
 
-    def run(self, *args: str) -> subprocess.CompletedProcess[str]:
+    def run(self, *args: str, timeout: float = 30) -> subprocess.CompletedProcess[str]:
         self.calls.append(args)
         command = args[0]
         if command == self.fail:
@@ -29,6 +30,8 @@ class Manager:
             output = (
                 f"LoadState={'loaded' if self.loaded else 'not-found'}\n"
                 f"ActiveState={'active' if self.active else 'inactive'}\n"
+                "MainPID=0\nSendSIGKILL=no\n"
+                f"FragmentPath={gs.unit_path(self.home)}\n"
                 f"UnitFileState={'enabled' if self.enabled else 'disabled'}\n"
             )
         elif command == "stop":
@@ -43,8 +46,9 @@ class Manager:
 
 
 @pytest.fixture
-def manager(monkeypatch: pytest.MonkeyPatch) -> Manager:
+def manager(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Manager:
     manager = Manager()
+    manager.home = tmp_path
     monkeypatch.setattr(gs, "_systemctl", manager.run)
     monkeypatch.setattr(settings.general, "os_jobs_enabled", True)
     return manager

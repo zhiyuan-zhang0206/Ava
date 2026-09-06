@@ -301,7 +301,9 @@ def test_real_redis_stops_owned_instance_only(
             assert isinstance(directory, str)
             data = Path(directory)
             pid = int(client.info("server")["process_id"])  # pyright: ignore[reportUnknownMemberType] — redis stubs
-            client.set("owned-test", "present")
+            client.set("owned-test", "old")
+            client.save()  # pyright: ignore[reportUnknownMemberType] — redis stubs
+            client.set("owned-test", "latest-unsaved")
         monkeypatch.setattr(settings.data_plane, "redis_url", url)
         monkeypatch.setattr(plane.instance, "_redis_data_dir", lambda: data)
         assert stop.stop_data_plane(3) == ["redis"]
@@ -313,6 +315,40 @@ def test_real_redis_stops_owned_instance_only(
         with redis.Redis.from_url(sibling_url) as sibling:  # pyright: ignore[reportUnknownMemberType] — redis stubs
             assert sibling.ping()  # pyright: ignore[reportUnknownMemberType] — redis stubs
         assert stop.stop_data_plane(1) == []
+        # Restart the exact private data directory. This proves SAVE includes
+        # the latest in-memory write, not merely that an old RDB existed.
+        from urllib.parse import urlparse
+
+        from tests._containers import _wait_port
+
+        port = urlparse(url).port
+        assert port is not None
+        restarted = subprocess.Popen(  # noqa: S603 — fixed binary and fixture-owned directory/port
+            [
+                "redis-server",
+                "--port",
+                str(port),
+                "--bind",
+                "127.0.0.1",
+                "--save",
+                "",
+                "--appendonly",
+                "no",
+                "--dir",
+                str(data),
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        try:
+            _wait_port(port)
+            with redis.Redis.from_url(url, decode_responses=True) as restored:  # pyright: ignore[reportUnknownMemberType]
+                assert restored.get("owned-test") == "latest-unsaved"  # pyright: ignore[reportUnknownMemberType]
+            assert stop.stop_data_plane(3) == ["redis"]
+        finally:
+            if restarted.poll() is None:
+                restarted.terminate()
+            restarted.wait(timeout=5)
 
 
 def test_foreign_redis_directory_refuses_before_local_signals(

@@ -5,19 +5,9 @@ that a pause, a status read and a deploy all need, and it imports none of them.
 `ops/cluster.py` re-exports this module; nothing here imports that facade, which
 is what keeps the family acyclic.
 
-Every session this module starts or stops goes through the platform session
-backend. Stops already did (`pause_local_cluster` -> `get_backend().kill_session`);
-the four *spawn* sites (`unpause_local_cluster`, `spawn_update`, `spawn_rollout`,
-`spawn_restart`) share `_spawn_detached_session`, which launches on
-`get_backend()` — the same backend that hosts services (POSIX: the native
-process supervisor; Windows: winproc). S7 moved the orchestration sessions
-(updater / rollout / cluster-restart) onto it, retiring the last legacy backend in
-the cluster path. The Windows half of that story is why the helper exists at
-all: before it, a Windows agent-runner could be paused but never resumed and
-could never run its own `ava cluster update` — every self-heal died on a
-missing-backend error, so no drift dimension (schema or pin) could ever converge and
-the restarter stayed dead. One-way reachability like that is worse than no
-reachability, hence one helper rather than four branches.
+Orchestration sessions (updater, rollout and cluster-restart) use the same
+platform session backend as services. Agent pause/resume manages the native
+host admission boundary; it does not start an independent agent supervisor.
 """
 
 from __future__ import annotations
@@ -55,7 +45,6 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 
 # Bare service names — composed into real session names by
 # shared.cluster.session_name (`ava-<service>`).
-_RESTARTER_SERVICE = "restarter"
 _UPDATER_SERVICE = "updater"
 _ROLLOUT_SERVICE = "rollout"
 _ROLLOUT_DRYRUN_SERVICE = "rollout-dryrun"

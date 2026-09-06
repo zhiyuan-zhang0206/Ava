@@ -1,39 +1,34 @@
 ---
 type: doc
 title: Agent Lifecycle
-description: Agent process lifecycle management—runs in the `finally` block of `main()` and signal handlers to ensure the process leaves a clean trail regardless of exit reason.
+description: Durable native controls executed by the agent host.
 tags: []
 ---
 
 # Agent Lifecycle
 
-## What it is
+Lifecycle authority is a durable inbound and the admitted runtime incarnation.
+`ops/ops_lifecycle.py` accepts restart/terminate/cancel through the home runner;
+`agent/graph/_claim.py` applies their routing at the next claim boundary.
 
-Agent process lifecycle management—runs in the `finally` block of `main()` and signal handlers to ensure the process leaves a clean trail regardless of exit reason.
+Normal restart/terminate returns from the graph, flushes the final checkpoint,
+and applies the matching command through `agent/hosted_ownership.py`. The host
+retains single-flight through settlement. Restart keeps the agent ID and allows
+new admission; terminate leaves the ID, context and pending work available for
+explicit resurrection. No per-agent exit callback or process restarter exists.
 
-## Core Responsibilities
+Force requests interrupt the exact hosted turn and its owned execution resources.
+An enqueued force request is not proof of completed cleanup. An uncooperative
+host task remains observable; stopping its whole host affects that runner's
+other turns as well.
 
-- **_exit_reason()**: Derives the exit reason label from `sys.exc_info()`
-  - `SystemExit("signal:NAME")` → silent death caused by signal (e.g., a session kill → SIGTERM)
-  - Other `SystemExit` → `"system_exit"`
-  - Exception → `"exception:<TypeName>"`
-  - No exception → `"normal"` (terminate inbound go to END)
-- **Signal handlers** (`_install_lifecycle_signal_handlers`): SIGHUP / SIGTERM → `SystemExit("signal:NAME")`, ensuring the finally block runs.
-- **Exit notification**: `_notify_exit` → `POST /api/agents/{id}/exited` (gateway sets `terminated`, closes only agent-owned `ava.ui.show()` pages, and retains daemon-supervised `ava.ui.serve()` pages). `agent/loop.py:_route_process_end_notify` keeps the finally block within its statement budget.
+Persistent PTY shells are separate resources: native agent restart preserves
+them. Cluster `pause` preserves them; full cluster `stop` closes them while
+retaining durable agent data. Impersonation is an independent identity protocol.
 
-## Key Dependencies
+## Related contracts
 
-- [[loop.ava.okf.md]] — Called in the finally block of main()
-- [[db.ava.okf.md]] — Gateway manages status via agents_meta table
-
-## Entry Points
-
-- `agent/lifecycle.py:_exit_reason()`
-- `agent/lifecycle.py:_install_lifecycle_signal_handlers()`
-- `agent/lifecycle.py:_notify_exit()`
-- `agent/loop.py:_route_process_end_notify()` — Routes based on reason
-
-## Notes
-
-- Shell sub-sessions (`ava-agent-<id>-shell-*`) are **deliberately not cleaned up** — background work (such as long-running watchers, shell sessions) should persist across terminate/restart
-- The signal → SystemExit design ensures the finally block always runs, leaving no orphaned state
+- [[process-lifecycle/reentry-paths.ava.okf.md]] — restart and resurrection
+- [[startup/admission.ava.okf.md]] — ownership fencing
+- [[sessions.ava.okf.md]] — persistent shell resources
+- [[shared/maintenance.ava.okf.md]] — cluster pause/stop

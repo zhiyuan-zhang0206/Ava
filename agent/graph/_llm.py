@@ -53,10 +53,8 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 from langgraph.types import Command
 
-# Kernel process imports ava to call help(ava) self-introspection and splice
-# the docstring into the system prompt. ava.self.AGENT_ID is set by the main
-# process via argv → ava.self.AGENT_ID = agent_id (see agent/loop.py); graph nodes
-# read agent_id from RunnableConfig.configurable.thread_id, not ava.self.AGENT_ID.
+# Import the SDK for system-prompt introspection. Graph nodes read the agent
+# identity from RunnableConfig; SDK calls use the host's bound turn identity.
 import ava
 from agent import state as _state
 from agent._turn_progress import mark_turn_progress
@@ -529,7 +527,7 @@ async def _persist_last_active(ctx: AvaContext, agent_id: int, text: str) -> Non
       the heartbeat daemon reads for idle timing. A completed LLM turn is the
       definition of "the agent did real work" — including a tool-only turn with
       no text. It is deliberately NOT written by the ops lifecycle (rollout
-      quiesce / respawn / update), and for an idle agent that whole cycle
+      pause / restart / update), and for an idle agent that whole cycle
       runs no LLM turn, so an ops restart cannot reset the idle clock.
     - last_message_text = the AI text WHEN this turn produced any: it survives
       compact (which replaces the whole checkpoint but not this column), read

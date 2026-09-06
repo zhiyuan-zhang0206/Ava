@@ -79,9 +79,6 @@ from ops.cluster_deploy import (
     spawn_update as spawn_update,
 )
 from ops.cluster_pause import (
-    _RESTARTER_CMD as _RESTARTER_CMD,
-)
-from ops.cluster_pause import (
     is_paused as is_paused,
 )
 from ops.cluster_pause import (
@@ -98,9 +95,6 @@ from ops.cluster_session import (
 )
 from ops.cluster_session import (
     _REPO_ROOT as _REPO_ROOT,
-)
-from ops.cluster_session import (
-    _RESTARTER_SERVICE as _RESTARTER_SERVICE,
 )
 from ops.cluster_session import (
     _ROLLOUT_SERVICE as _ROLLOUT_SERVICE,
@@ -143,9 +137,6 @@ from ops.cluster_status import (
 )
 from ops.cluster_status import (
     _collect_sessions as _collect_sessions,
-)
-from ops.cluster_status import (
-    _count_agent_processes as _count_agent_processes,
 )
 from ops.cluster_status import (
     _count_agent_shells as _count_agent_shells,

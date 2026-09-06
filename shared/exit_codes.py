@@ -40,3 +40,7 @@ RESTART_DECLINED_EXIT_CODE = 3
 # above `RESTART_DECLINED_EXIT_CODE` puts it in those ladders' "may be down ->
 # `ava start`" branch, which is the correct and idempotent response.
 SERVICES_NOT_READY_EXIT_CODE = 4
+
+# A temporary pause/stop did not finish. Source/schema were not advanced by its
+# caller, but some services may already have stopped; never report rollback success.
+STOP_INCOMPLETE_EXIT_CODE = 5

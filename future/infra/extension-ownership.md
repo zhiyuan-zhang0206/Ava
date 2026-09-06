@@ -3,7 +3,7 @@
 > **Status: S1 landed (decision + spec revision); no code yet.** The issue sets
 > the direction (three ownership tiers, five slices); this doc is the buildable
 > elaboration: data model, capability vocabulary, resolution semantics, the
-> fail-fast edge, executor semantics under both process models, migration from
+> fail-fast edge, executor semantics in the agent host, migration from
 > today's per-machine state, and per-slice test locks.
 >
 > **S1 is done**: the ownership model is recorded durably in
@@ -231,33 +231,14 @@ This keeps invariant 2 honest in both directions: nothing loads less than
 policy says without a queryable record, and nothing an agent explicitly
 requires is ever quietly dropped.
 
-## Executor semantics — process mode and the PR #49 runner-hosted mode
+## Executor semantics in the agent host
 
-Issue #39 leans on agent = process: `_load_extensions()`
-(`agent/graph/_build.py`), hook snapshots, and `build_agent_state()` are
-per-process, so gating *loading itself* gives per-agent composition with no new
-isolation machinery — off is off (no import, no state fields, no SDK
-namespaces, no exposure to another plugin's load-time failure).
-
-PR #49 (`agent-runner-as-server`, proposal awaiting ratification) would replace
-process-per-agent with turns as asyncio tasks in one runner process — and then
-"per-process" stops meaning "per-agent". The two designs reconcile because this
-design keeps activation as **data** (invariant 3) and leaves enforcement to the
-executor:
-
-| | process-per-agent (today) | runner-hosted (PR #49 Phase 1, if ratified) |
-|---|---|---|
-| resolution point | `_load_extensions()` at process boot | dispatcher, at agent registration / first turn |
-| enforcement | import gating: a non-activated plugin is never imported | the runner imports the **union** of sets activated by ≥1 local agent (a plugin no local agent activates is still never imported); per-turn composition filters hooks / state fields / SDK namespaces to the agent's resolved set, riding the same per-turn contextvar view PR #49 introduces for settings |
-| "off" means | not imported | not composed into this agent's turns (import may exist for a neighbor) |
-| load-failure blast radius | the one agent | the runner — consistent with Phase 1's stated fault model (a segfault already kills every local agent there) |
-
-Ordering: if S3 lands first, PR #49's Phase 1 must carry the per-turn
-composition filter as part of its settings-scoping work item (b); if Phase 1
-lands first, S3 implements activation directly at the turn boundary and never
-builds the process-boot gating. Either way the canary use case — "enable the
-new plugin for ONE agent, watch a week, then fleet-wide" — is expressed
-identically: an `extension_overlay` row, visible in the event trail.
+The agent host is the sole runtime. Per-agent activation must resolve at runtime
+construction/turn boundaries, not by globally importing or unloading modules
+for one agent. The host may import the union of locally needed plugins; each
+turn's resolved set determines its hooks, state fields and SDK namespaces.
+An extension overlay and its event trail remain the authority for enabling a
+plugin for one agent. Import failures still have a host-wide fault boundary.
 
 What this deliberately does *not* import from dsh: isolate realms / scoped
 registration machinery. dsh needs them because many sessions share one process
@@ -408,6 +389,6 @@ Adoption, not flag-day:
 |---|---|---|
 | **S1 — decision + spec** (landed) | `decisions/2026-08-21-extension-ownership-three-tiers.md` (three tiers; machine demoted to derived constraint; version-canary non-goal) + the plugin-spec-v2 S5 revision above, incl. the `hostCapabilities` split. No code. | — |
 | **S2 — skills first** (tables + install-write + materialization landed, cross-machine chain locked; boot materialization, adoption sweep and sync event pending) | `extensions`/`extension_blobs` migrations; `ava skill install` writes row + blob; converge + boot materialization for `kind='skill'`; adoption sweep; the sync event. Skills are pure text, no runtime, no requirements — validates the whole chain at minimum risk. | install on home A materializes on home B (two homes, one PG); adoption conflict refused with both machines named; user-edit hash guard survives the source change |
-| **S3 — per-agent activation** | `agents_meta.extension_overlay` migration; spawn API + preset + `ava.agents.spawn` field; resolution in `_load_extensions()` (or the turn boundary, per PR #49 ordering); event-trail recording. | overlay survives restart; overlay-disabled plugin has zero import side effects (process mode); unknown name refused at spawn |
+| **S3 — per-agent activation** | `agents_meta.extension_overlay` migration; spawn API + preset + `ava.agents.spawn` field; resolution in `_load_extensions()` (or the turn boundary, per PR #49 ordering); event-trail recording. | overlay survives restart; overlay-disabled plugin is absent from the agent turn composition; unknown name refused at spawn |
 | **S4 — plugins + capability matching** | plugin rows to the registry; `shared/capabilities.py` + probes + `machine_capabilities` registration; the matcher; placement constraint + boot re-check; `plugins_config.json` demoted to cache; not-runnable rows in status/inventory/inspect. | requirement-missing machine is refused as placement for a requiring agent; a default-enabled-but-not-runnable pair is queryable, not silent; cache rewrite is idempotent |
 | **S5 — MCP** | `kind='mcp'` rows + `requires` → vocabulary unification; `mcp_enabled.json` demoted. Routing endgame stays #1212. | machine-singleton browser server expressed via requirements matches only the capable machine |

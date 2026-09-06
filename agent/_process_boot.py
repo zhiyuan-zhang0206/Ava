@@ -1,100 +1,29 @@
-"""Agent process boot — the one-shot startup phases.
+"""Host and agent boot scopes.
 
-Everything between `python -m agent` and the graph going live, split out of
-`agent/loop.py` (which keeps `main()` orchestration + the `run()` entry):
-
-- framework-scope per-agent config (birth_config first, config_overlay on top)
-  + the sdk_disable delta, applied BEFORE `build_chat_model` so
-  `turn_settings.lm.llm_model` reflects this agent's model;
-- boot phase 1 (`_boot_agent_process`): process init, MCP daemon handle, trace
-  export init, ava SDK identity (`ava._boot.establish`), plugin load, workspace
-  pre-create, model build — composed from the two SCOPES below;
-- boot phase 2 (`_build_data_plane`): the inbound Redis pub/sub listener + the
-  SSE event publisher;
-- `_build_checkpointer`: the AsyncPostgresSaver (wrapped with loud-failure
-  logging and optional N-step checkpoint throttling) + the startup
-  claimed-inbound reconcile;
-- `_build_graph`: the compiled graph + dangling tool pairing repair + the
-  plugin-scope config overlay + the effective-config snapshot.
-
-The MCP daemon is a per-machine SHARED cluster service (ops roster session
-"mcp-daemon", watchdog-managed; socket $AVA_HOME/run/mcp_daemon.sock carries
-no agent_id). The handle `_boot_agent_process` returns is a no-op kept for
-boot-path compatibility: spawn()/await_ready() return immediately — the shared
-daemon is supervised independently and is already listening before any agent
-boots, so there is no per-agent fork or socket-bind cost here.
-
-Framework-scope config must apply BEFORE build_chat_model so
-`turn_settings.lm.llm_model` reflects it if this agent runs a different model.
-Plugin-scope is deferred until after build_graph's bind_from_disk has
-populated _PLUGIN_CONFIGS — see the second apply_config_overlay call in
-`_build_graph`.
-
-## The two boot scopes
-
-`_boot_agent_process` is the one-process-per-agent composition of two halves
-that are NOT the same scope, and the hosted agent-runner
-(`future/infra/agent-runner-as-server.md`, `services/agent_host/`) needs them
-apart: it serves many agents from one process, so it runs the process half once
-at daemon boot and the agent half per agent.
-
-- `init_process_scope` / `land_cluster_extensions` / `load_process_extensions` —
-  **process** scope: OTLP trace export init, the cluster-owned skill
-  materialization, and the external-plugin load. The first and third mutate
-  process globals (the tracer provider; `sys.modules` + the plugin registries),
-  so "once" is a correctness requirement in the hosted runner, not a saving —
-  see each function's docstring. The middle one is process scope for a different
-  reason: it writes the machine's skills directory, which every agent on the box
-  shares, so per-agent repetition would be pure cost.
-- `boot_agent_scope` — **agent** scope: the workspace pre-create, the desktop
-  permissions notice, and the chat model, which is built from
-  `turn_settings.lm.llm_model` and therefore differs per agent whenever an
-  overlay pins a model.
-
-Splitting them moved `workspace_dir` from just before the plugin load to just
-after it (the agent half must follow the process half, because
-`_notify_desktop_permissions_at_startup` needs the SDK loaded). It is an idempotent
-mkdir and no plugin touches the workspace at import time, so the two orders are
-equivalent.
+The daemon initializes tracing, materializes cluster skills, and loads external
+plugins once per process. Each agent receives its workspace, desktop permission
+notice, and model under its bound configuration. SDK restrictions are applied
+inside the disposable execution child, whose module state is isolated.
 """
 
+import asyncio
 import os
 from pathlib import Path
-from typing import cast
 
-import psycopg
-import redis.asyncio as aredis
 from langchain_core.language_models.chat_models import BaseChatModel
-from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
-from langgraph.graph.state import CompiledStateGraph
-from psycopg.rows import DictRow
-from psycopg_pool import AsyncConnectionPool
 
 import ava
-import ava._boot
-from shared.config import settings
+from ava.shell import sessions
 from shared.config.turn_view import turn_settings
-from shared.event_publisher import AgentEventPublisher
-from shared.helper_chain_guard import parent_chain_intact
 from shared.lm.factory import build_chat_model
-from shared.log import init_agent_process, logger
+from shared.log import logger
 from shared.paths import workspace_dir
-from shared.redis_client import get_async_redis
-from shared.redis_listener import RedisInboundListener
+from shared.watcher import TEMPLATE_VERSION
+from shared.watcher_registry import watcher_rows
 
-from . import _boot_timing
-from .graph import build_graph
-from .graph._context import AvaContext
-from .mcp_daemon import _MCPDaemon
 from .startup import (
     _notify_desktop_permissions_at_startup,
-    _reconcile_claimed_inbounds_at_startup,
-    _repair_dangling_tool_use_at_startup,
-    _wrap_saver_writes_with_loud_failure,
-    _wrap_saver_writes_with_nstep_interval,
-    _write_effective_config_to_restart_completed,
 )
-from .state import BaseAgentState, build_checkpoint_serde
 
 
 def _apply_per_agent_sdk_disable() -> None:
@@ -146,30 +75,6 @@ def _apply_per_agent_eval_isolation() -> None:
 def _isolated_memory_search(_query: str, _k: int = 5) -> list[tuple[Path, str, list[str]]]:
     """Return no shared-memory results for an isolated evaluation agent."""
     return []
-
-
-def _apply_per_agent_framework_config(
-    config_overlay: dict[str, object] | None, birth_config: dict[str, object] | None
-) -> None:
-    """Apply this agent's two stored config maps onto the settings singleton.
-
-    birth_config first, config_overlay on top: both write the same singleton via
-    `set_field`, so the last writer wins and the resulting precedence is
-    `config_overlay > birth_config > current config` — a field named in neither map
-    is simply left at whatever the live config already resolved to.
-
-    birth_config holds only framework fields (the frozen set is framework-only), so
-    unlike the overlay it has no deferred plugin-scope half.
-    """
-    if not (birth_config or config_overlay):
-        return
-    from shared.plugin_config_registry import apply_config_overlay
-
-    if birth_config:
-        apply_config_overlay(birth_config, scope="framework")
-    if config_overlay:
-        apply_config_overlay(config_overlay, scope="framework")
-    _apply_per_agent_sdk_disable()
 
 
 def init_process_scope() -> None:
@@ -259,9 +164,7 @@ def load_process_extensions() -> None:
     unimplemented, so a second load leaks whatever the first allocated and forks
     class identity for anything that captured a plugin class before it (PR #154
     made the module object stable, which removes a different obstacle, not this
-    one). The consequence is visible in hosted mode — process mode reloads on
-    each agent spawn, hosted mode only on a runner restart — and is a known,
-    filed behavioural difference, not something to work around here.
+    one). Newly installed plugins take effect on the next runner restart.
     """
     ava._extend.scan_and_load()
 
@@ -279,9 +182,8 @@ async def boot_agent_scope(agent_id: int) -> BaseChatModel:
     section advertising it is off (bench runners).
 
     The chat model is built from `turn_settings.lm.llm_model`, so callers must
-    have this agent's framework-scope config in effect first — the singleton
-    write in process mode (`_apply_per_agent_framework_config`), the contextvar
-    bind in hosted mode (`shared.config.turn_view.bind_agent_config`).
+    bind this agent's framework-scope config first through
+    `shared.config.turn_view.bind_agent_config`.
 
     Building it eagerly is safe even though the trace init is still in flight:
     traceloop's LangChain wrap injects its callback handler into every
@@ -301,173 +203,33 @@ async def boot_agent_scope(agent_id: int) -> BaseChatModel:
     return build_chat_model(turn_settings.lm.llm_model)
 
 
-async def _boot_agent_process(
-    agent_id: int,
-    config_overlay: dict[str, object] | None,
-    birth_config: dict[str, object] | None = None,
-) -> tuple[_MCPDaemon, BaseChatModel]:
-    """Boot phase 1: process init, MCP daemon spawn, SDK identity, plugin
-    load, framework-scope config, and the chat model build.
+async def reconcile_agent_watchers(agent_id: int) -> bool:
+    """Restore watcher intent under this turn's identity and configuration.
 
-    The MCP daemon is a per-machine SHARED cluster service (ops roster
-    session "mcp-daemon", watchdog-managed; socket $AVA_HOME/run/mcp_daemon.sock
-    carries no agent_id). This handle is a no-op kept for boot-path
-    compatibility: spawn()/await_ready() return immediately — the shared
-    daemon is supervised independently and is already listening before any
-    agent boots, so there is no per-agent fork or socket-bind cost here.
-
-    Framework-scope config (birth_config first, config_overlay on top) must
-    apply BEFORE build_chat_model so `turn_settings.lm.llm_model` reflects it if
-    this agent runs a different model. Plugin-scope is deferred until after
-    build_graph's bind_from_disk has populated _PLUGIN_CONFIGS — see the
-    second apply_config_overlay call in `_build_graph`.
+    Reconcile is best effort and may return after a registry or spawn failure.
+    Keep boot recovery pending until the remaining desired rows actually have
+    current sessions; an action list alone is not proof of completion.
     """
-    # claim_agent_row is called early in __main__.py before the heavy import
-    # chain. It atomically takes an unclaimed idling row into 'running' before
-    # this boot phase proceeds.
-    init_agent_process(agent_id=agent_id)
 
-    mcp_daemon = _MCPDaemon(agent_id)
-    await mcp_daemon.spawn()
+    def reconcile_and_verify() -> bool:
+        for action in ava.watcher.reconcile():
+            logger.info("watcher reconcile: {}", action, agent_id=agent_id)
+        running = [row for row in watcher_rows(agent_id) if row["status"] == "running"]
+        if not running:
+            return True
+        alive = sessions.list()
+        generation = sessions._current_session_generation()
+        return all(
+            row["generation"] == generation
+            and row["session_id"] in alive
+            and sessions._session_generation(row["session_id"]) == generation
+            and (row["kind"] != "cron" or (row["template_version"] or 0) >= TEMPLATE_VERSION)
+            for row in running
+        )
 
-    # ── trace recording init (OTLP export to the local collector sidecar) ──
-    init_process_scope()
-    _boot_timing.mark("trace_init")
-
-    # ── ava SDK in-process init ──
-    # The main process has already `import ava` (top-level) at module load
-    # time, with DB/Redis connections and submodules ready; here we establish
-    # this process's identity (sets ava.self.AGENT_ID; owns_loop=True marks it
-    # as the process that drives the turn loop, so lifecycle self-actions are
-    # permitted) and load plugins — must happen before the first exec_node runs
-    # agent code (plugins may monkey-patch ava.X.y functions).
-    ava._boot.establish(agent_id, owns_loop=True)
-    # Forward the agent identity into the environment so child processes inside
-    # persistent shell sessions (and watchers) can pick it up.  shared.session_env
-    # already forwards every AVA_* var onto sessions, so setting this here
-    # is the single source — no per-session plumbing needed.
-    os.environ["AVA_AGENT_ID"] = str(agent_id)
-    land_cluster_extensions()
-    load_process_extensions()
-
-    # ── MCP daemon startup ──
-    # Agent code in the exec child reaches the daemon via
-    # ava.mcps._get_remote_client, which derives the socket path from
-    # ava.self.AGENT_ID (the child re-establishes its identity from the
-    # request) and connects iff the socket exists. Readiness is awaited just
-    # before the graph goes live.
-
-    # Per-agent config, framework-scope: applied BEFORE build_chat_model so
-    # `settings.lm.llm_model` reflects it if this agent runs a different model.
-    # Plugin-scope is deferred until after build_graph's bind_from_disk has
-    # populated _PLUGIN_CONFIGS — see the second apply_config_overlay call below.
-    _apply_per_agent_framework_config(config_overlay, birth_config)
-
-    llm = await boot_agent_scope(agent_id)
-    _boot_timing.mark("sdk_mcp_model")
-    # The turn loop is outside this PR's allowed files; add the corresponding
-    # turn-boundary check when that scope is opened. This boot gate still keeps
-    # newly spawned process agents from accepting work on a broken chain.
-    _require_helper_parent_chain()
-    return mcp_daemon, llm
-
-
-def _require_helper_parent_chain() -> None:
-    """Exit a helper-spawned agent whose direct-parent chain was broken."""
-    if parent_chain_intact():
-        return
-    logger.warning("permissions helper parent chain broken, self-terminating for helper respawn")
-    os._exit(70)
-
-
-async def _build_data_plane(agent_id: int) -> tuple[RedisInboundListener, AgentEventPublisher]:
-    """Boot phase 2: one Redis client + the inbound pub/sub listener + the SSE
-    event publisher (started, best-effort fan-out).
-
-    `inbound_listener` owns a separate long-lived Redis pub/sub subscription
-    (needs its own connection for `get_message()`; auto-reconnects). The event
-    publisher runs one background worker that drains a queue and publishes
-    serially, so node code emits live-view events without ever awaiting Redis
-    on the control path (drained + stopped in main's finally).
-    """
-    redis_client: aredis.Redis = get_async_redis()
-    inbound_listener = RedisInboundListener(settings.data_plane.redis_url, agent_id)
-    event_publisher = AgentEventPublisher(
-        redis_client, settings.data_plane.events_channel, agent_id=agent_id
-    )
-    await event_publisher.start()
-    return inbound_listener, event_publisher
-
-
-async def _build_checkpointer(
-    db_pool: AsyncConnectionPool[psycopg.AsyncConnection], agent_id: int
-) -> AsyncPostgresSaver:
-    """Saver + reconcile: log every checkpoint write failure, optionally
-    throttle graph super-step checkpoints by the turn-scoped N-step interval,
-    then resolve any 'claimed' inbounds left by a previous process of this agent.
-
-    LangGraph submits aput / aput_writes into a background executor and never
-    propagates its failures; a conn that *dies during* aput goes silent. Wrap
-    the two write paths so every checkpoint failure lands a
-    checkpoint_write_failed event in events, then re-raise (retry /
-    propagation paths inside langgraph remain unchanged).
-
-    Reconcile: read state.messages, build the set of inbound ids whose
-    HumanMessage actually landed, then have agent/db.py finalize each
-    'claimed' row — done if confirmed in state.messages, else back to pending
-    for re-delivery on the next claim cycle. See
-    decisions/2026-04-26-inbound-queue.md.
-    """
-    # Schema creation/versioning is a deployment precondition: fresh install
-    # calls PostgresSaver.setup(); later upstream changes must ship as paired Ava
-    # migrations so rollback can reverse them, and start verifies their exact
-    # applied set. Agent processes dial as least-privilege ava_runner and must
-    # never attempt DDL. Any missed invariant fails here on the first saver read.
-    saver_pool = cast(AsyncConnectionPool[psycopg.AsyncConnection[DictRow]], db_pool)
-    checkpointer = AsyncPostgresSaver(conn=saver_pool, serde=build_checkpoint_serde())
-    _wrap_saver_writes_with_loud_failure(checkpointer, agent_id)
-    _wrap_saver_writes_with_nstep_interval(checkpointer, turn_settings.agent.checkpoint_interval)
-    from agent.impersonation import native_status
-
-    takeover = await native_status(agent_id)
-    if takeover is None or takeover["status"] != "active":
-        await _reconcile_claimed_inbounds_at_startup(db_pool, checkpointer, agent_id)
-    _boot_timing.mark("db_reconcile")
-    return checkpointer
-
-
-async def _build_graph(
-    checkpointer: AsyncPostgresSaver,
-    config_overlay: dict[str, object] | None,
-    agent_id: int,
-) -> CompiledStateGraph[BaseAgentState, AvaContext, BaseAgentState, BaseAgentState]:
-    """Build the graph, apply eval isolation, repair dangling tool pairing,
-    apply the plugin-scope config overlay, and write the effective-config snapshot.
-
-    A hard cancel (SIGTERM / restart / stop kill -> asyncio.CancelledError)
-    can leave a tool_use committed without its paired tool_result, or a
-    tool_result committed without its carrying tool_use; repair it before
-    ainvoke so resurrect does not loop on provider 400s (agents 167, 5333).
-
-    Plugin-scope overlay runs after build_graph's bind_from_disk has populated
-    _PLUGIN_CONFIGS; framework-scope already ran in `_boot_agent_process`
-    before build_chat_model. The effective_config snapshot is written after
-    both halves, so it reflects the actually effective config.
-
-    Eval isolation runs immediately after build_graph registers plugin
-    namespaces. Its framework-scope settings are already resolved by
-    `_boot_agent_process`, so it can rebind the live plugin SDK surface here.
-    """
-    graph = build_graph(checkpointer)
-    _apply_per_agent_eval_isolation()
-    from agent.impersonation import native_status
-
-    takeover = await native_status(agent_id)
-    if takeover is None or takeover["status"] != "active":
-        await _repair_dangling_tool_use_at_startup(graph, agent_id)
-    if config_overlay:
-        from shared.plugin_config_registry import apply_config_overlay
-
-        apply_config_overlay(config_overlay, scope="plugin")
-    _write_effective_config_to_restart_completed(agent_id)
-    return graph
+    try:
+        # to_thread carries the host's admitted identity and config bindings.
+        return await asyncio.to_thread(reconcile_and_verify)
+    except Exception:
+        logger.opt(exception=True).warning("watcher recovery remains pending", agent_id=agent_id)
+        return False

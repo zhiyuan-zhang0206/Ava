@@ -195,7 +195,6 @@ class TestConsumptionMatrixDeclarations:
 
         aliases = health_port_env_aliases()
         assert set(aliases) == {
-            "restarter",
             "labeler",
             "heartbeat",
             "task_maintenance",
@@ -206,11 +205,6 @@ class TestConsumptionMatrixDeclarations:
             "delivery_watchdog",
             "im_bridge",
             "page_server",
-            # The hosted agent-runner (future/infra/agent-runner-as-server.md).
-            # Listed even though the service only starts under AVA_RUNNER_MODE
-            # hosted: the alias must exist for every declared health-port
-            # service, gated or not, or the runner projection has no key to
-            # carry when a cluster does flip the mode.
             "agent_host",
             "pitr_uploader",
             "pitr_base_backup",
@@ -351,7 +345,6 @@ def test_backfill_derives_missing_keys_from_a_block_unit() -> None:
     base = 18114
     full = _block_env(base)
     present = {
-        "AVA_RESTARTER_HEALTH_PORT",
         "AVA_LABELER_HEALTH_PORT",
         "AVA_HEARTBEAT_HEALTH_PORT",
         "AVA_TASK_MAINTENANCE_HEALTH_PORT",
@@ -434,7 +427,7 @@ def test_backfill_refuses_an_ambiguous_tie_between_two_bases() -> None:
         "AVA_OPS_HEALTH_PORT": str(base + PORT_OFFSETS["ops"]),
         "AVA_LABELER_HEALTH_PORT": str(base + PORT_OFFSETS["labeler"]),
         "AVA_HEARTBEAT_HEALTH_PORT": str(other + PORT_OFFSETS["heartbeat"]),
-        "AVA_RESTARTER_HEALTH_PORT": str(other + PORT_OFFSETS["restarter"]),
+        "AVA_AGENT_HOST_HEALTH_PORT": str(other + PORT_OFFSETS["agent_host"]),
     }
     assert _backfill(keys) == {}
 

@@ -129,10 +129,10 @@ class MachineStatus(BaseModel):
     # when True, `online` is False and the roster marks the row "identity-mismatch".
     identity_mismatch: bool = False
     # Per-host runtime, mirrored from this node's ClusterStatus probe. shell_count
-    # is the live agent shell-session count; restarter/watchdog are pidfile
+    # is the live agent shell-session count; agent-host/watchdog are pidfile
     # liveness. All default to the "unknown" value used when a probe times out.
     shell_count: int = 0
-    restarter_online: bool | None = None
+    agent_host_online: bool | None = None
     watchdog_online: bool | None = None
     # Agent-runner detail surfaced on the Status Page.
     agent_count: int = 0

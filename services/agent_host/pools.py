@@ -22,8 +22,8 @@ def build_shared_pool(dsn: str) -> AsyncConnectionPool[psycopg.AsyncConnection]:
 
     `max_size` is the bound plus headroom rather than a round number, so the
     sizing states its reason (see `_POOL_HEADROOM`). `autocommit=True` +
-    `prepare_threshold=None` are the two settings the per-agent pool already
-    carries in process mode: the saver expects autocommit, and never preparing
+    `prepare_threshold=None` satisfy the saver and pooler: the saver expects
+    autocommit, and never preparing
     is what keeps borrows safe across PgBouncer's transaction pooling.
     """
     return LoggingConnectionPool[psycopg.AsyncConnection](

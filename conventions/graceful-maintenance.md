@@ -1,132 +1,120 @@
-# Graceful maintenance for a coordinated cluster stop
+# Pause, stop, and resume a cluster
 
-Use `ava maintenance` on each unit's own checkout. These commands act on **one
-local home**. The operator coordinates all participating machines using an
-existing transport such as SSH; this CLI does not discover SSH aliases or wake
-stopped remote ops servers. Ordinary `ava stop` and the existing update policy
-retain their own semantics and are not substitutes for this procedure.
+Use the `ava` belonging to each unit's checkout. `ava pause`, `ava stop`, and
+`ava start` act on **one local home**; they do not stop every machine remotely.
+For a planned cluster outage, coordinate the participating machines through
+SSH or their existing operator entry points. Stop runners before the gateway;
+start the gateway and verify its dependencies before starting runners.
 
-The implementation uses the existing lifecycle path: enqueue `restart`, let
-native claim consume it, return normally, flush the checkpoint, then close the
-original continuation/resources. It does not stop arbitrary Python at an
-intermediate instruction. A restart arriving just after claim may allow one
-more iteration before the next claim. A timeout or failure is a refusal to
-continue the shutdown, with no force fallback.
+## Choose the resource scope
 
-## Before the first use
+| Command | Native agent execution | Persistent shells and schedules | Local infrastructure and extras |
+| --- | --- | --- | --- |
+| `ava pause` | Drain normally and stop the native services | Retained | Keep PostgreSQL, Redis, PgBouncer, browser, Gate, helper and native LGTM |
+| `ava stop -y` | Same normal drain | Close terminal jobs and shells | Stop this home's services, browser, Gate, helper, native LGTM and private data plane |
+| `ava stop -y --keep-infra` | Same normal drain | Close | Keep the private data plane |
+| `ava stop -y --keep-infra --keep-service gateway` | Same normal drain | Close | Also retain the named service; dependent services require `--keep-infra` |
+| `ava start` | Restore normal admission after readiness | Reuse retained sessions; closed sessions are not serialized | Bring up enabled services from the existing home |
 
-Every running hosted daemon must already support the maintenance protocol.
-`prepare` checks the actual daemon's home, PID, protocol and boot owner. Updating
-source on disk does not upgrade a running process. **The first deployment of
-this feature is not protected by the feature itself.** Older hosted runtimes do
-not have its admission fence, and the old update Phase-A pause is not a global
-checkpoint barrier. Establish and independently verify a safe bootstrap plan
-before that deployment; this procedure does not supply a race-free shortcut.
+`--keep-service` is repeatable and accepts the bare service-roster name. It is
+an invocation's preservation choice, not a permanent disabled-service setting.
+`stop` asks for confirmation unless `-y` is passed; `pause` does not. Both use
+`--timeout 300` by default. A deadline is a failed stop, not permission to kill
+survivors. `--force` explicitly selects force behavior when normal exit cannot
+complete. Force stops the selected service processes without fabricating a
+restart receipt. Later start uses agent-host crash recovery from persisted
+checkpoints.
+Force does not provide normal pause's seamless continuation or a checkpoint
+for interrupted arbitrary code; use normal stop for the planned data-plane move.
 
-The first implementation supports hosted agent runtimes. Resolve external
-control leases before preparing. Unknown stale owners or process-mode native
-runtimes are refused. Clean unowned idle intent is preserved without inventing a
-restart or termination; this is not evidence that every legacy process is gone.
+A stop retains agent IDs, history, checkpoints, pending messages, workspaces,
+browser profiles and observability data. It does not terminate agent identities
+or destroy the cluster. A full stop closes persistent shells; their running
+processes and shell variables cannot be restored by `start`. Use pause when
+those live sessions must survive. Windows' user-wide permissions helper and
+externally launched tools are not owned by one local home.
 
-Persistent shells, schedules, watcher PTYs and their hosts need their own
-completed-work boundary. By default, strict stop refuses live terminal resources;
-it neither kills nor promises to serialize/replay them. When terminals must
-remain open, `stop --keep-terminals` and `stop-data-plane --keep-terminals`
-explicitly assert that the operator has separately verified their business
-work has stopped. The commands preserve those terminals, including Windows
-SDK shell and schedule records in the shared service namespace. The flag does
-not inspect terminal activity, freeze input or prove that a PTY cannot write
-to the old data plane. Stop active scripts and periodic writers at their own
-safe boundary before taking the final snapshot; an idle shell may stay open.
-Drain receipts, ops quiescence, exact service identities and normal exit checks
-remain required. Independently managed
-Gate, permission helper, Redis bridge, native LGTM, OS watchdog/autostart and
-logs-maintenance jobs are outside the service-backend proof. Inventory their exact
-home/PID identities and normal-stop behavior separately. Do not substitute a
-broad OS kill command for proof of completed work.
+Impersonation is a separate agent identity protocol. These commands do not
+request, acquire, renew or release external-agent control leases. Also, the
+legacy `ava cluster pause NAME` is machine membership administration, not this
+local maintenance operation; do not substitute it for `ava pause`.
 
-## Stop and retain the recovery cohort
+## What normal drain waits for
 
-Choose one nonempty operation identifier and one timezone-aware timestamp and
-use the exact same values on every participating home. For example:
+The command holds new native admission, enqueues an ordinary `restart`, and
+lets native claim consume it. The graph returns normally, its checkpoint is
+flushed, and its original continuation and resources finish. A restart
+arriving just after claim can allow another iteration before the next claim;
+this is not an instruction-level freeze. SDK dependencies stay available
+through this drain. Service stopping then closes new ops work and waits for
+already-admitted handlers and executor work before signalling services.
 
-```sh
-ava maintenance prepare --operation gateway-move --acquired-at 2026-09-06T12:00:00Z
-ava maintenance drain --operation gateway-move --acquired-at 2026-09-06T12:00:00Z --timeout 300
-ava maintenance status
-```
+The existing home-local journal survives a CLI crash, host reboot and an
+offline database. An incomplete drain or stop retains the hold and reports
+failure. Retry the command, or run `ava start` to restore services and release
+the hold after readiness succeeds. A failed start keeps admission closed.
+A recorded checkpoint/continuation failure blocks ordinary start and resume
+before services are launched; repair and inspect that failure first. A healthy
+service probe cannot prove that a failed checkpoint became durable.
+Normal commands manage their own operation identity; there is no operation ID
+or timestamp to copy between machines.
 
-Preparation persists the original live hosted cohort and one ordinary owned
-restart per agent. `drain` requires original-host receipts plus the matching
-unobserved restart pointers, and an empty active-continuation set. The hold
-survives host reboot and an offline database; normal startup and the 120-second
-stranded-pause recovery cannot release it. Keep this journal with each unit's
-home; preserve inbound rows and checkpoints together in the database move.
+Once stop has completed without recorded failures, repeating `ava stop` can
+read the existing local journal and finish without fetching an offline
+gateway. An incomplete, corrupt or failed journal does not enable this
+exception; the first normal drain needs the actual cluster configuration.
 
-After **all participating units** have drained and independently managed work
-has reached its own safe boundary, stop each runner's local recorded services:
+Cold native admission consumes the saved lifecycle pointers and checkpoints.
+Idle agents remain idle; pending work can continue; terminated agents remain
+terminated. Successful drain preserves completed tool results. No lifecycle
+command can guarantee exactly-once external effects if a process crashes after
+the external effect but before its result becomes durable.
 
-```sh
-ava maintenance stop --operation gateway-move --acquired-at 2026-09-06T12:00:00Z --timeout 300
-```
+## Updating and moving the data plane
 
-Use `--gateway-last` on a gateway-capable unit only after independently verifying
-the remote stops. This flag is an **operator assertion**, not an automatic
-remote probe. Stop refuses new ops calls only at this stage; admitted request
-handlers and executor futures must finish first. It signals exact captured
-process identities normally and verifies those processes, their original POSIX
-process groups and tracked descendants have exited. A newly created, unregistered
-daemon that deliberately leaves the group needs separate ownership proof. Failed/ambiguous identity, a survivor or timeout retains the hold.
-A success proves the declared local service set; it does not prove all OS-managed
-extras, remote hosts or detached resources have stopped.
+`ava cluster update` uses the same native drain and retains persistent PTYs.
+Schedules already running in those terminals continue with their loaded code;
+new schedule-runner code needs an explicit schedule restart at an appropriate
+work boundary, or a later full stop/start. Updating a schedule template on disk
+does not rewrite its authoritative database script.
 
-The local service stop leaves the data plane running. After the final database
-and Redis snapshot has been created and validated separately, stop the gateway's
-private native data plane:
+For a move, stop all participating runners, then stop the gateway last. Check
+each command's exit status before taking the final snapshots. PostgreSQL uses
+smart shutdown; open clients can prevent completion. Redis uses `SHUTDOWN SAVE`
+and its exact process exit is verified. Stop is not a backup: validate the
+separate database/Redis snapshots and required files before restoring them on
+the destination. Keep every unit's home-local pause journal with that home.
 
-```sh
-ava maintenance stop-data-plane --operation gateway-move --acquired-at 2026-09-06T12:00:00Z --gateway-last --timeout 300
-```
+Home-owned native LGTM stops after its producers. Its marker, unit definitions
+and data remain intact for start. Linux user units disable the supervisor's
+automatic SIGKILL; a timeout remains an incomplete stop. On macOS, the stop
+first waits for the observed process generation and its descendants to exit,
+then removes an idle launchd job; a KeepAlive replacement observed in between
+is drained too. The final launchd inspection and removal are not an atomic
+admission fence. Unregistered detached jobs and OS watchdog/autostart or daily
+log-maintenance producers outside the service roster need their own scope check for a coordinated machine
+shutdown; do not equate local command success with every remote writer stopping.
 
-This validates home ownership and normal exits of PgBouncer, PostgreSQL and
-Redis. PostgreSQL uses smart shutdown, so an open client blocks shutdown rather
-than being aborted. Redis uses `SHUTDOWN NOSAVE`: **this command creates no
-recoverable backup**. Remote-managed or unverified data planes are refused.
-The claim is zero declared business writers, not zero PostgreSQL internal
-background writes during a live snapshot.
+Every running daemon must already support the drain protocol. The command
+checks the actual hosted daemon's home, PID, protocol and boot owner. Updating
+source on disk does not update an imported running process. **The first
+deployment is not protected by the new protocol itself**: establish and verify
+its bootstrap procedure against the old running version before upgrading it.
 
-## Start, then explicitly resume
+## Explicit maintenance steps
 
-Restore and verify the data/configuration through the reviewed migration plan.
-Keep the original local journal and exact operation. Start the gateway/dependency
-unit first, then the runners, through their existing OS/SSH entry points:
+`ava maintenance prepare/drain/status/stop/stop-data-plane/start/resume` remains
+available for an operator who needs to inspect intermediate phases. These are
+local commands using the same journal and native drain, not a second agent
+ownership mechanism. They take a matching `--operation` and timezone-aware
+`--acquired-at`; ordinary pause/stop/start does not need these arguments.
 
-```sh
-ava maintenance start --operation gateway-move --acquired-at 2026-09-06T12:00:00Z
-ava maintenance status
-```
-
-A successful readiness result moves the journal to `ready`; a failed start stays
-`starting` and can be retried. Agent admission and schedules remain held. Existing
-disabled-service intent is preserved. After the operator verifies all required
-dependencies and units, explicitly release each unit:
-
-```sh
-ava maintenance resume --operation gateway-move --acquired-at 2026-09-06T12:00:00Z
-```
-
-Native successors consume the retained restart pointers and reload their cold
-checkpoints. Idle agents do not gain a synthetic model turn. Pending messages
-remain pending and claimed messages follow existing checkpoint reconciliation.
-Previously terminated agents stay terminated. Already-completed external effects
-are not replayed by a successful drain; a crash before a durable result cannot
-provide an exactly-once guarantee for arbitrary code.
-
-If preparation or drain is abandoned while services/dependencies remain usable,
-`resume --cancel` explicitly releases that same operation and returns its saved
-cohort to ordinary lifecycle recovery. It never automatically abandons a hold.
-Cancellation is allowed only in `preparing`, `draining` or `drained`, before
-service stopping begins. It cannot bypass a partial stop or failed startup.
-After a partial service stop, finish the verified stop and use maintenance start
-before resuming. A failure during an external effect still requires inspecting
-that effect; cancelling maintenance is not a claim that replay is safe.
+The explicit `maintenance stop` retains the data plane and refuses live
+terminals unless `--keep-terminals` asserts a separately verified work boundary.
+On a gateway, `--gateway-last` asserts the remote stops were independently
+verified. `maintenance stop-data-plane` separately stops the verified private
+data plane and saves Redis. `maintenance start` keeps admission held for an
+explicit `maintenance resume`; ordinary `ava start` can instead complete the
+same recovery and resume after its readiness gate. `resume --cancel` is for
+abandoning preparation/drain while services are usable, not for bypassing a
+partial stop or a failed startup.

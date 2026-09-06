@@ -211,6 +211,17 @@ ignore_imports = [
     "services.agent_host.* -> agent._runloop",
     "services.agent_host.* -> agent.db",
     "services.agent_host.* -> agent.graph",
+    # The host catches native fatal errors to persist the halted/circuit state
+    # and flush its checkpoint before settling the turn. Import only the taxonomy leaf.
+    "services.agent_host.host -> agent.graph._llm_errors",
+    # Compaction exhaustion is another expected native turn abort, handled by the host.
+    "services.agent_host.host -> agent.hooks.compact",
+    # The host owns the final durable checkpoint/trace link and the node-log tail.
+    "services.agent_host.host -> agent._trace_checkpoint",
+    "services.agent_host.host -> agent.graph._node_log",
+    # Database recovery retains and repairs the original fenced continuation.
+    "services.agent_host.db_recovery -> agent.impersonation",
+    "services.agent_host.db_recovery -> agent.inbound_ownership",
     "services.agent_host.* -> agent.hosted_ownership",
     # The hosted invocation driver shares the native takeover boundary: it
     # gates active leases and settles external state only after graph flush.
@@ -399,15 +410,6 @@ pythonpath = ["."]
 # prepend mode requires __init__.py for every dir containing tests, inconsistent and prone to basename collisions.
 addopts = ["-ra", "--strict-markers", "--import-mode=importlib"]
 markers = [
-    # Opt out of the autouse agent-launch guard (tests/conftest.py) for tests that
-    # exercise the *real* gateway.agents._launch_agent_process (spawn confirm /
-    # logs-dir / env-forward / config-overlay argv paths) rather than a spawn that
-    # should be a no-op.
-    "real_agent_launch: let this test call the real _launch_agent_process",
-    # Opt out of the autouse warm-up guard (tests/conftest.py) for tests that
-    # exercise the *real* cli.commands._launch_agent_warmup (role gate / Popen
-    # argv / detach) rather than a launch that should be a no-op.
-    "real_warmup_launch: let this test call the real _launch_agent_warmup",
     # Opt out of the autouse daemon-respawn guard (tests/conftest.py) for tests that
     # exercise the *real* shared.service_respawn.respawn_service — argv-shape
     # assertions against a faked subprocess.run, or the venv-activation test that

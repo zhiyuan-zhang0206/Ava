@@ -961,10 +961,12 @@ async def test_terminate_preserves_pending_summary_without_wiping_history(
     db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
 ):
     """Lifecycle acceptance is serial; a summary cannot run in the exiting owner."""
-    from agent._starting import claim_agent_row
+    from agent.hosted_ownership import apply_hosted_lifecycle
+    from shared.turn_identity import bind_turn_identity
+    from tests.agent.test_inbound_ownership import _admit, _agent
 
-    tid = spawn_agent()
-    claim_agent_row(tid)
+    tid = _agent(db_conn)
+    old = await _admit(aops_pool, tid)
     summary_text = "summary before terminate"
     _insert_compact_summary(db_conn, tid, summary_text)
     with db_conn.cursor() as cur:
@@ -981,40 +983,33 @@ async def test_terminate_preserves_pending_summary_without_wiping_history(
     ]
     state = AgentState(messages=initial_msgs)
 
-    cmd = await claim_node(state, _make_runtime(aops_pool), _config(tid))
+    with bind_turn_identity(tid, incarnation=old):
+        cmd = await claim_node(state, _make_runtime(aops_pool), _config(tid))
+        await apply_hosted_lifecycle(aops_pool, old)
 
     assert cmd.goto == END
     assert "context_reset" not in cmd.update  # type: ignore[operator]
     assert state.messages == initial_msgs
     assert db_conn.execute(
-        "SELECT kind,status,applied_at IS NOT NULL,observed_at FROM inbound_messages "
+        "SELECT kind,status,applied_at IS NOT NULL,observed_at IS NOT NULL FROM inbound_messages "
         "WHERE agent_id=%s ORDER BY id",
         (tid,),
     ).fetchall() == [
-        ("compact_summary", "pending", False, None),
-        ("terminate", "claimed", True, None),
+        ("compact_summary", "pending", False, False),
+        ("terminate", "done", True, True),
     ]
-    # This process remains alive: NULL/released state must not fabricate exit
-    # merely to let the summary run. Explicit resurrection is covered by the
-    # real-process E2E, which proves exit and successor response separately.
-    from shared.lifecycle_termination_observe import observe_applied_termination
-    from shared.machine import machine_name
-
-    assert not observe_applied_termination(db_conn, tid, machine_name())
-    db_conn.commit()
 
 
 async def test_compact_in_same_batch_as_restart(
     db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
 ):
     """The admitted successor, not the exiting owner, consumes the same summary."""
-    from agent._starting import claim_agent_row
-    from shared.runtime_incarnation import current_incarnation
+    from agent.hosted_ownership import apply_hosted_lifecycle
+    from shared.turn_identity import bind_turn_identity
+    from tests.agent.test_inbound_ownership import _admit, _agent
 
-    tid = spawn_agent()
-    claim_agent_row(tid)
-    old = current_incarnation(tid)
-    assert old is not None
+    tid = _agent(db_conn)
+    old = await _admit(aops_pool, tid)
 
     summary_text = "summary pre-restart"
     _insert_compact_summary(db_conn, tid, summary_text)
@@ -1032,7 +1027,9 @@ async def test_compact_in_same_batch_as_restart(
     ]
     state = AgentState(messages=initial_msgs)
 
-    cmd = await claim_node(state, _make_runtime(aops_pool), _config(tid))
+    with bind_turn_identity(tid, incarnation=old):
+        cmd = await claim_node(state, _make_runtime(aops_pool), _config(tid))
+        await apply_hosted_lifecycle(aops_pool, old)
 
     assert cmd.goto == END
     assert "context_reset" not in cmd.update  # type: ignore[operator]
@@ -1047,21 +1044,13 @@ async def test_compact_in_same_batch_as_restart(
         ("restart", "claimed", True, None),
     ]
     summary_id, restart_id = rows[0][0], rows[1][0]
-    # Simulate the controller's already-verified exit/launch boundary only;
-    # actual OS disappearance is proved by strict test_self_restart E2E.
-    db_conn.execute("UPDATE agents_meta SET status='idling',pid=NULL WHERE id=%s", (tid,))
-    db_conn.execute(
-        "UPDATE inbound_messages SET payload=payload||jsonb_build_object('launch_attempts',1) "
-        "WHERE id=%s",
-        (restart_id,),
-    )
-    db_conn.commit()
-    claim_agent_row(tid, restart_command_id=restart_id)
-    assert current_incarnation(tid) != old
+    successor = await _admit(aops_pool, tid)
+    assert successor.generation != old.generation
     assert db_conn.execute(
         "SELECT status,observed_at IS NOT NULL FROM inbound_messages WHERE id=%s", (restart_id,)
     ).fetchone() == ("done", True)
-    resumed = await claim_node(state, _make_runtime(aops_pool), _config(tid))
+    with bind_turn_identity(tid, incarnation=successor):
+        resumed = await claim_node(state, _make_runtime(aops_pool), _config(tid))
     tail = _compact_tail(resumed.update)
     assert tail[0].content == compose_summary_message(summary_text)  # pyright: ignore[reportUnknownMemberType]
     assert resumed.goto == "init_context"

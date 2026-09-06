@@ -112,27 +112,11 @@ class BaseAgentState(BaseModel):
     invocation (goto END) instead of blocking, so the runloop can close the
     turn's root span and re-invoke."""
     exit_requested: bool = False
-    """Claim's END means the PROCESS should exit (terminate/restart winner or
-    a lost lifecycle CAS); the turn-boundary END leaves it False so the
-    runloop re-invokes. Both flags reset in every invocation's input — a
-    stale checkpointed True (a resurrect) cannot kill the new process."""
+    """Claim accepted termination; the host flushes and applies it at END."""
     restart_requested: bool = False
-    """Hosted mode only: claim resolved a restart inbound and this run is
-    hosted, so there is no process to exit and no restarter to pick up a
-    'restarting' row. The host treats it as the fourth loop answer — drop the
-    cached runtime, NO exit-notify (the row must stay runnable), end the turn
-    task — while `exit_requested` stays False so the same END never routes
-    through the process-exit path. Process mode never sets it; it resets per
-    invocation like the other three, for the same rollback reason as
-    `turn_idle`."""
+    """Claim accepted restart; the host flushes, applies it, and releases the runtime."""
     turn_idle: bool = False
-    """Hosted mode only: claim found nothing and did NOT park (process mode
-    blocks on the inbound pub/sub instead, so its driver never sees this). The
-    third answer in the host's loop: `exit_requested` -> terminal, `turn_idle`
-    -> end the turn task, neither -> re-invoke on the same checkpointer thread
-    (`future/infra/agent-runner-as-server.md`). Reset per invocation like the
-    other two, plus one reason of its own: a cluster rolled back to process
-    mode replays threads a hosted run checkpointed."""
+    """Claim found no work; the host ends the turn task. Reset per invocation."""
     update_initiated: bool = False
     """Set by self-initiated restarts (`ava.self.restart()`); the historical
     `ava.self.update()` initiator path that introduced it is removed, but
@@ -760,7 +744,7 @@ def checkpoint_msgpack_allowlist() -> frozenset[tuple[str, str]]:
     class and would otherwise be blocked (degraded to a plain dict) the moment
     the allowlist replaces the permissive default.
 
-    Consumers: `agent/_process_boot.py::_build_checkpointer` (prod agent saver) and
+    Consumers: `services/agent_host/daemon.py::_build_checkpointer` (shared host saver) and
     any embedding checkpoint saver.
     """
     entries: set[tuple[str, str]] = set(STATIC_CHECKPOINT_MSGPACK_TYPES)
@@ -771,5 +755,5 @@ def checkpoint_msgpack_allowlist() -> frozenset[tuple[str, str]]:
 
 def build_checkpoint_serde() -> JsonPlusSerializer:
     """JsonPlusSerializer with the framework checkpoint allowlist — pass as
-    `serde=` when constructing the LangGraph checkpointer (agent/_process_boot.py)."""
+    `serde=` when constructing the hosted LangGraph checkpointer."""
     return JsonPlusSerializer(allowed_msgpack_modules=checkpoint_msgpack_allowlist())

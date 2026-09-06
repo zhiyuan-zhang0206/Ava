@@ -177,9 +177,7 @@ def _stall_dump_guard(node_name: str) -> Generator[None]:
 
 
 # Per-agent cursor of the last msg_idx covered by a published timeline
-# snapshot. Process memory: each OS process runs exactly one agent
-# (agent/loop.py), so a module-level dict is per-process state; keyed by
-# agent_id so tests / future multi-agent processes stay correct.
+# snapshot, keyed by agent_id because one host serves many agents.
 # Semantics: after a snapshot covering messages[:cursor] is emitted, the next
 # node enter renders only messages[cursor:] (incremental snapshot). cursor == 0
 # means "never published in this process" (first enter / process restart /
@@ -189,9 +187,8 @@ _SNAPSHOT_CURSOR: dict[int, int] = {}
 
 # Normal graph turns visit several nodes, so emitting each successful exit as a
 # separate event makes lifecycle bookkeeping dominate the noise tier. Buffer
-# normal flow per agent and flush once at the next claim boundary. Each process
-# currently runs one agent; the key keeps tests and a future multi-agent process
-# isolated. Exceptions bypass this buffer because their attached traceback is
+# normal flow per agent and flush at claim or invocation return. The agent key
+# isolates concurrent turns sharing the host. Exceptions bypass this buffer because their traceback is
 # load-bearing diagnostic data.
 _NODE_EXIT_AGGREGATE: dict[int, list[dict[str, Any]]] = {}
 _NODE_EXIT_AGGREGATE_CAP = 32
@@ -248,7 +245,7 @@ async def node_lifecycle(
     `BaseException` catch (vs Exception) is so SystemExit / KeyboardInterrupt
     also write the exit event; all paths re-raise to preserve propagation.
 
-    `agent_id` is already bound to logger.extra by `init_agent_process`, so
+    `agent_id` is already bound to logger.extra by the host turn identity, so
     all events carry it automatically; but `TimelineSnapshot.agent_id` is wire
     payload and must be passed explicitly.
 

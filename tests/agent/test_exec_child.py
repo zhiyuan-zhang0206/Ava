@@ -505,7 +505,10 @@ def test_child_applies_overlay_framework_and_pops_env(tmp_path: Path) -> None:
         ),
         config_overlay={"llm_model": "deepseek-v4-pro"},
         # per_agent=True field (overlay validation rejects non-per_agent keys).
-        birth_config={"llm_stream_ttft_timeout_seconds": 3.0},
+        birth_config={
+            "llm_model": "deepseek-v4-flash-vision-exp",
+            "llm_stream_ttft_timeout_seconds": 3.0,
+        },
     )
     assert proc.returncode == 0, proc.stderr
     payload = read_result(result)
@@ -535,6 +538,9 @@ def test_child_overlay_phases_framework_then_plugin(
     def fake_init_logger(_agent_id: int | None) -> None:
         return None
 
+    def fake_eval_isolation() -> None:
+        events.append("eval_isolation")
+
     def fake_sdk_disable() -> None:
         events.append("sdk_disable")
 
@@ -556,6 +562,7 @@ def test_child_overlay_phases_framework_then_plugin(
     monkeypatch.setattr(_exec_protocol, "read_request", fake_read_request)
     monkeypatch.setattr(exec_child, "_init_logger", fake_init_logger)
     monkeypatch.setattr("agent._process_boot._apply_per_agent_sdk_disable", fake_sdk_disable)
+    monkeypatch.setattr("agent._process_boot._apply_per_agent_eval_isolation", fake_eval_isolation)
     monkeypatch.setattr(exec_child, "_build_state_slot", fake_build_state_slot)
     monkeypatch.setattr(exec_child, "_run_code", fake_run_code)
     monkeypatch.setattr(_exec_protocol, "write_result", fake_write_result)
@@ -586,6 +593,7 @@ def test_child_overlay_phases_framework_then_plugin(
         "sdk_disable",
         "plugins",
         "apply:plugin",
+        "eval_isolation",
     ]
 
 

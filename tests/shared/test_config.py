@@ -106,32 +106,13 @@ def test_openai_api_key_field_exists_and_is_per_secret():
     assert field_domain("openai_api_key") == "lm"
 
 
-def test_runner_mode_defaults_to_hosted_and_is_not_per_agent() -> None:
-    """`AVA_RUNNER_MODE` gates the hosted agent-runner
-    (`future/infra/agent-runner-as-server.md`). Three properties are load-bearing:
-
-    - **default `hosted`** — the end-state model since 2026-09 (user ruling:
-      run agent-host by default); `process` is the explicit rollback opt-out,
-      never a silent drift target;
-    - **not `per_agent`** — the overlay an agent can write through
-      `ava.self.restart(config_overlay)` must not reach it, or an agent could flip
-      the hosting model of the runner it lives in;
-    - **cluster-pinned** — the design forbids a mixed cluster, because a hosted
-      agent's liveness is an in-process fact while a process agent's is a lease
-      row, and reconciling both at once needs double bookkeeping.
-    """
+def test_retired_runner_selector_is_not_configurable() -> None:
+    """Only the agent host runs agents; no UI or overlay can select the old runner."""
     from shared.config import FIELD_INFOS, get_config_metadata
 
-    meta = next(m for m in get_config_metadata() if m.name == "runner_mode")
-    assert meta.default_value == "hosted"
-    assert meta.per_agent is False
-    assert meta.scope == "cluster-pinned"
-    assert meta.capability == "agent-runner"
-    assert meta.env_var == "AVA_RUNNER_MODE"
-    # A closed set the frontend renders as a select; a new member is a deliberate
-    # edit here, not something a typo can introduce.
-    assert meta.choices == ["process", "hosted"]
-    assert FIELD_INFOS["runner_mode"].alias == "AVA_RUNNER_MODE"
+    assert "runner_mode" not in FIELD_INFOS
+    assert all(meta.env_var != "AVA_RUNNER_MODE" for meta in get_config_metadata())
+    assert "restarter_poll_interval_seconds" not in FIELD_INFOS
 
 
 def test_skill_match_fields_are_unregistered() -> None:
@@ -153,21 +134,6 @@ def test_skill_match_fields_are_unregistered() -> None:
         "skill_match_budget_ms",
     ):
         assert name not in FIELD_INFOS, f"{name} must not be a registered settings field"
-
-
-def test_runner_mode_rejects_an_unknown_value() -> None:
-    """Fail fast on an unknown mode rather than defaulting to one: a typo'd
-    `AVA_RUNNER_MODE` must not silently leave the cluster in process mode (or,
-    worse, be read as truthy by a later `!= "process"` check)."""
-    import pydantic
-
-    from shared.config.daemon import DaemonSettings
-
-    # Through model_validate rather than the constructor: a bad literal spelled
-    # inline is a static type error, and the point here is the RUNTIME rejection
-    # of a value that arrives from a `.env` file, which is untyped by nature.
-    with pytest.raises(pydantic.ValidationError):
-        DaemonSettings.model_validate({"AVA_RUNNER_MODE": "hostd"})
 
 
 @pytest.mark.parametrize("raw", ["[1, 2.5]", "1,2.5"])
@@ -379,7 +345,7 @@ def test_capability_assignment_is_pinned_for_load_bearing_fields() -> None:
     misgroups a load-bearing field (or breaks the domain-default / override
     resolution) fails loudly here. Covers: domain default (gateway_port -> gateway
     with no override), the mixed-domain override (ops_concurrency /
-    restarter_poll_interval_seconds -> agent-runner though their domain defaults to
+    host_max_concurrent_turns -> agent-runner though their domain defaults to
     gateway), agent-runtime config (llm_model -> agent-runner), the data plane
     (db_url -> gateway), and cluster-wide policy / host identity (timezone,
     machine_host -> common)."""
@@ -395,7 +361,7 @@ def test_capability_assignment_is_pinned_for_load_bearing_fields() -> None:
         # gateway profile pop (P0: AVA_MODEL popped broke spawn defaults).
         "exec_timeout_seconds": "agent-runner",
         "ops_concurrency": "agent-runner",  # services domain (default gateway) override
-        "restarter_poll_interval_seconds": "agent-runner",  # daemon domain (default gateway) override
+        "host_max_concurrent_turns": "agent-runner",  # daemon domain (default gateway) override
         "browser_enabled": "agent-runner",
         "timezone": "common",  # cluster-wide policy
         "machine_host": "common",  # shared host identity
@@ -561,7 +527,6 @@ _REMOTE_WRITABLE_ALLOWLIST = frozenset(
         "watchdog_interval_seconds",
         "watchdog_respawn_backoff_cap_seconds",
         "watchdog_respawn_breaker_rounds",
-        "wedged_agent_enabled",
     }
 )
 
@@ -640,10 +605,9 @@ def test_update_quiesce_timeout_rejects_non_finite(
         GatewaySettings.model_validate({"update_quiesce_timeout_seconds": bad})
 
 
-def test_update_quiesce_timeout_accepts_short_finite_values() -> None:
-    """The 2026-08-26 short-window ruling parses: a 5s window and 0 (signal
-    then immediately force-reap) are legal — only non-finite values are
-    rejected, no positive minimum exists."""
+def test_update_quiesce_timeout_requires_positive_finite_values() -> None:
+    from pydantic import ValidationError
+
     from shared.config.gateway import GatewaySettings
 
     assert (
@@ -652,12 +616,8 @@ def test_update_quiesce_timeout_accepts_short_finite_values() -> None:
         ).update_quiesce_timeout_seconds
         == 5.0
     )
-    assert (
-        GatewaySettings.model_validate(
-            {"update_quiesce_timeout_seconds": "0"}
-        ).update_quiesce_timeout_seconds
-        == 0.0
-    )
+    with pytest.raises(ValidationError):
+        GatewaySettings.model_validate({"update_quiesce_timeout_seconds": "0"})
 
 
 def test_cluster_secret_validator_allows_url_safe_and_empty() -> None:
@@ -1103,9 +1063,10 @@ def test_agent_profile_domains(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_runner_profile_domains(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Runner profile: sandbox included (browser MCP daemon reads
-    settings.sandbox.mcp_connect_timeout_seconds); agent is included because
-    the wedged-controller timing lattice reads the idle claim backstop."""
+    """Support daemons include browser sandbox, telemetry, and backup settings.
+
+    Agent execution settings belong to the agent-host's separate agent profile.
+    """
     from shared import config
 
     s = config.Settings(profile="runner")
@@ -1117,10 +1078,11 @@ def test_runner_profile_domains(monkeypatch: pytest.MonkeyPatch) -> None:
         "gateway",
         "lm",
         "sandbox",
-        "agent",
+        "observability",
+        "physical_backup",
     ):
         assert s.has_domain(domain), domain
-    for domain in ("web", "alerts", "telegram", "feishu"):
+    for domain in ("agent", "web", "alerts", "telegram", "feishu"):
         assert not s.has_domain(domain), domain
         with pytest.raises(AttributeError):
             getattr(s, domain)

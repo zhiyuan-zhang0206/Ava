@@ -68,7 +68,6 @@ from langgraph.runtime import Runtime
 from langgraph.types import Command
 
 from agent import state as _state
-from agent._config_carrier import get_config_maps
 from agent.graph._attach_drain import build_attach_message
 from agent.graph._attach_merge import merge_attachments
 from agent.graph._exec_notes import merge_exec_notes
@@ -76,6 +75,7 @@ from agent.messages import exec_output_message
 from agent.state import AttachState, _validate_plugin_state_keys
 from ava.security import SecurityFindingEntry, take_findings
 from shared.config import settings
+from shared.config.turn_view import current_agent_config_pins
 from shared.exit_codes import IDLE_EXIT_CODE, SYSTEM_HALT_EXIT_CODE
 from shared.lifecycle import (
     AgentImpersonation,
@@ -89,6 +89,7 @@ from shared.live_events import (
     ExecStart,
 )
 from shared.log import logger
+from shared.plugin_config_view import current_agent_plugin_pins
 
 from ._agent_traceback import format_full_traceback
 from ._context import AvaContext, agent_id_from_config
@@ -260,10 +261,10 @@ async def _run_agent_code(
     snapshot from the request envelope (`agent/exec_child.py`), and the
     plugin's state-update delta + drained security findings ride the result
     envelope back. Validation is fail-fast on a tampered slot, and the child
-    re-receives the agent's popped per-agent config maps so its SDK calls
+    receives the bound turn's config maps so its SDK calls
     resolve the same settings. Returns
     (result, plugin_state_update, exec_ms, findings, attachments)."""
-    config_overlay, birth_config = get_config_maps()
+    config_overlay = {**(current_agent_config_pins() or {}), **current_agent_plugin_pins()}
     exec_started = time.monotonic()
     async with subscribe_interrupt(ctx.ops_pool, agent_id) as cancel_event:
         outcome = await _exec_with_node_shield(
@@ -275,7 +276,6 @@ async def _run_agent_code(
                 chunk_publisher,
                 state=state.model_dump(),
                 config_overlay=config_overlay,
-                birth_config=birth_config,
             ),
             agent_id,
         )

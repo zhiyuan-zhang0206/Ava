@@ -77,7 +77,7 @@ A machine carries a **capability set** — `gateway`, `agent-runner`, or both:
 - **gateway** capability: owns the HTTP gateway + the data plane (Postgres /
   Redis / Milvus) + the gateway daemons for its cluster.
 - **agent-runner** capability: hosts agents and the ops server, using agent-host
-  in hosted mode or the process supervisor/restarter in process mode; its
+  through agent-host scheduling; its
   DB/Redis/Milvus URLs point at a gateway node when the host carries no
   `gateway` capability of its own.
 
@@ -450,9 +450,9 @@ authoritative and boot-time provisioning only inserts rows that are missing, so 
 template in `schedules/` reaches a running cluster only through an explicit
 `ava schedules update <name> --script-file <template>` (which relaunches an enabled
 schedule on the spot) — see [`schedules/README.md`](../schedules/README.md).
-The schedule runner PROCESS is the exception: a code-change rollout bounces every live
-`ava-schedule-<id>` session after the gateway boots, so runners (and the script text
-they materialized at launch) always run the new checkout (Task #1746).
+Persistent `ava-schedule-<id>` terminals survive pause and update with their
+currently loaded runner code and script text. Adopt changed runner code through
+an explicit schedule restart at its work boundary, or a full stop/start.
 On agent-runners it also runs capability preflights: a headed Chrome (when the browser
 is enabled, see below), a **probe of the configured cross-machine transfer backend**
 (`AVA_CROSS_MACHINE_TRANSFER_BACKEND`, `drive` by default), and **the ability to open
@@ -598,24 +598,13 @@ interactive shells / watchers each run in their own detached pty host
 (`shared/pty_sessions/` — one `pty.fork()` `bash -l -i` + pyte screen capture +
 byte transcript under `$AVA_HOME/logs/` per host, session ops over the
 session's own socket at `$AVA_HOME/run/pty/<name>.sock`; hosts reparent to
-init at creation, so they are in no service roster and survive every stop /
-update / respawn — a session ends only via its own kill, its shell exiting,
-or a machine reboot).
-A host runs the enabled service specs for its capabilities and runner mode,
-not every row in this reference table. In particular, hosted mode must not
-launch the process-mode restarter, including during update unpause or recovery.
-Verify the actual process/session inventory as well as the desired roster.
-
-In **process mode**, the agent (`agent-{N}` below) is a detached native process (a non-interactive agent
-talks over DB + Redis and logs to a file, so a PTY only cost the per-box `kern.tty.ptmx_max` ceiling that
-used to bound agent count). It is spawned double-forked onto init by the native process supervisor
-(`shared/posixproc.py` on POSIX, `shared/winproc.py` on Windows), tracked by `agents_meta.pid` + a session
-record under `$AVA_HOME/run/sessions/`, and is **not** a shell pane. The agent's own persistent
-shells (`ava.shell`, `…-agent-{N}-shell-{n}`) each run in their own detached pty host
-(`shared/pty_sessions/`).
-In hosted mode, a null per-agent PID is expected; verify agent-host membership,
-claim progress, and turn events instead. A process reaper must not interpret
-that null PID as a dead hosted agent.
+init at creation, so they are outside the service roster. Pause and update
+preserve them; full stop explicitly closes them).
+A host runs the enabled service specs for its capabilities. Agent execution
+always belongs to `agent-host`; each agent is a scheduled turn, not a separate
+OS process. A null per-agent PID is expected. Inspect host membership, claim
+progress and turn events for execution state. Verify actual process/session
+inventory as well as the desired roster when stopping an older release.
 
 Session names follow the pattern `ava-<service>` (composed by
 `shared/cluster/derive.py:session_name()`; neither machine nor cluster is encoded —
@@ -625,10 +614,9 @@ supervisor socket for agent shells / watchers).
 <!-- lint:roster-table -->
 | Service (suffix)         | Runs                                     | Healthcheck |
 |--------------------------|------------------------------------------|-------------|
-| `agent-{N}`              | `<venv>/python -m agent --agent-id N` — a **detached, native** process (double-forked onto init by the native supervisor), one per agent, created by spawn_agent. Tracked by `agents_meta.pid` + a `$AVA_HOME/run/sessions/` record; stdout/stderr → `$AVA_HOME/logs/agent-{N}.out.log`/`.stderr.log` | restarter watches local `agents.status='restarting'` + reaps dead pids (`agents_meta.machine = machine_name()` filter) |
 | `gateway` ★ (gateway only) | `.venv/bin/python scripts/start_gateway.py` (FastAPI 0.0.0.0:8000) | `services.healthchecks.gateway` (HTTP `/api/agents` 200) |
 | `ops` (agent-runner only) | `.venv/bin/python -m services.agent_ops.daemon` (inbound server on 0.0.0.0:<ops_port>; the gateway POSTs each cluster op to `/ops`, dispatched in-process via the gateway ops_* modules) | `services.healthchecks.ops` (`/healthz`) |
-| `agent-host` (agent-runner only; **on the start roster by default — `AVA_RUNNER_MODE` defaults to `hosted` (2026-09-02); `process` is the explicit rollback opt-out)** | `.venv/bin/python -m services.agent_host.daemon` (the hosted runner: instead of one OS process per agent, one daemon runs every local agent's turns as asyncio tasks. One `PSUBSCRIBE` over every inbound channel replaces N per-agent subscriptions; a wake creates a turn task, the turn runs until the agent has nothing left to claim, and then the task ends — an idle agent is no task at all. Per-agent identity/config/plugin-config ride contextvars bound around each invocation, so one process serves many agents without a per-agent process. Bounds: `AVA_HOST_MAX_CONCURRENT_TURNS` (default 16, with a workload pool sized from it plus four connections of headroom), a separate fixed four-connection control pool for lifecycle and durable scans, and `AVA_HOST_AGENT_CACHE_SIZE` (32) + `AVA_HOST_AGENT_IDLE_TTL_SECONDS` (900) on the per-agent runtime cache. These are process-local psycopg client pools; PgBouncer is the downstream server-connection multiplexer and does not stop one client pool from starving its own borrowers. `GET /stats` on its health port reports cache hit/miss, turns started, wakes skipped, and who is running. **Restarting the host to clear ONE wedged agent takes down EVERY hosted agent on that runner** — their in-flight turns abort and resume from checkpoint, but it is a runner-wide interruption caused by one agent, and there is no per-agent kill: `asyncio.Task.cancel()` lands only at the turn's next await, so a turn blocked inside a C call cannot be killed short of the host (process mode's SIGKILL always worked). Before reaching for the restart, check the `host_turn_uncancellable` event — it names the agent, how long its cancel has been pending, and how long since its last completed LLM step. **Do not use the `/api/agents` `last_active_at` to judge whether an agent is wedged**: that field is `MAX(inbound_messages.created_at)`, not the real activity clock, and it goes stale during exactly the long turns where the question matters (issue #183) — a healthy heads-down agent reads as dead. Bounding this blast radius is issue #184. The lifecycle around the turns is hosted-aware: spawn/resurrect/restart/terminate deliver via wakes or in-process channels instead of forking/killing processes, and cluster update skips the per-agent drain (the agent-host service stop is the stop-the-world; in-flight turns checkpoint on SIGTERM) (`ops/ops_launch.py`, `ops/agent_wake.py`, `ops/ops_lifecycle.py`, `cli/commands/_update_quiesce.py`). On exclusive boot, an old applied hosted force is observed only when its agent has no persistent disposable-exec request envelope; surviving evidence leaves recovery deferred for inspection. The process-mode restarter is gated off on a hosted cluster — see `future/infra/agent-runner-as-server.md`) | `services.healthchecks.agent_host` (`/healthz` :8114) |
+| `agent-host` (agent-runner only) | `.venv/bin/python -m services.agent_host.daemon`: one host schedules local turns with bounded concurrency, shared workload/control pools and per-agent context. Idle has no task. `/stats` reports active turns and cache use. Normal update drains claim, checkpoint, continuation and execution resources before stopping this service. Uncancellable tasks are reported; killing the whole host interrupts every active turn on that runner. | `services.healthchecks.agent_host` (`/healthz` :8114) |
 | `page-server` (agent-runner only) | `.venv/bin/python -m services.page_server.daemon` (supervisor of page servers: every open `agent_pages` row whose serve_dir is set — `ava.ui.serve()` pages — gets exactly one detached page server process on this host, spawned from the row's serve_dir on the row's port; rows that close get their server killed, while serve() pages stay open across an agent terminate. Truth source is the `agent_pages` table, not the session tree — a rollout's session rebuild does not kill page servers, an agent restart does not orphan them) | `services.healthchecks.page_server` (`/healthz` :8112) |
 | `labeler`                | `.venv/bin/python -m services.labeler.daemon` (auto label generation) | `services.healthchecks.labeler` (`/healthz` :8103) |
 | `im-bridge`              | `.venv/bin/python -m services.im_bridge.daemon` (IM frontends: Telegram; WeChat iLink / Feishu adapters shipped but **production-disabled since 2026-08-06** — `AVA_IM_DISABLED_ADAPTERS=weixin,feishu`) | `services.healthchecks.im_bridge` (`/healthz` :8111) |
@@ -636,7 +624,6 @@ supervisor socket for agent shells / watchers).
 | `delivery-watchdog` (gateway only) | `.venv/bin/python -m services.delivery_watchdog.daemon` (two jobs on a fast tick, default 0.5s per `AVA_DELIVERY_WATCHDOG_INTERVAL_SECONDS`: **(1) wake dispatch** — re-publishes the Redis wake (with the wake-key breadcrumb) for every `pending` inbound of an `idling` owner older than `AVA_DELIVERY_WATCHDOG_DISPATCH_THRESHOLD_SECONDS` (default 1s), collapsing the lost-publish recovery from the claim loop's 30s recheck to ~1.5s; constant ~2 qps load, independent of fleet size; **(2) stall alerting** — WARNINGs chat inbounds still `pending` past `AVA_DELIVERY_WATCHDOG_THRESHOLD_SECONDS` (default 30s) whose owner is `idling`/`terminated`, once per row while stuck, with a `delivery_stalled` event emitted to the unified `events` stream. `running` owners are never dispatched or alerted (mid-turn queues are normal). Gate cluster-level on/off with `AVA_DELIVERY_WATCHDOG_ENABLED`) | `services.healthchecks.delivery_watchdog` (`/healthz` :8110) |
 | `task-maintenance` (gateway only; **registered by the `ava_fleet` plugin**, not core — see `ava_builtins/plugins/ava_fleet/services.py`) | `.venv/bin/python -m ava_builtins.plugins.ava_fleet.task_maintenance.daemon` (every `AVA_TASK_MAINTENANCE_INTERVAL_SECONDS`, default 5 min, reminds owners of overdue in-progress tasks past their `remind_interval_seconds` window via a `chat` inbound; after `AVA_TASK_ESCALATE_N` (default 3) unanswered reminders, notifies the parent task's owner. Cluster-wide, runs once on the gateway. Discovered whenever the `ava_fleet` plugin code is present; gate its cluster-level on/off with `AVA_TASK_MAINTENANCE_ENABLED`) | `ava_builtins.plugins.ava_fleet.task_maintenance.healthcheck` (`/healthz` :8108) |
 | `events-maintenance` (gateway only) | `.venv/bin/python -m services.events_maintenance.daemon` (every `AVA_EVENTS_MAINTENANCE_INTERVAL_SECONDS`, default 1h. Each pass incrementally maintains the Since-Birth day-grain rollups — `agent_metrics_daily` / `agent_model_tokens_daily` (the durable token+cost ledger) — from **Loki** (the unified event stream's live store): one union-family count probe compares retained candidate days with `rollup_day_state`; missing, failed, count-changed, and the latest `AVA_EVENTS_ROLLUP_LATE_WRITE_LOOKBACK_DAYS` (default 1) get a full-day overwrite, while clean days avoid the fourteen aggregate queries. The scan clamps to Loki's 84h retention floor (an outage longer than retention loses those days' Loki aggregates — logged loudly; the filtered `events-YYYYMMDD.rollup.jsonl` mirror (90-day retention by default, tunable via `AVA_EVENTS_JSONL_ROLLUP_RETENTION_DAYS`) then automatically repairs older ledger-watermark gaps: zero-known-row files fail loudly and are not counted as replayed, missing files remain unrecoverable; pre-LGTM history was backfilled once by the llm-cost-rollup-columns migration from the frozen PG archive), uses its own capacity-one Loki budget, and stops between days at `AVA_EVENTS_ROLLUP_PASS_DEADLINE_S` (default 1200), leaving untouched/failed state for the next pass. Today is served live by the readers (whole-life cost = ledger + Loki tail from the watermark). Full-day overwrite upsert keyed on the PK ⇒ idempotent; a zero-row indexed slice preserves existing ledger rows and marks the day failed for retry. Cluster-wide, runs once on the gateway — it owns the data plane. The rollup, JSONL replay, checkpoint pruner, blob vacuum and hourly checkpoint size sample are unconditional — the PG `events` archive slices (partition rolling, retention, index governance) were removed with the task #1281/#1823 cleanup; the table-drop migration (20260829T030000_drop-events-archive) is pending deployment. The daemon also hosts the per-thread checkpoint pruner (every 60s, newest three regardless of liveness) and the blob vacuum) | `services.healthchecks.events_maintenance` (`/healthz` :8109) |
-| `restarter` ★ | `.venv/bin/python -m services.restarter.daemon` — runs three per-tick controllers over this host's agent rows. **RespawnController** (`ops/controllers/respawn.py`): restart dispatch, plus the dead-birth reaper for unclaimed `idling` rows past `boot_reap_grace_seconds`, the boot-phase reaper for dead `running`/`idling` rows that have produced no message, and the direct revive pass for dead post-message rows. Every reaper is machine scoped. **CrashResurrectController** (`ops/controllers/resurrect.py`): brings back involuntary deaths (`terminated` with `termination_source IN (reaper, launch-confirm)`) when work waits, subject to backoff. **WedgedAgentController** (`ops/controllers/wedged.py`): kills + resurrects live agents that stop consuming pending work; it uses a short idling threshold (`AVA_WEDGED_IDLING_AGENT_INBOUND_AGE_SECONDS`, default 180s) but preserves the long running-turn threshold. A `terminated` row retaining a live lease and pending terminate inbound is instead identity-reaped without resurrection, preserving the user's termination. Gated off the roster in hosted mode (`AVA_RUNNER_MODE=hosted` — per-agent process supervision is retired; see the `agent-host` row). | `services.healthchecks.restarter` (`/healthz` :8102) |
 | `milvus`                 | `.venv/bin/python -m services.milvus.daemon` (`milvus-lite server` gRPC :19530, data dir `~/.ava/milvus-data/`) | `services.healthchecks.milvus` (TCP probe :19530) |
 | `memory-indexer`         | `.venv/bin/python -m services.memory_indexer.daemon` (watchdog fs watch `~/.ava/memory/` + Gemini Embedding 2 → milvus collection) | `services.healthchecks.memory_indexer` (`/healthz` :8105) |
 | `memory-search`          | `.venv/bin/python -m services.memory_search.daemon` (uvicorn on 127.0.0.1:19531 serving the exact-search store — in-memory matrix + npz persistence; the gateway and the indexer call it over HTTP when `AVA_MEMORY_SEARCH_BACKEND=numpy`) | `services.healthchecks.memory_search` (real POST /search probe :19531) |
@@ -645,7 +632,7 @@ supervisor socket for agent shells / watchers).
 | `pitr-uploader` (gateway only, `AVA_PITR_ENABLED`) | `.venv/bin/python -m services.pitr.uploader_daemon` (single-worker immutable GCS upload; WAL-only ciphertext staging is capped at 64 MiB and reported alongside spool bytes; disabled by default) | `services.healthchecks.pitr_uploader` (identity-verified `/healthz` :8117) |
 | `pitr-base-candidate` (gateway only, `AVA_PITR_BASE_BACKUP_ENABLED`) | `.venv/bin/python -m services.pitr.base_scheduler_daemon` (weekly unprotected base candidate; when the additional `AVA_PITR_RESTORE_PROOF_ENABLED` gate is true, runs one generation-pinned isolated proof in the first-day 06:00 cluster-time monthly window when a candidate is pending; both default off) | `services.healthchecks.pitr_base_backup` (identity-verified `/healthz` :8118; candidate and restore-proof states are separate non-readiness-gating components) |
 | `gateway-watchdog` ★ (gateway only) | `.venv/bin/python -m services.watchdog.daemon --role gateway` (asyncio imports + runs the gateway-capability healthchecks above — redis-acl first (re-affirms the cluster's redis ACL user (the identifier its redis_url carries), which a redis-server restart silently drops), then pgbouncer (restarts the per-cluster pooler when its listener stops answering OR its reachable-address listener is missing — a silently degraded double bind, task #1288; when the pooler is enabled it is every consumer's AVA_DB_URL, so it comes before any service that would be revived without a database), then gateway/im-bridge/labeler/heartbeat/delivery-watchdog/events-maintenance/milvus/frontend/pg-backup/otel-collector/task-maintenance/memory-indexer — every 60s). Its distinct `/healthz` reports the last completed tick and becomes stale after a 90s unfinished round. | the OS-scheduled **watchdog probe** (`ava cluster watchdog-probe --role gateway`, launchd / crontab / schtasks, every 60s) respawns it when its pidfile shows it dead |
-| `agent-runner-watchdog` ★ (agent-runner only) | `.venv/bin/python -m services.watchdog.daemon --role agent-runner` (asyncio imports + runs the agent-runner-capability healthchecks above — ops/restarter (+browser, browser-mcp) — every 60s). Its distinct `/healthz` reports the last completed tick and becomes stale after a 90s unfinished round. | the OS-scheduled **watchdog probe** (`ava cluster watchdog-probe --role agent-runner`, launchd / crontab / schtasks, every 60s) respawns it when its pidfile shows it dead |
+| `agent-runner-watchdog` ★ (agent-runner only) | `.venv/bin/python -m services.watchdog.daemon --role agent-runner` (asyncio imports + runs the agent-runner-capability healthchecks above — ops/agent-host (+browser, browser-mcp) — every 60s). Its distinct `/healthz` reports the last completed tick and becomes stale after a 90s unfinished round. | the OS-scheduled **watchdog probe** (`ava cluster watchdog-probe --role agent-runner`, launchd / crontab / schtasks, every 60s) respawns it when its pidfile shows it dead |
 | `browser` (agent-runner only, auto-detect display; opt-out `AVA_BROWSER_ENABLED=false`) | `.venv/bin/python -m services.browser.daemon` (headed real Chrome, dedicated profile `~/.ava/chrome-profile/`, CDP :9222) | `services.healthchecks.browser` (HTTP probe `/json/version` :9222) |
 | `otel-collector` | `<otel-collector-dir>/otelcol-contrib --config <otel-collector-dir>/config.yaml` (native Go binary installed by converge on the `lgtm-host` gateway and pure runners; unmarked gateway homes skip it; the gateway fans out only its cluster's labeled resources, pure runners relay with bearer auth; traces mirror locally; trace/log queues are bounded and file-backed while metrics use bounded memory; every full queue rejects the newest batch without waiting, and every exporter gives up after a bounded 15-minute retry window) | `services.healthchecks.otel_collector` (valid empty OTLP POST must return 2xx on :4318; both :4318 and :8888 holders must resolve to this collector binary and its live session record, otherwise only a verified stale same-binary holder is reclaimed) |
 | `browser-mcp` (agent-runner only, gated with `browser`) | `.venv/bin/python -m services.browser.mcp_daemon` (one shared `chrome-devtools-mcp` upstream attached to the headed Chrome, multiplexed over a Unix socket `~/.ava/chrome-mcp.<cdp_port>.sock` to every agent's chrome bridge — serial, with per-connection page affinity so one Chrome client is shared instead of one per browser-using agent) | `services.healthchecks.browser_mcp` (Unix-socket `list_tools` probe) |
@@ -775,17 +762,11 @@ Session commands run under `bash -lc` (#476) — the login-shell flag pulls in t
 PATH without needing a sudo-installed symlink. macOS dev hosts already inherit login-shell PATH from
 Terminal.app; the change is load-bearing only for Linux / WSL agent-runners.
 
-Agent process sessions are named `ava-agent-{N}` (N == agent_id) — the record/session
-name `ops/agent_launch.py:_launch_agent_process` keys by; all daemon services follow the same
-`ava-<service>` convention (`shared/cluster/derive.py:session_name()`). Agent processes, daemon
-services, and agent shells / watchers are native-style sessions, so none of them are shell
-panes; enumerate live agents via the native-supervisor records
-(`native_proc().list_sessions()`) or `agents_meta` — both surfaced in `ava status` /
-cluster status (the `agent_count` field) — and agent shells via
-`python -m shared.pty_sessions.cli list`. `ava cluster status` enumerates
-every live session — services, orchestration (updater / rollout / cluster-restart),
-agent processes and shells. Raw session stdout is queried in Loki (see
-Logging / diagnostics below).
+The agent host is the `ava-agent-host` service. Agent identities are counted
+from this machine's non-terminated `agents_meta` rows; idle and paused identities
+remain visible. Enumerate service sessions through the native supervisor and
+persistent shells through `ava sessions list` / the shell backend. No per-agent
+main-process record participates in the current runtime.
 
 ### Emergency PTY allocation freeze
 
@@ -888,28 +869,6 @@ python ava_builtins/skills/ava-use-claude-code-and-codex/reference/spawn_codex.p
 
 A stale generation token cannot terminate a replacement owner.
 
-### Agent-stack warm-up at start
-
-After launching the service sessions, `ava start` fires a detached, best-effort
-warm-up on every **agent-runner-capable** host
-(`cli/commands/_warmup.py:_launch_agent_warmup` → `.venv/bin/python -m agent.warmup`,
-logged to `$AVA_HOME/logs/warmup.log`). On a freshly-booted box the *first*
-agent process pays a cold cost the rest do not: it cold-imports the heavy boot
-chain (langgraph + the chat model + the ava SDK), cold-spawns its MCP daemon
-subprocess, and — when the shared browser is on — does the one-time
-`chrome-devtools-mcp` npx download plus a first CDP handshake. `agent.warmup`
-does that work once, eagerly, so the OS page cache (and the npx package cache)
-are warm before any real agent spawns.
-
-It is **not** a service session: a one-shot process that exits, never healthchecked
-or respawned. Every step is independently best-effort — a warm-up failure is
-logged and swallowed, so a broken warm-up can only fail to *help* (the first
-agent then pays the cold cost itself, the tested status quo), never break a
-spawn or `ava start`. It is fire-and-forget: `ava start` does not block on it, so
-an agent spawned within the warm window still races the cold path. This warms
-the agent boot chain only; it does not affect the unclaimed-idling-to-claim window (the
-row is claimed early, before the heavy import — see `agent/__main__.py`).
-
 ### Shared browser (`browser` service)
 
 A single headed, real Chrome shared by all agents on an agent-runner, so they can
@@ -991,22 +950,17 @@ sides derive the CDP port + socket path from `settings.browser_cdp_port`
   `ava start` (or let the next watchdog round revive the session once the port is
   free) — and the refusal message now names that remedy itself. When the squatter
   is one of *ours* (a Chrome left outside the session by a `SingletonLock`
-  handoff), `ava stop --stop-browser` sweeps it, so there is no pid hunt: it kills
+  handoff), `ava stop --force` sweeps it, so there is no pid hunt: it kills
   every Chrome running on this cluster's `--user-data-dir`. A Chrome on some other
   profile is deliberately left alone — it cannot be positively identified as ours,
   and the operator's own browser is the thing that must never be killed — so that
   one is still quit by hand.
-- **Login state preserved across stop / update**: the profile holds expensive
-  hand-acquired logins, so an in-place `ava stop` and every `ava cluster update` /
-  restart leave the `ava-browser` session running (`_do_stop` skips it
-  by default, `keep_browser=True`) — a backend bounce never re-pops the window or
-  risks a session-restore prompt; `ava start` is skip-if-running, so it leaves the
-  live session alone. Only a full cluster teardown takes Chrome down: `ava stop
-  --stop-browser`, and `ava cluster destroy` (its internal stop passes
-  `--stop-browser` so a destroyed cluster leaves no orphan Chrome). Those two
-  paths also sweep by profile after the session kills, because a Chrome that
-  handed off is no longer in the session's process tree
-  (`services/browser/orphan.py`).
+- **Browser lifetime**: pause, update and restart preserve the running
+  `ava-browser` session. Default `ava stop` closes it; `--keep-service browser`
+  retains it. The profile and its logins survive either choice. `ava start`
+  reuses a retained session and relaunches a stopped one. Explicit force stop
+  and cluster destroy additionally sweep owned Chrome processes outside the
+  recorded session tree (`services/browser/orphan.py`).
 - **Upgrade impact**: all headed agent-runner hosts that upgrade without having
   previously set `AVA_BROWSER_ENABLED` will auto-launch a headed Chrome on the
   next `ava start`. Chrome binds CDP to loopback:9222 only; the profile starts
@@ -1042,22 +996,14 @@ sides derive the CDP port + socket path from `settings.browser_cdp_port`
 ### Deployment footprint & memory
 
 Ava retains a native Postgres/Redis data plane, LangGraph checkpoints, and a
-Next.js frontend. Agent memory accounting depends on the configured runner mode:
-process mode has a separate agent process; hosted mode shares an agent-host
-runtime and does not require a per-agent PID. Several layers bound the footprint:
+Next.js frontend. One agent-host daemon shares process-wide infrastructure
+while per-agent model/runtime caches remain bounded.
 
-- **Hosted runner (the flagship layer)** — the end state the fleet is moving
-  to: one `agent-host` daemon runs every local agent's turns as asyncio tasks,
-  and an idle agent is **no task at all** — identity lives in `agents_meta` +
-  its checkpoint. An idle agent's ~36MB resident heap + MCP daemon + pooled
-  Postgres connections + Redis subscription all go to zero between wakes by
-  construction, not by swap-out machinery. Phase 1 (dispatcher, turn tasks,
-  hosted-aware lifecycle) is built behind `AVA_RUNNER_MODE=hosted` (now the
-  default; `process` is the explicit rollback opt-out); the historical hibernation layer (controller, `hibernating`
-  status, SIGUSR1, `/hibernating` endpoint, `AVA_HIBERNATE_*` keys) was
-  DELETED in 2026-08 — its design docs stay for history:
-  [`decisions/2026-07-20-agent-hibernation.md`](../decisions/2026-07-20-agent-hibernation.md),
-  [`future/infra/agent-runner-as-server.md`](../future/infra/agent-runner-as-server.md).
+- **Agent host** runs local agents as asyncio tasks with a concurrency limit.
+  An idle identity has no active task. Model objects may remain in the bounded
+  cache; eviction does not delete identity or checkpoint state. Disposable
+  execution children and persistent PTY shells have separate resource costs.
+  There is no runner-mode toggle or individual agent process to maintain.
 - **Heartbeat owns the idle nudge, hibernation is gone** — the heartbeat's own
   idle threshold (`AVA_HEARTBEAT_IDLE_THRESHOLD_SECONDS`, default 300s) nudges
   idling agents; agents that paused their own heartbeat
@@ -1133,11 +1079,12 @@ ava start [--machine-name X --serve-gateway --serve-agent-runner --memory-remote
 ava memory init
              # After a new install, explicitly create the memory checkout and seed its template. A split agent-runner bootstraps from its running gateway. Start, update, and rollback never initialize or validate the memory repository.
 ava status   # one screen of sessions / probes (http / tcp / pid); filtered by role (agent-runner skips the pg/redis probe). A gateway host also gets a `gate (fleet UI entry)` section: whether anything answers on the entry port (:3000) and whether this cluster's own supervisor still holds the gate (launchd label / Linux user-systemd unit). ANY HTTP status counts as answering — the gate serves 503 (updating) and 502 (app rebuilding) by design, so a 2xx test would call a correctly-working gate dead mid-rollout; it is liveness-only for the same reason the frontend row is (the entry port is the public bookmark and carries no identity payload), which is what the supervisor line covers. Both halves also ride in `ava cluster health-probe`'s check 5 — alert-only, never feeding auto-rollback, since a gate that failed to register is not a code regression and no rollback puts it back. On any installed host warns if the prod source `$AVA_HOME/source` has drifted off `main` (an agent that developed in the prod tree instead of a worktree) — it runs the live cluster, so a feature branch there means un-reviewed code live + force-discarded on the next rollout. Also shows the cluster pin (`cluster_target_sha`, the commit the last rollout pinned the cluster to) vs this host's HEAD, so a node that missed a rollout is visible (read-only; fail-fast-on-drift is future — see commit-pinned-cluster.md)
-ava stop     # kill of the service sessions via the session backend (graceful SIGTERM to the top process, tree SIGKILL on timeout) + reap this cluster's agent sessions (ava-agent-<id>: SIGTERM so each agent tears down its MCP daemon / Claude Code subprocess, then force-kill stragglers — they are spawned via the gateway, not ServiceSpecs, so nothing else stops them; agent shells/watchers (per-session pty hosts) are force-killed) + stop this cluster's own native pg/redis (gateway: pg_ctl stop + redis shutdown, data persists on disk; agent-runner skips); stdin y to confirm. First best-effort POSTs /api/cluster/stopping?machine=<self> so the cluster view shows this host as "stopped" (intentional) not "offline" (crash) — the live probe can't tell them apart. Stays local by design: it kills the gateway + its own data plane, which can't be delegated to the gateway
+ava pause    # normal native drain; retain infrastructure, browser and persistent PTYs
+ava stop -y  # same drain, then full local stop; --keep-infra / --keep-service preserve resources; --force explicitly escalates
 # Read AVA_CLUSTER_SECRET without echo and export it for this command first; unset it afterward.
 ava enroll --gateway URL --machine-name NAME --machine-host HOST   # join a split-deployment agent-runner to a gateway (presents AVA_CLUSTER_SECRET to the gateway's authenticated /api/bootstrap without putting it in argv); --machine-host is this runner's reachable address (written to the $AVA_HOME/machine_host file, so a re-enroll keeps it) — the gateway dials its ops server there; verifies the runner projection, which every runner process re-fetches at startup, then run `ava start`. Add --health-port-base N (a block base on the allocator's grid, 18000 + k*22, e.g. 18110; pick one no local cluster already owns — `ava cluster ls`) only when another Ava unit shares this machine's localhost namespace — daemon health ports are a per-UNIT fact the gateway does not serve, and two units otherwise take the same defaults 8102-8109. A WSL2 host auto-applies its own reserved base when the flag is omitted (issue #1152), since a co-located native Windows unit would otherwise default to that same shared block; a base already in `.env` — hand-set or auto — survives a bare re-enroll
 ava cluster update   # thin client on every host: POST /api/cluster/rollout to the gateway, which spawns the three-phase orchestration in a detached `ava-rollout` session running `ava cluster update --local` and returns 202. `--local` is the explicit in-process escape hatch used by detached orchestration sessions and for debugging. Every in-process leg (`--local`, including `--local --restart-only`; the agent-runner self-update; and `ava restart`) refuses to run from inside an ordinary supervised session — a pty-hosted agent shell, agent process, or service daemon — because its own stop leg kills that session's whole tree, the orchestration with it (the 2026-08-12 stranding; `shared.proc.hosting_supervised_session`). The detached orchestration sessions are the narrow exemption. See "Multi-machine ava cluster update orchestration" below
-ava cluster rollback [--to SHA|TAG] [--keep-pin] [--set-known-good] [-y]  # default is a cluster rollback: stop-the-world (local + remote restarters paused, fleet quiesced) -> gateway schema/code rollback -> pin write-back -> remote runner self-update with mode=none (the drain already happened) -> poll. A runner still converging holds the deploy lease for the settle window and receives a best-effort resume; its watchdog then converges it to the rewritten pin. `--keep-pin` is the deliberate gateway-only escape hatch: it skips pin write-back and runner fan-out, then resumes the paused runners on their unchanged pin. `--set-known-good` explicitly makes the rollback target the anchor
+ava cluster rollback [--to SHA|TAG] [--keep-pin] [--set-known-good] [-y]  # default is a cluster rollback: stop-the-world (local + remote agent hosts drained, fleet quiesced) -> gateway schema/code rollback -> pin write-back -> remote runner self-update with mode=none (the drain already happened) -> poll. A runner still converging holds the deploy lease for the settle window and receives a best-effort resume; its watchdog then converges it to the rewritten pin. `--keep-pin` is the deliberate gateway-only escape hatch: it skips pin write-back and runner fan-out, then resumes the paused runners on their unchanged pin. `--set-known-good` explicitly makes the rollback target the anchor
 ava cluster status   # full multi-machine roster (thin client: GET /api/cluster/roster; gateway resolves its own row + probes each agent-runner by dialing a status_probe op to its ops server). online = live probe answered; stopped = machines.stopped_at set by `ava stop` (cleared by `register_self()` — on `ava start`, and on the ops daemon's own boot); offline = neither (crash / unreachable); STALE-STOP = the probe answered AND the stop marker is set, i.e. the two sources of truth disagree — the marker is the wrong one (a latch, cleared only by a `register_self()`), and until it is cleared the `ava cluster update` fan-out, which filters on that same marker, would drop this host; the next rollout reconciles it (`_resolve_fanout_targets`). The `up since` column is that same `register_self()` stamp (`machines.up_since_at`) — a boot/announce time, never a heartbeat: nothing refreshes it while a host merely keeps running, which is why `online` is the live probe and not a freshness test on this column. The `pin` column shows each node's HEAD vs the cluster pin (`cluster_target_sha`): ✓ on-pin / ✗ off-pin (missed a rollout) / ? no pin yet or HEAD unknown — the gateway computes the verdict (`on_pin`) server-side so the roster stays a bare list. Same per-node pin view on the Control page; the `agent-runner-watchdog` tick also self-heals when this host is off-pin — `_check_pin_drift` force-updates it to the pin via a spawned update (`_spawn_update(target_sha=pin)`, cooldown-guarded, skips that tick's healthchecks; a paused host returns at the `_tick` gate first so it never fights a rollout). It also declines while ANY update is in flight on this host, not only while the cluster lease is held — being off-pin is a running update's own mid-flight state, and a watchdog-spawned `ava-updater` takes no lease, so the lease-only check let this force the checkout back underneath a live updater and flap prod between two commits for two hours ([decision](../decisions/2026-07-31-two-healers-must-not-own-the-same-checkout.md), issue #1074). If you see this dimension idle on a host that is off-pin, look for an `ava-updater` session before assuming the heal is broken. The `gateway-watchdog` only warns on an off-pin gateway (`_warn_gateway_off_pin`) — a gateway drift needs a rollout, not a single-host self-checkout. The `code` column is the separate question the pin cannot answer: it shows the commit the process that answered the probe froze at ITS OWN boot (`shared/process_sha.py`), so `⚠` there means the checkout moved but that process was never restarted — a node can read `pin ✓` and `code ⚠` at once. `ava start` will not clear it (it skips already-running sessions); `ava restart` will — and on an agent-runner the `agent-runner-watchdog`'s **code controller** (`ops/controllers/code.py`) now spawns exactly that restart on its own once HEAD is on the pin but the running commit is not. It is the second half of the pin dimension: `_check_pin_drift` heals *off*-pin hosts, so an on-pin host running old code (a Phase-B checkout whose restart declined — the 2026-07-28 wsl state) used to be off every controller's map and needed a human. Same guard set as the pin heal (agent-runner only, declines while the cluster update lock is held or a local orchestration session is alive, persistent per-commit backoff, shared process cooldown), and it never runs outside the prod source tree — with one exception, which is why a `pin ✗` or `code ⚠` host beside a `waited-on` cell now clears in a watchdog round instead of on the hold's TTL: a **settle hold naming this host** is not a deploy mutating the cluster, it is a stated waiting period whose content is "this host has not converged", and nothing executes under it, so deferring to it made the hold and the heal wait on each other (`DeployLease.awaits`, issue #1020). The pin heal takes the same exception for the same reason — `settle_hosts_converged` will not release until the named host reports BOTH `head_sha == pin` (pin's dimension) and `running_sha == pin` (code's). A lease with no note — a rollout executing right now — still defers, as does a hold naming someone else. The stranded-pause recovery takes that same exception (issue #1116) rather than deferring to any live lease: unpausing is not itself convergence, but a paused host cannot reach the heals that are, because the pause gate blocks the whole round ahead of them — so a host that is both paused and waited-on was the one host forbidden to do the thing the hold was waiting for. Per-daemon granularity is on each daemon's own `/healthz` `sha`. The `hold` column is the third dimension, and the only one that is not a probe: it is transcribed from the live `cluster_update_lock` lease (`deploy_hold` = the lease sentence, stamped cluster-globally onto every row and printed once as a banner above the table; `waited-on` = this host is named in a settle hold's note). It answers "why was my deploy refused", which until now was legible only in the health-probe cron log or by reading the lock row by hand — but it answers ONLY that: `waited-on` is the hold's recorded set, not a live convergence verdict (`pin` / `code` are), a blank cell is "not named by the hold" and not "converged" (a host that never acked is never named), and a blank column is not proof no deploy is running, because a watchdog-spawned host-local `ava-updater` takes no lease at all. The roster deliberately reads the lease row rather than calling `deploy_in_flight()`, which would probe every machine and *release* a converged hold — neither belongs on a status GET. Above both banners sits the **last-update banner**: a rollout writes its own outcome to `cluster_last_update` (`shared/last_update.py`) — opened before Phase A and closed in the orchestration's `finally` — and the roster states it when it FAILED, because the `pin` and `code` columns alone are symptoms several unrelated states share (a node that missed a rollout, a checkout moved without a restart, a rollout that failed and rolled back all read the same there). **Pin semantics on failure:** a failed rollout does NOT roll the pin back. If the gateway reached its target before failing, the pin advanced and the hosts still off it converge via their own watchdog; if it failed earlier, the pin was never moved and nothing is converging toward the failed target — the banner says which. A rollout whose orchestration is killed never closes its row, and that is read as `orphaned` once its deploy lease lapses (the record is written ahead of the work precisely because the dying process cannot file it). A successful `ava cluster update` replaces the record, so nothing has to remember to clear a failure. The banner also carries the **rollback anchor** (`cluster_pin.last_known_good_sha`, surfaced beside the pin on both the roster and the status page): it was recorded since the pin existed and shown nowhere, so a rollback used to present as the pin simply moving to an older commit. And when an external observer has acted on the failure — today `ava cluster rollback`, which the health probe's `--auto-rollback` shells into — it writes what it did onto the record (`observed_by`, e.g. `rolled back 8bdd366 -> 7e571b4`) without touching the verdict: the dying orchestration files nothing, but the process cleaning up after it witnessed the death, and that sentence is what makes the surfaced failure actionable rather than merely visible. A failure the cluster has already come back from reads `recovered` rather than `aborted`, which is a different call to action — nothing to repair, only something to know, so both surfaces mark it as a warning instead of a failure. It is reached from either side: the orchestration writes it when its own gateway leg rolled back to last-known-good (rc=1 on the pull path), and a reader derives it for any failed record carrying an `observed_by`, which is how a rollback that cleaned up after a dead orchestration closes the 2026-07-30 story. Finally, the record names the rollout's own log (`log_path`), threaded down as `ava cluster update --rollout-log` by the `spawn_rollout` that created the file — so the banner points at THE log rather than at the `$AVA_HOME/logs/rollout-<epoch>.log` glob. It is stamped once, by the intent write, and no later writer touches it; a foreground `ava cluster update --local` is not teed to a file and records nothing, since naming an older rollout's log would be worse than naming none
 ava cluster restart  # bounce the WHOLE cluster (this host + fan out to agent-runners, no git pull) via POST /api/cluster/restart. The gateway's detached `ava-cluster-restart` session runs `ava cluster update --local --restart-only`; plain `ava cluster update --restart-only` is also a thin POST, never the detached child's command. `ava restart` is the local single-host form
 ava cluster ls       # list all registered clusters in ~/.ava/clusters.json
@@ -1199,7 +1146,7 @@ healthcheck dials) likewise cannot: absence of evidence is not failure.
 
 **The gate is tiered** (Task #2183, C2): the critical roster
 (`cli/commands/_probe.py:CRITICAL_SERVICE_SESSIONS` — gateway / frontend /
-restarter / agent-host / im-bridge / the two watchdogs; CTO ruling: critical =
+agent-host / im-bridge / the two watchdogs; CTO ruling: critical =
 a failure cuts user-visible core function or the ops safety net) is the only
 one that can fail a start and the only one waited on for the full 180 s. Every
 other launched service gets a 45 s window
@@ -1261,18 +1208,19 @@ tasks on Windows (`shared/os_schtasks.py`). Two properties are load-bearing:
   this: a prod cluster with it off silently loses its health probe, its watchdog
   probes, daily log maintenance, and its ability to come back after a reboot.
 
-Differences between `ava cluster update` and `ava stop && ava start`:
-- **graceful stop** — the session backend signals the service (SIGTERM to the top process on native
-  sessions; every service session is native), the daemon runs its cleanup
-  (close DB pool / remove pidfile / flush log / drain HTTP); only on timeout does it fall back to hard
-  kill (tree SIGKILL). `ava stop` defaults to hard kill, losing in-flight data.
-- **coordinated pipeline** — use the installed `ava cluster update` implementation,
-  its dry-run, recovery-point gates, and target-specific verification. Its internal
-  checkout, dependency, migration, and service stages are not a manual operator
-  recipe. A merged PR does not replace an already imported orchestrator; verify
-  the running implementation before relying on a newly added safety gate.
-- **No stdin confirmation** — runs through automatically, no prompt blocking. `ava stop` still asks for confirmation (ops needs to be explicit
-  about "I want it stopped now" before taking the hard-kill path).
+`ava pause`, `ava stop`, restart and update use the same normal native drain.
+Pause/update retain infrastructure and persistent PTYs; default stop closes
+those local resources too. Both preserve durable agent identity and work.
+A stop timeout is a failure; force escalation requires an explicit option.
+Normal `ava start` resumes only after readiness. See the
+[pause/stop procedure](graceful-maintenance.md) for partial stop, coordinated
+multi-machine ordering, failure recovery and the first-deployment limitation.
+
+`ava cluster update` additionally owns checkout, dependency, schema, readiness
+and recovery stages. Use its installed implementation and dry-run; these are
+not a manual checkout recipe. A merged PR does not replace an already imported
+orchestrator. Update needs no stdin confirmation; `ava stop` asks unless `-y`
+is supplied.
 
 
 ## Private-network deployment (phone / multi-device access)

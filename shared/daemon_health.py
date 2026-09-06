@@ -2,7 +2,7 @@
 
 Concurrent-loop trackers live in ``shared.loop_health`` after this module's split.
 
-Long-running daemons (scheduler / restarter / labeler /
+Long-running daemons (scheduler / agent-host / labeler /
 memory_indexer) previously probed via pidfile. Problem: daemon
 startup order is schema check -> init_gateway_process -> pidfile
 write; in the 1-2s init phase the watchdog has already polled once,
@@ -558,7 +558,7 @@ def probe_daemon(
     watchdog log reached 50 MB.
 
     Six healthchecks route through here (heartbeat, labeler, memory-indexer, ops,
-    events-maintenance, restarter), so a single escaping exception type silences
+    events-maintenance, agent-host), so a single escaping exception type silences
     six services' revival at once. The inner probe's narrow catches are kept —
     they produce the good operator-facing ``detail`` strings — and anything they
     miss is caught here, logged with a traceback, and reported as down.

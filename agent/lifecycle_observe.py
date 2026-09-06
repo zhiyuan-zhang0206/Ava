@@ -18,21 +18,6 @@ _CLEAR_POINTER = (
 )
 
 
-def observe_process_admission(conn: psycopg.Connection, incarnation: RuntimeIncarnation) -> None:
-    """Call only after actual admission CAS, before its transaction commits."""
-    observed = conn.execute(
-        _OBSERVE_RESTART, (incarnation.agent_id, incarnation.generation, incarnation.owner)
-    ).fetchone()
-    if observed is not None:
-        conn.execute(
-            "INSERT INTO inbound_messages(agent_id,content,kind,source,payload) "
-            "SELECT agent_id,content,'restart_completed',source, "
-            "payload-'launch_attempts'-'lifecycle_result' FROM inbound_messages WHERE id=%s",
-            (observed[0],),
-        )
-        conn.execute(_CLEAR_POINTER, (incarnation.agent_id, observed[0]))
-
-
 async def observe_hosted_admission(
     conn: psycopg.AsyncConnection, incarnation: RuntimeIncarnation
 ) -> None:

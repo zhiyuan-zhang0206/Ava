@@ -1,14 +1,14 @@
 ---
 type: doc
 title: Agent-runner Side Services — background services run by agent-runner capability
-description: "A group of background daemons run on machines whose capabilities include agent-runner — services meaningful only alongside machines that run agents: inbound ops server, crash agent restart, shared headed browser, macOS desktop automation. Source of truth: ServiceSpec.capabilities in ops/spec.py."
+description: "A group of background daemons run on machines whose capabilities include agent-runner — services meaningful only alongside machines that run agents: inbound ops server, agent turn execution, shared headed browser, macOS desktop automation. Source of truth: ServiceSpec.capabilities in ops/spec.py."
 tags: []
 ---
 
 # Agent-runner Side Services
 
 ## What is it
-Background service group run on machines whose capabilities set includes `agent-runner` (single-machine `gateway,agent-runner` or pure agent-runner). The agent-runner capability owns daemons meaningful only alongside machines that run agents: the ops server dialed by gateway, the restarter that respawns crashed agents, the shared headed browser + MCP upstream, and macOS-specific desktop automation.
+Background service group run on machines whose capabilities set includes `agent-runner` (single-machine `gateway,agent-runner` or pure agent-runner). The agent-runner capability owns daemons meaningful only alongside machines that run agents: the ops server dialed by gateway, the agent host that schedules local turns, the shared headed browser + MCP upstream, and macOS-specific desktop automation.
 
 `services/agent_runner_side/` is a **capability grouping, not a directory of code** — there is no `services/agent_runner_side/*.py`. Each daemon's code lives in its own `services/<name>/`; which side it runs on is a `ServiceSpec.capabilities` attribute that cuts across the filesystem. See [[gateway_side.ava.okf.md]] for the same note on the mirror group.
 
@@ -17,12 +17,11 @@ Source of truth = services in `ops/spec.py` `build_services()` whose `ServiceSpe
 
 | Service | Responsibility | File |
 |------|------|------|
-| restarter | agent restart scheduling + orphan reaper | [[restarter.ava.okf.md]] |
 | agent-ops | agent-runner inbound HTTP ops (authenticated) | [[agent_ops.ava.okf.md]] |
 | browser | headed Chrome reuse + shared MCP upstream | [[browser/browser.ava.okf.md]] |
 | permissions-helper | macOS/Windows desktop automation (launchd / logon task, not a session) | [[permissions-helper.ava.okf.md]] |
 | computer-mcp | computer-use executor: desktop actions through the signed permissions helper, screen-coordinated (lease + FIFO) + audited (task #1101) | [[computer-mcp.ava.okf.md]] |
-| agent-host | hosted runner: every local agent's turns as asyncio tasks in one daemon. Gated off unless `AVA_RUNNER_MODE=hosted` — the default since 2026-09-02 — so it is on every cluster's start roster by default, and `process` is the explicit rollback opt-out | `services/agent_host/` |
+| agent-host | Executes local agents as isolated asyncio turns in one daemon | `services/agent_host/` |
 
 ## Also Under agent-runner Capability
 - **browser-mcp** — shared chrome-devtools-mcp upstream. Gate = browser's PLUS AF_UNIX (its wrapper→daemon transport is a Unix socket), so it is **POSIX-only** where `browser` is not; see [[browser/browser.ava.okf.md]]
@@ -39,5 +38,5 @@ at WARNING so subsequent ownership renewals continue. The shared Redis client's
 long-lived pub/sub reads remain unbounded; shutdown cancellation still propagates.
 
 ## Key Dependencies
-- [[watchdog.ava.okf.md]] — agent-runner-watchdog keeps alive the session services in this group every 60s (restarter / ops / browser)
+- [[watchdog.ava.okf.md]] — agent-runner-watchdog keeps alive the session services in this group every 60s (agent-host / ops / browser)
 - [[services/services.ava.okf.md|Background Services Overview]] — the upper-level index of grouping and capability distribution

@@ -51,42 +51,6 @@ class GatewaySettings(EnvSettings):
         },
     )
 
-    launch_confirm_timeout_seconds: float = Field(
-        default=45.0,
-        alias="AVA_LAUNCH_CONFIRM_TIMEOUT_SECONDS",
-        description="Timeout (seconds) for polling a launched agent's pid claim. It must cover the child's whole pre-claim segment — python startup, imports, the schema assert, the placement SELECT — which on a loaded box has run past the old 10s and cost a live child its row. Not the only defense: if the launched process is still alive at the deadline the wait extends once, up to boot_reap_grace_seconds. The prompt is delivered pre-launch, so a timeout here never drops it; the restarter still reaps a genuinely stuck row.",
-        json_schema_extra={
-            "restart_required": "gateway",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-        },
-    )
-
-    agent_boot_stall_seconds: float = Field(
-        default=30.0,
-        alias="AVA_AGENT_BOOT_STALL_SECONDS",
-        description="How long an agent's boot may make no progress before the child kills itself. Passed to every child on argv; its own watchdog thread fires when no new boot phase is reached within this window, so it bounds ONE phase rather than the whole boot — a number that does not have to grow with import bloat or box load, unlike launch_confirm_timeout_seconds. Must stay below launch_confirm_timeout_seconds so a stalled child is already dead when the launcher first looks, making the launcher's liveness probe decisive instead of a guess.",
-        json_schema_extra={
-            "restart_required": "gateway",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-        },
-    )
-
-    agent_boot_budget_seconds: float = Field(
-        default=90.0,
-        alias="AVA_AGENT_BOOT_BUDGET_SECONDS",
-        description="Hard ceiling on an agent's whole pre-claim boot, enforced by the child's own watchdog alongside agent_boot_stall_seconds — whichever comes first. Must stay below boot_reap_grace_seconds (pinned by tests/shared/test_timing_topology.py). The stall window alone bounds a boot only at phases x stall, a product that grows silently the moment a boot phase is added; a boot that outlived the grace would have its row taken by the restarter's dead-birth reaper while the child was still alive and progressing — the 2026-07-30 incident's exact failure, relocated from the launcher to the reaper. This ceiling makes 'the child is gone before the reaper can claim' true by construction instead of by arithmetic over the phase count.",
-        json_schema_extra={
-            "restart_required": "gateway",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-        },
-    )
-
     sse_disconnect_poll_seconds: float = Field(
         default=1.0,
         alias="AVA_SSE_DISCONNECT_POLL_SECONDS",
@@ -180,24 +144,14 @@ class GatewaySettings(EnvSettings):
     )
 
     update_quiesce_timeout_seconds: float = Field(
-        default=5.0,
-        ge=0,
+        default=300.0,
+        gt=0,
         allow_inf_nan=False,
         alias="AVA_UPDATE_QUIESCE_TIMEOUT_SECONDS",
         description=(
-            "How long `ava cluster update` / `ava cluster rollback` (and the "
-            "standalone per-host self-heal) wait for signalled agents to end "
-            "their current turn and exit before force-reaping stragglers — the "
-            "'smooth' drain window. Default 5s (user ruling 2026-09-01): the "
-            "freeze plan deliberately targets an approximately 8s stop-the-world "
-            "window; idle "
-            "and between-turn agents exit at their turn boundary inside the "
-            "window; an agent mid-execute_code is cut short by the force-reap "
-            "and its work lost — accepted in exchange for a fast cluster "
-            "unblock. Any finite non-negative value is legal (0 = signal "
-            "then immediately force-reap; NaN/Inf rejected — an infinite "
-            "window would make the force-reap backstop never fire); there "
-            "is no minimum wait."
+            "Maximum wait for normal agent restart, checkpoint flush and execution "
+            "exit during update/rollback verification. Default 300 seconds; timeout "
+            "aborts without force-killing or migrating. Must be finite and positive."
         ),
         json_schema_extra={
             "restart_required": "",

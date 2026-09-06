@@ -53,6 +53,7 @@ import sys
 from contextlib import nullcontext
 from pathlib import Path
 
+from cli.commands._pause_resume import resume_after_start
 from cli.commands._probe import _probe_judges_a_fresh_launch
 from cli.commands._repo import ServiceSpec, _repo_root, session_name
 from cli.commands._session_lifecycle import _launch_roster, _launch_sessions
@@ -98,9 +99,9 @@ def _rollout_child_window(
     Settle holds carry a note and have no active orchestrator.
     """
     # Only the gateway local leg survives a checkout in a parent and owns the
-    # credential/restarter boundary.  A pure agent-runner's Phase-B updater
+    # credential/admission boundary.  A pure agent-runner's Phase-B updater
     # also starts internally under the cluster-wide executing lease, but that
-    # child must finish by restoring posture=idle and its local restarter so the
+    # child must finish by restoring posture=idle and hosted admission so the
     # gateway's Phase-B poll can observe convergence.
     if parent_handoff and gateway_capable:
         return True
@@ -311,6 +312,7 @@ def _refuse_occupied_health_ports(roster: tuple[ServiceSpec, ...]) -> int:
     return 1
 
 
+@resume_after_start
 def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (converge -> infra -> services -> status); splitting hurts readability
     machine_name: str | None = None,
     serve_gateway: bool | None = None,  # noqa: FBT001 — tri-state capability flag, always passed by name
@@ -403,6 +405,17 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
 
     raise_fd_limit(65536)  # every service spawned here inherits the raised ceiling
 
+    # Retired controllers must exit before convergence or schema changes. This
+    # is resource cleanup, not a second runtime or an admission fallback.
+    from cli.commands._retired_services import stop_retired_services
+    from shared.config import settings
+
+    try:
+        stop_retired_services(settings.gateway.update_quiesce_timeout_seconds)
+    except (RuntimeError, TimeoutError, OSError) as exc:
+        print(f"  ✗ retired service cleanup incomplete: {exc}", file=sys.stderr)
+        return 1
+
     # 1) converge host state (symlink / PATH / $AVA_HOME dirs / plugin config
     # images). Memory initialization is explicit (`ava memory init`) and never
     # runs during start or rollback. `ava cluster update` inherits this via its
@@ -484,7 +497,6 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
     # the backend preflight probe owns that failure path. Local instances
     # only: a remote-managed plane has no local admin socket, and its
     # extension provisioning belongs to its owner.
-    from shared.config import settings
 
     if "gateway" in roles and not settings.data_plane.is_remote:
         from cli.commands._cluster_instance import pg_admin_url
@@ -572,8 +584,6 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
     # internal restart reads that marker and unions its transient skips.
     from shared.disabled_services import resolve_launch_skip
 
-    if rollout_child:
-        disabled_services = (*disabled_services, "restarter")
     launch_skip = resolve_launch_skip(set(disabled_services), persist=persist_services)
 
     # 4a) probe before binding: refuse to launch a daemon onto a health port
@@ -597,14 +607,6 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
 
     launch_failures.record(list(launch.failed))
 
-    # 4.5) warm the agent boot stack (agent-runner hosts only) — pre-pay the
-    # first agent's cold-start (heavy import page cache + MCP daemon spawn +
-    # browser/npx) so the first spawn after a fresh start is fast. Detached +
-    # best-effort; never blocks or fails start. Called via `_ns` so the autouse
-    # test guard (tests/conftest.py:_guard_agent_warmup) can no-op it.
-    if not maintenance.held():
-        _ns._launch_agent_warmup(roles, repo)
-
     # 5) idempotent clear of the paused state — `ava start` means "I want to
     # serve"; when the gateway crashes between phase A and B leaving
     # a paused posture row so agent-runners are stuck at 503, a manual
@@ -615,15 +617,6 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
     from shared.host_deploy_state import set_posture
 
     set_posture("paused" if maintenance.held() else "converging" if rollout_child else "idle")
-
-    # 5.1) generation-scoped successful-finalize: a Phase-B `ava start`
-    # resumes without a cluster/resume op, so the journaled generation must be
-    # recorded `resumed` or it stays `paused` forever (2026-08-26 residue);
-    # a rollout child (converging) skips — its finally owns that boundary.
-    if not rollout_child:
-        from ops.cluster_pause import finalize_pause_owner_journal
-
-        finalize_pause_owner_journal()
 
     # 5.5) wait for the just-launched services to pass their probes before the
     # status snapshot. The spawn returns the instant the session starts, but a uvicorn
@@ -726,6 +719,12 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
     if not start_serving.mark_serving(serving_generation):
         print("  ✗ this start lost its serving generation", file=sys.stderr)
         return 1
+    if not rollout_child and not maintenance.held():
+        # Legacy deploy journals have no continuation hold. Finalize only after
+        # readiness; the wrapper releases current maintenance generations.
+        from shared.pause_owner import finalize_natural_resume
+
+        finalize_natural_resume()
     return 0
 
 
@@ -758,7 +757,7 @@ def cmd_start(
 
     Branch on the resolved capability set:
     - gateway: native pg/redis up + 9 service sessions (including frontend / daemon / milvus)
-    - agent-runner: skip local infra + only start ops/restarter/watchdog (3 service sessions)
+    - agent-runner: skip local infra + only start ops, agent-host and watchdog services
       (agent-runner's `~/.ava/.env` AVA_DB_URL / AVA_REDIS_URL / AVA_MILVUS_URI
       must point at the gateway's reachable endpoint; the gateway
       reaches this host by dialing its registered ops URL)

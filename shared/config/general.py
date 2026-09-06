@@ -194,7 +194,7 @@ class GeneralSettings(EnvSettings):
     machine_serve_agent_runner: bool | None = Field(
         default=None,
         alias="AVA_MACHINE_SERVE_AGENT_RUNNER",
-        description="Whether this host serves the agent-runner capability (runner/restarter/watchdog + agent processes). A host serves gateway and/or agent-runner; at least one must be true. None = fall back to the `$AVA_HOME/machine_serve_agent_runner` file.",
+        description="Whether this host serves the agent-runner capability (agent host, ops server, and watchdog). A host serves gateway and/or agent-runner; at least one must be true. None = fall back to the `$AVA_HOME/machine_serve_agent_runner` file.",
         json_schema_extra={
             "restart_required": "all",
             "writable": False,

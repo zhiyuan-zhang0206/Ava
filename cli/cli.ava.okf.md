@@ -18,8 +18,9 @@ The `ava` CLI — single entry point for cluster lifecycle. `cli/main.py` builds
 | Command | Function |
 |---------|----------|
 | `ava start` | **Pure bring-up** — birth moved to install time (`scripts/install.sh`); settings-free `cli.preflight.require_installed_home` fails uninstalled homes fast (→ install.sh). Ensures the cluster's own pg/redis + starts the union of local services. **Exit code carries readiness**: 0 = serving, 4 (`SERVICES_NOT_READY_EXIT_CODE`) = every step ran but a launched service never passed its probe (snapshot printed + sessions named first), 1 = a step failed. `--no-readiness-gate` drops the code, not the diagnosis — used by the boot job (uncapped retry) and the rollout's local leg (`_gateway_ready` answers it better) |
-| `ava stop` | stdin-confirmed force kill (local services + cluster pg/redis); keeps logged-in Chrome unless `--stop-browser` |
-| `ava restart` | stop (force, unconfirmed) + start — updater path (single-host; cross-host bounce: `ava cluster restart`) |
+| `ava pause` | Normal native drain and service stop; retain infrastructure, browser and persistent PTYs. Default timeout 300 seconds, no implicit force |
+| `ava stop` | Same drain, then full local stop including terminals, browser, extras and private pg/redis; `--keep-infra` / repeatable `--keep-service` preserve selected resources; `--force` is explicit |
+| `ava restart` | Pause + start on this unit, retaining PTYs and infrastructure; cross-host bounce: `ava cluster restart` |
 | `ava status` | status (including pg/redis and the end-to-end private-network Redis bridge view) |
 | `ava cluster update` | capability-dispatched: gateway-capable orchestrates the cluster; pure agent-runner self-updates. Every sync opens protected editable records + site-packages dirs via write window, restoring exact modes before continuing |
 | `ava converge` | replays idempotent host wiring (prod editable-install + site-packages protection/symlink/PATH/dirs/plugin images and the macOS Redis bridge), usually via `ava start`; it never touches the memory pool |
@@ -38,6 +39,10 @@ Verbs that act on a cluster rather than on this host's services, addressed by
 
 Agent lifecycle, context reads, local operations, and package-management command
 groups are enumerated in [[cli/operator-surfaces.ava.okf.md]].
+
+Ordinary `ava start` resumes the existing local pause after readiness. Durable
+agent identity and work survive both pause and stop; live terminal processes
+survive pause only. See [operator procedure](../conventions/graceful-maintenance.md).
 
 ## Install-Time Birth (`cli/install_cluster.py`)
 
@@ -62,6 +67,7 @@ the rest of the `_`-prefixed steps are enumerated in
 - **install births, `ava start` pure bring-up**: birth only at install; preflight rejects uninstalled homes, never implicit birthing.
 - **Ops-layer only**: not exposed to agents (they use the `ava.*` SDK).
 - **Settings-independent**: `ava enroll` / the `ava start` preflight are specially routed in `main()` before settings-gated imports — no `shared.config` (stdlib + `shared.dotenv_boot`). `ava config` uses only registry metadata and direct local files until a full Settings consumer actually needs the singleton, so a broken `.env` remains repairable. `ava pty` is settings-lite and data-plane-independent.
+- **Cold stop**: normal pause/stop loads the cluster configuration for native drain. Explicit force stop, or repeating a completed stop with no recorded failures, can skip gateway configuration fetch; the latter reads the existing pause journal before Settings bootstrap.
 - **Migrations are not a command**: `cli/commands/migrations.py:cmd_migrations_apply` runs internally from `ava start` / `ava cluster update`.
 
 ## Entry Points

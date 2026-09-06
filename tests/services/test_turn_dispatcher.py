@@ -538,37 +538,6 @@ class TestUncancellableTurn:
         assert report["agent_id"] == 12
         assert report["last_active_at"] is None
 
-    def test_the_unwind_bound_fits_inside_the_stop_paths_kill_window(self) -> None:
-        """The bound is only useful if the host survives long enough to emit the
-        report. `ava stop` SIGTERMs each agent process and force-kills after
-        `_reap_agent_sessions(timeout_s=...)`, so this wait plus the rest of
-        shutdown has to fit inside that window.
-
-        Pinned against the stop path's ACTUAL default rather than a number
-        copied into a comment, so moving either side surfaces here.
-        """
-        import inspect
-
-        from cli.commands.stop import _reap_agent_sessions
-
-        kill_window = inspect.signature(_reap_agent_sessions).parameters["timeout_s"].default
-        assert kill_window > dispatcher.CANCEL_UNWIND_TIMEOUT_S, (
-            f"the host waits {dispatcher.CANCEL_UNWIND_TIMEOUT_S}s for a turn to unwind but "
-            f"the stop path force-kills after {kill_window}s — the uncancellable-turn report "
-            "would never be emitted"
-        )
-        # Both waits, summed — the cancel wait, and then the activity-clock read
-        # that enriches the report. This replaces a `2 *` proxy for "leave room
-        # for the rest of shutdown" now that there is a real second term; the
-        # remaining headroom covers closing the pool, the healthz server and the
-        # pidfile.
-        total_wait = dispatcher.CANCEL_UNWIND_TIMEOUT_S + dispatcher.CLOCK_READ_TIMEOUT_S
-        assert kill_window > total_wait * 2, (
-            f"the host can wait {total_wait}s before it even starts closing its handles, "
-            f"against a {kill_window}s force-kill window — too little headroom for the "
-            "rest of shutdown"
-        )
-
 
 class TestCancelAgent:
     async def test_cancel_agent_cancels_a_running_turn(self) -> None:

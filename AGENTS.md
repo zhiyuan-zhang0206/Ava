@@ -113,8 +113,10 @@ scripts/install.sh --role ... | --worktree   # the ONLY birth (idempotent): regi
 uv sync       # install deps + the `ava` CLI into .venv/bin/
 ava start     # pure bring-up: ensures the cluster's own pg/redis is up, then brings up this
               # host's services. No identity flags — the home comes from the checkout-anchored boot.
-ava stop      # stdin-confirmed force kill (tears down services + this cluster's pg/redis).
-              # Leaves the headed browser session running; add --stop-browser for a full teardown.
+ava pause     # normal agent drain; preserves infrastructure, browser and persistent PTYs.
+ava stop      # normal agent drain, then full local stop including PTYs/browser/private pg+redis.
+              # --keep-infra / --keep-service retain resources; --force is explicit escalation.
+              # ava start resumes after readiness; agent identities and durable data survive.
 ava status    # check status (includes the pg/redis view)
 ava cluster update    # upgrade: a gateway-capable host orchestrates the whole cluster (pause
               # runners -> pull/sync/migrate/restart -> trigger runner self-updates); a pure

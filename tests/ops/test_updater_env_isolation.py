@@ -14,9 +14,9 @@ This module locks the three halves of the fix:
   updater machinery resolves — in-process or in a forwarded child env — can be
   the production home;
 - the deploy triggers (`spawn_update` / `spawn_rollout` / `spawn_restart`)
-  and the pause/unpause pair refuse the production home from any checkout that
+  refuse the production home from any checkout that
   is not its anchored `~/.ava/source`, BEFORE any handoff write, posture write,
-  pause, restarter respawn, or session spawn;
+  pause, or session spawn;
 - a failed spawn — even at the real-code level in a child process — leaves no
   pending handoff and no pause anywhere, and never touches the production
   handoff file.
@@ -40,7 +40,7 @@ from pathlib import Path
 
 import pytest
 
-from ops import cluster_deploy, cluster_pause
+from ops import cluster_deploy
 from ops.deploy_spawn import ProdHomeFromForeignCheckout
 from ops.update_check import UpdateCheck
 from shared.dotenv_boot import AVA_ENV_PATH
@@ -126,7 +126,7 @@ def _stub_all_deploy_write_seams(
 
     class _Backend:
         def has_session(self, _name: str) -> bool:
-            return True  # restarter "alive": the unpause respawn leg is skipped
+            return True
 
         def new_session(
             self, name: str, _cmd: str, _cwd: object, *, env: object, **_k: object
@@ -184,33 +184,28 @@ def _drive_restart(_monkeypatch: pytest.MonkeyPatch) -> None:
     cluster_deploy.spawn_restart("test-origin")
 
 
-def _drive_unpause(_monkeypatch: pytest.MonkeyPatch) -> None:
-    cluster_pause.unpause_local_cluster()
-
-
 _DEPLOY_TRIGGERS: tuple[tuple[str, Callable[[pytest.MonkeyPatch], None]], ...] = (
     ("update", _drive_update),
     ("rollout", _drive_rollout),
     ("restart", _drive_restart),
-    ("unpause", _drive_unpause),
 )
 
 
 @pytest.mark.parametrize(
     ("label", "drive"),
     _DEPLOY_TRIGGERS,
-    ids=["update", "rollout", "restart", "unpause"],
+    ids=["update", "rollout", "restart"],
 )
 def test_deploy_triggers_refuse_the_production_home_from_this_checkout(
     label: str,
     drive: Callable[[pytest.MonkeyPatch], None],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The deploy triggers and the unpause restarter respawn refuse when the
+    """The deploy triggers refuse when the
     resolved home is the production home but the executing checkout is not its
     anchored `~/.ava/source` — the exact 2026-08-27 incident shape (a dev/test
     checkout inheriting production AVA_HOME). The refusal fires BEFORE any write
-    seam: no handoff begin, no pause, no posture write, no restarter respawn,
+    seam: no handoff begin, no pause, no posture write, no service spawn,
     no session spawn, not even the update-log dir creation.
 
     A non-prod home (a worktree cluster, the suite's tmpfs home) never trips
@@ -234,7 +229,7 @@ def test_deploy_triggers_refuse_the_production_home_from_this_checkout(
         "log": [],
     }, (
         f"{label}: the guard must fire before any handoff write, pause, posture "
-        "write, restarter respawn, session spawn, or log creation"
+        "write, service spawn, session spawn, or log creation"
     )
 
 
@@ -253,7 +248,7 @@ def test_failed_spawn_in_a_child_process_leaves_no_handoff_and_no_pause(
     real-code level:
 
     - no pending handoff survives the failure (`updater_handoff.read()` is
-      inactive) and no pause survives (posture writes are paused then idle);
+      inactive) and no admission hold survives;
     - nothing outside the child's own home is touched: the modeled production
       handoff file (under the child's fake HOME, audit M-1) is byte-identical
       before and after.
@@ -290,6 +285,9 @@ def test_failed_spawn_in_a_child_process_leaves_no_handoff_and_no_pause(
         import shared.host_deploy_state
         import shared.session_backend
         import shared.updater_handoff
+        import shared.maintenance
+        from shared.machine import set_identity
+        set_identity(name="isolated-updater-child", role="agent-runner")
         from ops import cluster_deploy, cluster_session
         from ops.cluster_session import OrchestrationSpawnFailed
 
@@ -298,8 +296,7 @@ def test_failed_spawn_in_a_child_process_leaves_no_handoff_and_no_pause(
 
         class _Backend:
             def has_session(self, name: str) -> bool:
-                # Restarter "alive": unpause skips the respawn leg.
-                return True
+                return False  # No native host exists in this private home.
 
             def kill_session(self, name, *, graceful=False, expected=False):
                 return True, "forced"
@@ -323,6 +320,7 @@ def test_failed_spawn_in_a_child_process_leaves_no_handoff_and_no_pause(
             "handoff": snapshot.status,
             "posture_writes": posture_writes,
             "error": error,
+            "held": shared.maintenance.held(),
         }}))
     """)
     # S603: the child command is a fixed script this test itself wrote (no
@@ -344,7 +342,8 @@ def test_failed_spawn_in_a_child_process_leaves_no_handoff_and_no_pause(
     payload = json.loads(done.stdout.strip().splitlines()[-1])
     assert payload["error"] == "OrchestrationSpawnFailed"
     assert payload["handoff"] == "inactive", "a failed spawn must clear its pending handoff"
-    assert payload["posture_writes"] == ["paused", "idle"], (
+    assert not payload["held"], "a failed spawn must release its admission hold"
+    assert payload["posture_writes"] == ["idle"], (
         "a failed spawn must undo its pause (the incident left production paused)"
     )
 

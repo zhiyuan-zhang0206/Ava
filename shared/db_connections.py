@@ -41,7 +41,7 @@ class UnanchoredHomeError(RuntimeError):
 # "failed". This constant is therefore the single definition of that posture, and
 # is exported to the call sites that cannot go through `connect()` / `pool()`
 # because they are parameterized on a URL rather than on settings: the agent's own
-# pool kwargs (agent/loop.py), the boot-time schema assertion
+# pool kwargs (services/agent_host/pools.py), the boot-time schema assertion
 # (shared/migrations.py:assert_schema_current), `ava.DB` (ava/_settings.py), the
 # SDK shell-session index (ava/shell/sessions.py). Fail-fast behaviour is pinned
 # by tests/shared/test_connect_fail_fast.py.
@@ -70,7 +70,7 @@ PG_KEEPALIVE_KWARGS: dict[str, Any] = {
 # its DDL runs may legitimately exceed 60s — the migration applier must stay
 # unbounded. Every other connection point in the codebase goes through
 # connect()/pool() (or, in the agent process, reuses this constant explicitly —
-# see agent/loop.py / ava/_settings.py), so this one constant is the single
+# see services/agent_host/pools.py / ava/_settings.py), so this one constant is the single
 # statement-timeout definition.
 PG_STATEMENT_TIMEOUT_OPTIONS = "-c statement_timeout=60000"
 # The same ceiling as an explicit `SET` — the delivery path that works THROUGH
@@ -92,7 +92,7 @@ PG_STATEMENT_TIMEOUT_OPTIONS = "-c statement_timeout=60000"
 # every pooled backend is bounded at birth regardless of the client's code path.
 PG_STATEMENT_TIMEOUT_SET_SQL = "SET statement_timeout = 60000"
 # The full kwargs the sanctioned entry points pass to psycopg, exported so the
-# agent-process connection points (agent/loop.py pool, ava/_settings.py ava.DB,
+# runtime connection points (services/agent_host/pools.py pool, ava/_settings.py ava.DB,
 # agent/db.py CAS) can apply the same statement ceiling without re-deriving it.
 # `options` is the direct-connection delivery path (Postgres parses it itself);
 # pooled dials additionally run PG_STATEMENT_TIMEOUT_SET_SQL (see connect/pool).
@@ -141,9 +141,9 @@ def _restore_pooled_session(conn: psycopg.Connection) -> None:
 
 
 async def _restore_pooled_session_async(conn: psycopg.AsyncConnection) -> None:
-    """Async twin of `_restore_pooled_session` for the agent-process pools.
+    """Async twin of `_restore_pooled_session` for the host pools.
 
-    The agent's `AsyncConnectionPool` (agent/loop.py) is built directly rather
+    The agent's `AsyncConnectionPool` (services/agent_host/pools.py) is built directly rather
     than through `pool()`, so its per-borrow liveness check doubles as the
     baseline scrub here — same RESET ALL + statement ceiling, same discard-on-
     failure semantics (psycopg_pool replaces a connection whose check raises).
@@ -356,7 +356,7 @@ def pool(
     does NOT fail here when the DB is unreachable — the pool keeps retrying in
     background workers, so a dead data plane surfaces only at the first
     `pool.connection()`, one full timeout later. A caller on a bounded schedule (the
-    restarter healthcheck's stand-in dispatch runs inside the watchdog's sequential
+    watchdog's sequential
     tick, where a long wait delays every check behind it) must pass a short one;
     long-lived daemon pools keep the default.
 

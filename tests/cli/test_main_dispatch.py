@@ -260,9 +260,9 @@ def test_start_subcommand_forwards_argparse_flags(monkeypatch: pytest.MonkeyPatc
 def test_maintenance_verbs_opt_out_of_the_gateway_fetch(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """`ava stop` / `status` / `cluster watchdog-probe` set AVA_CONFIG_FETCH=skip
+    """`status` / `cluster watchdog-probe` set AVA_CONFIG_FETCH=skip
     before dispatch (settings-lite: they must work while the gateway is down);
-    `ava start` does not (its Settings build fetches, fail-fast)."""
+    start and normal pause/stop need the real cluster configuration."""
     import os as _os
 
     import cli.preflight as _preflight
@@ -272,22 +272,21 @@ def test_maintenance_verbs_opt_out_of_the_gateway_fetch(
     # same way `start`'s installed-home gate is neutralized below: this test
     # asserts env pinning, not gate behaviour.
     monkeypatch.setattr(_preflight, "require_anchored_home", lambda _verb: None)  # pyright: ignore[reportUnknownArgumentType]
-    for verb in ("stop", "status", "cluster", "agents", "config", "logs"):
+    for verb in ("status", "cluster", "agents", "config", "logs"):
         env = {"PATH": "/usr/bin"}
         monkeypatch.setattr(_os, "environ", env)
         monkeypatch.setattr(_main, "_build_parser", lambda v=verb: _noop_parser(v))
         assert _main.main([verb]) == 0
         assert env.get("AVA_CONFIG_FETCH") == "skip", f"{verb} must be settings-lite"
 
-    # start is NOT lite: the fetch happens at its Settings build
-    env = {"PATH": "/usr/bin"}
-    monkeypatch.setattr(_os, "environ", env)
-    import cli.preflight as _preflight
-
+    # Starting and graceful draining both need data-plane configuration.
     monkeypatch.setattr(_preflight, "require_installed_home", lambda: None)
-    monkeypatch.setattr(_main, "_build_parser", lambda: _noop_parser("start"))
-    assert _main.main(["start"]) == 0
-    assert "AVA_CONFIG_FETCH" not in env
+    for verb in ("start", "pause", "stop"):
+        env = {"PATH": "/usr/bin"}
+        monkeypatch.setattr(_os, "environ", env)
+        monkeypatch.setattr(_main, "_build_parser", lambda v=verb: _noop_parser(v))
+        assert _main.main([verb]) == 0
+        assert "AVA_CONFIG_FETCH" not in env
 
 
 def _noop_parser(verb: str) -> argparse.ArgumentParser:

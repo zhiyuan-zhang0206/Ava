@@ -537,7 +537,7 @@ async def run() -> None:
     Both before cold-start — cold-start may take tens of seconds
     embedding many files; pidfile / healthz being invisible would let
     watchdog misjudge death and spawn races (PR #254 fixed this).
-    Pidfile before the healthz bind — see services/restarter/daemon.py:run().
+    Publish the pidfile before binding healthz so identity-aware probes can verify it.
     """
     if _is_running():
         _log.info("[indexer] daemon already running (pidfile=%s), exiting", _PIDFILE)

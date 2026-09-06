@@ -51,7 +51,7 @@ RESTART_SCRIPT: tuple[AIMessage, ...] = (
 )
 
 IDLE_SCRIPT: tuple[AIMessage, ...] = (
-    AIMessage(content="\u6211\u5df2\u91cd\u542f\u5b8c\u6210\u3002", usage_metadata=_USAGE),
+    AIMessage(content="Follow-up processed by successor.", usage_metadata=_USAGE),
     AIMessage(content="Follow-up processed by successor.", usage_metadata=_USAGE),
 )
 

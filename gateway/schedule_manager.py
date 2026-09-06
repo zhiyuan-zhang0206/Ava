@@ -68,7 +68,7 @@ from shared.session_env import forward_env_dict
 _log = logging.getLogger(__name__)
 
 # Reconcile cadence. Snappier than cron (a schedule is a resident process, not a
-# wall-clock fire), slower than the restarter's 1s — a few seconds of detection
+# wall-clock fire) — a few seconds of detection
 # lag on a crash is fine and keeps the polling cheap.
 _POLL_INTERVAL_S = 5.0
 

@@ -266,7 +266,7 @@ async def test_llm_node_validator_wired(
     production falls back to silent idle.
 
     Error event publish is not tested here — publish has been moved to the outer
-    `agent/loop.py:_invoke_graph_with_lifecycle_logging` (only publishes after
+    `services/agent_host/host.py:_invoke_until_done` (only publishes after
     langgraph retries are exhausted, avoiding "error" for every failed retry attempt)."""
     from unittest.mock import MagicMock
 
