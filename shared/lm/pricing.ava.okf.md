@@ -31,6 +31,10 @@ tags:
 - **qwen3.8-flash uses the landed Model Studio EN page's Beijing USD column** (`$0.113 / $0.014 / $0.382`, checked 2026-09-02). The earlier QwenCloud figures tracked the Singapore column, overstated Beijing cost, and are retired (see the module docstring).
 - Rates are **region-specific**, and Qwen's endpoint is configurable (`AVA_DASHSCOPE_BASE_URL`). The archive's Qwen entries are Beijing; Singapore prices the same models differently (qwen3.8-max $2.00/$0.25/$6.00 against Beijing's $1.65/$0.206/$4.951). Repointing the base URL at another region means re-checking the archive and plugin price.
 
+## Sourcing
+
+- **gpt-5.6-sol carries its promotional price** ($4 in / $0.4 cached / $20 out per 1M, official model page checked 2026-09-06, valid at least through 2026-11-21). The revert to the standard rates ($5 / $0.5 / $30) is a deliberate manual flip in the plugin + archive, not an automatic period boundary (405 ruling 2026-09-07).
+
 ## Notes
 
 - **DeepSeek reasoning tokens** count into output and bill at the merged output rate; `usage_metadata` reports them separately but the underlying rate is the same.

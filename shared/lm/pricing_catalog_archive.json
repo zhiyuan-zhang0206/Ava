@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "catalog_version": "2026-09-06.1",
+  "catalog_version": "2026-09-06.2",
   "currency": "USD",
   "unit_tokens": 1000000,
   "models": {
@@ -617,8 +617,8 @@
     },
     "gpt-5.6-sol": {
       "vendor": "openai",
-      "source_url": "https://openai.com/api/pricing/",
-      "source_checked_at": "2026-06-27",
+      "source_url": "https://developers.openai.com/api/docs/models/gpt-5.6-sol",
+      "source_checked_at": "2026-09-06",
       "periods": [
         {
           "effective_from": null,
@@ -628,9 +628,9 @@
               "input_tokens_min": 0,
               "input_tokens_max": null,
               "rates": {
-                "input": "5.0",
-                "cache_read": "0.5",
-                "output": "30.0"
+                "input": "4.0",
+                "cache_read": "0.4",
+                "output": "20.0"
               },
               "utc_daily_overrides": []
             }

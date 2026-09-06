@@ -444,6 +444,20 @@ class TestBuildChatModel:
         assert isinstance(m, ChatOpenAI)
         assert m.reasoning == {"effort": "low"}
 
+    def test_gpt55_clamps_max_onto_declared_xhigh_rung(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """gpt-5.5's official vocabulary has no max (none..xhigh) — a
+        declared effort_levels now keeps out-of-range values off the wire."""
+        monkeypatch.setattr(settings.lm, "llm_override", "")
+        monkeypatch.setattr(settings.lm, "reasoning_effort", "max")
+        monkeypatch.setenv("OPENAI_API_KEY", "k")
+        from langchain_openai import ChatOpenAI
+
+        m = build_chat_model("gpt-5.5")
+        assert isinstance(m, ChatOpenAI)
+        assert m.reasoning == {"effort": "xhigh", "summary": "auto"}
+
     def test_gpt_thinking_disabled_drops_to_effort_none(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
