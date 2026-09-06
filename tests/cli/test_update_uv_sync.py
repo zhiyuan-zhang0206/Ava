@@ -30,6 +30,15 @@ from cli.commands import _update_uv_sync as _native_sync
 from shared.deploy_timing import UV_SYNC_TIMEOUT_S
 
 
+@pytest.fixture(autouse=True)
+def _canonical_sync_inputs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep transport stubs independent of this developer machine's mirror."""
+    monkeypatch.setenv("UV_DEFAULT_INDEX", "https://pypi.org/simple")
+    for repo in (tmp_path, tmp_path / "source"):
+        repo.mkdir(exist_ok=True)
+        (repo / "uv.lock").write_text("version = 1\npackage = []\n")
+
+
 def _expected_args(repo: Path) -> list[str]:
     """Mirror the implementation: the --python pin rides only when the venv
     interpreter already exists (a real host's converged venv). A fresh staging
@@ -118,7 +127,7 @@ def test_prod_sync_argv_excludes_dev_group_and_carries_the_bound(
     kwargs = seen["kwargs"]
     assert isinstance(kwargs, dict)
     assert kwargs["cwd"] == repo
-    assert kwargs["timeout"] == UV_SYNC_TIMEOUT_S
+    assert 0 < kwargs["timeout"] <= UV_SYNC_TIMEOUT_S
     assert kwargs["capture_output"] is False
     assert "VIRTUAL_ENV" not in kwargs["env"]
     # Lockfile semantics are asserted, never silently re-resolved or ignored:

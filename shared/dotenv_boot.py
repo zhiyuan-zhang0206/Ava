@@ -270,6 +270,17 @@ AVA_ENV_PATH = _HOME / ".env"
 AVA_MIRROR_ENV_PATH = _HOME / "mirror.env"
 
 
+def _load_dotenv_layer(path: Path) -> None:
+    """Preserve one default Python index across its two environment aliases."""
+    inherited_index = os.environ.get("UV_DEFAULT_INDEX") or os.environ.get("UV_INDEX_URL")
+    load_dotenv(path)
+    selected = (
+        inherited_index or os.environ.get("UV_DEFAULT_INDEX") or os.environ.get("UV_INDEX_URL")
+    )
+    if selected is not None:
+        os.environ["UV_DEFAULT_INDEX"] = selected
+
+
 def load_ava_env() -> None:
     """Load this process's `$AVA_HOME/.env` (then `mirror.env`) into os.environ.
 
@@ -281,13 +292,16 @@ def load_ava_env() -> None:
 
     mirror.env loads last and, like .env, never overrides an already-set key, so
     precedence is: real environment > .env > mirror.env. It is a no-op when the
-    file is absent (the common, non-mirror case).
+    file is absent (the common, non-mirror case). UV_DEFAULT_INDEX and
+    UV_INDEX_URL represent one setting across these layers; an inherited legacy
+    alias is normalized before a lower-priority layer can supply the other alias.
+    Additional index settings remain separate and are never merged here.
     """
     os.environ.setdefault("AVA_HOME", str(_HOME))
     if not _ANCHORED:
         os.environ.setdefault("AVA_DB_URL", UNANCHORED_DB_SENTINEL)
-    load_dotenv(AVA_ENV_PATH)
-    load_dotenv(AVA_MIRROR_ENV_PATH)
+    _load_dotenv_layer(AVA_ENV_PATH)
+    _load_dotenv_layer(AVA_MIRROR_ENV_PATH)
     _enforce_cluster_env_authority()
     _translate_legacy_skip_aliases()
 

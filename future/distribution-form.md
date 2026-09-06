@@ -23,7 +23,7 @@ core lives" only changes the URL (localhost vs a remote/tunnel address).
 | Audience | How they get + run it | Needs Apple Developer ID / a packaged `.app`? |
 |---|---|---|
 | **The operator's own machines** | existing helper + split deployment; grant TCC once per machine | **No** |
-| **Open-source self-hosters (devs)** | `git clone` -> `install.sh` (prereqs) -> `uv sync` -> `ava start` -> browser; grant TCC once on macOS | **No** |
+| **Open-source self-hosters (devs)** | `git clone` -> `install.sh` (prereqs + locked dependencies) -> `ava start` -> browser; grant TCC once on macOS | **No** |
 | **Non-technical end users** | a signed, notarized, dependency-bundled one-click `.app` | **Yes** |
 
 The decisive fact: **publishing the source is not shipping an installer.** A

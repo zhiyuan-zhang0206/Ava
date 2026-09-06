@@ -13,7 +13,7 @@ environment variables the package managers **already honor**, nothing Ava-specif
 
 | Leg | Mirror | Variable |
 |---|---|---|
-| PyPI (`uv sync`) | Tsinghua TUNA | `UV_DEFAULT_INDEX` |
+| Python locked installation | Tsinghua TUNA | `UV_DEFAULT_INDEX` |
 | npm (`npm ci` at `ava start`) | npmmirror | `npm_config_registry` |
 | Homebrew bottles + API (macOS) | Tsinghua TUNA | `HOMEBREW_BOTTLE_DOMAIN`, `HOMEBREW_API_DOMAIN` |
 
@@ -28,22 +28,24 @@ GitHub-hosted CI runners. Do not commit a host's mirror-resolved lock. The
 that boundary; a CI environment index override cannot replace artifact URLs
 already embedded in a frozen lock.
 
-Production updates use `uv sync --locked`. With uv 0.10.2, a canonical PyPI
-lock plus a different `UV_DEFAULT_INDEX` fails the freshness check because the
-index change requires a lock update. The install-time mirror path below does
-not establish mirrored production-update compatibility. That transport gap
-must be resolved before updating a mirror-enabled production host, while
-preserving the committed versions, hashes, and freshness validation.
+Installation and updates use the same dependency-free `cli.python_install`
+entry point. It checks the canonical lock, exports exact requirements and hashes
+with offline `uv export --locked`, and installs those artifacts through the
+host's index using `uv pip install --no-deps --require-hashes`. The real checkout
+is then installed editable with uv's normal build isolation. No lock is rewritten
+or re-resolved for a mirror. Existing machine uv and pip single-index settings
+are also recognized; explicit environment settings take precedence. See
+[Machine Python indexes](../../../../conventions/dev-setup.md#machine-python-indexes)
+for configuration precedence and supported transport settings.
 
-Two implementation details worth knowing:
+A process still running an older updater can execute its old mirror-incompatible
+prepare command before loading this helper. First rollout must verify the
+executing updater version; repository merge alone does not establish that
+bootstrap path. The shared helper's local tests do not replace that production
+check.
 
-- **`uv sync` re-resolves under a mirror** (the flag drops `--frozen`). The
-  committed `uv.lock` pins `files.pythonhosted.org` wheel URLs that `--frozen`
-  would fetch verbatim, ignoring the index override; re-resolving against
-  `UV_DEFAULT_INDEX` rewrites the *local* lock to mirror URLs (uncommitted). A
-  full mirror resolves the same versions.
-- **macOS installs `uv` via Homebrew** under a mirror, so the pinned uv release's
-  GitHub download is skipped (Homebrew is already mirror-routed).
+On macOS, selecting the mirror also installs `uv` via Homebrew, avoiding the
+pinned uv release's GitHub binary download. Homebrew is already mirror-routed.
 
 **Residual legs with no canonical CN mirror** (set these yourself if they stall):
 
@@ -55,6 +57,6 @@ Two implementation details worth knowing:
   clean CN mirror — point your apt sources and those vars at a proxy you trust.
   macOS is the clean end-to-end path.
 
-`--mirror` is refused together with `--worktree`: a worktree cluster runs no
-host-global download step (`uv sync --frozen` follows the committed lock), so
-there is nothing for a mirror to route.
+`--mirror` is refused together with `--worktree` because that flag writes a unit
+profile and selects host-global download routes. Worktree Python installation
+still honors existing machine index settings through the same locked helper.

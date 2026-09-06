@@ -47,6 +47,9 @@ pg/redis + provisioned database + `$AVA_HOME/.env`). Flags (`--role`,
 `--worktree`, `--seed`) and the data-plane identity rule are in
 [[cli/install_cluster.ava.okf.md]].
 
+The dependency-free installation seam shared by install and update is described
+in [[cli/python-install.ava.okf.md]].
+
 ## Internal Commands (`_` prefix, run by start/update)
 
 Per-cluster pg/redis bring-up, host convergence, the staged upgrade legs, and

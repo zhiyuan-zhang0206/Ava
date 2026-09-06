@@ -1,4 +1,11 @@
-"""Native update-chain seam for a production-scoped ``uv sync``.
+"""Native update-chain seam for a production-scoped locked Python install.
+
+``cli.python_install`` is imported before checkout and shared with install.sh.
+Its stdlib-only dependency closure stays callable when rollback removes the new
+helper from disk. It uses native ``uv sync`` for PyPI, or locked export plus
+hash-checked ``uv pip`` installation for a host mirror. Every uv process tree
+shares one deadline inside the editable write window, with record restoration
+and post-install import proof around both paths.
 
 The bare ``uv sync`` this module used to run syncs EVERY dependency group —
 including the ``dev`` group (pyright / pytest / ruff / ...). On the 2026-08-30
@@ -48,8 +55,10 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+from time import monotonic
 
 from cli.commands._repo import _repo_root
+from cli.python_install import install as install_locked
 from shared.deploy_timing import UV_SYNC_TIMEOUT_S
 from shared.editable_install import (
     editable_ava_pth_paths,
@@ -63,7 +72,7 @@ from shared.platform import IS_WINDOWS
 from shared.platform_backend import get_backend
 from shared.proc import run_bounded
 
-_PROD_SYNC_ARGS = ["uv", "sync", "--locked", "--no-dev", "--inexact", "--verbose"]
+_PROD_SYNC_ARGS = ["uv", "sync", "--locked", "--inexact", "--no-config", "--no-dev", "--verbose"]
 
 
 @dataclass(frozen=True)
@@ -75,24 +84,48 @@ class _EditableRecordSnapshot:
     content: bytes | None
 
 
-def _prod_sync_argv(repo: Path) -> list[str]:
-    """Production sync command pinned to ``repo``'s virtualenv interpreter.
-
-    The ``--python`` pin only applies when that interpreter already exists: a
-    real host's venv is present (the pin keeps the sync on the venv the
-    editable-install machinery converged), but a fresh dry-run staging
-    worktree has no venv yet, and pointing ``--python`` at the not-yet-created
-    ``.venv/bin/python`` makes uv fail with "No interpreter found" instead of
-    creating the venv (2026-09-02: every rollout since 93aab30 aborted in
-    prepare with exactly that). With no pin uv creates the venv from the same
-    managed interpreter the lockfile's ``requires-python`` selects.
-    """
-
+def _target_interpreter(repo: Path) -> str | None:
+    """Pin an existing venv; fresh staging lets uv select a managed interpreter."""
     python_name = "python.exe" if IS_WINDOWS else "python"
     interpreter = repo / ".venv" / get_backend().venv_bin_dir_name() / python_name
-    if not interpreter.exists():
-        return [*_PROD_SYNC_ARGS]
-    return [*_PROD_SYNC_ARGS, "--python", str(interpreter)]
+    return str(interpreter) if interpreter.exists() else None
+
+
+def _run_locked_install(
+    repo: Path, timeout_s: float, reinstall_package: str | None
+) -> subprocess.CompletedProcess[bytes]:
+    """Use the already-imported installer even after checkout removes its files."""
+    deadline = monotonic() + timeout_s
+    last_result: subprocess.CompletedProcess[bytes] | None = None
+
+    def run_step(
+        argv: list[str], repo: Path, env: dict[str, str], *, discard_stdout: bool = False
+    ) -> int:
+        nonlocal last_result
+        remaining = deadline - monotonic()
+        if remaining <= 0:
+            raise subprocess.TimeoutExpired(argv, timeout_s)
+        last_result = run_bounded(
+            argv,
+            cwd=repo,
+            env=env,
+            capture_output=False,
+            stdout=subprocess.DEVNULL if discard_stdout else None,
+            timeout=remaining,
+        )
+        return last_result.returncode
+
+    install_locked(
+        repo,
+        no_dev=True,
+        verbose=True,
+        interpreter=_target_interpreter(repo),
+        reinstall_package=reinstall_package,
+        run=run_step,
+    )
+    if last_result is None:
+        raise RuntimeError("Locked installer returned without running uv")
+    return last_result
 
 
 def _uv_cache_dir() -> str | None:
@@ -254,16 +287,7 @@ def run_uv_sync(
             )
             return _failed_uv_sync(126)
         try:
-            argv = _prod_sync_argv(repo)
-            if reinstall_package is not None:
-                argv.extend(("--reinstall-package", reinstall_package))
-            result = run_bounded(
-                argv,
-                cwd=repo,
-                env={key: value for key, value in os.environ.items() if key != "VIRTUAL_ENV"},
-                capture_output=False,
-                timeout=timeout_s,
-            )
+            result = _run_locked_install(repo, timeout_s, reinstall_package)
         except subprocess.TimeoutExpired:
             print(
                 f"  ✗ uv sync timed out after {timeout_s:.0f}s — the sync stopped "
@@ -273,6 +297,9 @@ def run_uv_sync(
                 file=sys.stderr,
             )
             result = _failed_uv_sync(124)
+        except ValueError as exc:
+            print(f"  ✗ locked Python install refused: {exc}", file=sys.stderr)
+            result = _failed_uv_sync(126)
         except OSError as exc:
             print(
                 f"  ✗ uv sync could not start: {exc} — is uv installed and on PATH?",
