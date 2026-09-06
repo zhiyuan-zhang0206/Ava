@@ -17,7 +17,6 @@ Verifies:
 from __future__ import annotations
 
 import asyncio
-import time
 from concurrent.futures import ThreadPoolExecutor
 
 import httpx
@@ -32,6 +31,7 @@ from shared.config import settings
 from tests.e2e._db import wait_for_status
 from tests.e2e._env import E2EEnv
 from tests.e2e.conftest import _HOSTED
+from tests.shared.poll_until import poll_until
 
 
 @pytest.mark.scenario("tests.e2e.fakes.scenarios.lifecycle_resurrect:build_waiting_for_chat")
@@ -70,11 +70,12 @@ def test_resurrect_brings_back_terminated_agent(e2e_env: E2EEnv) -> None:
 
     # wait for fresh process to start + idle (90s ceiling same as _db.py wait_for_status —
     # pure headroom, e2e runs serial on dedicated box, not a tight bound)
-    deadline = time.monotonic() + 90.0
     last_resurrect = False
     last_status: str | None = None
     last_pid: int | None = None
-    while time.monotonic() < deadline:
+
+    def resurrect_cycle_completed() -> tuple[bool, object]:
+        nonlocal last_resurrect, last_status, last_pid
         with psycopg.connect(settings.data_plane.db_url) as conn, conn.cursor() as cur:
             cur.execute(
                 "SELECT 1 FROM inbound_messages WHERE agent_id = %s AND kind = 'resurrect' LIMIT 1",
@@ -85,34 +86,50 @@ def test_resurrect_brings_back_terminated_agent(e2e_env: E2EEnv) -> None:
             row = cur.fetchone()
             if row:
                 last_status, last_pid = row
-        if (
+        reached_successor = (
             last_resurrect
             and last_status == AgentStatus.IDLING.value
             and last_pid is not None
             and last_pid != first_pid
-        ):
-            with psycopg.connect(settings.data_plane.db_url) as conn:
-                wake = conn.execute(
-                    "SELECT status,payload->'resurrection_retry'->>'attempts' "
-                    "FROM inbound_messages WHERE agent_id=%s AND kind='chat' AND content='wake up'",
-                    (agent_id,),
-                ).fetchone()
-            assert wake is not None and wake[0] in ("claimed", "done")
-            assert int(wake[1]) >= 2, "the old process must have remained alive through a retry"
-            items = httpx.get(
-                f"{e2e_env.gateway_url}/api/agents/{agent_id}/timeline?limit=1000", timeout=30
-            ).json()["items"]
-            assert any(
-                item["kind"] == "agent_chat"
-                and "I processed the wake after resurrection." in item["payload"]
-                for item in items
-            )
-            return
-        time.sleep(0.5)
-    raise RuntimeError(
-        f"agent {agent_id} did not complete resurrect cycle within 90s: "
-        f"first_pid={first_pid} resurrect={last_resurrect} "
-        f"status={last_status!r} pid={last_pid}"
+        )
+        state: dict[str, object] = {
+            "first_pid": first_pid,
+            "resurrect": last_resurrect,
+            "status": last_status,
+            "pid": last_pid,
+        }
+        if not reached_successor:
+            return False, state
+
+        with psycopg.connect(settings.data_plane.db_url) as conn:
+            wake = conn.execute(
+                "SELECT status,payload->'resurrection_retry'->>'attempts' "
+                "FROM inbound_messages WHERE agent_id=%s AND kind='chat' AND content='wake up'",
+                (agent_id,),
+            ).fetchone()
+        state["wake"] = wake
+        if wake is None:
+            return False, state
+        assert wake[0] in ("claimed", "done")
+        assert int(wake[1]) >= 2, "the old process must have remained alive through a retry"
+
+        items = httpx.get(
+            f"{e2e_env.gateway_url}/api/agents/{agent_id}/timeline?limit=1000", timeout=30
+        ).json()["items"]
+        reply_seen = any(
+            item["kind"] == "agent_chat"
+            and "I processed the wake after resurrection." in item["payload"]
+            for item in items
+        )
+        state["timeline_kinds"] = [item["kind"] for item in items]
+        state["reply_seen"] = reply_seen
+        return reply_seen, state
+
+    poll_until(
+        resurrect_cycle_completed,
+        timeout=90.0,
+        interval=0.5,
+        what=f"agent {agent_id} completes its resurrect cycle",
     )
 
 
@@ -135,15 +152,22 @@ def test_explicit_resurrection_after_observed_process_exit(
     e2e_env.page.fill('[data-testid="composer-input"]', "terminate before explicit resurrection")
     e2e_env.page.click('[data-testid="composer-send"]')
     wait_for_status(agent_id, AgentStatus.TERMINATED.value)
-    deadline = time.monotonic() + 90
-    while True:
+
+    def original_process_exited() -> tuple[bool, object]:
         try:
-            if not original.is_running() or original.status() == psutil.STATUS_ZOMBIE:
-                break
+            running = original.is_running()
+            status = original.status() if running else None
         except psutil.NoSuchProcess:
-            break
-        assert time.monotonic() < deadline, "the original process did not actually exit"
-        time.sleep(0.05)
+            return True, {"pid": original.pid, "running": False, "status": "missing"}
+        exited = not running or status == psutil.STATUS_ZOMBIE
+        return exited, {"pid": original.pid, "running": running, "status": status}
+
+    poll_until(
+        original_process_exited,
+        timeout=90,
+        interval=0.05,
+        what=f"original agent process {original.pid} exits",
+    )
     # Playwright's sync bridge keeps an event loop on this thread. The real
     # lifecycle RPC therefore runs on a separate, bounded test-owned thread.
     # Root truncated_db disables auth only in this pytest process, while the
@@ -207,9 +231,7 @@ def _assert_hosted_resurrect(e2e_env: E2EEnv, page: Page, agent_id: int) -> None
     resp.raise_for_status()
     assert "status" in resp.json()
 
-    deadline = time.monotonic() + 90.0
-    seen_marker = False
-    while True:
+    def resurrect_marker_reached_timeline() -> tuple[bool, object]:
         items = httpx.get(
             f"{e2e_env.gateway_url}/api/agents/{agent_id}/timeline?limit=1000", timeout=90.0
         ).json()["items"]
@@ -218,10 +240,14 @@ def _assert_hosted_resurrect(e2e_env: E2EEnv, page: Page, agent_id: int) -> None
             and "You have been resurrected by" in (it.get("payload") or "")
             for it in items
         )
-        if seen_marker or time.monotonic() > deadline:
-            break
-        time.sleep(0.5)
-    assert seen_marker, "hosted resurrect marker never reached the timeline"
+        return seen_marker, {"timeline_kinds": [it.get("kind") for it in items]}
+
+    poll_until(
+        resurrect_marker_reached_timeline,
+        timeout=90.0,
+        interval=0.5,
+        what=f"hosted resurrect marker reaches agent {agent_id} timeline",
+    )
     wait_for_status(agent_id, AgentStatus.IDLING.value)
 
     with psycopg.connect(settings.data_plane.db_url) as conn, conn.cursor() as cur:

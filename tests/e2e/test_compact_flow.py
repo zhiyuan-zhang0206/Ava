@@ -21,7 +21,6 @@ locks the full flow in the real browser:
 from __future__ import annotations
 
 import re
-import time
 from typing import Any
 
 import httpx
@@ -38,6 +37,7 @@ from tests.e2e.fakes.scenarios.compact_flow import (
     POST_COMPACT_REPLY,
     SUMMARY_TEXT,
 )
+from tests.shared.poll_until import poll_until
 
 _UNRECOGNIZED_RE = re.compile(
     "Unrecognized system_marker|\u65e0\u6cd5\u8bc6\u522b\u7684 system_marker"
@@ -58,14 +58,23 @@ def _wait_kinds(
     the first turn). Subsequence (not equality): the post-compact narration
     agent_chat can commit a beat after the compact envelope, and the poll
     must not race it."""
-    deadline = time.monotonic() + timeout
-    while True:
+    items: list[dict[str, Any]] = []
+
+    def expected_kinds_reached_timeline() -> tuple[bool, object]:
+        nonlocal items
         items = _timeline(gateway_url, agent_id)
         kinds = [it["kind"] for it in items if it["kind"] != "system_marker"]
-        it = iter(kinds)
-        if all(any(k == want for k in it) for want in expected) or time.monotonic() > deadline:
-            return items
-        time.sleep(0.5)
+        kinds_iter = iter(kinds)
+        reached = all(any(kind == want for kind in kinds_iter) for want in expected)
+        return reached, {"expected": expected, "timeline_kinds": kinds}
+
+    poll_until(
+        expected_kinds_reached_timeline,
+        timeout=timeout,
+        interval=0.5,
+        what=f"agent {agent_id} timeline contains {expected!r} in order",
+    )
+    return items
 
 
 @pytest.mark.scenario("tests.e2e.fakes.scenarios.compact_flow:build")
