@@ -32,6 +32,12 @@ Source of truth = services in `ops/spec.py` `build_services()` whose `ServiceSpe
 ## Notes
 permissions-helper is macOS/Windows, and **not in the session service roster** — its platform scheduler owns keepalive and it remains outside `build_services()`, while the macOS helper's real protocol healthcheck is manually attached to the agent-runner watchdog.
 
+The hosted runner renews database ownership and then beats local liveness before
+publishing its 60-second Redis turn-progress snapshot. That best-effort `SET`
+has a three-second operation deadline: a stalled response is cancelled and logged
+at WARNING so subsequent ownership renewals continue. The shared Redis client's
+long-lived pub/sub reads remain unbounded; shutdown cancellation still propagates.
+
 ## Key Dependencies
 - [[watchdog.ava.okf.md]] — agent-runner-watchdog keeps alive the session services in this group every 60s (restarter / ops / browser)
 - [[services/services.ava.okf.md|Background Services Overview]] — the upper-level index of grouping and capability distribution
