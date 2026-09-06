@@ -19,7 +19,7 @@ import pytest
 from cli.commands import _maintenance_data_plane as plane
 from cli.commands import _maintenance_stop as stop
 from shared.config import settings
-from shared.session_backend import PosixProcSessionBackend
+from shared.session_backend import PosixProcSessionBackend, PtySessionBackend
 from shared.session_record import SessionRecord, pid_starttime_ticks
 
 Launcher = Callable[[str, str], subprocess.Popen[str]]
@@ -160,6 +160,57 @@ def test_persistent_terminals_refuse_before_signalling(
     with pytest.raises(RuntimeError, match="will not kill or replay"):
         stop.stop_services(1)
     assert proc.poll() is None
+
+
+def test_explicit_keep_preserves_real_idle_terminal_during_service_stop(
+    home: Path, launch: Launcher, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from shared.pty_sessions import cli as pty
+    from shared.pty_sessions._paths import host_identity
+
+    name = "ava-agent-123-shell-1"
+    monkeypatch.setattr(stop, "get_shell_backend", PtySessionBackend)
+    envfile = pty.write_env_file({})
+    try:
+        created = subprocess.run(  # noqa: S603 — test-owned home and repository module
+            [sys.executable, "-m", "shared.pty_sessions.cli", name, "new", str(home), str(envfile)],
+            env={**os.environ, "AVA_HOME": str(home), "AVA_HOME_OVERRIDE": "1", "HOME": str(home)},
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+        assert created.returncode == 0, created.stderr
+        path = home / "run/pty" / f"{name}.json"
+        record = SessionRecord.read(path)
+        host = host_identity(path)
+        assert record is not None and host is not None
+        shell = stop.OwnedProcess(record.pid, record.create_time, record.starttime)
+        terminal_host = stop.OwnedProcess.capture(psutil.Process(host[0]))
+        deadline = time.monotonic() + 5
+        while psutil.Process(record.pid).children(recursive=True):
+            assert time.monotonic() < deadline, "terminal did not reach an idle shell"
+            time.sleep(0.05)
+        marker = home / "service-finally"
+        service = launch(
+            "ava-agent-host",
+            "import signal,time,pathlib; "
+            f"signal.signal(signal.SIGTERM,lambda *_: (pathlib.Path({str(marker)!r}).write_text('done'), exit(0))); "
+            "print('ready',flush=True); time.sleep(60)",
+        )
+        with pytest.raises(RuntimeError, match="will not kill or replay"):
+            stop.stop_services(3)
+        assert service.poll() is None
+        assert stop.stop_services(3, keep_terminals=True) == ["ava-agent-host"]
+        assert service.wait(timeout=1) == 0 and marker.read_text() == "done"
+        assert SessionRecord.read(path) == record and host_identity(path) == host
+        assert shell.live() and terminal_host.live()
+        assert PtySessionBackend().list_sessions() == [name]
+    finally:
+        # Only this fixture's named terminal is eligible for fixture cleanup.
+        if name in pty.live_sessions():
+            pty.session_request(name, {"op": "kill"})
+        envfile.unlink(missing_ok=True)
 
 
 def test_replaced_record_is_not_signalled(

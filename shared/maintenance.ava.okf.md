@@ -51,6 +51,12 @@ handlers and actual executor futures before signalling services. The HTTP
 server's socket close is insufficient when a client disconnects before its
 handler finishes. This accounting does not cover detached jobs or OS services.
 
+Local `stop` and `stop-data-plane` refuse live terminals by default. Explicit
+`--keep-terminals` preserves them using an operator assertion of a separately
+verified work boundary. It does not prove PTY business writes have stopped.
+Windows SDK shell/schedule records are excluded from service signalling only
+under that assertion; drain, ops and service identity/exit checks still apply.
+
 The CLI-only `authorized_start` ContextVar is an exact-operation capability for
 nested startup/unpause calls in one process; it is not propagated to service
 processes and never replaces the persistent journal authority.
