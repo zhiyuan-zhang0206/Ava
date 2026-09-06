@@ -8,6 +8,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
+import httpx
 import pytest
 
 from shared import telemetry_otlp
@@ -719,6 +720,65 @@ def test_otlp_exporter_posts_protobuf(monkeypatch: pytest.MonkeyPatch, tmp_path:
         assert req.SerializeToString()
         spans += sum(len(ss.spans) for rs in req.resource_spans for ss in rs.scope_spans)
     assert spans == 2
+
+
+def test_otlp_exporter_timeout_is_bounded_and_returns_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A collector timeout costs one bounded POST and never escapes the exporter."""
+    timeouts: list[float] = []
+
+    def _timeout(_url: str, *, content: bytes, headers: dict[str, str], timeout: float):
+        del content, headers
+        timeouts.append(timeout)
+        raise httpx.ReadTimeout("collector stalled")
+
+    monkeypatch.setattr("httpx.post", _timeout)
+    exporter = OtlpJsonHttpSpanExporter(endpoint="http://127.0.0.1:4318")
+
+    assert exporter.export([]) is trace_mod.SpanExportResult.FAILURE
+    assert timeouts == [trace_mod._TRACE_EXPORT_TIMEOUT_S]
+    assert 0 < trace_mod._TRACE_EXPORT_TIMEOUT_S <= 5.0
+
+
+def test_otlp_exporter_circuit_drops_during_cooldown_then_recovers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Consecutive failures open the circuit; one post-cooldown probe closes it."""
+    clock = {"now": 100.0}
+    posts = 0
+
+    class _Resp:
+        def raise_for_status(self) -> None:
+            return None
+
+    def _post(_url: str, *, content: bytes, headers: dict[str, str], timeout: float):
+        nonlocal posts
+        del content, headers, timeout
+        posts += 1
+        if posts <= trace_mod._TRACE_EXPORT_FAILURE_THRESHOLD:
+            raise httpx.ConnectError("collector unavailable")
+        return _Resp()
+
+    monkeypatch.setattr(trace_mod.time, "monotonic", lambda: clock["now"])
+    monkeypatch.setattr("httpx.post", _post)
+    exporter = OtlpJsonHttpSpanExporter(endpoint="http://127.0.0.1:4318")
+
+    for _ in range(trace_mod._TRACE_EXPORT_FAILURE_THRESHOLD):
+        assert exporter.export([]) is trace_mod.SpanExportResult.FAILURE
+    assert posts == trace_mod._TRACE_EXPORT_FAILURE_THRESHOLD
+
+    assert exporter.export([]) is trace_mod.SpanExportResult.FAILURE
+    assert posts == trace_mod._TRACE_EXPORT_FAILURE_THRESHOLD
+    assert exporter._dropped_batches == 1
+
+    clock["now"] += trace_mod._TRACE_EXPORT_COOLDOWN_S
+    assert exporter.export([]) is trace_mod.SpanExportResult.SUCCESS
+    assert posts == trace_mod._TRACE_EXPORT_FAILURE_THRESHOLD + 1
+    assert exporter._consecutive_failures == 0
+
+    assert exporter.export([]) is trace_mod.SpanExportResult.SUCCESS
+    assert posts == trace_mod._TRACE_EXPORT_FAILURE_THRESHOLD + 2
 
 
 # --- turn_span placeholder-root export timing (#1964) ------------------------------

@@ -23,7 +23,7 @@ from typing import Any
 import psycopg
 import pytest
 
-from shared import observability, telemetry, telemetry_otlp
+from shared import observability, telemetry, telemetry_otlp, telemetry_otlp_metrics
 from shared.telemetry import Event
 
 _AGENT = 8902
@@ -1011,6 +1011,71 @@ def test_endpoint_reachable_connection_refused_is_false():
 
 def test_endpoint_reachable_non_http_scheme_skips_probe():
     assert telemetry_otlp._OtlpBackend._endpoint_reachable("file:///tmp/x") is True
+
+
+def test_production_otlp_http_exporters_have_strict_timeouts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Log and metric SDK workers receive the same explicit HTTP deadline."""
+    calls: dict[str, Any] = {}
+
+    class _LoggerProvider:
+        def add_log_record_processor(self, processor: object) -> None:
+            calls["installed_log_processor"] = processor
+
+    class _BatchLogRecordProcessor:
+        def __init__(self, exporter: object, **kwargs: object) -> None:
+            calls["log_processor"] = (exporter, kwargs)
+
+    class _PeriodicExportingMetricReader:
+        def __init__(self, exporter: object, **kwargs: object) -> None:
+            calls["metric_reader"] = (exporter, kwargs)
+
+    class _MeterProvider:
+        def __init__(self, **kwargs: object) -> None:
+            calls["meter_provider"] = kwargs
+
+    def _log_exporter(**kwargs: object) -> object:
+        calls["log_exporter"] = kwargs
+        return object()
+
+    def _metric_exporter(**kwargs: object) -> object:
+        calls["metric_exporter"] = kwargs
+        return object()
+
+    monkeypatch.setattr(
+        "opentelemetry.exporter.otlp.proto.http._log_exporter.OTLPLogExporter", _log_exporter
+    )
+    monkeypatch.setattr(
+        "opentelemetry.exporter.otlp.proto.http.metric_exporter.OTLPMetricExporter",
+        _metric_exporter,
+    )
+    monkeypatch.setattr("opentelemetry.sdk._logs.LoggerProvider", _LoggerProvider)
+    monkeypatch.setattr(
+        "opentelemetry.sdk._logs.export.BatchLogRecordProcessor", _BatchLogRecordProcessor
+    )
+    monkeypatch.setattr("opentelemetry.sdk.metrics.MeterProvider", _MeterProvider)
+    monkeypatch.setattr(
+        "opentelemetry.sdk.metrics.export.PeriodicExportingMetricReader",
+        _PeriodicExportingMetricReader,
+    )
+    monkeypatch.setattr(telemetry_otlp_metrics, "_metrics_resource", object)
+    monkeypatch.setattr(telemetry_otlp_metrics, "_metric_views", list)
+
+    telemetry_otlp_metrics._build_providers("http://127.0.0.1:4318")
+    timeout_s = telemetry_otlp_metrics._OTLP_HTTP_TIMEOUT_S
+
+    assert calls["log_exporter"] == {
+        "endpoint": "http://127.0.0.1:4318/v1/logs",
+        "timeout": timeout_s,
+    }
+    assert calls["metric_exporter"] == {
+        "endpoint": "http://127.0.0.1:4318/v1/metrics",
+        "timeout": timeout_s,
+    }
+    assert calls["log_processor"][1]["export_timeout_millis"] == timeout_s * 1000
+    assert calls["metric_reader"][1]["export_timeout_millis"] == timeout_s * 1000
+    assert 0 < timeout_s <= 5.0
 
 
 # ── exec-child export path (task #1423) ──────────────────────────────────────

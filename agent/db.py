@@ -65,6 +65,13 @@ DEFAULT_WAIT_TIMEOUT_S = settings.agent.db_notify_wait_timeout_seconds
 # borrow is visible before it ever escalates to a hard PoolTimeout.
 _SLOW_ACQUIRE_WARN_S = 3.0
 
+# Claim is a hot scheduling boundary, not a general database query. Bound both
+# waiting for a client-pool slot and waiting on ownership row locks; a timeout
+# unwinds the transaction and lets process mode or the hosted scheduler retry
+# from the durable inbound row on a later round.
+_CLAIM_DB_ACQUIRE_TIMEOUT_S = min(5.0, settings.agent.db_pool_acquire_timeout_seconds)
+_CLAIM_DB_LOCK_TIMEOUT = f"{_CLAIM_DB_ACQUIRE_TIMEOUT_S:g}s"
+
 _CT = TypeVar("_CT", bound=psycopg.AsyncConnection[Any])
 
 
@@ -241,7 +248,11 @@ async def claim_inbound_batch(
     The lifecycle-only path leaves cancellation for the external decision
     owner, or the ordinary native claim if that owner returns without ACK.
     """
-    async with async_write_transaction(pool) as conn, conn.cursor() as cur:
+    async with (
+        async_write_transaction(pool, timeout=_CLAIM_DB_ACQUIRE_TIMEOUT_S) as conn,
+        conn.cursor() as cur,
+    ):
+        await conn.execute("SELECT set_config('lock_timeout', %s, true)", (_CLAIM_DB_LOCK_TIMEOUT,))
         await lock_inbound_owner(conn, agent_id)
         await cur.execute("SELECT runtime_kind FROM agents_meta WHERE id=%s", (agent_id,))
         runtime = await cur.fetchone()

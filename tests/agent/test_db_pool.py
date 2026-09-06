@@ -10,12 +10,15 @@ live pg by stubbing the base `getconn` and the clock.
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
+from typing import Any, cast
+
 import psycopg
 import pytest
 from psycopg_pool import AsyncConnectionPool, PoolTimeout
 
 from agent import db
-from agent.db import _SLOW_ACQUIRE_WARN_S, LoggingConnectionPool
+from agent.db import _SLOW_ACQUIRE_WARN_S, LoggingConnectionPool, claim_inbound_batch
 
 
 def _pool() -> LoggingConnectionPool[psycopg.AsyncConnection]:
@@ -109,3 +112,37 @@ async def test_pool_timeout_errors_and_propagates(
     assert recs[0]["extra"]["requests_waiting"] == 3
     assert recs[0]["extra"]["connections_errors"] == 0
     assert recs[0]["level"].name == "ERROR"  # pyright: ignore[reportUnknownMemberType]
+
+
+async def test_claim_pool_timeout_uses_bound_and_releases_borrow() -> None:
+    """A timed-out claim round cannot leave a connection checked out."""
+
+    class _Connection:
+        @asynccontextmanager
+        async def transaction(self):
+            yield
+
+        async def execute(self, _query: str, _params: object = None) -> None:
+            raise PoolTimeout("injected claim timeout")
+
+    class _Pool:
+        timeout: float | None = None
+        held = 0
+
+        @asynccontextmanager
+        async def connection(self, timeout: float | None = None):
+            self.timeout = timeout
+            self.held += 1
+            try:
+                yield _Connection()
+            finally:
+                self.held -= 1
+
+    fake = _Pool()
+    pool = cast(AsyncConnectionPool[Any], cast(object, fake))
+
+    with pytest.raises(PoolTimeout, match="injected claim timeout"):
+        await claim_inbound_batch(pool, 42)
+
+    assert fake.timeout == db._CLAIM_DB_ACQUIRE_TIMEOUT_S
+    assert fake.held == 0
