@@ -7,6 +7,8 @@ import subprocess
 import textwrap
 from pathlib import Path
 
+from shared.cluster import home_slug
+
 ROOT = Path(__file__).resolve().parents[2]
 START = ROOT / "deploy/lgtm/start.sh"
 STOP = ROOT / "deploy/lgtm/stop.sh"
@@ -50,10 +52,17 @@ def _toolset(tmp_path: Path) -> tuple[dict[str, str], Path]:
           rm -f "$FAKE_LOADED/grafana-native"
           exit 0
         fi
-        [[ "$1" == "bootout" ]] && exit 1
+        if [[ "$1" == "bootout" ]]; then
+          case "$2" in
+            *loki*) rm -f "$FAKE_LOADED/loki" ;;
+            *prometheus*) rm -f "$FAKE_LOADED/prometheus" ;;
+            *grafana*) rm -f "$FAKE_LOADED/grafana" ;;
+          esac
+        fi
         exit 0
         """,
     )
+    _executable(tools / "uname", "#!/usr/bin/env bash\nprintf Darwin\\n\n")
     _executable(tools / "sleep", "#!/usr/bin/env bash\n")
     _executable(
         tools / "curl",
@@ -110,9 +119,17 @@ def _toolset(tmp_path: Path) -> tuple[dict[str, str], Path]:
     agents_dir = home / "Library" / "LaunchAgents"
     agents_dir.mkdir(parents=True)
     for name in ("loki", "prometheus", "grafana"):
-        (agents_dir / f"com.ava.{name}.home-slug.plist").touch()
+        (agents_dir / f"com.ava.{name}.{home_slug(home.resolve())}.plist").touch()
+    python_stubs = tmp_path / "python-stubs"
+    python_stubs.mkdir()
+    (python_stubs / "sitecustomize.py").write_text(
+        'import platform\nplatform.system = lambda: "Darwin"\n', encoding="utf-8"
+    )
     env = {
         **os.environ,
+        "PYTHONPATH": os.pathsep.join(
+            filter(None, (str(python_stubs), os.environ.get("PYTHONPATH")))
+        ),
         "HOME": str(home),
         "AVA_HOME": str(home),
         "FAKE_LOG": str(log),
@@ -145,7 +162,7 @@ def test_start_and_stop_are_idempotent_without_real_services(tmp_path: Path) -> 
     assert not any(line.startswith("bootstrap ") for line in second_lines)
     assert not any(line.startswith("kickstart ") for line in second_lines)
 
-    # Clear the up markers so the stop assertions see exactly its four bootout attempts.
+    # Clear the up markers so the stop assertions see exactly its three owned bootout attempts.
     Path(env["FAKE_UP"]).mkdir(exist_ok=True)
     for child in Path(env["FAKE_UP"]).iterdir():
         child.unlink()
@@ -153,7 +170,7 @@ def test_start_and_stop_are_idempotent_without_real_services(tmp_path: Path) -> 
     assert _run(STOP, env).returncode == 0
     assert _run(STOP, env).returncode == 0
     stopped = log.read_text(encoding="utf-8").splitlines()
-    assert sum(line.startswith("bootout ") for line in stopped) == 4
+    assert sum(line.startswith("bootout ") for line in stopped) == 3
     assert stopped.count("compose down") == 0
 
 

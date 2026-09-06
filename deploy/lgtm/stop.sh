@@ -11,7 +11,6 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
-for name in loki prometheus; do
-    launchctl bootout "gui/$(id -u)/com.ava.$name" || true
-done
-echo "native LGTM jobs stopped (retained compose data volumes remain rollback assets)"
+# The CLI owns the exact home-scoped launchd/systemd identity, including Grafana.
+exec "$SCRIPT_DIR/../../.venv/bin/python" -c \
+    'from cli.commands._lgtm_native import bootout_native_jobs; from shared.paths import ava_home; bootout_native_jobs(ava_home())'

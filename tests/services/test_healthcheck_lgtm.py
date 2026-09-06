@@ -21,6 +21,11 @@ import pytest
 from services.healthchecks import lgtm as hc
 
 
+@pytest.fixture(autouse=True)
+def _darwin_lifecycle(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(hc.platform, "system", lambda: "Darwin")
+
+
 class _Response:
     def __init__(self, *, status: int, body: bytes = b"") -> None:
         self.status = status
@@ -46,12 +51,10 @@ def test_readiness_probes_exclude_remote_tempo() -> None:
     )
 
 
-def test_readiness_probes_follow_configured_urls(
+def test_readiness_probes_ignore_remote_query_urls(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The probes derive from the observability settings base URLs, with a
-    trailing slash stripped so a configured ``http://host:port/`` cannot turn
-    the probe into ``//ready`` (an HTTP 404 would be counted as alive)."""
+    """Remote read endpoints cannot falsely mark a local native service alive."""
     monkeypatch.setattr(
         hc.settings.observability, "telemetry_loki_url", "http://loki.example:3100/loki/"
     )
@@ -62,9 +65,9 @@ def test_readiness_probes_follow_configured_urls(
         hc.settings.observability, "telemetry_grafana_url", "http://grafana.example:3003"
     )
     assert hc.readiness_probes() == (
-        ("loki", "http://loki.example:3100/loki/ready"),
-        ("prometheus", "http://prom.example:9090/-/ready"),
-        ("grafana", "http://grafana.example:3003/api/health"),
+        ("loki", "http://127.0.0.1:3100/ready"),
+        ("prometheus", "http://127.0.0.1:9090/-/ready"),
+        ("grafana", "http://127.0.0.1:3003/api/health"),
     )
 
 
@@ -75,7 +78,7 @@ def test_endpoint_answers_any_http_status(monkeypatch: pytest.MonkeyPatch) -> No
     def _raise(_url, **_kw):
         raise urllib.error.HTTPError("http://127.0.0.1:3100/ready", 503, "starting", {}, None)  # pyright: ignore[reportArgumentType]
 
-    monkeypatch.setattr(urllib.request, "urlopen", _raise)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(hc._local_http, "open", _raise)  # pyright: ignore[reportUnknownArgumentType]
     assert hc._endpoint_answers("http://127.0.0.1:3100/ready") is True
 
 
@@ -94,7 +97,7 @@ def test_down_probes_names_connection_failures(monkeypatch: pytest.MonkeyPatch) 
             raise OSError("connection refused")
         return _Resp()
 
-    monkeypatch.setattr(urllib.request, "urlopen", _open)
+    monkeypatch.setattr(hc._local_http, "open", _open)
     assert hc.down_probes() == ["prometheus"]
 
 
@@ -102,7 +105,7 @@ def test_write_path_probe_rejects_non_2xx_push(monkeypatch: pytest.MonkeyPatch) 
     def _raise(_request: object, **_kwargs: object) -> None:
         raise urllib.error.HTTPError("http://loki/push", 429, "throttled", {}, None)  # pyright: ignore[reportArgumentType]
 
-    monkeypatch.setattr(urllib.request, "urlopen", _raise)
+    monkeypatch.setattr(hc._local_http, "open", _raise)
 
     assert hc.write_path_probe() == (False, "push_http_429")
 
@@ -111,7 +114,7 @@ def test_write_path_probe_reports_push_request_error(monkeypatch: pytest.MonkeyP
     def _raise(_request: object, **_kwargs: object) -> None:
         raise OSError("connection refused")
 
-    monkeypatch.setattr(urllib.request, "urlopen", _raise)
+    monkeypatch.setattr(hc._local_http, "open", _raise)
 
     assert hc.write_path_probe() == (False, "push_error")
 
@@ -125,7 +128,7 @@ def test_write_path_probe_reports_marker_not_visible(monkeypatch: pytest.MonkeyP
             return _Response(status=204)
         return _Response(status=200, body=b'{"data":{"result":[]}}')
 
-    monkeypatch.setattr(urllib.request, "urlopen", _open)
+    monkeypatch.setattr(hc._local_http, "open", _open)
 
     assert hc.write_path_probe() == (False, "probe_not_visible")
     request_body = requests[0].data
@@ -159,7 +162,7 @@ def test_write_path_probe_finds_marker_in_numeric_query_window(
         body = json.dumps({"data": {"result": [{"values": [["1", marker]]}]}}).encode()
         return _Response(status=200, body=body)
 
-    monkeypatch.setattr(urllib.request, "urlopen", _open)
+    monkeypatch.setattr(hc._local_http, "open", _open)
 
     assert hc.write_path_probe() == (True, "ok")
     query = urllib.parse.parse_qs(urllib.parse.urlparse(requests[1].full_url).query)
@@ -182,7 +185,7 @@ def test_write_path_probe_reports_query_request_error(monkeypatch: pytest.Monkey
             return _Response(status=204)
         raise OSError("query unavailable")
 
-    monkeypatch.setattr(urllib.request, "urlopen", _open)
+    monkeypatch.setattr(hc._local_http, "open", _open)
 
     assert hc.write_path_probe() == (False, "query_error")
 
