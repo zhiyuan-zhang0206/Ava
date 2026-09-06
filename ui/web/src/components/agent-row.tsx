@@ -32,10 +32,10 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { GitFork, Loader2, PowerOff, RotateCw, Shrink, X } from "lucide-react";
+import dynamic from "next/dynamic";
 import { useTranslations } from "next-intl";
 import { useEffect, useState } from "react";
 
-import { PromptDialog } from "@/components/agent-prompt-dialog";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -53,6 +53,13 @@ import type { AgentRow, PublicAgentStatus } from "@/lib/types";
 import { useInspectorPrefetch } from "@/lib/inspector-prefetch";
 import { cn } from "@/lib/utils";
 import { FLEX, FLEX_1, FLEX_COL, MIN_W_0 } from "@/lib/layout";
+
+// Radix Dialog is needed only after an advanced prompt-taking menu action;
+// closed rows keep no modal payload in the initial graph.
+const LazyPromptDialog = dynamic(() =>
+  import("@/components/agent-prompt-dialog").then((module) => module.PromptDialog),
+  { loading: () => null },
+);
 
 export type PendingAction = "restarting" | "terminating" | "resurrecting" | "compacting";
 
@@ -467,24 +474,28 @@ const dateFormat: DateFormat = rawDateFormat === "absolute" || rawDateFormat ===
           </>
         )}
       </ContextMenuContent>
-      <PromptDialog
-        open={forkOpen}
-        onOpenChange={setForkOpen}
-        title={t("forkAgent")}
-        description={t("forkAgentDesc")}
-        placeholder={t("forkPromptPlaceholder")}
-        submitLabel={t("fork")}
-        onSubmit={onFork}
-      />
-      <PromptDialog
-        open={resurrectOpen}
-        onOpenChange={setResurrectOpen}
-        title={t("resurrectAgent")}
-        description={t("resurrectDesc")}
-        placeholder={t("resurrectPromptPlaceholder")}
-        submitLabel={t("resurrect")}
-        onSubmit={onResurrect}
-      />
+      {forkOpen ? (
+        <LazyPromptDialog
+          open
+          onOpenChange={setForkOpen}
+          title={t("forkAgent")}
+          description={t("forkAgentDesc")}
+          placeholder={t("forkPromptPlaceholder")}
+          submitLabel={t("fork")}
+          onSubmit={onFork}
+        />
+      ) : null}
+      {resurrectOpen ? (
+        <LazyPromptDialog
+          open
+          onOpenChange={setResurrectOpen}
+          title={t("resurrectAgent")}
+          description={t("resurrectDesc")}
+          placeholder={t("resurrectPromptPlaceholder")}
+          submitLabel={t("resurrect")}
+          onSubmit={onResurrect}
+        />
+      ) : null}
     </ContextMenu>
   );
 }

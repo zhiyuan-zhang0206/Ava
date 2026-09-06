@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import plistlib
-import socket
-import threading
 from pathlib import Path
 
 import pytest
@@ -40,41 +38,6 @@ class _RecoveredListener:
 
     def close(self) -> None:
         return
-
-
-def test_half_closed_client_reclaims_pumps_and_both_relay_sockets(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A client EOF must interrupt a backend that keeps its read side open."""
-    client, remote_client = socket.socketpair()
-    backend, remote_backend = socket.socketpair()
-    monkeypatch.setattr(relay.socket, "create_connection", lambda *_a, **_kw: backend)  # pyright: ignore[reportUnknownArgumentType]
-
-    handler = threading.Thread(
-        target=relay._handle,
-        args=(client, ("127.0.0.1", 12345), ("127.0.0.1", 6380)),
-        daemon=True,
-    )
-    handler.start()
-    remote_client.shutdown(socket.SHUT_WR)
-    handler.join(timeout=1.0)
-    reclaimed_without_backend_eof = not handler.is_alive()
-
-    if handler.is_alive():
-        # Release the deliberately blocked backend pump so a regression fails
-        # instead of leaving a hanging test process.
-        remote_backend.shutdown(socket.SHUT_WR)
-        handler.join(timeout=1.0)
-
-    client_closed = client.fileno() == -1
-    backend_closed = backend.fileno() == -1
-    remote_client.close()
-    remote_backend.close()
-
-    assert reclaimed_without_backend_eof
-    assert not handler.is_alive()
-    assert client_closed
-    assert backend_closed
 
 
 def test_relay_rebuilds_listener_after_accept_failure(

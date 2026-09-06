@@ -25,7 +25,7 @@
 // resolved history (both kinds, newest first) sits behind a collapsed disclosure
 // so it never occupies the main stream.
 import { useTranslations } from "next-intl";
-import { memo, useEffect, useMemo, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 
 import { PRIORITY_RANK } from "@/lib/notices";
 import { groupByTaskSubtree } from "@/lib/task-notify";
@@ -69,6 +69,7 @@ export const InboxQueue = memo(function InboxQueue({
   onSelectAgent,
   compact,
   onCollapse,
+  anchorAgentId,
 }: {
   agents: AgentRow[];
   className?: string;
@@ -76,6 +77,7 @@ export const InboxQueue = memo(function InboxQueue({
   onSelectAgent?: (agentId: number | null) => void;
   compact?: boolean;
   onCollapse?: () => void;
+  anchorAgentId?: number | null;
 }) {
   const t = useTranslations("fleet");
   const {
@@ -129,6 +131,11 @@ export const InboxQueue = memo(function InboxQueue({
 
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [resolvedOpen, setResolvedOpen] = useState(false);
+  const [anchorHighlightKey, setAnchorHighlightKey] = useState<string | null>(null);
+  const listRef = useRef<HTMLUListElement>(null);
+  const attemptedAnchorRef = useRef<number | null>(null);
+  const anchorFrameRef = useRef<number | null>(null);
+  const anchorTimerRef = useRef<number | null>(null);
 
   // When an external selection arrives (tree/graph click), select the first open
   // notice from that agent so the list syncs bidirectionally.
@@ -140,6 +147,48 @@ export const InboxQueue = memo(function InboxQueue({
     if (first) setSelectedKey(openKey(first.notice.id));
     // eslint-disable-next-line react-hooks/exhaustive-deps -- openItems changes on every refresh; only react to selectedAgentId
   }, [selectedAgentId]);
+
+  // A route anchor is attempted once after the initial notice load. It only
+  // reveals the row in its existing display position; it never changes queue
+  // ordering or opens compact detail. A missing notice deliberately leaves the
+  // queue at its normal default and is not retried on a later SSE update.
+  useEffect(() => {
+    if (
+      anchorAgentId == null ||
+      isLoading ||
+      attemptedAnchorRef.current === anchorAgentId
+    ) {
+      return;
+    }
+    attemptedAnchorRef.current = anchorAgentId;
+    const item = openItems.find((candidate) => candidate.agentId === anchorAgentId);
+    if (!item) return;
+
+    const key = openKey(item.notice.id);
+    setAnchorHighlightKey(key);
+    anchorFrameRef.current = window.requestAnimationFrame(() => {
+      listRef.current
+        ?.querySelector<HTMLElement>(`[data-notice-key="${key}"]`)
+        ?.scrollIntoView({ block: "nearest" });
+      anchorFrameRef.current = null;
+    });
+    anchorTimerRef.current = window.setTimeout(() => {
+      setAnchorHighlightKey((current) => (current === key ? null : current));
+      anchorTimerRef.current = null;
+    }, 1_600);
+  }, [anchorAgentId, isLoading, openItems]);
+
+  useEffect(
+    () => () => {
+      if (anchorFrameRef.current !== null) {
+        window.cancelAnimationFrame(anchorFrameRef.current);
+      }
+      if (anchorTimerRef.current !== null) {
+        window.clearTimeout(anchorTimerRef.current);
+      }
+    },
+    [],
+  );
 
   // Resolve the selection; default to the top open notice so the detail pane is
   // never blank while work is waiting. A just-resolved selection (dropped from
@@ -180,6 +229,8 @@ export const InboxQueue = memo(function InboxQueue({
     hasNextPage,
     isFetchingNextPage,
     fetchNextPage,
+    listRef,
+    anchorHighlightKey,
   };
   const empty = openItems.length === 0 && resolved.length === 0;
   // Error presentation (audit C3) — stale-while-error, useTasks style: a

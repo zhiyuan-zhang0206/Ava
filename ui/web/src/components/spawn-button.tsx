@@ -377,10 +377,8 @@ export function SpawnButton({ onSpawn, variant }: Props) {
       );
     }
     return (
-      // flex-nowrap + min-w-0: the sidebar width is FIXED (task #750) and
-      // sized so this row always fits on one line — wrapping is no longer a
-      // fallback, min-w-0 just lets the pickers shrink instead of pushing
-      // the row wider than the sidebar.
+      // flex-nowrap + min-w-0: as the resizable sidebar narrows, the pickers
+      // shrink instead of pushing the row wider than its panel.
       <div className={cn("flex-nowrap items-center gap-1 w-full", FLEX, MIN_W_0)}>
         {presetSelect}
         {modelPicker}
@@ -435,8 +433,8 @@ export function SpawnButton({ onSpawn, variant }: Props) {
   }
 
   return (
-    // flex-nowrap + min-w-0: same as the single-machine branch above — the
-    // fixed sidebar width (task #750) always fits the row on one line.
+    // flex-nowrap + min-w-0: same shrink-with-the-panel contract as the
+    // single-machine branch above.
     <div className={cn("flex-nowrap items-center gap-1 w-full", FLEX, MIN_W_0)}>
       {presetSelect}
       {modelPicker}

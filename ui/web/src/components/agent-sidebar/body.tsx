@@ -25,6 +25,7 @@ import { useUserSettings } from "@/lib/use-user-settings";
 import { cn } from "@/lib/utils";
 
 import type { InnerProps } from "./types";
+import { fleetHref } from "./links";
 import { FLEX, FLEX_1, MIN_H_0, MIN_W_0 } from "@/lib/layout";
 
 // ── Expanded sidebar body ──
@@ -53,8 +54,17 @@ function sortAgentsFlat(agents: AgentRow[], sort: SidebarSort): AgentRow[] {
 
 export function SidebarBody(props: InnerProps & { wide: boolean }) {
   const t = useTranslations("sidebar");
-  const { agents, pendingSpawnCount, showTerminated, onToggleTerminated, viewMode, onToggleViewMode, onSpawn, isLoading } =
-    props;
+  const {
+    agents,
+    activeId,
+    pendingSpawnCount,
+    showTerminated,
+    onToggleTerminated,
+    viewMode,
+    onToggleViewMode,
+    onSpawn,
+    isLoading,
+  } = props;
 
   // searchQuery (store) drives the list filter below; the search INPUT itself
   // lives in the floating SearchOverlay (#723), not inline in the sidebar.
@@ -117,7 +127,7 @@ export function SidebarBody(props: InnerProps & { wide: boolean }) {
             awaiting-reply notifications are opted in. */}
         {notifyAwaitingReply && waiting > 0 && (
           <Link
-            href="/fleet"
+            href={fleetHref(activeId)}
             className={cn("items-center gap-1 shrink-0 hover:text-foreground transition-colors", FLEX)}
           >
             <span className="size-1.5 rounded-full bg-destructive" />

@@ -156,7 +156,7 @@ export function OpenNoticeDetail({
           }
           disabled={pending}
           aria-label={t("replyTo", { title: notice.title })}
-          className={cn("min-h-[3.25rem] rounded border border-input bg-background px-2 py-1.5 text-xs focus:border-primary disabled:opacity-50", FLEX_1)}
+          className={cn("min-h-[3.25rem] rounded border border-input bg-background px-2 py-1.5 font-mono text-xs focus:border-primary disabled:opacity-50", FLEX_1)}
         />
         {requiresResponse ? (
           <SendButton

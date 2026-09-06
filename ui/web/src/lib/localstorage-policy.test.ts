@@ -28,6 +28,7 @@ const SETITEM_ALLOWLIST = new Set<string>([
 const AUTOSAVE_ALLOWLIST = new Set<string>([
   "components/fleet/fleet-view.tsx", // ava.fleet.split
   "components/fleet/inbox-queue/index.tsx", // ava.fleet.queue-split (dir split, task #1010)
+  "components/home-layout.tsx", // home Agent Tree + Inspector panel split ratios (task #2556)
   "app/memory/graph/page.tsx", // ava.memory.graph.split (memory graph side panel, task #2145)
 ]);
 
@@ -39,6 +40,9 @@ const ALLOWED_KEYS = new Set<string>([
   "ava.fleet.split",
   "ava.fleet.queue-split",
   "ava.memory.graph.split",
+  "ava.home.columns.desktop",
+  "ava.home.columns.mobile",
+  "ava.home.inspector.desktop",
 ]);
 
 // The one module allowed to reference legacy keys (to read them once + remove).

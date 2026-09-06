@@ -81,6 +81,8 @@ export function NoticeListRow({
   selected,
   onSelect,
   onSelectAgent,
+  noticeKey,
+  anchorHighlighted,
 }: {
   priority: OpenNotice["priority"];
   blocking: boolean;
@@ -95,14 +97,19 @@ export function NoticeListRow({
   selected: boolean;
   onSelect: () => void;
   onSelectAgent?: (agentId: number | null) => void;
+  noticeKey?: string;
+  anchorHighlighted?: boolean;
 }) {
   const t = useTranslations("fleet.inboxPanel");
   return (
     <li
       data-testid="inbox-row"
+      data-notice-key={noticeKey}
+      data-anchor-highlighted={anchorHighlighted ? "true" : undefined}
       className={cn(
-        "items-stretch border-b border-border/50",
+        "items-stretch border-b border-border/50 transition-colors",
         selected && "bg-sidebar-accent",
+        anchorHighlighted && "bg-primary/10 ring-1 ring-inset ring-primary/50",
         FLEX
       )}
     >

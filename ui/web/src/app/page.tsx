@@ -28,8 +28,9 @@
 //   active-agent SSE connection (isEventForThread remains a defensive gate).
 
 import { useQuery } from "@tanstack/react-query";
+import dynamic from "next/dynamic";
 import { useTranslations } from "next-intl";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { AgentSidebar } from "@/components/agent-sidebar";
 import { AlertsBadge } from "@/components/alerts-badge";
@@ -37,7 +38,8 @@ import { ErrorBoundary } from "@/components/error-boundary";
 import { Composer } from "@/components/composer";
 import { ContentToggle } from "@/components/content-toggle";
 import { HeaderBar } from "@/components/header-bar";
-import { InspectorPanel, InspectorToggle } from "@/components/inspector-panel";
+import { HomeLayout } from "@/components/home-layout";
+import { InspectorToggle } from "@/components/inspector-toggle";
 import { PendingStrip } from "@/components/pending-strip";
 import { UploadButton } from "@/components/upload-button";
 import { TimelineView } from "@/components/timeline";
@@ -45,6 +47,7 @@ import { api, MessageDeliveryUnknownError } from "@/lib/api";
 import { errMsg } from "@/lib/errors";
 import { useInspectorOpen } from "@/lib/inspector-panel-store";
 import { useBreakpoint } from "@/lib/breakpoint";
+import { useSidebarCollapsed } from "@/lib/sidebar";
 import { useStore } from "@/lib/store";
 import { useTimelineStore } from "@/lib/timeline-store";
 import type { AgentRow, ContentBlock } from "@/lib/types";
@@ -57,6 +60,13 @@ import { useTokenUsage } from "@/lib/use-token-usage";
 import { AgentEventStreamProvider } from "@/lib/useEventStream";
 import { FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0, OVERFLOW_HIDDEN } from "@/lib/layout";
 import { cn } from "@/lib/utils";
+
+// The toggle stays in the initial graph; the panel body is needed only after
+// the existing open-state guard below renders it.
+const LazyInspectorPanel = dynamic(() =>
+  import("@/components/inspector-panel").then((module) => module.InspectorPanel),
+  { loading: () => null },
+);
 
 export default function HomePage() {
   // Read only client-only state here; the global SSE broadcast is provided at
@@ -86,6 +96,25 @@ interface HomeShellProps {
 
 function HomeShell({ showError }: HomeShellProps) {
   const focusComposer = useStore((s) => s.focusComposer);
+  const { isNarrow, isLarge } = useBreakpoint();
+  const {
+    collapsed: sidebarCollapsed,
+    setCollapsed: setSidebarCollapsed,
+    isLoading: sidebarSettingsLoading,
+  } = useSidebarCollapsed();
+  const sidebarEntryResetDone = useRef(false);
+
+  // #723: every home entry starts expanded, but a layout transition is not a
+  // new entry. HomeShell stays mounted while HomeLayout switches between the
+  // expanded RRP frame and collapsed static frame; AgentSidebar does not.
+  // Keeping the reset here prevents that child remount from undoing a user's
+  // collapse click. Wait for the persisted settings before consuming the
+  // one-time reset so a cold load with collapsed=true is still expanded.
+  useEffect(() => {
+    if (sidebarSettingsLoading || sidebarEntryResetDone.current) return;
+    sidebarEntryResetDone.current = true;
+    if (sidebarCollapsed) setSidebarCollapsed(false);
+  }, [sidebarCollapsed, sidebarSettingsLoading, setSidebarCollapsed]);
 
   const {
     agents,
@@ -146,33 +175,45 @@ function HomeShell({ showError }: HomeShellProps) {
     staleTime: 10_000,
   });
 
+  const sidebar = (
+    <ErrorBoundary>
+      <AgentSidebar
+        agents={agents}
+        isLoading={agentsLoading}
+        pendingActions={pendingActions}
+        pendingSpawnCount={pendingSpawnCount}
+        onSpawn={handleSpawn}
+        onTerminate={terminate}
+        onRestart={restart}
+        onResurrect={resurrect}
+        onFork={fork}
+        onCompact={compact}
+      />
+    </ErrorBoundary>
+  );
+  const main = (
+    <AgentEventStreamProvider>
+      <HomeContent
+        activeId={activeId}
+        agents={agents}
+        forkPending={forkPending}
+        showError={showError}
+        handleFork={handleFork}
+      />
+    </AgentEventStreamProvider>
+  );
+  const inspector =
+    inspectorOpen && activeId != null ? <LazyInspectorPanel agentId={activeId} /> : null;
+
   return (
-    <>
-      <ErrorBoundary>
-        <AgentSidebar
-          agents={agents}
-          isLoading={agentsLoading}
-          pendingActions={pendingActions}
-          pendingSpawnCount={pendingSpawnCount}
-          onSpawn={handleSpawn}
-          onTerminate={terminate}
-          onRestart={restart}
-          onResurrect={resurrect}
-          onFork={fork}
-          onCompact={compact}
-        />
-      </ErrorBoundary>
-      <AgentEventStreamProvider>
-        <HomeContent
-          activeId={activeId}
-          agents={agents}
-          forkPending={forkPending}
-          showError={showError}
-          handleFork={handleFork}
-        />
-      </AgentEventStreamProvider>
-      {inspectorOpen && activeId != null && <InspectorPanel agentId={activeId} />}
-    </>
+    <HomeLayout
+      isNarrow={isNarrow}
+      isLarge={isLarge}
+      sidebarCollapsed={sidebarCollapsed}
+      sidebar={sidebar}
+      main={main}
+      inspector={inspector}
+    />
   );
 }
 

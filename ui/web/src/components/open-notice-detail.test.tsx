@@ -61,6 +61,12 @@ describe("OpenNoticeDetail — timestamp", () => {
 });
 
 describe("OpenNoticeDetail — require_response", () => {
+  it("uses the same monospace input typography as the page composer", () => {
+    render(<OpenNoticeDetail agentId={7} notice={ntc()} />);
+
+    expect(screen.getByRole("textbox").className).toContain("font-mono");
+  });
+
   it("answer: sends action=answer with the typed reply, then calls onResolved", async () => {
     resolveNotice.mockResolvedValue({ status: "ok" });
     const onResolved = vi.fn();

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Awaitable, Callable
 from typing import cast
 
@@ -351,3 +352,97 @@ async def test_final_flush_persists_blobs_for_current_channel_versions() -> None
     flush_versions = saver.aput_calls[-1][3]
     assert "messages" in flush_versions
     assert flush_versions["messages"] == "v1"
+
+
+class _BlockedSaver(_StubSaver):
+    """Hold one actual save until the test releases it, before recording success."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.entered = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def aput(
+        self,
+        config: dict[str, object],
+        checkpoint: dict[str, object],
+        metadata: dict[str, object],
+        new_versions: dict[str, object],
+    ) -> dict[str, object]:
+        if metadata["step"] == 1:
+            self.entered.set()
+            await self.release.wait()
+        return await super().aput(config, checkpoint, metadata, new_versions)
+
+
+async def test_concurrent_flush_cannot_ack_before_the_inflight_save() -> None:
+    saver = _BlockedSaver()
+    _wrap(saver, interval=4)
+    await _aput(saver, 1)
+    first = asyncio.ensure_future(saver._ava_nstep_flush("default"))
+    await asyncio.wait_for(saver.entered.wait(), timeout=2)
+    started = asyncio.Event()
+
+    async def second_flush() -> None:
+        started.set()
+        await saver._ava_nstep_flush("default")
+
+    second = asyncio.create_task(second_flush())
+    try:
+        await asyncio.wait_for(started.wait(), timeout=2)
+        # The second task ran until its first suspension, so this is a real
+        # in-flight-save boundary, not a timing assumption about PostgreSQL.
+        assert not second.done(), "flush reported success before any save completed"
+        assert saver.aput_calls == []
+    finally:
+        saver.release.set()
+        await asyncio.wait_for(asyncio.gather(first, second), timeout=2)
+    assert [call[2]["step"] for call in saver.aput_calls] == [1]
+
+
+async def test_cancelled_flush_retains_the_tail_for_retry() -> None:
+    saver = _BlockedSaver()
+    _wrap(saver, interval=4)
+    await _aput(saver, 1)
+    pending = asyncio.ensure_future(saver._ava_nstep_flush("default"))
+    await asyncio.wait_for(saver.entered.wait(), timeout=2)
+    pending.cancel()
+    results = await asyncio.gather(pending, return_exceptions=True)
+    assert isinstance(results[0], asyncio.CancelledError)
+    assert saver.aput_calls == []
+
+    saver.release.set()
+    await saver._ava_nstep_flush("default")
+    await saver._ava_nstep_flush("default")
+    assert [call[2]["step"] for call in saver.aput_calls] == [1]
+
+
+async def test_flush_does_not_discard_a_newer_pending_checkpoint() -> None:
+    saver = _BlockedSaver()
+    _wrap(saver, interval=4)
+    await _aput(saver, 1)
+    pending = asyncio.ensure_future(saver._ava_nstep_flush("default"))
+    await asyncio.wait_for(saver.entered.wait(), timeout=2)
+    newer = asyncio.create_task(_aput(saver, 2))
+    try:
+        await asyncio.sleep(0)
+    finally:
+        saver.release.set()
+        await asyncio.wait_for(asyncio.gather(pending, newer), timeout=2)
+    await saver._ava_nstep_flush("default")
+    assert [call[2]["step"] for call in saver.aput_calls] == [1, 2]
+
+
+async def test_one_threads_flush_does_not_block_another_threads_save() -> None:
+    saver = _BlockedSaver()
+    _wrap(saver, interval=4)
+    await _aput(saver, 1, thread_id="agent-a")
+    pending = asyncio.ensure_future(saver._ava_nstep_flush("agent-a"))
+    await asyncio.wait_for(saver.entered.wait(), timeout=2)
+    try:
+        await asyncio.wait_for(_aput(saver, 0, thread_id="agent-b"), timeout=2)
+        assert _stored_thread_ids(saver) == ["agent-b"]
+    finally:
+        saver.release.set()
+        await asyncio.wait_for(pending, timeout=2)
+    assert _stored_thread_ids(saver) == ["agent-b", "agent-a"]

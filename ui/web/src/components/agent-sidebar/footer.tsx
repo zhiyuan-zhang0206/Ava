@@ -28,6 +28,8 @@ import type { StatsDashboard } from "@/lib/types";
 import { FLEX, FLEX_COL } from "@/lib/layout";
 import { cn } from "@/lib/utils";
 
+import { fleetHref } from "./links";
+
 // ── Stats cards (unchanged 2×3 grid) ──
 
 export function StatsCards({
@@ -210,7 +212,7 @@ export function StatsCards({
 // (Memory Graph / Fleet / Insights / Control) on the right. These moved here
 // from the header bar; the collapsed rail keeps icon-only versions.
 
-export function SidebarFooter() {
+export function SidebarFooter({ activeAgentId }: { activeAgentId: number | null }) {
   const t = useTranslations("sidebar");
   const navT = useTranslations("nav");
   const router = useRouter();
@@ -257,7 +259,10 @@ export function SidebarFooter() {
         >
           <NotebookText className="size-4" />
         </SidebarNavButton>
-        <SidebarNavButton onClick={() => router.push("/fleet")} label={navT("fleet")}>
+        <SidebarNavButton
+          onClick={() => router.push(fleetHref(activeAgentId))}
+          label={navT("fleet")}
+        >
           <Waypoints className="size-4" />
         </SidebarNavButton>
         <SidebarNavButton onClick={() => router.push("/insights")} label={navT("insights")}>
