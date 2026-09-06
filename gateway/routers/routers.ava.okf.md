@@ -41,7 +41,7 @@ Gateway's 43 route modules, split by business domain under `gateway/routers/<dom
 [[gateway/routers/frontend-ui-data.ava.okf.md]]
 
 ### Ops & system
-- **status** (`/api/health`, `/api/status`, `/api/stats/dashboard`) — liveness + status panel + dashboard ([[gateway/routers/ops-surfaces.ava.okf.md|dashboard contract]])
+- **status** (`/api/health`, `/api/status`, `/api/stats/dashboard`) — liveness + status panel + dashboard; public health exposes process `started_at` and boot-frozen `sha` for rollout observers ([[gateway/routers/ops-surfaces.ava.okf.md|dashboard contract]])
 - **metrics** (`/api/metrics`, `/api/metrics/agents`) — aggregated metrics over the unified `events` stream
 - **schedules** (`/api/schedules/*`) — scheduled task CRUD + start/stop/restart
 - **shell** (`/api/agents/{id}/shell/{sid}`) — terminal session monitor (session backend proxy)

@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "common": [
+    {"selector": "time", "reason": "absolute and relative timestamps"},
+    {"selector": "[data-testid='context-meter']", "reason": "token usage values"},
+    {"selector": "[data-testid='alerts-badge-count']", "reason": "active alert count"},
+    {"selector": ".animate-pulse", "reason": "status pulse"},
+    {"selector": ".tabular-nums", "reason": "clock-driven and last-active values"}
+  ],
+  "routes": {
+    "home": [
+      {"selector": "[data-testid='timeline-surface'] time", "reason": "message times"}
+    ],
+    "fleet": [
+      {"selector": "header .tabular-nums", "reason": "live fleet counts"}
+    ],
+    "control": [
+      {"selector": "[data-runtime-value]", "reason": "runtime inventory values"}
+    ],
+    "run-timeline": [
+      {"selector": "[data-testid='run-timeline-geometry']", "reason": "run fixture values"}
+    ]
+  }
+}
