@@ -102,9 +102,9 @@ async def test_exec_drains_attachment_right_after_output(
     # Interleaved pack: [text(notice), text(caption line), image_url, ...] —
     # the file's own caption line sits directly before its media block.
     assert content[0]["type"] == "text"
-    assert "Files attached during this turn" in content[0]["text"]  # pyright: ignore[reportUnknownIndexType]
+    assert "Files attached during this turn" in content[0]["text"]
     assert content[1]["type"] == "text"
-    assert "render.png" in content[1]["text"]  # pyright: ignore[reportUnknownIndexType]
+    assert "render.png" in content[1]["text"]
     assert content[2]["type"] == "image_url"
 
 

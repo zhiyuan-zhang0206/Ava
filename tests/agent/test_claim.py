@@ -1622,7 +1622,7 @@ async def test_claim_system_note_kind_appends_system_note_and_continues(
     assert note.additional_kwargs.get("ava_msg_type") == "system_note"  # pyright: ignore[reportUnknownMemberType]
     assert note.additional_kwargs.get("ava_note_tag") == "task"  # pyright: ignore[reportUnknownMemberType]
     assert note.additional_kwargs.get("ava_task_id") == 1  # pyright: ignore[reportUnknownMemberType]
-    assert cmd.update["active_task_id"] == 1  # pyright: ignore[index, reportOptionalSubscript]
+    assert cmd.update["active_task_id"] == 1  # pyright: ignore[reportOptionalSubscript]
     # The inbound row is consumed (done at claim, like other lifecycle kinds).
     with db_conn.cursor() as cur:
         cur.execute("SELECT status FROM inbound_messages WHERE id = %s", (inbound_id,))
@@ -2349,7 +2349,7 @@ async def test_claim_fork_strips_inherited_source_notes(
     tid = spawn_agent()
     _insert_inbound_kind(db_conn, tid, "", "fork", source="agent:7")
 
-    def _tagged(tag: NoteTag, content: str, id: str) -> HumanMessage:  # pyright: ignore[reportShadowedBuiltins]
+    def _tagged(tag: NoteTag, content: str, id: str) -> HumanMessage:
         return HumanMessage(
             content=f"[system] {content}",
             id=id,

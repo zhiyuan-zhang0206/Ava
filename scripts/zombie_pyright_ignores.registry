@@ -1,7 +1,0 @@
-tests/agent/test_claim.py:1625:index
-tests/agent/test_claim.py:2352:reportShadowedBuiltins
-tests/agent/test_exec_attach_drain.py:105:reportUnknownIndexType
-tests/agent/test_exec_attach_drain.py:107:reportUnknownIndexType
-tests/agent/test_fork_notes.py:112:reportShadowedBuiltins
-tests/agent/test_state_slot.py:919:operator
-tests/cli/test_converge_firewall.py:144:reportMissingReturnType

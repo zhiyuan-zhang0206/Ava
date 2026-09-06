@@ -916,7 +916,7 @@ async def test_exec_node_compact_path_drops_notes_and_clears_findings(
         f"compact path must write no messages back, got {update.get('messages')!r}"  # pyright: ignore[reportUnknownMemberType]
     )
     assert update.get("halted") is True  # pyright: ignore[reportUnknownMemberType]
-    assert "attach" not in update  # pyright: ignore[operator]
+    assert "attach" not in update
     # Findings drained even though nothing was injected
     from ava import security as _security
 

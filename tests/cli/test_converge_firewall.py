@@ -141,7 +141,7 @@ def test_failed_direct_and_sudo_repairs_print_exact_commands_and_do_not_raise(
     monkeypatch.setattr(fw, "manifest_paths", lambda: ())  # host-independent
     calls: list[list[str]] = []
 
-    def fail(cmd: list[str], **_kw: object):  # pyright: ignore[reportMissingReturnType]
+    def fail(cmd: list[str], **_kw: object):
         calls.append(cmd)
         return type("R", (), {"returncode": 1})()
 
