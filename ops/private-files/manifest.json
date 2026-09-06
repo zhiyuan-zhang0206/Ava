@@ -1,0 +1,65 @@
+{
+  "version": 1,
+  "entries": [
+    {
+      "id": "ci-autoscale-controller",
+      "path": "ops/ci_autoscale/controller.py",
+      "source": {
+        "kind": "git",
+        "repo": "~/Ava-archive",
+        "treeish": "HEAD"
+      },
+      "sha256": "76f0d99ca1088fa1cb17c8cdcf4aac05098114b3e16822a3be047a4bd2b8c9f7",
+      "status": "archived",
+      "notes": "Archived: byte-identical to Ava-archive HEAD (verified 2026-09-07); the durable source is the contract, so a deleted residue will not fail verification (see README lifecycle)."
+    },
+    {
+      "id": "ci-autoscale-hetzner",
+      "path": "ops/ci_autoscale/_hetzner.py",
+      "source": {
+        "kind": "git",
+        "repo": "~/Ava-archive",
+        "treeish": "HEAD"
+      },
+      "sha256": "9734a92b8440823c21483ef4ae7c2dafe7acc44a6fc5d6dd3440f046b4826cb6",
+      "status": "archived",
+      "notes": "Archived: byte-identical to Ava-archive HEAD (verified 2026-09-07); the durable source is the contract, so a deleted residue will not fail verification (see README lifecycle)."
+    },
+    {
+      "id": "ci-autoscale-cloud-init",
+      "path": "ops/ci_autoscale/cloud-init.yml",
+      "source": {
+        "kind": "git",
+        "repo": "~/Ava-archive",
+        "treeish": "HEAD"
+      },
+      "sha256": "b242de6580385c8d50268eb90ab39860cbea65f81042a27971e6e7be91c1dad7",
+      "status": "archived",
+      "notes": "Archived: byte-identical to Ava-archive HEAD (verified 2026-09-07); the durable source is the contract, so a deleted residue will not fail verification (see README lifecycle)."
+    },
+    {
+      "id": "ci-autoscale-stuck-watchdog",
+      "path": "ops/ci_autoscale/stuck_watchdog.py",
+      "source": {
+        "kind": "git",
+        "repo": "~/Ava-archive",
+        "treeish": "HEAD"
+      },
+      "sha256": "42f5f3c4d1198e4dbbdaac5a500113794ce482987495aa1eefdb5b48e74822d7",
+      "status": "archived",
+      "notes": "Archived: byte-identical to Ava-archive HEAD (verified 2026-09-07); the durable source is the contract, so a deleted residue will not fail verification (see README lifecycle)."
+    },
+    {
+      "id": "ci-autoscale-webhook",
+      "path": "ops/ci_autoscale/webhook.py",
+      "source": {
+        "kind": "git",
+        "repo": "~/Ava-archive",
+        "treeish": "HEAD"
+      },
+      "sha256": "46b46cc8f3c8e37363608e05dd12a22ff29679e7221c528c23bab2eb55b5c4be",
+      "status": "archived",
+      "notes": "Archived: byte-identical to Ava-archive HEAD (verified 2026-09-07); the durable source is the contract, so a deleted residue will not fail verification (see README lifecycle)."
+    }
+  ]
+}
