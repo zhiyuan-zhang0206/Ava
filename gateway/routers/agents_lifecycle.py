@@ -106,7 +106,9 @@ async def post_agent_terminate(
 ) -> TerminateAgentResponse:
     """Have the agent gracefully exit — INSERT one kind='terminate'
     source=body.source inbound; after processing the current turn, when
-    claim runs, dispatch goto END and the process exits.
+    claim runs, dispatch goto END and the process exits. An optional message
+    is committed as pending chat immediately before the terminate command, so
+    it is retained for resurrection without causing another LLM turn.
 
     With `force=true`, request interruption. Hosted force returns `enqueued`
     while the original host drains actual work; acceptance and metadata status

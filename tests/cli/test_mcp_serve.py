@@ -141,7 +141,7 @@ async def test_tool_arguments_match_the_gateway_surface() -> None:
     }
     assert set(schemas["send_message"]["required"]) == {"agent_id", "content"}
     assert schemas["list_agents"].get("required", []) == []
-    assert set(schemas["terminate_agent"]["properties"]) == {"agent_id", "force"}
+    assert set(schemas["terminate_agent"]["properties"]) == {"agent_id", "message", "force"}
     assert schemas["cluster_status"].get("required", []) == []
 
 
@@ -290,14 +290,20 @@ async def test_get_messages_defaults_to_a_bounded_window(monkeypatch: pytest.Mon
 
 
 @pytest.mark.parametrize("force", [False, True])
-async def test_terminate_agent_forwards_the_force_flag(
+async def test_terminate_agent_forwards_message_and_force(
     monkeypatch: pytest.MonkeyPatch, force: bool
 ) -> None:
     captured = _patch_http(monkeypatch, lambda _r: httpx.Response(200, json={"status": "enqueued"}))
-    await _call("terminate_agent", {"agent_id": 7, "force": force})
+    await _call(
+        "terminate_agent",
+        {"agent_id": 7, "message": "retain this result", "force": force},
+    )
 
     assert str(captured["request"].url) == "http://gw:8000/api/agents/7/terminate"
-    assert json.loads(captured["request"].content) == {"force": force}
+    assert json.loads(captured["request"].content) == {
+        "message": "retain this result",
+        "force": force,
+    }
 
 
 async def test_cluster_status_reads_the_cluster_route(monkeypatch: pytest.MonkeyPatch) -> None:

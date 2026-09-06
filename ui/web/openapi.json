@@ -513,7 +513,7 @@
     "/api/agents/{agent_id}/terminate": {
       "post": {
         "summary": "Post Agent Terminate",
-        "description": "Have the agent gracefully exit — INSERT one kind='terminate'\nsource=body.source inbound; after processing the current turn, when\nclaim runs, dispatch goto END and the process exits.\n\nWith `force=true`, request interruption. Hosted force returns `enqueued`\nwhile the original host drains actual work; acceptance and metadata status\nare not proof of exit. Detached process force returns `force_killed`.\n\nSmart liveness detection: if the process corresponding to\nagents_meta.pid is gone (zombie row, commonly from early-stage\nEmptyInputError residuals / respawn_agent failures leaving an unclaimed\nrow), force UPDATE status='terminated' directly without the\ninbound path — an inbound delivered to a dead process is pending\nforever and the user can never clear it.\n\nAlways runs on the agent's home machine via its ops server\n(`_forward_to_home_machine`). The force path must, because killing the\ndetached process / os.kill are physical local-host operations; the graceful\npath must too, because zombie detection `process_alive(pid)` is\nmeaningless across machines (probing a cross-machine PID via signal 0\nhits a remote PID space and gives false positives). Both paths run on\nthe home machine, symmetric in logic.\n\n404: agent_id does not exist (AgentNotFound -> handler returns\n    404 + reason).\n`already_terminated`: agent was already dead / process detected as\n    dead and cleaned up directly.\n`force_killed`: force=true killed the process and marked terminated.",
+        "description": "Have the agent gracefully exit — INSERT one kind='terminate'\nsource=body.source inbound; after processing the current turn, when\nclaim runs, dispatch goto END and the process exits. An optional message\nis committed as pending chat immediately before the terminate command, so\nit is retained for resurrection without causing another LLM turn.\n\nWith `force=true`, request interruption. Hosted force returns `enqueued`\nwhile the original host drains actual work; acceptance and metadata status\nare not proof of exit. Detached process force returns `force_killed`.\n\nSmart liveness detection: if the process corresponding to\nagents_meta.pid is gone (zombie row, commonly from early-stage\nEmptyInputError residuals / respawn_agent failures leaving an unclaimed\nrow), force UPDATE status='terminated' directly without the\ninbound path — an inbound delivered to a dead process is pending\nforever and the user can never clear it.\n\nAlways runs on the agent's home machine via its ops server\n(`_forward_to_home_machine`). The force path must, because killing the\ndetached process / os.kill are physical local-host operations; the graceful\npath must too, because zombie detection `process_alive(pid)` is\nmeaningless across machines (probing a cross-machine PID via signal 0\nhits a remote PID space and gives false positives). Both paths run on\nthe home machine, symmetric in logic.\n\n404: agent_id does not exist (AgentNotFound -> handler returns\n    404 + reason).\n`already_terminated`: agent was already dead / process detected as\n    dead and cleaned up directly.\n`force_killed`: force=true killed the process and marked terminated.",
         "operationId": "post_agent_terminate_api_agents__agent_id__terminate_post",
         "parameters": [
           {
@@ -14202,11 +14202,24 @@
             "minLength": 1,
             "title": "Source",
             "default": "user"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 1000000,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
           }
         },
         "type": "object",
         "title": "TerminateAgentRequest",
-        "description": "POST /api/agents/{id}/terminate request body — fully optional.\n\n`force` default False — graceful terminate path (INSERT inbound, wait\nfor agent claim). True directly kills the agent's detached process (native\nsupervisor) + its OS pid + force UPDATEs status='terminated', for cases where\nthe agent is stuck (hung LLM call etc.) and cannot reach the claim node.\n\n`source` default \"user\" — frontend terminate button does not need\nto pass it; SDK paths pass f\"agent:{my_id}\". Written into the\nlifecycle 'terminate' inbound's source; the claim-side dispatch\ncomposes it into the marker `[system ts] You have been terminated\nby {source}` so the agent knows who terminated it."
+        "description": "POST /api/agents/{id}/terminate request body — fully optional.\n\n`force` defaults to False for graceful termination. True directly kills the\ndetached process and force-updates status when the agent cannot reach claim.\n\n`source` defaults to \"user\"; SDK paths pass f\"agent:{my_id}\". Claim\nincludes this source in the lifecycle marker shown to the agent.\n\n`message`, when present, is queued as chat immediately before the terminate\ninbound. Lifecycle acceptance claims only the terminate row, so the chat\nremains pending for the next resurrection without another LLM turn."
       },
       "TerminateAgentResponse": {
         "properties": {

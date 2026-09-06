@@ -19,6 +19,7 @@ import json
 from datetime import UTC, datetime
 from typing import Any
 
+import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
@@ -233,7 +234,7 @@ def test_list_agents_rejects_unknown_status() -> None:
 # ── fleet tools against the in-process ops stand-ins ─────────────────────
 
 
-def test_spawn_get_terminate_round_trip() -> None:
+def test_spawn_get_terminate_round_trip(db_conn: psycopg.Connection) -> None:
     with TestClient(app) as client:
         token = _create_token(client)
         payload = _tool_result(_tool_call(client, token, "spawn_agent", {"prompt": "test goal"}))
@@ -243,8 +244,22 @@ def test_spawn_get_terminate_round_trip() -> None:
         assert row["agent_id"] == agent_id
         assert row["spawner"] == "mcp"
 
-        status = _tool_result(_tool_call(client, token, "terminate_agent", {"agent_id": agent_id}))
+        status = _tool_result(
+            _tool_call(
+                client,
+                token,
+                "terminate_agent",
+                {"agent_id": agent_id, "message": "retain this result"},
+            )
+        )
         assert status["status"] == "enqueued"
+    assert db_conn.execute(
+        "SELECT content,kind,source FROM inbound_messages WHERE agent_id=%s ORDER BY id",
+        (agent_id,),
+    ).fetchall()[-2:] == [
+        ("retain this result", "chat", "user"),
+        ("", "terminate", "user"),
+    ]
 
 
 def test_get_agent_not_found_is_an_error() -> None:

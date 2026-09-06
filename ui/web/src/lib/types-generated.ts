@@ -378,7 +378,9 @@ export interface paths {
          * Post Agent Terminate
          * @description Have the agent gracefully exit — INSERT one kind='terminate'
          *     source=body.source inbound; after processing the current turn, when
-         *     claim runs, dispatch goto END and the process exits.
+         *     claim runs, dispatch goto END and the process exits. An optional message
+         *     is committed as pending chat immediately before the terminate command, so
+         *     it is retained for resurrection without causing another LLM turn.
          *
          *     With `force=true`, request interruption. Hosted force returns `enqueued`
          *     while the original host drains actual work; acceptance and metadata status
@@ -7377,16 +7379,15 @@ export interface components {
          * TerminateAgentRequest
          * @description POST /api/agents/{id}/terminate request body — fully optional.
          *
-         *     `force` default False — graceful terminate path (INSERT inbound, wait
-         *     for agent claim). True directly kills the agent's detached process (native
-         *     supervisor) + its OS pid + force UPDATEs status='terminated', for cases where
-         *     the agent is stuck (hung LLM call etc.) and cannot reach the claim node.
+         *     `force` defaults to False for graceful termination. True directly kills the
+         *     detached process and force-updates status when the agent cannot reach claim.
          *
-         *     `source` default "user" — frontend terminate button does not need
-         *     to pass it; SDK paths pass f"agent:{my_id}". Written into the
-         *     lifecycle 'terminate' inbound's source; the claim-side dispatch
-         *     composes it into the marker `[system ts] You have been terminated
-         *     by {source}` so the agent knows who terminated it.
+         *     `source` defaults to "user"; SDK paths pass f"agent:{my_id}". Claim
+         *     includes this source in the lifecycle marker shown to the agent.
+         *
+         *     `message`, when present, is queued as chat immediately before the terminate
+         *     inbound. Lifecycle acceptance claims only the terminate row, so the chat
+         *     remains pending for the next resurrection without another LLM turn.
          */
         TerminateAgentRequest: {
             /**
@@ -7399,6 +7400,8 @@ export interface components {
              * @default user
              */
             source: string;
+            /** Message */
+            message?: string | null;
         };
         /**
          * TerminateAgentResponse

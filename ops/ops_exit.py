@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 from uuid import UUID
 
+import psycopg
 from psycopg_pool import ConnectionPool
 
 from ops.agent_identity import AgentProcessIdentity, probe_agent_process
@@ -23,10 +24,128 @@ from shared.audit_events import insert_event_log
 from shared.cluster import session_name
 from shared.db import publish_inbound_wake
 from shared.db_transaction import write_transaction
+from shared.envelope import validate_writable_source
 from shared.live_announce import publish_agent_updated_sync
 from shared.log import logger
 from shared.proc import force_kill
 from shared.session_backend import native_proc
+
+
+def _insert_termination_pair(
+    conn: psycopg.Connection,
+    agent_id: int,
+    *,
+    source: str,
+    message: str | None,
+) -> tuple[int | None, int]:
+    """Insert an optional pending chat followed by its terminate command."""
+    message_id: int | None = None
+    with conn.cursor() as cur:
+        if message is not None:
+            validate_writable_source(source)
+            cur.execute(
+                "INSERT INTO inbound_messages (agent_id,content,kind,source) "
+                "VALUES (%s,%s,'chat',%s) RETURNING id",
+                (agent_id, message, source),
+            )
+            message_row = cur.fetchone()
+            if message_row is None:
+                raise RuntimeError("termination message INSERT returned no id")
+            message_id = int(message_row[0])
+        cur.execute(
+            "INSERT INTO inbound_messages (agent_id,content,kind,source) "
+            "VALUES (%s,'','terminate',%s) RETURNING id",
+            (agent_id, source),
+        )
+        terminate_row = cur.fetchone()
+        if terminate_row is None:
+            raise RuntimeError("terminate inbound INSERT returned no id")
+    return message_id, int(terminate_row[0])
+
+
+def _insert_pending_termination_message(
+    conn: psycopg.Connection,
+    agent_id: int,
+    *,
+    source: str,
+    message: str,
+) -> int:
+    """Retry only the final chat after the termination command is durable."""
+    validate_writable_source(source)
+    with conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO inbound_messages (agent_id,content,kind,source) "
+            "VALUES (%s,%s,'chat',%s) RETURNING id",
+            (agent_id, message, source),
+        )
+        row = cur.fetchone()
+        if row is None:
+            raise RuntimeError("termination message retry INSERT returned no id")
+        return int(row[0])
+
+
+def _insert_termination_inbounds(
+    conn: psycopg.Connection,
+    agent_id: int,
+    *,
+    source: str,
+    message: str | None,
+) -> tuple[int | None, int]:
+    """Insert termination inbounds, preserving terminate on message failure.
+
+    The caller owns the outer transaction. Nested transactions are savepoints:
+    the first keeps the chat and command atomic, while the second contains a
+    failed best-effort chat retry without rolling back the durable command.
+    """
+    if message is None:
+        return _insert_termination_pair(conn, agent_id, source=source, message=None)
+    try:
+        with conn.transaction():
+            return _insert_termination_pair(conn, agent_id, source=source, message=message)
+    except Exception as exc:
+        logger.warning(
+            "atomic termination message enqueue failed for agent {agent_id}; "
+            "retrying the terminate command alone ({exc!r})",
+            agent_id=agent_id,
+            exc=exc,
+        )
+    _, terminate_id = _insert_termination_pair(conn, agent_id, source=source, message=None)
+    message_id: int | None = None
+    try:
+        with conn.transaction():
+            message_id = _insert_pending_termination_message(
+                conn,
+                agent_id,
+                source=source,
+                message=message,
+            )
+    except Exception as exc:
+        logger.warning(
+            "termination message retry failed for agent {agent_id}; the terminate "
+            "command remains durable ({exc!r})",
+            agent_id=agent_id,
+            exc=exc,
+        )
+    return message_id, terminate_id
+
+
+def _enqueue_termination_inbounds(
+    agent_id: int,
+    db_pool: ConnectionPool,
+    *,
+    source: str,
+    message: str | None,
+) -> int:
+    """Persist graceful termination and publish its audit/wake effects."""
+    with write_transaction(db_pool) as conn:
+        _, terminate_id = _insert_termination_inbounds(
+            conn,
+            agent_id,
+            source=source,
+            message=message,
+        )
+    _publish_force_terminate_inbound(agent_id, terminate_id, source)
+    return terminate_id
 
 
 def _force_terminate_transaction(
@@ -35,6 +154,7 @@ def _force_terminate_transaction(
     *,
     source: str,
     kill_process: bool,
+    message: str | None = None,
 ) -> tuple[AgentStatus, int | None, list[str], int]:
     """Fence and mark one explicit kill while holding the agent row lock.
 
@@ -57,15 +177,12 @@ def _force_terminate_transaction(
         old_status = AgentStatus(row[0])
         pid = row[1]
         page_names = list_open_page_names(conn, agent_id)
-        cur.execute(
-            "INSERT INTO inbound_messages (agent_id, content, kind, source) "
-            "VALUES (%s, '', 'terminate', %s) RETURNING id",
-            (agent_id, source),
+        _, terminate_inbound_id = _insert_termination_inbounds(
+            conn,
+            agent_id,
+            source=source,
+            message=message,
         )
-        inbound_row = cur.fetchone()
-        if inbound_row is None:
-            raise RuntimeError("force terminate inbound INSERT returned no id")
-        terminate_inbound_id = inbound_row[0]
         cur.execute(
             # termination_source='user': force-kill / a terminate that found the
             # pid already dead. Both are the user's will to end the agent, so it
@@ -108,7 +225,11 @@ def _publish_force_terminate_inbound(agent_id: int, inbound_id: int, source: str
 
 
 def _force_mark_terminated(
-    agent_id: int, db_pool: ConnectionPool, *, source: str = "user"
+    agent_id: int,
+    db_pool: ConnectionPool,
+    *,
+    source: str = "user",
+    message: str | None = None,
 ) -> list[str]:
     """Fence an explicit zombie kill and return cascade-closed page names."""
     _, _, page_names, inbound_id = _force_terminate_transaction(
@@ -116,6 +237,7 @@ def _force_mark_terminated(
         db_pool,
         source=source,
         kill_process=False,
+        message=message,
     )
     _publish_force_terminate_inbound(agent_id, inbound_id, source)
     return page_names

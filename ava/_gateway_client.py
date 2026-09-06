@@ -299,7 +299,13 @@ def list_agents(filter_by_status: tuple[AgentStatus, ...] | None = None) -> list
     return rows
 
 
-def terminate(agent_id: int, *, source: str | None = None, force: bool = False) -> str:
+def terminate(
+    agent_id: int,
+    *,
+    source: str | None = None,
+    message: str | None = None,
+    force: bool = False,
+) -> str:
     """POST /api/agents/{id}/terminate → status string.
 
     source defaults to f"agent:{ava.self.AGENT_ID}" so the lifecycle marker
@@ -309,12 +315,17 @@ def terminate(agent_id: int, *, source: str | None = None, force: bool = False) 
     force=True requests interruption. Hosted force returns "enqueued" while
     the original host drains actual work; acceptance is not observed exit.
     Detached process force retains its "force_killed" result.
+
+    message, when present, is retained for the agent's next resurrection while
+    termination proceeds without waiting for another response.
     """
     body: dict = {}
     if source is not None:
         body["source"] = source
     else:
         body["source"] = ava._boot.default_actor()
+    if message is not None:
+        body["message"] = message
     if force:
         body["force"] = True
     resp = _post(f"/api/agents/{agent_id}/terminate", body)
