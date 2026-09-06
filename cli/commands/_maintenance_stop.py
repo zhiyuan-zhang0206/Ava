@@ -17,8 +17,15 @@ import psutil
 
 from shared.paths import run_dir
 from shared.pty_sessions._paths import host_identity, host_starttime
-from shared.session_backend import WinprocSessionBackend, get_backend, get_shell_backend
+from shared.session_backend import (
+    SessionBackend,
+    WinprocSessionBackend,
+    get_backend,
+    get_shell_backend,
+)
 from shared.session_record import SessionRecord, pid_starttime_ticks
+
+_TERMINAL_NAME = re.compile(r"ava-(?:agent-\d+-shell-\d+(?:-|$)|schedule-\d+(?:-|$))")
 
 
 @dataclass(frozen=True)
@@ -162,11 +169,7 @@ def require_no_terminals() -> None:
     if isinstance(backend, WinprocSessionBackend):
         # Windows uses one record namespace for services and interactive shells.
         # These are the SDK and ScheduleManager's existing terminal name shapes.
-        listed = [
-            name
-            for name in listed
-            if re.match(r"ava-(?:agent-\d+-shell-\d+(?:-|$)|schedule-\d+(?:-|$))", name)
-        ]
+        listed = [name for name in listed if _TERMINAL_NAME.match(name)]
     terminals.extend(listed)
     if terminals:
         raise RuntimeError(
@@ -175,22 +178,24 @@ def require_no_terminals() -> None:
         )
 
 
-def stop_services(timeout: float) -> list[str]:
-    """Signal captured service identities; a survivor leaves maintenance held.
+def service_names(backend: SessionBackend, *, keep_terminals: bool = False) -> list[str]:
+    """Select services from Windows' shared service/terminal record namespace."""
+    names = backend.list_sessions()
+    if keep_terminals and isinstance(backend, WinprocSessionBackend):
+        names = [name for name in names if not _TERMINAL_NAME.match(name)]
+    return sorted(names)
 
-    No kill_session fallback is allowed. Windows uses the existing private
-    console helper with the remaining budget and expected record identity.
-    Original POSIX groups remain checked after their leaders exit; captured
-    descendants that left those groups are followed by birth identity. Unknown
-    newly daemonized sessions require separate ownership proof. Admission
-    fencing and separately registered resources remain caller duties.
-    """
-    deadline = deadline_after(timeout)
-    require_no_terminals()
-    backend = get_backend()
+
+def _validate_service_records(backend: SessionBackend, *, keep_terminals: bool) -> None:
     # List APIs may discard malformed or stale records; do not let that erase
     # an identity uncertainty before strict preflight has examined it.
     for path in (run_dir() / "sessions").glob("*.json"):
+        if (
+            keep_terminals
+            and isinstance(backend, WinprocSessionBackend)
+            and _TERMINAL_NAME.match(path.stem)
+        ):
+            continue
         record = SessionRecord.read(path)
         if record is None:
             raise RuntimeError(f"cannot verify service record: {path.stem}")
@@ -202,7 +207,26 @@ def stop_services(timeout: float) -> list[str]:
                 continue
             if current.live():
                 raise RuntimeError(f"service identity changed before stop: {path.stem}")
-    names = sorted(backend.list_sessions())
+
+
+def stop_services(timeout: float, *, keep_terminals: bool = False) -> list[str]:
+    """Signal captured service identities; a survivor leaves maintenance held.
+
+    No kill_session fallback is allowed. Windows uses the existing private
+    console helper with the remaining budget and expected record identity.
+    Original POSIX groups remain checked after their leaders exit; captured
+    descendants that left those groups are followed by birth identity. Unknown
+    newly daemonized sessions require separate ownership proof. Admission
+    fencing and separately registered resources remain caller duties.
+    keep_terminals is an operator assertion of a separately verified work
+    boundary; it preserves terminals without proving they have stopped writing.
+    """
+    deadline = deadline_after(timeout)
+    if not keep_terminals:
+        require_no_terminals()
+    backend = get_backend()
+    _validate_service_records(backend, keep_terminals=keep_terminals)
+    names = service_names(backend, keep_terminals=keep_terminals)
     records: dict[str, SessionRecord] = {}
     tracked: set[OwnedProcess] = set()
     ancestors = {os.getpid(), *(process.pid for process in psutil.Process().parents())}
@@ -223,8 +247,9 @@ def stop_services(timeout: float) -> list[str]:
     # exit before the next descendant snapshot. Never signal the group here.
     groups = _capture_groups(records)
     # Complete every identity/preflight check before delivering the first signal.
-    require_no_terminals()
-    if sorted(backend.list_sessions()) != names:
+    if not keep_terminals:
+        require_no_terminals()
+    if service_names(backend, keep_terminals=keep_terminals) != names:
         raise RuntimeError("service roster changed before held stop")
     ordered = sorted(names, key=lambda name: not name.endswith(("watchdog", "restarter")))
     for name in ordered:
@@ -242,8 +267,9 @@ def stop_services(timeout: float) -> list[str]:
                 raise RuntimeError(f"graceful signal refused the captured service: {name}")
     wait_for_exit(tracked, deadline, groups=groups)
     remaining(deadline)
-    require_no_terminals()
-    if backend.list_sessions():
+    if not keep_terminals:
+        require_no_terminals()
+    if service_names(backend, keep_terminals=keep_terminals):
         raise RuntimeError("services appeared during held stop")
     return names
 

@@ -16,6 +16,7 @@ from cli.commands._maintenance_stop import (
     deadline_after,
     remaining,
     require_no_terminals,
+    service_names,
     stop_data_plane,
     stop_services,
 )
@@ -108,7 +109,9 @@ def _gateway_last(*, confirmed: bool) -> None:
         )
 
 
-def _stop(holder: str, at: datetime, timeout: float, *, gateway_last: bool) -> None:
+def _stop(
+    holder: str, at: datetime, timeout: float, *, gateway_last: bool, keep_terminals: bool = False
+) -> None:
     deadline = deadline_after(timeout)
     _gateway_last(confirmed=gateway_last)
     hold = _hold(holder, at)
@@ -126,7 +129,7 @@ def _stop(holder: str, at: datetime, timeout: float, *, gateway_last: bool) -> N
         maintenance.set_phase(holder, at, "stopping")
     set_posture("paused")
     ops_quiescent(remaining(deadline))
-    stopped = stop_services(remaining(deadline))
+    stopped = stop_services(remaining(deadline), keep_terminals=keep_terminals)
     remaining(deadline)
     if hold.phase != "stopped":
         maintenance.set_phase(holder, at, "stopped")
@@ -170,15 +173,18 @@ def _resume(holder: str, at: datetime, *, cancel: bool) -> None:
     _wake(hold)
 
 
-def _stop_data(holder: str, at: datetime, timeout: float, *, gateway_last: bool) -> None:
+def _stop_data(
+    holder: str, at: datetime, timeout: float, *, gateway_last: bool, keep_terminals: bool = False
+) -> None:
     from shared.session_backend import get_backend
 
     _gateway_last(confirmed=gateway_last)
     if "gateway" not in machine_role() or _hold(holder, at).phase != "stopped":
         raise RuntimeError("data-plane stop requires this gateway's stopped maintenance hold")
-    if get_backend().list_sessions():
+    if service_names(get_backend(), keep_terminals=keep_terminals):
         raise RuntimeError("local services are still running; data plane left available")
-    require_no_terminals()
+    if not keep_terminals:
+        require_no_terminals()
     stopped = stop_data_plane(timeout)
     print(f"Stopped local data plane: {stopped}; no backup was created")
 
@@ -208,13 +214,25 @@ def run(args: argparse.Namespace) -> int:
     elif verb == "drain":
         _drain(args.operation, at, args.timeout)
     elif verb == "stop":
-        _stop(args.operation, at, args.timeout, gateway_last=args.gateway_last)
+        _stop(
+            args.operation,
+            at,
+            args.timeout,
+            gateway_last=args.gateway_last,
+            keep_terminals=args.keep_terminals,
+        )
     elif verb == "start":
         return _start(args.operation, at)
     elif verb == "resume":
         _resume(args.operation, at, cancel=args.cancel)
     elif verb == "stop-data-plane":
-        _stop_data(args.operation, at, args.timeout, gateway_last=args.gateway_last)
+        _stop_data(
+            args.operation,
+            at,
+            args.timeout,
+            gateway_last=args.gateway_last,
+            keep_terminals=args.keep_terminals,
+        )
     else:
         raise ValueError(f"unknown maintenance action: {verb}")
     return 0
