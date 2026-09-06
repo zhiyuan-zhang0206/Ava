@@ -1230,17 +1230,6 @@ jobs:
           name: e2e-logs-shard-${{ matrix.group }}
           path: tmp/e2e-logs/
 
-      # A missing visual reference intentionally writes the Ubuntu Chromium
-      # candidate here before failing. The operator reviews and commits those
-      # PNGs for the second CI round; normal regressions keep failing normally.
-      - name: Upload visual baseline candidates on failure
-        if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: e2e-visual-baselines-shard-${{ matrix.group }}
-          path: tests/e2e/__snapshots__/
-          if-no-files-found: warn
-
   e2e-hosted:
     name: e2e hosted (agent-runner-as-server happy path)
     runs-on: ubuntu-24.04
