@@ -16,6 +16,7 @@ from datetime import UTC, datetime, timedelta
 import ava
 from ava.agents import AgentStatus as S
 from schedules.agent_status_guard import ensure_agent_status_members
+from schedules.catchup import catch_up, fire_slot_once
 from shared.config import settings
 from shared.watcher import next_fire
 
@@ -125,16 +126,26 @@ def run_scan() -> None:
             print(f"daily report to {REPORT_AGENT} failed: {e}")
 
 
-while True:
-    # after=now-2min gives trigger tolerance: sleep precision delay can land `now`
-    # a fraction of a second past the hour; croniter get_next (strictly > base)
-    # would then jump to the next day (deterministic miss, observed 2026-08-06).
-    # tolerance window = [-120s, +60s].
-    now = datetime.now(UTC)
-    nxt = next_fire(CRON, after=now - timedelta(minutes=2), timezone=TZ)
-    wait = (nxt - now).total_seconds()
-    if wait > 60:
-        time.sleep(min(wait, 3600))
-        continue
+def _fire_scan(_trigger: None) -> None:
     run_scan()
-    time.sleep(120)
+
+
+def main() -> None:
+    catch_up([(CRON, None)], timezone=TZ, fire=_fire_scan)
+    while True:
+        # after=now-2min gives trigger tolerance: sleep precision delay can land `now`
+        # a fraction of a second past the hour; croniter get_next (strictly > base)
+        # would then jump to the next day (deterministic miss, observed 2026-08-06).
+        # tolerance window = [-120s, +60s].
+        now = datetime.now(UTC)
+        nxt = next_fire(CRON, after=now - timedelta(minutes=2), timezone=TZ)
+        wait = (nxt - now).total_seconds()
+        if wait > 60:
+            time.sleep(min(wait, 3600))
+            continue
+        fire_slot_once(nxt, None, fire=_fire_scan)
+        time.sleep(120)
+
+
+if __name__ == "__main__":
+    main()

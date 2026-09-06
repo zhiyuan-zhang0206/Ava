@@ -25,6 +25,7 @@ from datetime import UTC, datetime
 import ava
 from ava.agents import AgentStatus as S
 from schedules.agent_status_guard import ensure_agent_status_members
+from schedules.catchup import catch_up, fire_slot_once
 from shared.config import settings
 from shared.watcher import next_fire
 
@@ -68,7 +69,18 @@ def ensure_agent(label, prompt):
     return ava.agents.spawn(prompt=prompt, label=label)  # pyright: ignore[reportCallIssue] — fleet plugin wraps spawn with label
 
 
+def fire_memory_maintenance(message: str) -> None:
+    print(f"[schedule] Firing: {message}")
+    try:
+        full_prompt = f"memory-arbiter: {message}"
+        ensure_agent(MEMORY_ARBITRATOR_LABEL, full_prompt)
+        print(f"[schedule] Agent notified: {message}")
+    except Exception as exc:
+        print(f"[schedule] Failed: {exc}")
+
+
 def main():
+    catch_up(TRIGGERS, timezone=TIMEZONE, fire=fire_memory_maintenance)
     while True:
         # Find the next fire among all triggers
         now = datetime.now(UTC)
@@ -86,14 +98,7 @@ def main():
             print(f"[schedule] Next: {next_fire_time} ({cron_expr}) — sleeping {wait:.0f}s")
             time.sleep(wait)
 
-        # Fire
-        print(f"[schedule] Firing: {cron_expr} — {message}")
-        try:
-            full_prompt = f"memory-arbiter: {message}"
-            ensure_agent(MEMORY_ARBITRATOR_LABEL, full_prompt)
-            print(f"[schedule] Agent notified: {message}")
-        except Exception as e:
-            print(f"[schedule] Failed: {e}")
+        fire_slot_once(next_fire_time, message, fire=fire_memory_maintenance)
 
         # Small debounce to avoid double-fire
         time.sleep(60)

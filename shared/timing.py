@@ -82,6 +82,13 @@ from shared.host_deploy_state import UPDATER_LEASE_TTL_S
 CONTROLLER_SCAN_INTERVAL_S = 30.0
 
 
+# --- schedule supervision family ---------------------------------------------
+# The manager's missing-session alert must outlive a legitimate cluster
+# rollout's no-progress window. Otherwise an ordinary rollout could produce a
+# schedule-stalled alert before the updater itself is judged stuck.
+SCHEDULE_STALL_ALERT_AFTER_S = 2 * 60 * 60
+
+
 # --- wedged family: the derivation's components ------------------------------
 # The wedged threshold is derived, not arbitrary: an agent holding an unconsumed
 # pending inbound for this long is presumed wedged because a healthy agent's
@@ -260,6 +267,12 @@ CLOCKS: dict[str, Clock] = {
         "restarter",
         lambda: settings.daemon.restarter_poll_interval_seconds,
         "how often the restarter checks restarting-agent rows",
+    ),
+    # --- schedule supervision family ---
+    "SCHEDULE_STALL_ALERT_AFTER_S": Clock(
+        "schedule-supervision",
+        SCHEDULE_STALL_ALERT_AFTER_S,
+        "how long an enabled non-completed schedule may remain sessionless before alerting",
     ),
     # --- updater family ---
     "UPDATER_LEASE_TTL_S": Clock(
@@ -445,6 +458,14 @@ CONSTRAINTS: list[Constraint] = [
         "CLUSTER_DISPATCH_TIMEOUT_S",
         "the detached child must publish ownership before the dispatching client "
         "can time out and invite a duplicate submission",
+    ),
+    # --- schedule supervision family ---
+    Constraint(
+        "<",
+        "NO_PROGRESS_TIMEOUT_S",
+        "SCHEDULE_STALL_ALERT_AFTER_S",
+        "the schedule-silence alert must outlive a legitimate rollout's "
+        "no-progress window, so normal stop-the-world service churn stays quiet",
     ),
     # --- agent-lease family ---
     Constraint(

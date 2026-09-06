@@ -65,6 +65,7 @@ _SQL_OR_DYNAMIC_KINDS = frozenset(
         "gateway_event_loop",  # gateway/_runtime_metrics.py:_emit_snapshot positional emit
         "auth401_rejected",  # gateway/_auth401_log.py:emit_auth401_count telemetry.emit("telemetry", ...)
         "agent_registry",  # gateway/_agent_max_id.py:emit_max_agent_id telemetry.emit("telemetry", ...)
+        "schedule_stalled",  # gateway/schedule_manager.py:_report_stalled_schedules telemetry.emit
         "memory_search_stats",  # services/memory_search/app.py:emit_memory_search_stats (positional emit)
         "pitr_remote_inventory",  # services/pitr/retention_scheduler.py:refresh (positional emit)
         "recovery_drill_failed",  # services/backup_scheduler/daemon.py:_run_due_local_dump_restore + services/pitr/base_scheduler_daemon.py:run (positional emit)

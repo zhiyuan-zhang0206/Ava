@@ -71,6 +71,15 @@ as before.
   at process start, so a changed value needs `ava schedules restart <id>`.
   A one-off schedule you write yourself should do the same rather than
   hard-coding an IANA name; `next_fire(expr, timezone=None)` computes in UTC.
+- **Built-in cron slots are durably claimed.** Each template calls
+  `schedules.catchup.fire_slot_once()` for normal online fires and runs
+  `schedules.catchup.catch_up()` once at startup. The claim key is
+  `(schedule_id, slot_fire_at)`, so concurrent runners and later restarts cannot
+  execute the same slot twice. On first use, the schedule's `created_at` is the
+  lower bound; later starts use its newest claim. Startup executes at most the
+  two most recent missed slots and warns when older slots were truncated.
+  Claims commit before the fire callback: a crash after claiming can lose that
+  slot, which is the intentional at-most-once trade-off.
 - **A template change does not reach a running cluster on its own.** The DB is
   authoritative and `provision_builtin_schedules` only inserts rows that are
   missing — it never rewrites one that exists — so `ava cluster update` refreshes
@@ -81,6 +90,9 @@ as before.
   ava schedules update memory-arbiter        --script-file schedules/memory-steward-schedule.py
   ava schedules update self-evolution-daily  --script-file schedules/self-evolution-daily-schedule.py
   ava schedules update self-evolution-weekly --script-file schedules/self-evolution-weekly-schedule.py
+  ava schedules update adversarial-eval-weekly --script-file schedules/adversarial-eval-weekly-schedule.py
+  ava schedules update model-update-tracker  --script-file schedules/model-update-tracker-schedule.py
+  ava schedules update trace-ship-tempo      --script-file schedules/trace-ship-tempo-schedule.py
   ```
 
   An **enabled** schedule is relaunched onto the new script by that call alone;

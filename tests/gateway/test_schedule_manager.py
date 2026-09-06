@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Any, cast
 
 import psycopg
 import pytest
@@ -490,6 +491,82 @@ def test_error_schedule_not_relaunched_after_restart(
 
     assert launched == []  # not resurrected with a clean counter
     assert _status(db_conn, sid) == "error"
+
+
+def test_missing_error_schedule_alerts_after_two_hours_and_rearms_after_recovery(
+    db_conn: psycopg.Connection,
+    pool: ConnectionPool,
+    fake_session: tuple[_FakeBackend, list[int]],
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    backend, _launched = fake_session
+    sid = _insert(db_conn, "stalled-error")
+    _set_status(db_conn, sid, "error")
+    clock = {"t": 1000.0}
+    emitted: list[tuple[str, dict[str, object]]] = []
+    monkeypatch.setattr(sm.time, "monotonic", lambda: clock["t"])
+
+    def capture_emit(_category: object, event_name: str, **kwargs: Any) -> None:
+        emitted.append((event_name, cast(dict[str, object], kwargs["attributes"])))
+
+    monkeypatch.setattr(sm.telemetry, "emit", capture_emit)
+    manager = sm.ScheduleManager(pool)
+
+    with caplog.at_level(logging.WARNING, logger=sm.__name__):
+        manager._reconcile()
+        clock["t"] += sm._STALL_ALERT_AFTER_S
+        manager._reconcile()
+        assert emitted == []
+        clock["t"] += 0.1
+        manager._reconcile()
+        manager._reconcile()
+
+        name = session_name(f"schedule-{sid}")
+        backend.live.append(name)
+        manager._reconcile()
+        backend.live.remove(name)
+        manager._reconcile()
+        clock["t"] += sm._STALL_ALERT_AFTER_S + 0.1
+        manager._reconcile()
+
+    assert emitted == [
+        (
+            "schedule_stalled",
+            {"schedule_id": sid, "status": "error", "stalled_seconds": 7200.1},
+        ),
+        (
+            "schedule_stalled",
+            {"schedule_id": sid, "status": "error", "stalled_seconds": 7200.1},
+        ),
+    ]
+    assert caplog.text.count(f"schedule {sid} has had no live session") == 2
+
+
+def test_completed_and_disabled_schedules_do_not_stall_alert(
+    db_conn: psycopg.Connection,
+    pool: ConnectionPool,
+    fake_session: tuple[_FakeBackend, list[int]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    completed = _insert(db_conn, "completed-no-alert")
+    _set_status(db_conn, completed, "completed")
+    _insert(db_conn, "disabled-no-alert", enabled=False)
+    clock = {"t": 0.0}
+    emitted: list[str] = []
+    monkeypatch.setattr(sm.time, "monotonic", lambda: clock["t"])
+
+    def capture_emit(_category: object, event_name: str, **_kwargs: Any) -> None:
+        emitted.append(event_name)
+
+    monkeypatch.setattr(sm.telemetry, "emit", capture_emit)
+    manager = sm.ScheduleManager(pool)
+
+    manager._reconcile()
+    clock["t"] += sm._STALL_ALERT_AFTER_S + 1
+    manager._reconcile()
+
+    assert emitted == []
 
 
 def test_sync_recovers_errored_schedule(
