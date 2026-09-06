@@ -51,7 +51,7 @@ class _FakeHelper:
     def __init__(
         self,
         path: str,
-        handler: Callable[[dict], dict] | None = None,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+        handler: Callable[[dict], dict] | None = None,
         raw: Callable[[socket.socket], None] | None = None,
     ) -> None:
         self._srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -75,7 +75,7 @@ class _FakeHelper:
                     self._raw(conn)
                     continue
                 assert self._handler is not None  # pyright: ignore[reportUnknownMemberType]
-                resp = self._handler(json.loads(_read_line(conn)))  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+                resp = self._handler(json.loads(_read_line(conn)))  # pyright: ignore[reportUnknownMemberType]
                 conn.sendall((json.dumps(resp) + "\n").encode())
 
     def close(self) -> None:
@@ -85,12 +85,12 @@ class _FakeHelper:
 
 
 @pytest.fixture
-def fake_helper():  # pyright: ignore[reportUnknownParameterType]
+def fake_helper():
     servers: list[_FakeHelper] = []
     paths: list[str] = []
 
     def start(
-        handler: Callable[[dict], dict] | None = None,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+        handler: Callable[[dict], dict] | None = None,
         *,
         raw: Callable[[socket.socket], None] | None = None,
     ) -> str:
@@ -109,22 +109,22 @@ def fake_helper():  # pyright: ignore[reportUnknownParameterType]
         Path(p).unlink(missing_ok=True)
 
 
-def test_call_echoes_method_and_returns_result(fake_helper) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-    seen: dict = {}  # pyright: ignore[reportMissingTypeArgument, reportUnknownVariableType]
+def test_call_echoes_method_and_returns_result(fake_helper) -> None:
+    seen: dict = {}
 
-    def handler(req: dict) -> dict:  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+    def handler(req: dict) -> dict:
         seen.update(req)  # pyright: ignore[reportUnknownMemberType]
-        return {"id": req["id"], "ok": True, "result": {"path": req["path"], "bytes": 42}}  # pyright: ignore[reportUnknownVariableType]
+        return {"id": req["id"], "ok": True, "result": {"path": req["path"], "bytes": 42}}
 
-    path = fake_helper(handler)  # pyright: ignore[reportUnknownVariableType]
+    path = fake_helper(handler)
     out = client.screencapture_region(1, 2, 3, 4, "out.png", sock_path=path)  # pyright: ignore[reportUnknownArgumentType]
     assert out == {"path": "out.png", "bytes": 42}
     assert seen["method"] == "screencapture_region"
     assert (seen["x"], seen["y"], seen["w"], seen["h"]) == (1, 2, 3, 4)
 
 
-def test_ok_false_raises_with_server_error(fake_helper) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-    path = fake_helper(lambda req: {"id": req["id"], "ok": False, "error": "no focused window"})  # pyright: ignore[reportUnknownLambdaType, reportUnknownVariableType]
+def test_ok_false_raises_with_server_error(fake_helper) -> None:
+    path = fake_helper(lambda req: {"id": req["id"], "ok": False, "error": "no focused window"})
     with pytest.raises(PermissionsHelperError, match="no focused window"):
         client.ax_window_info("Finder", sock_path=path)  # pyright: ignore[reportUnknownArgumentType]
 
@@ -150,35 +150,35 @@ def test_permissions_helper_app_dir_is_stable_under_ava_home(
     assert paths.permissions_helper_app_dir() == tmp_path / "home" / "helper"
 
 
-def test_method_name_mapping(fake_helper) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_method_name_mapping(fake_helper) -> None:
     # type_text dispatches as method "type", not "type_text" -- pin that wire name.
     seen: list[str] = []
 
-    def handler(req: dict) -> dict:  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+    def handler(req: dict) -> dict:
         seen.append(req["method"])  # pyright: ignore[reportUnknownArgumentType]
-        return {"id": req["id"], "ok": True, "result": {}}  # pyright: ignore[reportUnknownVariableType]
+        return {"id": req["id"], "ok": True, "result": {}}
 
-    path = fake_helper(handler)  # pyright: ignore[reportUnknownVariableType]
+    path = fake_helper(handler)
     client.type_text("hi", sock_path=path)  # pyright: ignore[reportUnknownArgumentType]
     client.click(1, 2, sock_path=path)  # pyright: ignore[reportUnknownArgumentType]
     client.ping(sock_path=path)  # pyright: ignore[reportUnknownArgumentType]
     assert seen == ["type", "click", "ping"]
 
 
-def test_nursery_method_requests_and_results(fake_helper) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-    seen: list[dict] = []  # pyright: ignore[reportMissingTypeArgument, reportUnknownVariableType]
+def test_nursery_method_requests_and_results(fake_helper) -> None:
+    seen: list[dict] = []
 
-    def handler(req: dict) -> dict:  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
-        seen.append({key: value for key, value in req.items() if key != "id"})  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+    def handler(req: dict) -> dict:
+        seen.append({key: value for key, value in req.items() if key != "id"})  # pyright: ignore[reportUnknownMemberType]
         results: dict[str, object] = {
             "spawn": {"pid": 4123, "reused": False},
             "session_list": {"sessions": [{"name": "agent-demo", "pid": 4123, "alive": True}]},
             "session_has": {"alive": True},
             "signal": {"sent": True},
         }
-        return {"id": req["id"], "ok": True, "result": results[req["method"]]}  # pyright: ignore[reportUnknownVariableType]
+        return {"id": req["id"], "ok": True, "result": results[req["method"]]}
 
-    path = fake_helper(handler)  # pyright: ignore[reportUnknownVariableType]
+    path = fake_helper(handler)
     assert client.spawn_process(
         "agent-demo",
         ["/usr/bin/env", "python"],
@@ -212,11 +212,11 @@ def test_nursery_method_requests_and_results(fake_helper) -> None:  # pyright: i
     ]
 
 
-def test_spawn_process_preserves_reused_result(fake_helper) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-    def handler(req: dict) -> dict:  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
-        return {"id": req["id"], "ok": True, "result": {"pid": 4123, "reused": True}}  # pyright: ignore[reportUnknownVariableType]
+def test_spawn_process_preserves_reused_result(fake_helper) -> None:
+    def handler(req: dict) -> dict:
+        return {"id": req["id"], "ok": True, "result": {"pid": 4123, "reused": True}}
 
-    assert client.spawn_process(  # pyright: ignore[reportUnknownArgumentType]
+    assert client.spawn_process(
         "agent-demo",
         ["/usr/bin/env", "python"],
         {},
@@ -250,15 +250,15 @@ def test_signal_session_requires_exactly_one_target(name: str | None, pid: int |
         client.signal_session(name=name, pid=pid)
 
 
-def test_self_upgrade_treats_connection_close_as_success(fake_helper) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_self_upgrade_treats_connection_close_as_success(fake_helper) -> None:
     seen: list[dict[str, object]] = []
 
     def close_after_request(conn: socket.socket) -> None:
         request: dict[str, object] = json.loads(_read_line(conn))
         seen.append(request)
 
-    path = fake_helper(raw=close_after_request)  # pyright: ignore[reportUnknownVariableType]
-    assert client.request_self_upgrade(  # pyright: ignore[reportUnknownArgumentType]
+    path = fake_helper(raw=close_after_request)
+    assert client.request_self_upgrade(
         "/Applications/AvaPermissionsHelper.app/Contents/MacOS/AvaPermissionsHelper",
         sock_path=path,  # pyright: ignore[reportUnknownArgumentType]
     )
@@ -268,47 +268,47 @@ def test_self_upgrade_treats_connection_close_as_success(fake_helper) -> None:  
     )
 
 
-def test_self_upgrade_validation_error_is_not_a_success(fake_helper) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-    def handler(req: dict) -> dict:  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
-        return {"id": req["id"], "ok": False, "error": "outside helper bundle"}  # pyright: ignore[reportUnknownVariableType]
+def test_self_upgrade_validation_error_is_not_a_success(fake_helper) -> None:
+    def handler(req: dict) -> dict:
+        return {"id": req["id"], "ok": False, "error": "outside helper bundle"}
 
     with pytest.raises(PermissionsHelperError, match="outside helper bundle"):
-        client.request_self_upgrade(  # pyright: ignore[reportUnknownArgumentType]
+        client.request_self_upgrade(
             "/Applications/UntrustedHelper.app/Contents/MacOS/UntrustedHelper",
             sock_path=fake_helper(handler),  # pyright: ignore[reportUnknownArgumentType]
         )
 
 
-def test_file_method_mapping_and_list_result(fake_helper) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_file_method_mapping_and_list_result(fake_helper) -> None:
     seen: list[str] = []
     entries = [{"name": "notes.txt", "size": 12, "mtime": 1_725_000_000, "is_dir": False}]
 
-    def handler(req: dict) -> dict:  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+    def handler(req: dict) -> dict:
         seen.append(req["method"])  # pyright: ignore[reportUnknownArgumentType]
-        return {  # pyright: ignore[reportUnknownVariableType]
+        return {
             "id": req["id"],
             "ok": True,
             "result": {"entries": entries},
         }
 
-    path = fake_helper(handler)  # pyright: ignore[reportUnknownVariableType]
+    path = fake_helper(handler)
     assert client.list_dir("/Users/ava/Downloads", sock_path=path) == entries  # pyright: ignore[reportUnknownArgumentType]
     assert seen == ["file_list"]
 
 
 @pytest.mark.parametrize("content", [b"", b"\x00binary\xff\n"])
-def test_read_file_decodes_base64_content(fake_helper, content: bytes) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_read_file_decodes_base64_content(fake_helper, content: bytes) -> None:
     seen: list[str] = []
 
-    def handler(req: dict) -> dict:  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+    def handler(req: dict) -> dict:
         seen.append(req["method"])  # pyright: ignore[reportUnknownArgumentType]
-        return {  # pyright: ignore[reportUnknownVariableType]
+        return {
             "id": req["id"],
             "ok": True,
             "result": {"content_b64": base64.b64encode(content).decode("ascii")},
         }
 
-    path = fake_helper(handler)  # pyright: ignore[reportUnknownVariableType]
+    path = fake_helper(handler)
     assert client.read_file("/Users/ava/Downloads/example.bin", sock_path=path) == content  # pyright: ignore[reportUnknownArgumentType]
     assert seen == ["file_read"]
 
@@ -316,23 +316,23 @@ def test_read_file_decodes_base64_content(fake_helper, content: bytes) -> None: 
 @pytest.mark.parametrize("result", [{}, {"content_b64": 1}, {"content_b64": "%%%"}])
 def test_read_file_rejects_missing_or_malformed_content(
     fake_helper, result: dict[str, object]
-) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-    def handler(req: dict) -> dict:  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
-        return {"id": req["id"], "ok": True, "result": result}  # pyright: ignore[reportUnknownVariableType]
+) -> None:
+    def handler(req: dict) -> dict:
+        return {"id": req["id"], "ok": True, "result": result}
 
     with pytest.raises(PermissionsHelperError, match="invalid file_read response"):
-        client.read_file(  # pyright: ignore[reportUnknownArgumentType]
+        client.read_file(
             "/Users/ava/Downloads/example.bin",
             sock_path=fake_helper(handler),  # pyright: ignore[reportUnknownArgumentType]
         )
 
 
-def test_file_operations_raise_server_errors(fake_helper) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-    def handler(req: dict) -> dict:  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
-        error = "outside whitelist" if req["method"] == "file_list" else "file too large"  # pyright: ignore[reportUnknownVariableType]
-        return {"id": req["id"], "ok": False, "error": error}  # pyright: ignore[reportUnknownVariableType]
+def test_file_operations_raise_server_errors(fake_helper) -> None:
+    def handler(req: dict) -> dict:
+        error = "outside whitelist" if req["method"] == "file_list" else "file too large"
+        return {"id": req["id"], "ok": False, "error": error}
 
-    path = fake_helper(handler)  # pyright: ignore[reportUnknownVariableType]
+    path = fake_helper(handler)
     with pytest.raises(PermissionsHelperError, match="outside whitelist"):
         client.list_dir("/private/secret", sock_path=path)  # pyright: ignore[reportUnknownArgumentType]
     with pytest.raises(PermissionsHelperError, match="file too large"):
@@ -378,16 +378,16 @@ def test_file_whitelist_boundary_reference(tmp_path: Path) -> None:
     assert not _is_whitelisted_file_path(Path("Downloads/report.txt"), roots)
 
 
-def test_gui_ops_wire_requests(fake_helper) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_gui_ops_wire_requests(fake_helper) -> None:
     # Pin the wire request each GUI-driver wrapper emits (method name + args),
     # since the WeChat skill depends on these exact shapes.
-    seen: list[dict] = []  # pyright: ignore[reportMissingTypeArgument, reportUnknownVariableType]
+    seen: list[dict] = []
 
-    def handler(req: dict) -> dict:  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
-        seen.append({k: v for k, v in req.items() if k != "id"})  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
-        return {"id": req["id"], "ok": True, "result": {}}  # pyright: ignore[reportUnknownVariableType]
+    def handler(req: dict) -> dict:
+        seen.append({k: v for k, v in req.items() if k != "id"})  # pyright: ignore[reportUnknownMemberType]
+        return {"id": req["id"], "ok": True, "result": {}}
 
-    path = fake_helper(handler)  # pyright: ignore[reportUnknownVariableType]
+    path = fake_helper(handler)
     client.key(76, sock_path=path)  # pyright: ignore[reportUnknownArgumentType]
     client.key(9, cmd=True, sock_path=path)  # pyright: ignore[reportUnknownArgumentType]
     client.scroll(10, 20, -50, sock_path=path)  # pyright: ignore[reportUnknownArgumentType]
@@ -421,10 +421,10 @@ def test_incapability_branch_ordering(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(pp.shutil, "which", present.get)
     assert pp.permissions_helper_incapability() is None
 
-    monkeypatch.setattr(pp.shutil, "which", lambda _name: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(pp.shutil, "which", lambda _name: None)  # pyright: ignore[reportUnknownArgumentType]
     assert "no swiftc" in reason()
 
-    monkeypatch.setattr(pp.shutil, "which", lambda n: "/usr/bin/swiftc" if n == "swiftc" else None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(pp.shutil, "which", lambda n: "/usr/bin/swiftc" if n == "swiftc" else None)  # pyright: ignore[reportUnknownArgumentType]
     assert "no codesign" in reason()
 
     monkeypatch.setattr(pp.shutil, "which", present.get)
@@ -447,17 +447,17 @@ def test_incapability_windows_branch(monkeypatch: pytest.MonkeyPatch) -> None:
         (r"C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe",),
     )
 
-    monkeypatch.setattr(pp.Path, "exists", lambda _self: True)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(pp.Path, "exists", lambda _self: True)  # pyright: ignore[reportUnknownArgumentType]
     assert pp.permissions_helper_incapability() is None
     assert pp.permissions_helper_capable() is True
 
-    monkeypatch.setattr(pp.Path, "exists", lambda _self: False)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(pp.Path, "exists", lambda _self: False)  # pyright: ignore[reportUnknownArgumentType]
     reason = pp.permissions_helper_incapability()
     assert reason is not None
     assert "no csc.exe" in reason
 
 
-def test_recv_reassembles_across_chunks(fake_helper) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_recv_reassembles_across_chunks(fake_helper) -> None:
     def raw(conn: socket.socket) -> None:
         _read_line(conn)
         payload = json.dumps({"id": 1, "ok": True, "result": {"pong": True}}).encode() + b"\n"
@@ -468,14 +468,14 @@ def test_recv_reassembles_across_chunks(fake_helper) -> None:  # pyright: ignore
     assert client.ping(sock_path=fake_helper(raw=raw)) == {"pong": True}  # pyright: ignore[reportUnknownArgumentType]
 
 
-def test_closed_without_response_raises(fake_helper) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_closed_without_response_raises(fake_helper) -> None:
     with pytest.raises(PermissionsHelperError, match="closed without a response"):
         client.ping(
             sock_path=fake_helper(raw=_read_line)  # pyright: ignore[reportUnknownArgumentType]
-        )  # read, then close, no reply  # pyright: ignore[reportUnknownArgumentType]
+        )  # read, then close, no reply
 
 
-def test_truncated_response_raises(fake_helper) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_truncated_response_raises(fake_helper) -> None:
     def raw(conn: socket.socket) -> None:
         _read_line(conn)
         conn.sendall(b'{"id":1,"ok":tr')  # partial JSON, no trailing newline
@@ -484,7 +484,7 @@ def test_truncated_response_raises(fake_helper) -> None:  # pyright: ignore[repo
         client.ping(sock_path=fake_helper(raw=raw))  # pyright: ignore[reportUnknownArgumentType]
 
 
-def test_call_timeout_raises(fake_helper, monkeypatch: pytest.MonkeyPatch) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_call_timeout_raises(fake_helper, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(client, "_CALL_TIMEOUT_S", 0.2)
 
     def raw(conn: socket.socket) -> None:
@@ -495,7 +495,7 @@ def test_call_timeout_raises(fake_helper, monkeypatch: pytest.MonkeyPatch) -> No
         client.ping(sock_path=fake_helper(raw=raw))  # pyright: ignore[reportUnknownArgumentType]
 
 
-def test_line_limit_guard(fake_helper, monkeypatch: pytest.MonkeyPatch) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_line_limit_guard(fake_helper, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(client, "_LINE_LIMIT", 16)
 
     def raw(conn: socket.socket) -> None:
@@ -517,7 +517,7 @@ def test_connect_retries_then_succeeds(monkeypatch: pytest.MonkeyPatch) -> None:
     def late_start() -> None:
         time.sleep(0.25)
         holder.append(
-            _FakeHelper(path, lambda req: {"id": req["id"], "ok": True, "result": {"pong": True}})  # pyright: ignore[reportUnknownLambdaType]
+            _FakeHelper(path, lambda req: {"id": req["id"], "ok": True, "result": {"pong": True}})
         )
 
     t = threading.Thread(target=late_start, daemon=True)
@@ -546,10 +546,8 @@ def test_label_is_per_cluster(monkeypatch: pytest.MonkeyPatch) -> None:
 # reads it from the helper; the calling process's own grant is a different fact.
 
 
-def _ping_reply(  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
-    preflight_screen: bool, ax_trusted: bool = True
-) -> Callable[[dict], dict]:
-    return lambda req: {  # pyright: ignore[reportUnknownLambdaType, reportUnknownVariableType]
+def _ping_reply(preflight_screen: bool, ax_trusted: bool = True) -> Callable[[dict], dict]:
+    return lambda req: {
         "id": req["id"],
         "ok": True,
         "result": {
@@ -560,12 +558,12 @@ def _ping_reply(  # pyright: ignore[reportMissingTypeArgument, reportUnknownPara
     }
 
 
-def test_screen_capture_probe_reads_the_helpers_grant(fake_helper) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_screen_capture_probe_reads_the_helpers_grant(fake_helper) -> None:
     seen: list[str] = []
 
-    def handler(req: dict) -> dict:  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+    def handler(req: dict) -> dict:
         seen.append(req["method"])  # pyright: ignore[reportUnknownArgumentType]
-        return _ping_reply(True)(req)  # pyright: ignore[reportUnknownVariableType]
+        return _ping_reply(True)(req)
 
     status = client.check_screen_capture(sock_path=fake_helper(handler))  # pyright: ignore[reportUnknownArgumentType]
     assert seen == ["ping"]  # measured in the helper, not in whoever is asking
@@ -573,7 +571,7 @@ def test_screen_capture_probe_reads_the_helpers_grant(fake_helper) -> None:  # p
     assert status.available is True
 
 
-def test_screen_capture_probe_reports_no_grant(fake_helper) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_screen_capture_probe_reports_no_grant(fake_helper) -> None:
     status = client.check_screen_capture(sock_path=fake_helper(_ping_reply(False)))  # pyright: ignore[reportUnknownArgumentType]
     assert status.state is ScreenCaptureState.NO_GRANT
     assert status.available is False
@@ -602,7 +600,7 @@ def test_screen_capture_probe_waits_out_a_cold_helper(monkeypatch: pytest.Monkey
     # inside the settle window is a cold start rather than a dead daemon.
     calls: list[int] = []
 
-    def flaky(*, sock_path=None):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    def flaky(*, sock_path=None):
         calls.append(1)
         if len(calls) == 1:
             raise PermissionsHelperError("permissions helper not reachable")
@@ -620,13 +618,13 @@ def test_screen_capture_probe_waits_out_a_cold_helper(monkeypatch: pytest.Monkey
 # caller's inherited grant -- determines whether macOS accepts the action.
 
 
-def test_accessibility_probe_reads_the_helpers_grant(fake_helper) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_accessibility_probe_reads_the_helpers_grant(fake_helper) -> None:
     status = client.check_accessibility(sock_path=fake_helper(_ping_reply(True, True)))  # pyright: ignore[reportUnknownArgumentType]
     assert status.state is AccessibilityState.GRANTED
     assert status.available is True
 
 
-def test_accessibility_probe_reports_missing_grant(fake_helper) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_accessibility_probe_reports_missing_grant(fake_helper) -> None:
     status = client.check_accessibility(sock_path=fake_helper(_ping_reply(True, False)))  # pyright: ignore[reportUnknownArgumentType]
     assert status.state is AccessibilityState.NOT_GRANTED
     assert status.available is False
@@ -645,8 +643,8 @@ def test_accessibility_probe_keeps_unreachable_distinct_from_missing_grant() -> 
     assert "System Settings" not in status.diagnostic
 
 
-def test_accessibility_probe_treats_the_windows_wire_shape_as_granted(fake_helper) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-    def ping_without_ax(req: dict) -> dict:  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+def test_accessibility_probe_treats_the_windows_wire_shape_as_granted(fake_helper) -> None:
+    def ping_without_ax(req: dict) -> dict:
         return {
             "id": req["id"],
             "ok": True,
@@ -748,8 +746,8 @@ def _fake_tools(
 
     recorded: list[_Call] = []
 
-    def run(cmd, **kwargs):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-        cmd = list(cmd)  # pyright: ignore[reportUnknownArgumentType, reportUnknownVariableType]
+    def run(cmd, **kwargs):
+        cmd = list(cmd)  # pyright: ignore[reportUnknownArgumentType]
         # Every call must arrive with a bound -- KeyError here means an unbounded
         # call site slipped back in.
         recorded.append(_Call(cmd, kwargs["timeout"]))
@@ -787,7 +785,7 @@ def _fake_tools(
                 cmd,  # pyright: ignore[reportUnknownArgumentType]
                 keychain_rc,
                 b"",
-                b"User interaction is not allowed.",  # pyright: ignore[reportUnknownArgumentType]
+                b"User interaction is not allowed.",
             )
         if cmd[:2] == ["codesign", "--sign"]:
             scratch_name = Path(cmd[-1]).name  # pyright: ignore[reportUnknownArgumentType]
@@ -822,7 +820,7 @@ def test_read_dr_accepts_legacy_stderr_stream(
 
     app = tmp_path / "AvaPermissionsHelper.app"
 
-    def run(cmd, **kwargs):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    def run(cmd, **kwargs):
         if list(cmd)[:3] == ["codesign", "-d", "-r-"]:  # pyright: ignore[reportUnknownArgumentType]
             return subprocess.CompletedProcess(
                 cmd,  # pyright: ignore[reportUnknownArgumentType]
@@ -1426,7 +1424,7 @@ def test_a_hung_probe_answers_no_rather_than_raising(monkeypatch: pytest.MonkeyP
 
     from services.permissions_helper import lifecycle
 
-    def hang(cmd, **kwargs):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    def hang(cmd, **kwargs):
         raise subprocess.TimeoutExpired(cmd, kwargs["timeout"])  # pyright: ignore[reportUnknownArgumentType]
 
     monkeypatch.setattr(lifecycle, "run_bounded", hang)  # pyright: ignore[reportUnknownArgumentType]
@@ -1591,7 +1589,7 @@ def test_self_upgrade_ping_failure_falls_back_to_kickstart(
     replies: list[object] = [client.PermissionsHelperError("exec transition") for _ in range(10)]
     replies.append({"pong": True, "preflight_screen": True, "ax_trusted": True})
 
-    def ping():  # pyright: ignore[reportMissingReturnType]
+    def ping():
         reply = replies.pop(0)
         if isinstance(reply, Exception):
             raise reply
@@ -1614,7 +1612,7 @@ def test_failed_post_load_ping_repairs_with_bootout_and_bootstrap(
     replies: list[object] = [client.PermissionsHelperError("spawn failed") for _ in range(10)]
     replies.append({"pong": True, "preflight_screen": True, "ax_trusted": True})
 
-    def ping():  # pyright: ignore[reportMissingReturnType]
+    def ping():
         reply = replies.pop(0)
         if isinstance(reply, Exception):
             raise reply
@@ -1745,7 +1743,7 @@ def test_old_main_job_bound_to_our_socket_is_retired(
     own = _write_agent_plist(agents, mine, sock, env_key="AVA_PERMISSIONS_HELPER_SOCKET")
     recorded: list[list[str]] = []
 
-    def fake_run(cmd, **kwargs):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    def fake_run(cmd, **kwargs):
         recorded.append(list(cmd))  # pyright: ignore[reportUnknownArgumentType]
         import subprocess
 
@@ -1782,7 +1780,7 @@ def test_pre_rename_native_helper_job_is_retired(
     )
     recorded: list[list[str]] = []
 
-    def fake_run(cmd, **kwargs):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    def fake_run(cmd, **kwargs):
         recorded.append(list(cmd))  # pyright: ignore[reportUnknownArgumentType]
         import subprocess
 
@@ -1810,7 +1808,7 @@ def test_retire_is_idempotent_when_job_already_gone(
     monkeypatch.setattr(
         lifecycle,
         "run_bounded",
-        lambda cmd, **_kw: __import__("subprocess").CompletedProcess(  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda cmd, **_kw: __import__("subprocess").CompletedProcess(  # pyright: ignore[reportUnknownArgumentType]
             cmd, 78, b"", b""
         ),  # bootout: job not loaded
     )
@@ -1832,7 +1830,7 @@ def test_retire_removes_the_legacy_socket_file(
     monkeypatch.setattr(
         lifecycle,
         "run_bounded",
-        lambda cmd, **_kw: __import__("subprocess").CompletedProcess(cmd, 0, b"", b""),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda cmd, **_kw: __import__("subprocess").CompletedProcess(cmd, 0, b"", b""),  # pyright: ignore[reportUnknownArgumentType]
     )
     lifecycle._retire_stale_jobs()
     assert not legacy_sock.exists()

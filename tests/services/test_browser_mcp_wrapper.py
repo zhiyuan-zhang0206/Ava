@@ -39,7 +39,7 @@ class FakeReader:
         return self._lines.pop(0) if self._lines else b""
 
 
-def _line(obj: dict) -> bytes:  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+def _line(obj: dict) -> bytes:
     return (json.dumps(obj) + "\n").encode()
 
 
@@ -195,7 +195,7 @@ async def test_reconnecting_link_retries_on_not_delivered() -> None:
             # Return a _Link whose request() raises _NotDeliveredError.
             link_ = _ok_link("unused")
 
-            async def not_delivered(payload):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+            async def not_delivered(payload):
                 raise _NotDeliveredError("simulated dead socket on write")
 
             link_.request = not_delivered  # type: ignore[assignment]
@@ -218,7 +218,7 @@ async def test_reconnecting_link_exhausts_retries() -> None:
     async def _always_broken():
         link_ = _ok_link("unused")
 
-        async def always_raise(payload):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+        async def always_raise(payload):
             raise _NotDeliveredError("always broken")
 
         link_.request = always_raise  # type: ignore[assignment]
@@ -256,7 +256,7 @@ async def test_reconnecting_link_closes_old_link_on_reconnect() -> None:
         if connect_calls == 1:
             link_ = _ok_link("unused")
 
-            async def not_delivered(payload):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+            async def not_delivered(payload):
                 raise _NotDeliveredError("simulated")
 
             link_.request = not_delivered  # type: ignore[assignment]
@@ -290,7 +290,7 @@ async def test_reconnecting_link_serializes_requests() -> None:
     link = _ReconnectingLink(max_retries=1, base_delay=0.0)
     link._connect_once = _fake_connect  # type: ignore[assignment]
 
-    async def req(payload):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    async def req(payload):
         r = await link.request(payload)  # pyright: ignore[reportUnknownArgumentType]
         results.append(r)  # pyright: ignore[reportUnknownMemberType]
 
@@ -312,7 +312,7 @@ async def test_reconnecting_link_does_not_retry_after_delivery_loss() -> None:
         connect_calls += 1
         link_ = _ok_link("unused")
 
-        async def reset_request(payload):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+        async def reset_request(payload):
             raise ConnectionResetError("daemon died mid-round-trip")
 
         link_.request = reset_request  # type: ignore[assignment]

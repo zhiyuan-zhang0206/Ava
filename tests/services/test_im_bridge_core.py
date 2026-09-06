@@ -131,7 +131,7 @@ def _core(gateway: FakeGateway) -> IMBridgeCore:
 def _text(reply: object) -> str:
     """Flatten a Reply or list[Reply] into one joined string."""
 
-    replies = reply if isinstance(reply, list) else [reply]  # pyright: ignore[reportUnknownVariableType]
+    replies = reply if isinstance(reply, list) else [reply]
     return "\n".join(r.text for r in replies if r is not None)  # type: ignore[union-attr]
 
 

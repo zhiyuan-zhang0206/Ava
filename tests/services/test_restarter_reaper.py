@@ -33,7 +33,7 @@ _DEAD_PID = 424242
 
 def _stub_probe(monkeypatch: pytest.MonkeyPatch, verdict: AgentProcessIdentity) -> None:
     """Force every pid the reapers probe to come back with `verdict`."""
-    monkeypatch.setattr(rd, "probe_agent_process", lambda _pid, _agent_id: verdict)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(rd, "probe_agent_process", lambda _pid, _agent_id: verdict)  # pyright: ignore[reportUnknownArgumentType]
 
 
 @pytest.fixture
@@ -110,7 +110,7 @@ def test_reaping_dead_boot_phase_row_publishes_page_closed(
     monkeypatch.setattr(
         rd,
         "publish_page_closed_sync",
-        lambda aid, name: closed.append((aid, name)),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda aid, name: closed.append((aid, name)),  # pyright: ignore[reportUnknownArgumentType]
     )
 
     reaped = rd._reap_local_dead_boot_phase_agents(sync_pool, machine_name())
@@ -252,7 +252,7 @@ def test_reaping_unclaimed_idling_publishes_page_closed(
     monkeypatch.setattr(
         rd,
         "publish_page_closed_sync",
-        lambda aid, name: closed.append((aid, name)),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda aid, name: closed.append((aid, name)),  # pyright: ignore[reportUnknownArgumentType]
     )
 
     reaped = rd._reap_local_unclaimed_idling(sync_pool, machine_name(), _GRACE_S)
@@ -394,7 +394,7 @@ def test_revives_live_status_row_with_dead_pid(
     sync_pool: ConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
     status: str,
-    launched_agents: list,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+    launched_agents: list,
 ) -> None:
     """G5: 'running'/'idling' + dead pid -> relaunched in place (CAS to
     'idling' + launch) instead of reaped to 'terminated' — a rebooted
@@ -411,7 +411,7 @@ def test_revives_live_status_row_with_dead_pid(
         assert cur.fetchone() == ("idling", None)  # type: ignore[index]  # launch stubbed, no claim yet
     assert any(
         c.agent_id == tid  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
-        for c in launched_agents  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType, reportUnknownVariableType]
+        for c in launched_agents
     )  # at least one launch attempt (internal retries may record more)
 
 
@@ -766,7 +766,7 @@ class TestReviveAgent:
     def test_running_row_flips_to_idling_clears_pid_and_launches(
         self,
         db_conn: psycopg.Connection,
-        launched_agents: list,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+        launched_agents: list,
     ) -> None:
         """A 'running' row behind a dead pid -> CAS to unclaimed idling (pid cleared)
         + one launch; the checkpoint survives, so the revived agent resumes."""
@@ -780,12 +780,12 @@ class TestReviveAgent:
         with db_conn.cursor() as cur:
             cur.execute("SELECT status, pid FROM agents_meta WHERE id = %s", (tid,))
             assert cur.fetchone() == ("idling", None)  # type: ignore[index]
-        assert any(c.agent_id == tid for c in launched_agents)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType, reportUnknownVariableType]
+        assert any(c.agent_id == tid for c in launched_agents)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
 
     def test_idling_row_flips_to_unclaimed_idling(
         self,
         db_conn: psycopg.Connection,
-        launched_agents: list,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+        launched_agents: list,
     ) -> None:
         from ops.agent_wake import revive_agent
 
@@ -801,7 +801,7 @@ class TestReviveAgent:
     def test_inserts_no_lifecycle_inbound(
         self,
         db_conn: psycopg.Connection,
-        launched_agents: list,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+        launched_agents: list,
     ) -> None:
         """Revival is invisible to the agent — no resurrect / restart_completed
         inbound (Task #689 G5)."""
@@ -816,7 +816,7 @@ class TestReviveAgent:
             cur.execute("SELECT kind FROM inbound_messages WHERE agent_id = %s", (tid,))
             assert cur.fetchall() == []
 
-    def test_wrong_pid_is_noop(self, db_conn: psycopg.Connection, launched_agents: list) -> None:  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+    def test_wrong_pid_is_noop(self, db_conn: psycopg.Connection, launched_agents: list) -> None:
         """CAS re-asserts the probed pid: a row whose pid changed (already
         revived, or the process is actually alive) is never double-launched."""
         from ops.agent_wake import revive_agent
@@ -834,7 +834,7 @@ class TestReviveAgent:
     def test_non_live_status_is_noop(
         self,
         db_conn: psycopg.Connection,
-        launched_agents: list,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+        launched_agents: list,
     ) -> None:
         """Only 'running'/'idling' rows are revivable — a 'terminated' row is
         crash-resurrect's business, not this pass's."""
@@ -859,7 +859,7 @@ class TestReviveAgent:
     def test_double_revive_only_one_launches(
         self,
         db_conn: psycopg.Connection,
-        launched_agents: list,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+        launched_agents: list,
     ) -> None:
         """Idempotent under a double-trigger (two reap passes racing): the CAS
         picks a single winner; the second call sees an unclaimed idling row and no-ops."""

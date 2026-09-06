@@ -142,7 +142,7 @@ def test_is_alive_rejecting_valid_otlp_is_not_healthy(monkeypatch: pytest.Monkey
     """A listener that rejects the collector's valid OTLP body is not a healthy
     ingestion pipeline; a bare socket answer is insufficient."""
 
-    def _raise(_req, **_kw):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    def _raise(_req, **_kw):
         raise urllib.error.HTTPError(
             "http://127.0.0.1:4318/v1/traces",
             415,
@@ -151,7 +151,7 @@ def test_is_alive_rejecting_valid_otlp_is_not_healthy(monkeypatch: pytest.Monkey
             None,
         )
 
-    monkeypatch.setattr(urllib.request, "urlopen", _raise)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+    monkeypatch.setattr(urllib.request, "urlopen", _raise)  # pyright: ignore[reportUnknownArgumentType]
     assert hc._is_alive() is False
 
 
@@ -173,7 +173,7 @@ def test_is_alive_ok(monkeypatch: pytest.MonkeyPatch) -> None:
         seen["content_type"] = req.headers["Content-type"]
         return _Resp()
 
-    monkeypatch.setattr(urllib.request, "urlopen", _open)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(urllib.request, "urlopen", _open)
     assert hc._is_alive() is True
     assert seen == {
         "url": "http://127.0.0.1:4318/v1/traces",
@@ -205,7 +205,7 @@ def test_is_alive_probes_configured_otlp_endpoint(
         "telemetry_otlp_endpoint",
         "http://collector.example:4318/base",
     )
-    monkeypatch.setattr(urllib.request, "urlopen", _open)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(urllib.request, "urlopen", _open)
     assert hc._is_alive() is True
     assert seen == ["http://collector.example:4318/base/v1/traces"]
 
@@ -213,7 +213,7 @@ def test_is_alive_probes_configured_otlp_endpoint(
 def test_is_alive_connection_refused(monkeypatch: pytest.MonkeyPatch) -> None:
     """Connection-level failure — the sidecar is down."""
 
-    def _raise(_req, **_kw):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    def _raise(_req, **_kw):
         raise OSError("connection refused")
 
     monkeypatch.setattr(urllib.request, "urlopen", _raise)  # pyright: ignore[reportUnknownArgumentType]
@@ -225,7 +225,7 @@ def test_restart_invokes_verified_respawn(monkeypatch: pytest.MonkeyPatch) -> No
 
     took_over: list[int] = []
 
-    def fake_respawn(session: str, cmd: str, _repo, **kwargs) -> DaemonProbe:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    def fake_respawn(session: str, cmd: str, _repo, **kwargs) -> DaemonProbe:
         assert session == "otel-collector"
         assert "otelcol-contrib" in cmd and "config.yaml" in cmd
         assert kwargs["verify"] is hc.probe_collector
@@ -242,7 +242,7 @@ def test_main_restarts_a_stale_collector_even_when_its_otlp_port_answers(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A stale collector's 2xx cannot suppress the restarter's recovery path."""
-    monkeypatch.setattr(hc, "init_gateway_process", lambda _name: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(hc, "init_gateway_process", lambda _name: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(hc, "_is_alive", lambda: True)
     monkeypatch.setattr(
         hc,
@@ -331,7 +331,7 @@ otelcol_exporter_queue_size{data_type="logs",exporter="otlphttp/loki"} 12
         def read(self) -> bytes:
             return payload
 
-    monkeypatch.setattr(urllib.request, "urlopen", lambda *_a, **_kw: _Resp())  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType, reportUnknownMemberType]
+    monkeypatch.setattr(urllib.request, "urlopen", lambda *_a, **_kw: _Resp())  # pyright: ignore[reportUnknownArgumentType]
     pressure = hc._queue_pressure()
     assert pressure is not None
     assert pressure.saturated == ("otlphttp/prometheus",)

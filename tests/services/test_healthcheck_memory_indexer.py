@@ -24,7 +24,7 @@ def test_probe_asks_for_this_daemons_identity(monkeypatch: pytest.MonkeyPatch) -
     that got either wrong would accept a different daemon as healthy."""
     seen: dict[str, object] = {}
 
-    def fake_probe_daemon(name, url, *, pidfile, **_kw) -> DaemonProbe:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    def fake_probe_daemon(name, url, *, pidfile, **_kw) -> DaemonProbe:
         seen.update(name=name, url=url, pidfile=pidfile)  # pyright: ignore[reportUnknownArgumentType]
         return DaemonProbe.up("stub")
 
@@ -38,12 +38,12 @@ def test_restart_respawns_session_and_verifies(monkeypatch: pytest.MonkeyPatch) 
     """_restart_daemon respawns `memory-indexer` and returns the probe's verdict."""
     calls: list[tuple[str, str, Path]] = []
 
-    def fake_respawn_and_verify(session, cmd, repo, *, verify, **_kw) -> DaemonProbe:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    def fake_respawn_and_verify(session, cmd, repo, *, verify, **_kw) -> DaemonProbe:
         calls.append((session, cmd, repo))  # pyright: ignore[reportUnknownArgumentType]
-        return verify()  # pyright: ignore[reportUnknownVariableType]
+        return verify()
 
     monkeypatch.setattr(hc, "respawn_and_verify", fake_respawn_and_verify)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(hc, "probe_daemon", lambda *_a, **_kw: DaemonProbe.up("stub"))  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(hc, "probe_daemon", lambda *_a, **_kw: DaemonProbe.up("stub"))  # pyright: ignore[reportUnknownArgumentType]
 
     result = hc._restart_daemon()
     assert result.alive is True
@@ -57,11 +57,11 @@ def test_restart_reports_failure_when_daemon_never_answers(monkeypatch: pytest.M
     monkeypatch.setattr(
         hc,
         "respawn_and_verify",
-        lambda *_a, verify, **_kw: verify(),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda *_a, verify, **_kw: verify(),  # pyright: ignore[reportUnknownArgumentType]
     )
     monkeypatch.setattr(
         hc,
         "probe_daemon",
-        lambda *_a, **_kw: DaemonProbe.down("healthz unreachable"),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda *_a, **_kw: DaemonProbe.down("healthz unreachable"),  # pyright: ignore[reportUnknownArgumentType]
     )
     assert hc._restart_daemon().alive is False

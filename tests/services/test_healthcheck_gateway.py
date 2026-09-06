@@ -51,7 +51,7 @@ class _FakeResponse:
 
 
 def _respond(monkeypatch: pytest.MonkeyPatch, status: int, body: bytes) -> None:
-    monkeypatch.setattr(urllib.request, "urlopen", lambda _url, **_kw: _FakeResponse(status, body))  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(urllib.request, "urlopen", lambda _url, **_kw: _FakeResponse(status, body))  # pyright: ignore[reportUnknownArgumentType]
 
 
 def _own_health_body() -> bytes:
@@ -99,7 +99,7 @@ def test_another_clusters_gateway_is_not_respawned_against(monkeypatch: pytest.M
         200,
         json.dumps({"status": "ok", "home": str(Path.home() / ".ava-some-other-cluster")}).encode(),
     )
-    monkeypatch.setattr(hc, "init_gateway_process", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(hc, "init_gateway_process", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(hc, "_restart", lambda: pytest.fail("must not respawn against an impostor"))
     with pytest.raises(SystemExit) as excinfo:
         hc.main()
@@ -115,7 +115,7 @@ def test_an_unreachable_gateway_respawns_after_two_failed_probes(
         raise urllib.error.URLError("connection refused")
 
     monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
-    monkeypatch.setattr(hc, "init_gateway_process", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(hc, "init_gateway_process", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
     respawns: list[int] = []
     monkeypatch.setattr(hc, "_restart", lambda: (respawns.append(1), DaemonProbe.up("home /x"))[1])
     hc.main()
@@ -160,9 +160,9 @@ def test_restart_respawns_gateway_session_and_verifies(monkeypatch: pytest.Monke
     probe decides the verdict — the spawn accepting the command is not the answer."""
     calls: list[tuple[str, str, Path]] = []
 
-    def fake_respawn_and_verify(session, cmd, repo, *, verify, **_kw) -> DaemonProbe:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    def fake_respawn_and_verify(session, cmd, repo, *, verify, **_kw) -> DaemonProbe:
         calls.append((session, cmd, repo))  # pyright: ignore[reportUnknownArgumentType]
-        return verify()  # pyright: ignore[reportUnknownVariableType]
+        return verify()
 
     monkeypatch.setattr(hc, "respawn_and_verify", fake_respawn_and_verify)  # pyright: ignore[reportUnknownArgumentType]
     _respond(monkeypatch, 200, _own_health_body())
@@ -175,7 +175,7 @@ def test_restart_respawns_gateway_session_and_verifies(monkeypatch: pytest.Monke
 # ─── _probe always returns a verdict ─────────────────────────────────────
 
 
-def test_probe_survives_an_http_exception(monkeypatch: pytest.MonkeyPatch, caplog) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_probe_survives_an_http_exception(monkeypatch: pytest.MonkeyPatch, caplog) -> None:
     """`http.client.HTTPException` is not an `OSError`, so the inner probe's
     narrow catch misses it. Losing the verdict matters most here: the gateway is
     what the cluster health probe polls, with `--auto-rollback --threshold 3`
@@ -192,7 +192,7 @@ def test_probe_survives_an_http_exception(monkeypatch: pytest.MonkeyPatch, caplo
         probe = hc._probe()
     assert probe.alive is False
     assert "IncompleteRead" in probe.detail
-    assert any("raised unexpectedly" in r.getMessage() for r in caplog.records)  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+    assert any("raised unexpectedly" in r.getMessage() for r in caplog.records)  # pyright: ignore[reportUnknownMemberType]
 
 
 def test_probe_fails_closed_on_any_unexpected_exception(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -201,14 +201,14 @@ def test_probe_fails_closed_on_any_unexpected_exception(monkeypatch: pytest.Monk
     monkeypatch.setattr(
         dh,
         "_probe_home",
-        lambda *_a, **_kw: (_ for _ in ()).throw(RuntimeError("unpredicted")),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda *_a, **_kw: (_ for _ in ()).throw(RuntimeError("unpredicted")),  # pyright: ignore[reportUnknownArgumentType]
     )
     assert hc._probe().alive is False
 
 
 def test_probe_passes_through_a_normal_verdict(monkeypatch: pytest.MonkeyPatch) -> None:
     """The wrapper adds a floor, not a behaviour change."""
-    monkeypatch.setattr(dh, "_probe_home", lambda *_a, **_kw: DaemonProbe.up("home /x"))  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(dh, "_probe_home", lambda *_a, **_kw: DaemonProbe.up("home /x"))  # pyright: ignore[reportUnknownArgumentType]
     probe = hc._probe()
     assert probe.alive is True
     assert probe.detail == "home /x"

@@ -40,7 +40,7 @@ _FP = "test:gemini:dim=8"
 def _backend(client: Any) -> MilvusBackend:
     """Wrap the raw milvus fixture client in the backend adapter — the
     daemon talks to backends, not raw clients."""
-    return MilvusBackend(dim=_DIM, fingerprint=_FP, client=client)  # pyright: ignore[reportUnknownArgumentType]
+    return MilvusBackend(dim=_DIM, fingerprint=_FP, client=client)
 
 
 class _FakeProvider:
@@ -90,14 +90,14 @@ def _vec(seed: int) -> np.ndarray:
     return rng.standard_normal(_DIM).astype(np.float32)
 
 
-def test_index_connect_creates_collection(milvus_client) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_index_connect_creates_collection(milvus_client) -> None:
     """The fixture's connect() idempotently created the collection at the
     test dim; `_schema_current` agrees."""
     assert milvus_client.has_collection(_COLLECTION)  # pyright: ignore[reportUnknownMemberType]
     assert _schema_current(milvus_client, _DIM)  # pyright: ignore[reportUnknownArgumentType]
 
 
-def test_upsert_then_all_meta(milvus_client) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_upsert_then_all_meta(milvus_client) -> None:
     backend = _backend(milvus_client)
     backend.upsert("/a/b.md", 1.0, "hash1", _vec(0), kind="body", chunk_idx=0)
     backend.upsert("/c/d.md", 2.0, "hash2", _vec(1), kind="body", chunk_idx=0)
@@ -107,7 +107,7 @@ def test_upsert_then_all_meta(milvus_client) -> None:  # pyright: ignore[reportM
     }
 
 
-def test_upsert_overwrite(milvus_client) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_upsert_overwrite(milvus_client) -> None:
     """Same path = update (by primary key path), not insert."""
     backend = _backend(milvus_client)
     backend.upsert("/a.md", 1.0, "hash1", _vec(0), kind="body", chunk_idx=0)
@@ -115,7 +115,7 @@ def test_upsert_overwrite(milvus_client) -> None:  # pyright: ignore[reportMissi
     assert backend.all_meta() == {"/a.md": (2.0, "hash2", _FP)}
 
 
-def test_upsert_many_inserts_all_rows_and_overwrites(milvus_client) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_upsert_many_inserts_all_rows_and_overwrites(milvus_client) -> None:
     backend = _backend(milvus_client)
     backend.upsert_many(
         [
@@ -125,13 +125,13 @@ def test_upsert_many_inserts_all_rows_and_overwrites(milvus_client) -> None:  # 
         ]
     )
     assert backend.all_meta() == {"/a.md": (3.0, "new", _FP), "/b.md": (2.0, "hb", _FP)}
-    rows = milvus_client.query(  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+    rows = milvus_client.query(  # pyright: ignore[reportUnknownMemberType]
         collection_name=_COLLECTION, filter="", output_fields=["pk"], limit=100
     )
     assert len(rows) == 2  # pyright: ignore[reportUnknownArgumentType]
 
 
-def test_readonly_milvus_upsert_many_raises(milvus_client) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_readonly_milvus_upsert_many_raises(milvus_client) -> None:
     backend = MilvusBackend(
         dim=_DIM,
         fingerprint=_FP,
@@ -142,18 +142,18 @@ def test_readonly_milvus_upsert_many_raises(milvus_client) -> None:  # pyright: 
         backend.upsert_many([("/a.md", 1.0, "ha", _vec(0), "body", 0)])
 
 
-def test_delete(milvus_client) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_delete(milvus_client) -> None:
     backend = _backend(milvus_client)
     backend.upsert("/a.md", 1.0, "h", _vec(0), kind="body", chunk_idx=0)
     backend.delete("/a.md")
     assert backend.all_meta() == {}
 
 
-def test_delete_missing_noop(milvus_client) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_delete_missing_noop(milvus_client) -> None:
     _backend(milvus_client).delete("/never_existed.md")  # no raise
 
 
-def test_search_topk_returns_sorted_by_cosine(milvus_client) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_search_topk_returns_sorted_by_cosine(milvus_client) -> None:
     """Insert 3 known vectors, query matches one of them, that path ranks first."""
     backend = _backend(milvus_client)
     target = np.ones(_DIM, dtype=np.float32)
@@ -170,18 +170,18 @@ def test_search_topk_returns_sorted_by_cosine(milvus_client) -> None:  # pyright
     assert results[-1] == "/opposite.md"
 
 
-def test_search_topk_empty_collection(milvus_client) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_search_topk_empty_collection(milvus_client) -> None:
     assert _backend(milvus_client).search_topk(_vec(0), k=5) == []
 
 
-def test_search_topk_respects_k(milvus_client) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_search_topk_respects_k(milvus_client) -> None:
     backend = _backend(milvus_client)
     for i in range(10):
         backend.upsert(f"/{i}.md", float(i), f"h{i}", _vec(i), kind="body", chunk_idx=0)
     assert len(backend.search_topk(_vec(0), k=3)) == 3
 
 
-def test_upsert_chunk_rows_meta_stays_per_path(milvus_client) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_upsert_chunk_rows_meta_stays_per_path(milvus_client) -> None:
     backend = _backend(milvus_client)
     for idx in range(3):
         backend.upsert("/a.md", 1.0, "ha", _vec(idx), kind="body", chunk_idx=idx)
@@ -193,7 +193,7 @@ def test_upsert_chunk_rows_meta_stays_per_path(milvus_client) -> None:  # pyrigh
     }
 
 
-def test_search_topk_aggregates_chunks_by_path(milvus_client) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_search_topk_aggregates_chunks_by_path(milvus_client) -> None:
     """Chunk rows of one path collapse to a single hit; the best chunk per
     path decides the rank."""
     backend = _backend(milvus_client)
@@ -206,7 +206,7 @@ def test_search_topk_aggregates_chunks_by_path(milvus_client) -> None:  # pyrigh
     assert results == ["/a.md", "/b.md"]  # no duplicate paths
 
 
-def test_delete_removes_all_chunks_of_path(milvus_client) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_delete_removes_all_chunks_of_path(milvus_client) -> None:
     backend = _backend(milvus_client)
     for idx in range(3):
         backend.upsert("/a.md", 1.0, "ha", _vec(idx), kind="body", chunk_idx=idx)
@@ -217,20 +217,20 @@ def test_delete_removes_all_chunks_of_path(milvus_client) -> None:  # pyright: i
     assert backend.search_topk(_vec(0), k=5) == ["/b.md"]
 
 
-def test_connect_migrates_legacy_schema(milvus_client) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_connect_migrates_legacy_schema(milvus_client) -> None:
     """A legacy single-row-per-file collection (path PK, no kind/chunk_idx)
     is dropped and recreated by connect(); its rows are gone — cold-start
     rebuilds them chunked."""
     from pymilvus import DataType
 
-    client = milvus_client  # pyright: ignore[reportUnknownVariableType]
+    client = milvus_client
     client.drop_collection(_COLLECTION)  # pyright: ignore[reportUnknownMemberType]
-    schema = client.create_schema(auto_id=False, enable_dynamic_field=False)  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+    schema = client.create_schema(auto_id=False, enable_dynamic_field=False)  # pyright: ignore[reportUnknownMemberType]
     schema.add_field("path", DataType.VARCHAR, is_primary=True, max_length=1024)  # pyright: ignore[reportUnknownMemberType]
     schema.add_field("mtime", DataType.DOUBLE)  # pyright: ignore[reportUnknownMemberType]
     schema.add_field("content_hash", DataType.VARCHAR, max_length=128)  # pyright: ignore[reportUnknownMemberType]
     schema.add_field("vector", DataType.FLOAT_VECTOR, dim=_DIM)  # pyright: ignore[reportUnknownMemberType]
-    legacy_idx = client.prepare_index_params()  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+    legacy_idx = client.prepare_index_params()  # pyright: ignore[reportUnknownMemberType]
     legacy_idx.add_index(field_name="vector", metric_type="COSINE", index_type="AUTOINDEX")  # pyright: ignore[reportUnknownMemberType]
     client.create_collection(  # pyright: ignore[reportUnknownMemberType]
         collection_name=_COLLECTION, schema=schema, index_params=legacy_idx
@@ -250,7 +250,7 @@ def test_connect_migrates_legacy_schema(milvus_client) -> None:  # pyright: igno
     fresh = MilvusBackend(dim=_DIM, fingerprint=_FP)
     fresh.connect()
     try:
-        info = fresh._require_client().describe_collection(collection_name=_COLLECTION)  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+        info = fresh._require_client().describe_collection(collection_name=_COLLECTION)  # pyright: ignore[reportUnknownMemberType]
         fields = info["fields"] if isinstance(info, dict) else getattr(info, "fields", [])  # pyright: ignore[reportUnknownArgumentType]
         names = {f["name"] for f in fields}
         assert names >= _EXPECTED_FIELDS
@@ -259,15 +259,15 @@ def test_connect_migrates_legacy_schema(milvus_client) -> None:  # pyright: igno
         fresh.close()
 
 
-def test_schema_current_detects_legacy_layout(milvus_client) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_schema_current_detects_legacy_layout(milvus_client) -> None:
     """_schema_current is True on the chunked schema, False on the legacy one."""
     assert _schema_current(milvus_client, _DIM)  # pyright: ignore[reportUnknownArgumentType]
 
     from pymilvus import DataType
 
-    client = milvus_client  # pyright: ignore[reportUnknownVariableType]
+    client = milvus_client
     client.drop_collection(_COLLECTION)  # pyright: ignore[reportUnknownMemberType]
-    schema = client.create_schema(auto_id=False, enable_dynamic_field=False)  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+    schema = client.create_schema(auto_id=False, enable_dynamic_field=False)  # pyright: ignore[reportUnknownMemberType]
     schema.add_field("path", DataType.VARCHAR, is_primary=True, max_length=1024)  # pyright: ignore[reportUnknownMemberType]
     schema.add_field("mtime", DataType.DOUBLE)  # pyright: ignore[reportUnknownMemberType]
     schema.add_field("content_hash", DataType.VARCHAR, max_length=128)  # pyright: ignore[reportUnknownMemberType]
@@ -310,7 +310,7 @@ def test_scan_disk_missing_root_returns_empty(tmp_path: Path) -> None:
 def test_process_paths_embeds_new_files(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    milvus_client,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    milvus_client,
 ) -> None:
     f1 = tmp_path / "a.md"
     f1.write_text("content A")
@@ -328,7 +328,7 @@ def test_process_paths_embeds_new_files(
 def test_process_paths_skips_unchanged_hash(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    milvus_client,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    milvus_client,
 ) -> None:
     f = tmp_path / "a.md"
     f.write_text("content")
@@ -344,7 +344,7 @@ def test_process_paths_skips_unchanged_hash(
 def test_process_paths_reembeds_on_provider_fingerprint_change(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    milvus_client,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    milvus_client,
 ) -> None:
     """CTO ① (2026-08-30): a provider switch must trigger a full rebuild —
     old vectors live in a different semantic space even at the same dim, so
@@ -370,7 +370,7 @@ def test_process_paths_reembeds_on_provider_fingerprint_change(
     assert meta[str(f.resolve())][2] == "another-provider:dim=8"
 
 
-def test_process_paths_deletes_missing_files(tmp_path: Path, milvus_client) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_process_paths_deletes_missing_files(tmp_path: Path, milvus_client) -> None:
     """Path enters dirty set but file not on disk — index row is deleted."""
     ghost = str(
         tmp_path / "ghost_nonexistent.md"
@@ -423,7 +423,7 @@ def test_event_handler_on_moved_pushes_both_ends() -> None:
 def test_process_paths_deletes_foreign_paths_even_when_file_exists(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    milvus_client,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    milvus_client,
 ) -> None:
     """Rows outside the watched root are pruned even when the file still
     exists on disk — the stale authoring-checkout leftovers that surface
@@ -445,7 +445,7 @@ def test_process_paths_deletes_foreign_paths_even_when_file_exists(
 def test_cold_start_reconcile_prunes_foreign_rows(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    milvus_client,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    milvus_client,
 ) -> None:
     """Cold-start reconcile deletes rows whose path is outside the watched
     root — the durable fix for the 11 stale authoring-checkout entries."""
@@ -472,7 +472,7 @@ def test_cold_start_reconcile_prunes_foreign_rows(
 def test_cold_start_reconcile_reembeds_on_provider_switch(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    milvus_client,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    milvus_client,
 ) -> None:
     """CTO ①: the provider fingerprint is part of the reconcile key — a row
     built by another provider is dirty at cold start even at the same mtime
@@ -636,7 +636,7 @@ def test_file_rows_no_frontmatter_no_desc() -> None:
 def test_process_paths_indexes_desc_and_body_chunks(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    milvus_client,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    milvus_client,
 ) -> None:
     """One file with a description + a long body lands as 1 desc row + N body
     chunks; all_meta still reports the file once."""
@@ -649,20 +649,20 @@ def test_process_paths_indexes_desc_and_body_chunks(
 
     daemon._process_paths(_backend(milvus_client), {f.resolve()}, _FakeProvider())
     assert str(f.resolve()) in _backend(milvus_client).all_meta()
-    rows = milvus_client.query(  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+    rows = milvus_client.query(  # pyright: ignore[reportUnknownMemberType]
         collection_name=_COLLECTION,
         filter=f'path == "{f.resolve()!s}"',
         output_fields=["kind", "chunk_idx"],
         limit=100,
     )
-    kinds = sorted((r["kind"], r["chunk_idx"]) for r in rows)  # pyright: ignore[reportUnknownArgumentType, reportUnknownVariableType]
+    kinds = sorted((r["kind"], r["chunk_idx"]) for r in rows)  # pyright: ignore[reportUnknownArgumentType]
     assert kinds == [("body", 0), ("body", 1), ("desc", 0)]
 
 
 def test_process_paths_calls_upsert_many_once_across_embed_batches(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    milvus_client,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    milvus_client,
 ) -> None:
     class _RecordingBackend(MilvusBackend):
         def __init__(self) -> None:
@@ -690,7 +690,7 @@ def test_process_paths_calls_upsert_many_once_across_embed_batches(
 def test_process_paths_flushes_embedded_rows_before_embedding_error(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    milvus_client,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    milvus_client,
 ) -> None:
     class _FailSecondBatchProvider(_FakeProvider):
         def embed_batch(self, texts: list[str]) -> np.ndarray:

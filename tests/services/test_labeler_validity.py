@@ -272,7 +272,7 @@ class TestGenerateLabelRejectsNonLabels:
         _no_publish: list[str],
     ) -> None:
         tid = create_agent(db_conn)
-        monkeypatch.setattr(labeler_module, "build_chat_model", lambda _m, **_: _FakeLLM(raw))  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        monkeypatch.setattr(labeler_module, "build_chat_model", lambda _m, **_: _FakeLLM(raw))  # pyright: ignore[reportUnknownArgumentType]
 
         result = await generate_label_async(tid, "a long agent brief", "deepseek-v4-flash")
 
@@ -295,7 +295,7 @@ class TestGenerateLabelRejectsNonLabels:
             "build_chat_model",
             lambda _m, **_: _FakeLLM(
                 "\u9a8c\u8bc1\u9884\u89c8\u96c6\u7fa4\u65f6\u533a\u7edf\u4e00\u5e76\u6d4b\u8bd5SDK"
-            ),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+            ),  # pyright: ignore[reportUnknownArgumentType]
         )
 
         result = await generate_label_async(tid, "a long agent brief", "deepseek-v4-flash")

@@ -23,7 +23,7 @@ from shared.daemon_health import DaemonProbe
 
 @pytest.fixture(autouse=True)
 def _inert_process_setup(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(hc, "init_gateway_process", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(hc, "init_gateway_process", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
 
 
 def _spec_session() -> str:
@@ -95,11 +95,11 @@ def test_restart_respawns_the_spec_session_name(monkeypatch: pytest.MonkeyPatch)
         calls.append((session, cmd, repo))
         return verify()
 
-    monkeypatch.setattr(hc, "respawn_and_verify", fake_respawn_and_verify)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(hc, "respawn_and_verify", fake_respawn_and_verify)
     monkeypatch.setattr(
         shared.daemon_health,
         "probe_daemon",
-        lambda *_a, **_kw: DaemonProbe.up("stub"),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda *_a, **_kw: DaemonProbe.up("stub"),  # pyright: ignore[reportUnknownArgumentType]
     )
 
     result = hc._restart_daemon()

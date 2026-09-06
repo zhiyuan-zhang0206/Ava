@@ -125,7 +125,7 @@ def _enable_tracing(monkeypatch: pytest.MonkeyPatch) -> _RecordingTracer:
     tracer = _RecordingTracer()
     monkeypatch.setattr("shared.config.settings.observability.trace_enabled", True)
     monkeypatch.setitem(trace_mod._state, "initialized", True)
-    monkeypatch.setattr("opentelemetry.trace.get_tracer", lambda _name: tracer)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr("opentelemetry.trace.get_tracer", lambda _name: tracer)  # pyright: ignore[reportUnknownArgumentType]
     return tracer
 
 
@@ -200,7 +200,7 @@ def _no_retry_sleep(monkeypatch: pytest.MonkeyPatch) -> None:
     `_asleep` must be a REAL coroutine function: `aretry` awaits it, so a sync
     lambda turns every async retry into `TypeError: object NoneType can't be
     used in 'await' expression`."""
-    monkeypatch.setattr("shared.resilience._sleep", lambda _s: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr("shared.resilience._sleep", lambda _s: None)  # pyright: ignore[reportUnknownArgumentType]
 
     async def _no_asleep(_s: float) -> None:
         return None
@@ -506,14 +506,14 @@ def test_embed_4xx_fails_immediately(monkeypatch: pytest.MonkeyPatch) -> None:
                 response=httpx.Response(400),
             )
 
-        def json(  # pyright: ignore[reportUnknownParameterType]
+        def json(
             self,
-        ) -> dict:  # pragma: no cover — never reached  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
-            return {}  # pyright: ignore[reportUnknownVariableType]
+        ) -> dict:  # pragma: no cover — never reached
+            return {}
 
     calls: list[str] = []
 
-    def _post(url: str, *, json: dict, headers: dict, timeout: float) -> _FourHundred:  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+    def _post(url: str, *, json: dict, headers: dict, timeout: float) -> _FourHundred:
         calls.append(url)
         return _FourHundred()
 
@@ -552,7 +552,7 @@ def test_embed_no_api_key_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         httpx,
         "post",
-        lambda *_a, **_k: pytest.fail("must not POST without an API key"),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda *_a, **_k: pytest.fail("must not POST without an API key"),  # pyright: ignore[reportUnknownArgumentType]
     )
     with pytest.raises(EmbeddingAPIError) as exc_info:
         _provider().embed_query("hello")

@@ -105,7 +105,7 @@ async def test_healthy_db_revives_the_whole_agent_runner_roster(
     ran: list[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The converse baseline: with the schema aligned, nothing is held back."""
-    monkeypatch.setattr("ops.controllers.schema.check_schema_version", lambda _conn: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr("ops.controllers.schema.check_schema_version", lambda _conn: None)  # pyright: ignore[reportUnknownArgumentType]
     # Pin computer-mcp's platform gate "available" (env-independent roster; CI
     # hosts lack the permissions helper and would drop the service).
     monkeypatch.setattr("ops.spec._computer_mcp_gate_reason", lambda: None)
@@ -117,7 +117,7 @@ async def test_healthy_db_revives_the_whole_agent_runner_roster(
         def __exit__(self, *_a: object) -> bool:
             return False
 
-    monkeypatch.setattr(shared.db, "connect", lambda *_a, **_kw: _NoopConn())  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(shared.db, "connect", lambda *_a, **_kw: _NoopConn())  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(wd, "_manager", ControllerManager([SchemaController()]))
 
     await wd._tick("agent-runner")
@@ -224,14 +224,14 @@ def test_host_scoped_block_runs_nothing(monkeypatch: pytest.MonkeyPatch) -> None
 
 def test_unblocked_round_gets_the_full_roster(monkeypatch: pytest.MonkeyPatch) -> None:
     roster = [wd._Check("a", lambda: None, requires_db=True)]
-    monkeypatch.setattr(wd, "_checks_for_capability", lambda _role: roster)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(wd, "_checks_for_capability", lambda _role: roster)  # pyright: ignore[reportUnknownArgumentType]
     assert wd._checks_for_round("gateway", BlockScope.NONE) == roster
 
 
 def test_unknown_scope_explodes(monkeypatch: pytest.MonkeyPatch) -> None:
     """A new BlockScope member must force a decision here rather than defaulting to
     "run everything" (unsafe) or "run nothing" (the bug this replaced)."""
-    monkeypatch.setattr(wd, "_checks_for_capability", lambda _role: [])  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(wd, "_checks_for_capability", lambda _role: [])  # pyright: ignore[reportUnknownArgumentType]
     with pytest.raises(ValueError, match="unhandled block scope"):
         wd._checks_for_round("gateway", "sideways")  # type: ignore[arg-type]
 

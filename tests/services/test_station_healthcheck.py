@@ -174,7 +174,7 @@ def test_alert_fires_after_two_consecutive_failures_and_resolves(
     resolves every open row for the alertname (the machine-offline pattern)."""
     monkeypatch.setattr(hc.settings.alerts, "transition_warning_seconds", 0)
     monkeypatch.setattr(hc.settings.alerts, "transition_error_seconds", 3600)
-    monkeypatch.setattr("shared.alerts.notify_im", lambda _text: True)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr("shared.alerts.notify_im", lambda _text: True)  # pyright: ignore[reportUnknownArgumentType]
     target = hc._StationTarget(url="http://10.0.0.9:4318", advertised=True, name="station-test-a")
     now = datetime.now(UTC)
 
@@ -217,7 +217,7 @@ def test_main_probes_advertised_station_and_does_not_raise(
     runs clean and no alert fires."""
     monkeypatch.setattr(settings.observability, "observability_url", "http://10.0.0.9")
     _insert_station_unit()
-    monkeypatch.setattr(hc, "_station_answers", lambda _url: True)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(hc, "_station_answers", lambda _url: True)  # pyright: ignore[reportUnknownArgumentType]
     hc.main()  # must not raise
     with shared.db.connect() as conn, conn.cursor() as cur:
         cur.execute(
