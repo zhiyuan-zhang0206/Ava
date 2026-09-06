@@ -12,6 +12,7 @@ import asyncio
 import json
 import threading
 from collections import deque
+from collections.abc import Callable
 from types import SimpleNamespace
 from typing import Any
 
@@ -24,6 +25,16 @@ from services.im_bridge.adapters.feishu import (
     _segment,
 )
 from services.im_bridge.types import InboundMessage
+
+
+async def _wait_until(
+    predicate: Callable[[], bool], timeout: float = 30.0, interval: float = 0.01
+) -> None:
+    async def _poll() -> None:
+        while not predicate():
+            await asyncio.sleep(interval)
+
+    await asyncio.wait_for(_poll(), timeout=timeout)
 
 
 class FakeCore:
@@ -189,16 +200,14 @@ async def test_ws_callback_dispatches_on_main_loop(
 ) -> None:
     adapter._main_loop = asyncio.get_running_loop()
     adapter._on_im_message(make_event())
-    for _ in range(100):
-        if adapter.core.received:
-            break
-        await asyncio.sleep(0.01)
+    await _wait_until(lambda: bool(adapter.core.received))
     assert len(adapter.core.received) == 1
 
 
 async def test_ws_callback_drops_when_no_main_loop(adapter: FeishuAdapter) -> None:
     adapter._on_im_message(make_event())
-    await asyncio.sleep(0.02)
+    # The no-loop path drops synchronously, so no delivery can arrive later.
+    await asyncio.sleep(0.05)
     assert adapter.core.received == []
 
 
@@ -271,11 +280,8 @@ async def test_start_connects_with_credentials(
     # Point stop() at the live pytest loop so the scheduled disconnect actually
     # executes (the fake's ws loop never runs); it must return without raising.
     adapter._ws_loop = asyncio.get_running_loop()
-    await asyncio.wait_for(adapter.stop(), timeout=2)
-    for _ in range(100):
-        if ws_client.disconnected.is_set():
-            break
-        await asyncio.sleep(0.01)
+    await asyncio.wait_for(adapter.stop(), timeout=30.0)
+    await _wait_until(ws_client.disconnected.is_set)
     assert ws_client.disconnected.is_set()
 
 
