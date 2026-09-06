@@ -25,19 +25,19 @@ def test_restart_respawns_the_spec_session_name(monkeypatch: pytest.MonkeyPatch)
     """_restart_daemon respawns under the ServiceSpec.session name, not the module name."""
     calls: list[tuple[str, str, Path]] = []
 
-    def fake_respawn_and_verify(  # pyright: ignore[reportUnknownParameterType]
+    def fake_respawn_and_verify(
         session,
         cmd,
         repo,
         *,
         verify,
-        **_kw,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+        **_kw,
     ) -> DaemonProbe:
         calls.append((session, cmd, repo))  # pyright: ignore[reportUnknownArgumentType]
-        return verify()  # pyright: ignore[reportUnknownVariableType]
+        return verify()
 
     monkeypatch.setattr(hc, "respawn_and_verify", fake_respawn_and_verify)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(hc, "probe_daemon", lambda *_a, **_kw: DaemonProbe.up("stub"))  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(hc, "probe_daemon", lambda *_a, **_kw: DaemonProbe.up("stub"))  # pyright: ignore[reportUnknownArgumentType]
 
     result = hc._restart_daemon()
     assert result.alive is True

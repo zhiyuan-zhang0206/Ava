@@ -41,14 +41,14 @@ def _wire(
 ) -> None:
     """CDP reachability, the cluster's Chrome pids, who holds the port, and the
     holder's own (name, argv) for the listener-first direction."""
-    monkeypatch.setattr(probe_mod, "_cdp_unreachable", lambda _port: cdp)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-    monkeypatch.setattr(probe_mod, "find_cluster_chrome", lambda _profile: chromes)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-    monkeypatch.setattr(probe_mod, "_listens_on", lambda pid, _port: listening[pid])  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-    monkeypatch.setattr(probe_mod, "_listener_pid", lambda _port: holder)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(probe_mod, "_cdp_unreachable", lambda _port: cdp)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(probe_mod, "find_cluster_chrome", lambda _profile: chromes)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(probe_mod, "_listens_on", lambda pid, _port: listening[pid])  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(probe_mod, "_listener_pid", lambda _port: holder)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(probe_mod.macos_readiness, "degraded_wait_reason", lambda: None)
     if holder_facts is None:
         holder_facts = ("", None)
-    monkeypatch.setattr(probe_mod, "_process_facts", lambda _pid: holder_facts)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(probe_mod, "_process_facts", lambda _pid: holder_facts)  # pyright: ignore[reportUnknownArgumentType]
 
 
 def test_alive_when_our_chrome_holds_the_port(monkeypatch: pytest.MonkeyPatch) -> None:

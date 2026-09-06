@@ -198,7 +198,7 @@ def test_query_instant_enters_the_daemon_budget(monkeypatch: pytest.MonkeyPatch)
 
     class FakeBudget:
         @contextmanager
-        def slot(self):  # pyright: ignore[reportUnknownParameterType, reportMissingReturnType]
+        def slot(self):
             transitions.append("entered")
             yield
             transitions.append("released")

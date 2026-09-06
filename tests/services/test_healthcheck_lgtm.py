@@ -72,7 +72,7 @@ def test_endpoint_answers_any_http_status(monkeypatch: pytest.MonkeyPatch) -> No
     """An HTTPError (e.g. 503 from a warming-up backend) still proves the
     listener answered — alive."""
 
-    def _raise(_url, **_kw):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    def _raise(_url, **_kw):
         raise urllib.error.HTTPError("http://127.0.0.1:3100/ready", 503, "starting", {}, None)  # pyright: ignore[reportArgumentType]
 
     monkeypatch.setattr(urllib.request, "urlopen", _raise)  # pyright: ignore[reportUnknownArgumentType]
@@ -94,7 +94,7 @@ def test_down_probes_names_connection_failures(monkeypatch: pytest.MonkeyPatch) 
             raise OSError("connection refused")
         return _Resp()
 
-    monkeypatch.setattr(urllib.request, "urlopen", _open)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(urllib.request, "urlopen", _open)
     assert hc.down_probes() == ["prometheus"]
 
 
@@ -102,7 +102,7 @@ def test_write_path_probe_rejects_non_2xx_push(monkeypatch: pytest.MonkeyPatch) 
     def _raise(_request: object, **_kwargs: object) -> None:
         raise urllib.error.HTTPError("http://loki/push", 429, "throttled", {}, None)  # pyright: ignore[reportArgumentType]
 
-    monkeypatch.setattr(urllib.request, "urlopen", _raise)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(urllib.request, "urlopen", _raise)
 
     assert hc.write_path_probe() == (False, "push_http_429")
 
@@ -111,7 +111,7 @@ def test_write_path_probe_reports_push_request_error(monkeypatch: pytest.MonkeyP
     def _raise(_request: object, **_kwargs: object) -> None:
         raise OSError("connection refused")
 
-    monkeypatch.setattr(urllib.request, "urlopen", _raise)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(urllib.request, "urlopen", _raise)
 
     assert hc.write_path_probe() == (False, "push_error")
 
@@ -125,7 +125,7 @@ def test_write_path_probe_reports_marker_not_visible(monkeypatch: pytest.MonkeyP
             return _Response(status=204)
         return _Response(status=200, body=b'{"data":{"result":[]}}')
 
-    monkeypatch.setattr(urllib.request, "urlopen", _open)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(urllib.request, "urlopen", _open)
 
     assert hc.write_path_probe() == (False, "probe_not_visible")
     request_body = requests[0].data
@@ -159,7 +159,7 @@ def test_write_path_probe_finds_marker_in_numeric_query_window(
         body = json.dumps({"data": {"result": [{"values": [["1", marker]]}]}}).encode()
         return _Response(status=200, body=body)
 
-    monkeypatch.setattr(urllib.request, "urlopen", _open)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(urllib.request, "urlopen", _open)
 
     assert hc.write_path_probe() == (True, "ok")
     query = urllib.parse.parse_qs(urllib.parse.urlparse(requests[1].full_url).query)
@@ -182,7 +182,7 @@ def test_write_path_probe_reports_query_request_error(monkeypatch: pytest.Monkey
             return _Response(status=204)
         raise OSError("query unavailable")
 
-    monkeypatch.setattr(urllib.request, "urlopen", _open)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(urllib.request, "urlopen", _open)
 
     assert hc.write_path_probe() == (False, "query_error")
 
@@ -212,7 +212,7 @@ def test_restart_runs_start_sh_in_deploy_dir(monkeypatch: pytest.MonkeyPatch) ->
         calls.append((cmd, Path(str(kw["cwd"]))))
         return _Result()
 
-    monkeypatch.setattr(hc.subprocess, "run", fake_run)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(hc.subprocess, "run", fake_run)
     assert hc._restart_stack() is True
     assert len(calls) == 1
     cmd, cwd = calls[0]
@@ -223,10 +223,10 @@ def test_restart_runs_start_sh_in_deploy_dir(monkeypatch: pytest.MonkeyPatch) ->
 def test_main_noop_without_marker(monkeypatch: pytest.MonkeyPatch) -> None:
     """Every unmarked host (dev worktree clusters included) must never probe or
     restart — the native backends belong to another home's singleton."""
-    monkeypatch.setattr(hc, "init_gateway_process", lambda _name: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-    monkeypatch.setattr(hc, "is_lgtm_host", lambda: False)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(hc, "init_gateway_process", lambda _name: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(hc, "is_lgtm_host", lambda: False)
     probed: list[bool] = []
-    monkeypatch.setattr(hc, "down_probes", lambda: probed.append(True) or [])  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType, reportUnknownMemberType]
+    monkeypatch.setattr(hc, "down_probes", lambda: probed.append(True) or [])
 
     hc.main()
     assert probed == []
@@ -234,7 +234,7 @@ def test_main_noop_without_marker(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_write_counter_survives_oserror(monkeypatch: pytest.MonkeyPatch) -> None:
     """A counter write failure (e.g. full disk) must not crash the round."""
-    monkeypatch.setattr(hc, "_write_probe_counter_path", lambda: Path("/no-such-dir/x"))  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(hc, "_write_probe_counter_path", lambda: Path("/no-such-dir/x"))
 
     hc._write_counter(3)  # no raise — the lost increment only delays the verdict
 
@@ -242,22 +242,22 @@ def test_write_counter_survives_oserror(monkeypatch: pytest.MonkeyPatch) -> None
 def test_main_restarts_on_down_probe(monkeypatch: pytest.MonkeyPatch) -> None:
     """A down backend on the marked host triggers the start.sh re-run; a failed
     re-run exits non-zero (the watchdog's failure contract)."""
-    monkeypatch.setattr(hc, "init_gateway_process", lambda _name: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-    monkeypatch.setattr(hc, "is_lgtm_host", lambda: True)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-    monkeypatch.setattr(hc, "down_probes", lambda: ["loki"])  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(hc, "init_gateway_process", lambda _name: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(hc, "is_lgtm_host", lambda: True)
+    monkeypatch.setattr(hc, "down_probes", lambda: ["loki"])
     counters: list[int] = []
     monkeypatch.setattr(hc, "_write_counter", counters.append)
     write_probed: list[bool] = []
-    monkeypatch.setattr(hc, "write_path_probe", lambda: write_probed.append(True) or (True, "ok"))  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType, reportUnknownMemberType]
+    monkeypatch.setattr(hc, "write_path_probe", lambda: write_probed.append(True) or (True, "ok"))
     restarted: list[bool] = []
-    monkeypatch.setattr(hc, "_restart_stack", lambda: restarted.append(True) or True)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType, reportUnknownMemberType]
+    monkeypatch.setattr(hc, "_restart_stack", lambda: restarted.append(True) or True)
 
     hc.main()
     assert restarted == [True]
     assert counters == [0]
     assert write_probed == []
 
-    monkeypatch.setattr(hc, "_restart_stack", lambda: False)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(hc, "_restart_stack", lambda: False)
     with pytest.raises(SystemExit) as exc:
         hc.main()
     assert exc.value.code == 1
@@ -266,13 +266,13 @@ def test_main_restarts_on_down_probe(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_main_restarts_on_third_write_probe_failure_and_emits_each_round(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    monkeypatch.setattr(hc, "init_gateway_process", lambda _name: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-    monkeypatch.setattr(hc, "is_lgtm_host", lambda: True)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(hc, "init_gateway_process", lambda _name: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(hc, "is_lgtm_host", lambda: True)
     monkeypatch.setattr(hc, "down_probes", list)
     monkeypatch.setattr(hc, "ava_home", lambda: tmp_path)
-    monkeypatch.setattr(hc, "write_path_probe", lambda: (False, "probe_not_visible"))  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(hc, "write_path_probe", lambda: (False, "probe_not_visible"))
     restarts: list[bool] = []
-    monkeypatch.setattr(hc, "_restart_stack", lambda: restarts.append(True) or True)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType, reportUnknownMemberType]
+    monkeypatch.setattr(hc, "_restart_stack", lambda: restarts.append(True) or True)
     emitted: list[tuple[tuple[object, ...], dict[str, object]]] = []
 
     def _emit(*args: object, **kwargs: object) -> None:
@@ -302,11 +302,11 @@ def test_main_restarts_on_third_write_probe_failure_and_emits_each_round(
 def test_main_successful_write_probe_clears_counter(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    monkeypatch.setattr(hc, "init_gateway_process", lambda _name: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-    monkeypatch.setattr(hc, "is_lgtm_host", lambda: True)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(hc, "init_gateway_process", lambda _name: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(hc, "is_lgtm_host", lambda: True)
     monkeypatch.setattr(hc, "down_probes", list)
     monkeypatch.setattr(hc, "ava_home", lambda: tmp_path)
-    monkeypatch.setattr(hc, "write_path_probe", lambda: (True, "ok"))  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(hc, "write_path_probe", lambda: (True, "ok"))
     hc._write_counter(2)
 
     hc.main()
@@ -358,7 +358,7 @@ def test_restart_stack_failure_reports_stdout_and_stderr(
         stdout = "loki config verify failed\n"
         stderr = "boom\n"
 
-    monkeypatch.setattr(hc.subprocess, "run", lambda *_a, **_kw: _Result())  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(hc.subprocess, "run", lambda *_a, **_kw: _Result())  # pyright: ignore[reportUnknownArgumentType]
 
     assert hc._restart_stack() is False
     captured = capsys.readouterr()

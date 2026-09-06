@@ -87,14 +87,14 @@ def standin_calls(monkeypatch: pytest.MonkeyPatch) -> list[int]:
 @pytest.fixture(autouse=True)
 def _quiet_logging(monkeypatch: pytest.MonkeyPatch) -> None:
     """`main()` calls init_gateway_process(); no need for real log wiring here."""
-    monkeypatch.setattr(hc, "init_gateway_process", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(hc, "init_gateway_process", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
 
 
 def test_probe_is_scoped_to_this_units_restarter(monkeypatch: pytest.MonkeyPatch) -> None:
     """Identity is checked against name=restarter + this unit's pidfile."""
     seen: dict[str, object] = {}
 
-    def fake_probe_daemon(name, url, *, pidfile, **_kw) -> DaemonProbe:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    def fake_probe_daemon(name, url, *, pidfile, **_kw) -> DaemonProbe:
         seen.update(name=name, url=url, pidfile=pidfile)  # pyright: ignore[reportUnknownArgumentType]
         return DaemonProbe.up("stub")
 
@@ -295,7 +295,7 @@ def test_standin_dispatch_never_raises_on_a_failing_reconcile(
         def reconcile(self, role: str) -> ReconcileResult:
             raise psycopg.OperationalError("server closed the connection unexpectedly")
 
-    monkeypatch.setattr(hc.shared.db, "pool", lambda **_kw: fake_pool)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(hc.shared.db, "pool", lambda **_kw: fake_pool)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(hc, "RespawnController", _ExplodingController)
 
     hc._standin_dispatch()  # no exception

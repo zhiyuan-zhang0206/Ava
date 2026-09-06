@@ -58,7 +58,7 @@ def _rows(db_conn: psycopg.Connection) -> list[tuple[Any, ...]]:
             "SELECT pk, path, kind, chunk_idx, mtime, content_hash "
             "FROM memory_embeddings ORDER BY pk"
         )
-        return list(cur.fetchall())  # pyright: ignore[reportUnknownVariableType]
+        return list(cur.fetchall())
 
 
 # ── schema management ─────────────────────────────────────────────────────
@@ -71,14 +71,14 @@ def test_connect_creates_extension_and_table(
     with db_conn.cursor() as cur:
         cur.execute("SELECT to_regclass(%s)", (_TABLE,))
         row = cur.fetchone()
-        assert row is not None and row[0] == _TABLE  # pyright: ignore[reportUnknownMemberType]
+        assert row is not None and row[0] == _TABLE
         cur.execute(
             "SELECT atttypmod FROM pg_attribute "
             "WHERE attrelid = to_regclass(%s) AND attname = 'vector'",
             (_TABLE,),
         )
         row = cur.fetchone()
-        assert row is not None and row[0] == _DIM  # pyright: ignore[reportUnknownMemberType]
+        assert row is not None and row[0] == _DIM
 
 
 def test_connect_drops_and_recreates_on_dim_mismatch(
@@ -110,7 +110,7 @@ def test_connect_drops_and_recreates_on_dim_mismatch(
                 (_TABLE,),
             )
             row = cur.fetchone()
-            assert row is not None and row[0] == _DIM  # pyright: ignore[reportUnknownMemberType]
+            assert row is not None and row[0] == _DIM
     finally:
         fresh.close()
 
@@ -160,7 +160,7 @@ def test_readonly_ensure_schema_refuses_missing_table(db_conn: psycopg.Connectio
     with db_conn.cursor() as cur:
         cur.execute("SELECT to_regclass(%s)", (_TABLE,))
         row = cur.fetchone()
-    assert row is not None and row[0] is None  # pyright: ignore[reportUnknownMemberType]
+    assert row is not None and row[0] is None
 
 
 # ── write path (indexer daemon contract) ──────────────────────────────────
@@ -316,7 +316,7 @@ def test_probe_healthy_when_extension_available(monkeypatch: pytest.MonkeyPatch)
         def __exit__(self, *_a: object) -> bool:
             return False
 
-        def execute(self, sql: str, params: tuple[object, ...] | None = None) -> _FakeConn:  # pyright: ignore[reportUnusedParameter]
+        def execute(self, sql: str, params: tuple[object, ...] | None = None) -> _FakeConn:
             self._rows = [(1,)]  # count of pg_available_extensions rows
             return self
 
@@ -325,7 +325,7 @@ def test_probe_healthy_when_extension_available(monkeypatch: pytest.MonkeyPatch)
 
     import shared.db
 
-    monkeypatch.setattr(shared.db, "connect", _FakeConn)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(shared.db, "connect", _FakeConn)
     result = probe.probe_backend("pgvector")
     assert result.message is None
     assert result.fatal is False
@@ -343,7 +343,7 @@ def test_probe_fatal_with_actionable_fix_when_extension_missing(
         def __exit__(self, *_a: object) -> bool:
             return False
 
-        def execute(self, sql: str, params: tuple[object, ...] | None = None) -> _FakeConn:  # pyright: ignore[reportUnusedParameter]
+        def execute(self, sql: str, params: tuple[object, ...] | None = None) -> _FakeConn:
             self._rows = [(0,)]
             return self
 
@@ -352,7 +352,7 @@ def test_probe_fatal_with_actionable_fix_when_extension_missing(
 
     import shared.db
 
-    monkeypatch.setattr(shared.db, "connect", _FakeConn)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(shared.db, "connect", _FakeConn)
     result = probe.probe_backend("pgvector")
     assert result.fatal is True
     assert result.message is not None
@@ -367,7 +367,7 @@ def test_probe_transient_when_postgres_unreachable(monkeypatch: pytest.MonkeyPat
     def _raise(*_a: object, **_kw: object) -> None:
         raise psycopg.OperationalError("connection refused")
 
-    monkeypatch.setattr(shared.db, "connect", _raise)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(shared.db, "connect", _raise)
     result = probe.probe_backend("pgvector")
     assert result.fatal is False
     assert result.message is not None

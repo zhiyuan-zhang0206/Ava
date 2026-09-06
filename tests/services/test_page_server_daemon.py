@@ -73,7 +73,7 @@ def backend(monkeypatch: pytest.MonkeyPatch) -> _FakeShellBackend:
     monkeypatch.setattr(
         psd,
         "_page_session_shell_pids",
-        lambda _wanted, _live=None: {},  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda _wanted, _live=None: {},  # pyright: ignore[reportUnknownArgumentType]
     )
     return fake
 
@@ -123,7 +123,7 @@ def _reconcile(
     backoff: dict[tuple[int, str], float],
     degraded: dict[tuple[int, str], psd._DegradedServeDir],
 ) -> None:
-    psd._reconcile_once(pool, managed, backoff, degraded, _HOST)  # pyright: ignore[reportUnknownArgumentType]
+    psd._reconcile_once(pool, managed, backoff, degraded, _HOST)
 
 
 def _token_and_session(conn: psycopg.Connection, agent_id: int, name: str) -> tuple[str, str]:
@@ -196,7 +196,7 @@ def test_new_row_session_created_before_slow_housekeeping(
     monkeypatch.setattr(
         psd,
         "_live_session_records",
-        lambda _b: {name: SimpleNamespace(pid=12345) for name in backend.sessions},  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda _b: {name: SimpleNamespace(pid=12345) for name in backend.sessions},  # pyright: ignore[reportUnknownArgumentType]
     )
     orig_new = backend.new_session
 
@@ -242,9 +242,9 @@ def test_managed_row_liveness_uses_record_scan_not_backend_round_trip(
     monkeypatch.setattr(
         psd,
         "_live_session_records",
-        lambda _b: {page_session: SimpleNamespace(pid=12345)},  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda _b: {page_session: SimpleNamespace(pid=12345)},  # pyright: ignore[reportUnknownArgumentType]
     )
-    monkeypatch.setattr(psd, "_server_is_healthy", lambda *_args: True)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(psd, "_server_is_healthy", lambda *_args: True)  # pyright: ignore[reportUnknownArgumentType]
     calls: list[str] = []
     orig_has = backend.has_session
 
@@ -281,7 +281,7 @@ def test_healthy_page_is_not_resent(
         token=secrets.token_hex(16),
         session=page_session,
     )
-    monkeypatch.setattr(psd, "_server_is_healthy", lambda *_args: True)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(psd, "_server_is_healthy", lambda *_args: True)  # pyright: ignore[reportUnknownArgumentType]
     managed: dict[tuple[int, str], psd._ServerHandle] = {}
 
     _reconcile(sync_pool, managed, {}, {})
@@ -310,8 +310,8 @@ def test_crashed_server_is_relaunched_in_same_session(
         token=secrets.token_hex(16),
         session=page_session,
     )
-    monkeypatch.setattr(psd, "_server_is_healthy", lambda *_args: False)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-    monkeypatch.setattr(psd, "_probe_port", lambda *_args: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(psd, "_server_is_healthy", lambda *_args: False)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(psd, "_probe_port", lambda *_args: None)  # pyright: ignore[reportUnknownArgumentType]
     managed: dict[tuple[int, str], psd._ServerHandle] = {}
 
     _reconcile(sync_pool, managed, {}, {})
@@ -346,8 +346,8 @@ def test_windows_style_backend_recreates_the_session_when_it_cannot_send(
         token=secrets.token_hex(16),
         session=page_session,
     )
-    monkeypatch.setattr(psd, "_server_is_healthy", lambda *_args: False)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-    monkeypatch.setattr(psd, "_probe_port", lambda *_args: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(psd, "_server_is_healthy", lambda *_args: False)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(psd, "_probe_port", lambda *_args: None)  # pyright: ignore[reportUnknownArgumentType]
 
     _reconcile(sync_pool, {}, {}, {})
 
@@ -375,12 +375,12 @@ def test_stale_server_in_its_page_session_replaces_that_session(
         token=secrets.token_hex(16),
         session=page_session,
     )
-    monkeypatch.setattr(psd, "_server_is_healthy", lambda *_args: False)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-    monkeypatch.setattr(psd, "_probe_port", lambda *_args: "ok:old-token")  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(psd, "_server_is_healthy", lambda *_args: False)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(psd, "_probe_port", lambda *_args: "ok:old-token")  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
         psd, "_page_server_occupants", lambda: {12004: (5001, str(psd.settings.general.ava_home))}
     )
-    monkeypatch.setattr(psd, "_page_session_owner", lambda pid, _pids: key if pid == 5001 else None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(psd, "_page_session_owner", lambda pid, _pids: key if pid == 5001 else None)  # pyright: ignore[reportUnknownArgumentType]
     managed: dict[tuple[int, str], psd._ServerHandle] = {}
 
     _reconcile(sync_pool, managed, {}, {})
@@ -408,8 +408,8 @@ def test_foreign_port_occupant_is_left_alone_and_backed_off(
         token=secrets.token_hex(16),
         session=page_session,
     )
-    monkeypatch.setattr(psd, "_server_is_healthy", lambda *_args: False)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-    monkeypatch.setattr(psd, "_probe_port", lambda *_args: "wrong")  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(psd, "_server_is_healthy", lambda *_args: False)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(psd, "_probe_port", lambda *_args: "wrong")  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(psd, "_page_server_occupants", lambda: {12005: (5002, None)})
     managed: dict[tuple[int, str], psd._ServerHandle] = {}
     backoff: dict[tuple[int, str], float] = {}
@@ -456,7 +456,7 @@ def test_stale_snapshot_never_creates_session_for_closed_row(
     _insert_page_row(db_conn, agent_id, key[1], 12020, tmp_path)
     stale = psd._open_rows(sync_pool, _HOST)[0]
     _close_row(db_conn, agent_id, key[1])
-    monkeypatch.setattr(psd, "_open_rows", lambda _pool, _host: [stale])  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(psd, "_open_rows", lambda _pool, _host: [stale])  # pyright: ignore[reportUnknownArgumentType]
     managed: dict[tuple[int, str], psd._ServerHandle] = {}
 
     _reconcile(sync_pool, managed, {}, {})
@@ -496,7 +496,7 @@ def test_stale_snapshot_skips_row_re_registered_mid_pass(
             (agent_id, key[1]),
         )
     db_conn.commit()
-    monkeypatch.setattr(psd, "_open_rows", lambda _pool, _host: [stale])  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(psd, "_open_rows", lambda _pool, _host: [stale])  # pyright: ignore[reportUnknownArgumentType]
     managed: dict[tuple[int, str], psd._ServerHandle] = {}
 
     _reconcile(sync_pool, managed, {}, {})
@@ -532,9 +532,9 @@ def test_session_rolled_back_when_row_expires_during_create(
             (agent_id, key[1]),
         )
     db_conn.commit()
-    monkeypatch.setattr(psd, "_open_rows", lambda _pool, _host: [stale])  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(psd, "_open_rows", lambda _pool, _host: [stale])  # pyright: ignore[reportUnknownArgumentType]
     # The liveness re-check passed a moment ago; expiry lands after it.
-    monkeypatch.setattr(psd, "_row_matches_snapshot", lambda _pool, _row: True)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(psd, "_row_matches_snapshot", lambda _pool, _row: True)  # pyright: ignore[reportUnknownArgumentType]
     managed: dict[tuple[int, str], psd._ServerHandle] = {}
     backoff: dict[tuple[int, str], float] = {}
 
@@ -562,9 +562,9 @@ def test_session_created_for_row_closed_during_create_is_rolled_back(
     _insert_page_row(db_conn, agent_id, key[1], 12023, tmp_path)
     stale = psd._open_rows(sync_pool, _HOST)[0]
     _close_row(db_conn, agent_id, key[1])
-    monkeypatch.setattr(psd, "_open_rows", lambda _pool, _host: [stale])  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(psd, "_open_rows", lambda _pool, _host: [stale])  # pyright: ignore[reportUnknownArgumentType]
     # The liveness re-check passed a moment ago; the close lands after it.
-    monkeypatch.setattr(psd, "_row_matches_snapshot", lambda _pool, _row: True)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(psd, "_row_matches_snapshot", lambda _pool, _row: True)  # pyright: ignore[reportUnknownArgumentType]
     managed: dict[tuple[int, str], psd._ServerHandle] = {}
     backoff: dict[tuple[int, str], float] = {}
 
@@ -670,7 +670,7 @@ def test_daemon_restart_adopts_a_healthy_live_page_session(
         token=secrets.token_hex(16),
         session=page_session,
     )
-    monkeypatch.setattr(psd, "_server_is_healthy", lambda *_args: True)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(psd, "_server_is_healthy", lambda *_args: True)  # pyright: ignore[reportUnknownArgumentType]
     managed: dict[tuple[int, str], psd._ServerHandle] = {}
 
     _reconcile(sync_pool, managed, {}, {})
@@ -709,10 +709,10 @@ def test_reclaim_preserves_in_session_server_and_kills_detached_orphan(
             12011: (5011, str(psd.settings.general.ava_home)),
         },
     )
-    monkeypatch.setattr(psd, "_page_session_owner", lambda pid, _pids: key if pid == 5010 else None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(psd, "_page_session_owner", lambda pid, _pids: key if pid == 5010 else None)  # pyright: ignore[reportUnknownArgumentType]
     killed: list[int] = []
     monkeypatch.setattr(psd, "_kill_pid", killed.append)
-    monkeypatch.setattr(psd, "_server_is_healthy", lambda *_args: True)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(psd, "_server_is_healthy", lambda *_args: True)  # pyright: ignore[reportUnknownArgumentType]
 
     _reconcile(sync_pool, {}, {}, {})
 
@@ -773,7 +773,7 @@ def test_page_session_owner_walks_process_ancestry(monkeypatch: pytest.MonkeyPat
         def parents() -> list[_Parent]:
             return [_Parent(11), _Parent(12)]
 
-    monkeypatch.setattr(psd.psutil, "Process", lambda _pid: _Proc())  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(psd.psutil, "Process", lambda _pid: _Proc())  # pyright: ignore[reportUnknownArgumentType]
     assert psd._page_session_owner(99, {12: (7, "page")}) == (7, "page")
 
 

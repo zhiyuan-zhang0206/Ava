@@ -28,10 +28,10 @@ def _patch_uia_gac(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         dll.write_bytes(b"")
         dlls[name] = dll
 
-    def fake_glob(self, pat: str):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-        for n, dll in dlls.items():  # pyright: ignore[reportUnknownVariableType]
+    def fake_glob(self, pat: str):
+        for n, dll in dlls.items():
             if pat.startswith(f"{n}/"):
-                return (dll,)  # pyright: ignore[reportUnknownVariableType]
+                return (dll,)
         return ()
 
     monkeypatch.setattr(lifecycle.Path, "glob", fake_glob)  # pyright: ignore[reportUnknownArgumentType]
@@ -54,7 +54,7 @@ def test_build_compiles_with_csc_and_skips_when_current(
         for n in ("UIAutomationClient", "UIAutomationTypes")
     }
 
-    def fake_glob(self, pat: str):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    def fake_glob(self, pat: str):
         for n, dll in gac_dlls.items():
             if pat.startswith(f"{n}/"):
                 return (dll,)
@@ -64,7 +64,7 @@ def test_build_compiles_with_csc_and_skips_when_current(
     app_dir = tmp_path / "app"
     recorded: list[list[str]] = []
 
-    def fake_run(cmd, **kwargs):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    def fake_run(cmd, **kwargs):
         recorded.append(list(cmd))  # pyright: ignore[reportUnknownArgumentType]
         if cmd[0] == str(tmp_path / "csc.exe"):
             (tmp_path / "app" / "AvaPermissionsHelper.exe").parent.mkdir(
@@ -95,7 +95,7 @@ def test_register_creates_logon_task_and_runs_it(monkeypatch: pytest.MonkeyPatch
     recorded: list[list[str]] = []
     exists = [False]
 
-    def fake_run(cmd, **kwargs):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    def fake_run(cmd, **kwargs):
         recorded.append(list(cmd))  # pyright: ignore[reportUnknownArgumentType]
         if cmd[1] == "/Query":
             return subprocess.CompletedProcess(cmd, 0 if exists[0] else 1, b"", b"")  # pyright: ignore[reportUnknownArgumentType]
@@ -148,7 +148,7 @@ def test_build_stops_running_helper_before_rebuild(
     app_dir, exe, csc = _stale_exe_setup(monkeypatch, tmp_path)
     recorded: list[list[str]] = []
 
-    def fake_run(cmd, **kwargs):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    def fake_run(cmd, **kwargs):
         recorded.append(list(cmd))  # pyright: ignore[reportUnknownArgumentType]
         if cmd[0] == str(csc):
             exe.write_bytes(b"new binary")
@@ -177,7 +177,7 @@ def test_build_retries_once_when_first_compile_fails(
     recorded: list[list[str]] = []
     csc_calls = {"n": 0}
 
-    def fake_run(cmd, **kwargs):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    def fake_run(cmd, **kwargs):
         recorded.append(list(cmd))  # pyright: ignore[reportUnknownArgumentType]
         if cmd[0] == str(csc):
             csc_calls["n"] += 1
@@ -191,8 +191,8 @@ def test_build_retries_once_when_first_compile_fails(
     monkeypatch.setattr(
         lifecycle.time,
         "sleep",
-        lambda _s: None,  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-    )  # no real wait in tests  # pyright: ignore[reportUnknownArgumentType]
+        lambda _s: None,  # pyright: ignore[reportUnknownArgumentType]
+    )  # no real wait in tests
 
     built_exe, rebuilt = lifecycle.build(app_dir)
 
@@ -221,7 +221,7 @@ def test_build_rebuilds_when_compile_options_drift(
     exe = app_dir / "AvaPermissionsHelper.exe"
     recorded: list[list[str]] = []
 
-    def fake_run(cmd, **kwargs):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    def fake_run(cmd, **kwargs):
         recorded.append(list(cmd))  # pyright: ignore[reportUnknownArgumentType]
         if cmd[0] == str(tmp_path / "csc.exe"):
             exe.parent.mkdir(parents=True, exist_ok=True)

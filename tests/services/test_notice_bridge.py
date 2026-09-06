@@ -67,14 +67,14 @@ class FakeAdapter:
     channel = "telegram"
 
     def __init__(self) -> None:
-        self.sent: list[tuple[str, str, list | None]] = []  # pyright: ignore[reportMissingTypeArgument]
+        self.sent: list[tuple[str, str, list | None]] = []
 
     async def send_to_owner(
         self,
         text: str,
         *,
         markdown: bool = False,
-        buttons: list | None = None,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+        buttons: list | None = None,
     ) -> None:
         del markdown
         self.sent.append((text, "owner", buttons))  # pyright: ignore[reportUnknownMemberType]
@@ -127,7 +127,7 @@ def test_poll_pushes_new_notices_and_advances_cursor(
     asyncio.run(bridge.poll_once())
     assert (
         len(adapter.sent) == 3  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
-    )  # low filtered, decide pushed  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+    )  # low filtered, decide pushed
     assert bridge._cursor == 4
 
 
@@ -283,8 +283,8 @@ def test_list_queue_pushes_each_open_notice(tmp_path: Any, monkeypatch: pytest.M
     assert len(adapter.sent) == 2  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
     assert "Queue 1/2" in adapter.sent[0][0]  # pyright: ignore[reportUnknownMemberType]
     # each row carries an action button
-    b0 = adapter.sent[0][2]  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
-    b1 = adapter.sent[1][2]  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+    b0 = adapter.sent[0][2]  # pyright: ignore[reportUnknownMemberType]
+    b1 = adapter.sent[1][2]  # pyright: ignore[reportUnknownMemberType]
     assert b0 is not None and b0[0][0] == "✏️ Reply"  # emoji-ok: button label
     assert (
         b1 is not None and b1[0][0] == "✏️ Reply"  # emoji-ok: button label
@@ -413,7 +413,7 @@ def test_list_queue_reads_directly_from_db(
     try:
         hint = asyncio.run(bridge.list_queue())
         assert hint is not None and "1 notices open" in hint
-        assert any("queue item" in s[0] for s in adapter.sent)  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+        assert any("queue item" in s[0] for s in adapter.sent)  # pyright: ignore[reportUnknownMemberType]
     finally:
         pool.close()
 
@@ -430,7 +430,7 @@ class _FlakyAdapter(FakeAdapter):
         text: str,
         *,
         markdown: bool = False,
-        buttons: list | None = None,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+        buttons: list | None = None,
     ) -> None:
         if self._failures_left > 0:
             self._failures_left -= 1
@@ -453,7 +453,7 @@ def test_poll_holds_cursor_when_push_fails(tmp_path: Any, monkeypatch: pytest.Mo
     assert bridge._cursor == 0, "cursor must not advance past a failed push"
     assert (
         flaky.sent == []  # pyright: ignore[reportUnknownMemberType]
-    )  # notice 1 failed; 2 and 3 not attempted yet  # pyright: ignore[reportUnknownMemberType]
+    )  # notice 1 failed; 2 and 3 not attempted yet
 
     # next round: 1 succeeds, 2 and 3 pushed, cursor reaches 3
     asyncio.run(bridge.poll_once())

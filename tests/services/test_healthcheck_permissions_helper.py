@@ -15,7 +15,7 @@ from services.permissions_helper import client
 @pytest.fixture(autouse=True)
 def _macos_probe(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(hc, "IS_MACOS", True)
-    monkeypatch.setattr(hc, "init_gateway_process", lambda *_args, **_kwargs: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(hc, "init_gateway_process", lambda *_args, **_kwargs: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(hc, "_consecutive_failures", 0)
     monkeypatch.setattr(hc, "_reported_unhealthy", False)
     monkeypatch.setattr(hc, "_repair_attempted", False)

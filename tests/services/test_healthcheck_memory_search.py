@@ -21,7 +21,7 @@ from shared.daemon_health import DaemonProbe
 
 
 def test_probe_up_when_search_answers_with_paths(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(hc, "_post_search", lambda _uri: {"paths": []})  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(hc, "_post_search", lambda _uri: {"paths": []})  # pyright: ignore[reportUnknownArgumentType]
     result = hc._probe()
     assert result.alive is True
     assert result.terminal is False
@@ -31,7 +31,7 @@ def test_probe_down_when_search_fails(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         hc,
         "_post_search",
-        lambda _uri: DaemonProbe.down("connection refused"),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda _uri: DaemonProbe.down("connection refused"),  # pyright: ignore[reportUnknownArgumentType]
     )
     result = hc._probe()
     assert result.alive is False
@@ -40,7 +40,7 @@ def test_probe_down_when_search_fails(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_probe_down_when_payload_lacks_paths(monkeypatch: pytest.MonkeyPatch) -> None:
     """A foreign process answering 200 on the port is not the search service."""
-    monkeypatch.setattr(hc, "_post_search", lambda _uri: {"nope": 1})  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(hc, "_post_search", lambda _uri: {"nope": 1})  # pyright: ignore[reportUnknownArgumentType]
     assert hc._probe().alive is False
 
 
@@ -48,12 +48,12 @@ def test_restart_respawns_session_and_verifies(monkeypatch: pytest.MonkeyPatch) 
     """_restart_daemon respawns `memory-search` and returns the probe's verdict."""
     calls: list[tuple[str, str, Path]] = []
 
-    def fake_respawn_and_verify(session, cmd, repo, *, verify, **_kw) -> DaemonProbe:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    def fake_respawn_and_verify(session, cmd, repo, *, verify, **_kw) -> DaemonProbe:
         calls.append((session, cmd, repo))  # pyright: ignore[reportUnknownArgumentType]
-        return verify()  # pyright: ignore[reportUnknownVariableType]
+        return verify()
 
     monkeypatch.setattr(hc, "respawn_and_verify", fake_respawn_and_verify)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(hc, "_post_search", lambda _uri: {"paths": []})  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(hc, "_post_search", lambda _uri: {"paths": []})  # pyright: ignore[reportUnknownArgumentType]
 
     result = hc._restart_daemon()
     assert result.alive is True
@@ -67,12 +67,12 @@ def test_restart_reports_failure_when_daemon_never_answers(monkeypatch: pytest.M
     monkeypatch.setattr(
         hc,
         "respawn_and_verify",
-        lambda *_a, verify, **_kw: verify(),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda *_a, verify, **_kw: verify(),  # pyright: ignore[reportUnknownArgumentType]
     )
     monkeypatch.setattr(
         hc,
         "_post_search",
-        lambda _uri: DaemonProbe.down("POST /search failed"),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda _uri: DaemonProbe.down("POST /search failed"),  # pyright: ignore[reportUnknownArgumentType]
     )
     assert hc._restart_daemon().alive is False
 
@@ -86,8 +86,8 @@ def test_main_runs_the_shared_keepalive(monkeypatch: pytest.MonkeyPatch) -> None
     def fake_keepalive(label: str, log: object, *, probe: object, respawn: object) -> None:
         seen.update(label=label, probe=probe, respawn=respawn)
 
-    monkeypatch.setattr(hc, "run_keepalive", fake_keepalive)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(hc, "init_gateway_process", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(hc, "run_keepalive", fake_keepalive)
+    monkeypatch.setattr(hc, "init_gateway_process", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
 
     hc.main()
     assert seen["label"] == "memory_search"

@@ -344,7 +344,7 @@ def _write_v2(path: Path, *, kind: str = "rollout") -> None:
     )
 
 
-def test_authenticated_proxies_app(servers) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_authenticated_proxies_app(servers) -> None:
     _FakeGateway.authenticated = True
     _FakeGateway.down = False
     status, body = _get(servers["gate"] + "/fleet")  # pyright: ignore[reportUnknownArgumentType]
@@ -434,7 +434,7 @@ def test_app_proxy_rejects_invalid_browser_origin_headers(servers: _Servers) -> 
     ]
 
 
-def test_app_404_passes_through_not_updating_page(servers) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_app_404_passes_through_not_updating_page(servers) -> None:
     """The app answering 404 means the app is UP and the resource is gone — the
     gate must pass the 404 through. A browser probing /favicon.ico relies on
     the 404 to drop its cached icon; an updating page instead would keep the
@@ -451,7 +451,7 @@ def test_app_404_passes_through_not_updating_page(servers) -> None:  # pyright: 
         _FakeApp.not_found_paths.clear()
 
 
-def test_unauthenticated_serves_static_login(servers) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_unauthenticated_serves_static_login(servers) -> None:
     _FakeGateway.authenticated = False
     _FakeGateway.down = False
     status, body = _get(servers["gate"] + "/")  # pyright: ignore[reportUnknownArgumentType]
@@ -460,7 +460,7 @@ def test_unauthenticated_serves_static_login(servers) -> None:  # pyright: ignor
     assert "login" in body.lower()
 
 
-def test_gateway_503_serves_updating_page_when_flag_set(servers) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_gateway_503_serves_updating_page_when_flag_set(servers) -> None:
     """Phase A: the gateway 503s while the updating flag is set — the user must
     see the updating page, not a dead-app error."""
     _FakeGateway.authenticated = True
@@ -471,7 +471,7 @@ def test_gateway_503_serves_updating_page_when_flag_set(servers) -> None:  # pyr
     assert "System updating" in body
 
 
-def test_active_snapshot_fast_path_never_probes_gateway_or_app(servers) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_active_snapshot_fast_path_never_probes_gateway_or_app(servers) -> None:
     _write_v2(servers["flag"])  # pyright: ignore[reportUnknownArgumentType]
 
     status, body = _get(servers["gate"] + "/")  # pyright: ignore[reportUnknownArgumentType]
@@ -482,7 +482,7 @@ def test_active_snapshot_fast_path_never_probes_gateway_or_app(servers) -> None:
     assert _FakeApp.requests == 0
 
 
-def test_one_request_reuses_its_initial_snapshot_when_file_changes_during_auth(servers) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_one_request_reuses_its_initial_snapshot_when_file_changes_during_auth(servers) -> None:
     _FakeGateway.authenticated = True
     _FakeGateway.down = False
     _FakeGateway.auth_hook = lambda: _write_v2(servers["flag"])  # pyright: ignore[reportUnknownArgumentType]
@@ -500,7 +500,7 @@ def test_one_request_reuses_its_initial_snapshot_when_file_changes_during_auth(s
     assert "System updating" in body
 
 
-def test_same_origin_snapshot_hint_is_served_without_gateway_or_app(servers) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_same_origin_snapshot_hint_is_served_without_gateway_or_app(servers) -> None:
     _write_v2(servers["flag"], kind="rollout")  # pyright: ignore[reportUnknownArgumentType]
 
     status, body, headers = _request(servers["gate"] + "/__ava/deploy-state")  # pyright: ignore[reportUnknownArgumentType]
@@ -533,12 +533,12 @@ def test_same_origin_snapshot_hint_is_get_only_and_never_probes(servers: _Server
 def test_same_origin_snapshot_hint_projects_inactive_and_invalid_without_probes(
     servers: _Servers,
     raw: str | None,
-    expected: dict[str, object] | None,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    expected: dict[str, object] | None,
 ) -> None:
     if raw is not None:
-        servers["flag"].write_text(raw)  # pyright: ignore[reportUnknownMemberType]
+        servers["flag"].write_text(raw)
 
-    status, body = _get(servers["gate"] + "/__ava/deploy-state")  # pyright: ignore[reportUnknownArgumentType]
+    status, body = _get(servers["gate"] + "/__ava/deploy-state")
 
     assert status == 200
     payload = json.loads(body)
@@ -569,7 +569,7 @@ def test_updating_page_uses_the_flags_stable_started_at(
 
     monkeypatch.setattr(gate_daemon.dt, "datetime", _FixedDateTime)
     started_at = started.isoformat()
-    servers["flag"].write_text(  # pyright: ignore[reportUnknownMemberType]
+    servers["flag"].write_text(
         json.dumps(
             {
                 "schema_version": 2,
@@ -584,7 +584,7 @@ def test_updating_page_uses_the_flags_stable_started_at(
             }
         )
     )
-    status, body = _get(servers["gate"] + "/")  # pyright: ignore[reportUnknownArgumentType]
+    status, body = _get(servers["gate"] + "/")
     assert status == 503
     assert f'window.__AVA_DEPLOY_STARTED_AT__ = "{started_at}"' in body
     match = re.search(r"window\.__AVA_UPDATE_BASE_ELAPSED_MS__ = (\d+);", body)
@@ -594,7 +594,7 @@ def test_updating_page_uses_the_flags_stable_started_at(
     assert "sessionStorage" not in body
 
 
-def test_gateway_refused_serves_updating_page_when_flag_set(servers) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_gateway_refused_serves_updating_page_when_flag_set(servers) -> None:
     """Local leg: the gateway process is down entirely (connection refused) but
     the rollout marked the flag — updating page."""
     _FakeGateway.authenticated = True
@@ -606,7 +606,7 @@ def test_gateway_refused_serves_updating_page_when_flag_set(servers) -> None:  #
     assert "System updating" in body
 
 
-def test_gateway_503_without_flag_serves_down_page(servers) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_gateway_503_without_flag_serves_down_page(servers) -> None:
     """Gateway 503, no flag: the machine itself is not answering — the down page,
     and its copy must NOT promise an update."""
     _FakeGateway.authenticated = True
@@ -618,7 +618,7 @@ def test_gateway_503_without_flag_serves_down_page(servers) -> None:  # pyright:
     assert "System updating" not in body
 
 
-def test_gateway_refused_without_flag_serves_down_page(servers) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_gateway_refused_without_flag_serves_down_page(servers) -> None:
     """Connection refused, no flag: the machine is down (powered off / crashed),
     not mid-update."""
     _FakeGateway.authenticated = True
@@ -630,7 +630,7 @@ def test_gateway_refused_without_flag_serves_down_page(servers) -> None:  # pyri
     assert "System updating" not in body
 
 
-def test_each_failed_request_uses_the_current_persisted_snapshot(servers) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_each_failed_request_uses_the_current_persisted_snapshot(servers) -> None:
     """The gate may change pages only when the persisted deploy snapshot changes;
     a transport phase never invents a second state."""
     _FakeGateway.authenticated = True
@@ -643,7 +643,7 @@ def test_each_failed_request_uses_the_current_persisted_snapshot(servers) -> Non
     assert "Service unavailable" in body
 
 
-def test_app_transport_failure_without_active_marker_is_service_unavailable(servers) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_app_transport_failure_without_active_marker_is_service_unavailable(servers) -> None:
     """Gateway-up/app-down is the exact recovery gap observed in production.
 
     It must reuse the request's inactive snapshot; app transport failure cannot
@@ -677,9 +677,9 @@ def test_malformed_or_unknown_flag_fails_to_service_unavailable(
     available, reports Not Working, and leaves an observable warning."""
     _FakeGateway.authenticated = True
     _FakeGateway.down = True
-    servers["flag"].write_text(raw)  # pyright: ignore[reportUnknownMemberType]
+    servers["flag"].write_text(raw)
 
-    status, body = _get(servers["gate"] + "/")  # pyright: ignore[reportUnknownArgumentType]
+    status, body = _get(servers["gate"] + "/")
     assert status == 503
     assert "Service unavailable" in body
     assert "No update is in progress" not in body
@@ -687,7 +687,7 @@ def test_malformed_or_unknown_flag_fails_to_service_unavailable(
 
 
 @pytest.mark.parametrize("page", ["login_page", "updating_page", "down_page"])
-def test_pages_ship_self_contained(servers, page: str) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_pages_ship_self_contained(servers, page: str) -> None:
     """Every page carries its own styling and theme bootstrap.
 
     The gate answers one page per request and has no route to serve a second

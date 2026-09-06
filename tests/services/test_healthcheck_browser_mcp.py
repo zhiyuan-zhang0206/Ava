@@ -91,7 +91,7 @@ def test_main_does_not_propagate_an_unexpected_probe_failure(
         return True
 
     monkeypatch.setattr(hc, "_probe", _boom)
-    monkeypatch.setattr(hc, "init_gateway_process", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(hc, "init_gateway_process", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(hc, "_restart_daemon", _restart)
     hc.main()
     assert restarts == ["restart"]

@@ -113,7 +113,7 @@ def test_upsert_many_uses_one_request_with_batch_timeout() -> None:
         return httpx.Response(200, json={"status": "ok"})
 
     backend = NumPyBackend()
-    backend._client = httpx.Client(  # pyright: ignore[reportPrivateUsage]
+    backend._client = httpx.Client(
         base_url="http://memory-search", transport=httpx.MockTransport(_respond)
     )
     try:

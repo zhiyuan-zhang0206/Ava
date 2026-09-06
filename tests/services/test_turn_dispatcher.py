@@ -740,18 +740,18 @@ class TestDispatcherMessageHandling:
 
     def test_pmessage_wakes_its_agent(self) -> None:
         disp, woken = self._dispatcher()
-        disp._handle({"type": "pmessage", "channel": "ava:inbound:42", "data": "x"})  # pyright: ignore[reportPrivateUsage]
+        disp._handle({"type": "pmessage", "channel": "ava:inbound:42", "data": "x"})
         assert woken == [42]
 
     def test_non_pmessage_frames_are_ignored(self) -> None:
         """psubscribe confirmations and plain messages share the stream."""
         disp, woken = self._dispatcher()
-        disp._handle({"type": "psubscribe", "channel": "ava:inbound:*", "data": 1})  # pyright: ignore[reportPrivateUsage]
+        disp._handle({"type": "psubscribe", "channel": "ava:inbound:*", "data": 1})
         assert woken == []
 
     def test_unparseable_channel_is_dropped_quietly(self) -> None:
         disp, woken = self._dispatcher()
-        disp._handle({"type": "pmessage", "channel": "ava:inbound:oops", "data": "x"})  # pyright: ignore[reportPrivateUsage]
+        disp._handle({"type": "pmessage", "channel": "ava:inbound:oops", "data": "x"})
         assert woken == []
 
 
@@ -802,7 +802,7 @@ class TestPendingScan:
 
         disp = InboundWakeDispatcher(
             "redis://unused", scheduler, pending_scan=_pending, stale_after_s=180.0
-        )  # pyright: ignore[reportArgumentType]
+        )
 
         await disp.scan_once()
 
@@ -819,7 +819,7 @@ class TestPendingScan:
 
         disp = InboundWakeDispatcher(
             "redis://unused", scheduler, pending_scan=_pending, stale_after_s=180.0
-        )  # pyright: ignore[reportArgumentType]
+        )
 
         await disp.scan_once()
 
@@ -839,7 +839,7 @@ class TestPendingScan:
 
         disp = InboundWakeDispatcher(
             "redis://unused", scheduler, pending_scan=_pending, stale_after_s=180.0
-        )  # pyright: ignore[reportArgumentType]
+        )
 
         with pytest.raises(dispatcher.HostRestartRequiredError, match="did not unwind"):
             await disp.scan_once()
@@ -891,7 +891,7 @@ class TestStallRestartEscalation:
             scan_interval_s=0.005,
             subscription_read_timeout_s=0.005,
             reconnect_delay_s=0.0,
-        )  # pyright: ignore[reportArgumentType]
+        )
         with pytest.raises(dispatcher.HostRestartRequiredError, match="supervisor recovery"):
             await asyncio.wait_for(disp.run(), timeout=2.0)
 
@@ -927,7 +927,7 @@ class TestTurnLevelStaleScan:
 
         disp = InboundWakeDispatcher(
             "redis://unused", scheduler, pending_scan=_pending, stale_after_s=180.0
-        )  # pyright: ignore[reportArgumentType]
+        )
 
         await disp.scan_once()
 
@@ -945,7 +945,7 @@ class TestTurnLevelStaleScan:
 
         disp = InboundWakeDispatcher(
             "redis://unused", scheduler, pending_scan=_pending, stale_after_s=180.0
-        )  # pyright: ignore[reportArgumentType]
+        )
 
         await disp.scan_once()
 
@@ -966,7 +966,7 @@ class TestTurnLevelStaleScan:
 
         disp = InboundWakeDispatcher(
             "redis://unused", scheduler, pending_scan=_pending, stale_after_s=180.0
-        )  # pyright: ignore[reportArgumentType]
+        )
 
         await disp.scan_once()
 
@@ -984,7 +984,7 @@ class TestTurnLevelStaleScan:
 
         disp = InboundWakeDispatcher(
             "redis://unused", scheduler, pending_scan=_pending, stale_after_s=180.0
-        )  # pyright: ignore[reportArgumentType]
+        )
 
         with pytest.raises(dispatcher.HostRestartRequiredError, match="did not unwind"):
             await disp.scan_once()
@@ -1072,7 +1072,7 @@ class TestSubscriptionRecovery:
             max_scan_backoff_s=0.04,
             subscription_read_timeout_s=0.005,
             reconnect_delay_s=0.0,
-        )  # pyright: ignore[reportArgumentType]
+        )
         task = asyncio.create_task(disp.run())
         try:
             await asyncio.wait_for(failures_seen.wait(), timeout=1.0)
@@ -1106,7 +1106,7 @@ class TestSubscriptionRecovery:
             scan_interval_s=0.02,
             subscription_read_timeout_s=0.005,
             reconnect_delay_s=0.0,
-        )  # pyright: ignore[reportArgumentType]
+        )
         task = asyncio.create_task(disp.run())
         try:
             await asyncio.wait_for(first_failure.wait(), timeout=1.0)
@@ -1150,7 +1150,7 @@ class TestSubscriptionRecovery:
             scan_interval_s=0.02,
             subscription_read_timeout_s=0.005,
             reconnect_delay_s=0.0,
-        )  # pyright: ignore[reportArgumentType]
+        )
         task = asyncio.create_task(disp.run())
         try:
             await asyncio.wait_for(recovered_twice.wait(), timeout=1.0)
@@ -1178,7 +1178,7 @@ class TestSubscriptionRecovery:
             _ScanScheduler(),
             pending_scan=_pending,
             stale_after_s=180.0,
-        )  # pyright: ignore[reportArgumentType]
+        )
 
         with pytest.raises(dispatcher.HostRestartRequiredError, match="did not unwind"):
             await disp.run()
@@ -1241,7 +1241,7 @@ class TestSubscriptionRecovery:
             subscription_read_timeout_s=0.01,
             subscription_read_deadline_grace_s=0.01,
             reconnect_delay_s=0.0,
-        )  # pyright: ignore[reportArgumentType]
+        )
         task = asyncio.create_task(disp.run())
         try:
             await asyncio.wait_for(second_opened.wait(), timeout=1.0)

@@ -168,9 +168,9 @@ async def _ok_result(
     union, and pins the response shape at the same time."""
     resp = await _call(daemon, tool, args, agent_id)
     assert resp["ok"] is True
-    content = (resp["result"] or {}).get("content")  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+    content = (resp["result"] or {}).get("content")  # pyright: ignore[reportUnknownMemberType]
     assert isinstance(content, list) and len(content) == 1  # pyright: ignore[reportUnknownArgumentType]
-    block = content[0]  # pyright: ignore[reportUnknownVariableType]
+    block = content[0]
     assert block["type"] == "text"
     return json.loads(block["text"])  # pyright: ignore[reportUnknownArgumentType]
 
@@ -182,7 +182,7 @@ async def test_list_tools_and_ping() -> None:
     d = _daemon()
     resp = await d._dispatch(_req("list_tools"))
     assert resp["ok"] is True
-    names = {t["name"] for t in (resp["result"] or [])}  # pyright: ignore[reportUnknownVariableType]
+    names = {t["name"] for t in (resp["result"] or [])}
     assert names == {
         "release_control",
         "snapshot",
@@ -213,10 +213,10 @@ async def test_unknown_method_and_tool() -> None:
 
 async def test_click_executes_and_converts_coordinates(
     fake_helper: FakeHelper,
-    audit_log: list,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
-    monkeypatch: pytest.MonkeyPatch,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+    audit_log: list,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(screen_mod, "_snapshot_path", lambda _agent_id: "/tmp/x.png")  # noqa: S108  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(screen_mod, "_snapshot_path", lambda _agent_id: "/tmp/x.png")  # noqa: S108  # pyright: ignore[reportUnknownArgumentType]
     d = _daemon()
     resp = await _call(d, "click", {"x": 100, "y": 200})
     assert resp["ok"] is True
@@ -226,13 +226,13 @@ async def test_click_executes_and_converts_coordinates(
 
 async def test_snapshot_returns_path_and_geometry(
     fake_helper: FakeHelper,
-    audit_log: list,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
-    monkeypatch: pytest.MonkeyPatch,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+    audit_log: list,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
         screen_mod,
         "_snapshot_path",
-        lambda _agent_id: "/tmp/snap-test.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda _agent_id: "/tmp/snap-test.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType]
     )
     d = _daemon()
     result = await _ok_result(d, "snapshot", {"include_ax": True})
@@ -246,8 +246,8 @@ async def test_snapshot_returns_path_and_geometry(
 
 async def test_snapshot_and_click_measure_scale_not_helper_claim(
     fake_helper: FakeHelper,
-    audit_log: list,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
-    monkeypatch: pytest.MonkeyPatch,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+    audit_log: list,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Regression (2026-08-30 probe): the helper reported scale=2 on a 1x
     display, and the daemon divided click coords by it — every click landed
@@ -260,7 +260,7 @@ async def test_snapshot_and_click_measure_scale_not_helper_claim(
     monkeypatch.setattr(
         screen_mod,
         "_snapshot_path",
-        lambda _agent_id: "/tmp/snap-1x.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda _agent_id: "/tmp/snap-1x.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType]
     )
     d = _daemon()
     snap = await _ok_result(d, "snapshot", {})
@@ -279,8 +279,8 @@ async def test_snapshot_and_click_measure_scale_not_helper_claim(
 
 async def test_snapshot_measures_scale_on_2x_and_converts_ax(
     fake_helper: FakeHelper,
-    audit_log: list,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
-    monkeypatch: pytest.MonkeyPatch,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+    audit_log: list,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A genuine Retina 2x capture keeps the measured scale at 2 and converts
     ax geometry into physical pixels (the click space)."""
@@ -288,7 +288,7 @@ async def test_snapshot_measures_scale_on_2x_and_converts_ax(
     monkeypatch.setattr(
         screen_mod,
         "_snapshot_path",
-        lambda _agent_id: "/tmp/snap-2x.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda _agent_id: "/tmp/snap-2x.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType]
     )
     d = _daemon()
     snap = await _ok_result(d, "snapshot", {"include_ax": True})
@@ -304,7 +304,7 @@ async def test_snapshot_measures_scale_on_2x_and_converts_ax(
 
 async def test_click_before_any_snapshot_falls_back_to_helper_scale(
     fake_helper: FakeHelper,
-    audit_log: list,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+    audit_log: list,
 ) -> None:
     """Before the first snapshot the daemon has no measurement; it uses the
     helper's live screen report (also the only sane cold-start behavior)."""
@@ -315,18 +315,18 @@ async def test_click_before_any_snapshot_falls_back_to_helper_scale(
 
 async def test_snapshot_include_ocr_adds_text_boxes(
     fake_helper: FakeHelper,
-    audit_log: list,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
-    monkeypatch: pytest.MonkeyPatch,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+    audit_log: list,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
         screen_mod,
         "_snapshot_path",
-        lambda _agent_id: "/tmp/snap-ocr-test.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda _agent_id: "/tmp/snap-ocr-test.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType]
     )
     monkeypatch.setattr(
         daemon_mod.ocr_mod,
         "ocr_image",
-        lambda _path: [{"text": "\u4f60\u597d", "x": 1.0, "y": 2.0, "w": 30.0, "h": 12.0}],  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda _path: [{"text": "\u4f60\u597d", "x": 1.0, "y": 2.0, "w": 30.0, "h": 12.0}],  # pyright: ignore[reportUnknownArgumentType]
     )
     d = _daemon()
     result = await _ok_result(d, "snapshot", {"include_ocr": True})
@@ -336,16 +336,16 @@ async def test_snapshot_include_ocr_adds_text_boxes(
 
 async def test_snapshot_include_ocr_failure_degrades(
     fake_helper: FakeHelper,
-    audit_log: list,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
-    monkeypatch: pytest.MonkeyPatch,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+    audit_log: list,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
         screen_mod,
         "_snapshot_path",
-        lambda _agent_id: "/tmp/snap-ocr-fail.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda _agent_id: "/tmp/snap-ocr-fail.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType]
     )
 
-    def _boom(path: str) -> list[dict]:  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+    def _boom(path: str) -> list[dict]:
         raise daemon_mod.ocr_mod.OcrError("swiftc missing")
 
     monkeypatch.setattr(daemon_mod.ocr_mod, "ocr_image", _boom)  # pyright: ignore[reportUnknownArgumentType]
@@ -357,19 +357,19 @@ async def test_snapshot_include_ocr_failure_degrades(
 
 async def test_snapshot_without_include_ocr_skips_ocr(
     fake_helper: FakeHelper,
-    audit_log: list,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
-    monkeypatch: pytest.MonkeyPatch,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+    audit_log: list,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
         screen_mod,
         "_snapshot_path",
-        lambda _agent_id: "/tmp/snap-plain.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda _agent_id: "/tmp/snap-plain.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType]
     )
     called: list[str] = []
 
-    def _ocr(path: str) -> list[dict]:  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+    def _ocr(path: str) -> list[dict]:
         called.append(path)
-        return []  # pyright: ignore[reportUnknownVariableType]
+        return []
 
     monkeypatch.setattr(daemon_mod.ocr_mod, "ocr_image", _ocr)  # pyright: ignore[reportUnknownArgumentType]
     d = _daemon()
@@ -390,7 +390,7 @@ class FakeOcr:
         self.calls = 0
         self.error: str | None = None
 
-    def __call__(self, path: str) -> list[dict[str, float | str]]:  # pyright: ignore[reportUnknownParameterType]
+    def __call__(self, path: str) -> list[dict[str, float | str]]:
         self.calls += 1
         if self.error is not None:
             raise daemon_mod.ocr_mod.OcrError(self.error)
@@ -411,7 +411,7 @@ _OCR_BOXES: list[dict[str, float | str]] = [
 @pytest.fixture
 def fake_ocr(monkeypatch: pytest.MonkeyPatch) -> FakeOcr:
     stub = FakeOcr(_OCR_BOXES)
-    monkeypatch.setattr(daemon_mod.ocr_mod, "ocr_image", stub)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(daemon_mod.ocr_mod, "ocr_image", stub)
     return stub
 
 
@@ -458,16 +458,16 @@ def test_validate_text_query_rejects_blank_and_unknown_mode() -> None:
 
 async def test_find_text_returns_matching_boxes(
     fake_helper: FakeHelper,
-    audit_log: list,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+    audit_log: list,
     fake_ocr: FakeOcr,
-    monkeypatch: pytest.MonkeyPatch,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """find_text captures once, OCRs, and reports every match with
     physical-pixel geometry (the click space, no scale conversion)."""
     monkeypatch.setattr(
         screen_mod,
         "_snapshot_path",
-        lambda _agent_id: "/tmp/find-text.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda _agent_id: "/tmp/find-text.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType]
     )
     d = _daemon()
     result = await _ok_result(d, "find_text", {"text": "search"})
@@ -482,20 +482,20 @@ async def test_find_text_returns_matching_boxes(
 
 async def test_find_text_reuses_last_ocr_when_asked(
     fake_helper: FakeHelper,
-    audit_log: list,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+    audit_log: list,
     fake_ocr: FakeOcr,
-    monkeypatch: pytest.MonkeyPatch,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """snapshot_fresh=false searches the OCR the snapshot include_ocr just
     produced — no second capture, and the result says fresh:false."""
     monkeypatch.setattr(
         screen_mod,
         "_snapshot_path",
-        lambda _agent_id: "/tmp/find-text.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda _agent_id: "/tmp/find-text.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType]
     )
     d = _daemon()
     snap = await _ok_result(d, "snapshot", {"include_ocr": True})
-    assert len(snap["ocr"]) == 5  # pyright: ignore[reportUnknownArgumentType]
+    assert len(snap["ocr"]) == 5
     result = await _ok_result(d, "find_text", {"text": "hello", "snapshot_fresh": False})
     assert result["fresh"] is False
     assert result["count"] == 1
@@ -506,16 +506,16 @@ async def test_find_text_reuses_last_ocr_when_asked(
 
 async def test_find_text_fresh_then_stale_share_one_capture(
     fake_helper: FakeHelper,
-    audit_log: list,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+    audit_log: list,
     fake_ocr: FakeOcr,
-    monkeypatch: pytest.MonkeyPatch,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A fresh find_text fills the cache; the next snapshot_fresh=false call
     searches that same screen (fresh:false) without a new capture."""
     monkeypatch.setattr(
         screen_mod,
         "_snapshot_path",
-        lambda _agent_id: "/tmp/find-text.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda _agent_id: "/tmp/find-text.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType]
     )
     d = _daemon()
     first = await _ok_result(d, "find_text", {"text": "search"})
@@ -529,16 +529,16 @@ async def test_find_text_fresh_then_stale_share_one_capture(
 
 async def test_find_text_stale_with_empty_cache_captures(
     fake_helper: FakeHelper,
-    audit_log: list,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+    audit_log: list,
     fake_ocr: FakeOcr,
-    monkeypatch: pytest.MonkeyPatch,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """snapshot_fresh=false before any OCR ran has nothing to reuse — it
     falls back to a fresh capture (and reports fresh:true)."""
     monkeypatch.setattr(
         screen_mod,
         "_snapshot_path",
-        lambda _agent_id: "/tmp/find-text.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda _agent_id: "/tmp/find-text.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType]
     )
     d = _daemon()
     result = await _ok_result(d, "find_text", {"text": "search", "snapshot_fresh": False})
@@ -550,50 +550,50 @@ async def test_find_text_stale_with_empty_cache_captures(
 
 async def test_find_text_ocr_failure_is_an_error(
     fake_helper: FakeHelper,
-    audit_log: list,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+    audit_log: list,
     fake_ocr: FakeOcr,
-    monkeypatch: pytest.MonkeyPatch,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """find_text is strict where snapshot is soft: a failed OCR is an error,
     never a silent empty list."""
     monkeypatch.setattr(
         screen_mod,
         "_snapshot_path",
-        lambda _agent_id: "/tmp/find-text.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda _agent_id: "/tmp/find-text.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType]
     )
     fake_ocr.error = "swiftc missing"
     d = _daemon()
     resp = await _call(d, "find_text", {"text": "search"})
     assert resp["ok"] is False
-    assert "ocr failed" in resp["error"]  # pyright: ignore[reportUnknownArgumentType]
-    assert audit_log[0]["payload"]["outcome"] == "error"  # pyright: ignore[reportUnknownIndexType]
+    assert "ocr failed" in resp["error"]
+    assert audit_log[0]["payload"]["outcome"] == "error"
 
 
 async def test_find_text_requires_text_argument(
     fake_helper: FakeHelper,
-    audit_log: list,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+    audit_log: list,
 ) -> None:
     d = _daemon()
     resp = await _call(d, "find_text", {})
     assert resp["ok"] is False
-    assert "find_text requires argument 'text'" in resp["error"]  # pyright: ignore[reportUnknownArgumentType]
+    assert "find_text requires argument 'text'" in resp["error"]
     resp2 = await _call(d, "find_text", {"text": "  "})
     assert resp2["ok"] is False
-    assert "non-empty" in resp2["error"]  # pyright: ignore[reportUnknownArgumentType]
+    assert "non-empty" in resp2["error"]
 
 
 async def test_click_text_ocrs_locates_and_clicks(
     fake_helper: FakeHelper,
-    audit_log: list,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+    audit_log: list,
     fake_ocr: FakeOcr,
-    monkeypatch: pytest.MonkeyPatch,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """click_text = fresh capture + OCR + one click at the best match's center
     (physical pixels converted by the capture's measured 2x scale)."""
     monkeypatch.setattr(
         screen_mod,
         "_snapshot_path",
-        lambda _agent_id: "/tmp/click-text.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda _agent_id: "/tmp/click-text.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType]
     )
     d = _daemon()
     result = await _ok_result(d, "click_text", {"text": "search"})
@@ -608,14 +608,14 @@ async def test_click_text_ocrs_locates_and_clicks(
 
 async def test_click_text_index_selects_among_matches(
     fake_helper: FakeHelper,
-    audit_log: list,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+    audit_log: list,
     fake_ocr: FakeOcr,
-    monkeypatch: pytest.MonkeyPatch,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
         screen_mod,
         "_snapshot_path",
-        lambda _agent_id: "/tmp/click-text.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda _agent_id: "/tmp/click-text.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType]
     )
     d = _daemon()
     # index 1 = the lower "search" box (y=200): center (140, 212) → (70, 106)
@@ -630,65 +630,65 @@ async def test_click_text_index_selects_among_matches(
 
 async def test_click_text_failures_are_readable_and_never_click(
     fake_helper: FakeHelper,
-    audit_log: list,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+    audit_log: list,
     fake_ocr: FakeOcr,
-    monkeypatch: pytest.MonkeyPatch,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
         screen_mod,
         "_snapshot_path",
-        lambda _agent_id: "/tmp/click-text.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda _agent_id: "/tmp/click-text.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType]
     )
     d = _daemon()
     resp = await _call(d, "click_text", {"text": "zzz"})
     assert resp["ok"] is False
-    assert "no on-screen text matching 'zzz'" in resp["error"]  # pyright: ignore[reportUnknownArgumentType]
+    assert "no on-screen text matching 'zzz'" in resp["error"]
     resp2 = await _call(d, "click_text", {"text": "search", "index": 5})
     assert resp2["ok"] is False
-    assert "out of range" in resp2["error"]  # pyright: ignore[reportUnknownArgumentType]
+    assert "out of range" in resp2["error"]
     resp3 = await _call(d, "click_text", {"text": "search", "index": -1})
     assert resp3["ok"] is False
-    assert "index must be >= 0" in resp3["error"]  # pyright: ignore[reportUnknownArgumentType]
+    assert "index must be >= 0" in resp3["error"]
     resp4 = await _call(d, "click_text", {"text": "search", "match": "regex"})
     assert resp4["ok"] is False
-    assert "match must be 'contains' or 'exact'" in resp4["error"]  # pyright: ignore[reportUnknownArgumentType]
+    assert "match must be 'contains' or 'exact'" in resp4["error"]
     # none of the failures reached the helper's click
     assert not any(c[0] == "click" for c in fake_helper.calls)
 
 
 async def test_click_text_audits_the_clicked_center(
     fake_helper: FakeHelper,
-    audit_log: list,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+    audit_log: list,
     fake_ocr: FakeOcr,
-    monkeypatch: pytest.MonkeyPatch,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
         screen_mod,
         "_snapshot_path",
-        lambda _agent_id: "/tmp/click-text.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda _agent_id: "/tmp/click-text.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType]
     )
     d = _daemon()
     await _call(d, "click_text", {"text": "search"})
-    actions = [ev for ev in audit_log if ev["event_type"] == "computer_action"]  # pyright: ignore[reportUnknownVariableType]
+    actions = [ev for ev in audit_log if ev["event_type"] == "computer_action"]
     assert len(actions) == 1  # pyright: ignore[reportUnknownArgumentType]
-    ev = actions[0]  # pyright: ignore[reportUnknownVariableType]
+    ev = actions[0]
     assert ev["payload"]["action"] == "click_text"
     assert ev["payload"]["outcome"] == "ok"
     # the audited coordinate is the resolved click center, physical pixels
     assert ev["payload"]["coords"] == "540.0,112.0"
     # a failed click_text audits the error with the action name, no coords
     await _call(d, "click_text", {"text": "zzz"})
-    failed = [ev for ev in audit_log if ev["event_type"] == "computer_action"]  # pyright: ignore[reportUnknownVariableType]
-    assert failed[1]["payload"]["action"] == "click_text"  # pyright: ignore[reportUnknownIndexType]
-    assert failed[1]["payload"]["outcome"] == "error"  # pyright: ignore[reportUnknownIndexType]
-    assert failed[1]["payload"]["coords"] is None  # pyright: ignore[reportUnknownIndexType]
+    failed = [ev for ev in audit_log if ev["event_type"] == "computer_action"]
+    assert failed[1]["payload"]["action"] == "click_text"
+    assert failed[1]["payload"]["outcome"] == "error"
+    assert failed[1]["payload"]["coords"] is None
 
 
 async def test_click_text_measures_scale_and_tracks_pointer(
     fake_helper: FakeHelper,
-    audit_log: list,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+    audit_log: list,
     fake_ocr: FakeOcr,
-    monkeypatch: pytest.MonkeyPatch,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The stale-helper regression, applied to click_text: a capture on a 1x
     display (helper claims 2x) must pass click coordinates through UNCHANGED,
@@ -699,7 +699,7 @@ async def test_click_text_measures_scale_and_tracks_pointer(
     monkeypatch.setattr(
         screen_mod,
         "_snapshot_path",
-        lambda _agent_id: "/tmp/click-text.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda _agent_id: "/tmp/click-text.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType]
     )
     d = _daemon()
     result = await _ok_result(d, "click_text", {"text": "search"})
@@ -715,7 +715,7 @@ async def test_click_text_measures_scale_and_tracks_pointer(
     assert ("click", {"x": 81.0, "y": 15.0, "double": False}) in fh.calls
 
 
-async def test_type_key_scroll_window_session(fake_helper: FakeHelper, audit_log: list) -> None:  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+async def test_type_key_scroll_window_session(fake_helper: FakeHelper, audit_log: list) -> None:
     d = _daemon()
     assert (await _ok_result(d, "type_text", {"text": "\u4f60\u597d"}))["typed"] == 2
     assert (await _ok_result(d, "key", {"key": "return", "cmd": True}))["pressed"] == 36
@@ -726,8 +726,8 @@ async def test_type_key_scroll_window_session(fake_helper: FakeHelper, audit_log
 
 async def test_helper_failure_surfaces_as_error(
     fake_helper: FakeHelper,
-    audit_log: list,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
-    monkeypatch: pytest.MonkeyPatch,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+    audit_log: list,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     def _boom(*args: Any, **kw: Any) -> Any:
         raise PermissionsHelperError("helper down")
@@ -741,7 +741,7 @@ async def test_helper_failure_surfaces_as_error(
 
 async def test_success_result_is_call_tool_result_dump(
     fake_helper: FakeHelper,
-    audit_log: list,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+    audit_log: list,
 ) -> None:
     """The daemon's call_tool result validates as an MCP CallToolResult —
     the exact contract the per-agent wrapper and the direct dial enforce, and
@@ -761,7 +761,7 @@ async def test_success_result_is_call_tool_result_dump(
 
 async def test_missing_required_argument_fails_cleanly(
     fake_helper: FakeHelper,
-    audit_log: list,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+    audit_log: list,
 ) -> None:
     """A missing required argument is a readable tool error, not a bare
     KeyError leaking from the helper call."""
@@ -778,7 +778,7 @@ async def test_missing_required_argument_fails_cleanly(
 
 async def test_window_info_defaults_owner_to_frontmost(
     fake_helper: FakeHelper,
-    audit_log: list,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+    audit_log: list,
 ) -> None:
     """window_info without owner uses the frontmost app."""
     d = _daemon()
@@ -789,7 +789,7 @@ async def test_window_info_defaults_owner_to_frontmost(
 
 async def test_key_accepts_names_characters_and_keycodes(
     fake_helper: FakeHelper,
-    audit_log: list,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+    audit_log: list,
 ) -> None:
     """The key tool takes a key name, a single character, or a raw keycode."""
     d = _daemon()
@@ -808,7 +808,7 @@ async def test_key_accepts_names_characters_and_keycodes(
     ]
 
 
-async def test_key_unknown_name_fails_cleanly(fake_helper: FakeHelper, audit_log: list) -> None:  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+async def test_key_unknown_name_fails_cleanly(fake_helper: FakeHelper, audit_log: list) -> None:
     d = _daemon()
     resp = await _call(d, "key", {"key": "wibble"})
     assert resp["ok"] is False
@@ -821,7 +821,7 @@ async def test_key_unknown_name_fails_cleanly(fake_helper: FakeHelper, audit_log
 
 async def test_key_result_maps_helper_echo_to_pressed(
     fake_helper: FakeHelper,
-    audit_log: list,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+    audit_log: list,
 ) -> None:
     """The daemon's key response carries "pressed" even though the helper
     echoes {"key": code, "cmd": ...} — the contract callers read."""
@@ -832,7 +832,7 @@ async def test_key_result_maps_helper_echo_to_pressed(
 
 async def test_scroll_defaults_pointer_to_last_click(
     fake_helper: FakeHelper,
-    audit_log: list,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+    audit_log: list,
 ) -> None:
     """scroll with only dy scrolls at the last click's position (physical
     pixels converted to logical points)."""
@@ -845,7 +845,7 @@ async def test_scroll_defaults_pointer_to_last_click(
 
 async def test_scroll_without_pointer_uses_screen_center(
     fake_helper: FakeHelper,
-    audit_log: list,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+    audit_log: list,
 ) -> None:
     d = _daemon()
     result = await _ok_result(d, "scroll", {"dy": 5})
@@ -858,7 +858,7 @@ async def test_scroll_without_pointer_uses_screen_center(
 
 async def test_scroll_explicit_xy_updates_tracked_pointer(
     fake_helper: FakeHelper,
-    audit_log: list,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+    audit_log: list,
 ) -> None:
     d = _daemon()
     await _ok_result(d, "scroll", {"x": 40, "y": 60, "dy": -5})
@@ -873,16 +873,16 @@ async def test_scroll_explicit_xy_updates_tracked_pointer(
 
 async def test_audit_emitted_on_success(
     fake_helper: FakeHelper,
-    audit_log: list,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
-    monkeypatch: pytest.MonkeyPatch,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+    audit_log: list,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(screen_mod, "_snapshot_path", lambda _agent_id: "/tmp/x.png")  # noqa: S108  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(screen_mod, "_snapshot_path", lambda _agent_id: "/tmp/x.png")  # noqa: S108  # pyright: ignore[reportUnknownArgumentType]
     d = _daemon()
     await _call(d, "click", {"x": 100, "y": 200, "task_id": 42})
     # the computer_action row + the task-session envelope start
-    actions = [ev for ev in audit_log if ev["event_type"] == "computer_action"]  # pyright: ignore[reportUnknownVariableType]
+    actions = [ev for ev in audit_log if ev["event_type"] == "computer_action"]
     assert len(actions) == 1  # pyright: ignore[reportUnknownArgumentType]
-    ev = actions[0]  # pyright: ignore[reportUnknownVariableType]
+    ev = actions[0]
     assert ev["agent_id"] == 7
     assert ev["source"] == "agent:7"
     assert ev["payload"]["action"] == "click"
@@ -890,12 +890,12 @@ async def test_audit_emitted_on_success(
     assert ev["payload"]["coords"] == "100,200"
     assert ev["payload"]["task_id"] == 42
     assert ev["payload"]["app"] == "Finder"
-    starts = [ev for ev in audit_log if ev["event_type"] == "computer_session_start"]  # pyright: ignore[reportUnknownVariableType]
+    starts = [ev for ev in audit_log if ev["event_type"] == "computer_session_start"]
     assert len(starts) == 1  # pyright: ignore[reportUnknownArgumentType]
     assert starts[0]["payload"]["task_id"] == 42
 
 
-async def test_audit_emitted_on_error(fake_helper: FakeHelper, audit_log: list) -> None:  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+async def test_audit_emitted_on_error(fake_helper: FakeHelper, audit_log: list) -> None:
     d = _daemon()
     await _call(d, "key", {"key": "wibble"})
     assert len(audit_log) == 1  # pyright: ignore[reportUnknownArgumentType]
@@ -903,7 +903,7 @@ async def test_audit_emitted_on_error(fake_helper: FakeHelper, audit_log: list) 
     assert "key needs a key name" in audit_log[0]["payload"]["error"]
 
 
-async def test_no_audit_row_for_anonymous_call(audit_log: list) -> None:  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+async def test_no_audit_row_for_anonymous_call(audit_log: list) -> None:
     d = _daemon()
     await _call(d, "click", {"x": 1, "y": 2}, agent_id=None)
     assert audit_log == []
@@ -914,14 +914,14 @@ async def test_no_audit_row_for_anonymous_call(audit_log: list) -> None:  # pyri
 
 async def test_concurrent_calls_are_safe(
     fake_helper: FakeHelper,
-    audit_log: list,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
-    monkeypatch: pytest.MonkeyPatch,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+    audit_log: list,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Concurrent dispatches from different connections both complete and are
     both audited. Execution is synchronous and wrapped in the machine-wide
     action lock — the lock is the guard for future async points inside a call
     (e.g. Phase 2's queue), and the sync body already prevents interleaving."""
-    monkeypatch.setattr(screen_mod, "_snapshot_path", lambda _a: "/tmp/x.png")  # noqa: S108  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(screen_mod, "_snapshot_path", lambda _a: "/tmp/x.png")  # noqa: S108  # pyright: ignore[reportUnknownArgumentType]
     d = _daemon()
     t1 = asyncio.create_task(_call(d, "click", {"x": 1, "y": 2}))
     t2 = asyncio.create_task(_call(d, "snapshot"))
@@ -947,8 +947,8 @@ def _short_session(monkeypatch: pytest.MonkeyPatch) -> None:
 
 async def test_screen_busy_blocks_second_agent(
     fake_helper: FakeHelper,
-    audit_log: list,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
-    monkeypatch: pytest.MonkeyPatch,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+    audit_log: list,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _short_session(monkeypatch)
     d = _daemon()
@@ -963,8 +963,8 @@ async def test_screen_busy_blocks_second_agent(
 
 async def test_holder_continues_while_busy(
     fake_helper: FakeHelper,
-    audit_log: list,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
-    monkeypatch: pytest.MonkeyPatch,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+    audit_log: list,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _short_session(monkeypatch)
     d = _daemon()
@@ -976,8 +976,8 @@ async def test_holder_continues_while_busy(
 
 async def test_release_control_hands_over(
     fake_helper: FakeHelper,
-    audit_log: list,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
-    monkeypatch: pytest.MonkeyPatch,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+    audit_log: list,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _short_session(monkeypatch)
     d = _daemon()
@@ -996,8 +996,8 @@ async def test_release_control_hands_over(
 
 async def test_release_control_by_non_holder_fails(
     fake_helper: FakeHelper,
-    audit_log: list,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
-    monkeypatch: pytest.MonkeyPatch,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+    audit_log: list,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _short_session(monkeypatch)
     d = _daemon()
@@ -1009,8 +1009,8 @@ async def test_release_control_by_non_holder_fails(
 
 async def test_operator_force_release_without_identity(
     fake_helper: FakeHelper,
-    audit_log: list,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
-    monkeypatch: pytest.MonkeyPatch,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+    audit_log: list,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _short_session(monkeypatch)
     d = _daemon()
@@ -1025,22 +1025,22 @@ async def test_operator_force_release_without_identity(
 
 async def test_task_session_emit_failure_warns_but_action_succeeds(
     fake_helper: FakeHelper,
-    audit_log: list,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
-    monkeypatch: pytest.MonkeyPatch,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+    audit_log: list,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A failing session-envelope emit (contract mismatch, FK hiccup) must not
     fail the action nor stay silent — it warns (task #1136)."""
     warnings: list[str] = []
-    monkeypatch.setattr(daemon_mod.logger, "warning", lambda msg: warnings.append(str(msg)))  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-    log: list[dict] = []  # pyright: ignore[reportMissingTypeArgument, reportUnknownVariableType]
+    monkeypatch.setattr(daemon_mod.logger, "warning", lambda msg: warnings.append(str(msg)))  # pyright: ignore[reportUnknownArgumentType]
+    log: list[dict] = []
 
     def _insert(
         *,
         event_type: str,
         agent_id: int | None,
         source: str,
-        payload: dict,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
-        **_: object,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+        payload: dict,
+        **_: object,
     ) -> None:
         if event_type.startswith("computer_session_"):
             # the envelope path is broken (unregistered name etc.)
@@ -1055,7 +1055,7 @@ async def test_task_session_emit_failure_warns_but_action_succeeds(
     assert resp["ok"] is True  # the action itself executed
     assert any("task-session event failed" in w for w in warnings)
     # the computer_action row still landed (the envelope is auxiliary)
-    assert [e["event_type"] for e in log] == ["computer_action"]  # pyright: ignore[reportUnknownVariableType]
+    assert [e["event_type"] for e in log] == ["computer_action"]
 
 
 def _short_sock_dir() -> tuple[Path, Path, Any]:
@@ -1154,8 +1154,8 @@ async def test_shutdown_cancels_active_clients() -> None:
 
 async def test_high_priority_waiter_jumps_the_queue(
     fake_helper: FakeHelper,
-    audit_log: list,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
-    monkeypatch: pytest.MonkeyPatch,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+    audit_log: list,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A high-priority call queues ahead of an earlier normal one (Phase 3)."""
     from shared.config import settings
@@ -1185,18 +1185,18 @@ async def test_high_priority_waiter_jumps_the_queue(
 
 async def test_snapshot_audit_carries_png_path(
     fake_helper: FakeHelper,
-    audit_log: list,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
-    monkeypatch: pytest.MonkeyPatch,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+    audit_log: list,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A snapshot's computer_action row carries the PNG path — the trace
     replay needs it (Phase 3, task #1101)."""
     monkeypatch.setattr(
         screen_mod,
         "_snapshot_path",
-        lambda _agent_id: "/tmp/snap-trace.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda _agent_id: "/tmp/snap-trace.png",  # noqa: S108  # pyright: ignore[reportUnknownArgumentType]
     )
     d = _daemon()
     await _call(d, "snapshot", {"task_id": 42})
-    actions = [ev for ev in audit_log if ev["event_type"] == "computer_action"]  # pyright: ignore[reportUnknownVariableType]
+    actions = [ev for ev in audit_log if ev["event_type"] == "computer_action"]
     assert actions[0]["payload"]["action"] == "snapshot"
     assert actions[0]["payload"]["path"] == "/tmp/snap-trace.png"  # noqa: S108

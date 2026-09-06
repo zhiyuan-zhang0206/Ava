@@ -164,7 +164,7 @@ def test_run_skips_outside_window(monkeypatch: pytest.MonkeyPatch, cluster_tz: s
 
     class _Frozen(datetime):
         @classmethod
-        def now(cls, tz=None):  # noqa: ARG003 — the frozen instant carries its own tz  # pyright: ignore[reportMissingParameterType]
+        def now(cls, tz=None):  # noqa: ARG003 — the frozen instant carries its own tz
             return datetime(2026, 8, 10, 10, 0, tzinfo=UTC)  # 03:00 PDT — outside window
 
     monkeypatch.setattr("services.events_maintenance.blob_vacuum.datetime", _Frozen)
@@ -287,7 +287,7 @@ def test_run_skips_missing_tables_fresh_cluster(
     so an unguarded UndefinedTable would crash-loop the daily window
     (adversarial review of #2226)."""
 
-    def _fake_connect(*_a, **_k):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    def _fake_connect(*_a, **_k):
         return pool.connection()  # PoolConnection — usable as a `with` target
 
     import shared.db

@@ -53,7 +53,7 @@ def _patch_module(
             def _raise_rpc() -> list[str]:
                 raise OSError("milvus wedged: RPC timeout")
 
-            client.list_collections = _raise_rpc  # pyright: ignore[reportAttributeAccessIssue]
+            client.list_collections = _raise_rpc
         made.append(client)
         return client
 
@@ -98,7 +98,7 @@ def test_restart_invokes_respawn_service(monkeypatch: pytest.MonkeyPatch) -> Non
         extra_envs.append(env if isinstance(env, dict) else {})  # pyright: ignore[reportUnknownArgumentType]
         return True
 
-    monkeypatch.setattr(hc, "respawn_service", fake_respawn)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(hc, "respawn_service", fake_respawn)
     ok = hc._restart_daemon()
     assert ok is True
     assert calls == [("milvus", ".venv/bin/python -m services.milvus.daemon")]

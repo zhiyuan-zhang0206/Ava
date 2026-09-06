@@ -120,9 +120,9 @@ def _collector_up(monkeypatch: pytest.MonkeyPatch):
     """The local-collector preflight must pass by default — the tests exercise
     the exporter/init logic, not the network probe (which is covered by its own
     telemetry_otlp tests)."""
-    monkeypatch.setattr(  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(
         "shared.trace.endpoint_reachable",
-        lambda _e: True,  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda _e: True,  # pyright: ignore[reportUnknownArgumentType]
     )
 
 
@@ -157,15 +157,15 @@ def test_enabled_inits_traceloop_with_otlp_exporter(
     monkeypatch.setattr("shared.observability.production_identity", lambda: False)
     _under_watermark(monkeypatch)
 
-    calls: list[dict] = []  # pyright: ignore[reportMissingTypeArgument, reportUnknownVariableType]
-    monkeypatch.setattr("traceloop.sdk.Traceloop.init", lambda **kw: calls.append(kw))  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType, reportUnknownMemberType]
+    calls: list[dict] = []
+    monkeypatch.setattr("traceloop.sdk.Traceloop.init", lambda **kw: calls.append(kw))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
 
     initialize_tracing()
     _wait_init_resolved()
 
     assert len(calls) == 1  # pyright: ignore[reportUnknownArgumentType]
-    kw = calls[0]  # pyright: ignore[reportUnknownVariableType]
-    exporter = kw["exporter"]  # pyright: ignore[reportUnknownVariableType]
+    kw = calls[0]
+    exporter = kw["exporter"]
     assert isinstance(exporter, OtlpJsonHttpSpanExporter)
     assert exporter._endpoint == "http://127.0.0.1:4318/v1/traces"
     assert "api_endpoint" not in kw  # no SDK-level network sink; the exporter owns the POST
@@ -180,7 +180,7 @@ def test_enabled_inits_traceloop_with_otlp_exporter(
 
     from traceloop.sdk.instruments import Instruments
 
-    instruments = kw["instruments"]  # pyright: ignore[reportUnknownVariableType]
+    instruments = kw["instruments"]
     assert Instruments.ANTHROPIC in instruments
     assert Instruments.OPENAI in instruments
     assert Instruments.LANGCHAIN in instruments
@@ -256,14 +256,14 @@ def test_sdk_initialize_failure_logs_and_state_unchanged(
     monkeypatch.setattr("shared.trace_mirror.traces_dir", lambda: tmp_path)
     _under_watermark(monkeypatch)
 
-    def _raise(**_kw):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    def _raise(**_kw):
         raise RuntimeError("boom: init failed")
 
     monkeypatch.setattr("traceloop.sdk.Traceloop.init", _raise)  # pyright: ignore[reportUnknownArgumentType]
-    warnings: list[tuple] = []  # pyright: ignore[reportMissingTypeArgument, reportUnknownVariableType]
+    warnings: list[tuple] = []
     monkeypatch.setattr(
         "shared.trace.logger.warning",
-        lambda *a, **kw: warnings.append((a, kw)),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType, reportUnknownMemberType]
+        lambda *a, **kw: warnings.append((a, kw)),  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
     )
 
     initialize_tracing()  # must not raise: the failure is the arm thread's
@@ -272,7 +272,7 @@ def test_sdk_initialize_failure_logs_and_state_unchanged(
     assert trace_mod._state["initialized"] is False
     assert trace_mod._state["arm_failed"] is True
     assert warnings
-    attrs = warnings[0][1]  # pyright: ignore[reportUnknownVariableType]
+    attrs = warnings[0][1]
     assert attrs.get("action") == "recording_init_failed"  # pyright: ignore[reportUnknownMemberType]
 
 
@@ -290,7 +290,7 @@ def test_arm_failure_blocks_rearming(monkeypatch: pytest.MonkeyPatch, tmp_path: 
         calls.append(1)
         raise RuntimeError("boom")
 
-    monkeypatch.setattr("traceloop.sdk.Traceloop.init", _fail_then_record)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("traceloop.sdk.Traceloop.init", _fail_then_record)
 
     initialize_tracing()
     _wait_init_resolved()
@@ -306,8 +306,8 @@ def test_idempotent_second_call_is_noop(monkeypatch: pytest.MonkeyPatch, tmp_pat
     monkeypatch.setattr("shared.config.settings.observability.trace_enabled", True)
     monkeypatch.setattr("shared.trace_mirror.traces_dir", lambda: tmp_path)
     _under_watermark(monkeypatch)
-    calls: list[dict] = []  # pyright: ignore[reportMissingTypeArgument, reportUnknownVariableType]
-    monkeypatch.setattr("traceloop.sdk.Traceloop.init", lambda **kw: calls.append(kw))  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType, reportUnknownMemberType]
+    calls: list[dict] = []
+    monkeypatch.setattr("traceloop.sdk.Traceloop.init", lambda **kw: calls.append(kw))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
 
     initialize_tracing()
     initialize_tracing()
@@ -380,7 +380,7 @@ def test_arming_runs_off_the_caller_thread(monkeypatch: pytest.MonkeyPatch, tmp_
         entered.set()
         assert release.wait(timeout=5.0), "test released the arm thread"
 
-    monkeypatch.setattr("traceloop.sdk.Traceloop.init", _slow_init)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("traceloop.sdk.Traceloop.init", _slow_init)
 
     initialize_tracing()  # returns immediately — the mock is still blocked
     assert entered.wait(timeout=5.0), "arm thread must have started"
@@ -432,8 +432,8 @@ def test_arm_tracing_skips_init_when_already_resolved(
     monkeypatch.setattr("shared.config.settings.observability.trace_enabled", True)
     monkeypatch.setattr("shared.trace_mirror.traces_dir", lambda: tmp_path)
     _under_watermark(monkeypatch)
-    calls: list[dict] = []  # pyright: ignore[reportMissingTypeArgument, reportUnknownVariableType]
-    monkeypatch.setattr("traceloop.sdk.Traceloop.init", lambda **kw: calls.append(kw))  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType, reportUnknownMemberType]
+    calls: list[dict] = []
+    monkeypatch.setattr("traceloop.sdk.Traceloop.init", lambda **kw: calls.append(kw))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
 
     trace_mod._state["initialized"] = True
     trace_mod._state["arm_failed"] = False
@@ -462,12 +462,12 @@ def test_concurrent_arm_threads_init_once(monkeypatch: pytest.MonkeyPatch, tmp_p
 
     entered = threading.Event()
     release = threading.Event()
-    calls: list[dict] = []  # pyright: ignore[reportMissingTypeArgument, reportUnknownVariableType]
+    calls: list[dict] = []
 
     def _slow_init(**_kw: object) -> None:
         entered.set()
         assert release.wait(timeout=5.0), "test released the first arm's init"
-        calls.append(_kw)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+        calls.append(_kw)  # pyright: ignore[reportUnknownMemberType]
 
     monkeypatch.setattr("traceloop.sdk.Traceloop.init", _slow_init)
 
@@ -654,9 +654,9 @@ def test_ensure_init_resolved_instant_without_arming(
     monkeypatch.setattr("shared.config.settings.observability.trace_enabled", True)
     monkeypatch.setattr("shared.trace_mirror.traces_dir", lambda: tmp_path)
     _under_watermark(monkeypatch)
-    monkeypatch.setattr(  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(
         "shared.trace.endpoint_reachable",
-        lambda _e: False,  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda _e: False,  # pyright: ignore[reportUnknownArgumentType]
     )
     # Skip the daemon collector retry loop: this test asserts the instant
     # no-wait contract, not the loop (that is the retry-loop test above).
@@ -687,11 +687,11 @@ def test_otlp_exporter_posts_protobuf(monkeypatch: pytest.MonkeyPatch, tmp_path:
         def raise_for_status(self):
             pass
 
-    def _post(url, *, content, headers, timeout):  # pyright: ignore[reportUnknownParameterType]
-        posts.append((url, content, headers))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+    def _post(url, *, content, headers, timeout):
+        posts.append((url, content, headers))  # pyright: ignore[reportUnknownMemberType]
         return _Resp()
 
-    monkeypatch.setattr("httpx.post", _post)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr("httpx.post", _post)  # pyright: ignore[reportUnknownArgumentType]
 
     exporter = OtlpJsonHttpSpanExporter(endpoint="http://127.0.0.1:4318")
     provider = TracerProvider()
@@ -704,7 +704,7 @@ def test_otlp_exporter_posts_protobuf(monkeypatch: pytest.MonkeyPatch, tmp_path:
     provider.shutdown()
 
     assert len(posts) >= 1  # pyright: ignore[reportUnknownArgumentType]  # at least one export batch
-    url, _body, headers = posts[0]  # pyright: ignore[reportUnknownVariableType]
+    url, _body, headers = posts[0]
     assert url == "http://127.0.0.1:4318/v1/traces"
     assert headers["Content-Type"] == "application/x-protobuf"
 
@@ -715,7 +715,7 @@ def test_otlp_exporter_posts_protobuf(monkeypatch: pytest.MonkeyPatch, tmp_path:
     spans = 0
     for _, raw, _h in posts:
         req = ExportTraceServiceRequest()
-        req.ParseFromString(raw)  # pyright: ignore[reportUnknownArgumentType]
+        req.ParseFromString(raw)
         assert req.SerializeToString()
         spans += sum(len(ss.spans) for rs in req.resource_spans for ss in rs.scope_spans)
     assert spans == 2
@@ -751,11 +751,11 @@ def test_turn_span_exports_root_at_start_not_at_end(monkeypatch: pytest.MonkeyPa
         def raise_for_status(self):
             pass
 
-    def _post(url, *, content, headers, timeout):  # pyright: ignore[reportUnknownParameterType]
-        posts.append((url, content, headers))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+    def _post(url, *, content, headers, timeout):
+        posts.append((url, content, headers))  # pyright: ignore[reportUnknownMemberType]
         return _Resp()
 
-    monkeypatch.setattr("httpx.post", _post)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr("httpx.post", _post)  # pyright: ignore[reportUnknownArgumentType]
     exporter = OtlpJsonHttpSpanExporter(endpoint="http://127.0.0.1:4318")
     provider = TracerProvider()
     provider.add_span_processor(SimpleSpanProcessor(exporter))
@@ -772,7 +772,7 @@ def test_turn_span_exports_root_at_start_not_at_end(monkeypatch: pytest.MonkeyPa
                 )
 
                 req = ExportTraceServiceRequest()
-                req.ParseFromString(raw)  # pyright: ignore[reportUnknownArgumentType]
+                req.ParseFromString(raw)
                 for rs in req.resource_spans:
                     for ss in rs.scope_spans:
                         out.extend(ss.spans)
@@ -1048,7 +1048,7 @@ def test_turn_span_noop_when_disabled(monkeypatch: pytest.MonkeyPatch):
     """When trace_enabled=False, turn_span is a pass-through — does not open a span."""
     monkeypatch.setattr("shared.config.settings.observability.trace_enabled", False)
 
-    def _explode(*_a, **_kw):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    def _explode(*_a, **_kw):
         raise AssertionError("get_tracer should not be called when disabled")
 
     monkeypatch.setattr("opentelemetry.trace.get_tracer", _explode)  # pyright: ignore[reportUnknownArgumentType]
@@ -1064,7 +1064,7 @@ def test_turn_span_noop_when_initialize_skipped(monkeypatch: pytest.MonkeyPatch)
     monkeypatch.setattr("shared.config.settings.observability.trace_enabled", True)
     assert trace_mod._state["initialized"] is False
 
-    def _explode(*_a, **_kw):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    def _explode(*_a, **_kw):
         raise AssertionError("must not open a span when uninitialized")
 
     monkeypatch.setattr("opentelemetry.trace.get_tracer", _explode)  # pyright: ignore[reportUnknownArgumentType]
@@ -1081,7 +1081,7 @@ def test_turn_span_opens_root_with_session_id(monkeypatch: pytest.MonkeyPatch):
 
     span = _FakeSpan()
     tracer = _FakeTracer(span)
-    monkeypatch.setattr("opentelemetry.trace.get_tracer", lambda _name: tracer)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr("opentelemetry.trace.get_tracer", lambda _name: tracer)  # pyright: ignore[reportUnknownArgumentType]
 
     with turn_span(name="ava-agent-42", session_id="42", turn=3):
         # The placeholder root is ended (exported) at turn START, while the
@@ -1119,7 +1119,7 @@ def test_claim_idle_wait_span_noop_when_disabled(monkeypatch: pytest.MonkeyPatch
     """trace_enabled=False: pass-through — no OTel call at all."""
     monkeypatch.setattr("shared.config.settings.observability.trace_enabled", False)
 
-    def _explode(*_a, **_kw):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    def _explode(*_a, **_kw):
         raise AssertionError("OTel must not be touched when tracing is disabled")
 
     monkeypatch.setattr("opentelemetry.trace.get_current_span", _explode)  # pyright: ignore[reportUnknownArgumentType]
@@ -1137,7 +1137,7 @@ def test_claim_idle_wait_span_noop_when_initialize_skipped(
     monkeypatch.setattr("shared.config.settings.observability.trace_enabled", True)
     assert trace_mod._state["initialized"] is False
 
-    def _explode(*_a, **_kw):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    def _explode(*_a, **_kw):
         raise AssertionError("must not open a span when uninitialized")
 
     monkeypatch.setattr("opentelemetry.trace.get_tracer", _explode)  # pyright: ignore[reportUnknownArgumentType]
@@ -1158,9 +1158,9 @@ def test_claim_idle_wait_span_ends_node_span_and_opens_idle_wait(
     trace_mod._state["initialized"] = True
 
     node_span = _NodeFakeSpan("execute_task claim")
-    monkeypatch.setattr("opentelemetry.trace.get_current_span", lambda: node_span)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr("opentelemetry.trace.get_current_span", lambda: node_span)
     tracer = _FakeTracer(_FakeSpan())
-    monkeypatch.setattr("opentelemetry.trace.get_tracer", lambda _name: tracer)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr("opentelemetry.trace.get_tracer", lambda _name: tracer)  # pyright: ignore[reportUnknownArgumentType]
 
     with claim_idle_wait_span():
         pass
@@ -1180,9 +1180,9 @@ def test_claim_idle_wait_span_never_ends_non_node_span(
     trace_mod._state["initialized"] = True
 
     root_span = _NodeFakeSpan("ava-agent-42")
-    monkeypatch.setattr("opentelemetry.trace.get_current_span", lambda: root_span)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr("opentelemetry.trace.get_current_span", lambda: root_span)
     tracer = _FakeTracer(_FakeSpan())
-    monkeypatch.setattr("opentelemetry.trace.get_tracer", lambda _name: tracer)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr("opentelemetry.trace.get_tracer", lambda _name: tracer)  # pyright: ignore[reportUnknownArgumentType]
 
     with claim_idle_wait_span():
         pass
@@ -1201,9 +1201,9 @@ def test_claim_idle_wait_span_skips_non_recording_span(
     trace_mod._state["initialized"] = True
 
     node_span = _NodeFakeSpan("execute_task claim", recording=False)
-    monkeypatch.setattr("opentelemetry.trace.get_current_span", lambda: node_span)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr("opentelemetry.trace.get_current_span", lambda: node_span)
     tracer = _FakeTracer(_FakeSpan())
-    monkeypatch.setattr("opentelemetry.trace.get_tracer", lambda _name: tracer)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr("opentelemetry.trace.get_tracer", lambda _name: tracer)  # pyright: ignore[reportUnknownArgumentType]
 
     with claim_idle_wait_span():
         pass
@@ -1215,10 +1215,10 @@ def test_claim_idle_wait_span_skips_non_recording_span(
 # --- trace v2: content stripping --------------------------------------------
 
 
-def _otlp_with_attrs(attrs: dict[str, str]) -> dict:  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+def _otlp_with_attrs(attrs: dict[str, str]) -> dict:
     """Build a minimal OTLP export request with one span carrying the given
     attributes (keys -> string values)."""
-    return {  # pyright: ignore[reportUnknownVariableType]
+    return {
         "resourceSpans": [
             {
                 "scopeSpans": [
@@ -1245,7 +1245,7 @@ def test_strip_content_removes_llm_content_keeps_metadata():
     status survive."""
     from shared.trace import _strip_content_attributes
 
-    otlp = _otlp_with_attrs(  # pyright: ignore[reportUnknownVariableType]
+    otlp = _otlp_with_attrs(
         {
             "gen_ai.task.input": '{"inputs": {"messages": ["you are ava..."]}}',
             "gen_ai.task.output": "the full completion...",
@@ -1264,7 +1264,7 @@ def test_strip_content_removes_llm_content_keeps_metadata():
         }
     )
     _strip_content_attributes(otlp)  # pyright: ignore[reportUnknownArgumentType]
-    keys = {kv["key"] for kv in otlp["resourceSpans"][0]["scopeSpans"][0]["spans"][0]["attributes"]}  # pyright: ignore[reportUnknownVariableType]
+    keys = {kv["key"] for kv in otlp["resourceSpans"][0]["scopeSpans"][0]["spans"][0]["attributes"]}
     assert keys == {
         "traceloop.association.properties.agent_id",
         "traceloop.association.properties.langgraph_path",
@@ -1282,14 +1282,14 @@ def test_strip_content_size_guard_drops_huge_strings():
     from shared.trace import _MAX_ATTR_STRING_CHARS, _strip_content_attributes
 
     big = "x" * (_MAX_ATTR_STRING_CHARS + 1)
-    otlp = _otlp_with_attrs(  # pyright: ignore[reportUnknownVariableType]
+    otlp = _otlp_with_attrs(
         {
             "traceloop.association.properties.agent_id": "238",
             "mystery.new.content.key": big,
         }
     )
     _strip_content_attributes(otlp)  # pyright: ignore[reportUnknownArgumentType]
-    keys = {kv["key"] for kv in otlp["resourceSpans"][0]["scopeSpans"][0]["spans"][0]["attributes"]}  # pyright: ignore[reportUnknownVariableType]
+    keys = {kv["key"] for kv in otlp["resourceSpans"][0]["scopeSpans"][0]["spans"][0]["attributes"]}
     assert keys == {"traceloop.association.properties.agent_id"}
 
 
@@ -1356,7 +1356,7 @@ def test_exporter_posts_stripped_line(monkeypatch: pytest.MonkeyPatch, tmp_path:
 
     monkeypatch.setattr(
         "httpx.post",
-        lambda _url, *, content, headers, timeout: posts.append(content) or _Resp(),  # noqa: ARG005 — signature must match httpx.post  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda _url, *, content, headers, timeout: posts.append(content) or _Resp(),  # noqa: ARG005 — signature must match httpx.post  # pyright: ignore[reportUnknownArgumentType]
     )
 
     provider = TracerProvider()
@@ -1401,7 +1401,7 @@ def test_exporter_strip_opt_out_keeps_content(monkeypatch: pytest.MonkeyPatch, t
 
     monkeypatch.setattr(
         "httpx.post",
-        lambda _url, *, content, headers, timeout: posts.append(content) or _Resp(),  # noqa: ARG005 — signature must match httpx.post  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda _url, *, content, headers, timeout: posts.append(content) or _Resp(),  # noqa: ARG005 — signature must match httpx.post  # pyright: ignore[reportUnknownArgumentType]
     )
 
     provider = TracerProvider()
@@ -1475,7 +1475,7 @@ def test_disk_watermark_exceeded(monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 
     monkeypatch.setattr(
         "shared.trace_mirror.shutil.disk_usage",
-        lambda _p: SimpleNamespace(used=50 * 4096, total=1000 * 4096, free=950 * 4096),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda _p: SimpleNamespace(used=50 * 4096, total=1000 * 4096, free=950 * 4096),  # pyright: ignore[reportUnknownArgumentType]
     )
     assert _disk_watermark_exceeded(0.9) is False
     assert _disk_watermark_exceeded(0.01) is True
@@ -1517,10 +1517,10 @@ def test_initialize_relief_pass_runs_when_disk_over_watermark(
 
     monkeypatch.setattr("shared.trace._gzip_old_mirror", _spy_gzip)
     monkeypatch.setattr("shared.trace._enforce_dir_cap", _spy_cap)
-    init_calls: list[dict[str, object]] = []  # pyright: ignore[reportMissingTypeArgument]
+    init_calls: list[dict[str, object]] = []
     monkeypatch.setattr(
         "traceloop.sdk.Traceloop.init",
-        lambda **kw: init_calls.append(kw),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType, reportUnknownMemberType]
+        lambda **kw: init_calls.append(kw),  # pyright: ignore[reportUnknownArgumentType]
     )
 
     initialize_tracing()
@@ -1541,8 +1541,8 @@ def test_initialize_sets_trace_content_false(monkeypatch: pytest.MonkeyPatch, tm
     monkeypatch.setattr("shared.trace_mirror.traces_dir", lambda: tmp_path)
     _under_watermark(monkeypatch)
     monkeypatch.delenv("TRACELOOP_TRACE_CONTENT", raising=False)
-    calls: list[dict] = []  # pyright: ignore[reportMissingTypeArgument, reportUnknownVariableType]
-    monkeypatch.setattr("traceloop.sdk.Traceloop.init", lambda **kw: calls.append(kw))  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType, reportUnknownMemberType]
+    calls: list[dict] = []
+    monkeypatch.setattr("traceloop.sdk.Traceloop.init", lambda **kw: calls.append(kw))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
 
     initialize_tracing()
     _wait_init_resolved()
@@ -1559,9 +1559,9 @@ def test_initialize_skips_when_collector_unreachable(
     init-time tradeoff the events exporter makes)."""
     monkeypatch.setattr("shared.config.settings.observability.trace_enabled", True)
     monkeypatch.setattr("shared.trace_mirror.traces_dir", lambda: tmp_path)
-    monkeypatch.setattr(  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(
         "shared.trace.endpoint_reachable",
-        lambda _e: False,  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda _e: False,  # pyright: ignore[reportUnknownArgumentType]
     )
     monkeypatch.setattr(
         "shared.config.settings.observability.telemetry_otlp_endpoint",
@@ -1572,12 +1572,12 @@ def test_initialize_skips_when_collector_unreachable(
     # is test_collector_unreachable_retries_once_until_init_succeeds); without
     # the stub the daemon retry thread (300s sleep) leaks across tests.
     monkeypatch.setattr("shared.trace._start_collector_retry", lambda: None)
-    calls: list[dict] = []  # pyright: ignore[reportMissingTypeArgument, reportUnknownVariableType]
-    monkeypatch.setattr("traceloop.sdk.Traceloop.init", lambda **kw: calls.append(kw))  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType, reportUnknownMemberType]
-    warned: list[tuple] = []  # pyright: ignore[reportMissingTypeArgument, reportUnknownVariableType]
+    calls: list[dict] = []
+    monkeypatch.setattr("traceloop.sdk.Traceloop.init", lambda **kw: calls.append(kw))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+    warned: list[tuple] = []
     monkeypatch.setattr(
         "shared.trace.logger.warning",
-        lambda *a, **kw: warned.append((a, kw)),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType, reportUnknownMemberType]
+        lambda *a, **kw: warned.append((a, kw)),  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
     )
 
     initialize_tracing()
@@ -1585,7 +1585,7 @@ def test_initialize_skips_when_collector_unreachable(
     assert calls == []
     assert trace_mod._state["initialized"] is False
     assert warned
-    attrs = warned[0][1]  # pyright: ignore[reportUnknownVariableType]
+    attrs = warned[0][1]
     assert attrs.get("action") == "recording_disabled_collector_unreachable"  # pyright: ignore[reportUnknownMemberType]
     assert attrs.get("endpoint") == "http://127.0.0.1:4318"  # pyright: ignore[reportUnknownMemberType]
 
@@ -1596,12 +1596,12 @@ def test_initialize_skips_when_disk_over_watermark(monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr("shared.config.settings.observability.trace_enabled", True)
     monkeypatch.setattr("shared.trace_mirror.traces_dir", lambda: tmp_path)
     monkeypatch.setattr("shared.trace._disk_usage", lambda: (0.951, 2 * 1024**3))
-    calls: list[dict] = []  # pyright: ignore[reportMissingTypeArgument, reportUnknownVariableType]
-    monkeypatch.setattr("traceloop.sdk.Traceloop.init", lambda **kw: calls.append(kw))  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType, reportUnknownMemberType]
-    warned: list[tuple] = []  # pyright: ignore[reportMissingTypeArgument, reportUnknownVariableType]
+    calls: list[dict] = []
+    monkeypatch.setattr("traceloop.sdk.Traceloop.init", lambda **kw: calls.append(kw))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+    warned: list[tuple] = []
     monkeypatch.setattr(
         "shared.trace.logger.warning",
-        lambda *a, **kw: warned.append((a, kw)),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType, reportUnknownMemberType]
+        lambda *a, **kw: warned.append((a, kw)),  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
     )
 
     initialize_tracing()
@@ -1609,7 +1609,7 @@ def test_initialize_skips_when_disk_over_watermark(monkeypatch: pytest.MonkeyPat
     assert calls == []
     assert trace_mod._state["initialized"] is False
     assert warned, "a degradation warning must be logged"
-    attrs = warned[0][1]  # pyright: ignore[reportUnknownVariableType]
+    attrs = warned[0][1]
     assert attrs.get("event") == "trace"  # pyright: ignore[reportUnknownMemberType]
     assert attrs.get("action") == "recording_disabled_disk_watermark"  # pyright: ignore[reportUnknownMemberType]
     assert attrs.get("usage_fraction") == 0.951  # pyright: ignore[reportUnknownMemberType]
@@ -1651,7 +1651,7 @@ def test_enforce_dir_cap_survives_peer_prune(monkeypatch: pytest.MonkeyPatch, tm
     real_stat = Path.stat
     calls = {"n": 0}
 
-    def flaky_stat(self):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    def flaky_stat(self):
         calls["n"] += 1
         if calls["n"] == 2:  # the middle file is gone by the time we stat it
             raise FileNotFoundError

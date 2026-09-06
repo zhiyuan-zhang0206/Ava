@@ -17,7 +17,7 @@ class _FakeResult:
 
 
 def test_is_alive_curl_ok(monkeypatch: pytest.MonkeyPatch) -> None:
-    def fake_run(args, **kwargs):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    def fake_run(args, **kwargs):
         assert args[0] == "curl"
         return _FakeResult(returncode=0)
 
@@ -26,7 +26,7 @@ def test_is_alive_curl_ok(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_is_alive_curl_fails(monkeypatch: pytest.MonkeyPatch) -> None:
-    def fake_run(args, **kwargs):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    def fake_run(args, **kwargs):
         return _FakeResult(returncode=7)  # curl exit 7 = "Failed to connect"
 
     monkeypatch.setattr(hc.subprocess, "run", fake_run)  # pyright: ignore[reportUnknownArgumentType]
@@ -34,7 +34,7 @@ def test_is_alive_curl_fails(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_is_alive_curl_missing(monkeypatch: pytest.MonkeyPatch) -> None:
-    def fake_run(args, **kwargs):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    def fake_run(args, **kwargs):
         raise FileNotFoundError("curl not in PATH")
 
     monkeypatch.setattr(hc.subprocess, "run", fake_run)  # pyright: ignore[reportUnknownArgumentType]
@@ -42,7 +42,7 @@ def test_is_alive_curl_missing(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_is_alive_curl_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
-    def fake_run(args, **kwargs):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    def fake_run(args, **kwargs):
         raise subprocess.TimeoutExpired(cmd="curl", timeout=5)
 
     monkeypatch.setattr(hc.subprocess, "run", fake_run)  # pyright: ignore[reportUnknownArgumentType]
@@ -63,7 +63,7 @@ def test_restart_routes_through_respawn_service(
 
     captured: list[tuple[str, str, object, object, object]] = []
 
-    def fake_respawn(service, cmd, repo, *, checkout=None, extra_env=None) -> bool:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    def fake_respawn(service, cmd, repo, *, checkout=None, extra_env=None) -> bool:
         captured.append((service, cmd, repo, checkout, extra_env))  # pyright: ignore[reportUnknownArgumentType]
         return True
 
@@ -108,7 +108,7 @@ def test_restart_injects_gateway_port_matching_servicespec(
     monkeypatch.setattr(
         hc,
         "respawn_service",
-        lambda _s, cmd, _repo, **_kw: cmds.append(cmd) or True,  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda _s, cmd, _repo, **_kw: cmds.append(cmd) or True,  # pyright: ignore[reportUnknownArgumentType]
     )
     assert hc._restart() is True
     assert len(cmds) == 1
@@ -141,7 +141,7 @@ def test_respawn_command_is_the_spec_command_single_source(
     monkeypatch.setattr(
         hc,
         "respawn_service",
-        lambda _s, cmd, _repo, **_kw: cmds.append(cmd) or True,  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda _s, cmd, _repo, **_kw: cmds.append(cmd) or True,  # pyright: ignore[reportUnknownArgumentType]
     )
     assert hc._restart() is True
     assert len(cmds) == 1
@@ -179,7 +179,7 @@ def test_main_skips_restart_when_session_exists_but_curl_fails(
 
     restart_calls: list[bool] = []
     monkeypatch.setattr(hc, "_restart", lambda: restart_calls.append(True) or True)
-    monkeypatch.setattr(hc, "init_gateway_process", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(hc, "init_gateway_process", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
 
     hc.main()
     assert restart_calls == []  # _restart was not called
@@ -192,7 +192,7 @@ def test_main_restarts_when_session_gone_and_curl_fails(monkeypatch: pytest.Monk
 
     restart_calls: list[bool] = []
     monkeypatch.setattr(hc, "_restart", lambda: restart_calls.append(True) or True)
-    monkeypatch.setattr(hc, "init_gateway_process", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(hc, "init_gateway_process", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
 
     hc.main()
     assert restart_calls == [True]

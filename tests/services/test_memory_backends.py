@@ -110,7 +110,7 @@ def test_backend_close_idempotent() -> None:
     assert closed == ["x"]
 
 
-def test_backend_write_read_delegation(milvus_client) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_backend_write_read_delegation(milvus_client) -> None:
     """The adapter over a live client: upsert / all_meta / search_topk /
     delete behave exactly like the legacy module functions (same engine)."""
     backend = MilvusBackend(dim=_DIM, fingerprint=_FP, client=milvus_client)  # pyright: ignore[reportUnknownArgumentType]
@@ -168,7 +168,7 @@ def test_readonly_backends_refuse_mutations() -> None:
 
 def test_readonly_connect_refuses_dim_mismatch_without_dropping_rows(
     milvus_client,
-) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+) -> None:
     """D3 regression: a comparison connection cannot rebuild a live collection."""
     writer = MilvusBackend(dim=_DIM, fingerprint=_FP, client=milvus_client)  # pyright: ignore[reportUnknownArgumentType]
     writer.upsert("/survives.md", 1.0, "hash", _vec(0))
@@ -180,7 +180,7 @@ def test_readonly_connect_refuses_dim_mismatch_without_dropping_rows(
     assert writer.all_meta() == {"/survives.md": (1.0, "hash", _FP)}
 
 
-def test_readonly_connect_refuses_missing_collection(milvus_client) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_readonly_connect_refuses_missing_collection(milvus_client) -> None:
     """A comparison connection does not create an absent collection."""
     from services.memory_indexer.backends.milvus import _COLLECTION
 
@@ -188,10 +188,10 @@ def test_readonly_connect_refuses_missing_collection(milvus_client) -> None:  # 
     readonly = MilvusBackend(dim=_DIM, fingerprint=_FP, readonly=True)
     with pytest.raises(RuntimeError, match="is missing"):
         readonly.connect()
-    assert not milvus_client.has_collection(_COLLECTION)  # pyright: ignore[reportUnnecessaryComparison, reportUnknownMemberType]
+    assert not milvus_client.has_collection(_COLLECTION)  # pyright: ignore[reportUnknownMemberType]
 
 
-def test_readonly_connect_searches_matching_collection(milvus_client) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_readonly_connect_searches_matching_collection(milvus_client) -> None:
     """A matching collection still loads and serves the comparison reads."""
     writer = MilvusBackend(dim=_DIM, fingerprint=_FP, client=milvus_client)  # pyright: ignore[reportUnknownArgumentType]
     target = _vec(0)
@@ -284,7 +284,7 @@ def test_backend_connect_sets_client_and_close_releases(monkeypatch: pytest.Monk
     monkeypatch.setattr(milvus, "_connect", _fake_connect)
     backend = MilvusBackend(dim=_DIM, fingerprint=_FP)
     backend.connect()
-    assert isinstance(backend._client, _FakeClient)  # pyright: ignore[reportPrivateUsage]
+    assert isinstance(backend._client, _FakeClient)
     backend.close()
     assert closed == ["x"]
-    assert backend._client is None  # pyright: ignore[reportPrivateUsage]
+    assert backend._client is None

@@ -14,7 +14,7 @@ from shared import brew_pin
 @pytest.fixture(autouse=True)
 def _macos_check(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(hc, "IS_MACOS", True)
-    monkeypatch.setattr(hc, "init_gateway_process", lambda *_args, **_kwargs: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(hc, "init_gateway_process", lambda *_args, **_kwargs: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(hc, "_reported_missing", ())
 
 

@@ -185,7 +185,7 @@ async def test_dispatch_cluster_update_rejects_non_str_target_sha(
     monkeypatch.setattr(
         daemon.ops_cluster,
         "cluster_update_op",
-        lambda **_k: pytest.fail("must not dispatch on bad payload"),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda **_k: pytest.fail("must not dispatch on bad payload"),  # pyright: ignore[reportUnknownArgumentType]
     )
     status, result = await daemon._dispatch("cluster_update", {"target_sha": 123})
     assert status == "failed"
@@ -281,7 +281,7 @@ async def test_dispatch_shell_probe_bad_payload_fails(
     monkeypatch.setattr(
         daemon.ops_cluster,
         "shell_probe_op",
-        lambda *_a, **_kw: pytest.fail("must not dispatch on bad payload"),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda *_a, **_kw: pytest.fail("must not dispatch on bad payload"),  # pyright: ignore[reportUnknownArgumentType]
     )
     status, result = await daemon._dispatch("shell_probe", {})
     assert status == "failed"
@@ -364,7 +364,7 @@ async def test_dispatch_agent_skill_view_bad_payload_fails(
     monkeypatch.setattr(
         daemon.ops_cluster,
         "agent_skill_view_op",
-        lambda *_a, **_kw: pytest.fail("must not dispatch on bad payload"),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda *_a, **_kw: pytest.fail("must not dispatch on bad payload"),  # pyright: ignore[reportUnknownArgumentType]
     )
     status, result = await daemon._dispatch("agent_skill_view", {})
     assert status == "failed"
@@ -431,7 +431,7 @@ async def test_dispatch_upload_receive_calls_upload_receive_op(
     monkeypatch.setattr(daemon, "_db_pool", _stub_pool())
     seen: dict[str, object] = {}
 
-    def _fake_receive(payload):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    def _fake_receive(payload):
         seen["agent_id"] = payload.agent_id  # pyright: ignore[reportUnknownMemberType]
         seen["name"] = payload.name  # pyright: ignore[reportUnknownMemberType]
         return UploadReceiveResult(
@@ -829,7 +829,7 @@ async def test_ops_route_semaphore_caps_concurrency(monkeypatch: pytest.MonkeyPa
         finally:
             async with lock:
                 in_flight -= 1
-        return "completed", {}  # pyright: ignore[reportUnknownVariableType]
+        return "completed", {}
 
     monkeypatch.setattr(daemon, "_dispatch", _fake_dispatch)  # pyright: ignore[reportUnknownArgumentType]
     bodies = [
@@ -920,11 +920,11 @@ def test_register_boot_announces_this_unit_up(monkeypatch: pytest.MonkeyPatch) -
     from shared.machine import reset_identity, set_identity
 
     calls: list[str | None] = []
-    monkeypatch.setattr("shared.machines.register_self", lambda *, url=None: calls.append(url))  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr("shared.machines.register_self", lambda *, url=None: calls.append(url))  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr("shared.machine.reachable_host", lambda: "10.0.0.2")
     monkeypatch.setattr(
         "shared.daemon_health.health_port",
-        lambda name: 8600 if name == "ops" else 0,  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda name: 8600 if name == "ops" else 0,  # pyright: ignore[reportUnknownArgumentType]
     )
     set_identity(name="wsl", role="agent-runner")
     try:
@@ -951,10 +951,10 @@ def test_register_boot_failure_does_not_stop_the_daemon(
     monkeypatch.setattr("shared.machine.reachable_host", lambda: "10.0.0.2")
     monkeypatch.setattr(
         "shared.daemon_health.health_port",
-        lambda name: 8600 if name == "ops" else 0,  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda name: 8600 if name == "ops" else 0,  # pyright: ignore[reportUnknownArgumentType]
     )
     logged: list[str] = []
-    monkeypatch.setattr(daemon._log, "exception", lambda msg, *_a, **_k: logged.append(msg))  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(daemon._log, "exception", lambda msg, *_a, **_k: logged.append(msg))  # pyright: ignore[reportUnknownArgumentType]
 
     set_identity(name="wsl", role="agent-runner")
     try:
@@ -985,7 +985,7 @@ def test_register_boot_unstops_a_host_that_came_back(monkeypatch: pytest.MonkeyP
     monkeypatch.setattr("shared.machine.reachable_host", lambda: "10.0.0.9")
     monkeypatch.setattr(
         "shared.daemon_health.health_port",
-        lambda name: 8600 if name == "ops" else 0,  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda name: 8600 if name == "ops" else 0,  # pyright: ignore[reportUnknownArgumentType]
     )
     with psycopg.connect(settings.data_plane.db_url) as conn, conn.cursor() as cur:
         cur.execute("TRUNCATE machines")
@@ -1034,7 +1034,7 @@ def _fake_spawn_factory(calls: dict[str, int]) -> object:
         calls["n"] = calls.get("n", 0) + 1
         return SpawnedAgent(id=777)
 
-    return _fake_spawn  # pyright: ignore[reportUnknownVariableType]
+    return _fake_spawn
 
 
 @pytest.mark.asyncio
@@ -1064,7 +1064,7 @@ async def test_idempotent_dispatch_first_run_executes_and_stores(
             "WHERE key = %s AND method = 'ops'",
             ("key-1",),
         )
-        row = cur.fetchone()  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+        row = cur.fetchone()  # pyright: ignore[reportUnknownMemberType]
     assert row == ("spawn-launch", "completed", {"id": 777})
 
 

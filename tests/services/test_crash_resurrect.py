@@ -107,7 +107,7 @@ def _open_page(db: psycopg.Connection, aid: int, name: str = "report") -> None:
 def _capture_page_closed(monkeypatch: pytest.MonkeyPatch, mod: object) -> list[tuple[int, str]]:
     """Capture publish_page_closed_sync calls on `mod` (audit B2)."""
     closed: list[tuple[int, str]] = []
-    monkeypatch.setattr(mod, "publish_page_closed_sync", lambda i, n: closed.append((i, n)))  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(mod, "publish_page_closed_sync", lambda i, n: closed.append((i, n)))  # pyright: ignore[reportUnknownArgumentType]
     return closed
 
 
@@ -178,7 +178,7 @@ def _row(db: psycopg.Connection, aid: int) -> tuple[str, str | None]:
         return cur.fetchone()  # type: ignore[return-value]
 
 
-def _last_resurrect_at(db: psycopg.Connection, aid: int):  # pyright: ignore[reportUnknownParameterType]
+def _last_resurrect_at(db: psycopg.Connection, aid: int):
     with db.cursor() as cur:
         cur.execute("SELECT last_resurrect_at FROM agents_meta WHERE id=%s", (aid,))
         return cur.fetchone()[0]  # type: ignore[index]
@@ -193,18 +193,18 @@ class TestTerminationSourceStamping:
         db_conn: psycopg.Connection,
         sync_pool: ConnectionPool,
         monkeypatch: pytest.MonkeyPatch,
-        launched_agents: list,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+        launched_agents: list,
     ) -> None:
         """G5 (Task #689): a dead post-message 'running' row is no longer reaped to
         'terminated' + stamped 'reaper' — the revive pass relaunches it in place
         (CAS to unclaimed 'idling', launch). Boot-phase deaths enter the separate
         crash-resurrect backoff path."""
-        monkeypatch.setattr(rd, "probe_agent_process", lambda _pid, _aid: AgentProcessIdentity.GONE)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        monkeypatch.setattr(rd, "probe_agent_process", lambda _pid, _aid: AgentProcessIdentity.GONE)  # pyright: ignore[reportUnknownArgumentType]
         aid = _park(db_conn, status="running", pid=_DEAD_PID)
         launched_agents.clear()
         assert aid in rd._revive_local_dead_running_idling(sync_pool, _LOCAL, max_revive=50)
         assert _row(db_conn, aid)[0] == "idling"  # revived, no 'reaper' stamp
-        assert any(c.agent_id == aid for c in launched_agents)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType, reportUnknownVariableType]
+        assert any(c.agent_id == aid for c in launched_agents)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
 
     def test_reaper_dead_boot_phase_stamps_reaper(
         self,
@@ -212,7 +212,7 @@ class TestTerminationSourceStamping:
         sync_pool: ConnectionPool,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        monkeypatch.setattr(rd, "probe_agent_process", lambda _pid, _aid: AgentProcessIdentity.GONE)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        monkeypatch.setattr(rd, "probe_agent_process", lambda _pid, _aid: AgentProcessIdentity.GONE)  # pyright: ignore[reportUnknownArgumentType]
         aid = _park(db_conn, status="running", pid=_DEAD_PID, produced_message=False)
         assert aid in rd._reap_local_dead_boot_phase_agents(sync_pool, _LOCAL)
         assert _row(db_conn, aid) == ("terminated", "reaper")
@@ -271,11 +271,11 @@ class TestTerminationSourceStamping:
         # itself launches through the autouse spy — the boom is only for the relaunch).
         aid = _park(db_conn, status="idling", pid=None, live_lease=False)
 
-        def _boom(_id: int, config_overlay=None, **_kw: object) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+        def _boom(_id: int, config_overlay=None, **_kw: object) -> None:
             raise RuntimeError("launch failed")
 
         monkeypatch.setattr(agent_launch, "_launch_agent_process", _boom)  # pyright: ignore[reportUnknownArgumentType]
-        monkeypatch.setattr(agent_launch, "_require_released_agent_session", lambda _id: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        monkeypatch.setattr(agent_launch, "_require_released_agent_session", lambda _id: None)  # pyright: ignore[reportUnknownArgumentType]
         monkeypatch.setattr(agent_launch, "_LAUNCH_MAX_RETRIES", 0)  # no retry sleeps
         _open_page(db_conn, aid)
         closed = _capture_page_closed(monkeypatch, agent_launch)
@@ -638,7 +638,7 @@ class TestControllerFinalClaimGuard:
         db_conn: psycopg.Connection,
         sync_pool: ConnectionPool,
         monkeypatch: pytest.MonkeyPatch,
-        launched_agents: list,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+        launched_agents: list,
     ) -> None:
         """A controller task claimed for a reaper death cannot reverse a user
         force that lands before its final resurrection transition."""
@@ -668,7 +668,7 @@ class TestControllerFinalClaimGuard:
         db_conn: psycopg.Connection,
         sync_pool: ConnectionPool,
         monkeypatch: pytest.MonkeyPatch,
-        launched_agents: list,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+        launched_agents: list,
     ) -> None:
         """source+backoff can repeat after manual revive and another crash;
         the exact status_changed_at death epoch makes the old claim stale."""
@@ -714,12 +714,12 @@ class TestResurrectClearsSource:
         self,
         db_conn: psycopg.Connection,
         monkeypatch: pytest.MonkeyPatch,
-        launched_agents: list,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+        launched_agents: list,
     ) -> None:
         """The mark is per-death: bringing a corpse back to unclaimed 'idling' clears
         termination_source, so a write site that later forgets to stamp leaves NULL
         (not eligible) instead of a stale 'reaper'."""
-        monkeypatch.setattr("ops.agent_launch._require_released_agent_session", lambda _id: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        monkeypatch.setattr("ops.agent_launch._require_released_agent_session", lambda _id: None)  # pyright: ignore[reportUnknownArgumentType]
         aid = _corpse(db_conn, source="reaper")
         resurrect_agent(aid, resurrected_by="system")
         assert _row(db_conn, aid) == ("idling", None)
@@ -801,7 +801,7 @@ class TestControllerReconcile:
         monkeypatch.setattr(settings.daemon, "auto_resurrect_enabled", True)
         monkeypatch.setattr(settings.daemon, "auto_resurrect_backoff_seconds", _BACKOFF)
         monkeypatch.setattr(cr, "_gateway_healthy", lambda: True)
-        monkeypatch.setattr("ops.agent_launch._require_released_agent_session", lambda _id: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        monkeypatch.setattr("ops.agent_launch._require_released_agent_session", lambda _id: None)  # pyright: ignore[reportUnknownArgumentType]
         monkeypatch.setattr(
             agent_launch,
             "_confirm_launch_or_force_terminated",
@@ -812,7 +812,7 @@ class TestControllerReconcile:
         self,
         db_conn: psycopg.Connection,
         sync_pool: ConnectionPool,
-        launched_agents: list,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+        launched_agents: list,
     ) -> None:
         aid = _corpse(db_conn, source="reaper")
         _add_pending_inbound(db_conn, aid)
@@ -823,13 +823,13 @@ class TestControllerReconcile:
         assert result.acted is True
         assert _row(db_conn, aid) == ("idling", None)  # resurrected + source cleared
         assert _last_resurrect_at(db_conn, aid) is not None  # backoff clock stamped
-        assert aid in [c.agent_id for c in launched_agents]  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+        assert aid in [c.agent_id for c in launched_agents]  # pyright: ignore[reportUnknownMemberType]
 
     def test_attempt_budget_stops_crash_resurrect_at_limit(
         self,
         db_conn: psycopg.Connection,
         sync_pool: ConnectionPool,
-        launched_agents: list,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+        launched_agents: list,
     ) -> None:
         """Three unconsumed lifecycle rows prove three failed recoveries, so the
         crash scan leaves the corpse alone instead of starting a fourth boot."""
@@ -845,13 +845,13 @@ class TestControllerReconcile:
 
         assert result.acted is False
         assert _row(db_conn, aid) == ("terminated", "reaper")
-        assert aid not in [c.agent_id for c in launched_agents]  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+        assert aid not in [c.agent_id for c in launched_agents]  # pyright: ignore[reportUnknownMemberType]
 
     def test_attempt_budget_allows_crash_resurrect_below_limit(
         self,
         db_conn: psycopg.Connection,
         sync_pool: ConnectionPool,
-        launched_agents: list,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+        launched_agents: list,
     ) -> None:
         """Two unconsumed lifecycle rows remain below the default budget, so an
         eligible corpse still gets its third recovery attempt."""
@@ -867,13 +867,13 @@ class TestControllerReconcile:
 
         assert result.acted is True
         assert _row(db_conn, aid) == ("idling", None)
-        assert aid in [c.agent_id for c in launched_agents]  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+        assert aid in [c.agent_id for c in launched_agents]  # pyright: ignore[reportUnknownMemberType]
 
     def test_resurrects_corpse_with_only_claimed_work(
         self,
         db_conn: psycopg.Connection,
         sync_pool: ConnectionPool,
-        launched_agents: list,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+        launched_agents: list,
     ) -> None:
         """End-to-end claimed-only case: a corpse whose sole in-hand message is a
         'claimed' chat (in flight when it died, nothing 'pending' behind it) is
@@ -888,13 +888,13 @@ class TestControllerReconcile:
 
         assert result.acted is True
         assert _row(db_conn, aid) == ("idling", None)  # resurrected + source cleared
-        assert aid in [c.agent_id for c in launched_agents]  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+        assert aid in [c.agent_id for c in launched_agents]  # pyright: ignore[reportUnknownMemberType]
 
     def test_does_not_resurrect_user_terminate(
         self,
         db_conn: psycopg.Connection,
         sync_pool: ConnectionPool,
-        launched_agents: list,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+        launched_agents: list,
     ) -> None:
         aid = _corpse(db_conn, source="user")
         _add_pending_inbound(db_conn, aid)
@@ -904,13 +904,13 @@ class TestControllerReconcile:
 
         assert result.acted is False
         assert _row(db_conn, aid) == ("terminated", "user")
-        assert aid not in [c.agent_id for c in launched_agents]  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+        assert aid not in [c.agent_id for c in launched_agents]  # pyright: ignore[reportUnknownMemberType]
 
     def test_gateway_unhealthy_defers_without_stamping(
         self,
         db_conn: psycopg.Connection,
         sync_pool: ConnectionPool,
-        launched_agents: list,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+        launched_agents: list,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Gateway down → defer BEFORE the claim, so the backoff clock is untouched:
@@ -931,7 +931,7 @@ class TestControllerReconcile:
         self,
         db_conn: psycopg.Connection,
         sync_pool: ConnectionPool,
-        launched_agents: list,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+        launched_agents: list,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """A newly-starting host closes recovery before a crash claim mutates it."""
@@ -961,7 +961,7 @@ class TestControllerReconcile:
         self,
         db_conn: psycopg.Connection,
         sync_pool: ConnectionPool,
-        launched_agents: list,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+        launched_agents: list,
     ) -> None:
         """A failed start defers recovery without delaying its ready successor."""
         from shared import start_serving
@@ -981,7 +981,7 @@ class TestControllerReconcile:
 
         assert controller.reconcile("agent-runner").acted is True
         assert _row(db_conn, aid) == ("idling", None)
-        assert aid in [c.agent_id for c in launched_agents]  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+        assert aid in [c.agent_id for c in launched_agents]  # pyright: ignore[reportUnknownMemberType]
 
     def test_closed_boundary_does_not_throttle_when_gateway_is_down(
         self,
@@ -1007,7 +1007,7 @@ class TestControllerReconcile:
         self,
         db_conn: psycopg.Connection,
         sync_pool: ConnectionPool,
-        launched_agents: list,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+        launched_agents: list,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         monkeypatch.setattr(settings.daemon, "auto_resurrect_enabled", False)
@@ -1025,7 +1025,7 @@ class TestControllerReconcile:
         self,
         db_conn: psycopg.Connection,
         sync_pool: ConnectionPool,
-        launched_agents: list,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+        launched_agents: list,
     ) -> None:
         """The scan is throttled to _SCAN_INTERVAL_S: a second reconcile right after
         the first does not pick up a corpse that appeared in between."""
@@ -1057,7 +1057,7 @@ class TestBootRevivePass:
         monkeypatch.setattr(settings.daemon, "auto_resurrect_enabled", True)
         monkeypatch.setattr(settings.daemon, "auto_resurrect_backoff_seconds", _BACKOFF)
         monkeypatch.setattr(cr, "_gateway_healthy", lambda: True)
-        monkeypatch.setattr("ops.agent_launch._require_released_agent_session", lambda _id: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        monkeypatch.setattr("ops.agent_launch._require_released_agent_session", lambda _id: None)  # pyright: ignore[reportUnknownArgumentType]
         monkeypatch.setattr(
             agent_launch,
             "_confirm_launch_or_force_terminated",
@@ -1068,7 +1068,7 @@ class TestBootRevivePass:
         self,
         db_conn: psycopg.Connection,
         sync_pool: ConnectionPool,
-        launched_agents: list,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+        launched_agents: list,
     ) -> None:
         """The gap: a 'reaper' corpse with NO pending inbound is invisible to
         crash-resurrect; the boot pass brings it back on the first reconcile."""
@@ -1080,13 +1080,13 @@ class TestBootRevivePass:
         assert result.acted is True
         assert _row(db_conn, aid) == ("idling", None)  # resurrected + source cleared
         assert _last_resurrect_at(db_conn, aid) is not None
-        assert aid in [c.agent_id for c in launched_agents]  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+        assert aid in [c.agent_id for c in launched_agents]  # pyright: ignore[reportUnknownMemberType]
 
     def test_boot_pass_attempt_budget_stops_at_limit(
         self,
         db_conn: psycopg.Connection,
         sync_pool: ConnectionPool,
-        launched_agents: list,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+        launched_agents: list,
     ) -> None:
         """A daemon restart cannot bypass three failed recovery attempts."""
         aid = _corpse(db_conn, source="reaper")
@@ -1121,7 +1121,7 @@ class TestBootRevivePass:
         self,
         db_conn: psycopg.Connection,
         sync_pool: ConnectionPool,
-        launched_agents: list,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+        launched_agents: list,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """A failed start leaves involuntary corpses available for its successor.
@@ -1148,13 +1148,13 @@ class TestBootRevivePass:
 
         assert result.acted is True
         assert _row(db_conn, aid) == ("idling", None)
-        assert aid in [c.agent_id for c in launched_agents]  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+        assert aid in [c.agent_id for c in launched_agents]  # pyright: ignore[reportUnknownMemberType]
 
     def test_boot_pass_excludes_explicit_termination(
         self,
         db_conn: psycopg.Connection,
         sync_pool: ConnectionPool,
-        launched_agents: list,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+        launched_agents: list,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """user / exit / integrity / NULL stay dead — the same eligibility rule
@@ -1181,7 +1181,7 @@ class TestBootRevivePass:
         self,
         db_conn: psycopg.Connection,
         sync_pool: ConnectionPool,
-        launched_agents: list,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+        launched_agents: list,
     ) -> None:
         """The pass is one-shot: a corpse appearing AFTER the first reconcile is
         left for the delivery path / crash-resurrect (throttled scan), not
@@ -1201,7 +1201,7 @@ class TestBootRevivePass:
         self,
         db_conn: psycopg.Connection,
         sync_pool: ConnectionPool,
-        launched_agents: list,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+        launched_agents: list,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Gateway down at boot → the pass is skipped WITHOUT burning the
@@ -1221,13 +1221,13 @@ class TestBootRevivePass:
         result = controller.reconcile("agent-runner")
         assert result.acted is True
         assert _row(db_conn, aid) == ("idling", None)
-        assert aid in [c.agent_id for c in launched_agents]  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+        assert aid in [c.agent_id for c in launched_agents]  # pyright: ignore[reportUnknownMemberType]
 
     def test_boot_pass_respects_backoff(
         self,
         db_conn: psycopg.Connection,
         sync_pool: ConnectionPool,
-        launched_agents: list,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+        launched_agents: list,
     ) -> None:
         """A corpse whose last_resurrect_at is inside the backoff window is not
         re-claimed by the boot pass (a recent failed resurrect is spaced)."""
@@ -1244,7 +1244,7 @@ class TestBootRevivePass:
         self,
         db_conn: psycopg.Connection,
         sync_pool: ConnectionPool,
-        launched_agents: list,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+        launched_agents: list,
     ) -> None:
         """A foreign-machine corpse is never claimed locally (the resurrect
         would launch a process on the wrong host)."""
@@ -1261,7 +1261,7 @@ class TestBootRevivePass:
         self,
         db_conn: psycopg.Connection,
         sync_pool: ConnectionPool,
-        launched_agents: list,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+        launched_agents: list,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """The anti-storm cap (`revive_max_per_pass`) bounds one pass: a
@@ -1273,7 +1273,7 @@ class TestBootRevivePass:
         result = cr.CrashResurrectController(sync_pool).reconcile("agent-runner")
 
         assert result.acted is True
-        revived = {c.agent_id for c in launched_agents}  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+        revived = {c.agent_id for c in launched_agents}  # pyright: ignore[reportUnknownMemberType]
         assert len(revived) == 2  # capped  # pyright: ignore[reportUnknownArgumentType]
         assert revived <= set(ids)
         # the other three stay terminated and eligible
@@ -1324,7 +1324,7 @@ class TestWedgedForceTerminatePublishesPageClosed:
         )
         killed: list[int] = []
         monkeypatch.setattr(wd, "force_kill", killed.append)
-        monkeypatch.setattr(wd, "resurrect_agent", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        monkeypatch.setattr(wd, "resurrect_agent", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType]
         monkeypatch.setattr(
             agent_launch,
             "_confirm_launch_or_force_terminated",

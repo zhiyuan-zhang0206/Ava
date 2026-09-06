@@ -298,7 +298,7 @@ class TestDispatchWakes:
         monkeypatch.setattr(
             shared.db,
             "publish_inbound_wake",
-            lambda agent_id, payload: calls.append((agent_id, payload)) or True,  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+            lambda agent_id, payload: calls.append((agent_id, payload)) or True,  # pyright: ignore[reportUnknownArgumentType]
         )
         dispatched = dispatch_wakes(
             pool,
@@ -319,7 +319,7 @@ class TestDispatchWakes:
         aid = _make_idling_agent(db_conn)
         _insert_old_inbound(db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 0.5)
 
-        def boom(*_a, **_k) -> bool:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+        def boom(*_a, **_k) -> bool:
             return False
 
         monkeypatch.setattr(shared.db, "publish_inbound_wake", boom)  # pyright: ignore[reportUnknownArgumentType]
@@ -748,7 +748,7 @@ def _insert_claimed_row(
         )
         iid = cur.fetchone()[0]  # type: ignore[index]
     db.commit()
-    return iid  # pyright: ignore[reportUnknownVariableType]
+    return iid
 
 
 class TestDeadLetterStaleClaimed:
@@ -848,7 +848,7 @@ def _insert_pending_resurrect_row(
         )
         inbound_id = cur.fetchone()[0]  # type: ignore[index]
     db.commit()
-    return inbound_id  # pyright: ignore[reportUnknownVariableType]
+    return inbound_id
 
 
 class TestDeadLetterStalePendingResurrects:

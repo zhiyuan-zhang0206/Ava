@@ -38,7 +38,7 @@ class FakeReader:
         return self._lines.pop(0) if self._lines else b""
 
 
-def _line(obj: dict) -> bytes:  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+def _line(obj: dict) -> bytes:
     return (json.dumps(obj) + "\n").encode()
 
 
