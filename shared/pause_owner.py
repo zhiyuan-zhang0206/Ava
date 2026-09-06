@@ -43,7 +43,9 @@ class PauseOwnerSnapshot:
 
 
 def state_path() -> Path:
-    return shared.paths.run_dir() / "deploy-pause-owner.json"
+    # Admission/status reads must not create a home before setup validation.
+    # Writers create the parent through lock_path() and _write_atomic().
+    return shared.paths.ava_home() / "run" / "deploy-pause-owner.json"
 
 
 def lock_path() -> Path:
