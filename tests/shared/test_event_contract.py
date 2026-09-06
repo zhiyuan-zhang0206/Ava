@@ -142,9 +142,11 @@ def test_category_projection_matches_telemetry_whitelist() -> None:
     # and event-loop metrics bring the total to 150; delivery_poisoned raises
     # it to 151; loki_write_path_probe_failed raises it to 152; the watchdog
     # resurrection-failure suppressor raises it to 153; schedule_stalled
-    # (Task #2492's two-hour session-silence alert) raises the current total to 154.
+    # (Task #2492's two-hour session-silence alert) raises the current total to 154;
+    # heartbeat_backoff_raised + heartbeat_backoff_reset (Task #2574's B7
+    # platform-side nudge backoff) raise it to 156.
     assert "restart_cas_lost" not in _TELEMETRY_KINDS
-    assert len(_TELEMETRY_KINDS) == 154
+    assert len(_TELEMETRY_KINDS) == 156
 
 
 def test_delivery_wake_suppressed_payload_names_escalation_evidence() -> None:
@@ -340,6 +342,8 @@ def test_payload_keys_are_the_declared_attribute_contract() -> None:
     assert payload_keys("passive_recall") == ("search_ms", "filter_ms")
     assert payload_keys("hook_timing") == ("hook_ms",)
     assert payload_keys("heartbeat_nudged") == ("idle_minutes",)
+    assert payload_keys("heartbeat_backoff_raised") == ("level", "interval_seconds")
+    assert payload_keys("heartbeat_backoff_reset") == ("previous_level", "reason")
     assert payload_keys("delivery_stalled") == ("inbound_id", "age_s")
     assert payload_keys("telemetry_read_stale") == (
         "source",

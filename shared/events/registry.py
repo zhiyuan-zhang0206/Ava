@@ -21,6 +21,8 @@ from shared.events.payloads import (
     ExecSubprocessKilled,
     FrontendInteraction,
     Halt,
+    HeartbeatBackoffRaised,
+    HeartbeatBackoffReset,
     HeartbeatNudged,
     HeartbeatPaused,
     LlmProviderError,
@@ -399,6 +401,18 @@ _EVENTS_RUNTIME: dict[str, EventSpec] = {
     ),
     "heartbeat_nudged": _telemetry(
         "heartbeat_nudged", "heartbeat reminder", payload=HeartbeatNudged, tier="noise"
+    ),
+    "heartbeat_backoff_raised": _telemetry(
+        "heartbeat_backoff_raised",
+        "no-op nudge backoff level raised",
+        payload=HeartbeatBackoffRaised,
+        tier="noise",
+    ),
+    "heartbeat_backoff_reset": _telemetry(
+        "heartbeat_backoff_reset",
+        "nudge backoff reset by real inbound or pause",
+        payload=HeartbeatBackoffReset,
+        tier="noise",
     ),
     "task_reminder_digest": _telemetry(
         "task_reminder_digest",
