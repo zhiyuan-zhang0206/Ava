@@ -260,8 +260,9 @@ def test_legacy_manifest_daemon_paths_parse_without_crashing(
     from datetime import UTC, datetime
 
     root = _write_legacy_manifests(tmp_path)
-    # Path 1: boot-time scheduling gate.
-    assert not daemon.is_due(datetime.now(UTC), root / "base-manifests")
+    # Path 1: boot-time scheduling gate, evaluated in the historical fixture's week.
+    fixture_week = datetime(2026, 8, 31, 12, tzinfo=UTC)
+    assert not daemon.is_due(fixture_week, root / "base-manifests")
     # Path 2: boot-time last-success read.
     assert daemon._last_durable_success(root / "base-manifests") is not None
     # Path 3: loop candidate scan.
