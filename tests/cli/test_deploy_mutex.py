@@ -57,6 +57,42 @@ def no_local_session(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(cluster_session, "_has_orchestration_session", lambda _s: False)  # pyright: ignore[reportUnknownArgumentType]
 
 
+def test_live_orchestration_session_ignores_a_live_rollout_dry_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    live = {"ava-rollout-dryrun"}
+    monkeypatch.setattr(cluster_session, "_has_orchestration_session", live.__contains__)
+
+    assert cluster_session.live_orchestration_session() is None
+
+
+def test_live_orchestration_session_still_returns_a_live_rollout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    live = {"ava-rollout"}
+    monkeypatch.setattr(cluster_session, "_has_orchestration_session", live.__contains__)
+
+    assert cluster_session.live_orchestration_session() == "ava-rollout"
+
+
+def test_a_live_rollout_dry_run_does_not_block_a_deploy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    live = {"ava-rollout-dryrun"}
+    monkeypatch.setattr(cluster_session, "_has_orchestration_session", live.__contains__)
+    monkeypatch.setattr("ops.deploy_window.deploy_in_flight", lambda **_k: _IDLE)  # pyright: ignore[reportUnknownArgumentType]
+
+    cluster_mod._assert_no_orchestration_in_flight()
+
+
+def test_a_live_rollout_still_blocks_a_deploy(monkeypatch: pytest.MonkeyPatch) -> None:
+    live = {"ava-rollout"}
+    monkeypatch.setattr(cluster_session, "_has_orchestration_session", live.__contains__)
+
+    with pytest.raises(cluster_mod.ClusterUpdateInProgress, match="ava-rollout"):
+        cluster_mod._assert_no_orchestration_in_flight()
+
+
 def test_second_deploy_is_refused_while_the_cluster_is_still_settling(
     no_local_session, monkeypatch: pytest.MonkeyPatch
 ) -> None:

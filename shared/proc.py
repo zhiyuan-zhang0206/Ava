@@ -68,8 +68,12 @@ _DRAIN_TIMEOUT_S = 5.0
 # through `shared.cluster.session_name` — are the sanctioned hosts of an
 # in-process host transition (the stop leg does not target them), so
 # `hosting_supervised_session` exempts them. Spelled as the composed literals to
-# keep this leaf module below `shared.cluster` in the import graph.
-_ORCHESTRATION_SESSIONS = frozenset({"ava-rollout", "ava-updater", "ava-cluster-restart"})
+# keep this leaf module below `shared.cluster` in the import graph. The dry-run
+# exemption lets its detached child reach the non-mutating `--local --dry-run`
+# leg; it remains outside the deploy in-flight scan in `ops.cluster_session`.
+_ORCHESTRATION_SESSIONS = frozenset(
+    {"ava-rollout", "ava-rollout-dryrun", "ava-updater", "ava-cluster-restart"}
+)
 
 # A recorded pid counts as the recorded session only while the live process's
 # start time matches the record — the supervisors' own pid-recycling rule

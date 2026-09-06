@@ -23,7 +23,9 @@ import logging
 import subprocess as _sp
 import time
 from collections.abc import Callable, Iterator, Sequence
+from contextlib import nullcontext
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -208,16 +210,39 @@ def _drive_rollout(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.mark.real_cluster_spawn
-def test_dry_run_rollout_does_not_wait_for_a_ui_owner(
-    native_host: _FakeSessionBackend, monkeypatch: pytest.MonkeyPatch
+def test_dry_run_rollout_uses_its_own_session_and_does_not_wait_for_a_ui_owner(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """A dry run has no maintenance marker for the detached parent to await."""
+    """A dry run is detached separately and has no maintenance owner to await."""
     monkeypatch.setattr(
         cluster_deploy,
         "update_check",
         lambda: cluster_mod.UpdateCheck(
             behind=2, frontend_changed=False, backend_changed=True, needs_replay=False
         ),
+    )
+    monkeypatch.setattr(cluster_deploy, "_assert_no_orchestration_in_flight", lambda **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
+
+    def _rollout_log(_kind: str) -> Path:
+        return tmp_path / "rollout.log"
+
+    monkeypatch.setattr(cluster_deploy, "_new_update_log", _rollout_log)
+    monkeypatch.setattr(cluster_deploy.shared.ui_update_state, "lifecycle_lock", nullcontext)
+    monkeypatch.setattr(
+        cluster_deploy.shared.ui_update_state,
+        "read",
+        lambda: SimpleNamespace(status="inactive"),
+    )
+    spawned: list[tuple[str, str]] = []
+
+    def _capture_spawn(session: str, *, shell_cmd: str, native_cmd: str) -> None:
+        del native_cmd
+        spawned.append((session, shell_cmd))
+
+    monkeypatch.setattr(
+        cluster_deploy.cluster_session,
+        "_spawn_detached_session",
+        _capture_spawn,
     )
     waited: list[dict[str, str]] = []
     monkeypatch.setattr(
@@ -226,15 +251,17 @@ def test_dry_run_rollout_does_not_wait_for_a_ui_owner(
         lambda **kwargs: waited.append(kwargs),  # pyright: ignore[reportUnknownArgumentType]
     )
 
-    cluster_mod.spawn_rollout("test-origin", dry_run=True)
+    result = cluster_mod.spawn_rollout("test-origin", dry_run=True)
 
+    assert result["session"] == "ava-test-rollout-dryrun"
+    assert spawned[0][0] == "ava-test-rollout-dryrun"
+    assert "--dry-run" in spawned[0][1]
     assert waited == []
-    assert "--dry-run" in native_host.spawned[0][1]
 
 
 @pytest.mark.real_cluster_spawn
 def test_normal_rollout_waits_for_its_ui_owner(
-    native_host: _FakeSessionBackend, monkeypatch: pytest.MonkeyPatch
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """A committing rollout still publishes its maintenance owner before returning."""
     monkeypatch.setattr(
@@ -244,6 +271,24 @@ def test_normal_rollout_waits_for_its_ui_owner(
             behind=2, frontend_changed=False, backend_changed=True, needs_replay=False
         ),
     )
+    monkeypatch.setattr(cluster_deploy, "_assert_no_orchestration_in_flight", lambda **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
+
+    def _rollout_log(_kind: str) -> Path:
+        return tmp_path / "rollout.log"
+
+    monkeypatch.setattr(cluster_deploy, "_new_update_log", _rollout_log)
+    monkeypatch.setattr(cluster_deploy.shared.ui_update_state, "lifecycle_lock", nullcontext)
+    monkeypatch.setattr(
+        cluster_deploy.shared.ui_update_state,
+        "read",
+        lambda: SimpleNamespace(status="inactive"),
+    )
+    spawned: list[str] = []
+    monkeypatch.setattr(
+        cluster_deploy.cluster_session,
+        "_spawn_detached_session",
+        lambda session, **_kwargs: spawned.append(session),  # pyright: ignore[reportUnknownArgumentType]
+    )
     waited: list[dict[str, str]] = []
     monkeypatch.setattr(
         cluster_deploy,
@@ -251,8 +296,10 @@ def test_normal_rollout_waits_for_its_ui_owner(
         lambda **kwargs: waited.append(kwargs),  # pyright: ignore[reportUnknownArgumentType]
     )
 
-    cluster_mod.spawn_rollout("test-origin")
+    result = cluster_mod.spawn_rollout("test-origin")
 
+    assert result["session"] == "ava-test-rollout"
+    assert spawned == ["ava-test-rollout"]
     assert waited == [{"session": "ava-test-rollout", "kind": "rollout", "origin": "test-origin"}]
 
 

@@ -704,7 +704,7 @@ def test_cmd_update_posts_the_dry_run_flag(
 
         @staticmethod
         def json() -> dict[str, str]:
-            return {"session": "ava-rollout", "log": "rollout.log"}
+            return {"session": "ava-rollout-dryrun", "log": "rollout.log"}
 
         @staticmethod
         def raise_for_status() -> None:

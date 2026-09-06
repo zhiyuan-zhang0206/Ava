@@ -37,12 +37,22 @@ def test_exempt_set_matches_the_spawn_sides_session_names() -> None:
     make the renamed detached session refuse ITSELF — its record pid is always
     in its own lineage — failing every subsequent rollout with CI green. Tests
     have no layering constraint, so this is the one place both sides meet."""
-    from ops.cluster_session import _CLUSTER_RESTART_SERVICE, _ROLLOUT_SERVICE, _UPDATER_SERVICE
+    from ops.cluster_session import (
+        _CLUSTER_RESTART_SERVICE,
+        _ROLLOUT_DRYRUN_SERVICE,
+        _ROLLOUT_SERVICE,
+        _UPDATER_SERVICE,
+    )
     from shared.cluster import session_name
 
     spawn_side = {
         session_name(service)
-        for service in (_ROLLOUT_SERVICE, _UPDATER_SERVICE, _CLUSTER_RESTART_SERVICE)
+        for service in (
+            _ROLLOUT_SERVICE,
+            _ROLLOUT_DRYRUN_SERVICE,
+            _UPDATER_SERVICE,
+            _CLUSTER_RESTART_SERVICE,
+        )
     }
     assert spawn_side == _ORCHESTRATION_SESSIONS
 
@@ -217,7 +227,7 @@ def _stub_in_process_gateway_leg(monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     monkeypatch.setattr(_cli, "_run_gateway_orchestration", _ok)
 
 
-@pytest.mark.parametrize("session", sorted(_ORCHESTRATION_SESSIONS))
+@pytest.mark.parametrize("session", sorted(_ORCHESTRATION_SESSIONS - {"ava-rollout-dryrun"}))
 def test_detached_orchestration_sessions_are_exempt(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -230,6 +240,18 @@ def test_detached_orchestration_sessions_are_exempt(
     _stub_in_process_gateway_leg(monkeypatch, tmp_path)
 
     assert _cli.cmd_update(local=True) == 0
+
+
+def test_detached_rollout_dry_run_session_is_exempt(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    write_session_record: Callable[..., Path],
+) -> None:
+    """The renamed detached dry-run must reach its non-mutating local leg."""
+    write_session_record("ava-rollout-dryrun")
+    _stub_in_process_gateway_leg(monkeypatch, tmp_path)
+
+    assert _cli.cmd_update(local=True, dry_run=True) == 0
 
 
 def test_stale_record_of_a_recycled_pid_does_not_refuse(
