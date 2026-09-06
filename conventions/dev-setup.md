@@ -105,7 +105,7 @@ brings the in-place tree up as its own cluster (name defaults to the worktree di
 
 ```bash
 cd ~/Ava/.worktrees/<name>
-scripts/install.sh --worktree                # births cluster <name>: uv sync --frozen + own DB/redis/ports/home
+scripts/install.sh --worktree                # births cluster <name>: locked Python install + own DB/redis/ports/home
                                              # (~/.ava-<name>), NO cluster secret by default (single-machine
                                              # no-auth; AVA_INSTALL_CLUSTER_SECRET to turn auth on), seeded LLM/web
                                              # keys from ~/.ava/.env, and the .ava_home pointer. --path P
@@ -155,3 +155,52 @@ change):
 
 For PR / dev workflow conventions (worktree + PR for code changes, doc-axis
 direct edits in main), see [`CLAUDE.md`](../CLAUDE.md) "Workflow".
+
+## Machine Python indexes
+
+Installation and updates share `cli.python_install`: the installer launches its
+absolute script path; the updater retains its imported functions before switching
+source and passes the target repo explicitly. Historical canonical targets need
+not contain the new helper. All updater uv steps share one process-tree deadline.
+The committed `uv.lock` stays on canonical PyPI origins. A host mirror changes
+artifact transport only: offline `uv export --locked` validates freshness and
+exports exact requirements, hashes and markers; `uv pip install --no-deps
+--require-hashes` installs them into the real checkout venv; a separate isolated
+editable build points Ava at that same checkout. Exported requirements are
+short-lived scratch files, never a second maintained lock. A stale or
+noncanonical lock fails before the venv changes; mirror hash failures stop before
+the editable build. A failed install is not a transactional rollback of every
+package. The updater retains its existing editable-record recovery and bound.
+
+Index precedence is explicit `UV_DEFAULT_INDEX` / `UV_INDEX_URL`, then uv
+configuration, then `PIP_INDEX_URL`, then pip configuration, then PyPI. The
+installer's explicit `--mirror cn` selects and persists its profile as before;
+without that flag, the helper reads the unit's existing `mirror.env` without
+replacing real environment values. Update processes already load that file.
+The pip bridge reads only index settings, with global, user, target-venv and
+`PIP_CONFIG_FILE` precedence; `[install]` overrides `[global]`, an existing
+explicit config file suppresses user files, and `PIP_CONFIG_FILE=/dev/null`
+disables file discovery. uv itself does not read pip configuration. No tool
+configuration is rewritten, and index credentials stay out of command arguments.
+Multiple/additional/explicit-only indexes are rejected explicitly; this is not a
+replacement for uv's multi-index/source resolver.
+
+Updates exclude the dev group and preserve already-installed extras. Installer
+runs include the project's default groups. Official PyPI uses native
+`uv sync --locked --inexact`; both paths preserve the lock's versions and hashes.
+The entry point ignores machine resolver configuration when validating the lock,
+while uv still reads project metadata, default groups and dependency markers.
+Only index selection is bridged from machine configuration files; non-index
+uv.toml settings (including TLS/transport settings) are not translated. Existing
+transport/cache/TLS environment variables remain inherited. A configured
+`UV_CONFIG_FILE` is read for index discovery, then removed from child environments:
+uv 0.10.2 reads that explicit file even alongside `--no-config`. Hosts requiring
+custom certificates must provide supported uv environment settings; the helper
+does not silently claim compatibility with every machine uv.toml option.
+Build isolation remains enabled by default. Runtime lock hashes do not introduce
+new build-backend pins; build dependencies retain uv's existing build semantics.
+
+A running old updater cannot acquire this helper through a changed source tree.
+In particular, its pre-update staging sync may still use the old mirror-incompatible
+command. First rollout must verify which updater code executes prepare; a merged
+change alone is not proof that an already-running updater can install itself.

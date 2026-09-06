@@ -18,6 +18,15 @@ from cli.commands import start as _start
 from cli.commands import update as _up
 
 
+@pytest.fixture(autouse=True)
+def _canonical_sync_inputs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep transport stubs independent of this developer machine's mirror."""
+    monkeypatch.setenv("UV_DEFAULT_INDEX", "https://pypi.org/simple")
+    for repo in (tmp_path, tmp_path / "source"):
+        repo.mkdir(exist_ok=True)
+        (repo / "uv.lock").write_text("version = 1\npackage = []\n")
+
+
 def _read_mode(path: Path) -> int:
     return stat.S_IMODE(path.stat().st_mode)
 
@@ -47,7 +56,7 @@ def test_gateway_update_makes_pth_writable_only_while_uv_sync_runs(
     modes_during_sync: list[int] = []
 
     def sync_run(args: list[str], **_kwargs: object) -> SimpleNamespace:
-        assert args == _native_sync._prod_sync_argv(repo)
+        assert args == _native_sync._PROD_SYNC_ARGS
         modes_during_sync.append(_read_mode(pth))
         return SimpleNamespace(returncode=0)
 
@@ -88,7 +97,7 @@ def test_start_source_integrity_sync_restores_read_only_pth(
         return SimpleNamespace(returncode=0, stdout="target-sha\n")
 
     def sync_run(args: list[str], **_kwargs: object) -> SimpleNamespace:
-        assert args == _native_sync._prod_sync_argv(repo)
+        assert args == _native_sync._PROD_SYNC_ARGS
         modes_during_sync.append(_read_mode(pth))
         return SimpleNamespace(returncode=0)
 
@@ -113,7 +122,7 @@ def test_gateway_recovery_restores_pth_before_start(
     observed: list[tuple[str, int]] = []
 
     def sync_run(args: list[str], **_kwargs: object) -> SimpleNamespace:
-        assert args == _native_sync._prod_sync_argv(repo)
+        assert args == _native_sync._PROD_SYNC_ARGS
         observed.append(("sync", _read_mode(pth)))
         return SimpleNamespace(returncode=0)
 
@@ -153,7 +162,7 @@ def test_agent_runner_failed_sync_still_restores_read_only_pth(
     modes_during_sync: list[int] = []
 
     def sync_run(args: list[str], **_kwargs: object) -> SimpleNamespace:
-        assert args == _native_sync._prod_sync_argv(repo)
+        assert args == _native_sync._PROD_SYNC_ARGS
         modes_during_sync.append(_read_mode(pth))
         return SimpleNamespace(returncode=1)
 
@@ -186,7 +195,7 @@ def test_native_update_sync_entry_restores_read_only_pth(
     monkeypatch.setattr(_native_sync, "_repo_root", lambda: repo)
 
     def sync_run(args: list[str], **_kwargs: object) -> SimpleNamespace:
-        assert args == _native_sync._prod_sync_argv(repo)
+        assert args == _native_sync._PROD_SYNC_ARGS
         modes_during_sync.append(_read_mode(pth))
         return SimpleNamespace(returncode=0)
 

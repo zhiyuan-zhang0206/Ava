@@ -10,7 +10,7 @@ can be written.
 What this pins:
 - the checkout (and the default home name) derive from the script's own
   location, NEVER the cwd — the run's cwd is a decoy directory;
-- `uv sync --frozen` runs inside the checkout;
+- the locked Python installer runs inside the checkout;
 - the birth call carries --home/--role gateway,agent-runner/--worktree, --seed
   by default (dropped by --no-seed), and --path overrides the default home;
 - no host-global step runs (no symlink under ~/.local/bin, no brew/apt).
@@ -95,10 +95,13 @@ def _run_worktree(
 def test_worktree_flow_derives_checkout_and_home_from_script_location(tmp_path: Path) -> None:
     proc, calls, checkout, fake_home = _run_worktree(tmp_path, "myclone")
     assert proc.returncode == 0, f"stderr: {proc.stderr!r}"
-    assert len(calls) == 2, f"expected exactly uv sync + birth, got: {calls}"
+    assert len(calls) == 2, f"expected exactly locked install + birth, got: {calls}"
 
     uv_call, birth_call = calls
-    assert uv_call == f"uv sync --frozen cwd={checkout}"
+    assert (
+        uv_call
+        == f"uv run --no-project --python 3.12 python {checkout}/cli/python_install.py --locked --inexact --mirror-env {fake_home}/.ava-myclone/mirror.env cwd={checkout}"
+    )
     assert birth_call.startswith("python -m cli.install_cluster ")
     assert f"--home {fake_home}/.ava-myclone" in birth_call  # default home from checkout name
     assert "--role gateway,agent-runner" in birth_call

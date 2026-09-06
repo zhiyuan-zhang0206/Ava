@@ -29,7 +29,7 @@ The full linter inventory — what each one enforces and where it runs: [[script
 - `guard_editable_venv.py` — dependency-free worktree preflight that refuses symlinked/external virtualenvs and cross-checkout editable-install records before a sync can mutate them
 - `install-cli-tools.sh`, `setup-worktree.sh`, `worktree.sh`
 - `provision/` — `database.sh` / `node.sh` / `toolchain.sh` / `install-playwright.sh` (the Dockerfile's eval-image layer) / `install-system.sh` (Linux Debian/Ubuntu system-level install for a bare host: Python 3.12 + build tools, then composes the other scripts) / `_lib.sh`. Consumers: `install.sh`, the `Dockerfile`, `install-cli-tools.sh`.
-- `install.sh --mirror cn` — route pip/npm/brew through CN mirrors (loads `mirrors/cn.env`, copies mirror config to `~/.ava/mirror.env` for every subsequent `ava` command)
+- `install.sh --mirror cn` — select Python/npm/brew mirrors and persist the unit profile. Python install/update share `cli/python_install.py`: canonical lock validation, host-index transport with locked hashes, and the real editable checkout; existing machine uv/pip settings are reused without rewriting the lock. See [[cli/python-install.ava.okf.md]].
 
 ### CI / Release / Migration
 - `qa_gate.py` + `qa_receipt.py` — evaluates exact-head QA evidence from GitHub; synthetic queue exemptions require verified Trunk identity, same-repository draft targeting main, and a complete normal or `-bisection` test ref (see [receipt contract](../conventions/qa-approval-receipt.md))
