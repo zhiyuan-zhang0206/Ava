@@ -5,10 +5,12 @@ Playwright checks, but intercept every frontend API request and replace SSE
 with an inert open stream. That makes the baseline independent of a local
 cluster's live agents, alerts, and clock-driven event traffic.
 
-Generate and review the PNG references on CI's Ubuntu Chromium image, then
-commit them beside this test. The context fixes its color scheme, locale, and
-timezone so those Linux references are stable; a developer's host browser is
-not a baseline source of truth.
+Generate PNG references through the Visual baselines workflow, never from a
+developer host or a Docker image. Dispatch the workflow on a PR head for an
+intentional UI change; runner-image drift on main opens a PNG-only self-heal
+PR. Both paths render on the same GitHub Ubuntu runner environment that later
+compares the references. The browser context also fixes its color scheme,
+locale, and timezone.
 """
 
 from __future__ import annotations
