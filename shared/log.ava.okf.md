@@ -45,8 +45,9 @@ the unified event stream (`events` table, which the Stats Dashboard and
 
 - **milvus** has no event pipeline: it is `execvp`ed into a C++ binary that cannot honor
   loguru wiring, so its daemon `dup2`s the log fd over stdout/stderr before exec.
-- **the CLI** initializes only when `AVA_CLI_LOG_NAME` is set — `spawn_update` and
-  the watchdog's `_spawn_update` export it before `Popen`, so a **detached** `ava
+- **the CLI** initializes only when `AVA_CLI_LOG_NAME` is set —
+  `ops/cluster_deploy.py:spawn_update` exports it for the whole updater child
+  chain, so a **detached** `ava
   update` child reaches both surfaces, while an interactive `ava status` skips
   init (no event row per command). The CLI's own `print()` stays stdout/stderr,
   captured only in the parent's `spawn-update-<ts>.log`.
