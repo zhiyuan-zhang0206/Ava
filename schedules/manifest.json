@@ -3,6 +3,14 @@
   "policy": "Built-in schedules ship with Ava. Product schedules (adversarial evaluation, self-evolution, memory) are created enabled by default; cluster-operator schedules are created but disabled. provision_builtin_schedules() (gateway boot + `ava schedules provision`) creates missing built-ins keyed by name and never modifies existing rows.",
   "builtin_schedules": [
     {
+      "name": "c9-daily-report",
+      "class": "product",
+      "default_enabled": true,
+      "description": "Daily CI-minute reconciliation at 05:00 cluster time — appends the trailing 24h of CI runs to the attribution ledger (idempotent by run id) and emits the ci_usage_daily event; failures wake the Ava P0 lead.",
+      "script": "c9-daily-report-schedule.py",
+      "command": "python c9-daily-report-schedule.py"
+    },
+    {
       "name": "adversarial-eval-weekly",
       "class": "product",
       "default_enabled": true,

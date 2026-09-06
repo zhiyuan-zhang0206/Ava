@@ -10,6 +10,11 @@ import pytest
 SCHEDULES_DIR = Path(__file__).resolve().parents[2] / "schedules"
 
 EXPECTED_STATUS_MEMBERS: dict[str, set[str]] = {
+    "c9-daily-report-schedule.py": {
+        "IDLING",
+        "RUNNING",
+        "TERMINATED",
+    },
     "adversarial-eval-weekly-schedule.py": {
         "IDLING",
         "TERMINATED",
@@ -41,6 +46,7 @@ EXPECTED_STATUS_MEMBERS: dict[str, set[str]] = {
 }
 
 SCHEDULE_NAMES = {
+    "c9-daily-report-schedule.py": "c9-daily-report",
     "adversarial-eval-weekly-schedule.py": "adversarial-eval-weekly",
     "memory-steward-schedule.py": "memory-arbiter",
     "model-update-tracker-schedule.py": "model-update-tracker",

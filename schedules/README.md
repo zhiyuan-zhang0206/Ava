@@ -15,6 +15,7 @@ directory. The manifest is the single expression of the built-in policy
 
 | Schedule | Script | Class | Default |
 |----------|--------|-------|---------|
+| `c9-daily-report` | `c9-daily-report-schedule.py` | product | **enabled** |
 | `adversarial-eval-weekly` | `adversarial-eval-weekly-schedule.py` | product | **enabled** |
 | `memory-arbiter` | `memory-steward-schedule.py` | product | **enabled** |
 | `self-evolution-daily` | `self-evolution-daily-schedule.py` | product | **enabled** |

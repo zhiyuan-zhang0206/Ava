@@ -45,6 +45,7 @@ _SQL_OR_DYNAMIC_KINDS = frozenset(
         "heartbeat_nudged",  # services/heartbeat/daemon.py:_alert_idle
         "heartbeat_backoff_raised",  # services/heartbeat/daemon.py:_raise_backoff_level (positional emit)
         "heartbeat_backoff_reset",  # services/heartbeat/daemon.py:_sweep_backoff_resets (positional emit)
+        "ci_usage_daily",  # schedules/c9-daily-report-schedule.py:_fire (positional emit)
         # Dynamic emit: positional-argument form, no `event=` literal.
         "task_reminder_digest",  # task_maintenance/daemon.py:_run_reminders
         "task_escalation",  # task_maintenance/daemon.py:_run_escalate
