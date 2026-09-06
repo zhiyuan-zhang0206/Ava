@@ -11,7 +11,10 @@ import stat
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from shared.lm import provider_api
+from shared.lm._plugin_providers import ensure_provider_plugins_loaded
 from shared.lm.factory import attach_modalities_for_model
+from shared.lm.provider_api import AttachPolicy
 
 # Moved from ava._understand so both paths classify binary media identically.
 ATTACH_MEDIA_MIME: dict[str, str] = {
@@ -250,6 +253,8 @@ def _skip_for(
 
 
 def _delivery_error(model: str, state: _PackingState, size: int, media_type: str) -> str | None:
+    # The core ceiling is checked before the provider policy so a policy can
+    # only narrow the effective cap, never raise it (pre-plugin behavior).
     if size > ATTACH_MAX_FILE_BYTES:
         return f"file exceeds {_mib(ATTACH_MAX_FILE_BYTES)} limit"
     provider_size_limit = _file_size_limit(model, media_type)
@@ -291,14 +296,18 @@ def _media_type_for_mime(mime: str) -> str:
 
 
 def _file_size_limit(model: str, media_type: str) -> int:
-    if model.startswith("claude-"):
-        if media_type == "image":
-            return 10 * 1024 * 1024
-        if media_type == "pdf":
-            return 32 * 1024 * 1024
-    if model.startswith("deepseek-") and media_type == "image":
-        return 32 * 1024 * 1024
+    policy = _attach_policy(model)
+    if policy is not None:
+        return policy.file_size_limits.get(media_type, ATTACH_MAX_FILE_BYTES)
     return ATTACH_MAX_FILE_BYTES
+
+
+def _attach_policy(model: str) -> AttachPolicy | None:
+    ensure_provider_plugins_loaded()
+    for prefix, binding in provider_api.REGISTRY.bindings.items():
+        if model.startswith(prefix):
+            return binding.attach
+    return None
 
 
 def _image_dimensions(path: Path) -> tuple[tuple[int, int] | None, str | None]:
@@ -313,18 +322,23 @@ def _image_dimensions(path: Path) -> tuple[tuple[int, int] | None, str | None]:
 
 
 def _image_dimension_limit(model: str, image_count: int) -> int:
-    if model.startswith("deepseek-"):
-        return 4096 if image_count >= 15 else 8192
-    if model.startswith("claude-"):
-        return 8000
-    return 2**31 - 1
+    dimension_limit = 2**31 - 1
+    policy = _attach_policy(model)
+    if policy is None:
+        return dimension_limit
+    for min_image_count, max_px in policy.image_dimension_tiers:
+        if min_image_count > image_count:
+            break
+        dimension_limit = max_px
+    return dimension_limit
 
 
 def _content_block(model: str, media_type: str, mime: str, file_bytes: bytes) -> dict[str, object]:
     if media_type == "image":
         encoded = base64.b64encode(file_bytes).decode("ascii")
         return {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{encoded}"}}
-    if media_type == "pdf" and model.startswith("claude-"):
+    policy = _attach_policy(model)
+    if media_type == "pdf" and policy is not None and policy.pdf_document_block:
         encoded = base64.b64encode(file_bytes).decode("ascii")
         return {
             "type": "document",

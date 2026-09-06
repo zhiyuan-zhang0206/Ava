@@ -1,5 +1,8 @@
 """Explicit Gemini context caching (cachedContents API) for the agent system prompt.
 
+This is the ``lm_google`` plugin's explicit-cache wire code; core no longer
+owns Gemini wire modules.
+
 Why: implicit caching checkpoints trail a growing conversation, so the fleet
 cache-hit rate measurably lags the theoretical ceiling. The system prompt +
 the ``execute_code`` tool schema are static for a process boot, so they can be
@@ -213,7 +216,7 @@ async def get_or_create_cache(
         return None
     from langchain_google_genai import ChatGoogleGenerativeAI
     from langchain_google_genai._function_utils import (
-        convert_to_genai_function_declarations,  # pyright: ignore[reportUnknownVariableType] — google.genai.types proto-plus generics resolve partially Unknown; the wire shape is asserted in tests
+        convert_to_genai_function_declarations,
     )
 
     if not isinstance(llm, ChatGoogleGenerativeAI):

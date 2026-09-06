@@ -29,7 +29,8 @@ from agent.graph._llm import (
     _stream_with_cache_retry,
 )
 from agent.lm_cache import LlmInvocation
-from shared.lm._gemini_cache import CacheRef
+from ava_builtins.plugins.lm_google import gemini_cache
+from ava_builtins.plugins.lm_google.gemini_cache import CacheRef
 
 
 class _FakeClock:
@@ -235,8 +236,8 @@ async def test_stale_cache_retry_uses_second_attempt_window(
         return _plain_invocation(llm)  # pyright: ignore[reportUnknownArgumentType]
 
     _patch_prepare(monkeypatch, _invocation_factory)
-    monkeypatch.setattr("agent.graph._llm_stream.is_stale_cache_error", lambda _exc: True)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr("agent.graph._llm_stream.invalidate", lambda _ref: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(gemini_cache, "is_stale_cache_error", lambda _exc: True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(gemini_cache, "invalidate", lambda _ref: None)  # pyright: ignore[reportUnknownArgumentType]
 
     handler = _FakeHandler()
     chunks: list[AIMessageChunk] = []
