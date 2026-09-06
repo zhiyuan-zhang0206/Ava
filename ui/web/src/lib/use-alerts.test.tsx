@@ -7,7 +7,7 @@ import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AuthProvider, useAuth } from "@/lib/auth-context";
-import { AlertsProvider, foldAlert, useAlertsSection } from "@/lib/use-alerts";
+import { AlertsProvider, foldAlert, useAlerts, useAlertsSection } from "@/lib/use-alerts";
 import type { Alert, AlertsResponse } from "@/lib/types";
 
 const mocks = vi.hoisted(() => ({ getAlerts: vi.fn(), checkAuth: vi.fn() }));
@@ -83,6 +83,24 @@ describe("useAlertsSection", () => {
       window: "24h",
       limit: 200,
     });
+    queryClient.clear();
+  });
+});
+
+describe("useAlerts", () => {
+  it("fetches the default snapshot when the SSE provider has not warmed the cache", async () => {
+    mocks.getAlerts.mockResolvedValue(resp([], 0));
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    );
+
+    const { result } = renderHook(() => useAlerts(), { wrapper });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(mocks.getAlerts).toHaveBeenCalledWith({});
     queryClient.clear();
   });
 });
