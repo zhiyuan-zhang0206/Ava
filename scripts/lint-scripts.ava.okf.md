@@ -13,7 +13,7 @@ tags:
 
 Code and document structure guards, mostly invoked by `.pre-commit-config.yaml` and CI:
 - `lint_ava_okf.py` — OKF format validation (frontmatter / size / wikilink)
-- `lint_python_lock.py` — the shared `uv.lock` must use PyPI registry and
+- `lint_python_lock.py` — thin entry point over packaged `shared/python_lock.py`; the shared `uv.lock` must use PyPI registry and
   `files.pythonhosted.org` distribution URLs; explicit regional mirror profiles
   remain host-local. Runs through pre-commit and the always-on `repo-language`
   CI job, requiring no project dependency installation.

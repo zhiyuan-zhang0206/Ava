@@ -11,7 +11,7 @@
 # under $AVA_HOME/pg itself (no system data dir to bootstrap). See
 # conventions/windows-setup.md.
 #
-# All paths share: uv + Python 3.12, uv sync, ~/.local/bin/ava symlink.
+# All paths share: uv + Python 3.12, locked Python installation, ~/.local/bin/ava symlink.
 #
 # --role is REQUIRED — a comma-separated capability set, no default. A single box
 # carries BOTH on one unit (owns the data plane AND runs agents); split
@@ -43,7 +43,7 @@
 # (brew/apt, the install-dir guard, the ~/.local/bin symlink; --mirror is
 # refused). Identity is the path: home defaults to ~/.ava-<checkout-dir>
 # (derived from this script's checkout, never the cwd) and --path is the only
-# override — there is no name flag. Runs `uv sync --frozen`, births the cluster
+# override — there is no name flag. Runs the locked Python installer, births the cluster
 # (single-machine -> NO-AUTH, empty secret unless AVA_INSTALL_CLUSTER_SECRET states one;
 # never inherited from prod), writes the checkout's `.ava_home`
 # pointer, and seeds the SEED_ENV_KEYS allowlist (LLM + web-search keys) from
@@ -127,7 +127,7 @@ if [ "$WORKTREE" = 1 ]; then
     # A worktree cluster is always the single-box gateway,agent-runner shape, and
     # host-global steps (where a mirror matters) are skipped entirely.
     [ -z "$ROLE" ] || die "--worktree and --role are mutually exclusive (a worktree cluster is always gateway,agent-runner)"
-    [ -z "$MIRROR" ] || die "--worktree does not take --mirror (no host-global download steps run; uv sync --frozen follows the lock)"
+    [ -z "$MIRROR" ] || die "--worktree does not take --mirror (use existing machine index settings; --mirror writes a unit profile)"
 else
     [ -z "$WT_PATH" ] || die "--path requires --worktree"
     [ "$SEED" = 1 ] || die "--no-seed requires --worktree"
@@ -279,7 +279,7 @@ warn_browser_deps() {
 # ===========================================================================
 # common_host_wiring: shared by both roles.
 #   - installs uv + Python 3.12 if missing
-#   - runs uv sync (--frozen normally; re-resolving under a mirror)
+#   - installs the canonical lock through the configured machine index
 #   - symlinks .venv/bin/ava into ~/.local/bin
 #   - ensures ~/.local/bin is on PATH for the rest of this script
 # ===========================================================================
@@ -303,18 +303,12 @@ common_host_wiring() {
     # pyproject.toml requires-python = ">=3.12"; fetch a managed Python if absent.
     uv python install 3.12
 
-    # .venv defaults to cwd — prod (~/.ava/source/.venv) / dev (~/Ava/.venv) /
-    # bench container (/root/.ava/source/.venv) all consistent. A mirror drops
-    # --frozen so uv re-resolves against UV_DEFAULT_INDEX: the committed uv.lock
-    # pins files.pythonhosted.org URLs that --frozen would fetch verbatim,
-    # ignoring the mirror (re-resolution rewrites the local lock to mirror URLs).
-    if [ -n "$MIRROR" ]; then
-        uv sync
-    else
-        uv sync --frozen
-    fi
+    # The dependency-free installer validates the canonical lock first, then
+    # uses a machine uv/pip index only as transport. Never rewrite runtime pins
+    # or remove existing dev packages merely because this host uses a mirror.
+    env -u VIRTUAL_ENV uv run --no-project --python 3.12 python "$SCRIPT_DIR/../cli/python_install.py" --locked --inexact --mirror-env "$_AVA_HOME/mirror.env"
 
-    # Bootstrap `ava` onto PATH: `uv sync` generates .venv/bin/ava but a
+    # Bootstrap `ava` onto PATH: the editable install generates .venv/bin/ava but a
     # project venv is not on PATH by design. Symlink into ~/.local/bin so
     # `ava` is callable right after install.
     mkdir -p "$HOME/.local/bin"
@@ -437,7 +431,7 @@ print_next_steps() {
 # ===========================================================================
 # worktree mode: birth a dev worktree's own cluster — no host-global steps.
 #   Skips brew/apt, the install-dir guard, the ~/.local/bin symlink. Does:
-#   uv sync --frozen + cluster birth (registry + its own pg/redis + .env — a
+#   locked Python install + cluster birth (registry + its own pg/redis + .env — a
 #   single-machine birth, so NO-AUTH with an empty secret by default, or the
 #   AVA_INSTALL_CLUSTER_SECRET the caller states; never inherited from prod) + the
 #   checkout's .ava_home pointer + convenience-key seeding from ~/.ava/.env
@@ -457,7 +451,7 @@ install_worktree() {
     command -v uv >/dev/null 2>&1 || die "--worktree needs uv on PATH (dev-host prerequisite; see conventions/dev-setup.md)"
     command -v python3 >/dev/null 2>&1 || die "--worktree needs python3 to run the editable-venv guard"
     (cd "$checkout_dir" && python3 "$SCRIPT_DIR/guard_editable_venv.py" "$checkout_dir")
-    (cd "$checkout_dir" && env -u VIRTUAL_ENV uv sync --frozen)
+    (cd "$checkout_dir" && env -u VIRTUAL_ENV uv run --no-project --python 3.12 python "$checkout_dir/cli/python_install.py" --locked --inexact --mirror-env "$target_home/mirror.env")
     wt_args=("--home" "$target_home" "--role" "gateway,agent-runner" "--worktree")
     # A worktree birth is single-machine -> NO-AUTH (empty secret) by default;
     # AVA_INSTALL_CLUSTER_SECRET states one explicitly. The seed source is stated

@@ -759,6 +759,8 @@ def test_agent_profile_keeps_an_unmodeled_provider_key_from_dotenv(
     prerequisite for `child_env("agent", ...)` to forward their declared key.
     """
     monkeypatch.setitem(os.environ, "AVA_PROCESS_PROFILE", "agent")
+    # Register the original absence before load_ava_env adds this key directly.
+    monkeypatch.setitem(os.environ, "TESTP_API_KEY", "before-load")
     monkeypatch.delitem(os.environ, "TESTP_API_KEY", raising=False)
     env_file = tmp_path / ".env"
     env_file.write_text("TESTP_API_KEY=sk-plugin-test\n")
