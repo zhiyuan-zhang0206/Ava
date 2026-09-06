@@ -14,9 +14,12 @@
 # loopback backends. Backend ports never need an off-box bind.
 # Every collector also mirrors locally produced traces to JSONL
 # ($AVA_HOME/traces/spans.jsonl, rotated), so agents can grep spans without a
-# backend. Trace/log exporters use file_storage queues + unlimited retry;
-# metrics deliberately use a bounded in-memory queue + 15m retry, then shed
-# stale points (cumulative metrics repair on a later successful sample).
+# backend. Trace/log exporters use bounded file_storage queues; metrics use a
+# bounded in-memory queue. Every exporter rejects the newest batch immediately
+# when its queue is full, bounds each send attempt to 5s, and retries for at
+# most 15m before dropping with collector failure metrics. Cumulative metrics
+# repair on a later successful sample. The independent file/traces exporter is
+# not queued behind remote delivery and remains the local durable trace sink.
 # `ava trace ship` replays a mirrored gap without re-entering the local mirror.
 #
 # The sidecar also scrapes the traditional SRE layer (issue #46) into the same
