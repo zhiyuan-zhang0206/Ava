@@ -9,6 +9,7 @@ checks passed)" on a pull request that ran nothing.
 
 from __future__ import annotations
 
+import email.message
 import importlib.util
 import json
 import subprocess
@@ -842,3 +843,158 @@ def test_rerun_failed_jobs_success_exits_zero(monkeypatch: pytest.MonkeyPatch, c
 def test_rerun_failed_jobs_exclusive_with_wait() -> None:
     with pytest.raises(SystemExit):
         ci_utils.main(["42", "--rerun-failed-jobs", "--wait"])
+
+
+# --- Trunk queue operator commands: --queue-status / --evict ---
+
+
+def test_queue_status_prints_state_and_items(monkeypatch, capsys) -> None:
+    monkeypatch.setenv("TRUNK_API_TOKEN", "test-token")
+    requests: list[urllib.request.Request] = []
+    monkeypatch.setattr(
+        ci_utils.urllib.request,
+        "urlopen",
+        _urlopen_sequence(
+            [
+                _TrunkResponse(
+                    {
+                        "state": "running",
+                        "concurrency": 5,
+                        "enqueuedPullRequests": [
+                            {
+                                "state": "testing",
+                                "prNumber": 1900,
+                                "prTitle": "feat: x",
+                                "priorityName": "high",
+                                "prSha": "abc123abc123abc123",
+                            },
+                            {
+                                "state": "pending",
+                                "prNumber": 1901,
+                                "prTitle": "fix: y",
+                                "priorityName": "medium",
+                                "prSha": "def456def456def456",
+                            },
+                        ],
+                    }
+                )
+            ],
+            requests,
+        ),
+    )
+    assert ci_utils.main(["--queue-status"]) == 0
+    out = capsys.readouterr().out
+    assert "state=running" in out
+    assert "#1900 [testing] feat: x" in out
+    assert "#1901 [pending] fix: y" in out
+    assert requests[0].full_url == "https://api.trunk.io/v1/getQueue"
+    assert requests[0].get_header("X-api-token") == "test-token"
+    assert json.loads(cast(bytes, requests[0].data)) == {
+        "repo": {"host": "github.com", "owner": "zhiyuan-zhang0206", "name": "Ava"},
+        "targetBranch": "main",
+    }
+
+
+def test_queue_status_empty_queue(monkeypatch, capsys) -> None:
+    monkeypatch.setenv("TRUNK_API_TOKEN", "test-token")
+    monkeypatch.setattr(
+        ci_utils.urllib.request,
+        "urlopen",
+        _urlopen_sequence([_TrunkResponse({"state": "running", "enqueuedPullRequests": []})], []),
+    )
+    assert ci_utils.main(["--queue-status"]) == 0
+    assert "No PRs in the queue" in capsys.readouterr().out
+
+
+def test_queue_status_json_prints_raw_payload(monkeypatch, capsys) -> None:
+    monkeypatch.setenv("TRUNK_API_TOKEN", "test-token")
+    monkeypatch.setattr(
+        ci_utils.urllib.request,
+        "urlopen",
+        _urlopen_sequence([_TrunkResponse({"state": "running", "enqueuedPullRequests": []})], []),
+    )
+    assert ci_utils.main(["--queue-status", "--json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["state"] == "running"
+
+
+def test_queue_status_api_error_exits_three(monkeypatch, capsys) -> None:
+    monkeypatch.setenv("TRUNK_API_TOKEN", "test-token")
+    monkeypatch.setattr(
+        ci_utils.urllib.request,
+        "urlopen",
+        _urlopen_sequence([urllib.error.URLError("network down")], []),
+    )
+    assert ci_utils.main(["--queue-status"]) == 3
+    assert "Trunk queue status error" in capsys.readouterr().err
+
+
+def test_queue_status_requires_token(monkeypatch, capsys) -> None:
+    monkeypatch.delenv("TRUNK_API_TOKEN", raising=False)
+    assert ci_utils.main(["--queue-status"]) == 3
+    assert "TRUNK_API_TOKEN is required" in capsys.readouterr().err
+
+
+def test_evict_success_exits_zero(monkeypatch, capsys) -> None:
+    monkeypatch.setenv("TRUNK_API_TOKEN", "test-token")
+    requests: list[urllib.request.Request] = []
+    monkeypatch.setattr(
+        ci_utils.urllib.request,
+        "urlopen",
+        _urlopen_sequence([_TrunkResponse({})], requests),
+    )
+    assert ci_utils.main(["1877", "--evict"]) == 0
+    assert "PR #1877 cancelled from the Trunk merge queue" in capsys.readouterr().err
+    assert requests[0].full_url == "https://api.trunk.io/v1/cancelPullRequest"
+    assert json.loads(cast(bytes, requests[0].data)) == {
+        "repo": {"host": "github.com", "owner": "zhiyuan-zhang0206", "name": "Ava"},
+        "pr": {"number": 1877},
+        "targetBranch": "main",
+    }
+
+
+def test_evict_not_in_queue_exits_one(monkeypatch, capsys) -> None:
+    """cancelPullRequest answers 404 when the PR is not in the queue; a
+    nonzero exit keeps a typo'd PR number from reading as a clean evict."""
+    monkeypatch.setenv("TRUNK_API_TOKEN", "test-token")
+    responses: list[_TrunkResponse | urllib.error.URLError] = []
+    responses.append(
+        urllib.error.HTTPError(
+            "https://api.trunk.io/v1/cancelPullRequest",
+            404,
+            "Not Found",
+            email.message.Message(),
+            None,
+        )
+    )
+    monkeypatch.setattr(ci_utils.urllib.request, "urlopen", _urlopen_sequence(responses, []))
+    assert ci_utils.main(["1877", "--evict"]) == 1
+    assert "not in the Trunk merge queue" in capsys.readouterr().err
+
+
+def test_evict_api_error_exits_four(monkeypatch, capsys) -> None:
+    monkeypatch.setenv("TRUNK_API_TOKEN", "test-token")
+    monkeypatch.setattr(
+        ci_utils.urllib.request,
+        "urlopen",
+        _urlopen_sequence([urllib.error.URLError("network down")], []),
+    )
+    assert ci_utils.main(["1877", "--evict"]) == 4
+    assert "Trunk queue cancel error" in capsys.readouterr().err
+
+
+def test_evict_requires_pr_number() -> None:
+    with pytest.raises(SystemExit) as e:
+        ci_utils.main(["--evict"])
+    assert e.value.code == 2
+
+
+def test_queue_ops_exclusive_with_merge_wait() -> None:
+    with pytest.raises(SystemExit):
+        ci_utils.main(["--queue-status", "--merge"])
+    with pytest.raises(SystemExit):
+        ci_utils.main(["42", "--evict", "--wait"])
+    with pytest.raises(SystemExit):
+        ci_utils.main(["42", "--evict", "--queue-status"])
+    with pytest.raises(SystemExit):
+        ci_utils.main(["42", "--evict", "--json"])
