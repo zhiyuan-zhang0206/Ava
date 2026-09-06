@@ -319,11 +319,11 @@ class TestGlobalQueryBudget:
         assert loki_query_budget.LOKI_QUERY_CONCURRENCY == LOKI_QUERY_CONCURRENCY
 
     def test_both_loki_configs_retain_the_lineage_class_permanently(self) -> None:
-        """Lineage rows outlive the global 168h bucket in BOTH deploy variants.
+        """Lineage rows outlive the global 84h bucket in BOTH deploy variants.
 
         The container config is the operator's manual rollback asset, so a rule
         that lands only in the native template would silently drop lineage back
-        to 7 days the moment the rollback path is used — the 2026-08-20 loss
+        to 84 hours the moment the rollback path is used — the 2026-08-20 loss
         shape, one deploy variant later.
         """
         repo = Path(__file__).parents[2]
@@ -346,7 +346,7 @@ class TestGlobalQueryBudget:
             # The archive rule and the global bucket are untouched by this class.
             archive = [r for r in rules if r["selector"] == '{stream="archive"}']
             assert [r["period"] for r in archive] == ["8760h"]
-            assert limits["retention_period"] == "168h"
+            assert limits["retention_period"] == "84h"
 
     def test_rejects_loki_deploy_config_drift(self) -> None:
         with pytest.raises(ValueError, match="retention_period"):
@@ -363,7 +363,7 @@ class TestGlobalQueryBudget:
             validate_loki_deploy_config(
                 {
                     "limits_config": {
-                        "retention_period": "168h",
+                        "retention_period": "84h",
                         "max_query_series": 20000,
                     },
                     "querier": {"max_concurrent": 8},
@@ -373,7 +373,7 @@ class TestGlobalQueryBudget:
             validate_loki_deploy_config(
                 {
                     "limits_config": {
-                        "retention_period": "168h",
+                        "retention_period": "84h",
                         "max_query_series": 20000,
                     },
                     "querier": {"max_concurrent": 4},
@@ -384,7 +384,7 @@ class TestGlobalQueryBudget:
             validate_loki_deploy_config(
                 {
                     "limits_config": {
-                        "retention_period": "168h",
+                        "retention_period": "84h",
                         "max_query_series": 2000,
                     },
                     "querier": {"max_concurrent": 4},
@@ -404,7 +404,7 @@ class TestGlobalQueryBudget:
         def config(retention_stream: list[dict[str, object]]) -> dict[str, object]:
             return {
                 "limits_config": {
-                    "retention_period": "168h",
+                    "retention_period": "84h",
                     "max_query_series": LOKI_MAX_QUERY_SERIES,
                     "retention_stream": retention_stream,
                 },

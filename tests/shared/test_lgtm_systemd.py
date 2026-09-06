@@ -166,6 +166,29 @@ def test_bad_loki_configuration_prevents_all_start_commands(
         lgtm_systemd.start(tmp_path)
 
 
+def test_force_restart_verifies_loki_and_restarts_exact_unit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[tuple[object, ...]] = []
+
+    def verify(home: Path) -> None:
+        calls.append(("verify", home))
+
+    def control(*args: str) -> subprocess.CompletedProcess[str]:
+        calls.append(args)
+        return _control(*args)
+
+    monkeypatch.setattr(lgtm_systemd, "verify_loki", verify)
+    monkeypatch.setattr(lgtm_systemd, "_systemctl", control)
+
+    lgtm_systemd.force_restart(tmp_path, "loki")
+
+    assert calls == [
+        ("verify", tmp_path),
+        ("restart", lgtm_systemd.unit_name(tmp_path, "loki")),
+    ]
+
+
 def test_systemctl_failure_is_not_reported_as_success(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(lgtm_systemd, "IS_LINUX", True)
 

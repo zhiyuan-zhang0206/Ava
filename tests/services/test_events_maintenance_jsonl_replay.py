@@ -115,14 +115,14 @@ def test_replay_uses_pre_floor_watermark_and_only_days_strictly_below_floor(
     _seed_watermark(db, agent_id, date(2026, 5, 31))
     _seed_watermark(db, agent_id, date(2026, 6, 9))
     monkeypatch.setattr(jsonl_replay, "logs_dir", lambda: tmp_path)
-    for day in (date(2026, 6, 1), date(2026, 6, 3), date(2026, 6, 4)):
+    for day in (date(2026, 6, 1), date(2026, 6, 3), date(2026, 6, 7), date(2026, 6, 8)):
         _write_rollup_file(tmp_path, day, [_event("llm_usage", agent_id, {"model": "m1"})])
 
     result = replay_gap_days(db, now_utc=_NOW)
 
-    assert result.days_replayed == [date(2026, 6, 1), date(2026, 6, 3)]
+    assert result.days_replayed == [date(2026, 6, 1), date(2026, 6, 3), date(2026, 6, 7)]
     assert result.days_failed == []
-    assert _token_days(db) == [date(2026, 6, 1), date(2026, 6, 3)]
+    assert _token_days(db) == [date(2026, 6, 1), date(2026, 6, 3), date(2026, 6, 7)]
 
 
 def test_replay_writes_rows_and_second_run_is_a_noop(

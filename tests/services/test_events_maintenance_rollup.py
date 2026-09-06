@@ -30,11 +30,11 @@ from services.events_maintenance.rollup import MetricsRow, RollupResult, TokensR
 from shared.config.daemon import DaemonSettings
 from shared.loki_index_labels import INDEX_LABEL_CUTOVER_AT, LokiReadEra, LokiReadSlice
 
-# A fixed "now" so today = 2026-06-10 (UTC); rolled days are 06-07..06-09.
+# A fixed "now" so today = 2026-06-10 (UTC); retained days are 06-08..06-09.
 # Noon so the test does not ride on a midnight edge. The retention floor at
-# this now is 06-04 (now - 168h = 06-03T12:00 -> first full day 06-04).
+# this now is 06-08 (now - 84h = 06-07T00:00 -> first full day 06-08).
 _NOW = datetime(2026, 6, 10, 12, 0, tzinfo=UTC)
-_FLOOR = date(2026, 6, 4)
+_FLOOR = date(2026, 6, 8)
 
 
 @pytest.fixture
@@ -313,7 +313,7 @@ def test_first_pass_rolls_the_whole_retained_window_once(
 ) -> None:
     fake = _FakeLokiDays({})
     result = _roll(db, fake, monkeypatch)
-    expected = [_FLOOR + timedelta(days=offset) for offset in range(6)]
+    expected = [_FLOOR + timedelta(days=offset) for offset in range(2)]
     assert fake.queried == expected
     assert _fetch_state(db) == {str(day): ("rolled", 0, None) for day in expected}
     assert result.tokens_rows == 0 and result.metrics_rows == 0
@@ -349,7 +349,7 @@ def test_failed_day_stays_dirty_until_success(
     db: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     aid = _agent(db)
-    failed_day = date(2026, 6, 7)
+    failed_day = date(2026, 6, 8)
     yesterday = date(2026, 6, 9)
     _state(db, failed_day, 1, "failed")
     _state(db, yesterday, 1)
@@ -512,13 +512,13 @@ def test_missing_state_triggers_catchup_despite_existing_ledger(
     fake = _FakeLokiDays({})
     result = _roll(db, fake, monkeypatch, lookback=0)
     assert result == RollupResult(_FLOOR, date(2026, 6, 9), 0, 0)
-    assert fake.queried == [_FLOOR + timedelta(days=offset) for offset in range(6)]
+    assert fake.queried == [_FLOOR + timedelta(days=offset) for offset in range(2)]
 
 
 def test_pass_deadline_stops_before_remaining_dirty_days(
     db: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    days = [_FLOOR + timedelta(days=offset) for offset in range(6)]
+    days = [_FLOOR + timedelta(days=offset) for offset in range(2)]
     for day in days:
         _state(db, day, 0, "failed")
     clock = [0.0]

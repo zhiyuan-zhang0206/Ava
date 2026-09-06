@@ -413,7 +413,7 @@ def test_inspect_pre_cutover_agent_uses_indexed_lifecycle_window(
 
     The fixed index-label cutover (2026-08-23T11:00Z) sits inside the
     expired legacy zone once `now - EVENT_STREAM_RETENTION` (the rolling
-    retention floor) passes it — 2026-08-30T11:00Z onwards (the same
+    retention floor) passes it — 2026-08-26T23:00Z onwards (the same
     expiry the 8/20 Loki archive incident made visible). The retained
     window therefore starts at the floor, not the cutover; the projected
     Loki read asserts that landed behavior, and the request-window
@@ -1038,7 +1038,7 @@ def test_inspect_whole_life_tail_bounded_to_retention(
     db_conn: psycopg.Connection, fake_loki: _FakeLoki
 ) -> None:
     """With no rolled ledger day, the whole-life Loki tail starts at the
-    retention floor (now − 168h): a Loki row older than retention (which
+    retention floor (now − 84h): a Loki row older than retention (which
     real Loki would not even hold) falls outside; a recent snapshot row
     counts. No far-past sentinel, no max_query_length 400 (the 2026-08-12
     prod inspector 500)."""
@@ -1419,7 +1419,7 @@ def test_inspect_no_read_time_pricing_even_for_known_models(
 def test_inspect_hours_window_is_loki_only(
     db_conn: psycopg.Connection, fake_loki: _FakeLoki
 ) -> None:
-    """An hours window (StatsWindowHours caps at 168h = Loki retention)
+    """An hours window (StatsWindowHours caps at 168h; Loki retains 84h)
     aggregates pure Loki: rolled ledger days do NOT leak into it, the
     window scopes by event ts, and whole-life still sees both stores."""
     aid = _insert_agent(db_conn)

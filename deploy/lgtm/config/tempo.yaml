@@ -18,7 +18,7 @@ distributor:
 
 # Retention stated explicitly (the upstream default silently applies 14d):
 # 168h matches the write-side JSONL mirror retention (AVA_TRACE_RETENTION_DAYS
-# default) and Loki's documented 7d, so all three stores carry one horizon.
+# default); Loki has its own independent 84h filesystem-store horizon.
 # Tempo 3.0 removed the compactor component; retention/compaction settings
 # live in the Compaction block consumed by the backend scheduler (job
 # generation) and backend worker (execution) — both in-process in

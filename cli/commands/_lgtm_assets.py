@@ -29,7 +29,7 @@ _NATIVE_CONSTANTS: dict[str, _NativeService] = {
         arguments=(
             "--config.file={config}/prometheus.yml",
             "--storage.tsdb.path={data}/prom",
-            "--storage.tsdb.retention.time=15d",
+            "--storage.tsdb.retention.time=180h",
             "--storage.tsdb.retention.size=8GB",
             "--web.enable-otlp-receiver",
             "--web.listen-address={lgtm_listen_host}:{lgtm_prometheus_port}",
