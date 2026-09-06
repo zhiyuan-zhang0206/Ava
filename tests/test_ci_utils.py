@@ -1309,3 +1309,55 @@ def test_diagnose_merged_pr_reports_no_conflict_or_stale_base(diag_gh, monkeypat
     out = capsys.readouterr().out
     assert "merge_conflict" not in out
     assert "stale_base" not in out
+
+
+# --- --ci-usage: per-agent CI minute rollup (task #2575) ---
+
+
+def test_ci_usage_prints_per_agent_rollup(monkeypatch, tmp_path, capsys) -> None:
+    ledger = tmp_path / "ledger.jsonl"
+    ledger.write_text(
+        json.dumps(
+            {
+                "run_id": 1,
+                "day": "2026-09-06",
+                "agent_id": 5811,
+                "linux_minutes": 100,
+                "macos_minutes": 10,
+            }
+        )
+        + "\n"
+    )
+    monkeypatch.setattr(ci_utils, "DEFAULT_LEDGER", ledger)
+    assert ci_utils.main(["--ci-usage"]) == 0
+    out = capsys.readouterr().out
+    assert "#5811: 1 runs" in out
+    assert "est $1.4" in out
+
+
+def test_ci_usage_json_machine_readable(monkeypatch, tmp_path, capsys) -> None:
+    ledger = tmp_path / "ledger.jsonl"
+    ledger.write_text(
+        json.dumps(
+            {
+                "run_id": 1,
+                "day": "2026-09-06",
+                "agent_id": 5811,
+                "linux_minutes": 10,
+                "macos_minutes": 1,
+            }
+        )
+        + "\n"
+    )
+    monkeypatch.setattr(ci_utils, "DEFAULT_LEDGER", ledger)
+    assert ci_utils.main(["--ci-usage", "--json"]) == 0
+    rows = json.loads(capsys.readouterr().out)
+    assert rows[0]["agent_id"] == 5811
+    assert rows[0]["linux_minutes"] == 10
+
+
+def test_ci_usage_exclusive_and_no_pr() -> None:
+    with pytest.raises(SystemExit):
+        ci_utils.main(["42", "--ci-usage"])
+    with pytest.raises(SystemExit):
+        ci_utils.main(["--ci-usage", "--wait"])
