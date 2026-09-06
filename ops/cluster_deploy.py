@@ -72,6 +72,7 @@ from ops._update_shell import SOURCE_SWITCH_OFF, _restart_recovery_cmd
 from ops.cluster_session import (
     _CLUSTER_RESTART_SERVICE,
     _REPO_ROOT,
+    _ROLLOUT_DRYRUN_SERVICE,
     _ROLLOUT_SERVICE,
     _UPDATER_SERVICE,
     _native_arg,
@@ -472,7 +473,11 @@ def spawn_update(  # noqa: PLR0915 — one pause-to-detached-child transaction
 def spawn_rollout(
     origin: str, *, force: bool = False, mode: str = "smooth", dry_run: bool = False
 ) -> dict[str, str | bool]:
-    """Trigger the whole-cluster rollout via a detached `ava-rollout` session.
+    """Trigger a rollout via a detached session selected by ``dry_run``.
+
+    A real rollout runs as ``ava-rollout``; an informational, non-mutating
+    dry-run runs as ``ava-rollout-dryrun``. The dry-run session is outside the
+    orchestration-kind scan, so a live dry-run does not block a real rollout.
 
     Runs a detached shell command — `{ cd <repo> && <venv-activation> ava
     cluster update --local; } 2>&1 | tee -a <log>` — hosted on the service
@@ -499,7 +504,7 @@ def spawn_rollout(
     host (including this one). Idempotent: refuses if a rollout or a local
     update is already in flight.
 
-    Returns {"session": "ava-rollout", "log": <path>,
+    Returns {"session": <selected session>, "log": <path>,
     "backend_changed": <bool>, "needs_replay": <bool>}. The update-check
     values come from the same preflight that gates the no-op case:
     `backend_changed` tells the caller
@@ -538,7 +543,8 @@ def spawn_rollout(
     if check.behind == 0 and not check.needs_replay:
         raise NothingToUpdate("cluster is already up to date — nothing to roll out")
 
-    rollout_sess = shared.cluster.session_name(_ROLLOUT_SERVICE)
+    rollout_service = _ROLLOUT_DRYRUN_SERVICE if dry_run else _ROLLOUT_SERVICE
+    rollout_sess = shared.cluster.session_name(rollout_service)
     log_path = _new_update_log("rollout")
 
     repo = _REPO_ROOT

@@ -58,6 +58,7 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 _RESTARTER_SERVICE = "restarter"
 _UPDATER_SERVICE = "updater"
 _ROLLOUT_SERVICE = "rollout"
+_ROLLOUT_DRYRUN_SERVICE = "rollout-dryrun"
 _CLUSTER_RESTART_SERVICE = "cluster-restart"
 
 # What an in-flight orchestration is, as a status consumer (the Settings panel)
@@ -72,6 +73,8 @@ OrchestrationKind = Literal["rollout", "restart", "update"]
 # lease-less updater until its claim lands, and the probe is the first line
 # against racing spawns (the DB compare-and-set is the authoritative second).
 # The status READ (`current_orchestration`) no longer uses this — it reads the DB.
+# A rollout dry-run is deliberately excluded: it is informational and non-mutating,
+# so it never blocks a real deploy or gets interrupted by ops-manager orchestration actions.
 _ORCHESTRATION_KINDS: tuple[tuple[str, OrchestrationKind], ...] = (
     (_ROLLOUT_SERVICE, "rollout"),
     (_CLUSTER_RESTART_SERVICE, "restart"),
