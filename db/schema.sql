@@ -1145,6 +1145,18 @@ CREATE TABLE schedule_runs (
 );
 CREATE INDEX ON schedule_runs (schedule_id, ran_at DESC);
 
+-- Per-cron-slot at-most-once claims for resident schedules. Both startup
+-- catch-up and normal online fires claim through this table before invoking a
+-- schedule's fire function. A claim intentionally survives callback failure:
+-- this is at-most-once, not at-least-once delivery.
+CREATE TABLE schedule_fire_log (
+    id           BIGSERIAL PRIMARY KEY,
+    schedule_id  BIGINT NOT NULL REFERENCES schedules(id) ON DELETE CASCADE,
+    slot_fire_at TIMESTAMPTZ NOT NULL,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (schedule_id, slot_fire_at)
+);
+
 -- ─────────────── agent_watchers (R1 — Task #1021) ───────────────
 -- The watcher registry — the "should it exist?" half of the design's
 -- registry × lease frame for ava.watcher.at/cron/launch sessions. Written at
@@ -1448,3 +1460,7 @@ INSERT INTO schema_migrations (name) VALUES ('20260905T162656_watchdog-dispatch-
 -- without this applied marker still run the migration and fail loudly if
 -- the columns were added outside migration tracking.
 INSERT INTO schema_migrations (name) VALUES ('20260906T050000_wake-suppress');
+
+-- Schedule fire claims are already represented above. Fresh DBs stamp the
+-- migration instead of replaying the strict table-creation delta.
+INSERT INTO schema_migrations (name) VALUES ('20260906T081715_schedule-fire-log');

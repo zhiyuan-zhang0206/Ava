@@ -14,6 +14,7 @@ from pathlib import Path
 import ava
 from ava.agents import AgentStatus as S
 from schedules.agent_status_guard import ensure_agent_status_members
+from schedules.catchup import catch_up, fire_slot_once
 from shared.config import settings
 from shared.watcher import next_fire
 
@@ -37,6 +38,8 @@ TIMEZONE = settings.general.timezone
 MONDAY_CRON = "0 0 * * 2"
 # Mid-week follow-up for busy weeks: Friday 00:00 cluster time
 THURSDAY_CRON = "0 0 * * 5"
+MONDAY_TRIGGER = "monday"
+THURSDAY_TRIGGER = "thursday"
 
 # Minimum weekly events to trigger self-evolution (~4K/day floor).
 # Below this the week is too quiet for meaningful analysis.
@@ -157,7 +160,39 @@ def _main_loop() -> None:
     """The gateway runs this file as `python self-evolution-weekly-schedule.py`
     (never imports it); the guard keeps the loop out of import, so tests can
     load the module and call count_events directly."""
-    _thursday_enabled = False
+    thursday_enabled = False
+
+    def fire_weekly_trigger(trigger: str) -> None:
+        nonlocal thursday_enabled
+        if trigger == MONDAY_TRIGGER:
+            if should_fire_monday():
+                fire(PROMPT)
+                week_ago = datetime.now(UTC) - timedelta(days=7)
+                total = count_events(week_ago)
+                thursday_enabled = total >= HIGH_WEEKLY_EVENTS
+                if thursday_enabled:
+                    print(
+                        f"[{datetime.now(UTC).isoformat()}] self-evolution: "
+                        f"Thursday follow-up enabled ({total} >= {HIGH_WEEKLY_EVENTS})"
+                    )
+            else:
+                thursday_enabled = False
+            return
+        if trigger == THURSDAY_TRIGGER:
+            if should_fire_thursday():
+                fire(f"{PROMPT} (mid-week follow-up)")
+            thursday_enabled = False
+            return
+        raise ValueError(f"unknown self-evolution weekly trigger: {trigger}")
+
+    catch_up(
+        [
+            (MONDAY_CRON, MONDAY_TRIGGER),
+            (THURSDAY_CRON, THURSDAY_TRIGGER),
+        ],
+        timezone=TIMEZONE,
+        fire=fire_weekly_trigger,
+    )
 
     while True:
         now = datetime.now(UTC)
@@ -169,13 +204,8 @@ def _main_loop() -> None:
         nxt_monday = next_fire(MONDAY_CRON, after=now - timedelta(minutes=2), timezone=TIMEZONE)
         wait_monday = (nxt_monday - now).total_seconds()
 
-        if _thursday_enabled:
-            nxt_thursday = next_fire(
-                THURSDAY_CRON, after=now - timedelta(minutes=2), timezone=TIMEZONE
-            )
-            wait_thursday = (nxt_thursday - now).total_seconds()
-        else:
-            wait_thursday = float("inf")
+        nxt_thursday = next_fire(THURSDAY_CRON, after=now - timedelta(minutes=2), timezone=TIMEZONE)
+        wait_thursday = (nxt_thursday - now).total_seconds() if thursday_enabled else float("inf")
 
         wait = min(wait_monday, wait_thursday)
 
@@ -184,27 +214,20 @@ def _main_loop() -> None:
             continue
 
         if wait_monday <= 90:
-            if should_fire_monday():
-                fire(PROMPT)
-                week_ago = now - timedelta(days=7)
-                total = count_events(week_ago)
-                _thursday_enabled = total >= HIGH_WEEKLY_EVENTS
-                if _thursday_enabled:
-                    print(
-                        f"[{now.isoformat()}] self-evolution: "
-                        f"Thursday follow-up enabled ({total} >= {HIGH_WEEKLY_EVENTS})"
-                    )
-                else:
-                    _thursday_enabled = False
-            else:
-                _thursday_enabled = False
+            fire_slot_once(
+                nxt_monday,
+                MONDAY_TRIGGER,
+                fire=fire_weekly_trigger,
+            )
             time.sleep(120)
             continue
 
         if wait_thursday <= 90:
-            if should_fire_thursday():
-                fire(f"{PROMPT} (mid-week follow-up)")
-            _thursday_enabled = False
+            fire_slot_once(
+                nxt_thursday,
+                THURSDAY_TRIGGER,
+                fire=fire_weekly_trigger,
+            )
             time.sleep(120)
             continue
 

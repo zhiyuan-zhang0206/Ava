@@ -31,6 +31,7 @@ from shared.events.system import (
     RecoveryDrillFailed,
     ResolutionStatus,
     ResolvedMarker,
+    ScheduleStalled,
     SseLifecycle,
     TelemetryReadRecovered,
     TelemetryReadStale,
@@ -133,6 +134,12 @@ _EVENTS_OPS: dict[str, EventSpec] = {
     "respawn_breaker_open": _telemetry(
         "respawn_breaker_open",
         "watchdog respawn circuit breaker opened — repeated failed respawns held until a probe-alive round",
+        tier="anomaly",
+    ),
+    "schedule_stalled": _telemetry(
+        "schedule_stalled",
+        "enabled non-completed schedule has had no live session for more than two hours",
+        payload=ScheduleStalled,
         tier="anomaly",
     ),
     "history_dump": _telemetry(

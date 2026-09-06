@@ -27,8 +27,8 @@ def test_default_lattice_holds() -> None:
     """The full declared lattice must hold for the settings defaults.
 
     This is the topology pin: every constraint in `shared.timing.CONSTRAINTS`
-    (25 orderings across the boot / deploy / agent-lease / updater / wedged /
-    restarter families) is asserted against the live default values. A change to
+    (26 orderings across the boot / deploy / schedule-supervision / agent-lease /
+    updater / wedged / restarter families) is asserted against the live default values. A change to
     any default that inverts a load-bearing ordering fails here, with the
     constraint's intent in the failure message.
     """

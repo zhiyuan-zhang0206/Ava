@@ -25,7 +25,8 @@ A module-level constant whose name contains lattice vocabulary (`STALL`, `GRACE`
 `REAP_INTERVAL`) must be one of:
 
 1. **Defined in a lattice family module** — `shared/timing.py`,
-   `shared/boot_timing.py`, `shared/deploy_timing.py`, `shared/cluster_lock.py`,
+   `shared/boot_timing.py`, `shared/deploy_timing.py`, `shared/stop_timing.py`,
+   `shared/schedule_timing.py`, `shared/cluster_lock.py`,
    `shared/host_deploy_state.py`. These are the lattice's homes; registering a
    new clock there and in `CLOCKS` is the correct way to add one.
 2. **An alias of a registered clock** — the assignment's value is a bare
@@ -98,6 +99,7 @@ _FAMILY_MODULES = (
     "shared/boot_timing.py",
     "shared/deploy_timing.py",
     "shared/stop_timing.py",
+    "shared/schedule_timing.py",
     "shared/cluster_lock.py",
     "shared/host_deploy_state.py",
 )
