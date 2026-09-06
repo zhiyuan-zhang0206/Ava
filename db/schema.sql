@@ -1462,5 +1462,5 @@ INSERT INTO schema_migrations (name) VALUES ('20260905T162656_watchdog-dispatch-
 INSERT INTO schema_migrations (name) VALUES ('20260906T050000_wake-suppress');
 
 -- Schedule fire claims are already represented above. Fresh DBs stamp the
--- migration instead of replaying the strict CREATE TABLE delta.
+-- migration instead of replaying the strict table-creation delta.
 INSERT INTO schema_migrations (name) VALUES ('20260906T081715_schedule-fire-log');
