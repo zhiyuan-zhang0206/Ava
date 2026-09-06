@@ -19,7 +19,7 @@ message turn and asserts the rendered timeline.
 from __future__ import annotations
 
 import re
-import time
+from typing import Any
 
 import httpx
 import psycopg
@@ -30,6 +30,7 @@ from shared.config import settings
 from tests.e2e._db import wait_for_status
 from tests.e2e._env import E2EEnv
 from tests.e2e.fakes.scenarios.message_flow import REPLY_TEXT
+from tests.shared.poll_until import poll_until
 
 # The unrecognized-marker red alarm copy, en + zh. The #1017 user-visible
 # warning; its ABSENCE is the semantic assertion of every marker case.
@@ -62,17 +63,25 @@ def test_message_flow_renders_full_turn_without_unrecognized_marker(e2e_env: E2E
     # can still be in flight — poll the timeline (same pattern as fork test).
     wait_for_status(agent_id, AgentStatus.IDLING.value)
 
-    deadline = time.monotonic() + 90.0
-    while True:
+    items: list[dict[str, Any]] = []
+
+    def scripted_reply_reached_timeline() -> tuple[bool, object]:
+        nonlocal items
         items = httpx.get(
             f"{e2e_env.gateway_url}/api/agents/{agent_id}/timeline?limit=1000", timeout=90.0
         ).json()["items"]
-        if (
-            any(it["kind"] == "agent_chat" and REPLY_TEXT in it["payload"] for it in items)
-            or time.monotonic() > deadline
-        ):
-            break
-        time.sleep(0.5)
+        reply_seen = any(it["kind"] == "agent_chat" and REPLY_TEXT in it["payload"] for it in items)
+        return reply_seen, {
+            "timeline_kinds": [it["kind"] for it in items],
+            "agent_chat_payloads": [it["payload"] for it in items if it["kind"] == "agent_chat"],
+        }
+
+    poll_until(
+        scripted_reply_reached_timeline,
+        timeout=90.0,
+        interval=0.5,
+        what=f"scripted reply reaches agent {agent_id} timeline",
+    )
 
     # ── REST timeline: the turn's fan-out in item_id order ──
     # The agent's boot inserts a few one-time guidance system_markers before
