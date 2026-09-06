@@ -116,6 +116,8 @@ provide an exactly-once guarantee for arbitrary code.
 If preparation or drain is abandoned while services/dependencies remain usable,
 `resume --cancel` explicitly releases that same operation and returns its saved
 cohort to ordinary lifecycle recovery. It never automatically abandons a hold.
+Cancellation is allowed only in `preparing`, `draining` or `drained`, before
+service stopping begins. It cannot bypass a partial stop or failed startup.
 After a partial service stop, finish the verified stop and use maintenance start
 before resuming. A failure during an external effect still requires inspecting
 that effect; cancelling maintenance is not a claim that replay is safe.

@@ -108,6 +108,31 @@ def test_failed_start_remains_retryable_under_hold(monkeypatch: pytest.MonkeyPat
         command._resume("local", WHEN, cancel=False)
 
 
+@pytest.mark.parametrize("value", ["stopping", "stopped", "starting", "ready"])
+def test_cancel_cannot_bypass_stop_or_start_readiness(
+    monkeypatch: pytest.MonkeyPatch, value: str
+) -> None:
+    phase(value)
+    unpause = MagicMock()
+    monkeypatch.setattr("ops.cluster_pause.unpause_local_cluster", unpause)
+    with pytest.raises(RuntimeError, match="cancel cannot bypass"):
+        command._resume("local", WHEN, cancel=True)
+    unpause.assert_not_called()
+    assert command._hold("local", WHEN).phase == value
+
+
+@pytest.mark.parametrize("value", ["preparing", "draining", "drained"])
+def test_cancel_can_abandon_drain_before_service_stop(
+    monkeypatch: pytest.MonkeyPatch, value: str
+) -> None:
+    phase(value)
+    unpause = MagicMock()
+    monkeypatch.setattr("ops.cluster_pause.unpause_local_cluster", unpause)
+    command._resume("local", WHEN, cancel=True)
+    unpause.assert_called_once()
+    assert not maintenance.held()
+
+
 def test_real_parser_exposes_host_local_maintenance() -> None:
     from cli.parsers import build_parser
 

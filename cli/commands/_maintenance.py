@@ -152,6 +152,10 @@ def _resume(holder: str, at: datetime, *, cancel: bool) -> None:
     from ops.cluster_pause import unpause_local_cluster
 
     hold = _hold(holder, at)
+    if cancel and hold.phase not in ("preparing", "draining", "drained"):
+        raise RuntimeError(
+            "cancel cannot bypass a started stop; complete maintenance stop/start/resume"
+        )
     if not cancel and hold.phase != "ready":
         raise RuntimeError("resume requires maintenance start; use --cancel to abandon a drain")
     if "agent-runner" in machine_role():
