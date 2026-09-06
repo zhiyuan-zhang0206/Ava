@@ -282,6 +282,43 @@ class TestSelectPendingForDispatch:
             == []
         )
 
+    def test_wake_suppression_excludes_until_expiry(
+        self, db_conn: psycopg.Connection, pool: ConnectionPool
+    ) -> None:
+        aid = _make_idling_agent(db_conn)
+        iid = _insert_old_inbound(db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 1)
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "UPDATE agents_meta SET wake_suppressed_until = now() + interval '1 hour', "
+                "wake_suppress_reason = 'resurrect_failed' WHERE id = %s",
+                (aid,),
+            )
+        db_conn.commit()
+
+        assert (
+            select_pending_for_dispatch(
+                pool,
+                _DISPATCH_THRESHOLD_S,
+                _MAX_DISPATCH_COUNT,
+                _DISPATCH_BACKOFF_STEPS_S,
+            )
+            == []
+        )
+
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "UPDATE agents_meta SET wake_suppressed_until = now() - interval '1 second' "
+                "WHERE id = %s",
+                (aid,),
+            )
+        db_conn.commit()
+        assert select_pending_for_dispatch(
+            pool,
+            _DISPATCH_THRESHOLD_S,
+            _MAX_DISPATCH_COUNT,
+            _DISPATCH_BACKOFF_STEPS_S,
+        ) == [(iid, aid)]
+
 
 class TestDispatchWakes:
     def test_republishes_wake_per_stale_row(
@@ -1089,8 +1126,181 @@ class TestSelectTerminatedOwnersWithPending:
 
         assert select_terminated_owners_with_pending(pool) == []
 
+    def test_wake_suppression_excludes_until_expiry(
+        self, db_conn: psycopg.Connection, pool: ConnectionPool
+    ) -> None:
+        from services.delivery_watchdog.daemon import select_terminated_owners_with_pending
+
+        aid = _make_terminated_agent(db_conn)
+        iid = insert_inbound_message(db_conn, aid, "queued during suppression", source="agent:1")
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "UPDATE agents_meta SET wake_suppressed_until = now() + interval '1 hour', "
+                "wake_suppress_reason = 'resurrect_failed' WHERE id = %s",
+                (aid,),
+            )
+        db_conn.commit()
+
+        assert select_terminated_owners_with_pending(pool) == []
+
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "UPDATE agents_meta SET wake_suppressed_until = now() - interval '1 second' "
+                "WHERE id = %s",
+                (aid,),
+            )
+        db_conn.commit()
+        assert select_terminated_owners_with_pending(pool) == [(aid, iid)]
+
 
 class TestResurrectRetry:
+    async def test_repeated_terminated_results_suppress_and_emit_once(
+        self,
+        db_conn: psycopg.Connection,
+        pool: ConnectionPool,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        import asyncio
+
+        import ops.ops_lifecycle as ol
+        import services.delivery_watchdog.daemon as dw
+        from shared.agents import AgentStatus
+
+        aid = _make_terminated_agent(db_conn)
+        trigger_id = insert_inbound_message(db_conn, aid, "hello?", source="user")
+        calls: list[int] = []
+
+        async def _still_terminated(
+            agent_id: int,
+            *,
+            trigger_inbound_id: int,
+            trigger_inbound_kind: str,
+        ) -> AgentStatus:
+            assert trigger_inbound_id == trigger_id
+            assert trigger_inbound_kind == "chat"
+            calls.append(agent_id)
+            return AgentStatus.TERMINATED
+
+        emitted: list[tuple[tuple[object, ...], dict[str, object]]] = []
+
+        def _record_emit(*args: object, **kwargs: object) -> None:
+            emitted.append((args, kwargs))
+
+        monkeypatch.setattr(ol, "resurrect_if_terminated", _still_terminated)
+        monkeypatch.setattr(dw.telemetry, "emit", _record_emit)
+        monkeypatch.setattr(settings.daemon, "delivery_watchdog_resurrect_fail_before_suppress", 5)
+        monkeypatch.setattr(settings.daemon, "delivery_watchdog_suppress_base_seconds", 1800.0)
+        monkeypatch.setattr(settings.daemon, "delivery_watchdog_suppress_max_seconds", 86400.0)
+        dw._resurrect_failures.clear()
+        dw._resurrect_suppressions.clear()
+        dw._last_resurrect_attempt.clear()
+        dw._resurrect_tasks.clear()
+
+        for _ in range(5):
+            await dw._resurrect_one(pool, aid, trigger_id)
+
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "SELECT wake_suppress_reason, "
+                "EXTRACT(EPOCH FROM (wake_suppressed_until - clock_timestamp())) "
+                "FROM agents_meta WHERE id = %s",
+                (aid,),
+            )
+            row = cur.fetchone()
+        assert row is not None
+        assert row[0] == "resurrect_failed"
+        assert 1795.0 < float(row[1]) <= 1800.0
+        assert calls == [aid] * 5
+        assert len(emitted) == 1
+        assert emitted[0][0] == ("telemetry", "delivery_wake_suppressed")
+        assert emitted[0][1]["agent_id"] == aid
+        assert emitted[0][1]["attributes"] == {
+            "consecutive_failures": 5,
+            "suppress_seconds": 1800.0,
+            "suppress_count": 1,
+            "reason": "resurrect_failed",
+        }
+
+        # The durable selector, not the in-memory cooldown, prevents later
+        # watchdog ticks from scheduling another attempt during suppression.
+        dw._last_resurrect_attempt.clear()
+        dw._maybe_spawn_resurrects(pool, max_per_tick=5)
+        await asyncio.sleep(0)
+        assert dw._resurrect_tasks == {}
+        assert calls == [aid] * 5
+
+    async def test_success_resets_failure_and_suppression_escalation_counts(
+        self, db_conn: psycopg.Connection, pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import ops.ops_lifecycle as ol
+        import services.delivery_watchdog.daemon as dw
+        from shared.agents import AgentStatus
+
+        aid = _make_terminated_agent(db_conn)
+        trigger_id = insert_inbound_message(db_conn, aid, "hello?", source="user")
+
+        async def _resurrected(*_args: object, **_kwargs: object) -> AgentStatus:
+            return AgentStatus.IDLING
+
+        monkeypatch.setattr(ol, "resurrect_if_terminated", _resurrected)
+        dw._resurrect_failures[aid] = 4
+        dw._resurrect_suppressions[aid] = 3
+
+        await dw._resurrect_one(pool, aid, trigger_id)
+
+        assert aid not in dw._resurrect_failures
+        assert aid not in dw._resurrect_suppressions
+
+    async def test_expired_suppression_escalates_again_with_bounded_backoff(
+        self,
+        db_conn: psycopg.Connection,
+        pool: ConnectionPool,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        import ops.ops_lifecycle as ol
+        import services.delivery_watchdog.daemon as dw
+        from services.delivery_watchdog.daemon import select_terminated_owners_with_pending
+        from shared.agents import AgentStatus
+
+        aid = _make_terminated_agent(db_conn)
+        trigger_id = insert_inbound_message(db_conn, aid, "hello?", source="user")
+
+        async def _still_terminated(*_args: object, **_kwargs: object) -> AgentStatus:
+            return AgentStatus.TERMINATED
+
+        def _ignore_emit(*_args: object, **_kwargs: object) -> None:
+            pass
+
+        monkeypatch.setattr(ol, "resurrect_if_terminated", _still_terminated)
+        monkeypatch.setattr(dw.telemetry, "emit", _ignore_emit)
+        monkeypatch.setattr(settings.daemon, "delivery_watchdog_resurrect_fail_before_suppress", 1)
+        monkeypatch.setattr(settings.daemon, "delivery_watchdog_suppress_base_seconds", 10.0)
+        monkeypatch.setattr(settings.daemon, "delivery_watchdog_suppress_max_seconds", 15.0)
+        dw._resurrect_failures.clear()
+        dw._resurrect_suppressions.clear()
+
+        await dw._resurrect_one(pool, aid, trigger_id)
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "UPDATE agents_meta SET wake_suppressed_until = now() - interval '1 second' "
+                "WHERE id = %s",
+                (aid,),
+            )
+        db_conn.commit()
+        assert select_terminated_owners_with_pending(pool) == [(aid, trigger_id)]
+
+        await dw._resurrect_one(pool, aid, trigger_id)
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "SELECT EXTRACT(EPOCH FROM (wake_suppressed_until - clock_timestamp())) "
+                "FROM agents_meta WHERE id = %s",
+                (aid,),
+            )
+            row = cur.fetchone()
+        assert row is not None
+        assert 14.0 < float(row[0]) <= 15.0
+        assert dw._resurrect_suppressions[aid] == 2
+
     async def test_failed_resurrect_cleans_in_flight_and_enters_cooldown(
         self, db_conn: psycopg.Connection, pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -1346,7 +1556,7 @@ class TestResurrectRetry:
         monkeypatch.setattr(ol, "resurrect_if_terminated", fake)
         dw._last_resurrect_attempt.clear()
 
-        await dw._resurrect_one(aid, trigger_id)
+        await dw._resurrect_one(pool, aid, trigger_id)
 
         assert calls == [(aid, trigger_id, "chat")]
         assert dw._last_resurrect_attempt[aid] >= time.monotonic() - 5

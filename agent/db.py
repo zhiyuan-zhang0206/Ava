@@ -314,6 +314,13 @@ async def claim_inbound_batch(
             (agent_id, runtime_owned),
         )
         rows = await cur.fetchall()
+        if rows:
+            await cur.execute(
+                "UPDATE agents_meta "
+                "SET wake_suppressed_until=NULL, wake_suppress_reason=NULL "
+                "WHERE id=%s AND wake_suppressed_until IS NOT NULL",
+                (agent_id,),
+            )
     rows.sort(key=lambda r: r[6])  # created_at FIFO (index follows SELECT column count)
     return [ClaimedInbound.from_row(r) for r in rows]
 
