@@ -23,6 +23,7 @@ Kept alive via `services/healthchecks/heartbeat.py` (the gateway watchdog).
 import asyncio
 import contextlib
 import logging
+import math
 import os
 import sys
 import time
@@ -95,6 +96,23 @@ _MAX_CHECKINS_PER_STEP = 25
 # streak=1 -> next check-in after 2 idle windows; the cap bounds the longest
 # silence (~5.3h at a 5min idle threshold).
 _BACKOFF_MAX_WINDOWS = 64
+# Platform-side nudge backoff (B7): a no-op nudge — no real inbound arrived and
+# the agent did not pause — raises the agent's persisted backoff level, which
+# stretches the reminder floor to heartbeat_interval * 2^level, capped at 24h.
+# The level lives in agents_meta.heartbeat_backoff_level (survives daemon
+# restarts); the consecutive-no-op counter is in-process only, so a restart
+# recounts from zero. Real inbound or a pause resets the level to 0.
+_BACKOFF_MAX_INTERVAL_S = 86400
+_BACKOFF_MAX_LEVEL = 16  # schema CHECK bound; the raise-time cap is tighter
+
+
+def _backoff_max_level(interval_s: float) -> int:
+    """Highest backoff level whose stretched interval stays under the 24h cap."""
+    if interval_s <= 0:
+        return 0
+    return max(0, math.floor(math.log2(_BACKOFF_MAX_INTERVAL_S / interval_s)))
+
+
 # An idle_minutes reading this much below the value recorded at check-in time
 # counts as "the check-in produced a turn" (slack absorbs clock skew).
 _ADVANCE_SLACK_MINUTES = 0.5
@@ -183,7 +201,8 @@ def _select_idle_agents_needing_heartbeat(
             "  heartbeat_paused_until, "
             "  last_active_at "
             "  + make_interval(secs => %s + COALESCE(mod(id, NULLIF(%s, 0)::int), 0)), "
-            "  last_heartbeat_at + make_interval(secs => %s)"
+            "  last_heartbeat_at "
+            "  + make_interval(secs => LEAST(%s * power(2.0, heartbeat_backoff_level), 86400))"
             ") "
             "AND NOT EXISTS ("
             "  SELECT 1 FROM inbound_messages im "
@@ -201,7 +220,8 @@ def _select_idle_agents_needing_heartbeat(
             "  heartbeat_paused_until, "
             "  last_active_at "
             "  + make_interval(secs => %s + COALESCE(mod(id, NULLIF(%s, 0)::int), 0)), "
-            "  last_heartbeat_at + make_interval(secs => %s)"
+            "  last_heartbeat_at "
+            "  + make_interval(secs => LEAST(%s * power(2.0, heartbeat_backoff_level), 86400))"
             ") "
             "AND NOT EXISTS ("
             "  SELECT 1 FROM inbound_messages im "
@@ -280,9 +300,12 @@ def _reconcile_checkin_outcomes(
     pending_checkin: dict[int, float],
     failure_streak: dict[int, int],
     idle_threshold_s: float,
+    noop_streak: dict[int, int] | None = None,
+    heartbeat_interval_s: float = 300.0,
+    noop_nudges_threshold: int | None = None,
 ) -> None:
     """Judge the previous cycle's check-ins and detect recovery, updating the
-    per-agent failure streak.
+    per-agent failure streak and the B7 no-op-nudge streak.
 
     For every tracked agent (a check-in sent last cycle, or already on a
     streak):
@@ -295,17 +318,39 @@ def _reconcile_checkin_outcomes(
       spaced by `2^streak` idle windows);
     - the agent left the daemon's lanes (terminated / missing) → stop tracking.
 
+    B7 (platform-side nudge backoff) rides the same pass: a sent check-in that
+    produced neither a real inbound nor an agent pause increments `noop_streak`;
+    at `noop_nudges_threshold` consecutive no-ops the persisted
+    `heartbeat_backoff_level` is raised by one (the reminder floor stretches to
+    `heartbeat_interval * 2^level`, capped at 24h) and the counter restarts. A
+    real inbound or a pause clears the streak (the level reset itself is the
+    `_sweep_backoff_resets` pass — it also covers agents this daemon is not
+    tracking).
+
     `pending_checkin` maps agent_id → the `idle_minutes` observed when its
     check-in was sent; comparing `idle_minutes` readings (both derived from the
     DB clock) avoids wall-clock drift between this process and Postgres.
     """
-    tracked = set(pending_checkin) | set(failure_streak)
+    noop_streak = {} if noop_streak is None else noop_streak
+    threshold = (
+        settings.daemon.heartbeat_backoff_consecutive_noop_nudges
+        if noop_nudges_threshold is None
+        else noop_nudges_threshold
+    )
+    tracked = set(pending_checkin) | set(failure_streak) | set(noop_streak)
     if not tracked:
         return
     with pool.connection() as conn, conn.cursor() as cur:
         for agent_id in tracked:
             cur.execute(
-                "SELECT status, EXTRACT(EPOCH FROM (now() - last_active_at)) / 60.0 "
+                "SELECT status, "
+                "EXTRACT(EPOCH FROM (now() - last_active_at)) / 60.0, "
+                "heartbeat_backoff_level, "
+                "(heartbeat_paused_until IS NOT NULL AND heartbeat_paused_until > now()), "
+                "(last_heartbeat_at IS NOT NULL AND EXISTS ("
+                "  SELECT 1 FROM inbound_messages im "
+                "  WHERE im.agent_id = agents_meta.id AND im.kind <> 'heartbeat' "
+                "    AND im.created_at > agents_meta.last_heartbeat_at)) "
                 "FROM agents_meta WHERE id = %s",
                 (agent_id,),
             )
@@ -314,8 +359,12 @@ def _reconcile_checkin_outcomes(
             if row is None or row[0] not in ("idling", "running"):
                 # Gone, or parked outside the daemon's lanes — stop tracking.
                 failure_streak.pop(agent_id, None)
+                noop_streak.pop(agent_id, None)
                 continue
             idle_minutes = row[1]
+            level = int(row[2] or 0)
+            paused = bool(row[3])
+            real_inbound = bool(row[4])
             advanced = (
                 sent_at is not None
                 and idle_minutes is not None
@@ -330,6 +379,79 @@ def _reconcile_checkin_outcomes(
                 failure_streak[agent_id] = failure_streak.get(agent_id, 0) + 1
             # Not pending and not recovered: keep the existing streak — the
             # backoff deadline just extends by another window.
+
+            # B7 no-op nudge streak — independent of the failure streak above.
+            if paused or real_inbound:
+                noop_streak.pop(agent_id, None)
+            elif sent_at is not None:
+                noop_streak[agent_id] = noop_streak.get(agent_id, 0) + 1
+                if noop_streak[agent_id] >= threshold:
+                    noop_streak[agent_id] = 0
+                    new_level = min(level + 1, _backoff_max_level(heartbeat_interval_s))
+                    if new_level > level:
+                        _raise_backoff_level(pool, agent_id, new_level, heartbeat_interval_s)
+
+
+def _raise_backoff_level(
+    pool: ConnectionPool, agent_id: int, new_level: int, interval_s: float
+) -> None:
+    """Persist a raised B7 backoff level and emit its event."""
+    stretched_s = int(min(interval_s * (2**new_level), _BACKOFF_MAX_INTERVAL_S))
+    with write_transaction(pool) as conn, conn.cursor() as cur:
+        cur.execute(
+            "UPDATE agents_meta SET heartbeat_backoff_level = %s WHERE id = %s",
+            (new_level, agent_id),
+        )
+        telemetry.emit(
+            "telemetry",
+            "heartbeat_backoff_raised",
+            level="info",
+            agent_id=agent_id,
+            source="system",
+            attributes={
+                "level": new_level,
+                "interval_seconds": stretched_s,
+            },
+        )
+
+
+def _sweep_backoff_resets(pool: ConnectionPool) -> None:
+    """Reset B7 backoff levels whose agent received real inbound or paused.
+
+    Covers agents the daemon is not currently tracking (a fresh resurrect /
+    first real message after a restart), so a stretched reminder interval never
+    outlives the engagement that should end it.
+    """
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT id, heartbeat_backoff_level, "
+            "(heartbeat_paused_until IS NOT NULL AND heartbeat_paused_until > now()), "
+            "(last_heartbeat_at IS NOT NULL AND EXISTS ("
+            "  SELECT 1 FROM inbound_messages im "
+            "  WHERE im.agent_id = agents_meta.id AND im.kind <> 'heartbeat' "
+            "    AND im.created_at > agents_meta.last_heartbeat_at)) "
+            "FROM agents_meta WHERE heartbeat_backoff_level > 0"
+        )
+        rows = cur.fetchall()
+    for agent_id, level, paused, real_inbound in rows:
+        if not paused and not real_inbound:
+            continue
+        with write_transaction(pool) as conn, conn.cursor() as cur:
+            cur.execute(
+                "UPDATE agents_meta SET heartbeat_backoff_level = 0 WHERE id = %s",
+                (agent_id,),
+            )
+            telemetry.emit(
+                "telemetry",
+                "heartbeat_backoff_reset",
+                level="info",
+                agent_id=agent_id,
+                source="system",
+                attributes={
+                    "previous_level": int(level),
+                    "reason": "paused" if paused else "real_inbound",
+                },
+            )
 
 
 def _backoff_deadlines(failure_streak: dict[int, int], idle_threshold_s: float) -> dict[int, float]:
@@ -409,14 +531,20 @@ async def _dispatch_loop(pool: ConnectionPool, liveness: Liveness) -> None:
     # daemon restart re-probes everyone at the normal cadence.
     pending_checkin: dict[int, float] = {}
     failure_streak: dict[int, int] = {}
+    # B7 no-op-nudge counter: in-process only; the raised level itself persists
+    # in agents_meta.heartbeat_backoff_level.
+    noop_streak: dict[int, int] = {}
     while True:
         try:
             await _sleep_with_liveness(liveness, step)
+            _sweep_backoff_resets(pool)
             _reconcile_checkin_outcomes(
                 pool,
                 pending_checkin=pending_checkin,
                 failure_streak=failure_streak,
                 idle_threshold_s=idle_threshold,
+                noop_streak=noop_streak,
+                heartbeat_interval_s=heartbeat_interval,
             )
             rows = _select_idle_agents_needing_heartbeat(
                 pool,

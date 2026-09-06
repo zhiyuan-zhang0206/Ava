@@ -369,6 +369,27 @@ class HeartbeatNudged(TypedDict):
     idle_minutes: int
 
 
+class HeartbeatBackoffRaised(TypedDict):
+    """`heartbeat_backoff_raised` payload — services/heartbeat/daemon.py.
+
+    Emitted when N consecutive no-op nudges raise an agent's platform-side
+    nudge-backoff level (B7).
+    """
+
+    level: int
+    interval_seconds: int
+
+
+class HeartbeatBackoffReset(TypedDict):
+    """`heartbeat_backoff_reset` payload — services/heartbeat/daemon.py.
+
+    Emitted when a real inbound or an agent pause resets the level to 0 (B7).
+    """
+
+    previous_level: int
+    reason: str
+
+
 class TaskReminderDigest(TypedDict):
     """`task_reminder_digest` payload — task-maintenance daemon."""
 
