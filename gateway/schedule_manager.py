@@ -35,6 +35,12 @@ stale-session reap) and is closed as ``interrupted`` — a NULL row is
 legitimate only while the schedule has a live session, so the run drawer
 shows a permanent in-progress "…" only for a run that is actually running
 (QA P2-2).
+
+An enabled schedule that is not completed and has no live session for more
+than two hours emits one WARNING and one ``schedule_stalled`` telemetry event.
+Seeing the session live again rearms the alert for a later outage; breaker-
+tripped ``error`` rows remain eligible because their silence is the failure the
+alert exists to expose.
 """
 
 from __future__ import annotations
@@ -50,10 +56,12 @@ from typing import Any
 
 from psycopg_pool import ConnectionPool
 
+from shared import telemetry
 from shared.cluster import session_name
 from shared.config import settings
 from shared.db_transaction import write_transaction
 from shared.paths import ava_home, prod_service_checkout_error
+from shared.schedule_timing import SCHEDULE_STALL_ALERT_AFTER_S
 from shared.session_backend import get_shell_backend
 from shared.session_env import forward_env_dict
 
@@ -73,6 +81,7 @@ _BACKOFF_BASE_S = 2.0
 _BACKOFF_CAP_S = 60.0
 _STABLE_S = 60.0
 _PTY_FAILURE_LOG_INTERVAL_S = 60.0
+_STALL_ALERT_AFTER_S = SCHEDULE_STALL_ALERT_AFTER_S
 
 # Repo root (gateway/.. == <repo>/) — the cwd the runner launches from, so its
 # relative `.venv/bin/python` resolves into this checkout's venv.
@@ -100,6 +109,11 @@ class ScheduleManager:
         # A D-state survivor can resist each five-second reconcile forever; log
         # the first failure and periodic summaries rather than flooding ERROR.
         self._reap_failure_logs: dict[int, tuple[float, int]] = {}
+        # Missing-session alert state is owned by this manager's reconcile
+        # thread under _lock. A live observation clears both maps, rearming a
+        # later outage without sharing mutable state across execution flows.
+        self._not_live_since: dict[int, float] = {}
+        self._stall_alerted: set[int] = set()
         # Serializes the reconcile tick against API-driven control ops (restart),
         # which run on separate threads via asyncio.to_thread and both touch
         # backend + _backoff.
@@ -191,6 +205,7 @@ class ScheduleManager:
             if schedule_id in known
         }
         now = time.monotonic()
+        self._report_stalled_schedules(status, live, now)
         from shared import start_serving
 
         # A launch can find a same-name session after liveness initially said it
@@ -244,6 +259,50 @@ class ScheduleManager:
         # orphan (disabled/terminal schedules, backing-off relaunches, legacy
         # rows from before this sweep existed).
         self._close_orphan_runs()
+
+    def _report_stalled_schedules(
+        self,
+        status_by_id: dict[int, str],
+        live_ids: set[int],
+        now: float,
+    ) -> None:
+        """Alert once when an active schedule has been sessionless for 2h."""
+        eligible = {
+            schedule_id for schedule_id, status in status_by_id.items() if status != "completed"
+        }
+        missing = eligible - live_ids
+        self._not_live_since = {
+            schedule_id: since
+            for schedule_id, since in self._not_live_since.items()
+            if schedule_id in missing
+        }
+        self._stall_alerted.intersection_update(missing)
+
+        for schedule_id in missing:
+            if schedule_id not in self._not_live_since:
+                self._not_live_since[schedule_id] = now
+            stalled_seconds = now - self._not_live_since[schedule_id]
+            if stalled_seconds <= _STALL_ALERT_AFTER_S or schedule_id in self._stall_alerted:
+                continue
+            rounded_seconds = round(stalled_seconds, 3)
+            status = status_by_id[schedule_id]
+            _log.warning(
+                "schedule %s has had no live session for %.1fs (status=%s)",
+                schedule_id,
+                rounded_seconds,
+                status,
+            )
+            telemetry.emit(
+                "telemetry",
+                event_name="schedule_stalled",
+                level="warning",
+                attributes={
+                    "schedule_id": schedule_id,
+                    "status": status,
+                    "stalled_seconds": rounded_seconds,
+                },
+            )
+            self._stall_alerted.add(schedule_id)
 
     def _live_ids(self) -> set[int]:
         from shared.pty_sessions.allocation_freeze import current_generation

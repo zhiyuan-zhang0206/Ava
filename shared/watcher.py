@@ -31,6 +31,7 @@ __all__ = [
     "next_fire",
     "normalize_end_time",
     "normalize_when",
+    "previous_fire",
     "validate_cron",
     "validate_timezone",
 ]
@@ -119,6 +120,38 @@ def next_fire(
     if nxt.tzinfo is None:
         nxt = nxt.replace(tzinfo=compute_tz)
     return nxt.astimezone(_dt.UTC)
+
+
+def previous_fire(
+    expr: str,
+    before: _dt.datetime,
+    timezone: str | None = None,
+) -> _dt.datetime:
+    """Return the cron boundary strictly before ``before`` in UTC.
+
+    ``timezone`` has the same meaning as in :func:`next_fire`: croniter
+    interprets the expression in that IANA wall clock, while callers receive
+    one timezone-aware UTC instant. A naive ``before`` is interpreted as UTC,
+    matching ``next_fire``'s existing compatibility behavior.
+
+    Raises:
+        CronExprError: invalid cron expression.
+    """
+    base = before
+    if base.tzinfo is None:
+        base = base.replace(tzinfo=_dt.UTC)
+
+    compute_tz = ZoneInfo(timezone) if timezone else _dt.UTC
+    base_in_tz = base.astimezone(compute_tz)
+
+    try:
+        it = croniter(expr, base_in_tz)
+    except (ValueError, KeyError) as exc:
+        raise CronExprError(f"invalid cron expression: {expr!r}") from exc
+    previous: _dt.datetime = it.get_prev(_dt.datetime)
+    if previous.tzinfo is None:
+        previous = previous.replace(tzinfo=compute_tz)
+    return previous.astimezone(_dt.UTC)
 
 
 # `when` normalization

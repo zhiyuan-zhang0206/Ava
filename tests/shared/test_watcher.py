@@ -12,6 +12,7 @@ from shared.watcher import (
     next_fire,
     normalize_end_time,
     normalize_when,
+    previous_fire,
     validate_cron,
 )
 
@@ -65,6 +66,35 @@ def test_next_fire_tolerance_timezone() -> None:
         tolerance=dt.timedelta(minutes=2),
     )
     assert nxt_tol == dt.datetime(2026, 1, 1, 21, 0, tzinfo=dt.UTC)
+
+
+def test_previous_fire_returns_prior_utc_boundary() -> None:
+    before = dt.datetime(2026, 1, 1, 13, 30, tzinfo=dt.UTC)
+
+    previous = previous_fire("0 13 * * *", before=before, timezone="UTC")
+
+    assert previous == dt.datetime(2026, 1, 1, 13, 0, tzinfo=dt.UTC)
+
+
+@pytest.mark.parametrize(
+    ("expr", "base", "timezone"),
+    [
+        ("0 4 * * *", dt.datetime(2026, 9, 6, 12, 0, tzinfo=dt.UTC), "Asia/Shanghai"),
+        (
+            "30 2 * * *",
+            dt.datetime(2026, 3, 8, 12, 0, tzinfo=dt.UTC),
+            "America/Los_Angeles",
+        ),
+    ],
+)
+def test_previous_and_next_fire_are_inverse_across_timezones(
+    expr: str, base: dt.datetime, timezone: str
+) -> None:
+    previous = previous_fire(expr, before=base, timezone=timezone)
+
+    assert next_fire(expr, after=previous, timezone=timezone) == next_fire(
+        expr, after=base, timezone=timezone
+    )
 
 
 def test_normalize_when_naive_datetime_raises() -> None:

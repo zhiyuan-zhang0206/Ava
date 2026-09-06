@@ -219,6 +219,18 @@ class WatchdogTick(TypedDict):
     last_tick_timestamp_seconds: float
 
 
+class ScheduleStalled(TypedDict):
+    """`schedule_stalled` payload — gateway/schedule_manager.py.
+
+    Emitted once after an enabled, non-completed schedule has had no live
+    session for more than two hours. A live observation rearms a later outage.
+    """
+
+    schedule_id: int
+    status: str
+    stalled_seconds: float
+
+
 class PitrRemoteInventory(TypedDict):
     """`pitr_remote_inventory` payload — retention scheduler snapshot.
 

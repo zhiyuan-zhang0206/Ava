@@ -31,6 +31,7 @@ from schedules.adversarial_eval_cases import (
     write_scenario,
 )
 from schedules.agent_status_guard import ensure_agent_status_members
+from schedules.catchup import catch_up, fire_slot_once
 
 ensure_agent_status_members(
     S,
@@ -467,21 +468,26 @@ def _record_batch_error(exc: Exception) -> Path:
     return root / "results" / "index.jsonl"
 
 
+def _fire_weekly_batch(_trigger: None) -> None:
+    try:
+        run_weekly_batch()
+    except Exception as exc:
+        index_path = _record_batch_error(exc)
+        try:
+            ensure_agent(OWNER_LABEL, _owner_prompt(index_path, "batch error"))
+        except Exception as alert_exc:
+            print(f"adversarial-eval owner alert failed: {alert_exc}")
+        print(f"adversarial-eval batch failed: {exc}")
+
+
 def main() -> None:
-    """Sleep until the next Wednesday fire, then keep serving future weeks."""
+    """Catch up missed Wednesday slots, then keep serving future weeks."""
+    catch_up([(CRON, None)], timezone=TIMEZONE, fire=_fire_weekly_batch)
     while True:
         nxt = next_fire(CRON, after=datetime.now(UTC), timezone=TIMEZONE)
         while datetime.now(UTC) < nxt:
             time.sleep(60)
-        try:
-            run_weekly_batch()
-        except Exception as exc:
-            index_path = _record_batch_error(exc)
-            try:
-                ensure_agent(OWNER_LABEL, _owner_prompt(index_path, "batch error"))
-            except Exception as alert_exc:
-                print(f"adversarial-eval owner alert failed: {alert_exc}")
-            print(f"adversarial-eval batch failed: {exc}")
+        fire_slot_once(nxt, None, fire=_fire_weekly_batch)
 
 
 if __name__ == "__main__":

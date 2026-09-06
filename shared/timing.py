@@ -40,8 +40,10 @@ WEDGED / NO_PROGRESS / LOCK_TTL / UPDATER_LEASE / SCAN_INTERVAL / ...).
 ## Adding a clock
 
 1. Define its value in its family module (`shared/boot_timing.py` for the boot
-   family, `shared/deploy_timing.py` for the deploy family) or as a settings
-   field when the operator must be able to override it.
+   family, `shared/deploy_timing.py` for the deploy family,
+   `shared/stop_timing.py` for the stop family, `shared/schedule_timing.py` for
+   the schedule-supervision family) or as a settings field when the operator
+   must be able to override it.
 2. Register it in `CLOCKS` with a one-line `doc`.
 3. Declare every ordering it participates in as a `Constraint`, with the intent
    in `doc` — if it has no neighbours, it does not belong in the lattice.
@@ -72,6 +74,7 @@ import shared.stop_timing as stop
 from shared import cluster_lock
 from shared.config import settings
 from shared.host_deploy_state import UPDATER_LEASE_TTL_S
+from shared.schedule_timing import SCHEDULE_STALL_ALERT_AFTER_S
 
 # --- restarter family: the controller scan cadence ---------------------------
 # Shared by the three restarter controllers that scan agents (respawn reaper /
@@ -80,6 +83,13 @@ from shared.host_deploy_state import UPDATER_LEASE_TTL_S
 # between renewals, so a single missed renewal (a DB hiccup) never reads as death
 # against the 600 s TTL.
 CONTROLLER_SCAN_INTERVAL_S = 30.0
+
+
+# --- schedule supervision family ---------------------------------------------
+# Value lives in shared/schedule_timing.py: the gateway's schedule manager
+# imports it from there directly, without the lattice module's agent/sandbox
+# settings reads. The NO_PROGRESS_TIMEOUT_S ordering is declared in
+# CONSTRAINTS below.
 
 
 # --- wedged family: the derivation's components ------------------------------
@@ -260,6 +270,12 @@ CLOCKS: dict[str, Clock] = {
         "restarter",
         lambda: settings.daemon.restarter_poll_interval_seconds,
         "how often the restarter checks restarting-agent rows",
+    ),
+    # --- schedule supervision family ---
+    "SCHEDULE_STALL_ALERT_AFTER_S": Clock(
+        "schedule-supervision",
+        SCHEDULE_STALL_ALERT_AFTER_S,
+        "how long an enabled non-completed schedule may remain sessionless before alerting",
     ),
     # --- updater family ---
     "UPDATER_LEASE_TTL_S": Clock(
@@ -445,6 +461,14 @@ CONSTRAINTS: list[Constraint] = [
         "CLUSTER_DISPATCH_TIMEOUT_S",
         "the detached child must publish ownership before the dispatching client "
         "can time out and invite a duplicate submission",
+    ),
+    # --- schedule supervision family ---
+    Constraint(
+        "<",
+        "NO_PROGRESS_TIMEOUT_S",
+        "SCHEDULE_STALL_ALERT_AFTER_S",
+        "the schedule-silence alert must outlive a legitimate rollout's "
+        "no-progress window, so normal stop-the-world service churn stays quiet",
     ),
     # --- agent-lease family ---
     Constraint(
