@@ -12,8 +12,8 @@ This step:
      existed lack it) and materializes `AVA_APP_PORT` into the unit `.env`
      (`derive_env` only runs at install time),
   2. registers the gate under the platform supervisor — a launchd KeepAlive
-     LaunchAgent on macOS (real supervision), a detached nohup process with a
-     pidfile on other POSIX gateways (re-ensured on every converge).
+     LaunchAgent on macOS, a user-systemd unit on Linux, and a detached process
+     only on other POSIX systems.
 
 **Step 2 replaces the job only when the desired plist actually changed.** That is
 what "survives updates BY CONSTRUCTION" costs to keep true: converge runs on every
@@ -330,7 +330,8 @@ def gate_pid_is_ours(pid: int, repo: Path) -> bool:
 
     try:
         proc = psutil.Process(pid)
-        if _GATE_DAEMON_MODULE not in " ".join(proc.cmdline()):
+        argv = proc.cmdline()
+        if argv[1:] != ["-m", _GATE_DAEMON_MODULE]:
             return False
         return Path(proc.cwd()).resolve() == repo.resolve()
     except (psutil.Error, OSError):
@@ -392,6 +393,10 @@ def ensure_gate(ctx: ConvergeCtx) -> None:
     _ensure_app_port(home)
     if sys.platform == "darwin":
         _ensure_launchd(home, repo)
+    elif sys.platform == "linux":
+        from cli.commands._gate_systemd import ensure
+
+        ensure(home, repo, _gate_python(), _gate_content_hash())
     else:
         _ensure_detached(home, repo)
 
@@ -409,7 +414,7 @@ class GateStatus(NamedTuple):
     is liveness-only by property of the endpoint.
 
     `supervised` is the other half — whether this cluster's own supervisor still
-    holds the gate (the launchd label on macOS, the pidfile elsewhere). The two
+    holds the gate (the launchd label on macOS, the user-systemd unit on Linux). The two
     fail independently and neither implies the other: a crash-looping gate is
     supervised and dark, and a gate whose job was booted out but whose process
     survives is serving with nothing left to restart it.
@@ -479,6 +484,12 @@ def probe_gate(home: Path | None = None) -> GateStatus:
     if sys.platform == "darwin":
         label = gate_label(target)
         return GateStatus(entry, app_port(), serving, _job_loaded(label), f"launchd job {label}")
+    if sys.platform == "linux":
+        from cli.commands._gate_systemd import supervised, unit_name
+
+        return GateStatus(
+            entry, app_port(), serving, supervised(target), f"systemd user unit {unit_name(target)}"
+        )
     pidfile = target / "run" / "gate.pid"
     return GateStatus(entry, app_port(), serving, _pidfile_alive(pidfile), f"pidfile {pidfile}")
 
@@ -540,6 +551,12 @@ def unregister_gate(home: Path | None = None) -> None:
         # test can never boot out the operator's real job (`tests/cli/conftest.py`).
         _launchctl("bootout", f"gui/{os.getuid()}/{gate_label(target)}")
         _plist_path(target).unlink(missing_ok=True)
+    elif sys.platform == "linux":
+        from cli.commands._gate_systemd import _stop_legacy, stop
+        from shared.paths import repo_root
+
+        stop(target, remove=True)
+        _stop_legacy(target, repo_root())
     else:
         import contextlib
 

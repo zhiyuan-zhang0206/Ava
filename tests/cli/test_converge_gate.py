@@ -512,3 +512,35 @@ def test_ensure_detached_launches_when_the_pidfile_is_a_recycled_pid(
 
     assert launched and "services.gate.daemon" in launched[0]
     assert (home / "run" / "gate.pid").read_text() == "31337"
+
+
+def test_linux_gate_requires_real_supervision(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A pidfile cannot provide the Linux gate's crash/restart contract."""
+    monkeypatch.setattr(cg.sys, "platform", "linux")
+    monkeypatch.setattr(cg, "_pidfile_alive", lambda _: True)  # pyright: ignore[reportUnknownArgumentType]
+    status = cg.probe_gate(tmp_path)
+    assert "systemd" in status.supervisor
+    assert not status.supervised
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [["python", "-m", "services.gate.daemon_other"], ["sh", "-c", "echo services.gate.daemon"]],
+)
+def test_gate_pid_rejects_module_substrings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, argv: list[str]
+) -> None:
+    import psutil
+
+    class Proc:
+        def __init__(self, _pid: int) -> None: ...
+        def cmdline(self) -> list[str]:
+            return argv
+
+        def cwd(self) -> str:
+            return str(tmp_path)
+
+    monkeypatch.setattr(psutil, "Process", Proc)
+    assert not cg.gate_pid_is_ours(4242, tmp_path)

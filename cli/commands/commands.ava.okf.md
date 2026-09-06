@@ -29,6 +29,7 @@ Two kinds of module live here, distinguished by filename:
   (step-table aggregation and execution) / `_converge_spec` (the step contract) /
   `_converge_steps` (early host and data-plane wiring) / `_converge_os_jobs`
   (the OS-scheduled jobs) / `_converge_skills` / `_converge_firewall` (idempotent host wiring) /
+  `_converge_gate` / `_gate_systemd` (per-home launchd or Linux user-systemd gate),
   `_converge_legacy_permission_watcher` (one-shot cleanup of the removed
   permission-prompt watcher),
   `_update_git` /
@@ -45,6 +46,12 @@ it runs as a step of `ava start` / `ava update`, so any restart crossing a
 schema change catches the DB up on its own.
 
 ## Notes
+
+- The fleet UI gate stays outside service-session teardown. Linux uses a
+  per-home user-systemd unit with crash restart; unchanged active units survive
+  updates, while source-hash changes replace them after a completed stop.
+  Full stop and destroy use that same home identity. See
+  [Linux gate supervision](../../conventions/linux-gate-supervision.md).
 
 - `agent_timeline.py` exposes the existing timeline API as `ava agents timeline`
   and its exact `context` alias. `impersonation.py` manages explicit external
