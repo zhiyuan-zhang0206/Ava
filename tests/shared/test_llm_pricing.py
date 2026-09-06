@@ -304,10 +304,11 @@ def test_parse_catalog_rejects_unknown_schema_version() -> None:
         ("gemini-3.5-flash", 1.5 + 9.0),
         # 1M input selects Gemini's documented >200K tier.
         ("gemini-3.1-pro-preview", 4.0 + 18.0),
-        ("gpt-5.6-sol", 4.0 + 20.0),
-        ("gpt-6-astra", 10.0 + 50.0),
-        ("gpt-5.6-terra", 2.0 + 12.0),
-        ("gpt-5.6-luna", 0.20 + 1.20),
+        # 1M input selects the gpt >272K tier (2x input / 1.5x output).
+        ("gpt-5.6-sol", 8.0 + 30.0),
+        ("gpt-6-astra", 20.0 + 75.0),
+        ("gpt-5.6-terra", 4.0 + 18.0),
+        ("gpt-5.6-luna", 0.40 + 1.80),
         ("mimo-v2.5-pro", 0.435 + 0.87),
         ("mimo-v2.5-pro-ultraspeed", 1.305 + 2.61),
     ],
@@ -318,8 +319,9 @@ def test_cost_usd_priced_models(model: str, expected: float, gemini_archive_cata
 
 def test_cost_usd_cache_read_discount() -> None:
     """A fully-cached input bills at the cache-read rate, not the miss rate:
-    gpt-5.6-sol in=1M all cached, out=0 -> 1M * 0.40/M = $0.40 (promo)."""
-    assert cost_usd("gpt-5.6-sol", _M, 0, _M) == pytest.approx(0.4)  # pyright: ignore[reportUnknownMemberType]
+    gpt-5.6-sol in=1M all cached, out=0 -> the 1M input selects the >272K
+    tier, whose cached rate is 0.80/M -> $0.80 (promo tier2)."""
+    assert cost_usd("gpt-5.6-sol", _M, 0, _M) == pytest.approx(0.8)  # pyright: ignore[reportUnknownMemberType]
     # mimo-v2.5-pro: ~120x cheaper cache hit (0.0036/M) vs miss (0.435/M).
     assert cost_usd("mimo-v2.5-pro", _M, 0, _M) == pytest.approx(0.0036)  # pyright: ignore[reportUnknownMemberType]
 
@@ -687,3 +689,33 @@ def test_quote_rejects_impossible_token_usage(tok_in: int, tok_out: int, tok_cac
 def test_rates_at_rejects_a_negative_tier_input() -> None:
     with pytest.raises(ValueError, match="input_tokens"):
         rates_at("gemini-3.1-pro-preview", input_tokens=-1)
+
+
+@pytest.mark.parametrize(
+    ("model", "tier1", "tier2"),
+    [
+        ("gpt-6-astra", (10.0, 1.0, 50.0), (20.0, 2.0, 75.0)),
+        ("gpt-5.6-sol", (4.0, 0.4, 20.0), (8.0, 0.8, 30.0)),
+        ("gpt-5.6-terra", (2.0, 0.2, 12.0), (4.0, 0.4, 18.0)),
+        ("gpt-5.6-luna", (0.2, 0.02, 1.2), (0.4, 0.04, 1.8)),
+        ("gpt-5.5", (5.0, 0.5, 30.0), (10.0, 1.0, 45.0)),
+    ],
+)
+def test_gpt_272k_tier_boundary(
+    model: str, tier1: tuple[float, float, float], tier2: tuple[float, float, float]
+) -> None:
+    """Official gpt >272K rule: 2x input and cache, 1.5x output, full request —
+    the boundary is the documented decimal 272K (272,000), like the gemini
+    200K precedent."""
+    base = rates_at(model, input_tokens=272_000)
+    over = rates_at(model, input_tokens=272_001)
+    assert base is not None and over is not None
+    assert base.as_tuple() == pytest.approx(tier1)  # pyright: ignore[reportUnknownMemberType]
+    assert over.as_tuple() == pytest.approx(tier2)  # pyright: ignore[reportUnknownMemberType]
+
+
+def test_gpt54_mini_has_no_272k_tier() -> None:
+    """gpt-5.4-mini's official page carries no >272K rule — flat only."""
+    flat = rates_at("gpt-5.4-mini", input_tokens=1_000_000)
+    assert flat is not None
+    assert flat.as_tuple() == pytest.approx((0.75, 0.075, 4.5))  # pyright: ignore[reportUnknownMemberType]
