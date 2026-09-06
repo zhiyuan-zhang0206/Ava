@@ -36,6 +36,11 @@ def _add_maintenance_parser(sub: argparse._SubParsersAction[argparse.ArgumentPar
             )
         if verb in ("stop", "stop-data-plane"):
             command.add_argument(
+                "--keep-terminals",
+                action="store_true",
+                help="preserve terminals; operator must separately verify their business work has stopped",
+            )
+            command.add_argument(
                 "--gateway-last",
                 action="store_true",
                 help="operator assertion that all remote units were verified stopped; does not probe them",

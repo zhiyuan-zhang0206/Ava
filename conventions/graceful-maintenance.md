@@ -29,8 +29,17 @@ runtimes are refused. Clean unowned idle intent is preserved without inventing a
 restart or termination; this is not evidence that every legacy process is gone.
 
 Persistent shells, schedules, watcher PTYs and their hosts need their own
-completed-work boundary. The strict stop refuses live terminal resources;
-it neither kills nor promises to serialize/replay them. Independently managed
+completed-work boundary. By default, strict stop refuses live terminal resources;
+it neither kills nor promises to serialize/replay them. When terminals must
+remain open, `stop --keep-terminals` and `stop-data-plane --keep-terminals`
+explicitly assert that the operator has separately verified their business
+work has stopped. The commands preserve those terminals, including Windows
+SDK shell and schedule records in the shared service namespace. The flag does
+not inspect terminal activity, freeze input or prove that a PTY cannot write
+to the old data plane. Stop active scripts and periodic writers at their own
+safe boundary before taking the final snapshot; an idle shell may stay open.
+Drain receipts, ops quiescence, exact service identities and normal exit checks
+remain required. Independently managed
 Gate, permission helper, Redis bridge, native LGTM, OS watchdog/autostart and
 retention jobs are outside the service-backend proof. Inventory their exact
 home/PID identities and normal-stop behavior separately. Do not substitute a

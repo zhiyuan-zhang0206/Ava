@@ -108,3 +108,51 @@ def test_windows_terminal_filter_does_not_mistake_services_for_shells(
     )
     with pytest.raises(RuntimeError, match="will not kill or replay"):
         stop.require_no_terminals()
+
+
+def test_keep_windows_terminals_excludes_them_from_every_service_stop_scan(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from cli.commands import _maintenance_stop as stop
+
+    backend = WinprocSessionBackend()
+    terminals = ["ava-agent-123-shell-4", "ava-schedule-7", "ava-agent-123-shell-5-old"]
+    services = ["ava-agent-host", "ava-schedule-indexer"]
+    names = [*services, *terminals]
+    for index, name in enumerate(names):
+        SessionRecord(900000 + index, 1.0, "fixture", str(tmp_path), 1.0).write(
+            tmp_path / "sessions" / f"{name}.json"
+        )
+    monkeypatch.setattr(stop, "run_dir", lambda: tmp_path)
+    monkeypatch.setattr(stop, "get_backend", lambda: backend)
+    monkeypatch.setattr(stop, "get_shell_backend", lambda: backend)
+    monkeypatch.setattr(backend, "list_sessions", names.copy)
+    assert stop.service_names(backend) == sorted(names)
+    with pytest.raises(RuntimeError, match="will not kill or replay"):
+        stop.stop_services(1)
+
+    def live(_self: stop.OwnedProcess) -> bool:
+        return True
+
+    def capture(_identity: stop.OwnedProcess) -> set[stop.OwnedProcess]:
+        return set()
+
+    def groups(_records: dict[str, SessionRecord]) -> tuple[int, ...]:
+        return ()
+
+    monkeypatch.setattr(stop.OwnedProcess, "live", live)
+    monkeypatch.setattr(stop, "capture_tree", capture)
+    monkeypatch.setattr(stop, "_capture_groups", groups)
+    signalled: list[str] = []
+
+    def signal(name: str, *, expected: SessionRecord, timeout: float) -> bool:
+        assert name in services and timeout > 0
+        assert expected == SessionRecord.read(tmp_path / "sessions" / f"{name}.json")
+        signalled.append(name)
+        names.remove(name)
+        return True
+
+    monkeypatch.setattr(backend, "graceful_signal", signal)
+    assert stop.stop_services(1, keep_terminals=True) == sorted(services)
+    assert sorted(signalled) == sorted(services)
+    assert names == terminals

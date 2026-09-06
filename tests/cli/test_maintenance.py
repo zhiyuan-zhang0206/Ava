@@ -37,7 +37,8 @@ def test_stop_failure_retains_generation_and_retry_is_explicit(
 ) -> None:
     phase("drained")
 
-    def timeout(_timeout: float) -> list[str]:
+    def timeout(_timeout: float, *, keep_terminals: bool = False) -> list[str]:
+        assert not keep_terminals
         raise TimeoutError("owned process still alive")
 
     monkeypatch.setattr(command, "stop_services", timeout)
@@ -152,3 +153,73 @@ def test_real_parser_exposes_host_local_maintenance() -> None:
     assert parsed.maintenance_cmd == "drain"
     assert parsed.operation == "local"
     assert parsed.timeout == 3
+
+
+@pytest.mark.parametrize("verb", ["stop", "stop-data-plane"])
+@pytest.mark.parametrize("keep", [False, True])
+def test_keep_terminals_is_explicit_at_both_stop_entrypoints(
+    verb: str, keep: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from cli.parsers import build_parser
+
+    action = MagicMock()
+    monkeypatch.setattr(command, "_stop" if verb == "stop" else "_stop_data", action)
+    args = build_parser().parse_args(
+        ["maintenance", verb, "--operation", "local", "--acquired-at", WHEN.isoformat()]
+        + (["--keep-terminals"] if keep else [])
+    )
+    assert command.run(args) == 0
+    action.assert_called_once_with("local", WHEN, 300, gateway_last=False, keep_terminals=keep)
+
+
+def test_keep_terminals_does_not_skip_drain_or_ops_checks(monkeypatch: pytest.MonkeyPatch) -> None:
+    phase("drained")
+    stop = MagicMock()
+    monkeypatch.setattr(command, "stop_services", stop)
+    verify = MagicMock(side_effect=RuntimeError("drain incomplete"))
+    monkeypatch.setattr(command.maintenance_cohort, "verify_drained", verify)
+    with pytest.raises(RuntimeError, match="drain incomplete"):
+        command._stop("local", WHEN, 2, gateway_last=False, keep_terminals=True)
+    stop.assert_not_called()
+    verify.side_effect = None
+    monkeypatch.setattr(command, "ops_quiescent", MagicMock(side_effect=TimeoutError("busy ops")))
+    with pytest.raises(TimeoutError, match="busy ops"):
+        command._stop("local", WHEN, 2, gateway_last=False, keep_terminals=True)
+    stop.assert_not_called()
+    assert command._hold("local", WHEN).phase == "stopping"
+
+
+def test_data_plane_keep_still_requires_all_services_stopped(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    phase("stopped")
+    monkeypatch.setattr(command, "machine_role", lambda: frozenset({"gateway"}))
+    monkeypatch.setattr(
+        "shared.session_backend.get_backend", lambda: MagicMock(list_sessions=lambda: ["ava-ops"])
+    )
+    shutdown = MagicMock()
+    monkeypatch.setattr(command, "stop_data_plane", shutdown)
+    with pytest.raises(RuntimeError, match="services are still running"):
+        command._stop_data("local", WHEN, 2, gateway_last=True, keep_terminals=True)
+    shutdown.assert_not_called()
+
+
+@pytest.mark.parametrize("keep", [False, True])
+def test_data_plane_terminal_assertion_only_bypasses_terminal_guard(
+    keep: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    phase("stopped")
+    monkeypatch.setattr(command, "machine_role", lambda: frozenset({"gateway"}))
+    monkeypatch.setattr("shared.session_backend.get_backend", lambda: MagicMock(list_sessions=list))
+    terminals = MagicMock(side_effect=RuntimeError("live terminal"))
+    shutdown = MagicMock(return_value=[])
+    monkeypatch.setattr(command, "require_no_terminals", terminals)
+    monkeypatch.setattr(command, "stop_data_plane", shutdown)
+    if keep:
+        command._stop_data("local", WHEN, 2, gateway_last=True, keep_terminals=True)
+        terminals.assert_not_called()
+        shutdown.assert_called_once_with(2)
+    else:
+        with pytest.raises(RuntimeError, match="live terminal"):
+            command._stop_data("local", WHEN, 2, gateway_last=True)
+        shutdown.assert_not_called()
