@@ -2,7 +2,7 @@
 
 import subprocess
 import sys
-from unittest.mock import Mock
+from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
 
 import psutil
@@ -51,6 +51,37 @@ async def test_hosted_incarnation_survives_idle_and_next_turn(
         aops_pool, agent_id, "host-test", owner, expected_from="idling"
     )
     assert second == first
+
+
+async def test_hosted_status_changes_publish_agent_updated(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    publish = AsyncMock()
+    monkeypatch.setattr("agent.hosted_ownership.publish_agent_updated", publish)
+    agent_id, owner = _agent(db_conn), uuid4()
+
+    incarnation = await admit_hosted_runtime(
+        aops_pool, agent_id, "host-test", owner, expected_from="idling"
+    )
+    assert incarnation is not None
+    publish.assert_awaited_once_with(aops_pool, agent_id)
+
+    publish.reset_mock()
+    assert await settle_hosted_runtime(aops_pool, incarnation)
+    publish.assert_awaited_once_with(aops_pool, agent_id)
+
+    incarnation = await admit_hosted_runtime(
+        aops_pool, agent_id, "host-test", owner, expected_from="idling"
+    )
+    assert incarnation is not None
+    insert_inbound_message(db_conn, agent_id, "", "user", "terminate")
+    publish.reset_mock()
+    with bind_turn_identity(agent_id, incarnation=incarnation):
+        await claim_inbound_batch(aops_pool, agent_id)
+        assert await apply_hosted_lifecycle(aops_pool, incarnation) == "terminate"
+    publish.assert_awaited_once_with(aops_pool, agent_id)
 
 
 async def test_hosted_restart_releases_before_new_incarnation(

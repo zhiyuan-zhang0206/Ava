@@ -63,25 +63,26 @@ async def apply_hosted_lifecycle(
         command = await cursor.fetchone()
         if command is None:
             return None
-        if command[0] == "restart":
+        lifecycle_kind = command[0]
+        if lifecycle_kind == "restart":
             await conn.execute(
                 "UPDATE agents_meta SET status='idling',runtime_generation=NULL,"
                 "runtime_owner=NULL,runtime_kind=NULL,lease_expires_at=NULL,"
                 "runtime_protocol_version=0 WHERE id=%s",
                 (incarnation.agent_id,),
             )
-        elif command[0] == "terminate":
+        elif lifecycle_kind == "terminate":
             await conn.execute(
                 "UPDATE agents_meta SET status='terminated',termination_source='user',"
                 "lease_expires_at=NULL,runtime_protocol_version=0 WHERE id=%s",
                 (incarnation.agent_id,),
             )
         else:
-            raise ValueError(f"not an executable lifecycle command: {command[0]}")
+            raise ValueError(f"not an executable lifecycle command: {lifecycle_kind}")
         await conn.execute(
             "UPDATE inbound_messages SET applied_at=clock_timestamp() WHERE id=%s", (row[0],)
         )
-        if command[0] == "terminate":
+        if lifecycle_kind == "terminate":
             await conn.execute(
                 "UPDATE inbound_messages SET observed_at=clock_timestamp(),status='done' "
                 "WHERE id=%s",
@@ -92,7 +93,9 @@ async def apply_hosted_lifecycle(
                 "AND lifecycle_command_id=%s",
                 (incarnation.agent_id, row[0]),
             )
-        return command[0]
+    if lifecycle_kind == "terminate":
+        await publish_agent_updated(pool, incarnation.agent_id)
+    return lifecycle_kind
 
 
 async def admit_hosted_runtime(
