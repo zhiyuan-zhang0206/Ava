@@ -127,7 +127,7 @@ export function DefaultModelPanel({ id }: { id: string }) {
           </Button>
           {current.data?.source === "config" && (
             <span
-              className="text-[11px] italic text-muted-foreground"
+              className="text-xs italic text-muted-foreground"
               data-testid="default-model-source"
             >
               no cluster choice yet — showing the .env / code default

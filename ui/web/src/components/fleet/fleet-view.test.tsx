@@ -175,6 +175,14 @@ describe("FleetView (desktop)", () => {
     expect(root.classList.contains("flex-1")).toBe(true);
   });
 
+  it("uses sans typography for Fleet chrome", () => {
+    agentsMock.mockReturnValue([]);
+    const { container } = wrap(<FleetView />);
+    const root = container.firstElementChild as HTMLElement;
+    expect(root.classList).toContain("font-sans");
+    expect(root.classList).not.toContain("font-mono");
+  });
+
   it("aligns the Agents/Tasks bar with the Inbox header (one shared height)", () => {
     agentsMock.mockReturnValue([makeAgent({ agent_id: 1 })]);
     wrap(<FleetView />);

@@ -14,7 +14,7 @@ export function PriorityBadge({ priority, muted }: { priority: OpenNotice["prior
   return (
     <span
       className={cn(
-        "shrink-0 rounded px-1 text-[10px] font-semibold text-white",
+        "shrink-0 rounded px-1 font-mono text-2xs font-semibold text-white",
         muted ? "bg-muted-foreground/40" : PRIORITY_BG[priority],
       )}
     >
@@ -128,17 +128,19 @@ export function NoticeListRow({
       >
         <PriorityBadge priority={priority} muted={muted} />
         {blocking && (
-          <span className="shrink-0 rounded bg-destructive/10 px-1 text-[9px] font-medium uppercase text-destructive">
+          <span className="shrink-0 rounded bg-destructive/10 px-1 text-2xs font-medium uppercase text-destructive">
             {t("blocking")}
           </span>
         )}
         <span className={cn("truncate text-xs", MIN_W_0, FLEX_1)}>{title}</span>
-        <span className={cn("max-w-[45%] items-center gap-1.5 font-mono text-[10px] text-muted-foreground", FLEX, MIN_W_0)}>
+        <span className={cn("max-w-[45%] items-center gap-1.5 font-sans text-2xs text-muted-foreground", FLEX, MIN_W_0)}>
           <AgentStatusDot status={agentStatus} />
           <span className={cn("truncate", MIN_W_0)}>
             {agentLabel}
-            {createdAt ? ` · ${formatRelativeTime(createdAt)}` : ""}
           </span>
+          {createdAt ? (
+            <span className="shrink-0 font-mono">· {formatRelativeTime(createdAt)}</span>
+          ) : null}
         </span>
       </button>
       {agentPage && <AgentPageLink page={agentPage} className="shrink-0 px-2.5" />}
@@ -165,12 +167,16 @@ export function AgentContextHeader({
     <div className="mb-3">
       <div className={cn("items-center gap-2", FLEX)}>
         <AgentStatusDot status={agentStatus} />
-        <span className={cn("truncate font-mono text-[10px] text-muted-foreground", MIN_W_0)}>
+        <span className={cn("truncate font-sans text-2xs text-muted-foreground", MIN_W_0)}>
           {agentLabel}
-          {createdAt ? ` · ${formatRelativeTime(createdAt)}` : ""}
         </span>
+        {createdAt ? (
+          <span className="shrink-0 font-mono text-2xs text-muted-foreground">
+            · {formatRelativeTime(createdAt)}
+          </span>
+        ) : null}
         {agentPage && (
-          <AgentPageLink page={agentPage} showLabel className={cn("ml-auto text-[10px]", MIN_W_0)} />
+          <AgentPageLink page={agentPage} showLabel className={cn("ml-auto text-2xs", MIN_W_0)} />
         )}
       </div>
     </div>

@@ -462,7 +462,7 @@ export default function ConfigPage() {
 
       {/* Sticky tag-filter bar — stays pinned while the long field list scrolls. */}
       <div className={cn("sticky top-0 z-10 flex-wrap items-center gap-1.5 border-b border-border bg-background py-2", FLEX)}>
-        <span className="mr-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+        <span className="mr-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
           Filter
         </span>
         {CONFIG_FILTERS.map((f) => (
@@ -489,7 +489,7 @@ export default function ConfigPage() {
       </div>
 
       {isRemote && (
-        <p className="text-[11px] italic text-muted-foreground">
+        <p className="text-xs italic text-muted-foreground">
           Editing {selection}&apos;s host fields; cluster fields are read-only here — edit
           them on the Cluster view.
         </p>
@@ -636,7 +636,7 @@ function MachineSelector({
 // Small neutral tag badge on a config row.
 function TagBadge({ children }: { children: React.ReactNode }) {
   return (
-    <span className="rounded border border-border px-1 text-[11px] text-muted-foreground">
+    <span className="rounded border border-border px-1 text-xs text-muted-foreground">
       {children}
     </span>
   );
@@ -700,7 +700,7 @@ function ConfigRow({
           {field.writable ? (
             <TagBadge>{t("runtime")}</TagBadge>
           ) : (
-            <span className="rounded border border-border bg-muted px-1 text-[11px] font-medium">
+            <span className="rounded border border-border bg-muted px-1 text-xs font-medium">
               {t("cliOnly")}
             </span>
           )}
@@ -709,12 +709,12 @@ function ConfigRow({
           {field.restart_required && <TagBadge>Startup: {field.restart_required}</TagBadge>}
           {isDeprecated(field) && <TagBadge>{t("deprecated")}</TagBadge>}
           {remoteReadOnly && (
-            <span className="text-[11px] text-muted-foreground italic">
+            <span className="text-xs text-muted-foreground italic">
               {t("editOnCluster")}
             </span>
           )}
           {!editable && field.writable && !remoteReadOnly && (
-            <span className="text-[11px] text-muted-foreground italic">
+            <span className="text-xs text-muted-foreground italic">
               {t("readOnly")}
             </span>
           )}
@@ -725,12 +725,12 @@ function ConfigRow({
           </p>
         )}
         {editable && capabilityBlocked && field.reason && (
-          <p className="text-[11px] text-muted-foreground italic" data-testid={`capability-${field.name}`}>
+          <p className="text-xs text-muted-foreground italic" data-testid={`capability-${field.name}`}>
             {field.reason}
           </p>
         )}
         {fieldError && (
-          <p className="text-[11px] text-destructive" data-testid={`error-${field.name}`}>
+          <p className="text-xs text-destructive" data-testid={`error-${field.name}`}>
             {fieldError}
           </p>
         )}
@@ -902,7 +902,7 @@ function ConfigRow({
           </>
         )}
         </div>
-        <span className="text-[11px] text-muted-foreground">Default: {defaultText}</span>
+        <span className="text-xs text-muted-foreground">Default: {defaultText}</span>
       </div>
     </div>
   );

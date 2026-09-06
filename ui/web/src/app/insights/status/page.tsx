@@ -519,11 +519,11 @@ function GatewayCard({ m, currentMachine }: { m: MachineStatus; currentMachine: 
       </div>
       <div className="grid grid-cols-2 gap-x-4 gap-y-2 px-3 py-2.5 sm:grid-cols-4">
         <div>
-          <div className="text-[11px] uppercase tracking-wide text-muted-foreground">{t("host")}</div>
+          <div className="text-xs uppercase tracking-wide text-muted-foreground">{t("host")}</div>
           <div className="mt-0.5 text-sm font-medium">
             {m.name}
             {m.is_staging && (
-              <span className="ml-1.5 rounded-sm border border-amber-500/50 px-1 text-[10px] font-normal text-amber-600 dark:text-amber-400" title={t("stagingTitle")}>
+              <span className="ml-1.5 rounded-sm border border-amber-500/50 px-1 text-2xs font-normal text-amber-600 dark:text-amber-400" title={t("stagingTitle")}>
                 {t("staging")}
               </span>
             )}
@@ -533,19 +533,19 @@ function GatewayCard({ m, currentMachine }: { m: MachineStatus; currentMachine: 
           </div>
         </div>
         <div>
-          <div className="text-[11px] uppercase tracking-wide text-muted-foreground">{t("status")}</div>
+          <div className="text-xs uppercase tracking-wide text-muted-foreground">{t("status")}</div>
           <div className="mt-0.5 text-sm font-medium">
             <StatusText m={m} runningLabel="running" />
           </div>
         </div>
         <div>
-          <div className="text-[11px] uppercase tracking-wide text-muted-foreground">{t("health")}</div>
+          <div className="text-xs uppercase tracking-wide text-muted-foreground">{t("health")}</div>
           <div className={`mt-0.5 text-sm font-medium ${TONE_TEXT[health.tone]}`} title={t("daemonHealth", { restarter: daemonMark(m.restarter_online), watchdog: daemonMark(m.watchdog_online) })}>
             {health.label === "none" ? "—" : t(health.label)}
           </div>
         </div>
         <div>
-          <div className="text-[11px] uppercase tracking-wide text-muted-foreground">{t("upSince")}</div>
+          <div className="text-xs uppercase tracking-wide text-muted-foreground">{t("upSince")}</div>
           <div className="mt-0.5 text-sm font-medium">{upSince}</div>
         </div>
       </div>
@@ -576,7 +576,7 @@ function AgentRunnersCard({ runners }: { runners: MachineStatus[] }) {
               <TableCell className="font-medium">
                 {m.name}
                 {m.is_staging && (
-                  <span className="ml-1.5 rounded-sm border border-amber-500/50 px-1 text-[10px] font-normal text-amber-600 dark:text-amber-400" title={t("stagingTitle")}>
+                  <span className="ml-1.5 rounded-sm border border-amber-500/50 px-1 text-2xs font-normal text-amber-600 dark:text-amber-400" title={t("stagingTitle")}>
                     {t("staging")}
                   </span>
                 )}

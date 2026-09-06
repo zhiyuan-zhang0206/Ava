@@ -211,7 +211,7 @@ export default function ShellMonitorPage({
 
         {/* Lines control */}
         <div className={cn("shrink-0 items-center gap-1.5", FLEX)}>
-          <label htmlFor="shell-lines" className="font-mono text-[10px] text-muted-foreground">
+          <label htmlFor="shell-lines" className="font-sans text-2xs text-muted-foreground">
             Lines
           </label>
           <input

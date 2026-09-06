@@ -319,7 +319,7 @@ function MemoryNotePanel({ node }: { node: MemoryGraphNode }) {
             {node.tags.map((tag) => (
               <span
                 key={tag}
-                className="rounded border border-border px-1.5 py-0.5 text-[11px]"
+                className="rounded border border-border px-1.5 py-0.5 text-xs"
               >
                 {tag}
               </span>
@@ -709,7 +709,7 @@ const MemoryForceGraph = memo(function MemoryForceGraph({
                     y={-r - 6}
                     textAnchor="middle"
                     dominantBaseline="central"
-                    className={`fill-foreground text-[7px] select-none ${
+                    className={`fill-foreground text-2xs select-none ${
                       isFolder ? "font-semibold" : "font-medium"
                     }`}
                     style={{ pointerEvents: "none" }}
@@ -733,14 +733,14 @@ const MemoryForceGraph = memo(function MemoryForceGraph({
           reset={reset}
           groups={FORCE_GROUPS}
         />
-        <span className="rounded border border-border bg-background/80 px-2 py-0.5 text-[10px] text-muted-foreground backdrop-blur tabular-nums">
+        <span className="rounded border border-border bg-background/80 px-2 py-0.5 text-2xs text-muted-foreground backdrop-blur tabular-nums">
           <span className="tabular-nums">{t("noteCount", { count: noteCount })}</span>
           {" · "}
           <span className="tabular-nums">{t("folderCount", { count: folderCount })}</span>
           {" · "}
           <span className="tabular-nums">{t("edgeCount", { count: graph.edges.length })}</span>
         </span>
-        <span className="ml-2 hidden items-center gap-3 rounded border border-border bg-background/80 px-2 py-0.5 text-[10px] text-muted-foreground backdrop-blur md:flex">
+        <span className="ml-2 hidden items-center gap-3 rounded border border-border bg-background/80 px-2 py-0.5 text-2xs text-muted-foreground backdrop-blur md:flex">
           <span className={cn("items-center gap-1", FLEX)}>
             <svg width="18" height="4" aria-hidden="true">
               <line x1="0" y1="2" x2="18" y2="2" stroke="currentColor" strokeOpacity="0.35" strokeWidth="1" />
@@ -760,7 +760,7 @@ const MemoryForceGraph = memo(function MemoryForceGraph({
       <div className={cn("pointer-events-auto absolute right-3 top-3 gap-0.5", FLEX, FLEX_COL)}>
         <button
           type="button"
-          className={cn("size-6 items-center justify-center rounded border border-border bg-background/80 text-[10px] text-muted-foreground backdrop-blur hover:bg-sidebar-accent hover:text-foreground", FLEX)}
+          className={cn("size-6 items-center justify-center rounded border border-border bg-background/80 text-2xs text-muted-foreground backdrop-blur hover:bg-sidebar-accent hover:text-foreground", FLEX)}
           aria-label={t("resetZoom")}
           title={t("resetZoom")}
           onClick={resetZoom}

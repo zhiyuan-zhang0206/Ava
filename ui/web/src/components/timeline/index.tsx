@@ -210,7 +210,7 @@ function CompactHistoryDivider({ rank }: { readonly rank: number }) {
       data-testid="compact-history-divider"
       data-segment-rank={rank}
       aria-live="off"
-      className={cn("items-center gap-2 py-1 text-[11px] text-muted-foreground/70", FLEX)}
+      className={cn("items-center gap-2 py-1 text-xs text-muted-foreground/70", FLEX)}
     >
       <span aria-hidden="true" className={cn("h-px bg-border/60", FLEX_1)} />
       <span aria-hidden="true" className="shrink-0">↑</span>
@@ -910,7 +910,7 @@ export function TimelineView({
           it does not touch scrollTop itself, so it is inert to the sticky
           controller and the touch bounce-tolerance zones in lib/sticky.ts. */}
       <ScrollArea
-        className="h-full text-[13px] leading-relaxed"
+        className="h-full text-sm leading-relaxed"
         viewportClassName="[overflow-anchor:none] overscroll-y-contain"
       >
         {/* BAR_CLEAR_TOP_PADDING_CLASS (52px) clears the floating

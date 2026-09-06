@@ -200,7 +200,7 @@ export const ForceControls = memo(function ForceControls({
             <button
               type="button"
               onClick={reset}
-              className="text-[10px] text-muted-foreground underline decoration-dotted hover:text-foreground"
+              className="text-2xs text-muted-foreground underline decoration-dotted hover:text-foreground"
             >
               {t("resetAll")}
             </button>
@@ -208,13 +208,13 @@ export const ForceControls = memo(function ForceControls({
           <div className={cn("gap-3", FLEX, FLEX_COL)}>
             {groups.map((group) => (
               <div key={group.label}>
-                <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">
+                <div className="mb-1.5 text-2xs font-semibold uppercase tracking-wider text-muted-foreground/60">
                   {t(group.label)}
                 </div>
                 <div className={cn("gap-2", FLEX, FLEX_COL)}>
                   {group.sliders.map((s) => (
                     <label key={s.key} className={cn("gap-0.5", FLEX, FLEX_COL)}>
-                      <span className={cn("items-center justify-between text-[10px] text-muted-foreground", FLEX)}>
+                      <span className={cn("items-center justify-between text-2xs text-muted-foreground", FLEX)}>
                         <span>{t(s.label)}</span>
                         <span className="tabular-nums text-foreground">
                           {params[s.key] < 0.01 && params[s.key] > 0

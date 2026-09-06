@@ -25,6 +25,17 @@ describe("ContentToggle", () => {
     expect(screen.getByText("None")).toBeTruthy();
   });
 
+  it("uses the UI sans family and named small-size token", () => {
+    render(<ContentToggle />);
+    const label = screen.getByText("Details");
+    const select = screen.getByRole("combobox", { name: "Details level" });
+    for (const element of [label, select]) {
+      expect(element.classList).toContain("font-sans");
+      expect(element.classList).toContain("text-xs");
+      expect(element.classList).not.toContain("font-mono");
+    }
+  });
+
   it("defaults to 'all' selected", () => {
     render(<ContentToggle />);
     const select = screen.getByRole("combobox", { name: "Details level" });

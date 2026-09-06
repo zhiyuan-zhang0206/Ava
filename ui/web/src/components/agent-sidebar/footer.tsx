@@ -132,7 +132,7 @@ export function StatsCards({
     <div className="text-xs">
       <div className={cn("items-center justify-between border-b border-border px-3 py-2", FLEX)}>
         <div className={cn("items-center gap-1.5", FLEX)}>
-          <span className="text-[10px] tracking-wide text-muted-foreground">
+          <span className="text-2xs tracking-wide text-muted-foreground">
             {t("statistics")}
           </span>
           {fetching ? (
@@ -165,7 +165,7 @@ export function StatsCards({
           options={STATS_WINDOWS.map((h) => ({ value: String(h), label: STATS_WINDOW_LABELS[h] }))}
           onChange={(v) => onWindowChange(Number(v) as StatsWindowHours)}
           ariaLabel={t("statisticsWindow")}
-          className="bg-transparent text-[10px] text-muted-foreground hover:text-foreground rounded px-1 py-0.5 cursor-pointer focus:outline-none"
+          className="bg-transparent text-2xs text-muted-foreground hover:text-foreground rounded px-1 py-0.5 cursor-pointer focus:outline-none"
         />
       </div>
       <div className="grid grid-cols-2 gap-1 px-3 py-2">
@@ -186,7 +186,7 @@ export function StatsCards({
               title={windowMismatch && card.windowed ? card.title : undefined}
               className={cn("gap-0.5 px-2 py-1.5 rounded bg-sidebar-accent/40", FLEX, FLEX_COL)}
             >
-              <span className="text-[10px] tracking-wide text-muted-foreground">
+              <span className="text-2xs tracking-wide text-muted-foreground">
                 {card.label}
               </span>
               {firstLoad ? (
@@ -337,7 +337,7 @@ function WarningErrorCard({
       title={title}
       className={cn("gap-0.5 rounded bg-sidebar-accent/40 px-2 py-1.5", FLEX, FLEX_COL)}
     >
-      <span className="text-[10px] tracking-wide text-muted-foreground">
+      <span className="text-2xs tracking-wide text-muted-foreground">
         {t("warningsErrors")}
       </span>
       {firstLoad ? (

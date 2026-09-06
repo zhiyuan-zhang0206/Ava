@@ -20,7 +20,7 @@ export function InspectorToggle() {
       data-inspector-toggle=""
       aria-label={open ? t("closeInspector") : t("openInspector")}
       className={cn(
-        "inline-flex items-center gap-1.5 rounded border px-1.5 py-0.5 font-mono text-[11px] transition-colors select-none",
+        "inline-flex items-center gap-1.5 rounded border px-1.5 py-0.5 font-sans text-xs transition-colors select-none",
         open
           ? "border-border bg-accent text-accent-foreground"
           : "border-transparent text-muted-foreground/50 hover:border-border hover:text-muted-foreground",

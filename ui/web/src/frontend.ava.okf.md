@@ -18,7 +18,7 @@ Ava's web user interface — Next.js 16 (App Router) + React 19 + Tailwind CSS 4
 | UI | React 19 |
 | Styling | Tailwind CSS 4 |
 | Component library | shadcn/ui (Radix primitives) |
-| Font | Inter + Geist Mono |
+| Font | Inter for UI chrome + Geist Mono for technical content |
 | Theme | next-themes (class strategy, follow system) |
 | Server data | TanStack React Query |
 | Real-time comms | EventSource (SSE) |
@@ -70,6 +70,7 @@ Ava's web user interface — Next.js 16 (App Router) + React 19 + Tailwind CSS 4
 - [[frontend-state.ava.okf.md|State management]] — three mechanisms division of labor + per-thread timeline cache + sticky controller
 - [[ui/web/src/frontend-data-flow/frontend-data-flow.ava.okf.md|Data flow]] — dual SSE Provider architecture + hook directory
 - [[frontend-components.ava.okf.md|Components]] — chat view / Fleet view / settings page components
+- [[frontend-typography.ava.okf.md|Typography]] — family boundary, named size scale, and audited deviations
 
 ## Entry points
 

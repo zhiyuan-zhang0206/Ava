@@ -5,7 +5,7 @@
 // expanded, non-partial card; fork additionally attaches to the last agent
 // message. The shared backdrop / hover-reveal / opacity transition lives on
 // MessageCard — these components render only the button content, so they
-// stay simple inline-light controls (font-mono, muted, hover-tint).
+// stay simple inline-light controls (muted, hover-tint).
 
 import { Check, Copy, GitBranch } from "lucide-react";
 import { useTranslations } from "next-intl";

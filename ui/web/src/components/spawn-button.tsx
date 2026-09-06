@@ -195,7 +195,7 @@ export function SpawnButton({ onSpawn, variant }: Props) {
             <ul className="py-1 max-h-[320px] overflow-y-auto">
               {modelGroups.map(([provider, models]) => (
                 <Fragment key={provider}>
-                  <li className="px-3 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/70 first:pt-1">
+                  <li className="px-3 pt-2 pb-1 text-2xs font-semibold uppercase tracking-wide text-muted-foreground/70 first:pt-1">
                     {providerLabel(provider)}
                   </li>
                   {models.map((m) => {

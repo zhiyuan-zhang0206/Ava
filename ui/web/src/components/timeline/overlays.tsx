@@ -30,7 +30,7 @@ export function LoadingOlderBadge({ loadingOlder }: { loadingOlder: boolean }) {
         "absolute top-2 left-1/2 -translate-x-1/2 z-10 pointer-events-none",
         "items-center gap-1.5 px-2.5 py-1 rounded-full",
         "bg-background border border-border shadow-sm",
-        "text-[11px] text-muted-foreground",
+        "text-xs text-muted-foreground",
         "transition-opacity duration-200",
         loadingOlder ? "opacity-100" : "opacity-0",
         FLEX

@@ -128,7 +128,7 @@ export function PerModelPanel({
           ))}
         </select>
         {resolved.data?.registered === false && (
-          <span className="text-[11px] italic text-muted-foreground" data-testid="per-model-unregistered">
+          <span className="text-xs italic text-muted-foreground" data-testid="per-model-unregistered">
             {t("notInRegistry")}
           </span>
         )}
@@ -177,19 +177,19 @@ function PerModelRow({
             {fieldLabel(field.env_var)}
           </button>
           <span
-            className="rounded border border-dashed border-border px-1 text-[11px] text-muted-foreground/80"
+            className="rounded border border-dashed border-border px-1 text-xs text-muted-foreground/80"
             data-testid={`per-model-source-${field.name}`}
           >
             {SOURCE_LABEL[field.source]}
           </span>
           {field.per_agent && (
-            <span className="rounded border border-border px-1 text-[11px] text-muted-foreground">
+            <span className="rounded border border-border px-1 text-xs text-muted-foreground">
               per-agent
             </span>
           )}
         </div>
         {shadowed.length > 0 && (
-          <p className="text-[11px] text-muted-foreground" data-testid={`per-model-shadowed-${field.name}`}>
+          <p className="text-xs text-muted-foreground" data-testid={`per-model-shadowed-${field.name}`}>
             shadows {shadowed.join(", ")}
           </p>
         )}

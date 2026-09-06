@@ -184,10 +184,10 @@ export function GraphView({
         <p className="line-clamp-2 break-words text-xs font-semibold leading-snug text-popover-foreground">
           {node.label ?? t("unlabeledAgent")}
         </p>
-        <p className="mt-0.5 text-[10px] tabular-nums text-muted-foreground">
+        <p className="mt-0.5 font-mono text-2xs tabular-nums text-muted-foreground">
           {t("agent", { id: node.id })}
         </p>
-        <div className="mt-2 space-y-1 text-[11px]">
+        <div className="mt-2 space-y-1 text-xs">
           <p className={cn("items-center gap-1.5", FLEX)}>
             <span
               className={cn("size-2 rounded-full bg-current", STATUS_TEXT[node.status as GraphDisplayStatus])}
@@ -283,14 +283,14 @@ export function GraphView({
             options={STATS_WINDOWS.map((h) => ({ value: String(h), label: STATS_WINDOW_LABELS[h] }))}
             onChange={(v) => setWindowHours(Number(v) as StatsWindowHours)}
             ariaLabel={t("window")}
-            className="cursor-pointer rounded border border-border bg-background/80 px-1.5 py-0.5 text-[10px] text-muted-foreground backdrop-blur hover:text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+            className="cursor-pointer rounded border border-border bg-background/80 px-1.5 py-0.5 text-2xs text-muted-foreground backdrop-blur hover:text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
           />
         }
       />
       {graph.stale ? (
         <p
           role="status"
-          className="pointer-events-none absolute right-3 top-3 inline-flex items-center gap-1 rounded border border-amber-500/30 bg-background/80 px-2 py-1 text-[10px] text-amber-600 backdrop-blur dark:text-amber-400"
+          className="pointer-events-none absolute right-3 top-3 inline-flex items-center gap-1 rounded border border-amber-500/30 bg-background/80 px-2 py-1 text-2xs text-amber-600 backdrop-blur dark:text-amber-400"
         >
           <span aria-hidden className="size-1.5 rounded-full bg-amber-500" />
           {snapshotAge
@@ -300,7 +300,7 @@ export function GraphView({
       ) : graph.telemetry_stale ? (
         <p
           role="status"
-          className="pointer-events-none absolute right-3 top-3 inline-flex items-center gap-1 rounded border border-border bg-background/80 px-2 py-1 text-[10px] text-muted-foreground backdrop-blur"
+          className="pointer-events-none absolute right-3 top-3 inline-flex items-center gap-1 rounded border border-border bg-background/80 px-2 py-1 text-2xs text-muted-foreground backdrop-blur"
         >
           <span aria-hidden className="size-1.5 rounded-full bg-muted-foreground" />
           {t("telemetryDegraded")}
@@ -309,7 +309,7 @@ export function GraphView({
       {graph.truncated ? (
         <p
           role="status"
-          className="pointer-events-none absolute right-3 top-10 inline-flex items-center gap-1 rounded border border-orange-500/30 bg-background/80 px-2 py-1 text-[10px] text-orange-600 backdrop-blur dark:text-orange-400"
+          className="pointer-events-none absolute right-3 top-10 inline-flex items-center gap-1 rounded border border-orange-500/30 bg-background/80 px-2 py-1 text-2xs text-orange-600 backdrop-blur dark:text-orange-400"
         >
           <span aria-hidden className="size-1.5 rounded-full bg-orange-500" />
           {t("truncated")}
