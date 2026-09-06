@@ -864,7 +864,10 @@ def test_service_probes_no_roles_probes_nothing(monkeypatch: pytest.MonkeyPatch)
 # ─── cluster-stamped outbound alerts ─────────────────────────────────────────
 
 
-def test_notify_owner_stamps_home_label(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_notify_owner_stamps_home_label(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
     """Every ops alert carries the cluster name so the owner can tell which
     cluster is talking — a preview cluster's alert must not read like a prod
     incident. Stamping in the single send point covers every alert uniformly.
@@ -873,7 +876,6 @@ def test_notify_owner_stamps_home_label(monkeypatch: pytest.MonkeyPatch) -> None
     module attribute, so the captured `_REAL_NOTIFY_OWNER` is used to reach the
     actual send path). It POSTs to the im_bridge daemon's health-port `/send`
     RPC — stub `httpx.post` to capture the request."""
-    from pathlib import Path
 
     import httpx
 
@@ -884,7 +886,7 @@ def test_notify_owner_stamps_home_label(monkeypatch: pytest.MonkeyPatch) -> None
     monkeypatch.setattr(settings.alerts, "im_notify_enabled", True)
     monkeypatch.setattr(settings.data_plane, "cluster_secret", "test-secret")
     monkeypatch.setattr(shared.cluster, "home_label", lambda _home: ".ava-preview-42")  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr("shared.paths.ava_home", lambda: Path("/x/.ava-preview-42"))
+    monkeypatch.setattr("shared.paths.ava_home", lambda: tmp_path / ".ava-preview-42")
 
     sent: list[tuple[str, dict[str, str], dict[str, str]]] = []
 
@@ -910,13 +912,14 @@ def test_notify_owner_stamps_home_label(monkeypatch: pytest.MonkeyPatch) -> None
 
 
 def test_notify_owner_failed_send_does_not_leak_secret(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
 ) -> None:
     """A failed send must not write the cluster secret to the log. The secret
     rides in the Authorization header; httpx embeds the request (but never its
     headers) in the exception repr, so `_notify_owner` must never format the
     exception itself."""
-    from pathlib import Path
 
     import httpx
 
@@ -927,7 +930,7 @@ def test_notify_owner_failed_send_does_not_leak_secret(
     monkeypatch.setattr(settings.alerts, "im_notify_enabled", True)
     monkeypatch.setattr(settings.data_plane, "cluster_secret", secret)
     monkeypatch.setattr(shared.cluster, "home_label", lambda _home: ".ava-main")  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr("shared.paths.ava_home", lambda: Path("/x/.ava-main"))
+    monkeypatch.setattr("shared.paths.ava_home", lambda: tmp_path / ".ava-main")
 
     # A 401 from the daemon — raise_for_status() raises httpx.HTTPStatusError,
     # the path most likely to leak.
@@ -943,13 +946,14 @@ def test_notify_owner_failed_send_does_not_leak_secret(
 
 
 def test_notify_owner_im_bridge_down_does_not_raise(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
 ) -> None:
     """The alert is a side channel: when the im_bridge daemon is down the probe
     must still complete — no raise, just a stderr note naming the failure
     class. A dead bridge must never break the probe or the auto-rollback path
     it gates."""
-    from pathlib import Path
 
     import httpx
 
@@ -959,7 +963,7 @@ def test_notify_owner_im_bridge_down_does_not_raise(
     monkeypatch.setattr(settings.alerts, "im_notify_enabled", True)
     monkeypatch.setattr(settings.data_plane, "cluster_secret", "test-secret")
     monkeypatch.setattr(shared.cluster, "home_label", lambda _home: ".ava-main")  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr("shared.paths.ava_home", lambda: Path("/x/.ava-main"))
+    monkeypatch.setattr("shared.paths.ava_home", lambda: tmp_path / ".ava-main")
 
     def _post(*_a: object, **_k: object) -> None:
         raise httpx.ConnectError("connection refused")
@@ -972,12 +976,13 @@ def test_notify_owner_im_bridge_down_does_not_raise(
 
 
 def test_notify_owner_skips_when_im_notify_disabled(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
 ) -> None:
     """`AVA_OPS_ALERTS_IM_NOTIFY_ENABLED=false` silences the probe's owner
     alerts too — one master switch for every IM notification (the same flag
     the gateway's ops-alerts ingest honours). No HTTP call is made."""
-    from pathlib import Path
 
     import httpx
 
@@ -986,7 +991,7 @@ def test_notify_owner_skips_when_im_notify_disabled(
 
     monkeypatch.setattr(settings.alerts, "im_notify_enabled", False)
     monkeypatch.setattr(shared.cluster, "home_label", lambda _home: ".ava-main")  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr("shared.paths.ava_home", lambda: Path("/x/.ava-main"))
+    monkeypatch.setattr("shared.paths.ava_home", lambda: tmp_path / ".ava-main")
 
     called = False
 
@@ -1004,10 +1009,10 @@ def test_notify_owner_skips_when_im_notify_disabled(
 
 def test_notify_owner_honours_im_bridge_health_url_override(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     """`AVA_IM_BRIDGE_HEALTH_URL` (a remote host's bridge) is honoured when
     set; the loopback health port is only the fallback."""
-    from pathlib import Path
 
     import httpx
 
@@ -1018,7 +1023,7 @@ def test_notify_owner_honours_im_bridge_health_url_override(
     monkeypatch.setattr(settings.data_plane, "cluster_secret", "test-secret")
     monkeypatch.setattr(settings.services, "im_bridge_health_url", "http://10.0.0.5:9111/")
     monkeypatch.setattr(shared.cluster, "home_label", lambda _home: ".ava-main")  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr("shared.paths.ava_home", lambda: Path("/x/.ava-main"))
+    monkeypatch.setattr("shared.paths.ava_home", lambda: tmp_path / ".ava-main")
 
     sent: list[str] = []
 
@@ -1272,13 +1277,16 @@ def test_crash_loop_queries_the_current_window(monkeypatch: pytest.MonkeyPatch) 
 # ─── edge alerts → alerts ingest (W16) ──────────────────────────────────────
 
 
-def test_alert_summary_stamps_cluster_and_edge(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_alert_summary_stamps_cluster_and_edge(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
     """Every health alert carries the cluster label + the edge wording, so a
     preview cluster's alert never reads like a prod incident."""
     import shared.cluster
 
     monkeypatch.setattr(shared.cluster, "home_label", lambda _h: ".ava-preview-42")  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr("shared.paths.ava_home", lambda: Path("/x/.ava-preview-42"))
+    monkeypatch.setattr("shared.paths.ava_home", lambda: tmp_path / ".ava-preview-42")
     assert _cluster_health._alert_summary(recovered=False, message="FAIL: x") == (
         "[.ava-preview-42] [health-probe] cluster unhealthy: FAIL: x"
     )
@@ -2061,7 +2069,10 @@ def test_editable_install_no_prod_source_is_silent(
     assert _cluster_health._editable_install_failure() is None
 
 
-def test_editable_install_poisoned_pth_alerts(_prod_source: Path, tmp_path: Path) -> None:
+def test_editable_install_poisoned_pth_alerts(
+    _prod_source: Path,
+    tmp_path: Path,
+) -> None:
     """A pointer naming a worktree is the poison class — alert, listing the record."""
     worktree = tmp_path / "deleted-worktree"
     _write_editable_records(
@@ -2076,7 +2087,10 @@ def test_editable_install_poisoned_pth_alerts(_prod_source: Path, tmp_path: Path
     assert "direct_url" not in failure  # the healthy record is not noise
 
 
-def test_editable_install_poisoned_direct_url_alerts(_prod_source: Path, tmp_path: Path) -> None:
+def test_editable_install_poisoned_direct_url_alerts(
+    _prod_source: Path,
+    tmp_path: Path,
+) -> None:
     """A direct_url naming a worktree is the same poison recorded elsewhere."""
     worktree = tmp_path / "deleted-worktree"
     _write_editable_records(
