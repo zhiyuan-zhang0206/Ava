@@ -22,6 +22,7 @@ import pytest
 from shared import posixproc
 from shared.platform import IS_LINUX, IS_WINDOWS
 from shared.session_record import SessionRecord, pid_starttime_ticks
+from tests.shared.poll_until import poll_until
 from tests.shared.process_evidence import detach_evidence, detached_to_known_reaper
 
 pytestmark = pytest.mark.skipif(IS_WINDOWS, reason="posixproc is the POSIX supervisor")
@@ -42,29 +43,19 @@ def _pid(name: str) -> int:
     return rec.pid
 
 
-def _wait(predicate, timeout: float = 30.0, interval: float = 0.05) -> bool:
-    # 30s default (2026-09-03): process-lifetime waits (group kill reaping a
-    # late-spawned child, posixproc task #2249 regression test) tripped their
-    # old 5s budget under CI runner oversubscription — same failure mode the
-    # pty-sessions suite already sized for on 2026-08-09.
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if predicate():
-            return True
-        time.sleep(interval)
-    return predicate()
-
-
-def _no_new_direct_children(spawner: psutil.Process, before: set[psutil.Process]) -> bool:
-    """True when `spawner` has no direct child beyond the pre-spawn snapshot."""
+def _no_new_direct_children(
+    spawner: psutil.Process, before: set[psutil.Process]
+) -> tuple[bool, object]:
+    """(ok, state) when `spawner` has no direct child beyond the pre-spawn snapshot."""
     try:
-        return set(spawner.children()) - before == set()
+        lingering = set(spawner.children()) - before
     except psutil.NoSuchProcess:
-        return True
+        return True, "spawner gone"
+    return not lingering, [c.pid for c in lingering]
 
 
-def _no_zombie_children(spawner: psutil.Process) -> bool:
-    """True when none of `spawner`'s recursive children is a zombie.
+def _no_zombie_children(spawner: psutil.Process) -> tuple[bool, object]:
+    """(ok, state) when none of `spawner`'s recursive children is a zombie.
 
     Children that exit between the snapshot and the status read are skipped —
     a reaped child is exactly what the no-zombie assertion wants.
@@ -72,14 +63,15 @@ def _no_zombie_children(spawner: psutil.Process) -> bool:
     try:
         children = spawner.children(recursive=True)
     except psutil.NoSuchProcess:
-        return True
+        return True, "spawner gone"
+    zombies: list[int] = []
     for child in children:
         try:
             if child.status() == psutil.STATUS_ZOMBIE:
-                return False
+                zombies.append(child.pid)
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             continue
-    return True
+    return not zombies, zombies
 
 
 def _pid_gone_or_zombie(pid: int) -> bool:
@@ -113,7 +105,10 @@ def test_process_is_live_treats_zombie_as_dead() -> None:
     try:
         os.read(read_fd, 1)  # child has started its exit; parent has not waited
         proc = psutil.Process(pid)
-        assert _wait(lambda: proc.status() == psutil.STATUS_ZOMBIE)
+        poll_until(
+            lambda: proc.status() == psutil.STATUS_ZOMBIE,
+            what="forked child becomes a zombie",
+        )
         assert posixproc._process_is_live(proc) is False
         assert (
             posixproc._process_for_record(
@@ -157,8 +152,9 @@ def test_new_session_reparents_to_init_no_zombie(
         # execvp's into /bin/sleep — until then psutil reads the pre-exec
         # `python -m shared._reparent` image. Wait for the exec to land instead
         # of sampling the name once (that one-shot read flakes on a loaded runner).
-        assert _wait(lambda: child.name() == "sleep"), (
-            f"child never became sleep (name={child.name()})"
+        poll_until(
+            lambda: (child.name() == "sleep", child.name()),
+            what="child process becomes sleep",
         )
         # Init or a pre-existing ancestor subreaper adopts the detached child.
         # PID + birth guards reject an unknown/recycled adopter; the caller and
@@ -167,24 +163,35 @@ def test_new_session_reparents_to_init_no_zombie(
         # new_session's subprocess.run has already awaited; poll rather than
         # one-shot so a beat of ppid-update lag on a loaded runner can't flake it
         # (same treatment as the exec-name wait above).
-        assert _wait(
-            lambda: detached_to_known_reaper(child.pid, spawner.pid, caller_sid, ancestor_births)
-        ), f"child never detached to a known reaper: {detach_evidence(child.pid)}"
+        poll_until(
+            lambda: (
+                detached_to_known_reaper(child.pid, spawner.pid, caller_sid, ancestor_births),
+                detach_evidence(child.pid),
+            ),
+            what="child process detaches to a known reaper",
+        )
         # Each of these is a state the OS lands asynchronously (record write vs
         # /proc visibility), so read it with a bounded poll instead of sampling
         # once — a one-shot read races the update on a loaded runner.
-        assert _wait(lambda: posixproc.has_session(name) is True)
-        assert _wait(lambda: name in posixproc.list_sessions(prefix="ava-test-agent-"))
+        poll_until(
+            lambda: posixproc.has_session(name) is True,
+            what="new session is reported live",
+        )
+        poll_until(
+            lambda: name in posixproc.list_sessions(prefix="ava-test-agent-"),
+            what="new session appears in the session list",
+        )
 
         # The spawner gained no lingering direct child (the helper was reaped by
         # the internal subprocess wait), and no zombie. Same bounded-poll
-        # treatment — the assertions themselves are unchanged.
-        assert _wait(lambda: _no_new_direct_children(spawner, before_children)), (
-            f"spawner gained a lingering direct child: {set(spawner.children()) - before_children}"
+        # treatment — the success conditions themselves are unchanged.
+        poll_until(
+            lambda: _no_new_direct_children(spawner, before_children),
+            what="spawner has no lingering direct child",
         )
-        assert _wait(lambda: _no_zombie_children(spawner)), (
-            "spawner accreted a zombie; children: "
-            f"{[c.pid for c in spawner.children(recursive=True)]}"
+        poll_until(
+            lambda: _no_zombie_children(spawner),
+            what="spawner has no zombie descendants",
         )
     finally:
         posixproc.kill_session(name, graceful=False)
@@ -197,7 +204,10 @@ def test_graceful_signal_terminates(unit_home) -> None:
     _new(name, list(_SLEEP), unit_home)  # pyright: ignore[reportUnknownArgumentType]
     try:
         assert posixproc.graceful_signal(name) is True
-        assert _wait(lambda: not posixproc.has_session(name))
+        poll_until(
+            lambda: not posixproc.has_session(name),
+            what="gracefully signaled session disappears",
+        )
     finally:
         posixproc.kill_session(name, graceful=False)
 
@@ -222,13 +232,16 @@ def test_kill_session_force_kills_sigterm_ignoring_survivor(unit_home: Path) -> 
     ]
     _new(name, argv, unit_home)
     pid = _pid(name)
-    assert _wait(lambda: psutil.pid_exists(pid))
-    assert _wait(marker.exists), "child never installed SIG_IGN"
+    poll_until(lambda: psutil.pid_exists(pid), what="SIGTERM-ignoring child process appears")
+    poll_until(marker.exists, what="child installs SIG_IGN")
     ok, mode = posixproc.kill_session(name, graceful=True, timeout=0.5)
     # The child ignores SIGTERM, so the graceful signal alone cannot end it —
     # the force floor must fire, which is exactly what `forced` reports.
     assert ok is True and mode == "forced"
-    assert _wait(lambda: _pid_gone_or_zombie(pid))
+    poll_until(
+        lambda: _pid_gone_or_zombie(pid),
+        what="SIGTERM-ignoring child process exits",
+    )
     assert not posixproc._record_path(name).exists()
 
 
@@ -247,12 +260,21 @@ def test_kill_session_reaps_process_tree(unit_home) -> None:
     _new(name, argv, unit_home)  # pyright: ignore[reportUnknownArgumentType]
     parent_pid = _pid(name)
     # Give the parent a moment to spawn its child, then find it.
-    assert _wait(lambda: psutil.pid_exists(parent_pid) and psutil.Process(parent_pid).children())
+    poll_until(
+        lambda: bool(psutil.pid_exists(parent_pid) and psutil.Process(parent_pid).children()),
+        what="parent process spawns a child",
+    )
     child_pid = psutil.Process(parent_pid).children()[0].pid
 
     posixproc.kill_session(name, graceful=False)
-    assert _wait(lambda: _pid_gone_or_zombie(parent_pid))
-    assert _wait(lambda: _pid_gone_or_zombie(child_pid)), "child sleep should be reaped with tree"
+    poll_until(
+        lambda: _pid_gone_or_zombie(parent_pid),
+        what="parent process is reaped with its tree",
+    )
+    poll_until(
+        lambda: _pid_gone_or_zombie(child_pid),
+        what="child sleep is reaped with its tree",
+    )
 
 
 def test_has_session_false_when_process_gone(unit_home) -> None:
@@ -262,7 +284,10 @@ def test_has_session_false_when_process_gone(unit_home) -> None:
     posixproc.kill_session(name, graceful=False)
     # The SIGKILLed child lingers as a zombie until init reaps it — poll with a
     # zombie counted as gone instead of asserting on the one-shot pid_exists.
-    assert _wait(lambda: _pid_gone_or_zombie(pid))
+    poll_until(
+        lambda: _pid_gone_or_zombie(pid),
+        what="killed session process is gone or a zombie",
+    )
     # Record is gone after kill, so has_session is False.
     assert posixproc.has_session(name) is False
 
@@ -280,7 +305,10 @@ def test_list_sessions_reaps_dead_record(unit_home) -> None:
     # ChildProcessError on a non-child zombie.
     proc = psutil.Process(pid)
     proc.kill()
-    assert _wait(lambda: not psutil.pid_exists(pid))
+    poll_until(
+        lambda: not psutil.pid_exists(pid),
+        what="externally killed process disappears",
+    )
     assert posixproc._record_path(name).exists()
     assert posixproc.list_sessions(prefix="ava-test-agent-") == []
     assert not posixproc._record_path(name).exists()
@@ -292,7 +320,10 @@ def test_starttime_identity_survives_wall_clock_drift(unit_home: Path) -> None:
     name = "ava-test-agent-starttime-drift"
     child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(300)"])
     try:
-        assert _wait(lambda: psutil.pid_exists(child.pid))
+        poll_until(
+            lambda: psutil.pid_exists(child.pid),
+            what="start-time identity test child appears",
+        )
         starttime = pid_starttime_ticks(child.pid)
         assert starttime is not None
         rec = SessionRecord(
@@ -390,7 +421,10 @@ def test_kill_session_survivor_reports_and_keeps_record(
     argv = [sys.executable, "-c", "import time; time.sleep(300)"]
     _new(name, argv, unit_home)  # pyright: ignore[reportUnknownArgumentType]
     pid = _pid(name)
-    assert _wait(lambda: psutil.pid_exists(pid))
+    poll_until(
+        lambda: psutil.pid_exists(pid),
+        what="survivor test process appears",
+    )
 
     # Simulate a kill that achieves nothing (SIGKILL raced a D-state process,
     # or AccessDenied skipped _terminate_tree's whole body).
@@ -411,7 +445,10 @@ def test_kill_session_survivor_reports_and_keeps_record(
     monkeypatch.setattr(posixproc, "_terminate_tree", _real_terminate_tree)
     ok, _mode = posixproc.kill_session(name, graceful=False)
     assert ok is True
-    assert _wait(lambda: not psutil.pid_exists(pid))
+    poll_until(
+        lambda: not psutil.pid_exists(pid),
+        what="survivor test process disappears during cleanup",
+    )
     assert not posixproc._record_path(name).exists()
 
 
@@ -425,7 +462,10 @@ def test_kill_session_terminate_error_keeps_record(
     argv = [sys.executable, "-c", "import time; time.sleep(300)"]
     _new(name, argv, unit_home)  # pyright: ignore[reportUnknownArgumentType]
     pid = _pid(name)
-    assert _wait(lambda: psutil.pid_exists(pid))
+    poll_until(
+        lambda: psutil.pid_exists(pid),
+        what="terminate-error test process appears",
+    )
 
     def boom(*a, **k):
         raise OSError("kill failed")
@@ -440,7 +480,10 @@ def test_kill_session_terminate_error_keeps_record(
     monkeypatch.setattr(posixproc, "_terminate_tree", _real_terminate_tree)
     ok, _mode = posixproc.kill_session(name, graceful=False)
     assert ok is True
-    assert _wait(lambda: not psutil.pid_exists(pid))
+    poll_until(
+        lambda: not psutil.pid_exists(pid),
+        what="terminate-error test process disappears during cleanup",
+    )
 
 
 def test_new_session_dead_child_records_sentinel(
@@ -516,22 +559,30 @@ def test_kill_session_group_kill_reaps_late_spawned_child(
     _new(name, argv, unit_home)  # pyright: ignore[reportUnknownArgumentType]
     pid = _pid(name)
     try:
-        assert _wait(ready_file.exists), "top process never armed its SIGTERM handler"
+        poll_until(
+            ready_file.exists,
+            what="top process arms its SIGTERM handler",
+        )
         ok, mode = posixproc.kill_session(name, graceful=True, timeout=2.0)
         assert ok is True and mode == "forced"
-        assert _wait(lambda: not psutil.pid_exists(pid)), "top process must be gone"
-        assert _wait(late_file.exists), "late child never spawned"
+        poll_until(
+            lambda: not psutil.pid_exists(pid),
+            what="top process exits after the group kill",
+        )
+        poll_until(late_file.exists, what="late child pid file appears")
         late_pid = int(late_file.read_text())
         record_property("late_child_evidence", json.dumps(detach_evidence(late_pid)))
 
-        def child_exited() -> bool:
+        def child_exited() -> tuple[bool, object]:
             try:
-                return psutil.Process(late_pid).status() == psutil.STATUS_ZOMBIE
+                status = psutil.Process(late_pid).status()
             except psutil.NoSuchProcess:
-                return True
+                return True, "process gone"
+            return status == psutil.STATUS_ZOMBIE, status
 
-        assert _wait(child_exited), (
-            f"late-spawned child must exit with the group: {detach_evidence(late_pid)}"
+        poll_until(
+            child_exited,
+            what="late-spawned child exits with the process group",
         )
     finally:
         posixproc.kill_session(name, graceful=False)
@@ -553,13 +604,20 @@ def test_kill_session_group_kill_reaps_sigterm_ignoring_wrapper(
     _new(name, ["/bin/bash", "-c", "trap '' TERM; sleep 300 & wait"], unit_home)  # pyright: ignore[reportUnknownArgumentType]
     pid = _pid(name)
     try:
-        assert _wait(lambda: psutil.pid_exists(pid) and psutil.Process(pid).children())
+        poll_until(
+            lambda: bool(psutil.pid_exists(pid) and psutil.Process(pid).children()),
+            what="SIGTERM-ignoring wrapper spawns a child",
+        )
         child_pid = psutil.Process(pid).children()[0].pid
         ok, mode = posixproc.kill_session(name, graceful=True, timeout=0.5)
         assert ok is True and mode == "forced"
-        assert _wait(lambda: not psutil.pid_exists(pid))
-        assert _wait(lambda: not psutil.pid_exists(child_pid)), (
-            "wrapper's child must die with the group"
+        poll_until(
+            lambda: not psutil.pid_exists(pid),
+            what="SIGTERM-ignoring wrapper exits",
+        )
+        poll_until(
+            lambda: not psutil.pid_exists(child_pid),
+            what="wrapper child dies with the process group",
         )
     finally:
         posixproc.kill_session(name, graceful=False)
@@ -620,17 +678,24 @@ def test_kill_session_group_kill_reaps_detached_descendant(
     pid = _pid(name)
     detached_pid = -1
     try:
-        assert _wait(ready.exists)
+        poll_until(ready.exists, what="detached descendant pid file appears")
         detached_pid = int(detached_file.read_text())
-        assert _wait(lambda: psutil.pid_exists(detached_pid))
+        poll_until(
+            lambda: psutil.pid_exists(detached_pid),
+            what="detached descendant appears",
+        )
         # The descendant must really be outside the session's group, or the
         # test proves nothing (the group signal would cover it).
         assert os.getpgid(detached_pid) != os.getpgid(pid)
         ok, mode = posixproc.kill_session(name, graceful=True, timeout=1.0)
         assert ok is True and mode == "forced"  # the detached survivor forces the hard kill
-        assert _wait(lambda: not psutil.pid_exists(pid))
-        assert _wait(lambda: not psutil.pid_exists(detached_pid)), (
-            "detached descendant must die with the session"
+        poll_until(
+            lambda: not psutil.pid_exists(pid),
+            what="top session process exits",
+        )
+        poll_until(
+            lambda: not psutil.pid_exists(detached_pid),
+            what="detached descendant dies with the session",
         )
     finally:
         posixproc.kill_session(name, graceful=False)
