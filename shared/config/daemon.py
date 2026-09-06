@@ -277,6 +277,18 @@ class DaemonSettings(EnvSettings):
             "scope": "cluster-pinned",
         },
     )
+
+    heartbeat_backoff_consecutive_noop_nudges: int = Field(
+        default=3,
+        alias="AVA_HEARTBEAT_BACKOFF_CONSECUTIVE_NOOP_NUDGES",
+        description="Platform-side nudge backoff (B7): consecutive heartbeat nudges that produce no real inbound and no agent pause raise the agent's backoff level, stretching the reminder interval by 2^level (cap 24h). Real inbound or a pause resets it.",
+        json_schema_extra={
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
     delivery_watchdog_enabled: bool = Field(
         default=True,
         alias="AVA_DELIVERY_WATCHDOG_ENABLED",

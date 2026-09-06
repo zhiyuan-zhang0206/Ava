@@ -24,6 +24,7 @@ from services.heartbeat.daemon import (
     _reconcile_checkin_outcomes,
     _select_idle_agents_needing_heartbeat,
     _send_heartbeat_checkin,
+    _sweep_backoff_resets,
 )
 from shared import telemetry
 from shared.config import settings
@@ -593,3 +594,220 @@ class TestConsecutiveFailureBackoff:
         assert d1[1] - time.time() == pytest.approx(2 * _THRESHOLD_S, abs=1.0)  # pyright: ignore[reportUnknownMemberType]
         assert d2[1] - d1[1] == pytest.approx(2 * _THRESHOLD_S, abs=1.0)  # pyright: ignore[reportUnknownMemberType]
         assert d10[1] - d2[1] == pytest.approx((_BACKOFF_MAX_WINDOWS - 4) * _THRESHOLD_S, abs=1.0)  # pyright: ignore[reportUnknownMemberType]
+
+
+def _mirror_event(agent_id: int, event_name: str) -> dict | None:
+    """The latest mirror line for (agent, event), or None while the drain
+    thread has not landed it."""
+    import json
+    from datetime import UTC, datetime
+
+    from shared.paths import logs_dir
+
+    day = datetime.now(UTC).strftime("%Y%m%d")
+    path = logs_dir() / f"events-{day}.jsonl"
+    if not path.exists():
+        return None
+    for line in reversed(path.read_text(encoding="utf-8").splitlines()):
+        if not line.strip():
+            continue
+        try:
+            obj = json.loads(line)
+        except ValueError:
+            continue
+        if obj.get("event_name") == event_name and obj.get("agent_id") == agent_id:
+            return obj
+    return None
+
+
+def _poll_mirror(agent_id: int, event_name: str, timeout_s: float = 2.0) -> dict | None:
+    deadline = time.monotonic() + timeout_s
+    ev = None
+    while time.monotonic() < deadline:
+        telemetry.flush()
+        ev = _mirror_event(agent_id, event_name)
+        if ev is not None:
+            break
+        time.sleep(0.05)
+    return ev
+
+
+class TestNudgeBackoffB7:
+    """Platform-side nudge backoff: consecutive no-op nudges stretch the
+    reminder floor by 2^level (cap 24h); real inbound or a pause resets."""
+
+    def _set_level(self, db_conn: psycopg.Connection, aid: int, level: int) -> None:
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "UPDATE agents_meta SET heartbeat_backoff_level = %s WHERE id = %s",
+                (level, aid),
+            )
+        db_conn.commit()
+
+    def test_select_stretches_reminder_floor_by_level(
+        self, pool: ConnectionPool, db_conn: psycopg.Connection
+    ) -> None:
+        """last_heartbeat_at 10 min ago is due at the default 5 min cadence
+        but not at level 2 (5 min * 4 = 20 min)."""
+        aid = _make_idle(db_conn, status_changed_s_ago=400)
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "UPDATE agents_meta SET last_heartbeat_at = now() - make_interval(secs => 600) "
+                "WHERE id = %s",
+                (aid,),
+            )
+        db_conn.commit()
+        assert aid in _selected(pool)
+        self._set_level(db_conn, aid, 2)
+        assert aid not in _selected(pool)
+
+    def test_reconcile_raises_level_after_n_consecutive_noops(
+        self, pool: ConnectionPool, db_conn: psycopg.Connection
+    ) -> None:
+        aid = _make_idle(db_conn, status_changed_s_ago=400)
+        noop: dict[int, int] = {aid: 2}
+
+        _reconcile_checkin_outcomes(
+            pool,
+            pending_checkin={aid: 6.0},
+            failure_streak={},
+            idle_threshold_s=_THRESHOLD_S,
+            noop_streak=noop,
+            heartbeat_interval_s=_THRESHOLD_S,
+            noop_nudges_threshold=3,
+        )
+
+        assert noop == {aid: 0}
+        with db_conn.cursor() as cur:
+            cur.execute("SELECT heartbeat_backoff_level FROM agents_meta WHERE id = %s", (aid,))
+            row = cur.fetchone()
+            assert row is not None
+            assert row[0] == 1
+        ev = _poll_mirror(aid, "heartbeat_backoff_raised")
+        assert ev is not None
+        assert ev["attributes"]["level"] == 1
+        assert ev["attributes"]["interval_seconds"] == 600
+
+    def test_reconcile_clears_streak_on_real_inbound(
+        self, pool: ConnectionPool, db_conn: psycopg.Connection
+    ) -> None:
+        aid = _make_idle(db_conn, status_changed_s_ago=400)
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "UPDATE agents_meta SET last_heartbeat_at = now() - make_interval(secs => 60) "
+                "WHERE id = %s",
+                (aid,),
+            )
+            cur.execute(
+                "INSERT INTO inbound_messages (agent_id, content, kind, source) "
+                "VALUES (%s, 'hi', 'chat', 'user')",
+                (aid,),
+            )
+        db_conn.commit()
+        noop: dict[int, int] = {aid: 2}
+
+        _reconcile_checkin_outcomes(
+            pool,
+            pending_checkin={},
+            failure_streak={},
+            idle_threshold_s=_THRESHOLD_S,
+            noop_streak=noop,
+            heartbeat_interval_s=_THRESHOLD_S,
+            noop_nudges_threshold=3,
+        )
+
+        assert noop == {}
+
+    def test_reconcile_clears_streak_on_pause(
+        self, pool: ConnectionPool, db_conn: psycopg.Connection
+    ) -> None:
+        aid = _make_idle(db_conn, status_changed_s_ago=400, paused_until_s_ahead=3600)
+        noop: dict[int, int] = {aid: 2}
+
+        _reconcile_checkin_outcomes(
+            pool,
+            pending_checkin={},
+            failure_streak={},
+            idle_threshold_s=_THRESHOLD_S,
+            noop_streak=noop,
+            heartbeat_interval_s=_THRESHOLD_S,
+            noop_nudges_threshold=3,
+        )
+
+        assert noop == {}
+
+    def test_raise_is_capped_at_24h_max_level(
+        self, pool: ConnectionPool, db_conn: psycopg.Connection
+    ) -> None:
+        from services.heartbeat.daemon import _backoff_max_level
+
+        aid = _make_idle(db_conn, status_changed_s_ago=400)
+        max_level = _backoff_max_level(_THRESHOLD_S)
+        self._set_level(db_conn, aid, max_level)
+        noop: dict[int, int] = {aid: 2}
+
+        _reconcile_checkin_outcomes(
+            pool,
+            pending_checkin={aid: 6.0},
+            failure_streak={},
+            idle_threshold_s=_THRESHOLD_S,
+            noop_streak=noop,
+            heartbeat_interval_s=_THRESHOLD_S,
+            noop_nudges_threshold=3,
+        )
+
+        with db_conn.cursor() as cur:
+            cur.execute("SELECT heartbeat_backoff_level FROM agents_meta WHERE id = %s", (aid,))
+            row = cur.fetchone()
+            assert row is not None
+            assert row[0] == max_level
+
+    def test_sweep_resets_level_on_real_inbound(
+        self, pool: ConnectionPool, db_conn: psycopg.Connection
+    ) -> None:
+        aid = _make_idle(db_conn, status_changed_s_ago=400)
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "UPDATE agents_meta SET heartbeat_backoff_level = 2, "
+                "last_heartbeat_at = now() - make_interval(secs => 60) WHERE id = %s",
+                (aid,),
+            )
+            cur.execute(
+                "INSERT INTO inbound_messages (agent_id, content, kind, source) "
+                "VALUES (%s, 'hi', 'chat', 'user')",
+                (aid,),
+            )
+        db_conn.commit()
+
+        _sweep_backoff_resets(pool)
+
+        with db_conn.cursor() as cur:
+            cur.execute("SELECT heartbeat_backoff_level FROM agents_meta WHERE id = %s", (aid,))
+            row = cur.fetchone()
+            assert row is not None
+            assert row[0] == 0
+        ev = _poll_mirror(aid, "heartbeat_backoff_reset")
+        assert ev is not None
+        assert ev["attributes"]["previous_level"] == 2
+        assert ev["attributes"]["reason"] == "real_inbound"
+
+    def test_sweep_leaves_level_without_engagement(
+        self, pool: ConnectionPool, db_conn: psycopg.Connection
+    ) -> None:
+        aid = _make_idle(db_conn, status_changed_s_ago=400)
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "UPDATE agents_meta SET heartbeat_backoff_level = 2, last_heartbeat_at = now() "
+                "WHERE id = %s",
+                (aid,),
+            )
+        db_conn.commit()
+
+        _sweep_backoff_resets(pool)
+
+        with db_conn.cursor() as cur:
+            cur.execute("SELECT heartbeat_backoff_level FROM agents_meta WHERE id = %s", (aid,))
+            row = cur.fetchone()
+            assert row is not None
+            assert row[0] == 2
+        assert _poll_mirror(aid, "heartbeat_backoff_reset", timeout_s=0.5) is None
