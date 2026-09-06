@@ -100,8 +100,13 @@ def test_manifest_declares_c9_daily_report_schedule() -> None:
     assert "05:00 cluster time" in entry["description"]
 
 
-def test_window_bounds_covers_the_slot_day_in_cluster_timezone() -> None:
+def test_window_bounds_covers_the_slot_day_in_cluster_timezone(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     module = _load_schedule_module()
+    # Pin the cluster timezone: the day label must follow the cluster wall
+    # clock, not the test environment's zone (CI runs UTC).
+    monkeypatch.setattr(module, "TZ", "Asia/Shanghai")
     # 05:00 Asia/Shanghai on 2026-09-07 == 21:00 UTC on 2026-09-06: the UTC
     # date differs from the cluster day, which is the label that must win.
     slot_end = datetime(2026, 9, 6, 21, 0, tzinfo=UTC)
@@ -156,6 +161,7 @@ def test_fire_reconciles_the_claimed_slot_window_and_emits(
         del name
 
     monkeypatch.setattr(module, "init_gateway_process", fake_init_gateway)
+    monkeypatch.setattr(module, "TZ", "Asia/Shanghai")
     accounting = _FakeAccounting(module)
     sys.modules["ci_accounting"] = accounting  # type: ignore[assignment]
     emitted = _install_fake_accounting(monkeypatch, accounting)
