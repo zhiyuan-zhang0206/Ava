@@ -25,6 +25,7 @@ from typing import Any, Literal
 
 from psycopg_pool import ConnectionPool
 
+import shared.db
 from ops import cluster_rpc as _cluster_rpc
 from ops import runner_mode
 from ops.agent_identity import RESIDENT_IDENTITIES, probe_agent_process
@@ -89,6 +90,7 @@ from ops.rpc_schemas import (
     TerminateAgentResponse,
 )
 from shared.agents import (
+    AgentNotFound,
     AgentStatus,
     ResurrectAlreadyAlive,
 )
@@ -253,6 +255,26 @@ def _pending_allocation_can_resume(agent_id: int, trigger_inbound_id: int | None
         return pending_allocation(conn, agent_id, trigger_inbound_id)
 
 
+def _wake_suppression_active(agent_id: int) -> bool:
+    with shared.db.connect() as conn:
+        row = conn.execute(
+            "SELECT wake_suppressed_until >= now() FROM agents_meta WHERE id=%s",
+            (agent_id,),
+        ).fetchone()
+    if row is None:
+        raise AgentNotFound(f"agent {agent_id} does not exist")
+    return row[0] is True
+
+
+def _clear_wake_suppression(agent_id: int) -> None:
+    with shared.db.connect() as conn:
+        conn.execute(
+            "UPDATE agents_meta SET wake_suppressed_until=NULL, wake_suppress_reason=NULL "
+            "WHERE id=%s AND wake_suppressed_until IS NOT NULL",
+            (agent_id,),
+        )
+
+
 async def resurrect_agent_op(
     agent_id: int,
     body: ResurrectAgentRequest,
@@ -326,7 +348,7 @@ async def resurrect_if_terminated(
     in-process; a remote-homed one is forwarded as a 'lifecycle' op to its home
     machine's ops server, the same dispatch the gateway's /resurrect route uses
     (`_forward_to_home_machine`). An unreachable home machine skips the
-    resurrect with a warning — the queued inbound is picked up when the machine
+    resurrect with an INFO record — the queued inbound is picked up when the machine
     is back (next delivery re-triggers this, or a manual resurrect).
 
     This is deliberately NOT wired into the terminate / cancel / restart ops:
@@ -339,6 +361,13 @@ async def resurrect_if_terminated(
         status is not AgentStatus.IDLING
         or not await asyncio.to_thread(_pending_allocation_can_resume, agent_id, trigger_inbound_id)
     ):
+        return status
+    if await asyncio.to_thread(_wake_suppression_active, agent_id):
+        _log.debug(
+            "resurrect_if_terminated: automatic wake suppressed for agent %s; "
+            "skipping auto-resurrect",
+            agent_id,
+        )
         return status
     body = ResurrectAgentRequest(resurrected_by="system")
     try:
@@ -371,9 +400,10 @@ async def resurrect_if_terminated(
             else:
                 raise
         if result_status == "spawned":
+            await asyncio.to_thread(_clear_wake_suppression, agent_id)
             status = await asyncio.to_thread(get_agent_status, agent_id)
     except _cluster_rpc.ClusterOpUnreachable as exc:
-        _log.warning(
+        _log.info(
             "resurrect_if_terminated: agent %s home machine unreachable, skipping "
             "auto-resurrect (%s); inbound queued — the next delivery or a manual "
             "resurrect picks it up once the machine is back",
@@ -381,7 +411,7 @@ async def resurrect_if_terminated(
             exc,
         )
     except Exception:
-        _log.warning(
+        _log.info(
             "resurrect_if_terminated: auto-resurrect agent %s failed; "
             "inbound queued, manual resurrect will pick it up",
             agent_id,
