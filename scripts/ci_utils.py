@@ -19,6 +19,7 @@ Usage as CLI:
     .venv/bin/python scripts/ci_utils.py <PR_NUMBER> --wait [--timeout N] [--merge]
     .venv/bin/python scripts/ci_utils.py <PR_NUMBER> --evict [--repo owner/repo]
     .venv/bin/python scripts/ci_utils.py --queue-status [--repo owner/repo] [--json]
+    .venv/bin/python scripts/ci_utils.py <PR_NUMBER> --diagnose [--repo owner/repo] [--json]
 
     Default: query once and exit (PENDING prints and exits 0 — a one-shot
     probe, not a poller). `--wait`: poll until the verdict settles, then exit
@@ -59,6 +60,7 @@ from datetime import datetime
 from enum import Enum
 from math import ceil
 from pathlib import Path
+from typing import Any
 
 # Allow `python scripts/ci_utils.py` (sys.path[0] = scripts/) to find the
 # sibling module; under pytest pythonpath=["."] this is a redundant no-op.
@@ -825,6 +827,347 @@ def _rerun_command(args: argparse.Namespace, parser: argparse.ArgumentParser) ->
     return 3 if errors else 0
 
 
+# --- Trunk queue failure diagnosis (task #2572) ---
+
+_TRUNK_ORG_SLUG = "ava"
+_DIAGNOSE_LOG_TAIL = 4000
+_DIAGNOSE_MAX_JOB_LOGS = 8
+_DIAGNOSE_MAX_SYNTHETIC_PRS = 3
+
+# (regex, classification, suggested action) — first match wins.
+_FAILURE_SIGNATURES: list[tuple[str, str, str]] = [
+    (
+        r"over the 800-line hard ceiling",
+        "lint hard limit (file over 800 lines)",
+        "split the file into focused modules, fix, resubmit",
+    ),
+    (
+        r"First Load JS shared by all",
+        "frontend first-load JavaScript budget",
+        "reduce the bundle or update the budget baseline, fix, resubmit",
+    ),
+    (
+        r"toMatchImageSnapshot|visual regression|baseline image|snapshot baseline",
+        "e2e visual regression (stale snapshot baseline)",
+        "UI change: refresh the visual snapshot baseline, resubmit",
+    ),
+    (
+        r"archive cache is empty|no offline fallback|apt-get install",
+        "runner-side network flake (pgdg/apt family)",
+        "rerun the failed job — no code change; resubmit if the queue already failed",
+    ),
+    (
+        r"truncate-isolation|comment-stripping regex",
+        "deterministic truncate-isolation lint failure",
+        "fix the triggering comment/word, resubmit",
+    ),
+    (
+        r"lattice-vocabulary|clock lattice",
+        "deterministic clock-lattice lint failure (constant outside its family module)",
+        "move the constant into the family module, fix, resubmit",
+    ),
+]
+
+
+def _pr_view(pr: str, repo: str, fields: str) -> dict[str, object] | None:
+    """gh pr view --json; None when gh fails or the output is not an object."""
+    result = subprocess.run(  # noqa: S603
+        ["gh", "pr", "view", pr, "--repo", repo, "--json", fields],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        return None
+    try:
+        data = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _job_log_tail(job_id: int, repo: str) -> str:
+    """The last `_DIAGNOSE_LOG_TAIL` chars of a job log; empty when unreadable."""
+    result = subprocess.run(  # noqa: S603
+        ["gh", "api", f"repos/{repo}/actions/jobs/{job_id}/logs"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        return ""
+    return result.stdout[-_DIAGNOSE_LOG_TAIL:]
+
+
+def _failed_test_names(log: str) -> list[str]:
+    """Test ids from pytest's `FAILED <file>::<test>` summary lines."""
+    return re.findall(r"^FAILED\s+(\S+)", log, re.MULTILINE)
+
+
+def _quarantined_tests(repo: str, *, token: str | None) -> list[dict[str, object]]:
+    """Trunk's quarantined (flaky/broken) tests; empty when unavailable.
+
+    The lookup needs TRUNK_API_TOKEN and the Flaky Tests upload wiring (PR
+    #1626); without either, the diagnosis cannot vouch for flakiness and
+    says so instead of guessing.
+    """
+    if not token:
+        return []
+    owner, name = repo.split("/", maxsplit=1)
+    payload: dict[str, object] = {
+        "repo": {"host": "github.com", "owner": owner, "name": name},
+        "org_url_slug": _TRUNK_ORG_SLUG,
+        "page_query": {"page_size": 100},
+    }
+    data, error = _trunk_post("flaky-tests/list-quarantined-tests", payload, token)
+    if error is not None or data is None:
+        return []
+    raw = data.get("quarantined_tests", [])
+    tests = raw if isinstance(raw, list) else []
+    return [t for t in tests if isinstance(t, dict)]
+
+
+def _match_quarantined(
+    failed: list[str], quarantined: list[dict[str, object]]
+) -> list[dict[str, object]]:
+    """Quarantined entries whose test name appears among the failed tests."""
+    hits: list[dict[str, object]] = []
+    for entry in quarantined:
+        entry_name = str(entry.get("name") or "")
+        if not entry_name:
+            continue
+        if any(test_id.endswith("::" + entry_name) for test_id in failed):
+            hits.append(entry)
+    return hits
+
+
+def _classify_check(name: str, log: str, quarantined: list[dict[str, object]]) -> tuple[str, str]:
+    """(classification, suggested action) for one failing check."""
+    hits = _match_quarantined(_failed_test_names(log), quarantined)
+    if hits:
+        statuses = sorted({str(h.get("status")) for h in hits})
+        return (
+            f"known flake ({', '.join(statuses)} in Trunk flaky DB)",
+            "rerun the failed job — no code change; resubmit if the queue failed",
+        )
+    for pattern, label, action in _FAILURE_SIGNATURES:
+        if re.search(pattern, log, re.IGNORECASE):
+            return label, action
+    if "lint" in name.lower():
+        return "deterministic lint failure", "fix the offending code/comment, resubmit"
+    return "unclassified CI failure", "read the log tail; rerun once if it looks environmental"
+
+
+def _pull_head_ref(pull: dict[str, object]) -> str:
+    """The head branch ref of a pull payload; empty when unreadable."""
+    head = pull.get("head")
+    if not isinstance(head, dict):
+        return ""
+    return str(head.get("ref") or "")
+
+
+def _synthetic_test_prs(pr: str, repo: str) -> list[dict[str, object]]:
+    """Trunk's trunk-merge/pr-<n>/* test PRs (each = one queue attempt)."""
+    result = subprocess.run(  # noqa: S603
+        [
+            "gh",
+            "api",
+            f"repos/{repo}/pulls",
+            "-X",
+            "GET",
+            "-f",
+            "state=all",
+            "-f",
+            "per_page=100",
+            "-f",
+            "sort=updated",
+            "-f",
+            "direction=desc",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        return []
+    try:
+        pulls = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return []
+    prefix = f"trunk-merge/pr-{pr}/"
+    return [
+        pull for pull in pulls if isinstance(pull, dict) and _pull_head_ref(pull).startswith(prefix)
+    ][:_DIAGNOSE_MAX_SYNTHETIC_PRS]
+
+
+def _diagnose_pr(pr: str, repo: str, *, token: str | None) -> dict[str, Any]:
+    """Collect the PR's failure evidence and classify it (task #2572).
+
+    Diagnosis only — no repair action is taken here; the operator executes
+    the suggested action. Evidence sources: the PR's check rollup + job log
+    tails, Trunk's queue state + flaky DB, and the synthetic trunk-merge
+    test PRs.
+    """
+    diag: dict[str, Any] = {
+        "pr": pr,
+        "repo": repo,
+        "issues": [],
+        "checks": [],
+        "trunk": None,
+        "synthetic_test_prs": [],
+        "flaky_db_available": token is not None,
+    }
+    view = _pr_view(pr, repo, "mergeable,labels,headRefOid,state,statusCheckRollup")
+    if view is None:
+        diag["gh_error"] = "gh pr view failed"
+        return diag
+    diag["state"] = view.get("state")
+    mergeable = view.get("mergeable")
+    diag["mergeable"] = mergeable
+    # A merged/closed PR reports mergeable=UNKNOWN and its recorded base is
+    # naturally behind main — those are not diagnosable problems.
+    if view.get("state") == "OPEN" and mergeable == "CONFLICTING":
+        diag["issues"].append(
+            {
+                "kind": "merge_conflict",
+                "detail": f"mergeable={mergeable}",
+                "action": "rebase on origin/main, resubmit",
+            }
+        )
+    raw_labels = view.get("labels", [])
+    label_rows = raw_labels if isinstance(raw_labels, list) else []
+    labels = [str(lab.get("name")) for lab in label_rows if isinstance(lab, dict)]
+    if "qa-approved" not in labels:
+        diag["issues"].append(
+            {
+                "kind": "missing_qa_label",
+                "detail": "qa-approved label absent",
+                "action": "attach the qa-approved label (a receipt alone is not enough)",
+            }
+        )
+    stale = None
+    unreadable = False
+    if view.get("state") == "OPEN":
+        stale, unreadable = _base_freshness(pr, repo)
+    if stale:
+        diag["issues"].append(
+            {
+                "kind": "stale_base",
+                "detail": f"base {stale[0][:8]} vs main {stale[1][:8]}",
+                "action": "rebase, or drop --require-fresh-base and let the queue re-test the new base",
+            }
+        )
+    elif unreadable:
+        diag["issues"].append(
+            {
+                "kind": "base_unreadable",
+                "detail": "base freshness could not be read",
+                "action": "verify the PR base against current main manually",
+            }
+        )
+
+    quarantined = _quarantined_tests(repo, token=token)
+    failed_jobs = list_failed_jobs(pr, repo)
+    raw_rollup = view.get("statusCheckRollup", [])
+    rollup_rows = raw_rollup if isinstance(raw_rollup, list) else []
+    rollup = [c for c in rollup_rows if isinstance(c, dict)]
+    failing_checks = [c for c in rollup if c.get("conclusion") in FAILING][:_DIAGNOSE_MAX_JOB_LOGS]
+    for check in failing_checks:
+        check_name = str(check.get("name") or "unnamed check")
+        job = next((j for j in failed_jobs if j.get("name") == check_name), None)
+        log = _job_log_tail(int(job["job_id"]), repo) if job else ""
+        classification, action = _classify_check(check_name, log, quarantined)
+        entry: dict[str, object] = {
+            "check": check_name,
+            "conclusion": check.get("conclusion"),
+            "classification": classification,
+            "action": action,
+            "log_tail": log[-800:],
+        }
+        if job:
+            entry["job_id"] = job["job_id"]
+        diag["checks"].append(entry)
+
+    if token:
+        payload = _trunk_pr_payload(pr, repo)
+        data, error = _trunk_post("getSubmittedPullRequest", payload, token)
+        if error is None and data is not None:
+            diag["trunk"] = {
+                "state": data.get("state"),
+                "reason": data.get("reason"),
+                "readiness": data.get("readiness"),
+                "verifiedByTestRun": data.get("verifiedByTestRun"),
+            }
+        else:
+            diag["trunk"] = {"error": error}
+    diag["synthetic_test_prs"] = [
+        {
+            "number": pull.get("number"),
+            "state": pull.get("state"),
+            "head_ref": _pull_head_ref(pull),
+        }
+        for pull in _synthetic_test_prs(pr, repo)
+    ]
+    return diag
+
+
+def _print_diagnosis(diag: dict[str, Any]) -> None:
+    """Human-readable --diagnose report."""
+    if diag.get("gh_error"):
+        print(f"PR #{diag['pr']} diagnosis failed: {diag['gh_error']}", file=sys.stderr)
+        return
+    print(
+        f"PR #{diag['pr']} diagnosis (state={diag.get('state')}, mergeable={diag.get('mergeable')})"
+    )
+    issues = diag.get("issues", [])
+    if not issues:
+        print("No PR-level issues found.")
+    for issue in issues:
+        print(f"- {issue['kind']}: {issue['detail']} → {issue['action']}")
+    checks = diag.get("checks", [])
+    if not checks:
+        print("No failing checks on the PR head.")
+    for check in checks:
+        print(f"  check {check['check']}: {check['classification']} → {check['action']}")
+    trunk = diag.get("trunk")
+    if isinstance(trunk, dict):
+        if trunk.get("error"):
+            print(f"Trunk queue: not queryable ({trunk['error']})")
+        else:
+            print(f"Trunk queue: state={trunk.get('state')} reason={trunk.get('reason')}")
+    if not diag.get("flaky_db_available"):
+        print("Flaky DB: not checked (TRUNK_API_TOKEN missing) — flake calls stay unverified")
+    synthetic = diag.get("synthetic_test_prs", [])
+    for pull in synthetic:
+        print(
+            f"  synthetic test PR #{pull.get('number')} [{pull.get('state')}] "
+            f"{pull.get('head_ref')}"
+        )
+    if synthetic:
+        print(
+            "  → queue-attempt failures: inspect the synthetic PR's failed job log "
+            "(runner-side flake families rerun without code change)"
+        )
+
+
+def _diagnose_command(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int | None:
+    """Dispatch --diagnose when set; None when not set."""
+    if not args.diagnose:
+        return None
+    if args.wait or args.merge or args.rerun_failed_jobs or args.queue_status or args.evict:
+        parser.error(
+            "--diagnose is exclusive with --wait/--merge/--rerun-failed-jobs/--queue-status/--evict"
+        )
+    if args.pr is None:
+        parser.error("PR number is required with --diagnose")
+    diag = _diagnose_pr(args.pr, args.repo, token=os.environ.get("TRUNK_API_TOKEN"))
+    if args.json:
+        print(json.dumps(diag, indent=2))
+    else:
+        _print_diagnosis(diag)
+    return 0
+
+
 def _watch_trunk_enqueue(
     pr: str,
     repo: str,
@@ -1115,6 +1458,15 @@ def main(argv: list[str] | None = None) -> int:
         "recorded base (the queue would re-test against the newer base)",
     )
     p.add_argument(
+        "--diagnose",
+        action="store_true",
+        help="diagnose why the PR's CI / queue attempt failed: reads the check "
+        "rollup + job log tails, Trunk queue state + flaky DB, and the synthetic "
+        "trunk-merge test PRs, then prints classifications with suggested actions "
+        "(--json for the machine-readable report). Diagnosis only — no repair "
+        "action is executed.",
+    )
+    p.add_argument(
         "--evict",
         action="store_true",
         help="cancel the PR from the Trunk merge queue (requires TRUNK_API_TOKEN; "
@@ -1152,6 +1504,10 @@ def main(argv: list[str] | None = None) -> int:
         p.error("--timeout must be >= 0")
     if args.json and args.wait:
         p.error("--json and --wait are mutually exclusive")
+
+    diagnose_rc = _diagnose_command(args, p)
+    if diagnose_rc is not None:
+        return diagnose_rc
 
     operator_rc = _trunk_operator_command(args, p)
     if operator_rc is not None:
