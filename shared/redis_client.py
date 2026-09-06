@@ -151,6 +151,12 @@ _AUTH_RETRY_WINDOW_S = 60.0
 _AUTH_RETRY_MAX_ATTEMPTS = 10
 _AUTH_RETRY_ERRORS = (AuthenticationError, NoPermissionError)
 
+# A normal command must not inherit the pub/sub listener's unbounded read. The
+# shared client deliberately pins ``socket_timeout=None`` because listeners use
+# the same connection class and legitimately block while idle; command callers
+# that are only a latency optimization need their own operation-level bound.
+_BEST_EFFORT_PUBLISH_ATTEMPT_TIMEOUT_S = 2.0
+
 # The two indirections make the retry contract deterministic in unit tests
 # without making real callers choose a scheduler or clock implementation.
 _sleep_sync = time.sleep
@@ -385,7 +391,9 @@ async def publish_best_effort(channel: str, payload: str, *, context: str = "") 
                 channel, payload
             )
 
-        return await retry_auth_failures_async(_publish)
+        return await retry_auth_failures_async(
+            _publish, attempt_timeout_s=_BEST_EFFORT_PUBLISH_ATTEMPT_TIMEOUT_S
+        )
     except Exception as exc:
         _log_publish_failure(exc, channel=channel, context=context)
         return None

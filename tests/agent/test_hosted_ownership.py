@@ -1,5 +1,6 @@
 """Hosted owner authority outlives turns but not explicit release/replacement."""
 
+import asyncio
 import subprocess
 import sys
 from unittest.mock import AsyncMock, Mock
@@ -66,7 +67,9 @@ async def test_hosted_status_changes_publish_agent_updated(
         aops_pool, agent_id, "host-test", owner, expected_from="idling"
     )
     assert incarnation is not None
-    publish.assert_awaited_once_with(aops_pool, agent_id)
+    # #1687 moved admission's live announce into the bounded _run_turn
+    # settlement boundary, so admit_hosted_runtime itself no longer publishes.
+    publish.assert_not_awaited()
 
     publish.reset_mock()
     assert await settle_hosted_runtime(aops_pool, incarnation)
@@ -82,6 +85,75 @@ async def test_hosted_status_changes_publish_agent_updated(
         await claim_inbound_batch(aops_pool, agent_id)
         assert await apply_hosted_lifecycle(aops_pool, incarnation) == "terminate"
     publish.assert_awaited_once_with(aops_pool, agent_id)
+
+
+async def test_cancel_during_live_announce_settles_the_committed_admission(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The optional Redis announce is downstream of the durable status flip.
+
+    Model the exact half-open #5740 boundary: admission committed ``running``,
+    then PUBLISH parked before the graph could claim its pending inbound. A
+    work-task cancellation at that await must still settle the same incarnation
+    to ``idling``; its live host lease must not preserve a false running row.
+    """
+    from services.agent_host.host import AgentHost
+
+    agent_id = _agent(db_conn)
+    announce_entered = asyncio.Event()
+    announce_release = asyncio.Event()
+    publish_calls = 0
+
+    async def half_open_publish(_pool: object, published_agent_id: int) -> None:
+        nonlocal publish_calls
+        assert published_agent_id == agent_id
+        publish_calls += 1
+        if publish_calls == 1:
+            announce_entered.set()
+            await announce_release.wait()
+
+    monkeypatch.setattr("agent.hosted_ownership.publish_agent_updated", half_open_publish)
+    monkeypatch.setattr(
+        "services.agent_host.host.publish_agent_updated", half_open_publish, raising=False
+    )
+
+    def allow_model_config(*, model: str | None = None) -> None:
+        assert model is not None
+
+    monkeypatch.setattr("services.agent_host.host.validate_model_config", allow_model_config)
+
+    host = AgentHost(
+        pool=aops_pool,
+        control_pool=aops_pool,
+        checkpointer=Mock(),
+        graph=Mock(),
+        machine="host-test",
+    )
+    # Exercise the owned work task itself. ``run_turn`` deliberately shields
+    # this inner task from scheduler cancellation; injecting cancellation at
+    # the exact inner boundary proves that boundary is independently clean.
+    task = asyncio.create_task(host._run_turn(agent_id))
+    await asyncio.wait_for(announce_entered.wait(), timeout=2.0)
+    assert db_conn.execute(
+        "SELECT status FROM agents_meta WHERE id=%s", (agent_id,)
+    ).fetchone() == ("running",)
+
+    task.cancel()
+    done, _ = await asyncio.wait({task}, timeout=1.0)
+    cancellation_settled = bool(done)
+    if not cancellation_settled:
+        announce_release.set()
+        await asyncio.gather(task, return_exceptions=True)
+
+    assert cancellation_settled, "announcement cancellation did not finish settlement"
+    assert task.cancelled()
+    assert db_conn.execute(
+        "SELECT status FROM agents_meta WHERE id=%s", (agent_id,)
+    ).fetchone() == ("idling",)
+    assert publish_calls == 2, "settlement must announce after restoring durable status"
+    assert agent_id not in host._in_flight
 
 
 async def test_hosted_restart_releases_before_new_incarnation(
