@@ -39,7 +39,7 @@ def test_qa_pricing_scenarios_use_plugin_runtime_semantics() -> None:
 def test_all_plugin_models_match_archive_at_four_instant_classes() -> None:
     archive = _archive_catalog()
 
-    assert len(pricing._PLUGIN_PRICES) == 33
+    assert len(pricing._PLUGIN_PRICES) == 34
     for model, plugin_price in sorted(pricing._PLUGIN_PRICES.items()):
         assert model in archive
         input_tokens = 200_001 if model == "gemini-3.1-pro-preview" else 1_000_000

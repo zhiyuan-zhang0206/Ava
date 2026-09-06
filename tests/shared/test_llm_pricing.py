@@ -176,6 +176,7 @@ def test_openai_catalog_entries_live_only_in_the_archive() -> None:
     runtime_models = _pricing_catalog_models(_runtime_pricing_catalog_raw())
     archive_models = _pricing_catalog_models(_pricing_catalog_raw())
     expected = {
+        "gpt-6-astra",
         "gpt-5.6-sol",
         "gpt-5.6-terra",
         "gpt-5.6-luna",
@@ -304,6 +305,7 @@ def test_parse_catalog_rejects_unknown_schema_version() -> None:
         # 1M input selects Gemini's documented >200K tier.
         ("gemini-3.1-pro-preview", 4.0 + 18.0),
         ("gpt-5.6-sol", 5.0 + 30.0),
+        ("gpt-6-astra", 10.0 + 50.0),
         ("gpt-5.6-terra", 2.0 + 12.0),
         ("gpt-5.6-luna", 0.20 + 1.20),
         ("mimo-v2.5-pro", 0.435 + 0.87),

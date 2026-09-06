@@ -388,10 +388,12 @@ class TestBuildChatModel:
         assert m.use_responses_api is True
         assert m.reasoning == {"effort": "medium", "summary": "auto"}
 
-    def test_gpt_effort_preserves_cross_provider_vocabulary(
+    def test_gpt_effort_clamps_unsupported_vocabulary_onto_model_rungs(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """GPT preserves an explicitly selected cross-provider effort verbatim."""
+        """gpt-5.6's wire vocabulary has no "minimal" (official docs: none,
+        low, medium, high, xhigh, max) — an explicit out-of-vocabulary effort
+        clamps to the nearest supported rung instead of reaching the wire."""
         monkeypatch.setattr(settings.lm, "llm_override", "")
         monkeypatch.setattr(settings.lm, "reasoning_effort", "minimal")
         monkeypatch.setenv("OPENAI_API_KEY", "k")
@@ -399,7 +401,48 @@ class TestBuildChatModel:
 
         m = build_chat_model("gpt-5.6-sol")
         assert isinstance(m, ChatOpenAI)
-        assert m.reasoning == {"effort": "minimal", "summary": "auto"}
+        assert m.reasoning == {"effort": "low", "summary": "auto"}
+
+    def test_gpt6_astra_defaults_to_medium_effort(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """gpt-6-astra builds on the Responses API with the OpenAI default
+        effort pinned per model, like the gpt-5.6 tiers."""
+        monkeypatch.setattr(settings.lm, "llm_override", "")
+        monkeypatch.setenv("OPENAI_API_KEY", "k")
+        from langchain_openai import ChatOpenAI
+
+        m = build_chat_model("gpt-6-astra")
+        assert isinstance(m, ChatOpenAI)
+        assert m.use_responses_api is True
+        assert m.reasoning == {"effort": "medium", "summary": "auto"}
+
+    def test_gpt6_astra_clamps_none_and_minimal_to_low(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """gpt-6 dropped "none" and "minimal" from the effort vocabulary
+        (official guide: start at "low") — both clamp to low at build."""
+        monkeypatch.setattr(settings.lm, "llm_override", "")
+        monkeypatch.setenv("OPENAI_API_KEY", "k")
+        from langchain_openai import ChatOpenAI
+
+        for effort in ("none", "minimal"):
+            monkeypatch.setattr(settings.lm, "reasoning_effort", effort)
+            m = build_chat_model("gpt-6-astra")
+            assert isinstance(m, ChatOpenAI)
+            assert m.reasoning == {"effort": "low", "summary": "auto"}
+
+    def test_gpt6_astra_thinking_disabled_clamps_to_low(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """gpt-6 has no off-switch for reasoning (no "none" effort), so a
+        caller disabling thinking lands on the minimum rung, low, without a
+        summary request."""
+        monkeypatch.setattr(settings.lm, "llm_override", "")
+        monkeypatch.setenv("OPENAI_API_KEY", "k")
+        from langchain_openai import ChatOpenAI
+
+        m = build_chat_model("gpt-6-astra", thinking={"type": "disabled"})
+        assert isinstance(m, ChatOpenAI)
+        assert m.reasoning == {"effort": "low"}
 
     def test_gpt_thinking_disabled_drops_to_effort_none(
         self, monkeypatch: pytest.MonkeyPatch
