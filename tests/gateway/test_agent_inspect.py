@@ -1434,7 +1434,7 @@ def test_inspect_hours_window_is_loki_only(
             "model": "claude-opus-4-8",
             "cost_usd": 2.0,
         },
-        ts_offset_hours=100,
+        ts_offset_hours=60,
     )
     db_conn.commit()
     with TestClient(app) as client:
@@ -1444,7 +1444,7 @@ def test_inspect_hours_window_is_loki_only(
     cost = body["cost"]
     assert cost["llm_calls"] == 1
     assert cost["cost_usd"] == pytest.approx(2.0)  # pyright: ignore[reportUnknownMemberType]
-    # 24h window: the 100h-old row is outside
+    # 24h window: the 60h-old row is outside
     assert body24["cost"]["llm_calls"] == 0
     # whole life: ledger day + Loki tail
     assert whole["cost"]["llm_calls"] == 2
@@ -1814,7 +1814,7 @@ def test_inspect_incomplete_histogram_falls_back_to_the_full_raw_window(
     _metrics_ledger_row(
         db_conn,
         agent_id=aid,
-        days_ago=4,
+        days_ago=3,
         turn_total=1,
         turn_ok=1,
         turn_duration_seconds=8.0,
@@ -1823,7 +1823,7 @@ def test_inspect_incomplete_histogram_falls_back_to_the_full_raw_window(
         event="turn_end",
         agent_id=aid,
         payload={"duration_seconds": 8.0, "ok": True},
-        ts=now - timedelta(days=4),
+        ts=now - timedelta(days=3),
     )
     db_conn.commit()
 
