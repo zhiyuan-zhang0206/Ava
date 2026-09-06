@@ -452,7 +452,7 @@ describe("HomePage top-level render", () => {
     );
   });
 
-  // User ruling 2026-08-23: desktop is a fixed side panel and mobile is a
+  // User ruling 2026-08-23: desktop is a side panel and mobile is a
   // full-screen overlay. Both start closed and open only via the header's
   // inspector toggle — mount never touches either open-state source.
   it("mount does not auto-open the inspector", () => {
@@ -471,7 +471,7 @@ describe("HomePage top-level render", () => {
     expect(hooksState.setMobileInspectorOpen).not.toHaveBeenCalled();
   });
 
-  it("renders an open inspector as HomeContent's final sibling with its toggle in the header", () => {
+  it("renders an open inspector beside HomeContent in the desktop resizable group", () => {
     hooksState.activeId = 5;
     hooksState.agents = [makeAgent({ agent_id: 5 })];
     hooksState.settings = {
@@ -483,10 +483,13 @@ describe("HomePage top-level render", () => {
     const main = screen.getByRole("main");
     const homeContent = screen.getByTestId("timeline-surface").closest("section");
     const panel = screen.getByTestId("inspector-panel");
-    expect(homeContent?.parentElement).toBe(main);
-    expect(panel.parentElement).toBe(main);
-    expect(main.lastElementChild).toBe(panel);
-    expect(panel.previousElementSibling).toBe(homeContent);
+    const timelinePanel = homeContent?.parentElement;
+    const inspectorPanel = panel.parentElement;
+    const inspectorGroup = timelinePanel?.parentElement;
+    expect(inspectorGroup).toBeTruthy();
+    expect(main.contains(inspectorGroup!)).toBe(true);
+    expect(inspectorPanel?.parentElement).toBe(inspectorGroup);
+    expect(inspectorPanel?.previousElementSibling?.getAttribute("role")).toBe("separator");
     const toggle = screen.getByTestId("inspector-toggle");
     expect(screen.getByRole("banner").contains(toggle)).toBe(true);
     expect(screen.getByTestId("composer").contains(toggle)).toBe(false);

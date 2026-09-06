@@ -33,14 +33,14 @@ export function HeaderBar({ label, onOpenSidebar, children, maxWidthCss }: Props
         // timeline it covers shows through with a frosted-glass feel —
         // same treatment as the search button. The bar no longer reserves a
         // row; the timeline scrolls beneath it.
-        "absolute inset-x-0 top-0 z-20 bg-background/80 backdrop-blur-md",
+        "absolute inset-x-0 top-0 z-20 border-b border-border bg-background/80 backdrop-blur-md",
         "px-4 py-2 font-mono text-sm text-muted-foreground",
         BAR_HEIGHT_CLASS,
       )}
     >
       <div
         style={maxWidthCss ? { maxWidth: maxWidthCss } : undefined}
-        className={cn("mx-auto h-full w-full items-center justify-between gap-2 border-b border-border", FLEX)}
+        className={cn("mx-auto h-full w-full items-center justify-between gap-2", FLEX)}
       >
         <div className={cn("items-center gap-2", FLEX, MIN_W_0, FLEX_1)}>
           <button

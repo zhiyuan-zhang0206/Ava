@@ -3,7 +3,7 @@
 // placeholder) + StatsCards tri-state (loading/data/error) + handleSelect
 // closes mobile drawer + handleRename calls api.
 //
-// useSidebarWidth / useStatsDashboard / useStore are mocked as stubs so
+// useSidebarCollapsed / useStatsDashboard / useStore are mocked as stubs so
 // the test controls Zustand state. AgentRow / ScrollArea / Button are
 // simplified stubs to reduce noise. buildAgentTree is real — it's a pure
 // helper with its own tests.
@@ -14,7 +14,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { BAR_HEIGHT_CLASS } from "@/lib/layout";
-import { SIDEBAR_SORT_DEFAULT, SIDEBAR_WIDTH, SIDEBAR_WIDE_THRESHOLD, type StatsWindowHours } from "@/lib/sidebar";
+import { SIDEBAR_SORT_DEFAULT, type StatsWindowHours } from "@/lib/sidebar";
 import type * as SidebarModule from "@/lib/sidebar";
 import type { AgentRow, OpenNotice, StatsDashboard } from "@/lib/types";
 
@@ -72,8 +72,7 @@ vi.mock("@/lib/sidebar", async () => {
   const React = await import("react");
   return {
     ...actual,
-    useSidebarWidth: () => ({
-      width: actual.SIDEBAR_WIDTH,
+    useSidebarCollapsed: () => ({
       collapsed: state.sidebarCollapsed,
       setCollapsed: state.setSidebarCollapsed,
     }),
@@ -349,19 +348,18 @@ describe("DesktopSidebar collapse/expand", () => {
     expect(container.querySelectorAll(".animate-pulse").length).toBe(0);
   });
 
-  it("collapsed=false → shows ChevronLeft + 'Ava' title, no drag handle (task #750)", () => {
+  it("collapsed=false → shows ChevronLeft + 'Ava' title", () => {
     wrap(<AgentSidebar {...handlers} />);
     expect(screen.getByLabelText("Collapse sidebar")).toBeTruthy();
     expect(screen.getByText("Ava")).toBeTruthy();
     expect(screen.queryByLabelText("Drag to resize width")).toBeNull();
   });
 
-  it("collapsed rail is a narrow icon-only width (w-10, narrower than the old w-14)", () => {
+  it("collapsed rail fills the resizable panel frame", () => {
     state.sidebarCollapsed = true;
     const { container } = wrap(<AgentSidebar {...handlers} />);
     const rail = screen.getByLabelText("Expand sidebar").closest("aside");
-    expect(rail?.className).toContain("w-10");
-    expect(rail?.className).not.toContain("w-14");
+    expect(rail?.className).toContain("w-full");
     // no unbounded/scrollable overflow inside the collapsed rail
     expect(container.querySelectorAll("aside").length).toBeGreaterThan(0);
   });
@@ -413,11 +411,12 @@ describe("DesktopSidebar collapse/expand", () => {
     expect(handlers.onSpawn).toHaveBeenCalled();
   });
 
-  it("DesktopSidebar renders at the fixed width", () => {
+  it("expanded desktop sidebar fills the resizable panel frame", () => {
     const { container } = wrap(<AgentSidebar {...handlers} />);
-    const aside = container.querySelector('aside[style*="width"]');
+    const aside = container.querySelector<HTMLElement>("aside")!;
     expect(aside).toBeTruthy();
-    expect((aside as HTMLElement).style.width).toBe(`${SIDEBAR_WIDTH}px`);
+    expect(aside.className).toContain("w-full");
+    expect(aside.style.width).toBe("");
   });
 });
 
@@ -506,8 +505,7 @@ describe("SidebarBody empty / tree / spawning placeholder", () => {
 });
 
 describe("wide mode + fork propagation", () => {
-  it("fixed width is at/above the wide threshold → rows render wide (data-wide=1)", () => {
-    expect(SIDEBAR_WIDTH).toBeGreaterThanOrEqual(SIDEBAR_WIDE_THRESHOLD);
+  it("desktop rows render the full monitoring presentation", () => {
     state.agents = [makeAgent({ agent_id: 1 })];
     wrap(<AgentSidebar {...handlers} />);
     expect(screen.getByTestId("row-1").getAttribute("data-wide")).toBe("1");

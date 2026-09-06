@@ -37,6 +37,7 @@ import { ErrorBoundary } from "@/components/error-boundary";
 import { Composer } from "@/components/composer";
 import { ContentToggle } from "@/components/content-toggle";
 import { HeaderBar } from "@/components/header-bar";
+import { HomeLayout } from "@/components/home-layout";
 import { InspectorPanel, InspectorToggle } from "@/components/inspector-panel";
 import { PendingStrip } from "@/components/pending-strip";
 import { UploadButton } from "@/components/upload-button";
@@ -45,6 +46,7 @@ import { api, MessageDeliveryUnknownError } from "@/lib/api";
 import { errMsg } from "@/lib/errors";
 import { useInspectorOpen } from "@/lib/inspector-panel-store";
 import { useBreakpoint } from "@/lib/breakpoint";
+import { useSidebarCollapsed } from "@/lib/sidebar";
 import { useStore } from "@/lib/store";
 import { useTimelineStore } from "@/lib/timeline-store";
 import type { AgentRow, ContentBlock } from "@/lib/types";
@@ -86,6 +88,8 @@ interface HomeShellProps {
 
 function HomeShell({ showError }: HomeShellProps) {
   const focusComposer = useStore((s) => s.focusComposer);
+  const { isNarrow, isLarge } = useBreakpoint();
+  const { collapsed: sidebarCollapsed } = useSidebarCollapsed();
 
   const {
     agents,
@@ -146,33 +150,45 @@ function HomeShell({ showError }: HomeShellProps) {
     staleTime: 10_000,
   });
 
+  const sidebar = (
+    <ErrorBoundary>
+      <AgentSidebar
+        agents={agents}
+        isLoading={agentsLoading}
+        pendingActions={pendingActions}
+        pendingSpawnCount={pendingSpawnCount}
+        onSpawn={handleSpawn}
+        onTerminate={terminate}
+        onRestart={restart}
+        onResurrect={resurrect}
+        onFork={fork}
+        onCompact={compact}
+      />
+    </ErrorBoundary>
+  );
+  const main = (
+    <AgentEventStreamProvider>
+      <HomeContent
+        activeId={activeId}
+        agents={agents}
+        forkPending={forkPending}
+        showError={showError}
+        handleFork={handleFork}
+      />
+    </AgentEventStreamProvider>
+  );
+  const inspector =
+    inspectorOpen && activeId != null ? <InspectorPanel agentId={activeId} /> : null;
+
   return (
-    <>
-      <ErrorBoundary>
-        <AgentSidebar
-          agents={agents}
-          isLoading={agentsLoading}
-          pendingActions={pendingActions}
-          pendingSpawnCount={pendingSpawnCount}
-          onSpawn={handleSpawn}
-          onTerminate={terminate}
-          onRestart={restart}
-          onResurrect={resurrect}
-          onFork={fork}
-          onCompact={compact}
-        />
-      </ErrorBoundary>
-      <AgentEventStreamProvider>
-        <HomeContent
-          activeId={activeId}
-          agents={agents}
-          forkPending={forkPending}
-          showError={showError}
-          handleFork={handleFork}
-        />
-      </AgentEventStreamProvider>
-      {inspectorOpen && activeId != null && <InspectorPanel agentId={activeId} />}
-    </>
+    <HomeLayout
+      isNarrow={isNarrow}
+      isLarge={isLarge}
+      sidebarCollapsed={sidebarCollapsed}
+      sidebar={sidebar}
+      main={main}
+      inspector={inspector}
+    />
   );
 }
 

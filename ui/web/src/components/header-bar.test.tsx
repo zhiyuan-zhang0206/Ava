@@ -3,6 +3,8 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { BAR_HEIGHT_CLASS } from "@/lib/layout";
+
 import { HeaderBar } from "./header-bar";
 
 afterEach(() => {
@@ -33,6 +35,16 @@ describe("HeaderBar", () => {
     expect(header?.className).toContain("z-20");
     expect(header?.className).toContain("bg-background/80");
     expect(header?.className).toContain("backdrop-blur-md");
+  });
+
+  it("puts the shared title height and divider on the outer header", () => {
+    const { container } = render(<HeaderBar label="x" onOpenSidebar={vi.fn()} />);
+    const header = container.querySelector("header")!;
+    const inner = container.querySelector("header > div")!;
+
+    expect(header.className).toContain(BAR_HEIGHT_CLASS);
+    expect(header.className).toContain("border-b");
+    expect(inner.className).not.toContain("border-b");
   });
 
   it("maxWidthCss centers the inner content with the timeline column", () => {

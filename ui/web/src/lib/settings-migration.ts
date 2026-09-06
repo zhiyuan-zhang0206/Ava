@@ -75,8 +75,9 @@ interface MigrationEntry {
 // Order is irrelevant — each entry is independent.
 export const SETTINGS_MIGRATIONS: readonly MigrationEntry[] = [
   { legacyKey: "ava:inspector-open", settingKey: "display.inspector_open", parse: parseBool, default: false },
-  // display.sidebar_width is a legacy value the sidebar IGNORES (width is
-  // fixed at SIDEBAR_WIDTH, task #750) — drop-only, never migrate a width.
+  // display.sidebar_width is a legacy value the sidebar ignores. Homepage
+  // split ratios are now library-owned localStorage state — drop-only, never
+  // migrate the old pixel width into user_settings.
   { legacyKey: "ava.sidebar.width", settingKey: "" },
   { legacyKey: "ava.sidebar.collapsed", settingKey: "display.sidebar_collapsed", parse: parseBool, default: false },
   { legacyKey: "ava.sidebar.viewMode", settingKey: "display.sidebar_view_mode", parse: parseEnum(["flat", "tree"]), default: "flat" },

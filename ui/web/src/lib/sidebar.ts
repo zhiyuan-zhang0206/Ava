@@ -1,10 +1,8 @@
-// Sidebar state hooks: width / collapsed / view mode / sort / stats window are
+// Sidebar state hooks: collapsed / view mode / sort / stats window are
 // DB-backed user settings (display.sidebar_*), so the choice survives refreshes
-// AND stays in sync across every frontend entrypoint via the shared
-// ["user-settings"] cache. Width is FIXED (user ruling, task #750: dragging
-// was removed — the spawn/toolbar rows must never wrap, and a fixed width
-// makes that unconditional); only collapsed / view mode / sort / stats window
-// write through to the DB.
+// and stays in sync across every frontend entrypoint via the shared
+// ["user-settings"] cache. Homepage panel widths are device-local layout ratios
+// owned by react-resizable-panels, not durable user settings.
 //
 // Agent labels don't live here — the backend `threads.label` column is
 // the source of truth; the gateway BackgroundTask runs an LLM in the
@@ -18,28 +16,10 @@ import { api } from "./api";
 import type { StatsDashboard } from "./types";
 import { useUserSettings } from "./use-user-settings";
 
-// Fixed sidebar width (task #750, user ruling 2026-08-04: remove the drag
-// resize — a user-tunable width is what let the spawn row wrap). Measured
-// live in Chrome (dev server, macOS): the spawn row needs 417px of content
-// width at minimum — preset(120) + model(120) + effort(80) + Spawn(79.3)
-// + 4×gap-1(16) + the flex-1 spacer(1.7) — plus 24px of px-3 padding and
-// 1px border-right. The previous floor (440) left ZERO slack, so any font
-// or rounding difference wrapped the Spawn button onto a second line.
-// 460 = 442px hard need + 18px slack; the toolbar row (~310px) fits easily.
-export const SIDEBAR_WIDTH = 460;
-// At/above this width the rows switch to the detailed multi-agent
-// monitoring layout (per-row live activity line); below it the sidebar
-// stays the compact lineage tree.
-export const SIDEBAR_WIDE_THRESHOLD = 380;
-
-// Fixed sidebar width + collapsed flag. Width is the SIDEBAR_WIDTH constant
-// (task #750: no drag resize, no persisted display.sidebar_width — a stored
-// legacy value is ignored). Collapsed stays DB-backed (display.sidebar_collapsed)
-// and syncs across frontends WITHIN a session, but is reset to expanded on
-// every entry (#723 ruling — the reset waits for settings to load, see
-// agent-sidebar/index.tsx).
-export function useSidebarWidth(): {
-  width: number;
+// Collapse remains DB-backed (display.sidebar_collapsed) and syncs across
+// frontends within a session, but resets to expanded on every entry (#723).
+// The reset waits for settings to load in agent-sidebar/index.tsx.
+export function useSidebarCollapsed(): {
   collapsed: boolean;
   setCollapsed: (c: boolean) => void;
 } {
@@ -49,8 +29,7 @@ export function useSidebarWidth(): {
     (c: boolean) => setSetting("display.sidebar_collapsed", c),
     [setSetting],
   );
-
-  return { width: SIDEBAR_WIDTH, collapsed, setCollapsed };
+  return { collapsed, setCollapsed };
 }
 
 // Whether terminated agents are shown lives in the DB-backed user setting

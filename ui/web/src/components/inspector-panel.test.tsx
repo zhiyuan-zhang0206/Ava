@@ -1015,7 +1015,7 @@ describe("InspectorPanel desktop", () => {
     isLargeMock.mockReturnValue(true);
   });
 
-  it("renders as a fixed-width side panel without an overlay or backdrop", async () => {
+  it("fills its resizable side panel without an overlay or backdrop", async () => {
     getAgentInspect.mockResolvedValue(fixture());
     render(<InspectorPanel agentId={1} />);
 
@@ -1023,7 +1023,7 @@ describe("InspectorPanel desktop", () => {
     const aside = screen.getByRole("complementary");
     const classes = aside.className.split(" ");
     expect(classes).toContain("flex");
-    expect(classes).toContain("w-80");
+    expect(classes).toContain("w-full");
     expect(classes).toContain("border-l");
     expect(classes).not.toContain("fixed");
     expect(classes).not.toContain("absolute");

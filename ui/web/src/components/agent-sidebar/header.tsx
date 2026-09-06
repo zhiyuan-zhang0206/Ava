@@ -19,7 +19,7 @@ export function CollapsedSidebar(props: DesktopProps) {
   const { setCollapsed, onSearchOpen } = props;
 
   return (
-    <aside className={cn("hidden md:flex border-r border-border bg-sidebar w-10 shrink-0", FLEX_COL)}>
+    <aside className={cn("h-full w-full border-r border-border bg-sidebar", FLEX, FLEX_COL)}>
       {/* Collapsed rail top (user ruling 2026-08-05 21:50): expand sits at
           the very top, search directly below it — stacked vertically, never
           side by side. No divider lines between them. */}

@@ -2,9 +2,8 @@
 
 // Agent / thread sidebar — agent_id == agent_id 1:1, each row = one agent.
 //
-// Desktop: persistent aside on the left with a FIXED width (task #750 —
-//   drag resize was removed on user ruling; the width constant lives in
-//   lib/sidebar.ts and is sized so the spawn/toolbar rows never wrap).
+// Desktop: persistent aside on the left, sized by the homepage's resizable
+//   column frame. The body already wraps its controls at narrower widths.
 // Mobile (< md): fully hidden by default; the header hamburger opens a
 //   full-screen overlay. Tapping a row to select an agent auto-closes
 //   it back to the timeline.
@@ -42,7 +41,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { useBreakpoint } from "@/lib/breakpoint";
 import { errMsg } from "@/lib/errors";
-import { SIDEBAR_WIDE_THRESHOLD, useSidebarWidth, useSidebarViewMode } from "@/lib/sidebar";
+import { useSidebarCollapsed, useSidebarViewMode } from "@/lib/sidebar";
 import { useStore } from "@/lib/store";
 import { useUserSettings } from "@/lib/use-user-settings";
 
@@ -61,7 +60,7 @@ export function AgentSidebar(props: Props) {
   // one with CSS media queries). Switch point preserved from the old CSS
   // `md` rule: the rail shows at >= 768px, the drawer below it.
   const { isNarrow } = useBreakpoint();
-  const { width, collapsed, setCollapsed } = useSidebarWidth();
+  const { collapsed, setCollapsed } = useSidebarCollapsed();
   const { viewMode, setViewMode } = useSidebarViewMode();
   // Show-terminated is a DB-backed user setting (display.show_terminated), the
   // single source of truth shared with the Display settings page — toggling
@@ -152,7 +151,6 @@ export function AgentSidebar(props: Props) {
         onToggleCollapsed={() => setCollapsed(!collapsed)}
         onSearchOpen={openSearch}
         setCollapsed={setCollapsed}
-        width={width}
         viewMode={viewMode}
         onToggleViewMode={() => setViewMode(viewMode === "tree" ? "flat" : "tree")}
       />
@@ -199,7 +197,7 @@ export function AgentSidebar(props: Props) {
 
 function DesktopSidebar(props: DesktopProps) {
   const t = useTranslations("sidebar");
-  const { width, collapsed, setCollapsed, onSearchOpen } = props;
+  const { collapsed, setCollapsed, onSearchOpen } = props;
 
   if (collapsed) {
     return <CollapsedSidebar {...props} />;
@@ -214,10 +212,10 @@ function DesktopSidebar(props: DesktopProps) {
       // bounding, and the WHOLE aside — header, spawn/toolbar bars and the
       // fixed footer — scrolled together). overflow-x-hidden is a hard
       // backstop: SidebarBody's own controls (spawn selects, sort buttons)
-      // truncate to fit the fixed width, but this guarantees no horizontal
-      // scrollbar can ever appear even if a control slips past that.
-      className={cn("relative border-r border-border bg-sidebar shrink-0 overflow-x-hidden", FLEX, FLEX_COL)}
-      style={{ width }}
+      // truncate to fit the available panel width, but this guarantees no
+      // horizontal scrollbar can ever appear even if a control slips past that. h-full +
+      // w-full let react-resizable-panels own the outer column dimensions.
+      className={cn("relative h-full w-full border-r border-border bg-sidebar overflow-x-hidden", FLEX, FLEX_COL)}
     >
       <SidebarHeader
         trailing={
@@ -241,7 +239,7 @@ function DesktopSidebar(props: DesktopProps) {
           </>
         }
       />
-      <SidebarBody {...props} wide={width >= SIDEBAR_WIDE_THRESHOLD} />
+      <SidebarBody {...props} wide />
       {/* Fixed bottom strip (user ruling 2026-08-05): Statistics popover +
           the four nav shortcuts (Memory Graph / Fleet / Insights / Control)
           live here — the spot an app's avatar row would occupy. */}

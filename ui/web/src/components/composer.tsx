@@ -637,7 +637,7 @@ export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, f
         // inner wrapper) aligns with the timeline's px-4 content; the
         // textarea/upload rows indent a further 2px (px-0.5) from it, and
         // vertical rhythm is even (py-2 + gap-2).
-        "mx-auto w-full px-4 pt-2 pb-5 transition-colors",
+        "mx-auto w-full px-4 pt-2 pb-3 transition-colors",
         MIN_W_0,
         dragOver && "bg-primary/5 ring-1 ring-inset ring-primary/40",
       )}

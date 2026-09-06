@@ -1,6 +1,6 @@
 // Sidebar preference hooks are DB-backed now (display.sidebar_*), so these tests
 // drive them against the reactive user-settings mock and assert the read-side
-// mapping: defaults, validation of stored values (sort shape, width clamp,
+// mapping: defaults, validation of stored values (sort shape,
 // stats-window whitelist), and that a setter writes the right key. The legacy
 // localStorage → DB migration is centralized and covered in
 // settings-migration.test.ts.
@@ -20,10 +20,9 @@ import { mockSetSettingCalls, resetMockSettings, setMockSetting } from "@/test-s
 
 import {
   SIDEBAR_SORT_DEFAULT,
-  SIDEBAR_WIDTH,
   STATS_WINDOW_DEFAULT,
+  useSidebarCollapsed,
   useSidebarSort,
-  useSidebarWidth,
   useStatsDashboard,
   useStatsWindow,
 } from "./sidebar";
@@ -71,22 +70,9 @@ describe("useSidebarSort (DB-backed)", () => {
   });
 });
 
-describe("useSidebarWidth (fixed width, task #750)", () => {
-  it("always returns the fixed width, ignoring any persisted legacy value", () => {
-    // A legacy display.sidebar_width (from the drag-resize era) must not
-    // influence the width — the sidebar is fixed now.
-    setMockSetting("display.sidebar_width", 300);
-    const { result } = renderHook(() => useSidebarWidth());
-    expect(result.current.width).toBe(SIDEBAR_WIDTH);
-  });
-
-  it("does not expose setWidth (no drag resize)", () => {
-    const { result } = renderHook(() => useSidebarWidth());
-    expect("setWidth" in result.current).toBe(false);
-  });
-
+describe("useSidebarCollapsed", () => {
   it("setCollapsed writes display.sidebar_collapsed", () => {
-    const { result } = renderHook(() => useSidebarWidth());
+    const { result } = renderHook(() => useSidebarCollapsed());
     act(() => result.current.setCollapsed(true));
     expect(mockSetSettingCalls().at(-1)).toEqual({
       key: "display.sidebar_collapsed",

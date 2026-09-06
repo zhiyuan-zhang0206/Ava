@@ -73,7 +73,7 @@ const WINDOWS: { labelKey: string; value: number | null }[] = [
  * per-section skeletons instead of displaying a previous window's totals.
  *
  * Responsive (user ruling 2026-08-23, superseding the 2026-08-05 floating
- * overlay ruling on desktop): at ≥ lg it is a fixed right-side flex panel;
+ * overlay ruling on desktop): at ≥ lg it fills a resizable right-side panel;
  * below lg it is a full-screen overlay with a backdrop, matching the mobile
  * sidebar drawer. The header X closes both forms and the backdrop closes the
  * mobile overlay; Escape deliberately does not close either form (user ruling
@@ -307,11 +307,11 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
     </>
   );
 
-  // Desktop: fixed right-side flex sibling. The 2026-08-23 ruling supersedes
+  // Desktop: fill the parent resizable panel. The 2026-08-23 ruling supersedes
   // the 2026-08-05 floating overlay for this breakpoint.
   if (isLarge) {
     return (
-      <aside className={cn("w-80 shrink-0 border-l border-border bg-background", FLEX, FLEX_COL, MIN_H_0)}>
+      <aside className={cn("h-full w-full border-l border-border bg-background", FLEX, FLEX_COL, MIN_H_0)}>
         {body}
       </aside>
     );
