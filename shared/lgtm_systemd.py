@@ -7,7 +7,6 @@ No system services, foreign homes, or existing container deployments are changed
 from __future__ import annotations
 
 import argparse
-import platform
 import re
 import subprocess
 import tempfile
@@ -19,7 +18,7 @@ from pathlib import Path
 
 from shared.cluster import home_slug
 from shared.lgtm_local import BACKENDS, backend_urls, binary_path
-from shared.platform import user_systemd_unit_dir
+from shared.platform import IS_LINUX, user_systemd_unit_dir
 
 
 @dataclass(frozen=True)
@@ -74,7 +73,7 @@ def render_unit(home: Path, name: str, command: Command) -> str:
 
 
 def _systemctl(*args: str) -> subprocess.CompletedProcess[str]:
-    if platform.system() != "Linux":
+    if not IS_LINUX:
         raise RuntimeError("Native LGTM user systemd lifecycle requires Linux")
     result = subprocess.run(  # noqa: S603 — fixed user-manager command and owned unit identity
         ["systemctl", "--user", *args], capture_output=True, text=True, check=False, timeout=45

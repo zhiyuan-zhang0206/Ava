@@ -167,7 +167,7 @@ def test_bad_loki_configuration_prevents_all_start_commands(
 
 
 def test_systemctl_failure_is_not_reported_as_success(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(lgtm_systemd.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(lgtm_systemd, "IS_LINUX", True)
 
     def failed(*args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
         return subprocess.CompletedProcess(
