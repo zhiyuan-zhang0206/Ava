@@ -29,10 +29,13 @@ interface therefore creates a new listener without requiring a process restart.
 Each successful bind and each rebuild failure is timestamped in
 `$AVA_HOME/redis-bridge/relay.log`.
 
-Each connection has one pump in each direction. Completion of either pump
-shuts down and closes both relay sockets, interrupting a peer pump blocked on a
-backend that kept its read side open; the connection handler joins both threads
-before returning.
+The five-second backend timeout bounds connection establishment only. Connected
+sockets return to blocking mode so an idle Redis Pub/Sub subscription remains
+open. Each connection has one pump in each direction. An orderly EOF shuts down
+only the destination's write side, allowing the reverse stream to drain; the
+handler joins both pumps before closing their sockets. A transport error shuts
+down both directions immediately, releasing a reverse pump blocked on an open
+peer. A peer that only half-closes can intentionally keep reading indefinitely.
 
 `ava status` and the periodic cluster health probe authenticate and issue a
 real Redis `PING` through the private-network endpoint. The launchd-label check
