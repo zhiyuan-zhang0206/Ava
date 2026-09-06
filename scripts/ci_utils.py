@@ -17,6 +17,8 @@ that window is exactly when a poll right after pushing lands.
 Usage as CLI:
     .venv/bin/python scripts/ci_utils.py <PR_NUMBER> [--repo owner/repo] [--json]
     .venv/bin/python scripts/ci_utils.py <PR_NUMBER> --wait [--timeout N] [--merge]
+    .venv/bin/python scripts/ci_utils.py <PR_NUMBER> --evict [--repo owner/repo]
+    .venv/bin/python scripts/ci_utils.py --queue-status [--repo owner/repo] [--json]
 
     Default: query once and exit (PENDING prints and exits 0 — a one-shot
     probe, not a poller). `--wait`: poll until the verdict settles, then exit
@@ -27,7 +29,12 @@ Usage as CLI:
     advisory base-staleness warning (main advanced past the PR's base) into a
     refusal, so the operator rebases instead of paying an in-queue re-test. `--queue` (or `CI_QUEUE`) selects
     the Trunk queue; `--priority` maps the submission priority, which requires
-    `TRUNK_API_TOKEN`. Trunk refuses submission unless the PR has the
+    `TRUNK_API_TOKEN`. `--evict` cancels a submitted PR from the queue and
+    `--queue-status` prints the queue state with its enqueued PRs. Trunk's
+    public API has no reorder or priority-update operation — priority is fixed
+    at submit time and queue order follows it — so mid-queue reshuffles cannot
+    be scripted (verified against Trunk's API spec, 2026-09-06). Trunk refuses
+    submission unless the PR has the
     `qa-approved` label, and `.trunk/trunk.yaml` requires its
     `qa-approved-gate` status. Submission waits at least five minutes after a
     head update. The all-green predicate excludes the "Trunk Merge Queue"
@@ -38,6 +45,7 @@ Usage as CLI:
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import re
@@ -542,14 +550,20 @@ def _deadline_hit(
     return False
 
 
-def _trunk_pr_payload(pr: str, repo: str) -> dict[str, object]:
-    """Build the repository and PR identity required by Trunk's API."""
+def _trunk_target_payload(repo: str) -> dict[str, object]:
+    """Build the repository and target branch identity Trunk endpoints share."""
     owner, name = repo.split("/", maxsplit=1)
     return {
         "repo": {"host": "github.com", "owner": owner, "name": name},
-        "pr": {"number": int(pr)},
         "targetBranch": "main",
     }
+
+
+def _trunk_pr_payload(pr: str, repo: str) -> dict[str, object]:
+    """Build the repository, PR, and target branch identity Trunk requires."""
+    payload = _trunk_target_payload(repo)
+    payload["pr"] = {"number": int(pr)}
+    return payload
 
 
 def _trunk_qa_approved(pr: str, repo: str) -> tuple[bool, str | None]:
@@ -692,6 +706,123 @@ def _submit_trunk(pr: str, repo: str, priority: str, *, token: str) -> int:
         )
         time.sleep(RETRY_BACKOFF_SECONDS)
     return 4
+
+
+def _trunk_cancel(pr: str, repo: str, *, token: str) -> int:
+    """Evict a PR from the Trunk queue; 0 cancelled, 1 not in queue, 4 error.
+
+    Trunk exposes `cancelPullRequest` (verified live: 200 on success, HTTP
+    404 when the PR is not in the queue). There is no reorder endpoint — a
+    mid-queue reshuffle cannot be scripted, only cancel and re-submit.
+    """
+    payload = _trunk_pr_payload(pr, repo)
+    _, error = _trunk_post("cancelPullRequest", payload, token)
+    if error is None:
+        print(
+            f"PR #{pr} cancelled from the Trunk merge queue",
+            file=sys.stderr,
+            flush=True,
+        )
+        return 0
+    if error == "HTTP 404":
+        print(
+            f"PR #{pr} is not in the Trunk merge queue — nothing to cancel",
+            file=sys.stderr,
+            flush=True,
+        )
+        return 1
+    print(f"[ci] Trunk queue cancel error: {error}", file=sys.stderr, flush=True)
+    return 4
+
+
+def _trunk_queue_status(repo: str, *, token: str, as_json: bool) -> int:
+    """Print the Trunk queue state and enqueued PRs; 0 ok, 3 API error.
+
+    `--json` prints the raw `getQueue` response (queue config plus
+    `enqueuedPullRequests`, each carrying state / priority / sha). States are
+    lowercase as returned: queued / pending / testing / merged / failed /
+    cancelled.
+    """
+    payload = _trunk_target_payload(repo)
+    data, error = _trunk_post("getQueue", payload, token)
+    if error is not None:
+        print(f"[ci] Trunk queue status error: {error}", file=sys.stderr, flush=True)
+        return 3
+    if data is None:
+        print("[ci] Trunk queue status returned no data", file=sys.stderr, flush=True)
+        return 3
+    if as_json:
+        print(json.dumps(data, indent=2))
+        return 0
+    state = data.get("state", "unknown")
+    print(f"Trunk merge queue: state={state} concurrency={data.get('concurrency', '?')}")
+    raw_items = data.get("enqueuedPullRequests", [])
+    items = raw_items if isinstance(raw_items, list) else []
+    if not items:
+        print("No PRs in the queue.")
+        return 0
+    for item in items:
+        priority = item.get("priorityName") or item.get("priorityValue")
+        sha = str(item.get("prSha") or "")
+        print(
+            f"  #{item.get('prNumber')} [{item.get('state')}] "
+            f"{item.get('prTitle')} (priority {priority}, sha {sha[:8]})"
+        )
+    return 0
+
+
+def _trunk_operator_command(
+    args: argparse.Namespace, parser: argparse.ArgumentParser
+) -> int | None:
+    """Dispatch --queue-status / --evict when set; None when neither is.
+
+    Both touch the live Trunk queue and need TRUNK_API_TOKEN (exit 3 when
+    unset). Usage errors go through parser.error, which exits 2, matching the
+    rest of the CLI's contract.
+    """
+    if not (args.queue_status or args.evict):
+        return None
+    if args.wait or args.merge or args.rerun_failed_jobs:
+        parser.error("--queue-status/--evict are exclusive with --wait/--merge/--rerun-failed-jobs")
+    if args.queue_status and args.evict:
+        parser.error("--queue-status and --evict are mutually exclusive")
+    if args.evict and args.json:
+        parser.error("--json is not supported with --evict")
+    if args.evict and args.pr is None:
+        parser.error("PR number is required with --evict")
+    trunk_token = os.environ.get("TRUNK_API_TOKEN")
+    if not trunk_token:
+        print(
+            "TRUNK_API_TOKEN is required for Trunk queue operations",
+            file=sys.stderr,
+            flush=True,
+        )
+        return 3
+    if args.evict:
+        return _trunk_cancel(args.pr, args.repo, token=trunk_token)
+    return _trunk_queue_status(args.repo, token=trunk_token, as_json=args.json)
+
+
+def _rerun_command(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int | None:
+    """Dispatch --rerun-failed-jobs when set; None when not set."""
+    if not args.rerun_failed_jobs:
+        return None
+    if args.wait or args.merge or args.json:
+        parser.error("--rerun-failed-jobs is exclusive with --wait/--merge/--json")
+    if args.dry_run:
+        jobs = list_failed_jobs(args.pr, args.repo)
+        if not jobs:
+            print("No failed jobs to re-run")
+            return 0
+        for j in jobs:
+            print(f"{j['name']} (job {j['job_id']}, run {j['run_id']}, {j['conclusion']})")
+        return 0
+    reran, errors = rerun_failed_jobs(args.pr, args.repo)
+    for j in reran:
+        print(f"Re-ran {j['name']} (job {j['job_id']})")
+    for e in errors:
+        print(f"Re-run failed: {e}")
+    return 3 if errors else 0
 
 
 def _watch_trunk_enqueue(
@@ -933,10 +1064,8 @@ def main(argv: list[str] | None = None) -> int:
     """CLI entry. Default: one-shot query (legacy behavior). `--wait`: poll
     until the verdict settles with the monitor exit-code contract; `--merge`
     implies `--wait` and submits to Trunk once green."""
-    import argparse
-
     p = argparse.ArgumentParser(description="Check CI status of a GitHub PR")
-    p.add_argument("pr", help="PR number")
+    p.add_argument("pr", nargs="?", help="PR number (required except --queue-status)")
     p.add_argument(
         "--repo",
         default=DEFAULT_REPO,
@@ -986,6 +1115,19 @@ def main(argv: list[str] | None = None) -> int:
         "recorded base (the queue would re-test against the newer base)",
     )
     p.add_argument(
+        "--evict",
+        action="store_true",
+        help="cancel the PR from the Trunk merge queue (requires TRUNK_API_TOKEN; "
+        "exit 0 cancelled, 1 not in queue, 4 queue error). Trunk's API has no "
+        "reorder operation, so a mid-queue reshuffle is cancel + re-submit.",
+    )
+    p.add_argument(
+        "--queue-status",
+        action="store_true",
+        help="show the Trunk merge queue state and enqueued PRs (requires "
+        "TRUNK_API_TOKEN); with --json, print the raw getQueue response",
+    )
+    p.add_argument(
         "--rerun-failed-jobs",
         action="store_true",
         help="re-run every failed job of the PR's workflow runs at JOB level "
@@ -1011,6 +1153,13 @@ def main(argv: list[str] | None = None) -> int:
     if args.json and args.wait:
         p.error("--json and --wait are mutually exclusive")
 
+    operator_rc = _trunk_operator_command(args, p)
+    if operator_rc is not None:
+        return operator_rc
+
+    if args.pr is None:
+        p.error("PR number is required")
+
     if args.merge:
         args.wait = True
         # Enqueue-to-landed can take 10-30 min in a busy queue; bound the wait
@@ -1027,23 +1176,9 @@ def main(argv: list[str] | None = None) -> int:
             )
             return 3
 
-    if args.rerun_failed_jobs:
-        if args.wait or args.merge or args.json:
-            p.error("--rerun-failed-jobs is exclusive with --wait/--merge/--json")
-        if args.dry_run:
-            jobs = list_failed_jobs(args.pr, args.repo)
-            if not jobs:
-                print("No failed jobs to re-run")
-                return 0
-            for j in jobs:
-                print(f"{j['name']} (job {j['job_id']}, run {j['run_id']}, {j['conclusion']})")
-            return 0
-        reran, errors = rerun_failed_jobs(args.pr, args.repo)
-        for j in reran:
-            print(f"Re-ran {j['name']} (job {j['job_id']})")
-        for e in errors:
-            print(f"Re-run failed: {e}")
-        return 3 if errors else 0
+    rerun_rc = _rerun_command(args, p)
+    if rerun_rc is not None:
+        return rerun_rc
 
     if args.wait:
         return _wait_for_verdict(
