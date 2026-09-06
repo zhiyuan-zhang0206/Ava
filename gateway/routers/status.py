@@ -36,7 +36,7 @@ from gateway.schemas import (
     StatsTokens,
     StatsWindowHours,
     SystemStatus,
-    window_delta,
+    applied_window,
 )
 from ops import cluster_rpc as _cluster_rpc
 from ops.cluster import ClusterStatus, _check_pidfile, current_orchestration
@@ -83,9 +83,9 @@ def get_stats_dashboard(
       (task #1281 parity run; PG events dropped; not a live gauge)
 
     `?hours=` selects the aggregation window (0 = last 5m; 1/6/24/72/168 =
-    hours), whitelisted by `StatsWindowHours` (anything else 422s). Zero-data
-    scenario: tokens all 0, cost_usd 0.0, avg_turn_seconds None (frontend
-    shows "—"). Until the unlabeled legacy slice expires on 2026-08-30,
+    hours), whitelisted by `StatsWindowHours` (anything else 422s); the served horizon is
+    `applied_window_hours`. Zero-data scenario: tokens all 0, cost_usd 0.0, avg_turn_seconds
+    None (frontend shows "—"). Until the unlabeled legacy slice expires on 2026-08-30,
     the ledger removes the fixed-cost full-window token scans; afterward the
     indexed Loki tail keeps the same self-healing late-write behavior.
     """
@@ -98,7 +98,7 @@ def get_stats_dashboard(
     # frozen pre-cutover archive, so a live window queried there flatlines to
     # zero. Do not hold a pooled DB connection while these network queries wait.
     now = datetime.now(UTC)
-    window_start = now - window_delta(hours)
+    window_start = now - applied_window(hours)[1]
     try:
         # Settled UTC days avoid full-window Loki scans. The global newest
         # ledger day is reread live while retained, so a late write into that
@@ -213,6 +213,7 @@ def get_stats_dashboard(
     response = StatsDashboard(
         live_count=live_count,
         window_hours=hours,
+        applied_window_hours=applied_window(hours)[0],
         tokens=StatsTokens(
             input=int(in_total),
             output=int(out_total),

@@ -235,10 +235,20 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
         </button>
         <WindowSelect
           value={hours == null ? "all" : String(hours)}
-          options={WINDOWS.map((w) => ({
-            value: String(w.value ?? "all"),
-            label: t(w.labelKey as Parameters<typeof t>[0]),
-          }))}
+          options={WINDOWS.map((w) => {
+            const label = t(w.labelKey as Parameters<typeof t>[0]);
+            const appliedHours = windowedData?.applied_window_hours;
+            return {
+              value: String(w.value ?? "all"),
+              label:
+                w.value === hours &&
+                appliedHours != null &&
+                w.value != null &&
+                appliedHours < w.value
+                  ? `${label} · ${appliedHours}h`
+                  : label,
+            };
+          })}
           onChange={(v) => setHours(v === "all" ? null : Number(v))}
           ariaLabel={t("windowAriaLabel")}
           className="shrink-0 cursor-pointer rounded border border-border bg-transparent px-1 py-0.5 text-2xs text-muted-foreground hover:text-foreground focus:ring-1 focus:ring-ring focus:outline-none"

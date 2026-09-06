@@ -192,6 +192,13 @@ def restart_running(home: Path) -> None:
             _systemctl("restart", unit_name(home, name))
 
 
+def force_restart(home: Path, name: str) -> None:
+    """Restart one exact unit without treating a live listener as healthy."""
+    unit = unit_name(home, name)
+    verify_loki(home)
+    _systemctl("restart", unit)
+
+
 def stop(home: Path) -> None:
     """Disable and remove only the three exact units belonging to this home."""
     # Stop the UI/evaluator before the backends it queries.

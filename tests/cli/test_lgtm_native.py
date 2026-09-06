@@ -234,7 +234,7 @@ def test_ensure_renders_configs_with_native_paths_and_loopback(
     assert "http_listen_address: 127.0.0.1" in loki
     assert "grpc_listen_address: 127.0.0.1" in loki
     assert "instance_addr: 127.0.0.1" in loki
-    assert "retention_period: 168h" in loki
+    assert "retention_period: 84h" in loki
     assert "disk_full_threshold: 0.95" in loki
     validate_loki_deploy_config(loki_config)
     assert "max_query_series: 20000" in loki
@@ -326,6 +326,8 @@ def test_render_plist_uses_absolute_paths_and_memory_caps(tmp_path: Path) -> Non
         assert plist["Label"] == _lgtm_native.native_label(name, home)
         assert plist["EnvironmentVariables"]["GOMEMLIMIT"] == expected_limit
         assert Path(plist["ProgramArguments"][0]).is_absolute()
+        if name == "prometheus":
+            assert "--storage.tsdb.retention.time=180h" in plist["ProgramArguments"]
         assert plist["StandardOutPath"] == str(home / f"lgtm/native/logs/{name}.log")
         assert plist["StandardErrorPath"] == str(home / f"lgtm/native/logs/{name}.log")
 

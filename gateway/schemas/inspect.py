@@ -209,7 +209,10 @@ class AgentInspect(BaseModel):
 
     `window_hours` echoes the `?hours=` request parameter: None = cumulative
     since spawn (the default), else `cost` + `stats` + `tps` + `activity`
-    aggregate only over the past N hours. `since_compact` echoes
+    aggregate only over the past N hours. `applied_window_hours` is the
+    actually served window in hours, no greater than `window_hours` and
+    clamped to the Loki retention horizon; it is None for whole-life and
+    since-compact reads. `since_compact` echoes
     `?since_compact=`: True = those cover only events since the agent's latest
     compact halt (`hours` is ignored and `window_hours` is None). `shells`,
     `config_overlay`, `notice`, and `heartbeat` are always current, independent
@@ -229,6 +232,7 @@ class AgentInspect(BaseModel):
     spawned_at: datetime
     started_at: datetime | None = None
     window_hours: StatsWindowHours | None = None
+    applied_window_hours: int | None = None
     since_compact: bool = False
     shells: list[ShellInfo]
     config_overlay: dict[str, Any]
