@@ -43,14 +43,20 @@ def _open_listener(address: tuple[str, int]) -> socket.socket:
 def _pump(
     source: socket.socket,
     destination: socket.socket,
-    stopped: threading.Event,
 ) -> None:
     try:
+        while data := source.recv(_BUFFER_SIZE):
+            destination.sendall(data)
+    except OSError:
+        # A failed transport cannot drain. Interrupt the reverse pump even if
+        # its peer keeps the connection open indefinitely.
+        for connection in (source, destination):
+            with suppress(OSError):
+                connection.shutdown(socket.SHUT_RDWR)
+    else:
+        # EOF ends only this direction; the peer can still send a response.
         with suppress(OSError):
-            while data := source.recv(_BUFFER_SIZE):
-                destination.sendall(data)
-    finally:
-        stopped.set()
+            destination.shutdown(socket.SHUT_WR)
 
 
 def _handle(
@@ -64,23 +70,21 @@ def _handle(
         _log(f"backend connect failed for {peer[0]}:{peer[1]}: {exc}")
         client.close()
         return
+    # The timeout bounds connection establishment, not Redis Pub/Sub idleness.
+    backend.settimeout(None)
 
     _log(f"relay {peer[0]}:{peer[1]} <-> backend")
-    stopped = threading.Event()
     pumps = (
-        threading.Thread(target=_pump, args=(client, backend, stopped), daemon=True),
-        threading.Thread(target=_pump, args=(backend, client, stopped), daemon=True),
+        threading.Thread(target=_pump, args=(client, backend), daemon=True),
+        threading.Thread(target=_pump, args=(backend, client), daemon=True),
     )
     for pump in pumps:
         pump.start()
-    stopped.wait()
-    for connection in (client, backend):
-        with suppress(OSError):
-            connection.shutdown(socket.SHUT_RDWR)
-        with suppress(OSError):
-            connection.close()
     for pump in pumps:
         pump.join()
+    for connection in (client, backend):
+        with suppress(OSError):
+            connection.close()
 
 
 def serve_forever(
