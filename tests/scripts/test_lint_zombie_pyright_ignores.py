@@ -1,4 +1,4 @@
-"""Contract tests for the zombie Pyright-ignore registry gate."""
+"""Contract tests for the zero-zombie Pyright-ignore gate."""
 
 from __future__ import annotations
 
@@ -116,72 +116,41 @@ def test_classify_keeps_error_tier_and_non_family_rules(
     assert scan.invalid == frozenset({ignores[7]})
 
 
-@pytest.mark.parametrize(
-    ("registry_entries", "zombies", "expected_stderr"),
-    [
-        ([], [_ignore("agent/a.py", 3, "reportUnknownMemberType")], "new zombie"),
-        (
-            [_ignore("agent/a.py", 3, "reportUnknownMemberType")],
-            [],
-            "no longer corresponds",
-        ),
-    ],
-)
-def test_check_rejects_new_and_stale_registry_entries(
-    tmp_path: Path,
-    capsys: pytest.CaptureFixture[str],
-    registry_entries: list[gate.PyrightIgnore],
-    zombies: list[gate.PyrightIgnore],
-    expected_stderr: str,
-) -> None:
-    registry = tmp_path / "registry"
-    gate.write_registry(registry, frozenset(registry_entries))
+def test_check_rejects_any_zombie_ignore(capsys: pytest.CaptureFixture[str]) -> None:
+    zombie = _ignore("agent/a.py", 3, "reportUnknownMemberType")
 
-    assert gate.check_registry(gate.ScanResult(frozenset(zombies), frozenset()), registry) == 1
+    assert gate.check_scan(gate.ScanResult(frozenset({zombie}), frozenset())) == 1
     captured = capsys.readouterr()
-    assert "agent/a.py:3:reportUnknownMemberType" in captured.out
-    assert expected_stderr in captured.err
+    assert "zombie: agent/a.py:3:reportUnknownMemberType" in captured.out
+    assert "1 zombie Pyright ignore" in captured.err
 
 
-def test_check_accepts_matching_empty_sets(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    registry = tmp_path / "registry"
-    gate.write_registry(registry, frozenset())
-
-    assert gate.check_registry(gate.ScanResult(frozenset(), frozenset()), registry) == 0
+def test_check_accepts_zero_zombies(capsys: pytest.CaptureFixture[str]) -> None:
+    assert gate.check_scan(gate.ScanResult(frozenset(), frozenset())) == 0
     captured = capsys.readouterr()
     assert captured.out == ""
     assert "0 zombie" in captured.err
 
 
-def test_check_rejects_invalid_rule_without_registry_membership(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_check_rejects_invalid_rule(capsys: pytest.CaptureFixture[str]) -> None:
     invalid = _ignore("agent/a.py", 7, "reportMadeUpRule")
-    registry = tmp_path / "registry"
-    gate.write_registry(registry, frozenset())
 
-    assert gate.check_registry(gate.ScanResult(frozenset(), frozenset({invalid})), registry) == 1
+    assert gate.check_scan(gate.ScanResult(frozenset(), frozenset({invalid}))) == 1
     captured = capsys.readouterr()
-    assert f"invalid: {invalid.registry_entry}" in captured.out
-    assert "new invalid Pyright rule" in captured.err
+    assert f"invalid: {invalid.reference}" in captured.out
+    assert "1 invalid Pyright rule" in captured.err
 
 
-def test_check_accepts_grandfathered_invalid_rule(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    invalid = _ignore("agent/a.py", 7, "reportMadeUpRule")
-    zombie = _ignore("agent/a.py", 8, "reportUnknownMemberType")
-    registry = tmp_path / "registry"
-    gate.write_registry(registry, frozenset({invalid, zombie}))
-
-    assert (
-        gate.check_registry(gate.ScanResult(frozenset({zombie}), frozenset({invalid})), registry)
-        == 0
-    )
-    captured = capsys.readouterr()
-    assert captured.out == ""
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        ["--freeze"],
+        ["--registry", "retired"],
+    ],
+)
+def test_stateful_modes_are_retired(arguments: list[str]) -> None:
+    with pytest.raises(SystemExit):
+        gate._build_parser().parse_args(arguments)
 
 
 def test_docstring_lookalike_is_not_scanned() -> None:

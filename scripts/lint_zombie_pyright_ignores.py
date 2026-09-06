@@ -7,15 +7,13 @@ diagnostics gate merge (``uv run pyright`` and the pre-commit hook both exit 0
 on warnings — see the [tool.pyright] ladder comment in pyproject.toml); if
 warning-severity diagnostics ever become blocking, this classification must
 be revisited. Effective severity combines strict-mode defaults with the
-global and execution-environment overrides in ``pyproject.toml``. A
-bidirectional registry allows the existing debt while rejecting both new
-zombies and stale entries after a zombie is removed.
+global and execution-environment overrides in ``pyproject.toml``.
 
-Run ``--freeze`` only to establish a reviewed baseline. ``--check`` is the
-default CI path. ``--verify`` removes ignores in a temporary sibling and asks
-Pyright whether any errors appear beyond the original baseline. ``--strip`` applies
-only those certified removals; ``--strip --all-tier`` skips Pyright and removes
-the statically known warning-tier family rules.
+``--check`` is the default CI path and rejects every zombie or invalid rule.
+``--verify`` removes ignores in a temporary sibling and asks Pyright whether
+any errors appear beyond the original baseline. ``--strip`` applies only those
+certified removals; ``--strip --all-tier`` skips Pyright and removes the
+statically known warning-tier family rules.
 """
 
 from __future__ import annotations
@@ -36,7 +34,6 @@ from typing import Literal, cast
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _PYPROJECT_PATH = _REPO_ROOT / "pyproject.toml"
-_REGISTRY_PATH = _REPO_ROOT / "scripts/zombie_pyright_ignores.registry"
 _PYRIGHT_PATH = _REPO_ROOT / ".venv/bin/pyright"
 
 _FAMILY_RULES = frozenset(
@@ -237,7 +234,7 @@ class PyrightIgnore:
     rule: str
 
     @property
-    def registry_entry(self) -> str:
+    def reference(self) -> str:
         return f"{self.path}:{self.line}:{self.rule}"
 
 
@@ -396,64 +393,31 @@ def classify_ignores(ignores: Iterable[PyrightIgnore], config: TierConfig) -> Sc
     return ScanResult(frozenset(zombies), frozenset(invalid))
 
 
-def read_registry(path: Path) -> frozenset[PyrightIgnore]:
-    entries: set[PyrightIgnore] = set()
-    for raw_line in path.read_text(encoding="utf-8").splitlines():
-        parts = raw_line.rsplit(":", 2)
-        if len(parts) != 3 or not parts[0] or not parts[1].isdigit() or not parts[2]:
-            raise ValueError(f"invalid zombie-ignore registry entry: {raw_line!r}")
-        entry = PyrightIgnore(parts[0], int(parts[1]), parts[2])
-        if entry in entries:
-            raise ValueError(f"duplicate zombie-ignore registry entry: {raw_line}")
-        entries.add(entry)
-    return frozenset(entries)
-
-
-def write_registry(path: Path, entries: frozenset[PyrightIgnore]) -> None:
-    content = "".join(f"{entry.registry_entry}\n" for entry in sorted(entries))
-    path.write_text(content, encoding="utf-8")
-
-
 def _print_entries(entries: Iterable[PyrightIgnore], label: str | None = None) -> None:
     for entry in sorted(entries):
-        print(f"{label}: {entry.registry_entry}" if label else entry.registry_entry)
+        print(f"{label}: {entry.reference}" if label else entry.reference)
 
 
-def check_registry(scan: ScanResult, registry_path: Path) -> int:
-    registry = read_registry(registry_path)
-    current = scan.zombies | scan.invalid
-    new_entries = current - registry
-    stale_entries = registry - current
-    _print_entries((entry for entry in new_entries if entry in scan.invalid), "invalid")
-    _print_entries((entry for entry in new_entries if entry in scan.zombies), "zombie")
-    _print_entries(stale_entries, "stale")
+def check_scan(scan: ScanResult) -> int:
+    _print_entries(scan.invalid, "invalid")
+    _print_entries(scan.zombies, "zombie")
 
-    if new_entries & scan.invalid:
+    if scan.invalid:
         print(
-            f"{len(new_entries & scan.invalid)} new invalid Pyright rule entr"
-            f"{'y' if len(new_entries & scan.invalid) == 1 else 'ies'} found.",
+            f"{len(scan.invalid)} invalid Pyright rule(s) found.",
             file=sys.stderr,
         )
-    new_zombies = new_entries & scan.zombies
-    if new_zombies:
+    if scan.zombies:
         print(
-            f"{len(new_zombies)} new zombie Pyright ignore(s): delete them or raise "
+            f"{len(scan.zombies)} zombie Pyright ignore(s): delete them or raise "
             "the rule back to the error tier.",
             file=sys.stderr,
         )
-    if stale_entries:
-        print(
-            f"{len(stale_entries)} registry entr"
-            f"{'y' if len(stale_entries) == 1 else 'ies'} no longer corresponds to a "
-            "zombie; remove cleared ignores from the registry too.",
-            file=sys.stderr,
-        )
     print(
-        f"{len(scan.zombies)} zombie ignore(s), {len(scan.invalid)} invalid rule(s), "
-        f"{len(registry)} registry entry(ies).",
+        f"{len(scan.zombies)} zombie ignore(s), {len(scan.invalid)} invalid rule(s).",
         file=sys.stderr,
     )
-    return int(bool(new_entries or stale_entries))
+    return int(bool(scan.zombies or scan.invalid))
 
 
 def _comment_matches(source: str) -> dict[int, tuple[int, re.Match[str]]]:
@@ -581,8 +545,8 @@ def verify_file(path: Path, candidates: frozenset[PyrightIgnore]) -> Verificatio
 def _verification_json(results: Mapping[str, Verification]) -> str:
     payload = {
         path: {
-            "certified": [item.registry_entry for item in sorted(result.certified)],
-            "rejected": [item.registry_entry for item in sorted(result.rejected)],
+            "certified": [item.reference for item in sorted(result.certified)],
+            "rejected": [item.reference for item in sorted(result.rejected)],
         }
         for path, result in sorted(results.items())
     }
@@ -611,8 +575,11 @@ def _verify_selected(files: Sequence[str]) -> tuple[dict[str, Verification], Sca
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     modes = parser.add_mutually_exclusive_group()
-    modes.add_argument("--freeze", action="store_true", help="replace the registry")
-    modes.add_argument("--check", action="store_true", help="check the registry (default)")
+    modes.add_argument(
+        "--check",
+        action="store_true",
+        help="reject zombie and invalid ignores (default)",
+    )
     modes.add_argument(
         "--verify",
         nargs="+",
@@ -625,7 +592,6 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="with --strip, remove all statically known non-error ignores",
     )
-    parser.add_argument("--registry", type=Path, default=_REGISTRY_PATH)
     return parser
 
 
@@ -668,17 +634,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
 
     scan = classify_ignores(scan_repository(), _TIER_CONFIG)
-    if args.freeze:
-        entries = scan.zombies | scan.invalid
-        _print_entries(scan.invalid, "invalid")
-        write_registry(args.registry, entries)
-        print(
-            f"Wrote {len(entries)} zombie/invalid ignore(s) to {args.registry} "
-            f"({len(scan.zombies)} zombies, {len(scan.invalid)} invalid rules).",
-            file=sys.stderr,
-        )
-        return 0
-    return check_registry(scan, args.registry)
+    return check_scan(scan)
 
 
 if __name__ == "__main__":
