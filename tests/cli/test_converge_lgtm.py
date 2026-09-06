@@ -28,6 +28,13 @@ from cli.commands._converge_spec import ConvergeCtx
 _WILDCARD_LISTEN = "0.0.0.0"  # noqa: S104
 
 
+@pytest.fixture(autouse=True)
+def _darwin_lifecycle(monkeypatch: pytest.MonkeyPatch) -> None:
+    """These existing lifecycle cases exercise the Darwin implementation."""
+    monkeypatch.setattr(_lgtm_native.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(_lgtm_native.platform, "machine", lambda: "arm64")
+
+
 def _fail_on_docker_query(_name: str) -> None:
     pytest.fail("native lifecycle must not query the Docker CLI")
 
@@ -62,6 +69,7 @@ def _native_start_fixture(tmp_path: Path) -> tuple[Path, Path, Path, dict[str, s
     _write_executable(ava_home / "lgtm" / "native" / "grafana" / "run.sh", "#!/bin/sh\nexit 0\n")
 
     fake_bin = tmp_path / "fake-bin"
+    _write_executable(fake_bin / "uname", "#!/bin/sh\nprintf Darwin\\n\n")
     _write_executable(fake_bin / "curl", "#!/bin/sh\nprintf '200'\n")
     launchctl_log = tmp_path / "launchctl.log"
     _write_executable(
@@ -183,7 +191,7 @@ def test_native_backend_listen_hosts_are_settings_rendered_with_loopback_default
     assert "instance_addr: 127.0.0.1" in loki
     assert "address: 127.0.0.1" in loki
     assert (
-        "--web.listen-address={lgtm_listen_host}:9090"
+        "--web.listen-address={lgtm_listen_host}:{lgtm_prometheus_port}"
         in _lgtm_native._NATIVE_CONSTANTS["prometheus"].arguments
     )
 
@@ -594,6 +602,7 @@ def test_observability_url_validation_warns_and_falls_back(
 def test_native_converge_renders_grafana_password_only_when_configured(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
+    monkeypatch.setattr(_lgtm_native, "_launchctl", _no_launchctl)
     repo = Path(__file__).resolve().parents[2]
     home = tmp_path / "home"
     agents_dir = tmp_path / "LaunchAgents"
@@ -619,6 +628,7 @@ def test_native_converge_renders_grafana_password_only_when_configured(
 def test_native_converge_leaves_unconfigured_grafana_password_absent(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
+    monkeypatch.setattr(_lgtm_native, "_launchctl", _no_launchctl)
     repo = Path(__file__).resolve().parents[2]
     home = tmp_path / "home"
     agents_dir = tmp_path / "LaunchAgents"
@@ -772,6 +782,8 @@ def _without_loki_transport_paths(config: dict[str, object]) -> dict[str, object
         ("compactor", "working_directory"),
         ("server", "http_listen_address"),
         ("server", "grpc_listen_address"),
+        ("server", "http_listen_port"),
+        ("server", "grpc_listen_port"),
         ("common", "ring", "instance_addr"),
         ("frontend", "address"),
     ):

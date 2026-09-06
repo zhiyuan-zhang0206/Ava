@@ -14,6 +14,10 @@ shopt -s nullglob
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
+if [[ "$(uname -s)" == Linux ]]; then
+    exec "$SCRIPT_DIR/../../.venv/bin/python" -m shared.lgtm_systemd start
+fi
+
 log() { printf '[%s] %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*"; }
 
 NATIVE_DIR="${AVA_HOME:-$HOME/.ava}/lgtm/native"
@@ -48,7 +52,7 @@ _verify_loki_config() {
 
 _reachable() {
     local code
-    code=$(curl -s -o /dev/null -w '%{http_code}' "$1" 2>/dev/null || true)
+    code=$(curl --noproxy '*' -s -o /dev/null -w '%{http_code}' "$1" 2>/dev/null || true)
     [[ -n "$code" && "$code" != "000" ]]
 }
 
@@ -107,14 +111,15 @@ _retire_legacy_grafana() {
     fi
 }
 
-# Probe endpoints follow the observability settings (AVA_TELEMETRY_LOKI_URL /
-# AVA_TELEMETRY_PROMETHEUS_URL / AVA_TELEMETRY_GRAFANA_URL), the same source
-# the lgtm healthcheck's readiness probes derive from — one contract, so the
-# watchdog and this script can never probe different targets (WP3, task #1945).
-# The loopback defaults are the historical byte-identical values.
-LOKI_URL="${AVA_TELEMETRY_LOKI_URL:-http://127.0.0.1:3100}"
-PROM_URL="${AVA_TELEMETRY_PROMETHEUS_URL:-http://127.0.0.1:9090}"
-GRAFANA_PROBE_URL="${AVA_TELEMETRY_GRAFANA_URL:-http://127.0.0.1:3003}"
+# CLI/watchdog pass the resolved local bind settings. Direct shell invocation
+# uses the same host/port environment defaults, never remote query URLs.
+LOCAL_HOST="${AVA_LGTM_LISTEN_HOST:-127.0.0.1}"
+GRAFANA_HOST="${AVA_LGTM_GRAFANA_LISTEN_HOST:-127.0.0.1}"
+[[ "$LOCAL_HOST" == "0.0.0.0" ]] && LOCAL_HOST=127.0.0.1
+[[ "$GRAFANA_HOST" == "0.0.0.0" ]] && GRAFANA_HOST=127.0.0.1
+LOKI_URL="${AVA_NATIVE_LOKI_URL:-http://$LOCAL_HOST:${AVA_LGTM_LOKI_PORT:-3100}}"
+PROM_URL="${AVA_NATIVE_PROMETHEUS_URL:-http://$LOCAL_HOST:${AVA_LGTM_PROMETHEUS_PORT:-9090}}"
+GRAFANA_PROBE_URL="${AVA_NATIVE_GRAFANA_URL:-http://$GRAFANA_HOST:${AVA_LGTM_GRAFANA_PORT:-3003}}"
 
 _verify_loki_config
 _start_native loki "$LOKI_URL/ready"
@@ -124,7 +129,7 @@ _retire_legacy_grafana
 
 grafana_password="$NATIVE_DIR/grafana/admin_password"
 if [[ -f "$grafana_password" ]]; then
-    alert_rules=$(curl -s -u "admin:$(<"$grafana_password")" \
+    alert_rules=$(curl --noproxy '*' -s -u "admin:$(<"$grafana_password")" \
         "$GRAFANA_PROBE_URL/api/v1/provisioning/alert-rules" 2>/dev/null || true)
     if alert_count=$(printf '%s' "$alert_rules" | python3 -c 'import json, sys; print(len(json.load(sys.stdin)))' 2>/dev/null); then
         if [[ "$alert_count" -lt 18 ]]; then

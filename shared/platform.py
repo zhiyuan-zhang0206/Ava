@@ -367,3 +367,12 @@ def primary_disk_path() -> str:
     if IS_WINDOWS:
         return "C:\\"
     return "/"
+
+
+def user_systemd_unit_dir() -> Path:
+    """The user manager's XDG unit directory, independent of Ava configuration."""
+    configured = os.environ.get("XDG_CONFIG_HOME")
+    config = Path(configured) if configured else Path.home() / ".config"
+    if not config.is_absolute():
+        raise ValueError("XDG_CONFIG_HOME must be an absolute path for user systemd units")
+    return config / "systemd/user"

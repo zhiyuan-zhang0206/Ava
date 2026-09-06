@@ -41,6 +41,8 @@ def _wire(
     deploy_dir = tmp_path / "repo" / "deploy" / "lgtm"
     deploy_dir.mkdir(parents=True, exist_ok=True)
     monkeypatch.setattr(_lgtm, "lgtm_host_marker", lambda: marker)
+    monkeypatch.setattr(_lgtm.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr("shared.paths.ava_home", lambda: marker.parent)
     monkeypatch.setattr(_lgtm, "lgtm_deploy_dir", lambda _repo: deploy_dir)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(commands_ns, "_repo_root", lambda: tmp_path / "repo")
 
@@ -116,24 +118,26 @@ def test_off_removes_marker_then_stops(monkeypatch: pytest.MonkeyPatch, tmp_path
 
     marker_present_at_stop: list[bool] = []
 
-    def fake_run(cmd: list[str], **kw: object) -> _Result:
+    def stop(home: Path) -> None:
+        assert home == marker.parent
         marker_present_at_stop.append(marker.exists())
-        calls.append((cmd, Path(str(kw["cwd"]))))
-        return _Result()
 
-    monkeypatch.setattr(_lgtm.subprocess, "run", fake_run)
+    monkeypatch.setattr(_lgtm_native, "bootout_native_jobs", stop)
 
     assert _lgtm.cmd_lgtm_off() == 0
     assert not marker.exists()
-    assert [c[0] for c in calls] == [["bash", "stop.sh"]]
+    assert not calls
     assert marker_present_at_stop == [False]
 
 
 def test_off_without_marker_still_stops(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    _marker, calls = _wire(monkeypatch, tmp_path)
+    marker, calls = _wire(monkeypatch, tmp_path)
+    stopped: list[Path] = []
+    monkeypatch.setattr(_lgtm_native, "bootout_native_jobs", stopped.append)
 
     assert _lgtm.cmd_lgtm_off() == 0
-    assert [c[0] for c in calls] == [["bash", "stop.sh"]]
+    assert not calls
+    assert stopped == [marker.parent]
 
 
 def test_on_without_docker_starts_native_backends(

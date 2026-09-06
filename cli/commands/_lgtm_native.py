@@ -1,7 +1,7 @@
-"""Native LGTM installation and launchd configuration.
+"""Native LGTM installation and host service configuration.
 
 Converge downloads only a missing or stale release asset, while always
-rendering the live configs and launchd plists so checkout changes apply on the
+rendering live configs and launchd plists / user systemd units so changes apply on the
 next lifecycle run.
 """
 
@@ -22,7 +22,6 @@ import tempfile
 import time
 import urllib.request
 import zipfile
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 from urllib.parse import urlparse
@@ -31,6 +30,7 @@ import yaml
 
 from cli.commands._converge_spec import ConvergeCtx
 from cli.commands._lgtm import is_station_ctx, roles_declare_station
+from cli.commands._lgtm_assets import _NATIVE_CONSTANTS, load_versions
 from cli.commands._observatory_urls import (
     _alerts_webhook_url,
     _atomic_write,
@@ -40,7 +40,7 @@ from cli.commands._rendered_file import write_rendered_guarded
 from shared.log import logger
 from shared.loki_index_labels import validate_loki_deploy_config
 
-SUPPORTED_TAGS = {"darwin_arm64"}
+SUPPORTED_TAGS = {"darwin_arm64", "linux_amd64"}
 
 _DOWNLOAD_SOCKET_TIMEOUT_S = 30.0
 _DOWNLOAD_ATTEMPT_TIMEOUT_S = 600.0
@@ -50,82 +50,21 @@ _DOWNLOAD_PROGRESS_INTERVAL_S = 15.0
 _LAUNCHCTL_TIMEOUT_S = 5.0
 
 
-@dataclass(frozen=True)
-class _NativeService:
-    arguments: tuple[str, ...]
-    gomemlimit: str | None
-    archive_member: str | None
-    binary_path: str
-    uses_run_script: bool = False
-
-
-_NATIVE_CONSTANTS: dict[str, _NativeService] = {
-    "loki": _NativeService(
-        arguments=("-config.file={config}/loki.yaml",),
-        gomemlimit="2GiB",
-        archive_member="loki-darwin-arm64",
-        binary_path="bin/loki",
-    ),
-    "prometheus": _NativeService(
-        arguments=(
-            "--config.file={config}/prometheus.yml",
-            "--storage.tsdb.path={data}/prom",
-            "--storage.tsdb.retention.time=15d",
-            "--storage.tsdb.retention.size=8GB",
-            "--web.enable-otlp-receiver",
-            "--web.listen-address={lgtm_listen_host}:9090",
-        ),
-        gomemlimit="1GiB",
-        archive_member="prometheus-3.13.2.darwin-arm64/prometheus",
-        binary_path="bin/prometheus",
-    ),
-    "grafana": _NativeService(
-        arguments=(
-            "server",
-            "--config={config}/grafana.ini",
-            "--homepath={homepath}",
-        ),
-        gomemlimit=None,
-        archive_member=None,
-        binary_path="grafana-home/bin/grafana",
-        uses_run_script=True,
-    ),
-}
-
-
 def platform_tag() -> str | None:
     """Return the pinned release tag for this machine, if native LGTM supports it."""
-    if platform.system() != "Darwin":
-        return None
-    return "darwin_arm64" if platform.machine().lower() in {"arm64", "aarch64"} else None
+    system, machine = platform.system(), platform.machine().lower()
+    if system == "Darwin" and machine in {"arm64", "aarch64"}:
+        return "darwin_arm64"
+    if system == "Linux" and machine in {"x86_64", "amd64"}:
+        return "linux_amd64"
+    return None
 
 
 def _load_versions(repo: Path) -> dict[str, dict[str, str]]:
-    """Load the pinned version and release asset for every native backend."""
-    raw = yaml.safe_load((repo / "deploy/lgtm/native/versions.yml").read_text(encoding="utf-8"))
-    if not isinstance(raw, dict):
-        raise TypeError("deploy/lgtm/native/versions.yml must contain a mapping")
-    entries = cast(dict[str, object], raw)
-    versions: dict[str, dict[str, str]] = {}
-    for name in _NATIVE_CONSTANTS:
-        service = entries[name]
-        if not isinstance(service, dict):
-            raise TypeError(f"native LGTM version entry for {name} must be a mapping")
-        values = cast(dict[str, object], service)
-        version = values["version"]
-        assets = values["assets"]
-        if not isinstance(version, str) or not isinstance(assets, dict):
-            raise TypeError(f"native LGTM version entry for {name} is invalid")
-        asset = cast(dict[str, object], assets)["darwin-arm64"]
-        if not isinstance(asset, dict):
-            raise TypeError(f"native LGTM darwin-arm64 asset for {name} must be a mapping")
-        asset_values = cast(dict[str, object], asset)
-        url = asset_values["url"]
-        sha256 = asset_values["sha256"]
-        if not isinstance(url, str) or not isinstance(sha256, str):
-            raise TypeError(f"native LGTM darwin-arm64 asset for {name} is invalid")
-        versions[name] = {"version": version, "url": url, "sha256": sha256}
-    return versions
+    tag = platform_tag()
+    if tag is None:
+        raise RuntimeError("Native LGTM has no pinned assets for this platform")
+    return load_versions(repo, tag)
 
 
 def _plist_path(label: str) -> Path:
@@ -166,8 +105,10 @@ def _storage_dir(ava_home: Path) -> Path:
     return Path(configured).expanduser().resolve()
 
 
-def _render_plist(name: str, native_dir: Path, ava_home: Path) -> str:
-    """Render one owner-scoped launchd plist with absolute program paths."""
+def _service_invocation(
+    name: str, native_dir: Path, ava_home: Path
+) -> tuple[tuple[str, ...], dict[str, str]]:
+    """The same native command and environment for launchd and user systemd."""
     from shared.config import settings
 
     service = _NATIVE_CONSTANTS[name]
@@ -178,6 +119,7 @@ def _render_plist(name: str, native_dir: Path, ava_home: Path) -> str:
         "data": str(_storage_dir(ava_home)),
         "homepath": str(resolved_native / "grafana-home"),
         "lgtm_listen_host": settings.observability.lgtm_listen_host,
+        "lgtm_prometheus_port": str(settings.observability.lgtm_prometheus_port),
     }
     program_arguments = (
         [str(resolved_native / "grafana" / "run.sh")]
@@ -190,6 +132,13 @@ def _render_plist(name: str, native_dir: Path, ava_home: Path) -> str:
     environment = {"AVA_HOME": str(resolved_home)}
     if service.gomemlimit is not None:
         environment["GOMEMLIMIT"] = service.gomemlimit
+    return tuple(program_arguments), environment
+
+
+def _render_plist(name: str, native_dir: Path, ava_home: Path) -> str:
+    """Render one owner-scoped launchd plist with absolute program paths."""
+    program_arguments, environment = _service_invocation(name, native_dir, ava_home)
+    resolved_home = ava_home.resolve()
     plist: dict[str, Any] = {
         "Label": native_label(name, ava_home),
         "ProgramArguments": program_arguments,
@@ -258,9 +207,9 @@ def _download_with_retry(url: str, archive: Path) -> None:
     ) from last_error
 
 
-def _extract_member(name: str, archive: Path, destination: Path) -> None:
+def _extract_member(name: str, archive: Path, destination: Path, member: str | None = None) -> None:
     """Copy the expected release member into its final binary path."""
-    member = _NATIVE_CONSTANTS[name].archive_member
+    member = member or _NATIVE_CONSTANTS[name].archive_member
     if member is None:
         raise RuntimeError(f"native LGTM {name} must install a release tree")
     with tempfile.TemporaryDirectory() as temporary_dir:
@@ -316,8 +265,9 @@ def _download_and_verify(name: str, version: str, asset: dict[str, str], native_
         if service.archive_member is None:
             _extract_tree(name, archive, native_dir / "grafana-home")
         else:
-            _extract_member(name, archive, _binary_path(name, native_dir))
+            _extract_member(name, archive, _binary_path(name, native_dir), asset["member"])
     (native_dir / f"version-{name}").write_text(version + "\n", encoding="utf-8")
+    (native_dir / f"platform-{name}").write_text(str(platform_tag()) + "\n", encoding="utf-8")
 
 
 def _write_if_changed(path: Path, content: str, *, mode: int | None = None) -> None:
@@ -378,9 +328,8 @@ def _warn_listen_read_mismatches() -> None:
     """Warn when a native backend binds a specific non-loopback address while
     its telemetry read URL still resolves to loopback.
 
-    The healthcheck probes and the Prometheus scrape targets derive from the
-    telemetry URLs, so a widened listen host with loopback read URLs silently
-    breaks every read path (QA nit on PR #727, Task #1795)."""
+    Prometheus scrape targets and consumer reads use the telemetry URLs, so
+    a widened listen host with loopback read URLs breaks those read paths (QA nit on PR #727, Task #1795)."""
     from shared.config import settings
 
     observability = settings.observability
@@ -451,6 +400,8 @@ def _render_configs(repo: Path, native_dir: Path, ava_home: Path) -> None:
         "ALERTS_WEBHOOK_URL": _alerts_webhook_url(),
         "REPO": str(repo),
         "lgtm_grafana_listen_host": settings.observability.lgtm_grafana_listen_host,
+        "LGTM_LOKI_PORT": str(settings.observability.lgtm_loki_port),
+        "LGTM_GRAFANA_PORT": str(settings.observability.lgtm_grafana_port),
     }
     for name in ("loki.yaml", "prometheus.yml", "grafana.ini", "runtime.env"):
         template = (source_dir / name).read_text(encoding="utf-8")
@@ -475,6 +426,10 @@ def _render_configs(repo: Path, native_dir: Path, ava_home: Path) -> None:
         # the rendered line must stay byte-identical to the historical unquoted
         # address — so the template carries a brace-free token instead.
         content = content.replace("__LGTM_LISTEN_HOST__", lgtm_listen_host)
+        content = content.replace("__LGTM_LOKI_PORT__", str(settings.observability.lgtm_loki_port))
+        content = content.replace(
+            "__LGTM_LOKI_GRPC_PORT__", str(settings.observability.lgtm_loki_grpc_port)
+        )
         if name == "loki.yaml":
             rendered = yaml.safe_load(content)
             if not isinstance(rendered, dict):
@@ -629,15 +584,20 @@ def _retire_other_native_jobs(ava_home: Path) -> None:
 
 def bootout_native_jobs(ava_home: Path) -> None:
     """Boot out and delete this home's jobs; `ava lgtm off` should call it after marker removal."""
+    if platform.system() == "Linux":
+        from shared.lgtm_systemd import stop
+
+        stop(ava_home)
+        return
     for name in _NATIVE_CONSTANTS:
         label = native_label(name, ava_home)
-        if _job_loaded(label):
-            _launchctl("bootout", f"gui/{os.getuid()}/{label}")
+        if _job_loaded(label) and _launchctl("bootout", f"gui/{os.getuid()}/{label}").returncode:
+            raise RuntimeError(f"Failed to stop native LGTM job {label}")
         _plist_path(label).unlink(missing_ok=True)
 
 
 def ensure_lgtm_native(repo: Path, ava_home: Path, *, station: bool = False) -> None:
-    """Install current backend binaries and always converge configs and plists.
+    """Install current binaries and converge configs and native service definitions.
 
     `station` is the declarative provider identity (the `observability-station`
     capability); the legacy `$AVA_HOME/lgtm-host` marker is still honored on its
@@ -656,9 +616,16 @@ def ensure_lgtm_native(repo: Path, ava_home: Path, *, station: bool = False) -> 
     storage = _storage_dir(ava_home)
     for sub in ("", "loki", "prom"):
         (storage / sub).mkdir(parents=True, exist_ok=True)
+    config_before = _linux_config_fingerprint(native_dir)
     for name, asset in _load_versions(repo).items():
         marker = native_dir / f"version-{name}"
-        if marker.exists() and marker.read_text(encoding="utf-8").strip() == asset["version"]:
+        platform_marker = native_dir / f"platform-{name}"
+        matching_platform = (
+            platform_marker.read_text().strip() == tag
+            if platform_marker.exists()
+            else tag == "darwin_arm64"
+        )
+        if matching_platform and marker.exists() and marker.read_text().strip() == asset["version"]:
             print(f"  · lgtm native: {name} {asset['version']} present")
             continue
         _download_and_verify(name, asset["version"], asset, native_dir)
@@ -666,12 +633,34 @@ def ensure_lgtm_native(repo: Path, ava_home: Path, *, station: bool = False) -> 
     grafana_config_before = _grafana_config_fingerprint(native_dir)
     _render_configs(repo, native_dir, ava_home)
     _render_grafana_admin_password(native_dir)
+    if tag == "linux_amd64":
+        from shared import lgtm_systemd
+
+        commands = {
+            name: lgtm_systemd.Command(*_service_invocation(name, native_dir, ava_home))
+            for name in _NATIVE_CONSTANTS
+        }
+        units_changed = lgtm_systemd.register(ava_home, commands)
+        if units_changed or config_before != _linux_config_fingerprint(native_dir):
+            lgtm_systemd.restart_running(ava_home)
+        return
     for name in _NATIVE_CONSTANTS:
         label = native_label(name, ava_home)
         _write_if_changed(_plist_path(label), _render_plist(name, native_dir, ava_home))
     if station or (ava_home / "lgtm-host").exists():
         _retire_other_native_jobs(ava_home)
     _restart_grafana_if_config_changed(native_dir, ava_home, grafana_config_before)
+
+
+def _linux_config_fingerprint(native_dir: Path) -> tuple[str, ...]:
+    """Inputs whose changes require restarting an already running Linux backend."""
+    paths = [native_dir / "config" / name for name in ("loki.yaml", "prometheus.yml")]
+    paths += [native_dir / f"version-{name}" for name in _NATIVE_CONSTANTS]
+    paths.append(native_dir / "grafana/run.sh")
+    return (
+        *_grafana_config_fingerprint(native_dir),
+        *(p.read_text() if p.exists() else "" for p in paths),
+    )
 
 
 def _grafana_config_fingerprint(native_dir: Path) -> tuple[str, str, str]:
@@ -726,7 +715,7 @@ def ensure_lgtm_native_step(ctx: ConvergeCtx) -> None:
 
     Provider identity is the legacy `lgtm-host` marker OR the declarative
     `observability-station` capability; both render the full native set
-    (configs + launchd plists + storage dirs) and install pinned binaries.
+    (configs + native service definitions + storage dirs) and install pinned binaries.
     """
     if not is_station_ctx(ctx):
         return
@@ -735,6 +724,14 @@ def ensure_lgtm_native_step(ctx: ConvergeCtx) -> None:
 
 def backend_pids(native_dir: Path) -> dict[str, str | None]:
     """Return the running PID for each exact native binary path, if any."""
+    if platform.system() == "Linux":
+        from shared.lgtm_systemd import running_pid
+
+        home = native_dir.parent.parent
+        return {
+            name: str(pid) if (pid := running_pid(home, name)) else None
+            for name in _NATIVE_CONSTANTS
+        }
     pids: dict[str, str | None] = {}
     for name in _NATIVE_CONSTANTS:
         binary = _binary_path(name, native_dir).resolve()
