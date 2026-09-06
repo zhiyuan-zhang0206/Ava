@@ -13,7 +13,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { BAR_HEIGHT_CLASS } from "@/lib/layout";
+import { BAR_DIVIDER_CLASS, BAR_HEIGHT_CLASS } from "@/lib/layout";
 import { SIDEBAR_SORT_DEFAULT, type StatsWindowHours } from "@/lib/sidebar";
 import type * as SidebarModule from "@/lib/sidebar";
 import type { AgentRow, OpenNotice, StatsDashboard } from "@/lib/types";
@@ -364,6 +364,18 @@ describe("DesktopSidebar collapse/expand", () => {
     expect(container.querySelectorAll("aside").length).toBeGreaterThan(0);
   });
 
+  it("leaves the vertical separator to the owning layout handle", () => {
+    wrap(<AgentSidebar {...handlers} />);
+    expect(screen.getByText("Ava").closest("aside")?.className).not.toContain("border-r");
+    cleanup();
+
+    state.sidebarCollapsed = true;
+    wrap(<AgentSidebar {...handlers} />);
+    expect(screen.getByLabelText("Expand sidebar").closest("aside")?.className).not.toContain(
+      "border-r",
+    );
+  });
+
   it("expanded header and collapsed-rail toggle share the same BAR_HEIGHT_CLASS", () => {
     wrap(<AgentSidebar {...handlers} />);
     const expandedHeader = screen.getByText("Ava").closest("header");
@@ -376,6 +388,15 @@ describe("DesktopSidebar collapse/expand", () => {
     // (each button is flex-1 inside it, #723).
     const collapsedToggle = screen.getByLabelText("Expand sidebar");
     expect(collapsedToggle.parentElement?.className).toContain(BAR_HEIGHT_CLASS);
+  });
+
+  it("insets the expanded title divider", () => {
+    wrap(<AgentSidebar {...handlers} />);
+    const header = screen.getByText("Ava").closest("header");
+    for (const dividerClass of BAR_DIVIDER_CLASS.split(" ")) {
+      expect(header?.className).toContain(dividerClass);
+    }
+    expect(header?.className).not.toContain("border-b");
   });
 
   it("expanded sidebar aside clips horizontal overflow (overflow-x-hidden backstop)", () => {

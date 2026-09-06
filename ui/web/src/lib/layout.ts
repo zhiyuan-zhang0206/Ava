@@ -24,11 +24,17 @@
 // Persistent bars sit side-by-side or stack visually, so a single shared
 // height keeps their bottom borders pixel-aligned regardless of what each
 // bar's content needs. Single source of truth for the bar height in px.
-// BAR_HEIGHT_CLASS must stay 1:1 with this number (h-12 = 3rem = 48px);
+// BAR_HEIGHT_CLASS must stay 1:1 with this number (h-11 = 2.75rem = 44px);
 // keeping the px value named lets consumers derive offsets from it instead
 // of re-hardcoding the class string.
-export const BAR_HEIGHT_PX = 48;
-export const BAR_HEIGHT_CLASS = "h-12";
+export const BAR_HEIGHT_PX = 44;
+export const BAR_HEIGHT_CLASS = "h-11";
+
+// Each home column owns a separate title divider. Insetting its endpoints
+// prevents the Agent Tree, Timeline, and Inspector rules from reading as one
+// page-wide line while preserving their shared vertical position.
+export const BAR_DIVIDER_CLASS =
+  "relative after:pointer-events-none after:absolute after:inset-x-1 after:bottom-0 after:h-px after:bg-border";
 
 // Top padding that clears the floating HeaderBar for content scrolling
 // beneath it (timeline content column, user ruling 2026-08-06). 56px =
@@ -36,7 +42,7 @@ export const BAR_HEIGHT_CLASS = "h-12";
 // BAR_HEIGHT_PX / BAR_HEIGHT_CLASS and this must move with it, or the
 // first content row slides under the bar (the #874/#979 layout-regression
 // class).
-export const BAR_CLEAR_TOP_PADDING_CLASS = "pt-14";
+export const BAR_CLEAR_TOP_PADDING_CLASS = "pt-[52px]";
 
 // ── Flex-contract primitives (the I1–I6 material) ──────────────────────
 // These six classes are the layout invariants' raw material. Every usage

@@ -16,6 +16,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { InspectorPanel, InspectorToggle } from "./inspector-panel";
+import { BAR_DIVIDER_CLASS, BAR_HEIGHT_CLASS } from "@/lib/layout";
 import { formatAbsolute, formatRelative } from "@/lib/time";
 import type { AgentInspect, AgentInspectLive, PageRow } from "@/lib/types";
 
@@ -300,7 +301,8 @@ describe("InspectorPanel", () => {
     expect(screen.queryByRole("textbox")).toBeNull();
 
     resolveAgentB?.(liveFixture({ agent_id: 2, shells: [] }));
-    await waitFor(() => expect(screen.getByText("No open notice")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("Liveness")).toBeTruthy());
+    expect(screen.queryByText("Notice")).toBeNull();
     expect(screen.queryByText("Persistent shells")).toBeNull();
   });
 
@@ -626,11 +628,13 @@ describe("InspectorPanel", () => {
     expect(screen.getByText("Can we push to prod?")).toBeTruthy();
   });
 
-  it("shows 'no open notice' when notice is null", async () => {
+  it("hides the Notice section when no notice is open", async () => {
     getAgentInspectLive.mockResolvedValue(liveFixture({ notice: null }));
     render(<InspectorPanel agentId={1} />);
 
-    await waitFor(() => expect(screen.getByText("No open notice")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("Liveness")).toBeTruthy());
+    expect(screen.queryByText("Notice")).toBeNull();
+    expect(screen.queryByText("No open notice")).toBeNull();
   });
 
   it("invalidates both inspect query halves when notice SSE arrives", async () => {
@@ -655,7 +659,7 @@ describe("InspectorPanel", () => {
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ["agent-inspect", 1] });
   });
 
-  it("notice is an interactive reply surface before the Page section", async () => {
+  it("renders the Notice reply surface last without redundant open wording", async () => {
     const page = {
       id: 7,
       agent_id: 1,
@@ -687,12 +691,15 @@ describe("InspectorPanel", () => {
     // Interactive mirror (not the old read-only card): a reply box + Dismiss.
     expect(screen.getByRole("textbox")).toBeTruthy();
     expect(screen.getByText("Dismiss")).toBeTruthy();
-    // Notice is pinned above the Page section at the top of panel content.
+    // The Notice section follows the timeline link at the bottom of panel content.
     const notice = screen.getByText("Notice");
-    const pageTitle = await screen.findByText(page.title);
+    const timelineLink = screen.getByText("Open run timeline");
     expect(
-      notice.compareDocumentPosition(pageTitle) & Node.DOCUMENT_POSITION_FOLLOWING,
+      timelineLink.compareDocumentPosition(notice) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
+    const noticeSection = notice.closest("section");
+    expect(noticeSection).not.toBeNull();
+    expect(within(noticeSection!).queryByText(/open/i)).toBeNull();
   });
 
   it("resolving a notice re-enables the reply box when a new notice takes its place", async () => {
@@ -1024,10 +1031,21 @@ describe("InspectorPanel desktop", () => {
     const classes = aside.className.split(" ");
     expect(classes).toContain("flex");
     expect(classes).toContain("w-full");
-    expect(classes).toContain("border-l");
+    expect(classes).not.toContain("border-l");
     expect(classes).not.toContain("fixed");
     expect(classes).not.toContain("absolute");
     expect(document.querySelector('div[aria-hidden="true"]')).toBeNull();
+  });
+
+  it("uses the compact shared title bar with an inset divider", () => {
+    render(<InspectorPanel agentId={1} />);
+
+    const header = screen.getByText("Inspector", { selector: "span" }).closest("header");
+    expect(header?.className).toContain(BAR_HEIGHT_CLASS);
+    for (const dividerClass of BAR_DIVIDER_CLASS.split(" ")) {
+      expect(header?.className).toContain(dividerClass);
+    }
+    expect(header?.className).not.toContain("border-b");
   });
 
   it("closes when clicking the X button", async () => {

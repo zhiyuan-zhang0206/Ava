@@ -10,7 +10,7 @@ import { useTranslations } from "next-intl";
 import type { ReactNode } from "react";
 
 import { cn } from "@/lib/utils";
-import { BAR_HEIGHT_CLASS, FLEX, FLEX_1, MIN_W_0 } from "@/lib/layout";
+import { BAR_DIVIDER_CLASS, BAR_HEIGHT_CLASS, FLEX, FLEX_1, MIN_W_0 } from "@/lib/layout";
 
 interface Props {
   label: string;
@@ -33,8 +33,9 @@ export function HeaderBar({ label, onOpenSidebar, children, maxWidthCss }: Props
         // timeline it covers shows through with a frosted-glass feel —
         // same treatment as the search button. The bar no longer reserves a
         // row; the timeline scrolls beneath it.
-        "absolute inset-x-0 top-0 z-20 border-b border-border bg-background/80 backdrop-blur-md",
+        "absolute inset-x-0 top-0 z-20 bg-background/80 backdrop-blur-md",
         "px-4 py-2 font-mono text-sm text-muted-foreground",
+        BAR_DIVIDER_CLASS,
         BAR_HEIGHT_CLASS,
       )}
     >

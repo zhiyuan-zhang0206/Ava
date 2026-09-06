@@ -5,7 +5,7 @@ import * as Popover from "@radix-ui/react-popover";
 import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
 
-import { BAR_HEIGHT_CLASS, FLEX, FLEX_COL } from "@/lib/layout";
+import { BAR_DIVIDER_CLASS, BAR_HEIGHT_CLASS, FLEX, FLEX_COL } from "@/lib/layout";
 import { useStatsDashboard, useStatsWindow } from "@/lib/sidebar";
 import { cn } from "@/lib/utils";
 
@@ -19,7 +19,7 @@ export function CollapsedSidebar(props: DesktopProps) {
   const { setCollapsed, onSearchOpen } = props;
 
   return (
-    <aside className={cn("h-full w-full border-r border-border bg-sidebar", FLEX, FLEX_COL)}>
+    <aside className={cn("h-full w-full bg-sidebar", FLEX, FLEX_COL)}>
       {/* Collapsed rail top (user ruling 2026-08-05 21:50): expand sits at
           the very top, search directly below it — stacked vertically, never
           side by side. No divider lines between them. */}
@@ -143,7 +143,8 @@ export function SidebarHeader({
   return (
     <header
       className={cn(
-        "items-center justify-between px-3 py-2 border-b border-border",
+        "items-center justify-between px-3 py-2",
+        BAR_DIVIDER_CLASS,
         BAR_HEIGHT_CLASS,
         FLEX
       )}

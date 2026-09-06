@@ -3,7 +3,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { BAR_HEIGHT_CLASS } from "@/lib/layout";
+import { BAR_DIVIDER_CLASS, BAR_HEIGHT_CLASS } from "@/lib/layout";
 
 import { HeaderBar } from "./header-bar";
 
@@ -37,13 +37,16 @@ describe("HeaderBar", () => {
     expect(header?.className).toContain("backdrop-blur-md");
   });
 
-  it("puts the shared title height and divider on the outer header", () => {
+  it("puts the shared title height and inset divider on the outer header", () => {
     const { container } = render(<HeaderBar label="x" onOpenSidebar={vi.fn()} />);
     const header = container.querySelector("header")!;
     const inner = container.querySelector("header > div")!;
 
     expect(header.className).toContain(BAR_HEIGHT_CLASS);
-    expect(header.className).toContain("border-b");
+    for (const dividerClass of BAR_DIVIDER_CLASS.split(" ")) {
+      expect(header.className).toContain(dividerClass);
+    }
+    expect(header.className).not.toContain("border-b");
     expect(inner.className).not.toContain("border-b");
   });
 

@@ -44,7 +44,7 @@ import type {
 import { formatAbsolute, formatRelative, formatShort, formatUptime } from "@/lib/time";
 import { useEventStream } from "@/lib/useEventStream";
 import { cn } from "@/lib/utils";
-import { BAR_HEIGHT_CLASS, FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0 } from "@/lib/layout";
+import { BAR_DIVIDER_CLASS, BAR_HEIGHT_CLASS, FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0 } from "@/lib/layout";
 
 // Window options for the cost + activity sections. `null` = cumulative since
 // spawn (available as All); 0 = the last 5m and the positive values are a subset
@@ -213,7 +213,7 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
 
   const body = (
     <>
-      <header className={cn("items-center gap-2 border-b border-border px-4", BAR_HEIGHT_CLASS, FLEX)}>
+      <header className={cn("items-center gap-2 px-4", BAR_DIVIDER_CLASS, BAR_HEIGHT_CLASS, FLEX)}>
         <button
           type="button"
           onClick={toggle}
@@ -267,11 +267,6 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
           </div>
         ) : (
           <div className="space-y-4">
-            {liveData ? (
-              <NoticeReplySection agentId={agentId} notice={liveData.notice ?? null} />
-            ) : liveQuery.isPending ? (
-              <SectionSkeleton title={t("sectionNotice")} />
-            ) : null}
             <PageSection pages={pages} />
             {liveData ? (
               <>
@@ -301,6 +296,11 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
               {t("openRunTimeline")}
               <ExternalLink className="size-3" aria-hidden />
             </Link>
+            {liveData?.notice ? (
+              <NoticeReplySection agentId={agentId} notice={liveData.notice} />
+            ) : liveQuery.isPending ? (
+              <SectionSkeleton title={t("sectionNotice")} />
+            ) : null}
           </div>
         )}
       </div>
@@ -311,7 +311,7 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
   // the 2026-08-05 floating overlay for this breakpoint.
   if (isLarge) {
     return (
-      <aside className={cn("h-full w-full border-l border-border bg-background", FLEX, FLEX_COL, MIN_H_0)}>
+      <aside className={cn("h-full w-full bg-background", FLEX, FLEX_COL, MIN_H_0)}>
         {body}
       </aside>
     );
@@ -473,42 +473,37 @@ function PageSection({ pages }: { pages: PageRow[] }) {
   );
 }
 
-// The agent's single open notice, pinned to the top of the panel as an
+// The agent's single open notice, rendered at the bottom of the panel as an
 // interactive reply surface (mirrors the fleet "waiting on you" queue): a
 // require_response notice gets a reply box + Dismiss, an FYI gets Mark read.
 // Resolving invalidates the inspect query so the notice clears without waiting
-// out the slow background interval. `notice == null` → the quiet "No open
-// notice" line.
+// out the slow background interval. The parent omits this section when no
+// notice exists, matching the Inspector's other empty-section rules.
 
 function NoticeReplySection({
   agentId,
   notice,
 }: {
   agentId: number;
-  notice: OpenNotice | null;
+  notice: OpenNotice;
 }) {
   const queryClient = useQueryClient();
   const t = useTranslations("inspector");
   return (
-    <Section icon={<Bell className="size-3" />} title={t("sectionNotice")} badge={notice ? t("badgeOpen") : t("badgeNone")}>
-      {notice ? (
-        // key by notice id: OpenNoticeDetail keeps `pending` true after a resolve
-        // (the notice is going away), so when a refetch swaps in the NEXT open
-        // notice the keyed remount gives it a fresh, enabled reply surface
-        // instead of a permanently-disabled one.
-        <OpenNoticeDetail
-          key={notice.id}
-          agentId={agentId}
-          notice={notice}
-          showTimestamp
-          onResolved={() => {
-            void queryClient.invalidateQueries({ queryKey: inspectLiveQueryKey(agentId) });
-            void queryClient.invalidateQueries({ queryKey: ["agent-inspect", agentId] });
-          }}
-        />
-      ) : (
-        <p className="font-mono text-[11px] text-muted-foreground/70">{t("noOpenNotice")}</p>
-      )}
+    <Section icon={<Bell className="size-3" />} title={t("sectionNotice")}>
+      {/* Key by notice id: OpenNoticeDetail keeps `pending` true after a resolve
+          (the notice is going away), so when a refetch swaps in the next notice
+          the keyed remount gives it a fresh, enabled reply surface. */}
+      <OpenNoticeDetail
+        key={notice.id}
+        agentId={agentId}
+        notice={notice}
+        showTimestamp
+        onResolved={() => {
+          void queryClient.invalidateQueries({ queryKey: inspectLiveQueryKey(agentId) });
+          void queryClient.invalidateQueries({ queryKey: ["agent-inspect", agentId] });
+        }}
+      />
     </Section>
   );
 }

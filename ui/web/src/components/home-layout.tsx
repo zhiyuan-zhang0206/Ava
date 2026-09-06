@@ -140,6 +140,7 @@ export function HomeLayout({
           >
             {sidebar}
           </div>
+          <div aria-hidden data-slot="static-divider" className="w-px shrink-0 bg-border" />
           <div className={cn(FLEX, FLEX_1, MIN_H_0, MIN_W_0)}>
             {isLarge && inspector !== null && inspector !== undefined && inspector !== false ? (
               <DesktopMain main={main} inspector={inspector} />

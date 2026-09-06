@@ -200,7 +200,7 @@ function DesktopSidebar(props: DesktopProps) {
       // truncate to fit the available panel width, but this guarantees no
       // horizontal scrollbar can ever appear even if a control slips past that. h-full +
       // w-full let react-resizable-panels own the outer column dimensions.
-      className={cn("relative h-full w-full border-r border-border bg-sidebar overflow-x-hidden", FLEX, FLEX_COL)}
+      className={cn("relative h-full w-full bg-sidebar overflow-x-hidden", FLEX, FLEX_COL)}
     >
       <SidebarHeader
         trailing={

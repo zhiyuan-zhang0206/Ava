@@ -150,6 +150,7 @@ describe("HomeLayout autosave-safe responsive frames", () => {
 
     expect(screen.queryAllByTestId("resizable-panel-group")).toHaveLength(0);
     expect(screen.getByTestId("agent-tree").parentElement?.style.flexBasis).toBe("3%");
+    expect(document.querySelector('[data-slot="static-divider"]')).not.toBeNull();
     expect(screen.getByTestId("main-timeline")).toBeTruthy();
     expect(localStorage.length).toBe(1);
     expect(localStorage.getItem("sentinel")).toBe("unchanged");
