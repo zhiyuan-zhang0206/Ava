@@ -102,6 +102,12 @@ def retention_floor(now: datetime | None = None) -> datetime:
     return (now if now is not None else datetime.now(UTC)) - EVENT_STREAM_RETENTION
 
 
+def retention_hours() -> int:
+    """Whole hours retained — the gateway's window clamp."""
+
+    return int(EVENT_STREAM_RETENTION.total_seconds() // 3600)
+
+
 def ledger_gap_plan(newest_day: date | None, floor: datetime) -> LedgerGapPlan:
     """Plan one ledger/live split for every ledger-plus-tail reader.
 
@@ -128,7 +134,7 @@ def ledger_gap_plan(newest_day: date | None, floor: datetime) -> LedgerGapPlan:
 def _retention_period_str() -> str:
     """Format the retention constant in Loki's whole-hour YAML syntax."""
 
-    return f"{int(EVENT_STREAM_RETENTION.total_seconds() // 3600)}h"
+    return f"{retention_hours()}h"
 
 
 def _validate_lineage_retention(limits_config: Mapping[str, object]) -> None:

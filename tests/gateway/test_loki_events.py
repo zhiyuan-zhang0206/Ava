@@ -39,6 +39,7 @@ from shared.loki_index_labels import (
     LokiReadEra,
     LokiReadSlice,
     event_stream_selector,
+    retention_hours,
     validate_loki_deploy_config,
 )
 
@@ -47,6 +48,14 @@ def _selector_event_names(selector: str) -> set[str]:
     """The event_name alternation inside a `retention_stream` selector."""
     match = re.fullmatch(r'\{event_name=~"([a-z0-9_|]+)"\}', selector)
     return set(match.group(1).split("|")) if match else set()
+
+
+def test_retention_hours_drives_the_gateway_window_clamp() -> None:
+    expected = int(EVENT_STREAM_RETENTION.total_seconds() // 3600)
+
+    assert retention_hours() == expected
+    assert min(expected * 2, retention_hours()) == expected
+    assert min(expected - 1, retention_hours()) == expected - 1
 
 
 # ─── fake httpx transport ────────────────────────────────────────────────────

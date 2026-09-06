@@ -31,6 +31,7 @@ from gateway.schemas import (
     NeighborsResponse,
     PluginMetricResult,
     StatsWindowHours,
+    applied_window,
 )
 from ops import cluster_rpc as _cluster_rpc
 from ops.rpc_schemas import ShellInfo
@@ -74,7 +75,8 @@ def _alive_seconds(
     real lifecycle events are more accurate. This is also the intentional
     bridge when inspect excludes pre-index-cutover lifecycle events: the open
     alive tail remains exact for the default 24-hour view, while whole-life
-    and 7-day views can include pre-cutover gaps until legacy retention ends.
+    and wide-window views can include pre-cutover gaps until legacy retention
+    ends.
 
     Consecutive starts without an intervening terminate (the crash/reaper
     shape — SIGKILL/OOM leaves no `agent_terminated`, then the crash-resurrect
@@ -420,7 +422,7 @@ def _inspect_blocking(
 _INSPECT_CACHE_TTL_S = 75.0
 _INSPECT_CACHE_MAX = 1024
 # A panel request is an interactive read, not a batch job. Until the unlabeled
-# pre-cutover Loki slice expires on 2026-08-30 11:10Z, a cold 7-day or whole-life
+# pre-cutover Loki slice expires on 2026-08-30 11:10Z, a cold wide-window or whole-life
 # load can legitimately take about 15 seconds; 30 seconds prevents those reads
 # from returning 503. Every Loki query remains individually bounded at 8 seconds,
 # so a down backend fails in about 16 seconds rather than waiting for this bound.
@@ -554,8 +556,9 @@ async def get_agent_inspect(
     single-agent counterpart to `/api/stats/dashboard` (fleet-wide).
 
     `?hours=` windows `cost` + `stats` to the selected range (0 = last 5m;
-    1/6/24/72/168 = hours, anything else 422s); omitted = cumulative since
-    spawn.
+    1/6/24/72/168 = hours, anything else 422s), clamped to Loki retention;
+    omitted = cumulative since spawn. `applied_window_hours` reports the
+    served horizon while `window_hours` continues to echo the request.
     `?since_compact=true` windows them to events since the agent's latest
     compact halt instead — it takes precedence, `hours` is ignored and the
     echoed `window_hours` is None.
@@ -589,6 +592,7 @@ async def get_agent_inspect(
     pre-cutover use the `spawned_at` fallback described by `_alive_seconds`.
     """
     pool = request.app.state.db_pool
+    applied_window_hours = None if since_compact or hours is None else applied_window(hours)[0]
     # Release the agents_meta borrow before entering the potentially queued
     # Loki fan-out. This fresh read is the live half of the response and must
     # execute even when the historical aggregate is a TTL hit.
@@ -626,6 +630,7 @@ async def get_agent_inspect(
         spawned_at=db.spawned_at,
         started_at=db.started_at,
         window_hours=None if since_compact else hours,
+        applied_window_hours=applied_window_hours,
         since_compact=since_compact,
         shells=shells,
         shells_available=shells_available,

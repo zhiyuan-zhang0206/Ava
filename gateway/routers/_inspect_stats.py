@@ -447,7 +447,7 @@ def inspect_values(
     The retained live lifecycle stream is separately cached per agent for
     thirty minutes and begins at the index-label cutover, so it never scans
     the legacy slice. An agent with no indexed start event uses the existing
-    `agents_meta.spawned_at → now` fallback; whole-life and 7-day views then
+    `agents_meta.spawned_at → now` fallback; whole-life and wide-window views then
     approximate pre-cutover terminate/resurrect gaps until that slice expires
     on 2026-08-30. Whole-life archive distribution, activity, and lifecycle
     values use the frozen-archive rollup when it exists; windowed reads retain

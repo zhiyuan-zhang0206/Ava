@@ -9,10 +9,11 @@ snapshot count in ``unpriced_calls`` and contribute 0.
 
 Reads take one of two bounded paths:
 
-- a windowed request (``hours`` <= 7d by the StatsWindowHours whitelist, or
-  ``since_compact`` whose halt marker can only be found inside Loki
-  retention anyway) aggregates **pure Loki** over the window — with 24h
-  query splitting + result caches this is a handful of subqueries;
+- a windowed request (``hours`` requested up to 7d by the StatsWindowHours
+  whitelist and clamped to Loki retention, or ``since_compact`` whose halt
+  marker can only be found inside Loki retention anyway) aggregates **pure
+  Loki** over the window — with 24h query splitting + result caches this is a
+  handful of subqueries;
 - whole life = **ledger** (every rolled day except the newest retained day,
   which can be stale after a late write) + **Loki tail** from the reduced
   ledger watermark. Older days remain ledger-served; the newest retained day
@@ -34,7 +35,7 @@ from psycopg import sql
 from psycopg_pool import ConnectionPool
 
 from gateway import loki_events
-from gateway.schemas import AgentCost, StatsWindowHours, window_delta
+from gateway.schemas import AgentCost, StatsWindowHours, applied_window
 from shared.loki_index_labels import ledger_gap_plan, retention_floor
 
 # The compact-halt event name (payload key `body` mentions "compact") —
@@ -87,7 +88,8 @@ def window_bounds(
             return retention_floor(), None
         return compact_ts, compact_ts
     if hours is not None:
-        window_from = datetime.now(tz=UTC) - window_delta(hours)
+        _applied, duration = applied_window(hours)
+        window_from = datetime.now(tz=UTC) - duration
         return window_from, window_from
     return None, None
 
@@ -304,7 +306,8 @@ def agent_cost(
             agent_id, deadline=deadline
         )  # None = never compacted -> whole life
     elif hours is not None:
-        windowed_from = datetime.now(tz=UTC) - window_delta(hours)
+        _applied, duration = applied_window(hours)
+        windowed_from = datetime.now(tz=UTC) - duration
 
     merged: dict[str, _ModelAgg] = {}
     if windowed_from is not None:

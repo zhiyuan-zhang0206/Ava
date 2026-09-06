@@ -823,6 +823,21 @@ describe("InspectorPanel", () => {
     );
   });
 
+  it("labels a retention-clamped selected window with the applied hours", async () => {
+    panelState.hours = 168;
+    getAgentInspect.mockResolvedValue(
+      fixture({ window_hours: 168, applied_window_hours: 84 }),
+    );
+    render(<InspectorPanel agentId={1} />);
+
+    await waitFor(() => expect(screen.getByText("Persistent shells")).toBeTruthy());
+    const select = screen.getByLabelText<HTMLSelectElement>("Cost + activity window");
+    expect(select.selectedOptions[0].text).toBe("7d · 84h");
+    expect(Array.from(select.options).find((option) => option.value === "24")?.text).toBe(
+      "24h",
+    );
+  });
+
   it("Compact window selects since_compact instead of hours", async () => {
     // First load is 24h. After selecting Compact, the mock echoes since_compact=true.
     getAgentInspect.mockResolvedValueOnce(fixture());

@@ -806,6 +806,33 @@ describe("StatsCards window selector", () => {
     expect(labels).toEqual(["5m", "1h", "6h", "24h", "3d", "7d"]);
   });
 
+  it("labels a retention-clamped selected window with the applied hours", () => {
+    state.agents = [makeAgent({ agent_id: 1 })];
+    state.statsWindowHours = 168;
+    state.stats = {
+      live_count: 5,
+      window_hours: 168,
+      applied_window_hours: 84,
+      tokens: { input: 100, output: 50, cache_read: 0, cache_hit_pct: 0 },
+      cost_usd: 1,
+      avg_turn_seconds: 3,
+      warnings: 0,
+      errors: 0,
+      warnings_dismissed: 0,
+      warnings_net: 0,
+      errors_dismissed: 0,
+      errors_net: 0,
+      total_events: 100,
+    };
+
+    wrap(<AgentSidebar {...handlers} />);
+    openStats();
+
+    const select = screen.getByLabelText<HTMLSelectElement>("Statistics window");
+    expect(select.selectedOptions[0].text).toBe("7d · 84h");
+    expect(Array.from(select.options).find((option) => option.value === "72")?.text).toBe("3d");
+  });
+
   it("changing the select calls setWindowHours with the numeric window value", () => {
     state.agents = [makeAgent({ agent_id: 1 })];
     wrap(<AgentSidebar {...handlers} />);
