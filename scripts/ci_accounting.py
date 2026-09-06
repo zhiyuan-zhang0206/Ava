@@ -25,9 +25,12 @@ Usage:
     reconciliation step. `--report` reads a ledger and prints per-agent
     totals with cost at the GitHub-hosted overage rates.
 
-Rates: Linux $0.006/min, macOS $0.08/min (private-repo GitHub-hosted,
-2026-09-06). The account's 3,000 included minutes/month are account-wide
-across all repos — burn-through is a fleet signal, not a per-repo quota.
+Rates: Linux $0.006/min, macOS $0.062/min (private-repo GitHub-hosted,
+corrected 2026-09-06 per GitHub's published pricing). NOTE: this repo is
+currently PUBLIC — standard GitHub-hosted runner minutes are free for public
+repos, so cost estimates are a private-repo overage equivalent and phase-2
+quotas must gate on MINUTES, not dollars. The account's 3,000 included
+minutes/month (private-repo billing) are account-wide across all repos.
 
 Ledger rows are JSONL: {"run_id": int, "day": "YYYY-MM-DD", "agent_id": int|null,
 "task_id": int|null, "pr_number": int|null, "name": str, "head_branch": str,
@@ -46,7 +49,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 LINUX_MINUTE_USD = 0.006
-MACOS_MINUTE_USD = 0.08
+MACOS_MINUTE_USD = 0.062
 INCLUDED_MINUTES_MONTHLY = 3000
 
 DEFAULT_REPO = "zhiyuan-zhang0206/Ava"
@@ -293,7 +296,8 @@ def report_rows(ledger: dict[int, dict], *, days: int, agent: int | None) -> lis
 
 def _print_report(rows: list[dict], days: int) -> None:
     print(
-        f"CI usage, last {days} days (est. overage cost, Linux ${LINUX_MINUTE_USD}/min, macOS ${MACOS_MINUTE_USD}/min):"
+        f"CI usage, last {days} days (minutes primary; est. private-repo overage at "
+        f"Linux ${LINUX_MINUTE_USD}/min, macOS ${MACOS_MINUTE_USD}/min):"
     )
     if not rows:
         print("No attributed runs.")

@@ -1332,7 +1332,7 @@ def test_ci_usage_prints_per_agent_rollup(monkeypatch, tmp_path, capsys) -> None
     assert ci_utils.main(["--ci-usage"]) == 0
     out = capsys.readouterr().out
     assert "#5811: 1 runs" in out
-    assert "est $1.4" in out
+    assert "est $1.22" in out
 
 
 def test_ci_usage_json_machine_readable(monkeypatch, tmp_path, capsys) -> None:

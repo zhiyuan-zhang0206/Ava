@@ -266,7 +266,7 @@ def test_report_rollup_days_and_cost() -> None:
     assert top["agent_id"] == 5811
     assert top["linux_minutes"] == 100
     assert top["macos_minutes"] == 10
-    assert top["est_usd"] == pytest.approx(100 * 0.006 + 10 * 0.08)  # pyright: ignore[reportUnknownMemberType]
+    assert top["est_usd"] == pytest.approx(100 * 0.006 + 10 * 0.062)  # pyright: ignore[reportUnknownMemberType]
     only = ci_accounting.report_rows(ledger, days=7, agent=5814)
     assert only[0]["agent_id"] == 5814
     assert only[0]["linux_minutes"] == 50
