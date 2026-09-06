@@ -280,9 +280,40 @@ warn_browser_deps() {
 # common_host_wiring: shared by both roles.
 #   - installs uv + Python 3.12 if missing
 #   - installs the canonical lock through the configured machine index
-#   - symlinks .venv/bin/ava into ~/.local/bin
+#   - symlinks .venv/bin/ava into ~/.local/bin for the prod cluster only
 #   - ensures ~/.local/bin is on PATH for the rest of this script
 # ===========================================================================
+link_bare_ava() {
+    local bare_link="$HOME/.local/bin/ava"
+    local checkout_ava="$PWD/.venv/bin/ava"
+    local prod_home="${HOME}/.ava"
+    local install_home="${_AVA_HOME%/}"
+    while [[ "$install_home" == */ && "$install_home" != "/" ]]; do
+        install_home="${install_home%/}"
+    done
+    while [[ "$prod_home" == */ && "$prod_home" != "/" ]]; do
+        prod_home="${prod_home%/}"
+    done
+
+    if [ "$install_home" = "$prod_home" ]; then
+        # -n prevents ln from following a symlink whose target is a directory.
+        ln -sfn "$checkout_ava" "$bare_link"
+        return 0
+    fi
+
+    if [ -L "$bare_link" ]; then
+        local current_target
+        current_target="$(readlink "$bare_link")"
+        [ "$current_target" = "$checkout_ava" ] && return 0
+        echo "install.sh: WARNING non-prod install left $bare_link pointing at '$current_target'." >&2
+    elif [ -e "$bare_link" ]; then
+        echo "install.sh: WARNING non-prod install left existing $bare_link untouched (not a symlink)." >&2
+    else
+        echo "install.sh: WARNING non-prod install did not create $bare_link (no symlink exists)." >&2
+    fi
+    echo "  Re-link prod with: ln -sfn \"$HOME/.ava/source/.venv/bin/ava\" \"$HOME/.local/bin/ava\"" >&2
+}
+
 common_host_wiring() {
     # uv via the shared toolchain piece (idempotent — skips if uv is present). The
     # pinned uv release download needs curl, which the gateway path already has but a
@@ -312,7 +343,7 @@ common_host_wiring() {
     # project venv is not on PATH by design. Symlink into ~/.local/bin so
     # `ava` is callable right after install.
     mkdir -p "$HOME/.local/bin"
-    ln -sf "$PWD/.venv/bin/ava" "$HOME/.local/bin/ava"
+    link_bare_ava
     export PATH="$HOME/.local/bin:$PATH"
 }
 
