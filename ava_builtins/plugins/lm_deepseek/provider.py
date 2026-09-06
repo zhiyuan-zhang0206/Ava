@@ -8,6 +8,7 @@ from langchain_core.language_models.chat_models import BaseChatModel
 
 from shared.lm._effort import _clamp_effort
 from shared.lm.provider_api import (
+    AttachPolicy,
     BuildContext,
     PricePeriod,
     PriceRates,
@@ -142,6 +143,10 @@ register(
         effort_levels=_DEEPSEEK_EFFORT_LEVELS,
         vision=False,
         anthropic_protocol=True,
+        attach=AttachPolicy(
+            file_size_limits={"image": 32 * 1024 * 1024},
+            image_dimension_tiers=((1, 8192), (15, 4096)),
+        ),
         stop_spec=None,
     ),
     models={

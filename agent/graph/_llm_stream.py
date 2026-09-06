@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import time
 from collections.abc import AsyncIterator
+from typing import cast
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, AIMessageChunk, AnyMessage
@@ -25,7 +26,6 @@ from langchain_core.messages import AIMessage, AIMessageChunk, AnyMessage
 from agent.lm_cache import prepare_invocation
 from shared.config import settings
 from shared.config.turn_view import turn_settings
-from shared.lm._gemini_cache import invalidate, is_stale_cache_error
 from shared.log import logger
 
 from ._callbacks import RedisStreamHandler
@@ -326,13 +326,22 @@ async def _stream_with_cache_retry(
                 handler=handler,
             )
         except Exception as exc:
-            if invocation.cache_ref is None or not is_stale_cache_error(exc):
+            if invocation.cache_ref is None:
                 raise
+            from ava_builtins.plugins.lm_google.gemini_cache import (
+                CacheRef,
+                invalidate,
+                is_stale_cache_error,
+            )
+
+            if not is_stale_cache_error(exc):
+                raise
+            cache_ref = cast(CacheRef, invocation.cache_ref)
             logger.warning(
                 "[gemini-cache] stale cache {name} — invalidate + retry once on plain path",
-                name=invocation.cache_ref.name,
+                name=cache_ref.name,
             )
-            invalidate(invocation.cache_ref)
+            invalidate(cache_ref)
             chunks.clear()
             # The handler's per-stream state (started sets, args bufs, published
             # counts, timers) belongs to the FAILED attempt — re-streaming the

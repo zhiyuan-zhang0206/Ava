@@ -365,7 +365,7 @@ def _arm_tracing(endpoint: str) -> None:
 
     The import + init cost ~2.5-3 s (traceloop.sdk pulls in pandas via its
     datasets client; the GOOGLE_GENERATIVEAI instrumentor imports the ~66 MB
-    google.genai that shared/lm/_gemini_cache.py keeps lazy). Off the boot
+    google.genai that ava_builtins/plugins/lm_google/gemini_cache.py keeps lazy). Off the boot
     path, initialize_tracing returns after the cheap decisions; consumers
     wait on ensure_init_resolved() before first use; a failure logs and
     resolves the wait — recording stays off instead of killing boot.

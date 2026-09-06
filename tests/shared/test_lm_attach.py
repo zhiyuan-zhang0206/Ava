@@ -10,6 +10,7 @@ from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from PIL import Image
 
 from shared.lm import provider_api
+from shared.lm._plugin_providers import ensure_provider_plugins_loaded
 from shared.lm.attach import (
     ATTACH_MAX_FILE_BYTES,
     ATTACH_MAX_FILES_PER_TURN,
@@ -18,7 +19,7 @@ from shared.lm.attach import (
     pack_attachments,
 )
 from shared.lm.factory import media_types_for_model
-from shared.lm.provider_api import ProviderBinding
+from shared.lm.provider_api import AttachPolicy, ProviderBinding
 
 
 def _entry(path: Path, label: str | None = None) -> AttachEntry:
@@ -28,6 +29,12 @@ def _entry(path: Path, label: str | None = None) -> AttachEntry:
 def _png(path: Path, size: tuple[int, int] = (2, 2)) -> bytes:
     Image.new("RGB", size, "white").save(path)
     return path.read_bytes()
+
+
+def _padded_png(path: Path, file_size: int, *, dimensions: tuple[int, int] = (2, 2)) -> None:
+    image_bytes = _png(path, dimensions)
+    assert len(image_bytes) <= file_size
+    path.write_bytes(image_bytes + b"\0" * (file_size - len(image_bytes)))
 
 
 def test_deepseek_image_uses_a_data_uri_block(tmp_path: Path) -> None:
@@ -137,6 +144,104 @@ def test_uniform_and_provider_specific_size_caps_are_rechecked(tmp_path: Path) -
     assert claude_pack.skipped[0][1] == "file exceeds 10 MiB limit"
 
 
+def test_claude_attach_policy_size_limits(tmp_path: Path) -> None:
+    oversized_image = tmp_path / "oversized.png"
+    oversized_pdf = tmp_path / "oversized.pdf"
+    delivered_image = tmp_path / "delivered.png"
+    _padded_png(oversized_image, 11 * 1024 * 1024)
+    oversized_pdf.write_bytes(b"x" * (33 * 1024 * 1024))
+    _padded_png(delivered_image, 9 * 1024 * 1024)
+
+    pack = pack_attachments(
+        "claude-sonnet-5",
+        [_entry(oversized_image), _entry(oversized_pdf), _entry(delivered_image)],
+    )
+
+    assert pack is not None
+    assert pack.delivered == [str(delivered_image.resolve())]
+    assert [reason for _, reason in pack.skipped] == [
+        "file exceeds 10 MiB limit",
+        "file exceeds 20 MiB limit",  # core ceiling beats the 32 MiB provider rule
+    ]
+
+
+def test_core_size_ceiling_precedes_provider_policy_limits(tmp_path: Path) -> None:
+    oversized_image = tmp_path / "oversized.png"
+    delivered_image = tmp_path / "delivered.png"
+    _padded_png(oversized_image, 21 * 1024 * 1024)
+    _padded_png(delivered_image, 9 * 1024 * 1024)
+
+    pack = pack_attachments(
+        "deepseek-v4-flash-vision-exp",
+        [_entry(oversized_image), _entry(delivered_image)],
+    )
+
+    assert pack is not None
+    assert pack.delivered == [str(delivered_image.resolve())]
+    # The core 20 MiB ceiling is checked first; the deepseek binding's 32 MiB
+    # rule cannot raise the effective cap (same precedence as before plugins).
+    assert [reason for _, reason in pack.skipped] == ["file exceeds 20 MiB limit"]
+
+
+def test_provider_without_attach_policy_uses_core_size_and_dimension_defaults(
+    tmp_path: Path,
+) -> None:
+    oversized_image = tmp_path / "oversized.png"
+    delivered_image = tmp_path / "delivered.png"
+    _padded_png(oversized_image, ATTACH_MAX_FILE_BYTES + 1)
+    _padded_png(delivered_image, ATTACH_MAX_FILE_BYTES, dimensions=(9000, 1))
+
+    pack = pack_attachments(
+        "gpt-5.6-sol",
+        [_entry(oversized_image), _entry(delivered_image)],
+    )
+
+    assert pack is not None
+    assert pack.delivered == [str(delivered_image.resolve())]
+    assert [reason for _, reason in pack.skipped] == ["file exceeds 20 MiB limit"]
+
+
+def test_deepseek_attach_policy_switches_dimension_tier_at_image_15(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from shared.lm import attach
+
+    monkeypatch.setattr(attach, "ATTACH_MAX_FILES_PER_TURN", 15)
+    entries: list[AttachEntry] = []
+    for index in range(1, 14):
+        path = tmp_path / f"image-{index}.png"
+        _png(path)
+        entries.append(_entry(path))
+    image_14 = tmp_path / "image-14.png"
+    _png(image_14, (8001, 1))
+    entries.append(_entry(image_14))
+    image_15 = tmp_path / "image-15.png"
+    _png(image_15, (4097, 1))
+    entries.append(_entry(image_15))
+
+    pack = pack_attachments("deepseek-v4-flash-vision-exp", entries)
+
+    assert pack is not None
+    assert str(image_14.resolve()) in pack.delivered
+    assert pack.skipped == [(str(image_15.resolve()), "image exceeds 4096 px dimension limit")]
+
+
+def test_builtin_provider_bindings_own_attach_policy() -> None:
+    ensure_provider_plugins_loaded()
+
+    assert provider_api.REGISTRY.bindings["claude-"].attach == AttachPolicy(
+        file_size_limits={"image": 10 * 1024 * 1024, "pdf": 32 * 1024 * 1024},
+        image_dimension_tiers=((1, 8000),),
+        pdf_document_block=True,
+    )
+    assert provider_api.REGISTRY.bindings["deepseek-"].attach == AttachPolicy(
+        file_size_limits={"image": 32 * 1024 * 1024},
+        image_dimension_tiers=((1, 8192), (15, 4096)),
+    )
+    assert provider_api.REGISTRY.bindings["gpt-"].attach is None
+
+
 def test_per_turn_file_count_and_total_byte_caps_keep_first_entries(tmp_path: Path) -> None:
     count_entries: list[AttachEntry] = []
     for index in range(ATTACH_MAX_FILES_PER_TURN + 1):
@@ -185,6 +290,21 @@ def test_image_dimensions_and_model_capabilities_are_enforced(tmp_path: Path) ->
     assert claude_pack.skipped[0][1] == "image exceeds 8000 px dimension limit"
     assert text_only_pack.skipped[0][1] == "your model cannot receive image"
     assert claude_video_pack.skipped[0][1] == "your model cannot receive video"
+
+
+def test_non_claude_pdf_uses_generic_media_block(tmp_path: Path) -> None:
+    pdf_path = tmp_path / "report.pdf"
+    pdf_bytes = b"%PDF-1.7"
+    pdf_path.write_bytes(pdf_bytes)
+
+    pack = pack_attachments("gemini-3.8-flash", [_entry(pdf_path)])
+
+    assert pack is not None
+    assert pack.blocks[2] == {
+        "type": "media",
+        "mime_type": "application/pdf",
+        "data": pdf_bytes,
+    }
 
 
 def test_caption_numbers_entries_and_sanitizes_labels(tmp_path: Path) -> None:

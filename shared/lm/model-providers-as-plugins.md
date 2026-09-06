@@ -27,8 +27,8 @@ The extension surface enforces that boundary:
 
 Core owns only the extension and normalization mechanisms:
 
-- `provider_api.py` defines `ProviderBinding`, `BuildContext`, `PriceRates`, and
-  the fail-fast registration contract.
+- `provider_api.py` defines `ProviderBinding`, `BuildContext`, `AttachPolicy`,
+  `PriceRates`, and the fail-fast registration contract.
 - `_plugin_providers.py` discovers enabled plugins and imports their
   `provider.py` modules under a process-wide lock.
 - `registry.py`, `factory.py`, `_effort.py`, and `stop.py` assemble plugin data
@@ -91,8 +91,10 @@ same registration.
 A `provider.py` calls `register(binding, models=..., pricing=...)` once:
 
 - `ProviderBinding` declares the dispatch prefix, display name, `.env` key,
-  builder, provider-wide effort ladder, vision fallback, optional client-class
-  `StopSpec`, and an optional stable provider-key override.
+  builder, provider-wide effort ladder, vision fallback, optional attachment
+  policy, optional client-class `StopSpec`, and an optional stable provider-key
+  override. Attachment policies keep provider-specific byte, image-dimension,
+  and PDF wire-shape rules out of core; an absent policy uses core defaults.
 - Each `ModelSpec` owns model-specific availability, context, output cap,
   knowledge cutoff, effort ladder, tuning defaults, identity, and media types.
 - Each `PriceRates` owns the complete effective-period, input-tier, and daily-

@@ -4,7 +4,7 @@ Shared by the llm node (streaming) and the compaction path (single invoke) so
 every request an agent sends picks the same shape:
 
 - cache path — the system prompt + execute_code schema live in a server-side
-  CachedContent (shared/lm/_gemini_cache.py); the request strips the leading
+  CachedContent (ava_builtins/plugins/lm_google/gemini_cache.py); the request strips the leading
   SystemMessage and binds `cached_content` instead of tools (the API 400s if
   tools/system_instruction ride alongside a cache reference).
 - plain path — today's behavior: SystemMessage in-band + bind_tools. Taken for
@@ -21,6 +21,7 @@ function).
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Protocol, cast
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, AnyMessage, SystemMessage
@@ -28,12 +29,12 @@ from langchain_core.runnables import Runnable
 from loguru import logger
 
 from agent.llm import execute_code
-from shared.lm._gemini_cache import (
-    CacheRef,
-    get_or_create_cache,
-    invalidate,
-    is_stale_cache_error,
-)
+
+
+class CacheRef(Protocol):
+    """Agent-visible cache handle without importing provider wire code eagerly."""
+
+    name: str
 
 
 @dataclass
@@ -66,6 +67,8 @@ async def prepare_invocation(
         and isinstance(messages[0].content, str)  # pyright: ignore[reportUnknownMemberType]
         and not any(isinstance(m, SystemMessage) for m in messages[1:])
     ):
+        from ava_builtins.plugins.lm_google.gemini_cache import get_or_create_cache
+
         cache_ref = await get_or_create_cache(llm, messages[0].content, [execute_code])  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
         if cache_ref is not None:
             return LlmInvocation(
@@ -104,13 +107,24 @@ async def ainvoke_with_cache_retry(llm: BaseChatModel, messages: list[AnyMessage
         try:
             response = await invocation.runnable.ainvoke(invocation.messages)  # pyright: ignore[reportUnknownMemberType]
         except Exception as exc:
-            if invocation.cache_ref is None or not is_stale_cache_error(exc):
+            if invocation.cache_ref is None:
                 raise
+            from ava_builtins.plugins.lm_google.gemini_cache import (
+                CacheRef as GeminiCacheRef,
+            )
+            from ava_builtins.plugins.lm_google.gemini_cache import (
+                invalidate,
+                is_stale_cache_error,
+            )
+
+            if not is_stale_cache_error(exc):
+                raise
+            cache_ref = cast(GeminiCacheRef, invocation.cache_ref)
             logger.warning(
                 "[gemini-cache] stale cache {name} — invalidate + retry once on plain path",
-                name=invocation.cache_ref.name,
+                name=cache_ref.name,
             )
-            invalidate(invocation.cache_ref)
+            invalidate(cache_ref)
             plain = await prepare_invocation(llm, messages)
             response = await plain.runnable.ainvoke(plain.messages)  # pyright: ignore[reportUnknownMemberType]
         assert isinstance(response, AIMessage)  # noqa: S101 — chat models return AIMessage
