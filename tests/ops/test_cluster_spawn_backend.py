@@ -783,21 +783,38 @@ def test_spawn_update_rolls_back_the_pause_when_the_native_spawn_fails(
 
 
 @pytest.mark.real_cluster_spawn
+@pytest.mark.parametrize("restart_only", [False, True], ids=["update", "restart-only"])
 def test_posix_host_spawns_the_orchestration_session_on_the_session_backend(
     posix_native_host: _FakeSessionBackend,
+    restart_only: bool,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """S7: the POSIX orchestration session lands on the SAME session backend as
     services — `get_backend().new_session(session, shell_cmd, ...)` — with the
     shell command intact: the tee pipeline, the `[session-exit]` verdict and
     the venv activation all survive the move. No raw-binary argv exists anymore."""
-    cluster_mod.spawn_update(restart_only=True)
+    monkeypatch.setattr("shared.migrations.validate_migrations_at_ref", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType]
+    cluster_mod.spawn_update(restart_only=restart_only)
 
     assert [s[0] for s in posix_native_host.spawned] == ["ava-test-updater"]
     _name, cmd, cwd = posix_native_host.spawned[0]
     assert cwd == cluster_mod._REPO_ROOT
     assert "tee -a" in cmd
     assert 'echo "[session-exit] rc=$rc"' in cmd
-    assert "python -m cli.commands._update_agent_runner --restart-only" in cmd
+    assert "python -m cli.commands._update_agent_runner" in cmd
+    assert "export AVA_CLI_LOG_NAME=updater" in cmd
+
+
+@pytest.mark.real_cluster_spawn
+@pytest.mark.parametrize("restart_only", [False, True], ids=["update", "restart-only"])
+def test_native_updater_exports_cli_log_name(
+    native_host: _FakeSessionBackend, restart_only: bool
+) -> None:
+    """Every Windows updater child inherits the sink name for converge errors."""
+    cluster_mod.spawn_update(restart_only=restart_only)
+
+    cmd = native_host.spawned[0][1]
+    assert "set AVA_CLI_LOG_NAME=updater && " in cmd
 
 
 @pytest.mark.real_cluster_spawn
