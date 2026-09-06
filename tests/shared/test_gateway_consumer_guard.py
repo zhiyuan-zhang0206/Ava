@@ -14,24 +14,31 @@ The "right" fix when this fires is either:
 
 This is the structural enforcement the orchestrator asked for — the consumption
 matrix is the true source of ownership.
+
+On 2026-09-06, four failures on ``refs/pull/1871/merge`` correctly caught
+``shared/timing.py`` entering the gateway closure through a schedule-manager
+import before the PR's in-branch fix landed. That episode was a real guard
+finding, not a flake; do not weaken the scan to make such failures disappear.
 """
 
 from __future__ import annotations
 
 import ast
 import os
+from functools import lru_cache
 from pathlib import Path
 from typing import cast
 
 import pytest
 
-# Ensure settings-lite so we can import config
+# Intentional import-time isolation: pin settings-lite before any project import
+# can construct config from an inherited environment.
 os.environ["AVA_CONFIG_FETCH"] = (
     "skip"  # assignment, not setdefault: a setdefault would silently keep an inherited value (the login-shell .env leak class) instead of pinning settings-lite
 )
 
 # Gateway-side source roots — daemons that run under the gateway profile.
-_GATEWAY_SOURCE_ROOTS = [
+_GATEWAY_SOURCE_ROOTS = (
     "gateway/",
     "services/im_bridge/",
     "services/heartbeat/",
@@ -43,7 +50,7 @@ _GATEWAY_SOURCE_ROOTS = [
     "services/delivery_watchdog/",
     "services/frontend/",
     "services/pitr/",
-]
+)
 
 
 def _repo_root() -> Path:
@@ -236,7 +243,8 @@ _AGENT_ONLY_ALLOWLIST = frozenset(
 )
 
 
-def _repo_internal_import_closure(roots: list[str]) -> set[Path]:
+@lru_cache
+def _repo_internal_import_closure(roots: tuple[str, ...]) -> set[Path]:
     """Modules (repo-internal) transitively imported by the gateway-side roots."""
     root = _repo_root()
 
@@ -349,8 +357,8 @@ def test_gateway_closure_reads_do_not_hit_popped_keys() -> None:
 # The profile sets are NOT the capability display axis — capability is
 # config-panel grouping only, orthogonal to process ownership (see
 # shared/config/__init__.py docstring).
-_KIND_ROOTS: dict[str, list[str]] = {
-    "gateway": [
+_KIND_ROOTS: dict[str, tuple[str, ...]] = {
+    "gateway": (
         "gateway/",
         "services/im_bridge/",
         "services/heartbeat/",
@@ -360,8 +368,8 @@ _KIND_ROOTS: dict[str, list[str]] = {
         "services/milvus/",
         "services/delivery_watchdog/",
         "services/pitr/",
-    ],
-    "agent": [
+    ),
+    "agent": (
         "agent/",
         "ava/",
         "ava_builtins/",
@@ -371,8 +379,8 @@ _KIND_ROOTS: dict[str, list[str]] = {
         # `runner` launch profile crashed at import (settings.agent read) and
         # CI could not see it (2026-08-30 soak startup).
         "services/agent_host/",
-    ],
-    "runner": [
+    ),
+    "runner": (
         "ops/",
         "services/agent_ops/",
         "services/restarter/",
@@ -382,7 +390,7 @@ _KIND_ROOTS: dict[str, list[str]] = {
         "services/permissions_helper/",
         "services/computer/",
         "services/healthchecks/",
-    ],
+    ),
 }
 
 # Repo-internal package prefixes the closure walk follows (everything that can
@@ -401,7 +409,8 @@ _CLOSURE_PACKAGES = (
 )
 
 
-def _kind_closure(roots: list[str]) -> set[Path]:
+@lru_cache
+def _kind_closure(roots: tuple[str, ...]) -> set[Path]:
     """Root .py files + the repo-internal import closure, for one process kind."""
     root = _repo_root()
 
