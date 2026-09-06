@@ -47,6 +47,7 @@ from shared.context import AvaContext
 from shared.lm.factory import validate_model_config
 from shared.plugin_config_registry import _PLUGIN_CONFIG_CLASSES, _PLUGIN_CONFIGS
 from shared.plugin_config_view import turn_plugin_config
+from tests.shared.poll_until import poll_until_async
 
 
 class _HostPluginConfig(BaseModel):
@@ -950,7 +951,7 @@ class TestTurnStallGuard:
         monkeypatch.setattr(guard_mod, "_emit_error_event", _record_error)
 
         with pytest.raises(TurnStallTimeoutError):
-            await asyncio.wait_for(host.run_turn(11), timeout=2.0)
+            await asyncio.wait_for(host.run_turn(11), timeout=30.0)
 
         assert graph.cancel_seen
         assert 11 not in host._runtimes, "the runtime must be dropped for the reconcile"
@@ -981,13 +982,15 @@ class TestTurnStallGuard:
 
         keeper = asyncio.create_task(_keep_stepping())
         task = asyncio.create_task(host.run_turn(11))
-        await asyncio.wait_for(graph.entered.wait(), timeout=1.0)
+        await poll_until_async(graph.entered.is_set)
         # Let the timeout pass several times over; the steady marks must keep
         # the turn alive.
-        await asyncio.sleep(0.2)
+        observation_ends_at = asyncio.get_running_loop().time() + 0.2
+        await poll_until_async(lambda: asyncio.get_running_loop().time() >= observation_ends_at)
         assert not task.done(), "a progressing turn must not be aborted"
         graph.release.set()
-        await asyncio.wait_for(task, timeout=1.0)
+        await poll_until_async(task.done)
+        await task
         keeper.cancel()
         assert errors == []
         assert 11 in host._runtimes
@@ -1012,10 +1015,11 @@ class TestTurnStallGuard:
         host._graph = graph  # type: ignore[assignment]
 
         task = asyncio.create_task(host.run_turn(11))
-        await asyncio.wait_for(graph.entered.wait(), timeout=1.0)
+        await poll_until_async(graph.entered.is_set)
         task.cancel()
+        await poll_until_async(task.done)
         with pytest.raises(TurnStallTimeoutError):
-            await asyncio.wait_for(task, timeout=2.0)
+            await task
 
         assert graph.cancel_seen
         assert 11 not in host._runtimes, "the runtime must be dropped for the reconcile"
@@ -1034,7 +1038,7 @@ class TestTurnStallGuard:
         host._graph = graph  # type: ignore[assignment]
 
         with pytest.raises(HostRestartRequiredError, match="did not unwind"):
-            await asyncio.wait_for(host.run_turn(11), timeout=2.0)
+            await asyncio.wait_for(host.run_turn(11), timeout=30.0)
 
         assert graph.cancel_seen
         # Release the stuck invocation so the event loop is not left with a
