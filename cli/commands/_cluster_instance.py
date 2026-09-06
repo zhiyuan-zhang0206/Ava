@@ -29,13 +29,10 @@ cluster's own `.env` URLs (`shared.cluster.identity_from_url`) — or pass the
 fixed `DATA_PLANE_IDENTITY` at install-time birth — and thread it in via
 `ensure_cluster_instance(identity=...)`; nothing here derives it from a name.
 
-Bind posture — Postgres and its PgBouncer pooler bind loopback + this host's
-reachable address, never all interfaces. Redis is the exception: it always binds
-loopback-only. Non-loopback Redis inbound is served by the host-level relay bridge
-(`com.ava.redis-bridge`, `/usr/bin/python3 relay.py`), which forwards this host's
-private-network address and Redis port to `127.0.0.1`; see
-`docs/history/2026-08-24/redis-loopback-only.md` and task #1469. A single-box
-cluster is reachable only at loopback, so the Postgres binds collapse to loopback.
+Bind posture — authenticated Postgres, PgBouncer and Linux Redis bind loopback
+and this host's reachable address, never all interfaces. macOS Redis retains its
+loopback-only workaround and host-level `com.ava.redis-bridge` relay (task #1469).
+A no-secret cluster binds loopback only; no caller environment widens that posture.
 
 POSIX only (macOS brew / Linux pg_ctl + redis-server). Windows has no native
 pg_ctl/redis-server on PATH — a Windows per-cluster data plane is a follow-up;
@@ -45,6 +42,7 @@ pg_ctl/redis-server on PATH — a Windows per-cluster data plane is a follow-up;
 from __future__ import annotations
 
 import getpass
+import os
 import shutil
 import socket
 import subprocess
@@ -115,12 +113,25 @@ def _pg_template_dir() -> Path:
     return Path(settings.general.cluster_registry).expanduser().parent / "pg-template-17"
 
 
+def _redis_bin(name: str) -> str:
+    """One home-owned pair; an incomplete override never falls back to PATH."""
+    directory = settings.data_plane.redis_bin_dir
+    if directory:
+        root = Path(directory)
+        for tool in ("redis-server", "redis-cli"):
+            path = root / tool
+            if not path.is_file() or not os.access(path, os.X_OK):
+                raise RuntimeError(f"AVA_REDIS_BIN_DIR requires an executable file: {path}")
+        return str(root / name)
+    return str(brew_prefix("redis@8.2") / "bin" / name) if is_macos() else name
+
+
 def _redis_server_bin() -> str:
-    return str(brew_prefix("redis@8.2") / "bin" / "redis-server") if is_macos() else "redis-server"
+    return _redis_bin("redis-server")
 
 
 def _redis_cli_bin() -> str:
-    return str(brew_prefix("redis@8.2") / "bin" / "redis-cli") if is_macos() else "redis-cli"
+    return _redis_bin("redis-cli")
 
 
 def _pg_bin(name: str) -> str:
@@ -422,10 +433,6 @@ def _start_redis(
     cluster_secret: str,
     identity: str,
 ) -> int:
-    # The bearer controls only the network-auth posture outside Redis. Keep it
-    # explicit in this boundary's signature even though Redis itself is always
-    # loopback-only and uses the independent admin/runtime passwords below.
-    del cluster_secret
     dial_host = _redis_dial_host()
     if _redis_running(redis_port, redis_admin_password, dial_host):
         print(f"  ✓ redis already running ({dial_host}:{redis_port})")
@@ -436,6 +443,9 @@ def _start_redis(
         return _ensure_redis_acl(
             redis_port, redis_admin_password, runtime_password, identity, dial_host
         )
+    bind_addrs = ["127.0.0.1"] if is_macos() else _bind_addrs(cluster_secret)
+    if not is_macos() and cluster_secret and not _wait_for_reachable_bind():
+        return 1
     data = _redis_data_dir()
     data.mkdir(parents=True, exist_ok=True)
     args = [
@@ -446,7 +456,7 @@ def _start_redis(
         "--port",
         str(redis_port),
         "--bind",
-        "127.0.0.1",
+        *bind_addrs,
         "--protected-mode",
         "no",
         "--dir",

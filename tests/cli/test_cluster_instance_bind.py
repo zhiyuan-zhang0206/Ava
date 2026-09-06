@@ -211,11 +211,12 @@ def test_pg_hba_body_follows_passed_secret_not_ambient_settings(
     ]
 
 
-# ─── task #1469: redis always binds loopback and never waits ──────────────────
+# ─── task #1469: macOS retains its loopback Redis workaround ──────────────────
 
 
 def _wire_redis_start(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> list[list[str]]:
     """Capture a successful fresh Redis start without touching the cluster home."""
+    monkeypatch.setattr(_ci, "is_macos", lambda: True)
     monkeypatch.setattr(
         _ci,
         "_wait_for_reachable_bind",
@@ -260,10 +261,10 @@ def test_start_redis_binds_loopback_only_without_secret(
     assert (tmp_path / "redis.conf").read_text().startswith("save 900 1")
 
 
-def test_start_redis_binds_loopback_only_with_secret(
+def test_macos_start_redis_binds_loopback_only_with_secret(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """Authentication never widens Redis beyond exactly the loopback bind."""
+    """The macOS workaround retains its external relay even with auth."""
     monkeypatch.setattr(_ci, "reachable_host", lambda: "10.0.0.5")
     started = _wire_redis_start(monkeypatch, tmp_path)
 
@@ -271,7 +272,7 @@ def test_start_redis_binds_loopback_only_with_secret(
     assert _redis_bind_arg(started[0]) == ["--bind", "127.0.0.1"]
 
 
-def test_start_redis_does_not_use_shared_pg_bind_addrs(
+def test_macos_start_redis_does_not_use_shared_pg_bind_addrs(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """The shared helper may remain dual-bind for pg without widening Redis."""
@@ -284,6 +285,38 @@ def test_start_redis_does_not_use_shared_pg_bind_addrs(
 
     assert _ci._start_redis(6380, "redis-admin", "redis-runtime", "s3cr3t", "ava") == 0
     assert _redis_bind_arg(started[0]) == ["--bind", "127.0.0.1"]
+
+
+@pytest.mark.parametrize("secret", ["", "cluster-bearer"])
+def test_linux_redis_bind_uses_caller_secret_not_inherited_config(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, secret: str
+) -> None:
+    started = _wire_redis_start(monkeypatch, tmp_path)
+    monkeypatch.setattr(_ci, "is_macos", lambda: False)
+    monkeypatch.setattr(_ci, "reachable_host", lambda: "10.0.0.5")
+    monkeypatch.setattr(settings.data_plane, "cluster_secret", "" if secret else "polluted")
+    waits: list[bool] = []
+
+    def address_ready() -> bool:
+        waits.append(True)
+        return True
+
+    monkeypatch.setattr(_ci, "_wait_for_reachable_bind", address_ready)
+    assert _ci._start_redis(6380, "admin" if secret else "", "runtime", secret, "ava") == 0
+    expected = ["--bind", "127.0.0.1", "10.0.0.5"] if secret else ["--bind", "127.0.0.1"]
+    assert _redis_bind_arg(started[0]) == expected
+    assert waits == ([True] if secret else [])
+
+
+def test_linux_redis_refuses_start_when_reachable_address_is_unavailable(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    started = _wire_redis_start(monkeypatch, tmp_path)
+    monkeypatch.setattr(_ci, "is_macos", lambda: False)
+    monkeypatch.setattr(_ci, "_wait_for_reachable_bind", lambda: False)
+    assert _ci._start_redis(6380, "admin", "runtime", "bearer", "ava") == 1
+    assert started == []
+    assert not (tmp_path / "redis.conf").exists()
 
 
 def test_running_redis_persists_the_authenticated_password_to_its_config(
