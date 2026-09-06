@@ -337,14 +337,14 @@ repos:
         types: [python]
         pass_filenames: false
 
-      # Pyright's Unknown/Missing ladder leaves historical ignores inert when a
-      # rule is warning-only for that file. The bidirectional registry freezes
-      # existing debt while rejecting both new zombies and stale cleared rows.
+      # Pyright's Unknown/Missing ladder leaves ignores inert when a rule is
+      # warning-only for that file. With that debt cleared, every zombie is an
+      # error instead of a grandfathered exception.
       - id: lint-zombie-pyright-ignores
-        name: lint zombie Pyright ignores (warning-tier registry stays exact)
+        name: lint zombie Pyright ignores (zero warning-tier ignores)
         entry: .venv/bin/python scripts/lint_zombie_pyright_ignores.py --check
         language: system
-        files: ^(.*\.py|pyproject\.toml|scripts/zombie_pyright_ignores\.registry)$
+        files: ^(.*\.py|pyproject\.toml)$
         pass_filenames: false
 
       # (Config-scope ownership is now enforced at import by the config package's
