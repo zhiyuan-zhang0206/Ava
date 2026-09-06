@@ -4,7 +4,7 @@ Owns the entry port (the port the user bookmarks; `frontend` in the port
 table). Serves the static login page and two maintenance pages — "updating"
 and "service unavailable" — and proxies the Next.js app (on `app` = entry+1)
 whenever the cluster is healthy. A rollout takes the gateway down (503) and restarts the frontend —
-the gate is a launchd job OUTSIDE the update lifecycle, so the entry never
+the gate is owned by the platform supervisor OUTSIDE service-session teardown, so the entry never
 blacks out: users see the updating page during the rollout and land back on
 the app automatically when it finishes.
 

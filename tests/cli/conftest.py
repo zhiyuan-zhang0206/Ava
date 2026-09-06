@@ -60,7 +60,16 @@ def _gate_probe_offline(monkeypatch: pytest.MonkeyPatch) -> None:
     hermetic host looks like. Tests that assert a particular gate state (including
     `_ensure_launchd`'s own) install their own `_launchctl` on top."""
     import cli.commands._converge_gate as cg
+    import cli.commands._gate_systemd as gs
 
+    monkeypatch.setattr(
+        gs,
+        "_systemctl",
+        lambda *_args: subprocess.CompletedProcess(
+            [], 1, "LoadState=not-found\nActiveState=inactive\n", ""
+        ),  # pyright: ignore[reportUnknownArgumentType]
+    )
+    monkeypatch.setattr(gs, "unit_path", lambda home: home / "test-systemd" / gs.unit_name(home))  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(cg, "_entry_answers", lambda _port: False)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
         cg,
