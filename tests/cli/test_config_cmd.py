@@ -35,6 +35,7 @@ def _field(
     writable: bool,
     scope: str,
     restart_required: str,
+    remote_writable: bool | None = None,
 ) -> ConfigFieldView:
     """A ConfigFieldView with the CLI-relevant fields set + inert defaults for the
     rest — built from the real schema (not a partial dict) so the test fails loudly
@@ -52,7 +53,7 @@ def _field(
         sensitive=False,
         env_var=env_var,
         scope=scope,
-        remote_writable=writable,
+        remote_writable=writable if remote_writable is None else remote_writable,
         per_agent=False,
     )
 
@@ -209,6 +210,117 @@ def test_unset_sends_explicit_null(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_set_machine_is_forwarded(captured_put: dict[str, Any]) -> None:
     cfg.cmd_config_set(["AVA_OPS_CONCURRENCY=4"], machine="runner-2")
     assert captured_put["machine"] == "runner-2"
+
+
+def test_set_machine_host_field_uses_remote_writable(captured_put: dict[str, Any]) -> None:
+    captured_put["view"].fields.append(
+        _field(
+            "permissions_helper_enabled",
+            "AVA_PERMISSIONS_HELPER_ENABLED",
+            "bool",
+            False,
+            False,
+            "host",
+            "agent",
+            remote_writable=True,
+        )
+    )
+
+    rc = cfg.cmd_config_set(["AVA_PERMISSIONS_HELPER_ENABLED=true"], machine="company-mini")
+
+    assert rc == 0
+    assert captured_put["body"] == {"permissions_helper_enabled": True}
+    assert captured_put["machine"] == "company-mini"
+
+
+def test_set_machine_host_field_rejects_remote_read_only(
+    captured_put: dict[str, Any], capsys: pytest.CaptureFixture[str]
+) -> None:
+    captured_put["view"].fields.append(
+        _field(
+            "agent_host_health_port",
+            "AVA_AGENT_HOST_HEALTH_PORT",
+            "int",
+            8114,
+            True,
+            "host",
+            "agent",
+            remote_writable=False,
+        )
+    )
+
+    rc = cfg.cmd_config_set(["AVA_AGENT_HOST_HEALTH_PORT=18133"], machine="runner-2")
+
+    assert rc == 1
+    assert "AVA_AGENT_HOST_HEALTH_PORT is read-only" in capsys.readouterr().err
+    assert captured_put["body"] is None
+
+
+def test_set_machine_non_host_field_still_uses_writable(
+    captured_put: dict[str, Any], capsys: pytest.CaptureFixture[str]
+) -> None:
+    captured_put["view"].fields.append(
+        _field(
+            "read_only_cluster_field",
+            "AVA_READ_ONLY_CLUSTER_FIELD",
+            "string",
+            "old",
+            False,
+            "cluster-pinned",
+            "agent",
+            remote_writable=True,
+        )
+    )
+
+    rc = cfg.cmd_config_set(["AVA_READ_ONLY_CLUSTER_FIELD=new"], machine="runner-2")
+
+    assert rc == 1
+    assert "AVA_READ_ONLY_CLUSTER_FIELD is read-only" in capsys.readouterr().err
+    assert captured_put["body"] is None
+
+
+def test_unset_machine_host_field_rejects_remote_read_only(
+    captured_put: dict[str, Any], capsys: pytest.CaptureFixture[str]
+) -> None:
+    captured_put["view"].fields.append(
+        _field(
+            "agent_host_health_port",
+            "AVA_AGENT_HOST_HEALTH_PORT",
+            "int",
+            8114,
+            True,
+            "host",
+            "agent",
+            remote_writable=False,
+        )
+    )
+
+    rc = cfg.cmd_config_unset(["AVA_AGENT_HOST_HEALTH_PORT"], machine="runner-2")
+
+    assert rc == 1
+    assert "AVA_AGENT_HOST_HEALTH_PORT is read-only" in capsys.readouterr().err
+    assert captured_put["body"] is None
+
+
+def test_unset_machine_host_field_uses_remote_writable(captured_put: dict[str, Any]) -> None:
+    captured_put["view"].fields.append(
+        _field(
+            "permissions_helper_enabled",
+            "AVA_PERMISSIONS_HELPER_ENABLED",
+            "bool",
+            True,
+            False,
+            "host",
+            "agent",
+            remote_writable=True,
+        )
+    )
+
+    rc = cfg.cmd_config_unset(["AVA_PERMISSIONS_HELPER_ENABLED"], machine="company-mini")
+
+    assert rc == 0
+    assert captured_put["body"] == {"permissions_helper_enabled": None}
+    assert captured_put["machine"] == "company-mini"
 
 
 def _write_incident_env(home: Path) -> tuple[Path, Path]:
