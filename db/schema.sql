@@ -149,6 +149,8 @@ CREATE TABLE agents_meta (
     last_resurrect_at          TIMESTAMPTZ,              -- when CrashResurrectController last auto-resurrected this agent; the per-agent backoff clock (pin-heal shape). A crash corpse is skipped until now() - last_resurrect_at exceeds AVA_AUTO_RESURRECT_BACKOFF_SECONDS, so a resurrect that keeps failing (outage / poison message) retries on a fixed cadence instead of a tight loop and self-heals when the cause clears. NULL = never auto-resurrected.
     last_wedged_check_at       TIMESTAMPTZ,              -- when WedgedAgentController last attempted recovery of this agent; the per-agent backoff clock (same shape as last_resurrect_at). Stamped by the claiming UPDATE in ops/controllers/wedged.py; a wedged candidate is skipped until now() - last_wedged_check_at exceeds the backoff, preventing a poison-message loop from becoming a kill-spawn cycle. NULL = never checked. See the add-last-wedged-check-at migration.
     last_claim_loop_at         TIMESTAMPTZ,              -- when a process-mode agent last began an idling claim-loop round (agent/db.py:wait_for_inbound). The out-of-process wedged detector treats a non-NULL value stale past the idling threshold as evidence that the fallback SELECT loop stopped advancing even if no inbound has arrived. NULL is unknown (pre-migration / pre-rollout) and is deliberately not considered stale.
+    wake_suppressed_until      TIMESTAMPTZ,              -- delivery auto-resurrect and watchdog wake suppression deadline after repeated resurrection failures. New peer/user chats remain pending and become eligible again after expiry. Cleared by a successful resurrection spawn or inbound claim. NULL = not suppressed.
+    wake_suppress_reason       TEXT,                     -- operator-readable cause paired with wake_suppressed_until; currently 'resurrect_failed'. Cleared with the deadline on successful recovery.
     lease_expires_at           TIMESTAMPTZ,              -- R1 (Task #1021): the agent-process lease — liveness is a lease-expiry judgment (`lease_expires_at > now()`), status stays lifecycle intent. Written by the agent process at claim/start (now()+lease TTL, agent/db.py / agent/_starting.py), cleared on terminate/resurrect by the ops lifecycle; read by the heartbeat daemon and the reaper (shared/db.py ALIVE_SQL). NULL = row has no lease (pre-R1 legacy, or terminated).
     liveness_state             TEXT NOT NULL DEFAULT 'unknown' CHECK (liveness_state IN ('online', 'offline', 'unknown')),  -- gateway-owned derived liveness projection (Task #1174): 'online' = machine reachable AND (process lease alive where one is held); 'offline' = machine unreachable (2 consecutive failed status_probe) or lease expired; 'unknown' = not yet judged (fresh rows / unregistered machine). Written ONLY by the gateway heartbeat daemon's liveness pass — status stays lifecycle intent (R1 invariant #1); the frontend renders offline distinctly. 'terminated' rows are never judged.
     last_probe_at             TIMESTAMPTZ,              -- when the gateway liveness pass last judged this row (Task #1174).
@@ -1439,3 +1441,10 @@ INSERT INTO schema_migrations (name) VALUES ('20260905T140829_bound-failure-feed
 -- while existing DBs without this applied marker still run the migration and
 -- fail loudly if the columns were added outside migration tracking.
 INSERT INTO schema_migrations (name) VALUES ('20260905T162656_watchdog-dispatch-poison');
+
+
+-- Wake suppression is already represented above. Fresh DBs must not replay
+-- the strict ADD COLUMN against the baseline schema, while existing DBs
+-- without this applied marker still run the migration and fail loudly if
+-- the columns were added outside migration tracking.
+INSERT INTO schema_migrations (name) VALUES ('20260906T050000_wake-suppress');

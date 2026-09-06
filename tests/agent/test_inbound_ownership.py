@@ -95,6 +95,25 @@ async def test_unowned_ordinary_batch_remains_compatible(
     ).fetchall() == [("chat", "claimed"), ("compact_summary", "done")]
 
 
+async def test_successful_claim_clears_wake_suppression(
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+) -> None:
+    agent_id = _agent(db_conn)
+    inbound = _insert(db_conn, agent_id)
+    db_conn.execute(
+        "UPDATE agents_meta SET wake_suppressed_until=now()+interval '1 hour', "
+        "wake_suppress_reason='resurrect_failed' WHERE id=%s",
+        (agent_id,),
+    )
+    db_conn.commit()
+
+    assert [row.id for row in await claim_inbound_batch(aops_pool, agent_id)] == [inbound]
+    assert db_conn.execute(
+        "SELECT wake_suppressed_until,wake_suppress_reason FROM agents_meta WHERE id=%s",
+        (agent_id,),
+    ).fetchone() == (None, None)
+
+
 @pytest.mark.parametrize("missing", [False, True])
 async def test_stale_or_missing_owner_cannot_claim(
     db_conn: psycopg.Connection,

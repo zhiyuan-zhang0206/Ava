@@ -171,6 +171,48 @@ class DaemonSettings(EnvSettings):
         },
     )
 
+    delivery_watchdog_resurrect_fail_before_suppress: int = Field(
+        default=5,
+        ge=1,
+        alias="AVA_DELIVERY_WATCHDOG_RESURRECT_FAIL_BEFORE_SUPPRESS",
+        description="Consecutive failed terminated-owner auto-resurrect attempts before the delivery watchdog suppresses that agent's automatic wakes.",
+        json_schema_extra={
+            "capability": "gateway",
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    delivery_watchdog_suppress_base_seconds: float = Field(
+        default=1800.0,
+        gt=0,
+        alias="AVA_DELIVERY_WATCHDOG_SUPPRESS_BASE_SECONDS",
+        description="Initial automatic-wake suppression window after repeated terminated-owner resurrection failures; each later suppression for that agent doubles this duration.",
+        json_schema_extra={
+            "capability": "gateway",
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    delivery_watchdog_suppress_max_seconds: float = Field(
+        default=86400.0,
+        gt=0,
+        alias="AVA_DELIVERY_WATCHDOG_SUPPRESS_MAX_SECONDS",
+        description="Maximum automatic-wake suppression window after repeated terminated-owner resurrection failures.",
+        json_schema_extra={
+            "capability": "gateway",
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
     revive_max_per_pass: int = Field(
         default=50,
         alias="AVA_REVIVE_MAX_PER_PASS",

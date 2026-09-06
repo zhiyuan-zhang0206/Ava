@@ -140,9 +140,19 @@ def test_category_projection_matches_telemetry_whitelist() -> None:
     # and the schedule_self_respawn removal takes restart_cas_lost back out,
     # which the guard below keeps asserted. Gateway SSE lifecycle, process,
     # and event-loop metrics bring the total to 150; delivery_poisoned raises
-    # it to 151; loki_write_path_probe_failed raises the current total to 152.
+    # it to 151; loki_write_path_probe_failed raises it to 152; the watchdog
+    # resurrection-failure suppressor raises the current total to 153.
     assert "restart_cas_lost" not in _TELEMETRY_KINDS
-    assert len(_TELEMETRY_KINDS) == 152
+    assert len(_TELEMETRY_KINDS) == 153
+
+
+def test_delivery_wake_suppressed_payload_names_escalation_evidence() -> None:
+    assert payload_keys("delivery_wake_suppressed") == (
+        "consecutive_failures",
+        "suppress_seconds",
+        "suppress_count",
+        "reason",
+    )
 
 
 def test_gateway_observability_payloads_and_gauge_dispositions() -> None:

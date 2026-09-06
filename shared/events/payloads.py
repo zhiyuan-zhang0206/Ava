@@ -408,6 +408,15 @@ class DeliveryPoisoned(TypedDict):
     age_s: float
 
 
+class DeliveryWakeSuppressed(TypedDict):
+    """`delivery_wake_suppressed` payload — delivery watchdog resurrection guard."""
+
+    consecutive_failures: int
+    suppress_seconds: float
+    suppress_count: int
+    reason: str
+
+
 class FrontendInteraction(TypedDict):
     """`frontend_interaction` payload — gateway/routers/frontend_telemetry.py.
 

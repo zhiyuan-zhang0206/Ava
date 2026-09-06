@@ -43,7 +43,8 @@ def select_pending_for_dispatch(
     The initial publish is gated by ``age_s``. Later publishes wait for the
     configured step indexed by the row's current dispatch count (1-based),
     repeating the final step when the configured list is shorter than the
-    dispatch cap. Poisoned rows and rows at the cap are never selected.
+    dispatch cap. Poisoned rows, rows at the cap, and owners under an active
+    automatic-wake suppression window are never selected.
     """
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
@@ -51,6 +52,7 @@ def select_pending_for_dispatch(
             "FROM inbound_messages m "
             "JOIN agents_meta am ON am.id = m.agent_id "
             "WHERE m.status = 'pending' AND am.status = 'idling' "
+            "  AND (am.wake_suppressed_until IS NULL OR am.wake_suppressed_until < now()) "
             "  AND m.created_at < now() - make_interval(secs => %s) "
             "  AND m.dispatch_count < %s AND m.poisoned_at IS NULL "
             "  AND (m.last_dispatch_at IS NULL OR m.last_dispatch_at < now() - "

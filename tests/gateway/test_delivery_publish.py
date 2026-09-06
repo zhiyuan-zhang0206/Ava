@@ -217,6 +217,62 @@ async def test_retried_client_message_resurrects_terminated_agent_once(
         assert cur.fetchall() == [("chat", 1), ("resurrect", 1)]
 
 
+async def test_peer_message_queues_during_suppression_and_watchdog_recovers_after_expiry(
+    db_conn: psycopg.Connection,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Suppression gates automatic resurrection, never durable delivery."""
+    from ops import ops_lifecycle
+    from services.delivery_watchdog.daemon import select_terminated_owners_with_pending
+
+    tid = create_agent(db_conn)
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO agents_meta "
+            "(id, status, machine, wake_suppressed_until, wake_suppress_reason) "
+            "VALUES (%s, 'terminated', 'peer-home', now() + interval '1 hour', "
+            "'resurrect_failed')",
+            (tid,),
+        )
+    db_conn.commit()
+    forwards: list[str] = []
+
+    async def _record_forward(*_args: object, **_kwargs: object) -> dict[str, str]:
+        forwards.append("forwarded")
+        return {"status": "already_alive"}
+
+    monkeypatch.setattr(ops_lifecycle._cluster_rpc, "dispatch_to_machine", _record_forward)
+
+    with _sync_pool() as pool:
+        delivery = await deliver_chat_inbound(
+            pool,
+            tid,
+            prepare=lambda _conn: "peer work",
+            source="agent:42",
+        )
+
+    assert delivery.status is AgentStatus.TERMINATED
+    assert delivery.inbound_id is not None
+    assert forwards == []
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "SELECT status,kind,source,content FROM inbound_messages WHERE id=%s",
+            (delivery.inbound_id,),
+        )
+        assert cur.fetchone() == ("pending", "chat", "agent:42", "peer work")
+    with _sync_pool() as pool:
+        assert select_terminated_owners_with_pending(pool) == []
+
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "UPDATE agents_meta SET wake_suppressed_until=now()-interval '1 second' WHERE id=%s",
+            (tid,),
+        )
+    db_conn.commit()
+    with _sync_pool() as pool:
+        assert select_terminated_owners_with_pending(pool) == [(tid, delivery.inbound_id)]
+
+
 async def test_concurrent_same_key_terminated_delivery_has_one_resurrect_effect(
     db_conn: psycopg.Connection,
     monkeypatch: pytest.MonkeyPatch,

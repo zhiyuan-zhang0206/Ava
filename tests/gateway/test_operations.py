@@ -991,6 +991,29 @@ class TestResurrectIfTerminatedPlacement:
     an unreachable home machine skips the resurrect — the inbound is already
     queued, so the next delivery or a manual resurrect picks it up."""
 
+    @pytest.fixture(autouse=True)
+    def _default_unsuppressed(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(ops_lifecycle, "_wake_suppression_active", lambda _aid: False)
+        monkeypatch.setattr(ops_lifecycle, "_clear_wake_suppression", lambda _aid: None)
+
+    @pytest.mark.asyncio
+    async def test_active_suppression_skips_forward_and_launch(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from shared.agents import AgentStatus
+
+        monkeypatch.setattr(ops_lifecycle, "get_agent_status", lambda _aid: AgentStatus.TERMINATED)
+        monkeypatch.setattr(ops_lifecycle, "_wake_suppression_active", lambda _aid: True)
+
+        def _no_machine_read(_aid: int) -> str:
+            raise AssertionError("suppressed auto-resurrect must not read or contact the home")
+
+        monkeypatch.setattr(ops_lifecycle, "get_agent_machine", _no_machine_read)
+        status = await ops_lifecycle.resurrect_if_terminated(
+            5, trigger_inbound_id=88, trigger_inbound_kind="chat"
+        )
+        assert status is AgentStatus.TERMINATED
+
     @pytest.mark.asyncio
     async def test_local_home_resurrects_in_process(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Local-homed resurrect dispatches to ops server first; falls back
@@ -1018,6 +1041,16 @@ class TestResurrectIfTerminatedPlacement:
             return ResurrectAgentResponse(status="spawned")
 
         monkeypatch.setattr(ops_lifecycle, "resurrect_agent_op", _fake_resurrect_op)
+        cleared: list[int] = []
+
+        def _record_clear(agent_id: int) -> None:
+            cleared.append(agent_id)
+
+        monkeypatch.setattr(
+            ops_lifecycle,
+            "_clear_wake_suppression",
+            _record_clear,
+        )
 
         async def _fake_dispatch(*args: object, **kwargs: object) -> dict:
             dispatch_called.append(kwargs)
@@ -1047,6 +1080,7 @@ class TestResurrectIfTerminatedPlacement:
             "trigger_inbound_id": 88,
             "trigger_inbound_kind": "chat",
         }
+        assert cleared == [5]
 
     @pytest.mark.asyncio
     async def test_remote_home_forwards_lifecycle_op(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1105,7 +1139,7 @@ class TestResurrectIfTerminatedPlacement:
 
         monkeypatch.setattr(ops_lifecycle._cluster_rpc, "dispatch_to_machine", _unreachable)
 
-        with caplog.at_level("WARNING"):
+        with caplog.at_level("INFO"):
             status = await ops_lifecycle.resurrect_if_terminated(
                 7, trigger_inbound_id=99, trigger_inbound_kind="chat"
             )
@@ -1146,6 +1180,45 @@ class TestResurrectIfTerminatedPlacement:
             5, trigger_inbound_id=99, trigger_inbound_kind="chat"
         )
         assert status is AgentStatus.RUNNING
+
+
+@pytest.mark.asyncio
+async def test_spawned_auto_resurrect_clears_suppression_in_database(
+    db_conn: psycopg.Connection,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A successful spawn is a durable recovery, not only an in-memory result."""
+    from shared.agents import AgentStatus
+    from shared.db import create_agent, insert_inbound_message
+
+    agent_id = create_agent(db_conn)
+    db_conn.execute(
+        "INSERT INTO agents_meta "
+        "(id,status,machine,wake_suppressed_until,wake_suppress_reason) "
+        "VALUES(%s,'terminated','remote-home',now()-interval '1 second','resurrect_failed')",
+        (agent_id,),
+    )
+    db_conn.commit()
+    trigger_id = insert_inbound_message(db_conn, agent_id, "recover", source="user")
+
+    async def _spawn_on_home(*_args: object, **_kwargs: object) -> dict[str, str]:
+        db_conn.execute("UPDATE agents_meta SET status='idling' WHERE id=%s", (agent_id,))
+        db_conn.commit()
+        return {"status": "spawned"}
+
+    monkeypatch.setattr(ops_lifecycle._cluster_rpc, "dispatch_to_machine", _spawn_on_home)
+
+    status = await ops_lifecycle.resurrect_if_terminated(
+        agent_id,
+        trigger_inbound_id=trigger_id,
+        trigger_inbound_kind="chat",
+    )
+
+    assert status is AgentStatus.IDLING
+    assert db_conn.execute(
+        "SELECT wake_suppressed_until,wake_suppress_reason FROM agents_meta WHERE id=%s",
+        (agent_id,),
+    ).fetchone() == (None, None)
 
 
 @pytest.mark.asyncio

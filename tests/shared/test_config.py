@@ -190,6 +190,15 @@ def test_delivery_watchdog_backoff_rejects_empty_or_nonpositive_steps(raw: str) 
         DaemonSettings.model_validate({"AVA_DELIVERY_WATCHDOG_DISPATCH_BACKOFF_STEPS_S": raw})
 
 
+def test_delivery_watchdog_wake_suppression_defaults() -> None:
+    from shared.config.daemon import DaemonSettings
+
+    configured = DaemonSettings()
+    assert configured.delivery_watchdog_resurrect_fail_before_suppress == 5
+    assert configured.delivery_watchdog_suppress_base_seconds == 1800.0
+    assert configured.delivery_watchdog_suppress_max_seconds == 86400.0
+
+
 def test_current_field_values_coerces_secretstr(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     """A SecretStr field read from .env must come back a SecretStr, not a bare str
     — `.get_secret_value()` consumers crash on a plain str."""

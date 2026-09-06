@@ -37,7 +37,9 @@ in-flight turn is normal — the claim's turn-end SELECT picks it up. Boot state
    G4, user ruling 2026-08-03): a chat to a dead agent must wake it, and a
    missed auto-resurrect must be retried, not just alerted. Per-agent cooldown
    (60s) + per-tick cap + concurrency semaphore keep a pile of dead letters
-   (or an unreachable home machine) from spawning an LLM wake storm.
+   from spawning an LLM wake storm. Repeated failures suppress automatic wakes
+   for a bounded, exponentially increasing per-agent window; new messages stay
+   pending and normal delivery resumes after expiry.
 4. **Stale-inbound dead-letter sweep** — every 30s, flip `claimed` chat
    inbounds of TERMINATED owners older than
    `AVA_DELIVERY_WATCHDOG_STALE_CLAIMED_THRESHOLD_SECONDS` (default 24h), or
@@ -75,8 +77,9 @@ from psycopg_pool import ConnectionPool
 
 import shared.db
 from services._pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
-from services.delivery_watchdog import dispatch_guard, turn_liveness
+from services.delivery_watchdog import dispatch_guard, resurrect_guard, turn_liveness
 from shared import telemetry
+from shared.agents import AgentStatus
 from shared.config import settings
 from shared.config.service_read import current_field_values
 from shared.daemon_health import Liveness, health_port, start_health_server, stop_health_server
@@ -165,6 +168,8 @@ def select_terminated_owners_with_pending(pool: ConnectionPool) -> list[tuple[in
                 "  AND ((agents_meta.status = 'terminated' AND NOT {} "
                 " AND m.created_at > agents_meta.status_changed_at) OR {}) "
                 "  AND m.id > COALESCE(agents_meta.last_force_terminate_inbound_id, 0) "
+                "  AND (agents_meta.wake_suppressed_until IS NULL "
+                "       OR agents_meta.wake_suppressed_until < now()) "
                 "GROUP BY m.agent_id "
                 "ORDER BY m.agent_id"
             ).format(sql.SQL(FAILED_RESTART_FOR_CURRENT_TARGET), sql.SQL(PENDING_ALLOCATION))
@@ -415,13 +420,15 @@ async def _sleep_with_liveness(liveness: Liveness, total_s: float) -> None:
 # ── Terminated-owner resurrect retry (G4) ────────────────────────────────────
 _last_resurrect_attempt: dict[int, float] = {}
 _resurrect_tasks: dict[int, asyncio.Task[None]] = {}
+_resurrect_failures: dict[int, int] = {}
+_resurrect_suppressions: dict[int, int] = {}
 _resurrect_semaphore = asyncio.Semaphore(_RESURRECT_MAX_CONCURRENCY)
 
 
-async def _resurrect_one(agent_id: int, trigger_inbound_id: int) -> None:
+async def _resurrect_one(pool: ConnectionPool, agent_id: int, trigger_inbound_id: int) -> None:
     """Run `resurrect_if_terminated` for one agent, bounded by the concurrency
-    semaphore; log the outcome, never raise (a failure is retried next
-    cooldown window)."""
+    semaphore; classify the returned status and escalate consecutive failures
+    into a durable wake-suppression window."""
     from ops.ops_lifecycle import resurrect_if_terminated
 
     async with _resurrect_semaphore:
@@ -431,13 +438,33 @@ async def _resurrect_one(agent_id: int, trigger_inbound_id: int) -> None:
                 trigger_inbound_id=trigger_inbound_id,
                 trigger_inbound_kind="chat",
             )
-            _log.info(
-                "[delivery] resurrect retry for terminated agent %s -> status %s",
-                agent_id,
-                status,
-            )
+            if status is AgentStatus.TERMINATED:
+                resurrect_guard.record_resurrect_failure(
+                    pool,
+                    agent_id,
+                    _resurrect_failures,
+                    _resurrect_suppressions,
+                )
+            else:
+                _resurrect_failures.pop(agent_id, None)
+                _resurrect_suppressions.pop(agent_id, None)
+                _log.info(
+                    "[delivery] resurrect retry for terminated agent %s -> status %s",
+                    agent_id,
+                    status,
+                )
         except Exception:
-            _log.exception("[delivery] resurrect retry failed for agent %s", agent_id)
+            _log.info(
+                "[delivery] resurrect retry failed for agent %s",
+                agent_id,
+                exc_info=True,
+            )
+            resurrect_guard.record_resurrect_failure(
+                pool,
+                agent_id,
+                _resurrect_failures,
+                _resurrect_suppressions,
+            )
         finally:
             _last_resurrect_attempt[agent_id] = time.monotonic()
 
@@ -464,7 +491,7 @@ def _maybe_spawn_resurrects(pool: ConnectionPool, max_per_tick: int) -> None:
         if spawned >= max_per_tick:
             deferred += 1
             continue
-        task = asyncio.create_task(_resurrect_one(agent_id, trigger_inbound_id))
+        task = asyncio.create_task(_resurrect_one(pool, agent_id, trigger_inbound_id))
         _resurrect_tasks[agent_id] = task
 
         def _discard_completed_task(

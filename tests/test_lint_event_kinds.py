@@ -41,6 +41,7 @@ _SQL_OR_DYNAMIC_KINDS = frozenset(
         "delivery_stalled",  # services/delivery_watchdog/daemon.py:_alert_stalled
         "loki_write_path_probe_failed",  # services/healthchecks/lgtm.py write-path probe
         "delivery_poisoned",  # services/delivery_watchdog/dispatch_guard.py:_alert_poisoned
+        "delivery_wake_suppressed",  # services/delivery_watchdog/resurrect_guard.py:_alert_wake_suppressed
         "heartbeat_nudged",  # services/heartbeat/daemon.py:_alert_idle
         # Dynamic emit: positional-argument form, no `event=` literal.
         "task_reminder_digest",  # task_maintenance/daemon.py:_run_reminders
