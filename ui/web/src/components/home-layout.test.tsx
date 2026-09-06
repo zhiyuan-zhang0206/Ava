@@ -1,6 +1,7 @@
+import { useEffect, type ReactNode } from "react";
 import { renderToString } from "react-dom/server";
 import { cleanup, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/components/ui/resizable", () => ({
   ResizablePanelGroup: ({
@@ -9,25 +10,31 @@ vi.mock("@/components/ui/resizable", () => ({
     direction,
   }: {
     autoSaveId: string;
-    children: React.ReactNode;
+    children: ReactNode;
     direction: string;
-  }) => (
-    <div
-      data-testid="resizable-panel-group"
-      data-slot="resizable-panel-group"
-      data-autosave-id={autoSaveId}
-      data-direction={direction}
-    >
-      {children}
-    </div>
-  ),
+  }) => {
+    useEffect(() => {
+      localStorage.setItem(`react-resizable-panels:${autoSaveId}`, "mock persisted layout");
+    });
+
+    return (
+      <div
+        data-testid="resizable-panel-group"
+        data-slot="resizable-panel-group"
+        data-autosave-id={autoSaveId}
+        data-direction={direction}
+      >
+        {children}
+      </div>
+    );
+  },
   ResizablePanel: ({
     children,
     defaultSize,
     maxSize,
     minSize,
   }: {
-    children: React.ReactNode;
+    children: ReactNode;
     defaultSize: number;
     maxSize?: number;
     minSize: number;
@@ -46,7 +53,31 @@ vi.mock("@/components/ui/resizable", () => ({
 
 import { HomeLayout } from "./home-layout";
 
-afterEach(cleanup);
+function installLocalStoragePolyfill(): void {
+  const store = new Map<string, string>();
+  const fake: Storage = {
+    get length() {
+      return store.size;
+    },
+    clear: () => store.clear(),
+    getItem: (key) => store.get(key) ?? null,
+    setItem: (key, value) => store.set(key, value),
+    removeItem: (key) => store.delete(key),
+    key: (index) => Array.from(store.keys())[index] ?? null,
+  };
+  Object.defineProperty(globalThis, "localStorage", {
+    value: fake,
+    writable: true,
+    configurable: true,
+  });
+}
+
+beforeEach(installLocalStoragePolyfill);
+
+afterEach(() => {
+  cleanup();
+  localStorage.clear();
+});
 
 function panes() {
   return {
@@ -104,19 +135,24 @@ describe("HomeLayout autosave-safe responsive frames", () => {
     expect(directPanelDefaults(groups[1]).reduce((sum, size) => sum + size, 0)).toBe(100);
   });
 
-  it("collapsed desktop frame still totals 100 without overwriting the expanded constraints", () => {
+  it("collapsed desktop frame is static and cannot write panel layout storage", () => {
+    localStorage.setItem("sentinel", "unchanged");
+
     render(
       <HomeLayout
         {...panes()}
+        inspector={null}
         isNarrow={false}
         isLarge
         sidebarCollapsed
       />,
     );
 
-    const outer = screen.getAllByTestId("resizable-panel-group")[0];
-    expect(directPanelDefaults(outer)).toEqual([3, 97]);
-    expect(directPanelDefaults(outer).reduce((sum, size) => sum + size, 0)).toBe(100);
+    expect(screen.queryAllByTestId("resizable-panel-group")).toHaveLength(0);
+    expect(screen.getByTestId("agent-tree").parentElement?.style.flexBasis).toBe("3%");
+    expect(screen.getByTestId("main-timeline")).toBeTruthy();
+    expect(localStorage.length).toBe(1);
+    expect(localStorage.getItem("sentinel")).toBe("unchanged");
   });
 
   it("closed inspector frame gives its sole main panel the full group", () => {

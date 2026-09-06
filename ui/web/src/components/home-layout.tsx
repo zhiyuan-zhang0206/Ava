@@ -13,21 +13,21 @@ import { cn } from "@/lib/utils";
 interface ColumnFrame {
   autoSaveId: string;
   expanded: readonly [sidebar: number, main: number];
-  collapsed: readonly [sidebar: number, main: number];
+  collapsedSidebarSize: number;
   expandedMinimums: readonly [sidebar: number, main: number];
 }
 
 const DESKTOP_COLUMNS: ColumnFrame = {
   autoSaveId: "ava.home.columns.desktop",
   expanded: [30, 70],
-  collapsed: [3, 97],
+  collapsedSidebarSize: 3,
   expandedMinimums: [20, 45],
 };
 
 const MOBILE_COLUMNS: ColumnFrame = {
   autoSaveId: "ava.home.columns.mobile",
   expanded: [40, 60],
-  collapsed: [5, 95],
+  collapsedSidebarSize: 5,
   expandedMinimums: [30, 40],
 };
 
@@ -122,15 +122,41 @@ export function HomeLayout({
   }
 
   const frame = isLarge ? DESKTOP_COLUMNS : MOBILE_COLUMNS;
-  const sizes = sidebarCollapsed ? frame.collapsed : frame.expanded;
-  const sidebarMinimum = sidebarCollapsed ? sizes[0] : frame.expandedMinimums[0];
-  const mainMinimum = sidebarCollapsed ? 60 : frame.expandedMinimums[1];
+
+  if (sidebarCollapsed) {
+    return (
+      <>
+        {/* A collapsed rail is not user-resizable, so keep it outside rrp.
+            Mounting a constrained PanelGroup here lets rrp v3 persist the
+            rail minimum over the user's expanded split during a round trip. */}
+        <div className={cn("h-full w-full", FLEX, FLEX_1, MIN_H_0, MIN_W_0)}>
+          <div
+            className={cn(FLEX, MIN_H_0, MIN_W_0)}
+            style={{
+              flexBasis: `${frame.collapsedSidebarSize}%`,
+              flexGrow: 0,
+              flexShrink: 0,
+            }}
+          >
+            {sidebar}
+          </div>
+          <div className={cn(FLEX, FLEX_1, MIN_H_0, MIN_W_0)}>
+            {isLarge && inspector !== null && inspector !== undefined && inspector !== false ? (
+              <DesktopMain main={main} inspector={inspector} />
+            ) : (
+              main
+            )}
+          </div>
+        </div>
+        {isLarge ? null : inspector}
+      </>
+    );
+  }
 
   return (
     <>
-      {/* Desktop and compact frames have different autoSaveIds. Their panel
-          constraint keys also differ between collapsed and expanded frames,
-          so neither transition overwrites the user's expanded ratio. */}
+      {/* Desktop and compact frames have different autoSaveIds, so breakpoint
+          transitions cannot overwrite each other's saved ratios. */}
       <ResizablePanelGroup
         key={frame.autoSaveId}
         direction="horizontal"
@@ -138,17 +164,17 @@ export function HomeLayout({
         className={cn(FLEX_1, MIN_H_0, MIN_W_0)}
       >
         <ResizablePanel
-          defaultSize={sizes[0]}
-          minSize={sidebarMinimum}
-          maxSize={sidebarCollapsed ? sizes[0] : 50}
+          defaultSize={frame.expanded[0]}
+          minSize={frame.expandedMinimums[0]}
+          maxSize={50}
           className={cn(FLEX, MIN_H_0, MIN_W_0)}
         >
           {sidebar}
         </ResizablePanel>
-        {sidebarCollapsed ? null : <ResizableHandle />}
+        <ResizableHandle />
         <ResizablePanel
-          defaultSize={sizes[1]}
-          minSize={mainMinimum}
+          defaultSize={frame.expanded[1]}
+          minSize={frame.expandedMinimums[1]}
           className={cn(FLEX, MIN_H_0, MIN_W_0)}
         >
           {isLarge ? <DesktopMain main={main} inspector={inspector} /> : main}
