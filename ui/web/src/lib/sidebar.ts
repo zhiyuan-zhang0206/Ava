@@ -18,18 +18,19 @@ import { useUserSettings } from "./use-user-settings";
 
 // Collapse remains DB-backed (display.sidebar_collapsed) and syncs across
 // frontends within a session, but resets to expanded on every entry (#723).
-// The reset waits for settings to load in agent-sidebar/index.tsx.
+// The reset waits for settings to load in the stable HomeShell owner.
 export function useSidebarCollapsed(): {
   collapsed: boolean;
   setCollapsed: (c: boolean) => void;
+  isLoading: boolean;
 } {
-  const { settings, setSetting } = useUserSettings();
+  const { settings, setSetting, isLoading } = useUserSettings();
   const collapsed = settings["display.sidebar_collapsed"] === true;
   const setCollapsed = useCallback(
     (c: boolean) => setSetting("display.sidebar_collapsed", c),
     [setSetting],
   );
-  return { collapsed, setCollapsed };
+  return { collapsed, setCollapsed, isLoading };
 }
 
 // Whether terminated agents are shown lives in the DB-backed user setting

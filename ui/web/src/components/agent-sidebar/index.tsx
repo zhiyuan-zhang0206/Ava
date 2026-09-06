@@ -36,7 +36,7 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { ChevronLeft, Search, X } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 
 import { api } from "@/lib/api";
 import { useBreakpoint } from "@/lib/breakpoint";
@@ -70,7 +70,7 @@ export function AgentSidebar(props: Props) {
   // It is a RENDER-only switch: the terminated roster is fetched and merged
   // into `agents` unconditionally (its rows anchor spawn-lineage walks),
   // so this flag never gates a fetch.
-  const { settings: userSettings, setSetting, isLoading: settingsLoading } = useUserSettings();
+  const { settings: userSettings, setSetting } = useUserSettings();
   const showTerminated = userSettings["display.show_terminated"] === true;
   const setShowTerminated = (v: boolean) => setSetting("display.show_terminated", v);
   const queryClient = useQueryClient();
@@ -92,21 +92,6 @@ export function AgentSidebar(props: Props) {
   const closeSearch = useCallback(() => setSearchOpen(false), []);
 
   const { agents, pendingActions, pendingSpawnCount } = props;
-
-  // #723 (user ruling): entering the app always starts with the sidebar
-  // expanded — a previously persisted collapsed state (display.sidebar_collapsed
-  // === true) is reset on entry. The user can still collapse during the
-  // session; the next entry expands again. The reset must WAIT for the
-  // settings to load: a mount-only effect ran against the pre-load defaults
-  // (collapsed=false), saw nothing to reset and never re-ran when the
-  // persisted `true` arrived — cold loads silently stayed collapsed
-  // (Task #1051). Once settings have landed, the dep never flips again, so
-  // mid-session collapses are untouched.
-  useEffect(() => {
-    if (!settingsLoading && collapsed) setCollapsed(false);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- one-time entry reset, after settings land
-  }, [settingsLoading]);
-
 
   // Mobile: auto-close the drawer after selecting an agent.
   const handleSelect = useCallback(

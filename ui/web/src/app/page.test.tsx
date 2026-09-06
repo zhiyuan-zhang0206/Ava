@@ -496,6 +496,46 @@ describe("HomePage top-level render", () => {
   });
 });
 
+describe("sidebar app-entry reset", () => {
+  it("resets a loaded collapsed preference when the home surface is entered", () => {
+    hooksState.settings = {
+      "display.timeline_width_ratio": 0.4,
+      "display.sidebar_collapsed": true,
+    };
+
+    wrap(<HomePage />);
+
+    expect(hooksState.setSetting).toHaveBeenCalledWith(
+      "display.sidebar_collapsed",
+      false,
+    );
+  });
+
+  it("preserves a collapse that happens after the home surface has mounted", () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    const view = render(
+      <QueryClientProvider client={queryClient}>
+        <HomePage />
+      </QueryClientProvider>,
+    );
+    expect(hooksState.setSetting).not.toHaveBeenCalled();
+
+    hooksState.settings = {
+      "display.timeline_width_ratio": 0.4,
+      "display.sidebar_collapsed": true,
+    };
+    view.rerender(
+      <QueryClientProvider client={queryClient}>
+        <HomePage />
+      </QueryClientProvider>,
+    );
+
+    expect(hooksState.setSetting).not.toHaveBeenCalled();
+  });
+});
+
 describe("composerMode derivation", () => {
   it("activeId not null + status='terminated' → idle (send auto-resurrects)", () => {
     hooksState.activeId = 5;

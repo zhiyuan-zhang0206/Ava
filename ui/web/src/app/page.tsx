@@ -29,7 +29,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { AgentSidebar } from "@/components/agent-sidebar";
 import { AlertsBadge } from "@/components/alerts-badge";
@@ -89,7 +89,24 @@ interface HomeShellProps {
 function HomeShell({ showError }: HomeShellProps) {
   const focusComposer = useStore((s) => s.focusComposer);
   const { isNarrow, isLarge } = useBreakpoint();
-  const { collapsed: sidebarCollapsed } = useSidebarCollapsed();
+  const {
+    collapsed: sidebarCollapsed,
+    setCollapsed: setSidebarCollapsed,
+    isLoading: sidebarSettingsLoading,
+  } = useSidebarCollapsed();
+  const sidebarEntryResetDone = useRef(false);
+
+  // #723: every home entry starts expanded, but a layout transition is not a
+  // new entry. HomeShell stays mounted while HomeLayout switches between the
+  // expanded RRP frame and collapsed static frame; AgentSidebar does not.
+  // Keeping the reset here prevents that child remount from undoing a user's
+  // collapse click. Wait for the persisted settings before consuming the
+  // one-time reset so a cold load with collapsed=true is still expanded.
+  useEffect(() => {
+    if (sidebarSettingsLoading || sidebarEntryResetDone.current) return;
+    sidebarEntryResetDone.current = true;
+    if (sidebarCollapsed) setSidebarCollapsed(false);
+  }, [sidebarCollapsed, sidebarSettingsLoading, setSidebarCollapsed]);
 
   const {
     agents,

@@ -1076,12 +1076,14 @@ describe("Header layout + search overlay (task #723)", () => {
     expect(screen.queryByLabelText("Search agent")).toBeNull();
   });
 
-  // #723-⑦: entering the app resets a persisted collapsed state to expanded.
-  it("mount with sidebarCollapsed=true resets to expanded", () => {
+  // HomeShell owns the one-time app-entry reset. AgentSidebar can remount when
+  // HomeLayout switches between its RRP and static frames, and that layout
+  // transition must not reinterpret the user's collapse click as a new entry.
+  it("mount with sidebarCollapsed=true preserves the active session choice", () => {
     state.sidebarCollapsed = true;
     state.agents = [makeAgent({ agent_id: 1 })];
     wrap(<AgentSidebar {...handlers} />);
-    expect(state.setSidebarCollapsed).toHaveBeenCalledWith(false);
+    expect(state.setSidebarCollapsed).not.toHaveBeenCalled();
   });
 });
 
