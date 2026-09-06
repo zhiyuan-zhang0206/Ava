@@ -23,7 +23,9 @@ Usage as CLI:
     with the monitor contract — 0 green, 1 not green (or timed out), 3
     persistent gh/network errors, 4 Trunk queue submission failed.
     `--merge` implies `--wait`
-    and submits the PR to Trunk once green. `--queue` (or `CI_QUEUE`) selects
+    and submits the PR to Trunk once green. `--require-fresh-base` turns the
+    advisory base-staleness warning (main advanced past the PR's base) into a
+    refusal, so the operator rebases instead of paying an in-queue re-test. `--queue` (or `CI_QUEUE`) selects
     the Trunk queue; `--priority` maps the submission priority, which requires
     `TRUNK_API_TOKEN`. Trunk refuses submission unless the PR has the
     `qa-approved` label, and `.trunk/trunk.yaml` requires its
@@ -55,6 +57,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from scripts.ci_job_rerun import list_failed_jobs, rerun_failed_jobs
+
+# The Ava checkout root this script ships in — anchors base-freshness git reads
+# against THIS repo's origin regardless of the caller's cwd (task #2496).
+_REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
 class CIStatus(Enum):
@@ -568,6 +574,54 @@ def _trunk_qa_approved(pr: str, repo: str) -> tuple[bool, str | None]:
     ), None
 
 
+_SHA1_RE = re.compile(r"^[0-9a-f]{40}$")
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+
+
+def _is_sha(value: str) -> bool:
+    return bool(_SHA1_RE.match(value) or _SHA256_RE.match(value))
+
+
+def _base_freshness(pr: str, repo: str) -> tuple[tuple[str, str] | None, bool]:
+    """Return ((base_sha, main_sha) when stale else None, unreadable).
+
+    The PR's `baseRefOid` is the base-branch SHA GitHub last evaluated the PR
+    against. When current main is ahead of it, the queue's predictive branch
+    will include commits this PR's green CI never saw, so Trunk re-tests the
+    tree against the newer base — the extra in-queue round task #2496 (A1)
+    wants operators warned about. Advisory only: any read error or non-SHA
+    output sets `unreadable` and never blocks submission.
+    """
+    result = subprocess.run(  # noqa: S603
+        ["gh", "pr", "view", pr, "--repo", repo, "--json", "baseRefOid", "--jq", ".baseRefOid"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        return None, True
+    base_sha = result.stdout.strip()
+    if not _is_sha(base_sha):
+        return None, True
+    result = subprocess.run(  # noqa: S603
+        # -C anchors the checkout: cwd can be another git repo (e.g. the memory
+        # pool), whose origin would answer with a VALID sha and mis-refuse in
+        # require mode (QA NIT, 2026-09-06).
+        ["git", "-C", str(_REPO_ROOT), "ls-remote", "origin", "refs/heads/main"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        return None, True
+    main_sha = result.stdout.split(maxsplit=1)[0]
+    if not _is_sha(main_sha):
+        return None, True
+    if base_sha == main_sha:
+        return None, False
+    return (base_sha, main_sha), False
+
+
 def _trunk_post(
     endpoint: str, payload: dict[str, object], token: str
 ) -> tuple[dict[str, object] | None, str | None]:
@@ -699,7 +753,14 @@ def _watch_trunk_enqueue(
 
 
 def _trunk_merge_flow(
-    pr: str, repo: str, priority: str, *, every: int, timeout: int, token: str
+    pr: str,
+    repo: str,
+    priority: str,
+    *,
+    every: int,
+    timeout: int,
+    token: str,
+    require_fresh_base: bool = False,
 ) -> int:
     """Apply the standard cooldown/green recheck, then submit and watch Trunk."""
     deadline = time.monotonic() + timeout if timeout else None
@@ -741,6 +802,31 @@ def _trunk_merge_flow(
         )
         return 1
 
+    stale, unreadable = _base_freshness(pr, repo)
+    if stale is not None:
+        base_sha, main_sha = stale
+        print(
+            f"PR #{pr} base {base_sha[:8]} lags main {main_sha[:8]} — main advanced since this "
+            "PR last synced, so Trunk will re-test against the newer base (an extra "
+            "in-queue round). Rebase onto main before submitting to skip it.",
+            file=sys.stderr,
+            flush=True,
+        )
+        if require_fresh_base:
+            print(
+                f"PR #{pr} not submitted: --require-fresh-base is set",
+                file=sys.stderr,
+                flush=True,
+            )
+            return 1
+    elif unreadable and require_fresh_base:
+        print(
+            f"PR #{pr} could not verify base freshness — submitting anyway "
+            "(advisory check fails open)",
+            file=sys.stderr,
+            flush=True,
+        )
+
     rc = _submit_trunk(pr, repo, priority, token=token)
     if rc != 0:
         return rc
@@ -758,6 +844,7 @@ def _wait_for_verdict(
     merge: bool,
     priority: str = "medium",
     trunk_token: str | None = None,
+    require_fresh_base: bool = False,
 ) -> int:
     """Poll check_ci until the verdict settles, then report and exit.
 
@@ -823,7 +910,13 @@ def _wait_for_verdict(
                 if trunk_token is None:
                     raise AssertionError("Trunk merge flow requires a token")
                 return _trunk_merge_flow(
-                    pr, repo, priority, every=every, timeout=timeout, token=trunk_token
+                    pr,
+                    repo,
+                    priority,
+                    every=every,
+                    timeout=timeout,
+                    token=trunk_token,
+                    require_fresh_base=require_fresh_base,
                 )
             return 0
 
@@ -885,6 +978,12 @@ def main(argv: list[str] | None = None) -> int:
         choices=tuple(_TRUNK_PRIORITIES),
         default="medium",
         help="with --queue trunk: queue priority (default: medium)",
+    )
+    p.add_argument(
+        "--require-fresh-base",
+        action="store_true",
+        help="with --merge: refuse to submit when main has advanced past the PR's "
+        "recorded base (the queue would re-test against the newer base)",
     )
     p.add_argument(
         "--rerun-failed-jobs",
@@ -955,6 +1054,7 @@ def main(argv: list[str] | None = None) -> int:
             merge=args.merge,
             priority=args.priority,
             trunk_token=trunk_token,
+            require_fresh_base=args.require_fresh_base,
         )
     return _query_once(args.pr, args.repo, as_json=args.json)
 
