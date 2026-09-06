@@ -23,6 +23,7 @@ from services.pitr.restore_proof import (
     DrillResult,
     LivePostgresIdentity,
     RestoreProofError,
+    _is_zombie,
     update_restore_owner,
 )
 
@@ -271,6 +272,11 @@ def _matching_sandbox(identity: SandboxPostgresIdentity) -> psutil.Process | Non
         process = psutil.Process(identity.pid)
         if abs(process.create_time() - identity.created_at) >= 0.01:
             return None
+        # A zombie postmaster is dead, not live — and it fails the pgid probe
+        # below on macOS anyway (getpgid raises on zombies). Only the run()
+        # cleanup reaps it, via the Popen handle (activation #12).
+        if _is_zombie(process):
+            return None
         if os.getpgid(identity.pid) != identity.pgid:
             return None
         return process
@@ -358,6 +364,7 @@ class IsolatedPostgresRestoreExecutor:
         sandbox_log = run_root / "sandbox-postgres.log"
         replay_started = time.monotonic()
         sandbox: SandboxPostgresIdentity | None = None
+        sandbox_process: subprocess.Popen[str] | None = None
         try:
             update_restore_owner(
                 owner_path,
@@ -408,9 +415,20 @@ class IsolatedPostgresRestoreExecutor:
                     sandbox_pgid=sandbox.pgid,
                     sandbox_pgdata=sandbox.data_directory,
                 )
-            if sandbox is not None:
-                self._stop(pgdata, sandbox)
-                update_restore_owner(owner_path, state="postgres_stopped")
+            try:
+                if sandbox is not None:
+                    self._stop(pgdata, sandbox)
+                    update_restore_owner(owner_path, state="postgres_stopped")
+            finally:
+                if sandbox_process is not None:
+                    # The sandbox postmaster is our direct child; once stopped it
+                    # lingers as a zombie until someone waitpid()s it. The stop
+                    # path never reaps: a zombie fails the pgid identity probe,
+                    # and an unreaped one kept looking "live" to the cleanup
+                    # guards, masking the real failure (activation #12). Reap it
+                    # here on every exit path.
+                    with suppress(Exception):
+                        sandbox_process.wait(timeout=10)
 
     def _wait_for_promotion(
         self,

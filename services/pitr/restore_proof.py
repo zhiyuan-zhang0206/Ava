@@ -278,10 +278,23 @@ def update_restore_owner(path: Path, **changes: object) -> None:
     _atomic_owner(path, evidence)
 
 
+def _is_zombie(process: psutil.Process) -> bool:
+    """A zombie is an exited process whose status was never reaped: it runs
+    nothing, so every live-process probe must count it as dead. An unreaped
+    sandbox postmaster otherwise keeps looking "live" to the cleanup guards
+    and masks the real failure (activation #12)."""
+    try:
+        return process.status() == psutil.STATUS_ZOMBIE
+    except (psutil.NoSuchProcess, psutil.ZombieProcess, psutil.AccessDenied):
+        return False
+
+
 def _matching_process(pid: int, created_at: float) -> psutil.Process | None:
     try:
         process = psutil.Process(pid)
         if abs(process.create_time() - created_at) >= 0.01:
+            return None
+        if _is_zombie(process):
             return None
         return process
     except psutil.AccessDenied as exc:
@@ -294,7 +307,7 @@ def _group_members(pgid: int) -> list[psutil.Process]:
     members: list[psutil.Process] = []
     for process in psutil.process_iter(["pid"]):
         try:
-            if os.getpgid(process.pid) == pgid:
+            if os.getpgid(process.pid) == pgid and not _is_zombie(process):
                 members.append(process)
         except (ProcessLookupError, PermissionError, psutil.NoSuchProcess):
             continue

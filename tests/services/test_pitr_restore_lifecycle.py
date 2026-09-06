@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
 import sys
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -546,3 +549,156 @@ def _dummy_candidate() -> CandidateManifest:
         "7",
         "migrations",
     )
+
+
+def _dead_child() -> tuple[subprocess.Popen[str], int, float, int]:
+    """A real child that has exited but is not yet reaped (a zombie).
+
+    The caller must popen.wait() in a finally to reap it."""
+    process = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(60)"],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        text=True,
+    )
+    probe = psutil.Process(process.pid)
+    created_at = probe.create_time()
+    pgid = os.getpgid(process.pid)
+    process.terminate()
+    deadline = time.monotonic() + 10
+    while probe.status() != psutil.STATUS_ZOMBIE and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert probe.status() == psutil.STATUS_ZOMBIE
+    return process, process.pid, created_at, pgid
+
+
+def test_matching_process_treats_a_zombie_as_not_live() -> None:
+    """Activation #12: a stopped-but-unreaped sandbox postmaster kept passing
+    the create_time probe, so cleanup refused to remove a dead restore and
+    masked the real failure. A zombie runs nothing and is not live."""
+    process, pid, created_at, _pgid = _dead_child()
+    try:
+        assert restore_proof._matching_process(pid, created_at) is None
+        assert not restore_proof._sandbox_is_live(
+            {"sandbox_pid": pid, "sandbox_created_at": created_at}
+        )
+    finally:
+        process.wait(timeout=10)
+
+
+def test_matching_sandbox_treats_a_zombie_as_not_live() -> None:
+    process, pid, created_at, pgid = _dead_child()
+    try:
+        identity = SandboxPostgresIdentity(pid, created_at, pgid, "/data")
+        assert restore_postgres._matching_sandbox(identity) is None
+    finally:
+        process.wait(timeout=10)
+
+
+def test_group_members_excludes_zombies() -> None:
+    process, pid, _created_at, pgid = _dead_child()
+    try:
+        assert all(member.pid != pid for member in restore_proof._group_members(pgid))
+    finally:
+        process.wait(timeout=10)
+
+
+def test_executor_run_reaps_the_sandbox_postmaster_on_failure(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    """The direct-exec postmaster is the worker's child; the stop path never
+    reaps it (a zombie fails the pgid identity probe), so run()'s finally must
+    reap the Popen itself — otherwise cleanup still sees a "live" restore and
+    masks the real failure (activation #12)."""
+    child = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(60)"],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        text=True,
+    )
+    # Mirror the production partial layout: everything the sandbox touches
+    # lives under the run root (recovery config paths are root-checked).
+    run_root = tmp_path / "run"
+    (run_root / "archive").mkdir(parents=True)
+    pgdata = run_root / "sandbox" / "data"
+    pgdata.mkdir(parents=True)
+    owner = tmp_path / "owner.json"
+    restore_proof._atomic_owner(
+        owner,
+        {
+            "schema_version": 1,
+            "state": "spawning",
+            "run_id": "test-run",
+            "partial": str(tmp_path / ".test.partial"),
+            "pid": os.getpid(),
+            "created_at": psutil.Process().create_time(),
+            "pgid": os.getpgrp(),
+            "deadline": time.time() + 100,
+        },
+    )
+    executor = IsolatedPostgresRestoreExecutor(
+        live_db_url="postgresql://unused",
+        data_directory="/unused",
+        pg_ctl=Path("/pg/pg_ctl"),
+        pg_verifybackup=Path("/pg/pg_verifybackup"),
+        timeout_seconds=900,
+    )
+    created_at = psutil.Process(child.pid).create_time()
+
+    class LiveProbe:
+        data_directory = "/unused"
+
+    def fake_verify(_command: list[str], *, timeout: float) -> None:
+        return None
+
+    def fake_spawn(
+        _postgres: Path, _pgdata: Path, _config_file: Path, _log_path: Path
+    ) -> subprocess.Popen[str]:
+        return child
+
+    def fake_wait_identity(
+        _process: subprocess.Popen[str],
+        _pgdata: Path,
+        _log_path: Path,
+        _timeout: int,
+    ) -> SandboxPostgresIdentity:
+        return SandboxPostgresIdentity(child.pid, created_at, os.getpgrp(), str(pgdata.resolve()))
+
+    def fake_wait_promotion(
+        _socket_dir: Path,
+        _port: int,
+        _candidate: CandidateManifest,
+        _process: subprocess.Popen[str] | None = None,
+        _log_path: Path | None = None,
+    ) -> str:
+        return "0/2000000"
+
+    def fake_smoke(_socket_dir: Path, _port: int, _candidate: CandidateManifest) -> str:
+        raise RestoreProofError("restored migration set differs")
+
+    def fake_stop(_pgdata: Path, _identity: SandboxPostgresIdentity) -> None:
+        child.terminate()  # dead child left unreaped, as the real stop path does
+
+    monkeypatch.setattr(restore_postgres, "_run", fake_verify)
+    monkeypatch.setattr(restore_postgres, "_spawn_sandbox_postgres", fake_spawn)
+    monkeypatch.setattr(restore_postgres, "_wait_for_sandbox_identity", fake_wait_identity)
+    monkeypatch.setattr(executor, "live_identity", LiveProbe)
+    monkeypatch.setattr(executor, "_wait_for_promotion", fake_wait_promotion)
+    monkeypatch.setattr(executor, "_smoke", fake_smoke)
+    monkeypatch.setattr(executor, "_stop", fake_stop)
+    try:
+        with pytest.raises(RestoreProofError, match="migration set differs"):
+            executor.run(
+                pgdata=pgdata,
+                wal_dir=run_root / "archive",
+                candidate=_dummy_candidate(),
+                run_root=run_root,
+                owner_path=owner,
+            )
+        assert child.poll() is not None
+        with pytest.raises(psutil.NoSuchProcess):
+            psutil.Process(child.pid)
+    finally:
+        child.wait(timeout=10)
