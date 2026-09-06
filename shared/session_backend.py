@@ -583,12 +583,14 @@ class WinprocSessionBackend(SessionBackend):
 
         return winproc.kill_session(name, graceful=graceful, timeout=timeout)
 
-    def graceful_signal(self, name: str, *, expected: SessionRecord | None = None) -> bool:
-        if expected is not None:
-            raise NotImplementedError("Windows expected-record stop has no verified contract")
+    def graceful_signal(
+        self, name: str, *, expected: SessionRecord | None = None, timeout: float = 5.0
+    ) -> bool:
         from shared import winproc
 
-        return winproc.graceful_signal(name)
+        if expected is None and timeout == 5.0:
+            return winproc.graceful_signal(name)
+        return winproc.graceful_signal(name, expected=expected, timeout=timeout)
 
     def list_sessions(self, prefix: str = "") -> list[str]:
         from shared import winproc

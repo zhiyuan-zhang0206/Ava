@@ -74,6 +74,9 @@ def cmd_update(
     `mode` (`--mode smooth|force`) is the agent-drain policy before the
     rollout restarts processes.
     """
+    from shared import maintenance
+
+    maintenance.require_released("cluster update")
     if local:
         # --local wins over --restart-only (their historical combination was the
         # in-process restart-only orchestration).

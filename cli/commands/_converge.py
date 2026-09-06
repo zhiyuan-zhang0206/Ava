@@ -706,8 +706,10 @@ def converge_host(
 def cmd_converge() -> int:
     """`ava converge` — bring this host to the state the current code expects (idempotent)."""
     import cli.commands as _ns
+    from shared import maintenance
     from shared.platform import raise_fd_limit
 
+    maintenance.require_start_allowed()
     raise_fd_limit(65536)  # converge spawns services + frontend deps; children inherit
     repo = _ns._repo_root()
     roles = _ns._roles_or_none()
