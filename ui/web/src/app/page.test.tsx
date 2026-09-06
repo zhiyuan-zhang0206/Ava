@@ -269,6 +269,9 @@ vi.mock("@/components/content-toggle", () => ({
 
 vi.mock("@/components/inspector-panel", () => ({
   InspectorPanel: () => <div data-testid="inspector-panel" />,
+}));
+
+vi.mock("@/components/inspector-toggle", () => ({
   InspectorToggle: () => <button data-testid="inspector-toggle">toggle</button>,
 }));
 
@@ -471,7 +474,7 @@ describe("HomePage top-level render", () => {
     expect(hooksState.setMobileInspectorOpen).not.toHaveBeenCalled();
   });
 
-  it("renders an open inspector beside HomeContent in the desktop resizable group", () => {
+  it("renders an open inspector beside HomeContent in the desktop resizable group", async () => {
     hooksState.activeId = 5;
     hooksState.agents = [makeAgent({ agent_id: 5 })];
     hooksState.settings = {
@@ -482,7 +485,7 @@ describe("HomePage top-level render", () => {
 
     const main = screen.getByRole("main");
     const homeContent = screen.getByTestId("timeline-surface").closest("section");
-    const panel = screen.getByTestId("inspector-panel");
+    const panel = await screen.findByTestId("inspector-panel");
     const timelinePanel = homeContent?.parentElement;
     const inspectorPanel = panel.parentElement;
     const inspectorGroup = timelinePanel?.parentElement;

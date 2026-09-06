@@ -15,7 +15,8 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { InspectorPanel, InspectorToggle } from "./inspector-panel";
+import { InspectorPanel } from "./inspector-panel";
+import { InspectorToggle } from "./inspector-toggle";
 import { BAR_DIVIDER_CLASS, BAR_HEIGHT_CLASS } from "@/lib/layout";
 import { formatAbsolute, formatRelative } from "@/lib/time";
 import type { AgentInspect, AgentInspectLive, PageRow } from "@/lib/types";

@@ -28,6 +28,7 @@
 //   active-agent SSE connection (isEventForThread remains a defensive gate).
 
 import { useQuery } from "@tanstack/react-query";
+import dynamic from "next/dynamic";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -38,7 +39,7 @@ import { Composer } from "@/components/composer";
 import { ContentToggle } from "@/components/content-toggle";
 import { HeaderBar } from "@/components/header-bar";
 import { HomeLayout } from "@/components/home-layout";
-import { InspectorPanel, InspectorToggle } from "@/components/inspector-panel";
+import { InspectorToggle } from "@/components/inspector-toggle";
 import { PendingStrip } from "@/components/pending-strip";
 import { UploadButton } from "@/components/upload-button";
 import { TimelineView } from "@/components/timeline";
@@ -59,6 +60,13 @@ import { useTokenUsage } from "@/lib/use-token-usage";
 import { AgentEventStreamProvider } from "@/lib/useEventStream";
 import { FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0, OVERFLOW_HIDDEN } from "@/lib/layout";
 import { cn } from "@/lib/utils";
+
+// The toggle stays in the initial graph; the panel body is needed only after
+// the existing open-state guard below renders it.
+const LazyInspectorPanel = dynamic(() =>
+  import("@/components/inspector-panel").then((module) => module.InspectorPanel),
+  { loading: () => null },
+);
 
 export default function HomePage() {
   // Read only client-only state here; the global SSE broadcast is provided at
@@ -195,7 +203,7 @@ function HomeShell({ showError }: HomeShellProps) {
     </AgentEventStreamProvider>
   );
   const inspector =
-    inspectorOpen && activeId != null ? <InspectorPanel agentId={activeId} /> : null;
+    inspectorOpen && activeId != null ? <LazyInspectorPanel agentId={activeId} /> : null;
 
   return (
     <HomeLayout
