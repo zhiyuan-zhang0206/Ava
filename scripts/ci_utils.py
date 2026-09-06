@@ -20,6 +20,7 @@ Usage as CLI:
     .venv/bin/python scripts/ci_utils.py <PR_NUMBER> --evict [--repo owner/repo]
     .venv/bin/python scripts/ci_utils.py --queue-status [--repo owner/repo] [--json]
     .venv/bin/python scripts/ci_utils.py <PR_NUMBER> --diagnose [--repo owner/repo] [--json]
+    .venv/bin/python scripts/ci_utils.py --ci-usage [--ci-usage-days N] [--json]
 
     Default: query once and exit (PENDING prints and exits 0 — a one-shot
     probe, not a poller). `--wait`: poll until the verdict settles, then exit
@@ -66,6 +67,7 @@ from typing import Any
 # sibling module; under pytest pythonpath=["."] this is a redundant no-op.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from scripts.ci_accounting import DEFAULT_LEDGER, load_ledger, report_rows
 from scripts.ci_job_rerun import list_failed_jobs, rerun_failed_jobs
 
 # The Ava checkout root this script ships in — anchors base-freshness git reads
@@ -827,6 +829,61 @@ def _rerun_command(args: argparse.Namespace, parser: argparse.ArgumentParser) ->
     return 3 if errors else 0
 
 
+def _validate_common_args(args: argparse.Namespace, parser: argparse.ArgumentParser) -> None:
+    """Shared usage validation, kept out of main()'s statement budget."""
+    try:
+        _resolve_queue(args.queue)
+    except ValueError as error:
+        parser.error(str(error))
+    if args.every <= 0:
+        parser.error("--every must be positive")
+    if args.timeout < 0:
+        parser.error("--timeout must be >= 0")
+    if args.json and args.wait:
+        parser.error("--json and --wait are mutually exclusive")
+
+
+def _ci_usage_command(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int | None:
+    """Dispatch --ci-usage when set; None when not set.
+
+    Reads the repo ledger (scripts/ci_usage/ledger.jsonl, produced by
+    scripts/ci_accounting.py --append-ledger) and prints per-agent rollups —
+    the read side of the CI cost attribution pipeline (task #2575).
+    """
+    if not args.ci_usage:
+        return None
+    if (
+        args.wait
+        or args.merge
+        or args.rerun_failed_jobs
+        or args.queue_status
+        or args.evict
+        or args.diagnose
+    ):
+        parser.error(
+            "--ci-usage is exclusive with --wait/--merge/--rerun-failed-jobs/"
+            "--queue-status/--evict/--diagnose"
+        )
+    if args.pr is not None:
+        parser.error("--ci-usage takes no PR number")
+    rows = report_rows(
+        load_ledger(DEFAULT_LEDGER), days=args.ci_usage_days, agent=args.ci_usage_agent
+    )
+    if args.json:
+        print(json.dumps(rows, indent=2))
+        return 0
+    if not rows:
+        print("No attributed CI runs in the ledger window.")
+        return 0
+    for row in rows:
+        agent = row["agent_id"] if row["agent_id"] is not None else "unattributed"
+        print(
+            f"  #{agent}: {row['runs']} runs, {row['linux_minutes']} linux + "
+            f"{row['macos_minutes']} macos minutes, est ${row['est_usd']}"
+        )
+    return 0
+
+
 # --- Trunk queue failure diagnosis (task #2572) ---
 
 _TRUNK_ORG_SLUG = "ava"
@@ -1458,6 +1515,25 @@ def main(argv: list[str] | None = None) -> int:
         "recorded base (the queue would re-test against the newer base)",
     )
     p.add_argument(
+        "--ci-usage",
+        action="store_true",
+        help="per-agent CI minute rollup from the repo ledger "
+        "(scripts/ci_usage/ledger.jsonl); with --days N (default 7) and "
+        "optional --ci-usage-agent ID. --json for machine-readable output.",
+    )
+    p.add_argument(
+        "--ci-usage-agent",
+        type=int,
+        default=None,
+        help="with --ci-usage: restrict the rollup to one agent id",
+    )
+    p.add_argument(
+        "--ci-usage-days",
+        type=int,
+        default=7,
+        help="with --ci-usage: rollup window in days (default 7)",
+    )
+    p.add_argument(
         "--diagnose",
         action="store_true",
         help="diagnose why the PR's CI / queue attempt failed: reads the check "
@@ -1494,16 +1570,11 @@ def main(argv: list[str] | None = None) -> int:
         help="with --rerun-failed-jobs: list failed jobs without re-running them",
     )
     args = p.parse_args(argv)
-    try:
-        _resolve_queue(args.queue)
-    except ValueError as error:
-        p.error(str(error))
-    if args.every <= 0:
-        p.error("--every must be positive")
-    if args.timeout < 0:
-        p.error("--timeout must be >= 0")
-    if args.json and args.wait:
-        p.error("--json and --wait are mutually exclusive")
+    _validate_common_args(args, p)
+
+    ci_usage_rc = _ci_usage_command(args, p)
+    if ci_usage_rc is not None:
+        return ci_usage_rc
 
     diagnose_rc = _diagnose_command(args, p)
     if diagnose_rc is not None:
