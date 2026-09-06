@@ -57,7 +57,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from collections.abc import Awaitable
+from collections.abc import Awaitable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Literal
@@ -299,7 +299,11 @@ async def _run_agent_code(
 
 
 def _dispatch_exec_result(
-    result: _ExecResult, ctx: AvaContext, agent_id: int
+    result: _ExecResult,
+    ctx: AvaContext,
+    agent_id: int,
+    *,
+    referenced_messages: Sequence[AnyMessage] = (),
 ) -> tuple[bool, str, int]:
     """Map the `_ExecResult` sum type to (halted, result_text, exit_code_for_msg).
 
@@ -319,7 +323,9 @@ def _dispatch_exec_result(
             halted = True
             extra = "[system halt] You just called ava.self.compact; your context has been compacted and you will continue as the same agent\n"
             output = (output if not output or output.endswith("\n") else output + "\n") + extra
-            result_text = wrap_code_output(output, stream_cap=stream_cap)
+            result_text = wrap_code_output(
+                output, stream_cap=stream_cap, referenced_messages=referenced_messages
+            )
             exit_code_for_msg = SYSTEM_HALT_EXIT_CODE
             logger.info("[{label}] {body}", label="exec", body=result_text)
             logger.info("[{label}] {body}", label="halt", body="system_halt (compact)")
@@ -330,7 +336,9 @@ def _dispatch_exec_result(
             # records consent in its lease. Their drivers resume after exec
             # cleanup, without adding a duplicate "[halt]" annotation here.
             halted = True
-            result_text = wrap_code_output(output, stream_cap=stream_cap)
+            result_text = wrap_code_output(
+                output, stream_cap=stream_cap, referenced_messages=referenced_messages
+            )
             exit_code_for_msg = IDLE_EXIT_CODE
             logger.info("[{label}] {body}", label="exec", body=result_text)
             logger.info(
@@ -349,7 +357,12 @@ def _dispatch_exec_result(
             )
         case _ExecCancelled(output=output):
             halted = True
-            result_text = wrap_code_output(output, cancelled=True, stream_cap=stream_cap)
+            result_text = wrap_code_output(
+                output,
+                cancelled=True,
+                stream_cap=stream_cap,
+                referenced_messages=referenced_messages,
+            )
             exit_code_for_msg = -1
             logger.info(
                 "[{label}] {body}", label="exec-cancelled", body=result_text, event="exec_cancelled"
@@ -362,7 +375,12 @@ def _dispatch_exec_result(
             # Timeout is ordinary feedback, not a stop-turn signal: the envelope
             # hints at long-running primitives; the next LLM round adapts.
             halted = False
-            result_text = wrap_code_output(output, timed_out=True, stream_cap=stream_cap)
+            result_text = wrap_code_output(
+                output,
+                timed_out=True,
+                stream_cap=stream_cap,
+                referenced_messages=referenced_messages,
+            )
             exit_code_for_msg = -1
             logger.info(
                 "[{label}] {body}", label="exec-timeout", body=result_text, event="exec_timeout"
@@ -377,7 +395,9 @@ def _dispatch_exec_result(
             # (`child_traceback`); parent-side construction failures (spawn
             # error, unserializable state) format from `exc`.
             halted = False
-            result_text = wrap_code_output(output, stream_cap=stream_cap)
+            result_text = wrap_code_output(
+                output, stream_cap=stream_cap, referenced_messages=referenced_messages
+            )
             exit_code_for_msg = 0
             logger.info(
                 "[{label}] {body}\n[full traceback]\n{full_traceback}",
@@ -389,7 +409,9 @@ def _dispatch_exec_result(
             )
         case _ExecDone(output=output):
             halted = False
-            result_text = wrap_code_output(output, stream_cap=stream_cap)
+            result_text = wrap_code_output(
+                output, stream_cap=stream_cap, referenced_messages=referenced_messages
+            )
             exit_code_for_msg = 0
             logger.info("[{label}] {body}", label="exec", body=result_text)
     return halted, result_text, exit_code_for_msg
@@ -451,7 +473,9 @@ async def _exec_node_impl(
         envelope_findings,
         envelope_attachments,
     ) = await _run_agent_code(state, ctx, agent_id, resolved.code, chunk_publisher)
-    halted, result_text, exit_code_for_msg = _dispatch_exec_result(result, ctx, agent_id)
+    halted, result_text, exit_code_for_msg = _dispatch_exec_result(
+        result, ctx, agent_id, referenced_messages=state.messages
+    )
 
     # Pop the plugin's messages delta out of the state update — merged below
     # after the ToolMessage instead of riding the dict **spread (which would
