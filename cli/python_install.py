@@ -106,23 +106,8 @@ def install(
     env = {key: value for key, value in configured.items() if key not in _IGNORED_ENV}
     flags = (["--no-dev"] if no_dev else []) + (["--verbose"] if verbose else [])
     python_args = ["--python", interpreter] if interpreter else []
-    if index == PYPI_INDEX:
-        env["UV_DEFAULT_INDEX"] = PYPI_INDEX
-        reinstall = ["--reinstall-package", reinstall_package] if reinstall_package else []
-        return run(
-            [
-                "uv",
-                "sync",
-                "--locked",
-                "--inexact",
-                "--no-config",
-                *flags,
-                *python_args,
-                *reinstall,
-            ],
-            repo,
-            env,
-        )
+    # uv sync can recreate an interpreter-drifted venv before checking freshness.
+    # Export validates the manifest without synchronizing the target environment.
     with tempfile.TemporaryDirectory(prefix="ava-python-lock-") as temporary:
         requirements = Path(temporary) / "requirements.txt"
         env["UV_DEFAULT_INDEX"] = PYPI_INDEX
@@ -146,6 +131,23 @@ def install(
         )
         if result:
             return result
+        if index == PYPI_INDEX:
+            env["UV_DEFAULT_INDEX"] = PYPI_INDEX
+            reinstall = ["--reinstall-package", reinstall_package] if reinstall_package else []
+            return run(
+                [
+                    "uv",
+                    "sync",
+                    "--locked",
+                    "--inexact",
+                    "--no-config",
+                    *flags,
+                    *python_args,
+                    *reinstall,
+                ],
+                repo,
+                env,
+            )
         target = (
             repo / ".venv" / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
         )
