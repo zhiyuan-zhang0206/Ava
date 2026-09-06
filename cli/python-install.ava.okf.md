@@ -30,7 +30,9 @@ by the installer. These files are never rewritten by discovery. Explicit
 mirror profile selection remains the install script's existing persistent action.
 Additional/explicit-only indexes fail rather than silently losing their source policy.
 
-The lock-source lint runs before installation. PyPI uses native locked, inexact
+The lock-source lint runs before installation. Its stdlib implementation lives in
+`shared/python_lock.py`, included in the runtime wheel; the checkout-only
+`scripts/lint_python_lock.py` is a thin CLI entry point. PyPI uses native locked, inexact
 sync. A mirror uses offline, freshness-checked uv export to temporary hashed
 requirements, installs the complete exported graph with `uv pip install --no-deps
 --require-hashes`, then builds the real project editable with no dependency

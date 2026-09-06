@@ -26,6 +26,8 @@ REQUIRED = (
     "ops/spec.py",
     "shared/dotenv_boot.py",
     "cli/main.py",
+    "cli/python_install.py",
+    "shared/python_lock.py",
     "ava_builtins/plugins/ava_code/plugin.py",
     "ava_builtins/plugins/ava_code/ava_code.ava.okf.md",
     "db/schema.sql",
@@ -76,6 +78,7 @@ def verify_installed(checkout: Path) -> None:
     ):
         for name in (
             "cli.main",
+            "cli.python_install",
             "agent.exec_child",
             "ops.spec",
             "services.agent_host.daemon",
