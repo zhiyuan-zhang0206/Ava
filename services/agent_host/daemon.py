@@ -87,6 +87,7 @@ _PIDFILE = settings.services.agent_host_pidfile
 # A fixed timer proves liveness even when no agent has work.
 _LIVENESS_TIMEOUT_S = 60.0
 _LIVENESS_BEAT_STEP_S = 15.0
+_OWNERSHIP_RENEW_TIMEOUT_S = 10.0
 # The gateway treats key presence as proof that this 15-second host loop still
 # runs. Four missed beats expire the proof without adding another probe process.
 _TURN_PROGRESS_HEARTBEAT_TTL_S = 60
@@ -332,8 +333,11 @@ async def _beat_forever(
     """Renew ownership and liveness independently of idle dispatcher subscriptions."""
     while True:
         _require_helper_parent_chain()
-        await host.renew_ownership()
         liveness.beat()
+        try:
+            await asyncio.wait_for(host.renew_ownership(), timeout=_OWNERSHIP_RENEW_TIMEOUT_S)
+        except Exception:
+            _log.exception("[agent-host] ownership renewal failed — retrying next beat")
         await _publish_turn_progress_heartbeat(machine, scheduler.active_agents)
         await asyncio.sleep(_LIVENESS_BEAT_STEP_S)
 

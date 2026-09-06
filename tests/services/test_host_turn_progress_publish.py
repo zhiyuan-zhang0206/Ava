@@ -241,7 +241,11 @@ async def test_timed_out_redis_connection_is_released_before_next_heartbeat(
         await asyncio.gather(*handlers, return_exceptions=True)
 
 
-async def test_existing_ownership_beat_publishes_after_renewal(
+def test_ownership_renewal_timeout_precedes_next_liveness_beat() -> None:
+    assert 0 < host_daemon._OWNERSHIP_RENEW_TIMEOUT_S < host_daemon._LIVENESS_BEAT_STEP_S
+
+
+async def test_agent_host_beats_liveness_before_renewing_ownership(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls: list[object] = []
@@ -279,8 +283,107 @@ async def test_existing_ownership_beat_publishes_after_renewal(
         )
 
     assert calls == [
-        "renew",
         "liveness",
+        "renew",
         ("publish", "runner-a", frozenset({41, 42})),
         ("sleep", 15.0),
     ]
+
+
+async def test_agent_host_liveness_continues_when_ownership_renewal_hangs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    renew_calls = 0
+    beat_counts: list[int] = []
+    release_renewal = asyncio.Event()
+    second_renewal_started = asyncio.Event()
+
+    class FakeHost:
+        async def renew_ownership(self) -> None:
+            nonlocal renew_calls
+            renew_calls += 1
+            if renew_calls == 2:
+                second_renewal_started.set()
+            await release_renewal.wait()
+
+    class FakeScheduler:
+        active_agents = frozenset[int]()
+
+    class FakeLiveness:
+        def beat(self) -> None:
+            beat_counts.append(len(beat_counts) + 1)
+
+    async def fake_publish(machine: str, active_agents: object) -> None:
+        pass
+
+    monkeypatch.setattr(host_daemon, "_OWNERSHIP_RENEW_TIMEOUT_S", 0.01)
+    monkeypatch.setattr(host_daemon, "_LIVENESS_BEAT_STEP_S", 0.0)
+    monkeypatch.setattr(host_daemon, "_publish_turn_progress_heartbeat", fake_publish)
+
+    beat = asyncio.create_task(
+        host_daemon._beat_forever(
+            cast(host_daemon.Liveness, FakeLiveness()),
+            cast(host_daemon.AgentHost, FakeHost()),
+            cast(host_daemon.TurnScheduler, FakeScheduler()),
+            "runner-a",
+        )
+    )
+    second_renewal = asyncio.create_task(second_renewal_started.wait())
+    try:
+        done, _ = await asyncio.wait([second_renewal], timeout=1.0)
+        assert second_renewal in done
+        assert len(beat_counts) >= 2
+        assert beat_counts == list(range(1, len(beat_counts) + 1))
+    finally:
+        release_renewal.set()
+        second_renewal.cancel()
+        await asyncio.gather(second_renewal, return_exceptions=True)
+        await host_daemon._stop_ownership_beat(beat)
+
+
+async def test_agent_host_liveness_continues_when_ownership_renewal_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    renew_calls = 0
+    beat_counts: list[int] = []
+    second_beat = asyncio.Event()
+
+    class FakeHost:
+        async def renew_ownership(self) -> None:
+            nonlocal renew_calls
+            renew_calls += 1
+            raise RuntimeError("database unavailable")
+
+    class FakeScheduler:
+        active_agents = frozenset[int]()
+
+    class FakeLiveness:
+        def beat(self) -> None:
+            beat_counts.append(len(beat_counts) + 1)
+            if len(beat_counts) == 2:
+                second_beat.set()
+
+    async def fake_publish(machine: str, active_agents: object) -> None:
+        pass
+
+    monkeypatch.setattr(host_daemon, "_LIVENESS_BEAT_STEP_S", 0.01)
+    monkeypatch.setattr(host_daemon, "_publish_turn_progress_heartbeat", fake_publish)
+
+    beat = asyncio.create_task(
+        host_daemon._beat_forever(
+            cast(host_daemon.Liveness, FakeLiveness()),
+            cast(host_daemon.AgentHost, FakeHost()),
+            cast(host_daemon.TurnScheduler, FakeScheduler()),
+            "runner-a",
+        )
+    )
+    next_beat = asyncio.create_task(second_beat.wait())
+    try:
+        done, _ = await asyncio.wait([next_beat], timeout=1.0)
+        assert next_beat in done
+        assert beat_counts[:2] == [1, 2]
+        assert renew_calls >= 1
+    finally:
+        next_beat.cancel()
+        await asyncio.gather(next_beat, return_exceptions=True)
+        await host_daemon._stop_ownership_beat(beat)
