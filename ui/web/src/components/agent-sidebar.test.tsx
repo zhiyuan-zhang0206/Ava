@@ -1053,6 +1053,21 @@ describe("Header layout + search overlay (task #723)", () => {
     expect(pushSpy).toHaveBeenCalledWith("/insights");
   });
 
+  it("Fleet shortcuts carry the last-viewed agent in expanded and collapsed layouts", () => {
+    state.activeId = 405;
+    state.agents = [makeAgent({ agent_id: 405 })];
+    wrap(<AgentSidebar {...handlers} />);
+    fireEvent.click(screen.getByLabelText("Fleet"));
+    expect(pushSpy).toHaveBeenLastCalledWith("/fleet?agent_id=405");
+
+    cleanup();
+    pushSpy.mockClear();
+    state.sidebarCollapsed = true;
+    wrap(<AgentSidebar {...handlers} />);
+    fireEvent.click(screen.getByLabelText("Fleet"));
+    expect(pushSpy).toHaveBeenLastCalledWith("/fleet?agent_id=405");
+  });
+
   it("clicking the search button opens the floating overlay", () => {
     state.agents = [makeAgent({ agent_id: 1 })];
     wrap(<AgentSidebar {...handlers} />);
@@ -1222,9 +1237,11 @@ describe("awaiting-reply indicator (notification.awaiting_reply)", () => {
       makeAgent({ agent_id: 1, notices_awaiting_response: [notice] }),
       makeAgent({ agent_id: 2, notices_awaiting_response: [{ ...notice, id: 2 }] }),
     ];
+    state.activeId = 2;
     wrap(<AgentSidebar {...handlers} />);
-    // The indicator is a Link to /fleet with the waiting count
-    expect(screen.getByRole("link", { name: /2/ })).toBeTruthy();
+    // The indicator carries the last-viewed agent into Fleet's task queue.
+    const link = screen.getByRole("link", { name: /2/ });
+    expect(link.getAttribute("href")).toBe("/fleet?agent_id=2");
   });
 
   it("opted in but nothing waiting → no indicator", () => {

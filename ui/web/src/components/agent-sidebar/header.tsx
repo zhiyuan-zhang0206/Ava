@@ -10,6 +10,7 @@ import { useStatsDashboard, useStatsWindow } from "@/lib/sidebar";
 import { cn } from "@/lib/utils";
 
 import { StatsCards } from "./footer";
+import { fleetHref } from "./links";
 import type { DesktopProps } from "./types";
 
 export function CollapsedSidebar(props: DesktopProps) {
@@ -58,7 +59,7 @@ export function CollapsedSidebar(props: DesktopProps) {
         </button>
         <button
           type="button"
-          onClick={() => router.push("/fleet")}
+          onClick={() => router.push(fleetHref(props.activeId))}
           aria-label={navT("fleet")}
           title={navT("fleet")}
           className="p-1 rounded text-muted-foreground hover:bg-sidebar-accent hover:text-foreground transition-colors"

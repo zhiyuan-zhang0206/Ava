@@ -228,7 +228,7 @@ function DesktopSidebar(props: DesktopProps) {
       {/* Fixed bottom strip (user ruling 2026-08-05): Statistics popover +
           the four nav shortcuts (Memory Graph / Fleet / Insights / Control)
           live here — the spot an app's avatar row would occupy. */}
-      <SidebarFooter />
+      <SidebarFooter activeAgentId={props.activeId} />
     </aside>
   );
 }
@@ -267,7 +267,7 @@ function MobileSidebar(props: MobileProps) {
           }
         />
         <SidebarBody {...props} wide />
-        <SidebarFooter />
+        <SidebarFooter activeAgentId={props.activeId} />
       </aside>
     </div>
   );
