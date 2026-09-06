@@ -50,6 +50,19 @@ def _truncate_list_from_conftest() -> set[str]:
 _MIGRATIONS_DIR = _REPO_ROOT / "migrations"
 _CREATE_TABLE_RE = re.compile(r"CREATE TABLE (?:IF NOT EXISTS )?(\w+)")
 
+_SQL_LINE_COMMENT_RE = re.compile(r"--[^\n]*")
+_SQL_BLOCK_COMMENT_RE = re.compile(r"/\*.*?\*/", re.DOTALL)
+
+
+def _strip_sql_comments(text: str) -> str:
+    """Strip ``--`` line and ``/* */`` block comments from SQL text.
+
+    Comment prose must never be mistaken for DDL: db/schema.sql cites a
+    ``CREATE TABLE`` inside a comment (the agent_notices migration note), and
+    the raw findall below once captured that citation as a real table.
+    """
+    return _SQL_BLOCK_COMMENT_RE.sub("", _SQL_LINE_COMMENT_RE.sub("", text))
+
 
 _DROP_TABLE_RE = re.compile(r"DROP TABLE (?:IF EXISTS )?(?:\w+\.)?(\w+)")
 
@@ -65,7 +78,7 @@ def _schema_tables() -> set[str]:
     tables that can carry test data.
     """
     tables: set[str] = set()
-    schema = (_REPO_ROOT / "db" / "schema.sql").read_text(encoding="utf-8")
+    schema = _strip_sql_comments((_REPO_ROOT / "db" / "schema.sql").read_text(encoding="utf-8"))
     tables.update(_CREATE_TABLE_RE.findall(schema))
     # LangGraph owns these declarations outside db/schema.sql. Three carry
     # per-test checkpoint data; checkpoint_migrations is infra bookkeeping.
@@ -73,7 +86,7 @@ def _schema_tables() -> set[str]:
     for mig in sorted(_MIGRATIONS_DIR.glob("*.sql")):
         if mig.name.endswith(".down.sql"):
             continue
-        text = mig.read_text(encoding="utf-8")
+        text = _strip_sql_comments(mig.read_text(encoding="utf-8"))
         tables.update(_CREATE_TABLE_RE.findall(text))
         tables.difference_update(_DROP_TABLE_RE.findall(text))
     return tables
@@ -164,3 +177,17 @@ def test_exemption_list_has_no_stale_entries() -> None:
     covered = _cascade_closure(truncate, edges)
     stale = [t for t in _EXEMPT if t not in tables or t in covered]
     assert not stale, f"stale exemption entries (removed or now covered): {stale}"
+
+
+def test_strip_sql_comments_neutralizes_comment_ddl_citations() -> None:
+    """Comment prose citing DDL must not reach the CREATE/DROP findalls."""
+    text = (
+        "-- inline in the agent_notices CREATE TABLE, because agent_notices is defined\n"
+        "CREATE TABLE real_table (id BIGSERIAL);\n"
+        "/* block comment: DROP TABLE ghost_block; */\n"
+        "CREATE TABLE other_real (id BIGSERIAL);\n"
+    )
+    cleaned = _strip_sql_comments(text)
+    assert "agent_notices CREATE TABLE" not in cleaned
+    assert "ghost_block" not in cleaned
+    assert _CREATE_TABLE_RE.findall(cleaned) == ["real_table", "other_real"]
