@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import type { ComponentProps } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { AgentRow, NoticeItem, OpenNotice, PageRow, TaskSummaryRow } from "@/lib/types";
@@ -46,6 +47,12 @@ const useAllPagesMock = vi.fn<() => PageRow[]>(() => []);
 vi.mock("@/lib/use-all-pages", () => ({ useAllPages: () => useAllPagesMock() }));
 
 import { InboxQueue } from "./inbox-queue";
+
+const scrollIntoViewMock = vi.fn();
+Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+  configurable: true,
+  value: scrollIntoViewMock,
+});
 
 afterEach(() => {
   cleanup();
@@ -150,11 +157,14 @@ function agent(over: {
   };
 }
 
-function renderQueue(agents: AgentRow[]) {
+function renderQueue(
+  agents: AgentRow[],
+  props: Omit<ComponentProps<typeof InboxQueue>, "agents"> = {},
+) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   return render(
     <QueryClientProvider client={qc}>
-      <InboxQueue agents={agents} />
+      <InboxQueue agents={agents} {...props} />
     </QueryClientProvider>,
   );
 }
@@ -196,6 +206,61 @@ describe("InboxQueue — open stream", () => {
     });
     renderQueue([agent({ agent_id: 1, label: "a" })]);
     expect(listTitles()).toEqual(["t-block", "t-older", "t-newer"]);
+  });
+});
+
+describe("InboxQueue — route anchor", () => {
+  it("scrolls to and briefly highlights the matching notice without reordering", async () => {
+    vi.useFakeTimers();
+    const raf = vi
+      .spyOn(window, "requestAnimationFrame")
+      .mockImplementation((callback) => {
+        callback(0);
+        return 1;
+      });
+    try {
+      setFeed({
+        awaiting: [
+          n({ id: 1, agent_id: 1, title: "first", priority: "P0" }),
+          n({ id: 2, agent_id: 405, title: "target", priority: "P3" }),
+        ],
+      });
+      renderQueue(
+        [agent({ agent_id: 1 }), agent({ agent_id: 405 })],
+        { anchorAgentId: 405 },
+      );
+
+      expect(listTitles()).toEqual(["first", "target"]);
+      const target = screen.getByText("target").closest('[data-testid="inbox-row"]');
+      expect(target?.getAttribute("data-anchor-highlighted")).toBe("true");
+      expect(target?.className).toContain("bg-primary/10");
+      expect(scrollIntoViewMock).toHaveBeenCalledWith({ block: "nearest" });
+
+      await act(() => vi.advanceTimersByTime(1_600));
+      expect(target?.getAttribute("data-anchor-highlighted")).toBeNull();
+      expect(listTitles()).toEqual(["first", "target"]);
+    } finally {
+      raf.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps the default position when that agent has no notice", () => {
+    setFeed({
+      awaiting: [
+        n({ id: 1, agent_id: 1, title: "first", priority: "P0" }),
+        n({ id: 2, agent_id: 2, title: "second", priority: "P3" }),
+      ],
+    });
+    renderQueue(
+      [agent({ agent_id: 1 }), agent({ agent_id: 2 })],
+      { anchorAgentId: 405 },
+    );
+
+    expect(listTitles()).toEqual(["first", "second"]);
+    expect(screen.getByRole("heading", { name: "first" })).toBeTruthy();
+    expect(document.querySelector('[data-anchor-highlighted="true"]')).toBeNull();
+    expect(scrollIntoViewMock).not.toHaveBeenCalled();
   });
 });
 

@@ -108,7 +108,7 @@ export function useUserSettings(): {
   };
 }
 
-// A DB-backed setting that a user drags (sidebar width, force-layout sliders):
+// A DB-backed setting that a user drags (timeline width, force-layout sliders):
 // the value changes many times per second, so a write-through PUT on every
 // change would flood the server. This keeps a local copy for instant feedback
 // and persists it debounced (one PUT after the drag settles), flushing any

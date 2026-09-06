@@ -46,7 +46,6 @@ export interface DesktopProps extends InnerProps {
   collapsed: boolean;
   onToggleCollapsed: () => void;
   setCollapsed: (c: boolean) => void;
-  width: number;
   /** Opens the floating search overlay (search button in the header / rail). */
   onSearchOpen: () => void;
 }

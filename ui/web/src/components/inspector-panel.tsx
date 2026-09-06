@@ -3,8 +3,6 @@
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Bell,
-  ChevronLeft,
-  ChevronRight,
   DollarSign,
   ExternalLink,
   HeartPulse,
@@ -44,7 +42,7 @@ import type {
 import { formatAbsolute, formatRelative, formatShort, formatUptime } from "@/lib/time";
 import { useEventStream } from "@/lib/useEventStream";
 import { cn } from "@/lib/utils";
-import { BAR_HEIGHT_CLASS, FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0 } from "@/lib/layout";
+import { BAR_DIVIDER_CLASS, BAR_HEIGHT_CLASS, FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0 } from "@/lib/layout";
 
 // Window options for the cost + activity sections. `null` = cumulative since
 // spawn (available as All); 0 = the last 5m and the positive values are a subset
@@ -73,7 +71,7 @@ const WINDOWS: { labelKey: string; value: number | null }[] = [
  * per-section skeletons instead of displaying a previous window's totals.
  *
  * Responsive (user ruling 2026-08-23, superseding the 2026-08-05 floating
- * overlay ruling on desktop): at ≥ lg it is a fixed right-side flex panel;
+ * overlay ruling on desktop): at ≥ lg it fills a resizable right-side panel;
  * below lg it is a full-screen overlay with a backdrop, matching the mobile
  * sidebar drawer. The header X closes both forms and the backdrop closes the
  * mobile overlay; Escape deliberately does not close either form (user ruling
@@ -213,7 +211,7 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
 
   const body = (
     <>
-      <header className={cn("items-center gap-2 border-b border-border px-4", BAR_HEIGHT_CLASS, FLEX)}>
+      <header className={cn("relative items-center gap-2 px-4", BAR_DIVIDER_CLASS, BAR_HEIGHT_CLASS, FLEX)}>
         <button
           type="button"
           onClick={toggle}
@@ -296,8 +294,8 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
               {t("openRunTimeline")}
               <ExternalLink className="size-3" aria-hidden />
             </Link>
-            {liveData ? (
-              <NoticeReplySection agentId={agentId} notice={liveData.notice ?? null} />
+            {liveData?.notice ? (
+              <NoticeReplySection agentId={agentId} notice={liveData.notice} />
             ) : liveQuery.isPending ? (
               <SectionSkeleton title={t("sectionNotice")} />
             ) : null}
@@ -307,11 +305,11 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
     </>
   );
 
-  // Desktop: fixed right-side flex sibling. The 2026-08-23 ruling supersedes
+  // Desktop: fill the parent resizable panel. The 2026-08-23 ruling supersedes
   // the 2026-08-05 floating overlay for this breakpoint.
   if (isLarge) {
     return (
-      <aside className={cn("w-80 shrink-0 border-l border-border bg-background", FLEX, FLEX_COL, MIN_H_0)}>
+      <aside className={cn("h-full w-full bg-background", FLEX, FLEX_COL, MIN_H_0)}>
         {body}
       </aside>
     );
@@ -328,35 +326,6 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
       />
       <aside className={cn("relative w-full bg-background", FLEX, FLEX_COL)}>{body}</aside>
     </div>
-  );
-}
-
-/** Inspector toggle button — opens/closes the panel from the HeaderBar's
- *  children slot at the top-right of the content column. Closed means no
- *  inspect traffic: the panel's enabled query performs the first fetch only
- *  after this button opens it. */
-export function InspectorToggle() {
-  const { open, toggle } = useInspectorOpen();
-  const t = useTranslations("inspector");
-  return (
-    <button
-      type="button"
-      onClick={toggle}
-      data-inspector-toggle=""
-      aria-label={open ? t("closeInspector") : t("openInspector")}
-      className={cn(
-        "inline-flex items-center gap-1.5 rounded border px-1.5 py-0.5 font-mono text-[11px] transition-colors select-none",
-        open
-          ? "border-border bg-accent text-accent-foreground"
-          : "border-transparent text-muted-foreground/50 hover:border-border hover:text-muted-foreground",
-      )}
-    >
-      {/* Closed points right to open the right-side panel; open points left to
-          close it back and keeps the "Close inspector" semantics. The
-          2026-08-24 user ruling supersedes the 8/6 and #1065 up-arrow ruling. */}
-      {open ? <ChevronLeft className="size-3.5" /> : <ChevronRight className="size-3.5" />}
-      <span className="hidden sm:inline">{t("toggle")}</span>
-    </button>
   );
 }
 
@@ -446,31 +415,29 @@ function WindowedSectionsError({ onRetry }: { onRetry: () => void }) {
 
 function PageSection({ pages }: { pages: PageRow[] }) {
   const t = useTranslations("inspector");
+  if (pages.length === 0) return null;
+
   return (
     <Section icon={<LayoutPanelTop className="size-3" />} title={t("sectionPage")}>
-      {pages.length === 0 ? (
-        <p className="font-mono text-[11px] text-muted-foreground/70">{t("noOpenPage")}</p>
-      ) : (
-        pages.map((p) => (
-          <a
-            key={p.name}
-            href={p.url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className={cn("items-center gap-2 rounded bg-sidebar-accent/40 px-2 py-1.5 font-mono text-[11px] hover:bg-sidebar-accent group", FLEX)}
-          >
-            <ExternalLink className="size-3 shrink-0 text-muted-foreground group-hover:text-foreground" />
-            <span className={cn(FLEX, FLEX_COL, MIN_W_0, FLEX_1)}>
-              <span className="truncate text-foreground">{p.title ?? p.name}</span>
-              <span
-                className="truncate text-[10px] text-muted-foreground"
-              >
-                {p.url}
-              </span>
+      {pages.map((p) => (
+        <a
+          key={p.name}
+          href={p.url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className={cn("items-center gap-2 rounded bg-sidebar-accent/40 px-2 py-1.5 font-mono text-[11px] hover:bg-sidebar-accent group", FLEX)}
+        >
+          <ExternalLink className="size-3 shrink-0 text-muted-foreground group-hover:text-foreground" />
+          <span className={cn(FLEX, FLEX_COL, MIN_W_0, FLEX_1)}>
+            <span className="truncate text-foreground">{p.title ?? p.name}</span>
+            <span
+              className="truncate text-[10px] text-muted-foreground"
+            >
+              {p.url}
             </span>
-          </a>
-        ))
-      )}
+          </span>
+        </a>
+      ))}
     </Section>
   );
 }
@@ -479,38 +446,33 @@ function PageSection({ pages }: { pages: PageRow[] }) {
 // interactive reply surface (mirrors the fleet "waiting on you" queue): a
 // require_response notice gets a reply box + Dismiss, an FYI gets Mark read.
 // Resolving invalidates the inspect query so the notice clears without waiting
-// out the slow background interval. `notice == null` → the quiet "No open
-// notice" line.
+// out the slow background interval. The parent omits this section when no
+// notice exists, matching the Inspector's other empty-section rules.
 
 function NoticeReplySection({
   agentId,
   notice,
 }: {
   agentId: number;
-  notice: OpenNotice | null;
+  notice: OpenNotice;
 }) {
   const queryClient = useQueryClient();
   const t = useTranslations("inspector");
   return (
-    <Section icon={<Bell className="size-3" />} title={t("sectionNotice")} badge={notice ? t("badgeOpen") : t("badgeNone")}>
-      {notice ? (
-        // key by notice id: OpenNoticeDetail keeps `pending` true after a resolve
-        // (the notice is going away), so when a refetch swaps in the NEXT open
-        // notice the keyed remount gives it a fresh, enabled reply surface
-        // instead of a permanently-disabled one.
-        <OpenNoticeDetail
-          key={notice.id}
-          agentId={agentId}
-          notice={notice}
-          showTimestamp
-          onResolved={() => {
-            void queryClient.invalidateQueries({ queryKey: inspectLiveQueryKey(agentId) });
-            void queryClient.invalidateQueries({ queryKey: ["agent-inspect", agentId] });
-          }}
-        />
-      ) : (
-        <p className="font-mono text-[11px] text-muted-foreground/70">{t("noOpenNotice")}</p>
-      )}
+    <Section icon={<Bell className="size-3" />} title={t("sectionNotice")}>
+      {/* Key by notice id: OpenNoticeDetail keeps `pending` true after a resolve
+          (the notice is going away), so when a refetch swaps in the next notice
+          the keyed remount gives it a fresh, enabled reply surface. */}
+      <OpenNoticeDetail
+        key={notice.id}
+        agentId={agentId}
+        notice={notice}
+        showTimestamp
+        onResolved={() => {
+          void queryClient.invalidateQueries({ queryKey: inspectLiveQueryKey(agentId) });
+          void queryClient.invalidateQueries({ queryKey: ["agent-inspect", agentId] });
+        }}
+      />
     </Section>
   );
 }
@@ -519,6 +481,8 @@ function ShellsSection({ inspect }: { inspect: AgentInspectLive }) {
   const { shells } = inspect;
   const now = useNow(1_000);
   const t = useTranslations("inspector");
+  if (inspect.shells_available === true && shells.length === 0) return null;
+
   return (
     <Section
       icon={<Terminal className="size-3" />}
@@ -527,8 +491,6 @@ function ShellsSection({ inspect }: { inspect: AgentInspectLive }) {
     >
       {inspect.shells_available !== true ? (
         <p className="font-mono text-[11px] text-muted-foreground">Shell observation unavailable</p>
-      ) : shells.length === 0 ? (
-        <p className="font-mono text-[11px] text-muted-foreground/70">{t("noShellsOpen")}</p>
       ) : (
         <ul className="space-y-1">
           {shells.map((s) => (
@@ -614,25 +576,21 @@ function displaySkillName(name: string): string {
 function ConfigOverlaySection({ inspect }: { inspect: AgentInspectLive }) {
   const entries = Object.entries(inspect.config_overlay);
   const t = useTranslations("inspector");
+  if (entries.length === 0) return null;
+
   return (
     <Section icon={<SlidersHorizontal className="size-3" />} title={t("sectionConfigOverlay")}>
-      {entries.length === 0 ? (
-        <p className="font-mono text-[11px] text-muted-foreground/70">
-          {t("configOverlayDefaults")}
-        </p>
-      ) : (
-        <dl className="space-y-1">
-          {entries.map(([k, v]) => (
-            <div
-              key={k}
-              className="rounded bg-sidebar-accent/40 px-2 py-1 font-mono text-[11px]"
-            >
-              <dt className="break-all text-muted-foreground">{k}</dt>
-              <dd className="mt-0.5 break-all text-foreground">{formatValue(SKILL_LIST_KEYS.has(k) && Array.isArray(v) ? v.map(displaySkillName) : v)}</dd>
-            </div>
-          ))}
-        </dl>
-      )}
+      <dl className="space-y-1">
+        {entries.map(([k, v]) => (
+          <div
+            key={k}
+            className="rounded bg-sidebar-accent/40 px-2 py-1 font-mono text-[11px]"
+          >
+            <dt className="break-all text-muted-foreground">{k}</dt>
+            <dd className="mt-0.5 break-all text-foreground">{formatValue(SKILL_LIST_KEYS.has(k) && Array.isArray(v) ? v.map(displaySkillName) : v)}</dd>
+          </div>
+        ))}
+      </dl>
     </Section>
   );
 }
@@ -803,10 +761,7 @@ function formatTokens(n: number): string {
 
 function formatTps(n: number): string {
   if (n === 0) return "—";
-  if (n < 1) return n.toFixed(1);
-  if (n < 10) return n.toFixed(1);
-  if (n < 100) return n.toFixed(1);
-  return `${Math.round(n)}`;
+  return n.toFixed(1);
 }
 
 // A heartbeat interval / pause duration as a compact span: `45s` / `15m` /

@@ -59,6 +59,7 @@ export function FleetView() {
   // vice versa.
   const [selectedAgentId, setSelectedAgentId] = useState<number | null>(null);
   const [selectedTaskId, setSelectedTaskId] = useState<number | null>(null);
+  const [anchorAgentId, setAnchorAgentId] = useState<number | null>(null);
   // Mobile tab selection (Agents | Decisions | Reviews).
   const [mobileTab, setMobileTab] = useState<MobileTab>("agents");
 
@@ -78,9 +79,15 @@ export function FleetView() {
   }, []);
   useEffect(() => {
     const hash = window.location.hash;
-    const tab = new URLSearchParams(window.location.search).get("tab");
+    const search = new URLSearchParams(window.location.search);
+    const tab = search.get("tab");
+    const rawAgentId = search.get("agent_id");
+    const routeAgentId = rawAgentId === null ? Number.NaN : Number.parseInt(rawAgentId, 10);
+    if (Number.isFinite(routeAgentId) && routeAgentId > 0) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- Route state is hydrated after mount to avoid an SSR mismatch.
+      setAnchorAgentId(routeAgentId);
+    }
     if (hash === "#inbox" || tab === "inbox") {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- The route identifies the mobile surface selected by the user.
       setMobileTab("inbox");
     }
   }, []);
@@ -115,6 +122,7 @@ export function FleetView() {
           setSelectedAgentId={setSelectedAgentId}
           selectedTaskId={selectedTaskId}
           setSelectedTaskId={setSelectedTaskId}
+          anchorAgentId={anchorAgentId}
         />
       ) : (
         <MobileLayout
@@ -127,6 +135,7 @@ export function FleetView() {
           mobileTab={mobileTab}
           setMobileTab={setMobileTab}
           inboxCount={inboxCount}
+          anchorAgentId={anchorAgentId}
         />
       )}
     </div>
@@ -142,6 +151,7 @@ const DesktopLayout = memo(function DesktopLayout({
   setSelectedAgentId,
   selectedTaskId,
   setSelectedTaskId,
+  anchorAgentId,
 }: {
   aliveCount: number;
   agents: AgentRow[];
@@ -149,6 +159,7 @@ const DesktopLayout = memo(function DesktopLayout({
   setSelectedAgentId: (id: number | null) => void;
   selectedTaskId: number | null;
   setSelectedTaskId: (id: number | null) => void;
+  anchorAgentId: number | null;
 }) {
   const t = useTranslations("fleet");
   // Queue panel collapse (RCS): collapsed leaves only a STATIC handle — no
@@ -229,6 +240,7 @@ const DesktopLayout = memo(function DesktopLayout({
               selectedAgentId={selectedAgentId}
               onSelectAgent={setSelectedAgentId}
               onCollapse={() => setQueueCollapsed(true)}
+              anchorAgentId={anchorAgentId}
             />
           </ResizablePanel>
         </ResizablePanelGroup>
@@ -249,6 +261,7 @@ const MobileLayout = memo(function MobileLayout({
   mobileTab,
   setMobileTab,
   inboxCount,
+  anchorAgentId,
 }: {
   aliveCount: number;
   agents: AgentRow[];
@@ -259,6 +272,7 @@ const MobileLayout = memo(function MobileLayout({
   mobileTab: MobileTab;
   setMobileTab: (t: MobileTab) => void;
   inboxCount: number;
+  anchorAgentId: number | null;
 }) {
   const t = useTranslations("fleet");
   return (
@@ -304,6 +318,7 @@ const MobileLayout = memo(function MobileLayout({
             agents={agents}
             className="h-full"
             onSelectAgent={setSelectedAgentId}
+            anchorAgentId={anchorAgentId}
             compact
           />
         ) : null}
