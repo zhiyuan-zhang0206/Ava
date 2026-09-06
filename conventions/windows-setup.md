@@ -241,6 +241,11 @@ run as SYSTEM.
 
 ## Troubleshooting
 
+For a **WSL gateway** on this Windows host, use the separate
+[unattended WSL boot procedure](wsl-gateway-boot.md). It preserves the native
+Windows runner's interactive task identity and does not automatically register
+or alter any existing task.
+
 **`ava start` prints "the per-cluster data plane is not supported on Windows"** —
 this host was asked to serve the gateway capability. Check `%USERPROFILE%\.ava\.env`
 for `AVA_MACHINE_SERVE_GATEWAY`; it should be absent or `false`. An enrolled
