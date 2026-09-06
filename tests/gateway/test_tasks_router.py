@@ -41,7 +41,7 @@ def _make_agent(db: psycopg.Connection) -> int:
             (aid,),  # pyright: ignore[reportUnknownArgumentType]
         )
     db.commit()
-    return aid  # pyright: ignore[reportUnknownVariableType]
+    return aid
 
 
 def _make_task(
@@ -64,7 +64,7 @@ def _make_task(
         )
         tid = cur.fetchone()[0]  # type: ignore[index]
     db.commit()
-    return tid  # pyright: ignore[reportUnknownVariableType]
+    return tid
 
 
 def _make_root_task(db: psycopg.Connection) -> int:
@@ -75,7 +75,7 @@ def _make_root_task(db: psycopg.Connection) -> int:
         )
         tid = cur.fetchone()[0]  # type: ignore[index]
     db.commit()
-    return tid  # pyright: ignore[reportUnknownVariableType]
+    return tid
 
 
 def _status(db: psycopg.Connection, tid: int) -> str:
@@ -665,7 +665,7 @@ class TestGetTasksWindow:
             # quotes is mis-bound by psycopg3's client-side substitution.
             cur.execute(
                 "UPDATE agent_tasks SET updated_at = now() - (%s * interval '1 day') WHERE id = %s",
-                (days, tid),  # pyright: ignore[reportUnknownArgumentType]
+                (days, tid),
             )
         db.commit()
 
@@ -673,7 +673,7 @@ class TestGetTasksWindow:
         with db.cursor() as cur:
             cur.execute(
                 "UPDATE agent_tasks SET updated_at = now() - (%s * interval '1 hour') WHERE id = %s",
-                (hours, tid),  # pyright: ignore[reportUnknownArgumentType]
+                (hours, tid),
             )
         db.commit()
 

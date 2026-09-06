@@ -135,7 +135,7 @@ def _archive_event(
     )
 
 
-def _neighbors(client: TestClient, agent_id: int, **params: int) -> list[dict]:  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+def _neighbors(client: TestClient, agent_id: int, **params: int) -> list[dict]:
     resp = client.get(f"/api/agents/{agent_id}/neighbors", params=params)
     assert resp.status_code == 200, resp.text
     return resp.json()["neighbors"]
@@ -152,11 +152,11 @@ def test_direct_ties_both_directions_self_and_root_excluded(
     _event(fake_loki, event_type="spawn", agent_id=c, target=a)
 
     with TestClient(app) as client:
-        rows = _neighbors(client, a, depth=1)  # pyright: ignore[reportUnknownVariableType]
+        rows = _neighbors(client, a, depth=1)
 
-    ids = {r["agent_id"] for r in rows}  # pyright: ignore[reportUnknownVariableType]
+    ids = {r["agent_id"] for r in rows}
     assert ids == {b, c}  # root a excluded; both neighbors found regardless of direction
-    assert all(r["depth"] == 1 for r in rows)  # pyright: ignore[reportUnknownArgumentType, reportUnknownVariableType]
+    assert all(r["depth"] == 1 for r in rows)  # pyright: ignore[reportUnknownArgumentType]
 
 
 def test_lineage_and_message_equal_at_zero_age(
@@ -171,9 +171,9 @@ def test_lineage_and_message_equal_at_zero_age(
     _event(fake_loki, event_type="send_message", agent_id=c, target=a, days_ago=0.0)
 
     with TestClient(app) as client:
-        rows = _neighbors(client, a, depth=1)  # pyright: ignore[reportUnknownVariableType]
+        rows = _neighbors(client, a, depth=1)
 
-    by_id = {r["agent_id"]: r for r in rows}  # pyright: ignore[reportUnknownVariableType]
+    by_id = {r["agent_id"]: r for r in rows}
     assert by_id[b]["score"] == by_id[c]["score"]
 
 
@@ -189,9 +189,9 @@ def test_lineage_permanent_message_decays_over_time(
     _event(fake_loki, event_type="send_message", agent_id=msg, target=a, days_ago=5.0)
 
     with TestClient(app) as client:
-        rows = _neighbors(client, a, depth=1)  # pyright: ignore[reportUnknownVariableType]
+        rows = _neighbors(client, a, depth=1)
 
-    by_id = {r["agent_id"]: r for r in rows}  # pyright: ignore[reportUnknownVariableType]
+    by_id = {r["agent_id"]: r for r in rows}
     assert set(by_id) == {lineage, msg}  # pyright: ignore[reportUnknownArgumentType]
     assert by_id[lineage]["score"] > by_id[msg]["score"]
 
@@ -202,9 +202,9 @@ def test_resurrect_counts_as_a_tie(db_conn: psycopg.Connection, fake_loki: FakeL
     _event(fake_loki, event_type="resurrect", agent_id=b, target=a)
 
     with TestClient(app) as client:
-        rows = _neighbors(client, a, depth=1)  # pyright: ignore[reportUnknownVariableType]
+        rows = _neighbors(client, a, depth=1)
 
-    assert {r["agent_id"] for r in rows} == {b}  # pyright: ignore[reportUnknownVariableType]
+    assert {r["agent_id"] for r in rows} == {b}
 
 
 def test_recency_decay_ranks_recent_first(db_conn: psycopg.Connection, fake_loki: FakeLoki) -> None:
@@ -215,9 +215,9 @@ def test_recency_decay_ranks_recent_first(db_conn: psycopg.Connection, fake_loki
     _event(fake_loki, event_type="send_message", agent_id=stale, target=a, days_ago=10.0)
 
     with TestClient(app) as client:
-        rows = _neighbors(client, a, depth=1)  # pyright: ignore[reportUnknownVariableType]
+        rows = _neighbors(client, a, depth=1)
 
-    assert [r["agent_id"] for r in rows] == [recent, stale]  # pyright: ignore[reportUnknownVariableType]
+    assert [r["agent_id"] for r in rows] == [recent, stale]
     assert rows[0]["score"] > rows[1]["score"]
 
 
@@ -232,13 +232,13 @@ def test_depth_limits_reach_and_gamma_decays_deeper_hops(
     _event(fake_loki, event_type="send_message", agent_id=c, target=b, days_ago=0.0)
 
     with TestClient(app) as client:
-        depth1 = _neighbors(client, a, depth=1)  # pyright: ignore[reportUnknownVariableType]
-        depth2 = _neighbors(client, a, depth=2)  # pyright: ignore[reportUnknownVariableType]
+        depth1 = _neighbors(client, a, depth=1)
+        depth2 = _neighbors(client, a, depth=2)
 
     # depth=1 sees only the direct neighbor b.
-    assert {r["agent_id"] for r in depth1} == {b}  # pyright: ignore[reportUnknownVariableType]
+    assert {r["agent_id"] for r in depth1} == {b}
     # depth=2 reaches c, marked as a 2-hop neighbor, and below b (gamma discount).
-    by_id = {r["agent_id"]: r for r in depth2}  # pyright: ignore[reportUnknownVariableType]
+    by_id = {r["agent_id"]: r for r in depth2}
     assert set(by_id) == {b, c}  # pyright: ignore[reportUnknownArgumentType]
     assert by_id[b]["depth"] == 1
     assert by_id[c]["depth"] == 2
@@ -253,7 +253,7 @@ def test_terminated_neighbor_included_with_status(
     _event(fake_loki, event_type="send_message", agent_id=dead, target=a)
 
     with TestClient(app) as client:
-        rows = _neighbors(client, a, depth=1)  # pyright: ignore[reportUnknownVariableType]
+        rows = _neighbors(client, a, depth=1)
 
     assert len(rows) == 1  # pyright: ignore[reportUnknownArgumentType]
     assert rows[0]["agent_id"] == dead
@@ -267,7 +267,7 @@ def test_limit_caps_result_count(db_conn: psycopg.Connection, fake_loki: FakeLok
         _event(fake_loki, event_type="send_message", agent_id=peer, target=a)
 
     with TestClient(app) as client:
-        rows = _neighbors(client, a, depth=1, limit=2)  # pyright: ignore[reportUnknownVariableType]
+        rows = _neighbors(client, a, depth=1, limit=2)
 
     assert len(rows) == 2  # pyright: ignore[reportUnknownArgumentType]
 
@@ -275,7 +275,7 @@ def test_limit_caps_result_count(db_conn: psycopg.Connection, fake_loki: FakeLok
 def test_no_ties_returns_empty(db_conn: psycopg.Connection, fake_loki: FakeLoki) -> None:
     a = _seed_agent(db_conn)
     with TestClient(app) as client:
-        rows = _neighbors(client, a, depth=1)  # pyright: ignore[reportUnknownVariableType]
+        rows = _neighbors(client, a, depth=1)
     assert rows == []
 
 
@@ -309,7 +309,7 @@ def test_telemetry_message_does_not_create_neighbor(
     )
 
     with TestClient(app) as client:
-        rows = _neighbors(client, a, depth=1)  # pyright: ignore[reportUnknownVariableType]
+        rows = _neighbors(client, a, depth=1)
     assert rows == []
 
 
@@ -325,10 +325,10 @@ def test_archive_and_loki_merge_on_the_same_pair(
     _event(fake_loki, event_type="send_message", agent_id=b, target=a, days_ago=0.0)
 
     with TestClient(app) as client:
-        rows = _neighbors(client, a, depth=1)  # pyright: ignore[reportUnknownVariableType]
+        rows = _neighbors(client, a, depth=1)
 
     assert len(rows) == 1  # pyright: ignore[reportUnknownArgumentType]
-    score = rows[0]["score"]  # pyright: ignore[reportUnknownVariableType]
+    score = rows[0]["score"]
     assert score == pytest.approx(math.log1p(2), abs=1e-3)  # pyright: ignore[reportUnknownMemberType]
 
 
@@ -342,16 +342,16 @@ def test_archive_lineage_alone_forms_a_tie(
     _archive_event(fake_loki, event_type="spawn", agent_id=b, target=a, age_hours=2.0)
 
     with TestClient(app) as client:
-        rows = _neighbors(client, a, depth=1)  # pyright: ignore[reportUnknownVariableType]
+        rows = _neighbors(client, a, depth=1)
 
-    assert {r["agent_id"] for r in rows} == {b}  # pyright: ignore[reportUnknownVariableType]
+    assert {r["agent_id"] for r in rows} == {b}
     assert rows[0]["score"] == pytest.approx(math.log1p(1), abs=1e-3)  # pyright: ignore[reportUnknownMemberType]
 
 
 # ── ancestors: the immutable birth chain above the queried agent ─────────
 
 
-def _ancestors(client: TestClient, agent_id: int, **params: int) -> list[dict]:  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+def _ancestors(client: TestClient, agent_id: int, **params: int) -> list[dict]:
     resp = client.get(f"/api/agents/{agent_id}/neighbors", params=params)
     assert resp.status_code == 200, resp.text
     return resp.json()["ancestors"]
@@ -364,16 +364,16 @@ def test_ancestors_spawn_chain_nearest_first_walks_to_top(db_conn: psycopg.Conne
     c = _seed_agent(db_conn, born_spawner=f"agent:{b}")
 
     with TestClient(app) as client:
-        rows = _ancestors(client, c)  # pyright: ignore[reportUnknownVariableType]
+        rows = _ancestors(client, c)
         # the parent is not an ancestor of itself — the chain is read correctly
-        rows_b = _ancestors(client, b)  # pyright: ignore[reportUnknownVariableType]
+        rows_b = _ancestors(client, b)
 
-    assert [r["agent_id"] for r in rows] == [b, a]  # pyright: ignore[reportUnknownVariableType]
-    assert [r["depth"] for r in rows] == [1, 2]  # pyright: ignore[reportUnknownVariableType]
+    assert [r["agent_id"] for r in rows] == [b, a]
+    assert [r["depth"] for r in rows] == [1, 2]
     # each hop's edge is the permanent lineage weight, gamma-discounted per hop
     assert rows[0]["score"] == pytest.approx(math.log1p(1), abs=1e-3)  # pyright: ignore[reportUnknownMemberType]
-    assert rows[1]["score"] < rows[0]["score"]  # pyright: ignore[reportUnknownMemberType]
-    assert [r["agent_id"] for r in rows_b] == [a]  # pyright: ignore[reportUnknownVariableType]
+    assert rows[1]["score"] < rows[0]["score"]
+    assert [r["agent_id"] for r in rows_b] == [a]
 
 
 def test_ancestors_ignore_neighbor_depth_param(db_conn: psycopg.Connection) -> None:
@@ -384,9 +384,9 @@ def test_ancestors_ignore_neighbor_depth_param(db_conn: psycopg.Connection) -> N
     c = _seed_agent(db_conn, born_spawner=f"agent:{b}")
 
     with TestClient(app) as client:
-        rows = _ancestors(client, c, depth=1)  # pyright: ignore[reportUnknownVariableType]
+        rows = _ancestors(client, c, depth=1)
 
-    assert [r["agent_id"] for r in rows] == [b, a]  # pyright: ignore[reportUnknownVariableType]
+    assert [r["agent_id"] for r in rows] == [b, a]
 
 
 def test_ancestors_fork_forms_a_parent(db_conn: psycopg.Connection) -> None:
@@ -394,9 +394,9 @@ def test_ancestors_fork_forms_a_parent(db_conn: psycopg.Connection) -> None:
     b = _seed_agent(db_conn, born_spawner=f"agent:{a}")
 
     with TestClient(app) as client:
-        rows = _ancestors(client, b)  # pyright: ignore[reportUnknownVariableType]
+        rows = _ancestors(client, b)
 
-    assert [r["agent_id"] for r in rows] == [a]  # pyright: ignore[reportUnknownVariableType]
+    assert [r["agent_id"] for r in rows] == [a]
 
 
 def test_ancestors_message_ties_and_resurrect_never_parent(
@@ -425,7 +425,7 @@ def test_ancestors_terminated_ancestor_included_with_status(db_conn: psycopg.Con
     b = _seed_agent(db_conn, born_spawner=f"agent:{a}")
 
     with TestClient(app) as client:
-        rows = _ancestors(client, b)  # pyright: ignore[reportUnknownVariableType]
+        rows = _ancestors(client, b)
 
     assert len(rows) == 1  # pyright: ignore[reportUnknownArgumentType]
     assert rows[0]["agent_id"] == a
@@ -445,9 +445,9 @@ def test_ancestors_read_born_spawner_not_loki_parentage(
     _event(fake_loki, event_type="spawn", agent_id=b, target=stale_event_parent)
 
     with TestClient(app) as client:
-        rows = _ancestors(client, b)  # pyright: ignore[reportUnknownVariableType]
+        rows = _ancestors(client, b)
 
-    assert [r["agent_id"] for r in rows] == [a]  # pyright: ignore[reportUnknownVariableType]
+    assert [r["agent_id"] for r in rows] == [a]
     assert rows[0]["score"] == pytest.approx(math.log1p(1), abs=1e-3)  # pyright: ignore[reportUnknownMemberType]
 
 
@@ -457,9 +457,9 @@ def test_ancestors_use_one_constant_weight_per_birth_edge(db_conn: psycopg.Conne
     b = _seed_agent(db_conn, born_spawner=f"agent:{a}")
 
     with TestClient(app) as client:
-        rows = _ancestors(client, b)  # pyright: ignore[reportUnknownVariableType]
+        rows = _ancestors(client, b)
 
-    assert [r["agent_id"] for r in rows] == [a]  # pyright: ignore[reportUnknownVariableType]
+    assert [r["agent_id"] for r in rows] == [a]
     assert rows[0]["score"] == pytest.approx(math.log1p(1), abs=1e-3)  # pyright: ignore[reportUnknownMemberType]
 
 
@@ -495,7 +495,7 @@ def test_archive_rows_fetched_once_then_served_from_cache(
         second = _neighbors(client, a, depth=1)
 
     assert first == second
-    assert {r["agent_id"] for r in first} == {b}  # pyright: ignore[reportUnknownArgumentType]
+    assert {r["agent_id"] for r in first} == {b}
     assert len(archive_calls) == 1  # second request hit the Redis cache
     assert neighbors._ARCHIVE_CACHE_KEY in frozen_cache.store
     # the originating fetch's has_more rides the payload, so a cache hit
@@ -527,7 +527,7 @@ def test_archive_cache_redis_outage_degrades_to_direct_query(
     with TestClient(app) as client:
         rows = _neighbors(client, a, depth=1)
 
-    assert {r["agent_id"] for r in rows} == {b}  # pyright: ignore[reportUnknownArgumentType]
+    assert {r["agent_id"] for r in rows} == {b}
 
 
 def test_archive_refresh_failure_degrades_to_live_only_and_heals(
@@ -584,7 +584,7 @@ def test_archive_refresh_failure_degrades_to_live_only_and_heals(
         del frozen_cache.store[neighbors._ARCHIVE_CACHE_KEY]
         rows = _neighbors(client, a, depth=1)
 
-    assert {r["agent_id"] for r in rows} == {b}  # pyright: ignore[reportUnknownArgumentType]
+    assert {r["agent_id"] for r in rows} == {b}
     assert archive_calls == 2
     healed = _json.loads(frozen_cache.store[neighbors._ARCHIVE_CACHE_KEY])
     assert healed["rows"] and "degraded" not in healed
@@ -653,7 +653,7 @@ def test_corrupt_archive_cache_entry_refetches_from_loki(
     with TestClient(app) as client:
         rows = _neighbors(client, a, depth=1)
 
-    assert {r["agent_id"] for r in rows} == {b}  # pyright: ignore[reportUnknownArgumentType]
+    assert {r["agent_id"] for r in rows} == {b}
 
 
 def test_live_tail_read_is_bounded_and_cached_parts_never_requery(

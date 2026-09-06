@@ -124,10 +124,10 @@ def page_server(tmp_path: Path) -> Iterator[int]:
 
     # SimpleHTTPRequestHandler takes directory as a constructor arg (a class
     # attribute is ignored — __init__ falls back to cwd).
-    handler = lambda *args, **kwargs: _QuietHandler(  # noqa: E731 — factory for ThreadingTCPServer  # pyright: ignore[reportUnknownLambdaType, reportUnknownVariableType]
+    handler = lambda *args, **kwargs: _QuietHandler(  # noqa: E731 — factory for ThreadingTCPServer
         *args,  # pyright: ignore[reportUnknownArgumentType]
         directory=str(tmp_path),
-        **kwargs,  # pyright: ignore[reportUnknownArgumentType]
+        **kwargs,
     )
     server = socketserver.ThreadingTCPServer(("127.0.0.1", 0), handler)  # pyright: ignore[reportUnknownArgumentType]
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -147,7 +147,7 @@ def _register(client: TestClient, agent_id: int, name: str, port: int) -> None:
     assert resp.status_code == 201
 
 
-def test_proxy_serves_page_content(db_conn, page_server: int) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_proxy_serves_page_content(db_conn, page_server: int) -> None:
     """GET through the gateway returns the page server's content — root,
     nested path, and query string all work."""
     aid = create_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
@@ -175,7 +175,7 @@ def test_proxy_serves_page_content(db_conn, page_server: int) -> None:  # pyrigh
         assert "<h1>hello</h1>" in with_qs.text
 
 
-def test_proxy_redirects_root_without_trailing_slash(db_conn, page_server: int) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_proxy_redirects_root_without_trailing_slash(db_conn, page_server: int) -> None:
     """/pages/{name} (no slash) redirects to /pages/{name}/ so relative asset
     links inside the page resolve against the page directory."""
     aid = create_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
@@ -186,7 +186,7 @@ def test_proxy_redirects_root_without_trailing_slash(db_conn, page_server: int) 
     assert resp.headers["location"] == f"/pages/{aid}-p/"
 
 
-def test_proxy_404_unknown_page(db_conn) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_proxy_404_unknown_page(db_conn) -> None:
     """A never-registered page name is a 404, not a proxy attempt."""
     aid = create_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
     with TestClient(app) as client:
@@ -194,7 +194,7 @@ def test_proxy_404_unknown_page(db_conn) -> None:  # pyright: ignore[reportMissi
     assert resp.status_code == 404
 
 
-def test_proxy_404_closed_page(db_conn, page_server: int) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_proxy_404_closed_page(db_conn, page_server: int) -> None:
     """close() removes the reverse-proxy route: a closed page 404s."""
     aid = create_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
     with TestClient(app) as client:
@@ -263,7 +263,7 @@ def test_proxy_410_expired_page_en_when_display_language_en(
     assert "Page expired - ask the agent to serve it again" in response.text
 
 
-def test_proxy_404_missing_agent(db_conn, page_server: int) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_proxy_404_missing_agent(db_conn, page_server: int) -> None:
     with TestClient(app) as client:
         resp = client.get("/pages/99999-p/")
     assert resp.status_code == 404
@@ -279,7 +279,7 @@ def test_proxy_404_missing_agent(db_conn, page_server: int) -> None:  # pyright:
         "sub/..%5coutside-secret.txt",
     ],
 )
-def test_proxy_rejects_traversal(db_conn, page_server: int, bad_path: str) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_proxy_rejects_traversal(db_conn, page_server: int, bad_path: str) -> None:
     """Encoded dot-segments and backslashes are rejected with 400 — the
     gateway never forwards a path that could escape the page directory."""
     aid = create_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
@@ -292,7 +292,7 @@ def test_proxy_rejects_traversal(db_conn, page_server: int, bad_path: str) -> No
     assert "TOP-SECRET-OUTSIDE-CONTENT" not in resp.text
 
 
-def test_proxy_502_when_page_server_unreachable(db_conn) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_proxy_502_when_page_server_unreachable(db_conn) -> None:
     """A registered page whose server is down surfaces as 502 with the
     friendly zh copy (the default display language) — never the raw host:port."""
     aid = create_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
@@ -342,7 +342,7 @@ def test_proxy_502_friendly_copy_en_when_display_language_en(
     )
 
 
-def test_proxy_502_emits_structured_log_line(db_conn) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_proxy_502_emits_structured_log_line(db_conn) -> None:
     """The 502 branch writes one structured log line carrying trace_id,
     agent_id, page name, host:port, and the exception type + message — the
     traceability the report asked for (task #2212)."""
@@ -360,7 +360,7 @@ def test_proxy_502_emits_structured_log_line(db_conn) -> None:  # pyright: ignor
     probe.bind(("127.0.0.1", 0))
     free_port = probe.getsockname()[1]
     probe.close()
-    sink_id = _loguru.add(_capture, level="WARNING")  # pyright: ignore[reportUnknownArgumentType]
+    sink_id = _loguru.add(_capture, level="WARNING")
     try:
         with TestClient(app) as client:
             client.post(
@@ -396,7 +396,7 @@ def test_proxy_504_timeout_friendly_copy_and_log(
 
     async def _send_times_out(
         self: object, request: object, *args: object, **kwargs: object
-    ) -> None:  # pyright: ignore[reportUnknownParameterType, reportUnknownArgumentType]
+    ) -> None:
         raise httpx.TimeoutException("connect timed out")
 
     records: list[_Any] = []
@@ -404,12 +404,12 @@ def test_proxy_504_timeout_friendly_copy_and_log(
     def _capture(message: _Any) -> None:
         records.append(message.record)
 
-    aid = create_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
+    aid = create_agent(db_conn)
     probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     probe.bind(("127.0.0.1", 0))
     free_port = probe.getsockname()[1]
     probe.close()
-    sink_id = _loguru.add(_capture, level="WARNING")  # pyright: ignore[reportUnknownArgumentType]
+    sink_id = _loguru.add(_capture, level="WARNING")
     monkeypatch.setattr(httpx.AsyncClient, "send", _send_times_out)
     try:
         with TestClient(app) as client:
@@ -448,7 +448,7 @@ def test_proxy_502_language_lookup_failure_falls_back_to_default(
         raise RuntimeError("pg down")
 
     monkeypatch.setattr("gateway.routers.pages.display_language", _boom)
-    aid = create_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
+    aid = create_agent(db_conn)
     probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     probe.bind(("127.0.0.1", 0))
     free_port = probe.getsockname()[1]
@@ -484,7 +484,7 @@ def test_proxy_revalidates_nonloopback_registry_target_before_dialing(
     assert "refusing to proxy" in response.json()["detail"]
 
 
-def test_proxy_streams_sse_chunked_content(db_conn) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_proxy_streams_sse_chunked_content(db_conn) -> None:
     """A chunked upstream (SSE) passes through with its content-type and all
     events — the proxy streams instead of buffering."""
     sse_server = socketserver.ThreadingTCPServer(("127.0.0.1", 0), _SSEHandler)
@@ -505,7 +505,7 @@ def test_proxy_streams_sse_chunked_content(db_conn) -> None:  # pyright: ignore[
         sse_server.server_close()
 
 
-def test_proxy_requires_auth(monkeypatch: pytest.MonkeyPatch, db_conn) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_proxy_requires_auth(monkeypatch: pytest.MonkeyPatch, db_conn) -> None:
     """The reverse proxy is auth-gated like every other API route: no
     credentials -> 401; a valid bearer passes the middleware (404 here
     because the page was never registered, proving it reached the route)."""
@@ -539,11 +539,11 @@ def test_new_url_parses_page_key_with_dashes_in_name() -> None:
     assert _parse_page_key("12") is None
 
 
-def test_old_page_urls_no_longer_route(db_conn, page_server) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_old_page_urls_no_longer_route(db_conn, page_server) -> None:
     """One-time switch, no backwards compatibility: the previous
     /api/pages/<id>-<name>/ and /api/agents/<id>/pages/<name>/ URLs are gone
     (404), only /pages/<id>-<name>/ serves content."""
-    port = page_server  # pyright: ignore[reportUnknownVariableType]
+    port = page_server
     aid = create_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
     with TestClient(app) as client:
         resp = client.post(

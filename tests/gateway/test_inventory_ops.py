@@ -29,7 +29,7 @@ from shared import mcp_enabled, plugins_config
 # ---------------------------------------------------------------------------
 
 
-def _write_machine_mcp(unit_home: Path, servers: dict[str, dict]) -> None:  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+def _write_machine_mcp(unit_home: Path, servers: dict[str, dict]) -> None:
     (unit_home / "mcp.json").write_text(json.dumps({"mcpServers": servers}), encoding="utf-8")
 
 

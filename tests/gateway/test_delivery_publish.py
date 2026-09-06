@@ -69,7 +69,7 @@ async def test_deliver_survives_publish_failure(
     monkeypatch.setattr(
         redis_client,
         "sync_redis",
-        lambda **_: _BoomSyncClient(RedisConnectionError("down")),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda **_: _BoomSyncClient(RedisConnectionError("down")),  # pyright: ignore[reportUnknownArgumentType]
     )
     monkeypatch.setattr(
         redis_client, "get_async_redis", lambda: _BoomAsyncClient(RedisConnectionError("down"))

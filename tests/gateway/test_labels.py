@@ -163,7 +163,7 @@ class TestGenerateLabelAsync:
         monkeypatch.setattr(
             labels_module,
             "build_chat_model",
-            lambda _m, **_: _FakeLLM("\u67e5 X \u6a21\u5757"),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+            lambda _m, **_: _FakeLLM("\u67e5 X \u6a21\u5757"),  # pyright: ignore[reportUnknownArgumentType]
         )
         published: list[str] = []
 
@@ -201,7 +201,7 @@ class TestGenerateLabelAsync:
         monkeypatch.setattr(
             labels_module,
             "build_chat_model",
-            lambda _m, **_: _FakeLLM("LLM \u8d77\u7684"),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+            lambda _m, **_: _FakeLLM("LLM \u8d77\u7684"),  # pyright: ignore[reportUnknownArgumentType]
         )
         published: list[str] = []
 
@@ -234,7 +234,7 @@ class TestGenerateLabelAsync:
         monkeypatch.setattr(
             labels_module,
             "build_chat_model",
-            lambda _m, **_: _FakeLLM("LLM \u8d77\u7684"),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+            lambda _m, **_: _FakeLLM("LLM \u8d77\u7684"),  # pyright: ignore[reportUnknownArgumentType]
         )
         published: list[str] = []
 
@@ -258,7 +258,7 @@ class TestGenerateLabelAsync:
             async def ainvoke(self, _messages: Any) -> Any:
                 raise RuntimeError("api boom")
 
-        monkeypatch.setattr(labels_module, "build_chat_model", lambda _m, **_: _ExplodingLLM())  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        monkeypatch.setattr(labels_module, "build_chat_model", lambda _m, **_: _ExplodingLLM())  # pyright: ignore[reportUnknownArgumentType]
         published: list[str] = []
 
         async def _capture(_self: Any, channel: str, payload: str) -> int:
@@ -278,7 +278,7 @@ class TestGenerateLabelAsync:
     ) -> None:
         """LLM returns blank / only quotes → _normalize returns "" → do not write to DB, do not publish."""
         tid = create_agent(db_conn)
-        monkeypatch.setattr(labels_module, "build_chat_model", lambda _m, **_: _FakeLLM('"   "'))  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        monkeypatch.setattr(labels_module, "build_chat_model", lambda _m, **_: _FakeLLM('"   "'))  # pyright: ignore[reportUnknownArgumentType]
         published: list[str] = []
 
         async def _capture(_self: Any, channel: str, payload: str) -> int:
@@ -300,7 +300,7 @@ class TestGenerateLabelAsync:
         monkeypatch.setattr(
             labels_module,
             "build_chat_model",
-            lambda _m, **_: _FakeLLMWithThinking("migrate data"),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+            lambda _m, **_: _FakeLLMWithThinking("migrate data"),  # pyright: ignore[reportUnknownArgumentType]
         )
         published: list[str] = []
 
@@ -338,7 +338,7 @@ class TestGenerateLabelAsync:
                     ]
                 )
 
-        monkeypatch.setattr(labels_module, "build_chat_model", lambda _m, **_: _ThinkingOnlyLLM())  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        monkeypatch.setattr(labels_module, "build_chat_model", lambda _m, **_: _ThinkingOnlyLLM())  # pyright: ignore[reportUnknownArgumentType]
         published: list[str] = []
 
         async def _capture(_self: Any, _channel: str, payload: str) -> int:
@@ -372,7 +372,7 @@ class TestGenerateLabelAsync:
                     ]
                 )
 
-        monkeypatch.setattr(labels_module, "build_chat_model", lambda _m, **_: _MultiTextLLM())  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        monkeypatch.setattr(labels_module, "build_chat_model", lambda _m, **_: _MultiTextLLM())  # pyright: ignore[reportUnknownArgumentType]
         published: list[str] = []
 
         async def _capture(_self: Any, _channel: str, payload: str) -> int:
@@ -463,7 +463,7 @@ class TestSpawnAgentSchedulesLabelGeneration:
         monkeypatch.setattr(
             labels_module,
             "build_chat_model",
-            lambda _m, **_: _FakeLLM("\u8fc1\u79fb\u6570\u636e"),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+            lambda _m, **_: _FakeLLM("\u8fc1\u79fb\u6570\u636e"),  # pyright: ignore[reportUnknownArgumentType]
         )
 
         async def _noop_publish(_self: Any, channel: str, payload: str) -> int:

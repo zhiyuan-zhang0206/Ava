@@ -64,13 +64,13 @@ class TestAiMessageItems:
     """
 
     @staticmethod
-    def _next_ts(_msg=None):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    def _next_ts(_msg=None):
         # In production, next_ts returns the message's own real timestamp (ava_created_at)
         # or an incrementing-microsecond fallback; these block-split tests don't care about
         # timestamps, so the stub ignores _msg and returns a placeholder value.
         return "2026-01-01T00:00:00.000001+00:00"
 
-    def _items(self, msg, msg_idx=5):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    def _items(self, msg, msg_idx=5):
         from langchain_core.messages import AIMessage
 
         if not isinstance(msg, AIMessage):
@@ -743,7 +743,7 @@ class TestTimelineDispatch:
     """
 
     @staticmethod
-    def _put_checkpoint(agent_id: int, messages: list) -> None:  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+    def _put_checkpoint(agent_id: int, messages: list) -> None:
         """Directly use PostgresSaver.put to set a checkpoint with
         channel_values.messages = `messages`. Bypass the entire graph, so tests
         only care about dispatch behavior."""
@@ -1101,7 +1101,7 @@ class TestTimelineFailLoud:
         tid = create_agent(db_conn)
         self._put_minimal_aimessage(tid)
 
-        def boom(*_args, **_kwargs):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+        def boom(*_args, **_kwargs):
             raise RuntimeError(
                 "simulated dispatch failure (e.g. NameError when refactor forgot import)"
             )
@@ -1136,7 +1136,7 @@ class TestTimelineFailLoud:
         from contextlib import contextmanager
 
         @contextmanager
-        def fake_saver(_url):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+        def fake_saver(_url):
             raise OSError("simulated DB connection lost")
             yield  # type: ignore[unreachable]
 
@@ -1145,7 +1145,7 @@ class TestTimelineFailLoud:
         import langgraph.checkpoint.postgres as ckpt_mod
 
         class FakeSaver:
-            from_conn_string = staticmethod(fake_saver)  # pyright: ignore[reportUnknownArgumentType, reportUnknownVariableType]
+            from_conn_string = staticmethod(fake_saver)  # pyright: ignore[reportUnknownArgumentType]
 
         monkeypatch.setattr(ckpt_mod, "PostgresSaver", FakeSaver)
         resp = test_client.get(f"/api/agents/{tid}/timeline")
@@ -1568,7 +1568,7 @@ class TestSystemPromptInColdLoad:
     """
 
     @staticmethod
-    def _put_checkpoint(agent_id: int, messages: list) -> None:  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+    def _put_checkpoint(agent_id: int, messages: list) -> None:
         from langgraph.checkpoint.base import empty_checkpoint
         from langgraph.checkpoint.postgres import PostgresSaver
 
@@ -2448,7 +2448,7 @@ class TestTimelineCompactHistory:
                     },
                 )
             )
-        self._put_checkpoint(tid, messages, version="1")  # pyright: ignore[reportUnknownMemberType]
+        self._put_checkpoint(tid, messages, version="1")
 
         resp = test_client.get(f"/api/agents/{tid}/timeline")
         assert resp.status_code == 200
@@ -2506,7 +2506,7 @@ class TestTimelineCompactHistory:
                     },
                 )
             )
-        self._put_checkpoint(tid, messages, version="1")  # pyright: ignore[reportUnknownMemberType]
+        self._put_checkpoint(tid, messages, version="1")
 
         resp = test_client.get(f"/api/agents/{tid}/timeline")
         assert resp.status_code == 200

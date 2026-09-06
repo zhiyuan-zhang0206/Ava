@@ -22,7 +22,7 @@ def test_autouse_guard_replaces_real_launch() -> None:
     assert getattr(ops.agent_launch._launch_agent_process, "_ava_test_guard", False)
 
 
-def test_launched_agents_records_spawn(db_conn: psycopg.Connection, launched_agents: list) -> None:  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+def test_launched_agents_records_spawn(db_conn: psycopg.Connection, launched_agents: list) -> None:
     """The `launched_agents` recorder captures the id (and config overlay) of
     every launch, replacing per-test `_record` stubs."""
     from ops.agent_spawn import create_agent_row
@@ -39,13 +39,13 @@ def test_launched_agents_records_spawn(db_conn: psycopg.Connection, launched_age
         new_id, config_overlay={"llm_model": "gpt-5.6-sol"}, confirm=False
     )
 
-    assert [c.agent_id for c in launched_agents] == [new_id]  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+    assert [c.agent_id for c in launched_agents] == [new_id]  # pyright: ignore[reportUnknownMemberType]
     assert launched_agents[0].config_overlay == {"llm_model": "gpt-5.6-sol"}  # pyright: ignore[reportUnknownMemberType]
 
 
 def test_spawn_preflight_raises_without_agent_runner_capability(
     db_conn: psycopg.Connection,
-    set_machine_identity,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    set_machine_identity,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The gateway's spawn preflight is the defense behind the router 400: a
@@ -58,6 +58,6 @@ def test_spawn_preflight_raises_without_agent_runner_capability(
     from shared.agents import SpawnTargetNotAgentRunner
 
     set_machine_identity(role="gateway", name="gw-only")
-    monkeypatch.setattr("shared.machines.lookup_role", lambda _name: ["gateway"])  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr("shared.machines.lookup_role", lambda _name: ["gateway"])  # pyright: ignore[reportUnknownArgumentType]
     with pytest.raises(SpawnTargetNotAgentRunner, match="agent-runner"):
         _spawn_preflight_blocking("gw-only", SpawnAgentRequest(spawner="user"), object())  # type: ignore[arg-type]

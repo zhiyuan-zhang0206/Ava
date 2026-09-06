@@ -362,7 +362,7 @@ def test_run_record_failure_does_not_break_the_run(
             return self._inner.execute(query, params)
 
     def _flaky_connect(*args: object, **kwargs: object) -> _Flaky:
-        return _Flaky(real_connect(*args, **kwargs))  # pyright: ignore[reportArgumentType]
+        return _Flaky(real_connect(*args, **kwargs))
 
     monkeypatch.setattr(sr.shared.db, "connect", _flaky_connect)
     sid = _insert_schedule(db_conn, script="x = 1\n")
@@ -435,7 +435,7 @@ def test_run_completed_marker_failure_keeps_run_row_honest(
             return self._inner.execute(query, params)
 
     def _flaky_connect(*args: object, **kwargs: object) -> _Flaky:
-        return _Flaky(real_connect(*args, **kwargs))  # pyright: ignore[reportArgumentType]
+        return _Flaky(real_connect(*args, **kwargs))
 
     monkeypatch.setattr(sr.shared.db, "connect", _flaky_connect)
     sid = _insert_schedule(db_conn, script="x = 1\n")
@@ -486,7 +486,7 @@ def test_stall_guard_fires_on_a_stalled_main_thread(
     monkeypatch.setattr(
         sr,
         "_stall_action",
-        lambda _sid, msg, _rid: fired.append(msg),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda _sid, msg, _rid: fired.append(msg),  # pyright: ignore[reportUnknownArgumentType]
     )
 
     stop = sr._start_stall_guard(1, None)
@@ -516,7 +516,7 @@ def test_stall_guard_ignores_a_legitimately_sleeping_main_thread(
     monkeypatch.setattr(
         sr,
         "_stall_action",
-        lambda _sid, msg, _rid: fired.append(msg),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda _sid, msg, _rid: fired.append(msg),  # pyright: ignore[reportUnknownArgumentType]
     )
 
     # The runner wraps time.sleep before running a script; without the wrapper
@@ -568,7 +568,7 @@ def test_stall_verdict_closes_run_row(
     sid = _insert_schedule(db_conn, script="x = 1\n")
     run_id = sr._record_run_start(sid)
     exited: list[int] = []
-    monkeypatch.setattr(sr.os, "_exit", exited.append)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(sr.os, "_exit", exited.append)
 
     sr._stall_action(sid, "stalled in foo", run_id)
 
