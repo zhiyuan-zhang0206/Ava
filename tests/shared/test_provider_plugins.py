@@ -83,6 +83,7 @@ _REPO_MODEL_VENDORS = {
     "gpt-5.6-luna": "openai",
     "gpt-5.6-sol": "openai",
     "gpt-5.6-terra": "openai",
+    "gpt-6-astra": "openai",
     "kimi-k3": "moonshot",
     "mimo-v2.5-pro": "xiaomi",
     "mimo-v2.5-pro-ultraspeed": "xiaomi",
@@ -292,7 +293,7 @@ def test_zero_provider_plugins_fail_loud_and_remain_retryable(
 def test_repo_model_vendor_vocabulary_is_complete() -> None:
     ensure_provider_plugins_loaded()
 
-    assert len(_REPO_MODEL_VENDORS) == 33
+    assert len(_REPO_MODEL_VENDORS) == 34
     assert set(MODELS) == _REPO_MODEL_VENDORS.keys()
     assert set(pricing._CATALOG) == {"gemini-embedding-2"}
     assert {
@@ -454,6 +455,7 @@ def test_repo_openai_provider_is_enabled_and_registers_complete_contract() -> No
     }
     assert gpt_models <= MODELS.keys()
     assert set(SUPPORTED_MODELS["gpt"]) == {
+        "gpt-6-astra",
         "gpt-5.6-sol",
         "gpt-5.6-terra",
         "gpt-5.6-luna",

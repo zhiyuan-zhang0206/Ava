@@ -162,7 +162,7 @@ adding a provider.
   the contract and an all-enabled default set, not fallback providers.
 - **Tests:** provider contract tests lock duplicate/nested-prefix rejection,
   immediate model visibility, the exact default plugin set, zero-provider
-  startup failure, all 33 model/vendor mappings, archive/plugin price
+  startup failure, all 34 model/vendor mappings, archive/plugin price
   equivalence, stop-vocabulary ownership, and gateway model views.
 
 ## Alternatives rejected

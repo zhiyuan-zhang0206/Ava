@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "catalog_version": "2026-09-05.1",
+  "catalog_version": "2026-09-06.1",
   "currency": "USD",
   "unit_tokens": 1000000,
   "models": {
@@ -654,6 +654,29 @@
                 "input": "2.0",
                 "cache_read": "0.20",
                 "output": "12.0"
+              },
+              "utc_daily_overrides": []
+            }
+          ]
+        }
+      ]
+    },
+    "gpt-6-astra": {
+      "vendor": "openai",
+      "source_url": "https://developers.openai.com/api/docs/models/gpt-6-astra",
+      "source_checked_at": "2026-09-06",
+      "periods": [
+        {
+          "effective_from": null,
+          "effective_until": null,
+          "tiers": [
+            {
+              "input_tokens_min": 0,
+              "input_tokens_max": null,
+              "rates": {
+                "input": "10.0",
+                "cache_read": "1.0",
+                "output": "50.0"
               },
               "utc_daily_overrides": []
             }
