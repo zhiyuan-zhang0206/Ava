@@ -171,11 +171,10 @@ register(
             source_url="https://developers.openai.com/api/docs/models/gpt-6-astra",
             source_checked_at="2026-09-06",
             vendor="openai",
-            # Cache writes bill 1.25x uncached input ($12.50/M) and prompts
-            # >272K input tokens bill 2x input+cache / 1.5x output for the
-            # full request; both stay notes rather than tiers, matching the
-            # flat single-tier convention of the gpt-5.6 entries (which carry
-            # the same >272K rule unmodeled).
+            # Cache writes bill 1.25x uncached input ($12.50/M) — no cache-write
+            # field exists, so that rate stays a note. The >272K input rule IS
+            # modeled: 2x input and cache rates, 1.5x output, full request
+            # (official model page).
             periods=(
                 PricePeriod(
                     effective_from=None,
@@ -183,10 +182,17 @@ register(
                     tiers=(
                         PriceTier(
                             input_tokens_min=0,
-                            input_tokens_max=None,
+                            input_tokens_max=272_000,
                             cache_miss="10.0",
                             cache_hit="1.0",
                             output="50.0",
+                        ),
+                        PriceTier(
+                            input_tokens_min=272_001,
+                            input_tokens_max=None,
+                            cache_miss="20.0",
+                            cache_hit="2.0",
+                            output="75.0",
                         ),
                     ),
                 ),
@@ -195,8 +201,9 @@ register(
         "gpt-5.6-sol": PriceRates(
             # Promotional pricing, valid at least through 2026-11-21 (official
             # model page, checked 2026-09-06). On promo expiry, restore the
-            # standard rates 5.0 / 0.5 / 30.0 here AND in
-            # shared/lm/pricing_catalog_archive.json — a deliberate manual
+            # standard rates — tier1 5.0 / 0.5 / 30.0, tier2 (>272K input)
+            # 10.0 / 1.0 / 45.0 — here AND in
+            # shared/lm/pricing_catalog_archive.json; a deliberate manual
             # flip, not an automatic revert (405 ruling 2026-09-07).
             cache_miss=4.0,
             cache_hit=0.4,
@@ -211,10 +218,17 @@ register(
                     tiers=(
                         PriceTier(
                             input_tokens_min=0,
-                            input_tokens_max=None,
+                            input_tokens_max=272_000,
                             cache_miss="4.0",
                             cache_hit="0.4",
                             output="20.0",
+                        ),
+                        PriceTier(
+                            input_tokens_min=272_001,
+                            input_tokens_max=None,
+                            cache_miss="8.0",
+                            cache_hit="0.8",
+                            output="30.0",
                         ),
                     ),
                 ),
@@ -234,10 +248,17 @@ register(
                     tiers=(
                         PriceTier(
                             input_tokens_min=0,
-                            input_tokens_max=None,
+                            input_tokens_max=272_000,
                             cache_miss="2.0",
                             cache_hit="0.20",
                             output="12.0",
+                        ),
+                        PriceTier(
+                            input_tokens_min=272_001,
+                            input_tokens_max=None,
+                            cache_miss="4.0",
+                            cache_hit="0.40",
+                            output="18.0",
                         ),
                     ),
                 ),
@@ -257,16 +278,25 @@ register(
                     tiers=(
                         PriceTier(
                             input_tokens_min=0,
-                            input_tokens_max=None,
+                            input_tokens_max=272_000,
                             cache_miss="0.20",
                             cache_hit="0.02",
                             output="1.20",
+                        ),
+                        PriceTier(
+                            input_tokens_min=272_001,
+                            input_tokens_max=None,
+                            cache_miss="0.40",
+                            cache_hit="0.04",
+                            output="1.80",
                         ),
                     ),
                 ),
             ),
         ),
         "gpt-5.5": PriceRates(
+            # >272K input: 2x input and cache, 1.5x output for the full
+            # session (official model page).
             cache_miss=5.0,
             cache_hit=0.5,
             output=30.0,
@@ -280,10 +310,17 @@ register(
                     tiers=(
                         PriceTier(
                             input_tokens_min=0,
-                            input_tokens_max=None,
+                            input_tokens_max=272_000,
                             cache_miss="5.0",
                             cache_hit="0.5",
                             output="30.0",
+                        ),
+                        PriceTier(
+                            input_tokens_min=272_001,
+                            input_tokens_max=None,
+                            cache_miss="10.0",
+                            cache_hit="1.0",
+                            output="45.0",
                         ),
                     ),
                 ),
