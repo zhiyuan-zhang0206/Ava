@@ -396,6 +396,7 @@ describe("DesktopSidebar collapse/expand", () => {
     for (const dividerClass of BAR_DIVIDER_CLASS.split(" ")) {
       expect(header?.className).toContain(dividerClass);
     }
+    expect(header?.classList.contains("relative")).toBe(true);
     expect(header?.className).not.toContain("border-b");
   });
 

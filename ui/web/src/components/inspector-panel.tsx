@@ -213,7 +213,7 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
 
   const body = (
     <>
-      <header className={cn("items-center gap-2 px-4", BAR_DIVIDER_CLASS, BAR_HEIGHT_CLASS, FLEX)}>
+      <header className={cn("relative items-center gap-2 px-4", BAR_DIVIDER_CLASS, BAR_HEIGHT_CLASS, FLEX)}>
         <button
           type="button"
           onClick={toggle}

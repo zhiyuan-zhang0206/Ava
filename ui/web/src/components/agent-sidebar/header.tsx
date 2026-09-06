@@ -144,7 +144,7 @@ export function SidebarHeader({
   return (
     <header
       className={cn(
-        "items-center justify-between px-3 py-2",
+        "relative items-center justify-between px-3 py-2",
         BAR_DIVIDER_CLASS,
         BAR_HEIGHT_CLASS,
         FLEX

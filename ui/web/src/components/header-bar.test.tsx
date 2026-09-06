@@ -29,12 +29,13 @@ describe("HeaderBar", () => {
     // full-bleed timeline surface (absolute + backdrop blur), not a sticky
     // row in the content column.
     const { container } = render(<HeaderBar label="x" onOpenSidebar={vi.fn()} />);
-    const header = container.querySelector("header");
-    expect(header?.className).toContain("absolute");
-    expect(header?.className).toContain("top-0");
-    expect(header?.className).toContain("z-20");
-    expect(header?.className).toContain("bg-background/80");
-    expect(header?.className).toContain("backdrop-blur-md");
+    const header = container.firstChild as HTMLElement;
+    expect([...header.classList]).toContain("absolute");
+    expect([...header.classList]).not.toContain("relative");
+    expect(header.className).toContain("top-0");
+    expect(header.className).toContain("z-20");
+    expect(header.className).toContain("bg-background/80");
+    expect(header.className).toContain("backdrop-blur-md");
   });
 
   it("puts the shared title height and inset divider on the outer header", () => {

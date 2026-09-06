@@ -32,9 +32,11 @@ export const BAR_HEIGHT_CLASS = "h-11";
 
 // Each home column owns a separate title divider. Insetting its endpoints
 // prevents the Agent Tree, Timeline, and Inspector rules from reading as one
-// page-wide line while preserving their shared vertical position.
+// page-wide line while preserving their shared vertical position. Consumers
+// supply their own positioning context because the Timeline header is absolute
+// while the Agent Tree and Inspector headers are relative.
 export const BAR_DIVIDER_CLASS =
-  "relative after:pointer-events-none after:absolute after:inset-x-1 after:bottom-0 after:h-px after:bg-border";
+  "after:pointer-events-none after:absolute after:inset-x-1 after:bottom-0 after:h-px after:bg-border";
 
 // Top padding that clears the floating HeaderBar for content scrolling
 // beneath it (timeline content column, user ruling 2026-08-06). 56px =

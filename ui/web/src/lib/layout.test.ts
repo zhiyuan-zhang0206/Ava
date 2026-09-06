@@ -26,6 +26,13 @@ describe("home title bars", () => {
     expect(BAR_DIVIDER_CLASS).toContain("after:inset-x-1");
     expect(BAR_DIVIDER_CLASS).toContain("after:h-px");
   });
+
+  it("leaves each title bar in control of its own positioning context", () => {
+    const dividerClasses = BAR_DIVIDER_CLASS.split(" ");
+    for (const positionClass of ["static", "fixed", "absolute", "relative", "sticky"]) {
+      expect(dividerClasses).not.toContain(positionClass);
+    }
+  });
 });
 
 describe("LAYOUT_INVARIANTS", () => {
