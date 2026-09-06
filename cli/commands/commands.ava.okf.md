@@ -17,7 +17,7 @@ subcommand builders and `_h_*` handlers); `cli/main.py` composes it and
 dispatches via `set_defaults(func=)` to the module's `cmd_*` handler — there is
 no registry or plugin mechanism, the wiring is the parser.
 
-Two kinds of module live here, distinguished by filename:
+Most command modules follow these two naming groups:
 
 - **public** (`start.py`, `stop.py`, `status.py`, `logs.py`, `update.py`,
   `cluster.py`, `agents.py`, `config.py`, `plugins.py`, `skill.py`, `mcp.py`, `pitr.py`,
@@ -41,6 +41,12 @@ Two kinds of module live here, distinguished by filename:
   `_pkg_source`, `_pgbouncer`, `_lgtm`,
   `_claude_code_plugin`, `_cluster_health` /
   `_cluster_rollback` / `_cluster_cron` / `_cluster_watchdog_probe`.
+
+`cli/parsers/maintenance.py` dispatches the explicit local maintenance verbs to
+`_maintenance.py`; `_maintenance_probe`, `_maintenance_stop` and
+`_maintenance_data_plane` own the capability/progress and strict process checks.
+They reuse the [durable maintenance journal](../../shared/maintenance.ava.okf.md).
+See [the coordinated operator procedure](../../conventions/graceful-maintenance.md).
 
 `cli/commands/migrations.py:cmd_migrations_apply` is deliberately not a user-facing verb —
 it runs as a step of `ava start` / `ava update`, so any restart crossing a

@@ -509,6 +509,9 @@ def cmd_stop(
     --stop-browser` flips it to also take the browser down.
     """
 
+    from shared import maintenance
+
+    maintenance.require_released("force stop")
     repo = _repo_root()
     print(f"[ava stop] cwd = {repo}")
     return _do_stop(

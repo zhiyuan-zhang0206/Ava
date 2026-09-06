@@ -235,10 +235,17 @@ def graceful_signal(name: str, *, expected: SessionRecord | None = None) -> bool
     if proc is None:
         return False
     with contextlib.suppress(*_GONE):
-        if expected is not None and (
-            proc.create_time() != expected.create_time or _read_record(name) != expected
-        ):
-            return False
+        if expected is not None:
+            if _read_record(name) != expected:
+                return False
+            if expected.starttime is not None:
+                # WSL btime can move the epoch birth of this same process. The
+                # recorded /proc ticks are authoritative, including this final
+                # check; unavailable or changed ticks must still refuse delivery.
+                if expected.identifies(proc.pid) is not True:
+                    return False
+            elif proc.create_time() != expected.create_time:
+                return False
         # Signal only this captured process object, never resolve the name a
         # second time into a replacement target. psutil also guards PID reuse.
         proc.terminate()  # SIGTERM to the agent only; its finally closes its children

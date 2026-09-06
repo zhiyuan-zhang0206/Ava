@@ -151,6 +151,7 @@ from agent.startup import (
     _repair_dangling_tool_use_at_startup,
 )
 from agent.state import BaseAgentState
+from services.agent_host import maintenance as maintenance_receipts
 from services.agent_host.dispatcher import PendingInboundWake
 from services.agent_host.runtime import (
     HostStats,
@@ -160,6 +161,7 @@ from services.agent_host.runtime import (
     _StoredConfig,
 )
 from services.agent_host.stall_guard import run_invocation_with_stall_guard
+from shared import maintenance
 from shared.config import settings
 from shared.config.turn_view import bind_agent_config, resolve_agent_config_pins
 from shared.context import AvaContext
@@ -171,7 +173,7 @@ from shared.log import logger
 from shared.machine import machine_name
 from shared.plugin_config_view import bind_agent_plugin_config, resolve_agent_plugin_pins
 from shared.redis_client import get_async_redis
-from shared.runtime_incarnation import current_incarnation
+from shared.runtime_incarnation import RuntimeIncarnation, current_incarnation
 from shared.trace import turn_span
 from shared.turn_identity import bind_turn_identity
 
@@ -239,6 +241,7 @@ class AgentHost:
         # — it would just throw the work away and make that agent's NEXT turn
         # pay a cold build, which is the opposite of what a cache is for.
         self._in_flight: set[int] = set()
+        self._maintenance_failed: dict[int, tuple[str | None, datetime | None]] = {}
         self._turn_slots = asyncio.Semaphore(settings.daemon.host_max_concurrent_turns)
         self.stats = HostStats()
 
@@ -269,6 +272,9 @@ class AgentHost:
                 except asyncio.CancelledError:
                     cancelled = True
             work.result()
+        except BaseException as exc:
+            await maintenance_receipts.record_failure(agent_id, exc, self._maintenance_failed)
+            raise
         finally:
             _active_turn_config_fingerprint.set(turn_context.get(_active_turn_config_fingerprint))
             from shared.hosted_force import original_host_force
@@ -307,6 +313,7 @@ class AgentHost:
             settlement.result()
         if cancelled:
             raise asyncio.CancelledError
+        await maintenance_receipts.record_drained(self._control_pool, self._owner, agent_id)
 
     async def accepts_force(self, agent_id: int, command_id: int) -> bool:
         """Authenticate cancellation against this live host's actual boot owner."""
@@ -330,6 +337,11 @@ class AgentHost:
             self.stats.wakes_skipped += 1
             return
         _active_turn_config_fingerprint.set(stored.fingerprint)
+
+        if await maintenance_receipts.run_held(
+            agent_id, stored.status, self._maintenance_failed, self._run_held_controls
+        ):
+            return
 
         # An active external lease owns decisions; no native graph or plugin
         # initialization may start on a dispatcher wake or a host restart.
@@ -390,6 +402,12 @@ class AgentHost:
                     status=stored.status,
                 )
                 return
+            if maintenance.held():
+                # Admission may have waited for prepare's real row lock.
+                # Its only permitted continuation now is the owned control;
+                # do not build a new runtime or run initialization hooks.
+                await self._apply_held_controls(agent_id, incarnation)
+                return
             exited = False
             # Admission is durable before its optional live announce; every await
             # after that commit stays inside the settlement boundary so a
@@ -429,13 +447,17 @@ class AgentHost:
 
     async def _run_held_controls(self, agent_id: int, status: str) -> None:
         """Maintain ownership and apply admin intent without touching the graph."""
-        from agent.db import claim_inbound_batch
 
         incarnation = await admit_hosted_runtime(
             self._control_pool, agent_id, self._machine, self._owner, expected_from=status
         )
         if incarnation is None:
             return
+        await self._apply_held_controls(agent_id, incarnation)
+
+    async def _apply_held_controls(self, agent_id: int, incarnation: RuntimeIncarnation) -> None:
+        from agent.db import claim_inbound_batch
+
         with bind_turn_identity(agent_id, incarnation=incarnation):
             batch = await claim_inbound_batch(self._control_pool, agent_id, lifecycle_only=True)
             if len(batch) > 1 or any(not item.durable_lifecycle for item in batch):
@@ -600,16 +622,15 @@ class AgentHost:
         return None if row is None else row[0]
 
     async def pending_inbound_wakes(self, stale_after_s: float) -> list[PendingInboundWake]:
-        """Return local runnable agents with pending work for the dispatcher scan.
+        """Find pending work and lifecycle pointers missed by Redis wakes.
 
-        Every pending row gets a wake: this is the durable replacement for a
-        lost Redis pub/sub notification. ``stale`` is intentionally stricter:
-        both the pending row and the completed-turn activity clock must exceed
-        the running-turn grace (the same grace process mode's wedged
-        controller applies to running turns), so a newly-arrived message does
-        not cancel a legitimate long-running hosted turn merely because its
-        previous LLM step was old.
+        Stale cancellation requires both pending-message age and completed-turn
+        age to exceed the grace period. Held maintenance only wakes its restart
+        cohort, preserving the current iteration until its ordinary claim.
         """
+        held_wakes = maintenance_receipts.pending_wakes(self._maintenance_failed)
+        if held_wakes is not None:
+            return held_wakes
         async with self._control_pool.connection() as conn:
             rows = await (
                 await conn.execute(
@@ -710,34 +731,12 @@ class AgentHost:
             await event_publisher.aclose()
 
     async def _invoke_until_done(self, agent_id: int, ctx: AvaContext) -> bool:
-        """Invoke the graph until this agent has nothing left to do.
+        """Run until a durable lifecycle command or idle state ends this turn.
 
-        Four-way, and the four cases are genuinely different:
-
-        - `exit_requested` — claim resolved a terminate / restart, or lost a
-          lifecycle CAS. Terminal for this agent: stop, tell the gateway, and
-          drop the cached runtime. The notify is the same HTTP hop a process
-          makes on the way out, and it is guarded server-side, so a restart
-          (which already flipped the row to `restarting`) is left alone while a
-          terminate is finalized.
-        - `restart_requested` — claim resolved a restart and this run is
-          hosted: there is no process to exit and no restarter to pick up a
-          'restarting' row. Drop the cached runtime (the checkpointer thread,
-          the real state, is untouched — the next wake starts clean, exactly
-          like a fresh process), end the task, and do NOT notify the gateway:
-          the row must stay runnable.
-        - `turn_idle` — claim found nothing to claim and this run is hosted, so
-          there is no process to park. End the task; the dispatcher creates a
-          fresh one when a wake lands, and until then this agent costs nothing.
-        - neither — the turn boundary. Re-invoke on the SAME checkpointer
-          thread, so state carries across turns and the next invocation's claim
-          does the looking.
-
-        The input is the minimal flag reset, never a full `AgentState()`:
-        a default state would be an update resetting `halted`, the
-        compact/memory sub-states, and every plugin state field on each turn.
-        Each invocation gets its own root span, so one turn is one exported
-        trace.
+        Normal return flushes before applying lifecycle; restart retains its
+        successor pointer, termination returns terminal intent, idle releases
+        the task without manufacturing an inbound or model call.
+        Reset only transient flags; halted/message/plugin state survives cold admission.
         """
         tags = ["ava", f"agent-{agent_id}", "hosted"]
         metadata: dict[str, object] = {"agent_id": agent_id, "hosted": True}

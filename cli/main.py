@@ -312,7 +312,7 @@ _LITE_VERBS = frozenset(
 # absent — both REQUIRE `--path` and address a home by name, so they never act on the
 # current one; and why the read-only (`ls`, `status`) and probe-registration
 # subcommands are absent too.
-_ANCHORED_HOME_VERBS = frozenset({"stop", "restart", "converge", "logs"})
+_ANCHORED_HOME_VERBS = frozenset({"stop", "restart", "converge", "logs", "maintenance"})
 _ANCHORED_HOME_CLUSTER_SUBVERBS = frozenset(
     {"update", "restart", "rollback", "recover", "cancel", "ensure-db-role", "ensure-runner-role"}
 )
@@ -388,6 +388,12 @@ def main(argv: list[str] | None = None) -> int:
     # never inherit the opt-out.
     if args_in and args_in[0] in _LITE_VERBS:
         os.environ.setdefault("AVA_CONFIG_FETCH", "skip")
+    if args_in[:2] in (
+        ["maintenance", "status"],
+        ["maintenance", "stop"],
+        ["maintenance", "stop-data-plane"],
+    ):
+        os.environ.setdefault("AVA_CONFIG_FETCH", "skip")
 
     # Home gates — settings-free (cli.preflight), so an uninstalled/unanchored home
     # gets the actionable pointer instead of the generic Settings validation error the
@@ -401,7 +407,7 @@ def main(argv: list[str] | None = None) -> int:
     if args_in and not ({"-h", "--help"} & set(args_in)):
         verb = args_in[0]
         sub = args_in[1] if len(args_in) > 1 else ""
-        if verb == "start":
+        if verb == "start" or (verb == "maintenance" and sub == "start"):
             from cli.preflight import require_installed_home
 
             rc = require_installed_home()

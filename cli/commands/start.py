@@ -339,6 +339,9 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
     """
     # Dynamic namespace lookup preserves existing setup/converge/probe test seams.
     import cli.commands as _ns
+    from shared import maintenance
+
+    maintenance.require_start_allowed()
 
     # Receipt admission precedes every setup/converge/source-repair write.
     from cli.commands._release_candidate import admit_start_candidate
@@ -599,7 +602,8 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
     # browser/npx) so the first spawn after a fresh start is fast. Detached +
     # best-effort; never blocks or fails start. Called via `_ns` so the autouse
     # test guard (tests/conftest.py:_guard_agent_warmup) can no-op it.
-    _ns._launch_agent_warmup(roles, repo)
+    if not maintenance.held():
+        _ns._launch_agent_warmup(roles, repo)
 
     # 5) idempotent clear of the paused state — `ava start` means "I want to
     # serve"; when the gateway crashes between phase A and B leaving
@@ -610,7 +614,7 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
     # local start must never clear or reclassify that maintenance owner.
     from shared.host_deploy_state import set_posture
 
-    set_posture("converging" if rollout_child else "idle")
+    set_posture("paused" if maintenance.held() else "converging" if rollout_child else "idle")
 
     # 5.1) generation-scoped successful-finalize: a Phase-B `ava start`
     # resumes without a cluster/resume op, so the journaled generation must be

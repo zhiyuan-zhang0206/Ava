@@ -43,3 +43,10 @@ receivers ignore the new payload; a new receiver accepts an old tokenless
 resume only through the one-rollout inactive-journal bridge above. Full
 delayed-request protection begins after stop-side protocol adoption on every
 node and degrades when rolling back to an older target.
+
+
+An explicit [maintenance hold](maintenance.ava.okf.md) uses the same journal
+with a typed cohort/progress payload. It has no automatic expiry. Ordinary
+compensation, natural startup finalization, force-clear and a newer rollout
+cannot release or overwrite it; only the exact maintenance start/resume path
+can do so. This is distinct from a recoverable stranded rollout pause.

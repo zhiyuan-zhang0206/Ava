@@ -102,6 +102,7 @@ from ops.rpc_schemas import (
 )
 from services._pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 from services.agent_ops import health
+from services.agent_ops import maintenance as maintenance_activity
 from services.agent_ops._boot import (
     _open_db_pool,
     _ops_auth_token,
@@ -268,9 +269,11 @@ async def _run_arm(kind: str, payload: dict[str, Any]) -> tuple[str, dict[str, o
     active = (kind, time.monotonic())
     _active_ops[kind] = active
     try:
-        return await loop.run_in_executor(
+        future = loop.run_in_executor(
             _op_thread_pool(), functools.partial(_dispatch_sync, kind, payload)
         )
+        maintenance_activity.track_worker(future)
+        return await asyncio.shield(future)
     finally:
         if _active_ops.get(kind) == active:
             _active_ops.pop(kind)
@@ -641,19 +644,20 @@ async def _ops_route(body: bytes) -> tuple[int, bytes, str]:
         )
 
     async with sem:
-        try:
-            if envelope.idempotency_key is not None:
-                # Non-idempotent ops retried by the gateway carry a dedup key:
-                # first dispatch executes + stores, later same-key dispatches
-                # replay (see _dispatch_idempotent).
-                status, result = await _dispatch_idempotent(
-                    envelope.kind, envelope.payload, envelope.idempotency_key, _db_pool
-                )
-            else:
-                status, result = await _dispatch(envelope.kind, envelope.payload)
-        except Exception as exc:
-            _log.exception("dispatch crashed for kind=%s", envelope.kind)
-            status, result = "failed", {"error": f"{type(exc).__name__}: {exc}"}
+        with maintenance_activity.admission():
+            try:
+                if envelope.idempotency_key is not None:
+                    # Non-idempotent ops retried by the gateway carry a dedup key:
+                    # first dispatch executes + stores, later same-key dispatches
+                    # replay (see _dispatch_idempotent).
+                    status, result = await _dispatch_idempotent(
+                        envelope.kind, envelope.payload, envelope.idempotency_key, _db_pool
+                    )
+                else:
+                    status, result = await _dispatch(envelope.kind, envelope.payload)
+            except Exception as exc:
+                _log.exception("dispatch crashed for kind=%s", envelope.kind)
+                status, result = "failed", {"error": f"{type(exc).__name__}: {exc}"}
     # default=str is a last-resort fallback: op results should already be
     # JSON-native (Pydantic returns go through model_dump(mode="json")), but a
     # stray non-JSON value (datetime, Path, ...) in a hand-built dict must
@@ -708,9 +712,10 @@ async def _main() -> None:
             extra_routes={("POST", "/ops"): _ops_route},
             components=lambda: health.ops_components(_cluster_update_held_since, _active_ops),
             extra=lambda: {
+                "maintenance": maintenance_activity.progress(),
                 "saturation": health.saturation(
                     _active_ops, max(1, settings.services.ops_concurrency)
-                )
+                ),
             },
             auth_token=auth_token,
         )

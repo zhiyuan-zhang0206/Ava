@@ -7,6 +7,7 @@ from uuid import UUID, uuid4
 import psutil
 from psycopg_pool import AsyncConnectionPool
 
+from shared import maintenance
 from shared.audit_events import insert_event_log_async
 from shared.db_transaction import async_write_transaction
 from shared.deploy_timing import AGENT_LEASE_TTL_S
@@ -109,6 +110,19 @@ async def admit_hosted_runtime(
     """Keep this owner's logical incarnation across turns; reject live others."""
     from shared.exec_owner_recovery import recover_local_resources
 
+    if maintenance.held():
+        if maintenance.pending_command(agent_id) is None:
+            return None
+        async with pool.connection() as conn:
+            held_owner = await (
+                await conn.execute(
+                    "SELECT runtime_owner,runtime_kind FROM agents_meta WHERE id=%s",
+                    (agent_id,),
+                )
+            ).fetchone()
+        if held_owner != (owner, "hosted"):
+            return None
+
     await asyncio.to_thread(recover_local_resources, agent_id, machine)
     native = psutil.Process()
     from shared.exec_owner_recovery import process_ended
@@ -129,6 +143,13 @@ async def admit_hosted_runtime(
                 )
             ).fetchone()
             if previous is None:
+                _refuse_hosted_admission()
+            if maintenance.held() and (
+                maintenance.pending_command(agent_id) is None or previous[1:3] != (owner, "hosted")
+            ):
+                # A successor cannot certify that its predecessor flushed.
+                # A host crash during drain therefore retains the hold and
+                # requires explicit cancellation/recovery, never a fake ACK.
                 _refuse_hosted_admission()
             generation = (
                 previous[0]
