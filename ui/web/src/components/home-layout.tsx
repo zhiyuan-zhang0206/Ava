@@ -1,13 +1,13 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
 
 import {
   ResizableHandle,
   ResizablePanel,
   ResizablePanelGroup,
 } from "@/components/ui/resizable";
-import { FLEX, FLEX_1, MIN_H_0, MIN_W_0 } from "@/lib/layout";
+import { BAR_HEIGHT_PX, FLEX, FLEX_1, MIN_H_0, MIN_W_0 } from "@/lib/layout";
 import { cn } from "@/lib/utils";
 
 interface ColumnFrame {
@@ -34,6 +34,19 @@ const MOBILE_COLUMNS: ColumnFrame = {
 const INSPECTOR_AUTO_SAVE_ID = "ava.home.inspector.desktop";
 const INSPECTOR_OPEN_SIZES = [68, 32] as const;
 
+// The painted divider starts below the 44px shared title bar and the 40px
+// column-title row. Its 89px bottom gap ends at the composer's measured top
+// edge (y=750 in the 839px acceptance viewport). The handle itself remains
+// full-height; only its `after` paint segment uses these insets.
+const HOME_DIVIDER_COLUMN_TITLE_ROW_HEIGHT_PX = 40;
+const HOME_DIVIDER_BOTTOM_INSET_PX = 89;
+const HOME_DIVIDER_LINE_CLASS =
+  "after:top-[var(--home-divider-line-top)] after:bottom-[var(--home-divider-line-bottom)]";
+const HOME_DIVIDER_LINE_STYLE = {
+  "--home-divider-line-top": `${BAR_HEIGHT_PX + HOME_DIVIDER_COLUMN_TITLE_ROW_HEIGHT_PX}px`,
+  "--home-divider-line-bottom": `${HOME_DIVIDER_BOTTOM_INSET_PX}px`,
+} as CSSProperties;
+
 interface Props {
   isNarrow: boolean;
   isLarge: boolean;
@@ -41,6 +54,10 @@ interface Props {
   sidebar: ReactNode;
   main: ReactNode;
   inspector: ReactNode;
+}
+
+function HomeDividerHandle() {
+  return <ResizableHandle className={HOME_DIVIDER_LINE_CLASS} style={HOME_DIVIDER_LINE_STYLE} />;
 }
 
 function DesktopMain({ main, inspector }: Pick<Props, "main" | "inspector">) {
@@ -65,7 +82,7 @@ function DesktopMain({ main, inspector }: Pick<Props, "main" | "inspector">) {
       </ResizablePanel>
       {inspectorVisible ? (
         <>
-          <ResizableHandle />
+          <HomeDividerHandle />
           <ResizablePanel
             defaultSize={INSPECTOR_OPEN_SIZES[1]}
             minSize={25}
@@ -172,7 +189,7 @@ export function HomeLayout({
         >
           {sidebar}
         </ResizablePanel>
-        <ResizableHandle />
+        <HomeDividerHandle />
         <ResizablePanel
           defaultSize={frame.expanded[1]}
           minSize={frame.expandedMinimums[1]}

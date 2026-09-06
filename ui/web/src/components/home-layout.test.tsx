@@ -1,4 +1,4 @@
-import { useEffect, type ReactNode } from "react";
+import { useEffect, type CSSProperties, type ReactNode } from "react";
 import { renderToString } from "react-dom/server";
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -48,7 +48,13 @@ vi.mock("@/components/ui/resizable", () => ({
       {children}
     </div>
   ),
-  ResizableHandle: () => <div data-slot="resizable-handle" />,
+  ResizableHandle: ({
+    className,
+    style,
+  }: {
+    className?: string;
+    style?: CSSProperties;
+  }) => <div data-slot="resizable-handle" className={className} style={style} />,
 }));
 
 import { HomeLayout } from "./home-layout";
@@ -133,6 +139,35 @@ describe("HomeLayout autosave-safe responsive frames", () => {
     expect(directPanelDefaults(groups[0]).reduce((sum, size) => sum + size, 0)).toBe(100);
     expect(directPanelDefaults(groups[1])).toEqual([68, 32]);
     expect(directPanelDefaults(groups[1]).reduce((sum, size) => sum + size, 0)).toBe(100);
+  });
+
+  it("insets both desktop divider lines across the same header-to-composer segment", () => {
+    render(
+      <HomeLayout
+        {...panes()}
+        isNarrow={false}
+        isLarge
+        sidebarCollapsed={false}
+      />,
+    );
+
+    const handles = Array.from(
+      document.querySelectorAll<HTMLElement>('[data-slot="resizable-handle"]'),
+    );
+    expect(handles).toHaveLength(2);
+    expect(handles.map((handle) => handle.className)).toEqual([
+      "after:top-[var(--home-divider-line-top)] after:bottom-[var(--home-divider-line-bottom)]",
+      "after:top-[var(--home-divider-line-top)] after:bottom-[var(--home-divider-line-bottom)]",
+    ]);
+    expect(
+      handles.map((handle) => ({
+        top: handle.style.getPropertyValue("--home-divider-line-top"),
+        bottom: handle.style.getPropertyValue("--home-divider-line-bottom"),
+      })),
+    ).toEqual([
+      { top: "84px", bottom: "89px" },
+      { top: "84px", bottom: "89px" },
+    ]);
   });
 
   it("collapsed desktop frame is static and cannot write panel layout storage", () => {

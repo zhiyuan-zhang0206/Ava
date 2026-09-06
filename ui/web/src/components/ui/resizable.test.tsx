@@ -17,10 +17,17 @@ describe("ResizableHandle", () => {
     const handle = container.querySelector<HTMLElement>('[data-slot="resizable-handle"]');
 
     expect(handle).not.toBeNull();
-    expect(handle!.className).toContain("w-px");
-    expect(handle!.className).toContain("z-10");
-    expect(handle!.className).toContain("before:w-2");
-    expect(handle!.className).toContain("after:w-px");
-    expect(handle!.className).not.toContain("after:w-1");
+    const classes = handle!.className.split(" ");
+    expect(classes).toContain("w-px");
+    expect(classes).toContain("z-10");
+    expect(classes).toContain("bg-transparent");
+    expect(classes).not.toContain("bg-border");
+    expect(classes).toContain("before:inset-y-0");
+    expect(classes).toContain("before:w-2");
+    expect(classes).toContain("after:top-0");
+    expect(classes).toContain("after:bottom-0");
+    expect(classes).toContain("after:w-px");
+    expect(classes).toContain("after:bg-border");
+    expect(classes).not.toContain("after:w-1");
   });
 });
