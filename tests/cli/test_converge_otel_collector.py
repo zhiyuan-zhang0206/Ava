@@ -278,6 +278,63 @@ def test_gateway_config_trace_mirror_rotation_policy(
     assert rotation["max_days"] == 3  # from trace_retention_days default
 
 
+@pytest.mark.parametrize(
+    "roles",
+    [
+        pytest.param(frozenset({"gateway"}), id="gateway"),
+        pytest.param(frozenset({"agent-runner"}), id="runner"),
+    ],
+)
+def test_gateway_and_runner_exporters_drop_newest_after_bounded_retry(
+    monkeypatch: pytest.MonkeyPatch,
+    roles: frozenset[str],
+) -> None:
+    """Every collector-to-downstream hop fails fast when its queue is full.
+
+    Persistent trace/log queues retain their stable IDs and bounded capacity,
+    but never block an OTLP receiver waiting for queue space or downstream
+    completion. Each send attempt and the whole retry sequence are bounded;
+    retry exhaustion drops the batch through the collector's counted failure
+    path. Metrics keep their existing 15-minute retry policy in memory.
+    """
+    cfg = _render_real_template(monkeypatch, roles)
+    exporters = cfg["exporters"]
+
+    for exporter_id in ("otlphttp/tempo", "otlphttp/loki"):
+        exporter = exporters[exporter_id]
+        assert exporter["timeout"] == "5s"
+        assert exporter["sending_queue"] == {
+            "enabled": True,
+            "queue_size": 5000,
+            "storage": "file_storage",
+            "block_on_overflow": False,
+            "wait_for_result": False,
+        }
+        assert exporter["retry_on_failure"] == {
+            "enabled": True,
+            "initial_interval": "5s",
+            "max_interval": "30s",
+            "max_elapsed_time": "15m",
+        }
+
+    metrics_exporter = exporters["otlphttp/prometheus"]
+    assert metrics_exporter["timeout"] == "5s"
+    assert metrics_exporter["sending_queue"] == {
+        "enabled": True,
+        "queue_size": 1000,
+        "block_on_overflow": False,
+        "wait_for_result": False,
+    }
+    assert metrics_exporter["retry_on_failure"]["max_elapsed_time"] == "15m"
+
+    # Remote backpressure never removes the local durable trace sink.
+    assert "file/traces" in exporters
+    assert cfg["service"]["pipelines"]["traces"]["exporters"] == [
+        "otlphttp/tempo",
+        "file/traces",
+    ]
+
+
 def test_gateway_config_scrapes_this_clusters_own_data_plane(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -41,6 +41,7 @@ from string import Template
 from urllib.parse import unquote, urlsplit
 
 from cli.commands._converge_spec import ConvergeCtx
+from cli.commands._otel_collector_exporters import BACKEND_EXPORTERS, RELAY_EXPORTERS
 from cli.commands._rendered_file import write_rendered_guarded
 from shared.machine import MachineRoles
 from shared.observability import collector_allowed_for_home
@@ -378,100 +379,6 @@ def _remote_receiver_fragments(roles: MachineRoles | None) -> dict[str, str]:
     }
 
 
-_BACKEND_EXPORTERS = """
-  otlphttp/tempo:
-    endpoint: {tempo_endpoint}
-    tls:
-      insecure: true
-    sending_queue:
-      enabled: true
-      queue_size: 5000
-      storage: file_storage
-    retry_on_failure:
-      enabled: true
-      initial_interval: 5s
-      max_interval: 30s
-      max_elapsed_time: 0s
-  otlphttp/loki:
-    endpoint: {loki_base}
-    tls:
-      insecure: true
-    sending_queue:
-      enabled: true
-      queue_size: 5000
-      storage: file_storage
-    retry_on_failure:
-      enabled: true
-      initial_interval: 5s
-      max_interval: 30s
-      max_elapsed_time: 0s
-  otlphttp/prometheus:
-    endpoint: {prom_base}
-    tls:
-      insecure: true
-    sending_queue:
-      enabled: true
-      queue_size: 1000
-    retry_on_failure:
-      enabled: true
-      initial_interval: 5s
-      max_interval: 30s
-      max_elapsed_time: 15m
-"""
-
-
-_RELAY_EXPORTERS = """
-  # Keep all three component IDs stable across the direct-backend -> relay
-  # cutover. In particular, file_storage keys the Tempo/Loki persisted queues
-  # by exporter ID; renaming either would strand the backlog this repair drains.
-  # Prometheus stays stable too, while retaining its bounded in-memory policy.
-  otlphttp/tempo:
-    endpoint: {endpoint}
-    headers:
-      Authorization: {authorization}
-    tls:
-      insecure: true
-    sending_queue:
-      enabled: true
-      queue_size: 5000
-      storage: file_storage
-    retry_on_failure:
-      enabled: true
-      initial_interval: 5s
-      max_interval: 30s
-      max_elapsed_time: 0s
-  otlphttp/loki:
-    endpoint: {endpoint}
-    headers:
-      Authorization: {authorization}
-    tls:
-      insecure: true
-    sending_queue:
-      enabled: true
-      queue_size: 5000
-      storage: file_storage
-    retry_on_failure:
-      enabled: true
-      initial_interval: 5s
-      max_interval: 30s
-      max_elapsed_time: 0s
-  otlphttp/prometheus:
-    endpoint: {endpoint}
-    headers:
-      Authorization: {authorization}
-    tls:
-      insecure: true
-    sending_queue:
-      enabled: true
-      queue_size: 1000
-    retry_on_failure:
-      enabled: true
-      initial_interval: 5s
-      max_interval: 30s
-      max_elapsed_time: 15m
-"""
-
-
 def _otlp_exporters(roles: MachineRoles | None) -> str:
     """Role-specific fan-out with stable component/queue identities.
 
@@ -488,18 +395,18 @@ def _otlp_exporters(roles: MachineRoles | None) -> str:
     from shared.config import settings
 
     if roles == frozenset({"agent-runner"}):
-        return _RELAY_EXPORTERS.format(
+        return RELAY_EXPORTERS.format(
             endpoint=_yaml_quote(gateway_otel_ingress_endpoint()),
             authorization=_yaml_quote(_cluster_bearer()),
         )
     obs = settings.observability
     if obs.observability_url:
-        return _RELAY_EXPORTERS.format(
+        return RELAY_EXPORTERS.format(
             endpoint=_yaml_quote(station_otel_ingress_endpoint()),
             authorization=_yaml_quote(_cluster_bearer()),
         )
     loki_base, prom_base = _lgtm_fanout_bases()
-    return _BACKEND_EXPORTERS.format(
+    return BACKEND_EXPORTERS.format(
         tempo_endpoint=_yaml_quote(obs.telemetry_tempo_endpoint.rstrip("/")),
         loki_base=_yaml_quote(loki_base),
         prom_base=_yaml_quote(prom_base),
