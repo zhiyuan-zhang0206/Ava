@@ -11,6 +11,7 @@ from shared.observability import cluster_label
 # near-live without a per-batch network round-trip; the reader thread owns the
 # timing, the emitter never waits on it.
 _METRICS_INTERVAL_S = 15
+_OTLP_HTTP_TIMEOUT_S = 2.0
 
 # Histogram bucket boundaries for LLM-scale latencies (ms). The OTel defaults
 # top out at 10000 — every call slower than 10s fell into +Inf and clipped
@@ -175,14 +176,17 @@ def _build_providers(endpoint: str) -> tuple[Any, Any]:
 
     logs = LoggerProvider()
     log_exporter: Any = _EventDimensionResourceExporter(
-        OTLPLogExporter(endpoint=f"{endpoint}/v1/logs")
+        OTLPLogExporter(endpoint=f"{endpoint}/v1/logs", timeout=_OTLP_HTTP_TIMEOUT_S)
     )
-    logs.add_log_record_processor(BatchLogRecordProcessor(log_exporter))
+    logs.add_log_record_processor(
+        BatchLogRecordProcessor(log_exporter, export_timeout_millis=_OTLP_HTTP_TIMEOUT_S * 1000)
+    )
     metrics = MeterProvider(
         metric_readers=[
             PeriodicExportingMetricReader(
-                OTLPMetricExporter(endpoint=f"{endpoint}/v1/metrics"),
+                OTLPMetricExporter(endpoint=f"{endpoint}/v1/metrics", timeout=_OTLP_HTTP_TIMEOUT_S),
                 export_interval_millis=_METRICS_INTERVAL_S * 1000,
+                export_timeout_millis=_OTLP_HTTP_TIMEOUT_S * 1000,
             )
         ],
         resource=_metrics_resource(),

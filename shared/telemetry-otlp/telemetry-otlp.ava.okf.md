@@ -26,8 +26,9 @@ are specified in [[cluster-isolation.ava.okf.md|Telemetry cluster isolation]].
   off unless an operator supplies an explicit endpoint. Their request-file
   handshake is not an export authority.
 - `shared/trace.py` — spans → OTLP/HTTP (protobuf wire, content-stripped) to
-  the sidecar's `/v1/traces`; the sidecar's file exporter writes the mirror.
-  A missing sidecar reports once and starts one five-minute daemon retry loop.
+  the sidecar's `/v1/traces`; the sidecar's file exporter writes the OTLP/JSON
+  mirror. Producer timeout, circuit-breaker, shedding, and synchronous-flush
+  bounds live in [[export-backpressure.ava.okf.md|OTLP export backpressure]].
 - `ava trace ship` (`cli/commands/trace.py`) — recovery replay that bypasses
   the local sidecar (replaying through it would loop the mirror watermark).
   Gateway/single-box units dial loopback Tempo; pure runners dial the gateway
@@ -49,7 +50,7 @@ are specified in [[cluster-isolation.ava.okf.md|Telemetry cluster isolation]].
   per-process Resource, and latency-shaping Views — the full mapping contract
   is its own node: [[shared/telemetry-otlp/metrics-mapping.ava.okf.md]].
 - **Traces** — exported with the cluster Resource by `shared/trace.py` to the sidecar's `/v1/traces`
-  (OTLP/JSON, content-stripped before leaving the process); the sidecar's
+  (OTLP/HTTP protobuf, content-stripped before leaving the process); the sidecar's
   file exporter mirrors each batch to `$AVA_HOME/traces/spans.jsonl`
   (rotated `spans-<ISO>.jsonl`). Recovery replay is `ava trace ship`: it
   POSTs each mirror line as OTLP/HTTP protobuf to the role-correct recovery
@@ -62,15 +63,9 @@ are specified in [[cluster-isolation.ava.okf.md|Telemetry cluster isolation]].
   recording). Incremental (per-file byte-offset watermark
   `traces/.ship-watermark.json`) or windowed (`--since` / `--until`);
   ingestion is idempotent by span id. Tempo is the only target.
-- **Failure isolation** — OTLP never blocks or breaks the event drain after its
-  JSONL mirror write. The drain uses bounded `put_nowait` into a 2048-entry
-  queue (shed, counted) plus in-memory metric atomics; SDK threads own all
-  network I/O and retry/drop. Entry points suppress errors end to end. Failed
-  init retries every five minutes, emitting `otlp_backend_disabled` per failure
-  and `otlp_backend_recovered` on recovery. A dead collector cannot cost the
-  JSONL copy; status events land there when OTLP itself is unavailable. The
-  cached production-identity/home-role gate warns at most once per process when
-  an unmarked gateway declines the default exporter.
+- **Failure isolation** — the producer queue, network deadlines, trace circuit,
+  drop accounting, initialization retries, and exec-child flush ceilings are
+  specified in [[export-backpressure.ava.okf.md|OTLP export backpressure]].
 
 ## Read side
 
