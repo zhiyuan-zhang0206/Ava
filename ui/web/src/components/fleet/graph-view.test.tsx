@@ -20,7 +20,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { FleetGraph, FleetGraphEdge, FleetGraphNode } from "@/lib/types";
 import type { FleetGraphResult } from "@/lib/use-fleet-graph";
 
-import { resetMockSettings } from "@/test-support/user-settings-mock";
+import {
+  mockSetSettingCalls,
+  resetMockSettings,
+} from "@/test-support/user-settings-mock";
 
 import { GraphView } from "./graph-view";
 
@@ -172,7 +175,7 @@ describe("GraphView", () => {
     expect(screen.queryByLabelText("Zoom out")).toBeNull();
   });
 
-  it("explains status colors and activity-score sizing", () => {
+  it("explains status colors without an activity-score sizing legend", () => {
     useFleetGraph.mockReturnValue(ok(richGraph()));
     renderGraph(<GraphView selectedAgentId={null} onSelectAgent={vi.fn()} />);
 
@@ -180,7 +183,7 @@ describe("GraphView", () => {
     for (const label of ["Running", "Idling", "Terminated", "Offline"]) {
       expect(legend.textContent).toContain(label);
     }
-    expect(legend.textContent).toContain("size = activity score (24h window)");
+    expect(legend.textContent).not.toContain("size = activity score");
   });
 
   it("shows the hover card with full node identity even when zoom hides labels", async () => {
@@ -326,6 +329,75 @@ describe("GraphView", () => {
     expect(opacities).toHaveLength(2);
     expect(opacities[0]).toBeCloseTo(0.545);
     expect(opacities[1]).toBeCloseTo(0.85);
+  });
+
+  it("scales edge thickness by weight by default", async () => {
+    useFleetGraph.mockReturnValue(
+      ok({
+        nodes: [node(1), node(2), node(3)],
+        edges: [
+          edge(1, 2, "message", { weight: 1 }),
+          edge(1, 3, "message", { weight: 4 }),
+        ],
+      }),
+    );
+    const { container } = renderGraph(
+      <GraphView selectedAgentId={null} onSelectAgent={vi.fn()} />,
+    );
+    await waitFor(() => getNodeLabel(1), { timeout: 4000 });
+
+    const widths = Array.from(
+      container.querySelectorAll('svg[aria-label="Fleet relationship graph"] line'),
+      (line) => Number(line.getAttribute("stroke-width")),
+    ).sort((a, b) => a - b);
+    expect(widths[0]).toBeCloseTo(1.8);
+    expect(widths[1]).toBeCloseTo(3);
+  });
+
+  it("renders uniform base widths when edge-weight thickness is off", async () => {
+    resetMockSettings({ "display.graph_edge_weight": false });
+    useFleetGraph.mockReturnValue(
+      ok({
+        nodes: [node(1), node(2), node(3)],
+        edges: [
+          edge(1, 2, "message", { weight: 1 }),
+          edge(1, 3, "message", { weight: 4 }),
+        ],
+      }),
+    );
+    const { container } = renderGraph(
+      <GraphView selectedAgentId={null} onSelectAgent={vi.fn()} />,
+    );
+    await waitFor(() => getNodeLabel(1), { timeout: 4000 });
+
+    const widths = Array.from(
+      container.querySelectorAll('svg[aria-label="Fleet relationship graph"] line'),
+      (line) => Number(line.getAttribute("stroke-width")),
+    );
+    expect(widths).toEqual([0.6, 0.6]);
+  });
+
+  it("persists the edge-weight thickness toggle in user settings", async () => {
+    useFleetGraph.mockReturnValue(ok(richGraph()));
+    renderGraph(<GraphView selectedAgentId={null} onSelectAgent={vi.fn()} />);
+    fireEvent.click(screen.getByLabelText("Graph layout settings"));
+
+    const toggle = await screen.findByRole("switch", {
+      name: "Scale edge thickness by weight",
+    });
+    expect(toggle.getAttribute("aria-checked")).toBe("true");
+    fireEvent.click(toggle);
+    expect(mockSetSettingCalls()).toContainEqual({
+      key: "display.graph_edge_weight",
+      value: false,
+    });
+
+    fireEvent.click(screen.getByText("Reset all"));
+    expect(mockSetSettingCalls()).toContainEqual({
+      key: "display.graph_edge_weight",
+      value: true,
+    });
+    expect(toggle.getAttribute("aria-checked")).toBe("true");
   });
 
   it("drops terminated nodes and their edges before rendering (task #1104)", async () => {
@@ -484,7 +556,7 @@ describe("GraphView", () => {
 
   it("shows the hover card instantly on mouseenter and hides it on mouseleave", async () => {
     useFleetGraph.mockReturnValue(
-      ok({ nodes: [node(1, { label: "alpha", node_score: 12_345 })], edges: [] }),
+      ok({ nodes: [node(1, { label: "alpha", node_score: 12_345_678 })], edges: [] }),
     );
     const { container } = renderGraph(<GraphView selectedAgentId={null} onSelectAgent={vi.fn()} />);
     const label = await waitFor(() => getNodeLabel(1), { timeout: 4000 });
@@ -512,7 +584,7 @@ describe("GraphView", () => {
       expect(card.textContent).toContain("alpha");
       expect(card.textContent).toContain("Agent #1");
       expect(card.textContent).toContain("Running");
-      expect(card.textContent).toContain("Activity score: 12,345");
+      expect(card.textContent).toContain("Activity score: 12.35M");
 
       // Leaving the node dismisses the card.
       fireEvent.mouseLeave(group);
