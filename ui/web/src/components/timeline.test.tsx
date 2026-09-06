@@ -109,6 +109,7 @@ vi.mock("@/lib/use-user-settings", () => ({
 }));
 
 import { TimelineView } from "./timeline";
+import { streamingParseIntervalMs } from "./timeline/item";
 import { LIFECYCLE_TAGS, MEMORY_SOURCES, NOTE_SOURCES } from "./timeline/markers";
 
 afterEach(() => {
@@ -3873,5 +3874,24 @@ describe("touch drag vs streaming pin (#1016)", () => {
     viewportGeom(viewport, 1200, 600);
     fireRO();
     expect(viewport.scrollTop).toBe(1200); // pinned (real browser: 600)
+  });
+});
+
+describe("streamingParseIntervalMs (adaptive stream-parse window, user report 2026-09-06)", () => {
+  it("keeps the base 40ms window for short payloads", () => {
+    expect(streamingParseIntervalMs(0)).toBe(40);
+    expect(streamingParseIntervalMs(100)).toBe(40);
+    expect(streamingParseIntervalMs(2400)).toBe(40);
+  });
+  it("widens one SSE window per 2400 bytes", () => {
+    expect(streamingParseIntervalMs(2401)).toBe(80);
+    expect(streamingParseIntervalMs(4800)).toBe(80);
+    expect(streamingParseIntervalMs(4801)).toBe(120);
+    expect(streamingParseIntervalMs(20_000)).toBe(360);
+  });
+  it("caps at 1000ms — a 300-line block re-parses ~1x/s", () => {
+    expect(streamingParseIntervalMs(57_600)).toBe(960); // 24 steps × 40ms ≈ 1Hz
+    expect(streamingParseIntervalMs(60_000)).toBe(1000);
+    expect(streamingParseIntervalMs(200_000)).toBe(1000);
   });
 });
