@@ -293,12 +293,19 @@ def _spawn_impl(
     )
 
 
-def terminate(agent_id: int, *, force: bool = False) -> TerminateResult:
-    """Request termination. `force=True` interrupts work; an `enqueued` result
-    confirms acceptance, not that the agent or its active work has exited."""
+def terminate(
+    agent_id: int,
+    *,
+    message: str | None = None,
+    force: bool = False,
+) -> TerminateResult:
+    """End an agent after its current step. `message` is saved without another
+    response and is available if the agent is later revived. `force=True`
+    interrupts work; an `enqueued` result confirms acceptance, not exit."""
     agent_id = coerce_typed(agent_id, "agent_id", int)
+    message = coerce_str(message, "message", allow_none=True)
     force = coerce_typed(force, "force", bool)
-    return TerminateResult(_client.terminate(agent_id, force=force))
+    return TerminateResult(_client.terminate(agent_id, message=message, force=force))
 
 
 def restart(agent_id: int) -> RestartResult:

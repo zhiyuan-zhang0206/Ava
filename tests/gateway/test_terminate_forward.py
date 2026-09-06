@@ -65,6 +65,9 @@ class TestTerminateRouting:
         """machine == local + force=true → takes local force-kill path (kill-session + os.kill stub)."""
         import subprocess as _subprocess
 
+        from ops import runner_mode
+
+        monkeypatch.setattr(runner_mode, "is_hosted", lambda: False)
         monkeypatch.setattr(
             _subprocess,
             "run",
@@ -99,11 +102,15 @@ class TestTerminateRouting:
             agent_id = client.post("/api/agents", json={}).json()["id"]
             _set_agent_machine(db_conn, agent_id, "remote-mac")
             monkeypatch.setattr(lifecycle_module, "_forward_to_home_machine", _capture_forward)  # pyright: ignore[reportUnknownArgumentType]
-            resp = client.post(f"/api/agents/{agent_id}/terminate")
+            resp = client.post(
+                f"/api/agents/{agent_id}/terminate",
+                json={"message": "retain this note"},
+            )
         assert resp.status_code == 200
         assert resp.json() == {"status": "enqueued"}
         assert captured["agent_id"] == agent_id
         assert captured["path"] == f"/api/agents/{agent_id}/terminate"
+        assert captured["json_body"]["message"] == "retain this note"
 
     def test_remote_force_forwards(
         self,
