@@ -1136,7 +1136,7 @@ def test_redis_bridge_probe_reports_running_but_dead_listener(
     monkeypatch.setattr(
         bridge,
         "probe_redis_bridge",
-        lambda *_a: _redis_bridge(serving=False, detail="connection refused"),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda *_a: _redis_bridge(serving=False, detail="connection refused"),  # pyright: ignore[reportUnknownArgumentType]
     )
 
     failure = _cluster_health._redis_bridge_probe()

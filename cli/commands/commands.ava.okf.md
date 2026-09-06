@@ -84,10 +84,10 @@ schema change catches the DB up on its own.
   `_gateway_ready` uses the same audit when an off-box probe fails. See
   [[shared/shared.ava.okf.md|Shared Libraries]].
 - `_converge_redis_bridge` installs the repo-owned pure-stdlib relay into
-  `$AVA_HOME`, converges its macOS KeepAlive job, and exposes the authenticated
-  Redis PING used by `ava status` and the alert-only cluster health check. The
-  listener recreates its socket after an interface or descriptor failure; Redis
-  itself never widens beyond loopback.
+  `$AVA_HOME`, converges or retires its macOS KeepAlive job as the cluster shape
+  changes, and exposes the authenticated Redis PING used by `ava status` and the
+  alert-only cluster health check. The listener recreates its socket after an
+  interface or descriptor failure; Redis itself never widens beyond loopback.
 - The prod editable-install assertion and update write window are one lifecycle
   guard: [[editable-install-guard.ava.okf.md]]; the prod source checkout's
   integrity (periodic reset + probe detection) is its sibling guard:

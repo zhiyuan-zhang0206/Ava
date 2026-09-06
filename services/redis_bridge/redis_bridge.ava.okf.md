@@ -20,13 +20,19 @@ end because the bridge does not terminate or interpret RESP.
 prod gateway converge copies `services/redis_bridge/relay.py` to the stable home
 path, writes `com.ava.redis-bridge.plist`, and reloads the launchd job only when
 the source or desired job changes. A remote-managed data plane, a loopback-only
-machine identity, or a cluster without a bearer does not install a bridge.
+machine identity, or a cluster without a bearer does not need a bridge;
+converge boots out any stale job and removes its plist and installed source.
 
 The relay treats its listening socket as replaceable state. An `accept()` or
 bind failure closes the descriptor and enters capped retry; a restored network
 interface therefore creates a new listener without requiring a process restart.
 Each successful bind and each rebuild failure is timestamped in
 `$AVA_HOME/redis-bridge/relay.log`.
+
+Each connection has one pump in each direction. Completion of either pump
+shuts down and closes both relay sockets, interrupting a peer pump blocked on a
+backend that kept its read side open; the connection handler joins both threads
+before returning.
 
 `ava status` and the periodic cluster health probe authenticate and issue a
 real Redis `PING` through the private-network endpoint. The launchd-label check

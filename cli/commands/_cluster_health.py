@@ -453,7 +453,8 @@ def _redis_bridge_probe() -> str | None:
     if not status.required:
         return None
     if not status.serving:
-        return f"Redis bridge {status.endpoint} failed authenticated PING ({status.detail})"
+        endpoint = f" {status.endpoint}" if status.endpoint else ""
+        return f"Redis bridge{endpoint} failed authenticated PING ({status.detail})"
     if not status.supervised:
         return (
             f"Redis bridge {status.endpoint} serves PING but is unsupervised "

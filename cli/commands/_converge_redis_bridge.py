@@ -3,7 +3,8 @@
 Redis remains bound to loopback.  On a split gateway, this host-level launchd
 job accepts the cluster's authenticated private-network traffic and forwards it
 to the same port on ``127.0.0.1``.  Converge copies the pure-stdlib relay into a
-stable path under ``$AVA_HOME`` and owns the launchd plist that executes it.
+stable path under ``$AVA_HOME`` and owns both installing and retiring the
+launchd job that executes it.
 """
 
 from __future__ import annotations
@@ -47,6 +48,10 @@ class RedisBridgeStatus(NamedTuple):
     detail: str
 
 
+class _RedisBridgeUnconfiguredError(RuntimeError):
+    pass
+
+
 def _bridge_config(home: Path) -> RedisBridgeConfig | None:
     """Return this host's relay config, or None when no relay should exist."""
     if sys.platform != "darwin" or settings.data_plane.is_remote:
@@ -62,7 +67,7 @@ def _bridge_config(home: Path) -> RedisBridgeConfig | None:
         return None
     record = get_record(home)
     if record is None:
-        raise RuntimeError(f"no registry record for {home} — cannot configure Redis bridge")
+        raise _RedisBridgeUnconfiguredError(f"bridge unconfigured: no registry record for {home}")
     return RedisBridgeConfig(listen_host=listen_host, port=record_redis_port(record))
 
 
@@ -195,10 +200,29 @@ def _ensure_launchd(home: Path, repo: Path, config: RedisBridgeConfig) -> None:
     )
 
 
+def _retire_launchd_bridge(home: Path) -> None:
+    """Unload and remove stale bridge state after the relay becomes unnecessary."""
+    plist_path = _plist_path()
+    installed_path = _installed_path(home)
+    loaded = _job_loaded()
+    if not loaded and not plist_path.exists() and not installed_path.exists():
+        return
+    if loaded and not _bootout_and_wait():
+        raise RuntimeError(
+            f"Redis bridge LaunchAgent {_LABEL} remained loaded after "
+            f"{_BOOTOUT_TIMEOUT_S:.0f}s; retained {plist_path} for inspection"
+        )
+    plist_path.unlink(missing_ok=True)
+    installed_path.unlink(missing_ok=True)
+    logger.info("Retired unnecessary Redis bridge LaunchAgent and installed source")
+
+
 def ensure_redis_bridge(ctx: ConvergeCtx) -> None:
     """Install and supervise the bridge when this gateway has off-box Redis clients."""
     config = _bridge_config(ctx.ava_home)
     if config is None:
+        if sys.platform == "darwin":
+            _retire_launchd_bridge(ctx.ava_home)
         return
     _ensure_launchd(ctx.ava_home, ctx.repo, config)
 
@@ -208,7 +232,16 @@ def probe_redis_bridge(home: Path | None = None) -> RedisBridgeStatus:
     from shared.paths import ava_home
 
     target = (home or ava_home()).expanduser()
-    config = _bridge_config(target)
+    try:
+        config = _bridge_config(target)
+    except _RedisBridgeUnconfiguredError as exc:
+        return RedisBridgeStatus(
+            required=True,
+            endpoint="",
+            serving=False,
+            supervised=_job_loaded(),
+            detail=str(exc),
+        )
     if config is None:
         return RedisBridgeStatus(
             required=False,
@@ -258,7 +291,8 @@ def print_redis_bridge_status() -> None:
         print("  · not required (Redis has no local off-box ingress)")
         return
     mark = "✓" if status.serving else "✗"
-    print(f"  {mark} {status.endpoint} Redis PING: {status.detail}")
+    endpoint = f" {status.endpoint}" if status.endpoint else ""
+    print(f"  {mark}{endpoint} Redis PING: {status.detail}")
     if status.supervised:
         print(f"  ✓ supervised by launchd job {_LABEL}")
     else:

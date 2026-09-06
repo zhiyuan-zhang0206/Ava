@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import plistlib
+import socket
+import threading
 from pathlib import Path
 
 import pytest
@@ -38,6 +40,41 @@ class _RecoveredListener:
 
     def close(self) -> None:
         return
+
+
+def test_half_closed_client_reclaims_pumps_and_both_relay_sockets(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A client EOF must interrupt a backend that keeps its read side open."""
+    client, remote_client = socket.socketpair()
+    backend, remote_backend = socket.socketpair()
+    monkeypatch.setattr(relay.socket, "create_connection", lambda *_a, **_kw: backend)  # pyright: ignore[reportUnknownArgumentType]
+
+    handler = threading.Thread(
+        target=relay._handle,
+        args=(client, ("127.0.0.1", 12345), ("127.0.0.1", 6380)),
+        daemon=True,
+    )
+    handler.start()
+    remote_client.shutdown(socket.SHUT_WR)
+    handler.join(timeout=1.0)
+    reclaimed_without_backend_eof = not handler.is_alive()
+
+    if handler.is_alive():
+        # Release the deliberately blocked backend pump so a regression fails
+        # instead of leaving a hanging test process.
+        remote_backend.shutdown(socket.SHUT_WR)
+        handler.join(timeout=1.0)
+
+    client_closed = client.fileno() == -1
+    backend_closed = backend.fileno() == -1
+    remote_client.close()
+    remote_backend.close()
+
+    assert reclaimed_without_backend_eof
+    assert not handler.is_alive()
+    assert client_closed
+    assert backend_closed
 
 
 def test_relay_rebuilds_listener_after_accept_failure(
@@ -186,6 +223,66 @@ def test_unchanged_loaded_job_is_not_restarted(
     assert calls == [("print", f"gui/{bridge.os.getuid()}/{bridge._LABEL}")]
 
 
+def test_converge_retires_stale_bridge_when_it_is_no_longer_required(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home"
+    installed = home / "redis-bridge" / "relay.py"
+    installed.parent.mkdir(parents=True)
+    installed.write_text("# stale relay\n")
+    plist = tmp_path / "LaunchAgents" / "com.ava.redis-bridge.plist"
+    plist.parent.mkdir(parents=True)
+    plist.write_text("stale plist")
+    loaded = True
+    calls: list[tuple[str, ...]] = []
+
+    def _launchctl(*args: str) -> object:
+        nonlocal loaded
+        calls.append(args)
+        if args[0] == "bootout":
+            loaded = False
+        return type("Result", (), {"returncode": 0 if loaded else 1, "stderr": ""})()
+
+    def _not_required(_home: Path) -> None:
+        return None
+
+    monkeypatch.setattr(bridge.sys, "platform", "darwin")
+    monkeypatch.setattr(bridge, "_bridge_config", _not_required)
+    monkeypatch.setattr(bridge, "_plist_path", lambda: plist)
+    monkeypatch.setattr(bridge, "_launchctl", _launchctl)
+    ctx = ConvergeCtx(repo=tmp_path / "repo", ava_home=home, roles=None)
+
+    bridge.ensure_redis_bridge(ctx)
+
+    assert ("bootout", f"gui/{bridge.os.getuid()}/{bridge._LABEL}") in calls
+    assert not plist.exists()
+    assert not installed.exists()
+
+
+def test_retire_preserves_artifacts_when_launchd_job_does_not_exit(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home"
+    installed = home / "redis-bridge" / "relay.py"
+    installed.parent.mkdir(parents=True)
+    installed.write_text("# live relay\n")
+    plist = tmp_path / "LaunchAgents" / "com.ava.redis-bridge.plist"
+    plist.parent.mkdir(parents=True)
+    plist.write_text("live plist")
+
+    monkeypatch.setattr(bridge, "_plist_path", lambda: plist)
+    monkeypatch.setattr(bridge, "_job_loaded", lambda: True)
+    monkeypatch.setattr(bridge, "_bootout_and_wait", lambda: False)
+
+    with pytest.raises(RuntimeError, match="remained loaded"):
+        bridge._retire_launchd_bridge(home)
+
+    assert plist.exists()
+    assert installed.exists()
+
+
 def test_probe_uses_authenticated_redis_ping_through_bridge(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -248,7 +345,7 @@ def test_probe_does_not_accept_a_loaded_job_when_ping_fails(
         "redis_url",
         "redis://ava:secret@127.0.0.1:16380/0",
     )
-    monkeypatch.setattr("redis.Redis.from_url", lambda *_a, **_kw: _DeadClient())  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr("redis.Redis.from_url", lambda *_a, **_kw: _DeadClient())  # pyright: ignore[reportUnknownArgumentType]
 
     status = bridge.probe_redis_bridge(tmp_path)
 
@@ -256,6 +353,39 @@ def test_probe_does_not_accept_a_loaded_job_when_ping_fails(
     assert not status.serving
     assert status.supervised
     assert status.detail == "connection refused"
+
+
+def test_probe_reports_unconfigured_when_registry_record_is_missing(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(bridge.sys, "platform", "darwin")
+    monkeypatch.setattr(bridge.settings.data_plane, "cluster_secret", "cluster-secret")
+    monkeypatch.setattr(
+        bridge.settings.data_plane,
+        "db_url",
+        "postgresql://ava@127.0.0.1:6433/ava",
+    )
+    monkeypatch.setattr(
+        bridge.settings.data_plane,
+        "redis_url",
+        "redis://ava:secret@127.0.0.1:6380/0",
+    )
+
+    def _missing_record(_home: Path) -> None:
+        return None
+
+    monkeypatch.setattr("shared.machine.reachable_host", lambda: "10.64.0.7")
+    monkeypatch.setattr("shared.cluster.get_record", _missing_record)
+    monkeypatch.setattr(bridge, "_job_loaded", lambda: False)
+
+    status = bridge.probe_redis_bridge(tmp_path)
+
+    assert status.required
+    assert not status.serving
+    assert not status.supervised
+    assert status.endpoint == ""
+    assert status.detail == f"bridge unconfigured: no registry record for {tmp_path}"
 
 
 def test_bridge_step_is_gateway_prod_host_only() -> None:

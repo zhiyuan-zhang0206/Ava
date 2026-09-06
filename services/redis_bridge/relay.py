@@ -40,10 +40,17 @@ def _open_listener(address: tuple[str, int]) -> socket.socket:
     return listener
 
 
-def _pump(source: socket.socket, destination: socket.socket) -> None:
-    with suppress(OSError):
-        while data := source.recv(_BUFFER_SIZE):
-            destination.sendall(data)
+def _pump(
+    source: socket.socket,
+    destination: socket.socket,
+    stopped: threading.Event,
+) -> None:
+    try:
+        with suppress(OSError):
+            while data := source.recv(_BUFFER_SIZE):
+                destination.sendall(data)
+    finally:
+        stopped.set()
 
 
 def _handle(
@@ -59,17 +66,21 @@ def _handle(
         return
 
     _log(f"relay {peer[0]}:{peer[1]} <-> backend")
+    stopped = threading.Event()
     pumps = (
-        threading.Thread(target=_pump, args=(client, backend), daemon=True),
-        threading.Thread(target=_pump, args=(backend, client), daemon=True),
+        threading.Thread(target=_pump, args=(client, backend, stopped), daemon=True),
+        threading.Thread(target=_pump, args=(backend, client, stopped), daemon=True),
     )
     for pump in pumps:
         pump.start()
-    for pump in pumps:
-        pump.join()
+    stopped.wait()
     for connection in (client, backend):
         with suppress(OSError):
+            connection.shutdown(socket.SHUT_RDWR)
+        with suppress(OSError):
             connection.close()
+    for pump in pumps:
+        pump.join()
 
 
 def serve_forever(
