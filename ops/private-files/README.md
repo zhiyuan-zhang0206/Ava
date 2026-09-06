@@ -33,6 +33,24 @@ component is now dead code.
    lowercase SHA-256 digest, status, and useful audit notes.
 5. Run the verifier against the production checkout root.
 
+## Entry lifecycle
+
+Each entry has a `status`:
+
+- `active` — the file is a production dependency: the verifier requires the
+  disk copy to exist AND its SHA-256 to match the durable source. A missing or
+  tampered file fails verification — the lost-file guard.
+- `archived` — the file was migrated to a durable source and is kept for audit
+  (e.g. a now-dead component's residue). The verifier requires only the durable
+  source to exist and match; the disk copy may already be gone. Deleting an
+  archived residue therefore does not produce a permanent verification failure;
+  the entry keeps certifying that the source is intact.
+
+Unexpected statuses are refused loudly. When a file graduates from a live
+residue to dead code, flip its status to `archived` — then its removal from the
+checkout is an operator-approved change, and verification stays green
+afterwards.
+
 ## Verify
 
 Run manually from the repository:

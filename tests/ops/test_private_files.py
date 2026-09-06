@@ -8,6 +8,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 from ops.private_files import verify
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -150,3 +152,49 @@ def test_cli_exit_codes_and_json_output(tmp_path: Path) -> None:
 
     assert failed.returncode == 1
     assert failed.stdout == f"FAIL example {_RELATIVE_PATH.as_posix()}: file is missing\n"
+
+
+def test_verify_rejects_invalid_manifest(tmp_path: Path) -> None:
+    """A malformed manifest must be rejected loudly, not silently misread."""
+    root, _source_repo, manifest = _fixture(tmp_path)
+    manifest.write_text(json.dumps({"version": 2, "entries": []}), encoding="utf-8")
+    with pytest.raises(ValueError, match="unsupported private-files manifest version"):
+        verify(root, manifest)
+
+    manifest.write_text(json.dumps({"version": 1, "entries": {}}), encoding="utf-8")
+    with pytest.raises(TypeError, match="manifest entries must be a list"):
+        verify(root, manifest)
+
+
+def test_verify_rejects_path_escape(tmp_path: Path) -> None:
+    """An entry path that escapes the checked root must be refused."""
+    root, _source_repo, manifest = _fixture(tmp_path)
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    data["entries"][0]["path"] = "../../outside.txt"
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+    with pytest.raises(ValueError, match="path must be relative"):
+        verify(root, manifest)
+
+    data["entries"][0]["path"] = "/etc/evil.conf"
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+    with pytest.raises(ValueError, match="path must be relative"):
+        verify(root, manifest)
+
+
+def test_archived_entry_skips_disk_check(tmp_path: Path) -> None:
+    """archived = durable source is the contract; a deleted residue must not
+    fail verification forever, while active entries keep the missing-file guard."""
+    root, _source_repo, manifest = _fixture(tmp_path)
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    entry = data["entries"][0]
+    (root / _RELATIVE_PATH).unlink()
+    entry["status"] = "archived"
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+    outcomes = verify(root, manifest)
+    assert outcomes[0].ok is True
+
+    entry["status"] = "active"
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+    outcomes = verify(root, manifest)
+    assert outcomes[0].ok is False
+    assert outcomes[0].errors == ("file is missing",)

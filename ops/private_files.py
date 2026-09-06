@@ -129,23 +129,34 @@ def _git_source_errors(
 
 
 def verify(root: Path, manifest: Path) -> list[Outcome]:
-    """Verify checked files and their durable git sources without writing either."""
+    """Verify checked files and their durable git sources without writing either.
+
+    Lifecycle semantics: an ``active`` entry must exist on disk AND match its
+    durable git source — the missing-file guard. An ``archived`` entry's disk
+    copy may be gone (the residue was removed after its source was archived);
+    only the durable source must exist and match. This keeps an archived entry
+    verifiable forever, instead of failing the moment the residue is deleted.
+    """
     registry = _load_manifest(manifest)
     checked_root = root.expanduser()
     outcomes: list[Outcome] = []
     for entry in registry["entries"]:
+        status = entry.get("status", "active")
+        if status not in ("active", "archived"):
+            raise ValueError(f"unsupported private-files entry status: {status!r}")
         relative_path = _relative_path(entry["path"])
         expected_sha256 = entry["sha256"]
         errors: list[str] = []
-        checked_file = checked_root.joinpath(*relative_path.parts)
-        if not checked_file.is_file():
-            errors.append("file is missing")
-        else:
-            actual_sha256 = _file_sha256(checked_file)
-            if actual_sha256 != expected_sha256:
-                errors.append(
-                    f"file sha256 mismatch: expected {expected_sha256}, got {actual_sha256}"
-                )
+        if status == "active":
+            checked_file = checked_root.joinpath(*relative_path.parts)
+            if not checked_file.is_file():
+                errors.append("file is missing")
+            else:
+                actual_sha256 = _file_sha256(checked_file)
+                if actual_sha256 != expected_sha256:
+                    errors.append(
+                        f"file sha256 mismatch: expected {expected_sha256}, got {actual_sha256}"
+                    )
         errors.extend(_git_source_errors(entry["source"], relative_path, expected_sha256))
         outcomes.append(
             Outcome(
