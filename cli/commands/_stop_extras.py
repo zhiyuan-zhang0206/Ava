@@ -7,7 +7,7 @@ supervisor, which that loop never sees and a plain kill does not stick on
 (launchd KeepAlive respawns):
 
 - the fleet UI gate (`services.gate`): a launchd KeepAlive LaunchAgent on
-  macOS, a detached nohup process with a pidfile on other POSIX gateways;
+  macOS, a user-systemd unit on Linux, and a detached process on other POSIX systems;
 - the permissions-helper LaunchAgent (`com.ava.permissions-helper.<slug>`).
 
 These were observed surviving a "full" `ava stop` on the preview teardown
@@ -48,7 +48,21 @@ def stop_gate_service() -> None:
                 file=sys.stderr,
             )
         return
-    # Non-macOS POSIX gateways: a detached process with a pidfile. Verify the pid
+    if sys.platform == "linux":
+        from cli.commands._gate_systemd import stop, unit_path
+        from shared.machine import is_gateway
+
+        # A pure runner has no gate to supervise. A registration/pidfile still
+        # requires cleanup even if the current capability has changed.
+        if (
+            not unit_path(home).exists()
+            and not (home / "run/gate.pid").exists()
+            and not is_gateway()
+        ):
+            return
+        if stop(home):
+            print("  ✓ gate systemd user unit stopped")
+    # Legacy Linux and other POSIX gateways: a detached process with a pidfile. Verify the pid
     # is this checkout's gate daemon before signalling it — a recycled number
     # would otherwise take a SIGTERM and then a SIGKILL.
     #
