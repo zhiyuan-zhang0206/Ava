@@ -387,8 +387,24 @@ def test_trunk_flow_submits_when_qa_approved_label_is_present(
         == 0
     )
     assert label_calls == [
-        ["gh", "pr", "view", "42", "--repo", "zhiyuan-zhang0206/Ava", "--json", "labels"]
+        ["gh", "pr", "view", "42", "--repo", "zhiyuan-zhang0206/Ava", "--json", "labels"],
+        # Advisory base-freshness reads (task #2496): the labels-stub returns
+        # JSON for them too, which the SHA guard treats as unreadable -> no-op.
+        [
+            "gh",
+            "pr",
+            "view",
+            "42",
+            "--repo",
+            "zhiyuan-zhang0206/Ava",
+            "--json",
+            "baseRefOid",
+            "--jq",
+            ".baseRefOid",
+        ],
     ]
+    # (ls-remote never runs: the labels-stub's non-SHA output makes the
+    # advisory check bail early — the SHA guard is the no-op path.)
     assert len(requests) == 2
 
 
@@ -545,3 +561,203 @@ def test_trunk_submit_accepts_plain_text_ok_body(
 
     assert rc == 0
     assert capsys.readouterr().out == "PR #42 merged by the Trunk merge queue\n"
+
+
+def _trunk_runner(
+    labels: list[str],
+    *,
+    base_sha: str | None,
+    main_sha: str | None,
+    calls: list[list[str]],
+):
+    """Stand in for gh/git subprocess calls: labels, baseRefOid, and ls-remote."""
+
+    def run(command: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+        calls.append(command)
+        if "ls-remote" in command:
+            if main_sha is None:
+                return subprocess.CompletedProcess(command, 1, "", "boom")
+            return subprocess.CompletedProcess(command, 0, f"{main_sha}\trefs/heads/main\n", "")
+        if "baseRefOid" in command:
+            if base_sha is None:
+                return subprocess.CompletedProcess(command, 1, "", "boom")
+            return subprocess.CompletedProcess(command, 0, f"{base_sha}\n", "")
+        return subprocess.CompletedProcess(
+            command, 0, json.dumps({"labels": [{"name": label} for label in labels]}), ""
+        )
+
+    return run
+
+
+def test_trunk_flow_warns_but_submits_when_base_lags_main(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    calls: list[list[str]] = []
+    requests: list[urllib.request.Request] = []
+    monkeypatch.setattr(ci_utils, "_queue_cooldown_seconds", _no_cooldown)
+    monkeypatch.setattr(ci_utils, "check_ci", _all_green)
+    monkeypatch.setattr(
+        ci_utils.subprocess,
+        "run",
+        _trunk_runner(["qa-approved"], base_sha="a" * 40, main_sha="b" * 40, calls=calls),
+    )
+    monkeypatch.setattr(
+        ci_utils.urllib.request,
+        "urlopen",
+        _urlopen_sequence(
+            [_TrunkResponse({"accepted": True}), _TrunkResponse({"state": "merged"})], requests
+        ),
+    )
+
+    rc = ci_utils._trunk_merge_flow(
+        "42",
+        "zhiyuan-zhang0206/Ava",
+        "medium",
+        every=1,
+        timeout=0,
+        token="trunk-token",  # noqa: S106 — test fixture
+    )
+
+    assert rc == 0
+    err = capsys.readouterr().err
+    assert "PR #42 base aaaaaaaa lags main bbbbbbbb" in err
+    assert requests  # submission still happened (advisory warning only)
+
+
+def test_trunk_flow_refuses_when_require_fresh_base_and_stale(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    calls: list[list[str]] = []
+    requests: list[urllib.request.Request] = []
+    monkeypatch.setattr(ci_utils, "_queue_cooldown_seconds", _no_cooldown)
+    monkeypatch.setattr(ci_utils, "check_ci", _all_green)
+    monkeypatch.setattr(
+        ci_utils.subprocess,
+        "run",
+        _trunk_runner(["qa-approved"], base_sha="a" * 40, main_sha="b" * 40, calls=calls),
+    )
+    monkeypatch.setattr(
+        ci_utils.urllib.request,
+        "urlopen",
+        _urlopen_sequence(
+            [_TrunkResponse({"accepted": True}), _TrunkResponse({"state": "merged"})], requests
+        ),
+    )
+
+    rc = ci_utils._trunk_merge_flow(
+        "42",
+        "zhiyuan-zhang0206/Ava",
+        "medium",
+        every=1,
+        timeout=0,
+        token="trunk-token",  # noqa: S106 — test fixture
+        require_fresh_base=True,
+    )
+
+    assert rc == 1
+    assert requests == []  # refused before any Trunk API call
+    assert "--require-fresh-base is set" in capsys.readouterr().err
+
+
+def test_trunk_flow_skips_warning_when_base_is_current_main(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    calls: list[list[str]] = []
+    requests: list[urllib.request.Request] = []
+    monkeypatch.setattr(ci_utils, "_queue_cooldown_seconds", _no_cooldown)
+    monkeypatch.setattr(ci_utils, "check_ci", _all_green)
+    monkeypatch.setattr(
+        ci_utils.subprocess,
+        "run",
+        _trunk_runner(["qa-approved"], base_sha="a" * 40, main_sha="a" * 40, calls=calls),
+    )
+    monkeypatch.setattr(
+        ci_utils.urllib.request,
+        "urlopen",
+        _urlopen_sequence(
+            [_TrunkResponse({"accepted": True}), _TrunkResponse({"state": "merged"})], requests
+        ),
+    )
+
+    rc = ci_utils._trunk_merge_flow(
+        "42",
+        "zhiyuan-zhang0206/Ava",
+        "medium",
+        every=1,
+        timeout=0,
+        token="trunk-token",  # noqa: S106 — test fixture
+    )
+
+    assert rc == 0
+    assert "lags main" not in capsys.readouterr().err
+    assert requests
+
+
+def test_trunk_flow_degrades_when_freshness_reads_fail(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    calls: list[list[str]] = []
+    requests: list[urllib.request.Request] = []
+    monkeypatch.setattr(ci_utils, "_queue_cooldown_seconds", _no_cooldown)
+    monkeypatch.setattr(ci_utils, "check_ci", _all_green)
+    monkeypatch.setattr(
+        ci_utils.subprocess,
+        "run",
+        _trunk_runner(["qa-approved"], base_sha=None, main_sha=None, calls=calls),
+    )
+    monkeypatch.setattr(
+        ci_utils.urllib.request,
+        "urlopen",
+        _urlopen_sequence(
+            [_TrunkResponse({"accepted": True}), _TrunkResponse({"state": "merged"})], requests
+        ),
+    )
+
+    rc = ci_utils._trunk_merge_flow(
+        "42",
+        "zhiyuan-zhang0206/Ava",
+        "medium",
+        every=1,
+        timeout=0,
+        token="trunk-token",  # noqa: S106 — test fixture
+    )
+
+    assert rc == 0
+    assert "lags main" not in capsys.readouterr().err
+    assert requests  # advisory check never blocks
+
+
+def test_trunk_flow_warns_distinctly_when_require_mode_cannot_verify_freshness(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    calls: list[list[str]] = []
+    requests: list[urllib.request.Request] = []
+    monkeypatch.setattr(ci_utils, "_queue_cooldown_seconds", _no_cooldown)
+    monkeypatch.setattr(ci_utils, "check_ci", _all_green)
+    monkeypatch.setattr(
+        ci_utils.subprocess,
+        "run",
+        _trunk_runner(["qa-approved"], base_sha=None, main_sha=None, calls=calls),
+    )
+    monkeypatch.setattr(
+        ci_utils.urllib.request,
+        "urlopen",
+        _urlopen_sequence(
+            [_TrunkResponse({"accepted": True}), _TrunkResponse({"state": "merged"})], requests
+        ),
+    )
+
+    rc = ci_utils._trunk_merge_flow(
+        "42",
+        "zhiyuan-zhang0206/Ava",
+        "medium",
+        every=1,
+        timeout=0,
+        token="trunk-token",  # noqa: S106 — test fixture
+        require_fresh_base=True,
+    )
+
+    assert rc == 0
+    err = capsys.readouterr().err
+    assert "could not verify base freshness" in err
+    assert requests  # fail-open: unreadable never blocks, even in require mode
