@@ -38,6 +38,8 @@ export interface SimNode extends SimulationNodeDatum {
 export interface SimLink extends SimulationLinkDatum<SimNode> {
   source: number | string | SimNode;
   target: number | string | SimNode;
+  /** Stable view-owned identity for per-link force accessors. */
+  key?: string;
 }
 
 export interface Pos {
@@ -68,6 +70,8 @@ export interface ForceLayoutOptions {
   // without raising gravity, which would drown the Repulsion knob entirely.
   // A fixed per-view constant, applied at build; not a user-tunable param.
   chargeDistanceMax?: number;
+  /** Optional per-link spring strength; the view owns the mapping. */
+  linkStrength?: (link: SimLink) => number;
 }
 
 /**
@@ -111,7 +115,9 @@ export function useForceLayout(
     radiiRef.current = new Map(nodes.map((n) => [n.id, n.r]));
   });
 
-  // Rebuild signature: node ids + edge pairs.
+  // Rebuild signature: node ids + edge identities. A stable view-owned key
+  // distinguishes parallel links without rebuilding when only their weights
+  // (and therefore their live-applied strengths) change.
   const signature = useMemo(() => {
     const nids = [...nodes]
       .map((n) => String(n.id))
@@ -121,7 +127,7 @@ export function useForceLayout(
       .map((l) => {
         const s = typeof l.source === "object" ? l.source.id : l.source;
         const t = typeof l.target === "object" ? l.target.id : l.target;
-        return `${s}-${t}`;
+        return `${s}-${t}-${l.key ?? ""}`;
       })
       .sort()
       .join(",");
@@ -161,7 +167,7 @@ export function useForceLayout(
     const link = forceLink<SimNode, SimLink>(simLinks)
       .id((d) => d.id)
       .distance(fp.linkDistance)
-      .strength(fp.linkStrength);
+      .strength(optionsRef.current.linkStrength ?? fp.linkStrength);
     const center = forceCenter<SimNode>(0, 0).strength(fp.centerStrength);
     const fx: ForceX<SimNode> | null =
       fp.centerForceX > 0
@@ -227,7 +233,7 @@ export function useForceLayout(
     );
     linkRef.current
       ?.distance(params.linkDistance)
-      .strength(params.linkStrength);
+      .strength(options.linkStrength ?? params.linkStrength);
     if (params.centerForceX > 0) {
       if (!fxRef.current) {
         fxRef.current = forceX<SimNode>(0).strength(params.centerForceX);
@@ -252,7 +258,7 @@ export function useForceLayout(
     }
     sim.alphaDecay(params.alphaDecay);
     sim.alpha(0.3).restart();
-  }, [params]);
+  }, [params, options.linkStrength]);
 
   // Compute the settled layout bounding box for a fit-to-content viewBox.
   const layout = useMemo((): LayoutBox | null => {
