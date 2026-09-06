@@ -5,11 +5,12 @@ import * as Popover from "@radix-ui/react-popover";
 import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
 
-import { BAR_HEIGHT_CLASS, FLEX, FLEX_COL } from "@/lib/layout";
+import { BAR_DIVIDER_CLASS, BAR_HEIGHT_CLASS, FLEX, FLEX_COL } from "@/lib/layout";
 import { useStatsDashboard, useStatsWindow } from "@/lib/sidebar";
 import { cn } from "@/lib/utils";
 
 import { StatsCards } from "./footer";
+import { fleetHref } from "./links";
 import type { DesktopProps } from "./types";
 
 export function CollapsedSidebar(props: DesktopProps) {
@@ -19,7 +20,7 @@ export function CollapsedSidebar(props: DesktopProps) {
   const { setCollapsed, onSearchOpen } = props;
 
   return (
-    <aside className={cn("hidden md:flex border-r border-border bg-sidebar w-10 shrink-0", FLEX_COL)}>
+    <aside className={cn("h-full w-full bg-sidebar", FLEX, FLEX_COL)}>
       {/* Collapsed rail top (user ruling 2026-08-05 21:50): expand sits at
           the very top, search directly below it — stacked vertically, never
           side by side. No divider lines between them. */}
@@ -58,7 +59,7 @@ export function CollapsedSidebar(props: DesktopProps) {
         </button>
         <button
           type="button"
-          onClick={() => router.push("/fleet")}
+          onClick={() => router.push(fleetHref(props.activeId))}
           aria-label={navT("fleet")}
           title={navT("fleet")}
           className="p-1 rounded text-muted-foreground hover:bg-sidebar-accent hover:text-foreground transition-colors"
@@ -143,7 +144,8 @@ export function SidebarHeader({
   return (
     <header
       className={cn(
-        "items-center justify-between px-3 py-2 border-b border-border",
+        "relative items-center justify-between px-3 py-2",
+        BAR_DIVIDER_CLASS,
         BAR_HEIGHT_CLASS,
         FLEX
       )}

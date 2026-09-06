@@ -913,8 +913,8 @@ export function TimelineView({
         className="h-full text-[13px] leading-relaxed"
         viewportClassName="[overflow-anchor:none] overscroll-y-contain"
       >
-        {/* BAR_CLEAR_TOP_PADDING_CLASS (pt-14) clears the floating
-            HeaderBar (h-12, lib/layout.ts) — 56px = 48px bar + 8px clearance,
+        {/* BAR_CLEAR_TOP_PADDING_CLASS (52px) clears the floating
+            HeaderBar (h-11, lib/layout.ts) — 52px = 44px bar + 8px clearance,
             derived from BAR_HEIGHT_PX so a bar-height change can't silently
             slide the first row underneath it (user ruling 2026-08-06); the
             composer stack lives in normal flow below the surface (user

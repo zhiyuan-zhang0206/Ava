@@ -6,10 +6,34 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  BAR_CLEAR_TOP_PADDING_CLASS,
+  BAR_DIVIDER_CLASS,
+  BAR_HEIGHT_CLASS,
+  BAR_HEIGHT_PX,
   LAYOUT_INVARIANTS,
   LAYOUT_INVARIANT_IDS,
   LAYOUT_VIEWPORT_TIERS,
 } from "./layout";
+
+describe("home title bars", () => {
+  it("uses the compact 44px bar with 8px of timeline clearance", () => {
+    expect(BAR_HEIGHT_PX).toBe(44);
+    expect(BAR_HEIGHT_CLASS).toBe("h-11");
+    expect(BAR_CLEAR_TOP_PADDING_CLASS).toBe("pt-[52px]");
+  });
+
+  it("insets each horizontal divider so adjacent panel segments do not join", () => {
+    expect(BAR_DIVIDER_CLASS).toContain("after:inset-x-1");
+    expect(BAR_DIVIDER_CLASS).toContain("after:h-px");
+  });
+
+  it("leaves each title bar in control of its own positioning context", () => {
+    const dividerClasses = BAR_DIVIDER_CLASS.split(" ");
+    for (const positionClass of ["static", "fixed", "absolute", "relative", "sticky"]) {
+      expect(dividerClasses).not.toContain(positionClass);
+    }
+  });
+});
 
 describe("LAYOUT_INVARIANTS", () => {
   it("ids are the canonical I1–I6 sequence, unique", () => {

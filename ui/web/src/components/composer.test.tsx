@@ -142,6 +142,15 @@ describe("Composer button mode dispatch", () => {
     expect(root.style.maxWidth).toBe("min(40vw, 1280px)");
   });
 
+  it("uses the tighter bottom gap without changing the textarea height", () => {
+    render(<Composer {...baseProps} mode="idle" />);
+    const root = screen.getByTestId("composer");
+
+    expect(root.className).toContain("pb-3");
+    expect(root.className).not.toContain("pb-5");
+    expect(screen.getByTestId("composer-input").className).toContain("min-h-9");
+  });
+
   it("root maxWidth follows the maxWidthCss prop (setting-derived)", () => {
     render(<Composer {...baseProps} mode="idle" maxWidthCss="min(60vw, 1280px)" />);
     const root = screen.getByTestId("composer");

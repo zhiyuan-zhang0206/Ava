@@ -230,7 +230,11 @@ export function AlertsProvider({ children }: { children: ReactNode }) {
 
 /** The badge count + rows (default params, warmed by the provider). */
 export function useAlerts() {
-  return useQuery<AlertsResponse>({ queryKey: ALERTS_QUERY_KEY, staleTime: Infinity });
+  return useQuery<AlertsResponse>({
+    queryKey: ALERTS_QUERY_KEY,
+    queryFn: () => api.getAlerts({}),
+    staleTime: Infinity,
+  });
 }
 
 /** The alert section's history. */

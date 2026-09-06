@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { ReactElement, ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -50,6 +50,10 @@ const localStorageMock = (() => {
   };
 })();
 Object.defineProperty(globalThis, "localStorage", { value: localStorageMock, writable: true });
+Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+  configurable: true,
+  value: vi.fn(),
+});
 
 // The live agent list is injected; the view itself is pure projection.
 const agentsMock = vi.fn<() => AgentRow[]>();
@@ -114,6 +118,7 @@ afterEach(() => {
   cleanup();
   vi.clearAllMocks();
   localStorage.clear();
+  window.history.replaceState(null, "", "/fleet");
   isLargeMock.mockReturnValue(true); // reset to desktop default
 });
 
@@ -197,6 +202,48 @@ describe("FleetView (desktop)", () => {
     expect(screen.getByText("Inbox")).toBeTruthy();
     expect(screen.queryByText("Decisions")).toBeNull();
     expect(screen.queryByText("Reviews")).toBeNull();
+  });
+
+  it("reads agent_id from the route and anchors that agent's notice", async () => {
+    window.history.replaceState(null, "", "/fleet?agent_id=405");
+    agentsMock.mockReturnValue([
+      makeAgent({ agent_id: 1, label: "lead" }),
+      makeAgent({ agent_id: 405, label: "reviewer" }),
+    ]);
+    useNoticesMock.mockReturnValue({
+      open: [
+        {
+          id: 1405,
+          agent_id: 405,
+          agent_label: "reviewer",
+          title: "Review result",
+          content: null,
+          priority: "P3",
+          require_response: false,
+          blocking: false,
+          created_at: "2026-06-06T00:00:00Z",
+          updated_at: null,
+          resolved_at: null,
+          resolution: null,
+          reply: null,
+          task_id: null,
+        },
+      ],
+      awaiting: [],
+      resolved: [],
+      fetchNextPage: () => undefined,
+      hasNextPage: false,
+      isFetchingNextPage: false,
+      error: false,
+      resolvedError: false,
+      isLoading: false,
+    });
+
+    wrap(<FleetView />);
+
+    const list = screen.getByRole("list", { name: /inbox queue/i });
+    const row = within(list).getByText("Review result").closest('[data-testid="inbox-row"]');
+    await waitFor(() => expect(row?.getAttribute("data-anchor-highlighted")).toBe("true"));
   });
 
   it("collapses the queue panel to a static handle and persists the choice", () => {

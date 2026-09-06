@@ -745,9 +745,9 @@ export const USER_SETTING_DEFAULTS: Record<string, unknown> = {
   // 2026-08-23, superseding the 2026-08-05 floating desktop panel); the
   // composer's toggle opens it.
   "display.inspector_open": false,
-  // Sidebar layout. Width is FIXED (task #750: drag resize removed); the
-  // stored display.sidebar_width is a legacy value and is ignored — kept in
-  // the type only so old persisted rows read cleanly.
+  // Sidebar layout. The homepage split ratio is device-local state owned by
+  // react-resizable-panels; stored display.sidebar_width is a legacy pixel
+  // value and is ignored — kept in the type only so old rows read cleanly.
   "display.sidebar_width": 240,
   "display.sidebar_collapsed": false,
   "display.sidebar_view_mode": "flat",

@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment } from "react";
+import { Fragment, type RefObject } from "react";
 import { ChevronRight, PanelRightClose } from "lucide-react";
 import { useTranslations } from "next-intl";
 
@@ -102,6 +102,8 @@ export function QueueList({
   fetchNextPage,
   openFailed,
   historyFailed,
+  listRef,
+  anchorHighlightKey,
 }: {
   units: QueueUnit<OpenItem>[];
   resolved: NoticeItem[];
@@ -117,10 +119,12 @@ export function QueueList({
   fetchNextPage: () => void;
   openFailed: boolean;
   historyFailed: boolean;
+  listRef: RefObject<HTMLUListElement | null>;
+  anchorHighlightKey: string | null;
 }) {
   const t = useTranslations("fleet.inboxPanel");
   return (
-    <ul className={cn("overflow-y-auto", FLEX_1, MIN_W_0)} aria-label={t("queue")}>
+    <ul ref={listRef} className={cn("overflow-y-auto", FLEX_1, MIN_W_0)} aria-label={t("queue")}>
       <OpenUnits
         units={units}
         agentStatus={agentStatus}
@@ -128,6 +132,7 @@ export function QueueList({
         effectiveKey={effectiveKey}
         onSelect={onSelect}
         onSelectAgent={onSelectAgent}
+        anchorHighlightKey={anchorHighlightKey}
       />
       {units.length === 0 && (
         <li className="px-4 py-6 text-center text-xs text-muted-foreground">
@@ -196,6 +201,7 @@ export function OpenUnits({
   effectiveKey,
   onSelect,
   onSelectAgent,
+  anchorHighlightKey,
 }: {
   units: QueueUnit<OpenItem>[];
   agentStatus: Map<number, PublicAgentStatus>;
@@ -203,28 +209,34 @@ export function OpenUnits({
   effectiveKey: string | null;
   onSelect: (key: string) => void;
   onSelectAgent?: (agentId: number | null) => void;
+  anchorHighlightKey: string | null;
 }) {
   const t = useTranslations("fleet.inboxPanel");
   return (
     <>
       {units.map((u) => {
-        const rows = u.items.map((it) => (
-          <NoticeListRow
-            key={openKey(it.notice.id)}
-            priority={it.notice.priority}
-            blocking={it.notice.blocking}
-            title={it.notice.title}
-            agentLabel={it.agentLabel}
-            agentId={it.agentId}
-            agentStatus={agentStatus.get(it.agentId) ?? null}
-            agentPage={activePageByAgent.get(it.agentId)}
-            createdAt={it.notice.created_at}
-            indent={u.root !== null}
-            selected={effectiveKey === openKey(it.notice.id)}
-            onSelect={() => onSelect(openKey(it.notice.id))}
-            onSelectAgent={onSelectAgent}
-          />
-        ));
+        const rows = u.items.map((it) => {
+          const key = openKey(it.notice.id);
+          return (
+            <NoticeListRow
+              key={key}
+              noticeKey={key}
+              priority={it.notice.priority}
+              blocking={it.notice.blocking}
+              title={it.notice.title}
+              agentLabel={it.agentLabel}
+              agentId={it.agentId}
+              agentStatus={agentStatus.get(it.agentId) ?? null}
+              agentPage={activePageByAgent.get(it.agentId)}
+              createdAt={it.notice.created_at}
+              indent={u.root !== null}
+              selected={effectiveKey === key}
+              onSelect={() => onSelect(key)}
+              onSelectAgent={onSelectAgent}
+              anchorHighlighted={anchorHighlightKey === key}
+            />
+          );
+        });
         if (u.root === null) {
           return <Fragment key={`loose-${u.items[0].notice.id}`}>{rows}</Fragment>;
         }

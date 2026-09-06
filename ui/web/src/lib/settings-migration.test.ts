@@ -86,7 +86,7 @@ describe("migrateLegacyLocalStorageSettings", () => {
     expect(localStorage.getItem("ava.sidebar.showTerminated")).toBeNull();
   });
 
-  it("drops the legacy sidebar width without writing (display.sidebar_width is ignored — width is fixed, task #750)", async () => {
+  it("drops the legacy sidebar width without writing (panel ratios are library-owned)", async () => {
     localStorage.setItem("ava.sidebar.width", "320");
     await migrateLegacyLocalStorageSettings(write);
     expect(write).not.toHaveBeenCalled();

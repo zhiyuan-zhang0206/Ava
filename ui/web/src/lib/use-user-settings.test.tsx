@@ -143,64 +143,70 @@ describe("useUserSettings", () => {
   });
 });
 
-// useDebouncedSetting — the write path for dragged settings (sidebar width,
-// force-layout sliders): local value live immediately, DB PUT coalesced, and a
-// pending write flushed on unmount.
+// useDebouncedSetting — the write path for dragged DB settings (timeline
+// width, force-layout sliders): local value live immediately, DB PUT
+// coalesced, and a pending write flushed on unmount.
 describe("useDebouncedSetting", () => {
   beforeEach(() => {
     vi.spyOn(api, "getSettings").mockResolvedValue({ settings: [] });
     vi.spyOn(api, "putSetting").mockResolvedValue({
-      key: "display.sidebar_width",
-      value: 0,
+      key: "display.timeline_width_ratio",
+      value: 0.4,
       updated_at: "2026-01-01T00:00:00Z",
     });
   });
 
   it("updates the local value immediately but debounces the PUT", async () => {
     const { result } = renderHook(
-      () => useDebouncedSetting("display.sidebar_width", 240, 50),
+      () => useDebouncedSetting("display.timeline_width_ratio", 0.4, 50),
       { wrapper },
     );
-    await waitFor(() => expect(result.current[0]).toBe(240));
+    await waitFor(() => expect(result.current[0]).toBe(0.4));
 
-    act(() => result.current[1](300));
+    act(() => result.current[1](0.5));
     // Local value is live immediately (for a smooth drag)…
-    expect(result.current[0]).toBe(300);
+    expect(result.current[0]).toBe(0.5);
     // …but the network write has not fired yet.
     expect(api.putSetting).not.toHaveBeenCalled();
 
     // After the debounce window, exactly one PUT lands with the final value.
-    await waitFor(() => expect(api.putSetting).toHaveBeenCalledWith("display.sidebar_width", 300));
+    await waitFor(() =>
+      expect(api.putSetting).toHaveBeenCalledWith("display.timeline_width_ratio", 0.5),
+    );
     expect(api.putSetting).toHaveBeenCalledTimes(1);
   });
 
   it("coalesces a rapid burst of changes into one trailing PUT", async () => {
     const { result } = renderHook(
-      () => useDebouncedSetting("display.sidebar_width", 240, 50),
+      () => useDebouncedSetting("display.timeline_width_ratio", 0.4, 50),
       { wrapper },
     );
-    await waitFor(() => expect(result.current[0]).toBe(240));
+    await waitFor(() => expect(result.current[0]).toBe(0.4));
 
-    act(() => result.current[1](260));
-    act(() => result.current[1](280));
-    act(() => result.current[1](300));
+    act(() => result.current[1](0.45));
+    act(() => result.current[1](0.48));
+    act(() => result.current[1](0.5));
 
-    await waitFor(() => expect(api.putSetting).toHaveBeenCalledWith("display.sidebar_width", 300));
+    await waitFor(() =>
+      expect(api.putSetting).toHaveBeenCalledWith("display.timeline_width_ratio", 0.5),
+    );
     expect(api.putSetting).toHaveBeenCalledTimes(1);
   });
 
   it("flushes a pending write on unmount", async () => {
     const { result, unmount } = renderHook(
       // Long delay so the timer never fires on its own — only the unmount flush can.
-      () => useDebouncedSetting("display.sidebar_width", 240, 10_000),
+      () => useDebouncedSetting("display.timeline_width_ratio", 0.4, 10_000),
       { wrapper },
     );
-    await waitFor(() => expect(result.current[0]).toBe(240));
+    await waitFor(() => expect(result.current[0]).toBe(0.4));
 
-    act(() => result.current[1](500));
+    act(() => result.current[1](0.6));
     expect(api.putSetting).not.toHaveBeenCalled();
 
     unmount();
-    await waitFor(() => expect(api.putSetting).toHaveBeenCalledWith("display.sidebar_width", 500));
+    await waitFor(() =>
+      expect(api.putSetting).toHaveBeenCalledWith("display.timeline_width_ratio", 0.6),
+    );
   });
 });
