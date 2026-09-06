@@ -1533,9 +1533,11 @@ would orphan their file_storage backlog during an upgrade.
 **Record** — `shared/trace.py:initialize_tracing`, gated by `AVA_TRACE_ENABLED`
 (default **on**). Instrumentation is OpenLLMetry (`traceloop-sdk`); the sole span
 exporter is `OtlpJsonHttpSpanExporter`, which POSTs each export batch as one
-standard OTLP/JSON `ExportTraceServiceRequest` to the configured collector's
-`/v1/traces` (JSON wire format; LLM content stripped before it leaves the
-process). The sidecar's file exporter mirrors each batch line-for-line to
+standard protobuf `ExportTraceServiceRequest` to the configured collector's
+`/v1/traces` (LLM content stripped before it leaves the process). Each batch
+gets one 2-second POST; three consecutive failures open a 30-second circuit
+that counts and drops later batches without a POST, then admits one recovery
+probe. The sidecar's file exporter mirrors each accepted batch as OTLP/JSON to
 `$AVA_HOME/traces/spans.jsonl` — the durable, vendor-neutral, grep-able
 source of truth (any OTLP backend ingests the same lines; rotation bounds the
 directory by size/day/backups, and the agent-start prune enforces

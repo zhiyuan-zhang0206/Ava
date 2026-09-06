@@ -7,6 +7,7 @@ import psycopg
 import pytest
 from psycopg_pool import AsyncConnectionPool
 
+from agent import db as agent_db
 from agent.db import (
     claim_inbound_batch,
     finalize_claimed_inbounds,
@@ -229,6 +230,31 @@ async def test_lock_wait_past_unchanged_lease_expiry_refuses_claim(
     assert db_conn.execute(
         "SELECT status FROM inbound_messages WHERE id=%s", (inbound,)
     ).fetchone() == ("pending",)
+
+
+async def test_claim_lock_timeout_releases_connection_for_retry(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A blocked owner row aborts promptly and returns its pool connection."""
+    monkeypatch.setattr(agent_db, "_CLAIM_DB_LOCK_TIMEOUT", "50ms")
+    agent_id = _agent(db_conn)
+    owner = await _admit(aops_pool, agent_id)
+    inbound = _insert(db_conn, agent_id)
+
+    with bind_turn_identity(agent_id, incarnation=owner):
+        async with async_write_transaction(aops_pool) as blocker:
+            await blocker.execute("SELECT id FROM agents_meta WHERE id=%s FOR UPDATE", (agent_id,))
+            with pytest.raises(psycopg.errors.LockNotAvailable):
+                await claim_inbound_batch(aops_pool, agent_id)
+
+            # The blocker holds one of the two pool slots. This borrow can only
+            # succeed if the failed claim returned the other connection.
+            async with aops_pool.connection(timeout=0.5) as conn:
+                assert await (await conn.execute("SELECT 1")).fetchone() == (1,)
+
+        assert [row.id for row in await claim_inbound_batch(aops_pool, agent_id)] == [inbound]
 
 
 async def test_missing_redis_publish_recovers_from_durable_pg(

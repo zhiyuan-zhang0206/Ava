@@ -137,6 +137,13 @@ _NODE_SPAN_PREFIX = "execute_task "
 # and attributable instead of hiding it inside the node span's duration.
 _IDLE_WAIT_SPAN_NAME = "claim idle-wait"
 
+# The collector is a local sidecar, so a slow request is already a failed
+# request. One short attempt bounds the exporting SDK thread; repeated failures
+# open the circuit so later turns shed spans without touching the network.
+_TRACE_EXPORT_TIMEOUT_S = 2.0
+_TRACE_EXPORT_FAILURE_THRESHOLD = 3
+_TRACE_EXPORT_COOLDOWN_S = 30.0
+
 
 # ── LLM content stripping (trace v2) ─────────────────────────────────────────
 #
@@ -263,72 +270,114 @@ class OtlpJsonHttpSpanExporter(SpanExporter):
     the LOCAL sidecar (``AVA_TELEMETRY_OTLP_ENDPOINT``, default
     127.0.0.1:4318); agents never dial a backend directly.
 
-    The sidecar is supervised (watchdog, 60s), so a failed POST means a
-    restart in progress or a broken install: retry briefly, then return
-    FAILURE and let the SDK's batch processor drop the batch — bounded loss,
-    reported. The mirror is the collector's job now; this exporter's only
-    duties are stripping (defensive layer 2) and the POST itself.
+    The sidecar is supervised (watchdog, 60s), so a failed POST returns FAILURE
+    and lets the SDK's batch processor drop the batch. Three consecutive failed
+    batches open a 30-second circuit: exports during cooldown are counted and
+    shed without a POST, then one half-open probe decides whether to recover.
+    The mirror is the collector's job now; this exporter's only duties are
+    stripping (defensive layer 2) and the bounded POST itself.
     """
-
-    # POST attempts per batch before FAILURE. The sidecar is local; 3 tries
-    # with short backoff covers a watchdog restart without stalling the batch
-    # processor's schedule for long.
-    _MAX_ATTEMPTS = 3
 
     def __init__(self, endpoint: str | None = None) -> None:
         base = (endpoint or settings.observability.telemetry_otlp_endpoint).rstrip("/")
         self._endpoint = f"{base}/v1/traces"
-        self._failures = 0
+        self._consecutive_failures = 0
+        self._circuit_open_until = 0.0
+        self._probe_in_flight = False
+        self._dropped_batches = 0
+        self._dropped_spans = 0
+        self._circuit_lock = threading.Lock()
+
+    def _circuit_drops(self, span_count: int) -> bool:
+        """Shed during cooldown, admitting only one probe after it expires."""
+        now = time.monotonic()
+        with self._circuit_lock:
+            if self._circuit_open_until == 0.0:
+                return False
+            if now >= self._circuit_open_until and not self._probe_in_flight:
+                self._probe_in_flight = True
+                return False
+            self._dropped_batches += 1
+            self._dropped_spans += span_count
+            dropped_batches = self._dropped_batches
+            dropped_spans = self._dropped_spans
+        if dropped_batches == 1 or dropped_batches % 50 == 0:
+            logger.warning(
+                "OTLP trace export circuit open — dropping batch",
+                event="trace",
+                action="export_dropped",
+                endpoint=self._endpoint,
+                dropped_batches=dropped_batches,
+                dropped_spans=dropped_spans,
+            )
+        return True
 
     def export(self, spans: Sequence[ReadableSpan]) -> SpanExportResult:
+        if self._circuit_drops(len(spans)):
+            return SpanExportResult.FAILURE
         # Imported lazily: the OTLP encoder pulls in the protobuf stack, which
         # the no-tracing path should not pay for.
-        from google.protobuf.json_format import MessageToDict, Parse
-        from opentelemetry.exporter.otlp.proto.common.trace_encoder import encode_spans
+        try:
+            from google.protobuf.json_format import MessageToDict, Parse
+            from opentelemetry.exporter.otlp.proto.common.trace_encoder import encode_spans
+            from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import (
+                ExportTraceServiceRequest,
+            )
 
-        request = encode_spans(spans)
-        otlp = MessageToDict(request)
-        # Defensive layer 2 of content stripping (layer 1 is
-        # TRACELOOP_TRACE_CONTENT=false at init): whatever the instrumentors
-        # attached, content never leaves the process. `trace_strip_content=False`
-        # opts out (benchmarks that genuinely want full prompts in the mirror).
-        if settings.observability.trace_strip_content:
-            _strip_content_attributes(otlp)
-        # dict -> protobuf: the same reconstruction `ava trace ship` performs
-        # on mirror lines (Parse of the OTLP/JSON dict, then the binary form).
-        from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import (
-            ExportTraceServiceRequest,
-        )
-
-        req = Parse(
-            json.dumps(otlp, separators=(",", ":"), ensure_ascii=False), ExportTraceServiceRequest()
-        )
-        body = req.SerializeToString()
-        headers = {"Content-Type": "application/x-protobuf"}
-        for attempt in range(self._MAX_ATTEMPTS):
-            try:
-                resp = httpx.post(self._endpoint, content=body, headers=headers, timeout=5.0)
-                resp.raise_for_status()
-                self._failures = 0
-                return SpanExportResult.SUCCESS
-            except Exception as exc:  # exporter must never raise into the SDK
-                self._failures += 1
-                if attempt < self._MAX_ATTEMPTS - 1:
-                    time.sleep(0.5 * (attempt + 1))
-                    continue
-                # Report first + every 50th consecutive failure — a sustained
-                # collector outage is an ops signal, a transient blip is not.
-                if self._failures == 1 or self._failures % 50 == 0:
-                    logger.warning(
-                        "OTLP trace export failed — collector unreachable",
-                        event="trace",
-                        action="export_failed",
-                        endpoint=self._endpoint,
-                        consecutive_failures=self._failures,
-                        error=repr(exc),
-                    )
-                return SpanExportResult.FAILURE
-        return SpanExportResult.FAILURE  # pragma: no cover — loop always returns
+            otlp = MessageToDict(encode_spans(spans))
+            if settings.observability.trace_strip_content:
+                _strip_content_attributes(otlp)
+            req = Parse(
+                json.dumps(otlp, separators=(",", ":"), ensure_ascii=False),
+                ExportTraceServiceRequest(),
+            )
+            resp = httpx.post(
+                self._endpoint,
+                content=req.SerializeToString(),
+                headers={"Content-Type": "application/x-protobuf"},
+                timeout=_TRACE_EXPORT_TIMEOUT_S,
+            )
+            resp.raise_for_status()
+        except Exception as exc:  # exporter failures must never escape into the SDK
+            now = time.monotonic()
+            with self._circuit_lock:
+                self._consecutive_failures += 1
+                failures = self._consecutive_failures
+                circuit_opened = (
+                    self._probe_in_flight or failures >= _TRACE_EXPORT_FAILURE_THRESHOLD
+                )
+                self._probe_in_flight = False
+                if circuit_opened:
+                    self._circuit_open_until = now + _TRACE_EXPORT_COOLDOWN_S
+            if failures == 1 or circuit_opened:
+                logger.warning(
+                    "OTLP trace export failed",
+                    event="trace",
+                    action="export_failed",
+                    endpoint=self._endpoint,
+                    consecutive_failures=failures,
+                    circuit_open=circuit_opened,
+                    error=repr(exc),
+                )
+            return SpanExportResult.FAILURE
+        with self._circuit_lock:
+            recovered_failures = self._consecutive_failures
+            dropped_batches = self._dropped_batches
+            dropped_spans = self._dropped_spans
+            self._consecutive_failures = 0
+            self._circuit_open_until = 0.0
+            self._probe_in_flight = False
+        if recovered_failures:
+            logger.info(
+                "OTLP trace export recovered",
+                event="trace",
+                action="export_recovered",
+                endpoint=self._endpoint,
+                consecutive_failures=recovered_failures,
+                dropped_batches=dropped_batches,
+                dropped_spans=dropped_spans,
+            )
+        return SpanExportResult.SUCCESS
 
     def force_flush(self, timeout_millis: int = 30_000) -> bool:  # noqa: ARG002 — SpanExporter interface signature
         return True
