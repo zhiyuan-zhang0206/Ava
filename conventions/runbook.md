@@ -271,6 +271,29 @@ multi-second init), plus `redis-server` with its data dir under `$AVA_HOME/redis
 is no standalone infra verb, and no shared host instance to survive across
 checkouts/worktrees.
 
+To select an already-installed Redis build for one unit, run that checkout's
+CLI on its owning host:
+
+```bash
+.venv/bin/ava config set --local redis_bin_dir=/absolute/redis/bin
+.venv/bin/ava config get --local redis_bin_dir
+```
+
+This persists `AVA_REDIS_BIN_DIR` only in the target home's `.env`. The directory
+must be absolute and contain executable `redis-server` and `redis-cli`; both
+start and probe/stop commands use that pair. A missing or nonexecutable tool
+fails clearly, without falling back to PATH. An inherited selection is replaced
+by the current home's declaration, or cleared when that home has none. Empty or
+`ava config unset --local redis_bin_dir` restores the existing brew/PATH default.
+No host PATH, package, preview, or Docker configuration changes are required.
+
+The setting does not replace a live Redis process. `ava start` retains an
+already-running instance, and `ava cluster update` normally keeps its data plane
+up. Change the running version only through an explicitly coordinated data-plane
+stop/start, after checking persistence and version compatibility. Keep the
+selected directory available across boot and updates; the config selects tools
+but neither downloads nor upgrades them.
+
 The data-plane posture is uniform — the default is multi-machine, a single box is just
 the case where the reachable address is loopback (no single-vs-multi branch). When the
 control-plane bearer is set, Postgres authenticates its owner role with the gateway-only
@@ -333,17 +356,18 @@ cluster adopts the scoped ACL user. **Postgres and PgBouncer bind loopback + thi
 host's reachable address (`AVA_MACHINE_HOST`, default `localhost`), de-duplicated**
 (never all interfaces): a single box resolves to loopback alone, while a split node
 sets its real private-network IP, which is appended, plus the `scram-sha-256`
-`AVA_TRUSTED_CIDRS` pg_hba ranges. Redis is the exception: it always binds
-loopback-only, and the host-level `com.ava.redis-bridge` relay (`/usr/bin/python3
-$AVA_HOME/redis-bridge/relay.py`) serves non-loopback Redis inbound by forwarding
-the host's private-network address and Redis port to `127.0.0.1`. The prod
-gateway's converge step installs that script from the repository-owned
-`services/redis_bridge/relay.py` and owns the launchd plist. If the private-network
-interface or listening descriptor fails, the still-running relay closes and
-recreates the listener with capped backoff. `ava status` and the periodic cluster
-health probe issue an authenticated Redis `PING` through this endpoint, so a
-running launchd PID with a dead listener is reported rather than certified.
-Each per-cluster pg is started with
+`AVA_TRUSTED_CIDRS` pg_hba ranges. Authenticated Linux Redis uses that same
+loopback + reachable-address bind directly, without a relay. macOS retains its
+loopback-only Redis workaround: the host-level `com.ava.redis-bridge` relay
+(`/usr/bin/python3 $AVA_HOME/redis-bridge/relay.py`) forwards the host's private-
+network address and Redis port to `127.0.0.1`; the prod gateway's converge step
+installs that script from the repository-owned `services/redis_bridge/relay.py`
+and owns the launchd plist. If the private-network interface or listening
+descriptor fails, the still-running relay closes and recreates the listener with
+capped backoff. `ava status` and the periodic cluster health probe issue an
+authenticated Redis `PING` through this endpoint, so a running launchd PID with a
+dead listener is reported rather than certified. No-secret Redis remains
+loopback-only on both platforms. Each per-cluster pg is started with
 `max_connections = 500` (each agent process holds ~4 steady conns), passed on the
 `pg_ctl start` line; pg_hba is written into `$AVA_HOME/pg/pg_hba.conf` and —
 when the server is already running — reloaded (SIGHUP) so the rewritten hba takes
@@ -354,8 +378,8 @@ is a *consumer*: it skips the bring-up when this cluster's pg/redis are already 
 (`pg_isready` + a redis PING), and on a fresh start Postgres (and PgBouncer) first
 waits (bounded, ~60s) for the reachable bind address to appear on an interface — so
 a reboot that starts `ava` before the private-network interface exists retries rather
-than dying on an un-bindable address. Redis never waits because loopback is always
-available. pg/redis are never touched when already up, so a (re)start never
+than dying on an un-bindable address. Authenticated Linux Redis uses the same
+bounded wait; macOS Redis and no-secret Redis need only loopback. pg/redis are never touched when already up, so a (re)start never
 disrupts a running data plane — with ONE deliberate exception: a running
 pgbouncer that answers on loopback but is missing its reachable-address listener
 (a silently degraded double bind, task #1288) is RESTARTED rather than reloaded,

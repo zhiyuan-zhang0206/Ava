@@ -118,7 +118,7 @@ class TestConsumptionMatrixDeclarations:
     ports) stay exactly the declared facts — declared by FIELD NAME so an alias
     rename follows automatically."""
 
-    def test_identity_keys_are_the_machine_identity_fields(self) -> None:
+    def test_identity_keys_are_the_home_owned_identity_and_tool_fields(self) -> None:
         from shared.env_registry import env_identity_keys
 
         expected = _aliases_with(scope=("host",)) & {
@@ -129,6 +129,7 @@ class TestConsumptionMatrixDeclarations:
             "AVA_MACHINE_NAME",
             "AVA_MACHINE_DESCRIPTION",
             "AVA_GATEWAY_URL",
+            "AVA_REDIS_BIN_DIR",
         }
         # memory_remote is cluster-pinned (a remote is cluster config) but still
         # machine identity; AVA_PRIMARY_GATEWAY_URL is the deprecated alias row.

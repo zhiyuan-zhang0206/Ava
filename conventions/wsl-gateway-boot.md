@@ -33,6 +33,15 @@ removed by `ava cluster destroy`. Do not install competing anchors for the same
 distribution. Inventory any existing logon/keepalive wrappers before replacing
 them during a coordinated maintenance window.
 
+Cron does not activate an interactive shell's custom PATH. For a gateway that
+needs a separately installed Redis build, persist the unit-local `redis_bin_dir`
+with the [runbook's config command](runbook.md), rather than changing the Windows
+anchor or the user's global PATH. The fresh `ava boot`/update child reads that
+same home-bound setting; other homes retain their own tool selection.
+An authenticated Linux gateway binds Redis to loopback and its configured
+reachable address directly after the bounded address wait. It needs no copy of
+the macOS Redis relay. An unauthenticated unit remains loopback-only.
+
 [S4U has no Windows network or encrypted-file access](https://learn.microsoft.com/en-us/windows/win32/taskschd/taskschedulerschema-logontype-principaltype-element).
 That restriction alone does not prove whether Linux networking inside WSL works.
 Validate the real distribution, local data paths, and required Linux network
