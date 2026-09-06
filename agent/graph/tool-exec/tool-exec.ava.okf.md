@@ -29,8 +29,7 @@ The agent's sole tool—`execute_code(code: str)`—executes Python code in a di
 
 ### Output Handling
 - `agent/graph/_exec_output.py:wrap_code_output()` wraps the result (cancelled/timed_out markers)
-- Long output `agent/graph/_exec_output.py:truncate_both_ends` **keeps the head and tail, drops the middle** (each half `max_chars//2`); the full text is saved to a workspace `.exec_output/` file ring (keeping the last 20 copies, `_OVERFLOW_KEEP=20`) for grep
-- The two caps are compatible by construction: `exec_output_accumulation_max_chars >= exec_output_max_chars` is validated at startup, so `truncate_both_ends` always slices its head out of the accumulator's kept head and its tail out of the kept tail. When the accumulation cap fired, a `StreamCap` rides the `_ExecResult` into `wrap_code_output`, which reports the **true produced length** (banner + the `[exec output chars]` instrumentation line) and headers the archive with "this file is NOT the full output" instead of pretending — the dropped middle was never stored anywhere
+- Configurable soft line previews and the two existing hard caps have distinct retention contracts; see [[agent/graph/tool-exec/output-preview.ava.okf.md]]. Soft archives protect current context references within a byte budget; legacy hard-overflow files retain their 20-file ring
 - Results are dispatched by sum type (`_ExecDone|_ExecCancelled|_ExecTimedOut|_ExecLifecycle|_ExecCrashed`): runtime imports occur under the child entry guard, so boot/config and user-code exceptions become a `crashed` envelope with their traceback; lifecycle exceptions (terminate/restart/compact) take highest priority
 
 ### In-memory system-note injection (`_exec_notes.py`, user ruling 2026-08-11)
@@ -49,6 +48,7 @@ The agent's sole tool—`execute_code(code: str)`—executes Python code in a di
 - `agent/graph/_exec_stream.py` — `StreamingTextIO` + `ExecOutputChunkPublisher` (streaming output incremental push)
 - `agent/graph/_tool_calls.py` — Multiple tool_call normalization (merging, not parsing)
 - `agent/graph/_exec_output.py` — Output envelope formatting
+- `agent/graph/_exec_crop.py` — Soft line previews and bounded, reference-protected archives
 
 ## Notes
 

@@ -85,7 +85,59 @@ class SandboxSettings(EnvSettings):
     exec_output_max_chars: int = Field(
         default=30_000,
         alias="AVA_EXEC_OUTPUT_MAX_CHARS",
-        description="Inline character cap on a single exec's output fed back to the LLM. On overflow, keep the first + last half, drop the middle, and write the full output to a tmp file whose path is reported.",
+        description="Hard inline character cap on a single exec's output fed back to the LLM. On overflow, keep the first + last half and archive the retained output in the workspace's bounded 20-file legacy ring. The independent soft line crop can produce a smaller preview first.",
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    exec_output_crop_after_lines: int = Field(
+        default=120,
+        ge=0,
+        alias="AVA_EXEC_OUTPUT_CROP_AFTER_LINES",
+        description="Soft preview threshold: crop outputs with more than this many splitlines() lines, keeping the configured head and tail. Zero disables soft cropping. Crop only when the marker-inclusive preview is shorter and the full output can be archived; existing hard caps still apply.",
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    exec_output_crop_head_lines: int = Field(
+        default=25,
+        ge=1,
+        alias="AVA_EXEC_OUTPUT_CROP_HEAD_LINES",
+        description="Number of original leading lines kept by a soft exec output preview. Independent of the line-count trigger and the existing hard character caps.",
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    exec_output_crop_tail_lines: int = Field(
+        default=25,
+        ge=1,
+        alias="AVA_EXEC_OUTPUT_CROP_TAIL_LINES",
+        description="Number of original trailing lines kept by a soft exec output preview. Cropping never duplicates overlapping head and tail lines.",
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    exec_output_crop_archive_max_bytes: int = Field(
+        default=16 * 1024 * 1024,
+        ge=1,
+        alias="AVA_EXEC_OUTPUT_CROP_ARCHIVE_MAX_BYTES",
+        description="Per-agent byte budget for full soft-cropped outputs. Only files unreferenced by the current context can be evicted. If referenced files fill the budget or archival fails, skip soft cropping and retain the original output subject to existing hard caps. Independent of the legacy hard-overflow ring.",
         json_schema_extra={
             "restart_required": "agent",
             "writable": True,
