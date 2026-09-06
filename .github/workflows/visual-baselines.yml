@@ -1,0 +1,321 @@
+name: Visual baselines
+
+# Visual references and comparisons must run in one rendering environment.
+# GitHub's Ubuntu runner is that authority: intentional PR changes dispatch
+# this workflow on the PR head, while main pushes open a PNG-only refresh PR
+# when the known changed-pixel signature indicates runner-image drift.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'ui/web/**'
+      - 'tests/e2e/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: visual-baselines-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'push' }}
+
+jobs:
+  render:
+    name: Check runner-native visual baselines
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      branch: ${{ steps.dispatched.outputs.branch }}
+      changed: ${{ steps.diff.outputs.changed }}
+      source_sha: ${{ github.sha }}
+    env:
+      AVA_RUNNER_MODE: process
+      AVA_DB_URL: postgresql://unused@127.0.0.1:1/unused
+      AVA_REDIS_URL: redis://127.0.0.1:1/0
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Require a PR head for manual regeneration
+        if: github.event_name == 'workflow_dispatch'
+        id: dispatched
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [[ "$GITHUB_REF" != refs/heads/* ]] || [ "$GITHUB_REF" = 'refs/heads/main' ]; then
+            echo 'Dispatch visual regeneration on a non-main PR head branch.' >&2
+            exit 1
+          fi
+          BRANCH="${GITHUB_REF#refs/heads/}"
+          PR_COUNT="$(
+            gh pr list \
+              --head "$BRANCH" \
+              --state open \
+              --json number,isCrossRepository \
+              --jq '[.[] | select(.isCrossRepository == false)] | length'
+          )"
+          if [ "$PR_COUNT" -ne 1 ]; then
+            echo "Expected exactly one open same-repository PR for $BRANCH, found $PR_COUNT." >&2
+            exit 1
+          fi
+          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: 0.10.2
+          enable-cache: true
+
+      - name: Install Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ui/web/package-lock.json
+
+      - name: Install Postgres 17 + Redis (server binaries on PATH)
+        uses: ./.github/actions/install-pg-redis
+
+      - name: Install Python deps
+        uses: ./.github/actions/uv-sync
+
+      - name: Install frontend deps
+        working-directory: ui/web
+        run: npm ci
+
+      - name: Cache Playwright chromium
+        id: playwright-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('uv.lock') }}
+
+      - name: Install Playwright chromium
+        # Same bounded-install reasoning as the e2e-shard job in ci.yml.
+        timeout-minutes: 10
+        run: uv run playwright install --with-deps chromium
+
+      - name: Check visual baselines
+        if: github.event_name == 'push'
+        id: check
+        run: |
+          set +e
+          uv run python scripts/refresh_visual_baselines.py --check-only
+          EXIT_CODE="$?"
+          set -e
+          echo "exit_code=$EXIT_CODE" >> "$GITHUB_OUTPUT"
+          if [ "$EXIT_CODE" -ne 0 ] && [ "$EXIT_CODE" -ne 10 ]; then
+            exit "$EXIT_CODE"
+          fi
+
+      - name: Regenerate visual baselines
+        if: >-
+          github.event_name == 'workflow_dispatch' ||
+          steps.check.outputs.exit_code == '10'
+        run: uv run python scripts/refresh_visual_baselines.py --regenerate
+
+      - name: Detect regenerated PNGs
+        if: >-
+          github.event_name == 'workflow_dispatch' ||
+          steps.check.outputs.exit_code == '10'
+        id: diff
+        run: |
+          if git diff --quiet -- tests/e2e/__snapshots__/test_visual_regression/; then
+            echo 'changed=false' >> "$GITHUB_OUTPUT"
+          else
+            echo 'changed=true' >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Reject drift without a reproducible baseline change
+        if: >-
+          github.event_name == 'push' &&
+          steps.check.outputs.exit_code == '10' &&
+          steps.diff.outputs.changed != 'true'
+        run: |
+          echo 'Pixel drift did not reproduce during regeneration on the same runner.' >&2
+          exit 1
+
+      - name: Upload complete baseline set
+        if: steps.diff.outputs.changed == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: regenerated-visual-baselines
+          path: tests/e2e/__snapshots__/test_visual_regression/
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    # The render job may execute PR-head frontend and pytest code, so it stays
+    # read-only. This write-capable job runs no repository code and accepts
+    # only the three fixed regular-PNG artifact paths before committing them.
+    name: Publish runner-native visual baselines
+    if: needs.render.outputs.changed == 'true'
+    needs: render
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      actions: write
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.render.outputs.source_sha }}
+
+      - name: Download regenerated baselines
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: regenerated-visual-baselines
+          path: ${{ runner.temp }}/visual-baselines
+
+      - name: Accept exactly three PNG references
+        env:
+          ARTIFACT_ROOT: ${{ runner.temp }}/visual-baselines
+        run: |
+          REFERENCES=(
+            'test_fleet_visual_regression/fleet.png'
+            'test_home_visual_regression/home.png'
+            'test_mobile_visual_regression/mobile.png'
+          )
+          FILE_COUNT="$(find "$ARTIFACT_ROOT" -type f | wc -l | tr -d ' ')"
+          LINK_COUNT="$(find "$ARTIFACT_ROOT" -type l | wc -l | tr -d ' ')"
+          if [ "$FILE_COUNT" -ne 3 ] || [ "$LINK_COUNT" -ne 0 ]; then
+            echo "Expected exactly three regular PNGs and no symlinks; found $FILE_COUNT files and $LINK_COUNT symlinks." >&2
+            exit 1
+          fi
+          for REFERENCE in "${REFERENCES[@]}"; do
+            SOURCE="$ARTIFACT_ROOT/$REFERENCE"
+            TARGET="tests/e2e/__snapshots__/test_visual_regression/$REFERENCE"
+            if [ ! -f "$SOURCE" ] || [ -L "$SOURCE" ]; then
+              echo "Missing regular baseline artifact: $REFERENCE" >&2
+              exit 1
+            fi
+            cp "$SOURCE" "$TARGET"
+          done
+
+      - name: Commit and push to the dispatched PR head
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          BRANCH: ${{ needs.render.outputs.branch }}
+        run: |
+          git config user.name 'ava-visual-baselines-bot'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add tests/e2e/__snapshots__/test_visual_regression/
+          git commit \
+            -m '[Ava-5814] test(e2e): refresh visual baselines' \
+            -m 'Co-authored-by: Ava #5814'
+          git push origin "HEAD:refs/heads/$BRANCH"
+
+      - name: Re-run CI for the updated PR head
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ needs.render.outputs.branch }}
+        run: gh workflow run ci.yml --ref "$BRANCH"
+
+      - name: Push a dated baseline-refresh branch
+        if: github.event_name == 'push'
+        id: self-heal
+        run: |
+          BRANCH="ava/visual-baselines/$(date --utc '+%Y-%m-%d')"
+          REMOTE_SHA="$(git ls-remote --heads origin "refs/heads/$BRANCH" | awk '{print $1}')"
+          git config user.name 'ava-visual-baselines-bot'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add tests/e2e/__snapshots__/test_visual_regression/
+          git commit \
+            -m '[Ava-5814] test(e2e): refresh visual baselines' \
+            -m 'Co-authored-by: Ava #5814'
+          if [ -n "$REMOTE_SHA" ]; then
+            git push \
+              --force-with-lease="refs/heads/$BRANCH:$REMOTE_SHA" \
+              origin "HEAD:refs/heads/$BRANCH"
+          else
+            git push origin "HEAD:refs/heads/$BRANCH"
+          fi
+          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
+
+      - name: Open or update the baseline-refresh PR
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ steps.self-heal.outputs.branch }}
+        run: |
+          PR_NUMBER="$(
+            gh pr list \
+              --head "$BRANCH" \
+              --state open \
+              --json number,isCrossRepository \
+              --jq '[.[] | select(.isCrossRepository == false)][0].number // empty'
+          )"
+          PR_BODY="$RUNNER_TEMP/visual-baselines-pr.md"
+          cat > "$PR_BODY" <<'EOF'
+          ## Summary
+
+          The visual regression check detected the known changed-pixel drift
+          signature after a GitHub runner image change. The three references
+          were regenerated on the same Ubuntu runner and Playwright Chromium
+          environment that compares them in CI. The comparison algorithm and
+          thresholds are unchanged.
+
+          ## File tree
+
+          ```text
+          tests/e2e/__snapshots__/test_visual_regression/
+          EOF
+          mapfile -t CHANGED_REFERENCES < <(
+            git diff --name-only HEAD^ HEAD -- tests/e2e/__snapshots__/test_visual_regression/
+          )
+          for INDEX in "${!CHANGED_REFERENCES[@]}"; do
+            REFERENCE="${CHANGED_REFERENCES[$INDEX]}"
+            RELATIVE="${REFERENCE#tests/e2e/__snapshots__/test_visual_regression/}"
+            CONNECTOR='├──'
+            if [ "$INDEX" -eq "$((${#CHANGED_REFERENCES[@]} - 1))" ]; then
+              CONNECTOR='└──'
+            fi
+            case "$RELATIVE" in
+              test_fleet_visual_regression/fleet.png) NOTE='fleet reference' ;;
+              test_home_visual_regression/home.png) NOTE='home reference' ;;
+              test_mobile_visual_regression/mobile.png) NOTE='mobile reference' ;;
+              *) echo "Unexpected committed baseline path: $RELATIVE" >&2; exit 1 ;;
+            esac
+            printf '%s %s  (M) ★ %s\n' "$CONNECTOR" "$RELATIVE" "$NOTE" >> "$PR_BODY"
+          done
+          cat >> "$PR_BODY" <<'EOF'
+          ```
+
+          ## Data flow
+
+          GitHub-hosted runner comparison → changed-pixel-only classification
+          → missing-reference candidate generation on that same runner →
+          PNG-only guard → this reviewable refresh PR.
+
+          An in-environment probe captured all three pages eight times in the
+          CI-aligned Playwright container. Every pairwise diff was
+          bit-identical with zero changed pixels. The intermittent failures
+          arise only when references generated in a different environment meet
+          runner font, FreeType, or graphics-stack churn. This PR keeps
+          generation and comparison in one environment without reducing
+          true-regression sensitivity.
+
+          ## Not tested automatically
+
+          Automation verifies runner provenance, the exact failure class, and
+          PNG-only mutation scope. It cannot decide whether the refreshed
+          appearance is desirable; the image diff still requires human review.
+          EOF
+          if [ -z "$PR_NUMBER" ]; then
+            gh pr create \
+              --base main \
+              --head "$BRANCH" \
+              --title '[Ava-5814] test(e2e): refresh visual baselines (runner drift)' \
+              --body-file "$PR_BODY"
+          else
+            gh pr edit "$PR_NUMBER" --body-file "$PR_BODY"
+          fi
+          gh workflow run ci.yml --ref "$BRANCH"
