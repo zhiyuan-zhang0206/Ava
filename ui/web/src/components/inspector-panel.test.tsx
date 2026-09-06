@@ -1,6 +1,6 @@
 // InspectorPanel render + window-selector tests — verify the sections
 // (shells / heartbeat / config overlay / cost) render from a mocked /inspect
-// response, the empty states, and that the header window selector re-queries
+// response, empty-section visibility, and that the header window selector re-queries
 // with the chosen `hours`. Also covers mobile overlay rendering.
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -36,7 +36,7 @@ const { getAgentInspect, getAgentInspectLive, listPages, resolveNotice } =
     getAgentInspectLive:
       vi.fn<(agentId: number, signal?: AbortSignal) => Promise<AgentInspectLive>>(),
     // useAgentPages fetches the open-pages list; default to none so the Page
-    // section renders its empty state and these render tests stay focused on the
+    // section stays hidden and these render tests stay focused on the
     // /inspect sections. The dedicated use-agent-pages.test.ts covers the fetch +
     // SSE fold.
     listPages: vi.fn<(agentId: number) => Promise<PageRow[]>>(() => Promise.resolve([])),
@@ -300,7 +300,8 @@ describe("InspectorPanel", () => {
     expect(screen.queryByRole("textbox")).toBeNull();
 
     resolveAgentB?.(liveFixture({ agent_id: 2, shells: [] }));
-    await waitFor(() => expect(screen.getByText("None open")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("No open notice")).toBeTruthy());
+    expect(screen.queryByText("Persistent shells")).toBeNull();
   });
 
   it("renders all sections from the /inspect response", async () => {
@@ -407,13 +408,11 @@ describe("InspectorPanel", () => {
     expect(within(pageSection!).queryByText("Open")).toBeNull();
   });
 
-  it("renders the empty Page state without a redundant None badge", async () => {
+  it("hides the Page section when no page is open", async () => {
     render(<InspectorPanel agentId={1} />);
 
-    await waitFor(() => expect(screen.getByText("No open page")).toBeTruthy());
-    const pageSection = screen.getByText("Page").closest("section");
-    expect(pageSection).not.toBeNull();
-    expect(within(pageSection!).queryByText("None")).toBeNull();
+    await waitFor(() => expect(listPages).toHaveBeenCalled());
+    expect(screen.queryByText("Page")).toBeNull();
   });
 
   it("renders section skeletons instead of a single loading line on a cold split load", () => {
@@ -422,7 +421,7 @@ describe("InspectorPanel", () => {
 
     render(<InspectorPanel agentId={1} />);
 
-    expect(screen.getByText("Page")).toBeTruthy();
+    expect(screen.queryByText("Page")).toBeNull();
     expect(screen.getByLabelText("Persistent shells loading")).toBeTruthy();
     expect(screen.getByLabelText("Liveness loading")).toBeTruthy();
     expect(screen.getByLabelText("Configuration overlay loading")).toBeTruthy();
@@ -529,6 +528,22 @@ describe("InspectorPanel", () => {
     await waitFor(() => expect(screen.getByText("Persistent shells")).toBeTruthy());
     expect(screen.getByText("$0.0073")).toBeTruthy();
     expect(screen.getByText("7 unpriced")).toBeTruthy();
+  });
+
+  it.each([
+    [0, "—"],
+    [42.54, "42.5"],
+    [5_834, "5834.0"],
+  ] as const)("formats TPS %s as %s", async (tps, expected) => {
+    getAgentInspect.mockResolvedValue(
+      fixture({ tps: { lm_stage_tps: tps, agent_lifecycle_tps: 0 } }),
+    );
+    render(<InspectorPanel agentId={1} />);
+
+    await waitFor(() => expect(screen.getByText("Activity")).toBeTruthy());
+    const activitySection = screen.getByText("Activity").closest("section");
+    expect(activitySection).not.toBeNull();
+    expect(within(activitySection!).getByText(expected)).toBeTruthy();
   });
 
   it("formats durations past 24h as Xd Yh (task #824): idle 24d 3h", async () => {
@@ -640,7 +655,19 @@ describe("InspectorPanel", () => {
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ["agent-inspect", 1] });
   });
 
-  it("notice is an interactive reply surface sitting below Activity", async () => {
+  it("notice is an interactive reply surface before the Page section", async () => {
+    const page = {
+      id: 7,
+      agent_id: 1,
+      name: "task-dashboard",
+      port: 4173,
+      title: "Task dashboard",
+      serve_dir: null,
+      url: "http://gateway.test/pages/7-task-dashboard/",
+      created_at: "2026-08-24T12:00:00Z",
+      closed_at: null,
+    } satisfies PageRow;
+    listPages.mockResolvedValueOnce([page]);
     getAgentInspectLive.mockResolvedValue(
       liveFixture({
         notice: {
@@ -660,11 +687,11 @@ describe("InspectorPanel", () => {
     // Interactive mirror (not the old read-only card): a reply box + Dismiss.
     expect(screen.getByRole("textbox")).toBeTruthy();
     expect(screen.getByText("Dismiss")).toBeTruthy();
-    // Rendered after the Activity section (bottom of the panel).
-    const activity = screen.getByText("Activity");
+    // Notice is pinned above the Page section at the top of panel content.
     const notice = screen.getByText("Notice");
+    const pageTitle = await screen.findByText(page.title);
     expect(
-      activity.compareDocumentPosition(notice) & Node.DOCUMENT_POSITION_FOLLOWING,
+      notice.compareDocumentPosition(pageTitle) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
   });
 
@@ -723,11 +750,12 @@ describe("InspectorPanel", () => {
     expect(screen.getByText("Milestone reached")).toBeTruthy();
   });
 
-  it("renders empty states for no shells / no overrides", async () => {
+  it("hides available-but-empty shells and an empty config overlay", async () => {
     getAgentInspectLive.mockResolvedValue(liveFixture({ shells: [], config_overlay: {} }));
     render(<InspectorPanel agentId={1} />);
-    await waitFor(() => expect(screen.getByText("None open")).toBeTruthy());
-    expect(screen.getByText("Defaults — no overrides")).toBeTruthy();
+    await waitFor(() => expect(screen.getByText("Liveness")).toBeTruthy());
+    expect(screen.queryByText("Persistent shells")).toBeNull();
+    expect(screen.queryByText("Configuration overlay")).toBeNull();
   });
 
   it("does not render observation details", async () => {
@@ -742,7 +770,7 @@ describe("InspectorPanel", () => {
     getAgentInspectLive.mockResolvedValue(liveFixture({ shells: [], shells_available: false }));
     render(<InspectorPanel agentId={1} />);
     await waitFor(() => expect(screen.getByText("Shell observation unavailable")).toBeTruthy());
-    expect(screen.queryByText("None open")).toBeNull();
+    expect(screen.getByText("Persistent shells")).toBeTruthy();
   });
 
   it("renders skill-list config keys in canonical dash spelling (display_name)", async () => {

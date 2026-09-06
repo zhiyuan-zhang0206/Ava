@@ -267,6 +267,11 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
           </div>
         ) : (
           <div className="space-y-4">
+            {liveData ? (
+              <NoticeReplySection agentId={agentId} notice={liveData.notice ?? null} />
+            ) : liveQuery.isPending ? (
+              <SectionSkeleton title={t("sectionNotice")} />
+            ) : null}
             <PageSection pages={pages} />
             {liveData ? (
               <>
@@ -296,11 +301,6 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
               {t("openRunTimeline")}
               <ExternalLink className="size-3" aria-hidden />
             </Link>
-            {liveData ? (
-              <NoticeReplySection agentId={agentId} notice={liveData.notice ?? null} />
-            ) : liveQuery.isPending ? (
-              <SectionSkeleton title={t("sectionNotice")} />
-            ) : null}
           </div>
         )}
       </div>
@@ -446,36 +446,34 @@ function WindowedSectionsError({ onRetry }: { onRetry: () => void }) {
 
 function PageSection({ pages }: { pages: PageRow[] }) {
   const t = useTranslations("inspector");
+  if (pages.length === 0) return null;
+
   return (
     <Section icon={<LayoutPanelTop className="size-3" />} title={t("sectionPage")}>
-      {pages.length === 0 ? (
-        <p className="font-mono text-[11px] text-muted-foreground/70">{t("noOpenPage")}</p>
-      ) : (
-        pages.map((p) => (
-          <a
-            key={p.name}
-            href={p.url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className={cn("items-center gap-2 rounded bg-sidebar-accent/40 px-2 py-1.5 font-mono text-[11px] hover:bg-sidebar-accent group", FLEX)}
-          >
-            <ExternalLink className="size-3 shrink-0 text-muted-foreground group-hover:text-foreground" />
-            <span className={cn(FLEX, FLEX_COL, MIN_W_0, FLEX_1)}>
-              <span className="truncate text-foreground">{p.title ?? p.name}</span>
-              <span
-                className="truncate text-[10px] text-muted-foreground"
-              >
-                {p.url}
-              </span>
+      {pages.map((p) => (
+        <a
+          key={p.name}
+          href={p.url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className={cn("items-center gap-2 rounded bg-sidebar-accent/40 px-2 py-1.5 font-mono text-[11px] hover:bg-sidebar-accent group", FLEX)}
+        >
+          <ExternalLink className="size-3 shrink-0 text-muted-foreground group-hover:text-foreground" />
+          <span className={cn(FLEX, FLEX_COL, MIN_W_0, FLEX_1)}>
+            <span className="truncate text-foreground">{p.title ?? p.name}</span>
+            <span
+              className="truncate text-[10px] text-muted-foreground"
+            >
+              {p.url}
             </span>
-          </a>
-        ))
-      )}
+          </span>
+        </a>
+      ))}
     </Section>
   );
 }
 
-// The agent's single open notice, rendered at the bottom of the panel as an
+// The agent's single open notice, pinned to the top of the panel as an
 // interactive reply surface (mirrors the fleet "waiting on you" queue): a
 // require_response notice gets a reply box + Dismiss, an FYI gets Mark read.
 // Resolving invalidates the inspect query so the notice clears without waiting
@@ -519,6 +517,8 @@ function ShellsSection({ inspect }: { inspect: AgentInspectLive }) {
   const { shells } = inspect;
   const now = useNow(1_000);
   const t = useTranslations("inspector");
+  if (inspect.shells_available === true && shells.length === 0) return null;
+
   return (
     <Section
       icon={<Terminal className="size-3" />}
@@ -527,8 +527,6 @@ function ShellsSection({ inspect }: { inspect: AgentInspectLive }) {
     >
       {inspect.shells_available !== true ? (
         <p className="font-mono text-[11px] text-muted-foreground">Shell observation unavailable</p>
-      ) : shells.length === 0 ? (
-        <p className="font-mono text-[11px] text-muted-foreground/70">{t("noShellsOpen")}</p>
       ) : (
         <ul className="space-y-1">
           {shells.map((s) => (
@@ -614,25 +612,21 @@ function displaySkillName(name: string): string {
 function ConfigOverlaySection({ inspect }: { inspect: AgentInspectLive }) {
   const entries = Object.entries(inspect.config_overlay);
   const t = useTranslations("inspector");
+  if (entries.length === 0) return null;
+
   return (
     <Section icon={<SlidersHorizontal className="size-3" />} title={t("sectionConfigOverlay")}>
-      {entries.length === 0 ? (
-        <p className="font-mono text-[11px] text-muted-foreground/70">
-          {t("configOverlayDefaults")}
-        </p>
-      ) : (
-        <dl className="space-y-1">
-          {entries.map(([k, v]) => (
-            <div
-              key={k}
-              className="rounded bg-sidebar-accent/40 px-2 py-1 font-mono text-[11px]"
-            >
-              <dt className="break-all text-muted-foreground">{k}</dt>
-              <dd className="mt-0.5 break-all text-foreground">{formatValue(SKILL_LIST_KEYS.has(k) && Array.isArray(v) ? v.map(displaySkillName) : v)}</dd>
-            </div>
-          ))}
-        </dl>
-      )}
+      <dl className="space-y-1">
+        {entries.map(([k, v]) => (
+          <div
+            key={k}
+            className="rounded bg-sidebar-accent/40 px-2 py-1 font-mono text-[11px]"
+          >
+            <dt className="break-all text-muted-foreground">{k}</dt>
+            <dd className="mt-0.5 break-all text-foreground">{formatValue(SKILL_LIST_KEYS.has(k) && Array.isArray(v) ? v.map(displaySkillName) : v)}</dd>
+          </div>
+        ))}
+      </dl>
     </Section>
   );
 }
@@ -803,10 +797,7 @@ function formatTokens(n: number): string {
 
 function formatTps(n: number): string {
   if (n === 0) return "—";
-  if (n < 1) return n.toFixed(1);
-  if (n < 10) return n.toFixed(1);
-  if (n < 100) return n.toFixed(1);
-  return `${Math.round(n)}`;
+  return n.toFixed(1);
 }
 
 // A heartbeat interval / pause duration as a compact span: `45s` / `15m` /
