@@ -47,16 +47,7 @@ from shared.context import AvaContext
 from shared.lm.factory import validate_model_config
 from shared.plugin_config_registry import _PLUGIN_CONFIG_CLASSES, _PLUGIN_CONFIGS
 from shared.plugin_config_view import turn_plugin_config
-
-
-async def _wait_until(
-    predicate: Callable[[], bool], timeout: float = 30.0, interval: float = 0.01
-) -> None:
-    async def _poll() -> None:
-        while not predicate():
-            await asyncio.sleep(interval)
-
-    await asyncio.wait_for(_poll(), timeout=timeout)
+from tests.shared.poll_until import poll_until_async
 
 
 class _HostPluginConfig(BaseModel):
@@ -991,14 +982,14 @@ class TestTurnStallGuard:
 
         keeper = asyncio.create_task(_keep_stepping())
         task = asyncio.create_task(host.run_turn(11))
-        await _wait_until(graph.entered.is_set)
+        await poll_until_async(graph.entered.is_set)
         # Let the timeout pass several times over; the steady marks must keep
         # the turn alive.
         observation_ends_at = asyncio.get_running_loop().time() + 0.2
-        await _wait_until(lambda: asyncio.get_running_loop().time() >= observation_ends_at)
+        await poll_until_async(lambda: asyncio.get_running_loop().time() >= observation_ends_at)
         assert not task.done(), "a progressing turn must not be aborted"
         graph.release.set()
-        await _wait_until(task.done)
+        await poll_until_async(task.done)
         await task
         keeper.cancel()
         assert errors == []
@@ -1024,9 +1015,9 @@ class TestTurnStallGuard:
         host._graph = graph  # type: ignore[assignment]
 
         task = asyncio.create_task(host.run_turn(11))
-        await _wait_until(graph.entered.is_set)
+        await poll_until_async(graph.entered.is_set)
         task.cancel()
-        await _wait_until(task.done)
+        await poll_until_async(task.done)
         with pytest.raises(TurnStallTimeoutError):
             await task
 
