@@ -242,6 +242,12 @@ def _resolve_field(key: str, index: dict[str, ConfigFieldView]) -> ConfigFieldVi
     return field
 
 
+def _field_editable(field: ConfigFieldView, *, remote: bool) -> bool:
+    # Mirrors shared.config.editing.field_editable. The CLI has the wire view,
+    # not ConfigFieldMeta, so these two definitions must stay in lockstep.
+    return field.remote_writable if remote and field.scope == "host" else field.writable
+
+
 def _coerce(field_type: str, raw: str) -> Any:
     """Coerce a CLI string value to the field's type so the gateway validator and
     typed consumers see the right shape."""
@@ -312,27 +318,33 @@ def cmd_config_get(key: str | None, machine: str | None, *, local: bool = False)
 
 
 def _build_delta(
-    view: ConfigView, pairs: dict[str, Any] | None, unset_keys: list[str] | None
+    view: ConfigView,
+    pairs: dict[str, Any] | None,
+    unset_keys: list[str] | None,
+    *,
+    machine: str | None,
 ) -> dict[str, Any]:
     """Build a merge patch carrying ONLY the changed keys (reducer semantics).
 
     A set is `{field: value}`; an unset is `{field: None}` (explicit deletion).
     The endpoint leaves any key not in the body untouched, so we send just the
     delta — never the whole override set — and deletion is the explicit None, not
-    an omission. `view` is used only to resolve key aliases and gate read-only sets.
+    an omission. `view` is used only to resolve key aliases and gate read-only edits.
 
     Raises:
-        _ConfigError: an unknown key, or a set on a read-only field.
+        _ConfigError: an unknown key, or an edit of a read-only field.
     """
     index = _index_fields(view)
     body: dict[str, Any] = {}
     for key, raw in (pairs or {}).items():
         field = _resolve_field(key, index)
-        if not field.writable:
+        if not _field_editable(field, remote=machine is not None):
             raise _ConfigError(f"{field.env_var} is read-only")
         body[field.name] = _coerce(field.field_type, raw)
     for key in unset_keys or []:
         field = _resolve_field(key, index)
+        if not _field_editable(field, remote=machine is not None):
+            raise _ConfigError(f"{field.env_var} is read-only")
         body[field.name] = None
     return body
 
@@ -419,7 +431,7 @@ def _edit_config(
         return 1
 
     try:
-        body = _build_delta(view, pairs, unset_keys)
+        body = _build_delta(view, pairs, unset_keys, machine=machine)
     except _ConfigError as e:
         print(f"[ava config {verb}] {e}", file=sys.stderr)
         return 1
