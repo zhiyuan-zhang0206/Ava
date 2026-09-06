@@ -65,7 +65,9 @@ def _gate_probe_offline(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         gs,
         "_systemctl",
-        lambda *_args: subprocess.CompletedProcess([], 1, "LoadState=not-found\n", ""),  # pyright: ignore[reportUnknownArgumentType]
+        lambda *_args: subprocess.CompletedProcess(
+            [], 1, "LoadState=not-found\nActiveState=inactive\n", ""
+        ),  # pyright: ignore[reportUnknownArgumentType]
     )
     monkeypatch.setattr(gs, "unit_path", lambda home: home / "test-systemd" / gs.unit_name(home))  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(cg, "_entry_answers", lambda _port: False)  # pyright: ignore[reportUnknownArgumentType]

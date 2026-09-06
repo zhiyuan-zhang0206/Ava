@@ -163,11 +163,26 @@ def test_failed_destroy_keeps_file_and_does_not_claim_removal(
     assert not manager.active
 
 
-def test_stop_finds_loaded_unit_even_if_its_fragment_disappeared(
+def test_destroy_unloaded_fragment_after_initial_reload_failure(
     tmp_path: Path, manager: Manager
+) -> None:
+    manager.fail = "daemon-reload"
+    with pytest.raises(RuntimeError, match="injected"):
+        ensure(tmp_path)
+    assert gs.unit_path(tmp_path).exists()
+    assert not manager.loaded
+    manager.fail = "stop"  # Native stop reports an error for a not-found unit.
+    assert gs.stop(tmp_path, remove=True)
+    assert not gs.unit_path(tmp_path).exists()
+
+
+@pytest.mark.parametrize("loaded", [True, False])
+def test_stop_finds_loaded_unit_even_if_its_fragment_disappeared(
+    tmp_path: Path, manager: Manager, loaded: bool
 ) -> None:
     ensure(tmp_path)
     gs.unit_path(tmp_path).unlink()
+    manager.loaded = loaded  # A reload can lose the fragment while its process lives.
     assert gs.stop(tmp_path, remove=True)
     assert not manager.active and not manager.enabled
 

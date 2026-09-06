@@ -39,7 +39,9 @@ not establish no-login Windows recovery.
 
 The source hash covers `services/gate/`, as on macOS. A stop failure leaves
 the old definition intact; reload/start failure raises and is retried by the
-next converge. Mutations for one home share a bounded file lock. Migration
+next converge. Destroy also removes a known-unloaded fragment left by a failed
+first reload; it does not send a stop request to a nonexistent unit. Mutations
+for one home share a bounded file lock. Migration
 from the former detached process requires its PID to match both the exact
 `-m services.gate.daemon` argv pair and the owning checkout's working
 directory. Unknown ownership or a surviving process stops convergence;

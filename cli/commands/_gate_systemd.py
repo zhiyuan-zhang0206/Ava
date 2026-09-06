@@ -214,21 +214,24 @@ def ensure(home: Path, repo: Path, python: str, content_hash: str) -> None:
 def stop(home: Path, *, remove: bool = False) -> bool:
     """Wait for this home's unit to stop; destroy also disables and removes it.
 
-    Failure retains the registration and raises so teardown cannot claim success.
+    Failed stop/disable preserves the fragment; any failure raises so teardown
+    cannot claim success (including reload after removal).
     An ordinary stop keeps next-login registration, matching launchd bootout.
     """
     path = unit_path(home)
-    if not path.exists():
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with file_lock(path.with_suffix(".lock"), timeout_s=35):
+        state = _state(home)
         # A deleted fragment does not unload a live unit. Stop by its home-bound
         # name before the orphan reaper can kill a process systemd would revive.
-        if _state(home).get("LoadState") == "not-found":
+        if state["LoadState"] != "not-found" or state["ActiveState"] not in {"inactive", "failed"}:
+            _checked("stop", unit_name(home))
+            if _state(home)["ActiveState"] not in {"inactive", "failed"}:
+                raise RuntimeError(f"Gate unit {unit_name(home)} is still running after stop")
+        elif not path.exists():
             return False
-        path.parent.mkdir(parents=True, exist_ok=True)
-    with file_lock(path.with_suffix(".lock"), timeout_s=35):
-        _checked("stop", unit_name(home))
-        state = _state(home)
-        if state.get("ActiveState") not in {"inactive", "failed"}:
-            raise RuntimeError(f"Gate unit {unit_name(home)} is still running after stop")
+        # A first reload can fail after writing the file but before the manager
+        # discovers it. That known-unloaded fragment still needs deregistration.
         if remove:
             _checked("disable", unit_name(home))
             path.unlink(missing_ok=True)
