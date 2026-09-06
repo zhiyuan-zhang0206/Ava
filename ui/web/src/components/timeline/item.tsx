@@ -38,7 +38,27 @@ import { FLEX } from "@/lib/layout";
 // per-chunk parse storm that pegs the mobile main thread. The window is the
 // same constant the agent-side publisher coalesces into (generated from
 // shared/live_events.py EVENT_COALESCE_MS). See use-throttled-streaming.ts.
-const STREAM_PARSE_INTERVAL_MS = SSE_EVENT_WINDOW_MS;
+//
+// A FIXED window is not enough: the parse is O(payload length), so as a code
+// block streams, each flush re-highlights the whole accumulated text — total
+// work is quadratic and the main thread saturates (user report 2026-09-06; bench: a 33-line
+// block ≈ 69ms/highlight ≈ 1.7s of main-thread work per streaming second at
+// 25Hz, a 300-line block ≈ 11.8s/s). The window therefore widens linearly with
+// payload length — one extra SSE window per 2400 bytes, capped at 1s — so a
+// 300-line block re-parses ~1x/s while chat/reasoning keep the live 40ms
+// cadence. The settle path (use-throttled-streaming.ts, !live) still renders
+// the final text in full immediately.
+const STREAM_PARSE_INTERVAL_BASE_MS = SSE_EVENT_WINDOW_MS;
+const STREAM_PARSE_INTERVAL_MAX_MS = 1000;
+const STREAM_PARSE_INTERVAL_BYTES_PER_STEP = 2400;
+
+export function streamingParseIntervalMs(payloadLength: number): number {
+  const steps = Math.ceil(payloadLength / STREAM_PARSE_INTERVAL_BYTES_PER_STEP);
+  return Math.min(
+    STREAM_PARSE_INTERVAL_MAX_MS,
+    Math.max(STREAM_PARSE_INTERVAL_BASE_MS, steps * STREAM_PARSE_INTERVAL_BASE_MS),
+  );
+}
 
 // envelope wrap is always "<header>:\n\n<body>" (envelope.py wrap_inbound /
 // _exec.py wrap_code_output both follow this). Split out the header as a metadata
@@ -328,7 +348,7 @@ export const ItemView = memo(function ItemView({
   const streamingPayload = useThrottledStreaming(
     item.payload,
     live,
-    STREAM_PARSE_INTERVAL_MS,
+    streamingParseIntervalMs(item.payload.length),
   );
 
   switch (item.kind) {
