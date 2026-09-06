@@ -155,6 +155,31 @@ class DataPlaneSettings(EnvSettings):
         },
     )
 
+    redis_bin_dir: str = Field(
+        default="",
+        alias="AVA_REDIS_BIN_DIR",
+        description="Absolute directory containing redis-server and redis-cli for this "
+        "unit. Empty keeps the platform default. Read from this home's .env, never "
+        "an inherited override. Both tools must be executable; takes effect on the "
+        "next data-plane start, not by replacing an already-running Redis.",
+        json_schema_extra={
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "host",
+            "remote_writable": False,
+        },
+    )
+
+    @field_validator("redis_bin_dir")
+    @classmethod
+    def _absolute_redis_bin_dir(cls, value: str) -> str:
+        if value and (not Path(value).is_absolute() or any(ord(c) < 32 for c in value)):
+            raise ValueError(
+                "redis_bin_dir must be an absolute directory without control characters"
+            )
+        return value
+
     pgbouncer_enabled: bool = Field(
         default=True,
         alias="AVA_PGBOUNCER_ENABLED",

@@ -326,6 +326,8 @@ WSL_DEFAULT_HEALTH_PORT_BASE = BLOCK_MAX + BLOCK_SIZE
 # field is a KeyError — fail-fast, not a silent empty set).
 # Machine-identity fields: a unit's identity is a per-unit fact — it must come
 # from the unit's own .env / $AVA_HOME files, never from a parent process env.
+# The Redis executable selection is also home-owned: inheriting it would make
+# a sibling unit start a different server merely because of its caller.
 _IDENTITY_FIELDS = frozenset(
     {
         "machine_serve_gateway",
@@ -336,6 +338,7 @@ _IDENTITY_FIELDS = frozenset(
         "machine_description",
         "gateway_url",
         "memory_remote",
+        "redis_bin_dir",
     }
 )
 # The derive_env() surface (shared/cluster/derive.py): the cluster-isolation

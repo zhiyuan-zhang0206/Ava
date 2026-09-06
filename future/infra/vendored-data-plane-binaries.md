@@ -5,9 +5,11 @@
 `~/.ava/runtime/pg/` and injects the pinned pgvector extension into it (a
 `cli/commands/_converge.py` step), and
 `shared/pg_tools.py:pg_tool()` prefers it over brew/apt. So `brew install
-postgresql@17` is no longer a prerequisite. `redis-server` is still resolved from
-brew/apt (`cli/commands/_cluster_instance.py`), which is what keeps a package
-manager on the critical path.
+postgresql@17` is no longer a prerequisite. Redis defaults to brew/PATH
+(`cli/commands/_cluster_instance.py`); the unit-local `redis_bin_dir` setting can
+select an already-installed server/CLI pair. Automatic Redis download remains
+unimplemented, so fresh provisioning still needs a package manager or an
+operator-supplied build.
 
 This is also **the single home for the remaining slice 3** of
 [`embedded-per-cluster-data-plane.md`](embedded-per-cluster-data-plane.md) (that doc
@@ -87,8 +89,9 @@ infra this introduces.
 - **Resolution:** `shared/pg_tools.py:pg_tool()` prefers `~/.ava/runtime/pg/` when
   present, else falls back to brew/apt — so existing dev boxes keep working
   unchanged and a clean machine uses the vendored copy. The redis bin resolver
-  (`cli/commands/_cluster_instance.py`) still only knows brew/apt; it gains the same
-  prefer-vendored shape with the redis leg.
+  (`cli/commands/_cluster_instance.py`) currently uses the unit's explicit
+  `redis_bin_dir` or the brew/PATH default. A future vendored default must preserve
+  an explicit per-unit selection rather than overriding it with a host-wide copy.
 - **Version pinning:** the PG major must match across `initdb` and the data dir it
   created, so the pinned version is a single source of truth; a major bump is an
   expand step (new tree, re-`initdb` or `pg_upgrade`), not an in-place swap.

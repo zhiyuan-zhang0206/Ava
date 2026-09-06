@@ -93,8 +93,8 @@ password, and Redis runtime ACL password. Isolation comes from *each cluster
 having its own instance* (which kills cross-talk); authority is separated so a
 runner cannot use its bearer to become an owner or Redis administrator.
 
-Postgres bind posture is unchanged — loopback + this host's reachable address,
-never all interfaces — while Redis is loopback-only; only the ports become
+Authenticated Postgres and Linux Redis bind loopback + this host's reachable address,
+never all interfaces; macOS Redis keeps its loopback relay workaround. The ports are
 per-cluster instead of the fixed 5432/6379.
 
 ## Prod migrated (grandfathering removed)
@@ -187,13 +187,15 @@ The "What it deletes" list above describes the end state, now reached in slices 
 
 ## redis-bridge external-migration boundary (task #1945, WP3)
 
-The `com.ava.redis-bridge` relay (`/usr/bin/python3
+On macOS, the `com.ava.redis-bridge` relay (`/usr/bin/python3
 $AVA_HOME/redis-bridge/relay.py`, per host) is
-the off-loopback Redis inbound mechanism: Redis always binds loopback-only
+the off-loopback Redis inbound mechanism: macOS Redis binds loopback-only
 (see `docs/history/2026-08-24/redis-loopback-only.md`), and the bridge
 forwards the host's private-network address + Redis port to `127.0.0.1`, so a
 split deployment's runners reach the gateway's Redis over the tailnet without
-Redis ever listening off-loopback. Facts registered here:
+Redis ever listening off-loopback. Authenticated Linux gateways bind Redis directly
+to loopback + their reachable address and need no such relay. The following
+bridge facts describe macOS:
 
 - **Station scenario (observatory on another machine)** — the bridge is
   independent of the observatory: Redis stays on the gateway host with the
