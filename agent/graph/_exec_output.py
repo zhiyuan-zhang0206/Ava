@@ -6,13 +6,12 @@ envelope fed back to the LLM. Split out from `_exec.py` to keep that file's line
 budget — this is a self-contained formatting layer with one public entry,
 `wrap_code_output`, called by the exec node's result dispatch.
 
-Oversized output is truncated head+tail inline and the full text written to a
-ring of files under `.exec_output/` in the agent's workspace, so the agent can
-still read / grep the complete output via its shell / files tools — the
-workspace is their default base, and unlike the system temp dir it is neither
-reaped by the OS nor lost on reboot.
+Long multiline output can first use a configurable line preview backed by a
+full archive protected while the current context references it (`_exec_crop`).
+The existing hard inline cap uses a separate 20-file ring under `.exec_output/`
+in the agent's workspace. Neither archive lives in the OS temporary directory.
 
-This is the SECOND of two caps. The first (`_exec_stream.StreamingTextIO`)
+The hard inline limit is the SECOND of two hard caps. The first (`_exec_stream.StreamingTextIO`)
 bounds accumulation while the code is still running; when it fired, its
 `StreamCap` travels here so this layer reports the true produced length and
 stops promising the archive holds the full text — the middle was dropped before
@@ -23,9 +22,12 @@ the accumulator's kept head and its tail out of the kept tail.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
+
+from langchain_core.messages import BaseMessage
 
 import ava
 import ava._boot
@@ -33,6 +35,7 @@ from shared.config import now_timestamp, settings
 from shared.log import logger
 from shared.paths import workspace_dir
 
+from ._exec_crop import crop_output
 from ._exec_stream import StreamCap
 
 # Marker for exec cancel — thread really ran and was interrupted by user pressing Stop;
@@ -66,6 +69,7 @@ def wrap_code_output(
     timeout_seconds: float | None = None,
     max_chars: int | None = None,
     stream_cap: StreamCap | None = None,
+    referenced_messages: Sequence[BaseMessage] = (),
 ) -> str:
     """Generate the code execution output envelope fed to the LLM.
 
@@ -84,6 +88,10 @@ def wrap_code_output(
     `output` mid-run: it carries the true produced length for the
     instrumentation log line, and tells the overflow archive to stop claiming
     it holds the full text.
+
+    `referenced_messages` is the native node's current context, passed explicitly
+    because the parent does not install that state into the child SDK's slot.
+    Soft-crop archives mentioned there cannot be evicted to make space.
 
     Format (double \n after header, same contract as wrap_inbound; the
     frontend splitEnvelope uses this to split header / body):
@@ -119,7 +127,19 @@ def wrap_code_output(
         # length; the StreamCap carries what the code actually produced.
         produced = stream_cap.produced_chars if stream_cap is not None else len(output)
         logger.info("[exec output chars] {n}", n=produced)
-        if len(output) > max_chars:
+        preview = None
+        crop_after = settings.sandbox.exec_output_crop_after_lines
+        if stream_cap is None and crop_after and len(output.splitlines()) > crop_after:
+            preview = crop_output(
+                output,
+                _overflow_dir(),
+                settings.sandbox,
+                referenced_messages=referenced_messages,
+                max_chars=max_chars,
+            )
+        if preview is not None:
+            output = preview
+        elif len(output) > max_chars:
             output = truncate_both_ends(output, max_chars, stream_cap=stream_cap)
         body = output if output.endswith("\n") else output + "\n"
     if timed_out:

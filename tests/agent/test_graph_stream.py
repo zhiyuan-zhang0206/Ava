@@ -14,8 +14,10 @@ if any side field changes, the other side test will turn red."""
 
 import asyncio
 from collections.abc import AsyncIterator
+from pathlib import Path
 from unittest.mock import MagicMock
 
+import pytest
 from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
@@ -367,6 +369,34 @@ async def test_exec_node_output_uses_wrap_code_output_envelope(
     assert msg.additional_kwargs["ava_exec_ms"] >= 0  # pyright: ignore[reportUnknownMemberType]
     # Old format should not appear
     assert not content.startswith("[exec output]")  # pyright: ignore[reportUnknownMemberType]
+
+
+async def test_exec_node_protects_archives_referenced_by_its_current_state(
+    fake_cancel_event: asyncio.Event, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A real child exec cannot evict the previous output still in native context."""
+    from agent.graph import _exec_output
+    from shared.config import settings
+
+    directory = tmp_path / ".exec_output"
+    monkeypatch.setattr(_exec_output, "_overflow_dir", lambda: directory)
+    old_body = ("old payload " * 10 + "\n") * 140
+    new_body = ("new payload " * 10 + "\n") * 140
+    monkeypatch.setattr(settings.sandbox, "exec_output_crop_archive_max_bytes", len(old_body))
+    prior_output = _exec_output.wrap_code_output(old_body)
+    archive = next(directory.glob("crop_*.txt"))
+    state = AgentState(
+        messages=[
+            HumanMessage(content=prior_output),
+            _ai_with_code("print(('new payload ' * 10 + '\\n') * 140, end='')"),
+        ],
+        halted=False,
+    )
+    result = await exec_node(state, _make_runtime(), {"configurable": {"thread_id": "7"}})
+
+    assert new_body in result.update["messages"][0].content  # pyright: ignore[reportUnknownMemberType]
+    assert archive.read_text() == old_body
+    assert list(directory.glob("crop_*.txt")) == [archive]
 
 
 # Removed test_exec_node_cancel_output_uses_wrap_code_output_cancelled——it used
