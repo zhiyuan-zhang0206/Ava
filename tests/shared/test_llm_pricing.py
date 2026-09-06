@@ -304,7 +304,7 @@ def test_parse_catalog_rejects_unknown_schema_version() -> None:
         ("gemini-3.5-flash", 1.5 + 9.0),
         # 1M input selects Gemini's documented >200K tier.
         ("gemini-3.1-pro-preview", 4.0 + 18.0),
-        ("gpt-5.6-sol", 5.0 + 30.0),
+        ("gpt-5.6-sol", 4.0 + 20.0),
         ("gpt-6-astra", 10.0 + 50.0),
         ("gpt-5.6-terra", 2.0 + 12.0),
         ("gpt-5.6-luna", 0.20 + 1.20),
@@ -318,8 +318,8 @@ def test_cost_usd_priced_models(model: str, expected: float, gemini_archive_cata
 
 def test_cost_usd_cache_read_discount() -> None:
     """A fully-cached input bills at the cache-read rate, not the miss rate:
-    gpt-5.6 in=1M all cached, out=0 -> 1M * 0.50/M = $0.50."""
-    assert cost_usd("gpt-5.6-sol", _M, 0, _M) == pytest.approx(0.5)  # pyright: ignore[reportUnknownMemberType]
+    gpt-5.6-sol in=1M all cached, out=0 -> 1M * 0.40/M = $0.40 (promo)."""
+    assert cost_usd("gpt-5.6-sol", _M, 0, _M) == pytest.approx(0.4)  # pyright: ignore[reportUnknownMemberType]
     # mimo-v2.5-pro: ~120x cheaper cache hit (0.0036/M) vs miss (0.435/M).
     assert cost_usd("mimo-v2.5-pro", _M, 0, _M) == pytest.approx(0.0036)  # pyright: ignore[reportUnknownMemberType]
 

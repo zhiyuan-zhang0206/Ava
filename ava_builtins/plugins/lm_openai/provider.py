@@ -147,12 +147,19 @@ register(
             provider="gpt",
             context_window=256_000,
             knowledge_cutoff="2025-12",
+            # Official vocabulary (none, low, medium, high, xhigh — no max);
+            # declared so the builder clamps out-of-range efforts instead of
+            # passing them to the wire verbatim.
+            effort_levels=("none", "low", "medium", "high", "xhigh"),
             media_types=frozenset({"image"}),
         ),
         "gpt-5.4-mini": ModelSpec(
             provider="gpt",
             context_window=256_000,
             knowledge_cutoff="2025-08",
+            # Same vocabulary as gpt-5.5 (official docs), same reason to
+            # declare it.
+            effort_levels=("none", "low", "medium", "high", "xhigh"),
             media_types=frozenset({"image"}),
         ),
     },
@@ -186,11 +193,16 @@ register(
             ),
         ),
         "gpt-5.6-sol": PriceRates(
-            cache_miss=5.0,
-            cache_hit=0.5,
-            output=30.0,
-            source_url="https://openai.com/api/pricing/",
-            source_checked_at="2026-06-27",
+            # Promotional pricing, valid at least through 2026-11-21 (official
+            # model page, checked 2026-09-06). On promo expiry, restore the
+            # standard rates 5.0 / 0.5 / 30.0 here AND in
+            # shared/lm/pricing_catalog_archive.json — a deliberate manual
+            # flip, not an automatic revert (405 ruling 2026-09-07).
+            cache_miss=4.0,
+            cache_hit=0.4,
+            output=20.0,
+            source_url="https://developers.openai.com/api/docs/models/gpt-5.6-sol",
+            source_checked_at="2026-09-06",
             vendor="openai",
             periods=(
                 PricePeriod(
@@ -200,9 +212,9 @@ register(
                         PriceTier(
                             input_tokens_min=0,
                             input_tokens_max=None,
-                            cache_miss="5.0",
-                            cache_hit="0.5",
-                            output="30.0",
+                            cache_miss="4.0",
+                            cache_hit="0.4",
+                            output="20.0",
                         ),
                     ),
                 ),
