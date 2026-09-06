@@ -204,7 +204,7 @@ export function RunTimelineChart({
         className="rounded-[10px] border border-border bg-card p-4"
         aria-label={labels.chart}
       >
-        <p className="font-mono text-sm text-muted-foreground">{labels.empty}</p>
+        <p className="font-sans text-sm text-muted-foreground">{labels.empty}</p>
       </section>
     );
   }
@@ -213,7 +213,7 @@ export function RunTimelineChart({
     <section aria-label={labels.chart} className="rounded-[10px] border border-border bg-card p-3">
       <div className={cn("grid gap-3", selectedRow ? "lg:grid-cols-[minmax(0,1fr)_320px]" : "")}>
         <div ref={popoverLayerRef} className={cn(MIN_W_0, "relative space-y-2")}>
-          <div className={cn(FLEX, "items-center justify-between px-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground")}>
+          <div className={cn(FLEX, "items-center justify-between px-1 text-2xs font-medium uppercase tracking-wide text-muted-foreground")}>
             <span>{labels.time}</span>
             <span>{labels.eventRail}</span>
           </div>
@@ -329,7 +329,7 @@ export function RunTimelineChart({
                     data-timeline-tick=""
                     data-testid="fixed-timeline-text"
                     className={cn(
-                      "absolute w-[72px] font-mono text-[10px] tabular-nums text-muted-foreground",
+                      "absolute w-[72px] font-mono text-2xs tabular-nums text-muted-foreground",
                       index === 0 ? "text-left" : index === layout.ticks.length - 1 ? "text-right" : "text-center",
                     )}
                     style={{ left: `${Math.round(left)}px`, top: "4px" }}
@@ -358,7 +358,7 @@ export function RunTimelineChart({
                     onFocus={showPopover}
                     onBlur={hidePopover}
                     className={cn(
-                      "absolute truncate rounded-md border px-1.5 py-0.5 text-center font-mono text-[10px] leading-4 outline-none focus-visible:ring-2 focus-visible:ring-foreground focus-visible:ring-offset-2",
+                      "absolute truncate rounded-md border px-1.5 py-0.5 text-center font-mono text-2xs leading-4 outline-none focus-visible:ring-2 focus-visible:ring-foreground focus-visible:ring-offset-2",
                       eventChipClass(event.kind),
                     )}
                     style={{
@@ -409,7 +409,7 @@ export function RunTimelineChart({
                     {row.turn !== null && turn.width >= 32 ? (
                       <span
                         data-testid="fixed-timeline-text"
-                        className="block truncate px-1 font-mono text-[10px] font-semibold text-white"
+                        className="block truncate px-1 font-mono text-2xs font-semibold text-white"
                         style={{ left: `${turn.left}px` }}
                       >
                         {row.turn}
@@ -431,7 +431,7 @@ export function RunTimelineChart({
             />
           ) : null}
           {rail.skippedCount > 0 ? (
-            <p className="px-1 font-mono text-[10px] text-muted-foreground">
+            <p className="px-1 font-mono text-2xs text-muted-foreground">
               {labels.moreEvents(rail.skippedCount, rail.skippedSummary)}
             </p>
           ) : null}

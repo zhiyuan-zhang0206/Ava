@@ -71,10 +71,10 @@ const STATUS_FILL: Record<string, string> = {
 function MetaRow({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className={MIN_W_0}>
-      <p className="text-[9px] font-medium uppercase tracking-wider text-muted-foreground/60">
+      <p className="text-2xs font-medium uppercase tracking-wider text-muted-foreground/60">
         {label}
       </p>
-      <p className="truncate text-[11px] text-popover-foreground">{children}</p>
+      <p className="truncate text-xs text-popover-foreground">{children}</p>
     </div>
   );
 }
@@ -118,13 +118,13 @@ function TaskHoverCard({
           <p className="line-clamp-2 break-words text-xs font-semibold leading-snug text-popover-foreground">
             {task.title}
           </p>
-          <p className="mt-0.5 text-[10px] tabular-nums text-muted-foreground">
+          <p className="mt-0.5 font-mono text-2xs tabular-nums text-muted-foreground">
             {t("task", { id: task.id })}
           </p>
         </div>
         <span
           className={cn(
-            "shrink-0 self-start rounded px-1 py-0.5 text-[9px] font-bold leading-none text-white",
+            "shrink-0 self-start rounded px-1 py-0.5 font-mono text-2xs font-bold leading-none text-white tabular-nums",
             PRIORITY_BG[task.priority],
           )}
         >
@@ -146,7 +146,7 @@ function TaskHoverCard({
 
       {/* Reminder extras — only when the task actually has a reminder history. */}
       {task.reminder_count > 0 || task.last_reminded_at != null ? (
-        <p className="mt-1.5 text-[10px] text-muted-foreground/70">
+        <p className="mt-1.5 text-2xs text-muted-foreground/70">
           {t("reminders", { count: task.reminder_count })}
           {task.last_reminded_at != null ? ` · ${t("lastReminder", { time: formatRelative(task.last_reminded_at) })}` : ""}
         </p>
@@ -154,26 +154,26 @@ function TaskHoverCard({
 
       {task.description ? (
         <div className="mt-2 border-t border-border pt-2">
-          <p className="text-[9px] font-medium uppercase tracking-wider text-muted-foreground/60">
+          <p className="text-2xs font-medium uppercase tracking-wider text-muted-foreground/60">
             {t("meta.description")}
           </p>
-          <p className="mt-0.5 line-clamp-4 whitespace-pre-wrap break-words text-[11px] leading-snug text-popover-foreground/90">
+          <p className="mt-0.5 line-clamp-4 whitespace-pre-wrap break-words text-xs leading-snug text-popover-foreground/90">
             {task.description}
           </p>
         </div>
       ) : null}
       {task.results ? (
         <div className="mt-2 border-t border-border pt-2">
-          <p className="text-[9px] font-medium uppercase tracking-wider text-muted-foreground/60">
+          <p className="text-2xs font-medium uppercase tracking-wider text-muted-foreground/60">
             {t("meta.result")}
           </p>
-          <p className="mt-0.5 line-clamp-4 whitespace-pre-wrap break-words text-[11px] leading-snug text-popover-foreground/90">
+          <p className="mt-0.5 line-clamp-4 whitespace-pre-wrap break-words text-xs leading-snug text-popover-foreground/90">
             {task.results}
           </p>
         </div>
       ) : null}
 
-      <p className="mt-2 border-t border-border pt-1.5 text-[9px] text-muted-foreground/60">
+      <p className="mt-2 border-t border-border pt-1.5 text-2xs text-muted-foreground/60">
         {t("openOwnerConversation")}
       </p>
     </div>
@@ -208,7 +208,7 @@ function StatusToggleButton({
       type="button"
       onClick={onClick}
       className={cn(
-        "inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium",
+        "inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-2xs font-medium",
         "border transition-colors select-none",
         active
           ? "border-border bg-accent text-accent-foreground"
@@ -218,7 +218,7 @@ function StatusToggleButton({
       {icon}
       <span>{label}</span>
       {!active && hiddenCount > 0 && (
-        <span className="rounded-full bg-muted px-1 text-[9px] tabular-nums text-muted-foreground">
+        <span className="rounded-full bg-muted px-1 font-mono text-2xs tabular-nums text-muted-foreground">
           {hiddenCount}
         </span>
       )}
@@ -234,7 +234,7 @@ function StaleBadge({ show }: { show: boolean }) {
   if (!show) return null;
   return (
     <span
-      className="inline-flex items-center gap-1 text-[10px] text-amber-600 dark:text-amber-400"
+      className="inline-flex items-center gap-1 text-2xs text-amber-600 dark:text-amber-400"
     >
       <span className="size-1.5 rounded-full bg-amber-500" />
       {t("stale")}
@@ -284,7 +284,7 @@ function FilterCluster({
         options={taskWindowOptions}
         onChange={(v) => setTaskWindow(v as TaskWindow)}
         ariaLabel={t("window")}
-        className="cursor-pointer rounded border border-border bg-background/80 px-1.5 py-0.5 text-[10px] text-muted-foreground backdrop-blur hover:text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+        className="cursor-pointer rounded border border-border bg-background/80 px-1.5 py-0.5 text-2xs text-muted-foreground backdrop-blur hover:text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
       />
       <StatusToggleButton
         active={showDone}
@@ -554,11 +554,11 @@ export function TaskGraph({
             <button
               type="button"
               onClick={() => setMode("graph")}
-              className="rounded px-2 py-0.5 text-[11px] text-muted-foreground hover:text-foreground hover:bg-sidebar-accent"
+              className="rounded px-2 py-0.5 text-xs text-muted-foreground hover:text-foreground hover:bg-sidebar-accent"
             >
               {t("graph")}
             </button>
-            <span className="rounded bg-sidebar-accent px-2 py-0.5 text-[11px] font-medium text-foreground">
+            <span className="rounded bg-sidebar-accent px-2 py-0.5 text-xs font-medium text-foreground">
               {t("kanban")}
             </span>
           </div>
@@ -594,13 +594,13 @@ export function TaskGraph({
     <div className={cn("h-full", FLEX, FLEX_COL, MIN_H_0)}>
       <div className={cn("shrink-0 flex-wrap items-center gap-1 border-b border-border px-2 py-1.5", FLEX)}>
         <div className={cn("gap-1", FLEX)}>
-          <span className="rounded bg-sidebar-accent px-2 py-0.5 text-[11px] font-medium text-foreground">
+          <span className="rounded bg-sidebar-accent px-2 py-0.5 text-xs font-medium text-foreground">
             {t("graph")}
           </span>
           <button
             type="button"
             onClick={() => setMode("kanban")}
-            className="rounded px-2 py-0.5 text-[11px] text-muted-foreground hover:text-foreground hover:bg-sidebar-accent"
+            className="rounded px-2 py-0.5 text-xs text-muted-foreground hover:text-foreground hover:bg-sidebar-accent"
           >
             {t("kanban")}
           </button>

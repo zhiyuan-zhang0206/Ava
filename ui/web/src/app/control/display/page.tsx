@@ -431,7 +431,7 @@ export default function DisplaySettingsPage() {
       <SettingsSection id="display-model-picker" title="Model picker">
         {modelGroups.map(([provider, models]) => (
           <Fragment key={provider}>
-            <div className="px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground/70 bg-muted/30">
+            <div className="px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground/70 bg-muted/30">
               {providerLabel(provider)}
             </div>
             {models.map((modelName) => {

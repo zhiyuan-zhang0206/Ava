@@ -102,7 +102,7 @@ export default function AlertsSection() {
                 <TableCell>
                   <span
                     className={cn(
-                      "inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold",
+                      "inline-flex items-center rounded px-1.5 py-0.5 text-2xs font-semibold",
                       a.status === "resolved"
                         ? "bg-muted text-muted-foreground"
                         : cn("text-white", SEVERITY_BG[a.severity]),
@@ -122,7 +122,7 @@ export default function AlertsSection() {
                     {a.alertname}
                   </div>
                   {summaryOf(a) && (
-                    <div className="mt-0.5 whitespace-normal break-words text-[11px] text-muted-foreground">
+                    <div className="mt-0.5 whitespace-normal break-words text-xs text-muted-foreground">
                       {summaryOf(a)}
                     </div>
                   )}
@@ -141,7 +141,7 @@ export default function AlertsSection() {
                     {a.status}
                   </span>
                 </TableCell>
-                <TableCell className="hidden text-[11px] text-muted-foreground lg:table-cell">
+                <TableCell className="hidden text-xs text-muted-foreground lg:table-cell">
                   {a.source}
                 </TableCell>
               </TableRow>

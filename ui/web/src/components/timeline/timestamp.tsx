@@ -29,7 +29,7 @@ export function ItemTimestamp({ iso, showWeekday = false }: { iso: string; showW
   const time = formatItemTime(iso, showWeekday);
   if (!time) return null;
   return (
-    <span className="ml-2 text-[10px] text-muted-foreground/60 font-mono tabular-nums">
+    <span className="ml-2 text-2xs text-muted-foreground/60 font-mono tabular-nums">
       {time}
     </span>
   );

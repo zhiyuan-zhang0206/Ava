@@ -92,10 +92,10 @@ export function TaskKanban({
             className={cn("shrink-0 rounded-lg border border-border bg-background", FLEX, FLEX_COL)}
           >
             <div className={cn("shrink-0 items-center gap-2 border-b border-border px-3 py-2", FLEX)}>
-              <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+              <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                 {laneLabels[lane]}
               </span>
-              <span className="rounded-full bg-muted px-1.5 text-[10px] tabular-nums text-foreground">
+              <span className="rounded-full bg-muted px-1.5 font-mono text-2xs tabular-nums text-foreground">
                 {cards.length}
               </span>
             </div>
@@ -177,7 +177,7 @@ function KanbanCard({
           key; leads the row so the ordering is readable down the left edge. */}
       <span
         className={cn(
-          "mt-px shrink-0 rounded px-1 text-[9px] font-bold leading-tight text-white",
+          "mt-px shrink-0 rounded px-1 font-mono text-2xs font-bold leading-tight text-white tabular-nums",
           PRIORITY_BG[task.priority],
         )}
       >
@@ -189,14 +189,14 @@ function KanbanCard({
           <span className="text-muted-foreground">#{task.id}</span> {task.title}
         </div>
         {task.description && (
-          <div className="mt-1 whitespace-pre-wrap break-words text-[10px] text-muted-foreground/70">
+          <div className="mt-1 whitespace-pre-wrap break-words text-2xs text-muted-foreground/70">
             {task.description}
           </div>
         )}
       </div>
       {/* Meta rail — status / owner, right-aligned so titles stay flush left
           across the whole section. */}
-      <div className={cn("max-w-[40%] items-center gap-2 text-[10px] text-muted-foreground", FLEX, MIN_W_0)}>
+      <div className={cn("max-w-[40%] items-center gap-2 text-2xs text-muted-foreground", FLEX, MIN_W_0)}>
         <span>{statusLabel[task.status] ?? task.status}</span>
         {task.owner != null ? (
           <span className={cn("truncate", MIN_W_0)}>

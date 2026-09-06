@@ -258,6 +258,17 @@ describe("CardHeader", () => {
     expect(container.textContent).toContain("Ava ▸");
   });
 
+  it("uses sans typography and the named small-size token for its UI header", () => {
+    const cfg = messageCardConfig(baseItem)!;
+    const { container } = renderWithQuery(
+      <CardHeader item={baseItem} config={cfg} expanded={true} onToggle={noop} />,
+    );
+    const button = container.querySelector("button")!;
+    expect(button.classList).toContain("font-sans");
+    expect(button.classList).toContain("text-xs");
+    expect(button.classList).not.toContain("font-mono");
+  });
+
   it("collapsed state → aria-expanded=false, data-expanded=false, no title (no hover tooltip)", () => {
     const cfg = messageCardConfig(baseItem)!;
     const { container } = renderWithQuery(

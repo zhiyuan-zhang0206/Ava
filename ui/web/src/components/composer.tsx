@@ -700,7 +700,7 @@ export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, f
               {img.status !== "ready" ? (
                 <span
                   className={cn(
-                    "absolute inset-0 items-center justify-center text-[10px]",
+                    "absolute inset-0 items-center justify-center text-2xs",
                     img.status === "error" ? "text-destructive" : "text-muted-foreground",
                     FLEX
                   )}
@@ -713,7 +713,7 @@ export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, f
                 aria-label={t("removeImage", { name: img.name })}
                 onClick={() => removeImage(img.key)}
                 disabled={composerLocked}
-                className={cn("absolute -right-1.5 -top-1.5 h-4 w-4 items-center justify-center rounded-full bg-foreground/80 text-background text-[10px] leading-none", FLEX)}
+                className={cn("absolute -right-1.5 -top-1.5 h-4 w-4 items-center justify-center rounded-full bg-foreground/80 text-background text-2xs leading-none", FLEX)}
               >
                 ×
               </button>

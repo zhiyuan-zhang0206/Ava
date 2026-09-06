@@ -1050,6 +1050,14 @@ describe("InspectorPanel desktop", () => {
     expect(header?.className).not.toContain("border-b");
   });
 
+  it("uses sans typography for the Inspector title", () => {
+    render(<InspectorPanel agentId={1} />);
+
+    const title = screen.getByText("Inspector", { selector: "span" });
+    expect(title.classList).toContain("font-sans");
+    expect(title.classList).not.toContain("font-mono");
+  });
+
   it("closes when clicking the X button", async () => {
     getAgentInspect.mockResolvedValue(fixture());
     render(<InspectorPanel agentId={1} />);
@@ -1232,6 +1240,14 @@ describe("InspectorToggle", () => {
     const btn = screen.getByRole("button", { name: "Close inspector" });
     fireEvent.click(btn);
     expect(toggle).toHaveBeenCalledOnce();
+  });
+
+  it("uses sans typography for its UI label", () => {
+    render(<InspectorToggle />);
+    const btn = screen.getByRole("button", { name: "Close inspector" });
+    expect(btn.classList).toContain("font-sans");
+    expect(btn.classList).toContain("text-xs");
+    expect(btn.classList).not.toContain("font-mono");
   });
 
   it("chevron points left when open and right when closed (2026-08-24 ruling)", () => {

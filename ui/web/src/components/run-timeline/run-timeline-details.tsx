@@ -105,7 +105,7 @@ function turnFacts(row: RunTimelineResponse["rows"][number], labels: RunTimeline
 function DetailMetric({ label, value }: { label: string; value: string }) {
   return (
     <div className="space-y-1 rounded-[10px] border border-border bg-muted px-3 py-2">
-      <dt className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{label}</dt>
+      <dt className="text-2xs font-medium uppercase tracking-wide text-muted-foreground">{label}</dt>
       <dd className="font-mono text-xs tabular-nums text-foreground">{value}</dd>
     </div>
   );
@@ -129,7 +129,7 @@ export function TurnDetailPanel({
     >
       <header className={cn(FLEX, "items-start justify-between gap-3")}>
         <div>
-          <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{labels.turnDetails}</p>
+          <p className="text-2xs font-medium uppercase tracking-wide text-muted-foreground">{labels.turnDetails}</p>
           <h3 className="text-sm font-semibold">{facts.label}</h3>
         </div>
         <button
@@ -163,7 +163,7 @@ export function TurnDetailPanel({
           <p className="text-xs text-muted-foreground">{labels.noExecutions}</p>
         ) : (
           <div className={cn(OVERFLOW_HIDDEN, "rounded-[10px] border border-border")}>
-            <div className="grid grid-cols-[minmax(0,1fr)_auto_auto] gap-3 bg-muted px-3 py-2 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+            <div className="grid grid-cols-[minmax(0,1fr)_auto_auto] gap-3 bg-muted px-3 py-2 text-2xs font-medium uppercase tracking-wide text-muted-foreground">
               <span>{labels.tool}</span>
               <span>{labels.duration}</span>
               <span>{labels.status}</span>
@@ -171,10 +171,10 @@ export function TurnDetailPanel({
             {row.execs.map((execution, index) => (
               <div
                 key={`${execution.tool}-${index}`}
-                className="grid grid-cols-[minmax(0,1fr)_auto_auto] gap-3 border-t border-border px-3 py-2 font-mono text-[11px]"
+                className="grid grid-cols-[minmax(0,1fr)_auto_auto] gap-3 border-t border-border px-3 py-2 font-sans text-xs"
               >
-                <span className="truncate">{execution.tool}</span>
-                <span className="tabular-nums">{execution.dur_s.toFixed(2)}s</span>
+                <span className="truncate font-mono">{execution.tool}</span>
+                <span className="font-mono tabular-nums">{execution.dur_s.toFixed(2)}s</span>
                 <span className={execution.ok ? "text-emerald-700 dark:text-emerald-400" : "text-red-700 dark:text-red-400"}>
                   {execution.ok ? labels.succeeded : labels.failed}
                 </span>
@@ -193,7 +193,7 @@ export function TurnDetailPanel({
             {row.anomalies.map((anomaly) => (
               <span
                 key={anomaly}
-                className="rounded-md border border-red-200 bg-red-50 px-2 py-1 font-mono text-[10px] text-red-700 dark:border-red-500/30 dark:bg-red-950/30 dark:text-red-400"
+                className="rounded-md border border-red-200 bg-red-50 px-2 py-1 font-mono text-2xs text-red-700 dark:border-red-500/30 dark:bg-red-950/30 dark:text-red-400"
               >
                 {anomaly}
               </span>
@@ -233,7 +233,7 @@ export function TimelinePopover({
       {facts ? (
         <>
           <p className="text-xs font-semibold">{facts.label}</p>
-          <dl className="mt-2 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-[11px]">
+          <dl className="mt-2 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-xs">
             <dt className="text-muted-foreground">{labels.timeRange}</dt>
             <dd className="font-mono tabular-nums">{facts.timeRange}</dd>
             <dt className="text-muted-foreground">{labels.activeSeconds}</dt>
@@ -249,7 +249,7 @@ export function TimelinePopover({
       ) : event ? (
         <>
           <p className="text-xs font-semibold">{labels.eventDetails}</p>
-          <dl className="mt-2 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-[11px]">
+          <dl className="mt-2 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-xs">
             <dt className="text-muted-foreground">{labels.kind}</dt>
             <dd className="font-mono">{event.kind}</dd>
             <dt className="text-muted-foreground">{labels.timestamp}</dt>

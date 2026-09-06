@@ -36,7 +36,7 @@ export function UploadButton({ agentId, onUpload, uploading, progress, count, er
   // For a multi-file batch prefix the file count ("3 files · 42%").
   if (uploading) {
     return (
-      <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
+      <span className="inline-flex items-center gap-1 text-2xs text-muted-foreground">
         <Loader2 className="size-3 animate-spin" />
         {count > 1 ? `${count} files · ${progress}%` : `${progress}%`}
       </span>
@@ -67,8 +67,8 @@ export function UploadButton({ agentId, onUpload, uploading, progress, count, er
         disabled={agentId == null}
         className={
           error
-            ? "inline-flex items-center gap-1 text-[10px] text-destructive hover:text-destructive/80 disabled:opacity-30 transition-colors"
-            : "inline-flex items-center gap-1 text-[10px] text-muted-foreground/50 hover:text-muted-foreground disabled:opacity-30 transition-colors"
+            ? "inline-flex items-center gap-1 text-2xs text-destructive hover:text-destructive/80 disabled:opacity-30 transition-colors"
+            : "inline-flex items-center gap-1 text-2xs text-muted-foreground/50 hover:text-muted-foreground disabled:opacity-30 transition-colors"
         }
       >
         {error ? <AlertCircle className="size-3.5" /> : <Paperclip className="size-3.5" />}

@@ -103,13 +103,17 @@ export function SearchOverlay({
                     onSelect(a.agent_id);
                     onClose();
                   }}
-                  className={cn("w-full items-center gap-2 px-3 py-2 text-left font-mono text-xs text-muted-foreground hover:bg-sidebar-accent/60 hover:text-foreground", FLEX)}
+                  className={cn("w-full items-center px-3 py-2 text-left font-sans text-xs text-muted-foreground hover:bg-sidebar-accent/60 hover:text-foreground", FLEX)}
                 >
                   {/* Same shape as sidebar rows (task #750): `#id · label`, or
                       bare `#id` when there is no label. */}
-                  <span className="truncate">
-                    {a.label ? `#${a.agent_id} · ${a.label}` : `#${a.agent_id}`}
-                  </span>
+                  <span className="shrink-0 font-mono">#{a.agent_id}</span>
+                  {a.label ? (
+                    <>
+                      {" · "}
+                      <span className="truncate">{a.label}</span>
+                    </>
+                  ) : null}
                 </button>
               </li>
             ))

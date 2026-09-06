@@ -1,13 +1,8 @@
 // Font-stack contract — the global font stacks must cover the CJK fallbacks
 // for every platform the app runs on (user ruling 2026-08-09 #1094).
 //
-// History: `--font-sans` carried "PingFang SC" / "Microsoft YaHei" from the
-// start, but `--font-mono` had NO CJK fonts — and the UI is font-mono-heavy
-// (fleet view, sidebar, timeline). On Windows the mono CJK glyphs fell through
-// to the generic `monospace` → SimSun (\u5b8b\u4f53), which is what the user reported
-// as "CJK glyphs look ugly on Windows". The mono stack now mirrors the sans stack: PingFang SC
-// (macOS) → Microsoft YaHei (Windows) → Noto Sans SC (Linux), with the generic
-// fallback last.
+// Both stacks cover CJK because code and data surfaces can contain localized
+// text even though application chrome uses sans by default.
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -41,5 +36,16 @@ describe("global font stacks (task #1094)", () => {
     expect(yahei).toBeGreaterThan(ping);
     expect(noto).toBeGreaterThan(yahei);
     expect(generic).toBeGreaterThan(noto);
+  });
+});
+
+describe("typography scale (task #2560)", () => {
+  it.each([
+    ["text-2xs", "0.625rem"],
+    ["text-xs", "0.75rem"],
+    ["text-sm", "0.875rem"],
+    ["text-base", "1rem"],
+  ])("declares --%s as %s", (name, size) => {
+    expect(stackOf(name)).toContain(size);
   });
 });

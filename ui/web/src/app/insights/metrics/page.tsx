@@ -99,7 +99,7 @@ export default function MetricsRedirectPage() {
             {t("openGrafana")}
           </a>
         </div>
-        <p className="text-[11px] leading-relaxed text-muted-foreground">
+        <p className="text-xs leading-relaxed text-muted-foreground">
           {t("fallbackBefore")} {" "}
           <code className="mx-1 rounded bg-muted px-1 py-0.5 font-mono">{t("metricsScript")}</code>{" "}
           {t("fallbackMiddle")} {" "}

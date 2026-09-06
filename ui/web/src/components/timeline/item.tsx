@@ -192,7 +192,7 @@ function AttachContent({
             "whitespace-pre-wrap [overflow-wrap:anywhere] font-mono leading-relaxed m-0",
             isNotice
               ? "text-[11px] text-muted-foreground/70"
-              : "text-[13px] text-foreground/90",
+              : "text-sm text-foreground/90",
           )}
         >
           {line}
@@ -266,7 +266,7 @@ function EnvelopeContent({
     <>
       {header ? (
         <div className="mb-1.5">
-          <span className="font-mono text-[13px] leading-relaxed text-foreground/90 [overflow-wrap:anywhere]">
+          <span className="font-mono text-sm leading-relaxed text-foreground/90 [overflow-wrap:anywhere]">
             {header}
           </span>
         </div>
@@ -275,12 +275,12 @@ function EnvelopeContent({
         showCopy ? (
           <div className="group relative">
             <CopyButton text={body} label={t("commandOutput")} />
-            <pre className="whitespace-pre-wrap [overflow-wrap:anywhere] font-mono text-[13px] leading-relaxed text-foreground/90 m-0">
+            <pre className="whitespace-pre-wrap [overflow-wrap:anywhere] font-mono text-sm leading-relaxed text-foreground/90 m-0">
               {body}
             </pre>
           </div>
         ) : (
-          <pre className="whitespace-pre-wrap [overflow-wrap:anywhere] font-mono text-[13px] leading-relaxed text-foreground/90 m-0">
+          <pre className="whitespace-pre-wrap [overflow-wrap:anywhere] font-mono text-sm leading-relaxed text-foreground/90 m-0">
             {body}
           </pre>
         )
@@ -303,7 +303,7 @@ function EnvelopeContent({
 function InterruptedNotice() {
   const t = useTranslations("timeline");
   return (
-    <div className="mt-1 text-[11px] text-amber-700 dark:text-amber-400 font-mono select-none">
+    <div className="mt-1 font-sans text-xs text-amber-700 dark:text-amber-400 select-none">
       {t("streamingInterrupted")}
     </div>
   );
@@ -397,7 +397,7 @@ export const ItemView = memo(function ItemView({
         <>
           <pre
             className={cn(
-              "whitespace-pre-wrap [overflow-wrap:anywhere] font-mono text-[12px] leading-relaxed text-muted-foreground/90 m-0",
+              "whitespace-pre-wrap [overflow-wrap:anywhere] font-mono text-xs leading-relaxed text-muted-foreground/90 m-0",
               item.partial && "italic opacity-75",
               item.interrupted && "border-b border-dashed border-amber-500/60 pb-1",
             )}
@@ -416,7 +416,7 @@ export const ItemView = memo(function ItemView({
       // The agent's system prompt (state.messages[0]) — thousands of lines, so it
       // stays collapsed by default. Body-only monospace dump.
       return (
-        <pre className="whitespace-pre-wrap [overflow-wrap:anywhere] font-mono text-[12px] leading-relaxed text-muted-foreground/90 m-0">
+        <pre className="whitespace-pre-wrap [overflow-wrap:anywhere] font-mono text-xs leading-relaxed text-muted-foreground/90 m-0">
           {item.payload}
         </pre>
       );
@@ -438,7 +438,7 @@ export const ItemView = memo(function ItemView({
   const _exhaustive: never = item.kind;
   console.warn("[timeline] ItemView: unknown item kind", _exhaustive);
   return (
-    <div className="text-muted-foreground font-mono text-xs">{t("unknownEventType")}</div>
+    <div className="text-muted-foreground font-sans text-xs">{t("unknownEventType")}</div>
   );
 },
 // Custom comparator: only re-render when item reference or content changes.

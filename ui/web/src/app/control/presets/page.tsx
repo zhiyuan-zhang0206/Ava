@@ -222,7 +222,7 @@ function PresetCard({
           {preset.description && (
             <p className="mt-1.5 text-xs text-muted-foreground">{preset.description}</p>
           )}
-          <div className="mt-auto pt-2 text-[11px] text-muted-foreground">
+          <div className="mt-auto pt-2 text-xs text-muted-foreground">
             Updated {formatRelative(preset.updated_at)}
           </div>
         </div>
@@ -248,7 +248,7 @@ function PresetCard({
               onChange={(e) => setDescription(e.target.value)}
             />
           </label>
-          <p className="text-[11px] text-muted-foreground">
+          <p className="text-xs text-muted-foreground">
             The config itself isn&apos;t hand-edited here — delete this preset and describe a new
             one above to reshape it.
           </p>

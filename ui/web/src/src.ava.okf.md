@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Src
-description: "Frontend `ui/web/src/` overview index—UI hub + three in-depth topics: state management / data flow / components."
+description: "Frontend `ui/web/src/` overview index—UI hub + four in-depth topics: state management / data flow / components / typography."
 ---
 
 # Src
@@ -16,3 +16,4 @@ Overview of Ava frontend `ui/web/src/`—all source code of the Next.js App Rout
 - [[ui/web/src/frontend-state.ava.okf.md|Frontend State]]
 - [[ui/web/src/frontend-data-flow/frontend-data-flow.ava.okf.md|Frontend Data Flow]]
 - [[ui/web/src/frontend-components/frontend-components.ava.okf.md|Frontend Components]]
+- [[ui/web/src/frontend-typography.ava.okf.md|Frontend Typography]]
