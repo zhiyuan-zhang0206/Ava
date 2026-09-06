@@ -58,7 +58,7 @@ def _insert_agent(
     db: psycopg.Connection,
     *,
     status: str = "running",
-    config_overlay: dict | None = None,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+    config_overlay: dict | None = None,
     status_changed_s_ago: float | None = None,
     paused_until_s_ahead: float | None = None,
 ) -> int:

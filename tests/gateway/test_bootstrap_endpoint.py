@@ -25,7 +25,7 @@ def _auth() -> dict[str, str]:
     return bearer_header(_SECRET)
 
 
-def test_bootstrap_returns_config_with_secret(db_conn, monkeypatch: pytest.MonkeyPatch) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_bootstrap_returns_config_with_secret(db_conn, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(config.settings.data_plane, "cluster_secret", _SECRET)
     with TestClient(app) as client:
         resp = client.get("/api/bootstrap", headers=_auth())
@@ -48,7 +48,7 @@ def test_bootstrap_returns_config_with_secret(db_conn, monkeypatch: pytest.Monke
     assert "AVA_REDIS_PASSWORD" not in body
 
 
-def test_bootstrap_carries_no_cluster_name(db_conn, monkeypatch: pytest.MonkeyPatch) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_bootstrap_carries_no_cluster_name(db_conn, monkeypatch: pytest.MonkeyPatch) -> None:
     """Path-only identity: no name travels in the payload — a runner's cluster
     identity is the gateway URL + secret; the db/role identifiers ride inside
     the connection URLs as data."""
@@ -59,7 +59,7 @@ def test_bootstrap_carries_no_cluster_name(db_conn, monkeypatch: pytest.MonkeyPa
     assert "AVA_CLUSTER" not in resp.json()
 
 
-def test_bootstrap_rejects_missing_secret(db_conn, monkeypatch: pytest.MonkeyPatch) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_bootstrap_rejects_missing_secret(db_conn, monkeypatch: pytest.MonkeyPatch) -> None:
     """No bearer -> 401 (reachability is not trust)."""
     monkeypatch.setattr(config.settings.data_plane, "cluster_secret", _SECRET)
     with TestClient(app) as client:
@@ -67,7 +67,7 @@ def test_bootstrap_rejects_missing_secret(db_conn, monkeypatch: pytest.MonkeyPat
     assert resp.status_code == 401
 
 
-def test_bootstrap_rejects_wrong_secret(db_conn, monkeypatch: pytest.MonkeyPatch) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_bootstrap_rejects_wrong_secret(db_conn, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(config.settings.data_plane, "cluster_secret", _SECRET)
     with TestClient(app) as client:
         resp = client.get("/api/bootstrap", headers=bearer_header("wrong-secret"))
@@ -75,8 +75,8 @@ def test_bootstrap_rejects_wrong_secret(db_conn, monkeypatch: pytest.MonkeyPatch
 
 
 def test_bootstrap_serves_without_auth_when_secret_unset(
-    db_conn,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-    monkeypatch: pytest.MonkeyPatch,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    db_conn,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """An unset cluster secret is the no-auth posture: the endpoint serves
     without a bearer (there is no credential to require)."""
@@ -88,8 +88,8 @@ def test_bootstrap_serves_without_auth_when_secret_unset(
 
 
 def test_bootstrap_role_runner_projects_ava_runner_url(
-    db_conn,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-    monkeypatch: pytest.MonkeyPatch,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    db_conn,
+    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     """?role=runner serves AVA_DB_URL as the least-privilege ava_runner identity
@@ -115,8 +115,8 @@ def test_bootstrap_role_runner_projects_ava_runner_url(
 
 
 def test_bootstrap_unknown_role_refused(
-    db_conn,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-    monkeypatch: pytest.MonkeyPatch,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    db_conn,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(config.settings.data_plane, "cluster_secret", _SECRET)
     with TestClient(app) as client:
@@ -125,8 +125,8 @@ def test_bootstrap_unknown_role_refused(
 
 
 def test_bootstrap_role_runner_without_credential_refused(
-    db_conn,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-    monkeypatch: pytest.MonkeyPatch,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    db_conn,
+    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     """A runner projection on a cluster that never provisioned the role fails

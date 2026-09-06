@@ -96,7 +96,7 @@ def _local_spawn_in_process(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture(autouse=True)
 def _local_lifecycle_in_process(monkeypatch: pytest.MonkeyPatch) -> None:
-    async def _in_process_lifecycle(target: str, path: str, json_body: dict) -> dict:  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+    async def _in_process_lifecycle(target: str, path: str, json_body: dict) -> dict:
         # The runner's ops daemon dispatches lifecycle_op in-process; mirror
         # that here so a forwarded local terminate/resurrect/restart executes
         # against the test DB. AvaAgentError raises propagate directly — the
@@ -121,7 +121,7 @@ def _local_config_in_process(monkeypatch: pytest.MonkeyPatch) -> None:
 
     real_dispatch = _config_router._cluster_rpc.dispatch_to_machine
 
-    async def _in_process_config(  # pyright: ignore[reportUnknownParameterType]
+    async def _in_process_config(
         target_machine: str,
         kind: str,
         payload: dict[str, object],
@@ -130,7 +130,7 @@ def _local_config_in_process(monkeypatch: pytest.MonkeyPatch) -> None:
         ops_url: str | None = None,
         retries: int | None = None,
         idempotency_key: str | None = None,
-    ) -> dict:  # pyright: ignore[reportMissingTypeArgument]
+    ) -> dict:
         # Mirror dispatch_to_machine's exact signature so positionally-called
         # tests (e.g. cluster_rpc's own unit tests) keep working. None forwards
         # to the real dispatch, which resolves AVA_CLUSTER_RPC_TIMEOUT_SECONDS

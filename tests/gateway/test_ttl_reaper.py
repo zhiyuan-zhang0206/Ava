@@ -274,7 +274,7 @@ async def test_reap_expired_shells_deletes_on_killed(
     monkeypatch.setattr(
         ttl_reaper.cluster_rpc,
         "dispatch_to_machine",
-        _dispatch,  # pyright: ignore[reportUnknownArgumentType]
+        _dispatch,
     )
     reaped = await _reap_expired_shells(reaper_pool)
 
@@ -311,7 +311,7 @@ async def test_reap_expired_shells_keeps_row_on_unreachable(
     monkeypatch.setattr(
         ttl_reaper.cluster_rpc,
         "dispatch_to_machine",
-        _dispatch,  # pyright: ignore[reportUnknownArgumentType]
+        _dispatch,
     )
     reaped = await _reap_expired_shells(reaper_pool)
 
@@ -366,7 +366,7 @@ async def test_reap_expired_shells_idle_reaping_is_silent(
     monkeypatch.setattr(
         ttl_reaper.cluster_rpc,
         "dispatch_to_machine",
-        _dispatch,  # pyright: ignore[reportUnknownArgumentType]
+        _dispatch,
     )
     reaped = await _reap_expired_shells(reaper_pool)
 
@@ -402,7 +402,7 @@ async def test_reap_expired_shells_absent_reaping_is_silent(
     monkeypatch.setattr(
         ttl_reaper.cluster_rpc,
         "dispatch_to_machine",
-        _dispatch,  # pyright: ignore[reportUnknownArgumentType]
+        _dispatch,
     )
     reaped = await _reap_expired_shells(reaper_pool)
 
@@ -438,7 +438,7 @@ async def test_reap_expired_shells_missing_interrupted_field_notifies(
     monkeypatch.setattr(
         ttl_reaper.cluster_rpc,
         "dispatch_to_machine",
-        _dispatch,  # pyright: ignore[reportUnknownArgumentType]
+        _dispatch,
     )
     reaped = await _reap_expired_shells(reaper_pool)
 

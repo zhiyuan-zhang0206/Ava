@@ -44,7 +44,7 @@ def _patch(
         def _capturing_handler(request: httpx.Request) -> httpx.Response:
             captured["request"] = request
             captured.setdefault("requests", []).append(request)
-            return handler(request)  # pyright: ignore[reportUnknownVariableType]
+            return handler(request)
 
         def _client_factory(**kwargs: object) -> httpx.AsyncClient:
             kwargs.pop("transport", None)
@@ -60,7 +60,7 @@ async def test_completed_returns_result(monkeypatch: pytest.MonkeyPatch) -> None
     captured = _patch(
         monkeypatch,
         url="http://host:8106",
-        handler=lambda _r: httpx.Response(200, json={"status": "completed", "result": {"id": 5}}),  # pyright: ignore[reportUnknownLambdaType]
+        handler=lambda _r: httpx.Response(200, json={"status": "completed", "result": {"id": 5}}),
     )
     result = await cluster_rpc.dispatch_to_machine(
         "wsl", "spawn-launch", {"prompt": "hi"}, retries=0
@@ -82,7 +82,7 @@ async def test_failed_raises_cluster_op_failed(monkeypatch: pytest.MonkeyPatch) 
     """200 + status=failed -> ClusterOpFailed carrying the result payload."""
     _patch(
         monkeypatch,
-        handler=lambda _r: httpx.Response(  # pyright: ignore[reportUnknownLambdaType]
+        handler=lambda _r: httpx.Response(
             200, json={"status": "failed", "result": {"error": "boom"}}
         ),
     )
@@ -97,7 +97,7 @@ async def test_unknown_status_raises_unreachable(monkeypatch: pytest.MonkeyPatch
     malformed-response ClusterOpUnreachable, never a silently-returned garbage result."""
     _patch(
         monkeypatch,
-        handler=lambda _r: httpx.Response(200, json={"status": "pending", "result": {}}),  # pyright: ignore[reportUnknownLambdaType]
+        handler=lambda _r: httpx.Response(200, json={"status": "pending", "result": {}}),
     )
     with pytest.raises(cluster_rpc.ClusterOpUnreachable, match="malformed response"):
         await cluster_rpc.dispatch_to_machine("wsl", "status_probe", {}, retries=0)
@@ -106,7 +106,7 @@ async def test_unknown_status_raises_unreachable(monkeypatch: pytest.MonkeyPatch
 @pytest.mark.asyncio
 async def test_non_200_raises_unreachable(monkeypatch: pytest.MonkeyPatch) -> None:
     """A non-200 from the ops server -> ClusterOpUnreachable (not ClusterOpFailed)."""
-    _patch(monkeypatch, handler=lambda _r: httpx.Response(503, text="ops down"))  # pyright: ignore[reportUnknownLambdaType]
+    _patch(monkeypatch, handler=lambda _r: httpx.Response(503, text="ops down"))
     with pytest.raises(cluster_rpc.ClusterOpUnreachable, match="503"):
         await cluster_rpc.dispatch_to_machine("wsl", "status_probe", {}, retries=0)
 
@@ -190,7 +190,7 @@ async def test_provided_ops_url_bypasses_machines_lookup(monkeypatch: pytest.Mon
     captured = _patch(
         monkeypatch,
         lookup_exc=MachineNotRegistered("lookup must not run when ops_url is provided"),
-        handler=lambda _r: httpx.Response(200, json={"status": "completed", "result": {"ok": 1}}),  # pyright: ignore[reportUnknownLambdaType]
+        handler=lambda _r: httpx.Response(200, json={"status": "completed", "result": {"ok": 1}}),
     )
     result = await cluster_rpc.dispatch_to_machine(
         "wsl", "cluster_resume", {}, ops_url="http://direct:8106"
@@ -208,7 +208,7 @@ async def test_default_timeout_comes_from_settings(
     from shared.config import settings
 
     monkeypatch.setattr(settings.gateway, "cluster_rpc_timeout_seconds", 12.5)
-    monkeypatch.setattr(cluster_rpc, "lookup_machine_url", lambda _n: "http://host:8106")  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(cluster_rpc, "lookup_machine_url", lambda _n: "http://host:8106")  # pyright: ignore[reportUnknownArgumentType]
     real_client = httpx.AsyncClient
     seen: dict[str, httpx.Timeout] = {}
 
@@ -227,7 +227,7 @@ async def test_default_timeout_comes_from_settings(
 @pytest.mark.asyncio
 async def test_client_ignores_system_proxy(monkeypatch: pytest.MonkeyPatch) -> None:
     """Cluster-private RPC dials never inherit the host's proxy settings."""
-    monkeypatch.setattr(cluster_rpc, "lookup_machine_url", lambda _n: "http://host:8106")  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(cluster_rpc, "lookup_machine_url", lambda _n: "http://host:8106")  # pyright: ignore[reportUnknownArgumentType]
     real_client = httpx.AsyncClient
     seen: dict[str, object] = {}
 
@@ -248,7 +248,7 @@ async def test_connect_timeout_capped_by_timeout_s(monkeypatch: pytest.MonkeyPat
     """A short probe timeout_s bounds the connect phase too. The connect floor
     used to be a flat 10s, so a blackholed host (powered-off private-network peer)
     stretched every 3s roster probe to ~10s and /api/status with it."""
-    monkeypatch.setattr(cluster_rpc, "lookup_machine_url", lambda _n: "http://host:8106")  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(cluster_rpc, "lookup_machine_url", lambda _n: "http://host:8106")  # pyright: ignore[reportUnknownArgumentType]
     real_client = httpx.AsyncClient
     seen: dict[str, httpx.Timeout] = {}
 
@@ -276,7 +276,7 @@ def _pin_retry(monkeypatch: pytest.MonkeyPatch) -> list[float]:
         sleeps.append(delay)
 
     monkeypatch.setattr(cluster_rpc, "_sleep", _fake_sleep)
-    monkeypatch.setattr(cluster_rpc.random, "uniform", lambda _a, _b: 1.0)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(cluster_rpc.random, "uniform", lambda _a, _b: 1.0)  # pyright: ignore[reportUnknownArgumentType]
     return sleeps
 
 
@@ -383,8 +383,8 @@ async def test_retry_delay_is_bounded_and_jittered(monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(
         cr.random,
         "uniform",
-        lambda _a, _b: 1.0,  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-    )  # pin jitter  # pyright: ignore[reportUnknownArgumentType]
+        lambda _a, _b: 1.0,  # pyright: ignore[reportUnknownArgumentType]
+    )  # pin jitter
     assert cr._retry_delay_s(0) == 0.5
     assert cr._retry_delay_s(1) == 1.0
     assert cr._retry_delay_s(2) == 2.0
@@ -433,7 +433,7 @@ async def test_caller_supplied_idempotency_key_rides_envelope(
 
     captured = _patch(
         monkeypatch,
-        handler=lambda _r: httpx.Response(200, json={"status": "completed", "result": {}}),  # pyright: ignore[reportUnknownLambdaType]
+        handler=lambda _r: httpx.Response(200, json={"status": "completed", "result": {}}),
     )
     await cluster_rpc.dispatch_to_machine(
         "wsl", "spawn-launch", {}, idempotency_key="my-logical-op-1"
@@ -451,9 +451,7 @@ async def test_spawn_launch_defaults_to_its_agent_idempotency_key(
 
     captured = _patch(
         monkeypatch,
-        handler=lambda _r: httpx.Response(  # pyright: ignore[reportUnknownLambdaType]
-            200, json={"status": "completed", "result": {"id": 42}}
-        ),
+        handler=lambda _r: httpx.Response(200, json={"status": "completed", "result": {"id": 42}}),
     )
 
     for target, payload in (
@@ -481,9 +479,7 @@ async def test_only_spawn_launch_reuses_a_business_idempotency_key(
 
     captured = _patch(
         monkeypatch,
-        handler=lambda _r: httpx.Response(  # pyright: ignore[reportUnknownLambdaType]
-            200, json={"status": "completed", "result": {}}
-        ),
+        handler=lambda _r: httpx.Response(200, json={"status": "completed", "result": {}}),
     )
 
     operations: tuple[tuple[cluster_rpc.OpKind, dict[str, Any]], ...] = (
@@ -509,7 +505,7 @@ async def test_idempotent_kind_carries_no_key(monkeypatch: pytest.MonkeyPatch) -
 
     captured = _patch(
         monkeypatch,
-        handler=lambda _r: httpx.Response(200, json={"status": "completed", "result": {}}),  # pyright: ignore[reportUnknownLambdaType]
+        handler=lambda _r: httpx.Response(200, json={"status": "completed", "result": {}}),
     )
     await cluster_rpc.dispatch_to_machine("wsl", "status_probe", {})
     body = json.loads(captured["request"].content)
@@ -542,7 +538,7 @@ async def test_5xx_is_retried(monkeypatch: pytest.MonkeyPatch) -> None:
 async def test_4xx_is_not_retried(monkeypatch: pytest.MonkeyPatch) -> None:
     """A 404 is deterministic (wrong path / wrong server) — single attempt even
     with a large retry budget; retrying cannot change the outcome."""
-    captured = _patch(monkeypatch, handler=lambda _r: httpx.Response(404, text="nope"))  # pyright: ignore[reportUnknownLambdaType]
+    captured = _patch(monkeypatch, handler=lambda _r: httpx.Response(404, text="nope"))
     _pin_retry(monkeypatch)
 
     with pytest.raises(cluster_rpc.ClusterOpUnreachable, match="returned 404"):
@@ -558,7 +554,7 @@ async def test_cluster_op_failed_is_not_retried(monkeypatch: pytest.MonkeyPatch)
     op (e.g. a second spawn)."""
     captured = _patch(
         monkeypatch,
-        handler=lambda _r: httpx.Response(  # pyright: ignore[reportUnknownLambdaType]
+        handler=lambda _r: httpx.Response(
             200, json={"status": "failed", "result": {"error": "boom"}}
         ),
     )
@@ -576,7 +572,7 @@ async def test_malformed_response_is_not_retried(monkeypatch: pytest.MonkeyPatch
     retrying cannot heal a contract mismatch."""
     captured = _patch(
         monkeypatch,
-        handler=lambda _r: httpx.Response(200, json={"status": "pending", "result": {}}),  # pyright: ignore[reportUnknownLambdaType]
+        handler=lambda _r: httpx.Response(200, json={"status": "pending", "result": {}}),
     )
     _pin_retry(monkeypatch)
 

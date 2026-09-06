@@ -35,7 +35,7 @@ def test_client(db_conn: psycopg.Connection):
         yield client
 
 
-def _put_checkpoint(agent_id: int, messages: list) -> None:  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+def _put_checkpoint(agent_id: int, messages: list) -> None:
     """Write channel_values.messages = `messages` directly via
     PostgresSaver.put, bypassing the graph — the endpoint only cares about
     reading back what is in the checkpoint."""
@@ -83,7 +83,7 @@ def test_default_window_returns_raw_message_dicts(
     from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
     tid = create_agent(db_conn)
-    ai_blocks: list[str | dict] = [  # pyright: ignore[reportMissingTypeArgument, reportUnknownVariableType]
+    ai_blocks: list[str | dict] = [
         {"type": "thinking", "thinking": "hm"},
         {"type": "text", "text": "on it"},
     ]
@@ -321,12 +321,12 @@ def test_checkpoint_read_failure_returns_503(
     tid = create_agent(db_conn)
 
     @contextmanager
-    def fake_saver(_url):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    def fake_saver(_url):
         raise OSError("simulated DB connection lost")
         yield  # type: ignore[unreachable]
 
     class FakeSaver:
-        from_conn_string = staticmethod(fake_saver)  # pyright: ignore[reportUnknownArgumentType, reportUnknownVariableType]
+        from_conn_string = staticmethod(fake_saver)  # pyright: ignore[reportUnknownArgumentType]
 
     monkeypatch.setattr(ckpt_mod, "PostgresSaver", FakeSaver)
     # raise_server_exceptions=False so FastAPI's error middleware turns the

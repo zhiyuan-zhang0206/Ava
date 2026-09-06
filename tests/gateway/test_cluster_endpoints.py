@@ -75,7 +75,7 @@ def _pin_session_names(monkeypatch: pytest.MonkeyPatch) -> None:
     of them. The spawn tests patch ``shared.session_backend.get_backend`` to a
     recording fake, so the composed names are what the assertions read.
     """
-    monkeypatch.setattr("shared.cluster.session_name", lambda svc: f"ava-test-{svc}")  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr("shared.cluster.session_name", lambda svc: f"ava-test-{svc}")  # pyright: ignore[reportUnknownArgumentType]
 
 
 # ─── middleware 503 mode ──────────────────────────────────────────────────────
@@ -160,7 +160,7 @@ class TestPauseMiddleware:
         assert r.headers["access-control-allow-origin"] == allowed_origin
         assert r.headers["access-control-allow-credentials"] == "true"
 
-    def test_cluster_status_bypasses_503(self, fake_flag: Path, set_machine_identity) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    def test_cluster_status_bypasses_503(self, fake_flag: Path, set_machine_identity) -> None:
         """`/api/cluster/status` still returns 200 while paused — it is the observability + control path."""
         fake_flag.write_text("")
         set_machine_identity(role="gateway", name="test-mc")
@@ -466,7 +466,7 @@ class TestUnpauseLocalCluster:
         pause_backend: _FakeSessionBackend,
     ) -> None:
         """new_session fails and the session is still not up -> RuntimeError."""
-        monkeypatch.setattr("shared.host_deploy_state.set_posture", lambda _p: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        monkeypatch.setattr("shared.host_deploy_state.set_posture", lambda _p: None)  # pyright: ignore[reportUnknownArgumentType]
         pause_backend.spawn_ok = False
         with pytest.raises(RuntimeError, match="could not respawn"):
             cluster_mod.unpause_local_cluster()
@@ -524,7 +524,7 @@ class TestSpawnUpdate:
         """spawn_update vets the target's migrations/ from git (validate-before-kill)
         before pausing; these tests drive the spawn / pause mechanics, so default the
         vet to pass. The refusal path has its own test (test_spawn_update_refuses_*)."""
-        monkeypatch.setattr("shared.migrations.validate_migrations_at_ref", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        monkeypatch.setattr("shared.migrations.validate_migrations_at_ref", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType]
 
     def test_spawn_update_launches_the_updater_session(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, spawn_backend: _FakeSessionBackend
@@ -609,7 +609,7 @@ class TestSpawnUpdate:
         monkeypatch.setattr(cluster_pause, "pause_local_cluster", lambda: events.append("pause"))
         monkeypatch.setattr("shared.paths.ava_home", lambda: tmp_path)
 
-        def _raise(_ref, **_kw):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+        def _raise(_ref, **_kw):
             raise MigrationLayoutError("duplicate migration name: '20260719T143000_add-foo'")
 
         monkeypatch.setattr("shared.migrations.validate_migrations_at_ref", _raise)  # pyright: ignore[reportUnknownArgumentType]
@@ -636,7 +636,7 @@ class TestSpawnUpdate:
         """
         import subprocess as _sp
 
-        seen: dict = {}  # pyright: ignore[reportMissingTypeArgument, reportUnknownVariableType]
+        seen: dict = {}
 
         def fake_bounded(argv, **kwargs):  # type: ignore[no-untyped-def]
             seen["kwargs"] = kwargs
@@ -683,7 +683,7 @@ class TestSpawnUpdate:
     def test_post_update_returns_502_when_update_in_progress(
         self,
         monkeypatch: pytest.MonkeyPatch,
-        set_machine_identity,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+        set_machine_identity,
     ) -> None:
         """HTTP layer: an in-flight update raises on the target's ops server,
         surfacing as a failed op -> 502 carrying the failure payload."""
@@ -693,12 +693,12 @@ class TestSpawnUpdate:
 
         async def _fake_dispatch(
             *,
-            target_machine,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-            kind,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-            payload,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-            timeout_s=None,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-            retries=None,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-            idempotency_key=None,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+            target_machine,
+            kind,
+            payload,
+            timeout_s=None,
+            retries=None,
+            idempotency_key=None,
         ):  # type: ignore[no-untyped-def]
             raise cluster_router._cluster_rpc.ClusterOpFailed(
                 {
@@ -715,7 +715,7 @@ class TestSpawnUpdate:
     def test_post_update_forwards_target_sha_local(
         self,
         monkeypatch: pytest.MonkeyPatch,
-        set_machine_identity,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+        set_machine_identity,
     ) -> None:
         """POST /api/cluster/update?target_sha=... dispatches a cluster_update op
         to this host's own ops server with the target_sha in the payload (the
@@ -728,12 +728,12 @@ class TestSpawnUpdate:
 
         async def _fake_dispatch(
             *,
-            target_machine,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-            kind,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-            payload,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-            timeout_s=None,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-            retries=None,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-            idempotency_key=None,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+            target_machine,
+            kind,
+            payload,
+            timeout_s=None,
+            retries=None,
+            idempotency_key=None,
         ):  # type: ignore[no-untyped-def]
             captured["target_machine"] = target_machine
             captured["kind"] = kind
@@ -756,12 +756,12 @@ class TestSpawnUpdate:
 
         async def _fake_dispatch(
             *,
-            target_machine,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-            kind,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-            payload,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-            timeout_s=None,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-            retries=None,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-            idempotency_key=None,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+            target_machine,
+            kind,
+            payload,
+            timeout_s=None,
+            retries=None,
+            idempotency_key=None,
         ):  # type: ignore[no-untyped-def]
             captured["payload"] = payload
             return {"session": "ava-main-updater", "log": "/x"}
@@ -812,7 +812,7 @@ class TestSpawnUpdate:
         """A backend launch failure (the old missing-binary class) surfaces as
         OrchestrationSpawnFailed — the same fail-fast, minus the legacy dependency."""
 
-        def _boom(*_a, **_k):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+        def _boom(*_a, **_k):
             raise RuntimeError("reparent helper failed to launch session")
 
         monkeypatch.setattr(spawn_backend, "new_session", _boom)  # pyright: ignore[reportUnknownArgumentType]
@@ -825,7 +825,7 @@ class TestSpawnUpdate:
     def test_post_update_returns_503_when_ops_unreachable(
         self,
         monkeypatch: pytest.MonkeyPatch,
-        set_machine_identity,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+        set_machine_identity,
     ) -> None:
         """HTTP layer: an unreachable ops server maps to 503 with detail."""
         from gateway.routers import cluster as cluster_router
@@ -834,12 +834,12 @@ class TestSpawnUpdate:
 
         async def _fake_dispatch(
             *,
-            target_machine,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-            kind,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-            payload,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-            timeout_s=None,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-            retries=None,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-            idempotency_key=None,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+            target_machine,
+            kind,
+            payload,
+            timeout_s=None,
+            retries=None,
+            idempotency_key=None,
         ):  # type: ignore[no-untyped-def]
             raise cluster_router._cluster_rpc.ClusterOpUnreachable("connect timeout")
 
@@ -1159,7 +1159,7 @@ class TestSpawnSessionsResolveAvaFromVenv:
         """Run a spawn_* entry point with the session backend faked; return the
         shell command it would run."""
         monkeypatch.setattr(cluster_pause, "pause_local_cluster", lambda: None)
-        monkeypatch.setattr("shared.migrations.validate_migrations_at_ref", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        monkeypatch.setattr("shared.migrations.validate_migrations_at_ref", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType]
         spawn()
         return spawn_backend.spawn_calls[0][1]
 
@@ -1265,7 +1265,7 @@ class TestCurrentOrchestration:
 
     def test_none_when_idle(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr("shared.cluster_lock.read_update_lease", lambda: None)
-        monkeypatch.setattr("shared.host_deploy_state.read", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        monkeypatch.setattr("shared.host_deploy_state.read", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType]
         assert cluster_mod.current_orchestration() is None
 
     def test_rollout_lease_reports_rollout(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1289,7 +1289,7 @@ class TestCurrentOrchestration:
                 kind="rollout",  # type: ignore[arg-type]
             ),
         )
-        monkeypatch.setattr("shared.host_deploy_state.read", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        monkeypatch.setattr("shared.host_deploy_state.read", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType]
         assert cluster_mod.current_orchestration() is None
 
     def test_live_updater_lease_reports_update(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1302,7 +1302,7 @@ class TestCurrentOrchestration:
         monkeypatch.setattr("shared.cluster_lock.read_update_lease", lambda: None)
         monkeypatch.setattr(
             "shared.host_deploy_state.read",
-            lambda *_a, **_k: HostDeployState(  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+            lambda *_a, **_k: HostDeployState(  # pyright: ignore[reportUnknownArgumentType]
                 machine="test",
                 posture="converging",
                 updated_at=datetime.now(UTC),
@@ -1322,7 +1322,7 @@ class TestCurrentOrchestration:
         monkeypatch.setattr("shared.cluster_lock.read_update_lease", lambda: None)
         monkeypatch.setattr(
             "shared.host_deploy_state.read",
-            lambda *_a, **_k: HostDeployState(  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+            lambda *_a, **_k: HostDeployState(  # pyright: ignore[reportUnknownArgumentType]
                 machine="test",
                 posture="converging",
                 updated_at=datetime.now(UTC),
@@ -1439,14 +1439,14 @@ class TestLockHolderLiveness:
         from ops import ops_cluster as ops_mod
 
         monkeypatch.setattr(ops_mod, "machine_name", lambda: "mc")
-        monkeypatch.setattr(ops_mod, "process_alive", lambda _pid: False)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        monkeypatch.setattr(ops_mod, "process_alive", lambda _pid: False)  # pyright: ignore[reportUnknownArgumentType]
         assert ops_mod._lock_holder_is_live("mc:pid123") is False
 
     def test_this_machine_alive_pid_is_live(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from ops import ops_cluster as ops_mod
 
         monkeypatch.setattr(ops_mod, "machine_name", lambda: "mc")
-        monkeypatch.setattr(ops_mod, "process_alive", lambda _pid: True)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        monkeypatch.setattr(ops_mod, "process_alive", lambda _pid: True)  # pyright: ignore[reportUnknownArgumentType]
         assert ops_mod._lock_holder_is_live("mc:pid123") is True
 
     def test_foreign_machine_holder_is_treated_live(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1518,7 +1518,7 @@ class TestClusterRecoverEndpoint:
 
         calls: list[str] = []
         monkeypatch.setattr(ops_mod, "read_update_lease", lambda: self._lease("mc:pid999"))
-        monkeypatch.setattr(ops_mod, "_lock_holder_is_live", lambda _h, **_kw: False)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        monkeypatch.setattr(ops_mod, "_lock_holder_is_live", lambda _h, **_kw: False)  # pyright: ignore[reportUnknownArgumentType]
         monkeypatch.setattr(ops_mod, "updater_lease_live", lambda: False)
         monkeypatch.setattr(ops_mod, "unpause_local_cluster", lambda: calls.append("unpause"))
 
@@ -1575,7 +1575,7 @@ class TestClusterRecoverEndpoint:
 
         calls: list[str] = []
         monkeypatch.setattr(ops_mod, "read_update_lease", lambda: self._lease("mc:pid123"))
-        monkeypatch.setattr(ops_mod, "_lock_holder_is_live", lambda _h, **_kw: True)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        monkeypatch.setattr(ops_mod, "_lock_holder_is_live", lambda _h, **_kw: True)  # pyright: ignore[reportUnknownArgumentType]
         monkeypatch.setattr(ops_mod, "unpause_local_cluster", lambda: calls.append("unpause"))
 
         def _unexpected_claim(
@@ -1600,7 +1600,7 @@ class TestClusterRolloutEndpoint:
     def test_returns_202_and_calls_rollout_op_on_gateway(
         self,
         monkeypatch: pytest.MonkeyPatch,
-        set_machine_identity,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+        set_machine_identity,
     ) -> None:
         from gateway.routers import cluster as cluster_router
         from ops import ops_cluster as ops_mod
@@ -1621,7 +1621,7 @@ class TestClusterRolloutEndpoint:
         monkeypatch.setattr(
             ops_mod,
             "spawn_rollout",
-            lambda origin, **kwargs: (  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+            lambda origin, **kwargs: (  # pyright: ignore[reportUnknownArgumentType]
                 origins.append(origin)  # pyright: ignore[reportUnknownArgumentType]
                 or options.append(cast(dict[str, object], kwargs))
                 or {"session": "ava-test-rollout", "log": "/var/log/rollout.log"}
@@ -1644,7 +1644,7 @@ class TestClusterRolloutEndpoint:
             assert options[-1]["dry_run"] is True
             assert published == [("rollout", "user"), ("rollout", "agent:7")]
 
-    def test_returns_400_on_agent_runner(self, set_machine_identity) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    def test_returns_400_on_agent_runner(self, set_machine_identity) -> None:
         set_machine_identity(role="agent-runner")
         with TestClient(app) as client:
             r = client.post("/api/cluster/rollout")
@@ -1654,7 +1654,7 @@ class TestClusterRolloutEndpoint:
     def test_returns_409_when_rollout_in_progress(
         self,
         monkeypatch: pytest.MonkeyPatch,
-        set_machine_identity,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+        set_machine_identity,
     ) -> None:
         from gateway.routers import cluster as cluster_router
         from ops import ops_cluster as ops_mod
@@ -1686,7 +1686,7 @@ class TestClusterRolloutEndpoint:
     def test_returns_422_when_already_up_to_date(
         self,
         monkeypatch: pytest.MonkeyPatch,
-        set_machine_identity,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+        set_machine_identity,
     ) -> None:
         """behind==0 (NothingToUpdate) maps to 422, distinct from the 409 of an
         in-flight update, so a direct POST cannot silently roll an empty cluster."""
@@ -1706,7 +1706,7 @@ class TestClusterRolloutEndpoint:
     def test_returns_503_when_the_session_backend_will_not_spawn(
         self,
         monkeypatch: pytest.MonkeyPatch,
-        set_machine_identity,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+        set_machine_identity,
     ) -> None:
         from ops import ops_cluster as ops_mod
 
@@ -1728,7 +1728,7 @@ class TestClusterRestartEndpoint:
     def test_returns_202_and_calls_restart_op_on_gateway(
         self,
         monkeypatch: pytest.MonkeyPatch,
-        set_machine_identity,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+        set_machine_identity,
     ) -> None:
         from gateway.routers import cluster as cluster_router
         from ops import ops_cluster as ops_mod
@@ -1748,7 +1748,7 @@ class TestClusterRestartEndpoint:
         monkeypatch.setattr(
             ops_mod,
             "spawn_restart",
-            lambda origin, **_kw: (  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+            lambda origin, **_kw: (  # pyright: ignore[reportUnknownArgumentType]
                 origins.append(origin)  # pyright: ignore[reportUnknownArgumentType]
                 or {"session": "ava-test-cluster-restart", "log": "/var/log/restart.log"}
             ),
@@ -1763,7 +1763,7 @@ class TestClusterRestartEndpoint:
             assert origins == ["user", "agent:7"]
             assert published == [("restart", "user"), ("restart", "agent:7")]
 
-    def test_returns_400_on_agent_runner(self, set_machine_identity) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    def test_returns_400_on_agent_runner(self, set_machine_identity) -> None:
         set_machine_identity(role="agent-runner")
         with TestClient(app) as client:
             r = client.post("/api/cluster/restart")
@@ -1773,7 +1773,7 @@ class TestClusterRestartEndpoint:
     def test_returns_409_when_in_progress(
         self,
         monkeypatch: pytest.MonkeyPatch,
-        set_machine_identity,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+        set_machine_identity,
     ) -> None:
         from ops import ops_cluster as ops_mod
 
@@ -1796,7 +1796,7 @@ class TestClusterUpdateCheckEndpoint:
     def test_returns_check_on_gateway(
         self,
         monkeypatch: pytest.MonkeyPatch,
-        set_machine_identity,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+        set_machine_identity,
     ) -> None:
         from ops import ops_cluster as ops_mod
 
@@ -1819,7 +1819,7 @@ class TestClusterUpdateCheckEndpoint:
             "needs_replay": False,
         }
 
-    def test_returns_400_on_agent_runner(self, set_machine_identity) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    def test_returns_400_on_agent_runner(self, set_machine_identity) -> None:
         set_machine_identity(role="agent-runner")
         with TestClient(app) as client:
             r = client.get("/api/cluster/update-check")
@@ -1827,7 +1827,7 @@ class TestClusterUpdateCheckEndpoint:
 
 
 class TestStatusSnapshot:
-    def test_snapshot_reflects_flag_and_role(self, fake_flag: Path, set_machine_identity) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    def test_snapshot_reflects_flag_and_role(self, fake_flag: Path, set_machine_identity) -> None:
         set_machine_identity(role="agent-runner", name="wsl")
         # unpaused
         snap = cluster_mod.status_snapshot()
@@ -1842,8 +1842,8 @@ class TestStatusSnapshot:
 
     def test_snapshot_includes_head_sha(
         self,
-        set_machine_identity,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-        monkeypatch: pytest.MonkeyPatch,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+        set_machine_identity,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """status_snapshot threads the prod-source HEAD so the roster can compare
         it against the cluster pin."""
@@ -1853,8 +1853,8 @@ class TestStatusSnapshot:
 
     def test_snapshot_includes_running_sha(
         self,
-        set_machine_identity,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-        monkeypatch: pytest.MonkeyPatch,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+        set_machine_identity,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """status_snapshot threads the commit the answering process froze at its
         own boot — distinct from head_sha (the checkout the pin verdict compares)
@@ -1866,8 +1866,8 @@ class TestStatusSnapshot:
 
     def test_snapshot_ignores_the_start_bookmark(
         self,
-        set_machine_identity,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-        monkeypatch: pytest.MonkeyPatch,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+        set_machine_identity,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """A start that restarted nothing must not be able to make this node look
         current.
@@ -1894,8 +1894,8 @@ class TestStatusSnapshot:
     def test_watchdog_online_requires_only_this_capabilitys_watchdog(
         self,
         fake_flag: Path,
-        set_machine_identity,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-        monkeypatch: pytest.MonkeyPatch,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+        set_machine_identity,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """`watchdog_online` (single bool for the frontend dot) now means "every
         watchdog this host should run is alive". A split agent-runner has only the
@@ -1919,8 +1919,8 @@ class TestStatusSnapshot:
     def test_watchdog_online_single_box_requires_both(
         self,
         fake_flag: Path,
-        set_machine_identity,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-        monkeypatch: pytest.MonkeyPatch,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+        set_machine_identity,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """A single-box host runs BOTH watchdogs, so the dot is online only when
         both pidfiles are alive."""
@@ -1952,26 +1952,26 @@ class TestClusterEndpoints:
     def test_post_stop_dispatches_cluster_stop(
         self,
         monkeypatch: pytest.MonkeyPatch,
-        set_machine_identity,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+        set_machine_identity,
     ) -> None:
         """POST /api/cluster/stop forwards a cluster_stop op to this host's own
         ops server — the gateway router never touches the flag/session itself."""
         from gateway.routers import cluster as cluster_router
 
         set_machine_identity(role="gateway", name="test-host")
-        dispatched: list[dict] = []  # pyright: ignore[reportMissingTypeArgument, reportUnknownVariableType]
+        dispatched: list[dict] = []
 
-        async def _fake_dispatch(  # pyright: ignore[reportUnknownParameterType]
+        async def _fake_dispatch(
             *,
-            target_machine,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-            kind,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-            payload,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-            timeout_s=None,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-            retries=None,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-            idempotency_key=None,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+            target_machine,
+            kind,
+            payload,
+            timeout_s=None,
+            retries=None,
+            idempotency_key=None,
         ):  # type: ignore[no-untyped-def]
             dispatched.append({"target_machine": target_machine, "kind": kind, "payload": payload})  # pyright: ignore[reportUnknownMemberType]
-            return {}  # pyright: ignore[reportUnknownVariableType]
+            return {}
 
         monkeypatch.setattr(cluster_router._cluster_rpc, "dispatch_to_machine", _fake_dispatch)  # pyright: ignore[reportUnknownArgumentType]
         with TestClient(app) as client:
@@ -1995,26 +1995,26 @@ class TestClusterEndpoints:
     def test_post_resume_dispatches_cluster_resume(
         self,
         monkeypatch: pytest.MonkeyPatch,
-        set_machine_identity,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+        set_machine_identity,
     ) -> None:
         """POST /api/cluster/resume forwards a cluster_resume op to this host's
         own ops server, symmetric with /stop."""
         from gateway.routers import cluster as cluster_router
 
         set_machine_identity(role="gateway", name="test-host")
-        dispatched: list[dict] = []  # pyright: ignore[reportMissingTypeArgument, reportUnknownVariableType]
+        dispatched: list[dict] = []
 
-        async def _fake_dispatch(  # pyright: ignore[reportUnknownParameterType]
+        async def _fake_dispatch(
             *,
-            target_machine,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-            kind,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-            payload,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-            timeout_s=None,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-            retries=None,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-            idempotency_key=None,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+            target_machine,
+            kind,
+            payload,
+            timeout_s=None,
+            retries=None,
+            idempotency_key=None,
         ):  # type: ignore[no-untyped-def]
             dispatched.append({"target_machine": target_machine, "kind": kind, "payload": payload})  # pyright: ignore[reportUnknownMemberType]
-            return {}  # pyright: ignore[reportUnknownVariableType]
+            return {}
 
         monkeypatch.setattr(cluster_router._cluster_rpc, "dispatch_to_machine", _fake_dispatch)  # pyright: ignore[reportUnknownArgumentType]
         with TestClient(app) as client:
@@ -2059,7 +2059,7 @@ class TestClusterEndpoints:
         monkeypatch.setattr(
             ops_mod,
             "mark_stopping",
-            lambda name, home: marked.append((name, home)),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+            lambda name, home: marked.append((name, home)),  # pyright: ignore[reportUnknownArgumentType]
         )
         with TestClient(app) as client:
             r = client.post("/api/cluster/stopping", params={"machine": "wsl", "home": "~/.ava"})
@@ -2070,7 +2070,7 @@ class TestClusterEndpoints:
     def test_post_update_returns_202_with_session(
         self,
         monkeypatch: pytest.MonkeyPatch,
-        set_machine_identity,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+        set_machine_identity,
     ) -> None:
         from gateway.routers import cluster as cluster_router
 
@@ -2078,12 +2078,12 @@ class TestClusterEndpoints:
 
         async def _fake_dispatch(
             *,
-            target_machine,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-            kind,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-            payload,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-            timeout_s=None,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-            retries=None,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-            idempotency_key=None,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+            target_machine,
+            kind,
+            payload,
+            timeout_s=None,
+            retries=None,
+            idempotency_key=None,
         ):  # type: ignore[no-untyped-def]
             return {"session": "ava-test-updater", "log": "/var/log/updater-123.log"}
 
@@ -2099,35 +2099,35 @@ class TestClusterUpdateRouting:
     """`POST /api/cluster/update` dispatches a cluster_update op to the target's
     ops server — this host included (no in-process spawn shortcut)."""
 
-    def _capture_dispatch(self, monkeypatch: pytest.MonkeyPatch) -> list[dict]:  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+    def _capture_dispatch(self, monkeypatch: pytest.MonkeyPatch) -> list[dict]:
         from gateway.routers import cluster as cluster_router
 
-        dispatched: list[dict] = []  # pyright: ignore[reportMissingTypeArgument, reportUnknownVariableType]
+        dispatched: list[dict] = []
 
         async def _fake_dispatch(
             *,
-            target_machine,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-            kind,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-            payload,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-            timeout_s=None,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-            retries=None,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-            idempotency_key=None,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+            target_machine,
+            kind,
+            payload,
+            timeout_s=None,
+            retries=None,
+            idempotency_key=None,
         ):  # type: ignore[no-untyped-def]
             dispatched.append({"target_machine": target_machine, "kind": kind, "payload": payload})  # pyright: ignore[reportUnknownMemberType]
             return {"session": "ava-test-updater", "log": "/var/log/ava-test.log"}
 
         monkeypatch.setattr(cluster_router._cluster_rpc, "dispatch_to_machine", _fake_dispatch)  # pyright: ignore[reportUnknownArgumentType]
-        return dispatched  # pyright: ignore[reportUnknownVariableType]
+        return dispatched
 
     def test_no_target_dispatches_to_self(
         self,
         monkeypatch: pytest.MonkeyPatch,
-        set_machine_identity,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+        set_machine_identity,
     ) -> None:
         """No target param → treated as self → op dispatched to this host's own
         ops server."""
         set_machine_identity(role="gateway", name="test-host")
-        dispatched = self._capture_dispatch(monkeypatch)  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+        dispatched = self._capture_dispatch(monkeypatch)  # pyright: ignore[reportUnknownMemberType]
         with TestClient(app) as client:
             r = client.post("/api/cluster/update")
         assert r.status_code == 202
@@ -2138,12 +2138,12 @@ class TestClusterUpdateRouting:
     def test_target_self_dispatches_to_self(
         self,
         monkeypatch: pytest.MonkeyPatch,
-        set_machine_identity,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+        set_machine_identity,
     ) -> None:
         """target=<own machine name> → same as no target → dispatched to this
         host's own ops server."""
         set_machine_identity(role="gateway", name="test-host")
-        dispatched = self._capture_dispatch(monkeypatch)  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+        dispatched = self._capture_dispatch(monkeypatch)  # pyright: ignore[reportUnknownMemberType]
         with TestClient(app) as client:
             r = client.post("/api/cluster/update?target=test-host")
         assert r.status_code == 202
@@ -2152,23 +2152,23 @@ class TestClusterUpdateRouting:
     def test_target_remote_dispatches(
         self,
         monkeypatch: pytest.MonkeyPatch,
-        set_machine_identity,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+        set_machine_identity,
     ) -> None:
         """target=<other machine> → POST cluster_update to its ops server, return its result."""
         from gateway.routers import cluster as cluster_router
 
         set_machine_identity(role="gateway", name="test-host")
 
-        dispatched: list[dict] = []  # pyright: ignore[reportMissingTypeArgument, reportUnknownVariableType]
+        dispatched: list[dict] = []
 
         async def _fake_dispatch(
             *,
-            target_machine,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-            kind,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-            payload,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-            timeout_s=None,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-            retries=None,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-            idempotency_key=None,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+            target_machine,
+            kind,
+            payload,
+            timeout_s=None,
+            retries=None,
+            idempotency_key=None,
         ):  # type: ignore[no-untyped-def]
             dispatched.append({"target_machine": target_machine, "kind": kind, "payload": payload})  # pyright: ignore[reportUnknownMemberType]
             return {"session": "ava-main-updater", "log": "/x"}
@@ -2348,7 +2348,7 @@ class TestAdminEvents:
 class TestAdminMachineDelete:
     def test_deletes_existing_row(self, db_conn, set_machine_identity) -> None:  # type: ignore[no-untyped-def]
         set_machine_identity(role="gateway", name="cloud")
-        with db_conn.cursor() as cur:  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+        with db_conn.cursor() as cur:  # pyright: ignore[reportUnknownMemberType]
             cur.execute("DELETE FROM machines WHERE name = 'laminar-stale'")  # pyright: ignore[reportUnknownMemberType]
             cur.execute(  # pyright: ignore[reportUnknownMemberType]
                 "INSERT INTO machines (name, role, gateway_url) "
@@ -2359,14 +2359,14 @@ class TestAdminMachineDelete:
             r = client.delete("/api/cluster/machines/laminar-stale")
         assert r.status_code == 200
         assert r.json() == {"deleted": True}
-        with db_conn.cursor() as cur:  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+        with db_conn.cursor() as cur:  # pyright: ignore[reportUnknownMemberType]
             cur.execute("SELECT COUNT(*) FROM machines WHERE name = 'laminar-stale'")  # pyright: ignore[reportUnknownMemberType]
-            (n,) = cur.fetchone()  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+            (n,) = cur.fetchone()  # pyright: ignore[reportUnknownMemberType]
         assert n == 0
 
     def test_missing_row_returns_deleted_false(self, db_conn, set_machine_identity) -> None:  # type: ignore[no-untyped-def]
         set_machine_identity(role="gateway", name="cloud")
-        with db_conn.cursor() as cur:  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+        with db_conn.cursor() as cur:  # pyright: ignore[reportUnknownMemberType]
             cur.execute("DELETE FROM machines WHERE name = 'never-existed'")  # pyright: ignore[reportUnknownMemberType]
         db_conn.commit()  # pyright: ignore[reportUnknownMemberType]
         with TestClient(app) as client:
@@ -2388,9 +2388,9 @@ class TestAdminMachineDelete:
 class TestAgentMachineList:
     def test_get_cluster_machines_returns_name_description_live(
         self,
-        db_conn,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-        set_machine_identity,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-        monkeypatch: pytest.MonkeyPatch,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+        db_conn,
+        set_machine_identity,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:  # type: ignore[no-untyped-def]
         # Seed one LOCAL agent-runner row. The local machine is probed through
         # its own ops server like any other (status_probe), so stub the op
@@ -2402,13 +2402,13 @@ class TestAgentMachineList:
 
         async def _fake_dispatch(
             *,
-            target_machine,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-            kind,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-            payload,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-            timeout_s=None,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-            ops_url=None,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-            retries=None,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-            idempotency_key=None,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+            target_machine,
+            kind,
+            payload,
+            timeout_s=None,
+            ops_url=None,
+            retries=None,
+            idempotency_key=None,
         ):  # type: ignore[no-untyped-def]
             assert kind == "status_probe"
             assert ops_url == "http://wsl-test:18121"
@@ -2422,7 +2422,7 @@ class TestAgentMachineList:
             }
 
         monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _fake_dispatch)  # pyright: ignore[reportUnknownArgumentType]
-        with db_conn.cursor() as cur:  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+        with db_conn.cursor() as cur:  # pyright: ignore[reportUnknownMemberType]
             cur.execute("TRUNCATE machines")  # pyright: ignore[reportUnknownMemberType]
             cur.execute(  # pyright: ignore[reportUnknownMemberType]
                 "INSERT INTO machines (name, role, gateway_url, description) "
@@ -2445,8 +2445,8 @@ class TestAgentMachineList:
 
     def test_get_cluster_machines_reachable_unknown_is_not_live(
         self,
-        db_conn,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-        set_machine_identity,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+        db_conn,
+        set_machine_identity,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:  # type: ignore[no-untyped-def]
         """The agent/config projection must not target a runner whose ops
@@ -2457,7 +2457,7 @@ class TestAgentMachineList:
         from gateway.schemas import MachineStatus
 
         set_machine_identity(role="gateway", name="cloud-test")
-        with db_conn.cursor() as cur:  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+        with db_conn.cursor() as cur:  # pyright: ignore[reportUnknownMemberType]
             cur.execute("TRUNCATE machines")  # pyright: ignore[reportUnknownMemberType]
             cur.execute(  # pyright: ignore[reportUnknownMemberType]
                 "INSERT INTO machines (name, role, gateway_url) "
@@ -2495,8 +2495,8 @@ class TestAgentMachineList:
 
     def test_get_cluster_machines_excludes_gateway(
         self,
-        db_conn,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-        monkeypatch: pytest.MonkeyPatch,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+        db_conn,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:  # type: ignore[no-untyped-def]
         """The agent view (`/api/cluster/machines`) lists only machines that run
         agent processes — the gateway (which runs none) is filtered out.
@@ -2510,7 +2510,7 @@ class TestAgentMachineList:
         from gateway.routers import cluster as cluster_router
         from gateway.schemas import MachineStatus
 
-        with db_conn.cursor() as cur:  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+        with db_conn.cursor() as cur:  # pyright: ignore[reportUnknownMemberType]
             cur.execute("TRUNCATE machines")  # pyright: ignore[reportUnknownMemberType]
             cur.execute(  # pyright: ignore[reportUnknownMemberType]
                 "INSERT INTO machines (name, role, gateway_url) "
@@ -2569,7 +2569,7 @@ class TestAgentMachineList:
         flag; a flagged row is still served on the roster (visible) but
         `list_agent_runners`-backed endpoints exclude it. Unknown name → 404."""
         set_machine_identity(role="gateway", name="test-host")
-        with db_conn.cursor() as cur:  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+        with db_conn.cursor() as cur:  # pyright: ignore[reportUnknownMemberType]
             cur.execute("TRUNCATE machines")  # pyright: ignore[reportUnknownMemberType]
             cur.execute(  # pyright: ignore[reportUnknownMemberType]
                 "INSERT INTO machines (name, role, gateway_url) "
@@ -2603,7 +2603,7 @@ class TestAgentMachineList:
         """`/api/cluster/roster` returns the full MachineStatus rows (name/role/
         online/paused), backing the thin `ava cluster status`."""
         set_machine_identity(role="gateway", name="test-host")
-        with db_conn.cursor() as cur:  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+        with db_conn.cursor() as cur:  # pyright: ignore[reportUnknownMemberType]
             cur.execute("TRUNCATE machines")  # pyright: ignore[reportUnknownMemberType]
             cur.execute(  # pyright: ignore[reportUnknownMemberType]
                 "INSERT INTO machines (name, role, gateway_url) "
@@ -2633,19 +2633,19 @@ def _seed_away_machine(
     host's own row (gateway-only in the DB — the roster's local lightweight
     path, so no probe dial; the test identity itself carries agent-runner so
     spawn_agent works)."""
-    with db_conn.cursor() as cur:  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
-        cur.execute("TRUNCATE machines")  # pyright: ignore[reportUnknownMemberType]
+    with db_conn.cursor() as cur:
+        cur.execute("TRUNCATE machines")
         if local_row:
-            cur.execute(  # pyright: ignore[reportUnknownMemberType]
+            cur.execute(
                 "INSERT INTO machines (name, role, gateway_url) "
                 "VALUES ('test-host', ARRAY['gateway'], NULL)"
             )
-        cur.execute(  # pyright: ignore[reportUnknownMemberType]
+        cur.execute(
             "INSERT INTO machines (name, role, gateway_url) "
             "VALUES (%s, ARRAY['agent-runner'], NULL)",
             (name,),
         )
-    db_conn.commit()  # pyright: ignore[reportUnknownMemberType]
+    db_conn.commit()
 
 
 def _seed_agent_on_machine(
@@ -2656,37 +2656,37 @@ def _seed_agent_on_machine(
     from tests.conftest import spawn_agent
 
     aid = spawn_agent(spawner="user")
-    with db_conn.cursor() as cur:  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
-        cur.execute(  # pyright: ignore[reportUnknownMemberType]
+    with db_conn.cursor() as cur:
+        cur.execute(
             "UPDATE agents_meta SET machine = %s, status = %s WHERE id = %s",
             (machine, status, aid),
         )
-    db_conn.commit()  # pyright: ignore[reportUnknownMemberType]
+    db_conn.commit()
     return aid
 
 
 def _seed_drain_owner(db_conn: psycopg.Connection, agent_id: int = 405) -> None:
     """The drain-owner agent row the pause endpoint reassigns tasks to (the
     FK target `agent_tasks.owner -> agents(id)`)."""
-    with db_conn.cursor() as cur:  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
-        cur.execute(  # pyright: ignore[reportUnknownMemberType]
+    with db_conn.cursor() as cur:
+        cur.execute(
             "INSERT INTO agents (id) VALUES (%s) ON CONFLICT (id) DO NOTHING",
             (agent_id,),
         )
-    db_conn.commit()  # pyright: ignore[reportUnknownMemberType]
+    db_conn.commit()
 
 
 def _seed_in_progress_task(db_conn: psycopg.Connection, owner: int, title: str) -> int:
-    with db_conn.cursor() as cur:  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
-        cur.execute(  # pyright: ignore[reportUnknownMemberType]
+    with db_conn.cursor() as cur:
+        cur.execute(
             "INSERT INTO agent_tasks (title, description, status, owner, created_by) "
             "VALUES (%s, 'desc', 'in_progress', %s, 'user') RETURNING id",
             (title, owner),
         )
-        row = cur.fetchone()  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+        row = cur.fetchone()
         assert row is not None
         (task_id,) = row
-    db_conn.commit()  # pyright: ignore[reportUnknownMemberType]
+    db_conn.commit()
     return task_id
 
 
@@ -2720,19 +2720,19 @@ class TestMachinePauseResume:
         assert body["pause_reason"] == "\u4f11\u5047\u4e00\u5468"
         assert body["paused_at"] is not None
 
-        with db_conn.cursor() as cur:  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+        with db_conn.cursor() as cur:  # pyright: ignore[reportUnknownMemberType]
             cur.execute(  # pyright: ignore[reportUnknownMemberType]
                 "SELECT COUNT(*) FROM agents_meta WHERE machine = 'away' AND status != 'terminated'"
             )
-            (n_live,) = cur.fetchone()  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+            (n_live,) = cur.fetchone()  # pyright: ignore[reportUnknownMemberType]
             cur.execute(  # pyright: ignore[reportUnknownMemberType]
                 "SELECT owner, results FROM agent_tasks WHERE title = 'task-on-away'"
             )
-            owner, results = cur.fetchone()  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+            owner, results = cur.fetchone()  # pyright: ignore[reportUnknownMemberType]
             cur.execute(  # pyright: ignore[reportUnknownMemberType]
                 "SELECT gateway_url, role FROM machines WHERE name = 'away'"
             )
-            gateway_url, role = cur.fetchone()  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+            gateway_url, role = cur.fetchone()  # pyright: ignore[reportUnknownMemberType]
         assert n_live == 0
         assert owner == 405
         assert "machine pause" in results or "paused" in results
@@ -2771,8 +2771,8 @@ class TestMachinePauseResume:
         from gateway.routers import agents_forward as _fwd
 
         set_machine_identity(role="agent-runner", name="test-host")
-        _seed_away_machine(db_conn)  # pyright: ignore[reportUnknownArgumentType]
-        aid = _seed_agent_on_machine(db_conn, "away")  # pyright: ignore[reportUnknownArgumentType]
+        _seed_away_machine(db_conn)
+        aid = _seed_agent_on_machine(db_conn, "away")
         from shared.db import insert_inbound_message
 
         old_chat_id = insert_inbound_message(db_conn, aid, "queued before pause", source="user")
@@ -2787,15 +2787,15 @@ class TestMachinePauseResume:
         body = r.json()
         assert body["terminated_agents"] == 0
         assert body["force_marked_agents"] == 1
-        with db_conn.cursor() as cur:  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
-            cur.execute(  # pyright: ignore[reportUnknownMemberType]
+        with db_conn.cursor() as cur:
+            cur.execute(
                 "SELECT status, termination_source, last_force_terminate_inbound_id "
                 "FROM agents_meta WHERE machine = 'away'"
             )
             status_row = cur.fetchone()
             assert status_row is not None
             status, source, fence_id = status_row
-            cur.execute(  # pyright: ignore[reportUnknownMemberType]
+            cur.execute(
                 "SELECT id FROM inbound_messages WHERE agent_id=%s AND kind='terminate' "
                 "ORDER BY id DESC LIMIT 1",
                 (aid,),
@@ -2845,11 +2845,11 @@ class TestMachinePauseResume:
         assert r.json() == {"name": "away", "resumed": True}
         assert again.json() == {"name": "away", "resumed": False}
 
-        with db_conn.cursor() as cur:  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+        with db_conn.cursor() as cur:  # pyright: ignore[reportUnknownMemberType]
             cur.execute(  # pyright: ignore[reportUnknownMemberType]
                 "SELECT paused_at, pause_reason FROM machines WHERE name = 'away'"
             )
-            paused_at, pause_reason = cur.fetchone()  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+            paused_at, pause_reason = cur.fetchone()  # pyright: ignore[reportUnknownMemberType]
         assert paused_at is None and pause_reason is None
 
         with TestClient(app) as client:

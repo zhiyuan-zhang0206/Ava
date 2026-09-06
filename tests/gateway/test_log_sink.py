@@ -59,7 +59,7 @@ def _isolate_events_mirror(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> N
     monkeypatch.setattr(paths, "ava_home", lambda: tmp_path / "ava_home")
 
 
-def _last_event() -> tuple[str, int | None, str, dict]:  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+def _last_event() -> tuple[str, int | None, str, dict]:
     """Flush the emitter, then return the last mirror line (event_name,
     agent_id, level, attributes). Fail loud on an empty mirror."""
     from shared.paths import logs_dir
@@ -75,29 +75,29 @@ def _last_event() -> tuple[str, int | None, str, dict]:  # pyright: ignore[repor
     return obj["event_name"], obj.get("agent_id"), obj.get("level"), obj.get("attributes", {})
 
 
-def test_sink_event_resolution_explicit_event(sink_logger) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_sink_event_resolution_explicit_event(sink_logger) -> None:
     """Explicit event= has priority, not overridden by label= fallback."""
     sink_logger.info("foo", event="turn_end", label="ignored")  # pyright: ignore[reportUnknownMemberType]
-    event, _agent_id, _level, payload = _last_event()  # pyright: ignore[reportUnknownVariableType]
+    event, _agent_id, _level, payload = _last_event()
     assert event == "turn_end"
     assert payload["label"] == "ignored"  # label still in payload, not lost
 
 
-def test_sink_event_resolution_label_fallback(sink_logger) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_sink_event_resolution_label_fallback(sink_logger) -> None:
     """When no event=, falls back to label= (compatible with existing [exec]/[claim] pattern)."""
     sink_logger.info("[{label}] {body}", label="exec", body="output...")  # pyright: ignore[reportUnknownMemberType]
-    event, _agent_id, _level, _payload = _last_event()  # pyright: ignore[reportUnknownVariableType]
+    event, _agent_id, _level, _payload = _last_event()
     assert event == "exec"
 
 
-def test_sink_event_resolution_log_default(sink_logger) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_sink_event_resolution_log_default(sink_logger) -> None:
     """Bare logger.info with no event/label → defaults to "log"."""
     sink_logger.info("bare message")  # pyright: ignore[reportUnknownMemberType]
-    event, _agent_id, _level, _payload = _last_event()  # pyright: ignore[reportUnknownVariableType]
+    event, _agent_id, _level, _payload = _last_event()
     assert event == "log"
 
 
-def test_sink_empty_event_raises(sink_logger) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_sink_empty_event_raises(sink_logger) -> None:
     """Explicit event="" must raise (caller bug, should not silently fall through).
     catch=False lets ValueError propagate out; in real deployment with catch=True,
     loguru would write the stack to stderr, but this test cannot assert stderr behavior."""
@@ -105,10 +105,10 @@ def test_sink_empty_event_raises(sink_logger) -> None:  # pyright: ignore[report
         sink_logger.info("foo", event="")  # pyright: ignore[reportUnknownMemberType]
 
 
-def test_sink_agent_id_dash_sentinel_maps_to_null(sink_logger) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_sink_agent_id_dash_sentinel_maps_to_null(sink_logger) -> None:
     """agent_id="-" (gateway init default) → DB NULL."""
     sink_logger.info("from gateway", event="sse_drop")  # pyright: ignore[reportUnknownMemberType]
-    _event, agent_id, _level, _payload = _last_event()  # pyright: ignore[reportUnknownVariableType]
+    _event, agent_id, _level, _payload = _last_event()
     assert agent_id is None
 
 
@@ -122,18 +122,18 @@ def _insert_agent(db: psycopg.Connection) -> int:
 
 
 def test_sink_agent_id_numeric_string_converts_to_int(
-    sink_logger,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-    db_conn: psycopg.Connection,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    sink_logger,
+    db_conn: psycopg.Connection,
 ) -> None:
     """agent_id="42" (init_agent_process bind) → the mirror row carries 42."""
     tid = _insert_agent(db_conn)
     db_conn.commit()
     sink_logger.bind(agent_id=str(tid)).info("from agent", event="sse_drop")  # pyright: ignore[reportUnknownMemberType]
-    _event, agent_id, _level, _payload = _last_event()  # pyright: ignore[reportUnknownVariableType]
+    _event, agent_id, _level, _payload = _last_event()
     assert agent_id == tid
 
 
-def test_stdlib_intercept_routes_through_sink(sink_logger) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_stdlib_intercept_routes_through_sink(sink_logger) -> None:
     """stdlib `logging.getLogger(...).info(...)` goes through _StdlibInterceptHandler →
     loguru sink → agent_events INSERT. Verifies that service modules (e.g. `services/agent_ops/daemon.py`
     that use stdlib logging) have their logs go to DB after upgrade, without needing to rewrite callsites line by line."""
@@ -144,30 +144,30 @@ def test_stdlib_intercept_routes_through_sink(sink_logger) -> None:  # pyright: 
     _install_stdlib_intercept()
     stdlib_log = logging.getLogger("test.stdlib.intercept")
     stdlib_log.warning("stdlib warn via intercept handler")
-    event, _agent_id, level, payload = _last_event()  # pyright: ignore[reportUnknownVariableType]
+    event, _agent_id, level, payload = _last_event()
     assert level == "warning"
     # event defaults to "log" (no explicit event=), message goes into payload.msg
     assert event == "log"
     assert payload["msg"] == "stdlib warn via intercept handler"
 
 
-def test_sink_agent_id_int_kwarg_overrides_bind(sink_logger, db_conn: psycopg.Connection) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_sink_agent_id_int_kwarg_overrides_bind(sink_logger, db_conn: psycopg.Connection) -> None:
     """log call passing agent_id=N overrides the bind default — used by shared/agents.py for cross-process
     lifecycle events (the caller process bind may not be the target)."""
     tid = _insert_agent(db_conn)
     db_conn.commit()
     sink_logger.info("spawned", event="agent_spawned", agent_id=tid)  # pyright: ignore[reportUnknownMemberType]
-    _event, agent_id, _level, _payload = _last_event()  # pyright: ignore[reportUnknownVariableType]
+    _event, agent_id, _level, _payload = _last_event()
     assert agent_id == tid
 
 
 def test_sink_payload_excludes_meta_columns_includes_msg(
-    sink_logger,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    sink_logger,
 ) -> None:
     """payload jsonb does not duplicate agent_id/event (columns already store them); msg goes into payload
     as a debug grep entry point."""
     sink_logger.info("hello {name}", event="sse_drop", name="world", custom_field=1)  # pyright: ignore[reportUnknownMemberType]
-    _event, _agent_id, _level, payload = _last_event()  # pyright: ignore[reportUnknownVariableType]
+    _event, _agent_id, _level, payload = _last_event()
     assert "agent_id" not in payload
     assert "agent_id" not in payload
     assert "event" not in payload
@@ -176,7 +176,7 @@ def test_sink_payload_excludes_meta_columns_includes_msg(
     assert payload["custom_field"] == 1
 
 
-def test_sink_preserves_llm_usage_source_in_payload(sink_logger) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_sink_preserves_llm_usage_source_in_payload(sink_logger) -> None:
     """A usage-path discriminator must not be consumed as event provenance."""
     sink_logger.info(  # pyright: ignore[reportUnknownMemberType]
         "metered web answer",
@@ -186,19 +186,19 @@ def test_sink_preserves_llm_usage_source_in_payload(sink_logger) -> None:  # pyr
         calls=1,
     )
 
-    _event, _agent_id, _level, payload = _last_event()  # pyright: ignore[reportUnknownVariableType]
+    _event, _agent_id, _level, payload = _last_event()
     assert payload["source"] == "web.fetch"
     assert "transport_source" not in payload
 
 
-def test_sink_level_is_recorded(sink_logger) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_sink_level_is_recorded(sink_logger) -> None:
     """WARNING / ERROR level goes into DB level column — used by sidebar warn_24h/err_24h."""
     sink_logger.warning("uh oh", event="sse_drop")  # pyright: ignore[reportUnknownMemberType]
-    _event, _agent_id, level, _payload = _last_event()  # pyright: ignore[reportUnknownVariableType]
+    _event, _agent_id, level, _payload = _last_event()
     assert level == "warning"
 
     sink_logger.error("boom", event="sse_drop")  # pyright: ignore[reportUnknownMemberType]
-    _event, _agent_id, level, _payload = _last_event()  # pyright: ignore[reportUnknownVariableType]
+    _event, _agent_id, level, _payload = _last_event()
     assert level == "error"
 
 
@@ -212,7 +212,7 @@ def test_sink_level_is_recorded(sink_logger) -> None:  # pyright: ignore[reportM
 
 
 def test_sink_exception_includes_traceback_in_payload(
-    sink_logger,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    sink_logger,
 ) -> None:
     """When logger.opt(exception=True), payload should carry traceback / exception_type /
     exception_value fields — for diagnosing exception turns in the events table (turn_end ok=False
@@ -222,25 +222,25 @@ def test_sink_exception_includes_traceback_in_payload(
     except RuntimeError:
         sink_logger.opt(exception=True).warning("turn ended", event="turn_end", ok=False)  # pyright: ignore[reportUnknownMemberType]
 
-    _event, _agent_id, _level, payload = _last_event()  # pyright: ignore[reportUnknownVariableType]
+    _event, _agent_id, _level, payload = _last_event()
     assert payload["exception_type"] == "RuntimeError"
     assert payload["exception_value"] == "simulated LLM timeout"
     assert "Traceback" in payload["traceback"]
     assert "RuntimeError: simulated LLM timeout" in payload["traceback"]
 
 
-def test_sink_no_exception_no_extra_fields(sink_logger) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_sink_no_exception_no_extra_fields(sink_logger) -> None:
     """Normal logger.info should not have traceback / exception_* fields — avoids payload bloat,
     and lets consumers (sidebar / SQL) use `payload ? 'traceback'` to detect exception turns."""
     sink_logger.info("normal turn", event="turn_end", ok=True)  # pyright: ignore[reportUnknownMemberType]
-    _event, _agent_id, _level, payload = _last_event()  # pyright: ignore[reportUnknownVariableType]
+    _event, _agent_id, _level, payload = _last_event()
     assert "traceback" not in payload
     assert "exception_type" not in payload
     assert "exception_value" not in payload
 
 
 def test_sink_opt_exception_without_active_exc_skips_garbage_payload(
-    sink_logger,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    sink_logger,
 ) -> None:
     """`logger.opt(exception=True)` when sys.exc_info() == (None,None,None) still
     sets record["exception"] as a namedtuple with all three fields None (not Python None).
@@ -252,7 +252,7 @@ def test_sink_opt_exception_without_active_exc_skips_garbage_payload(
     # outside an except block, opt(exception=True) → no active exception
     sink_logger.opt(exception=True).warning("no active exc", event="sse_drop")  # pyright: ignore[reportUnknownMemberType]
 
-    _event, _agent_id, _level, payload = _last_event()  # pyright: ignore[reportUnknownVariableType]
+    _event, _agent_id, _level, payload = _last_event()
     assert "traceback" not in payload, (
         f"empty exception should not inject traceback; got {payload.get('traceback')!r}"  # pyright: ignore[reportUnknownMemberType]
     )
@@ -286,7 +286,7 @@ def _reset_deploy_cache():
 
 def test_rollout_quiet_db_pool_acquire_slow(
     monkeypatch: pytest.MonkeyPatch,
-    sink_logger,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    sink_logger,
 ) -> None:
     """db_pool_acquire_slow during a deploy → INFO in the events row (file sink
     keeps the original level; only the PG row is quieted)."""
@@ -299,13 +299,13 @@ def test_rollout_quiet_db_pool_acquire_slow(
         name="ops",
         elapsed=2.0,
     )
-    _event, _agent_id, level, _payload = _last_event()  # pyright: ignore[reportUnknownArgumentType, reportUnknownVariableType]
+    _event, _agent_id, level, _payload = _last_event()
     assert level == "info"
 
 
 def test_rollout_quiet_db_outage_events(
     monkeypatch: pytest.MonkeyPatch,
-    sink_logger,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    sink_logger,
 ) -> None:
     """Every db_outage_* category is quieted while a deploy holds the lease."""
     import shared.log as slog
@@ -313,13 +313,13 @@ def test_rollout_quiet_db_outage_events(
     monkeypatch.setattr(slog, "_deploy_in_progress", lambda: True)
     for event in ("db_outage_wait", "db_outage_pause", "db_outage_reconcile_retry"):
         sink_logger.warning("db unreachable — pausing", event=event, agent_id="-")  # pyright: ignore[reportUnknownMemberType]
-        _event, _agent_id, level, _payload = _last_event()  # pyright: ignore[reportUnknownArgumentType, reportUnknownVariableType]
+        _event, _agent_id, level, _payload = _last_event()
         assert level == "info", f"{event} should be quieted to INFO"
 
 
 def test_rollout_quiet_ops_manager_round_blocked(
     monkeypatch: pytest.MonkeyPatch,
-    sink_logger,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    sink_logger,
 ) -> None:
     """The ops manager's stdlib-logged 'round blocked' line (event='log', no
     event=) is quieted by message prefix while a deploy holds the lease."""
@@ -330,7 +330,7 @@ def test_rollout_quiet_ops_manager_round_blocked(
         "[ops.manager] round blocked by pause (scope=all), roster NOT fully "
         "reconciled — 12 consecutive round(s)"
     )
-    _event, agent_id, level, _payload = _last_event()  # pyright: ignore[reportUnknownArgumentType, reportUnknownVariableType]
+    _event, agent_id, level, _payload = _last_event()
     assert level == "info"
     assert agent_id is None  # still a gateway/ops line, not an agent event
 
@@ -339,13 +339,13 @@ def test_rollout_quiet_ops_manager_round_blocked(
         "[ops.manager] round blocked by schema (scope=all), roster NOT fully "
         "reconciled — 15 consecutive round(s)"
     )
-    _event, _agent_id, level, _payload = _last_event()  # pyright: ignore[reportUnknownArgumentType, reportUnknownVariableType]
+    _event, _agent_id, level, _payload = _last_event()
     assert level == "info"
 
 
 def test_rollout_quiet_query_cancellation(
     monkeypatch: pytest.MonkeyPatch,
-    sink_logger,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    sink_logger,
 ) -> None:
     """The 'query cancellation failed' line (bare warning, event='log') is
     quieted by message prefix while a deploy holds the lease."""
@@ -353,13 +353,13 @@ def test_rollout_quiet_query_cancellation(
 
     monkeypatch.setattr(slog, "_deploy_in_progress", lambda: True)
     sink_logger.warning("query cancellation failed: cancellation timeout expired")  # pyright: ignore[reportUnknownMemberType]
-    _event, _agent_id, level, _payload = _last_event()  # pyright: ignore[reportUnknownArgumentType, reportUnknownVariableType]
+    _event, _agent_id, level, _payload = _last_event()
     assert level == "info"
 
 
 def test_rollout_quiet_no_deploy_keeps_warning(
     monkeypatch: pytest.MonkeyPatch,
-    sink_logger,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    sink_logger,
 ) -> None:
     """No deploy in flight → the same categories keep their original WARNING:
     outside a rollout window these are real signals."""
@@ -367,13 +367,13 @@ def test_rollout_quiet_no_deploy_keeps_warning(
 
     monkeypatch.setattr(slog, "_deploy_in_progress", lambda: False)
     sink_logger.warning("slow acquire", event="db_pool_acquire_slow", elapsed=2.0)  # pyright: ignore[reportUnknownMemberType]
-    _event, _agent_id, level, _payload = _last_event()  # pyright: ignore[reportUnknownArgumentType, reportUnknownVariableType]
+    _event, _agent_id, level, _payload = _last_event()
     assert level == "warning"
 
 
 def test_rollout_quiet_unrelated_warning_stays(
     monkeypatch: pytest.MonkeyPatch,
-    sink_logger,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    sink_logger,
 ) -> None:
     """A WARNING outside the quiet categories is untouched even mid-deploy —
     the suppression list is deliberately narrow (no blanket WARNING
@@ -382,13 +382,13 @@ def test_rollout_quiet_unrelated_warning_stays(
 
     monkeypatch.setattr(slog, "_deploy_in_progress", lambda: True)
     sink_logger.warning("real trouble", event="db_pool_acquire_timeout")  # pyright: ignore[reportUnknownMemberType]
-    _event, _agent_id, level, _payload = _last_event()  # pyright: ignore[reportUnknownArgumentType, reportUnknownVariableType]
+    _event, _agent_id, level, _payload = _last_event()
     assert level == "warning"
 
 
 def test_deploy_quieting_read_never_blocks_producer(
     monkeypatch: pytest.MonkeyPatch,
-    sink_logger,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    sink_logger,
 ) -> None:
     """The quieting lease read must never block the log producer (P1, audit
     2026-08-08): the check runs in the synchronous sink on the caller's
@@ -462,7 +462,7 @@ def test_stdlib_intercept_emit_never_raises(monkeypatch: pytest.MonkeyPatch) -> 
 
 def test_deploy_quieting_cache_holds_answer_through_read_failure(
     monkeypatch: pytest.MonkeyPatch,
-    sink_logger,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    sink_logger,
 ) -> None:
     """A failed refresh keeps the previous answer for the TTL: a mid-rollout DB
     blip (the gateway restart drops the data plane the lease lives in) must
@@ -476,5 +476,5 @@ def test_deploy_quieting_cache_holds_answer_through_read_failure(
     slog._deploy_cached_at = time.monotonic()
 
     sink_logger.warning("slow acquire", event="db_pool_acquire_slow", elapsed=2.0)  # pyright: ignore[reportUnknownMemberType]
-    _event, _agent_id, level, _payload = _last_event()  # pyright: ignore[reportUnknownArgumentType, reportUnknownVariableType]
+    _event, _agent_id, level, _payload = _last_event()
     assert level == "info", "cached lease must quiet within the TTL"

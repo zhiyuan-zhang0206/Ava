@@ -63,7 +63,7 @@ def fake_flag(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
 
 
 @pytest.fixture
-def stub_machine_identity(set_machine_identity) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def stub_machine_identity(set_machine_identity) -> None:
     """Set this unit's identity (gateway, name 'cloud-test') at the source
     so every machine_name() / machine_role() call site resolves it without
     per-module patching."""

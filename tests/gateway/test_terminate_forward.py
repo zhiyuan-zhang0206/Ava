@@ -22,7 +22,7 @@ from shared.agents import CrossMachineGatewayUnavailable, MachineNotRegistered
 
 
 @pytest.fixture
-def _force_local_machine(set_machine_identity) -> str:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def _force_local_machine(set_machine_identity) -> str:
     """Sets this unit's identity at the source via set_machine_identity so every
     machine_name() / machine_role() call site sees role=agent-runner, name='local-test'."""
     set_machine_identity(role="agent-runner", name="local-test")
@@ -68,7 +68,7 @@ class TestTerminateRouting:
         monkeypatch.setattr(
             _subprocess,
             "run",
-            lambda *_a, **_kw: CompletedProcess(args=[], returncode=0),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+            lambda *_a, **_kw: CompletedProcess(args=[], returncode=0),  # pyright: ignore[reportUnknownArgumentType]
         )
         with TestClient(app) as client:
             agent_id = client.post("/api/agents", json={}).json()["id"]
@@ -89,11 +89,11 @@ class TestTerminateRouting:
         """machine != local + force=false → forward, local does not INSERT inbound."""
         captured: dict[str, Any] = {}
 
-        async def _capture_forward(agent_id: int, path: str, json_body: dict) -> dict:  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+        async def _capture_forward(agent_id: int, path: str, json_body: dict) -> dict:
             captured["agent_id"] = agent_id
             captured["path"] = path
             captured["json_body"] = json_body
-            return {"status": "enqueued"}  # pyright: ignore[reportUnknownVariableType]
+            return {"status": "enqueued"}
 
         with TestClient(app) as client:
             agent_id = client.post("/api/agents", json={}).json()["id"]
@@ -114,9 +114,9 @@ class TestTerminateRouting:
         """machine != local + force=true → forward, local does not touch sessions / pid."""
         captured: dict[str, Any] = {}
 
-        async def _capture_forward(agent_id: int, path: str, json_body: dict) -> dict:  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+        async def _capture_forward(agent_id: int, path: str, json_body: dict) -> dict:
             captured["json_body"] = json_body
-            return {"status": "force_killed"}  # pyright: ignore[reportUnknownVariableType]
+            return {"status": "force_killed"}
 
         with TestClient(app) as client:
             agent_id = client.post("/api/agents", json={}).json()["id"]
@@ -182,9 +182,9 @@ def test_remote_home_machine_is_forwarded(
     just the special case where the ops server lives at localhost."""
     captured: dict[str, Any] = {}
 
-    async def _capture_enqueue(target: str, path: str, json_body: dict) -> dict:  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+    async def _capture_enqueue(target: str, path: str, json_body: dict) -> dict:
         captured["target"] = target
-        return {"status": "enqueued"}  # pyright: ignore[reportUnknownVariableType]
+        return {"status": "enqueued"}
 
     with TestClient(app) as client:
         agent_id = client.post("/api/agents", json={}).json()["id"]

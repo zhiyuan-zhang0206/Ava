@@ -26,7 +26,7 @@ def test_client(db_conn: psycopg.Connection):
         yield client
 
 
-def _put_checkpoint_with_trace(agent_id: int, messages: list, trace_id: str) -> str:  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+def _put_checkpoint_with_trace(agent_id: int, messages: list, trace_id: str) -> str:
     """Write one checkpoint whose metadata carries trace_id; return its id."""
     from typing import cast
 
@@ -109,7 +109,7 @@ def test_503_on_checkpoint_read_failure(
 
     tid = create_agent(db_conn)
 
-    def _boom(*_a, **_kw):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    def _boom(*_a, **_kw):
         raise checkpoint_mod.CheckpointReadError("boom")
 
     monkeypatch.setattr(agents_mod, "load_checkpoint_messages_by_trace", _boom)  # pyright: ignore[reportUnknownArgumentType]

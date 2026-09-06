@@ -24,7 +24,7 @@ from fastapi.testclient import TestClient
 
 from gateway.app import app
 from gateway.sse import (
-    _decode_frames_for_test,  # pyright: ignore[reportUnknownVariableType]
+    _decode_frames_for_test,
     event_stream,
     throttled_event_stream,
 )
@@ -78,10 +78,10 @@ async def _collect_frames(
     (90s same as e2e wait_for_status ceiling: covers worst-case observation recovery).
     """
     req = _FakeRequest()
-    gen = event_stream(  # type: ignore[arg-type]  # pyright: ignore[reportArgumentType]
+    gen = event_stream(  # type: ignore[arg-type]
         settings.data_plane.redis_url,
         agent_id,
-        req,  # type: ignore[arg-type]  # pyright: ignore[reportArgumentType]
+        req,  # type: ignore[arg-type]
         channel=channel,
         role_filter=role_filter,
         broadcast=broadcast,
@@ -142,8 +142,8 @@ def test_sse_forwards_matching_thread_events(
         ChatDelta(agent_id=tid, item_id="5.0", content="done").model_dump_json(),
     ]
     frames = asyncio.run(_collect_frames(tid, redis_client, payloads, n_data_frames=3))
-    decoded = _decode_frames_for_test(frames)  # pyright: ignore[reportUnknownVariableType]
-    assert [d["role"] for d in decoded] == ["code_delta", "code_delta", "chat_delta"]  # pyright: ignore[reportUnknownVariableType]
+    decoded = _decode_frames_for_test(frames)
+    assert [d["role"] for d in decoded] == ["code_delta", "code_delta", "chat_delta"]
     assert decoded[0]["content"] == "pri"
     assert decoded[1]["content"] == "nt(1)"
     assert decoded[2]["content"] == "done"
@@ -161,7 +161,7 @@ def test_sse_filters_by_agent_id(
         ChatDelta(agent_id=tid_a, item_id="5.0", content="for A").model_dump_json(),
     ]
     frames = asyncio.run(_collect_frames(tid_a, redis_client, payloads, n_data_frames=1))
-    decoded = _decode_frames_for_test(frames)  # pyright: ignore[reportUnknownVariableType]
+    decoded = _decode_frames_for_test(frames)
     assert len(decoded) == 1  # pyright: ignore[reportUnknownArgumentType]
     assert decoded[0]["content"] == "for A"
 
@@ -182,8 +182,8 @@ def test_sse_drops_invalid_payload_as_comment(
     text = b"".join(frames).decode()
     assert "dropped unparseable payload" in text
     # valid event still passes through — the bad one earlier didn't break the whole stream
-    decoded = _decode_frames_for_test(frames)  # pyright: ignore[reportUnknownVariableType]
-    assert [d["role"] for d in decoded] == ["chat_delta"]  # pyright: ignore[reportUnknownVariableType]
+    decoded = _decode_frames_for_test(frames)
+    assert [d["role"] for d in decoded] == ["chat_delta"]
     assert decoded[0]["content"] == "after"
 
 
@@ -234,7 +234,7 @@ def test_sse_role_filter_system_passes_code_delta(
             role_filter=SYSTEM_ROLES,
         )
     )
-    decoded = _decode_frames_for_test(frames)  # pyright: ignore[reportUnknownVariableType]
+    decoded = _decode_frames_for_test(frames)
     assert len(decoded) == 1  # pyright: ignore[reportUnknownArgumentType]
     assert decoded[0]["role"] == "code_delta"
 
@@ -260,9 +260,9 @@ def test_sse_role_filter_system_passes_chat_streaming(
             role_filter=SYSTEM_ROLES,
         )
     )
-    decoded = _decode_frames_for_test(frames)  # pyright: ignore[reportUnknownVariableType]
+    decoded = _decode_frames_for_test(frames)
     assert len(decoded) == 2  # pyright: ignore[reportUnknownArgumentType]
-    assert {d["role"] for d in decoded} == {"chat_delta", "code_delta"}  # pyright: ignore[reportUnknownVariableType]
+    assert {d["role"] for d in decoded} == {"chat_delta", "code_delta"}
 
 
 # --- fan-out split: the broadcast carries only GLOBAL_ROLES, the per-agent
@@ -301,10 +301,10 @@ def test_broadcast_drops_high_frequency_deltas_keeps_global_roles(
             broadcast=True,
         )
     )
-    decoded = _decode_frames_for_test(frames)  # pyright: ignore[reportUnknownVariableType]
+    decoded = _decode_frames_for_test(frames)
     # Both label_updated come through (broadcast = all agents); zero chat_delta.
-    assert [d["role"] for d in decoded] == ["label_updated", "label_updated"]  # pyright: ignore[reportUnknownVariableType]
-    assert {d["agent_id"] for d in decoded} == {tid_a, tid_b}  # pyright: ignore[reportUnknownVariableType]
+    assert [d["role"] for d in decoded] == ["label_updated", "label_updated"]
+    assert {d["agent_id"] for d in decoded} == {tid_a, tid_b}
 
 
 def test_per_agent_stream_carries_full_roles_for_one_agent_only(
@@ -336,9 +336,9 @@ def test_per_agent_stream_carries_full_roles_for_one_agent_only(
             role_filter=SYSTEM_ROLES,
         )
     )
-    decoded = _decode_frames_for_test(frames)  # pyright: ignore[reportUnknownVariableType]
-    assert [d["role"] for d in decoded] == ["chat_delta", "label_updated"]  # pyright: ignore[reportUnknownVariableType]
-    assert all(d["agent_id"] == tid_a for d in decoded)  # pyright: ignore[reportUnknownArgumentType, reportUnknownVariableType]
+    decoded = _decode_frames_for_test(frames)
+    assert [d["role"] for d in decoded] == ["chat_delta", "label_updated"]
+    assert all(d["agent_id"] == tid_a for d in decoded)  # pyright: ignore[reportUnknownArgumentType]
 
 
 def test_sse_system_endpoint_response_headers(
@@ -381,7 +381,7 @@ def test_sse_emits_heartbeat_data_event_when_idle(
     frames = asyncio.run(
         _collect_frames(tid, redis_client, [], n_data_frames=1, count_heartbeats=True)
     )
-    decoded = _decode_frames_for_test(frames)  # pyright: ignore[reportUnknownVariableType]
+    decoded = _decode_frames_for_test(frames)
     assert decoded[0] == {"role": "heartbeat"}
 
 
@@ -410,7 +410,7 @@ async def _collect_throttled_frames(
     req = _FakeRequest()
     gen = throttled_event_stream(
         settings.data_plane.redis_url,
-        req,  # type: ignore[arg-type]  # pyright: ignore[reportArgumentType]
+        req,  # type: ignore[arg-type]
         channel=channel,
         throttle_rate=throttle_rate,
         agent_filter=agent_filter,
@@ -458,7 +458,7 @@ async def _collect_throttled_frames(
     return frames
 
 
-def _decode_throttled_frames(chunks: list[bytes]) -> list[list[dict]]:  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+def _decode_throttled_frames(chunks: list[bytes]) -> list[list[dict]]:
     """Parse throttled SSE frames exactly like the browser does — ONE
     `json.parse` per `data:` line, yielding a JSON array of event OBJECTS.
 
@@ -470,7 +470,7 @@ def _decode_throttled_frames(chunks: list[bytes]) -> list[list[dict]]:  # pyrigh
     point: this helper must model the client so a double-encode regression
     can never pass green again.
     """
-    out: list[list[dict]] = []  # pyright: ignore[reportMissingTypeArgument, reportUnknownVariableType]
+    out: list[list[dict]] = []
     text = b"".join(chunks).decode()
     for frame in text.split("\n\n"):
         data_lines = [
@@ -480,13 +480,13 @@ def _decode_throttled_frames(chunks: list[bytes]) -> list[list[dict]]:  # pyrigh
             continue
         payload = json.loads("".join(data_lines))
         assert isinstance(payload, list), f"throttled frame is not a JSON array: {payload!r}"
-        for elem in payload:  # pyright: ignore[reportUnknownVariableType]
+        for elem in payload:
             assert isinstance(elem, dict), (
                 f"throttled frame element is {type(elem).__name__}, not an object — "  # pyright: ignore[reportUnknownArgumentType]
                 f"the server double-encoded the batch: {elem!r}"
             )
         out.append(payload)  # pyright: ignore[reportUnknownMemberType]
-    return out  # pyright: ignore[reportUnknownVariableType]
+    return out
 
 
 def test_throttled_batches_multiple_events(
@@ -514,16 +514,16 @@ def test_throttled_batches_multiple_events(
             redis_client, payloads, n_data_frames=1, throttle_rate=100.0, min_events=3
         )
     )
-    decoded = _decode_throttled_frames(frames)  # pyright: ignore[reportUnknownVariableType]
+    decoded = _decode_throttled_frames(frames)
     assert len(decoded) >= 1  # pyright: ignore[reportUnknownArgumentType]
     # All 3 events should be present, however many frames they landed in
-    all_events = [e for batch in decoded for e in batch]  # pyright: ignore[reportUnknownVariableType]
+    all_events = [e for batch in decoded for e in batch]
     assert len(all_events) == 3  # pyright: ignore[reportUnknownArgumentType]
-    roles = [e["role"] for e in all_events]  # pyright: ignore[reportUnknownVariableType]
+    roles = [e["role"] for e in all_events]
     assert "chat_delta" in roles
     assert "code_delta" in roles
     # Both agents' events are present (no agent_id filtering)
-    agent_ids = {e["agent_id"] for e in all_events}  # pyright: ignore[reportUnknownVariableType]
+    agent_ids = {e["agent_id"] for e in all_events}
     assert tid_a in agent_ids
     assert tid_b in agent_ids
 
@@ -547,9 +547,9 @@ def test_throttled_no_agent_filter(
             redis_client, payloads, n_data_frames=1, throttle_rate=1000.0, min_events=2
         )
     )
-    decoded = _decode_throttled_frames(frames)  # pyright: ignore[reportUnknownVariableType]
-    all_events = [e for batch in decoded for e in batch]  # pyright: ignore[reportUnknownVariableType]
-    agent_ids = {e["agent_id"] for e in all_events}  # pyright: ignore[reportUnknownVariableType]
+    decoded = _decode_throttled_frames(frames)
+    all_events = [e for batch in decoded for e in batch]
+    agent_ids = {e["agent_id"] for e in all_events}
     assert tid_a in agent_ids
     assert tid_b in agent_ids
 
@@ -576,9 +576,9 @@ def test_throttled_agent_filter(
             agent_filter={tid_a},
         )
     )
-    decoded = _decode_throttled_frames(frames)  # pyright: ignore[reportUnknownVariableType]
-    all_events = [e for batch in decoded for e in batch]  # pyright: ignore[reportUnknownVariableType]
-    assert [e["agent_id"] for e in all_events] == [tid_a, 0]  # pyright: ignore[reportUnknownVariableType]
+    decoded = _decode_throttled_frames(frames)
+    all_events = [e for batch in decoded for e in batch]
+    assert [e["agent_id"] for e in all_events] == [tid_a, 0]
     assert all_events[0]["content"] == "A"
     assert all_events[1]["label"] == "system"
 
@@ -600,9 +600,9 @@ def test_throttled_no_role_filter(
             redis_client, payloads, n_data_frames=1, throttle_rate=1000.0, min_events=2
         )
     )
-    decoded = _decode_throttled_frames(frames)  # pyright: ignore[reportUnknownVariableType]
-    all_events = [e for batch in decoded for e in batch]  # pyright: ignore[reportUnknownVariableType]
-    roles = {e["role"] for e in all_events}  # pyright: ignore[reportUnknownVariableType]
+    decoded = _decode_throttled_frames(frames)
+    all_events = [e for batch in decoded for e in batch]
+    roles = {e["role"] for e in all_events}
     assert "chat_delta" in roles
     assert "label_updated" in roles
 
@@ -688,8 +688,8 @@ def test_throttled_drops_invalid_payload(
     frames = asyncio.run(
         _collect_throttled_frames(redis_client, payloads, n_data_frames=1, throttle_rate=1000.0)
     )
-    decoded = _decode_throttled_frames(frames)  # pyright: ignore[reportUnknownVariableType]
-    all_events = [e for batch in decoded for e in batch]  # pyright: ignore[reportUnknownVariableType]
+    decoded = _decode_throttled_frames(frames)
+    all_events = [e for batch in decoded for e in batch]
     # Only the valid event makes it through
     assert len(all_events) == 1  # pyright: ignore[reportUnknownArgumentType]
     assert all_events[0]["role"] == "chat_delta"
@@ -711,10 +711,10 @@ def test_busy_channel_still_emits_keepalive_comments(
     other = create_agent(db_conn)  # whose events flood the channel
 
     req = _FakeRequest()
-    gen = event_stream(  # type: ignore[arg-type]  # pyright: ignore[reportArgumentType]
+    gen = event_stream(  # type: ignore[arg-type]
         settings.data_plane.redis_url,
         tid,
-        req,  # type: ignore[arg-type]  # pyright: ignore[reportArgumentType]
+        req,  # type: ignore[arg-type]
     )
 
     async def scenario() -> None:
@@ -756,10 +756,10 @@ def test_sse_survives_redis_typeerror(monkeypatch: pytest.MonkeyPatch) -> None:
 
     async def _drive() -> list[bytes]:
         req = _FakeRequest()
-        gen = event_stream(  # type: ignore[arg-type]  # pyright: ignore[reportArgumentType]
+        gen = event_stream(  # type: ignore[arg-type]
             settings.data_plane.redis_url,
             4242,
-            req,  # type: ignore[arg-type]  # pyright: ignore[reportArgumentType]
+            req,  # type: ignore[arg-type]
         )
         frames: list[bytes] = []
         try:

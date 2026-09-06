@@ -97,10 +97,10 @@ async def test_launch_agent_op_launches_precreated_row(
     confirmed: list[int] = []
 
     def _fake_launch(
-        agent_id: int,  # pyright: ignore[reportUnknownParameterType]
-        config: object = None,  # pyright: ignore[reportUnknownParameterType]
+        agent_id: int,
+        config: object = None,
         *,
-        birth_config: object = None,  # pyright: ignore[reportUnknownParameterType]
+        birth_config: object = None,
         confirm: bool = False,
     ) -> None:
         launched["agent_id"] = agent_id
@@ -109,7 +109,7 @@ async def test_launch_agent_op_launches_precreated_row(
         launched["confirm"] = confirm
 
     monkeypatch.setattr(ops_launch.agent_launch, "_launch_agent_process", _fake_launch)
-    monkeypatch.setattr(  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(
         ops_launch.agent_launch,
         "schedule_launch_confirm",
         lambda agent_id, _attempt: confirmed.append(agent_id),
@@ -134,10 +134,10 @@ async def test_launch_agent_op_delivers_plain_spawn_prompt(
 ) -> None:
     """A plain spawn's first prompt is inserted + InboundArrived published on
     the runner side after launch (inbound INSERT is within the runner role)."""
-    monkeypatch.setattr(ops_launch.agent_launch, "_launch_agent_process", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(ops_launch.agent_launch, "_launch_agent_process", lambda *_a, **_k: None)
     monkeypatch.setattr(
         ops_launch.agent_launch, "schedule_launch_confirm", lambda _id, _attempt=None: None
-    )  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    )
     seen: dict[str, object] = {}
 
     def _fake_insert(_pool: object, agent_id: int, prompt: str, source: str) -> int:
@@ -171,10 +171,10 @@ async def test_launch_agent_op_skips_prompt_for_fork(
 ) -> None:
     """A fork's prompt was already delivered pre-launch by create_agent_row —
     the launch op must not insert a second inbound."""
-    monkeypatch.setattr(ops_launch.agent_launch, "_launch_agent_process", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(ops_launch.agent_launch, "_launch_agent_process", lambda *_a, **_k: None)
     monkeypatch.setattr(
         ops_launch.agent_launch, "schedule_launch_confirm", lambda _id, _attempt=None: None
-    )  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    )
     inserted: list[int] = []
 
     def _fake_insert(_pool: object, _agent_id: int, _prompt: str, _source: str) -> int:
@@ -182,7 +182,7 @@ async def test_launch_agent_op_skips_prompt_for_fork(
         return 0
 
     monkeypatch.setattr(ops_launch, "_insert_prompt_blocking", _fake_insert)
-    monkeypatch.setattr(ops_lifecycle, "publish_inbound_arrived", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(ops_lifecycle, "publish_inbound_arrived", lambda *_a, **_k: None)
 
     body = LaunchAgentRequest(agent_id=10)  # no prompt — a fork
     result = await ops_lifecycle.launch_agent_op(body, stub_pool)  # type: ignore[arg-type]
@@ -199,7 +199,7 @@ class TestSpawnPrechecksBlocking:
         def __enter__(self):
             return self
 
-        def __exit__(self, *_a):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+        def __exit__(self, *_a):
             return False
 
     class _FakeConn:
@@ -209,7 +209,7 @@ class TestSpawnPrechecksBlocking:
         def __enter__(self):
             return self
 
-        def __exit__(self, *_a):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+        def __exit__(self, *_a):
             return False
 
     class _FakePool:
@@ -218,7 +218,7 @@ class TestSpawnPrechecksBlocking:
 
     def test_fork_resolves_checkpoint(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """fork_from -> latest_checkpoint_id resolves to an explicit id, not 'latest'."""
-        monkeypatch.setattr(ops_launch, "latest_checkpoint_id", lambda _cur, _aid: "ckpt:v1")  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        monkeypatch.setattr(ops_launch, "latest_checkpoint_id", lambda _cur, _aid: "ckpt:v1")
         checkpoint = ops_launch._spawn_prechecks_blocking(
             SpawnAgentRequest(spawner="user", fork_from=3),
             self._FakePool(),  # type: ignore[arg-type]
@@ -229,7 +229,7 @@ class TestSpawnPrechecksBlocking:
         """fork_from with no checkpoint raises ForkSourceEmpty (wire-mapped to 409)."""
         from shared.agents import ForkSourceEmpty
 
-        monkeypatch.setattr(ops_launch, "latest_checkpoint_id", lambda _cur, _aid: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        monkeypatch.setattr(ops_launch, "latest_checkpoint_id", lambda _cur, _aid: None)
         with pytest.raises(ForkSourceEmpty):
             ops_launch._spawn_prechecks_blocking(
                 SpawnAgentRequest(spawner="user", fork_from=3),
@@ -294,7 +294,7 @@ async def test_resurrect_agent_op_alive_returns_already_alive(
 ) -> None:
     from shared.agents import AgentStatus
 
-    monkeypatch.setattr(ops_lifecycle, "get_agent_status", lambda _aid: AgentStatus.RUNNING)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(ops_lifecycle, "get_agent_status", lambda _aid: AgentStatus.RUNNING)
     resp = await ops_lifecycle.resurrect_agent_op(9, ResurrectAgentRequest(prompt="test"))
     assert resp.status == "already_alive"
 
@@ -332,7 +332,7 @@ async def test_terminate_agent_op_terminated_short_circuits(
 ) -> None:
     from shared.agents import AgentStatus
 
-    monkeypatch.setattr(ops_lifecycle, "get_agent_status", lambda _aid: AgentStatus.TERMINATED)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(ops_lifecycle, "get_agent_status", lambda _aid: AgentStatus.TERMINATED)
     resp = await ops_lifecycle.terminate_agent_op(
         9,
         TerminateAgentRequest(),
@@ -354,7 +354,7 @@ async def test_lifecycle_op_parses_path_to_terminate(
 
         return TerminateAgentResponse(status="enqueued")
 
-    monkeypatch.setattr(ops_lifecycle, "terminate_agent_op", _fake_terminate)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(ops_lifecycle, "terminate_agent_op", _fake_terminate)
     result = await ops_lifecycle.lifecycle_op(
         "/api/agents/42/terminate",
         {"source": "user"},
@@ -840,7 +840,7 @@ def test_legacy_resume_never_bypasses_an_exact_or_invalid_journal(
 
 def test_cluster_update_op_returns_session_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
     expected = {"session": "ava-updater", "log": "/var/log/updater-123.log"}
-    monkeypatch.setattr(ops_cluster, "spawn_update", lambda **_kw: expected)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(ops_cluster, "spawn_update", lambda **_kw: expected)
     assert ops_cluster.cluster_update_op() == expected
 
 
@@ -849,8 +849,8 @@ def test_cluster_update_op_forwards_restart_only(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setattr(
         ops_cluster,
         "spawn_update",
-        lambda *, restart_only=False, target_sha=None, **_kw: (  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-            seen.update(ro=restart_only, sha=target_sha) or {}  # pyright: ignore[reportUnknownArgumentType]
+        lambda *, restart_only=False, target_sha=None, **_kw: (
+            seen.update(ro=restart_only, sha=target_sha) or {}
         ),
     )
     ops_cluster.cluster_update_op(restart_only=True)
@@ -863,8 +863,8 @@ def test_cluster_update_op_forwards_target_sha(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr(
         ops_cluster,
         "spawn_update",
-        lambda *, restart_only=False, target_sha=None, **_kw: (  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-            seen.update(ro=restart_only, sha=target_sha) or {}  # pyright: ignore[reportUnknownArgumentType]
+        lambda *, restart_only=False, target_sha=None, **_kw: (
+            seen.update(ro=restart_only, sha=target_sha) or {}
         ),
     )
     ops_cluster.cluster_update_op(target_sha="PINNEDSHA")
@@ -915,7 +915,7 @@ def test_cluster_update_op_success_does_not_unpause(monkeypatch: pytest.MonkeyPa
     """The happy path never touches unpause_local_cluster — that stays the job of
     the spawned ava-updater session's own `ava restart`/`ava start` tail."""
     expected = {"session": "ava-updater", "log": "/var/log/updater-123.log"}
-    monkeypatch.setattr(ops_cluster, "spawn_update", lambda **_kw: expected)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(ops_cluster, "spawn_update", lambda **_kw: expected)
     called: list[bool] = []
     monkeypatch.setattr(ops_cluster, "unpause_local_cluster", lambda: called.append(True))
 
@@ -925,13 +925,13 @@ def test_cluster_update_op_success_does_not_unpause(monkeypatch: pytest.MonkeyPa
 
 def test_cluster_rollout_op_returns_session_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
     expected = {"session": "ava-rollout", "log": "/var/log/rollout-123.log"}
-    monkeypatch.setattr(ops_cluster, "spawn_rollout", lambda _origin, **_kw: expected)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(ops_cluster, "spawn_rollout", lambda _origin, **_kw: expected)
     assert ops_cluster.cluster_rollout_op("test-origin") == expected
 
 
 def test_cluster_restart_op_returns_session_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
     expected = {"session": "ava-cluster-restart", "log": "/var/log/cluster-restart-123.log"}
-    monkeypatch.setattr(ops_cluster, "spawn_restart", lambda _origin, **_kw: expected)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(ops_cluster, "spawn_restart", lambda _origin, **_kw: expected)
     assert ops_cluster.cluster_restart_op("test-origin") == expected
 
 
@@ -972,7 +972,7 @@ async def test_mark_agent_exited_op_rowcount_gt_one_raises(
     faked cursor.rowcount=2 is the only way to exercise the guard. (The
     status-respecting WHERE-IN guard itself is covered against a real DB in
     tests/gateway/test_agents_internals.py:TestExitedEndpoint.)"""
-    monkeypatch.setattr(ops_exit, "list_open_page_names", lambda _conn, _aid: [])  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(ops_exit, "list_open_page_names", lambda _conn, _aid: [])
     fake_cursor = MagicMock()
     fake_cursor.rowcount = 2
     fake_conn = MagicMock()
@@ -998,8 +998,8 @@ class TestResurrectIfTerminatedPlacement:
         from shared.agents import AgentStatus
 
         statuses = iter([AgentStatus.TERMINATED, AgentStatus.IDLING])
-        monkeypatch.setattr(ops_lifecycle, "get_agent_status", lambda _aid: next(statuses))  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-        monkeypatch.setattr(ops_lifecycle, "get_agent_machine", lambda _aid: "home-a")  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        monkeypatch.setattr(ops_lifecycle, "get_agent_status", lambda _aid: next(statuses))
+        monkeypatch.setattr(ops_lifecycle, "get_agent_machine", lambda _aid: "home-a")
         monkeypatch.setattr(ops_lifecycle, "machine_name", lambda: "home-a")
         called: dict[str, object] = {}
         dispatch_called: list[dict[str, object]] = []
@@ -1019,11 +1019,11 @@ class TestResurrectIfTerminatedPlacement:
 
         monkeypatch.setattr(ops_lifecycle, "resurrect_agent_op", _fake_resurrect_op)
 
-        async def _fake_dispatch(*args: object, **kwargs: object) -> dict:  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+        async def _fake_dispatch(*args: object, **kwargs: object) -> dict:
             dispatch_called.append(kwargs)
             raise ops_lifecycle._cluster_rpc.ClusterOpUnreachable("ops server not reachable")
 
-        monkeypatch.setattr(ops_lifecycle._cluster_rpc, "dispatch_to_machine", _fake_dispatch)  # pyright: ignore[reportUnknownArgumentType]
+        monkeypatch.setattr(ops_lifecycle._cluster_rpc, "dispatch_to_machine", _fake_dispatch)
 
         status = await ops_lifecycle.resurrect_if_terminated(
             5,
@@ -1053,8 +1053,8 @@ class TestResurrectIfTerminatedPlacement:
         from shared.agents import AgentStatus
 
         statuses = iter([AgentStatus.TERMINATED, AgentStatus.IDLING])
-        monkeypatch.setattr(ops_lifecycle, "get_agent_status", lambda _aid: next(statuses))  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-        monkeypatch.setattr(ops_lifecycle, "get_agent_machine", lambda _aid: "wsl")  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        monkeypatch.setattr(ops_lifecycle, "get_agent_status", lambda _aid: next(statuses))
+        monkeypatch.setattr(ops_lifecycle, "get_agent_machine", lambda _aid: "wsl")
         monkeypatch.setattr(ops_lifecycle, "machine_name", lambda: "gateway-host")
 
         async def _no_local(*_a: object, **_kw: object) -> ResurrectAgentResponse:
@@ -1063,16 +1063,16 @@ class TestResurrectIfTerminatedPlacement:
         monkeypatch.setattr(ops_lifecycle, "resurrect_agent_op", _no_local)
         captured: dict[str, object] = {}
 
-        async def _fake_dispatch(  # pyright: ignore[reportUnknownParameterType]
+        async def _fake_dispatch(
             target_machine: str,
             kind: str,
-            payload: dict,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
-            **_kw: object,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
-        ) -> dict:  # pyright: ignore[reportMissingTypeArgument]
-            captured.update(target=target_machine, kind=kind, payload=payload)  # pyright: ignore[reportUnknownArgumentType]
-            return {"status": "spawned"}  # pyright: ignore[reportUnknownVariableType]
+            payload: dict,
+            **_kw: object,
+        ) -> dict:
+            captured.update(target=target_machine, kind=kind, payload=payload)
+            return {"status": "spawned"}
 
-        monkeypatch.setattr(ops_lifecycle._cluster_rpc, "dispatch_to_machine", _fake_dispatch)  # pyright: ignore[reportUnknownArgumentType]
+        monkeypatch.setattr(ops_lifecycle._cluster_rpc, "dispatch_to_machine", _fake_dispatch)
 
         status = await ops_lifecycle.resurrect_if_terminated(
             7,
@@ -1096,14 +1096,14 @@ class TestResurrectIfTerminatedPlacement:
         from ops.cluster_rpc import ClusterOpUnreachable
         from shared.agents import AgentStatus
 
-        monkeypatch.setattr(ops_lifecycle, "get_agent_status", lambda _aid: AgentStatus.TERMINATED)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-        monkeypatch.setattr(ops_lifecycle, "get_agent_machine", lambda _aid: "wsl")  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        monkeypatch.setattr(ops_lifecycle, "get_agent_status", lambda _aid: AgentStatus.TERMINATED)
+        monkeypatch.setattr(ops_lifecycle, "get_agent_machine", lambda _aid: "wsl")
         monkeypatch.setattr(ops_lifecycle, "machine_name", lambda: "gateway-host")
 
-        async def _unreachable(*_a: object, **_kw: object) -> dict:  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+        async def _unreachable(*_a: object, **_kw: object) -> dict:
             raise ClusterOpUnreachable("ops server for machine='wsl' unreachable")
 
-        monkeypatch.setattr(ops_lifecycle._cluster_rpc, "dispatch_to_machine", _unreachable)  # pyright: ignore[reportUnknownArgumentType]
+        monkeypatch.setattr(ops_lifecycle._cluster_rpc, "dispatch_to_machine", _unreachable)
 
         with caplog.at_level("WARNING"):
             status = await ops_lifecycle.resurrect_if_terminated(
@@ -1117,14 +1117,14 @@ class TestResurrectIfTerminatedPlacement:
         from ops.cluster_rpc import ClusterOpFailed
         from shared.agents import AgentStatus
 
-        monkeypatch.setattr(ops_lifecycle, "get_agent_status", lambda _aid: AgentStatus.TERMINATED)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-        monkeypatch.setattr(ops_lifecycle, "get_agent_machine", lambda _aid: "wsl")  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        monkeypatch.setattr(ops_lifecycle, "get_agent_status", lambda _aid: AgentStatus.TERMINATED)
+        monkeypatch.setattr(ops_lifecycle, "get_agent_machine", lambda _aid: "wsl")
         monkeypatch.setattr(ops_lifecycle, "machine_name", lambda: "gateway-host")
 
-        async def _failed(*_a: object, **_kw: object) -> dict:  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+        async def _failed(*_a: object, **_kw: object) -> dict:
             raise ClusterOpFailed({"error": "launch failed on the home machine"})
 
-        monkeypatch.setattr(ops_lifecycle._cluster_rpc, "dispatch_to_machine", _failed)  # pyright: ignore[reportUnknownArgumentType]
+        monkeypatch.setattr(ops_lifecycle._cluster_rpc, "dispatch_to_machine", _failed)
 
         status = await ops_lifecycle.resurrect_if_terminated(
             7, trigger_inbound_id=99, trigger_inbound_kind="chat"
@@ -1135,7 +1135,7 @@ class TestResurrectIfTerminatedPlacement:
     async def test_not_terminated_short_circuits(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from shared.agents import AgentStatus
 
-        monkeypatch.setattr(ops_lifecycle, "get_agent_status", lambda _aid: AgentStatus.RUNNING)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        monkeypatch.setattr(ops_lifecycle, "get_agent_status", lambda _aid: AgentStatus.RUNNING)
 
         def _no_machine_read(_aid: int) -> str:
             raise AssertionError("a live agent must not trigger a machine lookup")
@@ -1161,13 +1161,13 @@ async def test_launch_agent_op_hosted_skips_process_and_wakes(
     monkeypatch.setattr(
         ops_launch.agent_launch,
         "_launch_agent_process",
-        lambda *_a, **_k: launches.append(1),  # pyright: ignore[reportUnknownArgumentType]
+        lambda *_a, **_k: launches.append(1),
     )
     monkeypatch.setattr(
         ops_launch.agent_launch,
         "schedule_launch_confirm",
         lambda agent_id, _attempt: confirmed.append(agent_id),
-    )  # pyright: ignore[reportUnknownArgumentType]
+    )
     inserted: list[tuple[int, str, str]] = []
 
     def _fake_insert(_pool: object, agent_id: int, prompt: str, source: str) -> int:
@@ -1202,10 +1202,10 @@ async def test_launch_agent_op_hosted_fork_still_wakes(
     wake inside) — the hosted launch must publish the wake explicitly, and must
     not insert a second prompt."""
     monkeypatch.setattr(ops_launch.runner_mode, "is_hosted", lambda: True)
-    monkeypatch.setattr(ops_launch.agent_launch, "_launch_agent_process", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(ops_launch.agent_launch, "_launch_agent_process", lambda *_a, **_k: None)
     monkeypatch.setattr(
         ops_launch.agent_launch, "schedule_launch_confirm", lambda _id, _attempt=None: None
-    )  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    )
     inserted: list[int] = []
 
     def _fake_insert(_pool: object, _agent_id: int, _prompt: str, _source: str) -> int:
@@ -1242,7 +1242,7 @@ async def test_force_terminate_hosted_skips_process_kill_and_cancels_turn(
     monkeypatch.setattr(ops_lifecycle.runner_mode, "is_hosted", lambda: True)
     captured: dict[str, object] = {}
 
-    def _fake_force_blocking(  # pyright: ignore[reportUnknownParameterType]
+    def _fake_force_blocking(
         aid: int, _body: object, _pool: object, *, kill_process: bool
     ) -> tuple[AgentStatus, int | None, list[str], int]:
         captured["agent_id"] = aid
@@ -1283,7 +1283,7 @@ async def test_force_terminate_process_mode_still_kills_the_process(
     monkeypatch.setattr(ops_lifecycle.runner_mode, "is_hosted", lambda: False)
     captured: dict[str, object] = {}
 
-    def _fake_force_blocking(  # pyright: ignore[reportUnknownParameterType]
+    def _fake_force_blocking(
         aid: int, _body: object, _pool: object, *, kill_process: bool
     ) -> tuple[AgentStatus, int | None, list[str], int]:
         captured["agent_id"] = aid
@@ -1320,7 +1320,7 @@ async def test_launch_agent_op_hosted_failure_reclaims_its_row(
     row exists marks it terminated ('launch-confirm', the same class the
     process-mode launch confirm stamps) and re-raises."""
     monkeypatch.setattr(ops_launch.runner_mode, "is_hosted", lambda: True)
-    monkeypatch.setattr(ops_launch.agent_launch, "_launch_agent_process", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(ops_launch.agent_launch, "_launch_agent_process", lambda *_a, **_k: None)
 
     def _boom(_pool: object, _agent_id: int, _prompt: str, _source: str) -> int:
         raise RuntimeError("prompt insert failed")

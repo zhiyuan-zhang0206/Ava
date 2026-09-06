@@ -23,21 +23,21 @@ def _rows(*names: str) -> list[SessionInfo]:
     return [SessionInfo(name=n) for n in names]
 
 
-def test_collect_sessions_enumerates_both_backends(monkeypatch):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_collect_sessions_enumerates_both_backends(monkeypatch):
     """`_collect_sessions` merges the service backend and the shell backend,
     scoped to the cluster prefix, with timestamps where the backend records
     them."""
 
     class _FakeBackend:
-        def __init__(self, names, started=None):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+        def __init__(self, names, started=None):
             self._names = names
             self._started = started  # pyright: ignore[reportUnknownMemberType]
 
-        def list_sessions(self, prefix=""):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-            return [n for n in self._names if n.startswith(prefix)]  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+        def list_sessions(self, prefix=""):
+            return [n for n in self._names if n.startswith(prefix)]  # pyright: ignore[reportUnknownMemberType]
 
         def session_started_at(self, name: str) -> float | None:
-            return self._started(name) if self._started else None  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+            return self._started(name) if self._started else None  # pyright: ignore[reportUnknownMemberType]
 
         def session_started_ats(self, names: list[str]) -> dict[str, float | None]:
             return {n: self.session_started_at(n) for n in names}
@@ -61,9 +61,9 @@ def test_collect_sessions_enumerates_both_backends(monkeypatch):  # pyright: ign
     assert total == 4
 
 
-def test_collect_sessions_records_uptime_when_started_at_known(monkeypatch):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+def test_collect_sessions_records_uptime_when_started_at_known(monkeypatch):
     class _FakeBackend:
-        def list_sessions(self, prefix=""):  # pyright: ignore[reportMissingParameterType]
+        def list_sessions(self, prefix=""):
             return ["ava-main-restarter"]
 
         def session_started_at(self, name: str) -> float | None:
@@ -79,8 +79,8 @@ def test_collect_sessions_records_uptime_when_started_at_known(monkeypatch):  # 
         "_Empty",
         (),
         {
-            "list_sessions": staticmethod(lambda _p="": []),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-            "session_started_ats": staticmethod(lambda _names: {}),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+            "list_sessions": staticmethod(lambda _p="": []),  # pyright: ignore[reportUnknownArgumentType]
+            "session_started_ats": staticmethod(lambda _names: {}),  # pyright: ignore[reportUnknownArgumentType]
         },
     )
     monkeypatch.setattr("shared.session_backend.get_shell_backend", lambda: empty)  # pyright: ignore[reportUnknownMemberType]
@@ -303,7 +303,7 @@ def test_count_agent_processes(monkeypatch: pytest.MonkeyPatch):
 
     class _FakeNative:
         @staticmethod
-        def list_sessions(prefix=""):  # pyright: ignore[reportMissingParameterType]
+        def list_sessions(prefix=""):
             return [f"{prefix}7", f"{prefix}12", f"{prefix}15", f"{prefix}9-shell-0"]
 
     monkeypatch.setattr("shared.session_backend.native_proc", lambda: _FakeNative)
@@ -313,7 +313,7 @@ def test_count_agent_processes(monkeypatch: pytest.MonkeyPatch):
 def test_count_agent_processes_empty(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(
         "shared.session_backend.native_proc",
-        lambda: type("N", (), {"list_sessions": staticmethod(lambda **_kw: [])}),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda: type("N", (), {"list_sessions": staticmethod(lambda **_kw: [])}),  # pyright: ignore[reportUnknownArgumentType]
     )
     assert _count_agent_processes() == 0
 
@@ -352,13 +352,13 @@ def test_gather_cluster_status_local_agent_runner_probed(monkeypatch: pytest.Mon
 
     async def _fake_dispatch(
         *,
-        target_machine,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-        kind,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-        payload,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-        timeout_s=None,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-        ops_url=None,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-        retries=None,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-        idempotency_key=None,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+        target_machine,
+        kind,
+        payload,
+        timeout_s=None,
+        ops_url=None,
+        retries=None,
+        idempotency_key=None,
     ):
         assert kind == "status_probe"
         assert target_machine == "m1"
@@ -411,13 +411,13 @@ def test_probe_flags_identity_mismatch_when_responder_name_differs(monkeypatch: 
 
     async def _fake_dispatch(
         *,
-        target_machine,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-        kind,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-        payload,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-        timeout_s=None,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-        ops_url=None,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-        retries=None,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-        idempotency_key=None,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+        target_machine,
+        kind,
+        payload,
+        timeout_s=None,
+        ops_url=None,
+        retries=None,
+        idempotency_key=None,
     ):
         assert target_machine == "air"
         assert ops_url == "http://localhost:8106"
@@ -453,9 +453,9 @@ def test_gather_cluster_status_local_pure_gateway_lightweight(monkeypatch: pytes
     session/pidfile reads, agent-runner-only fields at their defaults."""
     dispatched: list[str] = []
 
-    async def _fake_dispatch(**kwargs):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    async def _fake_dispatch(**kwargs):
         dispatched.append(kwargs["kind"])  # pyright: ignore[reportUnknownArgumentType]
-        return {}  # pyright: ignore[reportUnknownVariableType]
+        return {}
 
     monkeypatch.setattr(status_mod._cluster_rpc, "dispatch_to_machine", _fake_dispatch)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(status_mod, "cluster_is_paused", lambda: True)
