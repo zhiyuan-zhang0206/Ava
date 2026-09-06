@@ -300,7 +300,7 @@ def spawn_update(  # noqa: PLR0915 — one pause-to-detached-child transaction
         # rather than `cd ... && <cmd>`: a failed `cd` must not read as a failed
         # bounce with services stopped.
         inner_cmd = (
-            f"{{ {venv_activation_prefix()}"
+            f"{{ {venv_activation_prefix()}export AVA_CLI_LOG_NAME=updater; "
             f"(python -m cli.commands._updater_stage run || true); "
             f"if cd {shlex.quote(str(repo))}; "
             f"then python -m cli.commands._update_agent_runner --restart-only"
@@ -314,6 +314,7 @@ def spawn_update(  # noqa: PLR0915 — one pause-to-detached-child transaction
         # forward_env_dict has already put this venv's bin dir on the child PATH,
         # so `ava` resolves without an activation prefix.
         native_cmd = (
+            f"set AVA_CLI_LOG_NAME=updater && "
             f"python -m cli.commands._updater_lease touch --handoff-generation {_native_arg(handoff_generation)}"
             f" && (python -m cli.commands._updater_stage run || ver>nul)"
             f" && (python -m cli.commands._updater_stage restart || ver>nul)"
@@ -337,7 +338,7 @@ def spawn_update(  # noqa: PLR0915 — one pause-to-detached-child transaction
         # activation goes ahead of the `if` so it survives into the branch.
         ref = shlex.quote(target_sha) if target_sha else f"origin/{settings.general.track_branch}"
         inner_cmd = (
-            f"{{ {venv_activation_prefix()}"
+            f"{{ {venv_activation_prefix()}export AVA_CLI_LOG_NAME=updater; "
             f"(python -m cli.commands._updater_stage run || true); "
             f"if cd {shlex.quote(str(repo))}; "
             f"then echo '[updater] self-update to {ref} via in-process path (force-checkout discards any unpushed local commits / dirty tree; recover via git reflog)'; "
@@ -374,6 +375,7 @@ def spawn_update(  # noqa: PLR0915 — one pause-to-detached-child transaction
             # fetch/checkout/sync before the old mid-chain claim left a slow host
             # looking ownerless (stranded-pause controller) mid-update. `ver>nul`
             # is the fail-soft spelling of `|| true`.
+            f"set AVA_CLI_LOG_NAME=updater && "
             f"python -m cli.commands._updater_lease touch --handoff-generation {_native_arg(handoff_generation)}"
             f" && (python -m cli.commands._updater_stage run || ver>nul)"
             f" && (python -m cli.commands._source_switch_marker on || ver>nul)"

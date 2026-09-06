@@ -1679,7 +1679,7 @@ Where to look when something went wrong on a host:
 |---|---|
 | what did daemon X do | `$AVA_HOME/logs/<name>.log` (JSONL, rotated 100MB / 7 days) |
 | what did the cluster do, without ssh | `GET /api/cluster/admin/events` over the private network |
-| what did a *detached* `ava cluster update` child do | same two — the spawner exports `AVA_CLI_LOG_NAME` so the CLI wires the sinks |
+| what did a *detached* `ava cluster update` child do | same two — `ops/cluster_deploy.py:spawn_update` exports `AVA_CLI_LOG_NAME=updater` so the CLI wires the sinks |
 | why did a daemon vanish | its log file: every daemon wraps `asyncio.run(main())` and logs the traceback before re-raising |
 | what did milvus say | its log file only — it is a C++ binary with no PG sink |
 | an agent | `$AVA_HOME/logs/agent-{N}.log` (kernel + its exec subprocess, both appending) |

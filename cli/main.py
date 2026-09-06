@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import os
 import sys
+from contextlib import suppress
 
 from pydantic import ValidationError
 
@@ -266,7 +267,10 @@ _cli_log_name = os.environ.get("AVA_CLI_LOG_NAME")
 if _cli_log_name:
     from shared.log import init_cli_process
 
-    init_cli_process(name=_cli_log_name)
+    # The updater's recovery child must remain usable while the gateway or DB is
+    # restarting; stderr/file sinks are still useful if the Postgres sink fails.
+    with suppress(Exception):
+        init_cli_process(name=_cli_log_name)
 
 
 # Settings-lite verbs — they must construct Settings while the gateway is down
