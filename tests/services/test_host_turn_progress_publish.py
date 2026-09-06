@@ -245,6 +245,50 @@ def test_ownership_renewal_timeout_precedes_next_liveness_beat() -> None:
     assert 0 < host_daemon._OWNERSHIP_RENEW_TIMEOUT_S < host_daemon._LIVENESS_BEAT_STEP_S
 
 
+async def test_ownership_renewal_timeout_logs_warning_without_traceback(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    class StopBeatError(Exception):
+        pass
+
+    class FakeHost:
+        async def renew_ownership(self) -> None:
+            await asyncio.Event().wait()
+
+    class FakeScheduler:
+        active_agents = frozenset[int]()
+
+    class FakeLiveness:
+        def beat(self) -> None:
+            pass
+
+    async def fake_publish(machine: str, active_agents: object) -> None:
+        pass
+
+    async def stop_sleep(delay: float) -> None:
+        raise StopBeatError
+
+    monkeypatch.setattr(host_daemon, "_OWNERSHIP_RENEW_TIMEOUT_S", 0.01)
+    monkeypatch.setattr(host_daemon, "_publish_turn_progress_heartbeat", fake_publish)
+    monkeypatch.setattr(host_daemon.asyncio, "sleep", stop_sleep)
+    caplog.set_level(logging.WARNING, logger="services.agent_host.daemon")
+
+    with pytest.raises(StopBeatError):
+        await host_daemon._beat_forever(
+            cast(host_daemon.Liveness, FakeLiveness()),
+            cast(host_daemon.AgentHost, FakeHost()),
+            cast(host_daemon.TurnScheduler, FakeScheduler()),
+            "runner-a",
+        )
+
+    [record] = [
+        record for record in caplog.records if "ownership renewal timed out" in record.getMessage()
+    ]
+    assert record.levelno == logging.WARNING
+    assert record.exc_info is None
+
+
 async def test_agent_host_beats_liveness_before_renewing_ownership(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -343,6 +387,7 @@ async def test_agent_host_liveness_continues_when_ownership_renewal_hangs(
 
 async def test_agent_host_liveness_continues_when_ownership_renewal_raises(
     monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     renew_calls = 0
     beat_counts: list[int] = []
@@ -368,6 +413,7 @@ async def test_agent_host_liveness_continues_when_ownership_renewal_raises(
 
     monkeypatch.setattr(host_daemon, "_LIVENESS_BEAT_STEP_S", 0.01)
     monkeypatch.setattr(host_daemon, "_publish_turn_progress_heartbeat", fake_publish)
+    caplog.set_level(logging.ERROR, logger="services.agent_host.daemon")
 
     beat = asyncio.create_task(
         host_daemon._beat_forever(
@@ -383,6 +429,12 @@ async def test_agent_host_liveness_continues_when_ownership_renewal_raises(
         assert next_beat in done
         assert beat_counts[:2] == [1, 2]
         assert renew_calls >= 1
+        failures = [
+            record for record in caplog.records if "ownership renewal failed" in record.getMessage()
+        ]
+        assert failures
+        assert all(record.levelno == logging.ERROR for record in failures)
+        assert all(record.exc_info is not None for record in failures)
     finally:
         next_beat.cancel()
         await asyncio.gather(next_beat, return_exceptions=True)

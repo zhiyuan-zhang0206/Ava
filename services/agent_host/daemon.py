@@ -330,12 +330,17 @@ async def _beat_forever(
     scheduler: TurnScheduler,
     machine: str,
 ) -> None:
-    """Renew ownership and liveness independently of idle dispatcher subscriptions."""
+    """Keep /healthz fresh and ownership renewed independently of the idle
+    dispatcher subscription — the dispatcher can block indefinitely on a quiet
+    cluster. liveness.beat() precedes DB renewal: process health must not
+    depend on DB availability; a hung renewal is bounded and retried next beat."""
     while True:
         _require_helper_parent_chain()
         liveness.beat()
         try:
             await asyncio.wait_for(host.renew_ownership(), timeout=_OWNERSHIP_RENEW_TIMEOUT_S)
+        except TimeoutError as err:
+            _log.warning("[agent-host] ownership renewal timed out: %r", err)
         except Exception:
             _log.exception("[agent-host] ownership renewal failed — retrying next beat")
         await _publish_turn_progress_heartbeat(machine, scheduler.active_agents)
