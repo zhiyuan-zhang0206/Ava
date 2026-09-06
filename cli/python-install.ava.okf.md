@@ -32,14 +32,20 @@ Additional/explicit-only indexes fail rather than silently losing their source p
 
 The lock-source lint runs before installation. Its stdlib implementation lives in
 `shared/python_lock.py`, included in the runtime wheel; the checkout-only
-`scripts/lint_python_lock.py` is a thin CLI entry point. PyPI uses native locked, inexact
-sync. A mirror uses offline, freshness-checked uv export to temporary hashed
-requirements, installs the complete exported graph with `uv pip install --no-deps
+`scripts/lint_python_lock.py` is a thin CLI entry point. Both transports first run
+offline, freshness-checked uv export to temporary hashed requirements, before
+any uv command can create or recreate the target environment. This also protects
+an existing environment whose managed interpreter now differs from the patch
+version recorded in `pyvenv.cfg`: native sync may recreate it before checking
+lock freshness. PyPI then uses native locked, inexact sync; a mirror installs the
+complete exported graph with `uv pip install --no-deps
 --require-hashes`, then builds the real project editable with no dependency
 resolution. uv evaluates groups and markers; hashes prevent alternate mirror
 artifacts, and the real checkout remains the editable target. Updates exclude
 new dev installs but retain existing dev packages. Failure aborts the remaining
 steps; neither branch mutates `uv.lock` or commits a derived requirements file.
+This preflight preserves the environment on a stale lock; it is not an atomic
+rollback of later network, build, or installation failures.
 
 Configuration precedence, limits, and first-rollout cautions:
 [Machine Python indexes](../conventions/dev-setup.md#machine-python-indexes).
