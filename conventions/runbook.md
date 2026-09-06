@@ -1463,10 +1463,12 @@ home/role producer gate additionally prevents an unmarked gateway from using
 the default loopback endpoint; explicitly setting `AVA_TELEMETRY_OTLP_ENDPOINT`
 bypasses that gate without creating a local collector.
 
-**LGTM backend lifecycle** — home-scoped native launchd jobs
-`com.ava.loki.<home-slug>` and `com.ava.prometheus.<home-slug>` (GOMEMLIMIT
-2GiB / 1GiB), plus the host-managed native Grafana launchd job, form the local
-observability backend. Tempo is configured per cluster; prod's host-scope
+**LGTM backend lifecycle** — home-scoped native launchd jobs on Darwin arm64
+and user systemd units on Linux amd64 run Loki, Prometheus (GOMEMLIMIT
+2GiB / 1GiB), and Grafana. Unit names include the home slug; Linux ownership
+also checks the loaded unit file and exact executable. Explicit host listen
+ports permit isolated homes; defaults remain 3100/9090/3003 plus Loki gRPC
+9095. See [native lifecycle](../cli/commands/lgtm.ava.okf.md). Tempo is configured per cluster; prod's host-scope
 override targets the remote WSL Tempo. No
 service lifecycle depends on a container backend. The backend is required while the gateway serves /ops
 and the inspect endpoints (consumers: the gateway Loki/Prometheus read paths,
@@ -1480,7 +1482,7 @@ observability station. Provider identity is either the operator-created
 --serve-observability-station` / `AVA_MACHINE_SERVE_OBSERVABILITY_STATION` /
 `$AVA_HOME/machine_serve_observability_station`). On the station home, converge
 installs pins from `deploy/lgtm/native/versions.yml`, renders native configs
-and plists, and runs the idempotent `deploy/lgtm/start.sh` on every `ava start`
+and native service definitions, and runs the idempotent lifecycle on every `ava start`
 / `ava cluster update`. The observation data volume is a per-machine knob:
 `AVA_LGTM_STORAGE_DIR` (empty default = `$AVA_HOME/lgtm/native/data`) moves the
 Loki filesystem store and Prometheus TSDB to a configured path. The gateway watchdog re-runs it when Loki/Prometheus/Grafana readiness

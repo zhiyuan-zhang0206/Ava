@@ -8,8 +8,9 @@ cluster health` audits Loki event history.
 
 ## Lifecycle ownership
 
-This is a host singleton with fixed ports, owned by one home per host — the
-observability station. Provider identity has two equivalent forms:
+The observability station owns its native services by home path. Default
+ports preserve the single-station layout; isolated homes require explicit,
+non-overlapping native listen ports. Provider identity has two equivalent forms:
 
 - **`$AVA_HOME/lgtm-host` marker** (legacy): `ava lgtm on` writes the marker,
   installs missing pinned native binaries, and runs the idempotent launcher.
@@ -18,7 +19,7 @@ observability station. Provider identity has two equivalent forms:
   declares the capability (`ava start --serve-observability-station`, or
   `AVA_MACHINE_SERVE_OBSERVABILITY_STATION` / the
   `$AVA_HOME/machine_serve_observability_station` file) converges the full
-  native set — configs, launchd plists, storage dirs — with no marker, and its
+  native set — configs, native service definitions, storage dirs — with no marker, and its
   watchdog keepalive, producer OTLP export, collector lifecycle, and Loki read
   gates all treat it as the station. The capability is orthogonal to
   `AVA_OBSERVABILITY_URL`: the role decides who PROVIDES the stack, the switch
@@ -26,10 +27,10 @@ observability station. Provider identity has two equivalent forms:
 
 With either form present, every converge runs the same launcher and the gateway
 watchdog re-runs it after a connection-level readiness failure. The launcher
-resolves the single home-scoped launchd plist for each backend and skips only
-when that job is loaded and its endpoint is reachable. `ava lgtm status` and
-`ava status` show native job PIDs, the compose services, and the readiness
-probes.
+uses launchd on Darwin arm64 and user systemd on Linux amd64. It skips a
+service only when the owned job and its local HTTP listener are alive. On
+Linux, both the loaded unit path and `/proc/<MainPID>/exe` must match this
+home. `ava lgtm status` and `ava status` show native PIDs and local probes.
 
 The identity gate also protects dev worktrees: their converge and watchdog
 paths are no-ops unless that worktree home is explicitly marked or declares the
@@ -39,17 +40,17 @@ capability.
 
 | Backend | Delivery | Version / limit | Port | Role |
 |---|---|---|---|---|
-| Loki | native launchd | 3.7.6 / `GOMEMLIMIT=2GiB` | 3100 | log backend, filesystem storage, 7-day retention |
-| Prometheus | native launchd | 3.13.2 / `GOMEMLIMIT=1GiB` | 9090 | metrics and OTLP receiver |
+| Loki | native launchd / user systemd | 3.7.6 / `GOMEMLIMIT=2GiB` | 3100 | log backend, filesystem storage, 7-day retention |
+| Prometheus | native launchd / user systemd | 3.13.2 / `GOMEMLIMIT=1GiB` | 9090 | metrics and OTLP receiver |
 | Tempo | remote per cluster config | WSL backend; compose copy is the rollback asset | configured by `AVA_TELEMETRY_TEMPO_ENDPOINT` | trace backend |
-| Grafana | native launchd | 13.1.3 | 3003 | anonymous read-only UI |
+| Grafana | native launchd / user systemd | 13.1.3 | 3003 | anonymous read-only UI |
 
 The pinned release assets and SHA256 values live in
 [`native/versions.yml`](native/versions.yml). Converge verifies an archive
 before extraction, writes each executable or release tree under
-`$AVA_HOME/lgtm/native/`, and records a per-backend version marker. Unsupported
-platforms warn and skip: only the designated macOS arm64 host has native assets
-today.
+`$AVA_HOME/lgtm/native/`, and records per-backend version and platform markers. A copied Darwin
+installation cannot reuse its executable markers on Linux. Pinned assets
+support Darwin arm64 and Linux amd64; unsupported platforms warn and skip.
 
 Native templates in `native/config/` are rendered on every converge into
 `$AVA_HOME/lgtm/native/config/`, including Grafana's INI, runtime environment,
@@ -67,6 +68,36 @@ the native logs stay under `$AVA_HOME/lgtm/native` regardless. Switching the
 knob does NOT migrate existing data: the new path starts empty, so move the old
 store yourself (`rsync` the previous data dir to the new location before the
 first start on the new path) or accept the history loss.
+
+
+### Linux user services and isolated listeners
+
+Linux requires an active user systemd manager (`systemctl --user`). Converge
+writes `com.ava.<backend>.<home-slug>.service` into the user's
+`$XDG_CONFIG_HOME/systemd/user` (default `~/.config/systemd/user`). The slug
+includes the full home path's hash. Only those exact three units are enabled,
+started, restarted, disabled, or removed; other homes and Docker services are
+not enumerated or retired. Services recover with `Restart=on-failure`, use a
+30-second stop timeout and `KillMode=control-group`, and append logs under
+`$AVA_HOME/lgtm/native/logs`. User lingering / WSL boot orchestration is a host
+prerequisite, not something `ava lgtm on` silently configures.
+
+Host-scoped ports default to the existing values:
+
+| Setting | Default |
+|---|---:|
+| `AVA_LGTM_LOKI_PORT` | 3100 |
+| `AVA_LGTM_LOKI_GRPC_PORT` | 9095 |
+| `AVA_LGTM_PROMETHEUS_PORT` | 9090 |
+| `AVA_LGTM_GRAFANA_PORT` | 3003 |
+
+An isolated acceptance home must set all four to unused ports, and point its
+consumer query URLs at those listeners. The regular cluster port registry
+does not allocate observability ports. These settings do not migrate storage,
+change the pinned releases, or alter remote Tempo. On Linux, changed rendered
+configs or service definitions restart only already running owned services;
+`ava lgtm on` subsequently starts any stopped services. Missing user manager,
+invalid Loki config, or failed service operations propagate as failures.
 
 ## Why this stack
 
@@ -100,8 +131,10 @@ All unauthenticated backend APIs remain loopback-only: Loki 3100, Prometheus
 anonymous-but-read-only surface; its listen host is the
 `AVA_LGTM_GRAFANA_LISTEN_HOST` knob, whose `0.0.0.0` default is the historical
 all-interfaces form. Widening a listen host past loopback requires the
-matching `AVA_TELEMETRY_*_URL` read URL — the healthcheck probes and the
-Prometheus scrape targets derive from it — and converge warns on a mismatch.
+matching `AVA_TELEMETRY_*_URL` for remote consumers and Prometheus scrape
+targets; converge warns on a listen/read mismatch. Local health probes instead
+use the native bind settings and bypass HTTP proxy variables. A remote HTTPS
+query URL is never interpreted as a local bind address or port.
 
 ## Start, stop, and rollback
 
@@ -114,11 +147,11 @@ ava lgtm off                # remove marker first, then stop deliberately
 
 `start.sh` and `stop.sh` are native-only. The launcher rejects a missing native
 binary, Grafana launch script, or missing/ambiguous home-scoped launchd plist;
-it bootstraps Loki, Prometheus, or Grafana unless both its launchd job is loaded
+on Darwin it bootstraps Loki, Prometheus, or Grafana unless its launchd job is loaded
 and its HTTP listener answers. Before any Loki start or restart it runs
 `loki -config.file=$AVA_HOME/lgtm/native/config/loki.yaml -verify-config` and
 fails loudly if the rendered config is rejected — a bad `loki.yaml` field
-would otherwise crash-loop the launchd job (2026-08-25 incident). It checks
+would otherwise crash-loop the launchd job (2026-08-25 incident). The Darwin script checks
 that Grafana provisioned at least 18 alert rules when its admin password file
 is available. A newly bootstrapped job
 must answer within 30 seconds or the launcher fails loudly. Neither script

@@ -8,7 +8,8 @@
 auth_enabled: false
 
 server:
-  http_listen_port: 3100
+  http_listen_port: __LGTM_LOKI_PORT__
+  grpc_listen_port: __LGTM_LOKI_GRPC_PORT__
   # Default info logs every flush stream per chunk (~100M/day into the
   # launchd-captured log); warn keeps it small without hiding errors
   # (task #1978).

@@ -8,7 +8,7 @@ set -a
 if [ -f "{{REPO}}/deploy/lgtm/.env" ]; then
     . "{{REPO}}/deploy/lgtm/.env"
 fi
-export GRAFANA_ROOT_URL="${GRAFANA_ROOT_URL:-http://localhost:3003}"
+export GRAFANA_ROOT_URL="${GRAFANA_ROOT_URL:-http://localhost:{{LGTM_GRAFANA_PORT}}}"
 . "{{AVA_HOME}}/lgtm/native/config/runtime.env"
 set +a
 

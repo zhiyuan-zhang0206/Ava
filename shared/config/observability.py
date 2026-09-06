@@ -294,6 +294,66 @@ class ObservabilitySettings(EnvSettings):
         },
     )
 
+    lgtm_loki_port: int = Field(
+        default=3100,
+        ge=1,
+        le=65535,
+        alias="AVA_LGTM_LOKI_PORT",
+        description="HTTP listen port for this home's native loki backend; independent of external telemetry query URLs. Applied by LGTM converge and local health probes.",
+        json_schema_extra={
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "host",
+            "remote_writable": False,
+        },
+    )
+
+    lgtm_loki_grpc_port: int = Field(
+        default=9095,
+        ge=1,
+        le=65535,
+        alias="AVA_LGTM_LOKI_GRPC_PORT",
+        description="Internal gRPC listen port for this home's single-binary Loki; use a distinct port for isolated native homes.",
+        json_schema_extra={
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "host",
+            "remote_writable": False,
+        },
+    )
+
+    lgtm_prometheus_port: int = Field(
+        default=9090,
+        ge=1,
+        le=65535,
+        alias="AVA_LGTM_PROMETHEUS_PORT",
+        description="HTTP listen port for this home's native prometheus backend; independent of external telemetry query URLs. Applied by LGTM converge and local health probes.",
+        json_schema_extra={
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "host",
+            "remote_writable": False,
+        },
+    )
+
+    lgtm_grafana_port: int = Field(
+        default=3003,
+        ge=1,
+        le=65535,
+        alias="AVA_LGTM_GRAFANA_PORT",
+        description="HTTP listen port for this home's native grafana backend; independent of external telemetry query URLs. Applied by LGTM converge and local health probes.",
+        json_schema_extra={
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "host",
+            "remote_writable": False,
+        },
+    )
+
     lgtm_storage_dir: str = Field(
         default="",
         alias="AVA_LGTM_STORAGE_DIR",

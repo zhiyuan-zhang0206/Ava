@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import plistlib
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -11,6 +12,18 @@ import yaml
 from cli.commands import _lgtm_native
 from cli.commands._converge_spec import ConvergeCtx
 from shared.loki_index_labels import validate_loki_deploy_config
+
+
+@pytest.fixture(autouse=True)
+def _darwin_lifecycle(monkeypatch: pytest.MonkeyPatch) -> None:
+    """These existing lifecycle cases exercise the Darwin implementation."""
+    monkeypatch.setattr(_lgtm_native.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(_lgtm_native.platform, "machine", lambda: "arm64")
+
+    def absent_job(*args: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(args, 1, "", "")
+
+    monkeypatch.setattr(_lgtm_native, "_launchctl", absent_job)
 
 
 def _repo() -> Path:
@@ -43,7 +56,14 @@ def test_versions_file_has_the_pinned_release_assets() -> None:
     versions_path = _repo() / "deploy/lgtm/native/versions.yml"
     versions = yaml.safe_load(versions_path.read_text(encoding="utf-8"))
 
-    assert versions == {
+    darwin_versions = {
+        name: {
+            "version": spec["version"],
+            "assets": {"darwin-arm64": spec["assets"]["darwin-arm64"]},
+        }
+        for name, spec in versions.items()
+    }
+    assert darwin_versions == {
         "loki": {
             "version": "3.7.6",
             "assets": {
@@ -74,13 +94,17 @@ def test_versions_file_has_the_pinned_release_assets() -> None:
     }
 
 
-def test_platform_tag_supports_only_darwin_arm64(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_platform_tag_supports_darwin_arm64_and_linux_amd64(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(_lgtm_native.platform, "system", lambda: "Darwin")
     monkeypatch.setattr(_lgtm_native.platform, "machine", lambda: "arm64")
     assert _lgtm_native.platform_tag() == "darwin_arm64"
 
     monkeypatch.setattr(_lgtm_native.platform, "system", lambda: "Linux")
     assert _lgtm_native.platform_tag() is None
+    monkeypatch.setattr(_lgtm_native.platform, "machine", lambda: "x86_64")
+    assert _lgtm_native.platform_tag() == "linux_amd64"
 
 
 def test_ensure_skips_download_when_markers_match(
