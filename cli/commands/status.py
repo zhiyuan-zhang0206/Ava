@@ -1,9 +1,10 @@
-"""`ava status` — one-screen view of sessions / probe / infra / gate / cron.
+"""`ava status` — one-screen view of services, infra, host relays, and cron.
 
 Composed from `_print_service_row` (session + probe per spec) +
 `print_data_plane_status` (this cluster's own pg/redis) + `print_gate_status`
-(the fleet UI entry port), followed by the gateway's own cluster-status snapshot
-(GET `/api/cluster/status`).
+(the fleet UI entry port) + `print_redis_bridge_status` (authenticated PING
+through the private-network relay), followed by the gateway's own cluster-status
+snapshot (GET `/api/cluster/status`).
 
 The local session/infra probes are the bootstrap-exemption supplement: they work
 even when the gateway is down (e.g. mid-restart), and the gateway can only see
@@ -17,6 +18,7 @@ from contextlib import suppress
 
 from cli.commands._cluster_instance import print_data_plane_status
 from cli.commands._converge_gate import print_gate_status
+from cli.commands._converge_redis_bridge import print_redis_bridge_status
 from cli.commands._probe import (
     _cluster_pin_status,
     _detect_prod_source_drift,
@@ -137,6 +139,8 @@ def cmd_status() -> int:
     if not runner_only:
         print("\ngate (fleet UI entry):")
         print_gate_status()
+        print("\nredis bridge (private-network ingress):")
+        print_redis_bridge_status()
 
     # any installed host: warn if the prod source ($AVA_HOME/source) has drifted
     # off `main`. It is the checkout the live cluster runs from, so it must be

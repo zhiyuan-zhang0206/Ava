@@ -335,9 +335,15 @@ host's reachable address (`AVA_MACHINE_HOST`, default `localhost`), de-duplicate
 sets its real private-network IP, which is appended, plus the `scram-sha-256`
 `AVA_TRUSTED_CIDRS` pg_hba ranges. Redis is the exception: it always binds
 loopback-only, and the host-level `com.ava.redis-bridge` relay (`/usr/bin/python3
-relay.py`) serves non-loopback Redis inbound by forwarding the host's
-private-network address and Redis port to `127.0.0.1`. Each per-cluster pg is
-started with
+$AVA_HOME/redis-bridge/relay.py`) serves non-loopback Redis inbound by forwarding
+the host's private-network address and Redis port to `127.0.0.1`. The prod
+gateway's converge step installs that script from the repository-owned
+`services/redis_bridge/relay.py` and owns the launchd plist. If the private-network
+interface or listening descriptor fails, the still-running relay closes and
+recreates the listener with capped backoff. `ava status` and the periodic cluster
+health probe issue an authenticated Redis `PING` through this endpoint, so a
+running launchd PID with a dead listener is reported rather than certified.
+Each per-cluster pg is started with
 `max_connections = 500` (each agent process holds ~4 steady conns), passed on the
 `pg_ctl start` line; pg_hba is written into `$AVA_HOME/pg/pg_hba.conf` and —
 when the server is already running — reloaded (SIGHUP) so the rewritten hba takes
