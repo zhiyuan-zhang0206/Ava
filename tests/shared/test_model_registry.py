@@ -105,13 +105,12 @@ def test_superseded_models_stay_spawnable() -> None:
         assert spec.superseded_by in MODELS, model_id
 
 
-def test_gemini_3_8_flash_temporarily_falls_back_to_gemini_3_7_flash() -> None:
-    """The signature-rejection withdrawal hides 3.8 from new selections but
-    preserves existing configurations by resolving them to the last supported
-    Flash model."""
-    assert "gemini-3.8-flash" not in SUPPORTED_MODELS["gemini"]
+def test_gemini_3_8_flash_is_spawnable_again() -> None:
+    """The 2026-09-06 user order restored 3.8 to the production picker
+    (fresh-spawn verified clean); it resolves to itself, not to 3.7."""
+    assert "gemini-3.8-flash" in SUPPORTED_MODELS["gemini"]
     assert "gemini-3.7-flash" in SUPPORTED_MODELS["gemini"]
-    assert resolve_available_model("gemini-3.8-flash") == "gemini-3.7-flash"
+    assert resolve_available_model("gemini-3.8-flash") == "gemini-3.8-flash"
 
 
 def test_superseded_chain_validation_rejects_self_link(monkeypatch: pytest.MonkeyPatch) -> None:

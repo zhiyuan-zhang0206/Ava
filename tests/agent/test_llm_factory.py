@@ -28,18 +28,16 @@ ensure_provider_plugins_loaded()
 
 
 class TestBuildChatModel:
-    def test_temporarily_unavailable_gemini_model_builds_its_fallback(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """The builder—not only spawn validation—must protect restarted agents
-        whose frozen model configuration still names Gemini 3.8 Flash."""
+    def test_restored_gemini_3_8_flash_builds_itself(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The 2026-09-06 user order restored 3.8 to the production picker;
+        the builder resolves it to itself, not to the 3.7 fallback."""
         monkeypatch.setenv("GEMINI_API_KEY", "sk-gemini-test")
         from langchain_google_genai import ChatGoogleGenerativeAI
 
         llm = build_chat_model("gemini-3.8-flash")
 
         assert isinstance(llm, ChatGoogleGenerativeAI)
-        assert llm.model == "gemini-3.7-flash"
+        assert llm.model == "gemini-3.8-flash"
 
     def test_claude_prefix_returns_chat_anthropic(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
@@ -1514,17 +1512,15 @@ class TestValidateModelConfig:
         result = validate_model_config(model="claude-sonnet-5")
         assert result == "claude-sonnet-5"
 
-    def test_temporarily_unavailable_model_validates_to_its_fallback(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """An existing Gemini 3.8 configuration is accepted but runs on the
-        explicitly registered Gemini 3.7 fallback."""
+    def test_restored_model_validates_to_itself(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Gemini 3.8 is spawnable again (2026-09-06 user order): validation
+        resolves it to itself, not to the 3.7 fallback."""
         self._clear_all_keys(monkeypatch)
         self._set_plugin_keys(monkeypatch)
 
         result = validate_model_config(model="gemini-3.8-flash")
 
-        assert result == "gemini-3.7-flash"
+        assert result == "gemini-3.8-flash"
 
 
 class TestThinkingDisabledAcrossRoster:

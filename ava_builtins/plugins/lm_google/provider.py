@@ -164,7 +164,7 @@ register(
     models={
         "gemini-3.8-flash": ModelSpec(
             provider="gemini",
-            unavailable_fallback="gemini-3.7-flash",
+            spawnable=True,
             context_window=1_048_576,
             # Google does not publish a cutoff for 3.8 Flash; carries the 3.7
             # estimate forward (3.7 GA'd 2026-08-13, 3.8 GA'd 2026-09-02).

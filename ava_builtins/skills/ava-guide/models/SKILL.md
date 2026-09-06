@@ -86,9 +86,11 @@ reaching for anything more expensive):
 | **Judgment (main)** | `gemini-3.7-flash` | orchestration, planning, synthesis, reviewing/judging other agents' output, writing for humans |
 | **Mechanical** | `deepseek-v4-flash-vision-exp` | high-volume parallel workers, extraction, format transforms, checklist verification, scanning/sweeping |
 
-`gemini-3.8-flash` is temporarily unavailable because Google is intermittently
-rejecting thought signatures; use its supported predecessor, `gemini-3.7-flash`,
-until that validation failure is resolved. The mechanical tier replaced
+`gemini-3.8-flash` is spawnable on the production picker since 2026-09-06
+(user order; fresh-spawn verified clean by agent #5834). Caveat: restarting an
+EXISTING agent onto 3.8 (history written by another model) still 400s with
+"Corrupted thought signature" — the cross-model message-projection protocol is
+not landed yet, so switch only fresh agents to 3.8. The mechanical tier replaced
 `deepseek-v4-flash` with its vision-exp sibling (same price, strictly smarter —
 see the dominance pair above). Claude and other models stay registered and
 spawnable, but they sit outside the default policy — use them only when the
