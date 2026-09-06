@@ -15,6 +15,8 @@ from pydantic import (
     NonNegativeInt,
 )
 
+from shared.loki_index_labels import retention_hours
+
 
 class StatsWindowHours(IntEnum):
     """Whitelisted `?hours=` windows for stats, inspect, and fleet — 0 = last
@@ -36,6 +38,16 @@ def window_delta(hours: StatsWindowHours) -> timedelta:
     return timedelta(minutes=5) if hours == StatsWindowHours.M5 else timedelta(hours=int(hours))
 
 
+def applied_window(hours: StatsWindowHours) -> tuple[int, timedelta]:
+    """(served hours, duration) — the requested window clamped to the Loki
+    retention horizon: rows older than retention are already gone, so the
+    window is narrowed instead of silently returning partial data."""
+    applied = min(int(hours), retention_hours())
+    if applied < int(hours):
+        return applied, timedelta(hours=applied)
+    return int(hours), window_delta(hours)
+
+
 class StatsTokens(BaseModel):
     """`/api/stats/dashboard` token sub-section — windowed LLM usage aggregation.
 
@@ -54,8 +66,11 @@ class StatsDashboard(BaseModel):
     """GET /api/stats/dashboard response — sidebar-top stats card data pulled in one shot.
 
     All windowed fields (`tokens` / `cost_usd` / `avg_turn_seconds` /
-    `warnings` / `errors`) aggregate over the selected `window_hours` value —
-    `0` means five minutes; all other values are hours.
+    `warnings` / `errors`) aggregate over the `applied_window_hours` horizon.
+    `window_hours` echoes the selected value — `0` means five minutes; all
+    other values are hours.
+    `applied_window_hours` is the actually served window in hours, no greater
+    than `window_hours` and clamped to the Loki retention horizon.
 
     - `live_count`: current non-terminated count (from agents_meta, not
       events; not windowed)
@@ -88,6 +103,7 @@ class StatsDashboard(BaseModel):
 
     live_count: NonNegativeInt
     window_hours: StatsWindowHours
+    applied_window_hours: int | None = None
     tokens: StatsTokens
     cost_usd: float = Field(ge=0)
     avg_turn_seconds: float | None

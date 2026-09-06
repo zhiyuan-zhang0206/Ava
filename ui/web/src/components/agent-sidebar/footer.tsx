@@ -54,6 +54,12 @@ export function StatsCards({
   const placeholder = failedWithoutData ? "!" : "—";
   const win = STATS_WINDOW_LABELS[windowHours];
   const windowMismatch = stats !== undefined && stats.window_hours !== windowHours;
+  const appliedWindowHours =
+    !windowMismatch &&
+    stats?.applied_window_hours != null &&
+    stats.applied_window_hours < windowHours
+      ? stats.applied_window_hours
+      : null;
   const windowedPlaceholder = windowMismatch ? "…" : placeholder;
   const windowedTitle = windowMismatch ? t("statisticsUpdatingFor", { win }) : null;
   const cards: (
@@ -162,7 +168,13 @@ export function StatsCards({
         </div>
         <WindowSelect
           value={String(windowHours)}
-          options={STATS_WINDOWS.map((h) => ({ value: String(h), label: STATS_WINDOW_LABELS[h] }))}
+          options={STATS_WINDOWS.map((h) => ({
+            value: String(h),
+            label:
+              h === windowHours && appliedWindowHours != null
+                ? `${STATS_WINDOW_LABELS[h]} · ${appliedWindowHours}h`
+                : STATS_WINDOW_LABELS[h],
+          }))}
           onChange={(v) => onWindowChange(Number(v) as StatsWindowHours)}
           ariaLabel={t("statisticsWindow")}
           className="bg-transparent text-2xs text-muted-foreground hover:text-foreground rounded px-1 py-0.5 cursor-pointer focus:outline-none"

@@ -15,9 +15,11 @@ connection-level failure means a local backend is down, and then the fix is
 re-running the idempotent deploy/lgtm/start.sh. Same connection-level contract
 as the otel_collector sidecar check.
 
-Once all listeners answer, pushes a unique Loki probe line and queries it back.
-Three consecutive write/read failures re-run start.sh; the counter lives under
-AVA_HOME because the watchdog launches a fresh process for every 60-second round.
+Once all listeners answer, sends a unique Loki OTLP log and queries it back.
+Three consecutive generic write/read failures re-run start.sh. A stuck ingester
+is force-restarted immediately once its storage disk drops below the configured
+WAL throttle. The counter lives under AVA_HOME because the watchdog launches a
+fresh process for every 60-second round.
 
 The stack is the cluster's observability backend: while it is down the
 gateway's /ops + inspect reads (Loki/Prometheus), the Grafana-evaluated ops
@@ -28,7 +30,9 @@ lost meanwhile — the native sidecar buffers in its file-backed queue.
 from __future__ import annotations
 
 import json
+import os
 import platform
+import shutil
 import subprocess
 import sys
 import time
@@ -38,10 +42,14 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
+import shared.cluster
+import shared.lgtm_systemd
+import shared.proc
 from shared import telemetry
 from shared.config import settings
 from shared.lgtm_local import lifecycle_environment
 from shared.log import init_gateway_process
+from shared.loki_index_labels import WAL_DISK_FULL_THRESHOLD
 from shared.paths import ava_home
 
 _local_http = urllib.request.build_opener(urllib.request.ProxyHandler({}))
@@ -112,7 +120,7 @@ def down_probes() -> list[str]:
 
 
 def write_path_probe() -> tuple[bool, str]:
-    """Push one unique Loki line and verify that its write path made it queryable."""
+    """Send one unique OTLP log and verify that Loki made it queryable."""
     now_ns = time.time_ns()
     marker_ns = now_ns - (_WRITE_PROBE_END_LAG_SECONDS * _NANOSECONDS_PER_SECOND)
     marker = f"watchdog-write-probe-{marker_ns}"
@@ -121,16 +129,33 @@ def write_path_probe() -> tuple[bool, str]:
     base_url = backend_urls()["loki"]
     body = json.dumps(
         {
-            "streams": [
+            "resourceLogs": [
                 {
-                    "stream": {"probe_id": "watchdog-write"},
-                    "values": [[str(marker_ns), marker]],
+                    "resource": {
+                        "attributes": [
+                            {"key": "agent_id", "value": {"stringValue": marker}},
+                            {
+                                "key": "event_name",
+                                "value": {"stringValue": "watchdog-write-probe"},
+                            },
+                        ]
+                    },
+                    "scopeLogs": [
+                        {
+                            "logRecords": [
+                                {
+                                    "timeUnixNano": str(marker_ns),
+                                    "body": {"stringValue": marker},
+                                }
+                            ]
+                        }
+                    ],
                 }
             ]
         }
     ).encode()
     push_request = urllib.request.Request(  # noqa: S310 — configured Loki endpoint, deliberate
-        f"{base_url}/loki/api/v1/push",
+        f"{base_url}/otlp/v1/logs",
         data=body,
         headers={"Content-Type": "application/json", "X-Scope-OrgID": "fake"},
         method="POST",
@@ -138,9 +163,11 @@ def write_path_probe() -> tuple[bool, str]:
     try:
         with _local_http.open(push_request, timeout=2.0) as response:
             if not 200 <= response.status < 300:
-                return False, f"push_http_{response.status}"
+                response_body = response.read() if response.status >= 500 else b""
+                return False, _push_failure_reason(response.status, response_body)
     except urllib.error.HTTPError as exc:
-        return False, f"push_http_{exc.code}"
+        response_body = exc.read() if exc.code >= 500 else b""
+        return False, _push_failure_reason(exc.code, response_body)
     except Exception:
         return False, "push_error"
 
@@ -150,7 +177,7 @@ def write_path_probe() -> tuple[bool, str]:
     query_end_ns = time.time_ns()
     query = urllib.parse.urlencode(
         {
-            "query": '{probe_id="watchdog-write"}',
+            "query": f'{{agent_id="{marker}"}}',
             "start": str(marker_ns - (_WRITE_PROBE_LOOKBACK_SECONDS * _NANOSECONDS_PER_SECOND)),
             "end": str(query_end_ns),
         }
@@ -174,6 +201,12 @@ def write_path_probe() -> tuple[bool, str]:
     return (True, "ok") if visible else (False, "probe_not_visible")
 
 
+def _push_failure_reason(status: int, response_body: bytes) -> str:
+    if status >= 500 and b"ingester is shutting down" in response_body.lower():
+        return "ingester_shutting_down"
+    return f"push_http_{status}"
+
+
 def _write_probe_counter_path() -> Path:
     return ava_home() / "lgtm-write-probe-consecutive-failures"
 
@@ -193,6 +226,51 @@ def _write_counter(consecutive_failures: int) -> None:
         _write_probe_counter_path().write_text(str(consecutive_failures), encoding="utf-8")
     except OSError as exc:
         sys.stderr.write(f"lgtm write-probe counter write failed: {exc}\n")
+
+
+def _loki_storage_dir(home: Path) -> Path:
+    configured = settings.observability.lgtm_storage_dir.strip()
+    if configured:
+        return Path(configured).expanduser().resolve()
+    return (home / "lgtm" / "native" / "data").resolve()
+
+
+def _loki_storage_disk_below_threshold(home: Path) -> bool:
+    storage_dir = _loki_storage_dir(home)
+    try:
+        usage = shutil.disk_usage(storage_dir)
+    except OSError as exc:
+        sys.stderr.write(f"lgtm Loki storage disk usage probe failed for {storage_dir}: {exc}\n")
+        return False
+    return usage.used / usage.total < WAL_DISK_FULL_THRESHOLD
+
+
+def _force_restart_loki(home: Path) -> bool:
+    """Restart Loki even when its listener remains responsive; never raise."""
+    try:
+        system = platform.system()
+        if system == "Linux":
+            shared.lgtm_systemd.force_restart(home, "loki")
+            return True
+        if system != "Darwin":
+            sys.stderr.write(f"lgtm Loki force restart unsupported on {system}\n")
+            return False
+        label = f"com.ava.loki.{shared.cluster.home_slug(home)}"
+        result = shared.proc.run_bounded(
+            ["launchctl", "kickstart", "-k", f"gui/{os.getuid()}/{label}"],
+            timeout=45,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode:
+            sys.stderr.write(
+                f"lgtm Loki kickstart failed (exit {result.returncode}): {result.stderr}\n"
+            )
+            return False
+        return True
+    except Exception as exc:
+        sys.stderr.write(f"lgtm Loki force restart failed: {exc}\n")
+        return False
 
 
 def _restart_stack() -> bool:
@@ -249,6 +327,16 @@ def main() -> None:
         source="system",
         attributes={"consecutive_failures": consecutive_failures, "reason": reason},
     )
+    if reason == "ingester_shutting_down":
+        home = ava_home()
+        if _loki_storage_disk_below_threshold(home):
+            sys.stderr.write(
+                "lgtm write path found a stuck ingester below the WAL disk threshold "
+                "— force-restarting Loki\n"
+            )
+            _force_restart_loki(home)
+            _write_counter(0)
+        return
     if consecutive_failures < _WRITE_PROBE_RESTART_THRESHOLD:
         return
     sys.stderr.write(

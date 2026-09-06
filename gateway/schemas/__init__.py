@@ -135,6 +135,7 @@ from gateway.schemas.stats import (
     StatsTokens,
     StatsWindowHours,
     TokenUsageResponse,
+    applied_window,
     window_delta,
 )
 from gateway.schemas.status import (
@@ -301,5 +302,6 @@ __all__ = [
     "UserSettingListResponse",
     "UserSettingRow",
     "UserSettingUpdateRequest",
+    "applied_window",
     "window_delta",
 ]

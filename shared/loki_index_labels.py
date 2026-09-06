@@ -38,7 +38,7 @@ INDEX_LABEL_CUTOVER_AT = datetime(2026, 8, 23, 11, 0, tzinfo=UTC)
 # archive read (they are not in the live stream either).
 ARCHIVE_FLOOR_AT = datetime(2026, 5, 20, 0, 0, tzinfo=UTC)
 ARCHIVE_FREEZE_AT = datetime(2026, 8, 13, 3, 54, 10, 626517, tzinfo=UTC)
-EVENT_STREAM_RETENTION = timedelta(hours=168)
+EVENT_STREAM_RETENTION = timedelta(hours=84)
 # Must match deployed Loki `querier.max_concurrent`; render validation catches
 # drift before it ships (the 2026-08-18 incident).
 LOKI_QUERY_CONCURRENCY = 4
@@ -102,6 +102,12 @@ def retention_floor(now: datetime | None = None) -> datetime:
     return (now if now is not None else datetime.now(UTC)) - EVENT_STREAM_RETENTION
 
 
+def retention_hours() -> int:
+    """Whole hours retained — the gateway's window clamp."""
+
+    return int(EVENT_STREAM_RETENTION.total_seconds() // 3600)
+
+
 def ledger_gap_plan(newest_day: date | None, floor: datetime) -> LedgerGapPlan:
     """Plan one ledger/live split for every ledger-plus-tail reader.
 
@@ -128,14 +134,14 @@ def ledger_gap_plan(newest_day: date | None, floor: datetime) -> LedgerGapPlan:
 def _retention_period_str() -> str:
     """Format the retention constant in Loki's whole-hour YAML syntax."""
 
-    return f"{int(EVENT_STREAM_RETENTION.total_seconds() // 3600)}h"
+    return f"{retention_hours()}h"
 
 
 def _validate_lineage_retention(limits_config: Mapping[str, object]) -> None:
     """Reject a deployed config whose lineage retention rule drifted.
 
     The lineage class is permanent by ruling, and this per-stream override is
-    the only thing keeping it out of the global 168h bucket. The 2026-08-20
+    the only thing keeping it out of the global 84h bucket. The 2026-08-20
     archive loss is exactly what an unpinned override costs: the rule landed
     nine days after the global retention had already deleted the data. So the
     rule's presence, its event set (derived from the registry), and its period

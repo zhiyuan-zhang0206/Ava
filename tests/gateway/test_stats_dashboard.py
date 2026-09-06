@@ -27,6 +27,7 @@ from gateway.app import app
 from gateway.routers import _stats_dashboard, status
 from gateway.schemas import StatsWindowHours, window_delta
 from shared.cluster import home_label
+from shared.loki_index_labels import EVENT_STREAM_RETENTION, retention_floor
 from shared.paths import ava_home
 from tests.gateway.loki_fake import FakeLoki
 
@@ -331,13 +332,13 @@ def test_dashboard_168h_reads_tokens_from_ledger(
     fake_loki: FakeLoki,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A wide dashboard window reads settled days from the fleet token ledger."""
+    """A 168h request reports and serves the shorter Loki retention horizon."""
     first_agent = _insert_agent(db_conn)
     second_agent = _insert_agent(db_conn)
     for days_ago, model, agent_id, tokens_in, tokens_out, tokens_cached, cost_usd in (
-        (6, "model-a", first_agent, 100, 10, 50, 1.0),
-        (6, "model-b", second_agent, 200, 20, 25, 2.0),
-        (5, "model-a", first_agent, 300, 30, 100, 3.0),
+        (2, "model-a", first_agent, 100, 10, 50, 1.0),
+        (2, "model-b", second_agent, 200, 20, 25, 2.0),
+        (2, "model-c", first_agent, 300, 30, 100, 3.0),
     ):
         _insert_token_ledger_row(
             db_conn,
@@ -365,24 +366,52 @@ def test_dashboard_168h_reads_tokens_from_ledger(
         payload={"in_total": 20, "out_total": 2, "cache_read": 5, "cost_usd": 0.5},
         ts_offset_hours=1,
     )
+    fake_loki.add(
+        event="turn_end",
+        payload={"duration_seconds": 100.0, "ok": True},
+        ts_offset_hours=100,
+    )
+    fake_loki.add(event="old_warning", level="warning", ts_offset_hours=100)
     llm_usage_spans: list[tuple[datetime, datetime]] = []
+    loki_froms: list[datetime] = []
     real_aggregate = fake_loki.attribute_aggregate
+    real_count = fake_loki.count_events
+    real_classes = fake_loki.count_event_classes
 
     def spy_aggregate(**kwargs: Any) -> float | list[tuple[str, float]]:
+        loki_froms.append(kwargs["from_"])
         if kwargs.get("event_names") == ["llm_usage"]:
             llm_usage_spans.append((kwargs["from_"], kwargs["to"]))
         return real_aggregate(**kwargs)
 
+    def spy_count(**kwargs: Any) -> int:
+        loki_froms.append(kwargs["from_"])
+        return real_count(**kwargs)
+
+    def spy_classes(**kwargs: Any) -> dict[object, int]:
+        loki_froms.append(kwargs["from_"])
+        return real_classes(**kwargs)
+
     monkeypatch.setattr(loki_events, "attribute_aggregate", spy_aggregate)
+    monkeypatch.setattr(loki_events, "count_events", spy_count)
+    monkeypatch.setattr(loki_events, "count_event_classes", spy_classes)
     db_conn.commit()
+    floor_before = retention_floor()
     with TestClient(app) as client:
         body = client.get("/api/stats/dashboard", params={"hours": 168}).json()
+    floor_after = retention_floor()
 
+    expected_hours = int(EVENT_STREAM_RETENTION.total_seconds() // 3600)
+    assert body["window_hours"] == 168
+    assert body["applied_window_hours"] == expected_hours
     assert body["tokens"] == {"input": 620, "output": 62, "cache_read": 180, "cache_hit_pct": 29.03}
     assert body["cost_usd"] == pytest.approx(6.5)  # pyright: ignore[reportUnknownMemberType]
+    assert body["avg_turn_seconds"] is None
+    assert body["warnings"] == 0
+    assert floor_before <= min(loki_froms) <= floor_after
     assert len(llm_usage_spans) == 8
     assert len(set(llm_usage_spans)) == 2
-    assert all(end - start < timedelta(hours=168) for start, end in llm_usage_spans)
+    assert all(end - start < EVENT_STREAM_RETENTION for start, end in llm_usage_spans)
 
 
 def test_dashboard_72h_uses_ledger_and_tail_seam(
@@ -424,6 +453,7 @@ def test_dashboard_72h_uses_ledger_and_tail_seam(
     with TestClient(app) as client:
         body = client.get("/api/stats/dashboard", params={"hours": 72}).json()
 
+    assert body["applied_window_hours"] == 72
     assert body["tokens"] == {"input": 250, "output": 25, "cache_read": 100, "cache_hit_pct": 40}
     assert body["cost_usd"] == pytest.approx(2.5)  # pyright: ignore[reportUnknownMemberType]
 
@@ -448,6 +478,7 @@ def test_dashboard_24h_stays_pure_loki(
     with TestClient(app) as client:
         body = client.get("/api/stats/dashboard", params={"hours": 24}).json()
 
+    assert body["applied_window_hours"] == 24
     assert body["tokens"] == {"input": 10, "output": 5, "cache_read": 4, "cache_hit_pct": 40}
     assert body["cost_usd"] == pytest.approx(0.25)  # pyright: ignore[reportUnknownMemberType]
 

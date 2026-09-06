@@ -975,8 +975,9 @@ export interface paths {
          *     single-agent counterpart to `/api/stats/dashboard` (fleet-wide).
          *
          *     `?hours=` windows `cost` + `stats` to the selected range (0 = last 5m;
-         *     1/6/24/72/168 = hours, anything else 422s); omitted = cumulative since
-         *     spawn.
+         *     1/6/24/72/168 = hours, anything else 422s), clamped to Loki retention;
+         *     omitted = cumulative since spawn. `applied_window_hours` reports the
+         *     served horizon while `window_hours` continues to echo the request.
          *     `?since_compact=true` windows them to events since the agent's latest
          *     compact halt instead — it takes precedence, `hours` is ignored and the
          *     echoed `window_hours` is None.
@@ -3019,9 +3020,9 @@ export interface paths {
          *       (task #1281 parity run; PG events dropped; not a live gauge)
          *
          *     `?hours=` selects the aggregation window (0 = last 5m; 1/6/24/72/168 =
-         *     hours), whitelisted by `StatsWindowHours` (anything else 422s). Zero-data
-         *     scenario: tokens all 0, cost_usd 0.0, avg_turn_seconds None (frontend
-         *     shows "—"). Until the unlabeled legacy slice expires on 2026-08-30,
+         *     hours), whitelisted by `StatsWindowHours` (anything else 422s); the served horizon is
+         *     `applied_window_hours`. Zero-data scenario: tokens all 0, cost_usd 0.0, avg_turn_seconds
+         *     None (frontend shows "—"). Until the unlabeled legacy slice expires on 2026-08-30,
          *     the ledger removes the fixed-cost full-window token scans; afterward the
          *     indexed Loki tail keeps the same self-healing late-write behavior.
          */
@@ -3780,7 +3781,10 @@ export interface components {
          *
          *     `window_hours` echoes the `?hours=` request parameter: None = cumulative
          *     since spawn (the default), else `cost` + `stats` + `tps` + `activity`
-         *     aggregate only over the past N hours. `since_compact` echoes
+         *     aggregate only over the past N hours. `applied_window_hours` is the
+         *     actually served window in hours, no greater than `window_hours` and
+         *     clamped to the Loki retention horizon; it is None for whole-life and
+         *     since-compact reads. `since_compact` echoes
          *     `?since_compact=`: True = those cover only events since the agent's latest
          *     compact halt (`hours` is ignored and `window_hours` is None). `shells`,
          *     `config_overlay`, `notice`, and `heartbeat` are always current, independent
@@ -3809,6 +3813,8 @@ export interface components {
             /** Started At */
             started_at?: string | null;
             window_hours?: components["schemas"]["StatsWindowHours"] | null;
+            /** Applied Window Hours */
+            applied_window_hours?: number | null;
             /**
              * Since Compact
              * @default false
@@ -7100,8 +7106,11 @@ export interface components {
          * @description GET /api/stats/dashboard response — sidebar-top stats card data pulled in one shot.
          *
          *     All windowed fields (`tokens` / `cost_usd` / `avg_turn_seconds` /
-         *     `warnings` / `errors`) aggregate over the selected `window_hours` value —
-         *     `0` means five minutes; all other values are hours.
+         *     `warnings` / `errors`) aggregate over the `applied_window_hours` horizon.
+         *     `window_hours` echoes the selected value — `0` means five minutes; all
+         *     other values are hours.
+         *     `applied_window_hours` is the actually served window in hours, no greater
+         *     than `window_hours` and clamped to the Loki retention horizon.
          *
          *     - `live_count`: current non-terminated count (from agents_meta, not
          *       events; not windowed)
@@ -7134,6 +7143,8 @@ export interface components {
             /** Live Count */
             live_count: number;
             window_hours: components["schemas"]["StatsWindowHours"];
+            /** Applied Window Hours */
+            applied_window_hours?: number | null;
             tokens: components["schemas"]["StatsTokens"];
             /** Cost Usd */
             cost_usd: number;

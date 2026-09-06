@@ -3,13 +3,20 @@
 The watchdog repairs only the local LGTM backends, so its three readiness
 probes intentionally exclude remote Tempo. Any HTTP status proves a local
 listener is up; only a connection-level failure re-runs the idempotent start
-script immediately. Once listeners answer, three failed Loki write/read probes
-trigger the same repair. The check self-gates on the $AVA_HOME/lgtm-host marker.
+script immediately. Once listeners answer, three generic Loki write/read probe
+failures trigger the same repair. A body-qualified stuck ingester is force-restarted
+immediately when its storage disk is below the WAL throttle threshold. The check
+self-gates on the $AVA_HOME/lgtm-host marker.
 """
 
 from __future__ import annotations
 
+import email.message
+import io
 import json
+import os
+import shutil
+import subprocess
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -18,6 +25,9 @@ from typing import Any, cast
 
 import pytest
 
+import shared.cluster
+import shared.lgtm_systemd
+import shared.proc
 from services.healthchecks import lgtm as hc
 
 
@@ -101,13 +111,45 @@ def test_down_probes_names_connection_failures(monkeypatch: pytest.MonkeyPatch) 
     assert hc.down_probes() == ["prometheus"]
 
 
-def test_write_path_probe_rejects_non_2xx_push(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_write_path_probe_rejects_400_push(monkeypatch: pytest.MonkeyPatch) -> None:
     def _raise(_request: object, **_kwargs: object) -> None:
-        raise urllib.error.HTTPError("http://loki/push", 429, "throttled", {}, None)  # pyright: ignore[reportArgumentType]
+        raise urllib.error.HTTPError("http://loki/otlp/v1/logs", 400, "rejected", {}, None)  # pyright: ignore[reportArgumentType]
 
     monkeypatch.setattr(hc._local_http, "open", _raise)
 
-    assert hc.write_path_probe() == (False, "push_http_429")
+    assert hc.write_path_probe() == (False, "push_http_400")
+
+
+def test_write_path_probe_identifies_stuck_ingester(monkeypatch: pytest.MonkeyPatch) -> None:
+    def _raise(_request: object, **_kwargs: object) -> None:
+        raise urllib.error.HTTPError(  # pyright: ignore[reportArgumentType]
+            "http://loki/otlp/v1/logs",
+            500,
+            "internal error",
+            email.message.Message(),
+            io.BytesIO(b"RPC error: code = Unknown desc = InGeStEr Is ShUtTiNg DoWn"),
+        )
+
+    monkeypatch.setattr(hc._local_http, "open", _raise)
+
+    assert hc.write_path_probe() == (False, "ingester_shutting_down")
+
+
+def test_write_path_probe_does_not_misclassify_plain_503(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _raise(_request: object, **_kwargs: object) -> None:
+        raise urllib.error.HTTPError(  # pyright: ignore[reportArgumentType]
+            "http://loki/otlp/v1/logs",
+            503,
+            "throttled",
+            email.message.Message(),
+            io.BytesIO(b"write throttled because disk usage is too high"),
+        )
+
+    monkeypatch.setattr(hc._local_http, "open", _raise)
+
+    assert hc.write_path_probe() == (False, "push_http_503")
 
 
 def test_write_path_probe_reports_push_request_error(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -134,12 +176,12 @@ def test_write_path_probe_reports_marker_not_visible(monkeypatch: pytest.MonkeyP
     request_body = requests[0].data
     assert isinstance(request_body, bytes)
     payload = cast(dict[str, Any], json.loads(request_body))
-    stream = payload["streams"][0]
-    assert stream["stream"] == {"probe_id": "watchdog-write"}
-    timestamp, marker = stream["values"][0]
+    record = payload["resourceLogs"][0]["scopeLogs"][0]["logRecords"][0]
+    timestamp = record["timeUnixNano"]
+    marker = record["body"]["stringValue"]
     assert timestamp.isdigit()
     assert marker == f"watchdog-write-probe-{timestamp}"
-    assert requests[0].full_url.endswith("/loki/api/v1/push")
+    assert requests[0].full_url.endswith("/otlp/v1/logs")
     assert requests[0].get_header("X-scope-orgid") == "fake"
     assert requests[0].get_header("Content-type") == "application/json"
 
@@ -157,7 +199,18 @@ def test_write_path_probe_finds_marker_in_numeric_query_window(
             request_body = request.data
             assert isinstance(request_body, bytes)
             payload = cast(dict[str, Any], json.loads(request_body))
-            marker = payload["streams"][0]["values"][0][1]
+            resource_log = payload["resourceLogs"][0]
+            attributes = {
+                attribute["key"]: attribute["value"]["stringValue"]
+                for attribute in resource_log["resource"]["attributes"]
+            }
+            record = resource_log["scopeLogs"][0]["logRecords"][0]
+            marker = record["body"]["stringValue"]
+            assert attributes == {
+                "agent_id": marker,
+                "event_name": "watchdog-write-probe",
+            }
+            assert record["timeUnixNano"] == marker.removeprefix("watchdog-write-probe-")
             return _Response(status=204)
         body = json.dumps({"data": {"result": [{"values": [["1", marker]]}]}}).encode()
         return _Response(status=200, body=body)
@@ -166,7 +219,7 @@ def test_write_path_probe_finds_marker_in_numeric_query_window(
 
     assert hc.write_path_probe() == (True, "ok")
     query = urllib.parse.parse_qs(urllib.parse.urlparse(requests[1].full_url).query)
-    assert query["query"] == ['{probe_id="watchdog-write"}']
+    assert query["query"] == [f'{{agent_id="{marker}"}}']
     assert query["start"][0].isdigit()
     assert query["end"][0].isdigit()
     marker_ts = int(marker.removeprefix("watchdog-write-probe-"))
@@ -221,6 +274,18 @@ def test_restart_runs_start_sh_in_deploy_dir(monkeypatch: pytest.MonkeyPatch) ->
     cmd, cwd = calls[0]
     assert cmd == ["bash", "start.sh"]
     assert cwd.parts[-2:] == ("deploy", "lgtm")
+
+
+def test_force_restart_loki_reports_exception_without_raising(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def _unavailable(*_args: object, **_kwargs: object) -> None:
+        raise OSError("launchctl unavailable")
+
+    monkeypatch.setattr(shared.proc, "run_bounded", _unavailable)
+
+    assert hc._force_restart_loki(tmp_path) is False
+    assert "launchctl unavailable" in capsys.readouterr().err
 
 
 def test_main_noop_without_marker(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -300,6 +365,126 @@ def test_main_restarts_on_third_write_probe_failure_and_emits_each_round(
     assert all(entry[1]["level"] == "warning" for entry in emitted)
     assert all(entry[1]["source"] == "system" for entry in emitted)
     assert "write path probe failed 3 consecutive rounds" in capsys.readouterr().err
+
+
+def test_main_kickstarts_stuck_ingester_when_disk_is_below_threshold(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    class _Usage:
+        total = 100
+        used = 94
+
+    monkeypatch.setattr(hc, "init_gateway_process", lambda _name: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(hc, "is_lgtm_host", lambda: True)
+    monkeypatch.setattr(hc, "down_probes", list)
+    monkeypatch.setattr(hc, "ava_home", lambda: tmp_path)
+    monkeypatch.setattr(hc.settings.observability, "lgtm_storage_dir", "")
+    monkeypatch.setattr(hc, "write_path_probe", lambda: (False, "ingester_shutting_down"))
+    inspected: list[Path] = []
+
+    def _disk_usage(path: object) -> _Usage:
+        inspected.append(Path(str(path)))
+        return _Usage()
+
+    monkeypatch.setattr(shutil, "disk_usage", _disk_usage)
+    monkeypatch.setattr(os, "getuid", lambda: 501)
+    calls: list[tuple[list[str], float]] = []
+
+    def _run_bounded(
+        argv: list[str], *, timeout: float, **_kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
+        calls.append((argv, timeout))
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    monkeypatch.setattr(shared.proc, "run_bounded", _run_bounded)
+    emitted: list[dict[str, object]] = []
+
+    def _emit(*_args: object, **kwargs: object) -> None:
+        attributes = kwargs["attributes"]
+        if isinstance(attributes, dict):
+            emitted.append(cast(dict[str, object], attributes))
+
+    monkeypatch.setattr(hc.telemetry, "emit", _emit)
+
+    hc.main()
+
+    label = f"com.ava.loki.{shared.cluster.home_slug(tmp_path)}"
+    assert calls == [(["launchctl", "kickstart", "-k", f"gui/501/{label}"], 45)]
+    assert inspected == [(tmp_path / "lgtm/native/data").resolve()]
+    assert hc._read_counter() == 0
+    assert emitted == [{"consecutive_failures": 1, "reason": "ingester_shutting_down"}]
+    assert "force-restarting Loki" in capsys.readouterr().err
+
+
+def test_main_does_not_kickstart_stuck_ingester_at_disk_threshold(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    class _Usage:
+        total = 100
+        used = 95
+
+    monkeypatch.setattr(hc, "init_gateway_process", lambda _name: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(hc, "is_lgtm_host", lambda: True)
+    monkeypatch.setattr(hc, "down_probes", list)
+    monkeypatch.setattr(hc, "ava_home", lambda: tmp_path)
+    monkeypatch.setattr(hc.settings.observability, "lgtm_storage_dir", str(tmp_path / "data"))
+    monkeypatch.setattr(hc, "write_path_probe", lambda: (False, "ingester_shutting_down"))
+    inspected: list[Path] = []
+
+    def _disk_usage(path: object) -> _Usage:
+        inspected.append(Path(str(path)))
+        return _Usage()
+
+    def _deny(*_args: object, **_kwargs: object) -> None:
+        pytest.fail("high disk must suppress kickstart")
+
+    def _noop(*_args: object, **_kwargs: object) -> None:
+        return None
+
+    monkeypatch.setattr(shutil, "disk_usage", _disk_usage)
+    monkeypatch.setattr(shared.proc, "run_bounded", _deny)
+    monkeypatch.setattr(hc.telemetry, "emit", _noop)
+
+    hc.main()
+
+    assert inspected == [(tmp_path / "data").resolve()]
+    assert hc._read_counter() == 1
+
+
+def test_main_force_restarts_stuck_ingester_through_systemd(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    class _Usage:
+        total = 100
+        used = 10
+
+    monkeypatch.setattr(hc, "init_gateway_process", lambda _name: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(hc, "is_lgtm_host", lambda: True)
+    monkeypatch.setattr(hc, "down_probes", list)
+    monkeypatch.setattr(hc, "ava_home", lambda: tmp_path)
+    monkeypatch.setattr(hc.settings.observability, "lgtm_storage_dir", "")
+    monkeypatch.setattr(hc, "write_path_probe", lambda: (False, "ingester_shutting_down"))
+
+    def _disk_usage(_path: object) -> _Usage:
+        return _Usage()
+
+    monkeypatch.setattr(shutil, "disk_usage", _disk_usage)
+    monkeypatch.setattr(hc.platform, "system", lambda: "Linux")
+    calls: list[tuple[Path, str]] = []
+
+    def _force_restart(home: Path, name: str) -> None:
+        calls.append((home, name))
+
+    def _noop(*_args: object, **_kwargs: object) -> None:
+        return None
+
+    monkeypatch.setattr(shared.lgtm_systemd, "force_restart", _force_restart)
+    monkeypatch.setattr(hc.telemetry, "emit", _noop)
+
+    hc.main()
+
+    assert calls == [(tmp_path, "loki")]
+    assert hc._read_counter() == 0
 
 
 def test_main_successful_write_probe_clears_counter(

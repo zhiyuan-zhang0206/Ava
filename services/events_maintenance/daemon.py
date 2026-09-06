@@ -101,7 +101,7 @@ class WedgedPassError(RuntimeError):
 
 def _run_maintenance(pool: ConnectionPool, progress: LoopProgress) -> None:
     """One hourly pass: the cost-ledger rollup (Loki → `agent_model_tokens_daily`
-    — Loki only retains 168h, so skipping passes permanently loses days), the
+    — Loki only retains 84h, so skipping passes permanently loses days), the
     JSONL gap replay, the hourly checkpoint size/row-count telemetry sample,
     and the blob VACUUM. One `now` drives the time-based steps.
     Logs what each step did; a no-op pass logs nothing."""

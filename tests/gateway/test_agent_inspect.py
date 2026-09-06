@@ -43,7 +43,12 @@ from gateway.routers import _agent_cost, _inspect_stats, agent_inspect
 from gateway.routers._inspect_cache import InspectCacheFullError, InspectQueryCache
 from services.heartbeat import JITTER_SPAN_S, STALE_PENDING_S
 from shared.config import settings
-from shared.loki_index_labels import ARCHIVE_FREEZE_AT, INDEX_LABEL_CUTOVER_AT, retention_floor
+from shared.loki_index_labels import (
+    ARCHIVE_FREEZE_AT,
+    EVENT_STREAM_RETENTION,
+    INDEX_LABEL_CUTOVER_AT,
+    retention_floor,
+)
 
 
 def _insert_agent_row(db: psycopg.Connection, label: str = "t") -> int:
@@ -413,7 +418,7 @@ def test_inspect_pre_cutover_agent_uses_indexed_lifecycle_window(
 
     The fixed index-label cutover (2026-08-23T11:00Z) sits inside the
     expired legacy zone once `now - EVENT_STREAM_RETENTION` (the rolling
-    retention floor) passes it — 2026-08-30T11:00Z onwards (the same
+    retention floor) passes it — 2026-08-26T23:00Z onwards (the same
     expiry the 8/20 Loki archive incident made visible). The retained
     window therefore starts at the floor, not the cutover; the projected
     Loki read asserts that landed behavior, and the request-window
@@ -1038,7 +1043,7 @@ def test_inspect_whole_life_tail_bounded_to_retention(
     db_conn: psycopg.Connection, fake_loki: _FakeLoki
 ) -> None:
     """With no rolled ledger day, the whole-life Loki tail starts at the
-    retention floor (now − 168h): a Loki row older than retention (which
+    retention floor (now − 84h): a Loki row older than retention (which
     real Loki would not even hold) falls outside; a recent snapshot row
     counts. No far-past sentinel, no max_query_length 400 (the 2026-08-12
     prod inspector 500)."""
@@ -1419,11 +1424,27 @@ def test_inspect_no_read_time_pricing_even_for_known_models(
 def test_inspect_hours_window_is_loki_only(
     db_conn: psycopg.Connection, fake_loki: _FakeLoki
 ) -> None:
-    """An hours window (StatsWindowHours caps at 168h = Loki retention)
-    aggregates pure Loki: rolled ledger days do NOT leak into it, the
-    window scopes by event ts, and whole-life still sees both stores."""
+    """A requested window cannot reach behind Loki's retention floor."""
     aid = _insert_agent(db_conn)
     _ledger_row(db_conn, agent_id=aid, days_ago=20, tin=1_000_000, cost=30.0)
+    fake_loki.add(
+        event="llm_usage",
+        agent_id=aid,
+        payload={
+            "in_total": 9_000_000,
+            "out_total": 9_000_000,
+            "cache_read": 0,
+            "model": "claude-opus-4-8",
+            "cost_usd": 99.0,
+        },
+        ts_offset_hours=100,
+    )
+    fake_loki.add(
+        event="turn_end",
+        agent_id=aid,
+        payload={"duration_seconds": 99.0, "ok": True},
+        ts_offset_hours=100,
+    )
     fake_loki.add(
         event="llm_usage",
         agent_id=aid,
@@ -1434,19 +1455,43 @@ def test_inspect_hours_window_is_loki_only(
             "model": "claude-opus-4-8",
             "cost_usd": 2.0,
         },
-        ts_offset_hours=100,
+        ts_offset_hours=60,
+    )
+    fake_loki.add(
+        event="turn_end",
+        agent_id=aid,
+        payload={"duration_seconds": 2.0, "ok": True},
+        ts_offset_hours=60,
     )
     db_conn.commit()
+    floor_before = retention_floor()
     with TestClient(app) as client:
         body = client.get(f"/api/agents/{aid}/inspect?hours=168").json()
+        floor_after = retention_floor()
+        body72 = client.get(f"/api/agents/{aid}/inspect?hours=72").json()
         body24 = client.get(f"/api/agents/{aid}/inspect?hours=24").json()
         whole = client.get(f"/api/agents/{aid}/inspect").json()
+    expected_hours = int(EVENT_STREAM_RETENTION.total_seconds() // 3600)
+    assert body["window_hours"] == 168
+    assert body["applied_window_hours"] == expected_hours
     cost = body["cost"]
     assert cost["llm_calls"] == 1
     assert cost["cost_usd"] == pytest.approx(2.0)  # pyright: ignore[reportUnknownMemberType]
-    # 24h window: the 100h-old row is outside
+    assert body["stats"]["turn_total"] == 1
+    windowed_calls = [
+        call
+        for call in fake_loki.projected_calls
+        if call not in _lifecycle_projected_calls(fake_loki)
+    ]
+    earliest_from = min(call["from_"] for call in windowed_calls)
+    assert floor_before <= earliest_from <= floor_after
+    # 24h window: the 60h-old row is outside
+    assert body72["applied_window_hours"] == 72
+    assert body72["cost"]["llm_calls"] == 1
+    assert body24["applied_window_hours"] == 24
     assert body24["cost"]["llm_calls"] == 0
     # whole life: ledger day + Loki tail
+    assert whole["applied_window_hours"] is None
     assert whole["cost"]["llm_calls"] == 2
     assert whole["cost"]["cost_usd"] == pytest.approx(32.0)  # pyright: ignore[reportUnknownMemberType]
 
@@ -1746,24 +1791,24 @@ def test_inspect_whole_life_gap_day_events_read_live_and_not_double_counted(
     assert stats["turn_max_seconds"] == 5.0
 
 
-def test_inspect_seven_day_percentiles_use_histogram_and_narrow_live_tail(
+def test_inspect_clamped_seven_day_percentiles_use_histogram_and_narrow_live_tail(
     db_conn: psycopg.Connection, fake_loki: _FakeLoki
 ) -> None:
     """Complete daily histograms replace the settled days' raw duration scan."""
     aid = _insert_agent(db_conn)
     now = datetime.now(UTC)
     today = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    for days_ago, bucket in ((6, 1), (5, 2), (4, 3), (3, 4), (2, 5)):
-        _metrics_ledger_row(
-            db_conn,
-            agent_id=aid,
-            days_ago=days_ago,
-            turn_total=1,
-            turn_ok=1,
-            turn_duration_seconds=float(bucket) + 0.75,
-            turn_dur_hist={bucket: 1},
-            turn_min_seconds=1.75 if days_ago == 6 else float(bucket) + 0.75,
-        )
+    _metrics_ledger_row(
+        db_conn,
+        agent_id=aid,
+        days_ago=2,
+        turn_total=5,
+        turn_ok=5,
+        turn_duration_seconds=18.75,
+        turn_dur_hist=dict.fromkeys(range(1, 6), 1),
+        turn_min_seconds=1.75,
+        turn_max_seconds=5.75,
+    )
     # The newest completed day is reread live, as is today.
     _metrics_ledger_row(
         db_conn,
@@ -1814,7 +1859,7 @@ def test_inspect_incomplete_histogram_falls_back_to_the_full_raw_window(
     _metrics_ledger_row(
         db_conn,
         agent_id=aid,
-        days_ago=4,
+        days_ago=3,
         turn_total=1,
         turn_ok=1,
         turn_duration_seconds=8.0,
@@ -1823,7 +1868,7 @@ def test_inspect_incomplete_histogram_falls_back_to_the_full_raw_window(
         event="turn_end",
         agent_id=aid,
         payload={"duration_seconds": 8.0, "ok": True},
-        ts=now - timedelta(days=4),
+        ts=now - timedelta(days=3),
     )
     db_conn.commit()
 

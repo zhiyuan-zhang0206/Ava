@@ -98,13 +98,13 @@ distributor:
 
 # Retention: the viewer ingests Ava session stdout (~20MB/day new + ~130MB
 # one-time backfill of the existing logs dir) plus the OTLP event stream.
-# Without a cap the filesystem store grows linearly forever. 7d matches the
-# write-side JSONL mirror retention.
+# Without a cap the filesystem store grows linearly forever. The 84h global
+# window is pinned to the query and rollup floor in shared/loki_index_labels.py.
 #
 # Task #1281 (PG events archive import): the archived events (8.7M rows,
 # 05-23 -> 08-12) land under the stream label stream="archive" and get a
 # 365d retention via retention_streams (compactor-driven, applied on top of
-# the 168h period). The completed import needed old samples temporarily; the
+# the 84h period). The completed import needed old samples temporarily; the
 # default `reject_old_samples: true` is now restored as the clock-drift guard.
 # Keep reject_old_samples_max_age as that guard's age bound.
 limits_config:
@@ -116,7 +116,7 @@ limits_config:
   # 256KB per-line limit and Loki 400'd whole push batches -> collector drops.
   # Truncate instead of reject (identifier marks the cut).
   max_line_size_truncate: true
-  retention_period: 168h
+  retention_period: 84h
   retention_stream:
     - selector: '{stream="archive"}'
       priority: 1

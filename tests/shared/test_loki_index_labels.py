@@ -86,7 +86,13 @@ def test_ledger_gap_plan_includes_the_floor_boundary_and_clamps_watermark() -> N
     )
     floor = datetime(2026, 8, 10, 18, tzinfo=UTC)
     assert labels.ledger_gap_plan(date(2026, 8, 9), floor).tail_from == floor
-    assert labels.retention_floor(datetime(2026, 8, 17, tzinfo=UTC)) == boundary
+    # retention_floor derives from the retention constant: the floor is the
+    # requested instant minus EVENT_STREAM_RETENTION (84h today — 08-17 00:00
+    # minus 84h lands at 08-13 12:00, so a fixed 7d-boundary fixture would
+    # silently break if the horizon changes again). Assert the constant-derived
+    # value instead.
+    source_now = datetime(2026, 8, 17, tzinfo=UTC)
+    assert labels.retention_floor(source_now) == source_now - labels.EVENT_STREAM_RETENTION
 
 
 def test_split_before_after_and_straddle_cutover() -> None:

@@ -22,8 +22,8 @@ An indexed slice that returns zero aggregate rows is unsafe rather than
 authoritatively empty: the pass warns and skips that day, preserving its
 existing ledger rows while continuing with the remaining days.
 
-Loki bounds what is recoverable: retention is 7d
-(deploy/lgtm/config/loki.yaml `retention_period: 168h`), so the
+Loki bounds what is recoverable: retention is 84h
+(deploy/lgtm/config/loki.yaml `retention_period: 84h`), so the
 recompute window clamps to the first FULLY-retained day — a maintenance
 outage longer than retention leaves a gap in the Loki-sourced aggregates
 (logged loudly; the filtered rollup-source JSONL mirror is the automated replay

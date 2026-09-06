@@ -1,7 +1,7 @@
 # Prometheus — scrapes only the viewer's own components (zero impact on the
 # main flow). Ava's own series arrive by OTLP push
 # (--web.enable-otlp-receiver in the compose command); retention is set there
-# too (15d time / 8GB size).
+# too (180h time / 8GB size).
 #
 # There is no node_exporter here and there will not be one: host metrics
 # (issue #46) arrive on the same OTLP push, scraped by each machine's own OTel
