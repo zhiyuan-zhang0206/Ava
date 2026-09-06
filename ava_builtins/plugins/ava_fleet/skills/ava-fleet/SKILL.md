@@ -93,6 +93,20 @@ Every agent in a fleet is either an **orchestrator** (delegating work to others)
 
 Both roles share the same communication primitives: `send_message` for peer-to-peer, `ava.ui.notify` for the user, and task updates for the durable record. Reporting responsibility is split in two: anything needing the user's **authorization or decision** goes to the user directly, from any agent — that authority is never relayed. **Progress and conclusions** roll up to the delegator (the parent task's owner), who aggregates before the user sees anything — raw per-worker results do not land in the user's queue. An agent with no delegator delivers directly. **Roll-ups are milestone-based by default** (user ruling 2026-09-03): send on a real milestone, a blocker, a completion, or when the other side genuinely needs something — never for routine progress, and never a bare acknowledgment. A delegator that wants a different pattern names it in the brief; silence between milestones is the default, not a failure. Interruption discipline while the user is away: the `reduce-context-switch-for-human` skill.
 
+### One reporter per milestone
+
+Name a single reporter and the agent that must act on each shared milestone
+in the brief. The reporter delivers the authoritative artifact or record
+directly to that action owner. Once delivered, other participants do not
+relay the same result or acknowledge it without new information. Report new
+evidence, a blocker, or a changed result promptly; completion of a later stage
+is a new milestone.
+
+Keep the result in its existing record instead of copying its unchanged
+status into several places. In particular, `ava.tasks.log` by a non-owner
+also notifies the task owner: do not append a duplicate milestone merely to
+record that you forwarded it. Still record actual task outcomes and blockers.
+
 ## Two Dials: Effort and Autonomy
 
 Every delegation is set along two independent axes — per task, and (because decomposition is recursive) per reduce point, not once globally.

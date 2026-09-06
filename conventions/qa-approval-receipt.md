@@ -35,3 +35,19 @@ Activation requires reviewer workflow adoption and verification that required
 status checks consume the exact-head status. Existing legacy check runs with
 the same context can require a fresh PR head during migration. This change does
 not change queue method, enqueue PRs, or independently authenticate Ava agents.
+
+## Ready notifications
+
+The PR's current-head receipt and evaluated gate are the shared QA record;
+chat messages point to that record and do not replace its verification.
+Unless the brief names another single reporter, the reviewer reports readiness
+directly to the agent responsible for enqueueing after checking the current
+head, receipt, gate, and required CI. Include the PR, full head SHA, and receipt
+link. Do not also ask the author to relay the same ready result to that agent.
+
+Authors send findings and fixes directly to the reviewer. Once the action
+owner has the ready report, authors do not forward it again or copy it into
+that owner's task log merely to record the relay. A new head, blocker,
+revocation, or changed result still needs reporting promptly; a known failed
+delivery still needs retrying. This reporting contract grants no enqueue or
+merge permission.

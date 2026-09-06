@@ -27,6 +27,10 @@ The old tenet "any agent reaches the user directly, no relay chain" was over-ext
   turn). Task-assignment delivery stays full-text: a summary-plus-link
   redesign would cost an extra round-trip.
 - No task, no delegator: deliver directly; do not fabricate a hierarchy just to forward.
+- Each shared milestone has one reporter and one action owner named in the
+  brief. Other participants report changes instead of relaying an unchanged
+  result or copying it into the action owner's task log; non-owner task
+  writes can notify that owner too.
 
 ## Task ↔ Fleet Interaction Rules
 

@@ -99,6 +99,17 @@ def test_plugin_registers_prompt_section(_load_activity_plugin: None):
     assert "ava.self.set_label" in prompt
 
 
+def test_prompt_assigns_shared_milestone_reporting(_load_activity_plugin: None):
+    """The rendered prompt carries the reporting contract with the plugin."""
+    prompt = build_system_prompt()
+
+    assert prompt.count("One reporter per milestone") == 1
+    assert "single reporter and action owner" in prompt
+    assert "do not ask another agent to relay the same result" in prompt
+    assert "new evidence, a blocker, or a changed result" in prompt
+    assert "that write can notify the task owner too" in prompt
+
+
 def test_prompt_section_idle_vs_terminate_rule(_load_activity_plugin: None):
     """The Long-running agent section must make the end-of-turn choice
     explicit in plain language: waiting on a known event -> idle; all done ->
@@ -219,6 +230,7 @@ def test_task_conversion_absent_when_plugin_disabled():
     assert "## Fleet task interaction" not in prompt
     assert "create directly with `ava.tasks.create`" not in prompt
     assert "ava.tasks.create" not in prompt
+    assert "One reporter per milestone" not in prompt
 
 
 def test_spawn_label_param_gated_on_plugin(_load_activity_plugin: None):
