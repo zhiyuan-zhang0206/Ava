@@ -302,6 +302,48 @@ def test_unset_machine_host_field_rejects_remote_read_only(
     assert captured_put["body"] is None
 
 
+@pytest.mark.parametrize("scope", ["host", "cluster-pinned", "cluster-default", "agent"])
+@pytest.mark.parametrize("writable", [True, False])
+@pytest.mark.parametrize("remote_writable", [True, False])
+@pytest.mark.parametrize("remote", [True, False])
+def test_cli_field_editable_mirrors_shared_definition(
+    scope: str, writable: bool, remote_writable: bool, remote: bool
+) -> None:
+    """The CLI's wire-view gate and shared.config.editing.field_editable are two
+    definitions of one policy; this table pins their agreement so a future
+    special case in the shared definition turns this test red (task #2552)."""
+    from shared.config import ConfigFieldMeta
+    from shared.config.editing import field_editable
+
+    view_field = _field(
+        "parity",
+        "AVA_PARITY",
+        "string",
+        None,
+        writable,
+        scope,
+        "",
+        remote_writable=remote_writable,
+    )
+    meta = ConfigFieldMeta(
+        "parity",
+        "string",
+        None,
+        None,
+        "",
+        "",
+        "",
+        writable=writable,
+        sensitive=False,
+        env_var="AVA_PARITY",
+        scope=scope,
+        capability="common",
+        remote_writable=remote_writable,
+        per_agent=False,
+    )
+    assert cfg._field_editable(view_field, remote=remote) == field_editable(meta, local=not remote)
+
+
 def test_unset_machine_host_field_uses_remote_writable(captured_put: dict[str, Any]) -> None:
     captured_put["view"].fields.append(
         _field(
@@ -469,8 +511,21 @@ def test_local_get_masks_sensitive(
 
 
 def test_local_set_validates_candidate_and_rejects_incident_shape(
-    local_env_home: Path, capsys: pytest.CaptureFixture[str]
+    local_env_home: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # The agent runtime exports AVA_PITR_OSS_VIEWER_CREDENTIALS_FILE; inherited
+    # here it completes the OSS credential shape and turns this test's expected
+    # rejection into a valid patch (task #2552). The candidate validation builds
+    # the physical-backup model FRESH from os.environ (shared/config/candidate.py
+    # `source_model()`), so the env itself is the seam — not the Settings
+    # singleton (which is why setenv/delenv would be a no-op elsewhere, and why
+    # the wholesale environ swap is the honest patch here).
+    import os
+
+    clean_env = {k: v for k, v in os.environ.items() if k != "AVA_PITR_OSS_VIEWER_CREDENTIALS_FILE"}
+    monkeypatch.setattr(os, "environ", clean_env)
     _write_valid_gcs_env_with_incomplete_oss_transition(local_env_home)
     before = (local_env_home / ".env").read_bytes()
 
