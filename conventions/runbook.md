@@ -1070,9 +1070,13 @@ ava cluster destroy --path PATH [--drop-db]   # stop a cluster + free its regist
 `ava cluster update --dry-run` resolves and validates the target, runs the
 non-disruptive runner fetch and prepare checks, and reports the predicted
 maintenance window. It creates no recovery snapshot, pause/stop state, pin,
-or checkout; it is the operator check before a real rollout. Prepare-check
-failures return a failing verdict, while the maintenance estimate is
-informational and never permits or refuses a rollout. The estimate uses
+or checkout; it is the operator check before a real rollout. The gateway runs
+it in the detached `ava-rollout-dryrun` session, outside the orchestration-kind
+scan, so a live dry-run does not block or get interrupted by a real rollout; a
+dry-run still refuses while a real orchestration is live, and a second concurrent
+dry-run is rejected by the session backend's duplicate-name guard. Prepare-check
+failures return a failing verdict, while the maintenance estimate is informational
+and never permits or refuses a rollout. The estimate uses
 the p95 of the ten most recent stop-the-world, local-leg, and readiness stages.
 Phase B remains recorded and shown in the breakdown, but is excluded because it
 begins after readiness, while the gateway is serving, and measures remote-runner
