@@ -703,6 +703,23 @@ isolated replay, promotion, fingerprints, live-Postgres identity check, and
 immutable proof publication all succeed. Keep daily and pre-update logical
 dumps regardless; this boundary has no retention or remote-delete operation.
 
+When an activation fails, read the durable record first:
+`$AVA_HOME/physical-backup/activation/operation.json`
+(`error` / `error_code` / `error_detail`) and `ava cluster pitr status`. The
+CLI refusal line keeps only the TAIL of the restore worker's traceback, so the
+outermost exception there is the actionable cause — but a cleanup refusal can
+mask it. Zombie signature (2026-09-06, activation #12): the refusal names
+"refusing to remove a live restore PostgreSQL data directory" while a
+`.partial` restore directory is left behind. That message does NOT mean a
+postgres is running: the direct-exec sandbox postmaster is the restore
+worker's child and, once stopped, lingers as a zombie (it fails the pgid
+identity probe, so the stop path never reaps it, and psutil's create-time
+probe still matches it). Verify with
+`ps -o pid,stat,command -p <sandbox_pid>` — status `Z` means dead-but-unreaped
+(`sandbox_pid` sits in the matching `restore-owners/*.owner.json`). Since
+#1860 the run() cleanup reaps the Popen and every live-process probe treats a
+zombie as dead, so a current failure surfaces unmasked in the refusal tail.
+
 `AVA_PITR_RETENTION_PLANNER_ENABLED=true` adds only a local dry-run after the
 restore-proof gate is enabled. The private canonical plan lives at
 `$AVA_HOME/physical-backup/retention-plans/latest.dry-run.json`; inspect its
