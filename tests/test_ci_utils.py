@@ -998,3 +998,314 @@ def test_queue_ops_exclusive_with_merge_wait() -> None:
         ci_utils.main(["42", "--evict", "--queue-status"])
     with pytest.raises(SystemExit):
         ci_utils.main(["42", "--evict", "--json"])
+
+
+# --- --diagnose: Trunk/CI failure triage (task #2572) ---
+
+
+@pytest.fixture
+def diag_gh(monkeypatch):
+    """Stub the gh/git subprocess for --diagnose: canned responses keyed by a
+    substring of the command line, consumed in call order (first entry whose
+    key matches the current call)."""
+
+    def _install(responses: list[tuple[str, str]]) -> None:
+        def run(cmd, *_a, **_k):
+            joined = " ".join(str(c) for c in cmd)
+            for idx, (key, out) in enumerate(responses):
+                if key in joined:
+                    responses.pop(idx)
+                    return subprocess.CompletedProcess(cmd, 0, out, "")
+            return subprocess.CompletedProcess(cmd, 1, "", "unmatched: " + joined)
+
+        monkeypatch.setattr(ci_utils.subprocess, "run", run)
+
+    return _install
+
+
+def _diag_pr_view(mergeable: str = "MERGEABLE", checks: list[dict] | None = None) -> str:
+    return json.dumps(
+        {
+            "mergeable": mergeable,
+            "labels": [{"name": "qa-approved"}],
+            "headRefOid": "aaaa1111aaaa1111aaaa1111aaaa1111aaaa1111",
+            "state": "OPEN",
+            "statusCheckRollup": checks or [],
+        }
+    )
+
+
+def _diag_check(name: str, conclusion: str = "FAILURE") -> dict:
+    return {"name": name, "conclusion": conclusion, "status": "COMPLETED"}
+
+
+def _diag_job(name: str, job_id: int = 9, conclusion: str = "FAILURE") -> dict:
+    return {"name": name, "job_id": job_id, "run_id": 10, "conclusion": conclusion}
+
+
+def test_diagnose_merge_conflict(diag_gh, monkeypatch, capsys) -> None:
+    diag_gh(
+        [
+            ("--json mergeable", _diag_pr_view(mergeable="CONFLICTING")),
+            ("--json baseRefOid --jq", "cccc3333cccc3333cccc3333cccc3333cccc3333"),
+            ("ls-remote", "cccc3333cccc3333cccc3333cccc3333cccc3333\trefs/heads/main"),
+            ("json headRefOid --jq", "aaaa1111aaaa1111aaaa1111aaaa1111aaaa1111"),
+            ("head_sha=", "[]"),
+            ("state=all", "[]"),
+        ]
+    )
+    assert ci_utils.main(["1871", "--diagnose"]) == 0
+    out = capsys.readouterr().out
+    assert "merge_conflict" in out
+    assert "rebase on origin/main" in out
+
+
+def test_diagnose_lint_hard_limit(diag_gh, monkeypatch, capsys) -> None:
+    check = "backend structure (pre-commit lint + codegen freshness)"
+    diag_gh(
+        [
+            ("--json mergeable", _diag_pr_view(checks=[_diag_check(check)])),
+            ("--json baseRefOid --jq", "cccc3333cccc3333cccc3333cccc3333cccc3333"),
+            ("ls-remote", "cccc3333cccc3333cccc3333cccc3333cccc3333\trefs/heads/main"),
+            ("json headRefOid --jq", "aaaa1111aaaa1111aaaa1111aaaa1111aaaa1111"),
+            ("head_sha=", '["10"]'),
+            ("/jobs", json.dumps([_diag_job(check)])),
+            ("/logs", "scripts/host.py file is 812 lines, over the 800-line hard ceiling"),
+            ("state=all", "[]"),
+        ]
+    )
+    assert ci_utils.main(["1871", "--diagnose"]) == 0
+    out = capsys.readouterr().out
+    assert "lint hard limit" in out
+    assert "split the file" in out
+
+
+def test_diagnose_first_load_budget(diag_gh, monkeypatch, capsys) -> None:
+    check = "Production build + first-load JavaScript budget"
+    diag_gh(
+        [
+            ("--json mergeable", _diag_pr_view(checks=[_diag_check(check)])),
+            ("--json baseRefOid --jq", "cccc3333cccc3333cccc3333cccc3333cccc3333"),
+            ("ls-remote", "cccc3333cccc3333cccc3333cccc3333cccc3333\trefs/heads/main"),
+            ("json headRefOid --jq", "aaaa1111aaaa1111aaaa1111aaaa1111aaaa1111"),
+            ("head_sha=", '["10"]'),
+            ("/jobs", json.dumps([_diag_job(check)])),
+            ("/logs", "First Load JS shared by all is 512 kB (budget 500 kB)"),
+            ("state=all", "[]"),
+        ]
+    )
+    assert ci_utils.main(["1871", "--diagnose"]) == 0
+    assert "first-load JavaScript budget" in capsys.readouterr().out
+
+
+def test_diagnose_visual_regression(diag_gh, monkeypatch, capsys) -> None:
+    check = "e2e shard (3/4)"
+    diag_gh(
+        [
+            ("--json mergeable", _diag_pr_view(checks=[_diag_check(check)])),
+            ("--json baseRefOid --jq", "cccc3333cccc3333cccc3333cccc3333cccc3333"),
+            ("ls-remote", "cccc3333cccc3333cccc3333cccc3333cccc3333\trefs/heads/main"),
+            ("json headRefOid --jq", "aaaa1111aaaa1111aaaa1111aaaa1111aaaa1111"),
+            ("head_sha=", '["10"]'),
+            ("/jobs", json.dumps([_diag_job(check)])),
+            ("/logs", "toMatchImageSnapshot failed: baseline image differs"),
+            ("state=all", "[]"),
+        ]
+    )
+    assert ci_utils.main(["1871", "--diagnose"]) == 0
+    assert "visual regression" in capsys.readouterr().out
+
+
+def test_diagnose_truncate_lint_delta_case(diag_gh, monkeypatch, capsys) -> None:
+    """The #1871 delta case: truncate-isolation lint's comment-stripping
+    regex falsely captured the word delta — a deterministic lint failure."""
+    check = "lint truncate isolation"
+    diag_gh(
+        [
+            ("--json mergeable", _diag_pr_view(checks=[_diag_check(check)])),
+            ("--json baseRefOid --jq", "cccc3333cccc3333cccc3333cccc3333cccc3333"),
+            ("ls-remote", "cccc3333cccc3333cccc3333cccc3333cccc3333\trefs/heads/main"),
+            ("json headRefOid --jq", "aaaa1111aaaa1111aaaa1111aaaa1111aaaa1111"),
+            ("head_sha=", '["10"]'),
+            ("/jobs", json.dumps([_diag_job(check)])),
+            (
+                "/logs",
+                "truncate-isolation lint: comment-stripping regex captured CREATE TABLE delta",
+            ),
+            ("state=all", "[]"),
+        ]
+    )
+    assert ci_utils.main(["1871", "--diagnose"]) == 0
+    assert "truncate-isolation lint" in capsys.readouterr().out
+
+
+def test_diagnose_clock_lattice_gateway_case(diag_gh, monkeypatch, capsys) -> None:
+    """The #1871 gateway closure case: a constant outside its family module."""
+    check = "lint clock lattice"
+    diag_gh(
+        [
+            ("--json mergeable", _diag_pr_view(checks=[_diag_check(check)])),
+            ("--json baseRefOid --jq", "cccc3333cccc3333cccc3333cccc3333cccc3333"),
+            ("ls-remote", "cccc3333cccc3333cccc3333cccc3333cccc3333\trefs/heads/main"),
+            ("json headRefOid --jq", "aaaa1111aaaa1111aaaa1111aaaa1111aaaa1111"),
+            ("head_sha=", '["10"]'),
+            ("/jobs", json.dumps([_diag_job(check)])),
+            ("/logs", "lattice-vocabulary clock constant defined outside its family module"),
+            ("state=all", "[]"),
+        ]
+    )
+    assert ci_utils.main(["1871", "--diagnose"]) == 0
+    assert "clock-lattice lint" in capsys.readouterr().out
+
+
+def test_diagnose_known_flake_matches_quarantined(diag_gh, monkeypatch, capsys) -> None:
+    """The #1871 consumer_guard case: failing test is in Trunk's flaky DB."""
+    check = "backend shard (4/16)"
+    monkeypatch.setenv("TRUNK_API_TOKEN", "test-token")
+    monkeypatch.setattr(
+        ci_utils.urllib.request,
+        "urlopen",
+        _urlopen_sequence(
+            [
+                _TrunkResponse(
+                    {
+                        "quarantined_tests": [
+                            {
+                                "name": "test_consumer_guard_queue_backpressure",
+                                "file": "tests/agent/test_consumer_guard.py",
+                                "status": "FLAKY",
+                            }
+                        ]
+                    }
+                ),
+                _TrunkResponse({"state": "testing"}),
+            ],
+            [],
+        ),
+    )
+    diag_gh(
+        [
+            ("--json mergeable", _diag_pr_view(checks=[_diag_check(check)])),
+            ("--json baseRefOid --jq", "cccc3333cccc3333cccc3333cccc3333cccc3333"),
+            ("ls-remote", "cccc3333cccc3333cccc3333cccc3333cccc3333\trefs/heads/main"),
+            ("json headRefOid --jq", "aaaa1111aaaa1111aaaa1111aaaa1111aaaa1111"),
+            ("head_sha=", '["10"]'),
+            ("/jobs", json.dumps([_diag_job(check)])),
+            (
+                "/logs",
+                "FAILED tests/agent/test_consumer_guard.py::test_consumer_guard_queue_backpressure",
+            ),
+            ("state=all", "[]"),
+        ]
+    )
+    assert ci_utils.main(["1871", "--diagnose"]) == 0
+    out = capsys.readouterr().out
+    assert "known flake" in out
+    assert "state=testing" in out
+
+
+def test_diagnose_runner_network_flake(diag_gh, monkeypatch, capsys) -> None:
+    check = "backend (pytest + pyright)"
+    diag_gh(
+        [
+            ("--json mergeable", _diag_pr_view(checks=[_diag_check(check)])),
+            ("--json baseRefOid --jq", "cccc3333cccc3333cccc3333cccc3333cccc3333"),
+            ("ls-remote", "cccc3333cccc3333cccc3333cccc3333cccc3333\trefs/heads/main"),
+            ("json headRefOid --jq", "aaaa1111aaaa1111aaaa1111aaaa1111aaaa1111"),
+            ("head_sha=", '["10"]'),
+            ("/jobs", json.dumps([_diag_job(check)])),
+            ("/logs", "apt-get install failed: archive cache is empty — no offline fallback"),
+            ("state=all", "[]"),
+        ]
+    )
+    assert ci_utils.main(["1871", "--diagnose"]) == 0
+    assert "runner-side network flake" in capsys.readouterr().out
+
+
+def test_diagnose_reports_synthetic_test_pr(diag_gh, monkeypatch, capsys) -> None:
+    diag_gh(
+        [
+            ("--json mergeable", _diag_pr_view()),
+            ("--json baseRefOid --jq", "cccc3333cccc3333cccc3333cccc3333cccc3333"),
+            ("ls-remote", "cccc3333cccc3333cccc3333cccc3333cccc3333\trefs/heads/main"),
+            ("json headRefOid --jq", "aaaa1111aaaa1111aaaa1111aaaa1111aaaa1111"),
+            ("head_sha=", "[]"),
+            (
+                "state=all",
+                json.dumps(
+                    [
+                        {
+                            "number": 1875,
+                            "state": "closed",
+                            "head": {
+                                "ref": "trunk-merge/pr-1871/e65e4a02-9624-435e-853a-8fb467af307c"
+                            },
+                        }
+                    ]
+                ),
+            ),
+        ]
+    )
+    assert ci_utils.main(["1871", "--diagnose"]) == 0
+    out = capsys.readouterr().out
+    assert "synthetic test PR #1875" in out
+    assert "trunk-merge/pr-1871/" in out
+
+
+def test_diagnose_stale_base(diag_gh, monkeypatch, capsys) -> None:
+    diag_gh(
+        [
+            ("--json mergeable", _diag_pr_view()),
+            ("--json baseRefOid --jq", "bbbb2222bbbb2222bbbb2222bbbb2222bbbb2222"),
+            ("ls-remote", "cccc3333cccc3333cccc3333cccc3333cccc3333\trefs/heads/main"),
+            ("json headRefOid --jq", "aaaa1111aaaa1111aaaa1111aaaa1111aaaa1111"),
+            ("head_sha=", "[]"),
+            ("state=all", "[]"),
+        ]
+    )
+    assert ci_utils.main(["1871", "--diagnose"]) == 0
+    assert "stale_base" in capsys.readouterr().out
+
+
+def test_diagnose_json_machine_readable(diag_gh, monkeypatch, capsys) -> None:
+    diag_gh(
+        [
+            ("--json mergeable", _diag_pr_view(checks=[_diag_check("lint clock lattice")])),
+            ("--json baseRefOid --jq", "cccc3333cccc3333cccc3333cccc3333cccc3333"),
+            ("ls-remote", "cccc3333cccc3333cccc3333cccc3333cccc3333\trefs/heads/main"),
+            ("json headRefOid --jq", "aaaa1111aaaa1111aaaa1111aaaa1111aaaa1111"),
+            ("head_sha=", "[]"),
+            ("state=all", "[]"),
+        ]
+    )
+    assert ci_utils.main(["1871", "--diagnose", "--json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["pr"] == "1871"
+    assert payload["checks"][0]["classification"] == "deterministic lint failure"
+    assert "issues" in payload and "synthetic_test_prs" in payload
+
+
+def test_diagnose_exclusive_and_requires_pr() -> None:
+    with pytest.raises(SystemExit):
+        ci_utils.main(["42", "--diagnose", "--wait"])
+    with pytest.raises(SystemExit):
+        ci_utils.main(["--diagnose"])
+
+
+def test_diagnose_merged_pr_reports_no_conflict_or_stale_base(diag_gh, monkeypatch, capsys) -> None:
+    """A merged PR has mergeable=UNKNOWN and a base behind main by definition —
+    neither may be reported as a diagnosable problem."""
+    view = json.loads(_diag_pr_view(mergeable="UNKNOWN"))
+    view["state"] = "MERGED"
+    diag_gh(
+        [
+            ("--json mergeable", json.dumps(view)),
+            ("json headRefOid --jq", "aaaa1111aaaa1111aaaa1111aaaa1111aaaa1111"),
+            ("head_sha=", "[]"),
+            ("state=all", "[]"),
+        ]
+    )
+    assert ci_utils.main(["1871", "--diagnose"]) == 0
+    out = capsys.readouterr().out
+    assert "merge_conflict" not in out
+    assert "stale_base" not in out
