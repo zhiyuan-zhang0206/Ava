@@ -23,7 +23,10 @@ post-install import proof surround the complete sequence.
 
 `cli/_python_index.py` reads one host index from uv settings or the pip settings
 uv does not consume. The installer can pass the existing unit `mirror.env`; real
-environment values win. These files are never rewritten by discovery. Explicit
+environment values win. `shared/dotenv_boot.py` preserves the same precedence
+across both uv single-index aliases when a native command loads the unit files
+before calling the installer. Additional indexes remain separate and are rejected
+by the installer. These files are never rewritten by discovery. Explicit
 mirror profile selection remains the install script's existing persistent action.
 Additional/explicit-only indexes fail rather than silently losing their source policy.
 

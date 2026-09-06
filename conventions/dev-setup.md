@@ -176,7 +176,9 @@ Index precedence is explicit `UV_DEFAULT_INDEX` / `UV_INDEX_URL`, then uv
 configuration, then `PIP_INDEX_URL`, then pip configuration, then PyPI. The
 installer's explicit `--mirror cn` selects and persists its profile as before;
 without that flag, the helper reads the unit's existing `mirror.env` without
-replacing real environment values. Update processes already load that file.
+replacing real environment values. Native command boot preserves this precedence
+across both uv single-index aliases while loading `.env` and `mirror.env`, before
+an update enters the helper. Additional index settings are not merged into them.
 The pip bridge reads only index settings, with global, user, target-venv and
 `PIP_CONFIG_FILE` precedence; `[install]` overrides `[global]`, an existing
 explicit config file suppresses user files, and `PIP_CONFIG_FILE=/dev/null`

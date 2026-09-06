@@ -56,3 +56,45 @@ def test_mirror_env_fills_unset_keys(tmp_path: Path, monkeypatch: pytest.MonkeyP
     monkeypatch.delenv("npm_config_registry", raising=False)
     load_dotenv(mirror_env)
     assert os.environ["npm_config_registry"] == "https://registry.example"  # noqa: SIM112
+
+
+@pytest.mark.parametrize("source_layer", ["environment", "unit"])
+@pytest.mark.parametrize("higher_key", ["UV_INDEX_URL", "UV_DEFAULT_INDEX"])
+def test_unit_boot_preserves_single_index_precedence_across_aliases(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source_layer: str, higher_key: str
+) -> None:
+    from cli._python_index import python_index
+    from shared import dotenv_boot
+
+    lower_key = "UV_DEFAULT_INDEX" if higher_key == "UV_INDEX_URL" else "UV_INDEX_URL"
+    unit = tmp_path / ".env"
+    mirror = tmp_path / "mirror.env"
+    unit.write_text("")
+    mirror.write_text(f"{lower_key}=https://mirror.example/simple\n")
+    for key in (
+        "UV_DEFAULT_INDEX",
+        "UV_INDEX_URL",
+        "UV_INDEX",
+        "UV_EXTRA_INDEX_URL",
+        "UV_NO_INDEX",
+    ):
+        monkeypatch.delenv(key, raising=False)
+    if source_layer == "environment":
+        monkeypatch.setenv(higher_key, "https://pypi.org/simple")
+        unit.write_text(f"{lower_key}=https://unit.example/simple\n")
+    else:
+        unit.write_text(f"{higher_key}=https://pypi.org/simple\n")
+    monkeypatch.setattr(dotenv_boot, "AVA_ENV_PATH", unit)
+    monkeypatch.setattr(dotenv_boot, "AVA_MIRROR_ENV_PATH", mirror)
+    # These independent boot policies do not participate in package index precedence.
+    monkeypatch.setattr(dotenv_boot, "_enforce_cluster_env_authority", lambda: None)
+    monkeypatch.setattr(dotenv_boot, "_translate_legacy_skip_aliases", lambda: None)
+    before = unit.read_bytes(), mirror.read_bytes()
+    dotenv_boot.load_ava_env()
+    assert python_index(tmp_path, os.environ) == "https://pypi.org/simple"
+    assert (unit.read_bytes(), mirror.read_bytes()) == before
+    monkeypatch.setenv("UV_INDEX", "https://additional.example/simple")
+    dotenv_boot.load_ava_env()
+    assert os.environ["UV_INDEX"] == "https://additional.example/simple"
+    with pytest.raises(ValueError, match="one default Python index"):
+        python_index(tmp_path, os.environ)
