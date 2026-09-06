@@ -28,7 +28,7 @@ export function AlertsBadge() {
       <Bell className="size-4" aria-hidden />
       <span
         data-testid="alerts-badge-count"
-        className="absolute -right-1 -top-1 rounded-full bg-destructive px-1 text-[10px] font-semibold tabular-nums leading-4 text-white"
+        className="absolute -right-1 -top-1 rounded-full bg-destructive px-1 font-mono text-2xs font-semibold tabular-nums leading-4 text-white"
       >
         {unresolved > 99 ? "99+" : unresolved}
       </span>

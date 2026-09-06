@@ -236,9 +236,25 @@ describe("AgentRow inline rename accessibility", () => {
       />,
     );
 
-    fireEvent.doubleClick(screen.getByText("#1 · Focus"));
+    fireEvent.doubleClick(screen.getByText("Focus"));
 
     expect(screen.getByLabelText("Rename agent 1")).toBeTruthy();
+  });
+});
+
+describe("AgentRow typography", () => {
+  it("uses sans for the row and mono only for ID and time data", () => {
+    const { container } = render(
+      <AgentRow {...baseProps} agent={ag(1)} depth={0} ancestorsIsLast={[]} />,
+    );
+    const row = container.querySelector("li button")!;
+    const id = screen.getByText("#1");
+    const time = row.querySelector("span.tabular-nums")!;
+
+    expect(row.classList).toContain("font-sans");
+    expect(row.classList).not.toContain("font-mono");
+    expect(id.classList).toContain("font-mono");
+    expect(time.classList).toContain("font-mono");
   });
 });
 

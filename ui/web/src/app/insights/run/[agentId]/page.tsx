@@ -226,7 +226,7 @@ export default function RunTimelinePage({
   if (paramsResolved && agentId === null) {
     return (
       <main id="main-content">
-        <p className="p-6 font-mono text-sm text-destructive">{t("invalidAgent")}</p>
+        <p className="p-6 font-sans text-sm text-destructive">{t("invalidAgent")}</p>
       </main>
     );
   }
@@ -250,7 +250,7 @@ export default function RunTimelinePage({
               aria-label={t("zoom")}
             >
               {timeline ? (
-                <span className="max-w-full truncate px-1 font-mono text-[10px] text-muted-foreground">
+                <span className="max-w-full truncate px-1 font-mono text-2xs text-muted-foreground">
                   {t("windowRange", {
                     from: dateTimeInputValue(timeline.window.from).replace("T", " "),
                     to: dateTimeInputValue(timeline.window.to).replace("T", " "),
@@ -262,7 +262,7 @@ export default function RunTimelinePage({
                   key={hours}
                   type="button"
                   onClick={() => setZoomWindow(hours)}
-                  className="rounded border border-border px-2 py-1 font-mono text-xs hover:bg-muted"
+                  className="rounded border border-border px-2 py-1 font-sans text-xs hover:bg-muted"
                 >
                   {hours >= 1 ? `${hours}h` : "30m"}
                 </button>
@@ -271,7 +271,7 @@ export default function RunTimelinePage({
                 type="button"
                 aria-label={t("zoomOut")}
                 onClick={() => zoomBy(2)}
-                className="rounded border border-border px-2 py-1 font-mono text-xs hover:bg-muted"
+                className="rounded border border-border px-2 py-1 font-sans text-xs hover:bg-muted"
               >
                 −
               </button>
@@ -279,7 +279,7 @@ export default function RunTimelinePage({
                 type="button"
                 aria-label={t("zoomIn")}
                 onClick={() => zoomBy(0.5)}
-                className="rounded border border-border px-2 py-1 font-mono text-xs hover:bg-muted"
+                className="rounded border border-border px-2 py-1 font-sans text-xs hover:bg-muted"
               >
                 +
               </button>
@@ -287,7 +287,7 @@ export default function RunTimelinePage({
                 type="button"
                 aria-label={t("resetWindow")}
                 onClick={resetWindow}
-                className="rounded border border-border px-2 py-1 font-mono text-xs hover:bg-muted"
+                className="rounded border border-border px-2 py-1 font-sans text-xs hover:bg-muted"
               >
                 {t("resetWindow")}
               </button>
@@ -309,7 +309,7 @@ export default function RunTimelinePage({
                   aria-pressed={session === "compact"}
                   onClick={() => selectSession("compact")}
                   className={cn(
-                    "rounded border px-2 py-1 font-mono text-xs",
+                    "rounded border px-2 py-1 font-sans text-xs",
                     session === "compact" ? "border-primary bg-primary/10 text-primary" : "border-border hover:bg-muted",
                   )}
                 >
@@ -320,7 +320,7 @@ export default function RunTimelinePage({
                   aria-pressed={session === "current"}
                   onClick={() => selectSession("current")}
                   className={cn(
-                    "rounded border px-2 py-1 font-mono text-xs",
+                    "rounded border px-2 py-1 font-sans text-xs",
                     session === "current" ? "border-primary bg-primary/10 text-primary" : "border-border hover:bg-muted",
                   )}
                 >
@@ -389,7 +389,7 @@ export default function RunTimelinePage({
                   [t("restarts"), String(timeline.meta.n_restart)],
                 ].map(([label, value]) => (
                   <div key={label} className="rounded border border-border bg-card px-3 py-2">
-                    <div className="text-[10px] uppercase tracking-wide text-muted-foreground">{label}</div>
+                    <div className="text-2xs uppercase tracking-wide text-muted-foreground">{label}</div>
                     <div className="font-mono text-sm tabular-nums">{value}</div>
                   </div>
                 ))}
@@ -402,9 +402,9 @@ export default function RunTimelinePage({
               />
             </>
           ) : timelinePending ? (
-            <p className="font-mono text-sm text-muted-foreground">{t("loading")}</p>
+            <p className="font-sans text-sm text-muted-foreground">{t("loading")}</p>
           ) : (
-            <div className="space-y-2 font-mono text-sm text-destructive" role="alert">
+            <div className="space-y-2 font-sans text-sm text-destructive" role="alert">
               <p>{t("loadFailed")}</p>
               <button
                 type="button"

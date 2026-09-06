@@ -55,6 +55,14 @@ describe("InsightsPage shell", () => {
     expect(screen.getByRole("link", { name: /back to agents/i })).toBeTruthy();
   });
 
+  it("keeps the observation content in the UI sans family", () => {
+    wrap(<InsightsPage />);
+    const content = document.getElementById("insights-scroll")?.firstElementChild;
+
+    expect(content?.classList.contains("font-sans")).toBe(true);
+    expect(content?.classList.contains("font-mono")).toBe(false);
+  });
+
   it("renders the Status + Ops section headings + anchors", () => {
     wrap(<InsightsPage />);
     for (const section of INSIGHTS_SECTIONS) {

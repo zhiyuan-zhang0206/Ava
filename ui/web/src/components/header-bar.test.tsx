@@ -17,6 +17,13 @@ describe("HeaderBar", () => {
     expect(screen.getByText("Agent #5 · idle")).toBeTruthy();
   });
 
+  it("uses sans typography for the UI title", () => {
+    const { container } = render(<HeaderBar label="Agent #5 · idle" onOpenSidebar={vi.fn()} />);
+    const header = container.querySelector("header")!;
+    expect(header.classList).toContain("font-sans");
+    expect(header.classList).not.toContain("font-mono");
+  });
+
   it("click sidebar button → onOpenSidebar called", () => {
     const onOpen = vi.fn();
     render(<HeaderBar label="x" onOpenSidebar={onOpen} />);

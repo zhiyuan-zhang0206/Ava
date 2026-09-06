@@ -167,7 +167,7 @@ export function markerVisual(cls: MarkerClass): MarkerVisual {
 // inherited from the card (markerVisual.text).
 export function MarkerBody({ payload }: { payload: string }) {
   return (
-    <pre className="whitespace-pre-wrap [overflow-wrap:anywhere] font-mono text-[12px] leading-relaxed m-0">{payload}</pre>
+    <pre className="whitespace-pre-wrap [overflow-wrap:anywhere] font-mono text-xs leading-relaxed m-0">{payload}</pre>
   );
 }
 
@@ -188,13 +188,13 @@ function UnknownMarkerChip({ source, payload }: { source: string | null; payload
       data-testid="marker-unrecognized"
       className="border-l-2 border-destructive/60 bg-destructive/10 text-destructive rounded-r-sm px-3 py-2"
     >
-      <div className="text-[11px] font-mono uppercase tracking-widest mb-1">
+      <div className="text-xs font-sans uppercase tracking-widest mb-1">
         {t("unrecognized")}
       </div>
-      <div className="text-[11px] font-mono opacity-70 mb-1">
+      <div className="text-xs font-mono opacity-70 mb-1">
         source = {source === null ? "null" : JSON.stringify(source)}
       </div>
-      <pre className="whitespace-pre-wrap [overflow-wrap:anywhere] font-mono text-[12px] leading-relaxed m-0">{payload}</pre>
+      <pre className="whitespace-pre-wrap [overflow-wrap:anywhere] font-mono text-xs leading-relaxed m-0">{payload}</pre>
     </div>
   );
 }
@@ -203,7 +203,7 @@ function EphemeralMarker({ label, isError = false }: { label: string; isError?: 
   return (
     <div
       data-testid={isError ? "marker-error" : undefined}
-      className={cn("font-mono text-xs", isError ? "text-destructive" : "text-muted-foreground")}
+      className={cn("font-sans text-xs", isError ? "text-destructive" : "text-muted-foreground")}
     >
       {label}
     </div>

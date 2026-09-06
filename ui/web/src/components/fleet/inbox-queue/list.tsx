@@ -28,7 +28,7 @@ export function QueueHeader({
     <header className={cn("shrink-0 items-center gap-2 border-b border-border px-4", BAR_HEIGHT_CLASS, FLEX)}>
       <h2 className="text-sm font-semibold">{t("title")}</h2>
       {total > 0 && (
-        <span className="rounded-full bg-muted px-1.5 text-[10px] tabular-nums text-foreground">
+        <span className="rounded-full bg-muted px-1.5 font-mono text-2xs tabular-nums text-foreground">
           {total}
         </span>
       )}
@@ -38,7 +38,7 @@ export function QueueHeader({
           failure). Same treatment as the Task Graph's StaleBadge. */}
       {stale && (
         <span
-          className="inline-flex items-center gap-1 text-[10px] text-amber-600 dark:text-amber-400"
+          className="inline-flex items-center gap-1 text-2xs text-amber-600 dark:text-amber-400"
           title={t("refreshFailed")}
         >
           <span className="size-1.5 rounded-full bg-amber-500" />
@@ -140,7 +140,7 @@ export function QueueList({
         </li>
       )}
       {historyFailed && (
-        <li className="px-4 py-3 text-center text-[10px] text-muted-foreground">
+        <li className="px-4 py-3 text-center text-2xs text-muted-foreground">
           {t("historyUnavailable")}
         </li>
       )}
@@ -150,7 +150,7 @@ export function QueueList({
             type="button"
             onClick={() => setResolvedOpen((o) => !o)}
             aria-expanded={resolvedOpen}
-            className={cn("w-full items-center gap-1.5 px-4 pt-3 pb-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground/70 hover:text-foreground", FLEX)}
+            className={cn("w-full items-center gap-1.5 px-4 pt-3 pb-1 text-2xs font-medium uppercase tracking-wide text-muted-foreground/70 hover:text-foreground", FLEX)}
           >
             <ChevronRight className={cn("size-3 transition-transform", resolvedOpen && "rotate-90")} aria-hidden />
             {/* No count badge — user ruling 2026-08-09 #1096: the word alone. */}
@@ -181,7 +181,7 @@ export function QueueList({
             type="button"
             onClick={fetchNextPage}
             disabled={isFetchingNextPage}
-            className="w-full px-4 py-2 text-center text-[10px] text-muted-foreground hover:text-foreground disabled:opacity-50"
+            className="w-full px-4 py-2 text-center text-2xs text-muted-foreground hover:text-foreground disabled:opacity-50"
           >
             {isFetchingNextPage ? t("loading") : t("showMore")}
           </button>
@@ -246,10 +246,10 @@ export function OpenUnits({
               className={cn("items-center gap-2 px-4 pt-3 pb-1", FLEX)}
               aria-label={t("task", { id: u.root.id, title: u.root.title })}
             >
-              <span className={cn("truncate text-[10px] font-medium text-muted-foreground", MIN_W_0)}>
+              <span className={cn("truncate text-2xs font-medium text-muted-foreground", MIN_W_0)}>
                 #{u.root.id} {u.root.title}
               </span>
-              <span className="shrink-0 rounded-full bg-muted px-1.5 text-[10px] tabular-nums text-foreground">
+              <span className="shrink-0 rounded-full bg-muted px-1.5 font-mono text-2xs tabular-nums text-foreground">
                 {u.items.length}
               </span>
             </li>

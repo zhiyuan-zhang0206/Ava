@@ -122,7 +122,7 @@ export function SidebarBody(props: InnerProps & { wide: boolean }) {
       {/* 3. Toolbar: waiting indicator + view mode + status toggle + terminated toggle + sort.
           flex-wrap so a narrow sidebar wraps controls onto a second line
           instead of overflowing horizontally (none of these shrink). */}
-      <div className={cn("flex-wrap items-center gap-1.5 px-3 py-1.5 border-b border-border text-[11px] text-muted-foreground", FLEX)}>
+      <div className={cn("flex-wrap items-center gap-1.5 px-3 py-1.5 border-b border-border text-xs text-muted-foreground", FLEX)}>
         {/* X waiting on you — a jumping count is a dynamic signal; only when
             awaiting-reply notifications are opted in. */}
         {notifyAwaitingReply && waiting > 0 && (
@@ -322,7 +322,7 @@ function SpawningRow({ active, showStatus }: { active: boolean; showStatus: bool
     <li className="relative" data-testid="spawning-row">
       <div
         className={cn(
-          "w-full text-left py-2.5 pr-4 font-mono text-xs items-center gap-2 border-l-2",
+          "w-full text-left py-2.5 pr-4 font-sans text-xs items-center gap-2 border-l-2",
           active
             ? "bg-sidebar-accent text-sidebar-accent-foreground border-primary"
             : "text-muted-foreground border-transparent",
@@ -339,10 +339,10 @@ function SpawningRow({ active, showStatus }: { active: boolean; showStatus: bool
           {showStatus ? (
             <Loader2 className="size-3 animate-spin opacity-60" />
           ) : (
-            <span className="text-[10px] opacity-60 leading-none">…</span>
+            <span className="text-2xs opacity-60 leading-none">…</span>
           )}
         </span>
-        <span className="text-[10px] opacity-0 shrink-0 tabular-nums">·</span>
+        <span className="font-mono text-2xs opacity-0 shrink-0 tabular-nums">·</span>
         <span className="w-9 shrink-0" />
       </div>
     </li>

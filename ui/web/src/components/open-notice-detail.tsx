@@ -103,24 +103,24 @@ export function OpenNoticeDetail({
         <div className={cn("flex-wrap items-center gap-1.5", FLEX)}>
           <span
             className={cn(
-              "shrink-0 rounded px-1 text-[10px] font-semibold text-white",
+              "shrink-0 rounded px-1 font-mono text-2xs font-semibold text-white",
               PRIORITY_BG[notice.priority],
             )}
           >
             {notice.priority}
           </span>
           {notice.blocking && (
-            <span className="shrink-0 rounded bg-destructive/10 px-1 text-[9px] font-medium tracking-wide text-destructive uppercase">
+            <span className="shrink-0 rounded bg-destructive/10 px-1 text-2xs font-medium tracking-wide text-destructive uppercase">
               {t("blocking")}
             </span>
           )}
-          <span className="text-[10px] text-muted-foreground">
+          <span className="text-2xs text-muted-foreground">
             {requiresResponse ? "Decision" : "FYI"}
           </span>
           {showTimestamp ? (
             <>
-              <span aria-hidden className="text-[10px] text-muted-foreground">·</span>
-              <span className="text-[10px] text-muted-foreground">
+              <span aria-hidden className="text-2xs text-muted-foreground">·</span>
+              <span className="text-2xs text-muted-foreground">
                 {formatRelative(notice.created_at)}, {formatAbsolute(notice.created_at)}
               </span>
             </>
@@ -128,7 +128,7 @@ export function OpenNoticeDetail({
         </div>
         <h4 className="text-xs font-medium break-words">{notice.title}</h4>
         {notice.content && (
-          <div className="text-[11px] break-words text-muted-foreground">
+          <div className="text-xs break-words text-muted-foreground">
             <ChatMarkdown content={notice.content} />
           </div>
         )}
@@ -156,7 +156,7 @@ export function OpenNoticeDetail({
           }
           disabled={pending}
           aria-label={t("replyTo", { title: notice.title })}
-          className={cn("min-h-[3.25rem] rounded border border-input bg-background px-2 py-1.5 font-mono text-xs focus:border-primary disabled:opacity-50", FLEX_1)}
+          className={cn("min-h-[3.25rem] rounded border border-input bg-background px-2 py-1.5 font-sans text-xs focus:border-primary disabled:opacity-50", FLEX_1)}
         />
         {requiresResponse ? (
           <SendButton
@@ -176,13 +176,13 @@ export function OpenNoticeDetail({
       </div>
 
       <div className={cn("min-h-4 items-center justify-between gap-2", FLEX)}>
-        {error ? <p className="text-[10px] text-destructive">{error}</p> : <span />}
+        {error ? <p className="text-2xs text-destructive">{error}</p> : <span />}
         {requiresResponse ? (
           <button
             type="button"
             onClick={dismiss}
             disabled={pending}
-            className="shrink-0 rounded border border-border px-2 py-0.5 text-[10px] text-muted-foreground hover:bg-sidebar-accent hover:text-foreground disabled:opacity-50"
+            className="shrink-0 rounded border border-border px-2 py-0.5 text-2xs text-muted-foreground hover:bg-sidebar-accent hover:text-foreground disabled:opacity-50"
           >
             Dismiss
           </button>
@@ -191,7 +191,7 @@ export function OpenNoticeDetail({
             type="button"
             onClick={markRead}
             disabled={pending}
-            className="shrink-0 rounded border border-border px-2 py-0.5 text-[10px] text-muted-foreground hover:bg-sidebar-accent hover:text-foreground disabled:opacity-50"
+            className="shrink-0 rounded border border-border px-2 py-0.5 text-2xs text-muted-foreground hover:bg-sidebar-accent hover:text-foreground disabled:opacity-50"
           >
             {pending ? t("marking") : t("markRead")}
           </button>

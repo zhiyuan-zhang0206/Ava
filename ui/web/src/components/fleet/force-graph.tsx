@@ -775,7 +775,7 @@ export const ForceGraph = memo(function ForceGraph({
                     <text
                       textAnchor="middle"
                       dominantBaseline="central"
-                      className="fill-white text-[6px] font-mono font-semibold"
+                      className="fill-white font-mono text-2xs font-semibold"
                       stroke="rgba(0,0,0,0.35)"
                       strokeWidth={0.75}
                       paintOrder="stroke"
@@ -805,13 +805,13 @@ export const ForceGraph = memo(function ForceGraph({
 
       {/* Stats bar: node / edge counts. */}
       {statsText != null ? (
-        <div className="pointer-events-none absolute bottom-3 left-3 rounded-md border border-border bg-background/80 px-3 py-1.5 text-[10px] text-muted-foreground tabular-nums backdrop-blur">
+        <div className="pointer-events-none absolute bottom-3 left-3 rounded-md border border-border bg-background/80 px-3 py-1.5 font-mono text-2xs text-muted-foreground tabular-nums backdrop-blur">
           {statsText}
         </div>
       ) : null}
 
       {legend != null ? (
-        <div className="pointer-events-none absolute bottom-3 right-3 rounded-md border border-border bg-background/80 px-3 py-1.5 text-[10px] text-muted-foreground backdrop-blur">
+        <div className="pointer-events-none absolute bottom-3 right-3 rounded-md border border-border bg-background/80 px-3 py-1.5 text-2xs text-muted-foreground backdrop-blur">
           {legend}
         </div>
       ) : null}
@@ -858,7 +858,7 @@ export const ForceGraph = memo(function ForceGraph({
         <ForceControls params={params} setParams={setParams} reset={resetParams} groups={groups} />
         <button
           type="button"
-          className={cn("size-6 items-center justify-center rounded border border-border bg-background/80 text-[10px] text-muted-foreground backdrop-blur hover:bg-sidebar-accent hover:text-foreground", FLEX)}
+          className={cn("size-6 items-center justify-center rounded border border-border bg-background/80 text-2xs text-muted-foreground backdrop-blur hover:bg-sidebar-accent hover:text-foreground", FLEX)}
           aria-label={t("resetZoom")}
           onClick={resetZoom}
           disabled={transform.k === 1 && transform.x === 0 && transform.y === 0}

@@ -63,7 +63,7 @@ export const PythonCode = memo(function PythonCode({ code, streaming = false }: 
       {({ tokens, getLineProps, getTokenProps }) => (
         <div className="group relative">
           <CopyButton text={code} label="code" streaming={streaming} />
-          <pre className="whitespace-pre-wrap [overflow-wrap:anywhere] font-mono text-[13px] leading-relaxed my-2">
+          <pre className="whitespace-pre-wrap [overflow-wrap:anywhere] font-mono text-sm leading-relaxed my-2">
             {tokens.map((line, i) => {
               const isLast = i === tokens.length - 1;
               const lineProps = getLineProps({ line });

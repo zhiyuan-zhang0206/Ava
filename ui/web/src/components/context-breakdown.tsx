@@ -342,7 +342,7 @@ function BreakdownContent({
           {/* The section block's own disclosure — the same chevron button as a
               section row's, collapsed by default (the rows below only render
               once expanded). */}
-          <div className={cn("mb-1 items-center text-[11px] font-medium uppercase tracking-wide text-muted-foreground", FLEX)}>
+          <div className={cn("mb-1 items-center text-xs font-medium uppercase tracking-wide text-muted-foreground", FLEX)}>
             <button
               type="button"
               data-testid="context-breakdown-sections-toggle"

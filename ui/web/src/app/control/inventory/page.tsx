@@ -310,7 +310,7 @@ function InventoryRow({
           <div className={cn("items-center gap-2 flex-wrap", FLEX)}>
             <span className="font-mono font-medium break-all">{row.name}</span>
             <span
-              className="text-[11px] text-muted-foreground border border-border rounded px-1 whitespace-nowrap"
+              className="text-xs text-muted-foreground border border-border rounded px-1 whitespace-nowrap"
               data-testid={`summary-${row.name}`}
             >
               {enabled}/{present} enabled

@@ -113,7 +113,7 @@ export function FleetView() {
     // its content's max-content — main is a row-flex landmark, so without
     // flex-1 a short Inbox selection collapses the whole surface to the
     // content width (observed as the UI shrinking to the left ~60%).
-    <div className={cn("h-dvh bg-background text-foreground font-mono", FLEX, FLEX_COL, FLEX_1, MIN_W_0)}>
+    <div className={cn("h-dvh bg-background text-foreground font-sans", FLEX, FLEX_COL, FLEX_1, MIN_W_0)}>
       {isLarge ? (
         <DesktopLayout
           aliveCount={aliveCount}
@@ -174,7 +174,7 @@ const DesktopLayout = memo(function DesktopLayout({
     <>
       <header className={cn("shrink-0 items-center gap-3 border-b border-border px-6 py-3", FLEX)}>
         <h1 className="text-sm font-semibold">{t("title")}</h1>
-        <span className="text-xs text-muted-foreground tabular-nums">
+        <span className="font-mono text-xs text-muted-foreground tabular-nums">
           {t("activeTotal", { active: aliveCount, total: agents.length })}
         </span>
         {/* Plugin-contributed toolbar entries (contributions.ui.nav, location
@@ -209,7 +209,7 @@ const DesktopLayout = memo(function DesktopLayout({
             className={cn("shrink-0 w-7 items-center gap-2 border-l border-border pt-3 text-muted-foreground hover:bg-sidebar-accent hover:text-foreground", FLEX, FLEX_COL)}
           >
             <PanelRightOpen className="size-4" aria-hidden />
-            <span className="text-[10px] font-medium tracking-wide [writing-mode:vertical-rl]">
+            <span className="text-2xs font-medium tracking-wide [writing-mode:vertical-rl]">
               {t("queue")}
             </span>
           </button>
@@ -280,7 +280,7 @@ const MobileLayout = memo(function MobileLayout({
       {/* Mobile header (compact) */}
       <header className={cn("shrink-0 items-center gap-2 border-b border-border px-4 py-2", FLEX)}>
         <h1 className="text-sm font-semibold">{t("title")}</h1>
-        <span className="text-[11px] text-muted-foreground tabular-nums">
+        <span className="font-mono text-xs text-muted-foreground tabular-nums">
           {t("activeTotal", { active: aliveCount, total: agents.length })}
         </span>
         <Link
@@ -434,7 +434,7 @@ function TabButton({
     >
       {label}
       {count > 0 && (
-        <span className="rounded-full bg-muted px-1.5 text-[10px] tabular-nums text-foreground">
+        <span className="rounded-full bg-muted px-1.5 font-mono text-2xs tabular-nums text-foreground">
           {count}
         </span>
       )}
@@ -470,7 +470,7 @@ function MobileTabButton({
     >
       {label}
       {count > 0 && (
-        <span className="rounded-full bg-muted px-1.5 text-[10px] tabular-nums text-foreground">
+        <span className="rounded-full bg-muted px-1.5 font-mono text-2xs tabular-nums text-foreground">
           {count}
         </span>
       )}

@@ -129,7 +129,7 @@ export function ResolvedDetail({
         />
         <div className={cn("items-center gap-2", FLEX)}>
           <PriorityBadge priority={notice.priority} muted />
-          <span className="text-[10px] text-muted-foreground">
+          <span className="text-2xs text-muted-foreground">
             {notice.require_response ? t("decision") : t("fyi")}
           </span>
         </div>
@@ -143,7 +143,7 @@ export function ResolvedDetail({
             follows the agent's text directly instead of being pinned to the
             bottom of the panel with a gap of blank space in between. */}
         <div className="mt-4 border-t border-border pt-3">
-          <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground/70">
+          <div className="text-2xs font-medium uppercase tracking-wide text-muted-foreground/70">
             {label}
             {notice.resolved_at ? ` · ${formatRelativeTime(notice.resolved_at)}` : ""}
           </div>

@@ -86,7 +86,7 @@ export default function InsightsPage() {
           ariaLabel={t("sections")}
         />
         <div id={INSIGHTS_SCROLL_ID} className={cn("overflow-y-auto overflow-x-hidden", FLEX_1)}>
-          <div className={cn("mx-auto max-w-4xl space-y-12 px-6 py-6 font-mono text-sm", MIN_W_0)}>
+          <div className={cn("mx-auto max-w-4xl space-y-12 px-6 py-6 font-sans text-sm", MIN_W_0)}>
             <ControlSection
               id="status"
               label={t("statusLabel")}

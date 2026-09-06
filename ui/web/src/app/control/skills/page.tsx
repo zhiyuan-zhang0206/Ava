@@ -144,7 +144,7 @@ function SkillsTable({
                 <span className="font-mono font-medium">{s.name}</span>
               </TableCell>
               <TableCell className="align-top">
-                <span className="text-[11px] text-muted-foreground border border-border rounded px-1">
+                <span className="text-xs text-muted-foreground border border-border rounded px-1">
                   {layerLabel(s.layer, t)}
                 </span>
               </TableCell>
