@@ -370,6 +370,7 @@ def test_repo_google_provider_is_enabled_and_registers_complete_contract() -> No
     }
     assert gemini_models <= MODELS.keys()
     assert set(SUPPORTED_MODELS["gemini"]) == {
+        "gemini-3.8-flash",
         "gemini-3.7-flash",
         "gemini-3.5-flash",
         "gemini-3.1-pro-preview",
