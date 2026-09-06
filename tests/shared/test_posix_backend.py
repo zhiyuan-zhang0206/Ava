@@ -15,7 +15,6 @@ import os
 import shlex
 import subprocess
 import sys
-import time
 from pathlib import Path
 
 import psutil
@@ -30,6 +29,7 @@ from shared.session_backend import (
     WinprocSessionBackend,
     get_shell_backend,
 )
+from tests.shared.poll_until import poll_until
 
 pytestmark = pytest.mark.skipif(IS_WINDOWS, reason="posixproc is the POSIX supervisor")
 
@@ -46,15 +46,6 @@ def _pid(name: str) -> int:
     rec = posixproc._read_record(name)
     assert rec is not None
     return rec.pid
-
-
-def _wait(predicate, timeout: float = 5.0, interval: float = 0.05) -> bool:
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if predicate():
-            return True
-        time.sleep(interval)
-    return predicate()
 
 
 # ---------------------------------------------------------------------------
@@ -209,13 +200,19 @@ def test_tree_kill_leaves_no_orphans(unit_home):
                 continue  # exited between listing and name() — keep looking
         return False
 
-    assert _wait(_find_sleep), "spawned sleep descendant should appear"
+    poll_until(_find_sleep, what="spawned sleep descendant appears")
     child_pid = sleep_pids[-1]
 
     ok, mode = backend.kill_session(name, graceful=False)
     assert ok is True and mode == "forced"
-    assert _wait(lambda: not psutil.pid_exists(parent_pid))
-    assert _wait(lambda: not psutil.pid_exists(child_pid)), "child sleep should die with the tree"
+    poll_until(
+        lambda: (not psutil.pid_exists(parent_pid), psutil.pid_exists(parent_pid)),
+        what="tree-killed parent process exits",
+    )
+    poll_until(
+        lambda: (not psutil.pid_exists(child_pid), psutil.pid_exists(child_pid)),
+        what="tree-killed sleep descendant exits",
+    )
 
 
 def test_pid_reuse_protection(unit_home):
@@ -278,12 +275,15 @@ def test_login_shell_rebuilds_path_with_venv_prefix(unit_home):
     env["PATH"] = "/custom-only/bin:" + os.environ["PATH"]
     name = "ava-test-posixbe-path1"
     # Write via tmp + rename: `>` creates the file empty before echo fills it,
-    # so a bare redirect lets _wait(out.exists) observe an empty window.
+    # so a bare redirect lets poll_until(out.exists) observe an empty window.
     tmp = out.with_suffix(".tmp")  # pyright: ignore[reportUnknownMemberType]
     cmd = f'echo "$PATH" > {shlex.quote(str(tmp))} && exec /bin/mv {shlex.quote(str(tmp))} {shlex.quote(str(out))}'  # pyright: ignore[reportUnknownArgumentType]
     assert backend.new_session(name, cmd, unit_home, env=env) is True  # pyright: ignore[reportUnknownArgumentType]
     try:
-        assert _wait(out.exists)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+        poll_until(
+            out.exists,  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+            what="login-shell PATH output appears",
+        )
         path = out.read_text().strip()  # pyright: ignore[reportUnknownMemberType]
         # the venv was re-activated after the profile ran
         assert ".venv/bin" in path, f"venv bin missing from login-shell PATH: {path!r}"
@@ -318,7 +318,10 @@ def test_no_login_shell_preserves_env_path_exactly(unit_home):
         is True
     )
     try:
-        assert _wait(out.exists)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+        poll_until(
+            out.exists,  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+            what="no-login-shell PATH output appears",
+        )
         assert out.read_text().strip() == "/custom-only/bin"  # pyright: ignore[reportUnknownMemberType]
     finally:
         backend.kill_session(name, graceful=False)
