@@ -84,14 +84,15 @@ _log = logging.getLogger("services.agent_host.daemon")
 _MODULE = "services.agent_host.daemon"
 _PIDFILE = settings.services.agent_host_pidfile
 
-# The host is event-driven — it can legitimately sit for hours with no wake —
-# so liveness is beaten on a fixed timer rather than by work. The ceiling only
-# has to exceed the beat step.
+# A fixed timer proves liveness even when no agent has work.
 _LIVENESS_TIMEOUT_S = 60.0
 _LIVENESS_BEAT_STEP_S = 15.0
 # The gateway treats key presence as proof that this 15-second host loop still
 # runs. Four missed beats expire the proof without adding another probe process.
 _TURN_PROGRESS_HEARTBEAT_TTL_S = 60
+# Bound this best-effort SET separately from the shared client's intentionally
+# unbounded pub/sub socket reads. It must not starve ownership renewal.
+_TURN_PROGRESS_PUBLISH_TIMEOUT_S = 3.0
 
 # The launcher redirects fd 1/2 straight at $AVA_HOME/logs/ava-agent-host.out.log
 # — no pty transcript cap, no loguru rotation, nothing owns the file but the
@@ -304,10 +305,17 @@ async def _publish_turn_progress_heartbeat(
         if snapshot is not None:
             snapshots[str(agent_id)] = snapshot
     try:
-        await shared.redis_client.get_async_redis().set(
-            f"host_turn_progress:{machine}",
-            json.dumps(snapshots, separators=(",", ":")),
-            ex=_TURN_PROGRESS_HEARTBEAT_TTL_S,
+        async with asyncio.timeout(_TURN_PROGRESS_PUBLISH_TIMEOUT_S):
+            await shared.redis_client.get_async_redis().set(
+                f"host_turn_progress:{machine}",
+                json.dumps(snapshots, separators=(",", ":")),
+                ex=_TURN_PROGRESS_HEARTBEAT_TTL_S,
+            )
+    except TimeoutError:
+        _log.warning(
+            "[agent-host] turn-progress heartbeat publish exceeded %.1fs; "
+            "ownership renewal continues",
+            _TURN_PROGRESS_PUBLISH_TIMEOUT_S,
         )
     except Exception:
         # This signal is defensive evidence, not ownership authority. A Redis
@@ -321,12 +329,7 @@ async def _beat_forever(
     scheduler: TurnScheduler,
     machine: str,
 ) -> None:
-    """Keep /healthz fresh while the host waits for wakes.
-
-    The host's main loop is the dispatcher's subscription, which blocks for as
-    long as the cluster is quiet. Without this the probe would read a healthy
-    idle host as a wedged one.
-    """
+    """Renew ownership and liveness independently of idle dispatcher subscriptions."""
     while True:
         _require_helper_parent_chain()
         await host.renew_ownership()
