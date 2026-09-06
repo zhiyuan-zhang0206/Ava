@@ -13,7 +13,7 @@ from typing import Any
 import psycopg
 import pytest
 
-from schedules.catchup import catch_up, fire_slot_once
+from schedules.catchup import catch_up, claimed_slot, fire_slot_once
 
 _ROOT = Path(__file__).resolve().parents[2]
 
@@ -89,6 +89,29 @@ def test_concurrent_processes_execute_a_slot_at_most_once(
 
     observed = sorted(outcomes.get(timeout=5) for _ in range(3))
     assert observed == ["claimed", "fired", "lost"]
+    assert _claimed_slots(db_conn, schedule_id) == [slot]
+
+
+def test_claimed_slot_exposes_the_slot_around_the_fire_callback(
+    db_conn: psycopg.Connection,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The winner's callback sees its slot via claimed_slot(); losers never
+    run, and the slot is restored afterwards — the binding window-based
+    schedules (C9 daily report) rely on."""
+    schedule_id = _insert_schedule(db_conn, created_at=datetime(2026, 9, 6, 9, 30, tzinfo=UTC))
+    monkeypatch.setenv("AVA_SCHEDULE_ID", str(schedule_id))
+    slot = datetime(2026, 9, 6, 10, 0, tzinfo=UTC)
+    observed: list[datetime | None] = []
+
+    def fire(_payload: str) -> None:
+        observed.append(claimed_slot())
+
+    assert claimed_slot() is None
+    assert fire_slot_once(slot, "payload", fire=fire)
+    assert not fire_slot_once(slot, "payload", fire=lambda _payload: None)
+    assert observed == [slot]
+    assert claimed_slot() is None
     assert _claimed_slots(db_conn, schedule_id) == [slot]
 
 

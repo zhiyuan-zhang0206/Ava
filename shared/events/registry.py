@@ -5,6 +5,7 @@ from typing import Any, Literal
 from shared.events.payloads import (
     LLM_ERROR_FAMILY,
     AgentSpawned,
+    CiUsageDaily,
     CompactionCompleted,
     ComputerAction,
     ComputerSessionEnd,
@@ -413,6 +414,11 @@ _EVENTS_RUNTIME: dict[str, EventSpec] = {
         "nudge backoff reset by real inbound or pause",
         payload=HeartbeatBackoffReset,
         tier="noise",
+    ),
+    "ci_usage_daily": _telemetry(
+        "ci_usage_daily",
+        "daily CI-minute reconciliation totals (C9)",
+        payload=CiUsageDaily,
     ),
     "task_reminder_digest": _telemetry(
         "task_reminder_digest",
