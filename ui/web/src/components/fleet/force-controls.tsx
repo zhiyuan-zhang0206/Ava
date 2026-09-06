@@ -218,7 +218,7 @@ export const ForceControls = memo(function ForceControls({
                 </div>
                 <div className={cn("gap-2", FLEX, FLEX_COL)}>
                   {group.label === "edge" && onEdgeWeightEnabledChange ? (
-                    <label className={cn("items-center justify-between gap-2 text-[10px] text-muted-foreground", FLEX)}>
+                    <label className={cn("items-center justify-between gap-2 text-2xs text-muted-foreground", FLEX)}>
                       <span>{t("edgeWeight")}</span>
                       <Switch
                         checked={edgeWeightEnabled ?? true}
