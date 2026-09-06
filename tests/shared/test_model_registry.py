@@ -269,6 +269,7 @@ def test_image_media_types_match_the_verified_model_matrix() -> None:
         "gemini-3.1-pro-preview",
         "gemini-2.5-pro",
         "gemini-2.5-flash",
+        "gpt-6-astra",
         "gpt-5.6-sol",
         "gpt-5.6-terra",
         "gpt-5.6-luna",

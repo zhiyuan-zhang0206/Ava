@@ -60,8 +60,8 @@ SOURCES: dict[str, SourceDescriptor] = {
     "deepseek": SourceDescriptor("deepseek", "https://api.deepseek.com", "/models", "Authorization", "DEEPSEEK_API_KEY", "openai", re.compile(r"^deepseek-v\d+-(flash|pro)$"),
                                  re.compile(r"^deepseek-v\d+-(?P<series>flash|pro)$"), re.compile(r"^deepseek-v(?P<version>\d+)-(flash|pro)$")),
     # Official docs: OpenAI Models API.
-    "gpt": SourceDescriptor("gpt", "https://api.openai.com", "/v1/models", "Authorization", "OPENAI_API_KEY", "openai", re.compile(r"^gpt-5\.\d+(-(sol|terra|luna))?$"),
-                            re.compile(r"^gpt-5\.\d+(?:-(?P<series>sol|terra|luna))?$"), re.compile(r"^gpt-(?P<version>5\.\d+)(?:-(sol|terra|luna))?$")),
+    "gpt": SourceDescriptor("gpt", "https://api.openai.com", "/v1/models", "Authorization", "OPENAI_API_KEY", "openai", re.compile(r"^gpt-(?:5\.\d+|6)(?:-(?:sol|terra|luna|astra))?$"),
+                            re.compile(r"^gpt-(?:5\.\d+|6)(?:-(?P<series>sol|terra|luna|astra))?$"), re.compile(r"^gpt-(?P<version>5\.\d+|6)(?:-(?:sol|terra|luna|astra))?$")),
     # Official docs: Anthropic Models API.
     "claude": SourceDescriptor("claude", "https://api.anthropic.com", "/v1/models", "x-api-key", "ANTHROPIC_API_KEY", "anthropic", re.compile(r"^claude-(opus|sonnet|haiku|fable)-\d"),
                                re.compile(r"^claude-(?P<series>opus|sonnet|haiku|fable)-\d"), re.compile(r"^claude-(opus|sonnet|haiku|fable)-(?P<version>\d+(?:-\d+)?)"), (("anthropic-version", "2023-06-01"),)),

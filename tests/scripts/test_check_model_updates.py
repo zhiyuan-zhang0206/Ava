@@ -302,6 +302,28 @@ def test_candidate_is_reported_once_then_recorded_in_state(
     assert state["providers"]["glm"]["reported"] == ["glm-5.4"]
 
 
+def test_gpt6_family_ids_are_classified_not_dropped_as_other() -> None:
+    """gpt-6-* must stay inside the gpt family patterns: a registered gpt-6
+    member is skipped, and a same-series gpt-6 variant compares against the
+    5.x registry head (older major) and stays actionable."""
+    tracker = _load_script()
+    registry = {
+        "gpt-6-astra": type("Spec", (), {"provider": "gpt"})(),
+        "gpt-5.6-sol": type("Spec", (), {"provider": "gpt"})(),
+    }
+
+    comparison = tracker.compare_models(
+        tracker.SOURCES["gpt"],
+        ["gpt-6-astra", "gpt-6-sol"],
+        registry,
+    )
+
+    assert comparison.candidates == ["gpt-6-sol"]
+    assert comparison.suppressed == []
+    assert comparison.other_ids == []
+    assert comparison.series_models["gpt-6-sol"] == ["gpt-5.6-sol"]
+
+
 def test_newer_same_series_is_actionable_while_older_upstream_member_is_suppressed() -> None:
     tracker = _load_script()
     registry = {
