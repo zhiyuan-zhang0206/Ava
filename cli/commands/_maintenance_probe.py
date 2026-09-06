@@ -20,7 +20,7 @@ class HostIdentity:
 
 def host_identity() -> HostIdentity:
     """Refuse an old daemon, a foreign home, or a response from another PID."""
-    port = health_port("agent-host")
+    port = health_port("agent_host")
     with build_opener(ProxyHandler({})).open(
         f"http://127.0.0.1:{port}/stats", timeout=5
     ) as response:
