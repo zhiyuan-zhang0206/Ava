@@ -6,7 +6,7 @@
       "name": "c9-daily-report",
       "class": "product",
       "default_enabled": true,
-      "description": "Daily CI-minute reconciliation at 05:00 cluster time \u2014 appends the trailing 24h of CI runs to the attribution ledger (idempotent by run id) and emits the ci_usage_daily event; failures wake the Ava P0 lead.",
+      "description": "Daily CI-minute reconciliation at 05:00 cluster time — appends the trailing 24h of CI runs to the attribution ledger (idempotent by run id) and emits the ci_usage_daily event; failures wake the Ava P0 lead.",
       "script": "c9-daily-report-schedule.py",
       "command": "python c9-daily-report-schedule.py"
     },
@@ -14,7 +14,7 @@
       "name": "adversarial-eval-weekly",
       "class": "product",
       "default_enabled": true,
-      "description": "Weekly adversarial probe batch \u2014 rotates 5 of 9 behavior-probe cases through fresh eval-isolated agents every Wednesday 04:00 cluster time; quiet on success, wakes an owner agent for human review on any 0-score.",
+      "description": "Weekly adversarial probe batch — rotates 5 of 9 behavior-probe cases through fresh eval-isolated agents every Wednesday 04:00 cluster time; quiet on success, wakes an owner agent for human review on any 0-score.",
       "script": "adversarial-eval-weekly-schedule.py",
       "command": "python adversarial-eval-weekly-schedule.py"
     },
@@ -22,7 +22,7 @@
       "name": "memory-arbiter",
       "class": "product",
       "default_enabled": true,
-      "description": "Memory pool daily maintenance \u2014 4AM consolidation (commit + push + PR merge) and 7AM health check (OKF, size, dedup, stale).",
+      "description": "Memory pool daily maintenance — 4AM consolidation (commit + push + PR merge) and 7AM health check (OKF, size, dedup, stale).",
       "script": "memory-steward-schedule.py",
       "command": "python memory-steward-schedule.py"
     },
@@ -30,7 +30,7 @@
       "name": "self-evolution-daily",
       "class": "product",
       "default_enabled": true,
-      "description": "Daily incremental self-evolution scan \u2014 runs daily_scan.py at 00:00 (embedded timezone), wakes the self-evolution agent on ALERT (exit 2) or timeout.",
+      "description": "Daily incremental self-evolution scan — runs daily_scan.py at 00:00 (embedded timezone), wakes the self-evolution agent on ALERT (exit 2) or timeout.",
       "script": "self-evolution-daily-schedule.py",
       "command": "python self-evolution-daily-schedule.py"
     },
@@ -38,7 +38,7 @@
       "name": "self-evolution-weekly",
       "class": "product",
       "default_enabled": true,
-      "description": "Weekly self-evolution \u2014 fires the self-evolution agent when the past week's event volume clears a minimum threshold (dynamic; busy weeks get a mid-week follow-up).",
+      "description": "Weekly self-evolution — fires the self-evolution agent when the past week's event volume clears a minimum threshold (dynamic; busy weeks get a mid-week follow-up).",
       "script": "self-evolution-weekly-schedule.py",
       "command": "python self-evolution-weekly-schedule.py"
     },
@@ -46,7 +46,7 @@
       "name": "model-update-tracker",
       "class": "product",
       "default_enabled": true,
-      "description": "Daily upstream model detection \u2014 pulls each provider's official model list, diffs the registry, and wakes the P0 lead agent on new candidates (06:00 Asia/Shanghai).",
+      "description": "Daily upstream model detection — pulls each provider's official model list, diffs the registry, and wakes the P0 lead agent on new candidates (06:00 Asia/Shanghai).",
       "script": "model-update-tracker-schedule.py",
       "command": "python model-update-tracker-schedule.py"
     },

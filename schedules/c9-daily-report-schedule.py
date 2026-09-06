@@ -6,9 +6,13 @@ idempotently (keyed by run id — `scripts/ci_accounting.py`), and emits one
 `ci_usage_daily` telemetry event carrying the day's totals. The per-agent
 breakdown stays in the ledger; `ci_utils.py --ci-usage` reads it on demand.
 
-Idempotency: the slot claim (`schedules.catchup.fire_slot_once`) is
-at-most-once, and the ledger append is run-id-keyed, so a re-run of the same
-window is a no-op for already-recorded runs. A failed reconciliation does NOT
+The reconciliation window is the CLAIMED slot itself (exposed via
+`schedules.catchup.claimed_slot()`), so a catch-up boot that fires several
+missed slots reconciles each slot's own day — windows stay gapless and each
+day emits exactly one event. Idempotency: the slot claim
+(`schedules.catchup.fire_slot_once`) is at-most-once, and the ledger append
+is run-id-keyed, so a re-run of the same window is a no-op for
+already-recorded runs. A failed reconciliation does NOT
 retry automatically (the claim stays committed — the documented
 at-most-once trade-off); the failure message tells the P0 lead to backfill
 manually with `scripts/ci_accounting.py --since ... --until ... --append-ledger`.
@@ -27,10 +31,10 @@ from zoneinfo import ZoneInfo
 import ava
 from ava.agents import AgentStatus as S
 from schedules.agent_status_guard import ensure_agent_status_members
-from schedules.catchup import catch_up, fire_slot_once
+from schedules.catchup import catch_up, claimed_slot, fire_slot_once
 from shared.config import settings
 from shared.log import init_gateway_process
-from shared.watcher import next_fire, previous_fire
+from shared.watcher import next_fire
 
 ensure_agent_status_members(
     S,
@@ -144,9 +148,14 @@ def summarize(
 
 
 def _fire(_payload: None) -> None:
+    slot_end = claimed_slot()
+    if slot_end is None:
+        # Impossible through fire_slot_once (the claim sets the slot
+        # around the callback) — fail loud on a wiring mistake instead
+        # of reconciling the wrong window.
+        raise RuntimeError("c9-daily-report fired outside a claimed slot")
     try:
         accounting = _load_accounting()
-        slot_end = previous_fire(CRON, before=datetime.now(UTC), timezone=TZ)
         since, until, day = window_bounds(slot_end)
         entries = accounting.collect(accounting.DEFAULT_REPO, since, until)
         appended = accounting.append_ledger(accounting.DEFAULT_LEDGER, entries)
