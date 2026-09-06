@@ -1,9 +1,9 @@
-"""Vendored relocatable Postgres: resolution + a real download/extract.
+"""Vendored relocatable Postgres resolution and hermetic extraction.
 
-`test_pg_tool_prefers_vendored_dir` is a fast unit check (no network). The real
-download test fetches the pinned zonky jar from Maven Central, extracts it, and
-runs the relocatable `initdb` standalone -- the bring-up `ava start` depends on for
-a brew-free machine.
+The real downloadable artifact is covered by ``scripts/pgvector_runtime_smoke.py``
+in the ``backend-pgvector-smoke`` CI job. This unit suite stays offline while
+covering the checksum, extraction, executable, and idempotence contracts that
+``ava start`` depends on for a brew-free machine.
 """
 
 from __future__ import annotations
@@ -16,6 +16,7 @@ import subprocess
 import tarfile
 import urllib.error
 import urllib.request
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -117,7 +118,45 @@ def test_download_gives_up_after_bounded_retries(monkeypatch: pytest.MonkeyPatch
     assert sleeps == [2, 4, 8]
 
 
-def test_ensure_pg_binaries_real_download(isolated_runtime: None) -> None:
+def _synthetic_pg_jar(artifact_name: str) -> bytes:
+    """A jar wrapping the minimal executable Postgres tree used by the test."""
+    txz = io.BytesIO()
+    with tarfile.open(fileobj=txz, mode="w:xz") as tar:
+        for directory in ("bin", "lib", "share"):
+            info = tarfile.TarInfo(directory)
+            info.type = tarfile.DIRTYPE
+            info.mode = 0o755
+            tar.addfile(info)
+        initdb = b'#!/bin/sh\necho "17.4"\n'
+        info = tarfile.TarInfo("bin/initdb")
+        info.mode = 0o755
+        info.size = len(initdb)
+        tar.addfile(info, io.BytesIO(initdb))
+
+    jar = io.BytesIO()
+    with zipfile.ZipFile(jar, mode="w") as archive:
+        archive.writestr(f"{artifact_name}.txz", txz.getvalue())
+    return jar.getvalue()
+
+
+def test_ensure_pg_binaries_hermetic_fixture(
+    isolated_runtime: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    artifact_name = "synthetic-postgres"
+    synthetic_jar = _synthetic_pg_jar(artifact_name)
+    key = rb._platform_key()
+    monkeypatch.setitem(
+        rb._PG_ARTIFACTS,
+        key,
+        (artifact_name, hashlib.sha256(synthetic_jar).hexdigest()),
+    )
+    downloads: list[str] = []
+
+    def fake_download(url: str, *, headers: dict[str, str] | None = None) -> bytes:
+        downloads.append(url)
+        return synthetic_jar
+
+    monkeypatch.setattr(rb, "_download", fake_download)
     assert rb.vendored_pg_bin_dir() is None
 
     bin_dir = rb.ensure_pg_binaries()
@@ -128,10 +167,11 @@ def test_ensure_pg_binaries_real_download(isolated_runtime: None) -> None:
     out = subprocess.run(  # noqa: S603 — resolved vendored initdb path + static flag
         [str(bin_dir / "initdb"), "--version"], capture_output=True, text=True, check=True
     )
-    assert "17.4" in out.stdout
+    assert out.stdout.strip() == "17.4"
 
     # Idempotent: a second ensure is a no-op returning the same dir (no re-download).
     assert rb.ensure_pg_binaries() == bin_dir
+    assert len(downloads) == 1
 
 
 # ── pgvector injection unit coverage ───────────────────────────────────────
