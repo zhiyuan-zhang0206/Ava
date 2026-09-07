@@ -12,6 +12,14 @@
 // (TimelineView) owns the expanded state and builds the children only when
 // expanded, so a collapsed turn never mounts its inner rows (and never re-parses
 // their markdown / code on a streaming chunk).
+//
+// Sticky work block behavior:
+// When an expanded TurnBlock's top scrolls past the viewport top (accounting for
+// the floating HeaderBar offset, BAR_HEIGHT_PX), the header sticks at top-11
+// (sticky top-11 z-10) with backdrop-blur and elevation. The full detail rows
+// (thinking/code/output) continue scrolling naturally underneath the stuck header.
+// When collapsed while stuck, the content collapses in place and the viewport
+// scroll position is preserved (no jump back to block top).
 
 import { ChevronDown, ChevronRight, Layers } from "lucide-react";
 import { useTranslations } from "next-intl";
@@ -22,9 +30,45 @@ import { cn } from "@/lib/utils";
 
 import { CallBadge, HEADER_CLS } from "./card";
 import { formatTurnSummary, formatTurnTiming, type TurnSummary } from "./runs";
-import { FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0, OVERFLOW_HIDDEN } from "@/lib/layout";
+import { BAR_HEIGHT_PX, FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0, OVERFLOW_HIDDEN } from "@/lib/layout";
 
 const LIVE_CLOCK_INTERVAL_MS = 100;
+
+/**
+ * Identify which expanded turn block (if any) is currently stuck at the top of the viewport.
+ * When multiple expanded blocks have scrolled past the sticky line, returns the latest/closest one
+ * that crossed the viewport top (highest top position that is <= stickyLine).
+ */
+export function findClosestStuckTurnId(
+  viewport: HTMLElement,
+  topOffset: number = BAR_HEIGHT_PX,
+): string | null {
+  const turnElements = viewport.querySelectorAll<HTMLElement>('[data-turn-expanded="true"]');
+  if (turnElements.length === 0) return null;
+
+  const vpRect = viewport.getBoundingClientRect();
+  const stickyLine = vpRect.top + topOffset;
+
+  let closestTurnId: string | null = null;
+  let closestTop = -Infinity;
+
+  for (const el of turnElements) {
+    const turnId = el.getAttribute("data-turn-id") ?? el.getAttribute("data-item-id");
+    if (!turnId) continue;
+
+    const r = el.getBoundingClientRect();
+    // A block's header is stuck when its top has reached or passed stickyLine,
+    // and its bottom has not completely scrolled past stickyLine (with header buffer).
+    if (r.top <= stickyLine + 1 && r.bottom > stickyLine + 20) {
+      if (r.top >= closestTop) {
+        closestTop = r.top;
+        closestTurnId = turnId;
+      }
+    }
+  }
+
+  return closestTurnId;
+}
 
 export function TurnBlock({
   id,
@@ -33,6 +77,7 @@ export function TurnBlock({
   expanded,
   onToggle,
   turnActive,
+  isStuck,
   children,
 }: {
   // The turn's first member item_id, stamped as data-item-id so the load-older
@@ -53,6 +98,8 @@ export function TurnBlock({
   onToggle: () => void;
   // Whether the agent is mid-turn — drives the live "working for X" / "worked for X" clock.
   turnActive?: boolean;
+  // Whether this turn block is currently actively stuck at the top of the viewport.
+  isStuck?: boolean;
   // The inner rows — passed only when expanded (null when collapsed).
   children?: ReactNode;
 }) {
@@ -139,20 +186,32 @@ export function TurnBlock({
   return (
     <div
       data-item-id={id}
+      data-turn-id={id}
+      data-turn-expanded={expanded}
       data-turn-member-ids={memberIds.join(" ")}
       aria-live="off"
       className={cn(
-        "border-l-2 border-dashed border-border/70 rounded-r-sm",
+        "relative border-l-2 border-dashed border-border/70 rounded-r-sm",
         !expanded && "bg-muted/30",
       )}
     >
       <button
         type="button"
         onClick={onToggle}
-        className={cn(HEADER_CLS, "items-start")}
+        className={cn(
+          HEADER_CLS,
+          "items-start",
+          // top-11 (44px) must match BAR_HEIGHT_PX / BAR_HEIGHT_CLASS ("h-11") from @/lib/layout
+          // so the sticky header sits flush beneath the floating HeaderBar.
+          expanded && "sticky top-11 z-10",
+          expanded && isStuck
+            ? "bg-background/95 backdrop-blur-md shadow-xs border-b border-border/60 transition-[background-color,box-shadow,border-color] duration-150 ease-out motion-reduce:transition-none"
+            : "bg-transparent transition-[background-color,box-shadow,border-color] duration-150 ease-out motion-reduce:transition-none",
+        )}
         aria-expanded={expanded}
         data-testid="turn-toggle"
         data-expanded={expanded}
+        data-stuck={expanded && Boolean(isStuck) ? "true" : "false"}
       >
         {expanded ? (
           <ChevronDown className="size-3 shrink-0 opacity-60 mt-0.5" />
@@ -183,7 +242,7 @@ export function TurnBlock({
       </button>
       <div
         className={cn(
-          "grid transition-[grid-template-rows] duration-200",
+          "grid transition-[grid-template-rows] duration-200 ease-out motion-reduce:transition-none",
           expanded ? "grid-rows-[1fr]" : "grid-rows-[0fr]",
         )}
       >

@@ -3895,3 +3895,121 @@ describe("streamingParseIntervalMs (adaptive stream-parse window, user report 20
     expect(streamingParseIntervalMs(200_000)).toBe(1000);
   });
 });
+
+describe("TimelineView sticky work block (task #2601)", () => {
+  function makeMockRect(top: number, bottom: number, height: number): DOMRect {
+    return {
+      top,
+      bottom,
+      height,
+      left: 0,
+      right: 400,
+      width: 400,
+      x: 0,
+      y: top,
+      toJSON: () => undefined,
+    };
+  }
+
+  it("renders expanded work block with sticky header classes", () => {
+    const items = [
+      makeItem({ item_id: "1.0", kind: "agent_reasoning", payload: "thinking" }),
+      makeItem({ item_id: "1.1", kind: "agent_code", payload: "code" }),
+      makeItem({ item_id: "1.2", kind: "code_output", payload: "output" }),
+    ];
+
+    render(<TimelineView items={items} />);
+    const toggle = screen.getByTestId("turn-toggle");
+    expect(toggle.getAttribute("data-expanded")).toBe("true");
+    expect(toggle.className).toContain("sticky");
+    expect(toggle.className).toContain("top-11");
+    expect(toggle.className).toContain("z-10");
+  });
+
+  it("activates stuck state on scroll past top and updates data-stuck", async () => {
+    const items = [
+      makeItem({ item_id: "1.0", kind: "agent_reasoning", payload: "thinking" }),
+      makeItem({ item_id: "1.1", kind: "agent_code", payload: "code" }),
+      makeItem({ item_id: "1.2", kind: "code_output", payload: "output" }),
+    ];
+
+    const { container } = render(<TimelineView items={items} />);
+    const viewport = container.querySelector('[data-slot="scroll-area-viewport"]')!;
+
+    vi.spyOn(viewport, "getBoundingClientRect").mockReturnValue(makeMockRect(0, 800, 800));
+
+    const turnEl = container.querySelector('[data-turn-expanded="true"]')!;
+
+    // Mock turn element top past 44px
+    vi.spyOn(turnEl, "getBoundingClientRect").mockReturnValue(makeMockRect(10, 700, 690));
+
+    // Trigger scroll
+    fireEvent.scroll(viewport);
+
+    await waitFor(() => {
+      const toggle = screen.getByTestId("turn-toggle");
+      expect(toggle.getAttribute("data-stuck")).toBe("true");
+      expect(toggle.className).toContain("backdrop-blur-md");
+      expect(toggle.className).toContain("shadow-xs");
+    });
+  });
+
+  it("only marks the closest/latest work block as stuck when multiple blocks cross top", async () => {
+    const items = [
+      // Turn 1
+      makeItem({ item_id: "1.0", kind: "agent_reasoning", payload: "thinking 1" }),
+      makeItem({ item_id: "1.1", kind: "agent_code", payload: "code 1" }),
+      // Intervening primary message breaks the turn
+      makeItem({ item_id: "2.0", kind: "agent_chat", payload: "intermediate reply" }),
+      // Turn 2
+      makeItem({ item_id: "3.0", kind: "agent_reasoning", payload: "thinking 2" }),
+      makeItem({ item_id: "3.1", kind: "agent_code", payload: "code 2" }),
+    ];
+
+    const { container } = render(<TimelineView items={items} />);
+    const viewport = container.querySelector('[data-slot="scroll-area-viewport"]')!;
+
+    vi.spyOn(viewport, "getBoundingClientRect").mockReturnValue(makeMockRect(0, 800, 800));
+
+    const turnEls = container.querySelectorAll<HTMLElement>('[data-turn-expanded="true"]');
+    expect(turnEls.length).toBe(2);
+
+    // Turn 1: higher up (top = -300, bottom = 200)
+    vi.spyOn(turnEls[0], "getBoundingClientRect").mockReturnValue(makeMockRect(-300, 200, 500));
+
+    // Turn 2: closer to sticky line (top = 20, bottom = 750)
+    vi.spyOn(turnEls[1], "getBoundingClientRect").mockReturnValue(makeMockRect(20, 750, 730));
+
+    fireEvent.scroll(viewport);
+
+    await waitFor(() => {
+      const toggles = screen.getAllByTestId("turn-toggle");
+      expect(toggles[0].getAttribute("data-stuck")).toBe("false");
+      expect(toggles[1].getAttribute("data-stuck")).toBe("true");
+    });
+  });
+
+  it("collapsing while stuck collapses in place and preserves viewport scroll position", () => {
+    const items = [
+      makeItem({ item_id: "1.0", kind: "agent_reasoning", payload: "thinking" }),
+      makeItem({ item_id: "1.1", kind: "agent_code", payload: "code" }),
+      makeItem({ item_id: "1.2", kind: "code_output", payload: "output" }),
+    ];
+
+    const { container } = render(<TimelineView items={items} />);
+    const viewport = container.querySelector('[data-slot="scroll-area-viewport"]')!;
+
+    // Set scroll position
+    viewport.scrollTop = 450;
+
+    const toggle = screen.getByTestId("turn-toggle");
+    expect(toggle.getAttribute("data-expanded")).toBe("true");
+
+    // Click collapse
+    fireEvent.click(toggle);
+
+    expect(toggle.getAttribute("data-expanded")).toBe("false");
+    // Viewport position is preserved (not reset or jumped back to 0)
+    expect(viewport.scrollTop).toBe(450);
+  });
+});
