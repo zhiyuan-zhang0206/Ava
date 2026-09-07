@@ -14,11 +14,12 @@ from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
 from agent import _turn_progress as progress
+from agent.hosted_ownership import settle_stale_running_rows
 from agent.state import AgentState
 from services.agent_host import dispatcher as dispatch
 from services.agent_host import host as host_module
 from services.agent_host.dispatcher import InboundWakeDispatcher, TurnScheduler
-from services.agent_host.host import AgentHost, settle_stale_running_rows
+from services.agent_host.host import AgentHost
 from shared.db import insert_inbound_message
 from shared.incarnation_resources import IncarnationResources, ResourceProcess, decode_resources
 from shared.machine import machine_name

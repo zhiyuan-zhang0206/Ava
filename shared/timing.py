@@ -168,6 +168,12 @@ CLOCKS: dict[str, Clock] = {
         lambda: deploy.AGENT_LEASE_RENEW_INTERVAL_S,
         "how often a healthy agent renews its lease",
     ),
+    "CORPSE_REAP_GRACE_S": Clock(
+        "agent-lease",
+        lambda: deploy.CORPSE_REAP_GRACE_S,
+        "how long a crash-marked idling row may sit dead before the corpse "
+        "reaper stamps it terminated ('reaper')",
+    ),
     # --- schedule supervision family ---
     "SCHEDULE_STALL_ALERT_AFTER_S": Clock(
         "schedule-supervision",
@@ -252,6 +258,14 @@ CONSTRAINTS: list[Constraint] = [
         "land far inside that window — a grace at or beyond it would always "
         "find the reading stale and silently drop a converged host's completed "
         "stage breakdown",
+    ),
+    Constraint(
+        "<",
+        "AGENT_LEASE_TTL_S",
+        "CORPSE_REAP_GRACE_S",
+        "a crash-marked corpse must first decay offline (its lease stops being "
+        "renewed) before the reaper terminates it — the grace window sits "
+        "outside the lease TTL so the visible sequence stays offline-then-dead",
     ),
     Constraint(
         "<",
