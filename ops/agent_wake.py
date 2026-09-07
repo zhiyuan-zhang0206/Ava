@@ -43,6 +43,7 @@ def _transition_terminated_to_unclaimed_idling(
             sql.SQL(
                 "UPDATE agents_meta SET status = %s, pid = NULL, started_at = NULL, "
                 "termination_source = NULL, lease_expires_at = NULL, "
+                "last_turn_fatal_at = NULL, "
                 "runtime_generation = NULL, runtime_owner = NULL, runtime_kind = NULL, "
                 "runtime_protocol_version = 0 "
                 "WHERE id = %s AND status = %s "
@@ -60,6 +61,7 @@ def _transition_terminated_to_unclaimed_idling(
         cur.execute(
             "UPDATE agents_meta SET status = %s, pid = NULL, started_at = NULL, "
             "termination_source = NULL, lease_expires_at = NULL, "
+            "last_turn_fatal_at = NULL, "
             "runtime_generation = NULL, runtime_owner = NULL, runtime_kind = NULL, "
             "runtime_protocol_version = 0 "
             "WHERE id = %s AND status = %s RETURNING status_changed_at",

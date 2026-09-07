@@ -156,6 +156,7 @@ CREATE TABLE agents_meta (
     liveness_state             TEXT NOT NULL DEFAULT 'unknown' CHECK (liveness_state IN ('online', 'offline', 'unknown')),  -- gateway-owned derived liveness projection (Task #1174): 'online' = machine reachable AND (process lease alive where one is held); 'offline' = machine unreachable (2 consecutive failed status_probe) or lease expired; 'unknown' = not yet judged (fresh rows / unregistered machine). Written ONLY by the gateway heartbeat daemon's liveness pass — status stays lifecycle intent (R1 invariant #1); the frontend renders offline distinctly. 'terminated' rows are never judged.
     last_probe_at             TIMESTAMPTZ,              -- when the gateway liveness pass last judged this row (Task #1174).
     last_compact_at            TIMESTAMPTZ,              -- R1 (Task #1021): synchronous compact stamp — written by agent/hooks/compact.py at each compact, replacing the events-table OFFSET-1 read-your-own-write hack (the anchor for "last compact" without scanning events). NULL = never compacted.
+    last_turn_fatal_at        TIMESTAMPTZ,              -- first fatal turn crash since the last completed LLM turn (the corpse marker: NULL = healthy, set = crash-dead). Stamped with COALESCE (never refreshed while dead) by the hosted runner at crash catch time (agent/hosted_ownership.stamp_turn_fatal); cleared by a completed LLM turn (_persist_last_active) and the resurrect transition. The agent_host beat's reaper terminates marked idling rows past CORPSE_REAP_GRACE_S with termination_source='reaper'; renew_hosted_owner skips marked rows so their lease decays.
     runtime_generation UUID,
     runtime_kind TEXT CHECK (runtime_kind IN ('process', 'hosted')),
     runtime_owner UUID,
@@ -1479,3 +1480,7 @@ INSERT INTO schema_migrations (name) VALUES ('20260906T125200_heartbeat-nudge-ba
 -- Notice expire_at is already represented above. Fresh DBs stamp the
 -- migration instead of replaying the strict ADD COLUMN delta.
 INSERT INTO schema_migrations (name) VALUES ('20260907T190000_notice-expire-at');
+
+-- Corpse fatal marker is already represented above. Fresh DBs stamp the
+-- migration instead of replaying the strict ADD COLUMN delta.
+INSERT INTO schema_migrations (name) VALUES ('20260907T152552_corpse-fatal-marker');

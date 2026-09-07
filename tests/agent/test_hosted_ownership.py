@@ -16,9 +16,11 @@ from agent.db import claim_inbound_batch
 from agent.hosted_ownership import (
     admit_hosted_runtime,
     apply_hosted_lifecycle,
+    reap_crash_corpses,
     release_hosted_owner,
     renew_hosted_owner,
     settle_hosted_runtime,
+    stamp_turn_fatal,
 )
 from shared.db import create_agent, insert_inbound_message
 from shared.incarnation_resources import IncarnationResources, ResourceProcess, decode_resources
@@ -335,3 +337,252 @@ async def test_host_refuses_a_turn_owned_by_another_live_instance(
 
     monkeypatch.setattr(host, "_runtime_for", forbidden_runtime)
     await host.run_turn(agent_id)
+
+
+# ── corpse marker: stamp / settle / reap / renew ─────────────────────────────
+
+
+def _marker(db_conn: psycopg.Connection, agent_id: int) -> object:
+    row = db_conn.execute(
+        "SELECT last_turn_fatal_at FROM agents_meta WHERE id = %s", (agent_id,)
+    ).fetchone()
+    assert row is not None, f"agents_meta row {agent_id} missing"
+    return row[0]
+
+
+def _set_marker(
+    db_conn: psycopg.Connection, agent_id: int, *, minutes_ago: int | None = None
+) -> None:
+    if minutes_ago is None:
+        db_conn.execute(
+            "UPDATE agents_meta SET last_turn_fatal_at = NULL WHERE id = %s", (agent_id,)
+        )
+    else:
+        db_conn.execute(
+            "UPDATE agents_meta SET last_turn_fatal_at = now() - make_interval(mins => %s) "
+            "WHERE id = %s",
+            (minutes_ago, agent_id),
+        )
+    db_conn.commit()
+
+
+async def test_stamp_turn_fatal_is_monotonic_and_cas_guarded(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+) -> None:
+    agent_id, owner = _agent(db_conn), uuid4()
+    incarnation = await admit_hosted_runtime(
+        aops_pool, agent_id, "host-test", owner, expected_from="idling"
+    )
+    assert incarnation is not None
+
+    # First crash stamps.
+    assert await stamp_turn_fatal(aops_pool, incarnation)
+    first = _marker(db_conn, agent_id)
+    assert first is not None
+
+    # A later crash must NOT refresh the stamp (heartbeat crash-loops would
+    # restart the reap grace forever). Capture the old value first: a
+    # COALESCE -> now() regression would silently pass a `!= first` check
+    # (both stamps read ~now), so the assertion must demand equality with the
+    # pre-existing stamp.
+    _set_marker(db_conn, agent_id, minutes_ago=100)
+    old_stamp = _marker(db_conn, agent_id)
+    assert await stamp_turn_fatal(aops_pool, incarnation)
+    assert _marker(db_conn, agent_id) == old_stamp
+
+    # A settled (non-running) row is not stamped — the mark names the live
+    # incarnation only.
+    assert await settle_hosted_runtime(aops_pool, incarnation)
+    assert not await stamp_turn_fatal(aops_pool, incarnation)
+
+    # A foreign incarnation's stamp is a no-op.
+    foreign = RuntimeIncarnation(agent_id, uuid4(), owner)
+    assert not await stamp_turn_fatal(aops_pool, foreign)
+
+
+async def test_settle_never_touches_the_corpse_marker(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+) -> None:
+    """Settlement only writes the idling flip. The marker lifecycle belongs
+    elsewhere (stamp at crash, clear on a completed LLM turn / resurrect), so
+    a no-work park settle can never relabel a crash-dead row healthy and
+    resume its lease renewal forever (the 5858 escape)."""
+    agent_id, owner = _agent(db_conn), uuid4()
+    incarnation = await admit_hosted_runtime(
+        aops_pool, agent_id, "host-test", owner, expected_from="idling"
+    )
+    assert incarnation is not None
+
+    _set_marker(db_conn, agent_id, minutes_ago=30)
+    assert await settle_hosted_runtime(aops_pool, incarnation)
+    assert _marker(db_conn, agent_id) is not None
+
+    # A markerless row stays markerless — settle invents nothing.
+    assert await admit_hosted_runtime(
+        aops_pool, agent_id, "host-test", owner, expected_from="idling"
+    )
+    _set_marker(db_conn, agent_id, minutes_ago=None)
+    assert await settle_hosted_runtime(aops_pool, incarnation)
+    assert _marker(db_conn, agent_id) is None
+
+
+async def test_reap_crash_corpses_terminates_only_grace_elapsed_idling_corpses(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[tuple[int, str, str]] = []
+
+    async def _event(
+        event_type: str,
+        agent_id: int,
+        *,
+        payload: dict[str, object] | None = None,
+        **_kwargs: object,
+    ) -> None:
+        if payload is not None and payload.get("reason") == "corpse_reaper":
+            events.append((agent_id, event_type, "corpse_reaper"))
+
+    monkeypatch.setattr("agent.hosted_ownership.insert_event_log_async", _event)
+    published: list[int] = []
+
+    async def _publish(pool: object, agent_id: int) -> None:
+        published.append(agent_id)
+
+    monkeypatch.setattr("agent.hosted_ownership.publish_agent_updated", _publish)
+    owner = uuid4()
+
+    async def _row(
+        minutes_ago: int | None, *, status: str = "idling", row_owner: object = owner
+    ) -> int:
+        agent_id, _owner = _agent(db_conn), owner
+        incarnation = await admit_hosted_runtime(
+            aops_pool, agent_id, "host-test", _owner, expected_from="idling"
+        )
+        assert incarnation is not None
+        await settle_hosted_runtime(aops_pool, incarnation)
+        db_conn.execute(
+            "UPDATE agents_meta SET status=%s, runtime_owner=%s WHERE id=%s",
+            (status, row_owner, agent_id),
+        )
+        _set_marker(db_conn, agent_id, minutes_ago=minutes_ago)
+        return agent_id
+
+    past_grace = await _row(minutes_ago=16)
+    within_grace = await _row(minutes_ago=5)
+    healthy = await _row(minutes_ago=None)
+    running_corpse = await _row(minutes_ago=16, status="running")
+    foreign_corpse = await _row(minutes_ago=16, row_owner=None)
+    # A corpse left by a predecessor host (fresh owner UUID after a restart)
+    # is ownerless with an expired lease: the lease-qualified scope must
+    # reap it too, or it hangs offline forever.
+    abandoned_corpse = await _row(minutes_ago=16, row_owner=None)
+    db_conn.execute(
+        "UPDATE agents_meta SET lease_expires_at = NULL WHERE id = %s", (abandoned_corpse,)
+    )
+    db_conn.commit()
+
+    published.clear()  # settle publishes on every flip; keep only reap's
+    reaped = await reap_crash_corpses(aops_pool, "host-test", owner)
+    assert sorted(reaped) == sorted([past_grace, abandoned_corpse])
+
+    for reaped_id in reaped:
+        row = db_conn.execute(
+            "SELECT status, termination_source, lease_expires_at FROM agents_meta WHERE id = %s",
+            (reaped_id,),
+        ).fetchone()
+        assert row is not None
+        assert row[0] == "terminated" and row[1] == "reaper" and row[2] is None
+
+    for survivor, expected in (
+        (within_grace, "idling"),
+        (healthy, "idling"),
+        (running_corpse, "running"),
+        (foreign_corpse, "idling"),
+    ):
+        assert db_conn.execute(
+            "SELECT status FROM agents_meta WHERE id = %s", (survivor,)
+        ).fetchone() == (expected,)
+
+    assert sorted(events) == sorted(
+        [
+            (past_grace, "status_change", "corpse_reaper"),
+            (abandoned_corpse, "status_change", "corpse_reaper"),
+        ]
+    )
+    assert sorted(published) == sorted([past_grace, abandoned_corpse])
+    # A second pass finds nothing new (the corpses are terminated).
+    assert await reap_crash_corpses(aops_pool, "host-test", owner) == []
+
+
+async def test_crash_pipeline_marker_survives_settle_and_reaper_terminates(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+) -> None:
+    """The 5858 flow end-to-end at the ownership layer: crash stamps while
+    running, the idling settle keeps the stamp, renew stops renewing the
+    corpse, and the reaper terminates it once the grace window elapses."""
+    agent_id, owner = _agent(db_conn), uuid4()
+    incarnation = await admit_hosted_runtime(
+        aops_pool, agent_id, "host-test", owner, expected_from="idling"
+    )
+    assert incarnation is not None
+
+    # Crash while running: stamp first (CAS on running), then settle.
+    assert await stamp_turn_fatal(aops_pool, incarnation)
+    assert await settle_hosted_runtime(aops_pool, incarnation)
+    assert _marker(db_conn, agent_id) is not None
+
+    # The beat renews healthy rows only — the corpse's lease stays expired.
+    db_conn.execute("UPDATE agents_meta SET lease_expires_at = NULL WHERE id = %s", (agent_id,))
+    db_conn.commit()
+    await renew_hosted_owner(aops_pool, "host-test", owner)
+    assert db_conn.execute(
+        "SELECT lease_expires_at FROM agents_meta WHERE id = %s", (agent_id,)
+    ).fetchone() == (None,)
+
+    # Within the grace window the row is dead-but-waiting, not terminated.
+    assert await reap_crash_corpses(aops_pool, "host-test", owner) == []
+
+    # Past the grace window the reaper terminates it with the reaper stamp.
+    _set_marker(db_conn, agent_id, minutes_ago=16)
+    assert await reap_crash_corpses(aops_pool, "host-test", owner) == [agent_id]
+    row = db_conn.execute(
+        "SELECT status, termination_source FROM agents_meta WHERE id = %s", (agent_id,)
+    ).fetchone()
+    assert row is not None
+    assert row[0] == "terminated" and row[1] == "reaper"
+
+
+async def test_renew_hosted_owner_skips_crash_marked_rows(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+) -> None:
+    owner = uuid4()
+
+    async def _row(marked: bool) -> int:
+        agent_id, _owner = _agent(db_conn), owner
+        incarnation = await admit_hosted_runtime(
+            aops_pool, agent_id, "host-test", _owner, expected_from="idling"
+        )
+        assert incarnation is not None
+        await settle_hosted_runtime(aops_pool, incarnation)
+        if marked:
+            _set_marker(db_conn, agent_id, minutes_ago=0)
+        db_conn.execute("UPDATE agents_meta SET lease_expires_at = NULL WHERE id = %s", (agent_id,))
+        db_conn.commit()
+        return agent_id
+
+    corpse = await _row(marked=True)
+    live = await _row(marked=False)
+
+    await renew_hosted_owner(aops_pool, "host-test", owner)
+
+    assert db_conn.execute(
+        "SELECT lease_expires_at FROM agents_meta WHERE id = %s", (corpse,)
+    ).fetchone() == (None,)
+    assert db_conn.execute(
+        "SELECT lease_expires_at > now() FROM agents_meta WHERE id = %s", (live,)
+    ).fetchone() == (True,)

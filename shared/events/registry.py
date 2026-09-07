@@ -358,6 +358,40 @@ _EVENTS_RUNTIME: dict[str, EventSpec] = {
         "checkpoint",
         tier="anomaly",
     ),
+    # corpse reaper (task #2609) — crash-dead hosted rows get a firsthand
+    # death marker and are terminated by the host's own beat reaper
+    "host_turn_corpse_marked": _telemetry(
+        "host_turn_corpse_marked",
+        "a hosted turn crashed and the row was stamped with the corpse marker "
+        "(last_turn_fatal_at) — the reaper terminates it once the grace window "
+        "elapses unless a completed turn clears the mark first",
+        tier="anomaly",
+    ),
+    "corpse_stamp_failed": _telemetry(
+        "corpse_stamp_failed",
+        "the corpse marker stamp failed after a hosted turn crash — the row "
+        "keeps looking alive until a later stamp or a completed turn; the "
+        "reaper cannot see this death",
+        tier="anomaly",
+    ),
+    "corpse_reaper_terminated": _telemetry(
+        "corpse_reaper_terminated",
+        "the corpse reaper terminated crash-marked idling rows past the grace "
+        "window (termination_source='reaper')",
+        tier="anomaly",
+    ),
+    "corpse_reaper_failed": _telemetry(
+        "corpse_reaper_failed",
+        "the beat's corpse reap pass failed — retried on the next beat; leases "
+        "of healthy rows are unaffected (renewal runs first)",
+        tier="anomaly",
+    ),
+    "corpse_reaper_publish_failed": _telemetry(
+        "corpse_reaper_publish_failed",
+        "a reaped corpse's frontend snapshot publish failed — best-effort; the "
+        "durable terminated flip already committed",
+        tier="noise",
+    ),
     "host_turn_stall_aborted": _telemetry(
         "host_turn_stall_aborted",
         "a hosted turn task ended after its no-progress abort: the invocation "
