@@ -64,6 +64,8 @@ class ClusterStatus(BaseModel):
     serve_gateway: bool
     serve_agent_runner: bool
     serve_observability_station: bool = False
+    # Status only: business pause, native admission hold, or startup not yet serving.
+    # Does not alter the business HTTP middleware's DB-posture policy.
     paused: bool
     # The whole-cluster orchestration alive on this host ('rollout' / 'restart' /
     # 'update'), or None when idle. This endpoint bypasses the cluster-paused 503
@@ -425,6 +427,7 @@ def status_snapshot(pool: Any | None = None) -> ClusterStatus:
     through and FastAPI surfaces as default 500 (admin endpoint, not
     consumed by SDK).
     """
+    from shared import maintenance, start_serving
     from shared import process_sha as _process_sha
     from shared.cluster_drift import prod_source_head_sha
     from shared.config import settings
@@ -460,7 +463,12 @@ def status_snapshot(pool: Any | None = None) -> ClusterStatus:
         serve_gateway=is_gateway(),
         serve_agent_runner=is_agent_runner(),
         serve_observability_station=is_observability_station(),
-        paused=cluster_pause.is_paused(state),
+        paused=(
+            state is None
+            or cluster_pause.is_paused(state)
+            or maintenance.held()
+            or not start_serving.is_serving()
+        ),
         current_orchestration=cluster_session.current_orchestration(state, lease),
         last_updater_outcome=last_updater_outcome(state),
         head_sha=prod_source_head_sha(),
