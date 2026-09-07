@@ -11,6 +11,7 @@ import pytest
 
 from scripts.post_deploy_visual_check import (
     _accept_wave,
+    _assert_gate_origin,
     _container_command,
     _cookie_mount,
     _expected_capture_names,
@@ -169,6 +170,30 @@ def test_wave_id_rejects_path_traversal() -> None:
     assert validate_wave_id("abc123-demo_1.2") == "abc123-demo_1.2"
     with pytest.raises(ValueError, match="wave SHA"):
         validate_wave_id("../outside")
+
+
+def test_base_url_pointing_at_the_gateway_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+    class FakeResponse:
+        def __enter__(self) -> FakeResponse:
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+        def read(self) -> bytes:
+            return json.dumps({"status": "ok", "name": "gateway"}).encode()
+
+    monkeypatch.setattr("urllib.request.urlopen", lambda *_args, **_kwargs: FakeResponse())
+    with pytest.raises(ValueError, match="gate origin"):
+        _assert_gate_origin("http://gateway-only.example:8000")
+
+
+def test_base_url_serving_the_gate_is_accepted(monkeypatch: pytest.MonkeyPatch) -> None:
+    def not_json(req: object, timeout: int) -> None:
+        raise ValueError("the SPA wall is HTML, not JSON")
+
+    monkeypatch.setattr("urllib.request.urlopen", not_json)
+    _assert_gate_origin("http://gate.example:3000")
 
 
 def test_health_url_defaults_to_base_url_api_health() -> None:

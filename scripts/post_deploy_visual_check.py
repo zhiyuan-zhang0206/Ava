@@ -58,6 +58,25 @@ def _health_payload(base_url: str) -> dict[str, object]:
     return payload
 
 
+def _assert_gate_origin(base_url: str) -> None:
+    """Refuse a --base-url that points at the gateway API origin.
+
+    The gateway's /api/health answers JSON with ``name == "gateway"``; the
+    gate (frontend entry) serves the SPA wall or proxies /api to the app,
+    never that JSON. A matrix pointed at the gateway origin makes every
+    page settle-timeout (20 x 60s) — fail fast instead.
+    """
+    try:
+        payload = _health_payload(base_url)
+    except (TypeError, ValueError, OSError):
+        return
+    if payload.get("name") == "gateway":
+        raise ValueError(
+            "--base-url must be the frontend gate origin (e.g. the :3000 entry), "
+            "not the gateway API origin; put the gateway origin in --health-url"
+        )
+
+
 def _git_output(arguments: list[str]) -> str:
     result = subprocess.run(  # noqa: S603 - fixed executable with internal git arguments
         ["git", *arguments],
@@ -368,6 +387,7 @@ def _run_host(args: argparse.Namespace) -> int:
         return _run_demo(args)
     if not args.base_url:
         raise ValueError("--base-url is required")
+    _assert_gate_origin(args.base_url)
     cookie_value = inherited_process_env().get("AVA_VISUAL_GATE_COOKIE_FILE")
     if not cookie_value:
         raise ValueError("AVA_VISUAL_GATE_COOKIE_FILE is required")
