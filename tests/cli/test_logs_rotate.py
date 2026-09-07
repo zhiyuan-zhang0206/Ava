@@ -155,7 +155,12 @@ def test_logs_path_flag_reaches_the_command(
     from cli import main as cli_main
 
     seen: list[dict[str, object]] = []
-    monkeypatch.setattr(commands, "cmd_logs_rotate", lambda **kwargs: seen.append(kwargs) or 0)
+
+    def rotate(**kwargs: object) -> int:
+        seen.append(kwargs)
+        return 0
+
+    monkeypatch.setattr(commands, "cmd_logs_rotate", rotate)
 
     rc = cli_main.main(
         ["logs", "rotate", "--dry-run", "--size-mib", "8", "--logs-path", str(tmp_path)]
@@ -173,11 +178,11 @@ def test_io_error_is_reported_and_sets_failure_exit_code(
     from cli.commands import logs
 
     log = _dated_file(tmp_path / "ava-gateway.out.log", b"gateway", _NOW - timedelta(days=1))
-    monkeypatch.setattr(
-        logs.shutil,
-        "copyfile",
-        lambda _source, _archive: (_ for _ in ()).throw(PermissionError("denied")),
-    )
+
+    def deny_copy(_source: str | Path, _archive: str | Path) -> None:
+        raise PermissionError("denied")
+
+    monkeypatch.setattr(logs.shutil, "copyfile", deny_copy)
 
     rc = logs.cmd_logs_rotate(dry_run=False, size_mib=64, logs_path=tmp_path, now=_NOW)
 

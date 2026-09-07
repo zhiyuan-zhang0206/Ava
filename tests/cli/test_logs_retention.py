@@ -467,7 +467,11 @@ def test_active_service_stdout_is_excluded_via_open_path_snapshot(
     from cli.commands import logs
 
     active = _file_at(tmp_path, "ava-gateway.out.log", _NOW - timedelta(days=31))
-    monkeypatch.setattr(logs, "_active_log_paths", lambda _path: {active.resolve()})
+
+    def active_paths(_path: Path) -> set[Path]:
+        return {active.resolve()}
+
+    monkeypatch.setattr(logs, "_active_log_paths", active_paths)
 
     rc = logs.cmd_logs_retention(
         older_than_days=None,
@@ -496,7 +500,11 @@ def test_retention_deletes_expired_service_stdout_and_native_archive(
     service = _file_at(logs_path, "ava-otel-collector.out.log", _NOW - timedelta(days=4))
     native_archive = _file_at(native_path, "loki.log.2026-08-01", _NOW - timedelta(days=4))
     live_native = _file_at(native_path, "loki.log", _NOW - timedelta(days=40))
-    monkeypatch.setattr(logs, "_active_log_paths", lambda _path: set())
+
+    def no_active_paths(_path: Path) -> set[Path]:
+        return set()
+
+    monkeypatch.setattr(logs, "_active_log_paths", no_active_paths)
 
     rc = logs.cmd_logs_retention(
         older_than_days=None,
