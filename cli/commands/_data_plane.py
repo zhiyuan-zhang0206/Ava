@@ -32,6 +32,7 @@ def ensure_gateway_data_plane() -> int:
         db_identity,
         get_record,
         record_pgbouncer_port,
+        redis_identity,
         redis_password_from_env,
     )
     from shared.paths import ava_home
@@ -83,6 +84,7 @@ def ensure_gateway_data_plane() -> int:
             redis_password=redis_password,
             pgbouncer_port=record_pgbouncer_port(rec),
             identity=db_identity(),
+            redis_user=redis_identity(),
         )
 
     current = (

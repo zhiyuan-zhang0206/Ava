@@ -343,7 +343,10 @@ kept in the gateway's `.env`, and travels only inside the projected URL —
 never as a standalone bootstrap field. The pooler's userlist carries the
 matching entry; the gateway's own processes keep dialing the main identity.
 
-The redis ACL user is added live at `ava start` (`ensure_cluster_redis_acl`), scoped to
+The Redis ACL user comes from `AVA_REDIS_URL` independently of the Postgres
+db/role in `AVA_DB_URL` (for example, Redis `ava` and Postgres `ava_main`).
+Startup and credential splitting preserve both names. The redis ACL user is added
+live at `ava start` (`ensure_cluster_redis_acl`), scoped to
 the cluster's pub/sub channels (`ava:*`); it is re-affirmed on every start (not persisted
 to redis.conf) and by the `redis-acl` gateway-watchdog healthcheck, so a redis restart
 that drops the in-memory ACL is repaired before agents reconnect. Provisioning uses that
@@ -352,7 +355,9 @@ whose redis_url carries no username (`redis://:<runtime-password>@host/0`, born 
 names-as-data ACL model) dials as that `default` user — no ACL identity exists to
 drop, so the healthcheck warns and skips rather than raising every round, and `ava
 start` converge backfills the username into the URL (from the db_url identity) so the
-cluster adopts the scoped ACL user. **Postgres and PgBouncer bind loopback + this
+cluster adopts the scoped ACL user. The same startup process adopts the repaired
+URL before provisioning Redis; no-auth homes receive a named `nopass` identity.
+**Postgres and PgBouncer bind loopback + this
 host's reachable address (`AVA_MACHINE_HOST`, default `localhost`), de-duplicated**
 (never all interfaces): a single box resolves to loopback alone, while a split node
 sets its real private-network IP, which is appended, plus the `scram-sha-256`

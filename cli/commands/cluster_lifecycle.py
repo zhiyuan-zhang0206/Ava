@@ -77,6 +77,7 @@ def _ensure_cluster_instance(
         redis_password=redis_password or cluster_secret,
         pgbouncer_port=record_pgbouncer_port(rec),
         identity=identity,
+        redis_user=identity,
         runner_password=runner_password,
     )
 

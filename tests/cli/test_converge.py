@@ -1105,6 +1105,11 @@ def _redis_identity_ctx(
     """Wire the legacy backfill's db identity and pre-split bearer fallback."""
     monkeypatch.setattr(_converge.settings.data_plane, "db_url", db_url)
     monkeypatch.setattr(_converge.settings.data_plane, "cluster_secret", secret)
+    monkeypatch.setattr(
+        _converge.settings.data_plane, "redis_url", _converge.settings.data_plane.redis_url
+    )
+    # Backfill rebuilds DataPlaneSettings, which reads the actual environment.
+    monkeypatch.setitem(os.environ, "AVA_REDIS_URL", _converge.settings.data_plane.redis_url)
     return _ctx(tmp_path / "repo", tmp_path)
 
 
@@ -1123,12 +1128,17 @@ def test_redis_url_identity_step_backfills_missing_username(
         db_url=_rw_pg_url("sek", host="127.0.0.1:5433"),
         secret="sek",  # noqa: S106 — test fixture
     )
+    monkeypatch.setitem(os.environ, "AVA_MACHINE_HOST", "redis.lan")
     _converge._ensure_redis_url_identity_step(ctx)
     env = (tmp_path / ".env").read_text()
     assert f"AVA_REDIS_URL={_rw_url('sek', host='redis.lan:6380', user='ava_main')}" in env
     # The reachable host is preserved from the FILE (never the settings dial
     # value, which is loopback-rewritten), and the db line is untouched.
     assert f"AVA_DB_URL={_rw_pg_url('pw', host='db.lan:5433')}" in env
+    assert os.environ["AVA_REDIS_URL"] == _rw_url("sek", host="redis.lan:6380", user="ava_main")
+    assert _converge.settings.data_plane.redis_url == _rw_url(
+        "sek", host="127.0.0.1:6380", user="ava_main"
+    )
 
 
 def test_redis_url_identity_step_skips_when_username_present(
@@ -1165,16 +1175,17 @@ def test_redis_url_identity_step_falls_back_to_birth_identity(
     assert "AVA_REDIS_URL=redis://ava:sek@127.0.0.1:6380/0" in (tmp_path / ".env").read_text()
 
 
-def test_redis_url_identity_step_skips_without_secret(
+def test_redis_url_identity_step_backfills_nopass_without_secret(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    """No cluster secret (tests / unprovisioned checkout) cannot mint userinfo."""
+    """A no-auth legacy URL gains the named nopass identity without a credential."""
     (tmp_path / ".env").write_text("AVA_REDIS_URL=redis://:pw@127.0.0.1:6380/0\n")
     ctx = _redis_identity_ctx(
         tmp_path, monkeypatch, db_url="postgresql://ava_main:s@127.0.0.1:5433/ava_main", secret=""
     )
     _converge._ensure_redis_url_identity_step(ctx)
-    assert (tmp_path / ".env").read_text() == "AVA_REDIS_URL=redis://:pw@127.0.0.1:6380/0\n"
+    assert (tmp_path / ".env").read_text() == "AVA_REDIS_URL=redis://ava_main@127.0.0.1:6380/0\n"
+    assert _converge.settings.data_plane.redis_url == "redis://ava_main@127.0.0.1:6380/0"
 
 
 def test_redis_url_identity_step_skips_without_env_file(
