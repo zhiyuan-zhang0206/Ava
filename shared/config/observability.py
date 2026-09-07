@@ -6,13 +6,15 @@ env alias so the .env surface is unchanged. Aggregated by shared/config.
 
 from __future__ import annotations
 
-from pydantic import Field
+from typing import Self
+
+from pydantic import Field, model_validator
 
 from shared.config._base import EnvSettings
 
 # The standard OTLP/HTTP ingress port. Single source for every hardcoded 4318
 # in the telemetry path: the sidecar receiver endpoint, the gateway's
-# authenticated remote receiver + runner relay endpoint, and the roster /
+# authenticated remote receiver, and the roster /
 # healthcheck port probes all derive from `telemetry_otlp_port`; the
 # `telemetry_otlp_endpoint` default is rendered from the same constant so the
 # agent-side export target and the sidecar listener can never drift apart at
@@ -157,23 +159,25 @@ class ObservabilitySettings(EnvSettings):
             "restart_required": "all",
             "writable": True,
             "sensitive": False,
-            "scope": "cluster-pinned",
+            "scope": "host",
+            "remote_writable": False,
         },
     )
 
     telemetry_otlp_port: int = Field(
         default=_OTLP_INGRESS_PORT_DEFAULT,
         alias="AVA_TELEMETRY_OTLP_PORT",
+        ge=1,
+        le=65535,
         description=(
             "TCP port of the OTLP/HTTP ingress (standard OTLP port 4318). "
             "Single source for the sidecar receiver endpoint, the gateway's "
-            "authenticated remote receiver and the pure-runner relay endpoint, "
+            "authenticated remote receiver on THIS unit, "
             "and the roster/healthcheck port probes — change it here, not in "
             "the renderers. Two Ava units on one machine must use different "
             "ports or the second sidecar cannot bind. The agent-side export "
-            "target AVA_TELEMETRY_OTLP_ENDPOINT is a separate full-URL setting "
-            "whose default follows this port; an operator deviating from 4318 "
-            "sets both together."
+            "target AVA_TELEMETRY_OTLP_ENDPOINT is a separate full-URL setting; "
+            "when omitted, it follows this unit's local port."
         ),
         json_schema_extra={
             "restart_required": "all",
@@ -181,6 +185,31 @@ class ObservabilitySettings(EnvSettings):
             "sensitive": False,
             "scope": "host",
             "remote_writable": False,
+        },
+    )
+
+    @model_validator(mode="after")
+    def _default_local_otlp_endpoint(self) -> Self:
+        """An explicit collector URL wins; otherwise producers use this unit's listener."""
+        if "telemetry_otlp_endpoint" not in self.model_fields_set:
+            self.telemetry_otlp_endpoint = f"http://127.0.0.1:{self.telemetry_otlp_port}"
+        return self
+
+    gateway_otlp_endpoint: str = Field(
+        default="",
+        alias="AVA_GATEWAY_OTLP_ENDPOINT",
+        description=(
+            "Authenticated gateway OTLP/HTTP ingress, derived and published by "
+            "gateway bootstrap from its reachable host and local OTLP port. "
+            "Pure-runner collectors and trace replay consume this projection; "
+            "their own local receiver ports remain independent. Update the "
+            "gateway before runners so bootstrap can publish this endpoint."
+        ),
+        json_schema_extra={
+            "restart_required": "all",
+            "writable": False,
+            "sensitive": False,
+            "scope": "cluster-pinned",
         },
     )
 

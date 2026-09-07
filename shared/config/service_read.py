@@ -272,10 +272,12 @@ def bootstrap_config_values(role: str | None = None) -> dict[str, str]:
     served as its raw `.env` text verbatim (already the env-string form the
     recipient re-parses, including a comma-list), read fresh — so a rotated cluster
     secret reaches an agent on its next restart without the gateway itself
-    restarting. One deliberate exception: the data-plane URL aliases
+    restarting. The data-plane URL aliases
     (`AVA_DB_URL` / `AVA_REDIS_URL`) have their loopback host rewritten to this
     gateway's reachable address (`_serve_reachable_data_plane_hosts`) — required
-    for cross-machine enroll, everything else survives verbatim. A field absent
+    for cross-machine enroll. AVA_GATEWAY_OTLP_ENDPOINT is derived from this
+    gateway's reachable host and OTLP port; local receiver settings are not
+    distributed. A field absent
     from `.env` is served as its stringified boot-time value, except the required
     DB URL and runner credential, which must share this fresh snapshot. Only None is skipped
     (env can't express "no value"), so the recipient falls back to the field
@@ -322,6 +324,7 @@ def bootstrap_config_values(role: str | None = None) -> dict[str, str]:
             value = value.get_secret_value()
         out[alias] = runtime_config.env_value_text(value)
     _serve_reachable_data_plane_hosts(out)
+    out["AVA_GATEWAY_OTLP_ENDPOINT"] = _gateway_otlp_projection(aliases)
     # Provider keys are not Settings fields, so they cannot arrive through
     # BOOTSTRAP_FIELDS. Read only declared keys from the raw gateway .env; this
     # is the authenticated, fresh-file channel a split runner materializes.
@@ -354,6 +357,20 @@ def bootstrap_config_values(role: str | None = None) -> dict[str, str]:
         )
     out["AVA_DB_URL"] = project_runner_db_url(db_url, runner_password)
     return out
+
+
+def _gateway_otlp_projection(aliases: dict[str, str]) -> str:
+    """Publish this gateway's ingress without distributing its local listener settings."""
+    from shared.config import _self_machine_host
+    from shared.url_secret import url_with_host
+
+    port = int(
+        aliases.get("AVA_TELEMETRY_OTLP_PORT", str(_service_field_value("telemetry_otlp_port")))
+    )
+    if not 1 <= port <= 65535:
+        raise ValueError("AVA_TELEMETRY_OTLP_PORT must be between 1 and 65535")
+    host = aliases.get("AVA_MACHINE_HOST") or _self_machine_host()
+    return url_with_host(f"http://localhost:{port}", host)
 
 
 def _is_remote_data_plane(env: dict[str, str]) -> bool:

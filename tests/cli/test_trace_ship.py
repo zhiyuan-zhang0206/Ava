@@ -489,7 +489,7 @@ def test_runner_ship_posts_to_gateway_relay_with_cluster_bearer(
         "shared.config.settings.observability.telemetry_otlp_enabled", True
     )
     monkeypatch.setattr(  # pyright: ignore[reportUnknownMemberType]
-        "shared.config.settings.gateway.gateway_url", "http://10.0.0.10:8000"
+        "shared.config.settings.observability.gateway_otlp_endpoint", "http://10.0.0.10:4318"
     )
     monkeypatch.setattr(  # pyright: ignore[reportUnknownMemberType]
         "shared.config.settings.data_plane.cluster_secret", "cluster-token"
