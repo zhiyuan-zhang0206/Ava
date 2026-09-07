@@ -243,27 +243,31 @@ def _data_plane_receivers(roles: MachineRoles | None) -> tuple[str, str]:
 
 
 def gateway_otel_ingress_endpoint() -> str:
-    """The authenticated OTLP/HTTP ingress a pure runner dials.
-
-    `AVA_GATEWAY_URL` is already the runner's cluster-private route to the
-    gateway. OTLP owns a separate fixed port on that same host; it does not
-    inherit the gateway API's port or path. The receiver is deliberately HTTP:
-    the cluster private network supplies transport privacy,
-    while the cluster bearer authenticates the sender exactly like the gateway
-    API already does.
-    """
+    """The authenticated gateway ingress published by bootstrap, independent of local ports."""
     from shared.config import settings
     from shared.netutil import is_loopback_host
 
-    gateway_url = settings.gateway.gateway_url.strip()
-    parts = urlsplit(gateway_url)
+    endpoint = settings.observability.gateway_otlp_endpoint.strip()
+    parts = urlsplit(endpoint)
     host = parts.hostname or ""
-    if not host or is_loopback_host(host) or _unspecified_address(host):
+    if (
+        parts.scheme != "http"
+        or not host
+        or is_loopback_host(host)
+        or _unspecified_address(host)
+        or parts.port is None
+        or parts.username is not None
+        or parts.password is not None
+        or parts.path not in ("", "/")
+        or parts.query
+        or parts.fragment
+    ):
         raise RuntimeError(
-            "cannot build runner OTLP relay: gateway URL (AVA_GATEWAY_URL) must name the "
-            f"gateway's non-loopback private address (got {gateway_url!r})"
+            "cannot build runner OTLP relay: gateway bootstrap must publish "
+            "AVA_GATEWAY_OTLP_ENDPOINT as its non-loopback HTTP ingress with "
+            "an explicit port; update the gateway first, then restart this runner"
         )
-    return f"http://{_host_port(host, _otlp_ingress_port())}"
+    return endpoint.rstrip("/")
 
 
 def station_otel_ingress_endpoint() -> str:

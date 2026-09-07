@@ -13,6 +13,7 @@ import platform
 import re
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import pytest
 import yaml
@@ -245,6 +246,12 @@ def _render_real_template(
     )
     monkeypatch.setattr("shared.config.settings.data_plane.redis_admin_password", "abc")
     monkeypatch.setattr("shared.config.settings.gateway.gateway_url", gateway_url)
+    from shared.url_secret import url_with_host
+
+    monkeypatch.setattr(
+        "shared.config.settings.observability.gateway_otlp_endpoint",
+        url_with_host("http://localhost:4318", urlsplit(gateway_url).hostname or ""),
+    )
     monkeypatch.setattr("shared.config.settings.data_plane.cluster_secret", cluster_secret)
     monkeypatch.setattr(
         "shared.config.settings.observability.otel_collector_metrics_port", self_metrics_port
@@ -877,14 +884,10 @@ def test_station_otlp_ingress_port_follows_single_source(
     assert unit_dial_url(frozenset({"observability-station"})) == "http://10.0.0.10:4321"
 
 
-def test_otlp_ingress_port_single_source_renders_everywhere(
+def test_local_ingress_port_does_not_change_gateway_projection(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """AVA_TELEMETRY_OTLP_PORT is the one knob for the OTLP ingress: the
-    sidecar receiver, the gateway's authenticated remote receiver, and the
-    pure-runner relay endpoint all follow it (WP3, task #1945). Under the
-    default 4318 the rendered endpoints are byte-identical to the historical
-    values (locked by the tests above)."""
+    """Local receivers follow this unit's port; relay targets follow bootstrap."""
     monkeypatch.setattr("shared.config.settings.observability.telemetry_otlp_port", 4319)
     gateway_cfg = _render_real_template(monkeypatch, frozenset({"gateway"}))
     assert gateway_cfg["receivers"]["otlp"]["protocols"]["http"] == {"endpoint": "127.0.0.1:4319"}
@@ -893,7 +896,7 @@ def test_otlp_ingress_port_single_source_renders_everywhere(
     )
     runner_cfg = _render_real_template(monkeypatch, frozenset({"agent-runner"}))
     for exporter_id in ("otlphttp/tempo", "otlphttp/loki", "otlphttp/prometheus"):
-        assert runner_cfg["exporters"][exporter_id]["endpoint"] == "http://10.0.0.10:4319"
+        assert runner_cfg["exporters"][exporter_id]["endpoint"] == "http://10.0.0.10:4318"
 
 
 def test_hybrid_gateway_runner_still_serves_remote_runners(
@@ -1010,10 +1013,22 @@ def test_pure_role_units_collapse_remote_ingress_without_remote_identity(
             "http://localhost:8000",
             "10.0.0.20",
             "token",
-            "gateway URL",
+            "gateway bootstrap",
         ),
-        (frozenset({"agent-runner"}), "http://0.0.0.0:8000", "10.0.0.20", "token", "gateway URL"),
-        (frozenset({"agent-runner"}), "http://[::]:8000", "10.0.0.20", "token", "gateway URL"),
+        (
+            frozenset({"agent-runner"}),
+            "http://0.0.0.0:8000",
+            "10.0.0.20",
+            "token",
+            "gateway bootstrap",
+        ),
+        (
+            frozenset({"agent-runner"}),
+            "http://[::]:8000",
+            "10.0.0.20",
+            "token",
+            "gateway bootstrap",
+        ),
         (
             frozenset({"agent-runner"}),
             "http://10.0.0.10:8000",
@@ -1093,7 +1108,9 @@ def test_config_file_is_owner_only(monkeypatch: pytest.MonkeyPatch, tmp_path: Pa
     monkeypatch.setattr(
         "shared.config.settings.data_plane.redis_url", "redis://:abc@10.0.0.2:6380/0"
     )
-    monkeypatch.setattr("shared.config.settings.gateway.gateway_url", "http://10.0.0.10:8000")
+    monkeypatch.setattr(
+        "shared.config.settings.observability.gateway_otlp_endpoint", "http://10.0.0.10:4318"
+    )
     monkeypatch.setattr("shared.config.settings.data_plane.cluster_secret", "cluster-token")
     monkeypatch.setattr("shared.machine.reachable_host", lambda: "10.0.0.10")
     repo = Path(__file__).resolve().parents[2]

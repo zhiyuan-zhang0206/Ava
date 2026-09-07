@@ -1365,9 +1365,11 @@ The observability stack (user decision 2026-08-11, architecture task #1266):
 (`ava-otel-collector`, supervised by the watchdog and installed by converge
 from `deploy/otel-collector/`). Producers export OTLP/HTTP to their local
 sidecar (`AVA_TELEMETRY_OTLP_ENDPOINT`, default `http://127.0.0.1:4318`; the
-ingress port is one setting, `AVA_TELEMETRY_OTLP_PORT` — single source for the
-sidecar receiver, the gateway's remote receiver and the port probes,
-task #1945). An
+ingress port is the host setting `AVA_TELEMETRY_OTLP_PORT` — source for this
+unit's sidecar receiver, authenticated remote receiver and port probes).
+When no endpoint is explicitly set, it follows the local port.
+Both local endpoint and port stay on the unit; neither is distributed by
+bootstrap. An
 unmarked gateway skips the collector and the default producer export, keeping
 the JSONL event mirror only; an explicitly configured OTLP endpoint opts the
 producer into that external collector. Delivery is role-specific: the marked
@@ -1375,8 +1377,13 @@ gateway collector writes traces to the Tempo selected by the host-scope
 `AVA_TELEMETRY_TEMPO_ENDPOINT` setting (prod's override selects the remote WSL
 Tempo) and logs/metrics to gateway-loopback Loki/Prometheus; a pure runner
 collector keeps the same three exporter component IDs and relays each
-signal to the gateway collector at the host from `AVA_GATEWAY_URL`, port 4318,
-with `Authorization: Bearer $AVA_CLUSTER_SECRET`. The remote receiver binds
+signal to `AVA_GATEWAY_OTLP_ENDPOINT`, a read-only bootstrap projection of
+the gateway's reachable host and OTLP port, with
+`Authorization: Bearer $AVA_CLUSTER_SECRET`. A runner's local port never
+selects the remote port: a Windows receiver on 4318 can relay to a WSL gateway
+on 54318 without colliding in mirrored networking. Update the gateway before
+runners; a missing or invalid endpoint fails converge rather than guessing a
+port. `ava trace ship` uses the same projection. The remote receiver binds
 only the exact non-loopback `AVA_MACHINE_HOST`, never `0.0.0.0`/`::`; the
 local receiver remains `127.0.0.1:4318` without auth. Combined single-box
 deployments keep only the local receiver, including when their secret is set.
