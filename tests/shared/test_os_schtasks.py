@@ -279,6 +279,24 @@ def test_logon_task_triggers_on_logon_not_on_a_clock(
     assert root.findtext("t:Triggers/t:LogonTrigger/t:UserId", namespaces=_NS) == r"WIN-BOX\ava"
 
 
+def test_daily_task_uses_the_requested_local_schedule(
+    registered: list[tuple[list[str], str]],
+) -> None:
+    st.create_daily_task(
+        "logs-rotate",
+        ("logs", "rotate"),
+        hour=4,
+        minute=40,
+        time_limit_s=1800,
+    )
+
+    trigger = _parse(registered[0][1]).find("t:Triggers/t:CalendarTrigger", _NS)
+    assert trigger is not None
+    assert trigger.findtext("t:StartBoundary", namespaces=_NS) == "2000-01-01T04:40:00"
+    assert trigger.findtext("t:ScheduleByDay/t:DaysInterval", namespaces=_NS) == "1"
+    assert trigger.find("t:Repetition", _NS) is None
+
+
 # --- schtasks invocation --------------------------------------------------
 
 

@@ -1,8 +1,8 @@
 """Windows Task Scheduler primitives — the ``schtasks.exe`` analog of the launchd
 plist writer and the crontab editor.
 
-Three job kinds need the platform scheduler (health probe, watchdog probe, boot
-autostart). On macOS they share the LaunchAgent plist machinery; on Linux they
+Four job kinds need the platform scheduler (health probe, watchdog probe, boot
+autostart, log maintenance). On macOS they share the LaunchAgent plist machinery; on Linux they
 share the crontab rewrite. This module is the third of those — the shared
 Windows half — so each ``os_*`` module's ``_register_windows`` stays a few lines.
 
@@ -251,6 +251,24 @@ def _minute_trigger(minutes: int) -> str:
   </Triggers>"""
 
 
+def _daily_trigger(hour: int, minute: int) -> str:
+    """A daily local-time trigger with a stable calendar boundary."""
+    if not 0 <= hour <= 23:
+        raise ValueError(f"daily task hour must be between 0 and 23: {hour}")
+    if not 0 <= minute <= 59:
+        raise ValueError(f"daily task minute must be between 0 and 59: {minute}")
+    boundary = f"2000-01-01T{hour:02d}:{minute:02d}:00"
+    return f"""  <Triggers>
+    <CalendarTrigger>
+      <StartBoundary>{boundary}</StartBoundary>
+      <Enabled>true</Enabled>
+      <ScheduleByDay>
+        <DaysInterval>1</DaysInterval>
+      </ScheduleByDay>
+    </CalendarTrigger>
+  </Triggers>"""
+
+
 def _logon_trigger() -> str:
     """A logon trigger scoped to this user — the ``/SC ONLOGON`` shape."""
     return f"""  <Triggers>
@@ -418,6 +436,24 @@ def create_minute_task(
         time_limit_s=time_limit_s,
     )
     return _register(kind, xml, f"every {every} min")
+
+
+def create_daily_task(
+    kind: str,
+    args: Sequence[str],
+    *,
+    hour: int,
+    minute: int,
+    time_limit_s: int,
+) -> str | None:
+    """Register (or replace) a task that runs daily at one local wall-clock time."""
+    xml = task_xml(
+        description=_description(kind),
+        trigger=_daily_trigger(hour, minute),
+        args=args,
+        time_limit_s=time_limit_s,
+    )
+    return _register(kind, xml, f"daily at {hour:02d}:{minute:02d}")
 
 
 def create_logon_task(kind: str, args: Sequence[str], *, time_limit_s: int) -> str | None:

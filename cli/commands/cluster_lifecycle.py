@@ -272,7 +272,7 @@ def cmd_cluster_destroy(*, path: str, drop_db: bool = False) -> int:
 
 def _unregister_scheduled_jobs(home: Path) -> None:
     """Remove every OS-scheduled job the cluster at `home` registered (health
-    probe, both capabilities' watchdog probes, boot autostart).
+    probe, both capabilities' watchdog probes, boot autostart, logs maintenance).
 
     `home` is passed to each helper as an argument. It cannot be signalled by
     setting `AVA_HOME`: `settings` is constructed once at import, so a mid-process
@@ -288,11 +288,13 @@ def _unregister_scheduled_jobs(home: Path) -> None:
     from cli.commands._converge_gate import unregister_gate
     from shared.os_autostart import unregister_autostart
     from shared.os_cron import unregister_os_cron
+    from shared.os_logs_job import unregister_logs_job
     from shared.os_watchdog_probe import unregister_watchdog_probe
 
     jobs: list[tuple[str, Callable[[], None]]] = [
         ("health probe", lambda: unregister_os_cron(home)),
         ("autostart", lambda: unregister_autostart(home)),
+        ("logs maintenance", lambda: unregister_logs_job(home)),
         ("watchdog probe (gateway)", lambda: unregister_watchdog_probe("gateway", home)),
         ("watchdog probe (agent-runner)", lambda: unregister_watchdog_probe("agent-runner", home)),
         ("fleet UI gate", lambda: unregister_gate(home)),
@@ -310,7 +312,10 @@ def _unregister_scheduled_jobs(home: Path) -> None:
             file=sys.stderr,
         )
     else:
-        print(f"✓ removed '{home}' OS-scheduled jobs (health probe, watchdog probes, autostart)")
+        print(
+            f"✓ removed '{home}' OS-scheduled jobs "
+            "(health probe, watchdog probes, autostart, logs maintenance)"
+        )
 
 
 def cmd_cluster_ls() -> int:

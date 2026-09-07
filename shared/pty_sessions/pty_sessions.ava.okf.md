@@ -80,10 +80,10 @@ and sharing the dir would force every lister to regex-filter the other
 side's records. A record whose shell is dead is a crashed host's leftover
 and is swept lazily as enumeration discovers it. Transcripts stay at
 `$AVA_HOME/logs/<name>.out.log`; host diagnostics at `<name>.host.log`.
-Host startup never deletes either file. The separately scheduled
-`ava logs retention` command owns local cleanup and skips active open handles;
-its named-PTY allowlist covers `<name>.{out,host}.log` without traversing any
-subtree.
+Host startup never deletes either file. The converge-owned daily logs job
+copytruncates active `.out.log` files through `ava logs rotate`, then `ava logs
+retention` prunes allowlisted files while skipping active open handles; its
+named-PTY rule covers `<name>.{out,host}.log` without traversing any subtree.
 
 ## Lifecycle
 

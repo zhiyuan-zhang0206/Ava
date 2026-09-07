@@ -41,7 +41,7 @@ safe boundary before taking the final snapshot; an idle shell may stay open.
 Drain receipts, ops quiescence, exact service identities and normal exit checks
 remain required. Independently managed
 Gate, permission helper, Redis bridge, native LGTM, OS watchdog/autostart and
-retention jobs are outside the service-backend proof. Inventory their exact
+logs-maintenance jobs are outside the service-backend proof. Inventory their exact
 home/PID identities and normal-stop behavior separately. Do not substitute a
 broad OS kill command for proof of completed work.
 
