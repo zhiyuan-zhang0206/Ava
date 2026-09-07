@@ -66,7 +66,9 @@ notifications (P0 -> `send_message` to #3242 and #405, P2 -> `notify` queue).
 detection (the script appends `/api/health`). It defaults to `--base-url`,
 but the gate serves the SPA wall (or proxies /api to the app, which has no
 API routes) for unauthenticated /api requests, so a gate base URL needs the
-explicit gateway origin: `--health-url http://<gateway>:<port>`.
+explicit gateway origin: `--health-url http://<gateway>:<port>`. A base URL
+that answers the gateway's health JSON (`name: gateway`) is refused up front
+with the same hint.
 
 ## Cookie
 

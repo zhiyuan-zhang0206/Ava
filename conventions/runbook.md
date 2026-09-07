@@ -1060,7 +1060,11 @@ agent sends a P0 result to #3242 and #405 with `send_message`, or queues P2 with
 `notify`. It runs after rollout and cannot block deployment. Exit 20 is P0,
 exit 10 is P2, and exit 0 is green or expected drift.
 The daily 07:30 invocation and a same-process-start run are sentinels and do not
-advance the two-deployment-wave escalation counter.
+advance the two-deployment-wave escalation counter. A concrete first-wave
+invocation: `scripts/post_deploy_visual_check.py --check --base-url
+<gate-entry-url> --health-url <gateway-origin-url>` — the base URL is the
+gate (frontend entry), never the gateway API origin, and the script refuses a
+base URL that answers the gateway health JSON up front.
 
 No command updates a golden implicitly. After QA or #405 confirms a report,
 roll it forward with `scripts/post_deploy_visual_check.py --accept-wave <sha>
