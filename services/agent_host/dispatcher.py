@@ -610,12 +610,17 @@ class InboundWakeDispatcher:
         if self._stale_after_s is None:
             raise RuntimeError("hosted pending scan configured without stale_after_s")
 
+        # Inbox/DB timestamps describe accumulated work, not this turn. A
+        # freshly resumed stream may have old pending rows until its next claim.
+        # Only the current monotonic progress clock can license cancellation.
         started: set[int] = set()
         for candidate in await self._pending_scan(self._stale_after_s):
             if (
                 candidate.stale
                 and candidate.agent_id in self._scheduler.active_agents
                 and not _database_waiting(candidate.agent_id)
+                and (age := turn_progress_age_s(candidate.agent_id)) is not None
+                and age >= self._stale_after_s
             ):
                 await self._scheduler.cancel_agent(candidate.agent_id)
                 if candidate.agent_id in self._scheduler.active_agents:

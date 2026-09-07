@@ -778,9 +778,11 @@ class TestPendingScan:
         assert scheduler.woken == [23]
         assert scheduler.cancelled == []
 
-    async def test_scan_cancels_a_stale_active_turn_before_rescheduling(self) -> None:
-        """A pending row old enough to prove no progress must not remain behind
-        a task that has silently stopped consuming scheduler wakes."""
+    async def test_scan_cancels_a_stale_active_turn_before_rescheduling(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Old pending work and an actually stalled turn allow recovery."""
+        monkeypatch.setattr(dispatcher, "turn_progress_age_s", _stale_age)
         scheduler = _ScanScheduler({23})
 
         async def _pending(_stale_after_s: float) -> list[dispatcher.PendingInboundWake]:
@@ -795,12 +797,15 @@ class TestPendingScan:
         assert scheduler.cancelled == [23]
         assert scheduler.woken == [23]
 
-    async def test_scan_requires_a_host_restart_when_stale_turn_will_not_unwind(self) -> None:
+    async def test_scan_requires_a_host_restart_when_stale_turn_will_not_unwind(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """A task that survives bounded cancellation retains its one-turn slot.
 
         Exiting is the only safe recovery: scheduling another task beside it
         would let one agent claim and mutate its checkpoint concurrently.
         """
+        monkeypatch.setattr(dispatcher, "turn_progress_age_s", _stale_age)
         scheduler = _ScanScheduler({23}, unwinds_on_cancel=False)
 
         async def _pending(_stale_after_s: float) -> list[dispatcher.PendingInboundWake]:
