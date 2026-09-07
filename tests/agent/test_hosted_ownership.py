@@ -382,10 +382,14 @@ async def test_stamp_turn_fatal_is_monotonic_and_cas_guarded(
     assert first is not None
 
     # A later crash must NOT refresh the stamp (heartbeat crash-loops would
-    # restart the reap grace forever).
+    # restart the reap grace forever). Capture the old value first: a
+    # COALESCE -> now() regression would silently pass a `!= first` check
+    # (both stamps read ~now), so the assertion must demand equality with the
+    # pre-existing stamp.
     _set_marker(db_conn, agent_id, minutes_ago=100)
+    old_stamp = _marker(db_conn, agent_id)
     assert await stamp_turn_fatal(aops_pool, incarnation)
-    assert _marker(db_conn, agent_id) != first
+    assert _marker(db_conn, agent_id) == old_stamp
 
     # A settled (non-running) row is not stamped — the mark names the live
     # incarnation only.
@@ -471,17 +475,26 @@ async def test_reap_crash_corpses_terminates_only_grace_elapsed_idling_corpses(
     healthy = await _row(minutes_ago=None)
     running_corpse = await _row(minutes_ago=16, status="running")
     foreign_corpse = await _row(minutes_ago=16, row_owner=None)
+    # A corpse left by a predecessor host (fresh owner UUID after a restart)
+    # is ownerless with an expired lease: the lease-qualified scope must
+    # reap it too, or it hangs offline forever.
+    abandoned_corpse = await _row(minutes_ago=16, row_owner=None)
+    db_conn.execute(
+        "UPDATE agents_meta SET lease_expires_at = NULL WHERE id = %s", (abandoned_corpse,)
+    )
+    db_conn.commit()
 
     published.clear()  # settle publishes on every flip; keep only reap's
     reaped = await reap_crash_corpses(aops_pool, "host-test", owner)
-    assert reaped == [past_grace]
+    assert sorted(reaped) == sorted([past_grace, abandoned_corpse])
 
-    row = db_conn.execute(
-        "SELECT status, termination_source, lease_expires_at FROM agents_meta WHERE id = %s",
-        (past_grace,),
-    ).fetchone()
-    assert row is not None
-    assert row[0] == "terminated" and row[1] == "reaper" and row[2] is None
+    for reaped_id in reaped:
+        row = db_conn.execute(
+            "SELECT status, termination_source, lease_expires_at FROM agents_meta WHERE id = %s",
+            (reaped_id,),
+        ).fetchone()
+        assert row is not None
+        assert row[0] == "terminated" and row[1] == "reaper" and row[2] is None
 
     for survivor, expected in (
         (within_grace, "idling"),
@@ -493,9 +506,14 @@ async def test_reap_crash_corpses_terminates_only_grace_elapsed_idling_corpses(
             "SELECT status FROM agents_meta WHERE id = %s", (survivor,)
         ).fetchone() == (expected,)
 
-    assert events == [(past_grace, "status_change", "corpse_reaper")]
-    assert published == [past_grace]
-    # A second pass finds nothing new (the corpse is terminated).
+    assert sorted(events) == sorted(
+        [
+            (past_grace, "status_change", "corpse_reaper"),
+            (abandoned_corpse, "status_change", "corpse_reaper"),
+        ]
+    )
+    assert sorted(published) == sorted([past_grace, abandoned_corpse])
+    # A second pass finds nothing new (the corpses are terminated).
     assert await reap_crash_corpses(aops_pool, "host-test", owner) == []
 
 
