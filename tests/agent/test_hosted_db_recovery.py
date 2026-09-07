@@ -125,7 +125,7 @@ async def test_original_host_task_resumes_autonomous_work_without_pending_inboun
                     original.cancel()
                     await asyncio.gather(original, return_exceptions=True)
                     raise
-            assert await asyncio.wait_for(original, 5) is False
+            assert not (await asyncio.wait_for(original, 5)).exited
         assert len(invocations) == 2
         cold = await saver.aget({"configurable": {"thread_id": str(agent)}})
         assert cold is not None
