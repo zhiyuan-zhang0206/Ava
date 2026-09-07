@@ -66,7 +66,7 @@ async def test_database_failure_after_graph_return_preserves_completed_work(
             with pytest.raises(RuntimeOwnershipLostError, match="lost authority"):
                 await host._invoke_until_done(agent, ctx)
         else:
-            assert not await host._invoke_until_done(agent, ctx)
+            assert not (await host._invoke_until_done(agent, ctx)).exited
     assert failed
     cold = await saver.aget(config)
     assert cold is not None

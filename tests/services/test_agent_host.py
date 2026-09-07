@@ -294,9 +294,11 @@ _Build = Callable[..., "tuple[AgentHost, _FakeGraph, _FakePool]"]
 def _stub_host_transitions(
     monkeypatch: pytest.MonkeyPatch,
     flip: Callable[..., Awaitable[bool]],
-) -> None:
+) -> list[int]:
     import services.agent_host.host as host_mod
     from shared.runtime_incarnation import RuntimeIncarnation
+
+    stamps: list[int] = []
 
     async def admit(
         pool: object,
@@ -310,13 +312,21 @@ def _stub_host_transitions(
             return None
         return RuntimeIncarnation(agent_id, uuid4(), owner)
 
-    async def settle(
-        pool: object, incarnation: RuntimeIncarnation, *, release: bool = False
-    ) -> bool:
-        return await flip(pool, incarnation.agent_id, "idling", expected_from="running")
+    async def settle_and_stamp(
+        pool: object,
+        incarnation: RuntimeIncarnation,
+        *,
+        exited: bool,
+        crashed: bool,
+    ) -> None:
+        if crashed:
+            stamps.append(incarnation.agent_id)
+        if not exited:
+            await flip(pool, incarnation.agent_id, "idling", expected_from="running")
 
     monkeypatch.setattr(host_mod, "admit_hosted_runtime", admit)
-    monkeypatch.setattr(host_mod, "settle_hosted_runtime", settle)
+    monkeypatch.setattr(host_mod, "settle_and_stamp_turn", settle_and_stamp)
+    return stamps
 
 
 @pytest.fixture
@@ -494,16 +504,22 @@ class TestPoolIsolation:
             calls.append(("admit", pool))
             return RuntimeIncarnation(agent_id, uuid4(), owner)
 
-        async def settle(pool: object, incarnation: RuntimeIncarnation) -> bool:
-            calls.append(("settle", pool))
-            return True
+        async def settle_and_stamp(
+            pool: object,
+            incarnation: RuntimeIncarnation,
+            *,
+            exited: bool,
+            crashed: bool,
+        ) -> None:
+            if not exited:
+                calls.append(("settle", pool))
 
         async def force(pool: object, *_args: object, **_kwargs: object) -> bool:
             calls.append(("force", pool))
             return False
 
         monkeypatch.setattr(host_mod, "admit_hosted_runtime", admit)
-        monkeypatch.setattr(host_mod, "settle_hosted_runtime", settle)
+        monkeypatch.setattr(host_mod, "settle_and_stamp_turn", settle_and_stamp)
         monkeypatch.setattr("shared.hosted_force.original_host_force", force)
         host = AgentHost(
             pool=cast(AsyncConnectionPool[Any], turn_pool),
@@ -703,7 +719,7 @@ class TestTurnLoop:
         async def _boom(*_args: object, **_kwargs: object) -> dict[str, Any]:
             raise RuntimeError("turn exploded")
 
-        _stub_host_transitions(monkeypatch, _flip)
+        stamps = _stub_host_transitions(monkeypatch, _flip)
         host, graph, _ = wired({1: _Row(status="idling")})
         graph.ainvoke = _boom
 
@@ -711,6 +727,98 @@ class TestTurnLoop:
             await asyncio.wait_for(host.run_turn(1), 2)
 
         assert flips[-1] == (1, "idling", "running")
+        # The crash is a corpse: the settle is parked (keeps any marker) and
+        # the fatal stamp lands even though the turn raised.
+        assert stamps == [1]
+
+    async def test_a_normal_idle_turn_is_not_stamped_as_a_corpse(
+        self, wired: _Build, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+
+        flips: list[tuple[int, str, str]] = []
+
+        async def _flip(_pool: object, agent_id: int, to: str, *, expected_from: str) -> bool:
+            flips.append((agent_id, to, expected_from))
+            return True
+
+        stamps = _stub_host_transitions(monkeypatch, _flip)
+        host, _, _ = wired(
+            {1: _Row(status="idling")},
+            {1: [{"exit_requested": False, "turn_idle": True, "restart_requested": False}]},
+        )
+
+        await asyncio.wait_for(host.run_turn(1), 2)
+
+        assert flips[-1] == (1, "idling", "running")
+        assert stamps == []
+
+    async def test_a_cancelled_turn_is_not_stamped_as_a_corpse(
+        self, wired: _Build, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+
+        flips: list[tuple[int, str, str]] = []
+
+        async def _flip(_pool: object, agent_id: int, to: str, *, expected_from: str) -> bool:
+            flips.append((agent_id, to, expected_from))
+            return True
+
+        async def _cancel(*_args: object, **_kwargs: object) -> dict[str, Any]:
+            raise asyncio.CancelledError
+
+        stamps = _stub_host_transitions(monkeypatch, _flip)
+        host, graph, _ = wired({1: _Row(status="idling")})
+        graph.ainvoke = _cancel
+
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(host.run_turn(1), 2)
+
+        assert stamps == []
+
+    async def test_renew_ownership_reaps_after_renewing(
+        self, wired: _Build, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Renewal first, reap second: a reap failure must not starve leases.
+        The reap publishes each corpse snapshot itself (hosted_ownership)."""
+        import services.agent_host.host as host_mod
+
+        calls: list[str] = []
+
+        async def _renew(pool: object, machine: str, owner: UUID) -> None:
+            calls.append("renew")
+
+        async def _reap(pool: object, machine: str, owner: UUID) -> list[int]:
+            calls.append("reap")
+            return [7, 9]
+
+        monkeypatch.setattr(host_mod, "renew_hosted_owner", _renew)
+        monkeypatch.setattr(host_mod, "reap_crash_corpses", _reap)
+
+        host, _, _ = wired({1: _Row(status="idling")})
+        await host.renew_ownership()
+
+        assert calls == ["renew", "reap"]
+
+    async def test_renew_ownership_survives_a_reap_failure(
+        self, wired: _Build, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The beat must keep renewing healthy leases when the reap explodes."""
+        import services.agent_host.host as host_mod
+
+        renewed: list[str] = []
+
+        async def _renew(pool: object, machine: str, owner: UUID) -> None:
+            renewed.append("renew")
+
+        async def _reap(pool: object, machine: str, owner: UUID) -> list[int]:
+            raise RuntimeError("reap exploded")
+
+        monkeypatch.setattr(host_mod, "renew_hosted_owner", _renew)
+        monkeypatch.setattr(host_mod, "reap_crash_corpses", _reap)
+
+        host, _, _ = wired({1: _Row(status="idling")})
+        await host.renew_ownership()  # must not raise
+
+        assert renewed == ["renew"]
 
     async def test_exit_requested_does_not_restore_idling(
         self, wired: _Build, monkeypatch: pytest.MonkeyPatch

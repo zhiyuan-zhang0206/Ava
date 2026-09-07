@@ -211,6 +211,14 @@ LEASE_RENEW_INTERVAL_S = 60.0
 # TTL = 10x the renewal interval, so transient DB renewal failures do not
 # immediately relinquish a live turn. Expiry bounds crash recovery.
 AGENT_LEASE_TTL_S = 600.0
+
+# How long a crash-marked idling row may sit dead before the agent_host beat's
+# corpse reaper stamps it terminated ('reaper'). Deliberately longer than
+# AGENT_LEASE_TTL_S so a corpse first decays offline (renew skips marked rows)
+# and then terminates — the user sees an honest sequence. Also longer than the
+# claim-park window after a fatal abort (~4 min observed on the 5858 corpse),
+# so a still-running parked row is never raced.
+CORPSE_REAP_GRACE_S = 900.0
 AGENT_LEASE_RENEW_INTERVAL_S = 60.0
 # How long the orchestration waits for its own gateway to be serving before it tells
 # any agent-runner to update (`cli.commands._gateway_ready`). A different question

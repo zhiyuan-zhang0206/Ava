@@ -11,6 +11,7 @@ from psycopg_pool import AsyncConnectionPool
 from agent.db import claim_inbound_batch
 from agent.hosted_ownership import admit_hosted_runtime, apply_hosted_lifecycle
 from services.agent_host.host import AgentHost
+from services.agent_host.runtime import TurnOutcome
 from shared import maintenance, maintenance_cohort, pause_owner
 from shared.machine import machine_name
 from shared.turn_identity import bind_turn_identity
@@ -172,7 +173,7 @@ async def test_cold_idle_resume_uses_pointer_without_an_extra_model_call(
     monkeypatch.setattr(successor, "_runtime_for", AsyncMock(return_value=object()))
     monkeypatch.setattr("services.agent_host.host.validate_model_config", MagicMock())
 
-    async def drive(_agent: int, _runtime: Any) -> bool:
+    async def drive(_agent: int, _runtime: Any) -> TurnOutcome:
         return await successor._invoke_until_done(_agent, ctx)
 
     monkeypatch.setattr(successor, "_drive_turns", drive)
