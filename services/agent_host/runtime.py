@@ -104,3 +104,20 @@ class HostStats:
             "wakes_skipped": self.wakes_skipped,
             "config_rejected": self.config_rejected,
         }
+
+
+class TurnOutcome:
+    """How one hosted invocation ended, as the settle boundary needs it.
+
+    `crashed` stamps the corpse marker: fatal LLM classes + unclassified
+    exceptions — every path where the turn died without completing work. A
+    no-work park (crash-fresh halted claim, open circuit breaker) ends
+    `turn_idle` with `crashed` False, and the settle deliberately leaves the
+    marker untouched, so the park cannot relabel a corpse healthy.
+    """
+
+    __slots__ = ("crashed", "exited")
+
+    def __init__(self, *, exited: bool, crashed: bool) -> None:
+        self.exited = exited
+        self.crashed = crashed

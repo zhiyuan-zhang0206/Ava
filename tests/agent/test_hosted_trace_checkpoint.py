@@ -64,7 +64,7 @@ async def test_host_trace_reads_final_messages_after_nstep_flush(
         host = host_module.AgentHost(
             pool=aops_pool, checkpointer=saver, graph=graph, machine="test"
         )
-        assert not await host._invoke_until_done(agent_id, AvaContext(ops_pool=aops_pool))
+        assert not (await host._invoke_until_done(agent_id, AvaContext(ops_pool=aops_pool))).exited
 
     assert len(traces) == 1
     # This is the actual gateway trace-content reader, using fresh connections.

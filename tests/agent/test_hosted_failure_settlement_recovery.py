@@ -105,7 +105,7 @@ async def test_abort_survives_database_loss_before_halted_state_write(
     publisher = MagicMock()
     ctx = AvaContext(ops_pool=aops_pool, event_publisher=publisher, llm=MagicMock())
     with bind_turn_identity(agent, incarnation=owner):
-        assert not await host._invoke_until_done(agent, ctx)
+        assert not (await host._invoke_until_done(agent, ctx)).exited
     assert outages == 2 and len(model_calls) == (0 if failure == "compaction" else 1)
     errors = [
         json.loads(call.args[0])

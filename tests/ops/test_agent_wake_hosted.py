@@ -82,6 +82,25 @@ def test_resurrect_agent_hosted_flips_and_wakes(
     assert wakes == [(aid, "0")]
 
 
+def test_resurrect_agent_hosted_clears_the_corpse_marker(
+    db_conn: psycopg.Connection, wakes: list[tuple[int, str]]
+) -> None:
+    """A reaper-terminated corpse keeps `last_turn_fatal_at` stamped; the
+    resurrect transition must clear it or the reaper's next beat would
+    re-terminate the freshly revived row (the marker is already past grace)."""
+    aid = _park(db_conn, status="terminated")
+    db_conn.execute(
+        "UPDATE agents_meta SET termination_source='reaper', "
+        "last_turn_fatal_at = now() - interval '1 hour' WHERE id = %s",
+        (aid,),
+    )
+    db_conn.commit()
+    agent_wake.resurrect_agent(aid, resurrected_by="user")
+    assert db_conn.execute(
+        "SELECT last_turn_fatal_at FROM agents_meta WHERE id = %s", (aid,)
+    ).fetchone() == (None,)
+
+
 def test_resurrect_agent_hosted_keeps_trigger_guard(
     db_conn: psycopg.Connection, wakes: list[tuple[int, str]]
 ) -> None:

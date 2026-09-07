@@ -21,6 +21,7 @@ from agent.hooks.compact import COMPACT_MAX_ATTEMPTS
 from agent.impersonation import flush_checkpoint
 from agent.startup import _wrap_saver_writes_with_nstep_interval
 from services.agent_host.host import AgentHost
+from services.agent_host.runtime import TurnOutcome
 from shared.config import settings
 from shared.context import AvaContext
 from shared.db import insert_inbound_message
@@ -100,7 +101,7 @@ async def test_compaction_failure_is_visible_durable_and_recovers_on_new_inbound
     monkeypatch.setattr(host, "_runtime_for", AsyncMock(return_value=object()))
     monkeypatch.setattr("services.agent_host.host.validate_model_config", MagicMock())
 
-    async def drive(target: int, _runtime: object) -> bool:
+    async def drive(target: int, _runtime: object) -> TurnOutcome:
         return await host._invoke_until_done(target, ctx)
 
     monkeypatch.setattr(host, "_drive_turns", drive)

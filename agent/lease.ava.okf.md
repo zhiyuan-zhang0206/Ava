@@ -27,7 +27,7 @@ without requiring an independently resident agent process.
 ## Entry points
 
 - `agent/hosted_ownership.py` — admission, renewal, settlement and release
-- `services/agent_host/host.py:settle_stale_running_rows` — host recovery
+- `agent/hosted_ownership.py:settle_stale_running_rows` — host recovery
 - `services/agent_host/daemon.py` — owner health beat
 - `shared/runtime_incarnation.py` — context-bound execution identity
 

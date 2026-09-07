@@ -54,8 +54,10 @@ from agent.hooks.compact import CompactionFailedError
 from agent.hosted_ownership import (
     admit_hosted_runtime,
     apply_hosted_lifecycle,
+    reap_crash_corpses,
     release_hosted_owner,
     renew_hosted_owner,
+    settle_and_stamp_turn,
     settle_hosted_runtime,
 )
 from agent.impersonation import active_lease, flush_checkpoint, settle_checkpoint
@@ -69,6 +71,7 @@ from services.agent_host.db_recovery import database_phase, recover_database
 from services.agent_host.dispatcher import PendingInboundWake
 from services.agent_host.runtime import (
     HostStats,
+    TurnOutcome,
     _active_turn_config_fingerprint,
     _AgentRuntime,
     _copy_active_turn_context,
@@ -79,7 +82,6 @@ from shared import maintenance
 from shared.config import settings
 from shared.config.turn_view import bind_agent_config, resolve_agent_config_pins
 from shared.context import AvaContext
-from shared.db_transaction import async_write_transaction
 from shared.event_publisher import AgentEventPublisher
 from shared.live_announce import publish_agent_updated
 from shared.lm.factory import validate_model_config
@@ -99,31 +101,6 @@ _HostGraph = CompiledStateGraph[BaseAgentState, AvaContext, BaseAgentState, Base
 # `restarting` belong to the boot / respawn path, which owns the row until it
 # reaches a running state.
 _UNRUNNABLE_STATUSES = frozenset({"terminated", "restarting"})
-
-
-async def settle_stale_running_rows(pool: AsyncConnectionPool, machine: str) -> list[int]:
-    """Restore rows left running by a previous hosted-runner instance.
-
-    A pidless row may belong to another live host instance. Only unknown or
-    expired hosted ownership licenses this atomic startup status settlement.
-    """
-    async with async_write_transaction(pool) as conn:
-        rows = await (
-            await conn.execute(
-                "UPDATE agents_meta SET status = 'idling' "
-                "WHERE status = 'running' AND pid IS NULL AND machine = %s "
-                "AND (runtime_kind IS NULL OR runtime_kind = 'hosted') "
-                "AND (lease_expires_at IS NULL OR lease_expires_at <= now()) RETURNING id",
-                (machine,),
-            )
-        ).fetchall()
-    settled = [row[0] for row in rows]
-    logger.info(
-        "hosted stale-running settle: settled {n} row(s)",
-        event="host_stale_running_settled",
-        n=len(settled),
-    )
-    return settled
 
 
 class AgentHost:
@@ -324,7 +301,7 @@ class AgentHost:
                 # do not build a new runtime or run initialization hooks.
                 await self._apply_held_controls(agent_id, incarnation)
                 return
-            exited = False
+            outcome = TurnOutcome(exited=False, crashed=False)
             # Admission is durable before its optional live announce; every await
             # after that commit stays inside the settlement boundary so a
             # cancelled/half-open publish cannot strand a false `running` row.
@@ -341,24 +318,29 @@ class AgentHost:
                 ):
                     await publish_agent_updated(self._control_pool, agent_id)
                     runtime = await self._runtime_for(agent_id, stored.fingerprint)
-                    exited = await self._drive_turns(agent_id, runtime)
+                    outcome = await self._drive_turns(agent_id, runtime)
             except asyncio.CancelledError:
                 # A cancelled turn (stale-turn scan, force terminate, shutdown)
-                # must not keep its runtime either: the next wake's runtime build
-                # re-runs the startup reconcile — the hosted equivalent of a
-                # fresh boot. The in-flight ref keeps the current build alive;
-                # only the cache entry is dropped.
+                # must not keep its runtime either: the next wake re-runs the
+                # startup reconcile. External cancellation is not a corpse.
                 self.drop_agent(agent_id)
                 raise
             except Exception:
                 # The scheduler logs and drops the task; dropping the runtime
                 # ensures the next admission re-runs startup reconciliation.
+                # An unclassified crash is a corpse too: settle it idling but
+                # mark it so the reaper terminates it once grace elapses.
                 self.drop_agent(agent_id)
+                outcome = TurnOutcome(exited=False, crashed=True)
                 raise
             finally:
                 self._in_flight.discard(agent_id)
-                if not exited:
-                    await settle_hosted_runtime(self._control_pool, incarnation)
+                await settle_and_stamp_turn(
+                    self._control_pool,
+                    incarnation,
+                    exited=outcome.exited,
+                    crashed=outcome.crashed,
+                )
 
     async def _run_held_controls(self, agent_id: int, status: str) -> None:
         """Maintain ownership and apply admin intent without touching the graph."""
@@ -645,7 +627,7 @@ class AgentHost:
 
     # ── the turn loop ────────────────────────────────────────────────────────
 
-    async def _drive_turns(self, agent_id: int, runtime: _AgentRuntime) -> bool:
+    async def _drive_turns(self, agent_id: int, runtime: _AgentRuntime) -> TurnOutcome:
         """Build this turn task's context and invoke the graph until it is done.
 
         The event publisher is created per turn task rather than cached with the
@@ -668,7 +650,7 @@ class AgentHost:
         finally:
             await event_publisher.aclose()
 
-    async def _invoke_until_done(self, agent_id: int, ctx: AvaContext) -> bool:
+    async def _invoke_until_done(self, agent_id: int, ctx: AvaContext) -> TurnOutcome:
         """Run until a durable lifecycle command or idle state ends this turn.
 
         Normal return flushes before applying lifecycle; restart retains its
@@ -700,7 +682,7 @@ class AgentHost:
                                 pending_failure,
                             )
                             await attach_trace_checkpoint_ref(self._graph, ctx, agent_id)
-                        return False
+                        return TurnOutcome(exited=False, crashed=True)
                     try:
                         result: dict[str, object] = await run_invocation_with_stall_guard(
                             self._graph,
@@ -726,7 +708,7 @@ class AgentHost:
                                 pending_failure,
                             )
                             await attach_trace_checkpoint_ref(self._graph, ctx, agent_id)
-                        return False
+                        return TurnOutcome(exited=False, crashed=True)
                     # The trace must remain current until its final checkpoint is
                     # durable; an N-step buffered ID is not yet readable by the UI.
                     async with database_phase():
@@ -747,11 +729,11 @@ class AgentHost:
                         generation=str(incarnation.generation),
                         command_kind=kind,
                     )
-                    return kind == "terminate"
+                    return TurnOutcome(exited=kind == "terminate", crashed=False)
                 if result["turn_idle"]:
                     async with database_phase():
                         await settle_checkpoint(self._graph, agent_id)
-                    return False
+                    return TurnOutcome(exited=False, crashed=False)
             except (psycopg.OperationalError, PoolTimeout):
                 incarnation = current_incarnation(agent_id)
                 if incarnation is None:
@@ -777,5 +759,16 @@ class AgentHost:
         await release_hosted_owner(self._control_pool, self._machine, self._owner, self._in_flight)
 
     async def renew_ownership(self) -> None:
-        """Existing daemon health beat also proves idle runtime responsibility."""
+        """Existing daemon health beat also proves idle runtime responsibility.
+
+        Renewal first, corpse reap second: a reap failure must not starve
+        healthy rows' leases (the next beat retries the reap).
+        """
         await renew_hosted_owner(self._control_pool, self._machine, self._owner)
+        try:
+            await reap_crash_corpses(self._control_pool, self._machine, self._owner)
+        except Exception:
+            logger.exception(
+                "corpse reap failed — retrying next beat",
+                event="corpse_reaper_failed",
+            )
