@@ -116,6 +116,18 @@ class PlatformBackend(abc.ABC):
         ``slug``. Safe when none is registered."""
         ...
 
+    # -- logs maintenance ----------------------------------------------------
+
+    @abc.abstractmethod
+    def register_logs_job(self) -> None:
+        """Register daily copytruncate rotation followed by tiered retention."""
+        ...
+
+    @abc.abstractmethod
+    def unregister_logs_job(self, slug: str) -> None:
+        """Remove the daily logs-maintenance job for ``slug``."""
+        ...
+
     # -- watchdog probe -----------------------------------------------------
 
     @abc.abstractmethod
@@ -243,6 +255,19 @@ class MacPlatformBackend(PlatformBackend):
 
         _unregister_macos(slug)
 
+    # -- logs maintenance --
+
+    def register_logs_job(self) -> None:
+        from shared.os_logs_job import _register_macos
+
+        if _register_macos() != 0:
+            raise RuntimeError("logs-maintenance registration failed on macOS")
+
+    def unregister_logs_job(self, slug: str) -> None:
+        from shared.os_logs_job import _unregister_macos
+
+        _unregister_macos(slug)
+
     # -- watchdog probe --
 
     def register_watchdog_probe(self, role: str, interval_s: int = 60) -> None:
@@ -329,6 +354,19 @@ class LinuxPlatformBackend(PlatformBackend):
 
         _unregister_linux(slug)
 
+    # -- logs maintenance --
+
+    def register_logs_job(self) -> None:
+        from shared.os_logs_job import _register_linux
+
+        if _register_linux() != 0:
+            raise RuntimeError("logs-maintenance registration failed on Linux")
+
+    def unregister_logs_job(self, slug: str) -> None:
+        from shared.os_logs_job import _unregister_linux
+
+        _unregister_linux(slug)
+
     # -- watchdog probe --
 
     def register_watchdog_probe(self, role: str, interval_s: int = 60) -> None:
@@ -382,7 +420,8 @@ class LinuxPlatformBackend(PlatformBackend):
 class WindowsPlatformBackend(PlatformBackend):
     """Windows backend.
 
-    The three OS-scheduled job kinds (autostart, health probe, watchdog probe)
+    The four OS-scheduled job kinds (autostart, health probe, watchdog probe,
+    logs maintenance)
     route through ``shared.os_schtasks``. The data plane is still not wired here
     and stays a deliberate no-op — callers need no ``if IS_WINDOWS`` guards.
     """
@@ -456,6 +495,28 @@ class WindowsPlatformBackend(PlatformBackend):
 
     def unregister_cron(self, slug: str) -> None:
         from shared.os_cron import _unregister_windows
+
+        _unregister_windows(slug)
+
+    # -- logs maintenance --
+
+    def register_logs_job(self) -> None:
+        from shared.os_logs_job import _register_windows
+
+        reason = _register_windows()
+        if reason is not None:
+            print(  # noqa: T201
+                "  ! logs maintenance: schtasks registration failed — continuing "
+                "without daily rotation and retention "
+                f"(next `ava start` retries): {reason}",
+                file=sys.stderr,
+            )
+            from loguru import logger
+
+            logger.error("logs-maintenance registration failed on Windows: {}", reason)
+
+    def unregister_logs_job(self, slug: str) -> None:
+        from shared.os_logs_job import _unregister_windows
 
         _unregister_windows(slug)
 

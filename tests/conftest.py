@@ -170,7 +170,7 @@ os.environ.pop("AVA_PROCESS_PROFILE", None)
 # monkeypatch that was meant to stop it never reached the child. Nine
 # `com.ava.ava_e2e_home_*.health-probe` LaunchAgents survived on a dev box,
 # firing `--auto-rollback` every 300s against whatever `ava` PATH resolved to.
-# `shared.os_cron.os_jobs_enabled` gates all three registrars on this; the
+# `shared.os_cron.os_jobs_enabled` gates all four registrars on this; the
 # unregister paths stay live so cleanup still works.
 os.environ["AVA_OS_JOBS_ENABLED"] = "false"
 

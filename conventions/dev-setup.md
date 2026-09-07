@@ -122,7 +122,7 @@ scripts/install.sh --worktree                # births cluster <name>: locked Pyt
 Postgres/Redis instance and its registry slot stay up.
 `ava cluster destroy --path ~/.ava-<name>` additionally frees the slot (its port
 block) and deregisters that cluster's OS-scheduled jobs (health probe, both
-watchdog probes, autostart), and `--drop-db` drops its database. (A bare `ava stop` here tears down
+watchdog probes, autostart, logs maintenance), and `--drop-db` drops its database. (A bare `ava stop` here tears down
 only this worktree cluster's own private pg/redis instance — it can no longer
 touch the prod data plane, since every cluster owns a separate instance; still,
 don't run prod-affecting commands from a worktree.)

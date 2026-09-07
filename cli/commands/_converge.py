@@ -24,6 +24,7 @@ from cli.commands._converge_legacy_permission_watcher import remove_legacy_permi
 from cli.commands._converge_os_jobs import (
     ensure_cluster_autostart,
     ensure_health_probe_cron,
+    ensure_logs_maintenance,
     ensure_watchdog_probe,
     reap_stale_schtasks,
 )
@@ -608,6 +609,11 @@ CONVERGE_STEPS: tuple[ConvergeStep, ...] = (
     ),
     # Windows-only: reclaim \Ava\* tasks under a retired home slug (task #1196).
     ConvergeStep("reap stale Windows tasks", reap_stale_schtasks, requires_unit_config=True),
+    ConvergeStep(
+        "daily logs maintenance",
+        ensure_logs_maintenance,
+        requires_unit_config=True,
+    ),
     ConvergeStep(
         "health probe cron job",
         ensure_health_probe_cron,

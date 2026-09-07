@@ -300,6 +300,8 @@ $OTLP_EXPORTERS
 
 service:
   telemetry:
+    # Task #1978: keep exporter retry notices out of service stdout.
+    logs: { level: warn }
     metrics:
       readers:
         - pull:

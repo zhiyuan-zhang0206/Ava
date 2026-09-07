@@ -24,10 +24,15 @@ from pathlib import Path
 
 from shared.platform import IS_WINDOWS
 
-# The crontab comment markers the three registrars stamp their lines with
-# (`shared.os_cron` / `os_autostart` / `os_watchdog_probe`). A line carrying one
+# The crontab comment markers the four registrars stamp their lines with
+# (`shared.os_cron` / `os_autostart` / `os_watchdog_probe` / `os_logs_job`). A line carrying one
 # is an Ava job; anything else in the user's crontab is theirs and is ignored.
-_CRON_MARKERS = ("# ava-health-probe", "# ava-autostart", "# ava-watchdog-probe")
+_CRON_MARKERS = (
+    "# ava-health-probe",
+    "# ava-autostart",
+    "# ava-watchdog-probe",
+    "# ava-logs-maintenance",
+)
 
 
 def _launchd_dir() -> Path:

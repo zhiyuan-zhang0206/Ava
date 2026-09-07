@@ -1,9 +1,10 @@
-"""Delete expired local logs from the narrow operator-approved allowlist."""
+"""Rotate and delete local logs within narrow operator-approved boundaries."""
 
 from __future__ import annotations
 
 import os
 import re
+import shutil
 import sys
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -21,8 +22,15 @@ _MANAGED_LOG_NAME = re.compile(
     r"|(?P<shell>ava-agent-[0-9]+-shell-[0-9]+-[a-z][a-z0-9-]*\.(?:out|host)\.log)"
     r"|(?P<service>[a-z][a-z0-9_-]*)\.[0-9]{4}-[0-9]{2}-[0-9]{2}_"
     r"[0-9]{2}-[0-9]{2}-[0-9]{2}_[0-9]+\.log"
+    r"|(?P<svcout>ava-[a-z][a-z0-9_-]*\.out\.log)"
+    r"|(?P<rotlog>loki\.log\.[0-9]{4}-[0-9]{2}-[0-9]{2}"
+    r"|prometheus\.log\.[0-9]{4}-[0-9]{2}-[0-9]{2}"
+    r"|dbg-stdout\.log\.[0-9]{4}-[0-9]{2}-[0-9]{2})"
+    r"|(?P<rotout>ava-[a-z][a-z0-9_-]*\.out\.log\.[0-9]{4}-[0-9]{2}-[0-9]{2})"
     r")"
 )
+
+_ROTATED_LOG_ARCHIVE = re.compile(r".+\.log\.[0-9]{4}-[0-9]{2}-[0-9]{2}")
 
 _FAMILY_DEFAULT_DAYS = {
     "agent": 15,
@@ -49,14 +57,7 @@ class RetentionFailure:
     error: OSError
 
 
-def _log_family(match: re.Match[str]) -> str:
-    """Return the C retention family for one allowlisted filename."""
-    if match["agent"] is not None:
-        return "agent"
-    if match["shell"] is not None:
-        return "shell"
-
-    service = match["service"]
+def _service_family(service: str) -> str:
     if service.startswith("gateway"):
         return "gateway"
     if service == "ops" or service.startswith(("ops-", "ops_")):
@@ -66,6 +67,29 @@ def _log_family(match: re.Match[str]) -> str:
     if service.startswith("agent-"):
         return "agent"
     return "other"
+
+
+def _log_family(match: re.Match[str]) -> str:
+    """Return the C retention family for one allowlisted filename."""
+    if match["agent"] is not None:
+        return "agent"
+    if match["shell"] is not None:
+        return "shell"
+    if match["rotlog"] is not None:
+        return "other"
+
+    service = match["service"]
+    if service is None:
+        service_stdout = match["svcout"] or match["rotout"]
+        service = service_stdout.removeprefix("ava-").split(".out.log", 1)[0]
+    return _service_family(service)
+
+
+def _maintenance_roots(logs_path: Path) -> tuple[Path, ...]:
+    """Top-level roots maintained for an `$AVA_HOME/logs` path."""
+    if logs_path.name != "logs":
+        return (logs_path,)
+    return (logs_path, logs_path.parent / "lgtm" / "native" / "logs")
 
 
 def _active_log_paths(logs_path: Path) -> set[Path]:
@@ -132,6 +156,34 @@ def _utc_mtime(timestamp: float) -> str:
     )
 
 
+def _retention_scan(
+    target: Path,
+    current: datetime,
+    family_days: Mapping[str, int],
+) -> tuple[list[RetentionCandidate], list[RetentionFailure]]:
+    candidates: list[RetentionCandidate] = []
+    failures: list[RetentionFailure] = []
+    for root in _maintenance_roots(target):
+        try:
+            root_candidates, root_failures = _retention_candidates(
+                root,
+                current,
+                family_days,
+                _active_log_paths(root),
+            )
+        except FileNotFoundError as exc:
+            if root != target:
+                continue
+            failures.append(RetentionFailure(path=root, error=exc))
+            continue
+        except OSError as exc:
+            failures.append(RetentionFailure(path=root, error=exc))
+            continue
+        candidates.extend(root_candidates)
+        failures.extend(root_failures)
+    return sorted(candidates, key=lambda candidate: str(candidate.path)), failures
+
+
 def cmd_logs_retention(
     *,
     older_than_days: int | None,
@@ -161,16 +213,11 @@ def cmd_logs_retention(
             overrides["other"] = overrides.pop("default")
         resolved_family_days = _FAMILY_DEFAULT_DAYS | overrides
 
-    try:
-        candidates, scan_failures = _retention_candidates(
-            target,
-            current,
-            resolved_family_days,
-            _active_log_paths(target),
-        )
-    except OSError as exc:
-        candidates = []
-        scan_failures = [RetentionFailure(path=target, error=exc)]
+    candidates, scan_failures = _retention_scan(
+        target,
+        current,
+        resolved_family_days,
+    )
     total_bytes = sum(candidate.size_bytes for candidate in candidates)
     for failure in scan_failures:
         print(
@@ -228,4 +275,99 @@ def cmd_logs_retention(
         "retention_summary"
         f"\tmode=delete\tdeleted={deleted}\tbytes={reclaimed_bytes}\tfailed={failed}"
     )
+    return 1 if failed else 0
+
+
+def _rotation_name_allowed(name: str, *, native: bool) -> bool:
+    if not native:
+        return name.endswith(".out.log")
+    return (
+        name.endswith(".log")
+        and not name.startswith("grafana")
+        and _ROTATED_LOG_ARCHIVE.fullmatch(name) is None
+    )
+
+
+def _print_rotation_state(path: Path, copied_bytes: int, action: str) -> None:
+    print(f"rotate_state\tpath={path}\tbytes={copied_bytes}\taction={action}")
+
+
+def _rotation_entries(root: Path, target: Path) -> tuple[list[os.DirEntry[str]], bool]:
+    try:
+        with os.scandir(root) as scanned:
+            return sorted(scanned, key=lambda entry: entry.name), False
+    except FileNotFoundError as exc:
+        if root != target:
+            return [], False
+        print(f"rotate_error\tpath={root}\terror={exc}", file=sys.stderr)
+    except OSError as exc:
+        print(f"rotate_error\tpath={root}\terror={exc}", file=sys.stderr)
+    return [], True
+
+
+def _rotate_entry(
+    entry: os.DirEntry[str],
+    *,
+    native: bool,
+    current: datetime,
+    archive_suffix: str,
+    size_threshold: int,
+    dry_run: bool,
+) -> bool:
+    if not _rotation_name_allowed(entry.name, native=native):
+        return False
+    path = Path(entry.path)
+    try:
+        if not entry.is_file(follow_symlinks=False):
+            return False
+        file_stat = entry.stat(follow_symlinks=False)
+        archive = Path(f"{path}.{archive_suffix}")
+        triggered = file_stat.st_size >= size_threshold or (
+            datetime.fromtimestamp(file_stat.st_mtime, UTC).date() != current.date()
+        )
+        if not triggered or os.path.lexists(archive):
+            _print_rotation_state(path, 0, "kept")
+            return False
+        if not dry_run:
+            shutil.copyfile(path, archive)
+            with path.open("r+b") as stream:
+                stream.truncate(0)
+        _print_rotation_state(path, file_stat.st_size, "rotated")
+    except OSError as exc:
+        print(f"rotate_error\tpath={path}\terror={exc}", file=sys.stderr)
+        return True
+    return False
+
+
+def cmd_logs_rotate(
+    *,
+    dry_run: bool,
+    size_mib: int = 64,
+    logs_path: Path | None = None,
+    now: datetime | None = None,
+) -> int:
+    """Copytruncate oversized or prior-UTC-day stdout logs."""
+    if size_mib <= 0:
+        raise ValueError("--size-mib must be a positive integer")
+
+    target = logs_dir() if logs_path is None else logs_path
+    current = datetime.now(UTC) if now is None else now
+    archive_suffix = current.strftime("%Y-%m-%d")
+    size_threshold = size_mib * 1024 * 1024
+    failed = False
+
+    for root in _maintenance_roots(target):
+        entries, scan_failed = _rotation_entries(root, target)
+        failed |= scan_failed
+        native = root != target
+        for entry in entries:
+            failed |= _rotate_entry(
+                entry,
+                native=native,
+                current=current,
+                archive_suffix=archive_suffix,
+                size_threshold=size_threshold,
+                dry_run=dry_run,
+            )
+
     return 1 if failed else 0

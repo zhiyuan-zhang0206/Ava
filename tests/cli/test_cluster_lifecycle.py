@@ -678,6 +678,9 @@ class _RecordingBackend:
     def unregister_autostart(self, slug: str) -> None:
         self.jobs.append(("autostart", slug))
 
+    def unregister_logs_job(self, slug: str) -> None:
+        self.jobs.append(("logs-maintenance", slug))
+
     def unregister_watchdog_probe(self, role: str, slug: str) -> None:
         self.jobs.append((f"watchdog-probe.{role}", slug))
 
@@ -711,6 +714,7 @@ def test_destroy_unregisters_every_scheduled_job(
     assert sorted(kind for kind, _slug in recording_backend.jobs) == [
         "autostart",
         "health-probe",
+        "logs-maintenance",
         "watchdog-probe.agent-runner",
         "watchdog-probe.gateway",
     ]
