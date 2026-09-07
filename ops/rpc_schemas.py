@@ -8,7 +8,6 @@ reach up into gateway. Split out of the former monolithic ops/schemas.py.
 
 from datetime import datetime
 from typing import Annotated, Any, Literal
-from uuid import UUID
 
 from pydantic import (
     BaseModel,
@@ -33,21 +32,6 @@ _UserContent = Annotated[
     str,
     StringConstraints(strip_whitespace=True, min_length=1, max_length=_MAX_CONTENT_CHARS),
 ]
-
-
-class AgentExitedRequest(BaseModel):
-    """The actual admitted runtime reporting exit, never a freshly read token."""
-
-    model_config = ConfigDict(extra="forbid")
-    generation: UUID | None = None
-    owner: UUID | None = None
-
-    @model_validator(mode="after")
-    def require_complete_incarnation(self) -> "AgentExitedRequest":
-        """The legacy SDK serializes its empty body as {}; partial tokens are invalid."""
-        if (self.generation is None) != (self.owner is None):
-            raise ValueError("generation and owner must be supplied together")
-        return self
 
 
 class TextContentBlock(BaseModel):
@@ -329,12 +313,9 @@ class TerminateAgentResponse(BaseModel):
     `already_terminated`: agent was already dead. Graceful termination is a
         no-op. Hosted force instead returns enqueued until its exact original
         host can prove quiescence; metadata status alone is not exit evidence.
-    `force_killed`: force=true killed the agent's detached process + force
-        marked terminated — agent may have been stuck and never took
-        the graceful path.
     """
 
-    status: Literal["enqueued", "already_terminated", "force_killed"]
+    status: Literal["enqueued", "already_terminated"]
 
 
 class RestartAgentRequest(BaseModel):
@@ -378,9 +359,8 @@ class RestartAgentRequest(BaseModel):
 class RestartAgentResponse(BaseModel):
     """POST /api/agents/{id}/restart response.
 
-    `enqueued`: restart inbound INSERTed; agent exits after the current
-        turn + restarter daemon auto-respawns a fresh process attached
-        to the same agent_id.
+    `enqueued`: native restart is durable; the host completes claim and
+        checkpoint settlement before admitting the next incarnation.
     `already_terminated`: agent is dead; restart does not apply — use
         resurrect.
     """

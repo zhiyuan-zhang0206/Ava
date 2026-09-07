@@ -170,7 +170,7 @@ def test_both_changed_restarts_frontend_too(monkeypatch: pytest.MonkeyPatch) -> 
         _cli, "_changed_paths_vs_origin", lambda: ["ui/web/x.tsx", "gateway/app.py"]
     )
     monkeypatch.setattr(_cli, "_list_agent_runners", list)
-    monkeypatch.setattr(_cli, "_quiesce_all_agents", lambda **_: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_cli, "_quiesce_all_agents", lambda **_: True)  # pyright: ignore[reportUnknownArgumentType]
 
     def _local(
         _repo: Path,
@@ -303,7 +303,7 @@ def test_classify_failure_falls_back_to_full_restart(monkeypatch: pytest.MonkeyP
 
     monkeypatch.setattr(_cli, "_changed_paths_vs_origin", _boom)
     monkeypatch.setattr(_cli, "_list_agent_runners", list)
-    monkeypatch.setattr(_cli, "_quiesce_all_agents", lambda **_: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_cli, "_quiesce_all_agents", lambda **_: True)  # pyright: ignore[reportUnknownArgumentType]
 
     def _local(
         _repo: Path,

@@ -513,7 +513,7 @@
     "/api/agents/{agent_id}/terminate": {
       "post": {
         "summary": "Post Agent Terminate",
-        "description": "Have the agent gracefully exit — INSERT one kind='terminate'\nsource=body.source inbound; after processing the current turn, when\nclaim runs, dispatch goto END and the process exits. An optional message\nis committed as pending chat immediately before the terminate command, so\nit is retained for resurrection without causing another LLM turn.\n\nWith `force=true`, request interruption. Hosted force returns `enqueued`\nwhile the original host drains actual work; acceptance and metadata status\nare not proof of exit. Detached process force returns `force_killed`.\n\nSmart liveness detection: if the process corresponding to\nagents_meta.pid is gone (zombie row, commonly from early-stage\nEmptyInputError residuals / respawn_agent failures leaving an unclaimed\nrow), force UPDATE status='terminated' directly without the\ninbound path — an inbound delivered to a dead process is pending\nforever and the user can never clear it.\n\nAlways runs on the agent's home machine via its ops server\n(`_forward_to_home_machine`). The force path must, because killing the\ndetached process / os.kill are physical local-host operations; the graceful\npath must too, because zombie detection `process_alive(pid)` is\nmeaningless across machines (probing a cross-machine PID via signal 0\nhits a remote PID space and gives false positives). Both paths run on\nthe home machine, symmetric in logic.\n\n404: agent_id does not exist (AgentNotFound -> handler returns\n    404 + reason).\n`already_terminated`: agent was already dead / process detected as\n    dead and cleaned up directly.\n`force_killed`: force=true killed the process and marked terminated.",
+        "description": "Terminate through the home runner's durable native control path.\n\nClaim returns to END and the host flushes before applying normal termination.\nAn optional message is committed as pending work before the command, retained\nfor later resurrection without causing another model turn. Force returns\nenqueued while the exact original host settles its task and execution\nresources; acceptance and metadata status are not proof of completed exit.\n\nBoth paths forward to the home runner. A missing agent returns 404; an\nalready-terminated identity is a no-op for graceful termination.",
         "operationId": "post_agent_terminate_api_agents__agent_id__terminate_post",
         "parameters": [
           {
@@ -545,56 +545,6 @@
                 }
               }
             }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/agents/{agent_id}/exited": {
-      "post": {
-        "summary": "Post Agent Exited",
-        "description": "An agent process reports it has reached its own exit finally block —\nfinalize its status to 'terminated', close its agent-owned show() pages,\nand keep daemon-supervised serve() pages open.\n\nCalled by the agent itself (`ava.self`'s exit path), not by a user/peer.\nDistinct from `/terminate`, which *initiates* termination (inserts a\nterminate inbound for a live agent, or force-kills): by the time `/exited`\narrives the process has already stopped, so this only records the\nfinalized state. The status flip is guarded (a concurrent restart leaves\nstatus 'restarting' untouched), so a restart's process-exit hitting this\nendpoint does not strand the restarter.\n\nNo cross-machine forwarding: the work is a status UPDATE + event publish,\nboth against the shared DB / events channel, so it runs on whichever\ngateway receives it.",
-        "operationId": "post_agent_exited_api_agents__agent_id__exited_post",
-        "parameters": [
-          {
-            "name": "agent_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "title": "Agent Id"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "anyOf": [
-                  {
-                    "$ref": "#/components/schemas/AgentExitedRequest"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ],
-                "title": "Body"
-              }
-            }
-          }
-        },
-        "responses": {
-          "204": {
-            "description": "Successful Response"
           },
           "422": {
             "description": "Validation Error",
@@ -661,7 +611,7 @@
     "/api/agents/{agent_id}/restart": {
       "post": {
         "summary": "Post Agent Restart",
-        "description": "Have the agent self-restart — INSERT kind='restart' source=body.source\ninbound; after processing the current turn, when claim runs it UPDATE\nstatus='restarting' + goto END + process exits; the restarter daemon\nsees status='restarting' and auto-respawns a fresh process attached to\nthe same agent_id (new PID, LangGraph state preserved).\n\nAlways forwards to the agent's home machine ops server — the restart\ninbound INSERT hits the shared DB regardless of which host runs it, but\nthe uniform forwarding path (same as terminate/resurrect) keeps one\ncode path with no local shortcut.\n\n404: agent_id does not exist (AgentNotFound -> handler returns\n    404 + reason).\n`already_terminated`: agent is dead; restart does not apply — use\n    resurrect.",
+        "description": "Enqueue native restart on the agent's home runner.\n\nThe current turn reaches claim, returns normally and flushes its checkpoint.\nThe host then applies the exact command and releases the incarnation for\nnew admission, retaining agent ID and context. Terminated agents require\nresurrection; restart returns already_terminated for them.",
         "operationId": "post_agent_restart_api_agents__agent_id__restart_post",
         "parameters": [
           {
@@ -2648,7 +2598,7 @@
     "/api/cluster/stop": {
       "post": {
         "summary": "Post Cluster Stop",
-        "description": "Phase A handler — pause this host (posture row -> 503 + stop the\nrestarter), executed by this host's ops server via a cluster_stop op.",
+        "description": "Phase A handler: drain native agent controls while SDK dependencies\nremain available, then stop local services through cluster_stop.",
         "operationId": "post_cluster_stop_api_cluster_stop_post",
         "requestBody": {
           "content": {
@@ -2691,7 +2641,7 @@
     "/api/cluster/resume": {
       "post": {
         "summary": "Post Cluster Resume",
-        "description": "Compensating unpause — posture row -> idle + respawn restarter,\nexecuted by this host's ops server via a cluster_resume op.\n\nSymmetric inverse of `/api/cluster/stop`. The orchestration's failure path\nfans this out (by dialing each host's ops server) to every host it had paused.\nOperators recover a stranded host through `/api/cluster/recover`; this route\nrequires the opaque exact capability of the deploy that created the pause.",
+        "description": "Compensating unpause: restore posture and release native admission holds,\nexecuted by this host's ops server via a cluster_resume op.\n\nSymmetric inverse of `/api/cluster/stop`. The orchestration's failure path\nfans this out (by dialing each host's ops server) to every host it had paused.\nOperators recover a stranded host through `/api/cluster/recover`; this route\nrequires the opaque exact capability of the deploy that created the pause.",
         "operationId": "post_cluster_resume_api_cluster_resume_post",
         "requestBody": {
           "content": {
@@ -6598,38 +6548,6 @@
         "title": "AgentEventsResponse",
         "description": "GET /api/cluster/admin/events response — newest-first slice."
       },
-      "AgentExitedRequest": {
-        "properties": {
-          "generation": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "uuid"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Generation"
-          },
-          "owner": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "uuid"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Owner"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "title": "AgentExitedRequest",
-        "description": "The actual admitted runtime reporting exit, never a freshly read token."
-      },
       "AgentInspect": {
         "properties": {
           "agent_id": {
@@ -8153,7 +8071,7 @@
             "title": "Shell Count",
             "default": 0
           },
-          "restarter_online": {
+          "agent_host_online": {
             "anyOf": [
               {
                 "type": "boolean"
@@ -8162,7 +8080,7 @@
                 "type": "null"
               }
             ],
-            "title": "Restarter Online"
+            "title": "Agent Host Online"
           },
           "watchdog_online": {
             "anyOf": [
@@ -10315,7 +10233,7 @@
             "title": "Shell Count",
             "default": 0
           },
-          "restarter_online": {
+          "agent_host_online": {
             "anyOf": [
               {
                 "type": "boolean"
@@ -10324,7 +10242,7 @@
                 "type": "null"
               }
             ],
-            "title": "Restarter Online"
+            "title": "Agent Host Online"
           },
           "watchdog_online": {
             "anyOf": [
@@ -12201,7 +12119,7 @@
           "status"
         ],
         "title": "RestartAgentResponse",
-        "description": "POST /api/agents/{id}/restart response.\n\n`enqueued`: restart inbound INSERTed; agent exits after the current\n    turn + restarter daemon auto-respawns a fresh process attached\n    to the same agent_id.\n`already_terminated`: agent is dead; restart does not apply — use\n    resurrect."
+        "description": "POST /api/agents/{id}/restart response.\n\n`enqueued`: native restart is durable; the host completes claim and\n    checkpoint settlement before admitting the next incarnation.\n`already_terminated`: agent is dead; restart does not apply — use\n    resurrect."
       },
       "RestartBucket": {
         "properties": {
@@ -13181,7 +13099,7 @@
           "last_start"
         ],
         "title": "ServiceRestartRow",
-        "description": "One service's boot count within the window — `name` is the daemon\nidentity passed to `init_gateway_process` (gateway / restarter / watchdog /\ndelivery_watchdog / labeler / memory_indexer / heartbeat / ...)."
+        "description": "One service's boot count within the window — `name` is the daemon\nidentity passed to `init_gateway_process` (gateway / agent-host / watchdog /\ndelivery_watchdog / labeler / memory_indexer / heartbeat / ...)."
       },
       "ServicesStatus": {
         "properties": {
@@ -14249,8 +14167,7 @@
             "type": "string",
             "enum": [
               "enqueued",
-              "already_terminated",
-              "force_killed"
+              "already_terminated"
             ],
             "title": "Status"
           }
@@ -14260,7 +14177,7 @@
           "status"
         ],
         "title": "TerminateAgentResponse",
-        "description": "POST /api/agents/{id}/terminate response.\n\n`enqueued`: termination accepted, including hosted force. Actual work may\n    still be draining; this result does not prove exit.\n`already_terminated`: agent was already dead. Graceful termination is a\n    no-op. Hosted force instead returns enqueued until its exact original\n    host can prove quiescence; metadata status alone is not exit evidence.\n`force_killed`: force=true killed the agent's detached process + force\n    marked terminated — agent may have been stuck and never took\n    the graceful path."
+        "description": "POST /api/agents/{id}/terminate response.\n\n`enqueued`: termination accepted, including hosted force. Actual work may\n    still be draining; this result does not prove exit.\n`already_terminated`: agent was already dead. Graceful termination is a\n    no-op. Hosted force instead returns enqueued until its exact original\n    host can prove quiescence; metadata status alone is not exit evidence."
       },
       "TextContentBlock": {
         "properties": {

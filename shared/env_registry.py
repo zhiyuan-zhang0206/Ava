@@ -124,7 +124,7 @@ WINDOWS_SYSTEM_ENV_KEYS = frozenset(row.key for row in _WINDOWS_SYSTEM_ROWS)
 
 # The per-agent config overlay / birth stamp travel in env vars as JSON (never
 # argv — issue #974: argv is world-readable via `ps`). Not Settings fields:
-# they are process-bound carriers the launcher writes and agent.loop pops.
+# they are process-bound carriers the exec launcher writes and child boot consumes.
 AGENT_CONFIG_OVERLAY_ENV = "AVA_AGENT_CONFIG_OVERLAY"
 AGENT_BIRTH_CONFIG_ENV = "AVA_AGENT_BIRTH_CONFIG"
 # The Redis ACL runtime password is a file-only data-plane credential like the
@@ -176,7 +176,6 @@ _PASSTHROUGH_ROWS = (
 # consumer (derive_env, daemon_health, enroll, port_preflight, dotenv_boot's
 # force set) follows automatically.
 _HEALTH_PORT_SERVICES: tuple[str, ...] = (
-    "restarter",
     "labeler",
     "heartbeat",
     "task_maintenance",
@@ -577,7 +576,7 @@ def child_env(role: ProcessRole, platform: str) -> dict[str, str]:
         # so daemons (agent-host) and their in-process hosted agents would
         # start on the legacy code page and crash printing CJK (task #2540,
         # win agent 2528). Inject it here for every role, the same value
-        # ops/agent_launch already pins for detached agents.
+        # exec-child bootstrap also requires.
         env["PYTHONUTF8"] = "1"
         for key in WINDOWS_SYSTEM_ENV_KEYS:
             if os.environ.get(key):

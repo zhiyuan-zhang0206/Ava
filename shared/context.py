@@ -2,8 +2,8 @@
 
 Used in two layered roles:
 
-1. **LangGraph node DI** (`Runtime[AvaContext]`). `agent/loop.py` and
-   any embedding driver build an `AvaContext` and pass it via
+1. **LangGraph node DI** (`Runtime[AvaContext]`). The agent host and
+   embedding drivers build an `AvaContext` and pass it via
    `graph.ainvoke(input, context=ctx)`. Graph nodes have signature
    `(state, runtime: Runtime[AvaContext], config: RunnableConfig)` and
    access deps as `runtime.context.X`.
@@ -24,7 +24,7 @@ Lifecycle of fields:
   per-process snapshots taken at build time. Defaults read live `settings.X`
   so callers that don't pass them explicitly get the conftest-set value. The
   defaults are intentionally kept (not dropped) — see the refactor doc.
-- **Handles** (`llm`, `redis_sync`, `ops_pool`, `inbound_listener`) are
+- **Handles** (`llm`, `redis_sync`, `ops_pool`) are
   caller-built and caller-managed. Graph nodes that touch a handle expect it
   non-None. Non-graph entry points (gateway lifespan, daemons, cli) populate
   the handles relevant to their path and leave the rest None.
@@ -43,7 +43,6 @@ from psycopg_pool import AsyncConnectionPool
 
 from shared.config import settings
 from shared.event_publisher import AgentEventPublisher
-from shared.redis_listener import RedisInboundListener
 
 
 def agent_id_from_config(
@@ -87,8 +86,7 @@ class AvaContext:
 
     ops_pool: AsyncConnectionPool | None = None
     """Pool for all kernel-side transactional SQL (claim_inbound_batch /
-    reconcile_claimed_inbounds / mark_agent_status / claim_agent_row /
-    _has_pending_inbound). The
+    reconcile_claimed_inbounds / lifecycle settlement). The
     pool's `check_connection` health-checks every borrowed conn and
     transparently reconnects when the remote PG / PgBouncer evicts an idle
     conn — single-conn alternative silently dies after server idle timeout
@@ -96,33 +94,6 @@ class AvaContext:
     not need an inbound queue (graph runs one round of ainvoke per case);
     pass None so _claim takes the container early-return path without
     touching the queue."""
-
-    inbound_listener: RedisInboundListener | None = None
-    """Dedicated long-lived inbound wake listener with auto-reconnect.
-
-    A `RedisInboundListener` (Redis pub/sub). Lives outside `ops_pool`
-    because the subscription requires a dedicated long-lived connection —
-    Redis pub/sub needs its own connection for `get_message()` and cannot
-    share pool conns. None in container mode (no inbound queue)."""
-
-    hosted: bool = False
-    """True when this run's turns are hosted as tasks inside the agent-runner
-    rather than owned by a process of their own
-    (`future/infra/agent-runner-as-server.md`).
-
-    It changes exactly one decision: what the claim node does when it finds
-    nothing to claim. A process agent parks there — flips its row to `idling`
-    and blocks on the inbound pub/sub — because the process has nothing else to
-    do and must stay alive. A hosted agent has no process to park: the host ends
-    the turn task and creates a new one when the dispatcher sees a wake, so idle
-    genuinely costs nothing.
-
-    Deliberately a context field, not a `settings.daemon.runner_mode` read at
-    the claim site: the mode belongs to the runtime that BUILT this context, so
-    an eval-container or test run can stay process-shaped regardless of what
-    the cluster's flag says, and the claim node keeps taking all its
-    dependencies from one place. Left False by every current caller, so the
-    branch is unreachable until the host service builds a context with it."""
 
     # ── string-level config ──
     #

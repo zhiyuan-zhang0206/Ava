@@ -35,21 +35,9 @@ def fake_cancel_event(monkeypatch: pytest.MonkeyPatch) -> asyncio.Event:
 
 
 @pytest.fixture(autouse=True)
-def _fresh_config_carrier() -> None:
-    """`agent/_config_carrier.py` holds the popped per-agent config maps for
-    the process lifetime; a test session outlives every test, so maps stored
-    by a loop-run test (test_loop_main drives the real boot) would ride into
-    every later exec child and break its overlay application. Autouse: each
-    test starts with an empty carrier, matching a fresh agent process."""
-    from agent._config_carrier import store_config_maps
-
-    store_config_maps(None, None)
-
-
-@pytest.fixture(autouse=True)
 def _fresh_snapshot_cursor(monkeypatch: pytest.MonkeyPatch) -> None:
     """`_node_log._SNAPSHOT_CURSOR` is per-process module state — in production
-    each process runs one agent, but a test session outlives every test, so the
+    one host serves many agents and a test session outlives every test, so the
     cursor set by one test would silently switch a later test's node enter to
     the incremental path. Autouse: every test starts with a clean cursor (first
     enter = full-window snapshot, matching a fresh agent process)."""

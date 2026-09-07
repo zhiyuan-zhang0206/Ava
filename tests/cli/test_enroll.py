@@ -202,7 +202,7 @@ def test_write_bootstrap_env_preserves_machine_local_keys(tmp_path: Path) -> Non
         "ANTHROPIC_API_KEY=sk-local\n"
         "AVA_CROSS_MACHINE_TRANSFER_BACKEND=none\n"
         "AVA_DB_URL=postgresql://stale@old:5433/ava\n"
-        "AVA_RESTARTER_HEALTH_PORT=18117\n"
+        "AVA_AGENT_HOST_HEALTH_PORT=18117\n"
     )
     enroll.write_bootstrap_env(
         p,
@@ -215,7 +215,7 @@ def test_write_bootstrap_env_preserves_machine_local_keys(tmp_path: Path) -> Non
     assert "ANTHROPIC_API_KEY=sk-local" in text
     assert "AVA_CROSS_MACHINE_TRANSFER_BACKEND=none" in text
     assert "# model credentials stay local (windows-setup.md)" in text
-    assert "AVA_RESTARTER_HEALTH_PORT=18117" in text
+    assert "AVA_AGENT_HOST_HEALTH_PORT=18117" in text
     assert "AVA_DB_URL" not in text  # a cluster fact the runner must not cache
     assert text.count("AVA_GATEWAY_URL=") == 1  # owned: rewritten, not duplicated
     assert "AVA_GATEWAY_URL=https://cp" in text
@@ -681,7 +681,7 @@ def test_persist_enroll_writes_the_whole_block_for_a_health_port_base(
     home = tmp_path / ".ava"
     enroll._persist_enroll(home, machine_name="host-a", health_port_base=18112)
     env = (home / ".env").read_text()
-    assert "AVA_RESTARTER_HEALTH_PORT=18115" in env  # base + PORT_OFFSETS["restarter"]
+    assert "AVA_AGENT_HOST_HEALTH_PORT=18131" in env  # base + PORT_OFFSETS["agent_host"]
     assert "AVA_OPS_HEALTH_PORT=18119" in env
     assert "AVA_EVENTS_MAINTENANCE_HEALTH_PORT=18126" in env
     for var in health_port_env_aliases().values():
@@ -821,7 +821,7 @@ def test_run_enroll_pins_this_units_health_ports(
     """End-to-end: `--health-port-base` reaches the `.env` the daemons read."""
     rc, env_path = _enroll(tmp_path, monkeypatch, ["--health-port-base", "18112"])
     assert rc == 0
-    assert "AVA_RESTARTER_HEALTH_PORT=18115" in env_path.read_text()
+    assert "AVA_AGENT_HOST_HEALTH_PORT=18131" in env_path.read_text()
 
 
 def test_run_enroll_refuses_an_unusable_health_port_base(
@@ -842,8 +842,8 @@ def test_run_enroll_wsl_auto_defaults_health_port_base(
     monkeypatch.setattr(enroll, "IS_WSL", True)
     rc, env_path = _enroll(tmp_path, monkeypatch)
     assert rc == 0
-    expected = WSL_DEFAULT_HEALTH_PORT_BASE + 3  # PORT_OFFSETS["restarter"]
-    assert f"AVA_RESTARTER_HEALTH_PORT={expected}" in env_path.read_text()
+    expected = WSL_DEFAULT_HEALTH_PORT_BASE + 19  # PORT_OFFSETS["agent_host"]
+    assert f"AVA_AGENT_HOST_HEALTH_PORT={expected}" in env_path.read_text()
 
 
 def test_run_enroll_non_wsl_leaves_health_ports_unset_without_flag(
@@ -867,8 +867,8 @@ def test_run_enroll_explicit_flag_wins_over_wsl_auto_default(
     rc, env_path = _enroll(tmp_path, monkeypatch, ["--health-port-base", "18112"])
     assert rc == 0
     env = env_path.read_text()
-    assert "AVA_RESTARTER_HEALTH_PORT=18115" in env
-    assert f"AVA_RESTARTER_HEALTH_PORT={WSL_DEFAULT_HEALTH_PORT_BASE + 3}" not in env
+    assert "AVA_AGENT_HOST_HEALTH_PORT=18131" in env
+    assert f"AVA_AGENT_HOST_HEALTH_PORT={WSL_DEFAULT_HEALTH_PORT_BASE + 19}" not in env
 
 
 def test_run_enroll_preserves_existing_health_port_block_on_bare_reenroll(
@@ -881,7 +881,7 @@ def test_run_enroll_preserves_existing_health_port_block_on_bare_reenroll(
     assert rc1 == 0
     rc2, env_path = _enroll(tmp_path, monkeypatch)  # bare re-enroll, no flag
     assert rc2 == 0
-    assert "AVA_RESTARTER_HEALTH_PORT=18115" in env_path.read_text()
+    assert "AVA_AGENT_HOST_HEALTH_PORT=18131" in env_path.read_text()
 
 
 def test_run_enroll_wsl_reenroll_does_not_clobber_an_explicit_block(
@@ -894,8 +894,8 @@ def test_run_enroll_wsl_reenroll_does_not_clobber_an_explicit_block(
     rc2, env_path = _enroll(tmp_path, monkeypatch)  # bare re-enroll, still WSL2
     assert rc2 == 0
     env = env_path.read_text()
-    assert "AVA_RESTARTER_HEALTH_PORT=18115" in env
-    assert f"AVA_RESTARTER_HEALTH_PORT={WSL_DEFAULT_HEALTH_PORT_BASE + 3}" not in env
+    assert "AVA_AGENT_HOST_HEALTH_PORT=18131" in env
+    assert f"AVA_AGENT_HOST_HEALTH_PORT={WSL_DEFAULT_HEALTH_PORT_BASE + 19}" not in env
 
 
 def test_run_enroll_wsl_auto_default_is_idempotent_across_reenrolls(
@@ -905,8 +905,8 @@ def test_run_enroll_wsl_auto_default_is_idempotent_across_reenrolls(
     rc1, env_path = _enroll(tmp_path, monkeypatch)
     rc2, env_path = _enroll(tmp_path, monkeypatch)
     assert (rc1, rc2) == (0, 0)
-    expected = WSL_DEFAULT_HEALTH_PORT_BASE + 3
-    assert f"AVA_RESTARTER_HEALTH_PORT={expected}" in env_path.read_text()
+    expected = WSL_DEFAULT_HEALTH_PORT_BASE + 19
+    assert f"AVA_AGENT_HOST_HEALTH_PORT={expected}" in env_path.read_text()
 
 
 def test_run_enroll_prints_why_the_wsl_default_was_chosen(

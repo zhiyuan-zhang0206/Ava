@@ -144,15 +144,17 @@ def _build_child_env(
 ) -> dict[str, str]:
     """The child's environment: the parent's own (settings already materialized
     by dotenv_boot), plus the identity the session env allowlist deliberately
-    drops (Task #856) and the two envelope paths. The per-agent config maps the
-    agent process popped at boot are re-emitted here so the child's SDK calls
-    see the same effective settings (json in env, never argv — issue #974).
+    drops (Task #856) and the two envelope paths. Only explicit per-agent maps
+    are exported; ambient parent carriers are removed so an unbound child
+    cannot inherit another agent's pins (JSON in env, never argv).
 
     A child spawned outside its interpreter checkout drops ``VIRTUAL_ENV`` so
     a bare uv command cannot target a different checkout's editable install.
     Children running inside their own checkout preserve their venv identity.
     """
     env = os.environ.copy()
+    env.pop(AGENT_CONFIG_OVERLAY_ENV, None)
+    env.pop(AGENT_BIRTH_CONFIG_ENV, None)
     source_root = editable_install.current_interpreter_source_root()
     if source_root is not None and not _cwd_is_inside_checkout(
         Path.cwd().resolve(), source_root.resolve()

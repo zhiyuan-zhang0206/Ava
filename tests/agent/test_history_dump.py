@@ -43,7 +43,6 @@ from agent.messages import NoteTag, system_note_message
 from agent.state import AgentState
 from shared.config import settings
 from shared.lm.context_budget import ContextBudget
-from shared.redis_listener import RedisInboundListener
 from tests.conftest import spawn_agent
 
 # ── helpers ──
@@ -167,12 +166,10 @@ def _over_threshold_state() -> AgentState:
 def _make_runtime(
     *,
     ops_pool: AsyncConnectionPool | None = None,
-    inbound_listener: RedisInboundListener | None = None,
     llm: Any | None = None,
 ) -> Runtime[AvaContext]:
     ctx = AvaContext(
         ops_pool=ops_pool,
-        inbound_listener=inbound_listener,
         llm=llm if llm is not None else _fake_llm("synthetic summary"),
         event_publisher=MagicMock(),
     )
@@ -359,7 +356,6 @@ async def test_auto_compact_proceeds_when_dump_fails(
 async def test_claim_compact_summary_parks_dump_note_after_summary(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
-    aredis_inbound_listener: RedisInboundListener,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Any,
 ):
@@ -383,7 +379,6 @@ async def test_claim_compact_summary_parks_dump_note_after_summary(
         state,
         _make_runtime(
             ops_pool=aops_pool,
-            inbound_listener=aredis_inbound_listener,
             llm=_fake_llm("LLM should not be called"),
         ),
         _config(tid),
@@ -405,7 +400,6 @@ async def test_claim_compact_summary_parks_dump_note_after_summary(
 async def test_claim_compact_summary_no_note_when_disabled(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
-    aredis_inbound_listener: RedisInboundListener,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Any,
 ):
@@ -422,7 +416,6 @@ async def test_claim_compact_summary_no_note_when_disabled(
         state,
         _make_runtime(
             ops_pool=aops_pool,
-            inbound_listener=aredis_inbound_listener,
             llm=_fake_llm("LLM should not be called"),
         ),
         _config(tid),

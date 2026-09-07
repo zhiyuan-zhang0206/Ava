@@ -365,8 +365,9 @@ def test_derive_env_old_record_health_ports_fall_back_to_legacy(tmp_path: Path):
     )
     assert installed["AVA_IM_BRIDGE_HEALTH_PORT"] == str(LEGACY_AVA_PORTS["im_bridge"])
     assert installed["AVA_PG_BACKUP_HEALTH_PORT"] == str(LEGACY_AVA_PORTS["pg_backup"])
-    # the 7 original daemons keep their block offsets (the record carries them)
-    assert installed["AVA_RESTARTER_HEALTH_PORT"] == "18003"
+    # Active original daemons keep their recorded block offsets.
+    assert installed["AVA_LABELER_HEALTH_PORT"] == "18004"
+    assert "AVA_RESTARTER_HEALTH_PORT" not in installed
 
 
 def test_record_health_port_late_slot_legacy_for_old_record(tmp_path: Path):

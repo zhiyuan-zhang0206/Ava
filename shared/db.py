@@ -463,30 +463,6 @@ def list_live_agent_ids(machine: str | None = None) -> list[int]:
         return [row[0] for row in cur.fetchall()]
 
 
-def mark_agents_restarting(agent_ids: Collection[int]) -> list[int]:
-    """CAS-mark live agents 'restarting' so the restarter respawns them on new
-    code after the update (the force-reap leg of a quiesce timeout: the process
-    is killed next, and status='restarting' is what the restarter's
-    RespawnController picks up once the host unpauses).
-
-    Only rows currently 'running'/'idling' are moved — an agent that exited
-    cleanly in the meantime (consumed its restart signal) is untouched. Returns
-    the ids actually marked.
-    """
-    if not agent_ids:
-        return []
-    with write_transaction() as conn, conn.cursor() as cur:
-        cur.execute(
-            "UPDATE agents_meta SET status = 'restarting' "  # noqa: S608 — ALIVE_SQL is a module constant
-            f"WHERE id = ANY(%s) AND {ALIVE_SQL} "
-            "RETURNING id",
-            (list(agent_ids), list(ALIVE_STATUSES)),
-        )
-        ids = [row[0] for row in cur.fetchall()]
-        conn.commit()
-    return ids
-
-
 def list_pending_inbounds(db: psycopg.Connection, agent_id: int) -> list[InboundRow]:
     """List chat inbounds still queued for an agent, oldest first.
 

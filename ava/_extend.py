@@ -56,7 +56,7 @@ Plugin loading: at main-process startup `agent/graph/_build.py:_load_extensions`
 imports each enabled plugin inside `with PluginContext(name):`, so a wrap
 registered at plugin import time is attributed to its plugin without the author
 passing a name. `scan_and_load` is the simpler external-only loader used by
-`agent/loop.py`; it lives here because loading and wrapping are two halves of
+`agent/_process_boot.py`; it lives here because loading and wrapping are two halves of
 the one plugin-extension surface.
 """
 

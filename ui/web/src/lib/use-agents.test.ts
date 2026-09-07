@@ -862,8 +862,8 @@ describe("useAgents.terminate", () => {
     // invalidateQueries call — proving "no polling, no optimistic writes".
   });
 
-  it("force → calls api.terminateAgent(id, true) + 'Force killed' toast", async () => {
-    vi.mocked(api.terminateAgent).mockResolvedValue({ status: "force_killed" });
+  it("force → calls api.terminateAgent(id, true) and reports acceptance", async () => {
+    vi.mocked(api.terminateAgent).mockResolvedValue({ status: "enqueued" });
     const { result } = renderHook(() => useAgents(noop), { wrapper });
     await waitFor(() => {
       expect(result.current.activeId).toBe(1);
@@ -874,7 +874,7 @@ describe("useAgents.terminate", () => {
     });
 
     expect(api.terminateAgent).toHaveBeenCalledWith(1, true);
-    expect(useStore.getState().toast).toBe("Force killed");
+    expect(useStore.getState().toast).toBe("Termination requested");
   });
 
   it("accepted termination reports request, not completed exit", async () => {

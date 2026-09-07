@@ -32,13 +32,12 @@ in the agent process (their inbound INSERTs go to the same database over
 lifecycle outcome. The parent reconstructs the exception from the name
 (`agent.graph._exec_result.lifecycle_exception_from_name`).
 
-Per-agent config: the parent re-emits `AVA_AGENT_CONFIG_OVERLAY` /
-`AVA_AGENT_BIRTH_CONFIG` into this child's environment (the agent process pops
-them at boot and retains them in `agent/_config_carrier.py`). They are popped
-here and applied in two phases mirroring the agent process's own boot —
-framework scope early, plugin scope after plugins load — so SDK calls made
-from exec code (`ava.understand`, `ava.web.fetch`, ...) see the same
-effective settings as the agent process.
+Per-agent config: the host exports its bound framework and plugin pins through
+`AVA_AGENT_CONFIG_OVERLAY`. Direct embedding callers may also pass
+`AVA_AGENT_BIRTH_CONFIG`; overlay values take precedence. The child removes
+both carriers from its environment before applying framework configuration,
+then applies plugin configuration after plugin loading. SDK calls made from
+exec code see their owning turn's effective settings.
 """
 
 from __future__ import annotations
@@ -178,7 +177,7 @@ def _apply_overlay_scope(
     scope: Literal["framework", "plugin"],
 ) -> bool:
     """Apply both maps at one scope — birth first, overlay on top (the same
-    precedence the agent process uses at boot, `agent/_process_boot.py`).
+    precedence the host uses when it resolves stored configuration).
     Returns True when at least one map applied."""
     from shared.plugin_config_registry import apply_config_overlay
 
@@ -329,13 +328,13 @@ def _run(request_path: str, result_path: str) -> None:
     request = read_request(Path(request_path))
     payload = ResultPayload(kind="done")
 
-    overlay, birth = _pop_overlay_env()
+    birth, overlay = _pop_overlay_env()
     if request.agent_id is not None:
         _boot.establish(request.agent_id, owns_loop=True)
         if request.incarnation is not None:
-            from shared.runtime_incarnation import bind_process_incarnation
+            from shared.runtime_incarnation import bind_child_incarnation
 
-            bind_process_incarnation(request.incarnation)
+            bind_child_incarnation(request.incarnation)
         _init_logger(request.agent_id)
         from shared import telemetry_otlp
 
@@ -357,6 +356,9 @@ def _run(request_path: str, result_path: str) -> None:
     # process — the same explicit load a watcher child runs. Idempotent.
     ava._ensure_plugins_loaded()
     _apply_overlay_scope(birth, overlay, scope="plugin")
+    from agent._process_boot import _apply_per_agent_eval_isolation
+
+    _apply_per_agent_eval_isolation()
     _build_state_slot(request.state)
 
     if request.timeout_s > 0:

@@ -204,7 +204,7 @@ def test_respawn_and_verify_reports_the_probe_not_the_spawn(
     logged "restarted successfully" each time."""
     monkeypatch.setattr(_sr_mod, "respawn_service", lambda *_a, **_kw: True)  # pyright: ignore[reportUnknownArgumentType]
     result = _sr_mod.respawn_and_verify(
-        "restarter",
+        "agent-host",
         "cmd",
         Path("/repo"),
         verify=lambda: DaemonProbe.down("healthz unreachable"),
@@ -227,7 +227,7 @@ def test_respawn_and_verify_returns_alive_once_the_probe_confirms(
         return DaemonProbe.up("pid 42") if attempts["n"] >= 3 else DaemonProbe.down("not yet")
 
     result = _sr_mod.respawn_and_verify(
-        "restarter", "cmd", Path("/repo"), verify=verify, deadline_s=5.0, interval_s=0.01
+        "agent-host", "cmd", Path("/repo"), verify=verify, deadline_s=5.0, interval_s=0.01
     )
     assert result.alive is True
     assert attempts["n"] == 3
@@ -246,10 +246,10 @@ def test_respawn_and_verify_skips_probing_when_the_spawn_fails(
         return DaemonProbe.up("unexpected")
 
     result = _sr_mod.respawn_and_verify(
-        "restarter", "cmd", Path("/repo"), verify=verify, deadline_s=5.0, interval_s=0.01
+        "agent-host", "cmd", Path("/repo"), verify=verify, deadline_s=5.0, interval_s=0.01
     )
     assert result.alive is False
-    assert "t-restarter" in result.detail
+    assert "t-agent-host" in result.detail
     assert probed["n"] == 0
 
 
@@ -270,7 +270,7 @@ def test_respawn_and_verify_stops_polling_on_a_terminal_verdict(
         return DaemonProbe.port_taken("home='/home/ava/.ava' != ...")
 
     result = _sr_mod.respawn_and_verify(
-        "restarter", "cmd", Path("/repo"), verify=verify, deadline_s=5.0, interval_s=0.01
+        "agent-host", "cmd", Path("/repo"), verify=verify, deadline_s=5.0, interval_s=0.01
     )
     assert result.terminal is True
     assert attempts["n"] == 1, "a terminal verdict must not be re-polled"
@@ -370,55 +370,15 @@ def test_run_keepalive_does_not_respawn_a_terminal_verdict(caplog) -> None:
     assert "another unit's daemon holds this port" in caplog.text  # pyright: ignore[reportUnknownMemberType]
 
 
-def test_run_keepalive_runs_the_fallback_when_no_daemon_will_be_live() -> None:
-    """`on_unrevivable` is the caller's stand-in for a round that will have no live
-    daemon: the respawn failed to verify, or was skipped as futile. A verified respawn
-    must NOT trigger it — the daemon does its own catch-up then.
-
-    Since #1941 a failed respawn schedules the backoff and returns, but the
-    fallback must still run on that round (the restarter's stand-in keeps moving
-    `restarting` rows while the daemon stays down)."""
-    ran: list[str] = []
-    with pytest.raises(SystemExit):
-        _sr_mod.run_keepalive(
-            "restarter-terminal",
-            _log,
-            probe=lambda: DaemonProbe.port_taken("occupied"),
-            respawn=lambda: pytest.fail("must not respawn"),
-            on_unrevivable=lambda: ran.append("terminal"),
-        )
-    _sr_mod.run_keepalive(
-        "restarter-failed",
-        _log,
-        probe=lambda: DaemonProbe.down("healthz unreachable"),
-        respawn=lambda: DaemonProbe.down("still unreachable"),
-        on_unrevivable=lambda: ran.append("respawn-failed"),
-    )
-    _sr_mod.run_keepalive(
-        "restarter-revived",
-        _log,
-        probe=lambda: DaemonProbe.down("healthz unreachable"),
-        respawn=lambda: DaemonProbe.up("pid 42"),
-        on_unrevivable=lambda: ran.append("revived — must not happen"),
-    )
-    assert ran == ["terminal", "respawn-failed"]
-
-
-def test_run_keepalive_never_runs_the_fallback_before_the_respawn() -> None:
-    """The ordering invariant `services/healthchecks/restarter.py` documents, held
-    here so it cannot be broken from a healthcheck module: the stand-in reads the DB,
-    and a DB outage must not stand between a dead verdict and the respawn. The
-    failed respawn no longer exits (#1941) but the order stays: respawn first,
-    fallback after."""
+def test_run_keepalive_probes_before_attempting_respawn() -> None:
     order: list[str] = []
     _sr_mod.run_keepalive(
-        "restarter",
+        "agent-host-order",
         _log,
-        probe=lambda: DaemonProbe.down("healthz unreachable"),
+        probe=lambda: (order.append("probe"), DaemonProbe.down("healthz unreachable"))[1],
         respawn=lambda: (order.append("respawn"), DaemonProbe.down("still down"))[1],
-        on_unrevivable=lambda: order.append("fallback"),
     )
-    assert order == ["respawn", "fallback"]
+    assert order == ["probe", "respawn"]
 
 
 def test_run_keepalive_separates_the_two_failure_exit_codes(
@@ -564,11 +524,10 @@ def _round(
     clock: _FakeClock,
     seconds: float,
     respawns: list[float],
-    fallbacks: list[str],
     probe_down: bool = True,
 ) -> None:
     """One keepalive round at `seconds` on the fake clock: probe DOWN (unless
-    probe_down), respawn that never verifies alive, and a recording fallback."""
+    probe_down), then a respawn that never verifies alive."""
     clock.now = seconds
 
     def _respawn() -> DaemonProbe:
@@ -582,7 +541,6 @@ def _round(
             DaemonProbe.down("healthz unreachable") if probe_down else DaemonProbe.up("pid 42")
         ),
         respawn=_respawn,
-        on_unrevivable=lambda: fallbacks.append("unrevivable"),
     )
 
 
@@ -598,8 +556,6 @@ def test_run_keepalive_backs_off_exponentially_and_holds_after_breaker(
     - once breaker_rounds (5) consecutive non-alive rounds pass, respawns stop
       entirely and the round holds, WARNINGing the hold age each round;
     - the hold alert (event=respawn_breaker_open) fires exactly once per episode;
-    - the on_unrevivable fallback still runs after every failed respawn, never
-      before it.
     """
     clock = _FakeClock()
     monkeypatch.setattr(_sr_mod, "_monotonic", clock)
@@ -607,16 +563,13 @@ def test_run_keepalive_backs_off_exponentially_and_holds_after_breaker(
     monkeypatch.setattr(_shared_log, "logger", recorder)
     monkeypatch.setattr(_sr_mod.settings.services, "watchdog_respawn_backoff_cap_seconds", 10000.0)
     respawns: list[float] = []
-    fallbacks: list[str] = []
 
     with caplog.at_level(logging.WARNING):
         for t in range(13):
-            _round(clock, float(t * 60), respawns, fallbacks)
+            _round(clock, float(t * 60), respawns)
 
     # Exponential sparseness: 60s, then 120s, then the breaker holds forever.
     assert respawns == [0.0, 60.0, 180.0]
-    # The fallback ran after each failed respawn — never instead of one.
-    assert fallbacks == ["unrevivable", "unrevivable", "unrevivable"]
     # Exactly one hold alert for the whole episode.
     assert len(recorder.alerts()) == 1
     alert = recorder.alerts()[0]
@@ -645,29 +598,28 @@ def test_run_keepalive_alive_round_resets_backoff_counter_and_breaker(
     monkeypatch.setattr(_shared_log, "logger", recorder)
     monkeypatch.setattr(_sr_mod.settings.services, "watchdog_respawn_backoff_cap_seconds", 10000.0)
     respawns: list[float] = []
-    fallbacks: list[str] = []
 
     # Episode 1: failed respawns at t=0, 60, 180 (backoff skip at t=120), the
     # breaker tripping at its 5th non-alive round (t=240 → alert #1), one held
     # round, then recovery.
     with caplog.at_level(logging.WARNING):
-        _round(clock, 0.0, respawns, fallbacks)
-        _round(clock, 60.0, respawns, fallbacks)
-        _round(clock, 120.0, respawns, fallbacks)
-        _round(clock, 180.0, respawns, fallbacks)
-        _round(clock, 240.0, respawns, fallbacks)
-        _round(clock, 300.0, respawns, fallbacks)
-        _round(clock, 360.0, respawns, fallbacks, probe_down=False)
+        _round(clock, 0.0, respawns)
+        _round(clock, 60.0, respawns)
+        _round(clock, 120.0, respawns)
+        _round(clock, 180.0, respawns)
+        _round(clock, 240.0, respawns)
+        _round(clock, 300.0, respawns)
+        _round(clock, 360.0, respawns, probe_down=False)
         # Episode 2: the FIRST down round respawns immediately — a stale backoff
         # deadline (episode 1's last attempt set next=t=420... with the reset it is
         # cleared) and the open breaker must not delay or block it.
-        _round(clock, 420.0, respawns, fallbacks)
-        _round(clock, 480.0, respawns, fallbacks)
-        _round(clock, 540.0, respawns, fallbacks)
-        _round(clock, 600.0, respawns, fallbacks)
+        _round(clock, 420.0, respawns)
+        _round(clock, 480.0, respawns)
+        _round(clock, 540.0, respawns)
+        _round(clock, 600.0, respawns)
         # Episode 2's breaker trips at its own 5th non-alive round → alert #2.
-        _round(clock, 660.0, respawns, fallbacks)
-        _round(clock, 720.0, respawns, fallbacks)
+        _round(clock, 660.0, respawns)
+        _round(clock, 720.0, respawns)
 
     assert respawns == [0.0, 60.0, 180.0, 420.0, 480.0, 600.0]
     assert len(recorder.alerts()) == 2, "one alert per episode, not one per round"
@@ -684,11 +636,10 @@ def test_run_keepalive_backoff_delay_is_capped(
     monkeypatch.setattr(_sr_mod, "_monotonic", clock)
     monkeypatch.setattr(_sr_mod.settings.services, "watchdog_respawn_backoff_cap_seconds", 100.0)
     respawns: list[float] = []
-    fallbacks: list[str] = []
-    _round(clock, 0.0, respawns, fallbacks)
-    _round(clock, 60.0, respawns, fallbacks)
-    _round(clock, 120.0, respawns, fallbacks)  # 160-120=40s of backoff left → skip
-    _round(clock, 160.0, respawns, fallbacks)  # cap'd delay elapsed → attempt
+    _round(clock, 0.0, respawns)
+    _round(clock, 60.0, respawns)
+    _round(clock, 120.0, respawns)  # 160-120=40s of backoff left → skip
+    _round(clock, 160.0, respawns)  # cap'd delay elapsed → attempt
     assert respawns == [0.0, 60.0, 160.0]
 
 
@@ -702,7 +653,6 @@ def test_run_keepalive_verified_alive_respawn_resets_backoff(
     monkeypatch.setattr(_sr_mod, "_monotonic", clock)
     monkeypatch.setattr(_sr_mod.settings.services, "watchdog_respawn_backoff_cap_seconds", 10000.0)
     respawns: list[float] = []
-    fallbacks: list[str] = []
 
     # Failed respawn at t=0 (schedules next at t=60), then a respawn that
     # verifies alive at t=60 — and a failed one at t=120, which must happen
@@ -713,7 +663,6 @@ def test_run_keepalive_verified_alive_respawn_resets_backoff(
         _log,
         probe=lambda: DaemonProbe.down("down"),
         respawn=lambda: (respawns.append(0.0), DaemonProbe.down("still down"))[1],
-        on_unrevivable=lambda: fallbacks.append("f1"),
     )
     clock.now = 60.0
     _sr_mod.run_keepalive(
@@ -721,7 +670,6 @@ def test_run_keepalive_verified_alive_respawn_resets_backoff(
         _log,
         probe=lambda: DaemonProbe.down("down"),
         respawn=lambda: (respawns.append(60.0), DaemonProbe.up("pid 42"))[1],
-        on_unrevivable=lambda: fallbacks.append("must-not"),
     )
     clock.now = 120.0
     _sr_mod.run_keepalive(
@@ -729,14 +677,12 @@ def test_run_keepalive_verified_alive_respawn_resets_backoff(
         _log,
         probe=lambda: DaemonProbe.down("down"),
         respawn=lambda: (respawns.append(120.0), DaemonProbe.down("still down"))[1],
-        on_unrevivable=lambda: fallbacks.append("f2"),
     )
 
     assert respawns == [0.0, 60.0, 120.0], (
         "the t=120 attempt must not be delayed by the t=0 backoff deadline — "
         "the verified-alive respawn reset it"
     )
-    assert fallbacks == ["f1", "f2"]
 
 
 def test_run_keepalive_rejects_a_breaker_at_or_below_the_respawn_threshold(

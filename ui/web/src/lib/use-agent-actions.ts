@@ -108,7 +108,6 @@ export function useAgentActions(
       const messages = {
         enqueued: "Termination requested",
         already_terminated: "Already terminated",
-        force_killed: "Force killed",
       };
       useStore.getState().showToast(messages[data.status]);
       track("terminate");

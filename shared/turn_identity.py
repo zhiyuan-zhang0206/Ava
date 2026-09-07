@@ -114,7 +114,7 @@ def current_turn_incarnation() -> RuntimeIncarnation | None:
 
 
 def current_turn_agent_id() -> int | None:
-    """The turn identity bound in the current context, or None (process mode)."""
+    """The turn identity bound in the current context, or None outside an agent turn."""
     return _TURN_AGENT_ID.get()
 
 

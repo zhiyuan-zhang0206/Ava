@@ -1,6 +1,10 @@
 """Built-in compact hook: auto-compact when context exceeds threshold + Compaction
 LLM helper.
 
+Exhausted compaction attempts raise `CompactionFailedError`; the hosted turn
+boundary reports the failure, preserves history, and durably halts until new
+inbound work arrives. A consumed user compaction request is not replayed.
+
 Compaction is a core capability (Issue #1284) — this module is always active,
 not gated behind a plugin. The before_llm hook is registered by
 `register_compact_hooks()`, called from `build_graph()`.
@@ -43,7 +47,6 @@ from langgraph.graph.message import REMOVE_ALL_MESSAGES
 from langgraph.runtime import Runtime
 from psycopg_pool import AsyncConnectionPool
 
-from agent.graph._context import AvaContext, agent_id_from_config
 from agent.history_dump import dump_history, history_dump_note
 from agent.hooks import Hook, register_before_llm
 from agent.lm_cache import ainvoke_with_cache_retry
@@ -58,6 +61,7 @@ from agent.state import AgentState, CompactState, ContextReset
 from shared.audit_events import insert_event_log_async
 from shared.checkpoint_cleanup import mark_compact_boundary, trim_checkpoints
 from shared.config.turn_view import turn_settings
+from shared.context import AvaContext, agent_id_from_config
 from shared.live_events import CompactDone
 from shared.lm.context_budget import latest_input_tokens, resolve_context_budget
 from shared.log import logger

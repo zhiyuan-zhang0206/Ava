@@ -1,42 +1,34 @@
-"""Graceful-stop signal handling for service daemons.
+"""Route normal service stop signals through the daemon's cleanup path.
 
-The stop path (`ava stop`, and the update's graceful leg) asks a daemon to end
-by sending SIGTERM to its supervised pid and waiting before escalating to
-SIGKILL. Python's default disposition for SIGTERM kills the process outright —
-fast, but no `finally` runs, so a daemon that holds a pidfile, a DB pool or a
-child process tears down exactly as abruptly as under the SIGKILL it was meant
-to avoid.
+Normal pause/stop requests SIGTERM on POSIX and Ctrl-Break in each Windows
+service's verified private console. Both become KeyboardInterrupt, matching
+the daemon's existing asyncio.run()/finally cleanup. Normal stop waits for
+actual completion and reports an incomplete stop on timeout; only an explicit
+force request interrupts the remaining resources.
 
-`install_graceful_shutdown` turns SIGTERM into the interrupt the daemons are
-already written against: every one of them runs `asyncio.run(run())` under
-`except KeyboardInterrupt`, the shape Ctrl-C produces. Raising
-``KeyboardInterrupt`` from the handler unwinds the loop through those same
-`finally` blocks, so a supervisor's SIGTERM and an operator's Ctrl-C end the
-process by one path with one set of cleanup.
-
-This only matters because the signal now arrives at all: a service session's
-login shell `exec`s into the daemon (`shared.session_env.exec_into`), so the pid
-the supervisor records and signals IS this process. While a wrapper shell sat in
-between, no daemon ever observed SIGTERM and every graceful stop ran to its full
-timeout and hard-killed instead.
+POSIX launchers exec into the daemon before direct SIGTERM delivery. Windows
+delivery reaches the interpreter through its verified private console, whose
+recorded root may still be a launcher. SIGINT keeps Python's existing handler.
 """
 
 from __future__ import annotations
 
 import signal
+import sys
 import types
 
 from shared.log import logger
 
 
 def install_graceful_shutdown(label: str) -> None:
-    """Route SIGTERM into the daemon's `KeyboardInterrupt` shutdown path.
+    """Route SIGTERM and Windows SIGBREAK into the daemon's cleanup path.
 
     Call once from a daemon's `main()`, before its loop starts. `label` names
     the daemon in the shutdown log line (e.g. ``"labeler"``).
 
     SIGINT is left on Python's default handler, which already raises
-    ``KeyboardInterrupt`` — the two signals converge on the same unwind.
+    ``KeyboardInterrupt``. Windows Ctrl-Break arrives as SIGBREAK, which needs
+    an explicit handler to run the same cleanup instead of exiting abruptly.
     """
 
     def _handler(signum: int, _frame: types.FrameType | None) -> None:
@@ -46,3 +38,5 @@ def install_graceful_shutdown(label: str) -> None:
         raise KeyboardInterrupt
 
     signal.signal(signal.SIGTERM, _handler)
+    if sys.platform == "win32":
+        signal.signal(signal.SIGBREAK, _handler)

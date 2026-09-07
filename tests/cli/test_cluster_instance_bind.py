@@ -30,6 +30,8 @@ def test_macos_redis_binaries_use_versioned_formula(monkeypatch: pytest.MonkeyPa
 
     monkeypatch.setattr(_ci, "is_macos", lambda: True)
     monkeypatch.setattr(_ci, "brew_prefix", fake_brew_prefix)
+    # Exercise formula discovery independently of this machine's explicit pin.
+    monkeypatch.setattr(settings.data_plane, "redis_bin_dir", "")
 
     assert _ci._redis_server_bin() == "/opt/homebrew/opt/redis@8.2/bin/redis-server"
     assert _ci._redis_cli_bin() == "/opt/homebrew/opt/redis@8.2/bin/redis-cli"

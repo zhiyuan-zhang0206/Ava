@@ -109,7 +109,7 @@ fix-forward and alerts loudly instead.
 
 ## Version assertion is bidirectional
 
-Every long-running process (gateway / agent / restarter / labeler) calls
+Every long-running process (gateway / agent-host / ops / labeler) calls
 `shared.migrations.assert_schema_current(db_url)` at startup:
 
 | Condition | Exception | Meaning |

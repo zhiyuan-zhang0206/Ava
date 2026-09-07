@@ -586,10 +586,9 @@ def _phase_b_payload(
 ) -> ClusterOpPayload | None:
     """The optional params a Phase-B cluster op carries: `restart_only` (a
     restart-only bounce vs a full self-update), `target_sha` (the pinned rollout
-    commit every node checks out), `mode` (the host updater's drain policy) and `force_reap` (the host's updater kills its
-    still-live agents — the quiesce-timeout backstop; Phase B itself never
-    quiesces, the gateway-side quiesce already drained the fleet). None when all
-    are absent."""
+    commit every node checks out), `mode` (the host updater's stop policy), and
+    legacy `force_reap` (explicit interruption). Phase B verifies the existing
+    drain completed by Phase A. None when all fields are absent."""
     payload: ClusterOpPayload = {}
     if restart_only:
         payload["restart_only"] = True

@@ -69,7 +69,7 @@ const STATUS_OK: SystemStatus = {
           disk_total_gb: 250,
           disk_pct: 40,
         },
-        restarter_online: true,
+        agent_host_online: null,
         watchdog_online: true,
       },
       {
@@ -101,7 +101,7 @@ const STATUS_OK: SystemStatus = {
           disk_total_gb: 250,
           disk_pct: 40,
         },
-        restarter_online: null,
+        agent_host_online: null,
         watchdog_online: null,
       },
       {
@@ -124,7 +124,7 @@ const STATUS_OK: SystemStatus = {
         session_count: 0,
         agent_groups: [],
         resource: null,
-        restarter_online: true,
+        agent_host_online: true,
         watchdog_online: false,
       },
     ],

@@ -28,7 +28,6 @@ winproc on Windows).
 from __future__ import annotations
 
 import sys
-import time
 from pathlib import Path
 from typing import NamedTuple
 
@@ -168,78 +167,26 @@ def _graceful_kill_session(
 
 def _is_stop_controller(session: str) -> bool:
     """Controllers that can respawn another service while stop is in flight."""
-    return session.endswith(("restarter", "watchdog"))
+    return session.endswith("watchdog")
 
 
-def _stop_sessions(
-    sessions: list[str],
-    *,
-    graceful: bool,
-    include_agent_processes: bool = False,
-    deadline: float | None = None,
-) -> None:
-    """Step 1: stop every session in the plan — graceful SIGTERM + timeout
-    fallback (cmd_update) or the fast force-kill (cmd_stop).
+def _stop_sessions(sessions: list[str]) -> None:
+    """Force-stop the selected roster services after explicit interruption consent.
 
-    Every session here is a roster service on the native backend. Agent
-    interactive shells are NOT in this plan: they live in per-session pty
-    hosts detached to init (shared/pty_sessions), so no service stop — this
-    one included — can reach them as part of a process tree.
+    Persistent terminals have their own backend and full-stop scope. Normal
+    pause/stop uses the verified no-escalation boundary in _maintenance_stop.
     """
-    # Dynamic lookup for monkeypatch-aware tests.
     import cli.commands as _ns
 
-    label = "graceful stop" if graceful else "kill sessions"
-    print(f"\n→ {label}")
-    if not graceful:
-        for session in sessions:
-            ok = _ns._kill_session(session, expected=True)
-            print(f"  {'✓' if ok else '✗'} {session}")
-        return
-
-    from shared import stop_timing
-    from shared.session_backend import get_backend
-
-    backend = get_backend()
-    targets = list(sessions)
-    if include_agent_processes:
-        import re
-
-        from cli.commands._repo import session_name
-
-        prefix = session_name("agent-")
-        current = re.compile(rf"^{re.escape(prefix)}\d+$")
-        legacy = re.compile(r"^ava-.+-agent-\d+$")
-        targets.extend(
-            name
-            for name in backend.list_sessions(prefix="ava-")
-            if (current.match(name) or legacy.match(name)) and name not in targets
-        )
-
-    # Stop respawn owners first, then signal every dependent without waiting.
-    # One absolute deadline bounds the whole roster, including force-mode agent
-    # stragglers; no layer gets to recreate another per-session 15-second wait.
-    ordered = [s for s in targets if _is_stop_controller(s)] + [
-        s for s in targets if not _is_stop_controller(s)
+    print("\n→ kill sessions")
+    ordered = [s for s in sessions if _is_stop_controller(s)] + [
+        s for s in sessions if not _is_stop_controller(s)
     ]
-    was_live = {session: backend.has_session(session) for session in ordered}
     for session in ordered:
-        if was_live[session]:
-            backend.graceful_signal(session)
-
-    if deadline is None:
-        deadline = time.monotonic() + stop_timing.REAP_KILL_WINDOW_S
-    while time.monotonic() < deadline and any(
-        backend.has_session(session) for session in ordered if was_live[session]
-    ):
-        time.sleep(min(0.5, max(0.0, deadline - time.monotonic())))
-
-    for session in ordered:
-        survived = was_live[session] and backend.has_session(session)
-        ok, _ = backend.kill_session(session, graceful=False, expected=True)
-        mode = "forced" if survived else ("graceful" if was_live[session] else "noop")
-        marker = "✗" if not ok else ("✓" if mode in ("graceful", "noop") else "⚠")
-        print(f"  {marker} {session} ({mode})")
+        ok = _ns._kill_session(session, expected=True)
+        print(f"  {'✓' if ok else '✗'} {session}")
+        if not ok:
+            raise RuntimeError(f"force stop did not end session {session}")
 
 
 def _launch_roster(roles: MachineRoles, skip: set[str]) -> tuple[ServiceSpec, ...]:

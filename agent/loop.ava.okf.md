@@ -1,45 +1,55 @@
 ---
 type: doc
-title: Agent Main Loop
-description: Thin launcher for Ava agent processes. Each OS process is permanently bound to an `agent_id`, via `python -m agent --agent-id
+title: Agent Turn Loop
+description: The agent host schedules and drives isolated graph turns.
 tags: []
 ---
 
-# Agent Main Loop
+# Agent Turn Loop
 
-## What it is
+`services/agent_host/daemon.py` owns the process; `AgentHost` owns local agent
+turns. `TurnScheduler` serializes each agent while allowing bounded concurrency
+between agents. A wake with no work creates no model call; idle ends the task.
 
-Thin launcher for Ava agent processes. Each OS process is permanently bound to an `agent_id`, started via `.venv/bin/python -m agent --agent-id N`. After startup, it enters the per-turn graph run loop and never returns — until it receives a `terminate` inbound message and exits normally.
+`AgentHost._invoke_until_done()` invokes the same checkpoint thread until idle
+or a native lifecycle command ends the turn. Each invocation has its own trace.
+Normal return flushes the final checkpoint before lifecycle application; a
+failed flush cannot acknowledge a maintenance drain.
 
-## Core Responsibilities
+The final durable checkpoint is linked to the still-current turn trace, including
+when N-step buffering delayed its write. Node-exit aggregates flush at invocation
+return. Expected provider or compaction failures persist halted state and report
+an error without discarding conversation history.
 
-- **Process entry point**: `main()` parses `--agent-id`, initializes DB/Redis/LLM/Saver, starts the per-turn run loop (`agent/_runloop.py`): one `graph.ainvoke()` per TURN, each wrapped in its own `turn_span` root span (one trace = one turn); claim ends an invocation at the turn boundary (goto END, `exit_requested=False`) and the loop re-invokes on the same checkpointer thread
-- **State transitions**: `idling (unclaimed) → running` (`_starting.py` claims before heavy imports; the run loop needs no second transition)
-- **Inbound messages**: waits for messages via Redis pub/sub channel, `await listener.wait_one()` in claim_node
-- **Normal exit**: receives terminate inbound → claim_node goto END with `exit_requested=True` → the run loop returns → `_notify_exit()` → process exits
-- **Lifecycle signals**: SIGHUP/SIGTERM → SystemExit → `_notify_exit()` in finally block
-- **DB-outage pause** (laptop sleep/network change/private-network blackhole): `main()`'s `while True` catches `PoolTimeout` / `psycopg.OperationalError` and **does not exit** — backoff + probe until DB recovers, re-runs the same startup reconciliation as a fresh process in-process (two-phase claimed-inbound repair + dangling tool pairing repair), then re-enters `ainvoke` graph. Single branch handles DB disconnection for idle-recheck / mid-turn / LLM envelope exhaustion; process survives throughout, reaper won't kill by mistake, gateway view unchanged (row remains running/idling)
+Database connection loss keeps the original single-flight task waiting with
+bounded, cancellable backoff. Recovery revalidates the exact incarnation, flushes
+retained writes, reconciles claimed input and repairs dangling tool pairs before
+continuing. It creates no inbound, model call or maintenance acknowledgement;
+ownership loss stops the old continuation.
+An abort awaiting its halted/breaker write remains pending across a database
+outage; recovery retries that write instead of invoking the model again.
+Database-only invocation boundaries have a retry deadline; it does not bound
+model inference, code execution or the overall graceful drain. Recovery has
+separate, expiring evidence tied to its original task and incarnation, so local
+and gateway stall detectors can distinguish database waiting from a stuck turn
+without changing the actual node-progress clock.
 
-- **Liveness lease renewal**: a background task (`_renew_agent_lease_loop`) re-arms `agents_meta.lease_expires_at` every `AGENT_LEASE_RENEW_INTERVAL_S` (60 s) for the whole graph lifetime, idle included — the lease is what quiesce/reaper/frontend read as "this process is alive". See [[lease.ava.okf.md|Agent Liveness Lease]].
-- **Watcher reconcile at boot**: before the graph goes live, rebuilds watcher sessions a stop/rollout reaped from the `agent_watchers` registry (cron re-spawned from its stored expression; missed one-shots marked + alerted) — best-effort, a registry failure never blocks boot. See [[shared/watcher_registry.ava.okf.md|Watcher Registry]].
+Runtime construction binds agent identity and both config layers before model
+creation and startup reconciliation. Cache eviction removes model/runtime
+objects, not agent identity, history or database ownership. A failed or cancelled
+turn drops its runtime so the next admission re-runs reconciliation.
 
-## Key Dependencies
+## Entry points
 
-- [[graph.ava.okf.md]] — LangGraph execution graph
-- [[state.ava.okf.md]] — state channels
-- [[lifecycle.ava.okf.md]] — process exit handling
-- [[db.ava.okf.md]] — Postgres connection pool
-- [[mcp-daemon.ava.okf.md]] — MCP subprocess management
+- `services/agent_host/daemon.py:run` — host startup, health and ownership renewal
+- `services/agent_host/dispatcher.py:TurnScheduler` — wake scheduling and single-flight
+- `services/agent_host/host.py:AgentHost.run_turn` — admission and settlement
+- `services/agent_host/stall_guard.py:run_invocation_with_stall_guard` — shared invocation guard
+- `services/agent_host/db_recovery.py:recover_database` — retain and recover an interrupted turn
 
-## Entry Points
+## Related contracts
 
-- `agent/loop.py:main()` — main function
-- `agent/loop.py:_renew_agent_lease_loop` — the lease renewal task
-- `agent/__main__.py` — `.venv/bin/python -m agent`
-- `agent/_starting.py` — early startup (state declaration + row claim)
-
-## Notes
-
-- New processes are never started directly — always go through the gateway's `POST /api/agents` HTTP path
-- The agent's shell sessions are **not cleaned** on exit; background work persists across lifecycles
-- The `ava` module is imported once at the process level, worker threads share via `sys.modules` cache
+- [[startup/startup.ava.okf.md]] — host and per-agent initialization
+- [[lease.ava.okf.md]] — incarnation ownership
+- [[lifecycle.ava.okf.md]] — native control and checkpoint ordering
+- [[sessions.ava.okf.md]] — persistent shells

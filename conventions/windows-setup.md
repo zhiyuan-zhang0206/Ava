@@ -143,7 +143,8 @@ on WSL2, which auto-applies its own reserved base instead (above).
 `<N>` is a **block base on the allocator's grid** — `18000 + k*16`
 (`shared/port_block.py`), the same grid `install.sh` hands out to clusters, so a
 hand-set unit's ports are comparable with what `ava cluster ls` prints. `18112`
-puts the restarter on 18115 and the ops server on 18119. Pick a base **no local
+puts the ops server on 18119; offset 3 remains reserved for the retired service.
+Pick a base **no local
 cluster already owns**: run `ava cluster ls` on this machine and take a base
 outside every block it lists. Nothing checks this for you — the arithmetic
 cannot see the registry, and `ava start` only catches the overlap later, once

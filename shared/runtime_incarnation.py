@@ -6,7 +6,7 @@ on an exit path would defeat the fence.
 """
 
 from dataclasses import dataclass
-from uuid import UUID, uuid4
+from uuid import UUID
 
 
 @dataclass(frozen=True)
@@ -16,24 +16,19 @@ class RuntimeIncarnation:
     owner: UUID
 
 
-_boot_owner = uuid4()
-_current: RuntimeIncarnation | None = None
+_child_incarnation: RuntimeIncarnation | None = None
 
 
-def new_process_incarnation(agent_id: int) -> RuntimeIncarnation:
-    return RuntimeIncarnation(agent_id, uuid4(), _boot_owner)
-
-
-def bind_process_incarnation(incarnation: RuntimeIncarnation) -> None:
-    """Bind after successful process admission, before creating runtime tasks."""
-    global _current  # noqa: PLW0603 — one admitted agent per process
-    _current = incarnation
+def bind_child_incarnation(incarnation: RuntimeIncarnation) -> None:
+    """Bind only the original host incarnation carried in an execution request."""
+    global _child_incarnation  # noqa: PLW0603 — one request per execution child
+    _child_incarnation = incarnation
 
 
 def current_incarnation(agent_id: int) -> RuntimeIncarnation | None:
     from shared.turn_identity import current_turn_incarnation
 
-    incarnation = current_turn_incarnation() or _current
+    incarnation = current_turn_incarnation() or _child_incarnation
     if incarnation is not None and incarnation.agent_id != agent_id:
         raise RuntimeError("runtime incarnation belongs to a different agent")
     return incarnation

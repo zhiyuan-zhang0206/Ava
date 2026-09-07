@@ -230,15 +230,13 @@ def _probe_service(spec: ServiceSpec) -> ServiceProbe:
 #
 # The CTO ruling (Task #2183, C2): critical = a failure cuts user-visible core
 # function or the ops safety net. gateway / frontend are the serving surface;
-# restarter + agent-host (the hosted agent-runner; gated off unless
-# `AVA_RUNNER_MODE` is `hosted`) are the runners; im-bridge is the IM alert
-# channel; the two watchdogs are the revive safety net. `frontend` is named here
-# even though `_SLOW_TO_SERVE_SESSIONS` keeps it out of the wait entirely.
+# agent-host runs agent turns; im-bridge is the IM alert channel; the two
+# watchdogs are the revive safety net. `frontend` is named here even though
+# `_SLOW_TO_SERVE_SESSIONS` keeps it out of the wait entirely.
 CRITICAL_SERVICE_SESSIONS = frozenset(
     {
         "gateway",
         "frontend",
-        "restarter",
         "agent-host",
         "gateway-watchdog",
         "agent-runner-watchdog",

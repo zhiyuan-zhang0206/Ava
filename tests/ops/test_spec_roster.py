@@ -37,14 +37,9 @@ _GATEWAY_SESSIONS = {
     "pitr-base-candidate",
 }
 _AGENT_RUNNER_SESSIONS = {
-    "restarter",
     "page-server",
     "agent-runner-watchdog",
     "ops",
-    # The hosted agent-runner. On the roster unconditionally — membership is a
-    # capability fact, and AVA_RUNNER_MODE gates it out of the START roster
-    # separately (`_gate_reason`), which is what these ungated views deliberately
-    # do not see.
     "agent-host",
     "browser",
     "browser-mcp",
@@ -148,12 +143,11 @@ def test_gateway_roster_ordering_is_load_bearing() -> None:
 
 
 def test_agent_runner_roster_ordering() -> None:
-    """restarter precedes ops (the historical build_services order the watchdog
-    roster test asserts)."""
+    """The agent host is available before the inbound ops service starts."""
     order = [
         s.session for s, _r in spec.services_for_capabilities_annotated(frozenset({"agent-runner"}))
     ]
-    assert order.index("restarter") < order.index("ops")
+    assert order.index("agent-host") < order.index("ops")
 
 
 def test_watchdogs_declare_no_healthcheck_module() -> None:
@@ -523,52 +517,16 @@ def test_gateway_daemons_keep_the_gateway_marker() -> None:
 
 def test_runner_daemons_keep_the_runner_marker() -> None:
     by_session = {s.session: s for s in roster.build_services()}
-    for sess in ("ops", "restarter", "page-server"):
+    for sess in ("ops", "page-server"):
         assert service_spec.profile_marker(by_session[sess]) == "runner", sess
 
 
-def test_restarter_gated_out_in_hosted_mode(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The hosted mode flip retires per-agent process supervision: the restarter
-    (respawn / crash-resurrect / wedged — all process machinery) drops out of
-    the START roster, symmetric to how agent-host is gated out in process mode.
-    Exactly one of the two runs, by the same fail-closed read."""
-    monkeypatch.setattr(spec, "runner_mode", lambda: "hosted")
-    annotated = {
-        s.session: r
-        for s, r in spec.services_for_capabilities_annotated(frozenset({"agent-runner"}))
-    }
-    assert annotated["restarter"] and "hosted" in annotated["restarter"]
-    assert annotated["agent-host"] is None
-    start = {s.session for s in spec.services_for_capabilities(frozenset({"agent-runner"}))}
-    assert "restarter" not in start
-    assert "agent-host" in start
-
-
-def test_restarter_runs_in_process_mode(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The regression guard: an explicit process mode (rollback) keeps the
-    restarter on the start roster (and the agent-host off)."""
-    monkeypatch.setattr(spec, "runner_mode", lambda: "process")
-    annotated = {
-        s.session: r
-        for s, r in spec.services_for_capabilities_annotated(frozenset({"agent-runner"}))
-    }
-    assert annotated["restarter"] is None
-    assert annotated["agent-host"] and "AVA_RUNNER_MODE" in annotated["agent-host"]
-
-
-def test_gate_reason_for_session_matches_the_start_roster_decision(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The per-session gate helper single-service spawners use must agree with
-    the roster ``ava start`` launches. Hosted mode disables the restarter (and
-    enables agent-host); process mode is the reverse. A session the roster does
-    not know is never spawnable."""
-    monkeypatch.setattr("ops.spec.runner_mode", lambda: "hosted")
-    assert spec.gate_reason_for_session("restarter") is not None
+def test_gate_reason_for_session_matches_the_start_roster_decision() -> None:
+    """The single-service gate agrees with the roster and refuses retired services."""
     assert spec.gate_reason_for_session("agent-host") is None
-
-    monkeypatch.setattr("ops.spec.runner_mode", lambda: "process")
-    assert spec.gate_reason_for_session("restarter") is None
-    assert spec.gate_reason_for_session("agent-host") is not None
-
+    assert "agent-host" in {
+        s.session for s in spec.services_for_capabilities(frozenset({"agent-runner"}))
+    }
+    assert "restarter" not in {s.session for s in spec.build_services()}
+    assert spec.gate_reason_for_session("restarter") is not None
     assert spec.gate_reason_for_session("no-such-service") is not None

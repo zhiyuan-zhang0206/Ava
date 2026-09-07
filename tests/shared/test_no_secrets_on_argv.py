@@ -9,10 +9,10 @@ launcher that reaches for `redis-cli -a`, an env-var argv splice, or an
 argv-carried JSON blob fails here rather than in a `ps` listing.
 
 Coverage is per *launcher*, not per caller: the `ava start` session launch,
-`spawn_update` / `spawn_rollout` / `spawn_restart` / `unpause_local_cluster`
-(all four via `_spawn_detached_session`), the healthcheck respawns (via
-`respawn_service`), and the official agent launcher each funnel into one of
-the functions below. Agents do not own an independent atexit launcher.
+`spawn_update` / `spawn_rollout` / `spawn_restart` (via
+`_spawn_detached_session`), and the healthcheck respawns (via
+`respawn_service`) each funnel into one of the functions below. Agent-host
+startup also passes its secret-bearing DB projection through the environment.
 """
 
 from __future__ import annotations
@@ -194,7 +194,7 @@ def test_service_respawn(secret_env: None, monkeypatch: pytest.MonkeyPatch) -> N
 
 @pytest.mark.real_cluster_spawn
 def test_cluster_orchestration_session(secret_env: None, captured_argv: list[list[str]]) -> None:
-    """update / rollout / cluster-restart / unpause all spawn through this one.
+    """update / rollout / cluster-restart all spawn through this one.
 
     S7: the POSIX orchestration session launches through the native process
     supervisor (the reparent helper), whose argv carries the wrapped command
@@ -288,54 +288,41 @@ def test_agent_shell_session(
     envfile.unlink(missing_ok=True)
 
 
-@pytest.mark.real_agent_launch
-def test_agent_process_launch(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The agent process itself: env dict clean handoff, argv carries only
-    non-secret launch parameters (the agent id and the boot-stall window, which
-    the child must read before it can import `shared.config` at all).
+@pytest.mark.real_service_respawn
+def test_agent_host_launch(
+    secret_env: None, captured_argv: list[list[str]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The real host healthcheck forwards its DB credential through env only.
 
-    Not driven through `captured_argv` — the agent supervisor is not
-    `subprocess.run` (it double-forks through `shared._reparent`), so the
-    supervisor itself is faked and its argv inspected."""
-    from ops.agent_launch import _launch_agent_process
+    Exercise the healthcheck, shared service launcher, and native supervisor;
+    only the final subprocess and the post-launch liveness probe are faked.
+    """
+    from services.healthchecks import agent_host
+    from shared.config import settings
+    from shared.daemon_health import DaemonProbe
 
-    captured: list[tuple[list[str], dict[str, str]]] = []
+    captured_env: list[dict[str, str]] = []
+    fake_run = subprocess.run
 
-    class _FakeSupervisor:
-        @staticmethod
-        def new_session(
-            _name: str, argv: list[str], _cwd: Path, *, env: dict[str, str], **_kw: Any
-        ) -> bool:
-            captured.append((list(argv), dict(env)))
-            return True
+    def capture_run(args: Any, **kwargs: Any) -> Any:
+        if "shared._reparent" in args:
+            captured_env.append(dict(kwargs["env"]))
+        return fake_run(args, **kwargs)
 
-        @staticmethod
-        def kill_session(*_a: Any, **_kw: Any) -> tuple[bool, str]:
-            return (True, "noop")
+    monkeypatch.setattr(subprocess, "run", capture_run)
+    runner_url = _DB_URL.replace("postgresql://ava:", "postgresql://ava_runner:")
+    monkeypatch.setattr(settings.data_plane, "db_url", runner_url)
+    monkeypatch.setattr(settings.services, "project_root", Path("/repo"))
+    monkeypatch.setattr(agent_host, "_probe", lambda: DaemonProbe.up("test host"))
 
-    monkeypatch.setattr("ops.agent_launch.native_proc", lambda: _FakeSupervisor)
-    monkeypatch.setattr("ops.agent_launch._wait_for_agent_claim", lambda _id, _attempt=None: None)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr("ops.agent_launch.agent_spawn_env_dict", lambda: dict(_SECRET_ENV))
+    assert agent_host._restart_daemon().alive
 
-    _launch_agent_process(
-        11,
-        config_overlay={"deepseek_api_key": _API_KEY},
-        birth_config={"llm_model": "frozen-test-model"},
-    )
-
-    argv, env = captured[0]
-    _assert_clean(argv, label="_launch_agent_process")
-    # ... and the values really did reach the child, just by the other channel
-    assert env["AVA_CLUSTER_SECRET"] == _SECRET
-    assert _API_KEY in env["AVA_AGENT_CONFIG_OVERLAY"]
-    assert "frozen-test-model" in env["AVA_AGENT_BIRTH_CONFIG"]
-    from ops.agent_launch import BOOT_BUDGET_SEC, BOOT_STALL_SEC
-
-    for flag, expected in (
-        ("--boot-stall-seconds", BOOT_STALL_SEC),
-        ("--boot-budget-seconds", BOOT_BUDGET_SEC),
-    ):
-        assert float(argv[argv.index(flag) + 1]) == expected
+    launches = [argv for argv in captured_argv if "shared._reparent" in argv]
+    assert len(launches) == len(captured_env) == 1
+    assert "services.agent_host.daemon" in " ".join(launches[0])
+    _assert_clean(launches[0], label="agent_host._restart_daemon")
+    assert captured_env[0]["AVA_DB_URL"] == runner_url
+    assert captured_env[0]["AVA_PROCESS_PROFILE"] == "agent"
 
 
 def test_redis_bringup(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

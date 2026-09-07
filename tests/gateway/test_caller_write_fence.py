@@ -47,7 +47,6 @@ def test_direct_resurrection_rejects_before_transaction(monkeypatch: pytest.Monk
             prompt="hello",
             trigger_inbound_id=None,
             trigger_inbound_kind=None,
-            auto_claim=None,
         )
     transaction.assert_not_called()
 

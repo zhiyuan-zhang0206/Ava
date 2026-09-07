@@ -57,7 +57,6 @@ _SQL_OR_DYNAMIC_KINDS = frozenset(
         "editable_direct_url_repaired",  # shared/editable_install.py:repair_editable_direct_url
         "exec_editable_install_poisoned",  # shared/editable_install.py:guard_editable_install
         "source_tree_reset",  # shared/source_tree_guard.py:repair_source_tree
-        "agent_boot_failed",  # agent/loop.py:_emit_boot_failure
         "sdk_call",  # agent/sdk_metering.py recorder (via shared/sdk_telemetry)
         # shared/plugin_activation.py:emit binds event=PLUGIN_ACTIVATION_EVENT (a
         # module constant, like sdk_call), so the literal scan cannot see it.
@@ -111,6 +110,37 @@ _SQL_OR_DYNAMIC_KINDS = frozenset(
 )
 
 
+# The process runner and restarter are removed. Keep their event contracts
+# readable for existing DB/OTLP history; these are retired schemas, not live
+# producers or permission to emit new process-runner events.
+_RETIRED_PROCESS_KINDS = frozenset(
+    {
+        "agent_boot_failed",
+        "agent_restarted",
+        "boot_timing",
+        "agent_revived",
+        "agent_terminated",
+        "claim_cas_lost",
+        "claim_cas_lost_exit",
+        "db_outage_pause",
+        "db_outage_reconcile_retry",
+        "db_outage_wait",
+        "db_recovered",
+        "idle_cas_lost",
+        "launch_confirm_extended",
+        "launch_confirm_failed",
+        "launch_confirm_task_crashed",
+        "launch_force_terminated",
+        "launch_force_terminated_skipped",
+        "launch_retry",
+        "process_exit",
+        "respawn_phase1",
+        "respawn_phase2_launch",
+        "restart_handoff_host_unhealthy",
+    }
+)
+
+
 def _code_kinds() -> tuple[set[str], set[str], set[str]]:
     """(event= literals, label= literals, event_type= literals) from scan_kinds."""
     event_kinds, label_kinds, event_type_kinds, _sse_roles = scan_kinds.scan_code(_REPO)
@@ -138,6 +168,8 @@ def test_registered_telemetry_events_have_producers() -> None:
     for a kind nobody emits."""
     event_kinds, label_kinds, event_type_kinds = _code_kinds()
     produced = event_kinds | label_kinds | event_type_kinds | _SQL_OR_DYNAMIC_KINDS
+    assert not (_RETIRED_PROCESS_KINDS & produced), "retired process events have a new producer"
+    produced |= _RETIRED_PROCESS_KINDS
     orphaned = sorted(telemetry_events() - produced)
     assert not orphaned, (
         "EVENTS telemetry kind(s) with no producer in code: "

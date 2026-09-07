@@ -11,7 +11,7 @@ wifi).
   read from this.
 - `machine_role()`: this host's capability SET (frozenset). `gateway` =
   owns PG/Redis + the HTTP gateway + all gateway daemons; `agent-runner` =
-  runs runner+restarter+watchdog + agent processes (its DB/Redis/Milvus URLs
+  runs agent-host+ops+watchdog and disposable tool children (its DB/Redis/Milvus URLs
   point at a gateway node); `observability-station` = owns the native LGTM
   observability backends (the declarative form of the `$AVA_HOME/lgtm-host`
   marker). A host carries any combination; a single-box deployment is

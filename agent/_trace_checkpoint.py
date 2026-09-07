@@ -18,8 +18,6 @@ Failure-tolerant by design: any failure (DB hiccup, span context invalid,
 checkpoint not yet readable) just loses that one turn's link — tracing and
 checkpointing themselves are never on this path.
 
-Kept out of agent/loop.py (and its split run-loop module
-agent/_runloop.py): this helper is a self-contained module instead.
 """
 
 from __future__ import annotations

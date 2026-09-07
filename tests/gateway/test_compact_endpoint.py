@@ -120,10 +120,6 @@ def test_compact_terminated_agent_auto_resurrects(
     flips status terminated -> idling; the claim node's recency routing then lets
     the resurrect win while the compact_request still applies."""
 
-    def _confirm(_agent_id: int) -> bool:
-        return True
-
-    monkeypatch.setattr("ops.agent_launch._confirm_launch_or_force_terminated", _confirm)
     tid = _seed_agent(db_conn, status="terminated")
     with TestClient(app) as client:
         resp = client.post(f"/api/agents/{tid}/compact")

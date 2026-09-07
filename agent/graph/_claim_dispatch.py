@@ -1,40 +1,10 @@
 """Per-kind inbound dispatch for the claim node.
 
-Extracted from agent/graph/_claim.py (Task #1006 split — the kind-dispatch axis).
-Holds the dispatch-pass accumulator (_BatchState), the lifecycle marker
-renderers (_by_who / _ts_prefix / _render_restart_completed_marker), one
-handler per inbound kind, and the routing-guarded dispatch loop
-(dispatch_batch).
-
-Behavior (preserved from the original claim module unless noted):
-- chat: append HumanMessage (envelope wrap)
-- compact_summary: written by agent ava.self.compact(summary) → wipe the whole
-  history and replace with [system prompt, summary] (no raw tail)
-- compact_request: framework / user "/compact" triggered → run Compaction LLM
-  to generate summary, then replace
-- terminate: append "[system ts] You are terminated by {source}" lifecycle
-  marker, goto END
-- restart: only mark agents.status 'restarting' + goto END (**does not**
-  append message). restarter daemon INSERTs 'restart_completed' on respawn for
-  the new process, and the new process's claim appends the lifecycle marker
-  (correct tense). The committed halted flag records whether the agent was
-  idle at this point (excluding self sources — those have an in-flight
-  intention)
-- restart_completed: append "[system ts] You have been restarted by {source}"
-  lifecycle marker; system:update produces "updated and restarted" wording (a
-  cluster rollout). If the agent was idle pre-restart (halted=True survived)
-  and the batch holds nothing else, commit the marker and re-enter claim to
-  keep waiting — no LLM turn is spent acknowledging the restart
-- resurrect: append "[system ts] You have been resurrected by {source}"
-  lifecycle marker
-- fork: append "[system ts] You have been forked from {source}..." lifecycle
-  marker stating the new agent's own id (inherited history reads as the source
-  agent's identity; the marker corrects "who am I" before the first turn)
-- Unknown kind: ValueError fail-fast
-
-Routing-guarded kinds (TERMINATE, RESTART, RESURRECT, COMPACT_REQUEST) are
-skipped when _Routing.is_winner returns False — one guard, not three scattered
-across the loop body.
+Chat appends an envelope; compaction replaces history with its summary.
+Terminate and restart append acceptance markers and end the invocation so the
+host can flush the checkpoint before applying the command. Resurrect and fork
+append identity markers. Historical restart_completed messages remain readable.
+Routing guards select lifecycle and compaction winners; unknown kinds fail fast.
 """
 
 from __future__ import annotations
@@ -58,12 +28,10 @@ from agent.hooks.compact import (
     conversation_messages,
     generate_summary,
 )
-from agent.lifecycle_apply import apply_process_lifecycle
 from agent.messages import NoteTag, system_note_message
 from agent.state_channels import CIRCUIT_REASON_CONTEXT_OVERFLOW
 from ava.security import scan_content
 from shared.config import now_timestamp, settings
-from shared.db_transaction import async_write_transaction
 from shared.inbound import InboundKind
 from shared.live_events import Cancelled
 from shared.log import logger
@@ -87,7 +55,6 @@ class _BatchState:
     compact_payload: tuple[str, str] | None = None  # (summary_text, compact_kind)
     cancelled: bool = False
     restart_preserves_idle: bool = False
-    restart_cas_applied: bool = False
     restart_requested: bool = False
     update_initiated: bool = False
     active_task_id: int | None = None
@@ -360,7 +327,7 @@ async def _handle_heartbeat(
 
 
 async def _handle_terminate(
-    ctx: AvaContext,
+    _ctx: AvaContext,
     item: ClaimedInbound,
     st: _BatchState,
 ) -> None:
@@ -369,11 +336,6 @@ async def _handle_terminate(
     Only called when this terminate IS the routing winner (guard in
     dispatch_batch). Vetoed terminates never reach here.
     """
-    if not ctx.hosted and ctx.ops_pool is not None:
-        async with async_write_transaction(ctx.ops_pool) as conn:
-            if not await apply_process_lifecycle(conn, item.agent_id, item.id):
-                st.next_goto = END
-                return
     st.new_msgs.append(
         system_note_message(
             content=f"{_ts_prefix()}Termination was accepted from {_by_who(item.source)}",
@@ -385,50 +347,21 @@ async def _handle_terminate(
 
 
 async def _handle_restart(
-    ctx: AvaContext,
-    agent_id: int,
+    _ctx: AvaContext,
+    _agent_id: int,
     item: ClaimedInbound,
     st: _BatchState,
 ) -> None:
-    """RESTART: route to END.
-
-    Process mode: install the durable restart decision. The restarter alone
-    relaunches the process after its normal pause and ownership gates; no
-    agent-side fallback bypasses them. The NEW process writes the marker via
-    RESTART_COMPLETED, so no message is appended here.
-
-    Hosted mode: there is no process to relaunch and no restarter to flip the
-    row back — the host drops the cached runtime and ends the turn task, and
-    the next wake starts clean (the config view rebinds from `agents_meta`,
-    which is exactly the hosted replacement for "the process exits and boots
-    with the merged config"). The row must therefore NEVER leave a runnable
-    status. An acceptance marker renders here, and the separate
-    `restart_requested` channel carries the intent to the host — `exit_requested`
-    stays False so the END does not route through the process-exit path.
-
-    Deduplicates CAS across multiple restarts in one batch.  Only called when
-    this restart IS the routing winner.
-    """
-    if ctx.hosted:
-        st.new_msgs.append(
-            system_note_message(
-                content=f"{_ts_prefix()}Restart was accepted from {_by_who(item.source)}",
-                tag=NoteTag.LIFECYCLE_RESTART,
-                created_at=datetime.now(UTC),
-            )
+    """Render restart acceptance and end this invocation. The host applies the durable command after the graph returns and the checkpoint flushes."""
+    st.new_msgs.append(
+        system_note_message(
+            content=f"{_ts_prefix()}Restart was accepted from {_by_who(item.source)}",
+            tag=NoteTag.LIFECYCLE_RESTART,
+            created_at=datetime.now(UTC),
         )
-        st.next_goto = END
-        st.restart_requested = True
-        return
-    if not st.restart_cas_applied:
-        assert ctx.ops_pool is not None, "_handle_restart requires ctx.ops_pool"  # noqa: S101
-        async with async_write_transaction(ctx.ops_pool) as conn:
-            if not await apply_process_lifecycle(conn, agent_id, item.id):
-                st.next_goto = END
-                return
-        st.restart_cas_applied = True
-
+    )
     st.next_goto = END
+    st.restart_requested = True
 
 
 async def _handle_restart_stateful(

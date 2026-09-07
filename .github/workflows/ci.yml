@@ -502,12 +502,6 @@ jobs:
       TRUNK_ORG_URL_SLUG: ${{ secrets.TRUNK_ORG_URL_SLUG }}
       AVA_DB_URL: postgresql://unused@127.0.0.1:1/unused
       AVA_REDIS_URL: redis://127.0.0.1:1/0
-      # The backend lifecycle suites (gateway ops launch/resurrect, crash-
-      # resurrect controllers, restarter) exercise the PROCESS shape; runner_mode
-      # defaults to hosted since 2026-09, so pin process here (tests/conftest.py
-      # declares an exported AVA_RUNNER_MODE in the test home .env so the unit-env
-      # authority pass keeps it).
-      AVA_RUNNER_MODE: process
       # One data file per shard so the aggregator can `coverage combine` them.
       COVERAGE_FILE: coverage-data-${{ matrix.group }}
     steps:
@@ -615,7 +609,6 @@ jobs:
     env:
       AVA_DB_URL: postgresql://unused@127.0.0.1:1/unused
       AVA_REDIS_URL: redis://127.0.0.1:1/0
-      AVA_RUNNER_MODE: process
       TESTS: ${{ needs.test-select.outputs.tests }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -674,12 +667,6 @@ jobs:
       TRUNK_ORG_URL_SLUG: ${{ secrets.TRUNK_ORG_URL_SLUG }}
       AVA_DB_URL: postgresql://unused@127.0.0.1:1/unused
       AVA_REDIS_URL: redis://127.0.0.1:1/0
-      # The backend lifecycle suites (gateway ops launch/resurrect, crash-
-      # resurrect controllers, restarter) exercise the PROCESS shape; runner_mode
-      # defaults to hosted since 2026-09, so pin process here (tests/conftest.py
-      # declares an exported AVA_RUNNER_MODE in the test home .env so the unit-env
-      # authority pass keeps it).
-      AVA_RUNNER_MODE: process
       COVERAGE_FILE: coverage-data-serial
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -1152,11 +1139,6 @@ jobs:
         group: [1, 2, 3, 4]
     env:
       TRUNK_ORG_URL_SLUG: ${{ secrets.TRUNK_ORG_URL_SLUG }}
-      # Process-mode e2e variant, pinned explicitly: runner_mode defaults to
-      # hosted since 2026-09, so without this the shards would silently become
-      # a second hosted run and the process branches (the rollback shape)
-      # would lose all coverage.
-      AVA_RUNNER_MODE: process
       AVA_DB_URL: postgresql://unused@127.0.0.1:1/unused
       AVA_REDIS_URL: redis://127.0.0.1:1/0
     steps:
@@ -1235,14 +1217,11 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     needs: [classify]
-    # The hosted variant of the e2e net: the same three lifecycle scenarios
-    # (message flow / self-restart / self-terminate), but every agent runs as a
-    # turn task inside the agent-host daemon instead of one process each — the
-    # ratified acceptance items for AVA_RUNNER_MODE=hosted.
+    # Focused host acceptance scenarios alongside the complete e2e shards:
+    # message flow, self-restart and self-terminate through the real daemon.
     if: ${{ needs.classify.outputs.frontend == 'true' || needs.classify.outputs.backend == 'true' }}
     env:
       TRUNK_ORG_URL_SLUG: ${{ secrets.TRUNK_ORG_URL_SLUG }}
-      AVA_RUNNER_MODE: hosted
       AVA_DB_URL: postgresql://unused@127.0.0.1:1/unused
       AVA_REDIS_URL: redis://127.0.0.1:1/0
     steps:
@@ -1332,11 +1311,6 @@ jobs:
     if: ${{ needs.classify.outputs.frontend == 'true' || needs.classify.outputs.backend == 'true' }}
     env:
       TRUNK_ORG_URL_SLUG: ${{ secrets.TRUNK_ORG_URL_SLUG }}
-      # The e2e suite outside the hosted net is process-shaped (pid/restart
-      # assertions); runner_mode defaults to hosted since 2026-09, so pin process
-      # here (tests/conftest.py declares an exported AVA_RUNNER_MODE in the test
-      # home .env so the unit-env authority pass keeps it).
-      AVA_RUNNER_MODE: process
       AVA_DB_URL: postgresql://unused@127.0.0.1:1/unused
       AVA_REDIS_URL: redis://127.0.0.1:1/0
     steps:
@@ -1423,11 +1397,6 @@ jobs:
     if: ${{ needs.classify.outputs.frontend == 'true' || needs.classify.outputs.backend == 'true' }}
     env:
       TRUNK_ORG_URL_SLUG: ${{ secrets.TRUNK_ORG_URL_SLUG }}
-      # The e2e suite outside the hosted net is process-shaped (pid/restart
-      # assertions); runner_mode defaults to hosted since 2026-09, so pin process
-      # here (tests/conftest.py declares an exported AVA_RUNNER_MODE in the test
-      # home .env so the unit-env authority pass keeps it).
-      AVA_RUNNER_MODE: process
       AVA_DB_URL: postgresql://unused@127.0.0.1:1/unused
       AVA_REDIS_URL: redis://127.0.0.1:1/0
     steps:

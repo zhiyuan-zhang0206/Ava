@@ -1,16 +1,9 @@
 """Local OS process primitives: the liveness probe, the force-kill, and the
 timeout that actually bounds the work (`run_bounded`).
 
-`process_alive` is shared by the gateway's lazy zombie-reap (graceful-terminate
-path) and the restarter's dead-process reaper: both decide whether the
-process that owns an agent row is still alive *on the local host* before forcing
-the row to 'terminated'. Only meaningful for same-host pids — a pid from another
-machine is not ours to probe.
-
-`process_cmdline` is its companion and exists because liveness alone cannot
-answer that question: a pid the OS recycled is alive forever without being the
-process the row meant. The argv it reads back is the identity evidence
-`ops.agent_identity` matches against.
+`process_alive` and `process_cmdline` inspect local processes. A PID from
+another machine is not ours to probe, and PID liveness alone is not identity:
+callers that act on an execution owner must also verify its OS birth evidence.
 
 `run_bounded` is the module's other half and exists because
 `subprocess.run(..., timeout=T)` does not do what its name implies: on expiry

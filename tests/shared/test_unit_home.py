@@ -48,7 +48,7 @@ def test_pidfile_fields_rooted_under_unit_home(_restore_ava_home: None) -> None:
 
     s = Settings()
     root = Path("/srv/.ava_gateway")
-    assert s.services.restarter_pidfile == root / "run" / "restarter.pid"
+    assert s.services.agent_host_pidfile == root / "run" / "agent-host.pid"
     assert s.services.gateway_pidfile == root / "run" / "gateway.pid"
     assert s.services.memory_root == root / "memory"
     assert s.services.milvus_data_dir == root / "milvus-data"

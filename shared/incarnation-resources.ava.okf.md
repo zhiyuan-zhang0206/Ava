@@ -50,8 +50,8 @@ keepalives while the owner remains live; completion flushes only the unpublished
 tail. Task cancellation closes the owner's control input but does not abandon an
 in-flight registration transaction or an attached allocation. The caller retains
 those tasks and consumes the exact terminal receipt before propagating cancellation;
-this is required in process mode, which has no hosted turn scope to retain a later
-consumer.
+cancellation cannot abandon a completion consumer before resource ownership
+has been settled.
 The owner remains alive after host EOF, closes the managed domain, reaps its
 root, joins the output reader and exclusively publishes the terminal receipt.
 Request files live in exact domain subdirectories outside legacy age pruning.

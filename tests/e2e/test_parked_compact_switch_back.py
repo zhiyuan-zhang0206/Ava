@@ -56,6 +56,7 @@ from tests.e2e.fakes.scenarios.parked_compact import (
     REPLY_2,
     REPLY_3,
 )
+from tests.shared.poll_until import poll_until
 
 
 def _timeline(gateway_url: str, agent_id: int) -> list[dict[str, Any]]:
@@ -80,24 +81,29 @@ def _wait_kind(gateway_url: str, agent_id: int, kind: str, timeout: float = 60.0
     )
 
 
-def _wait_claimed_idling(gateway_url: str, agent_id: int) -> None:
-    """A new, unclaimed row is also IDLING — poll for IDLING plus the PID
-    written by the first claim (mirrors the spawned_agent fixture)."""
-    deadline = time.monotonic() + 90.0
-    last_status: str | None = None
-    last_pid: int | None = None
-    while time.monotonic() < deadline:
+def _wait_idle_intent(agent_id: int) -> None:
+    """An unmessaged agent may be idle before its first hosted admission."""
+
+    def idle() -> tuple[bool, object]:
         with psycopg.connect(settings.data_plane.db_url) as conn, conn.cursor() as cur:
-            cur.execute("SELECT status, pid FROM agents_meta WHERE id = %s", (agent_id,))
+            cur.execute(
+                "SELECT status, runtime_kind, runtime_owner, runtime_generation "
+                "FROM agents_meta WHERE id = %s",
+                (agent_id,),
+            )
             row = cur.fetchone()
-        if row is not None:
-            last_status, last_pid = row
-            if last_status == AgentStatus.IDLING.value and last_pid is not None:
-                return
-        time.sleep(0.3)
-    raise RuntimeError(
-        f"agent {agent_id} did not reach claimed idling within 90s: "
-        f"last_status={last_status!r} last_pid={last_pid!r}"
+        if row is None:
+            return False, row
+        status, kind, owner, generation = row
+        unadmitted = kind is None and owner is None and generation is None
+        hosted = kind == "hosted" and owner is not None and generation is not None
+        return status == AgentStatus.IDLING.value and (unadmitted or hosted), row
+
+    poll_until(
+        idle,
+        timeout=90.0,
+        interval=0.3,
+        what=f"agent {agent_id} has idle intent and a coherent hosted identity",
     )
 
 
@@ -119,7 +125,7 @@ def test_switch_back_after_parked_compact_shows_post_compact_state(e2e_env: E2EE
     resp.raise_for_status()
     agent_b = int(resp.json()["id"])
     try:
-        _wait_claimed_idling(gateway_url, agent_b)
+        _wait_idle_intent(agent_b)
 
         page.goto(e2e_env.agent_url)
         page.wait_for_selector('[data-testid="sse-ready"]', state="attached", timeout=10_000)

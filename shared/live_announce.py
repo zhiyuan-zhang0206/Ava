@@ -134,7 +134,7 @@ async def publish_agent_updated(pool: AsyncConnectionPool, agent_id: int) -> Non
 
 
 def publish_page_closed_sync(agent_id: int, name: str) -> None:
-    """Publish PageClosed from a sync context (restarter controllers, launch /
+    """Publish PageClosed from a sync context (ops lifecycle, launch /
     boot-failure force-terminate paths).
 
     The `cascade_close_agent_pages` trigger closes only agent-owned show() rows

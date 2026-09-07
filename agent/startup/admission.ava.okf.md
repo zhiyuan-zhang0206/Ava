@@ -1,76 +1,35 @@
 ---
 type: doc
-title: Runtime Admission and Boot Attempts
-description: Schema rejection, incarnation admission, canonical session publication and bounded restart recovery.
+title: Hosted Runtime Admission
+description: Database ownership fences hosted turns and lifecycle controls.
 tags: []
 ---
 
-# Runtime Admission and Boot Attempts
+# Hosted Runtime Admission
 
-## Schema rejection
+`agent/hosted_ownership.py:admit_hosted_runtime()` locks the agent metadata
+before granting execution to the local agent host. The row carries generation,
+owner and `runtime_kind='hosted'`; the context carries that admitted identity
+through the entire turn. A fresh foreign owner, terminal status, changed home or
+maintenance hold cannot be bypassed by a delayed wake.
 
-`claim_agent_row_or_die_on_stale_schema` validates schema before claiming running.
-Both `CodeBehindSchema` and `SchemaVersionMismatch` reject boot. Only genuinely
-unowned legacy idling rows become terminated: `_mark_preclaim_terminated` requires
-absent runtime kind, generation, owner and command pointer, and stamps
-`termination_source='launch-confirm'`. Owned attempts remain under their durable
-command's deadline and attempt budget. Legacy crash resurrection can apply after
-schema or placement repair. A code-behind host can update to the cluster schema;
-code-ahead requires correcting the deployed code, not pretending migration ran.
+Ownership survives normal idle and runtime-cache eviction. The daemon renews
+only rows belonging to its own boot owner. Settlement and release match the
+original incarnation, so a late turn cannot rewrite a replacement's state.
 
-## Admission and canonical publication
+Restart and terminate are durable inbounds. Native claim returns to END, the
+host flushes the final checkpoint, then applies the accepted lifecycle command.
+Single-flight remains held through the original continuation and settlement.
+Restart releases the incarnation for the next admission; terminate leaves the
+agent identity terminal. There is no child-process admission, OS launch budget,
+canonical per-agent process record or `/exited` callback.
 
-Parent launch records use unique boot-attempt names on POSIX and Windows. Only
-the actual PostgreSQL admission winner publishes the canonical agent record,
-including ordinary legacy births and explicit resurrection. A resident or
-unreadable old canonical process refuses replacement; no revive/retry path kills
-it by name. This preflight is not a reservation: admission CAS and the bounded
-canonical publication lock protect a winner appearing after the preflight.
+Force control retains its separate exact-incarnation resource fence. Acceptance
+means the interruption was enqueued; it does not certify that an uncooperative
+turn or disposable execution domain has finished.
 
-An applied durable restart requires its exact `--restart-command-id`. Under the
-metadata row lock, `agent/restart_admission.py` checks target incarnation, pending
-pointer and original application-time deadline. Missing, delayed or superseded
-attempts cannot use legacy admission.
+Historical database rows and command payloads are retained. Runtime removal
+requires no destructive schema migration.
 
-Process resurrection similarly uses `--resurrect-command-id`, referring to the
-existing notification inbound with server-reserved `resurrection_launch`
-evidence. It does not use restart/terminate-only target columns. Preparation
-fixes the actual allocation epoch, old incarnation, machine, original request
-deadline and trigger identity. Each OS attempt is authorized in a short committed
-transaction before launch outside locks. A pending user's persisted OS counter
-survives redispatch and is distinct from exit-wait preparation attempts. Missing
-or stale launch identity cannot claim that allocation. This establishes bounded
-authorization, not OS exactly-once. The existing delivery watchdog also retries
-an exact pending chat with a server-prepared, unexpired allocation and no admitted
-PID. The home runner resumes that same notification and allocation epoch without
-minting another budget; ordinary idle agents and historical task owners do not
-qualify. Actual crash/interleaving and full-CI evidence remain required gates.
-
-`agent/session_admission.py` publishes the winning process's canonical record
-before admission commits. The record is repairable observation, not a second
-ownership authority. Publication failure rolls back the DB transaction; live or
-unreadable previous identities refuse replacement without signaling. The
-controller launches `ava-boot-<agent>-<command>-<attempt>`; only the admitted child
-publishes canonical. Attempt records do not count as admitted agents or shells.
-Filesystem/DB publication is not atomic; real subprocess crash coverage remains
-a deployment gate.
-
-## Bounded command recovery
-
-The existing restarter controller allocates `payload.launch_attempts` in a short
-metadata-then-inbound transaction before spawning. Crash after commit consumes
-an attempt even when no OS process started. Retry ceiling and original command
-deadline both apply. Exhaustion records an explicit unobserved result, not an
-invented `observed_at` or PID. Before deadline, exhaustion remains unobserved;
-after deadline, positive target absence permits a failed command outcome and
-fenced pointer release, never a successful observation timestamp. The ended
-runtime becomes terminated; its restart failure remains in the command.
-
-Live runtime and cold controller share `shared/lifecycle_acceptance.py`. Cold
-acceptance requires proof of no admitted owner for that exact agent and an
-explicit restart/terminate. A new command has its own budget; an old command is
-never retargeted or reset. Ordinary chat, compact and system-note delivery cannot
-revive a released failed process: watchdog selection and final pending-work
-resurrection CAS both refuse. Explicit restart uses the public lifecycle action.
-Legacy unowned terminated-agent policy is unchanged. Protocol advertisement and
-all-old-writer closure remain activation gates.
+Related: [[../lease.ava.okf.md]], [[../lifecycle.ava.okf.md]], and
+[[shared/maintenance.ava.okf.md]].

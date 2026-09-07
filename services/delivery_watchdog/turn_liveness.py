@@ -8,12 +8,14 @@ import logging
 import math
 import time
 from typing import NamedTuple, Protocol, TypeGuard, cast
+from uuid import UUID
 
 from psycopg_pool import ConnectionPool
 
 import shared.db
 import shared.redis_client
 from shared import telemetry
+from shared.hosted_db_wait import database_wait_matches
 
 _log = logging.getLogger("services.delivery_watchdog.turn_liveness")
 
@@ -28,6 +30,8 @@ class _HostedTurnCandidate(NamedTuple):
     agent_id: int
     machine: str
     db_age_s: float
+    generation: UUID | None = None
+    owner: UUID | None = None
 
 
 class _HostedTurnWedge(NamedTuple):
@@ -41,6 +45,7 @@ class _HostedTurnWedge(NamedTuple):
 class _ProgressSnapshot(NamedTuple):
     age_s: float
     last_marks: tuple[float, ...]
+    db_wait: object = None
 
 
 def _is_finite_number(value: object) -> TypeGuard[int | float]:
@@ -58,12 +63,13 @@ def select_hosted_turn_liveness_candidates(
     """Stale DB clocks for exactly the hosted agents currently marked running."""
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
-            "SELECT id, machine, EXTRACT(EPOCH FROM (now() - last_active_at)) "
+            "SELECT id, machine, EXTRACT(EPOCH FROM (now() - last_active_at)), "
+            "runtime_generation, runtime_owner "
             "FROM agents_meta WHERE runtime_kind='hosted' AND status='running' "
             "AND last_active_at < now() - make_interval(secs => %s) ORDER BY id",
             (threshold_s,),
         )
-        return [_HostedTurnCandidate(r[0], r[1], float(r[2])) for r in cur.fetchall()]
+        return [_HostedTurnCandidate(r[0], r[1], float(r[2]), r[3], r[4]) for r in cur.fetchall()]
 
 
 def _parse_progress_snapshot(raw: str | bytes, agent_id: int) -> _ProgressSnapshot | None:
@@ -89,7 +95,7 @@ def _parse_progress_snapshot(raw: str | bytes, agent_id: int) -> _ProgressSnapsh
         if not _is_finite_number(mark):
             raise ValueError("agent turn-progress snapshot has invalid clock values")
         marks.append(float(mark))
-    return _ProgressSnapshot(float(age), tuple(marks))
+    return _ProgressSnapshot(float(age), tuple(marks), snapshot.get("db_wait"))
 
 
 async def _detect_hosted_turn_wedges(
@@ -114,6 +120,10 @@ async def _detect_hosted_turn_wedges(
                 )
                 continue
             snapshot = _parse_progress_snapshot(raw, candidate.agent_id)
+            if snapshot is not None and database_wait_matches(
+                snapshot.db_wait, candidate.generation, candidate.owner
+            ):
+                continue
             if snapshot is not None and snapshot.age_s >= threshold_s:
                 wedges.append(
                     _HostedTurnWedge(

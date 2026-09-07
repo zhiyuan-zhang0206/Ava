@@ -255,5 +255,5 @@ def cmd_agents_terminate(agent_id: int, *, source: str | None = None) -> int:
 def cmd_agents_kill(agent_id: int, *, source: str | None = None) -> int:
     """`ava agents kill <id>` — request forceful interruption. Hosted work may
     return enqueued while it drains; this is acceptance, not observed exit.
-    Detached process force retains its force_killed result."""
+    The response acknowledges the host lifecycle request; completion is asynchronous."""
     return _terminate(agent_id, force=True, source=source)

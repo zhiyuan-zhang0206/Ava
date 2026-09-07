@@ -147,8 +147,8 @@ async def _dispatch_op(
 
 @router.post("/api/cluster/stop", status_code=200)
 async def post_cluster_stop(body: ClusterTransitionPayload) -> dict[str, bool]:
-    """Phase A handler — pause this host (posture row -> 503 + stop the
-    restarter), executed by this host's ops server via a cluster_stop op.
+    """Phase A handler: drain native agent controls while SDK dependencies
+    remain available, then stop local services through cluster_stop.
     """
     await _dispatch_op(machine_name(), "cluster_stop", body.model_dump(mode="json"))
     return {"paused": True}
@@ -156,7 +156,7 @@ async def post_cluster_stop(body: ClusterTransitionPayload) -> dict[str, bool]:
 
 @router.post("/api/cluster/resume", status_code=200)
 async def post_cluster_resume(body: ClusterTransitionPayload) -> dict[str, bool]:
-    """Compensating unpause — posture row -> idle + respawn restarter,
+    """Compensating unpause: restore posture and release native admission holds,
     executed by this host's ops server via a cluster_resume op.
 
     Symmetric inverse of `/api/cluster/stop`. The orchestration's failure path
@@ -417,7 +417,7 @@ async def get_cluster_roster(request: Request) -> list[MachineStatus]:
 #   - Reading service logs: query the `events` PG table directly. Daemons
 #     route stdlib logging through loguru's PG sink (see shared/log.py's
 #     `_StdlibInterceptHandler` + `_postgres_sink`), so every INFO+ line from
-#     gateway / scheduler / labeler / runner / restarter / watchdog / memory-
+#     gateway / scheduler / labeler / agent-host / watchdog / memory-
 #     indexer lands here. agent processes also write here.
 #   - Cleaning up a stale machines row after a host is decommissioned or
 #     renamed (e.g. `laminar`→`cloud` 2026-05-25): a one-shot DELETE endpoint

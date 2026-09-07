@@ -168,7 +168,7 @@ async def test_cold_idle_resume_uses_pointer_without_an_extra_model_call(
         graph=builder.compile(checkpointer=AsyncPostgresSaver(aops_pool)),
         machine=machine_name(),
     )
-    ctx = AvaContext(ops_pool=aops_pool, hosted=True, event_publisher=MagicMock(), llm=MagicMock())
+    ctx = AvaContext(ops_pool=aops_pool, event_publisher=MagicMock(), llm=MagicMock())
     monkeypatch.setattr(successor, "_runtime_for", AsyncMock(return_value=object()))
     monkeypatch.setattr("services.agent_host.host.validate_model_config", MagicMock())
 

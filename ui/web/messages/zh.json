@@ -617,7 +617,7 @@
       "offPinBadge": "未固定",
       "settleHold": "部署的稳定等待仍在等待此主机：它已确认自更新，但在发布退出时尚未收敛。此记录来自租约而非实时检查；未固定/代码徽标才是实时结论。只要该等待存在，部署会被拒绝且自动回滚会被抑制。",
       "settleHoldBadge": "稳定等待",
-      "daemonHealth": "重启器 {restarter} · 看门狗 {watchdog}",
+      "daemonHealth": "Agent 宿主 {agentHost} · 看门狗 {watchdog}",
       "degraded": "降级",
       "healthy": "健康",
       "stoppedAt": "已停止 {time}",

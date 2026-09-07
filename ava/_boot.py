@@ -1,38 +1,20 @@
-"""Process bootstrap — establish who this `ava` process is.
+"""Agent identity for host turns, exec children and launched scripts.
 
-Both the agent process (`agent/loop.py`) and a launched background script
-(`ava.watcher.launch`) call `establish` exactly once at startup. It takes a
-single input — the agent id — and the rest of the SDK derives what it needs
-from that identity (the session-name prefix, the MCP daemon socket) plus the
-cluster-identifying env the launcher forwarded. This is the one place "which
-agent am I" is set, replacing per-attribute assignment scattered across the
-agent main loop.
+The agent host binds a turn contextvar (`shared/turn_identity.py`) around
+execution. It never establishes one process-wide agent id for its many agents.
+A disposable exec child or launched script may call `establish` once, and
+shell-launched children can derive the same identity from AVA_AGENT_ID.
+Reads resolve an explicitly borrowed external identity first (with lease
+validation), then the turn contextvar, then the process slot or child env.
 
-The agent id is held here, in a framework-internal module-level slot
-(`_agent_id`, read via `agent_id()`), NOT on the agent-facing `ava.self`
-module. Every framework call site that needs the identity reads it from here;
-`ava.self.AGENT_ID` re-exports it for the agent. Keeping the canonical slot off
-`ava.self` is what lets `AVA_SDK_DISABLE` remove the whole `self` lifecycle
-namespace (a hermetic single-task bench scopes it out) without stripping the
-kernel's own identity — boot and the framework still resolve "who am I", they
-just no longer reach through a disable-able SDK surface to do it.
+The canonical identity is framework-internal; `ava.self.AGENT_ID` re-exports
+it. Disabling the agent-facing `self` namespace does not remove identity from
+framework callers. `owns_loop` authorizes lifecycle self-actions in a turn or
+its exec child; background scripts establish with owns_loop=False so they
+cannot compact or restart the agent whose identity they carry.
 
-`owns_loop` records whether this process owns the agent's turn loop. The real
-agent process does; a launched background script does not. Lifecycle
-self-actions (`ava.self.compact/restart/terminate/update`) act on that loop and
-only make sense when `owns_loop` is true — from a launched script they would
-post a lifecycle inbound for an agent whose loop this process cannot drive
-(e.g. a watcher compacting the agent that launched it), so they refuse instead.
-
-In the hosted runner (future/infra/agent-runner-as-server.md) one process
-drives many agents' turns, so a third, innermost identity channel exists:
-the turn contextvar (`shared/turn_identity.py`), bound by the dispatcher
-around turn-task creation. Every read here resolves
-`turn contextvar > process slot > AVA_AGENT_ID env`; process mode never binds
-the contextvar, so its reads are unchanged.
-
-This module is framework-internal (plugin/SDK author surface), not agent-facing:
-it carries no `ava.help()` docstrings and is never imported by `ava/__init__`.
+This module carries no agent-facing help surface. Cluster configuration and
+credentials remain separate from the agent identity.
 """
 
 from __future__ import annotations
@@ -52,8 +34,8 @@ from shared.turn_identity import current_turn_agent_id
 _agent_id: int | None = None
 
 # Mutable per-process flag (lowercase on purpose — runtime state, not a
-# constant): True only in a process that owns the agent turn loop (the real
-# agent process). Default True so the agent process and the test harness —
+# constant): True for the host/exec execution path. Default True so host
+# turns and the test harness —
 # neither of which goes through a launched-script bootstrap — keep the unguarded
 # behavior; a launched script flips it False via `establish(..., owns_loop=False)`,
 # the one context where the lifecycle self-actions must refuse.

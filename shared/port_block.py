@@ -24,6 +24,7 @@ PORT_OFFSETS: dict[str, int] = {
     "gateway": 0,
     "frontend": 1,
     "heartbeat": 2,
+    # Retired service slot: reserved for existing home records; never reused.
     "restarter": 3,
     "labeler": 4,
     "task_maintenance": 5,
@@ -110,6 +111,7 @@ LEGACY_AVA_PORTS: dict[str, int] = {
     "frontend": 3000,
     "app": 3001,
     "heartbeat": 8107,
+    # Historical registry data only; no runtime service binds this port.
     "restarter": 8102,
     "labeler": 8103,
     "task_maintenance": 8108,

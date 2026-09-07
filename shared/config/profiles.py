@@ -54,7 +54,7 @@ PROCESS_PROFILES: dict[ProcessProfile, frozenset[str]] = {
             "physical_backup",
         }
     ),
-    # agent processes (the kernel + ava SDK + ava_builtins plugins). daemon is
+    # Agent host and exec children (kernel + SDK + builtin plugins). daemon is
     # consumed by the ava_fleet plugin's in-agent task_maintenance service
     # (task_maintenance_* / task_reminder_backoff_seconds / task_escalate_n).
     "agent": frozenset(
@@ -75,7 +75,7 @@ PROCESS_PROFILES: dict[ProcessProfile, frozenset[str]] = {
             "physical_backup",
         }
     ),
-    # runner daemons (ops / restarter / watchdog / browser / browser-mcp /
+    # runner support daemons (ops / watchdog / browser / browser-mcp /
     # gate / permissions-helper / healthchecks). sandbox is consumed by the
     # browser MCP daemon (settings.sandbox.mcp_connect_timeout_seconds);
     # observability by the daemons' event emitter via shared.telemetry_otlp.
@@ -91,10 +91,6 @@ PROCESS_PROFILES: dict[ProcessProfile, frozenset[str]] = {
             "observability",
             # ops/spec.py gates the pitr-uploader roster entry on AVA_PITR_ENABLED.
             "physical_backup",
-            # shared/timing.py's IDLE_CLAIM_BACKSTOP_S clock (imported by the
-            # wedged controller) reads settings.agent.db_notify_wait_timeout_seconds
-            # — the restarter's assert_clock_lattice() evaluates it at startup.
-            "agent",
         }
     ),
 }

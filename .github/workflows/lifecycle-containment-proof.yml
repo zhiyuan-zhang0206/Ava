@@ -23,7 +23,6 @@ jobs:
     env:
       AVA_DB_URL: postgresql://unused@127.0.0.1:1/unused
       AVA_REDIS_URL: redis://127.0.0.1:1/0
-      AVA_RUNNER_MODE: process
       BASELINE_SHA: 612326d130fdc5322e40cb8e688e8ba623d9bc5d
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

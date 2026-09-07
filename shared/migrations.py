@@ -1,11 +1,11 @@
 """Schema migration runner — framework infrastructure shared by gateway / agent.
 
-Lives in `shared/` because gateway / 3 service daemons / agent loop
+Lives in `shared/` because gateway / service daemons / agent host
 all need to call `assert_schema_current()` at their entry points for
 schema sanity; unrelated to the agent SDK (`ava.*`); we do not want
 gateway processes reverse-depending on the `ava` package.
 
-Long-running processes (gateway / agent / restarter /
+Long-running processes (gateway / agent-host /
 labeler) call `assert_schema_current()` early in startup;
 `ava cluster update` flow calls `apply_pending_migrations()` after git
 pull.

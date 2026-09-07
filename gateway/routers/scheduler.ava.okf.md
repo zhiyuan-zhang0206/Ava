@@ -56,7 +56,7 @@ Only applies to **crashes** (not clean exits) looping—clean exits go to `compl
 
 - [[db.ava.okf.md]] — reads/writes the `schedules` and `schedule_fire_log` tables
 - `shared.cluster.session_name()` — generates the session name `ava-schedule-<id>`
-- [[services/agent_runner_side/restarter/restarter.ava.okf.md]] — similar session management pattern, but schedules do tasks rather than guarding agents
+- [[agent/lifecycle.ava.okf.md]] — agent lifecycle is independent of persistent schedule sessions
 
 ## Entry Points
 

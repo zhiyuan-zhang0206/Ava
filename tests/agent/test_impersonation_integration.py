@@ -122,7 +122,7 @@ async def _prepare_graph(
     builder.add_node("after_exec", after_exec, destinations=("claim",))
     builder.add_edge(START, "claim")
     graph = builder.compile(checkpointer=saver)
-    ctx = AvaContext(ops_pool=aops_pool, hosted=True, event_publisher=MagicMock())
+    ctx = AvaContext(ops_pool=aops_pool, event_publisher=MagicMock())
     config: RunnableConfig = {"configurable": {"thread_id": str(agent_id)}, "recursion_limit": 100}
     reset: dict[str, Any] = {
         "turn_active": False,
@@ -264,35 +264,3 @@ async def test_replacement_host_adopts_held_agent_without_model(
         await host.run_turn(agent_id)
         assert leases.require_active(lease["id"], lease["token"])["status"] == "active"
     graph.ainvoke.assert_not_called()
-
-
-@pytest.mark.parametrize("control", ["restart", "terminate"])
-async def test_parked_process_applies_control_without_graph(
-    db_conn: psycopg.Connection[Any], aops_pool: AsyncConnectionPool[Any], control: str
-) -> None:
-    from agent._starting import claim_agent_row
-    from agent.impersonation import park_native
-    from shared.runtime_incarnation import current_incarnation
-    from tests.conftest import spawn_agent
-
-    agent_id = spawn_agent()
-    claim_agent_row(agent_id)
-    owner = current_incarnation(agent_id)
-    assert owner is not None
-    lease = leases.request(agent_id, caller=CallerIdentity(kind="external_agent", subject="codex"))
-    leases.accept(lease["id"], agent_id, owner)
-    leases.activate(lease["id"], owner)
-    db_conn.execute(
-        "INSERT INTO inbound_messages(agent_id,content,kind,source) VALUES(%s,'',%s,'user')",
-        (agent_id, control),
-    )
-    db_conn.commit()
-    assert await park_native(agent_id, AvaContext(ops_pool=aops_pool))
-    expected = "restarting" if control == "restart" else "terminated"
-    assert db_conn.execute(
-        "SELECT status FROM agents_meta WHERE id=%s", (agent_id,)
-    ).fetchone() == (expected,)
-    db_conn.commit()
-    assert leases.get(lease["id"], lease["token"])["status"] == (
-        "active" if control == "restart" else "expired"
-    )

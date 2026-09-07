@@ -34,8 +34,6 @@ The hand-added pseudo-checks classify themselves the same way: `redis-acl`, `pgb
 | pin — force-update spawned | `ALL` | it rewrites the checkout and restarts everything |
 | code — stale-process restart spawned | `ALL` | same, minus the checkout |
 
-The restarter's own controllers (respawn / resurrect / wedged) are never gates and always report `NONE`.
-
 ## A blocked round is never silent
 `ops/manager.py` logs every blocked round: which dimension blocked, the scope, the controller's `detail`, and how many **consecutive** rounds the streak has run — WARNING, escalating to ERROR at `_BLOCKED_ROUND_ALARM_ROUNDS` (10 rounds ≈ 10 min — "no legitimate rollout is longer than this"; `STRANDED_PAUSE_TIMEOUT_S` no longer shares that judgment, since it now bounds only a provably unowned pause). The round that clears a streak logs too, so the gap has an end timestamp and the counter resets.
 

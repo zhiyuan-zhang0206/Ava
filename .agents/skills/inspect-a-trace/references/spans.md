@@ -5,22 +5,15 @@ langgraph node path, and the shape of each LLM call. Come here once you already
 have a `trace_id`.
 
 **Check the trace's scope first.** The root span (`shared/trace.py:turn_span`)
-wraps one `graph.ainvoke` = one **turn**: the runloop invokes the graph once
-per turn and claim ends the invocation at the turn boundary, so a trace is one
-turn. Two duration caveats: the root span opens when the invocation starts —
-it *includes claim's idle wait for the turn's inbound* (OTel context cannot
-cross into LangGraph's per-node task), so a turn's wall-clock span duration
-can be far longer than the work in it; and runs recorded before 2026-08-20
-used a session-scoped root (`session_span`) that could span many turns — for
-an old run, read the root's start and end times rather than assuming a turn.
+wraps one graph invocation in `services/agent_host/host.py`. The host admits
+work before invoking the graph, so an idle agent has no parked graph invocation.
+The claim node returns at idle; waiting for a Redis wake happens in the host
+scheduler outside the turn span.
 
-The idle wait itself is now separately labeled: when the claim node blocks
-(`agent/graph/_claim_batch.py:_wait_for_batch`), `claim_idle_wait_span()`
-(`shared/trace.py`) ends the node's `execute_task claim` span at the park
-boundary and records the park as an explicit `claim idle-wait` span
-(parented under the ended node span). A giant `execute_task claim` span in a
-trace is therefore a pre-fix run — post-fix, `execute_task claim` covers only
-the real dispatch (ms) and the long wait shows as `claim idle-wait`.
+Historical traces can have different boundaries. The retired process runner
+could include an inbound idle wait, sometimes recorded as a `claim idle-wait`
+child span. Runs before 2026-08-20 could have a session-scoped root spanning
+many turns. Read their span boundaries before interpreting wall-clock duration.
 
 Three sources, in the order you should reach for them:
 

@@ -19,20 +19,6 @@ from shared.config.service_runtime import _ServiceRuntimeSettings
 
 
 class ServiceSettings(_ServiceRuntimeSettings):
-    restarter_pidfile: Path = Field(
-        default_factory=lambda: _unit_home() / "run" / "restarter.pid",
-        alias="AVA_RESTARTER_PIDFILE",
-        description="Restarter daemon pidfile path.",
-        json_schema_extra={
-            "capability": "agent-runner",
-            "restart_required": "",
-            "writable": False,
-            "sensitive": False,
-            "scope": "host",
-            "remote_writable": False,
-        },
-    )
-
     agent_host_pidfile: Path = Field(
         default_factory=lambda: _unit_home() / "run" / "agent-host.pid",
         alias="AVA_AGENT_HOST_PIDFILE",
@@ -380,20 +366,6 @@ class ServiceSettings(_ServiceRuntimeSettings):
         },
     )
 
-    restarter_health_url: str = Field(
-        default="",
-        alias="AVA_RESTARTER_HEALTH_URL",
-        description="Restarter daemon healthcheck URL. Empty = derive via health_port('restarter').",
-        json_schema_extra={
-            "capability": "agent-runner",
-            "restart_required": "",
-            "writable": False,
-            "sensitive": False,
-            "scope": "host",
-            "remote_writable": False,
-        },
-    )
-
     watchdog_interval_seconds: float = Field(
         default=60.0,
         alias="AVA_WATCHDOG_INTERVAL_SECONDS",
@@ -483,20 +455,6 @@ class ServiceSettings(_ServiceRuntimeSettings):
         default=None,
         alias="AVA_AGENT_RUNNER_WATCHDOG_HEALTH_PORT",
         description="Agent-runner watchdog /healthz port override (per unit). Unset = shared default 8120.",
-        json_schema_extra={
-            "capability": "agent-runner",
-            "restart_required": "",
-            "writable": False,
-            "sensitive": False,
-            "scope": "host",
-            "remote_writable": False,
-        },
-    )
-
-    restarter_health_port: int | None = Field(
-        default=None,
-        alias="AVA_RESTARTER_HEALTH_PORT",
-        description="Restarter daemon /healthz port override (per unit). Unset = shared default 8102.",
         json_schema_extra={
             "capability": "agent-runner",
             "restart_required": "",

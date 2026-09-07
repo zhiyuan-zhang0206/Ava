@@ -208,7 +208,7 @@ class _PluginsView:
             )
         # Agent-scoped read: the turn's config_overlay is layered over the disk
         # image, so in the hosted runner two agents sharing this process see
-        # their own overrides. Unbound (process mode) = the registry instance.
+        # their own overrides. Unbound service code reads the registry instance.
         return turn_plugin_config(name)
 
 

@@ -157,8 +157,8 @@ def test_successful_fresh_start_adopts_credentials_written_by_child(
 
     _set_parent_credentials(monkeypatch, home=tmp_path, db_url=old_db, redis_url=old_redis)
 
-    def _stop(*_args: object, **_kwargs: object) -> None:
-        return None
+    def _stop(*_args: object, **_kwargs: object) -> int:
+        return 0
 
     monkeypatch.setattr(_update, "_do_stop", _stop)
 
@@ -182,7 +182,7 @@ def test_successful_fresh_start_adopts_credentials_written_by_child(
     assert settings.data_plane.redis_admin_password == _NEW_REDIS_ADMIN_PASSWORD
 
 
-def test_gateway_child_keeps_restarter_down_until_orchestration_finishes(
+def test_gateway_child_leaves_readiness_to_orchestration(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     commands: list[tuple[list[str], dict[str, str]]] = []
@@ -204,8 +204,6 @@ def test_gateway_child_keeps_restarter_down_until_orchestration_finishes(
             "start",
             "--persist-services",
             "--no-readiness-gate",
-            "--disable-service",
-            "restarter",
         ]
     ]
     assert (
@@ -225,8 +223,8 @@ def test_interrupted_child_adopts_credentials_before_recovery(
     def _refresh(_repo: Path) -> None:
         return None
 
-    def _stop(*_args: object, **_kwargs: object) -> None:
-        return None
+    def _stop(*_args: object, **_kwargs: object) -> int:
+        return 0
 
     monkeypatch.setattr(_local, "_checkout_and_sync", _checkout)
     monkeypatch.setattr(_local, "_refresh_builtin_skills", _refresh)
@@ -264,7 +262,7 @@ def test_adoption_failure_attempts_recovery(
 
     monkeypatch.setattr(_local, "_checkout_and_sync", lambda *_args, **_kwargs: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_local, "_refresh_builtin_skills", lambda _repo: None)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_update, "_do_stop", lambda *_args, **_kwargs: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_update, "_do_stop", lambda *_args, **_kwargs: 0)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_local, "_boot_gateway_fresh", lambda *_args: order.append("child") or 0)  # pyright: ignore[reportUnknownArgumentType]
 
     def _fail_adoption() -> None:
@@ -304,7 +302,7 @@ def test_postgres_password_mutation_cannot_block_adoption_failure_recovery(
         lambda *_args, **_kwargs: None,  # pyright: ignore[reportUnknownArgumentType]
     )
     monkeypatch.setattr(_local, "_refresh_builtin_skills", lambda _repo: None)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_update, "_do_stop", lambda *_args, **_kwargs: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_update, "_do_stop", lambda *_args, **_kwargs: 0)  # pyright: ignore[reportUnknownArgumentType]
 
     def _boot(*_args: object) -> int:
         nonlocal actual_pg_password
@@ -448,7 +446,7 @@ def test_real_sigint_kills_child_and_replays_journal_before_recovery(tmp_path: P
         redis.Redis = Redis
         local._checkout_and_sync = lambda *_args, **_kwargs: None
         local._refresh_builtin_skills = lambda _repo: None
-        update._do_stop = lambda *_args, **_kwargs: None
+        update._do_stop = lambda *_args, **_kwargs: 0
         def recover(*_args, **_kwargs):
             values = dotenv_values(home / ".env")
             assert values["AVA_DB_ADMIN_PASSWORD"] == {_NEW_DB_PASSWORD!r}

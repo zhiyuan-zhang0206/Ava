@@ -342,14 +342,8 @@ def _add_cluster_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]
         "--mode",
         choices=("smooth", "force"),
         default="smooth",
-        help="agent-drain policy before the rollout restarts processes. "
-        "'smooth' (default) waits the configured AVA_UPDATE_QUIESCE_TIMEOUT_SECONDS "
-        "window (default 5s) for agents to end their current turn and exit at the "
-        "turn boundary, then force-kills any straggler. "
-        "'force' waits ~10s (idle agents drain) then force-kills whoever is still "
-        "running — long execs are cut short and their work is lost. Either way every "
-        "agent is restarted onto the new code; 'smooth' just gives them a short "
-        "window to land cleanly first.",
+        help="both modes require every native agent to finish restart/checkpoint drain "
+        "before migration; 'force' explicitly permits forced resource shutdown afterward",
     )
     cluster_update_p.set_defaults(func=_h_cluster_update)
 

@@ -217,16 +217,10 @@ from cli.commands._update_prepare import (
     refuse_normal_prepare as _refuse_normal_prepare,
 )
 from cli.commands._update_quiesce import (
-    _force_reap_local_agents as _force_reap_local_agents,
-)
-from cli.commands._update_quiesce import (
     _quiesce_all_agents as _quiesce_all_agents,
 )
 from cli.commands._update_quiesce import (
     _quiesce_local_agents as _quiesce_local_agents,
-)
-from cli.commands._update_quiesce import (
-    _quiesce_pass as _quiesce_pass,
 )
 from cli.commands._update_quiesce import (
     _quiesce_timeout_s as _quiesce_timeout_s,
@@ -539,31 +533,15 @@ def _run_gateway_orchestration_inner(  # noqa: PLR0915 (three-phase orchestratio
     phase_a_started = False
 
     # ── Phase 0: pre-flight git fetch on every agent-runner ──────────────────
-    # Unreachable hosts are skipped (their watchdog converges them on return),
-    # so the rollout can proceed without them; their names are collected here
-    # for the `finally`'s aftermath summary — the one line that tells the
-    # operator who still has to self-heal after a rollout that finished CLEAN
-    # for everyone it reached.
-    skipped: list[str] = []
+    # Every selected runner must confirm fetch. Missing acknowledgements abort
+    # before pause; no unavailable participant is silently excluded.
     with _stage_telemetry("phase0_fetch"):
-        phase0_failed = _run_preflight_fetch(
-            agent_runners, restart_only=restart_only, skipped=skipped
-        )
+        phase0_failed = _run_preflight_fetch(agent_runners, restart_only=restart_only)
     if phase0_failed:
         # Printed after the stage above has recorded itself — the summary must
         # include the phase whose failure aborted the rollout.
         telemetry.print_summary()
         return 1
-    if skipped:
-        skipped_names = set(skipped)
-        agent_runners = [(name, url) for name, url in agent_runners if name not in skipped_names]
-
-    # Freeze the eligible rollout set after Phase 0, while Postgres is up. A
-    # host whose fetch timed out may come back before Phase A, but pausing it
-    # would violate validate-before-kill: the timeout gave us no proof that it
-    # has the pinned target object Phase B will vet. The host converges at the
-    # next rollout, or when `ava cluster update` runs on it again.
-    #
     # Materialize each eligible runner's ops URL for the same reason: the
     # compensating resume in the `finally` dials these directly (never a fresh
     # `machines` lookup) so it survives a data plane the failed local update took
@@ -620,7 +598,7 @@ def _run_gateway_orchestration_inner(  # noqa: PLR0915 (three-phase orchestratio
         for name, _url in agent_runners:
             _clear_stale_stop_marker(name)
 
-        # 1-1c) pause restarters (local + remote) + quiesce all agents. None = a
+        # 1-1c) drain hosted agents (local + remote). None = a
         #       Phase-A 5xx; abort with nothing migrated (the finally resumes).
         hosts_to_resume = list(agent_runners)
         with _stage_telemetry("stop_the_world"):
@@ -632,19 +610,9 @@ def _run_gateway_orchestration_inner(  # noqa: PLR0915 (three-phase orchestratio
             )
         if paused_names is None:
             return 1
-        # Stragglers (quiesce timeout) or an explicit force mode: every host's
-        # stop leg force-reaps its live agents — marks them 'restarting' (the
-        # restarter respawns them on new code once the host unpauses) and kills
-        # the processes. Without this, a straggler would ride out the whole
-        # rollout on old code, exactly the "agent keeps running for rounds"
-        # behaviour this replaces.
-        force_reap = (mode == "force") or not all_quiesced
-        if force_reap:
-            print(
-                "\n→ force-reap stragglers: agents still live after the quiesce window "
-                "will be killed on every host (Local + Phase B) and respawned on new code",
-                file=sys.stderr,
-            )
+        if not all_quiesced:
+            return 1
+        force_reap = mode == "force"
 
         # 2-5) gateway local stop -> pull -> sync -> start (start migrates).
         #      restart_only skips the pull/sync (bounce on current code).
@@ -783,5 +751,4 @@ def _run_gateway_orchestration_inner(  # noqa: PLR0915 (three-phase orchestratio
             spawn_offsite_upload=_spawn_async_offsite_upload,
             repo=repo,
             pull_recover=pull_recover,
-            skipped=skipped,
         )

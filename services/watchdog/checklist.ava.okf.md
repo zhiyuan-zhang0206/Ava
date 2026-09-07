@@ -43,8 +43,7 @@ its own schedule and the watchdog only probes its last-success health
 ## Agent-runner order
 
 `brew-pin` → enabled `permissions-helper` → the derived agent-runner services in
-`build_services()` order (`restarter` in process mode or `agent-host` in hosted
-mode, `page-server`, `ops`, the gated browser/computer services, `mcp-daemon`,
+`build_services()` order (`agent-host`, `page-server`, `ops`, the gated browser/computer services, `mcp-daemon`,
 then `otel-collector` and plugin services). A station-capable runner appends
 `lgtm`.
 

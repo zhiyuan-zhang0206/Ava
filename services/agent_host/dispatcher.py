@@ -53,8 +53,9 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Protocol, cast
 
-from agent._turn_progress import turn_progress_age_s
+from agent._turn_progress import turn_progress_age_s, turn_progress_snapshot
 from services.agent_host.runtime import _active_turn_config_fingerprint
+from shared.hosted_db_wait import database_wait_snapshot
 from shared.log import logger
 from shared.stop_timing import CANCEL_UNWIND_TIMEOUT_S, CLOCK_READ_TIMEOUT_S
 
@@ -67,7 +68,7 @@ _INBOUND_PATTERN_SUFFIX = ":inbound:*"
 # boundary: a private-network connection can remain TCP-established while its
 # peer no longer answers reads, so an unbounded pub/sub iterator would silently
 # disable both delivery and the hosted pending scan forever. It intentionally
-# matches the process-mode fallback cadence.
+# is the durable scan backstop when a Redis wake is lost.
 _DEFAULT_SUBSCRIPTION_READ_TIMEOUT_S = 30.0
 # A per-call scheduler allowance, not a lifecycle grace with a cross-component
 # ordering. It gives `asyncio.wait_for` room to cancel a Redis read after the
@@ -89,15 +90,9 @@ _DEFAULT_MAX_SCAN_BACKOFF_S = 300.0
 # a visible one: without it, `aclose` hangs, the supervisor eventually SIGKILLs
 # the host, and nothing anywhere says why.
 #
-# The value is bounded from above by the stop path's own window:
-# `cli/commands/stop.py:_reap_agent_sessions` sends SIGTERM and waits
-# `REAP_KILL_WINDOW_S` (15s) before force-killing. This wait plus the rest of
-# shutdown — emitting the report, closing the pool, the healthz server, the
-# pidfile — has to fit inside that, or the host is killed before it can say what
-# was stuck. 5s leaves the remaining ~10s for the rest; the ordering is
-# registered in the clock lattice (`shared/timing.py`: CANCEL_UNWIND_TIMEOUT_S +
-# CLOCK_READ_TIMEOUT_S < REAP_KILL_WINDOW_S, issue #196) and pinned against the
-# stop path's actual default by `tests/services/test_turn_dispatcher.py`.
+# These bounds limit diagnostics after cancellation, not graceful maintenance.
+# Normal pause/stop waits for durable drain and fails on timeout without an
+# implicit force-kill. Explicit force can interrupt the host and its report.
 #
 # Ceiling on reading the stuck agents' activity clocks, on the shutdown path.
 # Small on purpose: this is a diagnostic enrichment of a report already worth
@@ -118,6 +113,12 @@ def _age_seconds(moment: datetime) -> float:
     if moment.tzinfo is None:
         moment = moment.replace(tzinfo=UTC)
     return (datetime.now(UTC) - moment).total_seconds()
+
+
+def _database_waiting(agent_id: int) -> bool:
+    progress = turn_progress_snapshot(agent_id)
+    last = progress["last_marks"][-1] if progress is not None else None
+    return database_wait_snapshot(agent_id, last_progress=last) is not None
 
 
 class TurnScheduler:
@@ -404,8 +405,7 @@ class PendingInboundWake:
 
     ``stale`` means BOTH that one pending inbound has passed the running
     turn grace and that the agent has made no completed-turn progress for
-    that grace (the same grace process mode's wedged controller applies to
-    running turns; an active turn may legitimately run up to the exec +
+    that grace (an active turn may legitimately run up to the exec +
     LLM-retry budget). A fresh pending row still receives the scan's normal
     wake, but does not interrupt a legitimate turn that happens to be running.
     """
@@ -460,12 +460,10 @@ class _ScanSchedule:
 class InboundWakeDispatcher:
     """One `PSUBSCRIBE` over every local agent's inbound channel.
 
-    Replaces the per-agent `RedisInboundListener` subscriptions of process mode:
-    one connection covers the whole runner, so adding an agent costs no Redis
+    One subscription covers the whole runner, so adding an agent costs no Redis
     resources at all.
 
-    The wake payload is ignored — as in process mode, a wake means "look at the
-    queue", and the claim CAS is what decides who gets the row. That keeps this
+    The wake payload is ignored — a wake means "look at the queue", and the claim CAS is what decides who gets the row. That keeps this
     loop free of any delivery semantics: a duplicate wake is harmless and a
     coalesced one is correct.
 
@@ -515,8 +513,7 @@ class InboundWakeDispatcher:
         Subscription failures reconnect with a short backoff. The periodic
         database scan catches a wake published while the subscription is down;
         its own failures leave a healthy subscription alone and retry with
-        bounded backoff. Unlike process mode, a hosted agent has no per-agent
-        claim loop to provide that durable fallback.
+        bounded backoff. This shared scan supplies durable recovery for all agents.
         """
         from shared.cluster import redis_channel_prefix
         from shared.redis_client import open_async_redis, retry_auth_failures_async
@@ -613,13 +610,20 @@ class InboundWakeDispatcher:
         if self._stale_after_s is None:
             raise RuntimeError("hosted pending scan configured without stale_after_s")
 
+        started: set[int] = set()
         for candidate in await self._pending_scan(self._stale_after_s):
-            if candidate.stale and candidate.agent_id in self._scheduler.active_agents:
+            if (
+                candidate.stale
+                and candidate.agent_id in self._scheduler.active_agents
+                and not _database_waiting(candidate.agent_id)
+            ):
                 await self._scheduler.cancel_agent(candidate.agent_id)
                 if candidate.agent_id in self._scheduler.active_agents:
                     raise HostRestartRequiredError(
                         f"hosted turn for agent {candidate.agent_id} did not unwind"
                     )
+            if candidate.agent_id not in self._scheduler.active_agents:
+                started.add(candidate.agent_id)
             self._scheduler.wake(candidate.agent_id)
 
         # Turn-level fake-alive: an in-flight agent whose turn-progress clock
@@ -633,6 +637,11 @@ class InboundWakeDispatcher:
         # this agent" — its stale clock is the answer to "has that turn done
         # ANYTHING since" (see agent/_turn_progress.py for what counts).
         for agent_id in self._scheduler.active_agents:
+            # A task just started by this scan has not entered its pump yet.
+            # Neither an idle agent's old clock nor its predecessor's clock
+            # justifies cancelling that new task before it can run.
+            if agent_id in started or _database_waiting(agent_id):
+                continue
             age = turn_progress_age_s(agent_id)
             if age is None or age < self._stale_after_s:
                 continue

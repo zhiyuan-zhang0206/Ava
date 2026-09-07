@@ -19,7 +19,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, Never, cast
 
-import shared.paths
 from shared.maintenance_state import MaintenanceHold
 from shared.platform import file_lock
 
@@ -43,12 +42,16 @@ class PauseOwnerSnapshot:
 
 
 def state_path() -> Path:
+    import shared.paths
+
     # Admission/status reads must not create a home before setup validation.
     # Writers create the parent through lock_path() and _write_atomic().
     return shared.paths.ava_home() / "run" / "deploy-pause-owner.json"
 
 
 def lock_path() -> Path:
+    import shared.paths
+
     return shared.paths.run_dir() / "deploy-pause-owner.lock"
 
 
@@ -84,6 +87,11 @@ def _read_unlocked(path: Path) -> PauseOwnerSnapshot:
         acquired_at=acquired_at.astimezone(dt.UTC),
         maintenance=maintenance,
     )
+
+
+def read_for_home(home: Path) -> PauseOwnerSnapshot:
+    """Read the journal before configuration bootstrap, without creating the home."""
+    return _read_unlocked(home / "run" / "deploy-pause-owner.json")
 
 
 def read() -> PauseOwnerSnapshot:
@@ -127,7 +135,10 @@ def mark_paused(holder: str, acquired_at: dt.datetime) -> PauseOwnerSnapshot:
         raise ValueError("holder and timezone-aware acquired_at are required")
     path = state_path()
     with file_lock(lock_path(), timeout_s=_LOCK_TIMEOUT_S):
-        _refuse_maintenance(_read_unlocked(path))
+        current = _read_unlocked(path)
+        if current.status == "paused" and current.matches(holder, acquired_at):
+            return current
+        _refuse_maintenance(current)
         _write_atomic(
             path,
             {
@@ -144,12 +155,12 @@ def mark_resumed(holder: str, acquired_at: dt.datetime) -> bool:
     path = state_path()
     with file_lock(lock_path(), timeout_s=_LOCK_TIMEOUT_S):
         current = _read_unlocked(path)
-        if current.maintenance is not None:
-            return False
         if not current.matches(holder, acquired_at):
             return False
         if current.status == "resumed":
             return True
+        if current.maintenance is not None:
+            return False
         if current.status != "paused":
             return False
         _write_atomic(
@@ -257,7 +268,9 @@ def begin_maintenance(holder: str, acquired_at: dt.datetime) -> PauseOwnerSnapsh
         current = _read_unlocked(state_path())
         if current.matches(holder, acquired_at) and current.maintenance is not None:
             return current
-        if current.status in ("paused", "invalid"):
+        if current.status == "invalid" or (
+            current.status == "paused" and not current.matches(holder, acquired_at)
+        ):
             raise RuntimeError("another or unreadable pause owner must be resolved first")
         return _write_maintenance(holder, acquired_at, MaintenanceHold())
 

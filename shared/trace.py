@@ -1,6 +1,6 @@
 """Trace recording — OTLP/HTTP export to the local OTel Collector sidecar.
 
-**Record** (this module): called once per process early in `agent/loop.py:main()`.
+**Record** (this module): called once per process during `agent/_process_boot.py:init_process_scope`.
 When `trace_enabled` (default on), OpenLLMetry (traceloop-sdk) auto-instruments
 the Anthropic/OpenAI/Google SDKs + LangChain/LangGraph, and every span is
 exported over OTLP/HTTP (protobuf wire format) to the local OTel Collector

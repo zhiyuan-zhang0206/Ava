@@ -141,7 +141,7 @@ Python surfaces, so they keep heading form rather than stub form).
    - **PEP 224 attribute docstring** (default) — `AGENT_ID: int\n"""Your
      agent id."""`, snug against the declaration. `help()` AST-parses the source, extracts it, and renders it as
      `## AGENT_ID: int` H2 child. **Suitable for**: values that may be assigned at runtime
-     (e.g. `AGENT_ID` rewritten by `agent/loop.py`); constants no one will pass directly to
+     (e.g. `AGENT_ID` resolved from the active turn context); constants no one will pass directly to
      `help(value)`.
    - **`ava.const(value, doc=...)` wrap** (opt-in) — `PATH = ava.const(
      Path.home() / ".ava" / "memory", doc="...")`, returns a `type(value)` subclass

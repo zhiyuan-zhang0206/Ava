@@ -44,7 +44,6 @@ _EXPECTED_CONTROL_PLANE = frozenset(
         ("POST", "/api/cluster/machines/{name}/pause"),
         ("POST", "/api/cluster/machines/{name}/resume"),
         ("POST", "/api/alerts"),
-        ("POST", "/api/agents/{agent_id}/exited"),
         ("POST", "/api/work-failed"),
     }
 )
@@ -96,7 +95,6 @@ def test_should_bypass_pause_agrees_with_surface() -> None:
         ("GET", "/api/cluster/status"),
         ("POST", "/api/cluster/update"),
         ("POST", "/api/alerts"),
-        ("POST", "/api/agents/42/exited"),
     ]
     blocked = [
         ("GET", "/api/alerts"),  # same template as the exempt webhook, different method
@@ -104,7 +102,7 @@ def test_should_bypass_pause_agrees_with_surface() -> None:
         ("GET", "/api/agents"),
         ("GET", "/api/agents/42/messages"),
         ("GET", "/api/agents/42"),
-        ("GET", "/api/agents/42/exited/extra"),  # exact match, not prefix
+        ("GET", "/api/cluster/status/extra"),  # exact match, not prefix
         ("GET", "/api/health"),
         ("GET", "/pages/5-report/a/b"),
     ]
@@ -156,8 +154,8 @@ def test_unknown_route_defaults_to_non_idempotent() -> None:
         ("/api/agents/{agent_id}/messages", "/api/agents/123/messages/x", False),
         ("/pages/{page_key}/{rest:path}", "/pages/5-report/a/b/c", True),
         ("/pages/{page_key}/{rest:path}", "/pages/5-report", False),
-        ("/api/agents/{agent_id}/exited", "/api/agents/42/exited", True),
-        ("/api/agents/{agent_id}/exited", "/api/agents/42/terminate", False),
+        ("/api/agents/{agent_id}/terminate", "/api/agents/42/terminate", True),
+        ("/api/agents/{agent_id}/terminate", "/api/agents/42/restart", False),
         ("/api/cluster/machines/{name}", "/api/cluster/machines/node-1", True),
         ("/api/cluster/machines/{name}", "/api/cluster/machines/node-1/x", False),
     ],

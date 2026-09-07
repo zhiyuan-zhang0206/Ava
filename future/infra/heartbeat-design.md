@@ -146,23 +146,11 @@ anything the fleet lead should know?"
 
 ### 2.2 Tier 1 — Gateway Liveness Watchdog
 
-> **Update (2026-06-13): the liveness-detection floor of Tier 1 is now landed
-> — but NOT via the `last_active_at` watchdog poll proposed below.** The
-> restarter daemon gained a reaper (`_reap_local_dead_running_idling` in
-> `services/restarter/daemon.py`) that, on its existing ~1s loop, probes the
-> OS pid of every local `running`/`idling` row and forces silently-dead ones
-> (OOM/SIGKILL/crash) to `terminated`. This answers "did the process die?"
-> with a direct, machine-scoped `os.kill(pid, 0)` liveness check — no
-> `last_active_at` timeout, no 5/15/25/50-min escalation chain, no separate
-> gateway poll job. `last_active_at` was rejected for this purpose because it
-> cannot tell a healthy idle agent (parked, alive) from a dead one (both have
-> a stale `last_active_at`); the pid probe distinguishes them exactly, and a
-> live pid is never reaped. The reaper marks state accurate (`terminated`,
-> visible + resurrectable) but deliberately does **not** auto-resurrect or
-> escalate — the "detect death -> resurrect/escalate" policy below remains
-> future work. The `last_active_at`-timeout watchdog described in this
-> subsection is superseded for liveness and kept only as the original research
-> record.
+> The original process-reaper proposal is superseded by agent-host ownership,
+> durable pending-work scans and host health checks. Idle has no task or
+> per-agent process to probe. The escalation proposal below is historical
+> research, not the current heartbeat implementation; see
+> `services/gateway_side/heartbeat.ava.okf.md` for the implemented contract.
 
 #### Trigger
 

@@ -65,10 +65,15 @@ ava start     # pure bring-up (idempotent). Ensures this cluster's own pg/redis
               # instance, then brings up the union of this host's services. The
               # cluster is born at install time (scripts/install.sh), not here;
               # the home resolves from the checkout, never a flag.
-ava stop      # stdin-confirmed force kill. Tears down this host's services
-              # + this cluster's pg/redis. Leaves headed browser session running.
+ava pause     # normal agent drain; keep infrastructure, browser and persistent PTYs
+ava stop      # normal drain, then full local stop; durable data and agent IDs survive
+              # --keep-infra / --keep-service retain resources; --force is explicit
+ava start     # after a pause/stop, restore services and resume after readiness
 ava status    # check status (includes the pg/redis view)
 ```
+
+For coordinated downtime and recovery, use the shared
+[pause/stop procedure](../../../../conventions/graceful-maintenance.md).
 
 **Bring-up ordering is strict.** Agent processes are never started directly —
 they are always created through the gateway (`POST /api/agents`, which

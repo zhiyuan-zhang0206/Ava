@@ -119,7 +119,7 @@ def test_new_session_preserves_argv_and_non_login_shell(
 
     monkeypatch.setattr(client, "spawn_process", fake_spawn_process)
     backend = helperproc.HelperProcSessionBackend()
-    argv = [sys.executable, "-m", "agent", "--agent-id", "7"]
+    argv = [sys.executable, "-m", "services.agent_host.daemon"]
 
     assert backend.new_session("ava-agent", argv, unit_home, env={})
     assert backend.new_session(
@@ -335,33 +335,25 @@ def test_parent_chain_guard_allows_unmanaged_and_requires_direct_helper_parent(
     assert not parent_chain_intact()
 
 
-def test_parent_chain_checks_are_wired_at_agent_boot_and_hosted_heartbeat() -> None:
-    from agent import _process_boot
+def test_parent_chain_checks_are_wired_at_host_boot_and_heartbeat() -> None:
     from services.agent_host import daemon
 
-    process_boot = inspect.getsource(_process_boot._boot_agent_process)
     hosted_boot = inspect.getsource(daemon.main)
     hosted_beat = inspect.getsource(daemon._beat_forever)
 
-    assert process_boot.index("_require_helper_parent_chain()") > process_boot.index(
-        '_boot_timing.mark("sdk_mcp_model")'
-    )
     assert "_require_helper_parent_chain()" in hosted_boot
     assert "_require_helper_parent_chain()" in hosted_beat
 
 
-def test_broken_parent_chain_exits_agent_and_host_with_software_error(
+def test_broken_parent_chain_exits_host_with_software_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from agent import _process_boot
     from services.agent_host import daemon
 
     exits: list[int] = []
-    monkeypatch.setattr(_process_boot, "parent_chain_intact", lambda: False)
     monkeypatch.setattr(daemon, "parent_chain_intact", lambda: False)
     monkeypatch.setattr(os, "_exit", exits.append)
 
-    _process_boot._require_helper_parent_chain()
     daemon._require_helper_parent_chain()
 
-    assert exits == [70, 70]
+    assert exits == [70]

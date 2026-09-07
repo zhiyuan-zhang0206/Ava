@@ -1,6 +1,6 @@
 """`ava` host-level lifecycle verbs — argparse builders + their `_h_*` handlers.
 
-`start` / `stop` / `restart` / `status` / `converge` / `firewall` / `trace` /
+`start` / `pause` / `stop` / `restart` / `status` / `converge` / `firewall` / `trace` /
 `lgtm` act
 on THIS host (or the unit this checkout owns), as opposed to the cluster-wide
 verbs in ``cli.parsers.cluster``. Handlers stay thin: each lazy-imports its
@@ -40,6 +40,17 @@ def _h_stop(args: argparse.Namespace) -> int:
         keep_infra=args.keep_infra,
         require_confirmation=not args.yes,
         stop_browser=args.stop_browser,
+        preserve_sessions=frozenset(args.keep_service),
+        force=args.force,
+        timeout=args.timeout,
+    )
+
+
+def _h_pause(args: argparse.Namespace) -> int:
+    from cli.commands.stop import cmd_pause
+
+    return cmd_pause(
+        preserve_sessions=frozenset(args.keep_service), force=args.force, timeout=args.timeout
     )
 
 
@@ -115,8 +126,7 @@ def _add_start_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) 
         "--serve-agent-runner",
         action=argparse.BooleanOptionalAction,
         default=None,
-        help="usually first-run only: serve the agent-runner capability (runner/restarter/watchdog + agent "
-        "processes); unset falls back to the $AVA_HOME/machine_serve_agent_runner file. "
+        help="usually first-run only: serve the agent-runner capability (agent-host/ops/watchdog); unset falls back to the $AVA_HOME/machine_serve_agent_runner file. "
         "env: AVA_MACHINE_SERVE_AGENT_RUNNER",
     )
     start_p.add_argument(
@@ -187,7 +197,8 @@ def _add_stop_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -
     from cli.main import _h_stop
 
     stop_p = sub.add_parser(
-        "stop", help="[host] stop full stack (force-kill by default, stdin y to confirm)"
+        "stop",
+        help="[host] stop services, terminals and data plane; preserve data and agent identities",
     )
     stop_p.add_argument(
         "--keep-infra",
@@ -207,12 +218,43 @@ def _add_stop_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -
     stop_p.add_argument(
         "--stop-browser",
         action="store_true",
-        help="also stop the headed browser session (its login Chrome). Off by "
-        "default: an in-place stop preserves it so the login session is not lost. "
-        "The cluster-down helper (`ava cluster destroy`) sets it — a full teardown "
-        "removes everything.",
+        default=True,
+        help=argparse.SUPPRESS,
     )
+    _add_stop_options(stop_p)
     stop_p.set_defaults(func=_h_stop)
+
+
+def _add_stop_options(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--keep-service",
+        action="append",
+        default=[],
+        metavar="SERVICE",
+        help="retain a named service (repeatable); DB-dependent services require --keep-infra",
+    )
+    parser.add_argument(
+        "--timeout",
+        type=float,
+        default=300,
+        help="total normal drain/stop deadline; failure never silently forces",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="explicitly permit force-killing work that cannot exit normally",
+    )
+
+
+def _add_pause_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    from cli.main import _h_pause
+
+    parser = sub.add_parser(
+        "pause",
+        help="[host] pause for maintenance; retain data plane, browser and persistent terminals",
+    )
+    _add_stop_options(parser)
+    parser.set_defaults(func=_h_pause)
 
 
 def _add_restart_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
@@ -220,32 +262,23 @@ def _add_restart_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]
 
     restart_p = sub.add_parser(
         "restart",
-        help="[host] stop (force, no confirmation prompt) then start — designed for the updater path",
+        help="[host] normal pause then start, retaining persistent terminals",
     )
     restart_p.add_argument(
         "--quiesce",
         action="store_true",
-        help="drain this host's agents before the bounce (per-host self-heal): "
-        "signal each live agent to restart, wait per --mode, force-reap stragglers "
-        "on timeout. The updater's watchdog / standalone update path; a rollout's "
-        "Phase B passes --force-reap instead (its agents were already drained "
-        "cluster-wide).",
+        help="compatibility flag; restart always uses the native drain boundary",
     )
     restart_p.add_argument(
         "--mode",
         choices=("smooth", "force"),
         default="smooth",
-        help="agent-drain policy with --quiesce: 'smooth' (default) waits the "
-        "configured AVA_UPDATE_QUIESCE_TIMEOUT_SECONDS window (default 10s) for "
-        "agents to end their turn, then force-reaps stragglers; 'force' waits "
-        "~10s (idle agents drain) then force-reaps.",
+        help="'smooth' preserves completed work; 'force' explicitly permits forced resource shutdown",
     )
     restart_p.add_argument(
         "--force-reap",
         action="store_true",
-        help="no signal, no wait — mark this host's still-live agents 'restarting' "
-        "and kill their processes (the rollout's Phase-B quiesce-timeout backstop; "
-        "the gateway-side quiesce already drained the fleet).",
+        help="explicitly permit forced resource shutdown; persistent terminals stay intact",
     )
     restart_p.set_defaults(func=_h_restart)
 

@@ -1,45 +1,8 @@
-"""Kernel-specific Postgres operations (async).
-
-LLM history is persisted by LangGraph AsyncPostgresSaver — this module only
-handles the kernel-side inbound queue. Cross UI / kernel shared basic agent
-CRUD is in `shared/db.py` (sync API). The early process bootstrap claims its
-row as `running`; this module then runs kernel-side SQL through
-`AsyncConnectionPool`.
-
-Current inbound_messages kinds (see db/schema.sql — this table is the agent's
-unified gateway: every trigger entering an agent goes through it):
-    chat               — chat message from user / peer agent
-    compact_summary    — written by agent ava.self.compact(summary); claim picks it up and directly replaces messages
-    compact_request    — UI "/compact" triggers; claim picks it up and runs backend LLM to generate summary replacement
-    heartbeat          — heartbeat daemon check-in for idle agents; claim appends system note (tag=NoteTag.HEARTBEAT)
-    cancel             — pause; claim discards in-flight LLM generation and routes the agent back to idle (no lifecycle marker)
-    terminate          — ava.self.terminate() / admin terminate; claim appends lifecycle marker + goto END
-                         (vetoed — consumed no-op, agent stays alive — when a newer/unseen message waits;
-                         see has_pending_inbound_after + the veto block in agent/graph/_claim.py)
-    restart            — ava.self.restart() / admin restart; claim only marks RESTARTING + goto END (does not append message)
-    restart_completed  — respawn_agent INSERT; new process starts, claim appends "You have been restarted by X" marker
-    resurrect          — resurrect_agent INSERT; new process starts, claim appends "You have been resurrected by X" marker
-    fork               — spawn_agent INSERT on a fork; new process starts, claim appends "you are now agent N, forked from agent:M" identity marker
-
-### Connection model: shared pool + dedicated listener
-
-`agent/loop.py` creates one `db_pool: AsyncConnectionPool` shared by
-checkpoint and kernel SQL, plus one `RedisInboundListener` subscription per
-agent. The pool retains positional psycopg rows, checks every borrow, and
-reconnects stale database connections; the listener owns its Redis pub/sub
-connection and resubscribes after transient failures.
-
-### Wake: Redis pub/sub
-
-`insert_inbound_message` publishes each inbound INSERT to
-`<prefix>:inbound:{agent_id}`; the claim node waits through the listener. Its
-timeout is a defensive SELECT recheck for the fire-and-forget channel.
-"""
+"""Kernel-side asynchronous queue operations. AgentHost owns runtime admission, status, leases and Redis subscriptions; graph nodes claim and reconcile durable inbound messages."""
 
 import asyncio
 import json
 import time
-from collections.abc import Awaitable, Callable
 from datetime import datetime
 from typing import Any, NamedTuple, TypeVar, cast
 
@@ -47,17 +10,10 @@ import psycopg
 from psycopg_pool import AsyncConnectionPool, PoolTimeout
 
 from agent.inbound_ownership import lock_inbound_owner
-from shared.agents import AgentStatus
 from shared.config import settings
 from shared.db import ALIVE_STATUSES, InboundRow, publish_inbound_wake
 from shared.db_transaction import async_write_transaction
-from shared.live_announce import publish_agent_updated
 from shared.log import logger
-from shared.redis_listener import RedisInboundListener
-
-# wait_for_inbound's fallback SELECT rechecks a missed pub/sub wake; configurable
-# through `AVA_DB_NOTIFY_WAIT_TIMEOUT_SECONDS`.
-DEFAULT_WAIT_TIMEOUT_S = settings.agent.db_notify_wait_timeout_seconds
 
 # A successful borrow that took at least this long still gets a WARNING — a
 # healthy pg hands a conn back in milliseconds, so seconds means it is under
@@ -67,7 +23,7 @@ _SLOW_ACQUIRE_WARN_S = 3.0
 
 # Claim is a hot scheduling boundary, not a general database query. Bound both
 # waiting for a client-pool slot and waiting on ownership row locks; a timeout
-# unwinds the transaction and lets process mode or the hosted scheduler retry
+# unwinds the transaction and lets the host scheduler retry
 # from the durable inbound row on a later round.
 _CLAIM_DB_ACQUIRE_TIMEOUT_S = min(5.0, settings.agent.db_pool_acquire_timeout_seconds)
 _CLAIM_DB_LOCK_TIMEOUT = f"{_CLAIM_DB_ACQUIRE_TIMEOUT_S:g}s"
@@ -484,16 +440,6 @@ async def finalize_claimed_inbounds(pool: AsyncConnectionPool | None, agent_id: 
         return cur.rowcount
 
 
-async def _has_pending_inbound(pool: AsyncConnectionPool, agent_id: int) -> bool:
-    """Whether there is a status='pending' inbound (filtered by agent_id)."""
-    async with pool.connection() as conn, conn.cursor() as cur:
-        await cur.execute(
-            "SELECT 1 FROM inbound_messages WHERE status = 'pending' AND agent_id = %s LIMIT 1",
-            (agent_id,),
-        )
-        return await cur.fetchone() is not None
-
-
 async def has_pending_inbound_after(
     pool: AsyncConnectionPool,
     agent_id: int,
@@ -545,226 +491,3 @@ async def has_pending_interrupt(pool: AsyncConnectionPool, agent_id: int) -> boo
             (agent_id,),
         )
         return await cur.fetchone() is not None
-
-
-async def mark_agent_status(
-    pool: AsyncConnectionPool,
-    agent_id: int,
-    status: str,
-    *,
-    expected_from: str,
-) -> None:
-    """`UPDATE agents_meta SET status=%s WHERE id=%s AND status=%s` (expected from→to transition).
-
-    Only modifies if the from status matches — 0 rows raises. The claim node
-    uses this to flip running ↔ idling. `expected_from` forces the caller to
-    think through the transition path, avoiding "blind overwrite" obscuring the
-    state machine; the schema CHECK constraint additionally rejects illegal status values.
-    """
-    async with async_write_transaction(pool) as conn, conn.cursor() as cur:
-        await lock_inbound_owner(conn, agent_id)
-        await cur.execute(
-            "UPDATE agents_meta SET status = %s WHERE id = %s AND status = %s",
-            (status, agent_id, expected_from),
-        )
-        if cur.rowcount != 1:
-            # Name the state the row is ACTUALLY in — a lost CAS here is almost
-            # always a concurrent lifecycle op (terminate / restart / reaper),
-            # and "which one won" is unrecoverable later without this read.
-            await cur.execute("SELECT status FROM agents_meta WHERE id = %s", (agent_id,))
-            actual_row = await cur.fetchone()
-            actual = actual_row[0] if actual_row is not None else "<row missing>"
-            raise RuntimeError(
-                f"agents_meta row {agent_id}: status {expected_from!r} → {status!r} "
-                f"UPDATE affected {cur.rowcount} rows; actual status now {actual!r} "
-                f"(a concurrent lifecycle op won the race)"
-            )
-        logger.info(
-            "[{label}] {body}",
-            label="status-change",
-            body=f"{expected_from} -> {status}",
-            event="status_change",
-            **{"from": expected_from, "to": status},
-        )
-        from shared.audit_events import insert_event_log_async
-
-        await insert_event_log_async(
-            event_type="status_change",
-            agent_id=agent_id,
-            source="system",
-            payload={"from": expected_from, "to": status},
-        )
-    await publish_agent_updated(pool, agent_id)
-
-
-async def enter_idling_state(pool: AsyncConnectionPool, agent_id: int) -> None:
-    """Transition to idling; no-op if already idling.
-
-    A DB outage during the idle wait can cause ``_wait_for_batch``'s
-    best-effort IDLING→RUNNING restore to fail against the same dead DB
-    (silently suppressed), leaving the row on 'idling' after the outage
-    pause. A naive strict CAS would then find 0 rows and raise, killing a
-    process that had already recovered. This idempotent entry prevents that.
-    """
-    async with pool.connection() as conn, conn.cursor() as cur:
-        await cur.execute("SELECT status FROM agents_meta WHERE id = %s", (agent_id,))
-        row = await cur.fetchone()
-        if row is not None and row[0] == AgentStatus.IDLING:
-            return  # already idling — no-op (post-DB-outage re-entry)
-    try:
-        await mark_agent_status(
-            pool, agent_id, AgentStatus.IDLING, expected_from=AgentStatus.RUNNING
-        )
-    except RuntimeError:
-        # CAS lost between the SELECT and the UPDATE — a concurrent lifecycle
-        # op (terminate / reaper) moved the row in the gap. Degrade instead
-        # of crashing (Task #688): the next claim attempt sees the foreign
-        # state and the process exits via the normal path (terminate inbound
-        # → END).
-        logger.warning(
-            "idle flip CAS lost for agent {agent_id} — concurrent lifecycle "
-            "op took the row; continuing (next claim attempt will exit cleanly)",
-            event="idle_cas_lost",
-            agent_id=agent_id,
-        )
-
-
-async def record_claim_loop_progress(pool: AsyncConnectionPool, agent_id: int) -> None:
-    """Stamp one process-mode idling claim-loop round.
-
-    The lease renewer is independent from the claim loop, so a live lease does
-    not prove the bounded Redis wait and its fallback SELECT are still making
-    progress. This marker is written immediately before every recheck round;
-    the wedged controller may then identify a silent idling loop even before an
-    inbound arrives. The status guard avoids reviving a marker after a
-    lifecycle operation has taken ownership of the row.
-    """
-    async with async_write_transaction(pool) as conn, conn.cursor() as cur:
-        await cur.execute(
-            "UPDATE agents_meta SET last_claim_loop_at = now() WHERE id = %s AND status = 'idling'",
-            (agent_id,),
-        )
-
-
-async def wait_for_inbound(
-    pool: AsyncConnectionPool,
-    listener: RedisInboundListener,
-    agent_id: int | None = None,
-    timeout_s: float = DEFAULT_WAIT_TIMEOUT_S,
-    *,
-    extra_ready: Callable[[], Awaitable[bool]] | None = None,
-) -> None:
-    """Async block until an inbound is available to claim.
-
-    `listener` owns the Redis pub/sub wake connection and auto-reconnects
-    on connection loss; this function just orchestrates the recheck loop:
-
-    1. SELECT once — catches INSERTs that landed before the subscription
-       took effect (or that arrived during a listener reconnect)
-    2. `listener.wait_one(timeout)` blocks until wake or timeout
-    3. Loop back to step 1
-
-    The SELECT is still kept as defensive cover for the rare case of a
-    lost wake message (Redis pub/sub is fire-and-forget — it does not
-    guarantee 100% delivery); `timeout_s` bounds how long that recheck
-    can be delayed. Conn-down recovery is handled inside the listener, not
-    by leaning on this SELECT as a polling fallback.
-
-    Cancel-friendly: any `task.cancel()` propagates through the underlying
-    wait as `CancelledError`.
-
-    Args:
-        agent_id: only care about a specific agent's inbound. None means look
-            at any status=pending (any agent). Claim node in practice always
-            passes its own agent_id.
-        timeout_s: how long `wait_one` blocks before doing a defensive
-            SELECT recheck. Default 30s.
-    """
-    started = time.monotonic()
-    rounds = 0
-    while True:
-        if extra_ready is not None and await extra_ready():
-            return
-        if agent_id is not None:
-            await record_claim_loop_progress(pool, agent_id)
-        if agent_id is not None and await _has_pending_inbound(pool, agent_id):
-            if rounds:
-                # One line per actual wake-from-idle (the immediate-pending
-                # fast path stays silent). elapsed vs rounds tells WHICH path
-                # delivered the wake: elapsed well under rounds * timeout_s
-                # means a publish (or the #1240 wake-key breadcrumb) landed
-                # mid-wait; elapsed at a round boundary means the wake rode
-                # the SELECT recheck — the pub/sub fast path is degraded and
-                # worth investigating. Still a normal wake (user ruling
-                # 2026-08-04: idle wake is never WARNING), so it logs at DEBUG
-                # while the healthy wake stays INFO — the degraded flag in the
-                # message keeps the two distinguishable.
-                elapsed = time.monotonic() - started
-                # Degraded = the wake rode the SELECT recheck: the last
-                # wait_one ran its FULL budget (elapsed >= rounds * timeout_s)
-                # instead of returning early on a publish / wake-key
-                # breadcrumb. Strict inequality on the healthy side: a
-                # mid-wait publish always returns before the round boundary,
-                # so only the timeout path can reach the boundary.
-                degraded = elapsed >= rounds * timeout_s
-                (logger.debug if degraded else logger.info)(
-                    "[{label}] {body}",
-                    label="idle-wake",
-                    body=(
-                        f"{'degraded ' if degraded else ''}pending found after "
-                        f"{elapsed:.1f}s ({rounds} wait rounds, timeout {timeout_s:.0f}s)"
-                        + (" — pub/sub wake lost; rode the SELECT recheck" if degraded else "")
-                    ),
-                    event="idle_wake",
-                    degraded=degraded,
-                    wake_state=listener.wake_state.value,
-                    elapsed_s=round(elapsed, 3),
-                    rounds=rounds,
-                    timeout_s=timeout_s,
-                )
-            return
-        await listener.wait_one(timeout=timeout_s)
-        rounds += 1
-        if agent_id is None:
-            # Caller without agent_id: any NOTIFY (or timeout) counts as wake
-            return
-
-
-async def renew_agent_lease(
-    pool: AsyncConnectionPool,
-    agent_id: int,
-    *,
-    ttl_s: float | None = None,
-) -> None:
-    """Re-arm the agent's liveness lease (R1, Task #1021): `lease_expires_at`
-    = now + TTL. Called by the run loop's renewal task on
-    `AGENT_LEASE_RENEW_INTERVAL_S` — the one constant of the process, idle
-    included — so a row with an unexpired lease IS a live process, and expiry
-    is the crash-reclaim judgment the reaper acts on.
-
-    Scoped to the alive statuses: a concurrent transition to 'restarting' /
-    'terminated' (a restart, a terminate, a reap) makes the UPDATE a no-op,
-    which is correct — this process is being replaced and must not keep
-    renewing a lease for a row that is no longer its own.
-    """
-    from shared.db import ALIVE_STATUSES
-    from shared.deploy_timing import AGENT_LEASE_TTL_S
-    from shared.runtime_incarnation import current_incarnation
-
-    incarnation = current_incarnation(agent_id)
-
-    async with async_write_transaction(pool) as conn, conn.cursor() as cur:
-        await cur.execute(
-            "UPDATE agents_meta SET lease_expires_at = now() + make_interval(secs => %s) "
-            "WHERE id = %s AND status = ANY(%s) "
-            "AND runtime_generation IS NOT DISTINCT FROM %s "
-            "AND runtime_owner IS NOT DISTINCT FROM %s "
-            "AND (runtime_kind IS NULL OR (runtime_kind = 'process' AND pid IS NOT NULL))",
-            (
-                ttl_s if ttl_s is not None else AGENT_LEASE_TTL_S,
-                agent_id,
-                list(ALIVE_STATUSES),
-                incarnation.generation if incarnation else None,
-                incarnation.owner if incarnation else None,
-            ),
-        )

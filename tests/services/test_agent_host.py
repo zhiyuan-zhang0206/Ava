@@ -346,6 +346,7 @@ def wired(monkeypatch: pytest.MonkeyPatch, host_plugin: None) -> _Build:
         return _Model(turn_settings.lm.llm_model)
 
     monkeypatch.setattr(host_mod, "boot_agent_scope", _fake_boot_agent_scope)
+    monkeypatch.setattr(host_mod, "reconcile_agent_watchers", AsyncMock(return_value=True))
 
     def _allow_model_config(*, model: str | None = None) -> None:
         """Keep fake host tests independent of installed provider credentials."""
@@ -1234,79 +1235,6 @@ class TestBounds:
         monkeypatch.setattr(settings.daemon, "host_agent_idle_ttl_seconds", -1.0)
         await asyncio.wait_for(host.run_turn(2), 2)
         assert set(host._runtimes) == {2}, "1 aged out; 2 was just used"
-
-
-# ── 6. the gate ──────────────────────────────────────────────────────────────
-
-
-class TestGateFailsClosed:
-    def _spec(self):
-        from ops.spec import build_services
-
-        return next(s for s in build_services() if s.session == "agent-host")
-
-    def test_process_mode_gates_the_host_out(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from ops.spec import _gate_reason
-        from shared.config import settings
-
-        # Explicit process override: hosted is the default since 2026-09.
-        monkeypatch.setattr(settings.daemon, "runner_mode", "process")
-        assert _gate_reason(self._spec()) == "disabled (AVA_RUNNER_MODE is process)"
-
-    def test_hosted_mode_lets_it_start(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from ops.spec import _gate_reason
-        from shared.config import settings
-
-        monkeypatch.setattr(settings.daemon, "runner_mode", "hosted")
-        assert _gate_reason(self._spec()) is None
-
-    def test_an_unreadable_mode_gates_OUT_rather_than_in(  # noqa: N802 — the direction is the point
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """`_gate_reason`'s own `except` fails OPEN — right for the 2026-08-08
-        incident that installed it (a raising plugin gate killed the watchdog's
-        whole roster), wrong here: failing open would START hosted mode on a
-        cluster that never opted in, where every agent already has a process and
-        the host would become a second claimant for the same inbound rows.
-
-        So the read is made structurally unable to raise. This test breaks the
-        setting read and asserts the service is still gated OUT — and that the
-        fail-open wrapper never even saw an exception.
-        """
-        import ops.spec as spec_mod
-
-        class _Exploding:
-            def __getattr__(self, _name: str) -> object:
-                raise RuntimeError("config domain unavailable in this process profile")
-
-        monkeypatch.setattr(spec_mod.settings, "daemon", _Exploding())
-        assert spec_mod._gate_reason(self._spec()) == "disabled (AVA_RUNNER_MODE is process)"
-
-    def test_the_daemon_refuses_in_process_mode(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """The second line of the same defence: a hand-started daemon on a
-        process cluster exits instead of double-serving agents that already have
-        processes of their own."""
-        from services.agent_host.daemon import _refuse_in_process_mode
-        from shared.config import settings
-
-        monkeypatch.setattr(settings.daemon, "runner_mode", "process")
-        with pytest.raises(SystemExit) as exc:
-            _refuse_in_process_mode()
-        assert exc.value.code == 0
-
-    def test_the_daemons_mode_read_also_cannot_raise(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """The daemon carries its own copy of the read rather than importing the
-        gate's — an import is itself a thing that can fail, and a failed import
-        inside `_gate_reason` would be caught by its fail-OPEN wrapper. Both
-        copies must answer `process` when the setting is unreadable."""
-        import services.agent_host.daemon as daemon_mod
-
-        class _Exploding:
-            def __getattr__(self, _name: str) -> object:
-                raise RuntimeError("config domain unavailable")
-
-        monkeypatch.setattr(daemon_mod.settings, "daemon", _Exploding())
-        assert daemon_mod._runner_mode() == "process"
 
 
 # ── the scheduler seam ───────────────────────────────────────────────────────

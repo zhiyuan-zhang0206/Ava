@@ -16,8 +16,6 @@ middleware comments):
 - `/api/alerts` — the alert webhook (Grafana embedded Alertmanager); a 503
   inside the rollout window exhausts Grafana's webhook retries and the
   alert is lost exactly when the user needs alerting most.
-- `/api/agents/{id}/exited` — the agent self-report the quiesce that owns
-  the pause window waits for; a 503 here stalls the rollout (#961).
 """
 
 from __future__ import annotations

@@ -41,7 +41,7 @@ def ran(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     callables — the browser probe would otherwise dial CDP and respawn sessions.
 
     The recorded name is the healthcheck module's last segment (`browser`,
-    `browser_mcp`, `restarter`, `ops`), which is what `_resolve_healthcheck` is
+    `browser_mcp`, `agent_host`, `ops`), which is what `_resolve_healthcheck` is
     handed.
     """
     calls: list[str] = []
@@ -65,7 +65,6 @@ def ran(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     monkeypatch.setattr(wd.settings.services, "permissions_helper_enabled", True)
     monkeypatch.setattr("ops.spec.browser_incapability", lambda: None)
     monkeypatch.setattr("ops.spec.browser_mcp_incapability", lambda: None)
-    monkeypatch.setattr("ops.spec.runner_mode", lambda: "process")
     return calls
 
 
@@ -97,7 +96,7 @@ async def test_db_outage_still_revives_the_browser_pair(
         "otel_collector",
     ], (
         "the DB-free services must keep being revived through a DB outage; "
-        "the DB-dependent restarter/ops must not"
+        "the DB-dependent agent-host/ops must not"
     )
 
 
@@ -124,8 +123,8 @@ async def test_healthy_db_revives_the_whole_agent_runner_roster(
 
     assert ran == [
         "permissions_helper",
-        "restarter",
         "page_server",
+        "agent_host",
         "ops",
         "browser",
         "browser_mcp",
@@ -140,7 +139,7 @@ async def test_db_outage_does_not_revive_the_dbs_users_into_a_starved_round(
 ) -> None:
     """The converse of the fix, pinned deliberately because it is the contested half.
 
-    An unreachable DB does NOT start reviving restarter/ops. It is tempting to argue
+    An unreachable DB does NOT start reviving agent-host/ops. It is tempting to argue
     that "DB unreachable" is no evidence a revived daemon would meet a newer schema —
     true, but it does not follow that the revive is safe: `assert_schema_current` opens
     its own connection, so unreachability alone fails the boot check. And the cost is
@@ -154,7 +153,7 @@ async def test_db_outage_does_not_revive_the_dbs_users_into_a_starved_round(
 
     await wd._tick("agent-runner")
 
-    assert "restarter" not in ran and "ops" not in ran
+    assert "agent_host" not in ran and "ops" not in ran
 
 
 def test_every_db_dependent_healthcheck_pays_a_verify_deadline() -> None:
@@ -168,7 +167,7 @@ def test_every_db_dependent_healthcheck_pays_a_verify_deadline() -> None:
 
     assert service_respawn._VERIFY_DEADLINE_S >= 10.0  # the cost this argument rests on
     for module in (
-        "services.healthchecks.restarter",
+        "services.healthchecks.agent_host",
         "services.healthchecks.ops",
         "services.healthchecks.gateway",
         "services.healthchecks.labeler",
@@ -248,7 +247,7 @@ def test_unknown_scope_explodes(monkeypatch: pytest.MonkeyPatch) -> None:
         ("labeler", True),
         ("heartbeat", True),
         ("events-maintenance", True),
-        ("restarter", True),
+        ("agent-host", True),
         ("ops", True),
         ("task-maintenance", True),
         # No DB connection anywhere in these: browser is a supervised Chrome,

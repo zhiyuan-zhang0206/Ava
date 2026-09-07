@@ -38,7 +38,7 @@ import tempfile
 import time
 from collections.abc import AsyncIterator, Generator, Iterator, Mapping
 from pathlib import Path
-from typing import Any, NamedTuple
+from typing import Any
 
 # Third-party only. These import no project module, so they are safe above the
 # env block; every `shared.*` / `ava.*` / `tests.*` import is below it.
@@ -53,7 +53,7 @@ def isolate_runtime_incarnation(monkeypatch: pytest.MonkeyPatch) -> None:
     """A test's process admission must not become another test's exit identity."""
     from shared import runtime_incarnation
 
-    monkeypatch.setattr(runtime_incarnation, "_current", None)
+    monkeypatch.setattr(runtime_incarnation, "_child_incarnation", None)
 
 
 from fastapi.testclient import TestClient
@@ -122,6 +122,10 @@ if sys.platform == "darwin":
 _SESSION_SUFFIX = f"{os.getpid()}_{int(time.time() * 1_000_000)}"
 _TEST_AVA_HOME = Path(tempfile.mkdtemp(prefix=f"ava_test_home_{_SESSION_SUFFIX}_"))
 os.environ["AVA_HOME"] = str(_TEST_AVA_HOME)
+# Persist the same worker-local channel through settings refresh and child boot.
+# A mutation of settings.data_plane alone is lost when a rollout rebuilds it.
+_TEST_EVENTS_CHANNEL = f"ava:events:test:{_SESSION_SUFFIX}"
+os.environ["AVA_EVENTS_CHANNEL"] = _TEST_EVENTS_CHANNEL
 
 # No Settings construction in the suite may fetch from a gateway. The config
 # source is role-derived (AVA_CONFIG_SOURCE is gone; a unit that does not serve
@@ -322,6 +326,7 @@ for _provider_key_env in _TEST_PROVIDER_KEY_ENVS:
         [
             f"AVA_DB_URL={os.environ['AVA_DB_URL']}",
             f"AVA_REDIS_URL={os.environ['AVA_REDIS_URL']}",
+            f"AVA_EVENTS_CHANNEL={_TEST_EVENTS_CHANNEL}",
             f"AVA_CLUSTER_SECRET={os.environ['AVA_CLUSTER_SECRET']}",
             "AVA_RUNNER_DB_PASSWORD=test-runner-db-password",
             f"AVA_TRANSPORT_ENCRYPTION={os.environ['AVA_TRANSPORT_ENCRYPTION']}",
@@ -329,6 +334,13 @@ for _provider_key_env in _TEST_PROVIDER_KEY_ENVS:
             f"AVA_TELEGRAM_BOT_TOKEN={os.environ['AVA_TELEGRAM_BOT_TOKEN']}",
             f"AVA_TELEGRAM_OWNER_ID={os.environ['AVA_TELEGRAM_OWNER_ID']}",
             *(f"{key}={os.environ[key]}" for key in _TEST_PROVIDER_KEY_ENVS),
+            # Host binary selections are file-owned. Preserve an explicit test
+            # override through Settings refresh without importing a real home.
+            *(
+                f"{key}={os.environ[key]}"
+                for key in ("AVA_REDIS_BIN_DIR", "AVA_PG_BIN_DIR")
+                if key in os.environ
+            ),
             f"AVA_TELEMETRY_OTLP_ENABLED={os.environ['AVA_TELEMETRY_OTLP_ENABLED']}",
             f"AVA_TELEMETRY_TEMPO_QUERY_URL={os.environ['AVA_TELEMETRY_TEMPO_QUERY_URL']}",
             f"AVA_TELEMETRY_TEMPO_ENDPOINT={os.environ['AVA_TELEMETRY_TEMPO_ENDPOINT']}",
@@ -338,18 +350,6 @@ for _provider_key_env in _TEST_PROVIDER_KEY_ENVS:
             # declaration the drop deletes the pinned 60s and the D5 fallback reads the
             # field default (300s) — test_config bootstrap/panel tests assert equality.
             "AVA_EXEC_TIMEOUT_SECONDS=60.0",  # the pinned value below; constant, not env-read (write precedes the pin)
-            # Same force-branch reasoning: runner-mode is cluster-scoped, and a
-            # CI job export the test home's .env does not declare would be DROPPED
-            # by the authority pass at the first load_ava_env — the process-shaped
-            # lifecycle suites (backend shards, e2e shards) would silently run the
-            # code default (hosted since 2026-09) as a second hosted net. Declare
-            # it when the environment carries it (e2e/backend CI jobs export it);
-            # local runs without the var keep the code default.
-            *(
-                [f"AVA_RUNNER_MODE={os.environ['AVA_RUNNER_MODE']}"]
-                if os.environ.get("AVA_RUNNER_MODE")
-                else []
-            ),
             "",
         ]
     )
@@ -432,7 +432,7 @@ _OS_JOBS_AT_START = host_ava_os_jobs()
 # import, so the home cannot be created down here. Reused below for Redis channel
 # isolation and machine_name, so concurrent sessions (dev agents + CI + manual
 # runs) never share channels or home dirs.
-settings.data_plane.events_channel = f"ava:events:test:{_SESSION_SUFFIX}"
+assert settings.data_plane.events_channel == _TEST_EVENTS_CHANNEL
 # A dev operator's .env may carry exec_timeout_seconds (≠ the field default),
 # which the module-load settings reads. The timeout-marker tests
 # (tests/agent/test_cancel.py) assert against the documented default, so pin it
@@ -1280,25 +1280,7 @@ def _stub_label_llm(monkeypatch: pytest.MonkeyPatch) -> None:
 # the top of this file, inherited by every child) replaces it and covers both.
 
 
-# ── Agent-launch guard: no test forks a real agent process ──
-#
-# `gateway._agent_launch._launch_agent_process` detaches a named session
-# (`ava-agent-<id>`) on the session backend to host a long-running agent. Any
-# test that exercises a spawn / resurrect / restart path would fork a real agent
-# process unless it stubs this out — historically ~86 byte-identical
-# `monkeypatch.setattr(..., lambda _id, **_kw: None)` stubs, one per test, with
-# the ever-present risk that a new spawn-touching test forgets one and silently
-# forks a real agent on the dev box / CI runner.
-#
-# The autouse `_guard_agent_launch` makes the no-op the default: every test runs
-# with the launch replaced by a recording spy. Tests that need to *assert* a launch
-# happened take the `launched_agents` fixture (the same recorder list). Tests that
-# need the launch to *fail* (backend-failure paths) still override with their own
-# `monkeypatch.setattr(..., boom)` inside the test body — last-write-wins over the
-# autouse default, restored LIFO at teardown.
-#
-# e2e is unaffected: it drives a real gateway uvicorn subprocess, so the spawn runs
-# in that child process, not the pytest process this patch touches.
+# Test agents are durable rows; only a real host process executes their turns.
 
 
 def spawn_agent(
@@ -1307,35 +1289,15 @@ def spawn_agent(
     config: dict[str, object] | None = None,
     **kw: Any,
 ) -> int:
-    """Test setup helper — the pre-#1236 `ops.agents.spawn_agent()` contract
-    (create row + launch) as the two-phase split: `create_agent_row`
-    (gateway-side, the main data-plane identity) then the guarded
-    `_launch_agent_process` (runner-side; the autouse guard spy records the
-    launch, and `launched_agents`-based tests rely on that record)."""
-    from ops import agent_launch
+    """Allocate a real agent row and publish its normal host-dispatch wake."""
     from ops.agent_spawn import create_agent_row
+    from shared.db import publish_inbound_wake
     from shared.machine import machine_name
 
-    agent_id, birth_config = create_agent_row(
-        spawner=spawner, machine=machine_name(), config=config, **kw
-    )
-    agent_launch._launch_agent_process(
-        agent_id, config_overlay=config, birth_config=birth_config, confirm=False
-    )
+    agent_id, _ = create_agent_row(spawner=spawner, machine=machine_name(), config=config, **kw)
+    publish_inbound_wake(agent_id, "0")
     return agent_id
 
-
-class LaunchCall(NamedTuple):
-    """One recorded `_launch_agent_process` call (id + the per-agent config it
-    would have forwarded to the child: the explicit overlay and the birth stamp)."""
-
-    agent_id: int
-    config_overlay: dict[str, object] | None
-    birth_config: dict[str, object] | None = None
-
-
-# Stash key the autouse guard uses to hand its recorder list to `launched_agents`.
-_LAUNCH_RECORDER: pytest.StashKey[list[LaunchCall]] = pytest.StashKey()
 
 # Same, for the daemon-respawn guard -> `respawned_services`.
 _RESPAWN_RECORDER: pytest.StashKey[list[tuple[str, str]]] = pytest.StashKey()
@@ -1388,66 +1350,12 @@ def _refuse_spawn(name: str, effect: str = "spawn a real long-running process"):
 
 
 @pytest.fixture(autouse=True)
-def _guard_agent_launch(
-    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """Autouse safety net: every test runs with `gateway._agent_launch._launch_agent_process`
-    replaced by a recording no-op spy, so a spawn-touching test that forgets to stub
-    never forks a real agent process.
-
-    Opt out with `@pytest.mark.real_agent_launch` when the test exercises the *real*
-    launch (backend confirm / logs-dir / env-forward / config-overlay argv paths)."""
-    if request.node.get_closest_marker("real_agent_launch"):
-        return
-
-    # Unit admission deliberately uses this pytest PID. Its canonical record
-    # must not make a later CLI test appear hosted by that synthetic agent.
-    # Real subprocess suites opt out above and keep their actual session tree.
-    monkeypatch.setattr("agent.session_admission.run_dir", lambda: tmp_path / "admission-run")
-
-    calls: list[LaunchCall] = []
-
-    def _spy(
-        agent_id: int,
-        config_overlay: dict[str, object] | None = None,
-        *,
-        birth_config: dict[str, object] | None = None,
-        **_kw: object,
-    ) -> None:
-        calls.append(LaunchCall(agent_id, config_overlay, birth_config))
-
-    # Marker so a test can assert the guard (not the real session fork) is active.
-    setattr(_spy, "_ava_test_guard", True)  # noqa: B010 — attribute probe by tests
-    # `_launch_agent_process` forks a real process unless stubbed; the spy
-    # covers spawn (confirm=False) and resurrect / respawn (confirm=True) alike.
-    # `schedule_launch_confirm` would otherwise detach a background DB-polling
-    # task per spawn (spawn's off-path launch confirm).
-    monkeypatch.setattr("ops.agent_launch._launch_agent_process", _spy)
-    # Resurrect authorizes and commits before detached launch. The launch spy
-    # never advances the row, so its
-    # matching confirm must be a no-op too. Tests of the real wait opt out with
-    # `real_agent_launch`.
-    monkeypatch.setattr("ops.agent_launch._wait_for_agent_claim", lambda _id, _attempt=None: None)
-    monkeypatch.setattr("ops.agent_launch.schedule_launch_confirm", lambda _id, _attempt=None: None)
-    request.node.stash[_LAUNCH_RECORDER] = calls
-
-
-@pytest.fixture
-def launched_agents(request: pytest.FixtureRequest, _guard_agent_launch: None) -> list[LaunchCall]:
-    """The recorder list the autouse guard appends to. Request this when a test
-    asserts a launch happened (replaces per-test `_record` stubs). Incompatible
-    with `@pytest.mark.real_agent_launch` (no spy is installed then)."""
-    return request.node.stash[_LAUNCH_RECORDER]
-
-
-@pytest.fixture(autouse=True)
 def _guard_service_respawn(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
     """Autouse safety net: `shared.service_respawn.respawn_service` is replaced by a
     recording no-op, so a test that reaches a healthcheck's restart path never forks
     a real long-running daemon.
 
-    The sibling of `_guard_agent_launch`, and closing the same kind of hole one
-    tier down. Daemon spawns were previously kept out of the suite purely by every
+    Daemon spawns were previously kept out of the suite purely by every
     test author remembering to monkeypatch — no structural enforcement — and a
     leaked daemon is the more expensive kind of escape: it binds a health port and
     answers /healthz, which is exactly how a pytest-spawned restarter stood in for
@@ -1502,28 +1410,15 @@ def _guard_cluster_spawn(
     """Autouse safety net: the `ops.cluster` entry points that detach a session and
     leave something long-running behind are stubbed.
 
-    `unpause_local_cluster` spawns a real `services.restarter.daemon`; the three
-    `spawn_*` functions detach a session that runs `ava cluster update` against this
-    checkout. Reaching any of them for real from a test is never intended — and it
-    was reachable: `tests/cli/test_update_autounpause.py` drives
-    `_run_gateway_orchestration`, whose `finally` unpauses the LOCAL host, and its
-    stubs covered only the remote fan-out. That spawned a live `ava-restarter`
-    every run. Before this change the daemon landed on the operator's default
-    session backend bound to prod's health port, which is the 2026-07-24 outage exactly.
-
-    Opt out with `@pytest.mark.real_cluster_spawn` where the function under test IS
-    one of these (those tests fake `subprocess.run`, so nothing is really spawned).
-
-    The teardown also clears the `cluster_paused` flag, which is per-machine FILE
-    state in the test home and therefore outlives the test that set it. While it
-    exists the pause middleware answers 503 to every request, so one test that
-    pauses and does not unpause fails every later `TestClient` test in the session
-    — hundreds of them, in whatever file happens to run next, with nothing
-    pointing back at the culprit."""
+    Update/restart entry points spawn real orchestration subprocesses. Tests
+    of their actual launch mechanics opt out with real_cluster_spawn and supply
+    their own subprocess isolation. Native pause/resume only changes durable
+    posture and is not a process-launch seam.
+    """
     import ops.cluster
 
     if not request.node.get_closest_marker("real_cluster_spawn"):
-        for name in ("unpause_local_cluster", "spawn_update", "spawn_rollout", "spawn_restart"):
+        for name in ("spawn_update", "spawn_rollout", "spawn_restart"):
             _stub_everywhere(monkeypatch, ops.cluster, name, _refuse_spawn(name))
         # The one guarded entry point that DESTROYS rather than spawns: it runs on
         # every agent-runner watchdog round, so any test that drives the default
@@ -1590,26 +1485,6 @@ def _guard_schedule_manager(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("gateway.schedule_manager.ScheduleManager.start", _noop_start)
     monkeypatch.setattr("gateway.schedule_manager.ScheduleManager.sync", _noop_sync)
     monkeypatch.setattr("gateway.schedule_manager.ScheduleManager.capture", _noop_capture)
-
-
-# ── Warm-up guard: no test fires the detached `ava start` warm-up subprocess ──
-#
-# `ava start` calls `cli.commands._launch_agent_warmup`, which Popens a detached
-# `agent.warmup` (via sys.executable) on agent-runner hosts. Tests that drive the
-# real `cmd_start` body (role agent-runner) would fork that heavy process unless
-# it is stubbed. Same safety-net pattern as `_guard_agent_launch` above.
-
-
-@pytest.fixture(autouse=True)
-def _guard_agent_warmup(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Autouse safety net: every test runs with `cli.commands._launch_agent_warmup`
-    replaced by a no-op, so a start-touching test never forks the warm-up process.
-
-    Opt out with `@pytest.mark.real_warmup_launch` when the test exercises the
-    real launcher (role gate / Popen argv / detach)."""
-    if request.node.get_closest_marker("real_warmup_launch"):
-        return
-    monkeypatch.setattr("cli.commands._launch_agent_warmup", lambda *_a, **_kw: None)
 
 
 # ── Gateway-readiness guard: no orchestration test dials a real gateway ──

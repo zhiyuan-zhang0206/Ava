@@ -14,9 +14,9 @@ tags:
 
 - An executing deploy lease refuses an operator `ava start` before migrations.
   For an internal start, only a gateway-capable fresh child inherits the
-  rollout parent's boundary: it suppresses the restarter and leaves posture
-  `converging`. A pure agent-runner Phase-B child completes its host-local
-  transition normally — restarter launched, posture `idle` — so the gateway's
+  rollout parent's boundary: it retains native admission holds and leaves posture
+  `converging`. A pure agent-runner Phase-B child completes readiness and its
+  host-local transition to `idle`, so the gateway's
   Phase-B poll can observe it as converged.
 - A rollout a stuck host is dragging has a formal cancel now (`ava cluster
   cancel`, P1 2026-08-30): `ops.ops_cluster.cluster_cancel_op` SIGINTs the
@@ -37,13 +37,10 @@ tags:
 
 ## Readiness and Phase B
 
-- Phase 0 freezes the eligible runner set before any pause: a runner whose
-  pre-flight fetch is unreachable is excluded from Phase A, Phase B, and the
-  compensating-resume set for this rollout. A later successful ops dial cannot
-  re-admit it because reachability does not prove the pinned Git object arrived;
-  pausing without that proof strands the runner at Phase B's migration-layout
-  validation. The runner remains serving and converges at the next rollout, or
-  when `ava cluster update` runs on that host.
+- Phase 0 freezes the eligible runner set before pause. Every participant
+  must fetch the target and acknowledge native drain in Phase A before the
+  gateway advances to migration. An unreachable or failed participant aborts
+  this rollout; it is not removed from the barrier while still serving.
 - `update.py`'s Phase-B poll answers a `PollVerdict` per host — the stall verdict
   reads the host's `host_deploy_state` row (idle → OK; live lease → working;
   paused+expired / converging+no-lease → STALLED ×2), and the no-progress
@@ -110,13 +107,12 @@ tags:
   half of the same fix. A lone single box therefore runs an empty Phase B and
   reports CLEAN, but is still put through the readiness gate: nothing else asks
   whether its gateway came back.
-- A force-mode local update marks live agents `restarting`, then the graceful
-  stop signals restarter/watchdogs first and batch-signals all dependent
-  services plus native agent processes. They share one monotonic absolute
-  deadline before survivors are force-killed; persistent PTY sessions stay out
-  of scope and Postgres/Redis still stop (or remain up for migration) only after
-  the service batch. One stubborn agent may still consume the whole shared
-  budget, but multiple targets cannot multiply it.
+- Normal local stop/update uses the shared native pause: ordinary restart,
+  checkpoint flush and original work exit before services are signalled.
+  Stop failures abort the next update stage. Default timeout is failure,
+  while explicit force remains a separate policy. Persistent agent and schedule
+  PTYs remain open across update; PostgreSQL/Redis remain up for migration.
+  First deployment needs a verified bootstrap: disk code does not fence old daemons.
 
 ## Key dependencies
 

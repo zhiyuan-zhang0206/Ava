@@ -88,9 +88,7 @@ class RouteContract:
 # that must stay reachable mid-migration — the /api/cluster/* control
 # plane, the Grafana alerting webhook (a 503 inside the rollout window
 # exhausts Grafana's webhook retries and the alert is lost exactly when
-# alerting matters most), and the agent self-report /exited (the quiesce's
-# drain signal — a 503 stalls the rollout, #961). Everything else is
-# data-plane.
+# alerting matters most). Everything else is data-plane.
 # ─────────────────────────────────────────────────────────────────────
 ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     # ── gateway/routers/agents.py ───────────────────────────────────
@@ -267,10 +265,6 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ("POST", "/api/cancel"): RouteContract(note="enqueue cancel — repeats are harmless"),
     ("POST", "/api/agents/{agent_id}/terminate"): RouteContract(
         note="graceful exit — already_terminated branch makes repeats harmless"
-    ),
-    ("POST", "/api/agents/{agent_id}/exited"): RouteContract(
-        pause=PauseSemantics.CONTROL_PLANE,
-        note="quiesce drain signal — guarded WHERE UPDATE; a 503 stalls rollout (#961)",
     ),
     ("POST", "/api/agents/{agent_id}/resurrect"): RouteContract(
         note="already_alive branch makes repeats harmless"

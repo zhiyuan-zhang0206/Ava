@@ -4,9 +4,8 @@ This module only defines types, no impl — agent process and gateway
 communicate over HTTP; both ends must see the same definitions of
 status / exception / wire-level reason.
 
-- Impl (spawn / respawn / launch / fork-checkpoint copy) lives in
-  `ops/agents.py`; gateway routes /
-  restarter daemon call directly.
+- Impl (spawn / resurrection / fork-checkpoint copy) lives in
+  `ops/agents.py`; gateway routes and local ops call it.
 - On the agent process side, the SDK (`ava.agents.*`) uniformly goes
   through HTTP to call gateway routes — no longer imports impl from
   this module, only imports types + exceptions to catch.
@@ -89,7 +88,6 @@ class TerminationSource(StrEnum):
 class TerminateResult(StrEnum):
     ENQUEUED = "enqueued"
     ALREADY_TERMINATED = "already_terminated"
-    FORCE_KILLED = "force_killed"
 
 
 class RestartResult(StrEnum):

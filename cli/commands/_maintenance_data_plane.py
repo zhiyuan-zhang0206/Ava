@@ -1,7 +1,7 @@
 """Verified native data-plane stop for an already drained maintenance hold.
 
-No force escalation, snapshots, or remote management. Redis NOSAVE requires the
-operator's separately verified final snapshot. PID disappearance is checked in
+No force escalation, snapshots, or remote management. Redis saves its current in-memory data before shutdown. An explicit save=False
+is reserved for callers that already verified a final snapshot. PID disappearance is checked in
 addition to command completion; an uncertain result always leaves the hold set.
 """
 
@@ -159,7 +159,7 @@ async def _capture_redis(client: Redis, deadline: float) -> OwnedProcess:
     return identity
 
 
-async def _stop(deadline: float) -> list[str]:
+async def _stop(deadline: float, *, save: bool = True) -> list[str]:
     pg = _capture_postgres()
     pgb = _capture_pooler()
     endpoint = instance._redis_endpoint()
@@ -231,7 +231,7 @@ async def _stop(deadline: float) -> list[str]:
                 from redis.exceptions import ConnectionError as RedisConnectionError
 
                 with contextlib.suppress(RedisConnectionError):
-                    await _redis_command(client, deadline, "SHUTDOWN", "NOSAVE")
+                    await _redis_command(client, deadline, "SHUTDOWN", "SAVE" if save else "NOSAVE")
             else:
                 _signal(identity)
             wait_for_exit(trees[name], deadline)
@@ -255,10 +255,10 @@ async def _stop(deadline: float) -> list[str]:
         await asyncio.wait_for(client.aclose(), max(0.001, deadline - time.monotonic()))
 
 
-def stop(timeout: float) -> list[str]:
+def stop(timeout: float, *, save: bool = True) -> list[str]:
     deadline = deadline_after(timeout)
     if sys.platform == "win32":
         raise RuntimeError("native maintenance data-plane stop requires POSIX")
     if settings.data_plane.is_remote:
         raise RuntimeError("maintenance cannot verify a remote-managed data-plane stop")
-    return asyncio.run(_stop(deadline))
+    return asyncio.run(_stop(deadline, save=save))

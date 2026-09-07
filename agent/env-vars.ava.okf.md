@@ -16,7 +16,7 @@ Ava's **key environment variables** and their propagation chain. These variables
 ### Agent Identity
 | Variable | Set at | Purpose |
 |------|--------|------|
-| `AVA_AGENT_ID` | `agent/loop.py:main()` — the agent process sets it for itself from its launch argv (`ava.self.AGENT_ID` → `os.environ`) | The agent's numeric ID, globally unique; never forwarded by the launcher allowlists (the agent sets it itself, so it cannot leak into a daemon/session child) |
+| `AVA_AGENT_ID` | External script bootstrap / disposable execution child; hosted turns use context-bound identity | The agent's numeric ID, globally unique; never forwarded to unrelated daemon/session children |
 
 ### Cluster & Data Plane
 | Variable | Set at | Purpose |
@@ -46,7 +46,7 @@ Cluster identity is **path-only** (`shared/cluster/`, #629/#633): there is no `A
 ### DB
 | Variable | Set at | Purpose |
 |------|--------|------|
-| `AVA_DB_NOTIFY_WAIT_TIMEOUT_SECONDS` | `settings.db_notify_wait_timeout_seconds` (`agent/db.py:DEFAULT_WAIT_TIMEOUT_S`) | Redis pub/sub wake-up timeout (upon expiry, a safety-net SELECT is performed) |
+| `AVA_DB_NOTIFY_WAIT_TIMEOUT_SECONDS` | `settings.db_notify_wait_timeout_seconds` (`services/agent_host/daemon.py`) | Host subscription read timeout and durable pending-work scan interval |
 
 ## Propagation Chain
 

@@ -289,7 +289,6 @@ def run_keepalive(
     *,
     probe: Callable[[], DaemonProbe],
     respawn: Callable[[], DaemonProbe],
-    on_unrevivable: Callable[[], None] | None = None,
     consecutive_failures_before_respawn: int = 1,
 ) -> None:
     """The whole body of a daemon healthcheck's ``main()`` — probe, then act once.
@@ -320,18 +319,6 @@ def run_keepalive(
       non-alive rounds pass, the breaker holds — see the backoff/breaker
       paragraph below.
 
-    ``on_unrevivable`` is the caller's fallback for "this round will have no live
-    daemon", run when the respawn failed to verify AND on the terminal path (where
-    no respawn is attempted at all). The restarter passes its stand-in dispatch
-    there: while the daemon stays down nothing else moves this host's `restarting`
-    rows, and a terminal verdict is the case where that is indefinite.
-
-    It is deliberately never called BEFORE the respawn. The restarter's stand-in
-    reads the DB, and a DB outage must not be able to stand between a dead verdict
-    and the respawn — that ordering is the invariant `services/healthchecks/
-    restarter.py` documents, and putting the hook after every respawn attempt is
-    what makes it unbreakable from here.
-
     **Backoff and circuit breaker** (task #1941 — the third incident of the same
     shape: #920 ENOSPC crash-loop, #903/3962 heartbeat, #927 GCS-unreachable 2h+
     all "restart cannot cure it" conditions, each respawned every 60s forever).
@@ -354,8 +341,8 @@ def run_keepalive(
 
     One consequence: a failed respawn no longer raises ``SystemExit``
     (``EXIT_RESPAWN_FAILED`` remains the browser healthcheck's own exit code —
-    it does not use `run_keepalive`). It schedules the backoff, runs
-    ``on_unrevivable``, and returns — the round's state lives in the WARNING
+    it does not use `run_keepalive`). It schedules the backoff and returns —
+    the round's state lives in the WARNING
     lines and the breaker alert, and the next round probes again instead of the
     watchdog re-driving a doomed respawn.
 
@@ -394,17 +381,14 @@ def run_keepalive(
         return
 
     def _unrevivable(code: int, message: str, detail: str) -> NoReturn:
-        """Report, run the caller's fallback, exit. `NoReturn` so the two call
+        """Report and exit. `NoReturn` so the two call
         sites below read as the terminating branches they are."""
         log.error(message, label, detail)
-        if on_unrevivable is not None:
-            on_unrevivable()
         raise SystemExit(code)
 
     if result.terminal:
         _reset_keepalive_state(label)
-        # No respawn at all — see ProbeVerdict. The stand-in fallback still runs:
-        # this is the case where "no live daemon" lasts until a human intervenes.
+        # A foreign port owner cannot be fixed by restarting this daemon.
         _unrevivable(
             EXIT_PORT_TAKEN,
             "[%s healthcheck] daemon NOT REVIVABLE by this unit (%s) — not respawning; "
@@ -479,11 +463,10 @@ def run_keepalive(
             after.detail,
         )
     # The respawn did not come up: the next attempt is already scheduled above
-    # (backoff), so this round reports, runs the fallback, and RETURNS instead of
+    # (backoff), so this round reports and RETURNS instead of
     # exiting — the round's failure signal is the WARNING naming the next attempt
     # (and, later, the breaker alert), not an exit code the watchdog would have
-    # to re-drive next round. The ordering invariant holds: `on_unrevivable`
-    # still runs only after the attempt, never before it. The breaker opens once
+    # to re-drive next round. The breaker opens once
     # breaker_rounds non-alive rounds pass.
     log.warning(
         "[%s healthcheck] daemon restart FAILED (%s) — next respawn attempt in %ds",
@@ -491,5 +474,3 @@ def run_keepalive(
         after.detail,
         int(delay_s),
     )
-    if on_unrevivable is not None:
-        on_unrevivable()

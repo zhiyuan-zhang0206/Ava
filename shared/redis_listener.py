@@ -1,25 +1,17 @@
 """Long-lived Redis pub/sub listener with auto-reconnect + re-subscribe.
 
-Wraps a Redis pub/sub subscription for inbound wake-up, exposing
-`wait_one` / `ensure_listening` / `close` — the interface `wait_for_inbound`
-(and historically the interrupt watcher; that watcher now polls the DB and no
-longer shares this listener — see `agent/graph/_interrupt.py`) relies on.
+Wraps a per-agent subscription for external CLI message waiting, exposing
+`wait_one`, `ensure_listening` and `close`. The agent host uses its own shared
+subscription and durable pending-work scan; idle agents do not park a graph
+invocation on this listener.
 
-Why Redis pub/sub, not PG LISTEN/NOTIFY:
-- PgBouncer transaction pooling breaks LISTEN (session-scoped).
-- Redis pub/sub is already in the stack for SSE events and agent lifecycle.
-- Moving inbound wake to Redis lets PG connections drop from 3→2 per agent
-  and enables PgBouncer integration.
+Channel: `<prefix>:inbound:{agent_id}` (`shared.cluster.inbound_channel`), inside
+the cluster Redis ACL grant. Wake delivery uses Redis because PgBouncer
+transaction pooling cannot carry session-scoped PG LISTEN/NOTIFY.
 
-Channel: `<prefix>:inbound:{agent_id}` (`shared.cluster.inbound_channel`) — one
-per agent, cluster-scoped so each agent only receives its own wake-ups AND the
-channel falls inside the cluster redis ACL user's `&<prefix>:*` grant.
-
-ACL degradation: if `subscribe` is rejected by the redis ACL
-(`NoPermissionError`, a `ResponseError` — NOT a `ConnectionError`), the listener
-does not crash the idle-wait. It logs once and degrades to the SELECT recheck in
-`wait_for_inbound` (wake still works, just at the recheck cadence, not instant),
-recovering automatically if the ACL is later fixed.
+ACL-denied subscriptions mark delivery degraded and log the failure. Callers
+retain the durable database recheck and can retry after ACL repair; a missing
+publish never becomes proof that the inbox is empty.
 
 Wake health is latched as HEALTHY or DEGRADED so wake-path failures cannot look
 healthy to callers. It covers every instant-wake-off cause: abandoned

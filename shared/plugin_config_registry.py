@@ -304,7 +304,7 @@ def get_plugin_config(plugin: str, cls: type[BaseModel] | None = None) -> BaseMo
 
     Agent-scoped: the read goes through `shared/plugin_config_view.py`, which
     layers the current turn's `config_overlay` over the bound disk image. With
-    nothing bound (process mode) that is `_PLUGIN_CONFIGS[plugin]` verbatim.
+    nothing bound (outside a turn) that is `_PLUGIN_CONFIGS[plugin]` verbatim.
 
     Raises:
         KeyError: plugin has no register_plugin_config or bind hasn't run — typo / wrong ordering.
@@ -575,8 +575,8 @@ def apply_config_overlay(
 ) -> None:
     """Boot-time apply — merge overlay into framework settings + plugin configs.
 
-    Framework keys (e.g. `llm_model`) need to be applied **before** the agent
-    process reads them — `agent/loop.py` builds the LLM client off
+    Framework keys (e.g. `llm_model`) need to be applied **before** the process
+    reads them — an embedding driver can build the LLM client off
     `settings.lm.llm_model` early. Plugin keys must be applied **after**
     `bind_from_disk()` populates `_PLUGIN_CONFIGS`. The two phases are
     different stages of the boot sequence, so the caller splits the overlay

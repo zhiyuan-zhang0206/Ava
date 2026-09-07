@@ -27,7 +27,7 @@ import asyncio
 import sys
 from typing import TypedDict
 
-_PHASE_A_TIMEOUT_S = 10.0
+_PHASE_A_TIMEOUT_S = 310.0
 _PHASE_B_TIMEOUT_S = 120.0
 _PREFLIGHT_FETCH_TIMEOUT_S = 30.0
 
@@ -36,8 +36,9 @@ class ClusterOpPayload(TypedDict, total=False):
     """The optional parameters a fan-out cluster op carries to an agent-runner's
     ops server: `restart_only` (a restart-only bounce vs a full self-update),
     `target_sha` (the pinned rollout commit every node checks out), `mode`
-    (the updater's agent-drain policy) and `force_reap` (the host's updater kills still-live agents — the
-    quiesce-timeout backstop). All absent for a plain stop op."""
+    (the updater's resource-stop policy) and legacy `force_reap` (accepted by
+    an older official updater). The validated deploy generation binds pause
+    and compensating resume; it is never an agent identity takeover."""
 
     restart_only: bool
     target_sha: str
@@ -166,10 +167,7 @@ def _print_fan_out_results(label: str, results: list[tuple[str, str, str]]) -> b
         if status == "ok":
             print(f"  ✓ {name}: {label} ack")
         elif status == "unreachable":
-            print(
-                f"  ⚠ {name}: unreachable, skipping ({detail})"
-                " — when this host comes back online, its watchdog self-heals via a cluster_update op to its own ops server"
-            )
+            print(f"  ✗ {name}: unreachable; no {label} acknowledgement ({detail})")
         else:
             print(f"  ✗ {name}: {detail}", file=sys.stderr)
             has_fatal = True

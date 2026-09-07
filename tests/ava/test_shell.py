@@ -311,41 +311,6 @@ def test_rebuild_uses_new_id_and_old_handle_stays_rejected(_agent_row: int) -> N
         shell.kill(new_id)
 
 
-def test_released_process_preflight_spares_lone_shell(_agent_row: int) -> None:
-    """Absence of the canonical process record never targets persistent shells."""
-    from ops import agent_launch
-
-    sid = shell.new(name="claude", ttl=120)  # the lone surviving session
-    try:
-        agent_launch._require_released_agent_session(_agent_row)
-        assert sid in shell.list()
-    finally:
-        shell.kill(sid)
-
-
-def test_resident_process_refusal_spares_process_and_shell(_agent_row: int) -> None:
-    """A canonical name does not authorize replacing a live native process."""
-    from ops import agent_launch
-    from shared import posixproc
-    from shared.cluster import session_name
-
-    agent_sess = session_name(f"agent-{_agent_row}")
-    # a real detached "stale process" tracked by the native supervisor
-    posixproc.new_session(agent_sess, ["/bin/sleep", "300"], Path.cwd(), env=dict(os.environ))
-    sid = shell.new(name="claude", ttl=120)
-    try:
-        assert posixproc.has_session(agent_sess)
-        with pytest.raises(RuntimeError, match="still live"):
-            agent_launch._require_released_agent_session(_agent_row)
-        # A name alone is no authority to kill the resident process.
-        assert posixproc.has_session(agent_sess)
-        # ... but the shell survived
-        assert sid in shell.list()
-    finally:
-        shell.kill(sid)
-        posixproc.kill_session(agent_sess, graceful=False)
-
-
 # ─── send_keys + per-session PTY integration ──────────────────────────────
 #
 # These run against REAL detached session hosts + REAL bash -l -i (the

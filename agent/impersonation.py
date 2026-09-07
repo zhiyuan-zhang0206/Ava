@@ -36,15 +36,6 @@ async def native_status(agent_id: int) -> dict[str, Any] | None:
     return await asyncio.to_thread(read_status, agent_id, incarnation)
 
 
-async def control_ready(agent_id: int, delivered_id: str | None) -> bool:
-    """Whether the idle claim wait should return to the control gate."""
-    session = await native_status(agent_id)
-    return session is not None and (
-        session["status"] != "requested"
-        or f"{session['id']}:{session['consent_version']}" != delivered_id
-    )
-
-
 async def lifecycle_ready(pool: AsyncConnectionPool, agent_id: int) -> bool:
     """Native restart/terminate can run while the external owner handles cancel."""
     async with pool.connection() as conn:
@@ -152,9 +143,7 @@ async def settle_checkpoint(
     if session["status"] == "accepted":
         if not activate_accepted:
             return False
-        # Hosted turns track asynchronous continuations here. Process mode has
-        # no turn-resource scope; it relies on exec return and the durable
-        # execution-allocation check inside activate(), after checkpoint flush.
+        # Continuations and managed exec resources must settle before activation.
         if not hosted_resources_settled():
             raise RuntimeError(
                 "cannot activate impersonation with unresolved native exec resources"
@@ -178,62 +167,4 @@ async def settle_checkpoint(
             await flush_checkpoint(graph.checkpointer, agent_id)  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
             receipt = expected
         await asyncio.to_thread(mark_plugin_applied, session["id"], version, incarnation)
-    return False
-
-
-async def prepare_invocation(
-    graph: CompiledStateGraph[
-        _state.BaseAgentState, AvaContext, _state.BaseAgentState, _state.BaseAgentState
-    ],
-    agent_id: int,
-    ctx: AvaContext,
-) -> bool:
-    """Park an existing holder, then import released external state."""
-    if await park_native(agent_id, ctx):
-        return True
-    await settle_checkpoint(graph, agent_id, activate_accepted=False)
-    return False
-
-
-async def park_native(agent_id: int, ctx: AvaContext) -> bool:
-    """Wait outside graph execution, keeping native liveness and cancellation."""
-    from agent.db import enter_idling_state, mark_agent_status, record_claim_loop_progress
-
-    idling = False
-    while True:
-        session = await native_status(agent_id)
-        has_control = (
-            session is not None
-            and session["status"] == "active"
-            and ctx.ops_pool is not None
-            and await lifecycle_ready(ctx.ops_pool, agent_id)
-        )
-        if has_control:
-            assert ctx.ops_pool is not None  # noqa: S101
-            if await apply_parked_process_controls(ctx.ops_pool, agent_id):
-                return True
-        if session is None or session["status"] != "active":
-            if idling:
-                assert ctx.ops_pool is not None  # noqa: S101
-                await mark_agent_status(ctx.ops_pool, agent_id, "running", expected_from="idling")
-            return False
-        if ctx.ops_pool is not None:
-            if not idling:
-                await enter_idling_state(ctx.ops_pool, agent_id)
-                idling = True
-            await record_claim_loop_progress(ctx.ops_pool, agent_id)
-        await asyncio.sleep(1)
-
-
-async def apply_parked_process_controls(pool: AsyncConnectionPool, agent_id: int) -> bool:
-    """Apply a real process restart/terminate at an already quiescent boundary."""
-    from agent.db import claim_inbound_batch
-    from agent.lifecycle_apply import apply_process_lifecycle
-    from shared.db_transaction import async_write_transaction
-
-    batch = await claim_inbound_batch(pool, agent_id, lifecycle_only=True)
-    for item in batch:
-        if item.kind in ("restart", "terminate"):
-            async with async_write_transaction(pool) as conn:
-                return await apply_process_lifecycle(conn, agent_id, item.id)
     return False

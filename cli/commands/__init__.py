@@ -100,7 +100,6 @@ from cli.commands._setup import (
     _resolve_setup_field,
     _SetupField,
 )
-from cli.commands._warmup import _launch_agent_warmup
 from cli.commands.cluster import (
     cmd_cluster_mark_staging,
     cmd_cluster_pause,
@@ -157,9 +156,9 @@ from cli.commands.start import _cmd_start_body, cmd_start
 from cli.commands.status import cmd_status
 from cli.commands.stop import (
     _do_stop,
-    _reap_agent_sessions,
     _reap_cluster_chrome,
     _release_self_heal_pause,
+    cmd_pause,
     cmd_restart,
     cmd_stop,
 )
@@ -182,7 +181,6 @@ from cli.commands.update import (
     _classify_change,
     _dispatch_one_and_wait,
     _fan_out,
-    _force_reap_local_agents,
     _list_agent_runners,
     _poll_until_unpaused,
     _probe_one_until_unpaused,
@@ -244,12 +242,10 @@ __all__ = [
     "_do_stop",
     "_ensure_frontend_deps",
     "_fan_out",
-    "_force_reap_local_agents",
     "_graceful_kill_session",
     "_has_session",
     "_husk_session_reason",
     "_kill_session",
-    "_launch_agent_warmup",
     "_launch_roster",
     "_launch_sessions",
     "_list_agent_runners",
@@ -269,7 +265,6 @@ __all__ = [
     "_probe_service",
     "_quiesce_all_agents",
     "_quiesce_local_agents",
-    "_reap_agent_sessions",
     "_reap_cluster_chrome",
     "_recovered_non_critical_specs",
     "_register_machine_or_die",
@@ -324,6 +319,7 @@ __all__ = [
     "cmd_mcp_uninstall",
     "cmd_mcp_upgrade",
     "cmd_migrations_apply",
+    "cmd_pause",
     "cmd_pitr_activate",
     "cmd_pitr_retention_inspect",
     "cmd_pitr_rollback",

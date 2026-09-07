@@ -13,7 +13,7 @@ Ava agent's dependency injection container. `AvaContext` is a dataclass that car
 
 ## Core Responsibilities
 
-- **Dependency aggregation (handles)**: `ops_pool` (DB connection pool), `inbound_listener` (dedicated Redis pub/sub connection), `llm` (ChatModel instance), `redis_sync`, `event_publisher`; plus configuration snapshots `db_url` / `redis_url` / `events_channel` / `ava_home`. The MCP daemon is not aggregated here—it is a local object in `agent/loop.py:main()`.
+- **Dependency aggregation (handles)**: `ops_pool` (DB connection pool), `inbound_listener` (dedicated Redis pub/sub connection), `llm` (ChatModel instance), `redis_sync`, `event_publisher`; plus configuration snapshots `db_url` / `redis_url` / `events_channel` / `ava_home`. MCP daemon ownership is host-scoped, outside the turn context.
 - **Decoupling graph build**: `build_graph()` does not accept these dependencies; the caller passes them via `graph.ainvoke(..., context=AvaContext(...))`
 - **Cross-node access**: Node functions access dependencies via `runtime.context.X`
 

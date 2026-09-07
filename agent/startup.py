@@ -7,19 +7,12 @@
   every Nth super-step while keeping aput_writes in lockstep and exposing a
   final-state flush
 - `_reconcile_claimed_inbounds_at_startup` — finalize any 'claimed'
-  inbound rows left behind by the previous process of this agent
-- `_write_effective_config_to_restart_completed` — write the freshly
-  applied config_overlay snapshot into the pending restart_completed row
+  inbound rows left behind by the previous runtime of this agent
 - `_notify_desktop_permissions_at_startup` — surface broken Screen Recording
   or Accessibility permission (detected at converge) to the user, exactly once
 - `reconcile_open_pages` — probe every open page's server and restore it
   (re-serve dead serve_dir pages, close dead no-dir pages); runs at boot,
-  on heartbeat, and on the periodic `page_reconcile_loop` as a catch-all
-  for server death
-- `page_reconcile_loop` — the heartbeat-independent periodic scan (every
-  heartbeat interval, AVA_HEARTBEAT_INTERVAL_SECONDS): a busy agent's
-  pages still heal while it works, even though heartbeats only reach
-  idle agents
+  on heartbeat, and in the host's periodic scan so busy agents also heal
 - `reconcile_all_open_pages` — the hosted daemon's periodic scan (task
   #2260): one pass over every agent with open pages, sharing the same
   per-agent interval throttle
@@ -63,7 +56,9 @@ from agent.hooks.repair import dangling_tool_pairing_repairs
 from shared.log import logger
 
 
-def _wrap_saver_writes_with_loud_failure(checkpointer: AsyncPostgresSaver, agent_id: int) -> None:
+def _wrap_saver_writes_with_loud_failure(
+    checkpointer: AsyncPostgresSaver, agent_id: int | None = None
+) -> None:
     """Wrap aput / aput_writes to log every failure as a checkpoint_write_failed
     event before re-raising. See call site for the langgraph silent-swallow
     background-task path this defends against.
@@ -72,30 +67,41 @@ def _wrap_saver_writes_with_loud_failure(checkpointer: AsyncPostgresSaver, agent
     re-binds them after `__init__`, so this is safe across the saver
     lifetime. Wrapper re-raises to keep langgraph's own retry / propagation
     semantics intact; the only added side effect is a log line per failure.
+    Identity is resolved from each write's thread_id, including deferred N-step
+    flushes. An explicit single-agent id is only a consistency constraint;
+    neither an ambient turn nor a daemon-global identity attributes shared writes.
     """
     orig_aput = checkpointer.aput
     orig_aput_writes = checkpointer.aput_writes
 
-    async def _logged_aput(*args: Any, **kwargs: Any) -> Any:
+    def write_agent_id(config: RunnableConfig) -> int:
+        resolved = int(_checkpoint_thread_id(config))
+        if agent_id is not None and resolved != agent_id:
+            raise ValueError("checkpoint thread_id differs from the saver agent identity")
+        return resolved
+
+    async def _logged_aput(config: RunnableConfig, *args: Any, **kwargs: Any) -> Any:
+        owner = write_agent_id(config)
         try:
-            return await orig_aput(*args, **kwargs)
+            return await orig_aput(config, *args, **kwargs)
         except BaseException:
             logger.opt(exception=True).error(
                 "checkpoint aput failed",
                 event="checkpoint_write_failed",
-                agent_id=agent_id,
+                agent_id=owner,
                 method="aput",
             )
             raise
 
-    async def _logged_aput_writes(*args: Any, **kwargs: Any) -> Any:
+    async def _logged_aput_writes(config: RunnableConfig, *args: Any, **kwargs: Any) -> Any:
+        owner = write_agent_id(config)
         try:
-            return await orig_aput_writes(*args, **kwargs)
+            return await orig_aput_writes(config, *args, **kwargs)
         except BaseException:
             logger.opt(exception=True).error(
                 "checkpoint aput_writes failed",
                 event="checkpoint_write_failed",
-                agent_id=agent_id,
+                agent_id=owner,
                 method="aput_writes",
             )
             raise
@@ -302,11 +308,11 @@ async def _reconcile_claimed_inbounds_at_startup(
     """Load the agent's LangGraph checkpoint, harvest every committed
     `ava_inbound_id` from state.messages, and hand the set to
     `reconcile_claimed_inbounds` so it can finalize any `'claimed'` rows
-    left behind by the previous process.
+    left behind by interrupted work.
 
-    A fresh process is the only legitimate caller; the agent is bound
-    1:1 to a process, so no other writer is concurrently mutating
-    `inbound_messages` for this agent_id right now.
+    The host calls this under the admitted incarnation's single-flight, on
+    cold runtime construction or database recovery. The inbound owner lock
+    fences concurrent control decisions; the caller must retain that identity.
 
     No prior checkpoint (brand-new agent) → no commits to confirm; reconcile
     is still called with an empty set so any unlikely stray `'claimed'`
@@ -373,53 +379,6 @@ async def _repair_dangling_tool_use_at_startup(
         event="dangling_tool_pairing_repaired",
         agent_id=agent_id,
     )
-
-
-def _write_effective_config_to_restart_completed(agent_id: int) -> None:
-    """On new process boot, write effective config snapshot into the most
-    recent pending restart_completed inbound's payload.effective_config (PR-E).
-
-    When respawn_agent INSERTs restart_completed, it only passes through
-    source/content + the original restart's payload (containing
-    config_overlay); this function adds the effective_config snapshot into
-    the same row after the new process completes overlay apply — the event
-    trail records "overlay input + actually effective config" in full.
-
-    Boot paths other than respawn_agent (spawn / resurrect) have no pending
-    restart_completed row; UPDATE rowcount=0 doesn't raise (noop).
-    """
-    from shared.plugin_config_registry import effective_config_snapshot
-
-    snapshot = effective_config_snapshot()
-    import json as _json
-
-    import psycopg as _pg
-
-    from shared.config import settings as _cfg
-
-    with _pg.connect(_cfg.data_plane.db_url) as conn, conn.cursor() as cur:
-        conn.execute("SET TRANSACTION READ WRITE")
-        # Directly UPDATE the most recent restart_completed (even if
-        # status='done', let claim see the latest snapshot). jsonb_set uses
-        # path to replace/append the key.
-        cur.execute(
-            """
-            UPDATE inbound_messages
-               SET payload = jsonb_set(
-                       COALESCE(payload, '{}'::jsonb),
-                       '{effective_config}',
-                       %s::jsonb,
-                       true
-                   )
-             WHERE id = (
-                 SELECT id FROM inbound_messages
-                  WHERE agent_id = %s AND kind = 'restart_completed'
-                  ORDER BY id DESC LIMIT 1
-             )
-            """,
-            (_json.dumps(snapshot), agent_id),
-        )
-        conn.commit()
 
 
 async def _notify_desktop_permissions_at_startup() -> None:
@@ -510,8 +469,7 @@ def _page_server_alive(host: str, port: int) -> bool:
 
 
 # time.monotonic() of the last reconcile pass per agent (boot, heartbeat,
-# or periodic). The periodic loops — the process-mode `page_reconcile_loop`
-# and the hosted daemon scan (task #2260) — skip an agent's pass when
+# or periodic). The host daemon scan skips an agent's pass when
 # another path already scanned it within the interval, keeping the combined
 # cadence at ~one pass per interval instead of two. Keyed by agent_id
 # because the hosted daemon serves MANY agents in one process: a single
@@ -519,7 +477,7 @@ def _page_server_alive(host: str, port: int) -> bool:
 # agent's pass. Plain float values (no asyncio.Lock — which would bind to
 # one event loop): each agent runs a single loop, tests run one loop per
 # case. The no-lock argument assumes a single event loop per process —
-# the current shape of both runtimes; revisit if multi-threaded execution
+# the current host runtime; revisit if multi-threaded execution
 # is ever introduced.
 _last_reconcile_at: dict[int, float] = {}
 
@@ -688,11 +646,8 @@ async def reconcile_all_open_pages(
 ) -> None:
     """Reconcile every open page on this machine — the hosted daemon's scan.
 
-    The hosted turn runner (services/agent_host) serves many agents in one
-    process and does not run agent/loop.py:main(), so no per-agent
-    `page_reconcile_loop` exists there (task #2260): a busy hosted agent's
-    pages would otherwise go unreconciled for as long as its turn lasts —
-    the same gap process mode had before #1284. One query lists this
+    The agent host scans independently of turns so a busy agent's pages
+    are reconciled while its turn is running. One query lists this
     machine's agents with open pages; each is reconciled through the
     ordinary per-agent pass (which stamps its own throttle key, so a
     heartbeat scan of that agent within `interval_s` suppresses this pass).

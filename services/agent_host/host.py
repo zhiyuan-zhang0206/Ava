@@ -1,122 +1,33 @@
-"""The hosted agent-runner's turn runner — one process, every local agent's turns.
+"""Run every local agent through one shared host and graph.
 
-Phase 1 of `future/infra/agent-runner-as-server.md`. `dispatcher.py` decides
-WHEN an agent runs (one wake -> one turn task, never two at once for the same
-agent); this module decides WHAT running means: resolve the agent's stored
-config, bind it for the turn, and drive `graph.ainvoke` until the agent has
-nothing left to claim.
+The dispatcher owns per-agent single-flight and wake delivery. This driver binds
+an admitted incarnation, resolves its framework/plugin configuration, and invokes
+the graph until idle or native lifecycle return. Contextvars surround invocation
+so every graph node inherits the same identity and configuration; managed exec
+children receive those pins through their existing environment projection.
 
-## What is shared and what is per-agent
+The daemon shares a workload pool, a separate control pool, one checkpointer
+(keyed by thread_id), and one compiled graph. Graph construction loads process-
+global plugin definitions, so compiling a graph per agent would corrupt concurrent
+turns. Chat models and startup reconciliation are cached per agent and invalidated
+by the stored birth/overlay configuration fingerprint. Shared graph retry policy
+still uses cluster-level settings (issue #174).
 
-Shared for the whole daemon, built once at boot and handed in:
+Cold admission repairs claimed inbound/checkpoint disagreements and dangling tool
+pairs, establishes the workspace, and reconciles persistent watchers. Boot watcher
+work also joins the existing durable scan, so a missed Redis wake cannot strand
+an idle agent's recurring work. No per-agent process or global identity is created.
 
-- **the Postgres pools** — a turn/checkpoint pool sized against
-  `AVA_HOST_MAX_CONCURRENT_TURNS` plus headroom, and a fixed four-connection
-  control pool for admission, settlement, ownership, and durable scans. Both
-  are daemon-scoped, never per agent. The split keeps a saturated turn path
-  from starving the control operations that make pending work recoverable;
-  PgBouncer remains the downstream server-connection multiplexer.
-- **the checkpointer** — one `AsyncPostgresSaver` over that pool. Agents are
-  already separated inside it by `thread_id`, which is the agent id; a saver per
-  agent would separate nothing further.
-- **the compiled graph.** This one is not a preference. `agent.graph.build_graph`
-  calls `_load_extensions`, which calls `clear_plugin_registrations()`,
-  re-executes every builtin plugin module, and rebinds `agent.state.AgentState`
-  — all process-global. Building a graph per agent inside one process would
-  therefore clear plugin hooks out from under every OTHER agent's in-flight
-  turn. One graph per process is the only safe shape until that loader is
-  re-entrant, and the per-agent behaviour that matters (identity, config, plugin
-  config) rides the contextvars bound below rather than the graph object.
+Native restart/terminate flushes the final checkpoint and applies its exact-owner
+command before releasing single-flight. Normal maintenance waits for continuation
+and managed-resource settlement. Explicit force cancellation stays fenced until
+those resources close. Database outages retain the original task; recovery checks
+its ownership before repairing and continuing, without creating a new inbound.
 
-  What that costs, precisely: `_build_llm_retry()` is evaluated at build time and
-  reads two per-agent things — the per-model `llm_retry_max_attempts`, and
-  `_retry_phase_jitter()`, the per-agent offset that de-phases fleet-wide retry
-  waves. Under one shared graph both become cluster-level in hosted mode, so a
-  correlated 429 burst retries in near-lockstep (LangGraph's own uniform(0,1)s
-  jitter remains). Fixing it means either making the plugin loader re-entrant or
-  deferring retry-policy resolution to run time; neither belongs here, and both
-  are weighed in issue #174, which must be resolved before a hosted cluster
-  carries enough agents for a correlated provider failure to matter.
-
-Per agent, cached in `_AgentRuntime` and rebuilt when the agent's stored config
-changes:
-
-- **the chat model** — `build_chat_model(turn_settings.lm.llm_model)`, so an
-  agent whose overlay pins a different model gets that model.
-- **the startup reconcile** — the claimed-inbound two-phase resolve and the
-  dangling-tool_use repair that a fresh process runs at boot. A cold cache entry
-  IS the hosted equivalent of "this agent's process just started", so that is
-  exactly where they belong; a crashed turn drops the entry so its retry gets
-  them again, matching what a process crash + respawn does today.
-
-## Why the cache key is the config itself
-
-A cached runtime carries a model built from this agent's config, so a stale
-entry would keep an agent on its old model while the DB says otherwise — the
-same class of lie 3a refused when it kept hosted agents out of IDLING. The key
-is a fingerprint of the agent's `(config_overlay, birth_config)`, which
-`run_turn` must read every turn anyway to bind the pins, so the invalidation
-cannot be forgotten: there is no second call site that has to remember it.
-
-(The obvious alternative, an `agents_meta.updated_at`, does not exist — and
-would be the wrong key if it did: that row is written by lease renewal every 60s
-and by every status flip, so it would evict on churn that has nothing to do with
-config.)
-
-## Why the binds happen where they do
-
-`bind_turn_identity` / `bind_agent_config` / `bind_agent_plugin_config` wrap the
-`ainvoke` call, not any code inside a node. LangGraph runs each node in its own
-asyncio task that copies the *loop-level* context, so a contextvar bound inside
-a node does not reach the next one, while one bound around the invocation
-propagates into every node task. The exec child does not inherit
-contextvars — it re-receives the agent's config through the re-emitted
-overlay env instead, so agent code still resolves the same settings.
-
-Deliberately NOT done: `ava._boot.establish(agent_id)` and
-`os.environ["AVA_AGENT_ID"]`. Both are process-wide, and in a process serving
-many agents they would be a lie. p1b already routes `ava._boot.agent_id()`,
-`require_agent_id()` and the `ava.self` lifecycle gate through the turn
-contextvar, so binding the turn is sufficient and establishing would be strictly
-worse than doing nothing.
-
-## The lifecycle around the turn
-
-This module runs turns. The rest of the agent lifecycle is hosted-aware:
-
-- **spawn** — `POST /api/agents` no longer forks for hosted clusters: the
-  launch op (`ops/ops_launch.launch_agent_op`) skips the fork and the
-  launch-confirm and just delivers the first prompt + a wake, which this host's
-  dispatcher turns into the first turn task; a failed launch reclaims its own
-  row (no restarter reaper exists in hosted mode). Resurrect / respawn /
-  swap-in / revive flip the row and publish a wake the same way
-  (`ops/agent_wake.py`, `ops/agent_revive.py`).
-- **restart** — hosted restarts resolve in-process: claim skips the
-  'restarting' flip (there is no restarter to pick it up) and sets the
-  `restart_requested` channel; this host drops the runtime and ends the task
-  without an exit-notify, so the row stays runnable and the next wake starts
-  clean with a rebinded config view.
-- **terminate** — force fixes the original command/target as an active pointer.
-  `/cancel-turn` validates that command against this boot owner before cancelling
-  the captured Task. Actual work is shielded until its resources settle; only
-  the original serialized pump can observe completion. Force returns accepted,
-  not a claim that the continuation or its child processes have already exited.
-- **cluster update** — the hosted-aware quiesce skips the per-agent drain
-  because hosted turns are checkpointer tasks rather than per-agent processes.
-  The host maintains each row's `running` / `idling` status around those turns;
-  the stop-the-world is this host's own service stop, which checkpoints every
-  in-flight turn on SIGTERM (`cli/commands/_update_quiesce.py`). The roster
-  gates the process-mode restarter off while this host runs (`ops/spec.py`).
-
-The existing host health beat renews owner-bound leases for busy and idle
-hosted incarnations. The lease-zombie reaper remains process-mode machinery
-(gated off a hosted cluster with the restarter); the hibernation chain
-(controller, status, SIGUSR1 path, endpoint, config keys) was deleted
-(2026-08, Task #1976).
-
-Before the runtime build, each wake validates its bound model configuration. A
-rejected configuration leaves the durable inbound pending, so correcting the
-overlay lets the next scan serve it without a crash-and-retry loop.
+Each completed invocation flushes its checkpoint before linking it to the current
+trace. Expected provider/compaction failures persist halted state; unexpected errors
+remain visible and propagate. Configuration rejection leaves pending work durable
+for a subsequent scan after the configuration is corrected.
 """
 
 from __future__ import annotations
@@ -124,20 +35,22 @@ from __future__ import annotations
 import asyncio
 import time
 from collections import OrderedDict
-from collections.abc import Awaitable, Callable
 from datetime import datetime
-from typing import cast
 from uuid import uuid4
 
 import psycopg
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.graph.state import CompiledStateGraph
-from psycopg_pool import AsyncConnectionPool
+from psycopg_pool import AsyncConnectionPool, PoolTimeout
 
-from agent._process_boot import boot_agent_scope
-from agent._runloop import _graph_config
+from agent._process_boot import boot_agent_scope, reconcile_agent_watchers
+from agent._runloop import PendingTurnFailure, _emit_error_event, _graph_config, settle_turn_failure
+from agent._trace_checkpoint import attach_trace_checkpoint_ref
 from agent._turn_progress import reset_turn_progress
+from agent.graph._llm_errors import FatalLLMStreamError, FatalProviderError
+from agent.graph._node_log import flush_node_exit_aggregate
+from agent.hooks.compact import CompactionFailedError
 from agent.hosted_ownership import (
     admit_hosted_runtime,
     apply_hosted_lifecycle,
@@ -145,13 +58,14 @@ from agent.hosted_ownership import (
     renew_hosted_owner,
     settle_hosted_runtime,
 )
-from agent.impersonation import active_lease, settle_checkpoint
+from agent.impersonation import active_lease, flush_checkpoint, settle_checkpoint
 from agent.startup import (
     _reconcile_claimed_inbounds_at_startup,
     _repair_dangling_tool_use_at_startup,
 )
 from agent.state import BaseAgentState
 from services.agent_host import maintenance as maintenance_receipts
+from services.agent_host.db_recovery import database_phase, recover_database
 from services.agent_host.dispatcher import PendingInboundWake
 from services.agent_host.runtime import (
     HostStats,
@@ -241,6 +155,7 @@ class AgentHost:
         # — it would just throw the work away and make that agent's NEXT turn
         # pay a cold build, which is the opposite of what a cache is for.
         self._in_flight: set[int] = set()
+        self._watcher_recovery_pending: set[int] = set()
         self._maintenance_failed: dict[int, tuple[str | None, datetime | None]] = {}
         self._turn_slots = asyncio.Semaphore(settings.daemon.host_max_concurrent_turns)
         self.stats = HostStats()
@@ -334,6 +249,7 @@ class AgentHost:
         """
         stored = await self._read_stored_config(agent_id)
         if stored is None or not self._is_runnable(agent_id, stored):
+            self._watcher_recovery_pending.discard(agent_id)
             self.stats.wakes_skipped += 1
             return
         _active_turn_config_fingerprint.set(stored.fingerprint)
@@ -436,8 +352,7 @@ class AgentHost:
                 raise
             except Exception:
                 # The scheduler logs and drops the task; dropping the runtime
-                # too makes the retry equal process mode's crash+respawn (a new
-                # process re-runs the startup reconcile).
+                # ensures the next admission re-runs startup reconciliation.
                 self.drop_agent(agent_id)
                 raise
             finally:
@@ -533,12 +448,15 @@ class AgentHost:
             cached.last_used = time.monotonic()
             self._runtimes.move_to_end(agent_id)
             self.stats.cache_hits += 1
+            if agent_id in self._watcher_recovery_pending:
+                await self._restore_watchers(agent_id)
             return cached
 
         reason = "cold" if cached is None else "config_changed"
         self.stats.cache_misses += 1
         started = time.monotonic()
         runtime = await self._build_runtime(agent_id, fingerprint)
+        await self._restore_watchers(agent_id)
         self._runtimes[agent_id] = runtime
         self._runtimes.move_to_end(agent_id)
         logger.info(
@@ -551,16 +469,14 @@ class AgentHost:
         self._evict()
         return runtime
 
-    async def _build_runtime(self, agent_id: int, fingerprint: str) -> _AgentRuntime:
-        """Build one agent's runtime: the startup reconcile, then the chat model.
+    async def _restore_watchers(self, agent_id: int) -> None:
+        if await reconcile_agent_watchers(agent_id):
+            self._watcher_recovery_pending.discard(agent_id)
+        else:
+            self._watcher_recovery_pending.add(agent_id)
 
-        The reconcile pair is what a fresh agent PROCESS runs at boot: resolve
-        any `claimed` inbound rows a previous turn left behind (committed ->
-        done, else back to pending) and repair a tool_use whose paired
-        tool_result a hard cancel dropped. Both are per-agent and both read the
-        checkpoint, so they belong on this cold path and not in the daemon's
-        process-scope boot.
-        """
+    async def _build_runtime(self, agent_id: int, fingerprint: str) -> _AgentRuntime:
+        """Repair checkpoint/inbound state, then prepare the model."""
         await _reconcile_claimed_inbounds_at_startup(self._pool, self._checkpointer, agent_id)
         await _repair_dangling_tool_use_at_startup(self._graph, agent_id)
         llm = await boot_agent_scope(agent_id)
@@ -620,6 +536,20 @@ class AgentHost:
                 )
             ).fetchone()
         return None if row is None else row[0]
+
+    async def watcher_boot_wakes(self) -> list[int]:
+        """Keep boot recovery in the existing scan until watchers are reconciled."""
+        async with self._control_pool.connection() as conn:
+            rows = await (
+                await conn.execute(
+                    "SELECT DISTINCT m.id FROM agents_meta m JOIN agent_watchers w ON w.agent_id=m.id "
+                    "WHERE m.machine=%s AND m.status IN ('running','idling') AND w.status='running'",
+                    (self._machine,),
+                )
+            ).fetchall()
+        agents = [row[0] for row in rows]
+        self._watcher_recovery_pending.update(agents)
+        return agents
 
     async def pending_inbound_wakes(self, stale_after_s: float) -> list[PendingInboundWake]:
         """Find pending work and lifecycle pointers missed by Redis wakes.
@@ -693,7 +623,13 @@ class AgentHost:
                     ),
                 )
             ).fetchall()
-        return [PendingInboundWake(agent_id=row[0], stale=row[1]) for row in rows]
+        wakes = [PendingInboundWake(agent_id=row[0], stale=row[1]) for row in rows]
+        pending = {wake.agent_id for wake in wakes}
+        wakes.extend(
+            PendingInboundWake(agent_id=agent_id, stale=False)
+            for agent_id in self._watcher_recovery_pending - pending
+        )
+        return wakes
 
     def drop_agent(self, agent_id: int) -> None:
         """Forget an agent's cached runtime — the hosted equivalent of the
@@ -719,11 +655,7 @@ class AgentHost:
             ops_pool=self._pool,
             llm=runtime.llm,
             event_publisher=event_publisher,
-            # No inbound listener by design: `hosted=True` makes the claim node
-            # end the turn instead of parking on a subscription, so the one
-            # thing a listener would be used for is unreachable from here.
-            inbound_listener=None,
-            hosted=True,
+            # The dispatcher owns subscriptions; an empty claim ends this task.
         )
         try:
             return await self._invoke_until_done(agent_id, ctx)
@@ -742,50 +674,95 @@ class AgentHost:
         metadata: dict[str, object] = {"agent_id": agent_id, "hosted": True}
         config: RunnableConfig = _graph_config(agent_id, tags, metadata)
         turn = 0
+        pending_failure: PendingTurnFailure | None = None
         while True:
-            await settle_checkpoint(self._graph, agent_id, activate_accepted=False)
-            turn += 1
-            with turn_span(name=f"ava-agent-{agent_id}", session_id=str(agent_id), turn=turn):
-                result: dict[str, object] = await run_invocation_with_stall_guard(
-                    self._graph,
-                    agent_id,
-                    ctx,
-                    config,
-                    {  # pyright: ignore[reportArgumentType, reportUnknownMemberType]
-                        "turn_active": False,
-                        "exit_requested": False,
-                        "turn_idle": False,
-                        "restart_requested": False,
-                    },
-                )
-            checkpointer_attrs = getattr(self._checkpointer, "__dict__", {})
-            if "_ava_nstep_flush" in checkpointer_attrs:
-                flush = cast(
-                    Callable[[str], Awaitable[None]],
-                    checkpointer_attrs["_ava_nstep_flush"],
-                )
-                await flush(str(agent_id))
-            # [] not .get(): this invocation's input wrote both channels, so a
-            # missing key is a bug, not a state to tolerate.
-            if result["exit_requested"] or result["restart_requested"]:
+            try:
+                async with database_phase():
+                    await settle_checkpoint(self._graph, agent_id, activate_accepted=False)
+                turn += 1
+                with turn_span(name=f"ava-agent-{agent_id}", session_id=str(agent_id), turn=turn):
+                    if pending_failure is not None:
+                        # Database recovery must finish the original abort, not
+                        # invoke a model again before halted/breaker state is saved.
+                        async with database_phase():
+                            await settle_turn_failure(
+                                self._graph,
+                                self._checkpointer,
+                                config,
+                                ctx,
+                                agent_id,
+                                pending_failure,
+                            )
+                            await attach_trace_checkpoint_ref(self._graph, ctx, agent_id)
+                        return False
+                    try:
+                        result: dict[str, object] = await run_invocation_with_stall_guard(
+                            self._graph,
+                            agent_id,
+                            ctx,
+                            config,
+                            {  # pyright: ignore[reportArgumentType, reportUnknownMemberType]
+                                "turn_active": False,
+                                "exit_requested": False,
+                                "turn_idle": False,
+                                "restart_requested": False,
+                            },
+                        )
+                    except (FatalLLMStreamError, FatalProviderError, CompactionFailedError) as exc:
+                        pending_failure = PendingTurnFailure(exc)
+                        async with database_phase():
+                            await settle_turn_failure(
+                                self._graph,
+                                self._checkpointer,
+                                config,
+                                ctx,
+                                agent_id,
+                                pending_failure,
+                            )
+                            await attach_trace_checkpoint_ref(self._graph, ctx, agent_id)
+                        return False
+                    # The trace must remain current until its final checkpoint is
+                    # durable; an N-step buffered ID is not yet readable by the UI.
+                    async with database_phase():
+                        await flush_checkpoint(self._checkpointer, agent_id)
+                        await attach_trace_checkpoint_ref(self._graph, ctx, agent_id)
+                if result["exit_requested"] or result["restart_requested"]:
+                    incarnation = current_incarnation(agent_id)
+                    if incarnation is None:
+                        raise RuntimeError(  # noqa: TRY301 — report through the turn error boundary
+                            "hosted lifecycle return has no admitted incarnation"
+                        )
+                    self.drop_agent(agent_id)
+                    async with database_phase():
+                        kind = await apply_hosted_lifecycle(self._control_pool, incarnation)
+                    logger.info(
+                        "hosted lifecycle return settled",
+                        agent_id=agent_id,
+                        generation=str(incarnation.generation),
+                        command_kind=kind,
+                    )
+                    return kind == "terminate"
+                if result["turn_idle"]:
+                    async with database_phase():
+                        await settle_checkpoint(self._graph, agent_id)
+                    return False
+            except (psycopg.OperationalError, PoolTimeout):
                 incarnation = current_incarnation(agent_id)
                 if incarnation is None:
-                    raise RuntimeError("hosted lifecycle return has no admitted incarnation")
-                # The graph continuation has returned under existing single-flight.
-                # Cache loss is a consequence of the durable command, not its identity.
-                self.drop_agent(agent_id)
-                kind = await apply_hosted_lifecycle(self._control_pool, incarnation)
-                logger.info(
-                    "hosted lifecycle return settled",
-                    agent_id=agent_id,
-                    generation=str(incarnation.generation),
-                    command_kind=kind,
+                    raise
+                await recover_database(
+                    pool=self._control_pool,
+                    checkpointer=self._checkpointer,
+                    graph=self._graph,
+                    incarnation=incarnation,
                 )
-                return kind == "terminate"
-            if result["turn_idle"]:
-                await settle_checkpoint(self._graph, agent_id)
-                return False
-            # Turn boundary: go round again on the same checkpointer thread.
+            except Exception as exc:
+                _emit_error_event(
+                    ctx, agent_id, f"{type(exc).__name__}: {exc}", error_class=type(exc).__name__
+                )
+                raise
+            finally:
+                flush_node_exit_aggregate(agent_id)
 
     async def aclose(self) -> None:
         """Drop every cached runtime. The pool, checkpointer and graph belong to

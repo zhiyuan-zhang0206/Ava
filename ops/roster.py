@@ -279,19 +279,9 @@ def build_services() -> tuple[ServiceSpec, ...]:
 
     # ── agent-runner-only services ──────────────────────────────────────────
     # The agent-runner capability owns everything that only makes sense next to
-    # running agents: the inbound ops server the gateway dials, the restarter that
-    # respawns crashed agent panes (exactly one, on the runner — two would race on
-    # the host's agents), the runner's own watchdog, and the shared headed browser.
+    # running agents: the inbound ops server, one agent host, the runner's
+    # watchdog, and the shared headed browser.
     agent_runner_services = (
-        ServiceSpec(
-            session="restarter",
-            cmd=".venv/bin/python -m services.restarter.daemon",
-            capabilities=_AGENT_RUNNER,
-            requires_db=True,  # assert_schema_current at boot; every controller scans the DB
-            curl_url=_hz("restarter"),
-            identity_probe=daemon_identity("restarter", settings.services.restarter_pidfile),
-            healthcheck_module="services.healthchecks.restarter",
-        ),
         # page-server: supervises page servers per agent_pages row (R3 door 3).
         # One per runner — it spawns/kills the detached page server processes
         # for rows whose host is this host.
@@ -313,12 +303,7 @@ def build_services() -> tuple[ServiceSpec, ...]:
             pidfile=settings.services.agent_runner_watchdog_pidfile,
             healthcheck_module=None,
         ),
-        # agent-host: the hosted agent-runner — one daemon running every local
-        # agent's turns as asyncio tasks instead of one OS process per agent
-        # (future/infra/agent-runner-as-server.md). Gated OFF unless
-        # AVA_RUNNER_MODE is `hosted`, which is not the default, so this service
-        # is absent from every cluster's roster until one opts in. One per
-        # runner, like the restarter: two would race on the same agents' turns.
+        # One agent host per runner owns every local agent's turn tasks.
         ServiceSpec(
             session="agent-host",
             cmd=".venv/bin/python -m services.agent_host.daemon",

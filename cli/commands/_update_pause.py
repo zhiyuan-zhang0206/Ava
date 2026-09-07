@@ -1,18 +1,8 @@
-"""
-Phase A of the gateway `ava cluster update` — pause every restarter.
+"""Phase A drains every runner's hosted agents before any schema migration.
 
-Split out of `cli/commands/update.py` to keep that module within the file-size
-budget. `_stop_the_world` is the pause + quiesce composition that precedes the
-schema migration: pause the LOCAL restarter first (so no agent exiting from
-here on can be respawned on old code), fan out `cluster/stop` to every remote
-agent-runner's ops server (Phase A), then quiesce all agents. A Phase-A 5xx
-aborts with nothing migrated (the orchestration's `finally` resumes anyone
-paused); `_run_phase_a` returns the set of hosts that ACKED — the answer to
-"which hosts did this rollout put into a transition?".
-
-Re-imported by `cli/commands/update.py` (and re-exported through `cli.commands`)
-so `cli.commands(.update)._run_phase_a` / `._stop_the_world` keep resolving.
-
+The local and remote acknowledgements use one deploy generation. Each proves
+ordinary restart application, final checkpoint flush and actual continuation
+completion. Any missing acknowledgement aborts while dependency APIs remain up.
 """
 
 from __future__ import annotations
@@ -47,15 +37,19 @@ def _run_phase_a(
         print("\n→ Phase A: no agent-runner registered, single-host path")
         return set()
     print(f"\n→ Phase A: pause {len(agent_runners)} agent-runner(s)")
+    from shared.config import settings
+
     results = _ns._fan_out(
         agent_runners,
         "/api/cluster/stop",
-        _PHASE_A_TIMEOUT_S,
+        max(_PHASE_A_TIMEOUT_S, settings.gateway.update_quiesce_timeout_seconds + 10),
         deploy_capability,
     )
-    if _print_fan_out_results("pause", results):
+    fatal = _print_fan_out_results("pause", results)
+    acknowledged = {name for name, status, _ in results if status == "ok"}
+    if fatal or acknowledged != {name for name, _ in agent_runners}:
         print(
-            "\n✗ Phase A got a 5xx, aborting (schema untouched, cluster can still recover)",
+            "\n✗ Phase A did not confirm every runner drained, aborting (schema untouched, cluster can still recover)",
             file=sys.stderr,
         )
         return None
@@ -68,52 +62,37 @@ def _stop_the_world(
     mode: str = "smooth",
     deploy_capability: ClusterOpPayload,
 ) -> tuple[set[str] | None, bool]:
-    """Pause every restarter (local + remote) and quiesce all agents — the
-    stop-the-world that precedes the schema migration.
+    """Drain every participating unit before allowing schema migration.
 
-    Returns (acked_names, all_quiesced): the names Phase A acked — or None when
-    Phase A hit a 5xx and the rollout must abort (nothing has migrated yet; the
-    caller's compensating `finally` resumes anyone paused) — plus whether every
-    agent drained within the mode's quiesce window. `all_quiesced=False` means
-    stragglers stayed live (long execs / wedged processes) and the rollout must
-    force-reap them on every host.
+    Every acknowledgement includes actual flush and hosted continuation exit. Failure
+    aborts; no timeout is converted to force authorization.
     """
     import cli.commands as _ns
     from ops.cluster import pause_local_cluster
 
-    # 1) Pause the local restarter FIRST (Phase A only covers remote
-    # agent-runners; single-box and the gateway-with-agent-runner case must
-    # explicitly pause the local restarter too). Before Phase A, not after:
-    # any agent that exits during Phase A's fan-out (which blocks up to
-    # _PHASE_A_TIMEOUT_S per unreachable host — 10s bit the 2026-07-13
-    # rollout) would otherwise be respawned on old code by the
-    # still-running local restarter within its 1s poll. The compensating
-    # finally unpauses on every exit path, so pausing early adds no strand
-    # risk.
-    # 1b) Phase A: fan-out cluster/stop. None = a 5xx; abort (the finally resumes
-    #     every host we may have paused). Otherwise the set of hosts that acked.
-    #
-    # Both halves are one telemetry stage: the brief's 368s breakdown had Phase A
-    # and the quiesce drain fused into one number, and they answer different
-    # questions (fan-out latency vs agents' exit latency), so the pause is timed
-    # here and the drain gets its own stage below.
+    # Bind the local drain to the same generation as the fan-out (whose roster
+    # can include this combined gateway/runner unit).
     with _stage_telemetry("phase_a_pause"):
+        from datetime import datetime
+
+        from shared import pause_owner
+
+        if (
+            "deploy_holder" not in deploy_capability
+            or "deploy_acquired_at" not in deploy_capability
+        ):
+            raise ValueError("cluster drain requires the validated deploy generation")
+        pause_owner.mark_paused(
+            deploy_capability["deploy_holder"],
+            datetime.fromisoformat(deploy_capability["deploy_acquired_at"]),
+        )
         pause_local_cluster()
         paused_names = _run_phase_a(agent_runners, deploy_capability=deploy_capability)
     if paused_names is None:
         return None, False
 
-    # 1c) Quiesce all agents before the migration. Every restarter is now
-    # paused (local above, remote in Phase A), so signalling each agent to
-    # restart takes it down and keeps it down — no old-code agent writes the
-    # central DB while the local update migrates the schema. Phase B brings
-    # each host back on new code, whose restarter respawns the quiesced
-    # agents. The wait is bounded per mode: smooth waits the configured
-    # AVA_UPDATE_QUIESCE_TIMEOUT_SECONDS window (default 10s — agents idle or
-    # between turns exit at their turn boundary; mid-exec agents are cut
-    # short), force waits only for idle agents to drain — either way a
-    # timeout means stragglers and the rollout force-reaps them everywhere.
-    print("\n→ quiesce all agents before migration (stop-the-world)")
+    # Each remote acknowledgement includes final flush and continuation exit.
+    # Re-verify the local hold before any source/schema change.
     from cli.commands import update as _up_mod
 
     with _stage_telemetry("quiesce_drain"):

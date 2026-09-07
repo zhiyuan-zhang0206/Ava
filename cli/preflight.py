@@ -261,3 +261,20 @@ def require_installed_home() -> int | None:
         )
         return 1
     return None
+
+
+def unit_already_stopped() -> bool:
+    """Allow an idempotent cold stop without fetching the offline gateway."""
+    from shared.dotenv_boot import resolve_ava_home
+    from shared.pause_owner import read_for_home
+
+    home, anchored = resolve_ava_home()
+    if not anchored:
+        return False
+    current = read_for_home(home)
+    return (
+        current.status == "paused"
+        and current.maintenance is not None
+        and current.maintenance.phase == "stopped"
+        and not current.maintenance.failures
+    )

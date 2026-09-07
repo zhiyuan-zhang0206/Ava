@@ -84,7 +84,7 @@ def cluster_stop_op(
     deploy_holder: str,
     deploy_acquired_at: datetime,
 ) -> dict[str, object]:
-    """Local pause — posture row -> paused + kill restarter."""
+    """Drain hosted continuations under the exact executing deploy generation."""
     with ui_update_state.lifecycle_lock():
         # Phase A is valid only while an executing rollout/restart owns the
         # cluster lease. Recheck under the same local mutex recovery uses: if a
@@ -473,9 +473,8 @@ def cluster_update_op(
     catches up to origin/main. `restart_only=True` (the agent-runner leg of a cluster
     restart) bounces services on the current code with no checkout / uv sync.
     `mode` sets the agent-drain policy (smooth/force; Phase B passes 'none' — the
-    gateway-side quiesce already drained the fleet) and `force_reap` is the
-    quiesce-timeout backstop that kills a host's still-live agents before the
-    bounce (Phase B's stragglers).
+    gateway-side quiesce already drained the fleet). The legacy `force_reap`
+    argument carries an explicit interruption request, never timeout escalation.
 
     `spawn_update` validates before its own pause, then publishes a host-local
     handoff across pause -> DB lease. It is the only layer with enough evidence
@@ -685,8 +684,8 @@ def cluster_fetch_op() -> dict[str, object]:
     that confirms this host can reach the remote and has the objects needed for
     the upcoming rollout's pinned target.
 
-    Non-disruptive: does NOT pause the restarter or write the paused posture,
-    or restart any service. The caller (the gateway's rollout orchestration)
+    Non-disruptive: does not pause agent admission, change posture or restart
+    any service. The caller (the gateway's rollout orchestration)
     fans this out to every agent-runner *before* Phase A so a fetch failure
     aborts the rollout with nothing paused.
 

@@ -29,7 +29,7 @@ These four plans co-locate with the code they plan for, per the 2026-08-12 doc r
 
 | File | What's left |
 |------|------|
-| [Agent-runner as server](infra/agent-runner-as-server.md) | **Phase 1 built** (dispatcher, turn tasks, hosted-aware lifecycle) behind `AVA_RUNNER_MODE`; hibernation deleted; per-agent lease/idle-wait machinery remains until after the hosted soak |
+| [Agent-runner as server](infra/agent-runner-as-server.md) | Implemented as the sole runtime; remaining question is host fault isolation |
 | [Vendored data-plane binaries](infra/vendored-data-plane-binaries.md) | **Redis leg only** — Postgres vendoring landed (`shared/runtime_binaries.py`), redis still comes from brew/apt. Also the single home for slice 3 of the doc below |
 | [Embedded per-cluster data plane](infra/embedded-per-cluster-data-plane.md) | Design record; slices 1+2 done. Only the redis half of slice 3 remains, tracked in the row above |
 | [Auth / TLS design](infra/auth-tls-design.md) | **Phase 3 (TLS) only** — Phase 1 (fail-closed gateway auth) and Phase 2 (cookie session auth) are deployed |

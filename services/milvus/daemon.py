@@ -2,7 +2,7 @@
 
 `os.execvp` replaces the current process with `milvus-lite server
 --data-dir ... --port ...`. Same entry pattern as other ava CLI daemons
-(gateway / restarter / labeler /
+(gateway / agent-host / labeler /
 memory_indexer): `python -m services.<name>.daemon`, unifying the session
 session startup logic.
 
