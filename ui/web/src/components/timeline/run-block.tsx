@@ -201,6 +201,8 @@ export function TurnBlock({
         className={cn(
           HEADER_CLS,
           "items-start",
+          // top-11 (44px) must match BAR_HEIGHT_PX / BAR_HEIGHT_CLASS ("h-11") from @/lib/layout
+          // so the sticky header sits flush beneath the floating HeaderBar.
           expanded && "sticky top-11 z-10",
           expanded && isStuck
             ? "bg-background/95 backdrop-blur-md shadow-xs border-b border-border/60 transition-[background-color,box-shadow,border-color] duration-150 ease-out motion-reduce:transition-none"
