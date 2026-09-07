@@ -25,6 +25,7 @@ from shared.cluster import (
     record_pgbouncer_port,
     record_postgres_port,
     record_redis_port,
+    redis_identity,
 )
 from shared.cluster.derive import REDIS_PASSWORD_ENV
 from shared.config import settings
@@ -249,7 +250,7 @@ def _ensure_data_plane_admin_secrets_unlocked(*, allow_legacy_upgrade: bool) -> 
         client.execute_command("CONFIG", "REWRITE")  # pyright: ignore[reportUnknownMemberType]
 
     ensure_cluster_redis_acl(
-        identity,
+        redis_identity(),
         redis_admin_url=f"redis://default:{redis_admin_password}@{redis_host}:{redis_port}",
         runtime_password=redis_password,
         channel_prefix=settings.data_plane.events_channel.removesuffix(":events"),

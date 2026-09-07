@@ -190,22 +190,25 @@ def _ensure_redis_url_identity_step(ctx: ConvergeCtx) -> None:
     `default` admin user and the gateway watchdog's redis-acl healthcheck (which
     reads the identity from the URL as data) had nothing to re-affirm. The
     identity is read from the cluster's own db_url (`identity_from_url` —
-    names-as-data; db/role/ACL share one identifier), falling back to the fixed
+    names-as-data for this legacy backfill), falling back to the fixed
     birth identifier only when db_url carries no username either. Safe to write
     mid-flight: the file-only Redis runtime password stays inside the URL, and
     `ava start` re-affirms the ACL user under this same identity
-    (ensure_cluster_instance takes it from db_identity) before daemons dial with
+    (ensure_cluster_instance takes it from redis_identity) before daemons dial with
     the new URL.
 
     The URL is read from the .env FILE, never from settings — the in-memory dial
     value is host-rewritten (loopback self-dial), and persisting that would
     clobber the reachable host. Idempotent: a URL already carrying a username is
-    left byte-identical.
+    left byte-identical. A repaired URL is adopted by the same start process;
+    no-auth homes receive a named `nopass` identity without minting a password.
     """
     from urllib.parse import urlsplit
 
     from shared.cluster import DATA_PLANE_IDENTITY, identity_from_url, redis_password_from_env
+    from shared.config.data_plane import DataPlaneSettings
     from shared.envfile import upsert_env
+    from shared.process_env import update_process_env
     from shared.url_secret import url_with_userinfo
 
     env_path = ctx.ava_home / ".env"
@@ -219,17 +222,21 @@ def _ensure_redis_url_identity_step(ctx: ConvergeCtx) -> None:
     if not raw or urlsplit(raw).username:
         return
     runtime_password = redis_password_from_env() or settings.data_plane.cluster_secret
-    if not runtime_password:
-        return  # no-secret test/unprovisioned homes: userinfo cannot be minted
     try:
         identity = identity_from_url(settings.data_plane.db_url)
     except ValueError:
         identity = DATA_PLANE_IDENTITY
+    rewritten = url_with_userinfo(raw, identity, runtime_password)
     upsert_env(
         env_path,
-        {"AVA_REDIS_URL": url_with_userinfo(raw, identity, runtime_password)},
+        {"AVA_REDIS_URL": rewritten},
         audit_site="converge_redis_identity",
     )
+    # The same start process provisions the ACL next. Adopt the committed URL
+    # now; normal settings validation retains the self-dial loopback rewrite.
+    update_process_env({"AVA_REDIS_URL": rewritten})
+    refreshed = DataPlaneSettings()  # pyright: ignore[reportCallIssue] — committed aliases supply config
+    settings.data_plane.redis_url = refreshed.redis_url
     print(f"  · backfilled AVA_REDIS_URL username {identity!r} (legacy URL carried none)")
 
 

@@ -41,13 +41,13 @@ def _rec() -> cluster.ClusterRecord:
 
 def test_gateway_data_plane_brings_up_own_instance(monkeypatch: pytest.MonkeyPatch) -> None:
     """A born cluster → the per-cluster instance on the record's exact pg/redis
-    ports, with the data-plane identity read from this cluster's own db_url
-    (names-as-data)."""
+    ports, with each data-plane identity read from its own URL."""
     monkeypatch.setattr(cluster, "get_record", lambda _home: _rec())  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(settings.data_plane, "cluster_secret", "sek")
     monkeypatch.setattr(
         settings.data_plane, "db_url", "postgresql://ava_main:sek@127.0.0.1:5433/ava_main"
     )
+    monkeypatch.setattr(settings.data_plane, "redis_url", "redis://ava:sek@127.0.0.1:6380/0")
     own_calls: list[dict[str, object]] = []
     monkeypatch.setattr(_ci, "ensure_cluster_instance", lambda **kw: own_calls.append(kw) or 0)  # pyright: ignore[reportUnknownArgumentType]
 
@@ -65,6 +65,7 @@ def test_gateway_data_plane_brings_up_own_instance(monkeypatch: pytest.MonkeyPat
             "redis_password": "sek",
             "pgbouncer_port": 6433,
             "identity": "ava_main",
+            "redis_user": "ava",
         }
     ]
 
