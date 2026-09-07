@@ -4,25 +4,38 @@
 // view renders the whole weighted relationship graph: spawn/fork lineage as
 // structural springs, plus aggregated agent-to-agent message traffic as weaker
 // springs whose pull (and on-screen opacity) scales with the edge weight. Node
-// size encodes cumulative token consumption (log scale). Degree-0 (orphan)
-// nodes float naturally with the same physics — no special arrangement
-// (user ruling 2026-08-06: the isolate grid was removed).
+// size encodes cumulative token consumption (log scale). When intermediate
+// parent agents terminate, live descendants re-parent to their nearest live
+// ancestor so lineage springs remain unbroken (matching agent-tree semantics).
 //
 // Rendering / interaction / parameters live in the shared ForceGraph (see
 // force-graph.tsx) — this module is a thin wrapper: it fetches the fleet graph,
 // adapts it to the shared node/edge model, and adds the time-window selector +
 // empty states. The Task Graph renders the same canvas with square nodes.
+//
+// Lineage re-parenting needs the terminated roster: the graph payload is
+// live-only (the backend excludes terminated nodes and edges), so the parent
+// rows of terminated intermediates must come from TERMINATED_AGENTS_QUERY_KEY.
+// Home seeds that cache through useAgents, but a direct /fleet session never
+// mounts it — this view therefore mounts both roster queries itself (same
+// keys, same cache: no duplicate fetch, and the global fold keeps them fresh).
 
 "use client";
 
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { WindowSelect } from "@/components/window-select";
 import { STATS_WINDOW_LABELS, STATS_WINDOWS, type StatsWindowHours } from "@/lib/sidebar";
 import type { PublicAgentStatus } from "@/lib/types";
 import { useFleetGraph } from "@/lib/use-fleet-graph";
+import {
+  AGENTS_QUERY_KEY,
+  TERMINATED_AGENTS_QUERY_KEY,
+  fetchAgentRoster,
+} from "@/lib/use-agents";
 
 import {
   FORCE_DEFAULTS,
@@ -41,13 +54,10 @@ import { cn } from "@/lib/utils";
 // expressed as text-* so it resolves for SVG fill, incl. the theme `destructive`).
 // Raw lifecycle transitions are projected at graph ingest, so the canvas only
 // accepts the same three public states as the sidebar.
-const OFFLINE_STATUS = "offline";
-type GraphDisplayStatus = PublicAgentStatus | typeof OFFLINE_STATUS;
-const STATUS_TEXT: Record<GraphDisplayStatus, string> = {
+const STATUS_TEXT: Record<PublicAgentStatus, string> = {
   running: "text-sky-500",
   idling: "text-emerald-500",
   terminated: "text-destructive",
-  offline: "text-muted-foreground",
 };
 const STATUS_PULSE: Record<PublicAgentStatus, boolean> = {
   running: false,
@@ -62,23 +72,54 @@ const DECAY_LAMBDA = 0.5;
 // keeps its own key so the two graphs' tunings stay independent.
 const FORCE_PARAMS_KEY = "display.graph_force_params";
 
-type SnapshotAge =
-  | { unit: "now" }
-  | { unit: "minutes"; count: number }
-  | { unit: "hours"; count: number }
-  | { unit: "days"; count: number };
+function parentIdOf(spawner: string): number | null {
+  if (!spawner.startsWith("agent:")) return null;
+  const n = Number(spawner.slice("agent:".length));
+  return Number.isFinite(n) ? n : null;
+}
 
-function formatSnapshotAge(snapshotAt: string): SnapshotAge | null {
-  const snapshotMs = Date.parse(snapshotAt);
-  if (Number.isNaN(snapshotMs)) return null;
+interface LineageAgentInfo {
+  readonly spawner: string;
+  readonly fork_source_agent_id?: number | null;
+}
 
-  const minutes = Math.max(0, Math.floor((Date.now() - snapshotMs) / 60_000));
-  if (minutes < 1) return { unit: "now" };
-  if (minutes < 60) return { unit: "minutes", count: minutes };
+/**
+ * Walk up the lineage ancestor chain to find the nearest ancestor that is still
+ * live in the graph view. Mirrors the recursive re-parenting in agent-tree.ts.
+ */
+function findNearestLiveAncestor(
+  agentId: number,
+  byId: Map<number, LineageAgentInfo>,
+  liveIds: Set<number>,
+): { ancestorId: number | null; isFork: boolean } {
+  let currId = agentId;
+  let directIsFork = false;
+  const visited = new Set<number>();
 
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return { unit: "hours", count: hours };
-  return { unit: "days", count: Math.floor(hours / 24) };
+  for (;;) {
+    if (visited.has(currId)) break;
+    visited.add(currId);
+
+    const node = byId.get(currId);
+    if (!node) break;
+
+    const parentId = node.fork_source_agent_id ?? parentIdOf(node.spawner);
+    const isFork = node.fork_source_agent_id != null;
+
+    if (currId === agentId) {
+      directIsFork = isFork;
+    }
+
+    if (parentId == null) break;
+
+    if (liveIds.has(parentId)) {
+      return { ancestorId: parentId, isFork: directIsFork };
+    }
+
+    currId = parentId;
+  }
+
+  return { ancestorId: null, isFork: directIsFork };
 }
 
 export function GraphView({
@@ -88,11 +129,16 @@ export function GraphView({
   selectedAgentId: number | null;
   onSelectAgent: (id: number | null) => void;
 }) {
-  const t = useTranslations("fleet.graph");
   const router = useRouter();
+  const queryClient = useQueryClient();
+  const t = useTranslations("fleet.graph");
+
+
+
   // Time window for node score + edge events (default 24h). Local to the graph
-  // view — independent of the sidebar's persisted stats window.
+  // view (not synced to user settings yet — rapid window hopping is common).
   const [windowHours, setWindowHours] = useState<StatsWindowHours>(24);
+
   // User-tunable force-layout knobs (DB-backed: display.graph_force_params).
   const { params: forceParams, setParams: setForceParams, reset: resetForceParams } =
     useForceParams(FORCE_PARAMS_KEY, FORCE_DEFAULTS);
@@ -103,54 +149,35 @@ export function GraphView({
   // surfaces stay consistent. The backend endpoint filters at the SQL layer
   // too (payload), but the ruling's filter ORDER is liveness before anything
   // else — the component re-filters so a backend leak can never paint a
-  // terminated node or its edges. A live node whose lineage partner has since
-  // terminated simply shows without that edge (no ghost nodes).
+  // terminated node or its edges.
   const { graph, loading, error } = useFleetGraph({
     hours: windowHours,
     decayLambda: DECAY_LAMBDA,
   });
-  const snapshotAge = graph.snapshot_at ? formatSnapshotAge(graph.snapshot_at) : null;
-  const snapshotAgeLabel =
-    snapshotAge?.unit === "now"
-      ? t("snapshotNow")
-      : snapshotAge?.unit === "minutes"
-        ? t("snapshotMinutes", { count: snapshotAge.count })
-        : snapshotAge?.unit === "hours"
-          ? t("snapshotHours", { count: snapshotAge.count })
-          : snapshotAge?.unit === "days"
-            ? t("snapshotDays", { count: snapshotAge.count })
-            : null;
-  const statusLabels = useMemo<Record<GraphDisplayStatus, string>>(
+
+  // Roster subscriptions for lineageById (see the module note). Subscribing —
+  // rather than a bare getQueryData read — guarantees the terminated cache is
+  // fetched on a direct /fleet load AND re-runs the lineage map when a roster
+  // lands or a lifecycle fold updates it.
+  const { data: liveRoster } = useQuery({
+    queryKey: AGENTS_QUERY_KEY,
+    queryFn: () => fetchAgentRoster(queryClient, "live"),
+    staleTime: Infinity,
+  });
+  const { data: terminatedRoster } = useQuery({
+    queryKey: TERMINATED_AGENTS_QUERY_KEY,
+    queryFn: () => fetchAgentRoster(queryClient, "terminated"),
+    staleTime: Infinity,
+  });
+
+  const statusLabels: Record<PublicAgentStatus, string> = useMemo(
     () => ({
       running: t("running"),
       idling: t("idling"),
       terminated: t("terminated"),
-      offline: t("offline"),
     }),
     [t],
   );
-
-  // A selected agent that was in the graph and then disappeared (transitioned to
-  // terminated) — clear the stale selection so the canvas and selection stay in sync.
-  // Agents selected from outside the graph (e.g. Task Graph) whose id is not in the
-  // node set are not cleared — they were never in the graph to begin with.
-  const prevGraphNodeIds = useRef<Set<number>>(new Set());
-  useEffect(() => {
-    // Track which agent ids have ever appeared in the graph nodes.
-    const currentIds = new Set(graph.nodes.map((n) => n.agent_id));
-    // Merge current ids into the accumulated set so we remember agents that
-    // were once in the graph but have since dropped out.
-    for (const id of currentIds) prevGraphNodeIds.current.add(id);
-    // Clear selection only when the selected agent was previously in the graph
-    // but is no longer there (it transitioned to terminated while selected).
-    if (
-      selectedAgentId != null &&
-      !currentIds.has(selectedAgentId) &&
-      prevGraphNodeIds.current.has(selectedAgentId)
-    ) {
-      onSelectAgent(null);
-    }
-  }, [graph.nodes, selectedAgentId, onSelectAgent]);
 
   // Liveness filter — see the note above; mirrors agent-sidebar/body.tsx.
   const liveNodes = useMemo(
@@ -162,46 +189,39 @@ export function GraphView({
     [liveNodes],
   );
 
+  // Lineage lookup map covering both live and terminated nodes to trace ancestors.
+  const lineageById = useMemo(() => {
+    const map = new Map<number, LineageAgentInfo>();
+    for (const a of liveRoster ?? []) {
+      map.set(a.agent_id, a);
+    }
+    for (const a of terminatedRoster ?? []) {
+      map.set(a.agent_id, a);
+    }
+    for (const n of graph.nodes) {
+      if (!map.has(n.agent_id)) {
+        map.set(n.agent_id, n);
+      }
+    }
+    return map;
+  }, [liveRoster, terminatedRoster, graph.nodes]);
+
   // Adapt the fleet graph to the shared node/edge model.
+  // User ruling 2026-09-07 21:02: Every live agent remains in the graph (children
+  // are never hidden). When intermediate parents terminate, their live descendants
+  // re-parent to the nearest live ancestor in the edges collection below.
   const nodes = useMemo<ForceGraphNode[]>(
     () =>
       liveNodes.map((n) => ({
         id: n.agent_id,
         label: n.label,
-        status: n.liveness_state === "offline" ? OFFLINE_STATUS : n.status,
+        status: n.status,
         score: n.node_score,
         pulse: STATUS_PULSE[n.status],
       })),
     [liveNodes],
   );
 
-  // Instant hover card — the shared canvas shows it the moment the cursor
-  // enters a node (replacing the delayed native <title>): identity, status
-  // and the activity score that drives node size.
-  const agentHoverCard = useCallback(
-    (node: ForceGraphNode) => (
-      <div className="w-52 rounded-lg border border-border bg-popover/95 p-3 shadow-xl backdrop-blur">
-        <p className="line-clamp-2 break-words text-xs font-semibold leading-snug text-popover-foreground">
-          {node.label ?? t("unlabeledAgent")}
-        </p>
-        <p className="mt-0.5 text-[10px] tabular-nums text-muted-foreground">
-          {t("agent", { id: node.id })}
-        </p>
-        <div className="mt-2 space-y-1 text-[11px]">
-          <p className={cn("items-center gap-1.5", FLEX)}>
-            <span
-              className={cn("size-2 rounded-full bg-current", STATUS_TEXT[node.status as GraphDisplayStatus])}
-            />
-            {statusLabels[node.status as GraphDisplayStatus]}
-          </p>
-          <p className="text-muted-foreground">
-            {t("activityScore", { score: Math.round(node.score).toLocaleString() })}
-          </p>
-        </div>
-      </div>
-    ),
-    [statusLabels, t],
-  );
   // The backend returns one edge per event kind (spawn / fork / resurrect /
   // message), and every non-message kind collapses to "lineage" here — so a
   // pair that fired several kinds would otherwise produce DUPLICATE React keys
@@ -213,12 +233,11 @@ export function GraphView({
   // if any member was a fork.
   const edges = useMemo<ForceGraphEdge[]>(() => {
     const byPair = new Map<string, ForceGraphEdge>();
+
+    // 1. Process telemetry/Loki edges between currently live nodes.
     for (const e of graph.edges) {
       const from = e.from_agent;
       const to = e.to_agent;
-      // Same liveness rule as the node filter: a line whose endpoint is not
-      // live cannot be drawn — drop it here so a backend leak can't paint a
-      // terminated node's edge either.
       if (!liveIds.has(from) || !liveIds.has(to)) continue;
       const key = e.event_type === "message" ? `m:${from}:${to}` : `l:${from}:${to}`;
       const existing = byPair.get(key);
@@ -240,8 +259,98 @@ export function GraphView({
         });
       }
     }
+
+    // 2. Nearest live ancestor re-parenting: ensure each live agent connects to
+    // its nearest live ancestor so that intermediate terminated nodes do not break
+    // lineage ties (matching tree semantics: A -> B(term) -> C => A -> C).
+    for (const node of liveNodes) {
+      const { ancestorId, isFork } = findNearestLiveAncestor(
+        node.agent_id,
+        lineageById,
+        liveIds,
+      );
+      if (ancestorId != null && liveIds.has(ancestorId)) {
+        const key = `l:${ancestorId}:${node.agent_id}`;
+        const existing = byPair.get(key);
+        if (!existing) {
+          byPair.set(key, {
+            from: ancestorId,
+            to: node.agent_id,
+            kind: "lineage",
+            dashed: isFork,
+            weight: 2.0,
+          });
+        } else {
+          byPair.set(key, {
+            from: ancestorId,
+            to: node.agent_id,
+            kind: existing.kind,
+            dashed: existing.dashed === true || isFork,
+            weight: Math.max(existing.weight, 2.0),
+          });
+        }
+      }
+    }
+
     return [...byPair.values()];
-  }, [graph.edges, liveIds]);
+  }, [graph.edges, liveNodes, liveIds, lineageById]);
+
+  // When the selected agent disappears from the graph (e.g. it was
+  // terminated) — clear the stale selection so the canvas and selection stay in sync.
+  useEffect(() => {
+    if (
+      selectedAgentId != null &&
+      !nodes.some((n) => n.id === selectedAgentId)
+    ) {
+      onSelectAgent(null);
+    }
+  }, [nodes, selectedAgentId, onSelectAgent]);
+
+  // Instant hover card — the shared canvas shows it the moment the cursor
+  // enters a node (replacing the delayed native <title>): identity, status
+  // and the activity score that drives node size.
+  const agentHoverCard = useCallback(
+    (node: ForceGraphNode) => (
+      <div className="w-52 rounded-lg border border-border bg-popover/95 p-3 shadow-xl backdrop-blur">
+        <p className="line-clamp-2 break-words text-xs font-semibold leading-snug text-popover-foreground">
+          {node.label ?? t("unlabeledAgent")}
+        </p>
+        <p className="mt-0.5 text-[10px] tabular-nums text-muted-foreground">
+          {t("agent", { id: node.id })}
+        </p>
+        <div className="mt-2 space-y-1 text-[11px]">
+          <p className={cn("items-center gap-1.5", FLEX)}>
+            <span
+              className={cn("size-2 rounded-full bg-current", STATUS_TEXT[node.status as PublicAgentStatus])}
+            />
+            {statusLabels[node.status as PublicAgentStatus]}
+          </p>
+          <p className="text-muted-foreground">
+            {t("activityScore", { score: `${(node.score / 1_000_000).toFixed(2)}M` })}
+          </p>
+        </div>
+      </div>
+    ),
+    [statusLabels, t],
+  );
+
+  // Stale age indicator — tick every 30s so "Xm ago" advances while the tab is open.
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNowMs(Date.now()), 30_000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const snapshotAge = graph.snapshot_at ? nowMs - Date.parse(graph.snapshot_at) : null;
+  const snapshotMinutes = snapshotAge != null ? Math.floor(snapshotAge / 60_000) : null;
+  const snapshotAgeLabel =
+    snapshotMinutes != null
+      ? snapshotMinutes < 1
+        ? t("snapshotNow")
+        : snapshotMinutes < 60
+          ? t("snapshotMinutes", { count: snapshotMinutes })
+          : t("snapshotHours", { count: Math.floor(snapshotMinutes / 60) })
+      : null;
 
   return (
     <div className={cn("relative h-full w-full", OVERFLOW_HIDDEN)}>
@@ -261,19 +370,18 @@ export function GraphView({
         legend={
           <div aria-label={t("legend")} className="space-y-1">
             <div className="grid grid-cols-2 gap-x-3 gap-y-0.5">
-              {([
-                "running",
-                "idling",
-                "terminated",
-                "offline",
-              ] as const).map((status) => (
+              {(
+                [
+                  "running",
+                  "idling",
+                ] as const
+              ).map((status) => (
                 <span key={status} className={cn("items-center gap-1.5", FLEX)}>
                   <span className={cn("size-2 rounded-full bg-current", STATUS_TEXT[status])} />
                   {statusLabels[status]}
                 </span>
               ))}
             </div>
-            <p>{t("sizeActivity", { window: "24h" })}</p>
           </div>
         }
         ariaLabel={t("ariaLabel")}
