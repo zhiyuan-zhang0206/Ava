@@ -3,6 +3,8 @@ exception taxonomy (transient / permanent / unknown). Sibling to
 test_provider_stop.py, which covers the terminal-reason classifier.
 """
 
+from collections.abc import Mapping
+
 import anthropic
 import httpx
 import openai
@@ -18,6 +20,26 @@ class _FakeStatusError(Exception):
         super().__init__(f"HTTP {status_code}")
         self.status_code = status_code
         self.body = body  # pyright: ignore[reportUnknownMemberType]
+
+
+class _FakeGoogleGenaiError(Exception):
+    """google.genai APIError shape: an int `.code` (HTTP status) + `.details`
+    response JSON (`{"error": {...}}`); no `.status_code`, no `.body`."""
+
+    def __init__(self, code: int, details: Mapping[str, object] | None = None) -> None:
+        super().__init__(f"{code} RESOURCE_EXHAUSTED. {details}")
+        self.code = code
+        self.details = details
+
+
+class _FakeGenaiWrapperError(Exception):
+    """langchain-google-genai `ChatGoogleGenerativeAIError` shape: a message-only
+    wrapper that chains the original google.genai error as its explicit
+    `__cause__` (attributes gone from the wrapper itself)."""
+
+    def __init__(self, message: str, cause: BaseException | None) -> None:
+        super().__init__(message)
+        self.__cause__ = cause
 
 
 # ───────────── permanent statuses ─────────────
@@ -299,6 +321,125 @@ def test_billing_is_independent_of_error_class() -> None:
     result = classify_error(exc)
     assert result.error_class is ErrorClass.TRANSIENT
     assert result.billing is True
+
+
+# ───────────── google.genai: `.code` status + `.details` body, read through the wrapper ─────────────
+
+# The exact response body of the 2026-09-07 incident (task #2610): google.genai
+# reports exhausted prepaid credits as HTTP 429 / gRPC RESOURCE_EXHAUSTED with
+# the reason ONLY in `message` — no `type`, and `code` is the int status.
+_GEMINI_PREPAY_DETAILS: Mapping[str, object] = {
+    "error": {
+        "code": 429,
+        "message": (
+            "Your prepayment credits are depleted. Please go to AI Studio at "
+            "https://ai.studio/projects to manage your project and billing. Learn more "
+            "at https://ai.google.dev/gemini-api/docs/billing#prepay. "
+        ),
+        "status": "RESOURCE_EXHAUSTED",
+    }
+}
+
+
+def test_google_genai_prepay_depletion_is_billing() -> None:
+    """The raw google.genai ClientError shape: `.code` is the HTTP status (no
+    `.status_code`), the body lives in `.details` (no `.body`), and the billing
+    reason is free-text prose. The classifier must read all three so the
+    first-occurrence billing alert fires — this is the 2026-09-07 incident
+    shape that previously logged billing=false / status=None / class=unknown."""
+    exc = _FakeGoogleGenaiError(429, _GEMINI_PREPAY_DETAILS)
+    result = classify_error(exc)
+    assert result.status == 429
+    assert result.error_class is ErrorClass.TRANSIENT
+    assert result.billing is True
+    # The int status `code` is not a body `error.code` string — it must not be
+    # reported as one (and the reported fields stay what the vendor said).
+    assert result.error_type is None
+    assert result.error_code is None
+
+
+def test_langchain_wrapper_reveals_chained_genai_billing() -> None:
+    """The exact crash shape of the 2026-09-07 incident (task #2610):
+    langchain-google-genai re-wraps the ClientError in a message-only
+    `ChatGoogleGenerativeAIError`, chaining the original as `__cause__`. The
+    classifier walks that explicit chain for status + body, so the wrapper
+    classifies as billing instead of UNKNOWN — while the reported `provider`
+    label stays the wrapper's package, unchanged from every past gemini event."""
+    cause = _FakeGoogleGenaiError(429, _GEMINI_PREPAY_DETAILS)
+    wrapper = _FakeGenaiWrapperError(
+        f"Error calling model 'gemini-3.7-flash' (RESOURCE_EXHAUSTED): {cause}", cause
+    )
+    result = classify_error(wrapper)
+    assert result.billing is True
+    assert result.status == 429
+    assert result.error_class is ErrorClass.TRANSIENT
+    # The `provider` label stays the top exception's package (the wrapper) —
+    # only the structured fields were read from the cause — so postmortems
+    # that already filter gemini events by provider keep matching.
+    assert result.provider == type(wrapper).__module__.split(".", 1)[0]
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        # Same API, same status name — rate limiting, not billing. Admitting
+        # these would page the operator on ordinary traffic.
+        "Quota exceeded for metric aiplatform.googleapis.com/generate_content_requests "
+        "per minute per user. Please retry later.",
+        "The model is overloaded. Please try again later.",
+        "429 RESOURCE_EXHAUSTED. Quota exceeded for metric requests per minute.",
+    ],
+)
+def test_google_genai_rate_limit_429_is_not_billing(message: str) -> None:
+    """The false-positive guard for the message arm: google.genai rate-limit
+    429s share the RESOURCE_EXHAUSTED status name, so only the prepayment
+    phrase — never the status — may flip the billing verdict."""
+    details = {"error": {"code": 429, "message": message, "status": "RESOURCE_EXHAUSTED"}}
+    result = classify_error(_FakeGoogleGenaiError(429, details))
+    assert result.error_class is ErrorClass.TRANSIENT
+    assert result.billing is False
+
+
+def test_prepay_phrase_without_status_is_not_billing() -> None:
+    """The message arm is gated on the 429 status: a phrase-only wrapper with
+    no chained status (nothing to prove this is Google's billing rejection)
+    must stay non-billing rather than page on a hunch."""
+    wrapper = _FakeGenaiWrapperError(
+        "Error calling model 'gemini-3.7-flash' (RESOURCE_EXHAUSTED): 429 "
+        "RESOURCE_EXHAUSTED. Your prepayment credits are depleted.",
+        None,
+    )
+    result = classify_error(wrapper)
+    assert result.status is None
+    assert result.error_class is ErrorClass.UNKNOWN
+    assert result.billing is False
+
+
+def test_google_genai_400_wrapper_classifies_permanent() -> None:
+    """Reading the chained `.code` restores status-driven classification for
+    gemini 4xx generally (they used to be UNKNOWN): a 400 invalid-argument is
+    deterministic within the turn, so the node fails fast instead of burning
+    the retry budget — same taxonomy every other provider already gets."""
+    cause = _FakeGoogleGenaiError(
+        400, {"error": {"message": "invalid argument", "status": "INVALID_ARGUMENT"}}
+    )
+    wrapper = _FakeGenaiWrapperError(
+        f"Error calling model 'gemini-3.7-flash' (INVALID_ARGUMENT): {cause}", cause
+    )
+    result = classify_error(wrapper)
+    assert result.status == 400
+    assert result.error_class is ErrorClass.PERMANENT
+    assert result.billing is False
+
+
+def test_google_genai_5xx_classifies_transient() -> None:
+    """google.genai server errors (raised raw, not wrapped) carry the 5xx as
+    `.code`; they classify TRANSIENT like every other provider's 5xx."""
+    exc = _FakeGoogleGenaiError(503, {"error": {"message": "unavailable", "status": "UNAVAILABLE"}})
+    result = classify_error(exc)
+    assert result.status == 503
+    assert result.error_class is ErrorClass.TRANSIENT
+    assert result.billing is False
 
 
 @pytest.mark.parametrize(
