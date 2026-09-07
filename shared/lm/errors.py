@@ -38,6 +38,7 @@ retry policy can clear, and it is what the billing/quota alert fires on.
 from __future__ import annotations
 
 import enum
+from collections.abc import Iterator
 from typing import Any, NamedTuple, cast
 
 import httpx
@@ -122,15 +123,17 @@ _CONTEXT_OVERFLOW_VOCABULARY: frozenset[str] = frozenset(
 # on the `llm_provider_error` event, so widening the match does not widen what
 # the reported `error_type` means for the providers that already say it there.
 #
-# What is still unverified: every entry below except the DeepSeek 402 path comes
-# from vendor documentation, not from a captured live 4xx. For DashScope matching
-# both fields removes one unknown and leaves one. Removed: WHICH field carries an
-# arrears reason no longer decides whether the alert can fire. Remaining: the
-# SPELLING. Alibaba documents its arrears codes in a single table that never says
-# which entries the OpenAI-compatible endpoint re-spells, and its compatible-mode
-# page publishes exactly one code — `invalid_api_key`, the body captured above.
-# So the documented PascalCase is what goes in; the case-fold absorbs a casing
-# difference, but a different WORD on the wire would still miss.
+# What is still unverified: every entry below except the DeepSeek 402 path and
+# the Google message phrase (both captured live — the latter 2026-09-07, task
+# #2610) comes from vendor documentation, not from a captured live 4xx. For
+# DashScope matching both fields removes one unknown and leaves one. Removed:
+# WHICH field carries an arrears reason no longer decides whether the alert can
+# fire. Remaining: the SPELLING. Alibaba documents its arrears codes in a
+# single table that never says which entries the OpenAI-compatible endpoint
+# re-spells, and its compatible-mode page publishes exactly one code —
+# `invalid_api_key`, the body captured above. So the documented PascalCase is
+# what goes in; the case-fold absorbs a casing difference, but a different WORD
+# on the wire would still miss.
 #
 # A wrong or missing string costs a MISSED alert, never a false one — but silence
 # here is indistinguishable from health: an unmatched string means nothing is
@@ -168,6 +171,25 @@ _BILLING_ERROR_VOCABULARY: frozenset[str] = frozenset(
     )
 )
 
+# The one message-only billing vocabulary — Google AI Studio prepaid credits.
+# google.genai reports the exhaustion as HTTP 429 with the gRPC status name
+# RESOURCE_EXHAUSTED and the reason ONLY in `message` (no `type`/`code` fields
+# to match): captured live 2026-09-07 (task #2610) when six gemini workers
+# crash-looped on `Your prepayment credits are depleted` with no billing alert
+# — the classifier saw no 402, no type, no code. Rate-limit 429s on the same
+# API share the status name, so the message phrase — gated on 429 in the
+# `billing` predicate — is the discriminator, never the status name alone.
+# Unlike the exact-match code vocabulary above, message prose is matched as a
+# case-folded SUBSTRING. langchain-google-genai re-wraps the error in a
+# message-only exception, but the original (`.code` / `.details`) survives as
+# its `__cause__`, which the field readers walk (see `_cause_chain`).
+_BILLING_MESSAGE_VOCABULARY: frozenset[str] = frozenset(
+    entry.lower()
+    for entry in (
+        "prepayment credits are depleted",  # Google — prepaid billing credits exhausted
+    )
+)
+
 
 def _is_transport_error(exc: BaseException) -> bool:
     """True for transport-layer failures (no HTTP status).
@@ -194,28 +216,40 @@ class ErrorClassification(NamedTuple):
     error_type: str | None  # provider body `error.type` (e.g. engine_overloaded_error), else None
     error_code: str | None  # provider body `error.code` — read by `billing` only, never logged
     error_message: str | None = (
-        None  # provider body `error.message` — read by `context_overflow` only
+        None  # provider body `error.message` — read by `context_overflow` and the billing message vocabulary
     )
 
     @property
     def billing(self) -> bool:
         """True when the provider refused because the key is out of credit or
-        its quota is exhausted (`_BILLING_STATUS` / `_BILLING_ERROR_VOCABULARY`).
+        its quota is exhausted (`_BILLING_STATUS` / `_BILLING_ERROR_VOCABULARY`
+        / `_BILLING_MESSAGE_VOCABULARY`).
 
         A derived view, not a field: it is a reading of the same
-        (status, error_type, error_code) the classifier already carries, so it
-        cannot drift out of sync with them. Both body fields are matched — not
-        `code` as a fallback for an absent `type`, which would never reach the
-        vendor that needs it (see the vocabulary comment). Deliberately
-        independent of `error_class` — an out-of-credit key arrives as a
-        PERMANENT 402 from one vendor and a TRANSIENT 429 from another, and the
-        operator has to top the key up either way.
+        (status, error_type, error_code, error_message) the classifier already
+        carries, so it cannot drift out of sync with them. The body `type` /
+        `code` fields are matched — not `code` as a fallback for an absent
+        `type`, which would never reach the vendor that needs it (see the
+        vocabulary comment) — and the one provider that says the reason only
+        in free-text prose (Google prepaid credits, a 429) is matched by
+        phrase against `error_message`, gated on the 429 status so a
+        rate-limit rejection quoting the same words cannot fire the
+        first-occurrence pager. Deliberately independent of `error_class` —
+        an out-of-credit key arrives as a PERMANENT 402 from one vendor and a
+        TRANSIENT 429 from another, and the operator has to top the key up
+        either way.
         """
         if self.status == _BILLING_STATUS:
             return True
-        return any(
+        if any(
             field is not None and field.lower() in _BILLING_ERROR_VOCABULARY
             for field in (self.error_type, self.error_code)
+        ):
+            return True
+        return (
+            self.status == 429
+            and self.error_message is not None
+            and any(v in self.error_message.lower() for v in _BILLING_MESSAGE_VOCABULARY)
         )
 
     @property
@@ -257,15 +291,52 @@ def _provider_of(exc: BaseException) -> str:
     return type(exc).__module__.split(".", 1)[0]
 
 
+def _cause_chain(exc: BaseException) -> Iterator[BaseException]:
+    """`exc` followed by its explicit `raise ... from ...` causes.
+
+    langchain-google-genai re-wraps google.genai client errors in a
+    message-only `ChatGoogleGenerativeAIError` — attributes gone — but chains
+    the original SDK error (`.code` HTTP status, `.details` body) as
+    `__cause__`. Walking the chain lets the duck-typed field readers below
+    classify what actually failed through a message-only wrapper. Only
+    `__cause__` is walked, never `__context__` (an unrelated error raised
+    while handling another); the walk is cycle-guarded. Falls back to `exc`
+    alone when nothing is chained — no worse than before.
+    """
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        yield current
+        current = current.__cause__
+
+
 def _status_of(exc: BaseException) -> int | None:
     """The provider SDK's int HTTP `status_code`, or None.
 
     Duck-typed (not an `isinstance` on `APIStatusError`) so a wrapper that
     re-exposes `status_code` still classifies, and one that hides it falls
-    through to transport / UNKNOWN — no worse than before.
+    through to transport / UNKNOWN — no worse than before. Walked along
+    `_cause_chain` so a message-only wrapper (langchain-google-genai) still
+    yields the status of the SDK error it re-raises from.
+
+    The google.genai family carries the HTTP status as an int `.code` rather
+    than `.status_code`, always beside its `.details` response body and/or its
+    gRPC-style `.status` name (raw SDK errors under the `google` module, plus
+    the langchain-google-genai wrappers that subclass them) — so `.code` is
+    read only in that shape, never for an unrelated int `.code` on some other
+    exception.
     """
-    status = getattr(exc, "status_code", None)
-    return status if isinstance(status, int) else None
+    for candidate in _cause_chain(exc):
+        status = getattr(candidate, "status_code", None)
+        if isinstance(status, int):
+            return status
+        code = getattr(candidate, "code", None)
+        if isinstance(code, int) and (
+            hasattr(candidate, "details") or hasattr(candidate, "status")
+        ):
+            return code
+    return None
 
 
 def _error_field_of(exc: BaseException, key: str) -> str | None:
@@ -276,15 +347,25 @@ def _error_field_of(exc: BaseException, key: str) -> str | None:
     one) the specific reason. Returns None when `body` is absent / not a dict,
     `error` is missing / not a dict, or the field is missing / not a non-empty
     string.
+
+    Two fallbacks, both walked along `_cause_chain` (a message-only wrapper
+    hides the SDK error it re-raises from, so the chain supplies the body):
+    the body attribute is `.body` on the openai/anthropic families and
+    `.details` on the google.genai family (same ``{"error": ...}`` shape,
+    different attribute name — google.genai's `details` is the response JSON).
     """
-    body = getattr(exc, "body", None)
-    if not isinstance(body, dict):
-        return None
-    error = cast("dict[str, Any]", body).get("error")
-    if not isinstance(error, dict):
-        return None
-    value = cast("dict[str, Any]", error).get(key)
-    return value if isinstance(value, str) and value else None
+    for candidate in _cause_chain(exc):
+        for attr in ("body", "details"):
+            body = getattr(candidate, attr, None)
+            if not isinstance(body, dict):
+                continue
+            error = cast("dict[str, Any]", body).get("error")
+            if not isinstance(error, dict):
+                continue
+            value = cast("dict[str, Any]", error).get(key)
+            if isinstance(value, str) and value:
+                return value
+    return None
 
 
 def classify_error(exc: BaseException) -> ErrorClassification:
