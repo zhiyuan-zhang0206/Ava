@@ -17,7 +17,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { FleetGraph, FleetGraphEdge, FleetGraphNode } from "@/lib/types";
+import type { AgentRow, FleetGraph, FleetGraphEdge, FleetGraphNode } from "@/lib/types";
 import type { FleetGraphResult } from "@/lib/use-fleet-graph";
 
 import { resetMockSettings } from "@/test-support/user-settings-mock";
@@ -37,6 +37,20 @@ const useFleetGraph = vi.fn<() => FleetGraphResult>();
 vi.mock("@/lib/use-fleet-graph", () => ({
   useFleetGraph: () => useFleetGraph(),
 }));
+
+// GraphView mounts the same roster queries as home's useAgents — the
+// TERMINATED_AGENTS_QUERY_KEY fetch is the data path under test (a direct
+// /fleet load never mounts useAgents). The fetcher is observable; tests seed
+// the query-client caches with the production data shape instead of letting
+// the graph payload carry terminated rows (which production never does).
+const { fetchAgentRoster } = vi.hoisted(() => ({ fetchAgentRoster: vi.fn() }));
+vi.mock("@/lib/use-agents", () => ({
+  AGENTS_QUERY_KEY: ["agents", "live"],
+  TERMINATED_AGENTS_QUERY_KEY: ["agents", "terminated"],
+  fetchAgentRoster,
+}));
+
+import { AGENTS_QUERY_KEY, TERMINATED_AGENTS_QUERY_KEY } from "@/lib/use-agents";
 
 function node(agent_id: number, over: Partial<FleetGraphNode> = {}): FleetGraphNode {
   return {
@@ -71,10 +85,41 @@ function edge(
 
 // A graph with: a central node (#1) wired by a spawn + a fork + several message
 // edges (so every edge style paints), and an idling node (#2).
-function renderGraph(ui: React.ReactElement) {
+function rosterRow(agent_id: number, over: Partial<AgentRow> = {}): AgentRow {
+  return {
+    agent_id,
+    spawner: "user",
+    fork_source_agent_id: null,
+    status: "terminated",
+    pid: null,
+    spawned_at: "2026-06-17T00:00:00Z",
+    started_at: null,
+    last_active_at: "2026-06-17T00:00:00Z",
+    last_inbound_at: "2026-06-17T00:00:00Z",
+    label: null,
+    machine: "test",
+    supports_vision: false,
+    liveness_state: "online",
+    notices_awaiting_response: [],
+    unread_notice_count: 0,
+    heartbeat_paused_until: null,
+    ...over,
+  };
+}
+
+function renderGraph(
+  ui: React.ReactElement,
+  seed?: { live?: AgentRow[]; terminated?: AgentRow[] },
+) {
   const qc = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
+  // Roster data reaches lineageById through the query cache (production
+  // shape) — never through graph.nodes, which is live-only. The default
+  // empty seeds stop the mounted roster queries from fetching in tests that
+  // don't exercise lineage; the fetch itself is asserted separately.
+  qc.setQueryData<AgentRow[]>(AGENTS_QUERY_KEY, seed?.live ?? []);
+  qc.setQueryData<AgentRow[]>(TERMINATED_AGENTS_QUERY_KEY, seed?.terminated ?? []);
   return render(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>);
 }
 
@@ -135,6 +180,7 @@ function ok(
 beforeEach(() => {
   push.mockReset();
   useFleetGraph.mockReset();
+  fetchAgentRoster.mockReset();
   resetMockSettings();
 });
 
@@ -384,22 +430,25 @@ describe("GraphView", () => {
   it("re-parents live descendants to their nearest live ancestor when intermediate parents terminate (user ruling 2026-09-07)", async () => {
     // A(1, live) -> B(2, terminated) -> C(3, live)
     // C is NOT dropped; its lineage edge connects directly to nearest live ancestor A.
+    //
+    // Production data shape: the graph payload is live-only, so the
+    // terminated intermediate B is NOT a graph node — it arrives through the
+    // TERMINATED_AGENTS_QUERY_KEY cache (the roster this view fetches on
+    // mount). Edges touching B are dropped by the backend too.
     useFleetGraph.mockReturnValue(
       ok({
         nodes: [
           node(1, { label: "grandparent", spawner: "user" }),
-          node(2, { label: "parent", status: "terminated", spawner: "agent:1" }),
           node(3, { label: "child", status: "idling", spawner: "agent:2" }),
         ],
-        edges: [
-          edge(1, 2, "spawn"), // dropped (touches terminated node 2)
-          edge(2, 3, "spawn"), // dropped (touches terminated node 2)
-        ],
-        stale: false,
+        edges: [],
       }),
     );
     const { container } = renderGraph(
       <GraphView selectedAgentId={null} onSelectAgent={vi.fn()} />,
+      {
+        terminated: [rosterRow(2, { spawner: "agent:1" })],
+      },
     );
 
     const label1 = await waitFor(() => getNodeLabel(1), { timeout: 4000 });
@@ -410,6 +459,27 @@ describe("GraphView", () => {
 
     const svg = container.querySelector('svg[aria-label="Fleet relationship graph"]')!;
     expect(svg.querySelectorAll("line").length).toBe(1); // lineage edge re-parented from 1 to 3
+  });
+
+  it("fetches the terminated roster itself on a direct /fleet load (no home visit)", async () => {
+    // The graph payload never carries terminated rows, and /fleet does not
+    // mount home's useAgents — so GraphView must fetch the terminated
+    // roster cache itself. Render against an UNSEEDED client: both roster
+    // queries fire, with the terminated scope being the gap under test.
+    fetchAgentRoster.mockResolvedValue([]);
+    useFleetGraph.mockReturnValue(ok({ nodes: [], edges: [] }));
+
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={qc}>
+        <GraphView selectedAgentId={null} onSelectAgent={vi.fn()} />
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() =>
+      expect(fetchAgentRoster).toHaveBeenCalledWith(expect.any(QueryClient), "terminated"),
+    );
+    expect(fetchAgentRoster).toHaveBeenCalledWith(expect.any(QueryClient), "live");
   });
 
   it("shows the stale snapshot age for a non-empty fallback graph", () => {

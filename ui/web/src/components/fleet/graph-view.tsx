@@ -12,21 +12,29 @@
 // force-graph.tsx) — this module is a thin wrapper: it fetches the fleet graph,
 // adapts it to the shared node/edge model, and adds the time-window selector +
 // empty states. The Task Graph renders the same canvas with square nodes.
+//
+// Lineage re-parenting needs the terminated roster: the graph payload is
+// live-only (the backend excludes terminated nodes and edges), so the parent
+// rows of terminated intermediates must come from TERMINATED_AGENTS_QUERY_KEY.
+// Home seeds that cache through useAgents, but a direct /fleet session never
+// mounts it — this view therefore mounts both roster queries itself (same
+// keys, same cache: no duplicate fetch, and the global fold keeps them fresh).
 
 "use client";
 
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { WindowSelect } from "@/components/window-select";
 import { STATS_WINDOW_LABELS, STATS_WINDOWS, type StatsWindowHours } from "@/lib/sidebar";
-import type { AgentRow, PublicAgentStatus } from "@/lib/types";
+import type { PublicAgentStatus } from "@/lib/types";
 import { useFleetGraph } from "@/lib/use-fleet-graph";
 import {
   AGENTS_QUERY_KEY,
   TERMINATED_AGENTS_QUERY_KEY,
+  fetchAgentRoster,
 } from "@/lib/use-agents";
 
 import {
@@ -147,6 +155,21 @@ export function GraphView({
     decayLambda: DECAY_LAMBDA,
   });
 
+  // Roster subscriptions for lineageById (see the module note). Subscribing —
+  // rather than a bare getQueryData read — guarantees the terminated cache is
+  // fetched on a direct /fleet load AND re-runs the lineage map when a roster
+  // lands or a lifecycle fold updates it.
+  const { data: liveRoster } = useQuery({
+    queryKey: AGENTS_QUERY_KEY,
+    queryFn: () => fetchAgentRoster(queryClient, "live"),
+    staleTime: Infinity,
+  });
+  const { data: terminatedRoster } = useQuery({
+    queryKey: TERMINATED_AGENTS_QUERY_KEY,
+    queryFn: () => fetchAgentRoster(queryClient, "terminated"),
+    staleTime: Infinity,
+  });
+
   const statusLabels: Record<PublicAgentStatus, string> = useMemo(
     () => ({
       running: t("running"),
@@ -168,15 +191,11 @@ export function GraphView({
 
   // Lineage lookup map covering both live and terminated nodes to trace ancestors.
   const lineageById = useMemo(() => {
-    const liveRoster = queryClient.getQueryData<AgentRow[]>(AGENTS_QUERY_KEY) ?? [];
-    const terminatedRoster =
-      queryClient.getQueryData<AgentRow[]>(TERMINATED_AGENTS_QUERY_KEY) ?? [];
-
     const map = new Map<number, LineageAgentInfo>();
-    for (const a of liveRoster) {
+    for (const a of liveRoster ?? []) {
       map.set(a.agent_id, a);
     }
-    for (const a of terminatedRoster) {
+    for (const a of terminatedRoster ?? []) {
       map.set(a.agent_id, a);
     }
     for (const n of graph.nodes) {
@@ -185,7 +204,7 @@ export function GraphView({
       }
     }
     return map;
-  }, [queryClient, graph.nodes]);
+  }, [liveRoster, terminatedRoster, graph.nodes]);
 
   // Adapt the fleet graph to the shared node/edge model.
   // User ruling 2026-09-07 21:02: Every live agent remains in the graph (children
