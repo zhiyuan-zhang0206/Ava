@@ -172,15 +172,18 @@ describe("GraphView", () => {
     expect(screen.queryByLabelText("Zoom out")).toBeNull();
   });
 
-  it("explains status colors and activity-score sizing", () => {
+  it("explains status colors without terminated/offline or activity-score sizing legend", () => {
     useFleetGraph.mockReturnValue(ok(richGraph()));
     renderGraph(<GraphView selectedAgentId={null} onSelectAgent={vi.fn()} />);
 
     const legend = screen.getByLabelText("Agent graph legend");
-    for (const label of ["Running", "Idling", "Terminated", "Offline"]) {
+    for (const label of ["Running", "Idling"]) {
       expect(legend.textContent).toContain(label);
     }
-    expect(legend.textContent).toContain("size = activity score (24h window)");
+    for (const label of ["Terminated", "Offline"]) {
+      expect(legend.textContent).not.toContain(label);
+    }
+    expect(legend.textContent).not.toContain("size = activity score");
   });
 
   it("shows the hover card with full node identity even when zoom hides labels", async () => {
@@ -188,7 +191,10 @@ describe("GraphView", () => {
     // is gone; the instant hover card carries the identity instead — visible
     // at any zoom level.
     useFleetGraph.mockReturnValue(
-      ok({ nodes: [node(1, { label: "alpha" }), node(2)], edges: [] }),
+      ok({
+        nodes: [node(1, { label: "alpha" }), node(2)],
+        edges: [edge(1, 2, "spawn")],
+      }),
     );
     const { container } = renderGraph(
       <GraphView selectedAgentId={null} onSelectAgent={vi.fn()} />,
@@ -375,42 +381,33 @@ describe("GraphView", () => {
     expect(screen.getByText("No agents to graph.")).toBeTruthy();
   });
 
-  it("renders an offline projected transition node in muted gray", async () => {
+  it("drops degree-0 orphan nodes without edges before rendering", async () => {
     useFleetGraph.mockReturnValue(
       ok({
         nodes: [
-          node(1, {
-            label: "offline-transition",
-            status: "idling",
-            liveness_state: "offline",
-          }),
+          node(1, { label: "connected-1" }),
+          node(2, { label: "connected-2" }),
+          node(3, { label: "orphan-node" }),
         ],
-        edges: [],
+        edges: [edge(1, 2, "spawn")],
         stale: false,
       }),
     );
-    const { container } = renderGraph(
-      <GraphView selectedAgentId={null} onSelectAgent={vi.fn()} />,
-    );
+    renderGraph(<GraphView selectedAgentId={null} onSelectAgent={vi.fn()} />);
 
     const label = await waitFor(() => getNodeLabel(1), { timeout: 4000 });
-    const nodeGroup = label.closest("g")!;
-    expect(nodeGroup.querySelector("circle")?.getAttribute("class")).toContain(
-      "text-muted-foreground",
-    );
-    // The hover card spells the projected transition out as "Offline".
-    fireEvent.mouseEnter(nodeGroup);
-    const card = await screen.findByRole("tooltip");
-    expect(card.textContent).toContain("Offline");
-    expect(container.querySelectorAll("svg title").length).toBe(0);
+    expect(label).toBeTruthy();
+    expect(queryNodeLabel(2)).not.toBeNull();
+    expect(queryNodeLabel(3)).toBeNull();
+    expect(screen.getByText("2 nodes · 1 edges")).toBeTruthy();
   });
 
   it("shows the stale snapshot age for a non-empty fallback graph", () => {
     const snapshotAt = new Date(Date.now() - 12 * 60 * 1000).toISOString();
     useFleetGraph.mockReturnValue(
       ok({
-        nodes: [node(1)],
-        edges: [],
+        nodes: [node(1), node(2)],
+        edges: [edge(1, 2, "spawn")],
         stale: true,
         snapshot_at: snapshotAt,
       }),
@@ -422,7 +419,13 @@ describe("GraphView", () => {
   });
 
   it("does not flag a fresh graph as stale", () => {
-    useFleetGraph.mockReturnValue(ok({ nodes: [node(1)], edges: [], stale: false }));
+    useFleetGraph.mockReturnValue(
+      ok({
+        nodes: [node(1), node(2)],
+        edges: [edge(1, 2, "spawn")],
+        stale: false,
+      }),
+    );
 
     renderGraph(<GraphView selectedAgentId={null} onSelectAgent={vi.fn()} />);
 
@@ -431,7 +434,11 @@ describe("GraphView", () => {
 
   it("shows a telemetry warning without labeling a fresh graph stale", () => {
     useFleetGraph.mockReturnValue(
-      ok({ nodes: [node(1)], edges: [], telemetry_stale: true }),
+      ok({
+        nodes: [node(1), node(2)],
+        edges: [edge(1, 2, "spawn")],
+        telemetry_stale: true,
+      }),
     );
 
     renderGraph(<GraphView selectedAgentId={null} onSelectAgent={vi.fn()} />);
@@ -442,7 +449,13 @@ describe("GraphView", () => {
   });
 
   it("marks a fresh graph whose Loki edge response was truncated", () => {
-    useFleetGraph.mockReturnValue(ok({ nodes: [node(1)], edges: [], truncated: true }));
+    useFleetGraph.mockReturnValue(
+      ok({
+        nodes: [node(1), node(2)],
+        edges: [edge(1, 2, "spawn")],
+        truncated: true,
+      }),
+    );
 
     renderGraph(<GraphView selectedAgentId={null} onSelectAgent={vi.fn()} />);
 
@@ -484,7 +497,10 @@ describe("GraphView", () => {
 
   it("shows the hover card instantly on mouseenter and hides it on mouseleave", async () => {
     useFleetGraph.mockReturnValue(
-      ok({ nodes: [node(1, { label: "alpha", node_score: 12_345 })], edges: [] }),
+      ok({
+        nodes: [node(1, { label: "alpha", node_score: 12_345_678 }), node(2)],
+        edges: [edge(1, 2, "spawn")],
+      }),
     );
     const { container } = renderGraph(<GraphView selectedAgentId={null} onSelectAgent={vi.fn()} />);
     const label = await waitFor(() => getNodeLabel(1), { timeout: 4000 });
@@ -512,7 +528,7 @@ describe("GraphView", () => {
       expect(card.textContent).toContain("alpha");
       expect(card.textContent).toContain("Agent #1");
       expect(card.textContent).toContain("Running");
-      expect(card.textContent).toContain("Activity score: 12,345");
+      expect(card.textContent).toContain("Activity score: 12.35M");
 
       // Leaving the node dismisses the card.
       fireEvent.mouseLeave(group);

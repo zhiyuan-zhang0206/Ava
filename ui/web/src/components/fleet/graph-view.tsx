@@ -5,8 +5,8 @@
 // structural springs, plus aggregated agent-to-agent message traffic as weaker
 // springs whose pull (and on-screen opacity) scales with the edge weight. Node
 // size encodes cumulative token consumption (log scale). Degree-0 (orphan)
-// nodes float naturally with the same physics — no special arrangement
-// (user ruling 2026-08-06: the isolate grid was removed).
+// nodes without active ties are dropped so disconnected agents do not float
+// in blank canvas space.
 //
 // Rendering / interaction / parameters live in the shared ForceGraph (see
 // force-graph.tsx) — this module is a thin wrapper: it fetches the fleet graph,
@@ -17,7 +17,7 @@
 
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { WindowSelect } from "@/components/window-select";
 import { STATS_WINDOW_LABELS, STATS_WINDOWS, type StatsWindowHours } from "@/lib/sidebar";
@@ -41,13 +41,10 @@ import { cn } from "@/lib/utils";
 // expressed as text-* so it resolves for SVG fill, incl. the theme `destructive`).
 // Raw lifecycle transitions are projected at graph ingest, so the canvas only
 // accepts the same three public states as the sidebar.
-const OFFLINE_STATUS = "offline";
-type GraphDisplayStatus = PublicAgentStatus | typeof OFFLINE_STATUS;
-const STATUS_TEXT: Record<GraphDisplayStatus, string> = {
+const STATUS_TEXT: Record<PublicAgentStatus, string> = {
   running: "text-sky-500",
   idling: "text-emerald-500",
   terminated: "text-destructive",
-  offline: "text-muted-foreground",
 };
 const STATUS_PULSE: Record<PublicAgentStatus, boolean> = {
   running: false,
@@ -62,25 +59,6 @@ const DECAY_LAMBDA = 0.5;
 // keeps its own key so the two graphs' tunings stay independent.
 const FORCE_PARAMS_KEY = "display.graph_force_params";
 
-type SnapshotAge =
-  | { unit: "now" }
-  | { unit: "minutes"; count: number }
-  | { unit: "hours"; count: number }
-  | { unit: "days"; count: number };
-
-function formatSnapshotAge(snapshotAt: string): SnapshotAge | null {
-  const snapshotMs = Date.parse(snapshotAt);
-  if (Number.isNaN(snapshotMs)) return null;
-
-  const minutes = Math.max(0, Math.floor((Date.now() - snapshotMs) / 60_000));
-  if (minutes < 1) return { unit: "now" };
-  if (minutes < 60) return { unit: "minutes", count: minutes };
-
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return { unit: "hours", count: hours };
-  return { unit: "days", count: Math.floor(hours / 24) };
-}
-
 export function GraphView({
   selectedAgentId,
   onSelectAgent,
@@ -88,11 +66,13 @@ export function GraphView({
   selectedAgentId: number | null;
   onSelectAgent: (id: number | null) => void;
 }) {
-  const t = useTranslations("fleet.graph");
   const router = useRouter();
+  const t = useTranslations("fleet.graph");
+
   // Time window for node score + edge events (default 24h). Local to the graph
-  // view — independent of the sidebar's persisted stats window.
+  // view (not synced to user settings yet — rapid window hopping is common).
   const [windowHours, setWindowHours] = useState<StatsWindowHours>(24);
+
   // User-tunable force-layout knobs (DB-backed: display.graph_force_params).
   const { params: forceParams, setParams: setForceParams, reset: resetForceParams } =
     useForceParams(FORCE_PARAMS_KEY, FORCE_DEFAULTS);
@@ -109,48 +89,15 @@ export function GraphView({
     hours: windowHours,
     decayLambda: DECAY_LAMBDA,
   });
-  const snapshotAge = graph.snapshot_at ? formatSnapshotAge(graph.snapshot_at) : null;
-  const snapshotAgeLabel =
-    snapshotAge?.unit === "now"
-      ? t("snapshotNow")
-      : snapshotAge?.unit === "minutes"
-        ? t("snapshotMinutes", { count: snapshotAge.count })
-        : snapshotAge?.unit === "hours"
-          ? t("snapshotHours", { count: snapshotAge.count })
-          : snapshotAge?.unit === "days"
-            ? t("snapshotDays", { count: snapshotAge.count })
-            : null;
-  const statusLabels = useMemo<Record<GraphDisplayStatus, string>>(
+
+  const statusLabels: Record<PublicAgentStatus, string> = useMemo(
     () => ({
       running: t("running"),
       idling: t("idling"),
       terminated: t("terminated"),
-      offline: t("offline"),
     }),
     [t],
   );
-
-  // A selected agent that was in the graph and then disappeared (transitioned to
-  // terminated) — clear the stale selection so the canvas and selection stay in sync.
-  // Agents selected from outside the graph (e.g. Task Graph) whose id is not in the
-  // node set are not cleared — they were never in the graph to begin with.
-  const prevGraphNodeIds = useRef<Set<number>>(new Set());
-  useEffect(() => {
-    // Track which agent ids have ever appeared in the graph nodes.
-    const currentIds = new Set(graph.nodes.map((n) => n.agent_id));
-    // Merge current ids into the accumulated set so we remember agents that
-    // were once in the graph but have since dropped out.
-    for (const id of currentIds) prevGraphNodeIds.current.add(id);
-    // Clear selection only when the selected agent was previously in the graph
-    // but is no longer there (it transitioned to terminated while selected).
-    if (
-      selectedAgentId != null &&
-      !currentIds.has(selectedAgentId) &&
-      prevGraphNodeIds.current.has(selectedAgentId)
-    ) {
-      onSelectAgent(null);
-    }
-  }, [graph.nodes, selectedAgentId, onSelectAgent]);
 
   // Liveness filter — see the note above; mirrors agent-sidebar/body.tsx.
   const liveNodes = useMemo(
@@ -162,46 +109,6 @@ export function GraphView({
     [liveNodes],
   );
 
-  // Adapt the fleet graph to the shared node/edge model.
-  const nodes = useMemo<ForceGraphNode[]>(
-    () =>
-      liveNodes.map((n) => ({
-        id: n.agent_id,
-        label: n.label,
-        status: n.liveness_state === "offline" ? OFFLINE_STATUS : n.status,
-        score: n.node_score,
-        pulse: STATUS_PULSE[n.status],
-      })),
-    [liveNodes],
-  );
-
-  // Instant hover card — the shared canvas shows it the moment the cursor
-  // enters a node (replacing the delayed native <title>): identity, status
-  // and the activity score that drives node size.
-  const agentHoverCard = useCallback(
-    (node: ForceGraphNode) => (
-      <div className="w-52 rounded-lg border border-border bg-popover/95 p-3 shadow-xl backdrop-blur">
-        <p className="line-clamp-2 break-words text-xs font-semibold leading-snug text-popover-foreground">
-          {node.label ?? t("unlabeledAgent")}
-        </p>
-        <p className="mt-0.5 text-[10px] tabular-nums text-muted-foreground">
-          {t("agent", { id: node.id })}
-        </p>
-        <div className="mt-2 space-y-1 text-[11px]">
-          <p className={cn("items-center gap-1.5", FLEX)}>
-            <span
-              className={cn("size-2 rounded-full bg-current", STATUS_TEXT[node.status as GraphDisplayStatus])}
-            />
-            {statusLabels[node.status as GraphDisplayStatus]}
-          </p>
-          <p className="text-muted-foreground">
-            {t("activityScore", { score: Math.round(node.score).toLocaleString() })}
-          </p>
-        </div>
-      </div>
-    ),
-    [statusLabels, t],
-  );
   // The backend returns one edge per event kind (spawn / fork / resurrect /
   // message), and every non-message kind collapses to "lineage" here — so a
   // pair that fired several kinds would otherwise produce DUPLICATE React keys
@@ -243,6 +150,89 @@ export function GraphView({
     return [...byPair.values()];
   }, [graph.edges, liveIds]);
 
+  // Topology filter: drop degree-0 (orphan) nodes so disconnected agents without
+  // active ties do not float in empty space.
+  const connectedAgentIds = useMemo(() => {
+    const ids = new Set<number>();
+    for (const e of edges) {
+      ids.add(e.from);
+      ids.add(e.to);
+    }
+    return ids;
+  }, [edges]);
+
+  // Adapt the fleet graph to the shared node/edge model.
+  const nodes = useMemo<ForceGraphNode[]>(
+    () =>
+      liveNodes
+        .filter((n) => connectedAgentIds.has(n.agent_id))
+        .map((n) => ({
+          id: n.agent_id,
+          label: n.label,
+          status: n.status,
+          score: n.node_score,
+          pulse: STATUS_PULSE[n.status],
+        })),
+    [liveNodes, connectedAgentIds],
+  );
+
+  // When the selected agent disappears from the graph (e.g. it was
+  // terminated or dropped as an orphan) — clear the stale selection so the canvas and selection stay in sync.
+  useEffect(() => {
+    if (
+      selectedAgentId != null &&
+      !nodes.some((n) => n.id === selectedAgentId)
+    ) {
+      onSelectAgent(null);
+    }
+  }, [nodes, selectedAgentId, onSelectAgent]);
+
+  // Instant hover card — the shared canvas shows it the moment the cursor
+  // enters a node (replacing the delayed native <title>): identity, status
+  // and the activity score that drives node size.
+  const agentHoverCard = useCallback(
+    (node: ForceGraphNode) => (
+      <div className="w-52 rounded-lg border border-border bg-popover/95 p-3 shadow-xl backdrop-blur">
+        <p className="line-clamp-2 break-words text-xs font-semibold leading-snug text-popover-foreground">
+          {node.label ?? t("unlabeledAgent")}
+        </p>
+        <p className="mt-0.5 text-[10px] tabular-nums text-muted-foreground">
+          {t("agent", { id: node.id })}
+        </p>
+        <div className="mt-2 space-y-1 text-[11px]">
+          <p className={cn("items-center gap-1.5", FLEX)}>
+            <span
+              className={cn("size-2 rounded-full bg-current", STATUS_TEXT[node.status as PublicAgentStatus])}
+            />
+            {statusLabels[node.status as PublicAgentStatus]}
+          </p>
+          <p className="text-muted-foreground">
+            {t("activityScore", { score: `${(node.score / 1_000_000).toFixed(2)}M` })}
+          </p>
+        </div>
+      </div>
+    ),
+    [statusLabels, t],
+  );
+
+  // Stale age indicator — tick every 30s so "Xm ago" advances while the tab is open.
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNowMs(Date.now()), 30_000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const snapshotAge = graph.snapshot_at ? nowMs - Date.parse(graph.snapshot_at) : null;
+  const snapshotMinutes = snapshotAge != null ? Math.floor(snapshotAge / 60_000) : null;
+  const snapshotAgeLabel =
+    snapshotMinutes != null
+      ? snapshotMinutes < 1
+        ? t("snapshotNow")
+        : snapshotMinutes < 60
+          ? t("snapshotMinutes", { count: snapshotMinutes })
+          : t("snapshotHours", { count: Math.floor(snapshotMinutes / 60) })
+      : null;
+
   return (
     <div className={cn("relative h-full w-full", OVERFLOW_HIDDEN)}>
       <ForceGraph
@@ -261,19 +251,18 @@ export function GraphView({
         legend={
           <div aria-label={t("legend")} className="space-y-1">
             <div className="grid grid-cols-2 gap-x-3 gap-y-0.5">
-              {([
-                "running",
-                "idling",
-                "terminated",
-                "offline",
-              ] as const).map((status) => (
+              {(
+                [
+                  "running",
+                  "idling",
+                ] as const
+              ).map((status) => (
                 <span key={status} className={cn("items-center gap-1.5", FLEX)}>
                   <span className={cn("size-2 rounded-full bg-current", STATUS_TEXT[status])} />
                   {statusLabels[status]}
                 </span>
               ))}
             </div>
-            <p>{t("sizeActivity", { window: "24h" })}</p>
           </div>
         }
         ariaLabel={t("ariaLabel")}
