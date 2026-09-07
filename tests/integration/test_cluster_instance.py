@@ -12,6 +12,7 @@ cluster; the rest of the suite mocks it out.
 from __future__ import annotations
 
 import getpass
+import os
 import shutil
 import socket
 import subprocess
@@ -24,6 +25,8 @@ import pytest
 import redis
 
 from cli.commands import _cluster_instance as ci
+from cli.commands._converge_spec import ConvergeCtx
+from cli.commands._converge_steps import _ensure_redis_url_identity_step
 from cli.commands._data_plane import ensure_gateway_data_plane
 from cli.commands._data_plane_admin_secrets import ensure_data_plane_admin_secrets
 from cli.commands._pgbouncer import pgbouncer_bin, stop_pgbouncer
@@ -279,6 +282,39 @@ def test_credential_split_preserves_distinct_redis_user(
         pytest.raises(redis.AuthenticationError),
     ):
         old_runtime.ping()  # pyright: ignore[reportUnknownMemberType]
+
+
+@pytest.mark.parametrize("authenticated", [True, False])
+def test_legacy_redis_backfill_reaches_cold_start(
+    isolated_cluster: tuple[int, int], monkeypatch: pytest.MonkeyPatch, authenticated: bool
+) -> None:
+    """Legacy URL repair and native startup work in the same live process."""
+    _, redis_port = isolated_cluster
+    home = _gateway_config(monkeypatch, isolated_cluster)
+    password = _REDIS_RUNTIME if authenticated else ""
+    legacy_url = f"redis://:{password}@127.0.0.1:{redis_port}/0"
+    # Exercise the fresh sub-model built during backfill, not only the singleton.
+    monkeypatch.setitem(os.environ, "AVA_REDIS_URL", legacy_url)
+    monkeypatch.setattr(settings.data_plane, "redis_url", legacy_url)
+    if not authenticated:
+        for field in ("cluster_secret", "db_admin_password", "redis_admin_password"):
+            monkeypatch.setattr(settings.data_plane, field, "")
+    env_path = home / ".env"
+    retained = [
+        line
+        for line in env_path.read_text().splitlines()
+        if not line.startswith(("AVA_REDIS_URL=", "AVA_REDIS_PASSWORD="))
+    ]
+    env_path.write_text(
+        "\n".join([*retained, f"AVA_REDIS_URL={legacy_url}", f"AVA_REDIS_PASSWORD={password}", ""])
+    )
+    ctx = ConvergeCtx(repo=Path.cwd(), ava_home=home, roles=frozenset({"gateway"}))
+    _ensure_redis_url_identity_step(ctx)
+    assert "AVA_REDIS_URL=redis://ava_main" in env_path.read_text()
+    assert ensure_gateway_data_plane() == 0
+    with redis.Redis.from_url(settings.data_plane.redis_url) as client:  # pyright: ignore[reportUnknownMemberType]
+        assert client.ping()  # pyright: ignore[reportUnknownMemberType]
+        assert client.acl_whoami() == "ava_main"  # pyright: ignore[reportUnknownMemberType]
 
 
 @pytest.mark.skipif(not _pgbouncer_installed(), reason="pgbouncer not installed (brew/apt)")

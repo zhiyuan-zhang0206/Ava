@@ -355,7 +355,9 @@ whose redis_url carries no username (`redis://:<runtime-password>@host/0`, born 
 names-as-data ACL model) dials as that `default` user — no ACL identity exists to
 drop, so the healthcheck warns and skips rather than raising every round, and `ava
 start` converge backfills the username into the URL (from the db_url identity) so the
-cluster adopts the scoped ACL user. **Postgres and PgBouncer bind loopback + this
+cluster adopts the scoped ACL user. The same startup process adopts the repaired
+URL before provisioning Redis; no-auth homes receive a named `nopass` identity.
+**Postgres and PgBouncer bind loopback + this
 host's reachable address (`AVA_MACHINE_HOST`, default `localhost`), de-duplicated**
 (never all interfaces): a single box resolves to loopback alone, while a split node
 sets its real private-network IP, which is appended, plus the `scram-sha-256`

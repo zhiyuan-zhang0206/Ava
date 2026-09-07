@@ -57,6 +57,8 @@ Gateway data-plane startup passes separate URL identities to `_cluster_instance`
 Postgres db/role comes from `db_identity()`, Redis ACL user from `redis_identity()`.
 `_data_plane_admin_secrets` preserves that distinction during credential splitting.
 Installation supplies the same birth identifier for both before `.env` exists.
+Legacy username backfill adopts its committed Redis URL in the same start
+process, including named `nopass` URLs for no-auth homes.
 
 `cli/commands/migrations.py:cmd_migrations_apply` is deliberately not a user-facing verb —
 it runs as a step of `ava start` / `ava update`, so any restart crossing a
