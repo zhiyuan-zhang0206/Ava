@@ -54,10 +54,15 @@ def test_create_session_activates_only_checkout_cwds(
 
     monkeypatch.setattr(sessions, "forward_env_dict", forward)
 
-    sessions._create_session("inside", cwd=str(inside))
-    sessions._create_session("sibling", cwd=str(sibling_worktree))
-    sessions._create_session("claude-sibling", cwd=str(claude_sibling_worktree))
-    sessions._create_session("outside", cwd=str(outside))
+    # TTL registration needs the gateway DB — not this test's concern.
+    def _noop_record_ttl(_sid: int, _ttl: float) -> None:
+        return None
+
+    monkeypatch.setattr(sessions, "_record_ttl", _noop_record_ttl)
+    sessions._create_session("inside", cwd=str(inside), ttl=120)
+    sessions._create_session("sibling", cwd=str(sibling_worktree), ttl=120)
+    sessions._create_session("claude-sibling", cwd=str(claude_sibling_worktree), ttl=120)
+    sessions._create_session("outside", cwd=str(outside), ttl=120)
 
     assert activations == [True, False, False, False]
     assert backend.environments[0]["VIRTUAL_ENV"] == "/venv"

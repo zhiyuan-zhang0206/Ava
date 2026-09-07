@@ -6860,9 +6860,10 @@ export interface components {
          *
          *     `created_at` / `uptime_seconds` come from the runner's session record
          *     (the launch epoch + probe-time uptime); `expires_at` is the gateway-owned
-         *     TTL deadline from `agent_shell_ttls` — None when the session has no TTL.
-         *     Together they let the monitor page's title bar render runtime + TTL
-         *     without a second probe.
+         *     TTL deadline from `agent_shell_ttls`, falling back to the 24h cap counted
+         *     from `created_at` when the session has no row — None only when there is
+         *     no launch epoch to count from. Together they let the monitor page's title
+         *     bar render runtime + TTL without a second probe.
          */
         ShellCaptureResponse: {
             /** Agent Id */
@@ -6893,8 +6894,9 @@ export interface components {
          *
          *     `created_at` / `uptime_seconds` come from the runner's session record
          *     (the launch epoch, resolved to the cluster timezone); `expires_at` is
-         *     the gateway-owned TTL deadline from `agent_shell_ttls` — None when the
-         *     session has no TTL (watcher sessions and legacy pre-TTL shells).
+         *     the gateway-owned TTL deadline from `agent_shell_ttls`, falling back to
+         *     the 24h cap counted from `created_at` when the session has no row — None
+         *     only when there is no launch epoch to count from.
          */
         ShellInfo: {
             /** Id */

@@ -268,7 +268,12 @@ def test_agent_shell_session(
 
     monkeypatch.setattr(sessions, "_next_session_index_from_db", lambda: 3)
     monkeypatch.setattr(sessions, "_shell_prefix", lambda: "ava-agent-1-shell-")
-    sessions._create_session("probe")
+
+    def _noop_record_ttl(_sid: int, _ttl: float) -> None:
+        return None
+
+    monkeypatch.setattr(sessions, "_record_ttl", _noop_record_ttl)
+    sessions._create_session("probe", ttl=120)
     launches = [
         a for a in captured_argv if a[:3] == [sys.executable, "-m", "shared.pty_sessions.cli"]
     ]

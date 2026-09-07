@@ -13207,7 +13207,7 @@
           "lines"
         ],
         "title": "ShellCaptureResponse",
-        "description": "GET /api/agents/{id}/shell/{sid} response — a recent tail of one\npersistent-shell session's terminal output.\n\n`lines` is the session's most recent output (up to the last 200 lines,\nhistory that has scrolled past included), one string per line with no\ntrailing newline. `session_name` is the resolved session name the\ncapture came from. Backs the shell monitor page, which polls it while open;\nthe session must be live (404 otherwise).\n\n`created_at` / `uptime_seconds` come from the runner's session record\n(the launch epoch + probe-time uptime); `expires_at` is the gateway-owned\nTTL deadline from `agent_shell_ttls` — None when the session has no TTL.\nTogether they let the monitor page's title bar render runtime + TTL\nwithout a second probe."
+        "description": "GET /api/agents/{id}/shell/{sid} response — a recent tail of one\npersistent-shell session's terminal output.\n\n`lines` is the session's most recent output (up to the last 200 lines,\nhistory that has scrolled past included), one string per line with no\ntrailing newline. `session_name` is the resolved session name the\ncapture came from. Backs the shell monitor page, which polls it while open;\nthe session must be live (404 otherwise).\n\n`created_at` / `uptime_seconds` come from the runner's session record\n(the launch epoch + probe-time uptime); `expires_at` is the gateway-owned\nTTL deadline from `agent_shell_ttls`, falling back to the 24h cap counted\nfrom `created_at` when the session has no row — None only when there is\nno launch epoch to count from. Together they let the monitor page's title\nbar render runtime + TTL without a second probe."
       },
       "ShellInfo": {
         "properties": {
@@ -13261,7 +13261,7 @@
           "id"
         ],
         "title": "ShellInfo",
-        "description": "One live persistent-shell session of an agent — a session named\n`…-agent-<id>-shell-<sid>[-<name>]`. `id` is the agent-local session id\n(the int the agent uses to drive it); `name` is the optional slug label\n(a watcher carries the conventional name \"watcher\"), None when unnamed.\nThe agent's own process session has no `-shell-` segment and is excluded.\n\n`created_at` / `uptime_seconds` come from the runner's session record\n(the launch epoch, resolved to the cluster timezone); `expires_at` is\nthe gateway-owned TTL deadline from `agent_shell_ttls` — None when the\nsession has no TTL (watcher sessions and legacy pre-TTL shells)."
+        "description": "One live persistent-shell session of an agent — a session named\n`…-agent-<id>-shell-<sid>[-<name>]`. `id` is the agent-local session id\n(the int the agent uses to drive it); `name` is the optional slug label\n(a watcher carries the conventional name \"watcher\"), None when unnamed.\nThe agent's own process session has no `-shell-` segment and is excluded.\n\n`created_at` / `uptime_seconds` come from the runner's session record\n(the launch epoch, resolved to the cluster timezone); `expires_at` is\nthe gateway-owned TTL deadline from `agent_shell_ttls`, falling back to\nthe 24h cap counted from `created_at` when the session has no row — None\nonly when there is no launch epoch to count from."
       },
       "SkillEnableUpdate": {
         "properties": {

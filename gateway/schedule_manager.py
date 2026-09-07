@@ -443,6 +443,13 @@ class ScheduleManager:
             f"cd {shlex.quote(str(_REPO_ROOT))} && "
             f".venv/bin/python -m gateway.schedule_runner {schedule_id}; exit $?"
         )
+        # No shell-TTL row is written here (deliberate exemption, task
+        # #2614): agent_shell_ttls rows key on an agent id, and schedule
+        # sessions have none (ava-schedule-<id> is allocated outside the
+        # per-agent session counter). The ScheduleManager is their reclaimer
+        # — reconcile reaps disabled/deleted schedules — and a registered 24h
+        # deadline would make the TTL reaper kill a resident schedule every
+        # day, one kill/relaunch cycle per schedule.
         try:
             backend.new_session(name, cmd, _REPO_ROOT, env=env)
         except Exception as exc:
