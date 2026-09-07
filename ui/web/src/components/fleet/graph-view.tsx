@@ -23,7 +23,6 @@ import { WindowSelect } from "@/components/window-select";
 import { STATS_WINDOW_LABELS, STATS_WINDOWS, type StatsWindowHours } from "@/lib/sidebar";
 import type { PublicAgentStatus } from "@/lib/types";
 import { useFleetGraph } from "@/lib/use-fleet-graph";
-import { useUserSettings } from "@/lib/use-user-settings";
 
 import {
   FORCE_DEFAULTS,
@@ -62,8 +61,6 @@ const DECAY_LAMBDA = 0.5;
 // DB-backed user settings key for this view's force knobs — the Task Graph
 // keeps its own key so the two graphs' tunings stay independent.
 const FORCE_PARAMS_KEY = "display.graph_force_params";
-const EDGE_WEIGHT_KEY = "display.graph_edge_weight";
-const EDGE_WEIGHT_DEFAULT = true;
 
 type SnapshotAge =
   | { unit: "now" }
@@ -99,16 +96,6 @@ export function GraphView({
   // User-tunable force-layout knobs (DB-backed: display.graph_force_params).
   const { params: forceParams, setParams: setForceParams, reset: resetForceParams } =
     useForceParams(FORCE_PARAMS_KEY, FORCE_DEFAULTS);
-  const { settings, setSetting } = useUserSettings();
-  // This view owns the boolean's default just as useForceParams owns its
-  // object defaults; the opaque DB value overrides it when present.
-  const storedEdgeWeight = settings[EDGE_WEIGHT_KEY];
-  const edgeWeightEnabled =
-    typeof storedEdgeWeight === "boolean" ? storedEdgeWeight : EDGE_WEIGHT_DEFAULT;
-  const resetGraphSettings = useCallback(() => {
-    resetForceParams();
-    setSetting(EDGE_WEIGHT_KEY, EDGE_WEIGHT_DEFAULT);
-  }, [resetForceParams, setSetting]);
 
   // Liveness filter FIRST (user ruling 2026-08-09 #1104): terminated agents
   // never appear in the graph — mirroring the sidebar's agent tree
@@ -181,8 +168,6 @@ export function GraphView({
       liveNodes.map((n) => ({
         id: n.agent_id,
         label: n.label,
-        // Offline is a projected display state from the gateway's machine and
-        // process liveness probes, not an agent lifecycle status.
         status: n.liveness_state === "offline" ? OFFLINE_STATUS : n.status,
         score: n.node_score,
         pulse: STATUS_PULSE[n.status],
@@ -199,10 +184,10 @@ export function GraphView({
         <p className="line-clamp-2 break-words text-xs font-semibold leading-snug text-popover-foreground">
           {node.label ?? t("unlabeledAgent")}
         </p>
-        <p className="mt-0.5 font-mono text-2xs tabular-nums text-muted-foreground">
+        <p className="mt-0.5 text-[10px] tabular-nums text-muted-foreground">
           {t("agent", { id: node.id })}
         </p>
-        <div className="mt-2 space-y-1 text-xs">
+        <div className="mt-2 space-y-1 text-[11px]">
           <p className={cn("items-center gap-1.5", FLEX)}>
             <span
               className={cn("size-2 rounded-full bg-current", STATUS_TEXT[node.status as GraphDisplayStatus])}
@@ -210,7 +195,7 @@ export function GraphView({
             {statusLabels[node.status as GraphDisplayStatus]}
           </p>
           <p className="text-muted-foreground">
-            {t("activityScore", { score: `${(node.score / 1_000_000).toFixed(2)}M` })}
+            {t("activityScore", { score: Math.round(node.score).toLocaleString() })}
           </p>
         </div>
       </div>
@@ -225,11 +210,7 @@ export function GraphView({
   // stale copies of the same edge accumulate at old coordinates, floating in
   // space and overlapping (the "extra dangling edges" bug). Merge the lineage
   // family into one edge per pair — strongest weight wins, fork styling wins
-  // if any member was a fork. Degree-0 live nodes remain valid: the endpoint's
-  // edge telemetry is time-windowed and excludes terminated endpoints, while
-  // the live-node set is not connectivity-filtered; older lineage can also
-  // predate retained edge events. They therefore float by data design rather
-  // than from a missing render edge.
+  // if any member was a fork.
   const edges = useMemo<ForceGraphEdge[]>(() => {
     const byPair = new Map<string, ForceGraphEdge>();
     for (const e of graph.edges) {
@@ -274,9 +255,7 @@ export function GraphView({
         onOpen={(id) => router.push(`/?agent_id=${id}`)}
         params={forceParams}
         setParams={setForceParams}
-        resetParams={resetGraphSettings}
-        edgeWeightEnabled={edgeWeightEnabled}
-        onEdgeWeightEnabledChange={(enabled) => setSetting(EDGE_WEIGHT_KEY, enabled)}
+        resetParams={resetForceParams}
         hoverCard={agentHoverCard}
         statsText={t("stats", { nodes: nodes.length, edges: edges.length })}
         legend={
@@ -294,6 +273,7 @@ export function GraphView({
                 </span>
               ))}
             </div>
+            <p>{t("sizeActivity", { window: "24h" })}</p>
           </div>
         }
         ariaLabel={t("ariaLabel")}
@@ -303,14 +283,14 @@ export function GraphView({
             options={STATS_WINDOWS.map((h) => ({ value: String(h), label: STATS_WINDOW_LABELS[h] }))}
             onChange={(v) => setWindowHours(Number(v) as StatsWindowHours)}
             ariaLabel={t("window")}
-            className="cursor-pointer rounded border border-border bg-background/80 px-1.5 py-0.5 text-2xs text-muted-foreground backdrop-blur hover:text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+            className="cursor-pointer rounded border border-border bg-background/80 px-1.5 py-0.5 text-[10px] text-muted-foreground backdrop-blur hover:text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
           />
         }
       />
       {graph.stale ? (
         <p
           role="status"
-          className="pointer-events-none absolute right-3 top-3 inline-flex items-center gap-1 rounded border border-amber-500/30 bg-background/80 px-2 py-1 text-2xs text-amber-600 backdrop-blur dark:text-amber-400"
+          className="pointer-events-none absolute right-3 top-3 inline-flex items-center gap-1 rounded border border-amber-500/30 bg-background/80 px-2 py-1 text-[10px] text-amber-600 backdrop-blur dark:text-amber-400"
         >
           <span aria-hidden className="size-1.5 rounded-full bg-amber-500" />
           {snapshotAge
@@ -320,7 +300,7 @@ export function GraphView({
       ) : graph.telemetry_stale ? (
         <p
           role="status"
-          className="pointer-events-none absolute right-3 top-3 inline-flex items-center gap-1 rounded border border-border bg-background/80 px-2 py-1 text-2xs text-muted-foreground backdrop-blur"
+          className="pointer-events-none absolute right-3 top-3 inline-flex items-center gap-1 rounded border border-border bg-background/80 px-2 py-1 text-[10px] text-muted-foreground backdrop-blur"
         >
           <span aria-hidden className="size-1.5 rounded-full bg-muted-foreground" />
           {t("telemetryDegraded")}
@@ -329,7 +309,7 @@ export function GraphView({
       {graph.truncated ? (
         <p
           role="status"
-          className="pointer-events-none absolute right-3 top-10 inline-flex items-center gap-1 rounded border border-orange-500/30 bg-background/80 px-2 py-1 text-2xs text-orange-600 backdrop-blur dark:text-orange-400"
+          className="pointer-events-none absolute right-3 top-10 inline-flex items-center gap-1 rounded border border-orange-500/30 bg-background/80 px-2 py-1 text-[10px] text-orange-600 backdrop-blur dark:text-orange-400"
         >
           <span aria-hidden className="size-1.5 rounded-full bg-orange-500" />
           {t("truncated")}
