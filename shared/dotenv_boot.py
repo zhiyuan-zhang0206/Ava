@@ -263,6 +263,21 @@ def _env_path(ava_home: str | None) -> Path:
 
 _HOME, _ANCHORED = resolve_ava_home()
 AVA_ENV_PATH = _HOME / ".env"
+
+
+def checkout_anchored() -> bool:
+    """Whether this checkout owns the home it resolves to (resolve_ava_home
+    rules 1-3), rather than falling back to the default home (rule 4).
+
+    Callers that would write or route through the resolved home gate on this:
+    an unanchored checkout (a bare worktree with no `.ava_home` pointer, a
+    fresh clone) must never silently operate the default home's config or
+    gateway — that home belongs to the prod source checkout
+    (shared/paths.py:prod_service_checkout_error).
+    """
+    return _ANCHORED
+
+
 # Optional sibling of .env written by `install.sh --mirror NAME`: a bundle of
 # package-manager index/registry env vars (PyPI / npm / Homebrew). Kept separate
 # from .env so `cp .env.example` never clobbers it and the mirror choice is

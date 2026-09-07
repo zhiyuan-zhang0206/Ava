@@ -27,30 +27,82 @@ from shared.api_contracts.config import ConfigFieldView, ConfigView, ConfigWrite
 _HTTP_TIMEOUT_S = 15.0
 
 
-def _gateway_base() -> str:
-    """Resolve the configured gateway without constructing ``Settings``."""
-    for key in ("AVA_GATEWAY_URL", "AVA_PRIMARY_GATEWAY_URL"):
-        gateway_url = os.environ.get(key, "").strip()
-        if gateway_url:
-            return gateway_url.rstrip("/")
+_GATEWAY_URL_KEYS = ("AVA_GATEWAY_URL", "AVA_PRIMARY_GATEWAY_URL")
+
+
+def _anchored_gateway_base() -> str | None:
+    """This checkout's own home gateway identity: its persisted ``gateway_url``
+    file first (machine identity, written at first start / enroll), then the
+    home `.env` aliases. None when the home carries no identity yet (fresh
+    install before first start) or when the checkout is unanchored — an
+    unanchored checkout has NO home of its own, and the rule-4 fallback to the
+    default home must never be treated as its identity."""
     from shared import runtime_config
+    from shared.dotenv_boot import AVA_ENV_PATH, checkout_anchored
 
-    aliases = runtime_config.read_env_aliases()
-    for key in ("AVA_GATEWAY_URL", "AVA_PRIMARY_GATEWAY_URL"):
-        gateway_url = aliases.get(key, "").strip()
-        if gateway_url:
-            return gateway_url.rstrip("/")
-    from shared.dotenv_boot import AVA_ENV_PATH
-
+    if not checkout_anchored():
+        return None
     gateway_url_path = AVA_ENV_PATH.parent / "gateway_url"
     if gateway_url_path.exists():
         gateway_url = gateway_url_path.read_text().strip()
         if gateway_url:
             return gateway_url.rstrip("/")
+    aliases = runtime_config.read_env_aliases()
+    for key in _GATEWAY_URL_KEYS:
+        gateway_url = aliases.get(key, "").strip()
+        if gateway_url:
+            return gateway_url.rstrip("/")
+    return None
+
+
+def _gateway_base() -> str:
+    """Resolve the configured gateway without constructing ``Settings``.
+
+    Explicit env wins (deliberate cross-cluster intent). Otherwise the
+    checkout-anchored home's own gateway identity wins — host aliases are only
+    its fallback, never the first choice: a bare worktree (no `.ava_home`
+    pointer) resolving to the default home used to pick up prod's gateway URL
+    from the alias file and route `ava config set` into prod's `.env`
+    (2026-09-07 incident). An unanchored checkout therefore gets a refusal
+    with guidance instead of a silent fallback."""
+    for key in _GATEWAY_URL_KEYS:
+        gateway_url = os.environ.get(key, "").strip()
+        if gateway_url:
+            return gateway_url.rstrip("/")
+    anchored = _anchored_gateway_base()
+    if anchored is not None:
+        return anchored
     raise _ConfigError(
-        "gateway_url unset — `ava enroll` writes it on an agent-runner; "
-        "or `export AVA_GATEWAY_URL=<gateway url>`"
+        "gateway_url unset — this checkout is not anchored to a cluster home: "
+        "run `scripts/install.sh --worktree` to give it its own cluster, or "
+        "`export AVA_GATEWAY_URL=<gateway url>` to target one explicitly. "
+        "(An unanchored checkout never falls back to the default home's gateway.)"
     )
+
+
+def _guard_gateway_write(target: str) -> None:
+    """Refuse gateway config writes whose target is not this checkout's home.
+
+    The 2026-09-01 ruling: config changes go through the official path AND are
+    verified against the complete candidate before writing. The target half of
+    that verification lives here: an unanchored checkout may not write any
+    gateway config, and an explicit env override that contradicts the
+    anchored home's own gateway identity is refused — a foreign-home write
+    must never be one innocuous command away (2026-09-07 incident)."""
+    anchored = _anchored_gateway_base()
+    if anchored is None:
+        raise _ConfigError(
+            "refusing to write gateway config: this checkout is not anchored "
+            "to a cluster home (no `.ava_home` pointer). Run "
+            "`scripts/install.sh --worktree` for a dev cluster, or run this "
+            "command from the target home's own checkout."
+        )
+    if target != anchored:
+        raise _ConfigError(
+            f"refusing to write gateway config: resolved target {target!r} "
+            f"does not match this home's gateway {anchored!r} — a config write "
+            "must target this checkout's own cluster home."
+        )
 
 
 def _auth_headers() -> dict[str, str]:
@@ -81,6 +133,7 @@ def _get_config(machine: str | None) -> ConfigView:
 def _put_config(body: dict[str, Any], machine: str | None) -> ConfigWriteResult:
     from shared.http_dial import put as dial_put
 
+    _guard_gateway_write(_gateway_base())
     params = {"machine": machine} if machine else None
     resp = dial_put(
         f"{_gateway_base()}/api/config",
@@ -289,6 +342,9 @@ def cmd_config_get(key: str | None, machine: str | None, *, local: bool = False)
 
     try:
         view = _get_config(machine)
+    except _ConfigError as e:
+        print(f"[ava config get] {e}", file=sys.stderr)
+        return 1
     except httpx.HTTPError as e:
         print(f"[ava config get] gateway request failed: {e}", file=sys.stderr)
         return 1
@@ -381,6 +437,17 @@ def _edit_local_config(
     """Validate and persist one local `.env` patch without booting Settings."""
     from shared import runtime_config
     from shared.config.candidate import validate_env_patch_for_write
+    from shared.dotenv_boot import checkout_anchored
+
+    if not checkout_anchored():
+        print(
+            "[ava config] refusing to write local config: this checkout is not "
+            "anchored to a cluster home (no `.ava_home` pointer) — the fallback "
+            "home is the prod home's, and a worktree must not mutate it. Run "
+            "`scripts/install.sh --worktree` for a dev cluster.",
+            file=sys.stderr,
+        )
+        return 1
 
     try:
         writes, removals, changed = _build_local_patch(pairs, unset_keys)
@@ -426,6 +493,9 @@ def _edit_config(
 
     try:
         view = _get_config(machine)
+    except _ConfigError as e:
+        print(f"[ava config {verb}] {e}", file=sys.stderr)
+        return 1
     except httpx.HTTPError as e:
         print(f"[ava config {verb}] gateway request failed: {e}", file=sys.stderr)
         return 1
