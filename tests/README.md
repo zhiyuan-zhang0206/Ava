@@ -178,7 +178,7 @@ vars are set in `os.environ`, not only on the settings singleton, so subprocesse
 reads one `~/Library/LaunchAgents` per user, `crontab` edits one table per user,
 schtasks owns one `\Ava\` folder per user. So the suite does not redirect it — it
 refuses to write to it at all, via `AVA_OS_JOBS_ENABLED=false`
-(`shared.os_cron.os_jobs_enabled` gates all three registrars; the unregister paths
+(`shared.os_cron.os_jobs_enabled` gates all four registrars; the unregister paths
 stay live). `pytest_sessionfinish` then diffs the host's Ava jobs against a
 snapshot taken at conftest import and fails the run on anything new, removing the
 jobs that name this suite's own homes and reporting anything else.

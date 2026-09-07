@@ -465,6 +465,12 @@ def test_collector_self_metrics_reader_is_per_unit(monkeypatch: pytest.MonkeyPat
     assert override_scrape[0]["static_configs"] == [{"targets": ["localhost:8889"]}]
 
 
+def test_collector_internal_logs_are_warn_level(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Exporter retry notices stay out of service stdout while warnings remain."""
+    cfg = _render_real_template(monkeypatch, frozenset({"gateway"}))
+    assert cfg["service"]["telemetry"]["logs"]["level"] == "warn"
+
+
 def test_logs_merge_event_and_filelog_transforms_before_batch(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -13,7 +13,7 @@ registration path) and the CLI converge step (belt-and-suspenders fallback) can
 call the same functions without violating the import layering (shared < ava <
 agent < gateway < cli).
 
-It also carries what all THREE OS-scheduled job kinds share, because they share
+It also carries what all four OS-scheduled job kinds share, because they share
 the same launchd / crontab mechanics and `os_autostart` / `os_watchdog_probe`
 already import from here: the label prefix, the binary + `$AVA_HOME` a job spec
 is anchored to (`ava_binary_path` / `job_home` / `launchd_env_block` /

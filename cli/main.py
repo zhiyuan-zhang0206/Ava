@@ -75,7 +75,7 @@ from cli.parsers.host import (
     _h_trace_ship,
 )
 from cli.parsers.impersonation import _h_impersonate, _h_impersonate_relay
-from cli.parsers.logs import _h_logs_retention
+from cli.parsers.logs import _h_logs_retention, _h_logs_rotate
 from cli.parsers.management import (
     _h_config_get,
     _h_config_set,
@@ -177,6 +177,7 @@ __all__ = [
     "_h_impersonate",
     "_h_impersonate_relay",
     "_h_logs_retention",
+    "_h_logs_rotate",
     "_h_mcp_add",
     "_h_mcp_disable",
     "_h_mcp_enable",

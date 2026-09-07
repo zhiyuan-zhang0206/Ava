@@ -46,6 +46,7 @@ _HANDLERS: tuple[tuple[list[str], str], ...] = (
     (["mcp", "serve"], "_h_mcp_serve"),
     (["memory", "search", "context"], "_h_memory_search"),
     (["logs", "retention"], "_h_logs_retention"),
+    (["logs", "rotate"], "_h_logs_rotate"),
 )
 
 

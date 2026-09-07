@@ -115,7 +115,7 @@ from cli.commands.cluster_lifecycle import (
 )
 from cli.commands.config import cmd_config_get, cmd_config_set, cmd_config_unset
 from cli.commands.ensure_db_role import cmd_ensure_db_role
-from cli.commands.logs import cmd_logs_retention
+from cli.commands.logs import cmd_logs_retention, cmd_logs_rotate
 from cli.commands.mcp import (
     cmd_mcp_add,
     cmd_mcp_disable,
@@ -314,6 +314,7 @@ __all__ = [
     "cmd_lgtm_on",
     "cmd_lgtm_status",
     "cmd_logs_retention",
+    "cmd_logs_rotate",
     "cmd_mcp_add",
     "cmd_mcp_disable",
     "cmd_mcp_enable",

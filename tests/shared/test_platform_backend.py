@@ -69,7 +69,7 @@ def test_windows_capability_queries() -> None:
 
 
 def test_windows_scheduling_delegates_to_schtasks(monkeypatch: pytest.MonkeyPatch) -> None:
-    """All three job kinds route through the Task Scheduler backend.
+    """All four job kinds route through the Task Scheduler backend.
 
     These used to be deliberate no-ops ("not yet wired on Windows"), which left a
     Windows unit with no health probe, no boot autostart, and — once the watchdog
@@ -79,6 +79,7 @@ def test_windows_scheduling_delegates_to_schtasks(monkeypatch: pytest.MonkeyPatc
     for mod, name in [
         ("shared.os_autostart", "autostart"),
         ("shared.os_cron", "cron"),
+        ("shared.os_logs_job", "logs"),
         ("shared.os_watchdog_probe", "watchdog"),
     ]:
         monkeypatch.setattr(f"{mod}._register_windows", lambda *_a, _n=name: calls.append(_n) or 0)  # pyright: ignore[reportUnknownArgumentType]
@@ -90,19 +91,22 @@ def test_windows_scheduling_delegates_to_schtasks(monkeypatch: pytest.MonkeyPatc
     backend = WindowsPlatformBackend()
     backend.register_autostart()
     backend.register_cron()
+    backend.register_logs_job()
     backend.register_watchdog_probe("gateway")
-    assert calls == ["autostart", "cron", "watchdog"]
+    assert calls == ["autostart", "cron", "logs", "watchdog"]
 
     # Unregister stays silent-on-absent, like the launchd / crontab paths — and
     # carries the caller's slug instead of resolving one from this process, so
     # `ava cluster destroy` removes the target cluster's tasks and not its own.
     backend.unregister_autostart("ava-target")
     backend.unregister_cron("ava-target")
+    backend.unregister_logs_job("ava-target")
     backend.unregister_watchdog_probe("gateway", "ava-target")
 
     assert unregistered == [
         ("autostart", ("ava-target",)),
         ("cron", ("ava-target",)),
+        ("logs", ("ava-target",)),
         ("watchdog", ("gateway", "ava-target")),
     ]
 
@@ -118,6 +122,7 @@ def test_windows_scheduling_failure_degrades_to_a_warning(
     for mod, _name in [
         ("shared.os_autostart", "autostart"),
         ("shared.os_cron", "health probe"),
+        ("shared.os_logs_job", "logs maintenance"),
         ("shared.os_watchdog_probe", "watchdog probe"),
     ]:
         monkeypatch.setattr(f"{mod}._register_windows", lambda *_a: "ERROR: Access is denied.")  # pyright: ignore[reportUnknownArgumentType]
@@ -125,17 +130,19 @@ def test_windows_scheduling_failure_degrades_to_a_warning(
     backend = WindowsPlatformBackend()
     backend.register_autostart()
     backend.register_cron()
+    backend.register_logs_job()
     backend.register_watchdog_probe("gateway")  # no exception
 
     err = capsys.readouterr().err
     assert "autostart" in err
     assert "health probe" in err
+    assert "logs maintenance" in err
     assert "watchdog probe" in err
     # And each says WHY, on stderr. The loguru record alone never reached disk on
     # the fleet's Windows box — a converge under the updater chain has its stderr
     # captured into the updater log but no sink configured — so "registration
     # failed" with nothing after it is all nine months of logs ever showed.
-    assert err.count("ERROR: Access is denied.") == 3
+    assert err.count("ERROR: Access is denied.") == 4
 
 
 def test_windows_pg_binary_path() -> None:

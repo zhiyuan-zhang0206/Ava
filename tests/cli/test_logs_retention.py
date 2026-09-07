@@ -351,9 +351,9 @@ def test_retention_preserves_every_path_outside_the_exact_boundary(
             "restarter.2026-08-24_10-00-00_12345.log",
             _NOW - timedelta(hours=1),
         ),
-        _stale_file(logs, "ava-agent-x.out.log", b"bad-id"),
+        _stale_file(logs, "ava-Agent-x.out.log", b"bad-service-name"),
         _stale_file(logs, "ava-agent-20.stderr.log", b"stderr"),
-        _stale_file(logs, "ava-agent-20-shell-2.out.log", b"unnamed"),
+        _stale_file(logs, "ava-agent-20-shell-2.stderr.log", b"stderr"),
         _stale_file(
             logs,
             "restarter.log.2026-08-01_00-00-00_12345.log",
@@ -407,3 +407,115 @@ def test_configured_days_apply_when_the_flag_is_omitted(
     assert rc == 0
     assert managed.exists()
     assert "retention_summary\tmode=delete\tdeleted=0\tbytes=0\tfailed=0" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    ("name", "family"),
+    [
+        ("ava-gateway.out.log", "gateway"),
+        ("ava-ops.out.log", "ops"),
+        ("ava-agent-runner-watchdog.out.log", "watchdog"),
+        ("ava-otel-collector.out.log", "other"),
+        ("ava-agent-host.out.log", "agent"),
+    ],
+)
+def test_service_stdout_names_are_managed_and_follow_service_family_rules(
+    name: str, family: str
+) -> None:
+    from cli.commands.logs import _MANAGED_LOG_NAME, _log_family
+
+    match = _MANAGED_LOG_NAME.fullmatch(name)
+    assert match is not None
+    assert match["svcout"] == name
+    assert _log_family(match) == family
+
+
+def test_agent_and_shell_names_keep_precedence_over_service_stdout() -> None:
+    from cli.commands.logs import _MANAGED_LOG_NAME
+
+    agent = _MANAGED_LOG_NAME.fullmatch("ava-agent-12.out.log")
+    shell = _MANAGED_LOG_NAME.fullmatch("ava-agent-12-shell-3-review.out.log")
+
+    assert agent is not None and agent["agent"] is not None and agent["svcout"] is None
+    assert shell is not None and shell["shell"] is not None and shell["svcout"] is None
+
+
+@pytest.mark.parametrize(
+    ("name", "group", "family"),
+    [
+        ("loki.log.2026-09-07", "rotlog", "other"),
+        ("prometheus.log.2026-09-07", "rotlog", "other"),
+        ("dbg-stdout.log.2026-09-07", "rotlog", "other"),
+        ("ava-gateway.out.log.2026-09-07", "rotout", "gateway"),
+        ("ava-otel-collector.out.log.2026-09-07", "rotout", "other"),
+    ],
+)
+def test_copytruncate_archives_are_managed(name: str, group: str, family: str) -> None:
+    from cli.commands.logs import _MANAGED_LOG_NAME, _log_family
+
+    match = _MANAGED_LOG_NAME.fullmatch(name)
+    assert match is not None
+    assert match[group] == name
+    assert _log_family(match) == family
+
+
+def test_active_service_stdout_is_excluded_via_open_path_snapshot(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from cli.commands import logs
+
+    active = _file_at(tmp_path, "ava-gateway.out.log", _NOW - timedelta(days=31))
+
+    def active_paths(_path: Path) -> set[Path]:
+        return {active.resolve()}
+
+    monkeypatch.setattr(logs, "_active_log_paths", active_paths)
+
+    rc = logs.cmd_logs_retention(
+        older_than_days=None,
+        family_days={},
+        dry_run=False,
+        logs_path=tmp_path,
+        now=_NOW,
+    )
+
+    assert rc == 0
+    assert active.exists()
+    assert str(active) not in capsys.readouterr().out
+
+
+def test_retention_deletes_expired_service_stdout_and_native_archive(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from cli.commands import logs
+
+    logs_path = tmp_path / "logs"
+    native_path = tmp_path / "lgtm" / "native" / "logs"
+    logs_path.mkdir()
+    native_path.mkdir(parents=True)
+    service = _file_at(logs_path, "ava-otel-collector.out.log", _NOW - timedelta(days=4))
+    native_archive = _file_at(native_path, "loki.log.2026-08-01", _NOW - timedelta(days=4))
+    live_native = _file_at(native_path, "loki.log", _NOW - timedelta(days=40))
+
+    def no_active_paths(_path: Path) -> set[Path]:
+        return set()
+
+    monkeypatch.setattr(logs, "_active_log_paths", no_active_paths)
+
+    rc = logs.cmd_logs_retention(
+        older_than_days=None,
+        family_days={},
+        dry_run=False,
+        logs_path=logs_path,
+        now=_NOW,
+    )
+
+    assert rc == 0
+    assert not service.exists()
+    assert not native_archive.exists()
+    assert live_native.exists()
+    assert "retention_summary\tmode=delete\tdeleted=2" in capsys.readouterr().out

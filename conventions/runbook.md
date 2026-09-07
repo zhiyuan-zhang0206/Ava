@@ -1142,7 +1142,7 @@ ava cluster status   # full multi-machine roster (thin client: GET /api/cluster/
 ava cluster restart  # bounce the WHOLE cluster (this host + fan out to agent-runners, no git pull) via POST /api/cluster/restart. The gateway's detached `ava-cluster-restart` session runs `ava cluster update --local --restart-only`; plain `ava cluster update --restart-only` is also a thin POST, never the detached child's command. `ava restart` is the local single-host form
 ava cluster ls       # list all registered clusters in ~/.ava/clusters.json
 ava cluster down --path PATH   # stop the cluster at a home path (its gateway + its own pg/redis instance), keeping its registry slot + data dirs (the safe way to stop a dev worktree cluster from another checkout)
-ava cluster destroy --path PATH [--drop-db]   # stop a cluster + free its registry slot (port block) + deregister its OS-scheduled jobs (health probe, both watchdog probes, autostart); --drop-db also removes its pg/redis data dirs; refused for the default home ~/.ava
+ava cluster destroy --path PATH [--drop-db]   # stop a cluster + free its registry slot (port block) + deregister its OS-scheduled jobs (health probe, both watchdog probes, autostart, logs maintenance); --drop-db also removes its pg/redis data dirs; refused for the default home ~/.ava
 ```
 
 `ava cluster update --dry-run` resolves and validates the target, runs the
@@ -1229,9 +1229,10 @@ anyway. Two callers pass it and an operator normally should not:
   question one step later and better (off-box, authenticated, through the probe
   each runner's preflight uses). See the deploy-window section.
 
-**OS-scheduled jobs.** Three kinds go to the platform scheduler — the health
+**OS-scheduled jobs.** Four kinds go to the platform scheduler — the health
 probe (`shared/os_cron.py`), one watchdog probe per capability
-(`shared/os_watchdog_probe.py`), and the boot autostart (`shared/os_autostart.py`)
+(`shared/os_watchdog_probe.py`), the boot autostart (`shared/os_autostart.py`),
+and daily rotate-then-retain log maintenance (`shared/os_logs_job.py`)
 — as launchd LaunchAgents on macOS, crontab lines on Linux, `\Ava\<home-slug>\`
 tasks on Windows (`shared/os_schtasks.py`). Two properties are load-bearing:
 
@@ -1258,7 +1259,7 @@ tasks on Windows (`shared/os_schtasks.py`). Two properties are load-bearing:
   isolate it — the pytest suite sets this and `tests/conftest.py` fails any run
   that leaves a job behind. Deregistration is never gated. Operators do not set
   this: a prod cluster with it off silently loses its health probe, its watchdog
-  probes, and its ability to come back after a reboot.
+  probes, daily log maintenance, and its ability to come back after a reboot.
 
 Differences between `ava cluster update` and `ava stop && ava start`:
 - **graceful stop** — the session backend signals the service (SIGTERM to the top process on native
@@ -1713,18 +1714,29 @@ Where to look when something went wrong on a host:
 | an agent | `$AVA_HOME/logs/agent-{N}.log` (kernel + its exec subprocess, both appending) |
 | raw session stdout (gateway / shells / daemons / schedules) | Loki (the LGTM backend): shell logs → `filelog/sessions`; gateway/daemon/schedule logs → `filelog/services`; updater/rollout tees → `filelog/orchestration`. Banner-only agent main stdout is excluded. All filelog receivers derive Loki `service_name` from the filename and persist offsets. Loki retains 84 hours; scheduled local cleanup uses the family tiers below. See `deploy/lgtm/README.md`. |
 
-### Local log retention
+### Local log rotation and retention
 
-`ava logs retention` removes expired files from the root of this checkout's
-`$AVA_HOME/logs` only. Its allowlist is deliberately narrow: agent-main
-`ava-agent-<id>.out.log`, named PTY
-`ava-agent-<id>-shell-<n>-<name>.{out,host}.log`, and Loguru rotations named
-`<service>.YYYY-MM-DD_HH-MM-SS_<pid>.log`. It never traverses subdirectories or
-follows symlinks, and it skips every file held open by a visible process.
+`ava logs rotate` copytruncates top-level `$AVA_HOME/logs/*.out.log` files and
+top-level `$AVA_HOME/lgtm/native/logs/*.log` files when they reach 64 MiB or
+their mtime's UTC date differs from today. Grafana logs are excluded because
+Grafana rotates itself, as are already dated `*.log.YYYY-MM-DD` archives. The
+archive suffix is today's UTC date; an existing archive makes that file a
+same-day idempotent no-op. Copytruncate preserves the live path and inode, so a
+writer keeps its open file descriptor.
+
+`ava logs retention` removes expired allowlisted files from those same two
+top-level roots. The allowlist covers agent-main `ava-agent-<id>.out.log`, named
+PTY `ava-agent-<id>-shell-<n>-<name>.{out,host}.log`, every service
+`ava-*.out.log`, Loguru rotations named
+`<service>.YYYY-MM-DD_HH-MM-SS_<pid>.log`, and the dated service/native archives
+created by `ava logs rotate`. Neither command traverses subdirectories or
+follows symlinks; retention also skips every file held open by a visible process.
 
 Preview the exact paths, UTC mtimes, sizes, and total bytes before deleting:
 
 ```bash
+ava logs rotate --dry-run
+ava logs rotate
 ava logs retention --dry-run
 ava logs retention
 AVA_LOG_RETENTION_DAYS=21 ava logs retention --dry-run
@@ -1736,12 +1748,13 @@ The age is a positive integer number of days. `--older-than` and
 `--family-days` are mutually exclusive. Without either flag, the legacy global
 threshold remains: `AVA_LOG_RETENTION_DAYS`, otherwise 14 days. `--older-than`
 is the explicit global override. `--family-days` activates the C baseline:
-agent-main and rotated `agent-*` files 15 days; named PTY shell transcript/host
-files 7 days; `gateway*`, `ops*`, and `*-watchdog` / `*_watchdog` rotations 30
-days; all other allowlisted service rotations 3 days. The rotation shape also
-admits underscores, so `delivery_watchdog` is in the watchdog family. Supply
-only the family values that differ; omitted values retain that baseline. In a
-mapping, `default=N` aliases `other=N` for the catch-all service family.
+agent-main, `ava-agent-*` service stdout, and their archives 15 days; named PTY
+shell transcript/host files 7 days; `gateway*`, `ops*`, and `*-watchdog` /
+`*_watchdog` service files and rotations 30 days; all other service and native
+archives 3 days. The rotation shape also admits underscores, so
+`delivery_watchdog` is in the watchdog family. Supply only the family values
+that differ; omitted values retain that baseline. In a mapping, `default=N`
+aliases `other=N` for the catch-all service family.
 
 Dry-run candidates include their family and selected days, followed by one
 `retention_family` line per policy family (including zero-candidate families)
@@ -1750,27 +1763,13 @@ retained (`mtime < cutoff` is deleted). Delete failures are reported per path on
 stderr, remaining candidates are attempted, and the command exits nonzero if any
 inspection or deletion failed.
 
-Register one low-traffic daily OS job per machine after deployment, using the
-same launchd/crontab scheduling layer as `shared.os_cron`, with that machine's
-anchored `ava` executable as the payload. Registration is deployment work; the
-command intentionally does not add or mutate an OS schedule itself.
-
-Use the following payload in the deployment-owned jobs; these are templates,
-not instructions to register a job from the CLI:
-
-```text
-# macmini launchd — StartCalendarInterval: Hour=4, Minute=35
-/Users/<user>/.local/bin/ava logs retention --family-days agent=15,shell=7,gateway=30,ops=30,watchdog=30,other=3
-
-# mba launchd — StartCalendarInterval: Hour=4, Minute=40
-/Users/<user>/.local/bin/ava logs retention --family-days agent=15,shell=7,gateway=30,ops=30,watchdog=30,other=3
-
-# WSL crontab — 04:40 daily
-40 4 * * * /home/<user>/.local/bin/ava logs retention --family-days agent=15,shell=7,gateway=30,ops=30,watchdog=30,other=3
-
-# Windows schtasks — 04:45 daily; use the worktree's own executable
-schtasks /Create /TN "\\Ava\\<home-slug>\\log-retention" /SC DAILY /ST 04:45 /TR "\"C:\\path\\to\\Ava\\.venv\\Scripts\\ava\" logs retention --family-days agent=15,shell=7,gateway=30,ops=30,watchdog=30,other=3"
-```
+Converge registers one low-traffic daily job per machine. macOS launchd and
+Linux cron run rotation followed by retention at 04:40 local time; the second
+command runs only when rotation succeeds. Windows registers two windowless
+Task Scheduler jobs at 04:40 and 04:41 because one task action carries one Ava
+argv. Re-converge replaces the job definitions idempotently, and cluster destroy
+removes them. On macOS, converge also removes the old hand-made
+`com.ava.<home-slug>.log-retention` LaunchAgent after the managed job is loaded.
 
 Raw session output is queried in Loki, not tailed from a file — Grafana Explore
 (Loki datasource), `logcli`, or the HTTP API:

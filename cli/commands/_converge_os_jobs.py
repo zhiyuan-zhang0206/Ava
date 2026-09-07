@@ -1,11 +1,12 @@
 """Converge steps that register this host's OS-level scheduled jobs.
 
-Three jobs, one concept — everything Ava asks the platform scheduler (launchd /
+Four jobs, one concept — everything Ava asks the platform scheduler (launchd /
 crontab) to run on its behalf:
 
 - **health probe** — periodic cluster health check with auto-rollback (gateway).
 - **watchdog probe** — revives a dead per-capability watchdog (any serving role).
 - **boot autostart** — brings the whole cluster back after a reboot (prod only).
+- **logs maintenance** — daily copytruncate rotation followed by tiered retention.
 
 They share a shape worth keeping together: each is idempotent, each delegates the
 platform branching to a ``shared.os_*`` module, and each fails the converge loudly
@@ -52,6 +53,17 @@ def ensure_health_probe_cron(_ctx: ConvergeCtx) -> None:
     # cluster starts without a health probe, which is a degraded state). On
     # Windows the backend degrades to a warning instead — see
     # WindowsPlatformBackend.register_cron.
+
+
+def ensure_logs_maintenance(_ctx: ConvergeCtx) -> None:
+    """Register daily rotation + retention and reap the old manual macOS job."""
+    from shared.os_logs_job import (
+        reap_legacy_logs_job,
+        register_logs_job,
+    )
+
+    register_logs_job()
+    reap_legacy_logs_job()
 
 
 def ensure_watchdog_probe(ctx: ConvergeCtx) -> None:

@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from shared import os_autostart, os_cron, os_watchdog_probe
+from shared import os_autostart, os_cron, os_logs_job, os_watchdog_probe
 from shared.config import settings
 
 
@@ -24,6 +24,9 @@ class _ExplodingBackend:
 
     def register_autostart(self) -> None:
         raise AssertionError("register_autostart reached the OS with the gate off")
+
+    def register_logs_job(self) -> None:
+        raise AssertionError("register_logs_job reached the OS with the gate off")
 
     def register_watchdog_probe(self, _role: str, **_kw: object) -> None:
         raise AssertionError("register_watchdog_probe reached the OS with the gate off")
@@ -39,6 +42,9 @@ class _RecordingBackend:
     def register_autostart(self) -> None:
         self.calls.append("autostart")
 
+    def register_logs_job(self) -> None:
+        self.calls.append("logs-maintenance")
+
     def register_watchdog_probe(self, role: str, **_kw: object) -> None:
         self.calls.append(f"watchdog-probe.{role}")
 
@@ -47,6 +53,9 @@ class _RecordingBackend:
 
     def unregister_autostart(self, slug: str) -> None:
         self.calls.append(f"unregister-autostart:{slug}")
+
+    def unregister_logs_job(self, slug: str) -> None:
+        self.calls.append(f"unregister-logs-maintenance:{slug}")
 
     def unregister_watchdog_probe(self, role: str, slug: str) -> None:
         self.calls.append(f"unregister-watchdog-probe:{role}:{slug}")
@@ -83,6 +92,7 @@ def test_suite_default_is_off() -> None:
     [
         pytest.param(os_cron.register_os_cron, id="health-probe"),
         pytest.param(os_autostart.register_autostart, id="autostart"),
+        pytest.param(os_logs_job.register_logs_job, id="logs-maintenance"),
         pytest.param(lambda: os_watchdog_probe.register_watchdog_probe("gateway"), id="watchdog"),
     ],
 )
@@ -97,8 +107,14 @@ def test_registration_never_reaches_the_backend_when_gated(
 def test_registration_dispatches_when_enabled(gate_on: None, backend: _RecordingBackend) -> None:
     os_cron.register_os_cron()
     os_autostart.register_autostart()
+    os_logs_job.register_logs_job()
     os_watchdog_probe.register_watchdog_probe("agent-runner")
-    assert backend.calls == ["cron", "autostart", "watchdog-probe.agent-runner"]
+    assert backend.calls == [
+        "cron",
+        "autostart",
+        "logs-maintenance",
+        "watchdog-probe.agent-runner",
+    ]
 
 
 def test_deregistration_is_never_gated(backend: _RecordingBackend, tmp_path: Path) -> None:
@@ -107,10 +123,12 @@ def test_deregistration_is_never_gated(backend: _RecordingBackend, tmp_path: Pat
     home = tmp_path / ".ava-target"
     os_cron.unregister_os_cron(home)
     os_autostart.unregister_autostart(home)
+    os_logs_job.unregister_logs_job(home)
     os_watchdog_probe.unregister_watchdog_probe("gateway", home)
     assert [c.split(":")[0] for c in backend.calls] == [
         "unregister-cron",
         "unregister-autostart",
+        "unregister-logs-maintenance",
         "unregister-watchdog-probe",
     ]
 
