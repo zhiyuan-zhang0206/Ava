@@ -93,11 +93,11 @@ import {
 } from "@/lib/sticky";
 import type { BackendTimelineItem } from "@/lib/types";
 import { useTimelineStore } from "@/lib/timeline-store";
-import { BAR_CLEAR_TOP_PADDING_CLASS, FLEX, FLEX_1, MIN_H_0, OVERFLOW_HIDDEN } from "@/lib/layout";
+import { BAR_HEIGHT_PX, BAR_CLEAR_TOP_PADDING_CLASS, FLEX, FLEX_1, MIN_H_0, OVERFLOW_HIDDEN } from "@/lib/layout";
 import { cn } from "@/lib/utils";
 
 import { ConnectionNotice } from "@/components/connection-notice";
-import { TurnBlock } from "./run-block";
+import { findClosestStuckTurnId, TurnBlock } from "./run-block";
 import { classifyItem, groupIntoTurns, type TimelineGroup } from "./runs";
 import { LoadingOlderBadge, ColdLoadSpinner, ScrollToBottomButton } from "./overlays";
 import { TimelineRow, cardConfigFor } from "./row";
@@ -296,6 +296,18 @@ export function TimelineView({
   // A ResizeObserver re-measures on those height changes. Initial true =
   // button hidden until the user scrolls away.
   const [atBottom, setAtBottom] = useState(true);
+  const stuckRafRef = useRef<number | null>(null);
+  const [activeStuckTurnId, setActiveStuckTurnId] = useState<string | null>(null);
+
+  const updateStuckTurn = useCallback(() => {
+    const viewport =
+      viewportRef.current ??
+      wrapperRef.current?.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]') ??
+      null;
+    if (!viewport) return;
+    const nextStuckId = findClosestStuckTurnId(viewport, BAR_HEIGHT_PX);
+    setActiveStuckTurnId((prev) => (prev === nextStuckId ? prev : nextStuckId));
+  }, []);
 
   // Pointer-aware sticky thresholds: touch keeps the wide bounce-tolerant
   // bottom zone; mouse/trackpad gets a tight one so a small scroll-up to
@@ -384,6 +396,10 @@ export function TimelineView({
       controller.handleScroll(snapshot());
       // Button visibility is independent of sticky — re-measure position.
       measureAtBottom();
+      stuckRafRef.current ??= requestAnimationFrame(() => {
+        stuckRafRef.current = null;
+        updateStuckTurn();
+      });
       // Near the top + older items remain → fetch the previous window. The
       // store guards concurrent loads, but checking the ref here avoids
       // firing a fetch every scroll frame.
@@ -524,7 +540,7 @@ export function TimelineView({
       viewport.removeEventListener("touchcancel", onTouchEnd);
       ro.disconnect();
     };
-  }, [controller, measureAtBottom, pinToBottom]);
+  }, [controller, measureAtBottom, pinToBottom, updateStuckTurn]);
 
   // The SINGLE force-scroll trigger. The store bumps scrollToBottomRequest on
   // exactly the two moments a scroll-to-bottom is unconditional — agent switch
@@ -775,6 +791,7 @@ export function TimelineView({
     setPrevDetailsMode(effectiveDetailsMode);
     setOverrides(new Set());
     setTurnOverrides(new Map());
+    setActiveStuckTurnId(null);
   }
 
   // item_ids are message indexes local to each thread, so the same ids recur
@@ -785,6 +802,7 @@ export function TimelineView({
     setPrevThreadKey(threadKey);
     setOverrides(new Set());
     setTurnOverrides(new Map());
+    setActiveStuckTurnId(null);
   }
 
   // Same-mode re-pick (user ruling 2026-08-06): the selector bumps this token
@@ -796,7 +814,22 @@ export function TimelineView({
     setPrevResetToken(resetToken);
     setOverrides(new Set());
     setTurnOverrides(new Map());
+    setActiveStuckTurnId(null);
   }
+
+  // Sync stuck turn on changes or layout shifts
+  useLayoutEffect(() => {
+    updateStuckTurn();
+  }, [updateStuckTurn, turnOverrides, effectiveDetailsMode, items]);
+
+  useEffect(() => {
+    return () => {
+      if (stuckRafRef.current !== null) {
+        cancelAnimationFrame(stuckRafRef.current);
+        stuckRafRef.current = null;
+      }
+    };
+  }, []);
 
   // Find the index of the last agent_chat — fork button attaches only there
   const lastAgentChatIdx = (() => {
@@ -968,6 +1001,7 @@ export function TimelineView({
                   expanded={runExpanded}
                   onToggle={() => toggleTurn(turnId, runExpanded)}
                   turnActive={turnActive && isLastTurn}
+                  isStuck={activeStuckTurnId === turnId}
                 >
                   {runExpanded
                     ? group.items.map((it, i) =>
