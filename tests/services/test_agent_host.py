@@ -403,8 +403,8 @@ def wired(monkeypatch: pytest.MonkeyPatch, host_plugin: None) -> _Build:
 class TestPendingInboundBackstop:
     async def test_stale_running_rows_qualified_by_the_scan(self) -> None:
         """The hosted dispatcher scans only this machine's runnable rows. A
-        fresh pending inbound wakes its agent; only the database predicate marks
-        a long-silent one stale enough for cancellation recovery."""
+        fresh pending inbound wakes its agent; database timestamps identify backlog, while current turn progress must
+        independently authorize cancellation."""
         pool = _PendingScanPool([(17, True), (23, False)])
         host = AgentHost(
             pool=pool,  # pyright: ignore[reportArgumentType]
@@ -426,6 +426,7 @@ class TestPendingInboundBackstop:
             host._owner,
             180.0,
             180.0,
+            host._owner,
             "this-box",
             host._owner,
         )

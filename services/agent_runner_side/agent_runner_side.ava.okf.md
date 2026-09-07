@@ -37,6 +37,20 @@ has a three-second operation deadline: a stalled response is cancelled and logge
 at WARNING so subsequent ownership renewals continue. The shared Redis client's
 long-lived pub/sub reads remain unbounded; shutdown cancellation still propagates.
 
+The durable host scan separates backlog age from active-turn progress. Old pending
+messages alone cannot cancel a newly resumed turn: its monotonic progress clock
+must also be stale, and a missing clock does not authorize cancellation. The same
+scan rediscovers `running` agents owned by another host after their lease expires,
+even if they have only claimed messages or checkpoint work. It schedules the
+ordinary admission path, which retains exact process/resource and owner fences;
+the scan does not rewrite state or manufacture messages.
+
+Host replacement still respects the ownership lease even when a predecessor's
+exact process has exited. Normal cancellation also retains the shield around
+runtime initialization and cleanup because those paths contain side-effecting
+threads. A true stalled turn that cannot unwind retains its slot and requires
+supervisor recovery; backlog recovery does not weaken that resource boundary.
+
 ## Key Dependencies
 - [[watchdog.ava.okf.md]] — agent-runner-watchdog keeps alive the session services in this group every 60s (agent-host / ops / browser)
 - [[services/services.ava.okf.md|Background Services Overview]] — the upper-level index of grouping and capability distribution
