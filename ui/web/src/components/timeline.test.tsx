@@ -1782,6 +1782,29 @@ describe("load-older prepend anchor & pull-down gesture (#659, #817, #1272)", ()
     expect(button.getAttribute("aria-hidden")).toBe("true");
   });
 
+  it("blurs the fallback control when it hides while focused (no invisible-focus activation)", () => {
+    const loadOlder = vi.fn();
+    const items = [makeItem({ item_id: "10.0", kind: "agent_chat", payload: "ten" })];
+    const { rerender } = render(
+      <TimelineView items={items} hasMoreOlder onLoadOlder={loadOlder} />,
+    );
+    const viewport = screen.getByTestId("scroll-viewport");
+    const button = screen.getByTestId("load-older-button");
+    viewport.scrollTop = 0;
+    act(() => {
+      viewport.dispatchEvent(new Event("scroll"));
+    });
+    expect(button.getAttribute("aria-hidden")).toBe("false");
+    button.focus();
+    expect(document.activeElement).toBe(button);
+
+    // The control hides (history exhausted) — focus must be released so an
+    // invisible button can never be activated by Enter/Space.
+    rerender(<TimelineView items={items} onLoadOlder={loadOlder} />);
+    expect(button.getAttribute("aria-hidden")).toBe("true");
+    expect(document.activeElement).not.toBe(button);
+  });
+
   it("hybrid device: an armed wheel-pull timer does not kill an in-flight touch pull", () => {
     const loadOlder = vi.fn();
     const items = [makeItem({ item_id: "10.0", kind: "agent_chat", payload: "ten" })];

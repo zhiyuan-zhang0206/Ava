@@ -1,8 +1,10 @@
 "use client";
 
 // Floating overlay chrome for the timeline view: the pull-to-load indicator,
-// the cold-load spinner, and the scroll-to-bottom button.
+// the load-older fallback control, the cold-load spinner, and the
+// scroll-to-bottom button.
 
+import { useEffect, useRef } from "react";
 import { ArrowDown, ArrowUp, Loader2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 
@@ -106,6 +108,15 @@ export function LoadOlderButton({
   onClick: () => void;
 }) {
   const t = useTranslations("timeline");
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  // When the control hides while it still holds focus (user scrolled away via
+  // wheel/touch, a load started, hasMoreOlder flipped), release the focus —
+  // an invisible focused button would still activate on Enter/Space.
+  useEffect(() => {
+    if (!visible && buttonRef.current && buttonRef.current === document.activeElement) {
+      buttonRef.current.blur();
+    }
+  }, [visible]);
   return (
     <div
       className={cn(
@@ -115,6 +126,7 @@ export function LoadOlderButton({
       )}
     >
       <button
+        ref={buttonRef}
         type="button"
         onClick={onClick}
         tabIndex={visible ? 0 : -1}
