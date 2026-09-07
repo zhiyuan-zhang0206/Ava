@@ -116,7 +116,7 @@ def test_summary_projection_omits_detail_only_columns_in_sql() -> None:
         "COALESCE("
         "(SELECT json_agg(json_build_object("
         "'id', n.id, 'title', n.title, 'content', n.content, 'priority', n.priority, "
-        "'blocking', n.blocking, 'created_at', n.created_at, 'task_id', n.task_id) ORDER BY n.created_at) "
+        "'blocking', n.blocking, 'created_at', n.created_at, 'task_id', n.task_id, 'expire_at', n.expire_at) ORDER BY n.created_at) "
         "FROM agent_notices n "
         "WHERE n.agent_id = a.id AND n.require_response AND n.resolved_at IS NULL), "
         "'[]'::json) AS notices_awaiting_response, "
