@@ -14,6 +14,7 @@ import os
 import platform
 import plistlib
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -391,13 +392,13 @@ def _render_configs(repo: Path, native_dir: Path, ava_home: Path) -> None:
         "AVA_PROVISIONING_PATH": str(rendered_provisioning),
         "GRAFANA_PROVISIONING_PATH": str(rendered_provisioning / "dashboards"),
         "AVA_TEMPO_QUERY_URL": tempo_query_url,
-        # Two-state datasource + webhook URLs: empty AVA_OBSERVABILITY_URL keeps
-        # the loopback defaults (byte-identical to pre-parameterization); the
-        # provisioning files consume them via Grafana's $__env{} expansion.
+        # Datasources and webhooks use their configured service endpoints;
+        # provisioning consumes them via Grafana's $__env{} expansion.
         "LOKI_URL": loki_url,
         "PROMETHEUS_URL": prometheus_url,
         "PG_URL": pg_url,
-        "ALERTS_WEBHOOK_URL": _alerts_webhook_url(),
+        # run.sh sources runtime.env; URL paths must remain literal shell data.
+        "ALERTS_WEBHOOK_URL": shlex.quote(_alerts_webhook_url()),
         "REPO": str(repo),
         "lgtm_grafana_listen_host": settings.observability.lgtm_grafana_listen_host,
         "LGTM_LOKI_PORT": str(settings.observability.lgtm_loki_port),

@@ -41,9 +41,9 @@ datasources:
   #
   # ⚠️ PG is the most typical bomb in observatory cutovers (#3606): it is the
   # CLUSTER's OWN database (grafana_ro/ava_main), not an observatory service.
-  # When AVA_OBSERVABILITY_URL is set, this URL follows the switch and the
-  # operator MUST ensure the target host's :5433 serves this cluster's
-  # ava_main with the grafana_ro role — otherwise the SQL panels break.
+  # Native converge derives this endpoint from the cluster's direct DB URL,
+  # independently of AVA_OBSERVABILITY_URL. The configured host and port must
+  # serve this cluster's ava_main with grafana_ro; no default port is assumed.
   - name: Postgres (ava read-only)
     uid: ops
     type: postgres

@@ -34,32 +34,46 @@ def _observability_datasource_urls() -> tuple[str, str, str]:
 
     obs = settings.observability
     base = _validated_observability_base(obs.observability_url)
+    pg = _pg_datasource_host_port(remote_observatory=bool(base))
     if base:
-        return f"{base}:3100", f"{base}:9090", _pg_datasource_host_port()
+        return f"{base}:3100", f"{base}:9090", pg
     return (
         obs.telemetry_loki_url.rstrip("/"),
         obs.telemetry_prometheus_url.rstrip("/"),
-        "127.0.0.1:5433",
+        pg,
     )
 
 
-def _pg_datasource_host_port() -> str:
+def _host_port(host: str, port: int | str) -> str:
+    """Format one TCP authority, including brackets around IPv6 literals."""
+    host = host.removeprefix("[").removesuffix("]")
+    return f"[{host}]:{port}" if ":" in host else f"{host}:{port}"
+
+
+def _pg_datasource_host_port(*, remote_observatory: bool) -> str:
     """The cluster's own PG host:port for the rendered Grafana SQL datasource.
 
     PG externalization (#1752) is an independent track from the observatory
     (stage C moves the observatory while PG stays on the gateway), so the
     datasource host must derive from the data plane, not from
-    AVA_OBSERVABILITY_URL. The runner's db_url is the single source of truth:
-    under a remote observatory it names the cluster's data-plane host, and
-    ``url_host`` is the same A5 single point the admin/status dials use. A
+    AVA_OBSERVABILITY_URL. The existing direct_db_url derivation resolves a
+    local registry's pooler port to its actual Postgres port. libpq parsing
+    preserves query-string host/port settings; a Unix socket uses the local
+    TCP listener for Grafana. No database credentials enter the result. A
     db_url that still names loopback under a remote observatory renders a
     loopback datasource (only correct when Grafana runs on the PG host
     itself) — warn loudly, same pattern as the Tempo topology warning.
     """
-    from shared.url_secret import url_host
+    from psycopg.conninfo import conninfo_to_dict
 
-    host = url_host(settings.data_plane.db_url)
-    if host in ("127.0.0.1", "localhost", "::1"):
+    from shared.db import direct_db_url
+
+    connection = conninfo_to_dict(direct_db_url())
+    host = str(connection.get("host") or "127.0.0.1")
+    if host.startswith("/"):
+        host = "127.0.0.1"
+    port = connection.get("port") or "5432"
+    if remote_observatory and host in ("127.0.0.1", "localhost", "::1"):
         print(
             "lgtm native: AVA_OBSERVABILITY_URL is set but the data-plane db_url "
             f"still names {host} — the rendered PG datasource will dial the "
@@ -67,7 +81,7 @@ def _pg_datasource_host_port() -> str:
             "data-plane host (task #1752) for a remote observatory.",
             file=sys.stderr,
         )
-    return f"{host}:5433"
+    return _host_port(host, port)
 
 
 def _validated_observability_base(observability_url: str) -> str:
@@ -109,28 +123,44 @@ def _alerts_webhook_url() -> str:
 
     Deliberately NOT derived from observability_url: the alert ingest endpoint
     lives on this cluster's gateway, wherever the observatory is. Two-state:
-    empty observability_url (local observatory) keeps the byte-identical
-    loopback 127.0.0.1:8000 default; a remote observatory needs the gateway's
-    reachable host (shared.machine.reachable_host) so the remote Grafana can
-    dial the ingest endpoint. Self-dialing a tailnet IP from the gateway host
-    itself can hit VPN hairpin filtering (pgbouncer probe incident), which is
+    empty observability_url (local observatory) uses loopback and the actual
+    gateway bind port. A remote observatory uses the configured gateway base
+    URL, including its scheme, port and optional proxy path; a legacy empty
+    base uses reachable_host and the same bind port. Self-dialing a tailnet IP
+    from the gateway host can hit VPN hairpin filtering (pgbouncer probe incident), which is
     exactly why the loopback form is kept when no remote observatory is set.
     """
     from shared.machine import reachable_host
 
+    port = settings.gateway.gateway_port
     if settings.observability.observability_url:
-        host = reachable_host()
+        base = settings.gateway.gateway_url.strip().rstrip("/")
+        if base:
+            parsed = urlparse(base)
+            if (
+                parsed.scheme not in ("http", "https")
+                or not parsed.hostname
+                or parsed.username is not None
+                or parsed.password is not None
+                or parsed.query
+                or parsed.fragment
+            ):
+                raise ValueError(
+                    "Grafana alert webhook requires a credential-free gateway base URL"
+                )
+        else:
+            base = f"http://{_host_port(reachable_host(), port)}"
         print(
             "lgtm native: alert webhook will point at the gateway's reachable "
-            f"address http://{host}:8000 — this presumes a REMOTE observatory "
+            f"address {base} — this presumes a REMOTE observatory "
             "Grafana consumes the rendered contact.yml (delivery lands with the "
             "observatory deployment, stage B). With a local Grafana consumer, "
             "self-dialing a tailnet address can hit VPN hairpin filtering; keep "
             "AVA_OBSERVABILITY_URL empty until the remote mechanism exists.",
             file=sys.stderr,
         )
-        return f"http://{host}:8000/api/alerts"
-    return "http://127.0.0.1:8000/api/alerts"
+        return f"{base}/api/alerts"
+    return f"http://127.0.0.1:{port}/api/alerts"
 
 
 def _atomic_write(path: Path, content: str) -> None:
