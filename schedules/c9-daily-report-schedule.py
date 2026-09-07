@@ -29,6 +29,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 import ava
+import shared
 from ava.agents import AgentStatus as S
 from schedules.agent_status_guard import ensure_agent_status_members
 from schedules.catchup import catch_up, claimed_slot, fire_slot_once
@@ -48,7 +49,12 @@ CRON = "0 5 * * *"
 TZ = settings.general.timezone
 _REPORT_AGENT_ENV = "AVA_CI_USAGE_REPORT_AGENT"
 _REPORT_LABEL = "Ava \u8d1f\u8d23\u4eba"
-_REPO_ROOT = Path(__file__).resolve().parents[1]
+# The gateway materializes this script to ~/.ava/schedules/<id>/ before
+# executing it, so a __file__-relative root resolves to ~/.ava/schedules at
+# runtime (the repo layout only matches inside the checkout). Derive the
+# source root from shared.__file__ instead: shared/ lives at the deployed
+# source root in both places, so scripts/ci_accounting.py is always found.
+_REPO_ROOT = Path(shared.__file__).resolve().parents[1]
 _PROCESS_NAME = "schedule-c9-daily"
 
 # GitHub-hosted overage rates (private-repo equivalent; scripts/ci_accounting.py).
