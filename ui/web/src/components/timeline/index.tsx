@@ -69,7 +69,7 @@
 // - `./timestamp` — formatItemTime + ItemTimestamp
 // - `./buttons`   — ForkButton + CopyButton
 // - `./row`       — TimelineRow (memo) + cardConfigFor (per-item config cache)
-// - `./overlays`  — LoadingOlderBadge / ColdLoadSpinner / ScrollToBottomButton
+// - `./overlays`  — PullToLoadIndicator / LoadOlderButton / ColdLoadSpinner / ScrollToBottomButton
 import {
   Fragment,
   useCallback,
@@ -99,7 +99,7 @@ import { cn } from "@/lib/utils";
 import { ConnectionNotice } from "@/components/connection-notice";
 import { findClosestStuckTurnId, TurnBlock } from "./run-block";
 import { classifyItem, groupIntoTurns, type TimelineGroup } from "./runs";
-import { LoadingOlderBadge, ColdLoadSpinner, ScrollToBottomButton } from "./overlays";
+import { LoadOlderButton, PullToLoadIndicator, ColdLoadSpinner, ScrollToBottomButton } from "./overlays";
 import { TimelineRow, cardConfigFor } from "./row";
 
 
@@ -137,10 +137,11 @@ interface Props {
   maxWidthCss?: string;
 }
 
-// scrollTop below this (px from the top) while older items remain triggers
-// a load-older fetch — a lookahead band so the previous window arrives
-// before the user reaches the very top.
-const LOAD_OLDER_TRIGGER_PX = 200;
+// Pull-down-to-load thresholds. Pulling down past top fills the circular
+// progress indicator; releasing once the threshold is met triggers loading the
+// older compact history.
+export const PULL_THRESHOLD_PX = 56;
+export const MAX_PULL_PX = 80;
 
 interface RenderGroup {
   readonly group: TimelineGroup;
@@ -287,6 +288,18 @@ export function TimelineView({
   // context re-attached at the head of every window. The ARRAY front does not
   // change when older items land — only the front real item does.
   const pendingAnchorRef = useRef<{ id: string; frontId: string | null; docTop: number } | null>(null);
+
+  // Pull-down-to-load state and gesture tracking.
+  const [pullDistance, setPullDistance] = useState(0);
+  const pullDistanceRef = useRef(0);
+  const latestPullRef = useRef(0);
+  const isPullingTouchRef = useRef(false);
+  const touchStartYRef = useRef<number | null>(null);
+  const touchStartXRef = useRef<number | null>(null);
+  const wheelPullRef = useRef(0);
+  const wheelTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const rafIdRef = useRef<number | null>(null);
+  const prevLoadingOlderRef = useRef(loadingOlder);
   // Scroll-to-bottom button visibility. Driven by the *measured* current
   // distance to the bottom (sticky.ts:isAtBottom), NOT by the sticky
   // hysteresis flag. The two diverge whenever content height changes with
@@ -296,6 +309,13 @@ export function TimelineView({
   // A ResizeObserver re-measures on those height changes. Initial true =
   // button hidden until the user scrolls away.
   const [atBottom, setAtBottom] = useState(true);
+  // Settled-at-top flag driving the load-older fallback control (keyboard /
+  // screen-reader / scrollbar users reach the top via scroll-only inputs, so
+  // they need an explicit affordance; the pull gestures below do not fire for
+  // them). Measured in onScroll and in the ResizeObserver callback so a
+  // short thread whose content fits the viewport (scrollTop stays 0, no
+  // scroll event ever fires) still gets the control.
+  const [atTop, setAtTop] = useState(false);
   const stuckRafRef = useRef<number | null>(null);
   const [activeStuckTurnId, setActiveStuckTurnId] = useState<string | null>(null);
 
@@ -356,6 +376,12 @@ export function TimelineView({
     );
   }, [stickyThresholds]);
 
+  const measureAtTop = useCallback(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    setAtTop(viewport.scrollTop <= 0);
+  }, []);
+
   // Pin the viewport to the bottom and report the performed scroll back to
   // the controller (post-write snapshot, so the browser-clamped actual
   // scrollTop becomes the controller's baseline).
@@ -379,6 +405,81 @@ export function TimelineView({
     viewport.scrollTop += delta;
   }, []);
 
+  // Capture the scroll anchor at the trigger moment. The anchor is the
+  // TOPMOST node the prepend can displace that the user can actually see —
+  // the first VISIBLE real item. Standing-context nodes are skipped because
+  // a prepend of older history inserts after them.
+  const captureAnchor = useCallback(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    const currentItems = itemsRef.current;
+    const headNoteIds = standingHeadNoteIds(currentItems);
+    const contextIds = new Set(
+      currentItems
+        .filter((it) => isReattachedTimelineContext(it) || headNoteIds.has(it.item_id))
+        .map((it) => it.item_id),
+    );
+    const vpRect = viewport.getBoundingClientRect();
+    let anchorNode: HTMLElement | null = null;
+    let contextNode: HTMLElement | null = null;
+    for (const n of viewport.querySelectorAll<HTMLElement>("[data-item-id]")) {
+      const id = n.dataset.itemId;
+      if (!id || id.startsWith("_")) continue;
+      if (contextIds.has(id)) {
+        contextNode ??= n;
+        continue;
+      }
+      const r = n.getBoundingClientRect();
+      if (r.bottom >= vpRect.top && r.top <= vpRect.bottom) {
+        anchorNode = n;
+        break;
+      }
+    }
+    anchorNode ??= contextNode;
+    const anchorId = anchorNode?.dataset.itemId;
+    if (anchorNode && anchorId) {
+      const frontRealId =
+        currentItems.find(
+          (it) =>
+            !isReattachedTimelineContext(it) &&
+            !headNoteIds.has(it.item_id) &&
+            !it.item_id.startsWith("_"),
+        )?.item_id ?? null;
+      pendingAnchorRef.current = {
+        id: anchorId,
+        frontId: frontRealId,
+        docTop: anchorNode.getBoundingClientRect().top + viewport.scrollTop,
+      };
+    }
+  }, []);
+
+  // rAF-throttled pull-distance render: touchmove/wheel can fire at
+  // 60-120/s; one state update per animation frame keeps the indicator
+  // silky without re-rendering the whole timeline per event.
+  const schedulePullRender = useCallback((pull: number) => {
+    pullDistanceRef.current = pull;
+    latestPullRef.current = pull;
+    if (rafIdRef.current !== null) return; // a frame is already scheduled
+    rafIdRef.current = requestAnimationFrame(() => {
+      rafIdRef.current = null;
+      setPullDistance(latestPullRef.current);
+    });
+  }, []);
+
+  // Click path of the load-older fallback control: same anchor capture as the
+  // gesture paths, so the prepend lands with zero jitter for this input too.
+  const handleLoadOlderClick = useCallback(() => {
+    captureAnchor();
+    loadOlderRef.current?.();
+  }, [captureAnchor]);
+
+  useLayoutEffect(() => {
+    if (loadingOlder && !prevLoadingOlderRef.current && pendingAnchorRef.current === null) {
+      captureAnchor();
+    }
+    prevLoadingOlderRef.current = loadingOlder;
+  }, [loadingOlder, captureAnchor]);
+
   useEffect(() => {
     const viewport = wrapperRef.current?.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]') ?? null;
     if (!viewport) return;
@@ -388,159 +489,185 @@ export function TimelineView({
       scrollHeight: viewport.scrollHeight,
       clientHeight: viewport.clientHeight,
     });
-    // Every scroll event goes to the controller. The snapshot is read from
-    // the LIVE viewport rather than the event (scroll events carry no
-    // position), so a delayed or coalesced event can never report a stale
-    // one. No sticky logic here.
+    // Every scroll event goes to the controller. Inertial momentum scroll
+    // to top stops naturally at scrollTop = 0 without auto-triggering loadOlder.
     const onScroll = () => {
       controller.handleScroll(snapshot());
-      // Button visibility is independent of sticky — re-measure position.
       measureAtBottom();
+      measureAtTop();
       stuckRafRef.current ??= requestAnimationFrame(() => {
         stuckRafRef.current = null;
         updateStuckTurn();
       });
-      // Near the top + older items remain → fetch the previous window. The
-      // store guards concurrent loads, but checking the ref here avoids
-      // firing a fetch every scroll frame.
-      if (
-        viewport.scrollTop < LOAD_OLDER_TRIGGER_PX &&
-        hasMoreOlderRef.current &&
-        !loadingOlderRef.current
-      ) {
-        // Capture the anchor now (DOM reflects the user's current scroll) so
-        // the prepend commit can re-pin to a fresh screen top.
-        //
-        // #817 (user report): the anchor must be a REAL content node, NOT the
-        // first [data-item-id] in the DOM. Standing context fronts every
-        // window, so a prepend inserts the older window AFTER it — those nodes
-        // (standalone or in a collapsed turn) are never pushed down by a
-        // landing. Anchoring to one yields delta ≈ 0, the
-        // compensation no-ops, and the viewport is left showing the new
-        // window's top — the "jump to the top" the user reported (#659's
-        // test mocked 0.0 as moved, which the real layout never does).
-        // The anchor is the TOPMOST node the prepend can displace that the user
-        // can actually see — the first VISIBLE real item. A standing-context
-        // node / an off-screen first item would pin the compensation to a
-        // position the user isn't reading, and the viewport would be yanked by
-        // the anchor's displacement instead of holding the reading position
-        // (#1272: the expanded 0.0 prompt card is tens of thousands of px tall,
-        // so with the card visible the first real item sits far below the
-        // viewport, and the old anchor made every landing jump ~60k px).
-        // When NO real item is visible — the user is reading INSIDE standing
-        // context — anchor to that context node itself: the prepend inserts
-        // after it, so it is never displaced and compensation is zero.
-        let anchorNode: HTMLElement | null = null;
-        let contextNode: HTMLElement | null = null;
-        // Re-attached context = the prompt + standing head notes (the gateway
-        // re-attaches both at the head of every window) + compact summaries.
-        // A prepend of a same-segment window inserts after them, so anchoring
-        // to one yields delta 0 — the "jump to the top" bug #817.
-        const headNoteIds = standingHeadNoteIds(itemsRef.current);
-        const contextIds = new Set(
-          itemsRef.current
-            .filter((it) => isReattachedTimelineContext(it) || headNoteIds.has(it.item_id))
-            .map((it) => it.item_id),
-        );
-        const vpRect = viewport.getBoundingClientRect();
-        for (const n of viewport.querySelectorAll<HTMLElement>("[data-item-id]")) {
-          const id = n.dataset.itemId;
-          if (!id || id.startsWith("_")) continue;
-          if (contextIds.has(id)) {
-            contextNode ??= n;
-            continue;
-          }
-          const r = n.getBoundingClientRect();
-          if (r.bottom >= vpRect.top && r.top <= vpRect.bottom) {
-            anchorNode = n;
-            break;
-          }
-        }
-        anchorNode ??= contextNode;
-        const anchorId = anchorNode?.dataset.itemId;
-        pendingAnchorRef.current =
-          anchorNode && anchorId
-            ? {
-                id: anchorId,
-                // Landing signal: the first real item id. Re-attached context
-                // keeps the array front fixed across a prepend; ephemeral
-                // _marker items are skipped too — they sort last in real data
-                // but the signal must not depend on their position.
-                frontId:
-                  itemsRef.current.find(
-                    (it) =>
-                      !isReattachedTimelineContext(it) &&
-                      !headNoteIds.has(it.item_id) &&
-                      !it.item_id.startsWith("_"),
-                  )?.item_id ?? null,
-                // Document-space top (rect.top + scrollTop — invariant under
-                // user scrolls). Refreshed on every commit while pending, so
-                // the landing compensation measures the anchor's ACTUAL
-                // displacement since the last commit — never the stale
-                // trigger-time position (the old code pinned to that, yanking
-                // the viewport back by however far the user scrolled during
-                // the fetch and double-counting across back-to-back landings).
-                docTop: anchorNode.getBoundingClientRect().top + viewport.scrollTop,
-              }
-            : null;
-        loadOlderRef.current?.();
-      }
     };
     viewport.addEventListener("scroll", onScroll, { passive: true });
+
     // Wheel intent — the "stop following" signal a slow scroll-up needs on
     // mouse/trackpad (per-event scroll deltas stay under unstickDeltaPx
     // while auto-scroll keeps re-pinning the baseline, so position alone
     // can never express it). The controller absorbs upward notches at the
     // bottom (resting-finger noise) and at the last-pinned bottom (a chunk
     // grew the content between this event and the pin that follows).
-    // Touch devices never fire wheel.
+    // Touch devices never fire wheel. The same event also drives the
+    // pull-down-to-load gesture when the viewport is already at the top.
     const onWheel = (e: WheelEvent) => {
       controller.handleWheel(e.deltaY, snapshot());
+      if (hasMoreOlderRef.current && !loadingOlderRef.current && viewport.scrollTop <= 0) {
+        if (e.deltaY < 0) {
+          if (wheelTimerRef.current) clearTimeout(wheelTimerRef.current);
+          wheelPullRef.current = Math.min(
+            MAX_PULL_PX,
+            wheelPullRef.current + Math.abs(e.deltaY) * 0.35,
+          );
+          const currentPull = wheelPullRef.current;
+          schedulePullRender(currentPull);
+          wheelTimerRef.current = setTimeout(() => {
+            if (
+              wheelPullRef.current >= PULL_THRESHOLD_PX &&
+              hasMoreOlderRef.current &&
+              !loadingOlderRef.current
+            ) {
+              captureAnchor();
+              loadOlderRef.current?.();
+            }
+            wheelPullRef.current = 0;
+            pullDistanceRef.current = 0;
+            latestPullRef.current = 0;
+            if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current);
+            rafIdRef.current = null;
+            setPullDistance(0);
+          }, 180);
+        } else if (e.deltaY > 0) {
+          if (wheelPullRef.current > 0) {
+            wheelPullRef.current = 0;
+            pullDistanceRef.current = 0;
+            latestPullRef.current = 0;
+            if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current);
+            rafIdRef.current = null;
+            setPullDistance(0);
+            if (wheelTimerRef.current) clearTimeout(wheelTimerRef.current);
+          }
+        }
+      }
     };
     viewport.addEventListener("wheel", onWheel, { passive: true });
-    // Touch drag = the user's own scroll position. The controller refuses
-    // layout-change pins while a drag is in progress (#1016: on touch
-    // devices a slow scroll-up during streaming was canceled every frame
-    // by the RO pin — the timeline stayed glued to the bottom and the
-    // scroll-to-bottom button never appeared; wheel devices escape via
-    // handleWheel, touch devices have no wheel). passive: the browser
-    // owns the scroll; we only observe the gesture's lifecycle.
-    const onTouchStart = () => {
+
+    // Touch pull-down gesture at the top of the viewport.
+    const onTouchStart = (e: TouchEvent) => {
       controller.handleTouchStart();
+      // DOM lib types touches as always-present, but plain Event dispatches
+      // (tests, synthetic events) can carry none — read it as optional.
+      const touches = e.touches as TouchList | undefined;
+      if (
+        touches?.length === 1 &&
+        viewport.scrollTop <= 0 &&
+        hasMoreOlderRef.current &&
+        !loadingOlderRef.current
+      ) {
+        // A hybrid device can arm a wheel pull (its settle timer still
+        // pending) and then start a touch pull; the stale wheel timer would
+        // fire mid-touch and zero the touch pull state, killing the release
+        // trigger. Retire the wheel pull when the touch pull arms.
+        if (wheelTimerRef.current) {
+          clearTimeout(wheelTimerRef.current);
+          wheelTimerRef.current = null;
+        }
+        wheelPullRef.current = 0;
+        touchStartYRef.current = touches[0].clientY;
+        touchStartXRef.current = touches[0].clientX;
+        isPullingTouchRef.current = true;
+      } else {
+        touchStartYRef.current = null;
+        touchStartXRef.current = null;
+        isPullingTouchRef.current = false;
+      }
     };
+
+    const onTouchMove = (e: TouchEvent) => {
+      const touches = e.touches as TouchList | undefined;
+      if (
+        !isPullingTouchRef.current ||
+        touchStartYRef.current === null ||
+        touchStartXRef.current === null ||
+        !touches?.length
+      ) {
+        return;
+      }
+      if (!hasMoreOlderRef.current || loadingOlderRef.current || viewport.scrollTop > 0) {
+        isPullingTouchRef.current = false;
+        pullDistanceRef.current = 0;
+        latestPullRef.current = 0;
+        if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current);
+        rafIdRef.current = null;
+        setPullDistance(0);
+        return;
+      }
+      const dy = touches[0].clientY - touchStartYRef.current;
+      const dx = touches[0].clientX - touchStartXRef.current;
+      if (dy > 0 && Math.abs(dy) > Math.abs(dx)) {
+        const pull = Math.min(MAX_PULL_PX, dy * 0.45);
+        schedulePullRender(pull);
+        if (e.cancelable && dy > 5) {
+          e.preventDefault();
+        }
+      } else if (dy <= 0) {
+        pullDistanceRef.current = 0;
+        latestPullRef.current = 0;
+        if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current);
+        rafIdRef.current = null;
+        setPullDistance(0);
+      }
+    };
+
     const onTouchEnd = () => {
       controller.handleTouchEnd(snapshot());
+      if (isPullingTouchRef.current) {
+        isPullingTouchRef.current = false;
+        const currentPull = pullDistanceRef.current;
+        if (
+          currentPull >= PULL_THRESHOLD_PX &&
+          hasMoreOlderRef.current &&
+          !loadingOlderRef.current
+        ) {
+          captureAnchor();
+          loadOlderRef.current?.();
+        }
+        pullDistanceRef.current = 0;
+        latestPullRef.current = 0;
+        if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current);
+        rafIdRef.current = null;
+        setPullDistance(0);
+      }
+      touchStartYRef.current = null;
+      touchStartXRef.current = null;
     };
+
     viewport.addEventListener("touchstart", onTouchStart, { passive: true });
+    viewport.addEventListener("touchmove", onTouchMove, { passive: false });
     viewport.addEventListener("touchend", onTouchEnd, { passive: true });
     viewport.addEventListener("touchcancel", onTouchEnd, { passive: true });
-    // Height changes fire no scroll event but move the bottom: content
-    // grows (streamed chunk, throttled markdown/highlight flush, async
-    // image), content-toggle re-filter (collapse-all can shrink the
-    // content under a reader), or viewport resize (mobile keyboard).
-    // ResizeObserver callbacks run after layout and before paint, so while
-    // sticky the pin below lands in the same frame the growth becomes
-    // visible — the timeline stays glued to the bottom with no
-    // paint-then-scroll flicker. The controller gets the snapshot because
-    // a height change with no scroll event is the one way the flag and the
-    // real position can drift apart. Observe both the content box
-    // (scrollHeight) and the viewport (clientHeight) so every input to
-    // dist re-triggers it.
+
+    // ResizeObserver callbacks run after layout and before paint.
     const ro = new ResizeObserver(() => {
       if (controller.handleLayoutChange(snapshot())) pinToBottom(viewport);
       measureAtBottom();
+      measureAtTop();
     });
     ro.observe(viewport);
     if (contentRef.current) ro.observe(contentRef.current);
+
     return () => {
       viewport.removeEventListener("scroll", onScroll);
       viewport.removeEventListener("wheel", onWheel);
       viewport.removeEventListener("touchstart", onTouchStart);
+      viewport.removeEventListener("touchmove", onTouchMove);
       viewport.removeEventListener("touchend", onTouchEnd);
       viewport.removeEventListener("touchcancel", onTouchEnd);
+      if (wheelTimerRef.current) clearTimeout(wheelTimerRef.current);
+      if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current);
       ro.disconnect();
     };
-  }, [controller, measureAtBottom, pinToBottom, updateStuckTurn]);
+  }, [controller, measureAtBottom, measureAtTop, pinToBottom, updateStuckTurn, captureAnchor, schedulePullRender]);
 
   // The SINGLE force-scroll trigger. The store bumps scrollToBottomRequest on
   // exactly the two moments a scroll-to-bottom is unconditional — agent switch
@@ -928,7 +1055,11 @@ export function TimelineView({
 
   return (
     <div ref={wrapperRef} className={cn("relative", FLEX_1, MIN_H_0, OVERFLOW_HIDDEN)}>
-      <LoadingOlderBadge loadingOlder={loadingOlder} />
+      <PullToLoadIndicator pullDistance={pullDistance} pullThreshold={PULL_THRESHOLD_PX} loadingOlder={loadingOlder} />
+      <LoadOlderButton
+        visible={atTop && hasMoreOlder && !loadingOlder && pullDistance === 0}
+        onClick={handleLoadOlderClick}
+      />
       <ColdLoadSpinner show={loading && items.length === 0} />
       {/* overflow-anchor: none disables Chrome scroll anchoring on the timeline
           viewport. Scroll anchoring silently adjusts scrollTop to keep the
