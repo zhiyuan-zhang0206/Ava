@@ -62,7 +62,7 @@ before configuration bootstrap, so an offline gateway does not prevent the
 idempotent stop. First-time normal drain still needs data-plane configuration.
 
 SDK dependencies remain available through prepare/drain. Service stop closes
-new ops admission and waits for admitted handlers and executor work before
+new ordinary ops admission and waits for admitted handlers and executor work before
 signalling services. `ava pause` retains infrastructure and persistent PTYs;
 `ava stop` closes terminal jobs and shells and stops home-owned infrastructure
 unless explicitly preserved. `_maintenance_stop` verifies process identities
@@ -70,6 +70,16 @@ and exits; `_maintenance_data_plane` saves Redis before its verified shutdown.
 `_stop_extras` covers home-owned Gate/helper/native LGTM outside the session
 roster, retaining desired configuration and data. None of these local checks
 proves that every remote or unregistered writer has stopped.
+
+During a stopped/starting hold, gateway `GET /api/health` remains a control-plane
+identity and real database probe. It remains public and reports database
+failure as degraded; it does not certify business admission. Ops `status_probe`
+and `cluster_resume` also stay reachable and remain counted through completion.
+Their existing authentication requirements are unchanged.
+Resume still checks the exact generation, failure receipts and actual serving
+state. Ordinary start proves readiness before releasing the hold; an exit-code
+waiver never marks either serving or explicit maintenance `ready`. Business APIs
+and native work stay closed until that successful resume.
 
 Explicit force kills native processes without stamping a normal termination or
 inventing a restart/flush receipt. It preserves the original metadata for the

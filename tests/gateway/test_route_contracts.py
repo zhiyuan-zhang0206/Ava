@@ -45,6 +45,7 @@ _EXPECTED_CONTROL_PLANE = frozenset(
         ("POST", "/api/cluster/machines/{name}/resume"),
         ("POST", "/api/alerts"),
         ("POST", "/api/work-failed"),
+        ("GET", "/api/health"),
     }
 )
 
@@ -92,6 +93,7 @@ def test_should_bypass_pause_agrees_with_surface() -> None:
     """The decision function answers by the declared surface, on concrete
     request paths (templates must match real paths)."""
     exempt = [
+        ("GET", "/api/health"),
         ("GET", "/api/cluster/status"),
         ("POST", "/api/cluster/update"),
         ("POST", "/api/alerts"),
@@ -103,7 +105,6 @@ def test_should_bypass_pause_agrees_with_surface() -> None:
         ("GET", "/api/agents/42/messages"),
         ("GET", "/api/agents/42"),
         ("GET", "/api/cluster/status/extra"),  # exact match, not prefix
-        ("GET", "/api/health"),
         ("GET", "/pages/5-report/a/b"),
     ]
     for method, path in exempt:

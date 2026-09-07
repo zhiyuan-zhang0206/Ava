@@ -1,5 +1,6 @@
 """Local CLI phases must retain the hold across failures and explicit startup."""
 
+from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
 from uuid import uuid4
@@ -8,7 +9,7 @@ import pytest
 
 from cli.commands import _maintenance as command
 from cli.commands._maintenance_probe import HostIdentity
-from shared import maintenance, pause_owner
+from shared import maintenance, pause_owner, start_serving
 from shared.maintenance_state import MaintenanceHold
 from tests.agent.test_maintenance import WHEN
 from tests.agent.test_maintenance import isolate as isolate
@@ -63,13 +64,18 @@ def test_gateway_last_is_required_before_any_stop(monkeypatch: pytest.MonkeyPatc
     assert command._hold("local", WHEN).phase == "drained"
 
 
-def test_start_keeps_hold_until_explicit_resume(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_start_keeps_hold_until_explicit_resume(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     phase("stopped")
+    monkeypatch.setattr(start_serving, "state_path", lambda: tmp_path / "serving.json")
 
     def start(**kwargs: Any) -> int:
         maintenance.require_start_allowed()
         assert maintenance.held()
         assert kwargs == {"persist_services": False}
+        generation = start_serving.begin_start()
+        assert start_serving.mark_serving(generation)
         return 0
 
     def unpause() -> None:
