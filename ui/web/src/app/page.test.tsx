@@ -267,8 +267,17 @@ vi.mock("@/components/content-toggle", () => ({
   ContentToggle: () => <div data-testid="content-toggle" />,
 }));
 
+const inspectorMockState = vi.hoisted(() => ({
+  shouldThrow: false,
+}));
+
 vi.mock("@/components/inspector-panel", () => ({
-  InspectorPanel: () => <div data-testid="inspector-panel" />,
+  InspectorPanel: () => {
+    if (inspectorMockState.shouldThrow) {
+      throw new Error("Simulated inspector render crash");
+    }
+    return <div data-testid="inspector-panel" />;
+  },
 }));
 
 vi.mock("@/components/inspector-toggle", () => ({
@@ -309,6 +318,7 @@ function wrap(ui: React.ReactElement) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  inspectorMockState.shouldThrow = false;
   hooksState.agents = [];
   hooksState.activeId = null;
   hooksState.forkPending = false;
@@ -496,6 +506,56 @@ describe("HomePage top-level render", () => {
     const toggle = screen.getByTestId("inspector-toggle");
     expect(screen.getByRole("banner").contains(toggle)).toBe(true);
     expect(screen.getByTestId("composer").contains(toggle)).toBe(false);
+  });
+
+  it("renders ErrorBoundary fallback when inspector panel throws a render error", async () => {
+    hooksState.activeId = 5;
+    hooksState.agents = [makeAgent({ agent_id: 5 })];
+    hooksState.settings = {
+      "display.timeline_width_ratio": 0.4,
+      "display.inspector_open": true,
+    };
+    inspectorMockState.shouldThrow = true;
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {
+      /* silence error logs in test */
+    });
+    wrap(<HomePage />);
+
+    expect(await screen.findByText("Something went wrong")).toBeTruthy();
+    expect(screen.getByText("Simulated inspector render crash")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
+    consoleSpy.mockRestore();
+  });
+
+  it("resets ErrorBoundary when activeId changes via key", async () => {
+    hooksState.activeId = 5;
+    hooksState.agents = [makeAgent({ agent_id: 5 }), makeAgent({ agent_id: 6 })];
+    hooksState.settings = {
+      "display.timeline_width_ratio": 0.4,
+      "display.inspector_open": true,
+    };
+    inspectorMockState.shouldThrow = true;
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {
+      /* silence error logs in test */
+    });
+    const { rerender } = wrap(<HomePage />);
+
+    expect(await screen.findByText("Something went wrong")).toBeTruthy();
+
+    inspectorMockState.shouldThrow = false;
+    hooksState.activeId = 6;
+    const qc = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    rerender(
+      <QueryClientProvider client={qc}>
+        <HomePage />
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByTestId("inspector-panel")).toBeTruthy();
+    expect(screen.queryByText("Something went wrong")).toBeNull();
+    consoleSpy.mockRestore();
   });
 });
 
