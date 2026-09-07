@@ -198,14 +198,27 @@ def _reap_expired_web_sessions_blocking(pool: ConnectionPool) -> int:
 def _expired_shell_rows_blocking(pool: ConnectionPool) -> list[tuple[int, int, datetime, datetime]]:
     """TTL-expired shell tracking rows, oldest deadline first.
 
+    A row whose (agent, session) pair still carries a live watcher registry
+    entry (``agent_watchers.status IN ('running', 'rebuilt')``) is skipped in
+    the same SQL: a watcher session owns its lifecycle through the registry
+    (its own deadline + the boot reconcile), never through a shell TTL. The
+    NOT EXISTS guard also covers the schedule/watcher path in one atomic
+    query — no TOCTOU window between a registry check and the kill.
+
     Each row carries ``expires_at`` and ``created_at`` so the interruption
     notice can state when the TTL expired and how long it was (the duration
     is ``expires_at - created_at``; no extra column needed)."""
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
-            "SELECT agent_id, session_id, expires_at, created_at FROM agent_shell_ttls "
-            "WHERE expires_at <= now() "
-            "ORDER BY agent_id, session_id LIMIT %s",
+            "SELECT t.agent_id, t.session_id, t.expires_at, t.created_at "
+            "FROM agent_shell_ttls t "
+            "WHERE t.expires_at <= now() "
+            "AND NOT EXISTS ("
+            "SELECT 1 FROM agent_watchers w "
+            "WHERE w.agent_id = t.agent_id AND w.session_id = t.session_id "
+            "AND w.status IN ('running', 'rebuilt')"
+            ") "
+            "ORDER BY t.agent_id, t.session_id LIMIT %s",
             (_PASS_BATCH,),
         )
         return [(row[0], row[1], row[2], row[3]) for row in cur.fetchall()]

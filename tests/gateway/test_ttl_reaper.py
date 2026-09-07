@@ -322,6 +322,87 @@ async def test_reap_expired_shells_keeps_row_on_unreachable(
         assert row is not None and row[0] == 1
 
 
+async def test_reap_expired_shells_skips_live_watcher_rows(
+    db_conn: psycopg.Connection, reaper_pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A TTL row whose (agent, session) is a live watcher is never reaped.
+
+    The watcher registry owns the session's lifecycle (its own deadline +
+    the boot reconcile); a shell TTL must not kill it. The skip is SQL-side
+    (NOT EXISTS), so no shell_kill is dispatched and the TTL row stays.
+    """
+    aid = _running_agent(db_conn)
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO agent_shell_ttls (agent_id, session_id, expires_at, created_at) "
+            "VALUES (%s, 21, now() - interval '1 minute', now() - interval '1 hour 1 minute')",
+            (aid,),
+        )
+        cur.execute(
+            "INSERT INTO agent_watchers (agent_id, session_id, kind, name, status) "
+            "VALUES (%s, 21, 'cron', 'escalation-check', 'running')",
+            (aid,),
+        )
+        cur.execute("UPDATE agents_meta SET machine = 'macmini' WHERE id = %s", (aid,))
+    db_conn.commit()
+
+    dispatched: list[tuple[str, object]] = []
+
+    async def _dispatch(
+        machine: str, kind: str, payload: dict[str, object], **kwargs: object
+    ) -> dict[str, object]:
+        dispatched.append((kind, payload))
+        return ShellKillResult(mode="killed", interrupted=True, name="x").model_dump()
+
+    monkeypatch.setattr(ttl_reaper.cluster_rpc, "dispatch_to_machine", _dispatch)
+    reaped = await _reap_expired_shells(reaper_pool)
+
+    assert reaped == []
+    assert dispatched == []
+    with db_conn.cursor() as cur:
+        cur.execute("SELECT count(*) FROM agent_shell_ttls WHERE agent_id = %s", (aid,))
+        row = cur.fetchone()
+        assert row is not None and row[0] == 1
+
+
+async def test_reap_expired_shells_reaps_closed_watcher_rows(
+    db_conn: psycopg.Connection, reaper_pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A watcher registry row in a terminal status (missed / reaped) does not
+    shield the TTL row — the watcher is gone and normal reclamation applies."""
+    aid = _running_agent(db_conn)
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO agent_shell_ttls (agent_id, session_id, expires_at, created_at) "
+            "VALUES (%s, 22, now() - interval '1 minute', now() - interval '1 hour 1 minute')",
+            (aid,),
+        )
+        cur.execute(
+            "INSERT INTO agent_watchers (agent_id, session_id, kind, name, status) "
+            "VALUES (%s, 22, 'at', 'one-shot', 'missed')",
+            (aid,),
+        )
+        cur.execute("UPDATE agents_meta SET machine = 'macmini' WHERE id = %s", (aid,))
+    db_conn.commit()
+
+    async def _dispatch(
+        machine: str, kind: str, payload: dict[str, object], **kwargs: object
+    ) -> dict[str, object]:
+        assert machine == "macmini"
+        assert kind == "shell_kill"
+        assert payload == {"agent_id": aid, "session_id": 22}
+        return ShellKillResult(mode="absent").model_dump()
+
+    monkeypatch.setattr(ttl_reaper.cluster_rpc, "dispatch_to_machine", _dispatch)
+    reaped = await _reap_expired_shells(reaper_pool)
+
+    assert reaped == [(aid, 22)]
+    with db_conn.cursor() as cur:
+        cur.execute("SELECT count(*) FROM agent_shell_ttls WHERE agent_id = %s", (aid,))
+        row = cur.fetchone()
+        assert row is not None and row[0] == 0
+
+
 async def test_reap_expired_shells_keeps_row_on_unknown_machine(
     db_conn: psycopg.Connection, reaper_pool: ConnectionPool
 ) -> None:
