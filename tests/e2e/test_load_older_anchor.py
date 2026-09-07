@@ -9,8 +9,11 @@ landing yanked the viewport back by the distance scrolled in between; with
 the anchor below the viewport it scrolled by the anchor's whole displacement
 — the "whole list jumps after loading older messages" report).
 
-The scroll-up paging request is slowed with a route delay so the continued
-scrolling happens while the fetch is in flight, deterministically.
+The paging request is triggered by the pull-down-to-load gesture (the old
+auto-trigger band was removed): after settling at the top, continued wheel-up
+past the threshold fills the ring and fires the fetch. The request is slowed
+with a route delay so the user's continued scrolling happens while the fetch
+is in flight, deterministically.
 """
 
 from __future__ import annotations
@@ -20,6 +23,7 @@ import time
 
 import httpx
 import pytest
+from playwright.sync_api import Page
 
 from tests.e2e._env import E2EEnv
 
@@ -60,14 +64,59 @@ _SCROLL_UP_JS = """
   const vp = window.__tl.vp;
   let st = vp.scrollTop;
   const step = () => {
-    st = Math.max(0, st - 100);
+    st = Math.max(0, st - 500);
     vp.scrollTop = st;
-    if (st > 0) setTimeout(step, 60);
+    if (st > 0) setTimeout(step, 30);
   };
   step();
   return 'scrolling';
 }
 """
+
+# Pull-down-to-load at the top: three wheel-up events past the threshold
+# (each accumulates |deltaY| * 0.35; 3 * 120 * 0.35 = 126 >= 56). The settle
+# timer fires 180ms after the last event and triggers the load-older fetch.
+_WHEEL_PULL_JS = """
+() => {
+  const vp = window.__tl.vp;
+  let i = 0;
+  const fire = () => {
+    vp.dispatchEvent(new WheelEvent('wheel', { deltaY: -120, bubbles: true }));
+    i += 1;
+    if (i < 3) setTimeout(fire, 40);
+  };
+  fire();
+  return 'pulling';
+}
+"""
+
+
+def _pull_load_older(page: Page, before_requests: list[str]) -> None:
+    """Trigger load-older via the new pull gesture (the old auto-trigger band
+    is gone): scroll to the top, wheel-up past the pull threshold, then keep
+    scrolling while the route-delayed fetch is in flight."""
+    page.evaluate(_SCROLL_UP_JS)
+    deadline = time.monotonic() + 15.0
+    while time.monotonic() < deadline:
+        st = page.evaluate("window.__tl.vp.scrollTop")
+        if st == 0:
+            break
+        page.wait_for_timeout(100)
+    assert page.evaluate("window.__tl.vp.scrollTop") == 0, "viewport never reached the top"
+
+    page.evaluate(_WHEEL_PULL_JS)
+    # The settle timer (180ms) fires the load-older request; the route handler
+    # records it before its 2s delay, so its presence proves the trigger.
+    deadline = time.monotonic() + 5.0
+    while time.monotonic() < deadline and not before_requests:
+        page.wait_for_timeout(50)
+    assert before_requests, "wheel pull at top never triggered the load-older request"
+
+    # The user keeps scrolling while the delayed fetch is in flight (the
+    # #1272 yank happened exactly when the landing compensated against a
+    # stale trigger-time position).
+    page.evaluate("window.__tl.vp.scrollTop = 600")
+    page.evaluate("window.__tl.vp.dispatchEvent(new Event('scroll'))")
 
 
 @pytest.mark.scenario("tests.e2e.fakes.scenarios.load_older:build")
@@ -134,10 +183,10 @@ def test_load_older_preserves_reading_position(e2e_env: E2EEnv) -> None:
     init = page.evaluate(_SAMPLER_JS)
     assert init.get("ok"), init
 
-    # Scroll up to the top in 100 px steps — the trigger band (< 200 px) is
-    # crossed mid-scroll, so the user is still scrolling when the (delayed)
-    # fetch lands.
-    page.evaluate(_SCROLL_UP_JS)
+    # Trigger load-older via the pull gesture (the old < 200px auto-trigger
+    # band is gone); the fetch is route-delayed 2s, and the user keeps
+    # scrolling while it is in flight.
+    _pull_load_older(page, before_requests)
 
     deadline = time.monotonic() + 30.0
     n = 0
