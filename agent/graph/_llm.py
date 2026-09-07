@@ -529,6 +529,9 @@ async def _persist_last_active(ctx: AvaContext, agent_id: int, text: str) -> Non
       no text. It is deliberately NOT written by the ops lifecycle (rollout
       pause / restart / update), and for an idle agent that whole cycle
       runs no LLM turn, so an ops restart cannot reset the idle clock.
+    - last_turn_fatal_at = NULL in the same statement: a completed turn is the
+      recovery signal that clears the corpse marker (the heartbeat circuit
+      breaker's "first successful LLM call closes the breaker" moment).
     - last_message_text = the AI text WHEN this turn produced any: it survives
       compact (which replaces the whole checkpoint but not this column), read
       back by get_last_message.
@@ -543,13 +546,15 @@ async def _persist_last_active(ctx: AvaContext, agent_id: int, text: str) -> Non
         async with async_write_transaction(ctx.ops_pool) as conn, conn.cursor() as cur:
             if text:
                 await cur.execute(
-                    "UPDATE agents_meta SET last_active_at = now(), last_message_text = %s "
+                    "UPDATE agents_meta SET last_active_at = now(), last_message_text = %s, "
+                    "last_turn_fatal_at = NULL "
                     "WHERE id = %s",
                     (text, agent_id),
                 )
             else:
                 await cur.execute(
-                    "UPDATE agents_meta SET last_active_at = now() WHERE id = %s",
+                    "UPDATE agents_meta SET last_active_at = now(), last_turn_fatal_at = NULL "
+                    "WHERE id = %s",
                     (agent_id,),
                 )
     except Exception:

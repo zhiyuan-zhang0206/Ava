@@ -23,6 +23,7 @@ from agent.hosted_ownership import admit_hosted_runtime, settle_hosted_runtime
 from agent.impersonation import protect_native_hooks
 from agent.startup import _wrap_saver_writes_with_nstep_interval
 from services.agent_host.host import AgentHost
+from services.agent_host.runtime import TurnOutcome
 from shared import maintenance, maintenance_cohort, pause_owner
 from shared.context import AvaContext
 from shared.db import create_agent, insert_inbound_message
@@ -193,7 +194,7 @@ async def test_admitted_model_finishes_real_exec_and_after_exec_before_drain_rec
     monkeypatch.setattr(host, "_runtime_for", AsyncMock(return_value=object()))
     monkeypatch.setattr("services.agent_host.host.validate_model_config", MagicMock())
 
-    async def drive(_agent: int, _runtime: Any) -> bool:
+    async def drive(_agent: int, _runtime: Any) -> TurnOutcome:
         return await host._invoke_until_done(_agent, ctx)
 
     monkeypatch.setattr(host, "_drive_turns", drive)
@@ -247,7 +248,7 @@ async def test_admitted_model_finishes_real_exec_and_after_exec_before_drain_rec
         )
         monkeypatch.setattr(successor, "_runtime_for", AsyncMock(return_value=object()))
 
-        async def resume_drive(_agent: int, _runtime: Any) -> bool:
+        async def resume_drive(_agent: int, _runtime: Any) -> TurnOutcome:
             return await successor._invoke_until_done(_agent, ctx)
 
         monkeypatch.setattr(successor, "_drive_turns", resume_drive)

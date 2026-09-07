@@ -133,6 +133,9 @@ async def test_llm_node_stamps_last_active_at_with_text(
     stamped = [s for s in _executed_sql(ops_pool) if "last_active_at = now()" in s]
     assert len(stamped) == 1, "a completed turn must issue exactly one last_active_at UPDATE"
     assert "last_message_text" in stamped[0], "a turn with text also persists last_message_text"
+    assert "last_turn_fatal_at = NULL" in stamped[0], (
+        "a completed turn clears the corpse marker (first success closes the breaker)"
+    )
 
 
 async def test_llm_node_stamps_last_active_at_on_tool_only_turn(
@@ -166,6 +169,9 @@ async def test_llm_node_stamps_last_active_at_on_tool_only_turn(
     stamped = [s for s in _executed_sql(ops_pool) if "last_active_at = now()" in s]
     assert len(stamped) == 1, "a tool-only turn must still stamp last_active_at"
     assert "last_message_text" not in stamped[0], "no AI text → no last_message_text in the UPDATE"
+    assert "last_turn_fatal_at = NULL" in stamped[0], (
+        "a tool-only turn also clears the corpse marker"
+    )
 
 
 async def test_llm_node_dispatches_chunks_to_handler_with_anthropic_shape(
