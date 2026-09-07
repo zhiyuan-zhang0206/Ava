@@ -197,8 +197,9 @@ def _agent_population(min_agents: int) -> bool:
 
 
 def _agent_population_failure_class(min_agents: int) -> str | None:
-    """Classify a failed population check without turning DB loss into code evidence."""
+    """Classify observed low population against DB availability and local intent."""
     import shared.db
+    from shared import disabled_services, pause_owner
 
     try:
         with shared.db.connect(autocommit=True) as conn, conn.cursor() as cur:
@@ -211,7 +212,14 @@ def _agent_population_failure_class(min_agents: int) -> str | None:
         return "environment"
     if row is None:
         return "code"
-    return "code" if row[0] < min_agents else None
+    if row[0] >= min_agents:
+        return None
+    current = pause_owner.read()
+    if disabled_services.is_skipped("agent-host", disabled_services.read_skipped()) or (
+        current.status == "paused" and current.maintenance is not None
+    ):
+        return "maintenance"
+    return "code"
 
 
 def _reset_pending_lkg_streak(home: Path) -> None:
@@ -261,6 +269,13 @@ def _unhealthy(
     _reset_pending_lkg_streak(home)
     deploying = _deploy_suppression()
     _alert_failure(home, message, deploy_explains=deploying is not None)
+    if failure_class == "maintenance":
+        _reset_failure_count(home)
+        print(
+            "  local agent maintenance — NOT counting low population toward rollback",
+            file=sys.stderr,
+        )
+        return 1
     if deploying is None:
         if failure_class == "environment":
             print("  environment-class failure — NOT counted toward auto-rollback", file=sys.stderr)
