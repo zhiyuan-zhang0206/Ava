@@ -36,3 +36,9 @@ loopback plus this host's reachable address after the bounded address wait.
 macOS keeps its loopback relay workaround; an empty caller bearer stays
 loopback-only on either platform. Redis authentication still uses the separate
 admin and runtime passwords, not the bearer.
+
+The local OTLP producer endpoint and collector port are host-scoped. Bootstrap
+publishes the read-only `AVA_GATEWAY_OTLP_ENDPOINT` derived from the gateway's
+reachable host and fresh OTLP port, overriding any stale copy of that derived
+field. Pure-runner collectors and trace replay consume it while retaining
+independent local listeners. The relay still requires the cluster bearer.
