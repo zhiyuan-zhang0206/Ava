@@ -17,6 +17,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from psycopg_pool import ConnectionPool
 
 from gateway.schemas import ShellCaptureResponse
+from gateway.shell_ttls import fallback_expiry
 from ops import cluster_rpc as _cluster_rpc
 
 router = APIRouter()
@@ -83,32 +84,62 @@ async def get_agent_shell(
             detail=f"agent {agent_id} shell {session_id} capture failed: {exc.result!r}",
         ) from exc
 
+    created_at = _parse_created_at(result.get("created_at"))
     expires_at = await asyncio.to_thread(
-        _shell_expiry_blocking, request.app.state.db_pool, agent_id, session_id
+        _shell_expiry_blocking,
+        request.app.state.db_pool,
+        agent_id,
+        session_id,
+        created_at,
     )
     return ShellCaptureResponse(
         agent_id=agent_id,
         session_id=session_id,
         session_name=result["session_name"],
         lines=result["lines"],
-        created_at=result.get("created_at"),
+        created_at=created_at,
         uptime_seconds=int(result.get("uptime_seconds") or 0),
         expires_at=expires_at,
     )
 
 
-def _shell_expiry_blocking(pool: ConnectionPool, agent_id: int, session_id: int) -> datetime | None:
-    """The session's TTL deadline from `agent_shell_ttls`, or None when it has
-    no TTL (watcher / legacy pre-mandate sessions). The table lives in the
-    gateway's own Postgres — a split runner cannot answer this, so the merge
-    happens here, mirroring the inspector's shell list enrichment."""
+def _parse_created_at(value: object) -> datetime | None:
+    """The capture op's launch epoch as a datetime; None when absent/unparsable.
+
+    The response model would parse the raw string itself; parsing here once
+    lets the TTL fallback count from the same instant the page renders."""
+    if not isinstance(value, str):
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        return None
+
+
+def _shell_expiry_blocking(
+    pool: ConnectionPool,
+    agent_id: int,
+    session_id: int,
+    created_at: datetime | None,
+) -> datetime | None:
+    """The session's TTL deadline from `agent_shell_ttls`.
+
+    A session without a row — legacy pre-mandate shell, or one created by a
+    not-yet-updated runner during a rollout — falls back to the 24h cap
+    counted from its launch epoch, so the monitor page always renders a
+    deadline. None only when there is no launch epoch to count from. The
+    table lives in the gateway's own Postgres — a split runner cannot answer
+    this, so the merge happens here, mirroring the inspector's shell list
+    enrichment."""
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT expires_at FROM agent_shell_ttls WHERE agent_id = %s AND session_id = %s",
             (agent_id, session_id),
         )
         row = cur.fetchone()
-    return row[0] if row is not None else None
+    if row is not None:
+        return row[0]
+    return fallback_expiry(created_at)
 
 
 def _agent_machine_blocking(pool: ConnectionPool, agent_id: int) -> str:

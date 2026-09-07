@@ -17,6 +17,7 @@ import time
 from collections.abc import Iterator
 from typing import Any
 
+import psycopg
 import pytest
 
 import ava
@@ -149,6 +150,72 @@ def test_launch_creates_watcher_session(_agent_row: int) -> None:
     try:
         assert isinstance(wid, int)
         assert _is_live_watcher(wid, "test-launch")
+    finally:
+        ava.shell.kill(wid)
+
+
+def _ttl_deadline(
+    conn: psycopg.Connection, agent_id: int, session_id: int
+) -> datetime.datetime | None:
+    conn.rollback()
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT expires_at FROM agent_shell_ttls WHERE agent_id = %s AND session_id = %s",
+            (agent_id, session_id),
+        )
+        row = cur.fetchone()
+    return row[0] if row is not None else None
+
+
+def test_launch_registers_ttl_row_from_timeout(
+    db_conn: psycopg.Connection, _agent_row: int
+) -> None:
+    """Task #2614: a launch watcher records its timeout as the session TTL —
+    the shell monitor page must show a deadline for every session."""
+    before = datetime.datetime.now(datetime.UTC)
+    wid = watcher.launch("import time\ntime.sleep(60)\n", timeout="30m", name="test-launch-ttl")
+    try:
+        deadline = _ttl_deadline(db_conn, _agent_row, wid)
+        assert deadline is not None
+        assert (
+            before + datetime.timedelta(minutes=29)
+            <= deadline
+            <= datetime.datetime.now(datetime.UTC) + datetime.timedelta(minutes=31)
+        )
+    finally:
+        ava.shell.kill(wid)
+
+
+def test_cron_registers_default_24h_ttl(db_conn: psycopg.Connection, _agent_row: int) -> None:
+    """Task #2614: a cron watcher has no timeout — its session records the
+    24h hard cap as the TTL (the reaper still never kills it while its
+    registry row is live; task #2589's NOT EXISTS guard)."""
+    before = datetime.datetime.now(datetime.UTC)
+    wid = watcher.cron("0 4 * * *", "wake", name="test-cron-ttl")
+    try:
+        deadline = _ttl_deadline(db_conn, _agent_row, wid)
+        assert deadline is not None
+        assert (
+            before + datetime.timedelta(hours=23, minutes=59)
+            <= deadline
+            <= datetime.datetime.now(datetime.UTC) + datetime.timedelta(hours=24, minutes=1)
+        )
+    finally:
+        ava.shell.kill(wid)
+
+
+def test_launch_timeout_beyond_24h_caps_session_ttl(
+    db_conn: psycopg.Connection, _agent_row: int
+) -> None:
+    """A launch watcher's watchdog may outlive one session day, but the
+    session TTL is still capped at the 24h ruling (2026-09-01)."""
+    wid = watcher.launch("import time\ntime.sleep(60)\n", timeout="48h", name="test-cap-ttl")
+    try:
+        deadline = _ttl_deadline(db_conn, _agent_row, wid)
+        assert deadline is not None
+        assert deadline <= datetime.datetime.now(datetime.UTC) + datetime.timedelta(
+            hours=24, minutes=1
+        )
     finally:
         ava.shell.kill(wid)
 
@@ -1014,7 +1081,7 @@ def test_spawn_binds_registry_generation_to_the_created_session_record(
         _name: str | None = None,
         *,
         _cwd: str | None = None,
-        _ttl: float | None = None,
+        ttl: float | None = None,
     ) -> tuple[int, str]:
         return 424271, "ava-agent-1-shell-424271-record-bound"
 
@@ -1213,7 +1280,7 @@ def test_spawn_back_to_back_keeps_all_files(
     alive: set[int] = set()
     counter = iter(range(1000, 1003))
 
-    def _fake_create(name: str) -> tuple[int, str]:
+    def _fake_create(name: str, *, ttl: float) -> tuple[int, str]:
         sid = next(counter)
         alive.add(sid)
         return sid, name

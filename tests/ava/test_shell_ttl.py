@@ -48,6 +48,13 @@ def test_sessions_new_requires_ttl() -> None:
         ava.shell.sessions.new("test-no-ttl")  # type: ignore[call-arg]
 
 
+def test_create_session_requires_ttl() -> None:
+    """The internal creation boundary is mandatory too (task #2614): every
+    creation path — shells and watchers — must carry a deadline."""
+    with pytest.raises(TypeError):
+        ava.shell.sessions._create_session("test-no-ttl")  # type: ignore[call-arg]
+
+
 def test_run_background_tracks_explicit_ttl(db_conn: psycopg.Connection, _agent_row: int) -> None:
     handle = ava.shell.run_background("sleep 60", name="test-bg-ttl", keep=True, ttl=120)
     try:

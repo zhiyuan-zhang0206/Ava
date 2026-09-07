@@ -143,8 +143,8 @@ export default function ShellMonitorPage({
   // Title-bar meta: runtime + TTL from the capture response's timestamps.
   // Runtime is launch → now (ticking via the shared 1s tick, falling back to
   // the probe-time uptime snapshot when created_at is missing); TTL remaining
-  // is expires_at − now, "No TTL" when the session records none (watcher /
-  // legacy pre-mandate shells).
+  // is expires_at − now. "No TTL" is defensive only: the backend answers a
+  // deadline whenever it can count from the launch epoch.
   const now = useNow(1_000);
   const createdMs = data?.created_at != null ? new Date(data.created_at).getTime() : NaN;
   const runtimeSeconds = Number.isFinite(createdMs)

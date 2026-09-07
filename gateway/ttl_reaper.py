@@ -245,8 +245,10 @@ def _expired_shell_rows_blocking(pool: ConnectionPool) -> list[tuple[int, int, d
     entry (``agent_watchers.status IN ('running', 'rebuilt')``) is skipped in
     the same SQL: a watcher session owns its lifecycle through the registry
     (its own deadline + the boot reconcile), never through a shell TTL. The
-    NOT EXISTS guard also covers the schedule/watcher path in one atomic
-    query — no TOCTOU window between a registry check and the kill.
+    NOT EXISTS guard makes that atomic — no TOCTOU window between a registry
+    check and the kill. Schedule sessions never carry rows at all (they have
+    no agent id; the ScheduleManager reaps them — see
+    ``gateway/schedule_manager._launch``).
 
     Each row carries ``expires_at`` and ``created_at`` so the interruption
     notice can state when the TTL expired and how long it was (the duration
