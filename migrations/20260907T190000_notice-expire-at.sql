@@ -1,9 +1,17 @@
--- Add mandatory expire_at to agent_notices, backfill existing rows with 1 day TTL,
+-- Add mandatory expire_at to agent_notices, backfill existing rows,
 -- allow 'expired' resolution status, and add an index for the TTL reaper sweep.
 
 ALTER TABLE agent_notices ADD COLUMN expire_at TIMESTAMPTZ;
 
-UPDATE agent_notices SET expire_at = created_at + INTERVAL '1 day' WHERE expire_at IS NULL;
+-- Backfill: resolved historical notices get created_at + 1 day; still-open notices
+-- get a full 24h grace window from deployment (now() + 1 day) so older open notices
+-- are not immediately expired on rollout.
+UPDATE agent_notices
+SET expire_at = CASE
+    WHEN resolved_at IS NOT NULL THEN created_at + INTERVAL '1 day'
+    ELSE now() + INTERVAL '1 day'
+END
+WHERE expire_at IS NULL;
 
 ALTER TABLE agent_notices ALTER COLUMN expire_at SET NOT NULL;
 

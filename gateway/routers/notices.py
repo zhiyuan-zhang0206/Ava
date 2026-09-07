@@ -485,6 +485,17 @@ async def post_notice_create(agent_id: int, body: NoticeCreateIn, request: Reque
             status_code=422,
             detail="blocking=True requires require_response=True (an FYI never stalls)",
         )
+    if body.expire_at is not None:
+        req_tz = (
+            body.expire_at
+            if body.expire_at.tzinfo is not None
+            else body.expire_at.replace(tzinfo=UTC)
+        )
+        if req_tz < datetime.now(UTC):
+            raise HTTPException(
+                status_code=422,
+                detail=f"expire_at is in the past: {req_tz.isoformat()}",
+            )
 
     def _create(pool: ConnectionPool) -> tuple[int, int, list[int], list[int]]:
         if body.task_id is not None:

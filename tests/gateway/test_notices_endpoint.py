@@ -1302,3 +1302,19 @@ def test_post_notice_clamps_expire_at_when_exceeding_limit(db_conn: psycopg.Conn
     expire_at = row[0]
     expected_max = now + timedelta(seconds=settings.daemon.notice_ttl_limit_seconds)
     assert abs((expire_at - expected_max).total_seconds()) < 5.0
+
+
+def test_post_notice_past_expire_at_is_422(db_conn: psycopg.Connection) -> None:
+    """POST with expire_at in the past returns 422."""
+    aid = _seed_agent(db_conn)
+    past = datetime.now(UTC) - timedelta(minutes=10)
+    with TestClient(app) as client:
+        resp = client.post(
+            f"/api/agents/{aid}/notices",
+            json={
+                "title": "past expiry notice",
+                "expire_at": past.isoformat(),
+            },
+        )
+    assert resp.status_code == 422
+    assert "expire_at is in the past" in resp.json()["detail"]

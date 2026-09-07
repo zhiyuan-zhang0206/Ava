@@ -135,6 +135,7 @@ def _reap_expired_notices_blocking(pool: ConnectionPool) -> list[tuple[int, int]
         if not rows:
             return []
         reaped: list[tuple[int, int]] = []
+        updated_agents: set[int] = set()
         for nid, agent_id, title, require_response in rows:
             with conn.cursor() as cur:
                 cur.execute(
@@ -145,8 +146,7 @@ def _reap_expired_notices_blocking(pool: ConnectionPool) -> list[tuple[int, int]
                 if cur.rowcount == 0:
                     continue
             if require_response:
-                with suppress(Exception):
-                    publish_agent_updated_sync(conn, agent_id)
+                updated_agents.add(agent_id)
             _notify_owner(
                 conn,
                 agent_id,
@@ -154,6 +154,9 @@ def _reap_expired_notices_blocking(pool: ConnectionPool) -> list[tuple[int, int]
                 source="system:notice-expire",
             )
             reaped.append((agent_id, nid))
+        for aid in updated_agents:
+            with suppress(Exception):
+                publish_agent_updated_sync(conn, aid)
         return reaped
 
 
