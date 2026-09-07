@@ -391,9 +391,8 @@ def _render_configs(repo: Path, native_dir: Path, ava_home: Path) -> None:
         "AVA_PROVISIONING_PATH": str(rendered_provisioning),
         "GRAFANA_PROVISIONING_PATH": str(rendered_provisioning / "dashboards"),
         "AVA_TEMPO_QUERY_URL": tempo_query_url,
-        # Two-state datasource + webhook URLs: empty AVA_OBSERVABILITY_URL keeps
-        # the loopback defaults (byte-identical to pre-parameterization); the
-        # provisioning files consume them via Grafana's $__env{} expansion.
+        # Datasources and webhooks use their configured service endpoints;
+        # provisioning consumes them via Grafana's $__env{} expansion.
         "LOKI_URL": loki_url,
         "PROMETHEUS_URL": prometheus_url,
         "PG_URL": pg_url,
