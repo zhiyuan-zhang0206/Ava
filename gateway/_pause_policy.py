@@ -13,6 +13,8 @@ Why these routes are control-plane (the audit trail that used to live in
 middleware comments):
 - `/api/cluster/*` — the gateway's phase-B / observability entry during a
   rollout.
+- `/api/health` — identity and database liveness needed before start can release
+  the native admission hold; ordinary business requests remain paused.
 - `/api/alerts` — the alert webhook (Grafana embedded Alertmanager); a 503
   inside the rollout window exhausts Grafana's webhook retries and the
   alert is lost exactly when the user needs alerting most.
