@@ -102,10 +102,14 @@ async def test_expired_predecessor_is_rediscovered_after_boot_without_pending_me
     inbound = insert_inbound_message(db_conn, agent, "Claimed before host exit", "user")
     db_conn.execute("UPDATE inbound_messages SET status='claimed' WHERE id=%s", (inbound,))
     db_conn.commit()
-    with subprocess.Popen([sys.executable, "-c", "import time; time.sleep(0.2)"]) as predecessor:
+    with subprocess.Popen(
+        [sys.executable, "-c", "import sys; sys.stdin.read()"], stdin=subprocess.PIPE
+    ) as predecessor:
+        assert predecessor.stdin is not None
         dead = ResourceProcess(
             pid=predecessor.pid, birth=psutil.Process(predecessor.pid).create_time()
         )
+        predecessor.stdin.close()
         predecessor.wait(timeout=3)
     row = db_conn.execute(
         "SELECT incarnation_resources FROM agents_meta WHERE id=%s", (agent,)
