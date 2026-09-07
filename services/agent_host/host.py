@@ -552,11 +552,13 @@ class AgentHost:
         return agents
 
     async def pending_inbound_wakes(self, stale_after_s: float) -> list[PendingInboundWake]:
-        """Find pending work and lifecycle pointers missed by Redis wakes.
+        """Find queued work and expired predecessors missed by Redis wakes.
 
-        Stale cancellation requires both pending-message age and completed-turn
-        age to exceed the grace period. Held maintenance only wakes its restart
-        cohort, preserving the current iteration until its ordinary claim.
+        Database age identifies backlog; cancellation additionally requires the
+        dispatcher's current turn-progress clock to be stale. Expired foreign
+        owners are rediscovered even with only claimed/checkpoint work, since
+        their lease may expire after host startup. Wakes retain normal admission
+        and resource fences. Held maintenance only wakes its restart cohort.
         """
         held_wakes = maintenance_receipts.pending_wakes(self._maintenance_failed)
         if held_wakes is not None:
@@ -573,7 +575,7 @@ class AgentHost:
                     "      AND stale.created_at < now() - make_interval(secs => %s)"
                     "  ) "
                     "FROM agents_meta m "
-                    "WHERE ("
+                    "WHERE ((("
                     "    m.status = 'idling' "
                     "    OR (m.status='running' AND m.runtime_owner IS DISTINCT FROM %s "
                     "        AND EXISTS (SELECT 1 FROM agent_impersonations takeover "
@@ -597,13 +599,16 @@ class AgentHost:
                     "        )"
                     "    )"
                     "  ) "
-                    "  AND m.machine = %s "
                     "  AND (m.lifecycle_command_id IS NOT NULL OR EXISTS ("
                     "    SELECT 1 FROM inbound_messages pending "
                     "    WHERE pending.agent_id = m.id AND pending.status = 'pending'"
                     "  ) OR EXISTS (SELECT 1 FROM agent_impersonations lease "
                     "    WHERE lease.agent_id=m.id AND (lease.status IN "
-                    "    ('requested','accepted','active') OR lease.delta_version>lease.applied_version))) "
+                    "    ('requested','accepted','active') OR lease.delta_version>lease.applied_version)))) "
+                    "  OR (m.status='running' AND m.runtime_kind='hosted' "
+                    "      AND m.runtime_owner IS DISTINCT FROM %s "
+                    "      AND (m.lease_expires_at IS NULL OR m.lease_expires_at<=now()))) "
+                    "  AND m.machine = %s "
                     "  AND (m.runtime_owner IS DISTINCT FROM %s OR NOT EXISTS ("
                     "    SELECT 1 FROM agent_impersonations held "
                     "    WHERE held.agent_id=m.id AND held.status='active' "
@@ -618,6 +623,7 @@ class AgentHost:
                         self._owner,
                         stale_after_s,
                         stale_after_s,
+                        self._owner,
                         self._machine,
                         self._owner,
                     ),
