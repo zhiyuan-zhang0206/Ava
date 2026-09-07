@@ -34,6 +34,17 @@ are host-scoped configuration; the regular cluster port block does not assign
 them. Separate homes therefore need explicit non-overlapping ports, including
 Loki's gRPC listener.
 
+`_observatory_urls.py` derives Grafana's PostgreSQL host/port through the
+existing direct database URL helper, including a local registry's pooler-to-PG
+port mapping. It does not follow the observatory address or assume port 5433.
+A remote pooler cannot be resolved from another machine's registry; the
+helper's existing warning and unchanged URL apply there. Local alert webhooks
+use loopback and the configured gateway bind port; a remote observatory uses
+the configured gateway base URL, or reachable host plus bind port for a legacy
+empty base. Database credentials never enter these rendered endpoint values.
+The webhook assignment is shell-quoted because Grafana's launcher sources
+runtime.env; proxy paths must not expand variables or execute substitutions.
+
 Converge rewrites configs on every invocation. On Linux, changed unit/config
 inputs restart only already running owned services; the following start step
 starts stopped services and waits for owned HTTP listeners. A repeated start

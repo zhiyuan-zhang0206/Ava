@@ -35,6 +35,16 @@ def _darwin_lifecycle(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(_lgtm_native.platform, "machine", lambda: "arm64")
 
 
+@pytest.fixture(autouse=True)
+def _default_provisioning_endpoints(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Default-render assertions use an explicit default deployment configuration."""
+    monkeypatch.setattr(
+        "shared.config.settings.data_plane.db_url", "postgresql://reader@127.0.0.1:5433/ava"
+    )
+    monkeypatch.setattr("shared.config.settings.gateway.gateway_url", "")
+    monkeypatch.setattr("shared.config.settings.gateway.gateway_port", 8000)
+
+
 def _fail_on_docker_query(_name: str) -> None:
     pytest.fail("native lifecycle must not query the Docker CLI")
 
