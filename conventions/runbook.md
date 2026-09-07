@@ -1385,8 +1385,9 @@ on 54318 without colliding in mirrored networking. Update the gateway before
 runners; a missing or invalid endpoint fails converge rather than guessing a
 port. `ava trace ship` uses the same projection. The remote receiver binds
 only the exact non-loopback `AVA_MACHINE_HOST`, never `0.0.0.0`/`::`; the
-local receiver remains `127.0.0.1:4318` without auth. Combined single-box
-deployments keep only the local receiver, including when their secret is set.
+local receiver uses `127.0.0.1:AVA_TELEMETRY_OTLP_PORT` (default 4318) without
+auth. Combined single-box deployments keep only the local receiver, including
+when their secret is set.
 Every application log, metric and trace Resource carries `cluster` = this
 home's display label. The gateway collector drops any non-null cluster that
 does not match its own, while retaining null-cluster legacy/filelog/infra
