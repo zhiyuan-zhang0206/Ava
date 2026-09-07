@@ -21,6 +21,7 @@ from psycopg_pool import ConnectionPool
 
 from gateway import ttl_reaper
 from gateway.ttl_reaper import (
+    _reap_expired_notices_blocking,
     _reap_expired_pages_blocking,
     _reap_expired_shells,
     _reap_expired_web_sessions_blocking,
@@ -582,3 +583,86 @@ def test_wall_clock_none_falls_back_to_host_zone(monkeypatch: pytest.MonkeyPatch
         .astimezone(UTC)
     )
     assert ttl_reaper._wall_clock(dt) == dt.astimezone(None).strftime("%H:%M")
+
+
+# --- Expired notices reaping ------------------------------------------------
+
+
+def test_reap_expired_notices_resolves_and_notifies_live_agent(
+    db_conn: psycopg.Connection, reaper_pool: ConnectionPool
+) -> None:
+    """Notices past expire_at are resolved with resolution='expired', and a system note is sent to live owner."""
+    aid = _running_agent(db_conn)
+    with db_conn.cursor() as cur:
+        # One expired notice
+        cur.execute(
+            "INSERT INTO agent_notices (agent_id, local_id, title, priority, require_response, blocking, expire_at) "
+            "VALUES (%s, 0, 'expired notice', 'P1', TRUE, FALSE, now() - interval '1 minute') RETURNING id",
+            (aid,),
+        )
+        row = cur.fetchone()
+        assert row is not None
+        nid = row[0]
+        # One unexpired notice
+        cur.execute(
+            "INSERT INTO agent_notices (agent_id, local_id, title, priority, require_response, blocking, expire_at) "
+            "VALUES (%s, 1, 'active notice', 'P2', FALSE, FALSE, now() + interval '1 hour')",
+            (aid,),
+        )
+    db_conn.commit()
+
+    reaped = _reap_expired_notices_blocking(reaper_pool)
+    assert reaped == [(aid, nid)]
+
+    # Check notice state in DB
+    with db_conn.cursor() as cur:
+        cur.execute("SELECT resolution, resolved_at FROM agent_notices WHERE id = %s", (nid,))
+        row = cur.fetchone()
+        assert row is not None
+        res, resolved_at = row
+    assert res == "expired"
+    assert resolved_at is not None
+
+    # Check inbound message delivered
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "SELECT source, content FROM inbound_messages WHERE agent_id = %s",
+            (aid,),
+        )
+        inbounds = cur.fetchall()
+    assert len(inbounds) == 1
+    assert inbounds[0][0] == "system:notice-expire"
+    assert "expired notice" in inbounds[0][1]
+    assert "[This notice has expired.]" in inbounds[0][1]
+
+
+def test_reap_expired_notices_does_not_resurrect_terminated_agent(
+    db_conn: psycopg.Connection, reaper_pool: ConnectionPool
+) -> None:
+    """Terminated agents have their notice closed as expired, but no inbound message is delivered."""
+    aid = create_agent(db_conn)
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO agents_meta (id, spawner, status) VALUES (%s, 'user', 'terminated')",
+            (aid,),
+        )
+        cur.execute(
+            "INSERT INTO agent_notices (agent_id, local_id, title, priority, require_response, blocking, expire_at) "
+            "VALUES (%s, 0, 'dead agent notice', 'P2', FALSE, FALSE, now() - interval '1 minute') RETURNING id",
+            (aid,),
+        )
+        row = cur.fetchone()
+        assert row is not None
+        nid = row[0]
+    db_conn.commit()
+
+    reaped = _reap_expired_notices_blocking(reaper_pool)
+    assert reaped == [(aid, nid)]
+
+    with db_conn.cursor() as cur:
+        cur.execute("SELECT resolution FROM agent_notices WHERE id = %s", (nid,))
+        row = cur.fetchone()
+        assert row is not None and row[0] == "expired"
+        cur.execute("SELECT count(*) FROM inbound_messages WHERE agent_id = %s", (aid,))
+        row = cur.fetchone()
+        assert row is not None and row[0] == 0

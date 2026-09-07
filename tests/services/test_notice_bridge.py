@@ -359,8 +359,8 @@ def _seed_notice(
 ) -> int:
     with db_conn.cursor() as cur:
         cur.execute(
-            "INSERT INTO agent_notices (agent_id, local_id, title, priority, require_response, blocking) "
-            "VALUES (%s, COALESCE((SELECT MAX(local_id) FROM agent_notices WHERE agent_id = %s), -1) + 1, %s, %s, false, false) "
+            "INSERT INTO agent_notices (agent_id, local_id, title, priority, require_response, blocking, expire_at) "
+            "VALUES (%s, COALESCE((SELECT MAX(local_id) FROM agent_notices WHERE agent_id = %s), -1) + 1, %s, %s, false, false, now() + interval '1 day') "
             "RETURNING id",
             (agent_id, agent_id, title, prio),
         )

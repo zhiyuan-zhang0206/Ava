@@ -493,7 +493,8 @@
     "sendNote": "发送备注",
     "marking": "标记中…",
     "answerPlaceholder": "你的回复…（回车发送）",
-    "notePlaceholder": "可选备注…（回车标记已读）"
+    "notePlaceholder": "可选备注…（回车标记已读）",
+    "expires": "{time}过期"
   },
   "pendingStrip": {
     "agent": "agent {id}",
@@ -811,6 +812,9 @@
       "blocking": "阻塞",
       "dismissed": "已忽略",
       "read": "已读",
+      "expired": "已到期",
+      "withdrawn": "已撤回",
+      "superseded": "已替换",
       "yourAnswer": "你的回复",
       "decision": "需要决策",
       "fyi": "供参考"

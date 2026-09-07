@@ -266,7 +266,7 @@ CREATE TABLE agent_notices (
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ,
     resolved_at     TIMESTAMPTZ,
-    resolution      TEXT CHECK (resolution IN ('answered', 'dismissed', 'read', 'withdrawn', 'superseded')),
+    resolution      TEXT CHECK (resolution IN ('answered', 'dismissed', 'read', 'withdrawn', 'superseded', 'expired')),
     reply           TEXT,
     -- Optional task this notice belongs to: the agent reports the task it was
     -- working when it posted, so the human queue groups notices by task rather
@@ -274,6 +274,7 @@ CREATE TABLE agent_notices (
     -- The FK to agent_tasks is added by ALTER after that table is defined below
     -- (agent_notices is declared first, so an inline REFERENCES would forward-ref).
     task_id         BIGINT,
+    expire_at       TIMESTAMPTZ NOT NULL,
     CONSTRAINT agent_notices_agent_local_id_unique UNIQUE (agent_id, local_id),
     CONSTRAINT agent_notices_blocking_requires_response
         CHECK (NOT blocking OR require_response),
@@ -281,8 +282,8 @@ CREATE TABLE agent_notices (
         CHECK ((resolved_at IS NULL) = (resolution IS NULL)),
     CONSTRAINT agent_notices_resolution_legal
         CHECK (resolution IS NULL
-               OR (require_response AND resolution IN ('answered', 'dismissed', 'withdrawn', 'superseded'))
-               OR (NOT require_response AND resolution IN ('answered', 'read', 'withdrawn', 'superseded'))),
+               OR (require_response AND resolution IN ('answered', 'dismissed', 'withdrawn', 'superseded', 'expired'))
+               OR (NOT require_response AND resolution IN ('answered', 'read', 'withdrawn', 'superseded', 'expired'))),
     CONSTRAINT agent_notices_answered_has_reply
         CHECK (resolution IS DISTINCT FROM 'answered' OR reply IS NOT NULL)
 );
@@ -305,6 +306,11 @@ CREATE INDEX agent_notices_unread_idx
 CREATE INDEX agent_notices_resolved_idx
     ON agent_notices (resolved_at DESC, id DESC)
     WHERE resolved_at IS NOT NULL;
+
+-- Active open notices index on expire_at for TTL reaper cleanup sweeps.
+CREATE INDEX agent_notices_expire_at_idx
+    ON agent_notices (expire_at)
+    WHERE resolved_at IS NULL;
 
 -- ─────────────── inbound_messages ───────────────
 -- The agent's unified gateway — any "trigger" entering an agent goes through this table.
@@ -1469,3 +1475,7 @@ INSERT INTO schema_migrations (name) VALUES ('20260906T081715_schedule-fire-log'
 -- Heartbeat nudge backoff is already represented above. Fresh DBs stamp the
 -- migration instead of replaying the strict ADD COLUMN delta.
 INSERT INTO schema_migrations (name) VALUES ('20260906T125200_heartbeat-nudge-backoff');
+
+-- Notice expire_at is already represented above. Fresh DBs stamp the
+-- migration instead of replaying the strict ADD COLUMN delta.
+INSERT INTO schema_migrations (name) VALUES ('20260907T190000_notice-expire-at');

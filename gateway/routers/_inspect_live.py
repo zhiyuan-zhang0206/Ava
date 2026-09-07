@@ -85,7 +85,7 @@ def notice_blocking(pool: ConnectionPool[Any], agent_id: int) -> OpenNotice | No
     """Read the agent's single unexpired open notice, if one exists."""
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
-            "SELECT id, title, content, priority, require_response, blocking, created_at "
+            "SELECT id, title, content, priority, require_response, blocking, created_at, expire_at "
             "FROM agent_notices "
             "WHERE agent_id = %s AND resolved_at IS NULL "
             "AND (require_response OR created_at > now() - make_interval(days => %s)) "
@@ -103,6 +103,7 @@ def notice_blocking(pool: ConnectionPool[Any], agent_id: int) -> OpenNotice | No
         require_response=row[4],
         blocking=row[5],
         created_at=row[6],
+        expire_at=row[7],
     )
 
 
