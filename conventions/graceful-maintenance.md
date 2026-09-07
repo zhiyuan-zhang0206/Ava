@@ -101,6 +101,15 @@ source on disk does not update an imported running process. **The first
 deployment is not protected by the new protocol itself**: establish and verify
 its bootstrap procedure against the old running version before upgrading it.
 
+Cold preparation can retain an expired owned idle row only when its native
+consumers are absent, resources are empty and the latest persisted checkpoint
+is a complete halted END. The same boundary can park a completed legacy
+restart stranded in `restarting`: its done, untargeted command must precede
+the final exit checkpoint. Only the parked status changes; historical leases,
+identity, messages, checkpoints and lifecycle acknowledgements are preserved.
+An expired lease alone, unfinished lifecycle/graph work or an uncertain
+checkpoint still refuses; queued ordinary messages remain available for resume.
+
 ## Explicit maintenance steps
 
 `ava maintenance prepare/drain/status/stop/stop-data-plane/start/resume` remains
