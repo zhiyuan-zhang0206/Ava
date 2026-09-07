@@ -657,7 +657,7 @@ async def test_host_persists_provider_failure_before_releasing_turn(
         _wrap_saver_writes_with_nstep_interval(saver, 100)
         graph = builder.compile(checkpointer=saver)  # pyright: ignore[reportUnknownMemberType]
         host = AgentHost(pool=aops_pool, checkpointer=saver, graph=graph, machine="test")
-        assert not await host._invoke_until_done(agent_id, _breaker_ctx())
+        assert not (await host._invoke_until_done(agent_id, _breaker_ctx())).exited
     # New saver/connection prevents in-memory buffered state from faking success.
     async with AsyncPostgresSaver.from_conn_string(settings.data_plane.db_url) as reader:
         stored = await reader.aget_tuple({"configurable": {"thread_id": str(agent_id)}})
