@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import json
+import os
+import subprocess
+import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -123,6 +127,38 @@ def test_webhook_rejects_url_credentials_without_reporting_them(
         _observatory_urls._alerts_webhook_url()
     captured = capsys.readouterr()
     assert "synthetic-secret" not in str(error.value) + captured.out + captured.err
+
+
+@pytest.mark.parametrize("path", ["$AVA_REVIEW_LITERAL", "$(touch${IFS}webhook-command-ran)"])
+def test_real_grafana_launcher_preserves_webhook_url_literal(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, path: str
+) -> None:
+    """The actual launcher sources runtime.env without expanding URL path code."""
+    base = f"https://gateway.test:20016/tenant/{path}"
+    monkeypatch.setattr(settings.observability, "observability_url", "http://observatory.test")
+    monkeypatch.setattr(settings.gateway, "gateway_url", base)
+    native = tmp_path / "lgtm/native"
+    _lgtm_native._render_configs(Path(__file__).resolve().parents[2], native, tmp_path)
+    executable = native / "grafana-home/bin/grafana"
+    executable.parent.mkdir(parents=True)
+    executable.write_text(
+        f"#!{sys.executable}\n"
+        "import json, os\n"
+        "print(json.dumps(os.environ['AVA_ALERTS_WEBHOOK_URL']))\n"
+    )
+    executable.chmod(0o755)
+    result = subprocess.run(  # noqa: S603 — generated launcher with a private stub executable
+        ["bash", str(native / "grafana/run.sh")],
+        cwd=tmp_path,
+        env={**os.environ, "AVA_REVIEW_LITERAL": "expanded"},
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=5,
+    )
+    assert result.returncode == 0, result.stderr
+    assert not (tmp_path / "webhook-command-ran").exists()
+    assert json.loads(result.stdout) == f"{base}/api/alerts"
 
 
 @pytest.mark.parametrize("observatory", ["", "http://observatory.test"])

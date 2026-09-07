@@ -42,6 +42,8 @@ helper's existing warning and unchanged URL apply there. Local alert webhooks
 use loopback and the configured gateway bind port; a remote observatory uses
 the configured gateway base URL, or reachable host plus bind port for a legacy
 empty base. Database credentials never enter these rendered endpoint values.
+The webhook assignment is shell-quoted because Grafana's launcher sources
+runtime.env; proxy paths must not expand variables or execute substitutions.
 
 Converge rewrites configs on every invocation. On Linux, changed unit/config
 inputs restart only already running owned services; the following start step

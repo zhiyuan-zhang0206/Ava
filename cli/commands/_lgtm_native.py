@@ -14,6 +14,7 @@ import os
 import platform
 import plistlib
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -396,7 +397,8 @@ def _render_configs(repo: Path, native_dir: Path, ava_home: Path) -> None:
         "LOKI_URL": loki_url,
         "PROMETHEUS_URL": prometheus_url,
         "PG_URL": pg_url,
-        "ALERTS_WEBHOOK_URL": _alerts_webhook_url(),
+        # run.sh sources runtime.env; URL paths must remain literal shell data.
+        "ALERTS_WEBHOOK_URL": shlex.quote(_alerts_webhook_url()),
         "REPO": str(repo),
         "lgtm_grafana_listen_host": settings.observability.lgtm_grafana_listen_host,
         "LGTM_LOKI_PORT": str(settings.observability.lgtm_loki_port),
