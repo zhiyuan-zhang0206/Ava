@@ -424,7 +424,8 @@
     "actionOutput": "output",
     "agentResponding": "Agent is responding.",
     "agentResponseComplete": "Agent response complete.",
-    "copied": "Copied"
+    "copied": "Copied",
+    "loadEarlier": "Load earlier messages"
   },
   "markers": {
     "terminated": "Terminated",

@@ -69,7 +69,7 @@
 // - `./timestamp` — formatItemTime + ItemTimestamp
 // - `./buttons`   — ForkButton + CopyButton
 // - `./row`       — TimelineRow (memo) + cardConfigFor (per-item config cache)
-// - `./overlays`  — LoadingOlderBadge / ColdLoadSpinner / ScrollToBottomButton
+// - `./overlays`  — PullToLoadIndicator / LoadOlderButton / ColdLoadSpinner / ScrollToBottomButton
 import {
   Fragment,
   useCallback,
@@ -99,7 +99,7 @@ import { cn } from "@/lib/utils";
 import { ConnectionNotice } from "@/components/connection-notice";
 import { findClosestStuckTurnId, TurnBlock } from "./run-block";
 import { classifyItem, groupIntoTurns, type TimelineGroup } from "./runs";
-import { PullToLoadIndicator, ColdLoadSpinner, ScrollToBottomButton } from "./overlays";
+import { LoadOlderButton, PullToLoadIndicator, ColdLoadSpinner, ScrollToBottomButton } from "./overlays";
 import { TimelineRow, cardConfigFor } from "./row";
 
 
@@ -309,6 +309,13 @@ export function TimelineView({
   // A ResizeObserver re-measures on those height changes. Initial true =
   // button hidden until the user scrolls away.
   const [atBottom, setAtBottom] = useState(true);
+  // Settled-at-top flag driving the load-older fallback control (keyboard /
+  // screen-reader / scrollbar users reach the top via scroll-only inputs, so
+  // they need an explicit affordance; the pull gestures below do not fire for
+  // them). Measured in onScroll and in the ResizeObserver callback so a
+  // short thread whose content fits the viewport (scrollTop stays 0, no
+  // scroll event ever fires) still gets the control.
+  const [atTop, setAtTop] = useState(false);
   const stuckRafRef = useRef<number | null>(null);
   const [activeStuckTurnId, setActiveStuckTurnId] = useState<string | null>(null);
 
@@ -368,6 +375,12 @@ export function TimelineView({
       ),
     );
   }, [stickyThresholds]);
+
+  const measureAtTop = useCallback(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    setAtTop(viewport.scrollTop <= 0);
+  }, []);
 
   // Pin the viewport to the bottom and report the performed scroll back to
   // the controller (post-write snapshot, so the browser-clamped actual
@@ -453,6 +466,13 @@ export function TimelineView({
     });
   }, []);
 
+  // Click path of the load-older fallback control: same anchor capture as the
+  // gesture paths, so the prepend lands with zero jitter for this input too.
+  const handleLoadOlderClick = useCallback(() => {
+    captureAnchor();
+    loadOlderRef.current?.();
+  }, [captureAnchor]);
+
   useLayoutEffect(() => {
     if (loadingOlder && !prevLoadingOlderRef.current && pendingAnchorRef.current === null) {
       captureAnchor();
@@ -474,6 +494,7 @@ export function TimelineView({
     const onScroll = () => {
       controller.handleScroll(snapshot());
       measureAtBottom();
+      measureAtTop();
       stuckRafRef.current ??= requestAnimationFrame(() => {
         stuckRafRef.current = null;
         updateStuckTurn();
@@ -543,6 +564,15 @@ export function TimelineView({
         hasMoreOlderRef.current &&
         !loadingOlderRef.current
       ) {
+        // A hybrid device can arm a wheel pull (its settle timer still
+        // pending) and then start a touch pull; the stale wheel timer would
+        // fire mid-touch and zero the touch pull state, killing the release
+        // trigger. Retire the wheel pull when the touch pull arms.
+        if (wheelTimerRef.current) {
+          clearTimeout(wheelTimerRef.current);
+          wheelTimerRef.current = null;
+        }
+        wheelPullRef.current = 0;
         touchStartYRef.current = touches[0].clientY;
         touchStartXRef.current = touches[0].clientX;
         isPullingTouchRef.current = true;
@@ -621,6 +651,7 @@ export function TimelineView({
     const ro = new ResizeObserver(() => {
       if (controller.handleLayoutChange(snapshot())) pinToBottom(viewport);
       measureAtBottom();
+      measureAtTop();
     });
     ro.observe(viewport);
     if (contentRef.current) ro.observe(contentRef.current);
@@ -636,7 +667,7 @@ export function TimelineView({
       if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current);
       ro.disconnect();
     };
-  }, [controller, measureAtBottom, pinToBottom, updateStuckTurn, captureAnchor, schedulePullRender]);
+  }, [controller, measureAtBottom, measureAtTop, pinToBottom, updateStuckTurn, captureAnchor, schedulePullRender]);
 
   // The SINGLE force-scroll trigger. The store bumps scrollToBottomRequest on
   // exactly the two moments a scroll-to-bottom is unconditional — agent switch
@@ -1025,6 +1056,10 @@ export function TimelineView({
   return (
     <div ref={wrapperRef} className={cn("relative", FLEX_1, MIN_H_0, OVERFLOW_HIDDEN)}>
       <PullToLoadIndicator pullDistance={pullDistance} pullThreshold={PULL_THRESHOLD_PX} loadingOlder={loadingOlder} />
+      <LoadOlderButton
+        visible={atTop && hasMoreOlder && !loadingOlder && pullDistance === 0}
+        onClick={handleLoadOlderClick}
+      />
       <ColdLoadSpinner show={loading && items.length === 0} />
       {/* overflow-anchor: none disables Chrome scroll anchoring on the timeline
           viewport. Scroll anchoring silently adjusts scrollTop to keep the

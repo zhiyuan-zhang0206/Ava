@@ -1705,6 +1705,122 @@ describe("load-older prepend anchor & pull-down gesture (#659, #817, #1272)", ()
     expect(viewport.scrollTop).toBe(0);
   });
 
+  it("shows the load-older fallback control when settled at top with more history; click loads with anchor capture", () => {
+    const loadOlder = vi.fn();
+    const items = [
+      makeItem({ item_id: "0.0", kind: "system_prompt", payload: "prompt", created_at: null }),
+      makeItem({ item_id: "10.0", kind: "agent_chat", payload: "ten" }),
+    ];
+    render(<TimelineView items={items} hasMoreOlder onLoadOlder={loadOlder} />);
+    const viewport = screen.getByTestId("scroll-viewport");
+    const button = screen.getByTestId("load-older-button");
+
+    // Not at top yet — control hidden and unfocusable.
+    viewport.scrollTop = 100;
+    act(() => {
+      viewport.dispatchEvent(new Event("scroll"));
+    });
+    expect(button.getAttribute("aria-hidden")).toBe("true");
+    expect(button.getAttribute("tabindex")).toBe("-1");
+
+    // Settled at top — control appears, focusable, exposed to assistive tech.
+    viewport.scrollTop = 0;
+    act(() => {
+      viewport.dispatchEvent(new Event("scroll"));
+    });
+    expect(button.getAttribute("aria-hidden")).toBe("false");
+    expect(button.getAttribute("tabindex")).toBe("0");
+
+    // Keyboard activation (button click semantics) loads older history.
+    fireEvent.click(button);
+    expect(loadOlder).toHaveBeenCalledTimes(1);
+  });
+
+  it("hides the fallback control when there is no more history, while loading, or mid-pull", () => {
+    const loadOlder = vi.fn();
+    const items = [makeItem({ item_id: "10.0", kind: "agent_chat", payload: "ten" })];
+    const { rerender } = render(
+      <TimelineView items={items} hasMoreOlder onLoadOlder={loadOlder} />,
+    );
+    const viewport = screen.getByTestId("scroll-viewport");
+    const button = screen.getByTestId("load-older-button");
+    viewport.scrollTop = 0;
+    act(() => {
+      viewport.dispatchEvent(new Event("scroll"));
+    });
+    expect(button.getAttribute("aria-hidden")).toBe("false");
+
+    // hasMoreOlder=false → hidden.
+    rerender(<TimelineView items={items} onLoadOlder={loadOlder} />);
+    expect(button.getAttribute("aria-hidden")).toBe("true");
+
+    // hasMoreOlder + loadingOlder → hidden (spinner shows instead).
+    rerender(<TimelineView items={items} hasMoreOlder loadingOlder onLoadOlder={loadOlder} />);
+    expect(button.getAttribute("aria-hidden")).toBe("true");
+
+    // Mid-pull → hidden (the ring shows instead).
+    rerender(<TimelineView items={items} hasMoreOlder onLoadOlder={loadOlder} />);
+    act(() => {
+      viewport.dispatchEvent(new Event("scroll"));
+    });
+    act(() => {
+      viewport.dispatchEvent(
+        new TouchEvent("touchstart", {
+          touches: [makeTouch(100, 100)],
+          bubbles: true,
+        }),
+      );
+      viewport.dispatchEvent(
+        new TouchEvent("touchmove", {
+          touches: [makeTouch(140, 100)],
+          cancelable: true,
+          bubbles: true,
+        }),
+      );
+      vi.advanceTimersByTime(16);
+    });
+    expect(button.getAttribute("aria-hidden")).toBe("true");
+  });
+
+  it("hybrid device: an armed wheel-pull timer does not kill an in-flight touch pull", () => {
+    const loadOlder = vi.fn();
+    const items = [makeItem({ item_id: "10.0", kind: "agent_chat", payload: "ten" })];
+    render(<TimelineView items={items} hasMoreOlder onLoadOlder={loadOlder} />);
+    const viewport = screen.getByTestId("scroll-viewport");
+
+    // Wheel pull below threshold arms the 180ms settle timer.
+    viewport.scrollTop = 0;
+    act(() => {
+      viewport.dispatchEvent(new WheelEvent("wheel", { deltaY: -80, bubbles: true }));
+    });
+
+    // A touch pull starts while the wheel timer is still pending, and passes
+    // the threshold; the stale wheel timer must not zero it.
+    act(() => {
+      viewport.dispatchEvent(
+        new TouchEvent("touchstart", {
+          touches: [makeTouch(100, 100)],
+          bubbles: true,
+        }),
+      );
+      viewport.dispatchEvent(
+        new TouchEvent("touchmove", {
+          touches: [makeTouch(260, 100)],
+          cancelable: true,
+          bubbles: true,
+        }),
+      );
+      viewport.dispatchEvent(new TouchEvent("touchend", { bubbles: true }));
+    });
+    expect(loadOlder).toHaveBeenCalledTimes(1);
+
+    // Let the (now-cleared) wheel timer window elapse — no double trigger.
+    act(() => {
+      vi.advanceTimersByTime(200);
+    });
+    expect(loadOlder).toHaveBeenCalledTimes(1);
+  });
+
   it("preserves the reading position when the user scrolled during the fetch (document-space delta, not the trigger-time viewport top)", () => {
     const loadOlder = vi.fn();
     const items = [

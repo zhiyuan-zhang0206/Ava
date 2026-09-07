@@ -3,7 +3,7 @@
 // Floating overlay chrome for the timeline view: the pull-to-load indicator,
 // the cold-load spinner, and the scroll-to-bottom button.
 
-import { ArrowDown, Loader2 } from "lucide-react";
+import { ArrowDown, ArrowUp, Loader2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import { cn } from "@/lib/utils";
@@ -87,6 +87,50 @@ export function PullToLoadIndicator({
           />
         </svg>
       )}
+    </div>
+  );
+}
+
+// Load-older fallback control — a real button shown when the user settles
+// at the top with older history remaining. Keyboard / screen-reader /
+// scrollbar-drag users fire scroll events only (never wheel/touch), so this
+// is their path to older history — and it doubles as the discoverability
+// hint for everyone, since the pull ring only appears mid-pull. Mounted
+// always (for the opacity transition) but unfocusable and pointer-events-none
+// while hidden, so an invisible control can never trap keyboard focus.
+export function LoadOlderButton({
+  visible,
+  onClick,
+}: {
+  visible: boolean;
+  onClick: () => void;
+}) {
+  const t = useTranslations("timeline");
+  return (
+    <div
+      className={cn(
+        "absolute top-2 left-1/2 -translate-x-1/2 z-10",
+        "transition-opacity duration-200",
+        visible ? "opacity-100" : "opacity-0 pointer-events-none",
+      )}
+    >
+      <button
+        type="button"
+        onClick={onClick}
+        tabIndex={visible ? 0 : -1}
+        aria-hidden={!visible}
+        data-testid="load-older-button"
+        className={cn(
+          "items-center gap-1.5 px-2.5 py-1 rounded-full",
+          "bg-background border border-border shadow-sm",
+          "text-[11px] text-muted-foreground hover:text-foreground",
+          "focus-visible:ring-[3px] focus-visible:ring-ring/50",
+          FLEX,
+        )}
+      >
+        <ArrowUp className="size-3" />
+        {t("loadEarlier")}
+      </button>
     </div>
   );
 }
