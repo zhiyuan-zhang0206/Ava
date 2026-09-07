@@ -39,6 +39,7 @@ import { Composer } from "@/components/composer";
 import { ContentToggle } from "@/components/content-toggle";
 import { HeaderBar } from "@/components/header-bar";
 import { HomeLayout } from "@/components/home-layout";
+import { InspectorPanelSkeleton } from "@/components/inspector-panel-skeleton";
 import { InspectorToggle } from "@/components/inspector-toggle";
 import { PendingStrip } from "@/components/pending-strip";
 import { UploadButton } from "@/components/upload-button";
@@ -63,9 +64,10 @@ import { cn } from "@/lib/utils";
 
 // The toggle stays in the initial graph; the panel body is needed only after
 // the existing open-state guard below renders it.
-const LazyInspectorPanel = dynamic(() =>
-  import("@/components/inspector-panel").then((module) => module.InspectorPanel),
-  { loading: () => null },
+const LazyInspectorPanel = dynamic(
+  () =>
+    import("@/components/inspector-panel").then((module) => module.InspectorPanel),
+  { loading: () => <InspectorPanelSkeleton /> },
 );
 
 export default function HomePage() {
@@ -203,7 +205,11 @@ function HomeShell({ showError }: HomeShellProps) {
     </AgentEventStreamProvider>
   );
   const inspector =
-    inspectorOpen && activeId != null ? <LazyInspectorPanel agentId={activeId} /> : null;
+    inspectorOpen && activeId != null ? (
+      <ErrorBoundary key={activeId}>
+        <LazyInspectorPanel agentId={activeId} />
+      </ErrorBoundary>
+    ) : null;
 
   return (
     <HomeLayout

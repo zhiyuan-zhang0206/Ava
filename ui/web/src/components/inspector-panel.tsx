@@ -17,6 +17,12 @@ import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { useCallback, type ReactNode, useEffect, useRef } from "react";
 
+import {
+  InspectorPanelSkeleton,
+  LiveSectionsSkeleton,
+  SectionSkeleton,
+  WindowedSectionsSkeleton,
+} from "@/components/inspector-panel-skeleton";
 import { OpenNoticeDetail } from "@/components/open-notice-detail";
 import { WindowSelect } from "@/components/window-select";
 import { api } from "@/lib/api";
@@ -370,42 +376,12 @@ function Section({
   );
 }
 
-function SectionSkeleton({ title, rows = 2 }: { title: string; rows?: number }) {
-  return (
-    <section aria-label={`${title} loading`} className="space-y-1.5">
-      <div className="h-3 w-24 animate-pulse rounded bg-muted-foreground/20" />
-      <div className="grid grid-cols-2 gap-1">
-        {Array.from({ length: rows }, (_, index) => (
-          <div
-            key={index}
-            className="h-10 animate-pulse rounded bg-muted-foreground/10"
-          />
-        ))}
-      </div>
-    </section>
-  );
-}
-
-function LiveSectionsSkeleton() {
-  const t = useTranslations("inspector");
-  return (
-    <>
-      <SectionSkeleton title={t("sectionShells")} rows={1} />
-      <SectionSkeleton title={t("sectionLiveness")} rows={3} />
-      <SectionSkeleton title={t("sectionConfigOverlay")} rows={1} />
-    </>
-  );
-}
-
-function WindowedSectionsSkeleton() {
-  const t = useTranslations("inspector");
-  return (
-    <>
-      <SectionSkeleton title={t("sectionCost")} rows={4} />
-      <SectionSkeleton title={t("sectionActivity")} rows={4} />
-    </>
-  );
-}
+export {
+  InspectorPanelSkeleton,
+  LiveSectionsSkeleton,
+  SectionSkeleton,
+  WindowedSectionsSkeleton,
+};
 
 function WindowedSectionsError({ onRetry }: { onRetry: () => void }) {
   const t = useTranslations("inspector");
