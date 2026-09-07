@@ -3,15 +3,19 @@
 from __future__ import annotations
 
 import json
+import time
 
 import psycopg
 from fastapi import Request
 from fastapi.responses import JSONResponse
 from psycopg_pool import PoolTimeout
 
+from shared import process_sha
 from shared.health_schema import DEGRADED, OK, component, render
 from shared.machine import machine_name
 from shared.paths import ava_home
+
+_STARTED_AT = time.time()
 
 
 def get_health(request: Request) -> dict[str, object] | JSONResponse:
@@ -19,12 +23,14 @@ def get_health(request: Request) -> dict[str, object] | JSONResponse:
     included — a gateway that can serve HTTP but cannot reach Postgres is not
     "healthy" enough for the watchdog to leave alone.
 
-    The identity fields answer the three questions a 200 alone cannot: `name` is
+    The identity fields answer the questions a 200 alone cannot: `name` is
     which *service* answered, `home` this gateway's `$AVA_HOME` (its cluster
-    identity), `machine` its host. A 200 on this port only proves *something*
-    listens there, so the watchdog verifies the identity too rather than the status
-    code alone — see `services/healthchecks/gateway.py`. Each was additive to the
-    `{"status": "ok"}` contract.
+    identity), `machine` its host, `started_at` this process's birth, and `sha`
+    the code frozen at boot. A 200 on this port only proves *something* listens
+    there, so the watchdog verifies the stable identity too rather than the status
+    code alone — see `services/healthchecks/gateway.py`. The start and code facts
+    also let read-only post-deploy checks detect a new serving generation without
+    consulting disk state. Each field was additive to the `{"status": "ok"}` contract.
 
     Liveness must fail faster than the resource it protects: this uses the
     control-plane pool and a 1-2 second database budget rather than waiting up
@@ -41,6 +47,8 @@ def get_health(request: Request) -> dict[str, object] | JSONResponse:
         "name": "gateway",
         "home": str(ava_home()),
         "machine": machine_name(),
+        "started_at": _STARTED_AT,
+        "sha": process_sha.get(),
         "liveness": OK,
     }
     components = [component("http", OK, progress="serving")]

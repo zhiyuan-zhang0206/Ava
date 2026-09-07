@@ -1093,6 +1093,34 @@ The next walls once memory is handled: the heartbeat's
 wake-rate ceiling (~1.67/s, ≈750 agents on today's numbers) and LLM turn cost,
 which is linear in fleet size regardless of any of the above.
 
+### Post-deploy visual gate
+
+On the macmini runtime host, export `AVA_VISUAL_GATE_COOKIE_FILE` as a 0600
+Playwright storage-state JSON, Netscape cookie jar, or single `name=value` file,
+then run `scripts/post_deploy_visual_check.py --check --base-url <production-gate>
+--health-url <gateway-origin>` (the gate serves the SPA wall for
+unauthenticated /api, so the health probe must target the gateway origin
+explicitly; the script appends `/api/health`).
+The wrapper calls the public gateway health API to compare process `started_at`,
+runs the browser pass inside `mcr.microsoft.com/playwright/python:v1.59.0-noble`,
+and writes `probes.json`, `meta.json`, and capture artifacts beneath
+`~/post-deploy-visual/<wave-sha>/`. It never routes notifications: the invoking
+agent sends a P0 result to #3242 and #405 with `send_message`, or queues P2 with
+`notify`. It runs after rollout and cannot block deployment. Exit 20 is P0,
+exit 10 is P2, and exit 0 is green or expected drift.
+The daily 07:30 invocation and a same-process-start run are sentinels and do not
+advance the two-deployment-wave escalation counter.
+
+No command updates a golden implicitly. After QA or #405 confirms a report,
+roll it forward with `scripts/post_deploy_visual_check.py --accept-wave <sha>
+--accepted-by <reviewer>`; this appends the reviewer, UTC timestamp, SHA, and
+capture list to the 0600 `acceptance-audit.jsonl`. If the exported cookie leaks,
+revoke it immediately with `curl --fail-with-body -X POST --cookie
+"$AVA_VISUAL_GATE_COOKIE_FILE" "$AVA_VISUAL_GATE_URL/api/auth/logout"`, delete
+the leaked file, export a fresh session cookie, and restore mode 0600 before the
+next run. The curl revocation consumes Netscape and `name=value` cookie files;
+a Playwright storage-state JSON export must be revoked from the logged-in UI.
+
 ### Start / check / restart
 
 Day-to-day ops **only uses the `ava` CLI** — one line to bring up the full set / check status / stop everything:

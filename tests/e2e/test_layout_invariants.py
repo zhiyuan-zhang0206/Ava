@@ -28,6 +28,12 @@ import os
 import pytest
 from playwright.sync_api import Browser, BrowserContext, Page, Route
 
+from tests.e2e._layout_assertions import (
+    all_elements_within_parents,
+    element_within_parent,
+    element_within_viewport,
+    no_document_horizontal_overflow,
+)
 from tests.e2e._ports import FRONTEND_URL
 
 _OVERRIDE_BASE_URL = os.environ.get("AVA_MOBILE_TEST_BASE_URL")
@@ -306,30 +312,15 @@ def _wait_layout_settled(page: Page) -> None:
 
 # ── Measurements (I1–I6) ────────────────────────────────────────────────
 def _no_page_scroll(page: Page) -> bool:
-    return page.evaluate(
-        "() => document.scrollingElement.scrollWidth <= document.scrollingElement.clientWidth + 1"
-    )
+    return no_document_horizontal_overflow(page)
 
 
 def _surface_within_parent(page: Page) -> bool:
-    return page.evaluate(
-        """() => {
-          const s = document.querySelector('[data-testid="timeline-surface"]');
-          if (!s) return false;
-          return s.scrollWidth <= s.parentElement.clientWidth + 1;
-        }"""
-    )
+    return element_within_parent(page, '[data-testid="timeline-surface"]')
 
 
 def _composer_within_viewport(page: Page) -> bool:
-    return page.evaluate(
-        """() => {
-          const t = document.querySelector('textarea');
-          if (!t) return false;
-          const r = t.getBoundingClientRect();
-          return r.left >= 0 && r.right <= window.innerWidth + 1;
-        }"""
-    )
+    return element_within_viewport(page, "textarea")
 
 
 def _no_page_vertical_scroll(page: Page) -> bool:
@@ -342,16 +333,7 @@ def _no_page_vertical_scroll(page: Page) -> bool:
 
 
 def _inbox_rows_within_container(page: Page) -> bool:
-    return page.evaluate(
-        """() => {
-          const rows = document.querySelectorAll('[data-testid="inbox-row"]');
-          if (rows.length === 0) return false;
-          for (const r of rows) {
-            if (r.scrollWidth > r.parentElement.clientWidth + 1) return false;
-          }
-          return true;
-        }"""
-    )
+    return all_elements_within_parents(page, '[data-testid="inbox-row"]')
 
 
 @pytest.mark.parametrize("width", VIEWPORTS)

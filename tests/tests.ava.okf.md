@@ -25,6 +25,11 @@ tags:
 | **E2E tests** | `tests/e2e/` | full-stack end-to-end tests |
 | **Data factories** | `tests/factories/` | test data construction tools |
 
+`tests/e2e/_layout_assertions.py` is the shared real-browser structural layer for
+document overflow, viewport containment, center-point occlusion, nonempty blocks,
+and settle-before-capture. Both the layout-invariant suite and the post-deploy
+visual gate consume it so their definitions cannot drift.
+
 ### Test coverage scope
 - `tests/agent/` — agent core (loop, graph, messages, state, hooks)
 - `tests/ava/` — SDK surface (ava.* namespace)
