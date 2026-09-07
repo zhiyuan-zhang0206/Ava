@@ -29,7 +29,16 @@ parked without being relaunched. Stale owners and ambiguous work refuse drain.
 Already-stopped hosted units also preserve legacy idle rows whose lease is
 NULL and whose PID/resources are empty, after proving the local host absent.
 An applied old restart and claimed ordinary work remain untouched for normal
-cold admission; an expired lease or an unapplied control does not qualify.
+cold admission. `maintenance_cold.py` also recognizes retired owned idle rows
+with an expired lease, or a completed legacy restart stranded in `restarting`.
+Both require an absent native host/legacy consumer, empty PID/resources/exec
+requests, no unresolved or failed lifecycle work, and the latest persisted v4
+checkpoint at END (halted, no ready channels or pending tasks/writes). A legacy
+restart additionally requires a done, untargeted command and a later checkpoint
+carrying its exit intent. Preparation holds the metadata row lock and rechecks
+the latest checkpoint identity. It only restores `restarting` to `idling`;
+historical leases, owners/generations, commands and checkpoints stay unchanged.
+Unknown checkpoint versions, live consumers and fresh leases still refuse.
 This is preserved idle intent, not a fabricated continuation receipt.
 
 Hosted drain receipts require the shielded continuation, final checkpoint

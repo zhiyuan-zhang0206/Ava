@@ -52,6 +52,16 @@ def prepare(
             "WHERE machine=%s AND status<>'terminated' ORDER BY id FOR UPDATE",
             (machine,),
         ).fetchall()
+        if host_absent:
+            from shared.maintenance_cold import normalize_retired_intent
+
+            for index, values in enumerate(rows):
+                row = _RuntimeRow(*values)
+                if row.retired_intent():
+                    normalize_retired_intent(
+                        conn, row.agent_id, restarting=row.status == "restarting"
+                    )
+                    rows[index] = row._replace(status="idling")
         applied = _applied_capture(conn, hold, host_owner, holder, acquired_at)
         captured = _classify(
             [_RuntimeRow(*row) for row in rows], hold, host_owner, applied, host_absent=host_absent
@@ -93,15 +103,27 @@ class _RuntimeRow(NamedTuple):
         )
 
     def cold_hosted_idle(self) -> bool:
-        # release_hosted_owner clears the lease only after normal host cleanup.
-        # A merely expired lease does not prove that boundary.
+        # Expired owned rows enter here only after retired_intent's persisted
+        # END and native-absence proof. Their historical lease stays unchanged.
         return (
             self.status == "idling"
             and self.kind in (None, "hosted")
-            and self.fresh is None
+            and (self.fresh is None or self.retired_intent())
             and self.pid is None
             and self.resources is None
             and (self.owner is None) == (self.generation is None)
+        )
+
+    def retired_intent(self) -> bool:
+        return (
+            self.status in ("idling", "restarting")
+            and (self.status == "restarting" or self.fresh is False)
+            and self.kind == "hosted"
+            and self.owner is not None
+            and self.generation is not None
+            and self.fresh is not True
+            and self.pid is None
+            and self.resources is None
         )
 
     def active_for(self, owner: UUID | None) -> bool:
@@ -221,7 +243,8 @@ def verify_drained(conn: psycopg.Connection, hold: MaintenanceHold) -> None:
         rows = conn.execute(
             "SELECT id FROM agents_meta WHERE id=ANY(%s) AND status='idling' "
             "AND ((runtime_owner IS NULL AND runtime_generation IS NULL) OR "
-            "(runtime_kind='hosted' AND lease_expires_at IS NULL)) "
+            "(runtime_kind='hosted' AND (lease_expires_at IS NULL "
+            "OR lease_expires_at<=clock_timestamp()))) "
             "AND pid IS NULL AND incarnation_resources IS NULL",
             (list(hold.parked),),
         ).fetchall()
