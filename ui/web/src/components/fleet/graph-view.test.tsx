@@ -381,25 +381,35 @@ describe("GraphView", () => {
     expect(screen.getByText("No agents to graph.")).toBeTruthy();
   });
 
-  it("drops degree-0 orphan nodes without edges before rendering", async () => {
+  it("re-parents live descendants to their nearest live ancestor when intermediate parents terminate (user ruling 2026-09-07)", async () => {
+    // A(1, live) -> B(2, terminated) -> C(3, live)
+    // C is NOT dropped; its lineage edge connects directly to nearest live ancestor A.
     useFleetGraph.mockReturnValue(
       ok({
         nodes: [
-          node(1, { label: "connected-1" }),
-          node(2, { label: "connected-2" }),
-          node(3, { label: "orphan-node" }),
+          node(1, { label: "grandparent", spawner: "user" }),
+          node(2, { label: "parent", status: "terminated", spawner: "agent:1" }),
+          node(3, { label: "child", status: "idling", spawner: "agent:2" }),
         ],
-        edges: [edge(1, 2, "spawn")],
+        edges: [
+          edge(1, 2, "spawn"), // dropped (touches terminated node 2)
+          edge(2, 3, "spawn"), // dropped (touches terminated node 2)
+        ],
         stale: false,
       }),
     );
-    renderGraph(<GraphView selectedAgentId={null} onSelectAgent={vi.fn()} />);
+    const { container } = renderGraph(
+      <GraphView selectedAgentId={null} onSelectAgent={vi.fn()} />,
+    );
 
-    const label = await waitFor(() => getNodeLabel(1), { timeout: 4000 });
-    expect(label).toBeTruthy();
-    expect(queryNodeLabel(2)).not.toBeNull();
-    expect(queryNodeLabel(3)).toBeNull();
+    const label1 = await waitFor(() => getNodeLabel(1), { timeout: 4000 });
+    expect(label1).toBeTruthy();
+    expect(queryNodeLabel(2)).toBeNull(); // terminated node 2 is omitted
+    expect(queryNodeLabel(3)).not.toBeNull(); // child node 3 stays visible
     expect(screen.getByText("2 nodes · 1 edges")).toBeTruthy();
+
+    const svg = container.querySelector('svg[aria-label="Fleet relationship graph"]')!;
+    expect(svg.querySelectorAll("line").length).toBe(1); // lineage edge re-parented from 1 to 3
   });
 
   it("shows the stale snapshot age for a non-empty fallback graph", () => {

@@ -4,9 +4,9 @@
 // view renders the whole weighted relationship graph: spawn/fork lineage as
 // structural springs, plus aggregated agent-to-agent message traffic as weaker
 // springs whose pull (and on-screen opacity) scales with the edge weight. Node
-// size encodes cumulative token consumption (log scale). Degree-0 (orphan)
-// nodes without active ties are dropped so disconnected agents do not float
-// in blank canvas space.
+// size encodes cumulative token consumption (log scale). When intermediate
+// parent agents terminate, live descendants re-parent to their nearest live
+// ancestor so lineage springs remain unbroken (matching agent-tree semantics).
 //
 // Rendering / interaction / parameters live in the shared ForceGraph (see
 // force-graph.tsx) — this module is a thin wrapper: it fetches the fleet graph,
@@ -15,14 +15,19 @@
 
 "use client";
 
+import { useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { WindowSelect } from "@/components/window-select";
 import { STATS_WINDOW_LABELS, STATS_WINDOWS, type StatsWindowHours } from "@/lib/sidebar";
-import type { PublicAgentStatus } from "@/lib/types";
+import type { AgentRow, PublicAgentStatus } from "@/lib/types";
 import { useFleetGraph } from "@/lib/use-fleet-graph";
+import {
+  AGENTS_QUERY_KEY,
+  TERMINATED_AGENTS_QUERY_KEY,
+} from "@/lib/use-agents";
 
 import {
   FORCE_DEFAULTS,
@@ -59,6 +64,56 @@ const DECAY_LAMBDA = 0.5;
 // keeps its own key so the two graphs' tunings stay independent.
 const FORCE_PARAMS_KEY = "display.graph_force_params";
 
+function parentIdOf(spawner: string): number | null {
+  if (!spawner.startsWith("agent:")) return null;
+  const n = Number(spawner.slice("agent:".length));
+  return Number.isFinite(n) ? n : null;
+}
+
+interface LineageAgentInfo {
+  readonly spawner: string;
+  readonly fork_source_agent_id?: number | null;
+}
+
+/**
+ * Walk up the lineage ancestor chain to find the nearest ancestor that is still
+ * live in the graph view. Mirrors the recursive re-parenting in agent-tree.ts.
+ */
+function findNearestLiveAncestor(
+  agentId: number,
+  byId: Map<number, LineageAgentInfo>,
+  liveIds: Set<number>,
+): { ancestorId: number | null; isFork: boolean } {
+  let currId = agentId;
+  let directIsFork = false;
+  const visited = new Set<number>();
+
+  for (;;) {
+    if (visited.has(currId)) break;
+    visited.add(currId);
+
+    const node = byId.get(currId);
+    if (!node) break;
+
+    const parentId = node.fork_source_agent_id ?? parentIdOf(node.spawner);
+    const isFork = node.fork_source_agent_id != null;
+
+    if (currId === agentId) {
+      directIsFork = isFork;
+    }
+
+    if (parentId == null) break;
+
+    if (liveIds.has(parentId)) {
+      return { ancestorId: parentId, isFork: directIsFork };
+    }
+
+    currId = parentId;
+  }
+
+  return { ancestorId: null, isFork: directIsFork };
+}
+
 export function GraphView({
   selectedAgentId,
   onSelectAgent,
@@ -67,7 +122,10 @@ export function GraphView({
   onSelectAgent: (id: number | null) => void;
 }) {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const t = useTranslations("fleet.graph");
+
+
 
   // Time window for node score + edge events (default 24h). Local to the graph
   // view (not synced to user settings yet — rapid window hopping is common).
@@ -83,8 +141,7 @@ export function GraphView({
   // surfaces stay consistent. The backend endpoint filters at the SQL layer
   // too (payload), but the ruling's filter ORDER is liveness before anything
   // else — the component re-filters so a backend leak can never paint a
-  // terminated node or its edges. A live node whose lineage partner has since
-  // terminated simply shows without that edge (no ghost nodes).
+  // terminated node or its edges.
   const { graph, loading, error } = useFleetGraph({
     hours: windowHours,
     decayLambda: DECAY_LAMBDA,
@@ -109,6 +166,43 @@ export function GraphView({
     [liveNodes],
   );
 
+  // Lineage lookup map covering both live and terminated nodes to trace ancestors.
+  const lineageById = useMemo(() => {
+    const liveRoster = queryClient.getQueryData<AgentRow[]>(AGENTS_QUERY_KEY) ?? [];
+    const terminatedRoster =
+      queryClient.getQueryData<AgentRow[]>(TERMINATED_AGENTS_QUERY_KEY) ?? [];
+
+    const map = new Map<number, LineageAgentInfo>();
+    for (const a of liveRoster) {
+      map.set(a.agent_id, a);
+    }
+    for (const a of terminatedRoster) {
+      map.set(a.agent_id, a);
+    }
+    for (const n of graph.nodes) {
+      if (!map.has(n.agent_id)) {
+        map.set(n.agent_id, n);
+      }
+    }
+    return map;
+  }, [queryClient, graph.nodes]);
+
+  // Adapt the fleet graph to the shared node/edge model.
+  // User ruling 2026-09-07 21:02: Every live agent remains in the graph (children
+  // are never hidden). When intermediate parents terminate, their live descendants
+  // re-parent to the nearest live ancestor in the edges collection below.
+  const nodes = useMemo<ForceGraphNode[]>(
+    () =>
+      liveNodes.map((n) => ({
+        id: n.agent_id,
+        label: n.label,
+        status: n.status,
+        score: n.node_score,
+        pulse: STATUS_PULSE[n.status],
+      })),
+    [liveNodes],
+  );
+
   // The backend returns one edge per event kind (spawn / fork / resurrect /
   // message), and every non-message kind collapses to "lineage" here — so a
   // pair that fired several kinds would otherwise produce DUPLICATE React keys
@@ -120,12 +214,11 @@ export function GraphView({
   // if any member was a fork.
   const edges = useMemo<ForceGraphEdge[]>(() => {
     const byPair = new Map<string, ForceGraphEdge>();
+
+    // 1. Process telemetry/Loki edges between currently live nodes.
     for (const e of graph.edges) {
       const from = e.from_agent;
       const to = e.to_agent;
-      // Same liveness rule as the node filter: a line whose endpoint is not
-      // live cannot be drawn — drop it here so a backend leak can't paint a
-      // terminated node's edge either.
       if (!liveIds.has(from) || !liveIds.has(to)) continue;
       const key = e.event_type === "message" ? `m:${from}:${to}` : `l:${from}:${to}`;
       const existing = byPair.get(key);
@@ -147,37 +240,44 @@ export function GraphView({
         });
       }
     }
-    return [...byPair.values()];
-  }, [graph.edges, liveIds]);
 
-  // Topology filter: drop degree-0 (orphan) nodes so disconnected agents without
-  // active ties do not float in empty space.
-  const connectedAgentIds = useMemo(() => {
-    const ids = new Set<number>();
-    for (const e of edges) {
-      ids.add(e.from);
-      ids.add(e.to);
+    // 2. Nearest live ancestor re-parenting: ensure each live agent connects to
+    // its nearest live ancestor so that intermediate terminated nodes do not break
+    // lineage ties (matching tree semantics: A -> B(term) -> C => A -> C).
+    for (const node of liveNodes) {
+      const { ancestorId, isFork } = findNearestLiveAncestor(
+        node.agent_id,
+        lineageById,
+        liveIds,
+      );
+      if (ancestorId != null && liveIds.has(ancestorId)) {
+        const key = `l:${ancestorId}:${node.agent_id}`;
+        const existing = byPair.get(key);
+        if (!existing) {
+          byPair.set(key, {
+            from: ancestorId,
+            to: node.agent_id,
+            kind: "lineage",
+            dashed: isFork,
+            weight: 2.0,
+          });
+        } else {
+          byPair.set(key, {
+            from: ancestorId,
+            to: node.agent_id,
+            kind: existing.kind,
+            dashed: existing.dashed === true || isFork,
+            weight: Math.max(existing.weight, 2.0),
+          });
+        }
+      }
     }
-    return ids;
-  }, [edges]);
 
-  // Adapt the fleet graph to the shared node/edge model.
-  const nodes = useMemo<ForceGraphNode[]>(
-    () =>
-      liveNodes
-        .filter((n) => connectedAgentIds.has(n.agent_id))
-        .map((n) => ({
-          id: n.agent_id,
-          label: n.label,
-          status: n.status,
-          score: n.node_score,
-          pulse: STATUS_PULSE[n.status],
-        })),
-    [liveNodes, connectedAgentIds],
-  );
+    return [...byPair.values()];
+  }, [graph.edges, liveNodes, liveIds, lineageById]);
 
   // When the selected agent disappears from the graph (e.g. it was
-  // terminated or dropped as an orphan) — clear the stale selection so the canvas and selection stay in sync.
+  // terminated) — clear the stale selection so the canvas and selection stay in sync.
   useEffect(() => {
     if (
       selectedAgentId != null &&
