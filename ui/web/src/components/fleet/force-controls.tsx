@@ -11,7 +11,6 @@ import { Settings2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { memo, useCallback, useMemo } from "react";
 
-import { Switch } from "@/components/ui/switch";
 import { useDebouncedSetting } from "@/lib/use-user-settings";
 import { FLEX, FLEX_COL } from "@/lib/layout";
 import { cn } from "@/lib/utils";
@@ -175,15 +174,11 @@ export const ForceControls = memo(function ForceControls({
   setParams,
   reset,
   groups = FORCE_GROUPS,
-  edgeWeightEnabled,
-  onEdgeWeightEnabledChange,
 }: {
   params: ForceParams;
   setParams: (p: ForceParams) => void;
   reset: () => void;
   groups?: ForceGroup[];
-  edgeWeightEnabled?: boolean;
-  onEdgeWeightEnabledChange?: (enabled: boolean) => void;
 }) {
   const t = useTranslations("fleet.force");
   return (
@@ -205,7 +200,7 @@ export const ForceControls = memo(function ForceControls({
             <button
               type="button"
               onClick={reset}
-              className="text-2xs text-muted-foreground underline decoration-dotted hover:text-foreground"
+              className="text-[10px] text-muted-foreground underline decoration-dotted hover:text-foreground"
             >
               {t("resetAll")}
             </button>
@@ -213,23 +208,13 @@ export const ForceControls = memo(function ForceControls({
           <div className={cn("gap-3", FLEX, FLEX_COL)}>
             {groups.map((group) => (
               <div key={group.label}>
-                <div className="mb-1.5 text-2xs font-semibold uppercase tracking-wider text-muted-foreground/60">
+                <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">
                   {t(group.label)}
                 </div>
                 <div className={cn("gap-2", FLEX, FLEX_COL)}>
-                  {group.label === "edge" && onEdgeWeightEnabledChange ? (
-                    <label className={cn("items-center justify-between gap-2 text-2xs text-muted-foreground", FLEX)}>
-                      <span>{t("edgeWeight")}</span>
-                      <Switch
-                        checked={edgeWeightEnabled ?? true}
-                        onCheckedChange={onEdgeWeightEnabledChange}
-                        aria-label={t("edgeWeight")}
-                      />
-                    </label>
-                  ) : null}
                   {group.sliders.map((s) => (
                     <label key={s.key} className={cn("gap-0.5", FLEX, FLEX_COL)}>
-                      <span className={cn("items-center justify-between text-2xs text-muted-foreground", FLEX)}>
+                      <span className={cn("items-center justify-between text-[10px] text-muted-foreground", FLEX)}>
                         <span>{t(s.label)}</span>
                         <span className="tabular-nums text-foreground">
                           {params[s.key] < 0.01 && params[s.key] > 0

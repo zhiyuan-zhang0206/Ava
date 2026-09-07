@@ -220,7 +220,7 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
         >
           <X className="size-5" />
         </button>
-        <span className={cn("truncate font-sans text-xs tracking-wide text-muted-foreground", MIN_W_0, FLEX_1)}>
+        <span className={cn("truncate font-mono text-xs tracking-wide text-muted-foreground", MIN_W_0, FLEX_1)}>
           {t("title")}
         </span>
         {hasStaleError ? <StaleDot /> : null}
@@ -251,13 +251,13 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
           })}
           onChange={(v) => setHours(v === "all" ? null : Number(v))}
           ariaLabel={t("windowAriaLabel")}
-          className="shrink-0 cursor-pointer rounded border border-border bg-transparent px-1 py-0.5 text-2xs text-muted-foreground hover:text-foreground focus:ring-1 focus:ring-ring focus:outline-none"
+          className="shrink-0 cursor-pointer rounded border border-border bg-transparent px-1 py-0.5 text-[10px] text-muted-foreground hover:text-foreground focus:ring-1 focus:ring-ring focus:outline-none"
         />
       </header>
 
       <div className={cn("overflow-y-auto px-4 py-3 text-xs", MIN_H_0, FLEX_1)}>
         {liveQuery.error && !liveData ? (
-          <div className="space-y-2 font-sans text-xs text-destructive" role="alert">
+          <div className="space-y-2 font-mono text-[11px] text-destructive" role="alert">
             <p>
               {liveQuery.error instanceof Error
                 ? liveQuery.error.message
@@ -285,7 +285,7 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
             ) : liveQuery.isPending ? (
               <LiveSectionsSkeleton />
             ) : (
-              <p className="font-sans text-xs text-muted-foreground">{t("noData")}</p>
+              <p className="font-mono text-[11px] text-muted-foreground">{t("noData")}</p>
             )}
             {windowedData ? (
               <>
@@ -299,7 +299,7 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
             )}
             <Link
               href={`/insights/run/${agentId}`}
-              className="inline-flex items-center gap-1 font-sans text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
+              className="inline-flex items-center gap-1 font-mono text-[11px] text-muted-foreground underline underline-offset-2 hover:text-foreground"
             >
               {t("openRunTimeline")}
               <ExternalLink className="size-3" aria-hidden />
@@ -356,11 +356,11 @@ function Section({
 }) {
   return (
     <section className="space-y-1.5">
-      <div className={cn("items-center gap-1.5 text-2xs tracking-wide text-muted-foreground", FLEX)}>
+      <div className={cn("items-center gap-1.5 text-[10px] tracking-wide text-muted-foreground", FLEX)}>
         {icon}
         <span>{title}</span>
         {badge != null && (
-          <span className="ml-auto font-mono text-xs tabular-nums text-foreground normal-case">
+          <span className="ml-auto font-mono text-[11px] tabular-nums text-foreground normal-case">
             {badge}
           </span>
         )}
@@ -410,7 +410,7 @@ function WindowedSectionsSkeleton() {
 function WindowedSectionsError({ onRetry }: { onRetry: () => void }) {
   const t = useTranslations("inspector");
   return (
-    <div className="space-y-2 font-sans text-xs text-destructive" role="alert">
+    <div className="space-y-2 font-mono text-[11px] text-destructive" role="alert">
       <p>{t("windowedUnavailable")}</p>
       <button
         type="button"
@@ -435,13 +435,13 @@ function PageSection({ pages }: { pages: PageRow[] }) {
           href={p.url}
           target="_blank"
           rel="noopener noreferrer"
-          className={cn("items-center gap-2 rounded bg-sidebar-accent/40 px-2 py-1.5 font-sans text-xs hover:bg-sidebar-accent group", FLEX)}
+          className={cn("items-center gap-2 rounded bg-sidebar-accent/40 px-2 py-1.5 font-mono text-[11px] hover:bg-sidebar-accent group", FLEX)}
         >
           <ExternalLink className="size-3 shrink-0 text-muted-foreground group-hover:text-foreground" />
           <span className={cn(FLEX, FLEX_COL, MIN_W_0, FLEX_1)}>
             <span className="truncate text-foreground">{p.title ?? p.name}</span>
             <span
-              className="truncate font-mono text-2xs text-muted-foreground"
+              className="truncate text-[10px] text-muted-foreground"
             >
               {p.url}
             </span>
@@ -500,7 +500,7 @@ function ShellsSection({ inspect }: { inspect: AgentInspectLive }) {
       badge={inspect.shells_available === true ? String(shells.length) : "?"}
     >
       {inspect.shells_available !== true ? (
-        <p className="font-sans text-xs text-muted-foreground">Shell observation unavailable</p>
+        <p className="font-mono text-[11px] text-muted-foreground">Shell observation unavailable</p>
       ) : (
         <ul className="space-y-1">
           {shells.map((s) => (
@@ -538,12 +538,12 @@ function ShellRow({
       ? Math.max(0, Math.floor((now.getTime() - createdMs) / 1000))
       : shell.uptime_seconds;
   const rowClass =
-    "flex items-center gap-2 rounded bg-sidebar-accent/40 px-2 py-1 font-sans text-xs";
+    "flex items-center gap-2 rounded bg-sidebar-accent/40 px-2 py-1 font-mono text-[11px]";
   const content = (
     <>
-      <span className="font-mono tabular-nums text-muted-foreground">#{shell.id}</span>
+      <span className="tabular-nums text-muted-foreground">#{shell.id}</span>
       <span className="truncate text-foreground">{shell.name ?? t("unnamed")}</span>
-      <span className="ml-auto shrink-0 font-mono tabular-nums text-muted-foreground">
+      <span className="ml-auto shrink-0 tabular-nums text-muted-foreground">
         {formatUptime(runtimeSeconds)}
       </span>
     </>
@@ -594,7 +594,7 @@ function ConfigOverlaySection({ inspect }: { inspect: AgentInspectLive }) {
         {entries.map(([k, v]) => (
           <div
             key={k}
-            className="rounded bg-sidebar-accent/40 px-2 py-1 font-mono text-xs"
+            className="rounded bg-sidebar-accent/40 px-2 py-1 font-mono text-[11px]"
           >
             <dt className="break-all text-muted-foreground">{k}</dt>
             <dd className="mt-0.5 break-all text-foreground">{formatValue(SKILL_LIST_KEYS.has(k) && Array.isArray(v) ? v.map(displaySkillName) : v)}</dd>
@@ -748,10 +748,10 @@ function Metric({
 }) {
   return (
     <div className={cn("gap-0.5 rounded bg-sidebar-accent/40 px-2 py-1", FLEX, FLEX_COL, className)}>
-      <span className="text-2xs tracking-wide text-muted-foreground">{label}</span>
+      <span className="text-[10px] tracking-wide text-muted-foreground">{label}</span>
       <span className="font-mono text-xs tabular-nums text-foreground">{value}</span>
       {sub != null && (
-        <span className="font-mono text-2xs tabular-nums text-muted-foreground/70">{sub}</span>
+        <span className="font-mono text-[10px] tabular-nums text-muted-foreground/70">{sub}</span>
       )}
     </div>
   );

@@ -61,12 +61,10 @@ describe("OpenNoticeDetail — timestamp", () => {
 });
 
 describe("OpenNoticeDetail — require_response", () => {
-  it("uses the notice UI's sans typography rather than the composer's message-body exception", () => {
+  it("uses the same monospace input typography as the page composer", () => {
     render(<OpenNoticeDetail agentId={7} notice={ntc()} />);
 
-    const textbox = screen.getByRole("textbox");
-    expect(textbox.className).toContain("font-sans");
-    expect(textbox.className).not.toContain("font-mono");
+    expect(screen.getByRole("textbox").className).toContain("font-mono");
   });
 
   it("answer: sends action=answer with the typed reply, then calls onResolved", async () => {

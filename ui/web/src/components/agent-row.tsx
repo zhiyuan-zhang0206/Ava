@@ -221,6 +221,7 @@ const dateFormat: DateFormat = rawDateFormat === "absolute" || rawDateFormat ===
   const notifyAwaitingReply = userSettings["notification.awaiting_reply"] === true;
 
   // #ID and label coexist, complementing each other: `#180 · screen-permission` or `#180` (when there's no label)
+  const displayLabel = label ? `#${agent.agent_id} · ${label}` : `#${agent.agent_id}`;
   // "hidden" renders no timestamp; for the other modes pick the source instant.
   const showTime = timeMode !== "hidden";
   const timeIso = timeMode === "spawned" ? agent.spawned_at : agent.last_active_at;
@@ -315,7 +316,7 @@ const dateFormat: DateFormat = rawDateFormat === "absolute" || rawDateFormat ===
               // cursor-default: the global button cursor:pointer rule (#709)
               // gives this row a hand cursor; a switching row is a list item,
               // not a button — user ruling (#723) keeps the default arrow.
-              "w-full text-left py-2.5 pr-4 font-sans text-xs items-center gap-2 cursor-default",
+              "w-full text-left py-2.5 pr-4 font-mono text-xs items-center gap-2 cursor-default",
               FLEX,
               active
                 ? "bg-sidebar-accent text-sidebar-accent-foreground"
@@ -353,7 +354,7 @@ const dateFormat: DateFormat = rawDateFormat === "absolute" || rawDateFormat ===
               return p ? (
                 <span
                   className={cn(
-                    "shrink-0 rounded-full px-1 font-mono text-2xs font-semibold leading-[1.4] text-white tabular-nums",
+                    "shrink-0 rounded-full px-1 text-[9px] font-semibold leading-[1.4] text-white",
                     PRIORITY_BG[p],
                   )}
                 >
@@ -364,7 +365,7 @@ const dateFormat: DateFormat = rawDateFormat === "absolute" || rawDateFormat ===
             <span className={cn(FLEX_1, MIN_W_0, FLEX, FLEX_COL)}>
               {editing ? (
                 <span className={cn("items-center gap-1", MIN_W_0, FLEX)}>
-                  <span className="font-mono text-xs shrink-0 select-none">#{agent.agent_id} ·</span>
+                  <span className="text-xs shrink-0 select-none">#{agent.agent_id} ·</span>
                   <input
                     autoFocus
                     value={draft}
@@ -387,32 +388,26 @@ const dateFormat: DateFormat = rawDateFormat === "absolute" || rawDateFormat ===
                 </span>
               ) : (
                 <span
-                  className={cn("items-center", MIN_W_0, FLEX)}
+                  className={cn("items-center gap-1", MIN_W_0, FLEX)}
                   onDoubleClick={(e) => {
                     e.stopPropagation();
                     setDraft(label ?? "");
                     setEditing(true);
                   }}
                 >
-                  <span className="shrink-0 font-mono">#{agent.agent_id}</span>
-                  {label ? (
-                    <>
-                      {" · "}
-                      <span className={cn("break-words", MIN_W_0)}>{label}</span>
-                    </>
-                  ) : null}
+                  <span className={cn("break-words", MIN_W_0)}>{displayLabel}</span>
                 </span>
               )}
             </span>
             {showMachine ? (
               <span
-                className="font-mono text-2xs opacity-60 shrink-0 px-1 rounded border border-border/50"
+                className="text-[10px] opacity-60 shrink-0 px-1 rounded border border-border/50"
               >
                 {agent.machine}
               </span>
             ) : null}
             {showTime ? (
-              <span className="font-mono text-2xs opacity-60 shrink-0 tabular-nums">
+              <span className="text-[10px] opacity-60 shrink-0 tabular-nums">
                 {absTime}
               </span>
             ) : null}
