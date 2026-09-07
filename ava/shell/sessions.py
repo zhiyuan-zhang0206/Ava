@@ -165,11 +165,40 @@ def _validate_ttl(ttl: float) -> float:
     return ttl
 
 
+def _record_ttl(session_id: int, ttl: float) -> None:
+    """Write the session's mandatory deadline row to `agent_shell_ttls`.
+
+    The gateway TTL reaper reads this table (the runner role holds INSERT).
+    Fail-loud: without the row the reaper can never reclaim the session, so
+    the caller must abort the creation it just made. `SET TRANSACTION READ
+    WRITE` leads the transaction — a pooled backend handed over with
+    session-level read-only poison would otherwise reject the write."""
+    import psycopg
+
+    from ava._settings import DB_URL
+    from shared.db import PG_STATEMENT_TIMEOUT_KWARGS
+
+    try:
+        with (
+            psycopg.connect(DB_URL, **PG_STATEMENT_TIMEOUT_KWARGS) as conn,
+            conn.cursor() as cur,
+        ):
+            cur.execute("SET TRANSACTION READ WRITE")
+            cur.execute(
+                "INSERT INTO agent_shell_ttls (agent_id, session_id, expires_at) "
+                "VALUES (%s, %s, now() + make_interval(secs => %s))",
+                (ava._boot.agent_id(), session_id, ttl),
+            )
+            conn.commit()
+    except Exception as exc:
+        raise RuntimeError(f"failed to track TTL for session {session_id}") from exc
+
+
 def _create_session(
     name: str | None = None,
     *,
     cwd: str | None = None,
-    ttl: float | None = None,
+    ttl: float,
 ) -> tuple[int, str]:
     # Allocate the next session id and create the shell session. `name` becomes
     # a `-<name>` suffix on the session identifier (None = unnamed). `cwd` sets
@@ -178,21 +207,20 @@ def _create_session(
     # (shell), `run_background`, and `ava.watcher._spawn` (named "watcher")
     # all use it.
     #
-    # `ttl` stays optional HERE only for the watcher path: a watcher session
-    # carries its own lifecycle (registry row + boot reconcile + its own
-    # at/cron/timeout deadlines), so it deliberately records no TTL. The
-    # public SDK surface (`sessions.new` / `run_background`) requires one —
-    # user ruling 2026-08-27: shell TTL is mandatory, the idle-shell-reminder
-    # daemon is gone, and TTL is the only reclamation mechanism.
+    # `ttl` is REQUIRED: user ruling 2026-08-27 made shell TTL mandatory (the
+    # idle-shell-reminder daemon is gone and TTL is the only reclamation
+    # mechanism). Every caller — shells and watchers alike — records its
+    # deadline in `agent_shell_ttls`; a watcher's registry + boot reconcile
+    # handles its liveness, but its session is still a resource that must
+    # carry a deadline (task #2614).
     if name is not None and not _NAME_RE.fullmatch(name):
         raise ValueError(
             f"session name {name!r} invalid — use a lowercase slug like 'dev-server' "
             "([a-z][a-z0-9-]*)"
         )
-    # Validate here, not at call sites, so every ttl-carrying caller is capped at
-    # the write point; the watcher path (ttl=None) intentionally skips it.
-    if ttl is not None:
-        ttl = _validate_ttl(ttl)
+    # Validate here, not at call sites, so every caller is capped at the
+    # write point (ruling 2026-09-01: sessions live at most 24h).
+    ttl = _validate_ttl(ttl)
     session_id = _next_session_index_from_db()
     full = f"{_shell_prefix()}{session_id}" + (f"-{name}" if name is not None else "")
     # Forward this agent process's AVA_* env onto the session. The detached
@@ -225,28 +253,14 @@ def _create_session(
     )
     if not ok:
         raise RuntimeError(f"failed to create session {full!r}")
-    if ttl is not None:
-        import psycopg
-
-        from ava._settings import DB_URL
-        from shared.db import PG_STATEMENT_TIMEOUT_KWARGS
-
-        try:
-            with (
-                psycopg.connect(DB_URL, **PG_STATEMENT_TIMEOUT_KWARGS) as conn,
-                conn.cursor() as cur,
-            ):
-                cur.execute("SET TRANSACTION READ WRITE")
-                cur.execute(
-                    "INSERT INTO agent_shell_ttls (agent_id, session_id, expires_at) "
-                    "VALUES (%s, %s, now() + make_interval(secs => %s))",
-                    (ava._boot.agent_id(), session_id, ttl),
-                )
-                conn.commit()
-        except Exception as exc:
-            with contextlib.suppress(Exception):
-                backend.kill_session(full, graceful=False)
-            raise RuntimeError(f"failed to track TTL for session {full!r}") from exc
+    try:
+        _record_ttl(session_id, ttl)
+    except RuntimeError:
+        # An untracked session could never be reclaimed — dispose of it
+        # rather than leaving a live session the reaper cannot see.
+        with contextlib.suppress(Exception):
+            backend.kill_session(full, graceful=False)
+        raise
     return session_id, full
 
 

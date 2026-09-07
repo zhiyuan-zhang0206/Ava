@@ -363,7 +363,18 @@ def _spawn(
     import sys
 
     agent_id = _agent_id()
-    session_id, session_name = _sessions._create_session(name)
+    # Every persistent session must carry a TTL (task #2614). A launch
+    # watcher's timeout IS its deadline; cron/at watchers have no timeout —
+    # the 24h session cap is the default. The gateway reaper never kills a
+    # live watcher (its expired-row query skips (agent, session) pairs with a
+    # running/rebuilt registry row — task #2589), so a standing cron watcher
+    # outliving its row is expected and safe.
+    watcher_ttl = (
+        min(timeout_secs, _sessions._MAX_TTL_SECONDS)
+        if timeout_secs is not None
+        else _sessions._MAX_TTL_SECONDS
+    )
+    session_id, session_name = _sessions._create_session(name, ttl=watcher_ttl)
     # The registry is desired state, so it must remember the generation of
     # the exact PTY record it can later rebuild. Reading the backend record
     # (rather than today's marker) binds the row to the session actually

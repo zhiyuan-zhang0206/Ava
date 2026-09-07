@@ -33,6 +33,7 @@ from gateway.schemas import (
     StatsWindowHours,
     applied_window,
 )
+from gateway.shell_ttls import fallback_expiry
 from ops import cluster_rpc as _cluster_rpc
 from ops.rpc_schemas import ShellInfo
 from shared.agents import AgentNotFound
@@ -248,9 +249,10 @@ def _shell_ttls_blocking(pool: ConnectionPool, agent_id: int) -> dict[int, datet
 
     The table lives in the gateway's own Postgres, so the TTL merge happens
     HERE (the runner probe answers session identity + uptime only; the ops
-    server on a split runner has no DB access). A session without a row has
-    no TTL — watcher sessions deliberately record none, and legacy
-    pre-mandate shells predate the table.
+    server on a split runner has no DB access). A session without a row
+    falls back to the 24h cap counted from its launch epoch — legacy
+    pre-mandate shells, or sessions created by not-yet-updated runners
+    during a rollout (gateway.shell_ttls.fallback_expiry).
     """
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
@@ -294,7 +296,11 @@ async def _probe_agent_shells(
     if shells:
         ttls = await asyncio.to_thread(_shell_ttls_blocking, pool, agent_id)
         shells = [
-            s.model_copy(update={"expires_at": ttls.get(s.id)}) if s.id in ttls else s
+            s.model_copy(
+                update={
+                    "expires_at": ttls.get(s.id) if s.id in ttls else fallback_expiry(s.created_at)
+                }
+            )
             for s in shells
         ]
     return shells, True

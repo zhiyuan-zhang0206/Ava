@@ -181,6 +181,101 @@ def test_shell_capture_carries_created_at_and_ttl_deadline(
     assert body["expires_at"] is not None  # agent_shell_ttls row -> deadline set
 
 
+def test_shell_capture_falls_back_to_launch_epoch_plus_24h_without_row(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Task #2614: a session without an agent_shell_ttls row (legacy
+    pre-mandate shell, or one created by a not-yet-updated runner during a
+    rollout) still gets a deadline — the 24h cap counted from the runner's
+    launch epoch — so the monitor page never renders No TTL for it."""
+    from datetime import UTC, datetime, timedelta
+
+    aid = _insert_agent(db_conn, machine="wsl")
+    launched = datetime.now(tz=UTC) - timedelta(hours=3)
+    db_conn.commit()
+
+    async def _meta_dispatch(
+        target_machine: str, kind: str, payload: dict[str, object], **kwargs: object
+    ) -> dict[str, object]:
+        return {
+            "session_name": f"ava-agent-{aid}-shell-7-watcher",
+            "lines": ["hello"],
+            "created_at": launched.isoformat(),
+            "uptime_seconds": 10800,
+        }
+
+    monkeypatch.setattr(shell_router._cluster_rpc, "dispatch_to_machine", _meta_dispatch)
+
+    with TestClient(app) as client:
+        body = client.get(f"/api/agents/{aid}/shell/7").json()
+    assert body["expires_at"] == (launched + timedelta(hours=24)).astimezone(
+        UTC
+    ).isoformat().replace("+00:00", "Z")
+
+
+def test_shell_capture_without_row_and_epoch_keeps_no_deadline(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No TTL row AND no launch epoch from the runner — nothing to count
+    from, so expires_at stays None and the page's defensive No TTL branch
+    renders. Only reachable with a very old runner that reports no
+    created_at."""
+    aid = _insert_agent(db_conn, machine="wsl")
+    db_conn.commit()
+
+    async def _meta_dispatch(
+        target_machine: str, kind: str, payload: dict[str, object], **kwargs: object
+    ) -> dict[str, object]:
+        return {
+            "session_name": f"ava-agent-{aid}-shell-8",
+            "lines": ["hello"],
+            "created_at": None,
+            "uptime_seconds": 0,
+        }
+
+    monkeypatch.setattr(shell_router._cluster_rpc, "dispatch_to_machine", _meta_dispatch)
+
+    with TestClient(app) as client:
+        body = client.get(f"/api/agents/{aid}/shell/8").json()
+    assert body["expires_at"] is None
+
+
+def test_shell_capture_prefers_row_over_fallback(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A recorded row wins over the launch-epoch fallback (a watcher's
+    timeout row is shorter than 24h)."""
+    from datetime import UTC, datetime, timedelta
+
+    aid = _insert_agent(db_conn, machine="wsl")
+    launched = datetime.now(tz=UTC) - timedelta(minutes=5)
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO agent_shell_ttls (agent_id, session_id, expires_at) VALUES (%s, %s, %s)",
+            (aid, 9, datetime.now(tz=UTC) + timedelta(minutes=30)),
+        )
+    db_conn.commit()
+
+    async def _meta_dispatch(
+        target_machine: str, kind: str, payload: dict[str, object], **kwargs: object
+    ) -> dict[str, object]:
+        return {
+            "session_name": f"ava-agent-{aid}-shell-9",
+            "lines": ["hello"],
+            "created_at": launched.isoformat(),
+            "uptime_seconds": 300,
+        }
+
+    monkeypatch.setattr(shell_router._cluster_rpc, "dispatch_to_machine", _meta_dispatch)
+
+    with TestClient(app) as client:
+        body = client.get(f"/api/agents/{aid}/shell/9").json()
+    # ~30m from now, not created_at+24h.
+    assert body["expires_at"] < (launched + timedelta(hours=24)).astimezone(
+        UTC
+    ).isoformat().replace("+00:00", "Z")
+
+
 def test_shell_machine_unreachable_503(
     db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
