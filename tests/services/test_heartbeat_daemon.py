@@ -467,6 +467,31 @@ class TestConsecutiveFailureBackoff:
         )
         assert [r[0] for r in selected] == [healthy]
 
+    @pytest.mark.parametrize("advanced", [False, True])
+    def test_real_selected_idle_clock_survives_next_checkin_cycle(
+        self, pool: ConnectionPool, db_conn: psycopg.Connection, advanced: bool
+    ) -> None:
+        """Use the actual PG result in pending state, as the dispatch loop does."""
+        aid = _make_idle(db_conn, status_changed_s_ago=1200)
+        pending = _selected(pool)
+        _send_heartbeat_checkin(pool, aid, pending[aid])
+        if advanced:
+            # Still beyond the idle threshold: recovery must use the observed
+            # progress, not the independent fresh-activity shortcut.
+            with db_conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE agents_meta SET last_active_at = now() - interval '10 minutes' "
+                    "WHERE id = %s",
+                    (aid,),
+                )
+            db_conn.commit()
+        streaks: dict[int, int] = {aid: 2}
+        _reconcile_checkin_outcomes(
+            pool, pending_checkin=pending, failure_streak=streaks, idle_threshold_s=_THRESHOLD_S
+        )
+        assert pending == {}
+        assert streaks == ({} if advanced else {aid: 3})
+
     def test_reconcile_increments_streak_when_checkin_produced_no_turn(
         self, pool: ConnectionPool, db_conn: psycopg.Connection
     ) -> None:

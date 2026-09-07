@@ -179,8 +179,11 @@ def _select_idle_agents_needing_heartbeat(
     # threshold cadence; the daemon supplies its configured check-in interval.
     reminder_interval_s = idle_threshold_s if heartbeat_interval_s is None else heartbeat_interval_s
 
+    # EXTRACT returns numeric (Decimal); keep the observed clock compatible
+    # with the float slack used when the next dispatch reconciles this reading.
     sql = (
-        "SELECT id, EXTRACT(EPOCH FROM (now() - last_active_at)) / 60.0 AS idle_minutes "
+        "SELECT id, (EXTRACT(EPOCH FROM (now() - last_active_at)) / 60.0)::double precision "
+        "AS idle_minutes "
         "FROM agents_meta "
         "WHERE status = 'idling' "
         "AND now() >= GREATEST("
@@ -311,7 +314,7 @@ def _reconcile_checkin_outcomes(
         for agent_id in tracked:
             cur.execute(
                 "SELECT status, "
-                "EXTRACT(EPOCH FROM (now() - last_active_at)) / 60.0, "
+                "(EXTRACT(EPOCH FROM (now() - last_active_at)) / 60.0)::double precision, "
                 "heartbeat_backoff_level, "
                 "(heartbeat_paused_until IS NOT NULL AND heartbeat_paused_until > now()), "
                 "(last_heartbeat_at IS NOT NULL AND EXISTS ("
