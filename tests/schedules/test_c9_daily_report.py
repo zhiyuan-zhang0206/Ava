@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import shutil
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -84,6 +85,38 @@ def _install_fake_accounting(monkeypatch: pytest.MonkeyPatch, accounting: Any) -
 
     monkeypatch.setattr("shared.telemetry.emit", record_emit)
     return emitted
+
+
+def test_repo_root_survives_runtime_materialization(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The script finds the source root from shared.__file__, not its own path.
+
+    The gateway materializes the script to ~/.ava/schedules/<id>/ before
+    executing it; there, ``Path(__file__).parents[1]`` is ~/.ava/schedules,
+    not the repo root, and ``scripts/ci_accounting`` becomes unimportable
+    (the 2026-09-08 05:00 first-fire failure). Loading a copy from a flat
+    runtime-style directory must still resolve _REPO_ROOT to the deployed
+    source root.
+    """
+    mat_dir = tmp_path / "schedules" / "11"
+    mat_dir.mkdir(parents=True)
+    mat_path = mat_dir / SCHEDULE_PATH.name
+    shutil.copy(SCHEDULE_PATH, mat_path)
+    monkeypatch.syspath_prepend(str(REPO_ROOT))
+
+    spec = importlib.util.spec_from_file_location("c9_daily_materialized", mat_path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        sys.modules.pop(spec.name, None)
+
+    assert module._REPO_ROOT == REPO_ROOT
+    assert mat_dir != module._REPO_ROOT
+    assert tmp_path != module._REPO_ROOT
 
 
 def test_manifest_declares_c9_daily_report_schedule() -> None:
