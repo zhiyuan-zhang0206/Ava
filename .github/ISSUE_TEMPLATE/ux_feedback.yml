@@ -1,0 +1,27 @@
+name: Experience feedback
+description: Something felt wrong, awkward, or unclear
+labels: [ux]
+body:
+  - type: textarea
+    id: context
+    attributes:
+      label: What you were trying to do
+    validations:
+      required: true
+  - type: textarea
+    id: felt-wrong
+    attributes:
+      label: What felt wrong
+      description: The friction, confusion, or surprise — wording, layout, flow, timing.
+    validations:
+      required: true
+  - type: textarea
+    id: suggestion
+    attributes:
+      label: How it should feel instead
+  - type: input
+    id: where
+    attributes:
+      label: Where
+      description: Which page / command / surface this is about.
+      placeholder: e.g. Control > Schedules, `ava config`, spawn dialog
