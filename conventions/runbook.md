@@ -1121,7 +1121,17 @@ gateway liveness three times, 30 seconds apart, before declaring it unhealthy. A
 failed liveness or agent-population check is classified against the data plane:
 Postgres/Redis reachability failure is environment-class, alerts the owner, and never
 increments the auto-rollback counter; a healthy data plane with a failing gateway,
-population, crash-loop, or schema check is code-class and counts normally. Any gating
+population, crash-loop, or schema check is code-class and counts normally. One
+population-specific exception reads the existing local intent: `agent-host` in
+`disabled_services`, or an active native maintenance payload in the pause-owner
+journal. A low global count still exits 1 and remains visible in the probe output;
+local intent does not prove that remote runners are stopped or healthy. This
+maintenance classification preserves global alert grading and clears the code
+failure counter instead of rolling back code. The existing cluster-wide deploy
+lease can still pause grading. Missing, legacy-only, resumed or
+invalid journals do not certify maintenance. Re-enabling the host restores normal
+population failure counting. Other failing checks retain their existing policy.
+Any gating
 failure, including a deploy-suppressed or environment-class one, restarts the pending
 known-good observation streak. A backend rollout writes its target as
 `pending_known_good_sha` while preserving `last_known_good_sha`; two consecutive
