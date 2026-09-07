@@ -15,7 +15,7 @@ unreadable state refuses admission. External-agent identity leases are a
 separate protocol and are not acquired or released by native maintenance.
 
 `ops.agent_pause` publishes the hold before locking native `agents_meta` rows.
-Hosted and process admission check it at their row-lock boundary. Existing
+Hosted admission checks it at the row-lock boundary. Existing
 iterations run until an ordinary `restart` reaches claim. Lifecycle priority
 preserves pending ordinary messages. A restart arriving after claim can allow
 one more iteration; this is not an instruction-level freeze.
@@ -34,9 +34,8 @@ This is preserved idle intent, not a fabricated continuation receipt.
 
 Hosted drain receipts require the shielded continuation, final checkpoint
 flush, resources and owner settlement to finish. The matching DB restart must
-be applied and unobserved. Process mode records its receipt after normal
-cleanup and additionally verifies the original process has exited. A successor
-cannot sign an absent original receipt. Failures latch before journal I/O;
+be applied and unobserved. A successor cannot sign an absent original receipt.
+Failures latch before journal I/O;
 `applied_at`, an idle row, or a released lease alone is insufficient.
 
 Phases are `preparing → draining → drained → stopping → stopped → starting →

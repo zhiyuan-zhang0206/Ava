@@ -303,8 +303,9 @@ def graceful_signal(
     its shutdown path (runs finally). True means Windows accepted delivery, not
     that Python dispatched its handler or the process exited. Helper failure
     and timeout propagate; legacy control provenance is refused.
-    `ava stop`'s reap uses this to signal every agent, then wait on all of them
-    under one shared deadline before force-killing stragglers.
+    Normal service stop waits for the signalled daemons under one shared
+    deadline and reports an incomplete stop if any remain. This delivery path
+    never escalates to force.
     """
     if not math.isfinite(timeout) or timeout <= 0:
         raise ValueError("private console delivery timeout must be finite and positive")

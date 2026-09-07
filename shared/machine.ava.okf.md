@@ -37,7 +37,7 @@ missing value prints an actionable error and exits 1. An agent calling `ava`
 | Capability | Owns | Data plane it uses |
 |---|---|---|
 | `gateway` | the HTTP gateway + this cluster's Postgres / Redis / Milvus + the gateway-side daemons | its own local instances |
-| `agent-runner` | agent processes + the ops server + the restarter | its own local instances when the host is also `gateway`; otherwise a gateway node's, via `AVA_DB_URL` / `AVA_REDIS_URL` / `AVA_MILVUS_URI` in its `.env` |
+| `agent-runner` | the agent host + the ops server | its own local instances when the host is also `gateway`; otherwise a gateway node's, via `AVA_DB_URL` / `AVA_REDIS_URL` / `AVA_MILVUS_URI` in its `.env` |
 
 A host runs the **union** of its capabilities' services — the per-service
 capability declaration is `ServiceSpec.capabilities` in `ops/spec.py`, and the

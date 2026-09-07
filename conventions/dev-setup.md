@@ -56,7 +56,7 @@ If you've already brought the agent-runner up with a wrong
    `/api/bootstrap` at Settings build (no `.env` cache since the 2026-08-01
    refactor; so a data-plane re-key reaches an already-enrolled runner on its
    next restart; fails fast if the gateway is unreachable), then start brings
-   up the ops / restarter / watchdog sessions (`ava-ops` etc.).
+   up the ops / agent-host / watchdog sessions (`ava-ops` etc.).
 
 ## Per-worktree cluster dev flow
 
@@ -111,8 +111,8 @@ scripts/install.sh --worktree                # births cluster <name>: locked Pyt
                                              # keys from ~/.ava/.env, and the .ava_home pointer. --path P
                                              # overrides the home; --no-seed skips the key copy. No host-global
                                              # steps. Idempotent — re-run freely.
-.venv/bin/ava start                          # brings up its gateway + agent-runner (ops/restarter/watchdog + agent
-                                             # processes). Pure bring-up: a home install.sh never birthed has no
+.venv/bin/ava start                          # brings up its gateway + agent-runner (ops/agent-host/watchdog).
+                                             # Pure bring-up: a home install.sh never birthed has no
                                              # registry record, and start fails fast pointing back at install.sh
 .venv/bin/ava status                         # sessions/probes for this cluster
 .venv/bin/ava cluster down --path ~/.ava-<name>  # stop the cluster's sessions (its own Postgres/Redis + registry slot stay up)

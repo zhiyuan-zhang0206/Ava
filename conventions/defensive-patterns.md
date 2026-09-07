@@ -112,8 +112,8 @@ A test asserting behavior under a downed dependency must close **every** route t
 it, not the route the current implementation happens to take. Patch `connect`
 *and* `pool`; otherwise the fixture silently retargets itself the next time the
 implementation changes seam, and the test keeps passing while guarding nothing.
-Evidence: [`postmortems/0002`](../postmortems/0002-db-down-tests-pass-for-the-wrong-reason.md),
-and the `no_db` / `dead_db` fixtures in `tests/services/test_healthcheck_restarter.py`.
+Evidence: [`postmortems/0002`](../postmortems/0002-db-down-tests-pass-for-the-wrong-reason.md)
+records the original `no_db` / `dead_db` fixture failure.
 
 ### A real-infrastructure suite fails open
 

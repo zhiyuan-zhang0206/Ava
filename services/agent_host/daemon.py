@@ -150,7 +150,7 @@ async def _watch_plugins_for_restart() -> None:
             "[agent-host] external plugins changed under $AVA_HOME/plugins — "
             "restarting to load them (issue #170)"
         )
-        os.kill(os.getpid(), signal.SIGTERM)
+        signal.raise_signal(signal.SIGTERM)
         return
 
 
