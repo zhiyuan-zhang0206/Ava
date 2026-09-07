@@ -190,11 +190,11 @@ def _ensure_redis_url_identity_step(ctx: ConvergeCtx) -> None:
     `default` admin user and the gateway watchdog's redis-acl healthcheck (which
     reads the identity from the URL as data) had nothing to re-affirm. The
     identity is read from the cluster's own db_url (`identity_from_url` —
-    names-as-data; db/role/ACL share one identifier), falling back to the fixed
+    names-as-data for this legacy backfill), falling back to the fixed
     birth identifier only when db_url carries no username either. Safe to write
     mid-flight: the file-only Redis runtime password stays inside the URL, and
     `ava start` re-affirms the ACL user under this same identity
-    (ensure_cluster_instance takes it from db_identity) before daemons dial with
+    (ensure_cluster_instance takes it from redis_identity) before daemons dial with
     the new URL.
 
     The URL is read from the .env FILE, never from settings — the in-memory dial

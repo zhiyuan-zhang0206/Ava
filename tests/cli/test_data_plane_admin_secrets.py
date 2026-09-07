@@ -302,10 +302,18 @@ def test_gateway_data_plane_retries_with_journal_credentials(
     monkeypatch.setattr(settings.data_plane, "cluster_secret", _LEGACY)
     monkeypatch.setattr(settings.data_plane, "db_admin_password", _LEGACY)
     monkeypatch.setattr(settings.data_plane, "redis_admin_password", _LEGACY)
+    monkeypatch.setattr(
+        settings.data_plane, "db_url", f"postgresql://ava_main:{_LEGACY}@127.0.0.1:16433/ava_main"
+    )
+    monkeypatch.setattr(
+        settings.data_plane, "redis_url", f"redis://ava:{_LEGACY}@127.0.0.1:16380/0"
+    )
 
     attempts: list[tuple[str, str, str]] = []
 
     def _ensure(**kwargs: object) -> int:
+        assert kwargs["identity"] == "ava_main"
+        assert kwargs["redis_user"] == "ava"
         credentials = (
             str(kwargs["db_admin_password"]),
             str(kwargs["redis_admin_password"]),

@@ -343,7 +343,10 @@ kept in the gateway's `.env`, and travels only inside the projected URL —
 never as a standalone bootstrap field. The pooler's userlist carries the
 matching entry; the gateway's own processes keep dialing the main identity.
 
-The redis ACL user is added live at `ava start` (`ensure_cluster_redis_acl`), scoped to
+The Redis ACL user comes from `AVA_REDIS_URL` independently of the Postgres
+db/role in `AVA_DB_URL` (for example, Redis `ava` and Postgres `ava_main`).
+Startup and credential splitting preserve both names. The redis ACL user is added
+live at `ava start` (`ensure_cluster_redis_acl`), scoped to
 the cluster's pub/sub channels (`ava:*`); it is re-affirmed on every start (not persisted
 to redis.conf) and by the `redis-acl` gateway-watchdog healthcheck, so a redis restart
 that drops the in-memory ACL is repaired before agents reconnect. Provisioning uses that

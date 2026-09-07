@@ -18,16 +18,16 @@ Model (mirrors `shared.pg_tools.throwaway_postgres`, but persistent + authed):
   owner role carries its independent password; provisioning connects over the socket.
 - Redis runs `redis-server` on the cluster's redis port with `requirepass` = the
   gateway-only Redis admin password when one is set; the cluster's ACL user has
-  its own runtime password. A no-secret cluster runs without requirepass and without an
-  ACL user, on the loopback-only bind. Data dir under `$AVA_HOME/redis`. The
+  its own runtime password. A no-secret cluster runs without requirepass, with a
+  named `nopass` ACL user, on the loopback-only bind. Data dir under `$AVA_HOME/redis`. The
   Redis admin password reaches redis through a 0600 `redis.conf` and reaches `redis-cli`
   through `$REDISCLI_AUTH` — never argv, which `ps` shows to any local user
   (issue #974).
 
-The db / role / ACL identifier is names-as-data: callers read it from the
-cluster's own `.env` URLs (`shared.cluster.identity_from_url`) — or pass the
-fixed `DATA_PLANE_IDENTITY` at install-time birth — and thread it in via
-`ensure_cluster_instance(identity=...)`; nothing here derives it from a name.
+The Postgres db/role and Redis ACL identifiers are independent URL data: callers
+read each from its own `.env` URL (`db_identity()` / `redis_identity()`) and pass
+`identity` / `redis_user` explicitly. Install-time birth supplies the fixed
+`DATA_PLANE_IDENTITY` for both; later starts preserve different existing names.
 
 Bind posture — authenticated Postgres, PgBouncer and Linux Redis bind loopback
 and this host's reachable address, never all interfaces. macOS Redis retains its
@@ -566,17 +566,18 @@ def ensure_cluster_instance(
     redis_password: str = "",
     pgbouncer_port: int,
     identity: str,
+    redis_user: str,
     runner_password: str | None = None,
 ) -> int:
     """Bring up this cluster's own Postgres + Redis (+ PgBouncer when enabled) on its
     allocated ports (idempotent). Returns 0 on success. The Postgres role/db/schema
     are provisioned separately by cluster_lifecycle._provision against pg_admin_url().
 
-    `identity` is the cluster's data-plane identifier (db / role / redis ACL
-    user), names-as-data: an existing cluster's caller reads it from the
-    cluster's own `.env` URLs (`shared.cluster.identity_from_url`); install-time
-    birth passes the fixed `DATA_PLANE_IDENTITY`. `runner_password` is the
-    gateway .env AVA_RUNNER_DB_PASSWORD, threaded at birth (no .env yet) and
+    `identity` is the Postgres db/role identifier; `redis_user` is the independent
+    Redis ACL user. Existing clusters read each from its respective `.env` URL;
+    install-time birth passes the fixed `DATA_PLANE_IDENTITY` for both.
+    `runner_password` is the gateway .env AVA_RUNNER_DB_PASSWORD, threaded at
+    birth (no .env yet) and
     resolved from the file otherwise; it lands in the pooler's userlist as the
     `ava_runner` credential.
 
@@ -609,7 +610,7 @@ def ensure_cluster_instance(
         return rc
     if (
         rc := _start_redis(
-            redis_port, redis_admin_password, redis_password, cluster_secret, identity
+            redis_port, redis_admin_password, redis_password, cluster_secret, redis_user
         )
     ) != 0:
         return rc

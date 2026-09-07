@@ -24,7 +24,10 @@ import pytest
 import redis
 
 from cli.commands import _cluster_instance as ci
+from cli.commands._data_plane import ensure_gateway_data_plane
+from cli.commands._data_plane_admin_secrets import ensure_data_plane_admin_secrets
 from cli.commands._pgbouncer import pgbouncer_bin, stop_pgbouncer
+from shared import cluster
 from shared.cluster import provision_database
 from shared.config import settings
 
@@ -32,6 +35,43 @@ _BEARER = "test_bearer_abc123"
 _DB_ADMIN = "test_db_admin_abc123"
 _REDIS_ADMIN = "test_redis_admin_abc123"
 _REDIS_RUNTIME = "test_redis_runtime_abc123"
+
+
+def _gateway_config(
+    monkeypatch: pytest.MonkeyPatch, ports: tuple[int, int], *, legacy: bool = False
+) -> Path:
+    """Configure a born gateway with different Postgres and Redis usernames."""
+    pg_port, redis_port = ports
+    home = Path(settings.general.ava_home)
+    values = {
+        "AVA_DB_URL": f"postgresql://ava_main:{_BEARER if legacy else _DB_ADMIN}@127.0.0.1:{pg_port}/ava_main",
+        "AVA_REDIS_URL": f"redis://ava:{_BEARER if legacy else _REDIS_RUNTIME}@127.0.0.1:{redis_port}/0",
+        "AVA_DB_ADMIN_PASSWORD": "" if legacy else _DB_ADMIN,
+        "AVA_REDIS_ADMIN_PASSWORD": "" if legacy else _REDIS_ADMIN,
+        "AVA_REDIS_PASSWORD": "" if legacy else _REDIS_RUNTIME,
+    }
+    for key, value in values.items():
+        monkeypatch.setenv(key, value)
+    for field in ("db_url", "redis_url", "db_admin_password", "redis_admin_password"):
+        monkeypatch.setattr(settings.data_plane, field, values[f"AVA_{field.upper()}"])
+    monkeypatch.setattr(settings.data_plane, "pgbouncer_enabled", False)
+    record = cluster.ClusterRecord(
+        ports=cast(
+            "cluster.ClusterPorts",
+            {"postgres": pg_port, "redis": redis_port, "pgbouncer": _free_port()},
+        ),
+        gateway_home=str(home),
+        created_at="test",
+    )
+
+    def _record(_home: Path) -> cluster.ClusterRecord:
+        return record
+
+    monkeypatch.setattr(cluster, "get_record", _record)
+    # The split module imports this registry seam at module load time.
+    monkeypatch.setattr("cli.commands._data_plane_admin_secrets.get_record", _record)
+    (home / ".env").write_text("".join(f"{key}={value}\n" for key, value in values.items()))
+    return home
 
 
 def _pgbouncer_installed() -> bool:
@@ -95,6 +135,7 @@ def test_per_cluster_instance_bringup(isolated_cluster: tuple[int, int]) -> None
         redis_password=_REDIS_RUNTIME,
         pgbouncer_port=pg_port + 1,
         identity="ava_tinst",
+        redis_user="ava_tinst",
     )
     assert rc == 0
 
@@ -163,9 +204,81 @@ def test_bringup_is_idempotent(isolated_cluster: tuple[int, int]) -> None:
                 redis_password=_REDIS_RUNTIME,
                 pgbouncer_port=pg_port + 1,
                 identity="ava_tinst",
+                redis_user="ava_tinst",
             )
             == 0
         )
+
+
+def test_gateway_cold_start_restores_redis_url_identity(
+    isolated_cluster: tuple[int, int], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Official start restores Redis's own ACL after a real RDB-only shutdown."""
+    pg_port, redis_port = isolated_cluster
+    home = _gateway_config(monkeypatch, isolated_cluster)
+    assert ensure_gateway_data_plane() == 0
+    provision_database(
+        "ava_main", base_admin_url=ci.pg_admin_url(pg_port), db_admin_password=_DB_ADMIN
+    )
+    with psycopg.connect(settings.data_plane.db_url) as conn:
+        assert conn.execute("SELECT current_user, current_database()").fetchone() == (
+            "ava_main",
+            "ava_main",
+        )
+    with redis.Redis.from_url(settings.data_plane.redis_url) as client:  # pyright: ignore[reportUnknownMemberType]
+        assert client.ping()  # pyright: ignore[reportUnknownMemberType]
+        assert client.set("continuation", "pending")  # pyright: ignore[reportUnknownMemberType]
+    subprocess.run(  # noqa: S603
+        [ci._redis_cli_bin(), "-p", str(redis_port), "shutdown", "save"],
+        env=ci._redis_cli_env(_REDIS_ADMIN),
+        check=True,
+        capture_output=True,
+    )
+    assert (home / "redis" / "dump.rdb").is_file()
+    assert ensure_gateway_data_plane() == 0
+    with redis.Redis.from_url(settings.data_plane.redis_url) as client:  # pyright: ignore[reportUnknownMemberType]
+        assert client.get("continuation") == b"pending"  # pyright: ignore[reportUnknownMemberType]
+    with redis.Redis(port=redis_port, password=_REDIS_ADMIN) as admin:
+        assert admin.acl_getuser("ava") is not None  # pyright: ignore[reportUnknownMemberType]
+        assert admin.acl_getuser("ava_main") is None  # pyright: ignore[reportUnknownMemberType]
+
+
+def test_credential_split_preserves_distinct_redis_user(
+    isolated_cluster: tuple[int, int], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Password splitting rotates the existing URL identities independently."""
+    pg_port, redis_port = isolated_cluster
+    _gateway_config(monkeypatch, isolated_cluster, legacy=True)
+    assert ensure_gateway_data_plane() == 0
+    provision_database(
+        "ava_main", base_admin_url=ci.pg_admin_url(pg_port), db_admin_password=_BEARER
+    )
+    # Model the existing live ACL that lets a legacy cluster serve before its
+    # first password split; this is real provisioning, not a mocked Redis client.
+    cluster.ensure_cluster_redis_acl(
+        "ava",
+        redis_admin_url=f"redis://default:{_BEARER}@127.0.0.1:{redis_port}",
+        runtime_password=_BEARER,
+        channel_prefix=settings.data_plane.events_channel.removesuffix(":events"),
+    )
+    minted = iter((_DB_ADMIN, _REDIS_ADMIN, _REDIS_RUNTIME))
+
+    def _token_urlsafe(_bytes: int) -> str:
+        return next(minted)
+
+    monkeypatch.setattr(
+        "cli.commands._data_plane_admin_secrets.secrets.token_urlsafe", _token_urlsafe
+    )
+    assert ensure_data_plane_admin_secrets() is True
+    with psycopg.connect(settings.data_plane.db_url) as conn:
+        assert conn.execute("SELECT current_user").fetchone() == ("ava_main",)
+    with redis.Redis.from_url(settings.data_plane.redis_url) as client:  # pyright: ignore[reportUnknownMemberType]
+        assert client.ping()  # pyright: ignore[reportUnknownMemberType]
+    with (
+        redis.Redis(port=redis_port, username="ava", password=_BEARER) as old_runtime,
+        pytest.raises(redis.AuthenticationError),
+    ):
+        old_runtime.ping()  # pyright: ignore[reportUnknownMemberType]
 
 
 @pytest.mark.skipif(not _pgbouncer_installed(), reason="pgbouncer not installed (brew/apt)")
@@ -194,6 +307,7 @@ def test_bringup_with_pgbouncer_enabled(
         redis_password=_REDIS_RUNTIME,
         pgbouncer_port=pgb_port,
         identity="ava_tinst",
+        redis_user="ava_tinst",
     )
     assert rc == 0
 
@@ -305,6 +419,7 @@ def test_birth_hba_follows_passed_secret_not_ambient_settings(
         cluster_secret="",
         pgbouncer_port=pg_port + 1,
         identity="ava_tinst",
+        redis_user="ava_tinst",
     )
     assert rc == 0
 
@@ -364,6 +479,7 @@ def test_fresh_install_migrations_apply_no_secret(
         cluster_secret=secret,
         pgbouncer_port=pg_port + 1,
         identity="ava_tinst",
+        redis_user="ava_tinst",
     )
     assert rc == 0
     provision_database(
@@ -378,6 +494,7 @@ def test_fresh_install_migrations_apply_no_secret(
         cluster_secret=secret,
         pgbouncer_port=pg_port + 1,
         identity="ava_tinst",
+        redis_user="ava_tinst",
     )
     assert rc == 0
     assert _active_hba(pg_port) == [("127.0.0.1", "trust"), ("::1", "trust")]
