@@ -1,0 +1,42 @@
+# Routes template-filed issues to the owning Ava line: bug -> QA,
+# feature request -> PM, experience feedback -> P0 lead. The templates apply
+# their own label (bug / enhancement / ux) at filing time, so this router only
+# classifies — a blank issue (disabled by config.yml) would carry no label and
+# is left untouched.
+
+name: Issue Router
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  issues: write
+
+jobs:
+  route:
+    name: route by template label
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Route to the owning line
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          labels="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}" --jq '[.labels[].name] | join(" ")')"
+          case " ${labels} " in
+            *" bug "*)  route="route/qa"; line="the Ava QA line (Ava #3242)";;
+            *" enhancement "*) route="route/pm"; line="the Ava PM (Ava #3187)";;
+            *" ux "*)   route="route/p0"; line="the Ava P0 lead (Ava #405)";;
+            *)          echo "no template label — nothing to route"; exit 0;;
+          esac
+          gh api --method POST \
+            "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}/labels" \
+            -f "labels[]=${route}" >/dev/null
+          gh api --method POST \
+            "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}/comments" \
+            -f "body=Routed to ${line} (label: \`${route}\`)." >/dev/null
+          echo "routed issue ${ISSUE_NUMBER} -> ${route}"
