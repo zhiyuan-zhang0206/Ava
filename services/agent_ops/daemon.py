@@ -644,8 +644,8 @@ async def _ops_route(body: bytes) -> tuple[int, bytes, str]:
         )
 
     async with sem:
-        with maintenance_activity.admission():
-            try:
+        try:
+            with maintenance_activity.admission(envelope.kind):
                 if envelope.idempotency_key is not None:
                     # Non-idempotent ops retried by the gateway carry a dedup key:
                     # first dispatch executes + stores, later same-key dispatches
@@ -655,9 +655,9 @@ async def _ops_route(body: bytes) -> tuple[int, bytes, str]:
                     )
                 else:
                     status, result = await _dispatch(envelope.kind, envelope.payload)
-            except Exception as exc:
-                _log.exception("dispatch crashed for kind=%s", envelope.kind)
-                status, result = "failed", {"error": f"{type(exc).__name__}: {exc}"}
+        except Exception as exc:
+            _log.exception("dispatch refused or crashed for kind=%s", envelope.kind)
+            status, result = "failed", {"error": f"{type(exc).__name__}: {exc}"}
     # default=str is a last-resort fallback: op results should already be
     # JSON-native (Pydantic returns go through model_dump(mode="json")), but a
     # stray non-JSON value (datetime, Path, ...) in a hand-built dict must

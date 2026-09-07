@@ -20,8 +20,9 @@ from cli.commands._maintenance_stop import (
 )
 from cli.commands._pause_resume import exclusive_resources
 from ops.agent_pause import _drain, _hold, _prepare
-from shared import maintenance, maintenance_cohort, pause_owner
+from shared import maintenance, maintenance_cohort, pause_owner, start_serving
 from shared.db import connect
+from shared.exit_codes import SERVICES_NOT_READY_EXIT_CODE
 from shared.machine import machine_role
 
 
@@ -72,6 +73,8 @@ def _start(holder: str, at: datetime) -> int:
     with maintenance.authorized_start(holder, at):
         result = cmd_start(persist_services=False)
     if result == 0:
+        if not start_serving.is_serving():
+            return SERVICES_NOT_READY_EXIT_CODE
         maintenance.set_phase(holder, at, "ready")
     return result
 

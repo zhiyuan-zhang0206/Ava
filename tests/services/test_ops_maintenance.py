@@ -57,8 +57,10 @@ async def test_same_kind_requests_remain_counted_and_stop_refuses_new_requests(
         await tasks[0]
         assert activity.progress()["requests"] == 1
         pause_owner.change_maintenance("ops", WHEN, draining, MaintenanceHold("stopping"))
-        with pytest.raises(RuntimeError, match="stopping"):
-            await daemon._ops_route(b'{"kind":"probe","payload":{}}')
+        status, body, _ = await daemon._ops_route(b'{"kind":"probe","payload":{}}')
+        assert status == 200
+        assert b'"status": "failed"' in body
+        assert b"stopping" in body
         assert count == 2
     finally:
         for event in finishes:
@@ -108,7 +110,7 @@ async def test_server_close_after_client_reset_is_not_request_completion() -> No
     entered, finish, returned = asyncio.Event(), asyncio.Event(), asyncio.Event()
 
     async def route(_body: bytes) -> tuple[int, bytes, str]:
-        with activity.admission():
+        with activity.admission("probe"):
             entered.set()
             await finish.wait()
             returned.set()

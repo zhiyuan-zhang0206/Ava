@@ -247,7 +247,10 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
         note="LLM draft generation — repeats waste tokens but are harmless"
     ),
     # ── gateway/routers/health.py ───────────────────────────────────
-    ("GET", "/api/health"): RouteContract(note="liveness probe"),
+    ("GET", "/api/health"): RouteContract(
+        pause=PauseSemantics.CONTROL_PLANE,
+        note="gateway identity and database liveness — start must prove readiness before releasing its hold",
+    ),
     # ── gateway/routers/inspect.py ───────────────────────────────────
     ("GET", "/api/agents/{agent_id}/inspect"): RouteContract(),
     ("GET", "/api/agents/{agent_id}/inspect/live"): RouteContract(

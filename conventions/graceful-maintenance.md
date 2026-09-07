@@ -56,6 +56,13 @@ the hold after readiness succeeds. A failed start keeps admission closed.
 A recorded checkpoint/continuation failure blocks ordinary start and resume
 before services are launched; repair and inspect that failure first. A healthy
 service probe cannot prove that a failed checkpoint became durable.
+`GET /api/health` and ops `status_probe` remain available during this hold, so
+start can measure real readiness before opening business requests or native
+admission. Public health still verifies identity and database access; status
+and resume retain their existing authentication requirements.
+The existing exact-generation `cluster_resume` RPC is reachable but refuses
+resume before readiness or after a recorded continuation failure. Neither
+`--no-readiness-gate` nor a waived update exit code certifies readiness.
 Normal commands manage their own operation identity; there is no operation ID
 or timestamp to copy between machines.
 
