@@ -61,7 +61,7 @@ def test_external_restart_of_idle_agent_is_silent(spawned_agent: int) -> None:
     # ── external restart (default source='user') ──
     httpx.post(f"{GATEWAY_URL}/api/agents/{agent_id}/restart", timeout=10.0).raise_for_status()
 
-    # respawn complete + marker committed to checkpoint: completed row / idling / new pid / marker
+    # Restart applied and marker committed: applied row / idling / durable marker.
     deadline = time.monotonic() + 90.0
     last: tuple = ()
     while time.monotonic() < deadline:
@@ -95,7 +95,7 @@ def test_external_restart_of_idle_agent_is_silent(spawned_agent: int) -> None:
 
     # ── Silent + liveness assertions ──
     # Zero LLM call: AIMessages still the pre-restart two (post-restart script is empty,
-    # any wakeup would kill process — this count is belt-and-suspenders)
+    # any model call would exhaust the script — this count is belt-and-suspenders)
     assert _ai_count(values) == 2, f"extra LLM turn after respawn: {_ai_count(values)} AIMessages"
     # After marker, agent stopped waiting — halted=True still in checkpoint as is
     assert values["halted"] is True
@@ -104,7 +104,7 @@ def test_external_restart_of_idle_agent_is_silent(spawned_agent: int) -> None:
         f"plugin state cwd did not survive respawn: {values.get('ava_code__cwd')!r}"
     )
 
-    # Short observation window: no delayed wakeup (if any, AIMessage increases / empty script kills process)
+    # Short observation window: no delayed wakeup (if any, AIMessage increases / empty script fails the invocation)
     time.sleep(2.0)
     values = _checkpoint_values(agent_id)
     with psycopg.connect(settings.data_plane.db_url) as conn, conn.cursor() as cur:

@@ -1,27 +1,12 @@
-"""External restart hitting an idle agent — silent respawn (zero LLM calls) cross-process scenario.
+"""An external restart preserves the idle checkpoint without a model call.
 
-Closed loop (PR #997's NOT-tested boundary):
+The first hosted incarnation writes a non-default plugin cwd and halts. After
+an ordinary external restart is applied, a newly built fake selects an empty
+script. Any accidental model call then raises ScriptExhaustedError. The test
+separately checks the durable restart marker, unchanged message count and cwd.
 
-  first process (before restart):
-    ↓ build() sees no 'restart_completed' in DB → returns PRE_RESTART_SCRIPT
-    llm 1 (PRE_RESTART_SCRIPT[0]): exec `ava.cwd.set(...)` — writes a non-default
-                                   cwd to plugin state as a respawn liveness witness
-    llm 2 (PRE_RESTART_SCRIPT[1]): plain-text halt → idle (halted=True checkpoint)
-    ↓ test directly POST /api/agents/{id}/restart (source defaults to 'user', external)
-    ↓ claim receives 'restart' (idle, external, no chat co-batch) → committed halted=True
-    ↓ restarter respawn → INSERT 'restart_completed' + fresh process
-  post-restart process (new PID, same agent_id):
-    ↓ build() sees 'restart_completed' → returns **empty** script
-    ↓ claim receives 'restart_completed' (marker-only batch + halted=True) →
-      commits marker then goto CLAIM back to waiting — **no LLM call**
-    ↓ if any path accidentally calls the LLM, empty script immediately blows up the
-      process with ScriptExhaustedError, status never reaches idling, test times out
-      — "zero LLM calls" is a fail-loud assertion
-
-Why cwd as liveness witness: the respawn's ainvoke input is an empty state update ({}),
-the plugin state channel (ava_code__cwd) must be read back verbatim from the checkpoint
-— the old implementation passed a full AgentState() which would overwrite it back to the
-default workspace; this scenario nails down that regression point.
+The cwd witnesses cold checkpoint restoration: an empty state update must
+preserve the existing plugin channel rather than replace it with a default.
 """
 
 from __future__ import annotations
@@ -68,12 +53,12 @@ PRE_RESTART_SCRIPT: tuple[AIMessage, ...] = (
 )
 
 # Post-restart the agent must stay silent: any LLM call exhausts the empty
-# script and kills the process loudly (status never reaches idling).
+# script and fails the invocation loudly.
 POST_RESTART_SCRIPT: tuple[AIMessage, ...] = ()
 
 
 def _is_post_restart_process() -> bool:
-    """restarter has already INSERTed 'restart_completed' inbound at respawn time = post-restart."""
+    """A durable restart was applied before constructing this hosted fake."""
     with psycopg.connect(settings.data_plane.db_url) as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT 1 FROM inbound_messages "

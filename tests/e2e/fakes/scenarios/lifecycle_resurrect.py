@@ -1,24 +1,9 @@
-"""ava.self.terminate + auto-resurrect — lifecycle scenario where sending a message to
-a dead agent automatically resurrects it.
+"""Terminate and resurrect the same agent identity through hosted admission.
 
-Two SCRIPTs built across processes, distinguished by the 'resurrect' kind row in the
-inbound_messages table (auto-resurrect triggered by deliver_chat_inbound; resurrect_agent is
-the only INSERTer of this kind):
-
-  first process:
-    ↓ build() sees no 'resurrect' inbound → returns TERMINATE_SCRIPT
-    llm 1 (TERMINATE_SCRIPT[0]): ava.self.terminate() + tool_call → exec
-                                AgentTermination → claim END → process exits
-                                → status='terminated'
-  test side: POST /api/agents/{id}/messages (chat)
-    → deliver_chat_inbound → resurrect_if_terminated: status='terminated'→'idling' + INSERT 'resurrect' inbound
-    → session spawn starts fresh process
-  post-resurrect process (new PID, same agent_id):
-    ↓ build() sees 'resurrect' → returns IDLE_SCRIPT
-    ↓ claim processes 'resurrect' inbound, writes marker → idles waiting for next inbound
-    (at this stage the fake is not called; teardown terminate API via lifecycle dispatch also
-    doesn't call the fake — so IDLE_SCRIPT is never actually consumed, just a defensive "don't
-    terminate again")
+The initial fake calls ava.self.terminate(). A later chat or explicit resurrect
+request creates durable resurrection intent; a newly built hosted runtime sees
+that inbound row and selects the follow-up script. The E2E test separately
+checks the new generation and delivery of the pending chat after resurrection.
 """
 
 from __future__ import annotations
