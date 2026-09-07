@@ -11,13 +11,13 @@ endpoint smoke tests live in tests/gateway/test_cluster_endpoints.py.
 from __future__ import annotations
 
 import re
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 import psycopg
 import pytest
 from pydantic import ValidationError
 
-from ops import ops_cluster, ops_exit, ops_launch, ops_lifecycle
+from ops import ops_cluster, ops_launch, ops_lifecycle
 from ops.rpc_schemas import (
     LaunchAgentRequest,
     RestartAgentRequest,
@@ -86,58 +86,11 @@ def stub_pool() -> object:
 
 
 @pytest.mark.asyncio
-@pytest.mark.asyncio
-async def test_launch_agent_op_launches_precreated_row(
-    monkeypatch: pytest.MonkeyPatch, stub_pool: object
-) -> None:
-    """launch_agent_op launches the pre-created row (the #1236 runner-side
-    half): _launch_agent_process off the event loop with the config +
-    birth_config the gateway stamped, then schedule_launch_confirm."""
-    launched: dict[str, object] = {}
-    confirmed: list[int] = []
-
-    def _fake_launch(
-        agent_id: int,
-        config: object = None,
-        *,
-        birth_config: object = None,
-        confirm: bool = False,
-    ) -> None:
-        launched["agent_id"] = agent_id
-        launched["config"] = config
-        launched["birth_config"] = birth_config
-        launched["confirm"] = confirm
-
-    monkeypatch.setattr(ops_launch.agent_launch, "_launch_agent_process", _fake_launch)
-    monkeypatch.setattr(
-        ops_launch.agent_launch,
-        "schedule_launch_confirm",
-        lambda agent_id, _attempt: confirmed.append(agent_id),
-    )
-    body = LaunchAgentRequest(
-        agent_id=7,
-        config={"llm_model": "gpt-5.6-sol"},
-        birth_config={"llm_model": "gpt-5.6-sol"},
-    )
-    result = await ops_lifecycle.launch_agent_op(body, stub_pool)  # type: ignore[arg-type]
-    assert result.id == 7
-    assert launched["agent_id"] == 7
-    assert launched["config"] == {"llm_model": "gpt-5.6-sol"}
-    assert launched["birth_config"] == {"llm_model": "gpt-5.6-sol"}
-    assert launched["confirm"] is False
-    assert confirmed == [7]
-
-
-@pytest.mark.asyncio
 async def test_launch_agent_op_delivers_plain_spawn_prompt(
     monkeypatch: pytest.MonkeyPatch, stub_pool: object
 ) -> None:
     """A plain spawn's first prompt is inserted + InboundArrived published on
     the runner side after launch (inbound INSERT is within the runner role)."""
-    monkeypatch.setattr(ops_launch.agent_launch, "_launch_agent_process", lambda *_a, **_k: None)
-    monkeypatch.setattr(
-        ops_launch.agent_launch, "schedule_launch_confirm", lambda _id, _attempt=None: None
-    )
     seen: dict[str, object] = {}
 
     def _fake_insert(_pool: object, agent_id: int, prompt: str, source: str) -> int:
@@ -171,10 +124,6 @@ async def test_launch_agent_op_skips_prompt_for_fork(
 ) -> None:
     """A fork's prompt was already delivered pre-launch by create_agent_row —
     the launch op must not insert a second inbound."""
-    monkeypatch.setattr(ops_launch.agent_launch, "_launch_agent_process", lambda *_a, **_k: None)
-    monkeypatch.setattr(
-        ops_launch.agent_launch, "schedule_launch_confirm", lambda _id, _attempt=None: None
-    )
     inserted: list[int] = []
 
     def _fake_insert(_pool: object, _agent_id: int, _prompt: str, _source: str) -> int:
@@ -345,6 +294,7 @@ async def test_terminate_agent_op_terminated_short_circuits(
 async def test_lifecycle_op_parses_path_to_terminate(
     monkeypatch: pytest.MonkeyPatch, stub_pool: object
 ) -> None:
+
     captured: dict[str, object] = {}
 
     async def _fake_terminate(agent_id, body, pool):  # type: ignore[no-untyped-def]
@@ -437,6 +387,7 @@ async def test_explicit_v2_resurrect_dispatches_manual_op(
 ) -> None:
     """The versioned unguarded path is the only runner path used by a new
     gateway for a deliberate manual or system lifecycle resurrection."""
+
     captured: dict[str, object] = {}
 
     async def _fake_resurrect(
@@ -963,26 +914,6 @@ def test_cluster_status_op_returns_snapshot(monkeypatch: pytest.MonkeyPatch) -> 
     assert seen == [expected_pool]
 
 
-@pytest.mark.asyncio
-async def test_mark_agent_exited_op_rowcount_gt_one_raises(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """rowcount > 1 means the agents_meta PK (one row per id) is violated —
-    fail-loud RuntimeError. The PK makes this impossible in practice, so a
-    faked cursor.rowcount=2 is the only way to exercise the guard. (The
-    status-respecting WHERE-IN guard itself is covered against a real DB in
-    tests/gateway/test_agents_internals.py:TestExitedEndpoint.)"""
-    monkeypatch.setattr(ops_exit, "list_open_page_names", lambda _conn, _aid: [])
-    fake_cursor = MagicMock()
-    fake_cursor.rowcount = 2
-    fake_conn = MagicMock()
-    fake_conn.cursor.return_value.__enter__.return_value = fake_cursor
-    fake_pool = MagicMock()
-    fake_pool.connection.return_value.__enter__.return_value = fake_conn
-    with pytest.raises(RuntimeError, match="PK invariant violated"):
-        await ops_exit.mark_agent_exited_op(42, fake_pool)
-
-
 class TestResurrectIfTerminatedPlacement:
     """`resurrect_if_terminated` must run the resurrect on the agent's home
     machine (`agents_meta.machine`): local in-process, remote via a 'lifecycle'
@@ -1084,6 +1015,7 @@ class TestResurrectIfTerminatedPlacement:
 
     @pytest.mark.asyncio
     async def test_remote_home_forwards_lifecycle_op(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        captured: dict[str, object] = {}
         from shared.agents import AgentStatus
 
         statuses = iter([AgentStatus.TERMINATED, AgentStatus.IDLING])
@@ -1095,7 +1027,6 @@ class TestResurrectIfTerminatedPlacement:
             raise AssertionError("remote-homed resurrect must not launch locally")
 
         monkeypatch.setattr(ops_lifecycle, "resurrect_agent_op", _no_local)
-        captured: dict[str, object] = {}
 
         async def _fake_dispatch(
             target_machine: str,
@@ -1228,19 +1159,6 @@ async def test_launch_agent_op_hosted_skips_process_and_wakes(
     """Hosted mode: the row the gateway created IS the agent. No fork, no
     launch-confirm — the prompt INSERT (which publishes its own wake inside
     `insert_inbound_message`) plus one explicit wake is the whole launch."""
-    monkeypatch.setattr(ops_launch.runner_mode, "is_hosted", lambda: True)
-    launches: list[int] = []
-    confirmed: list[int] = []
-    monkeypatch.setattr(
-        ops_launch.agent_launch,
-        "_launch_agent_process",
-        lambda *_a, **_k: launches.append(1),
-    )
-    monkeypatch.setattr(
-        ops_launch.agent_launch,
-        "schedule_launch_confirm",
-        lambda agent_id, _attempt: confirmed.append(agent_id),
-    )
     inserted: list[tuple[int, str, str]] = []
 
     def _fake_insert(_pool: object, agent_id: int, prompt: str, source: str) -> int:
@@ -1261,8 +1179,6 @@ async def test_launch_agent_op_hosted_skips_process_and_wakes(
     body = LaunchAgentRequest(agent_id=7, prompt="go do X", prompt_source="user")
     result = await ops_lifecycle.launch_agent_op(body, stub_pool)  # type: ignore[arg-type]
     assert result.id == 7
-    assert launches == []  # hosted never forks
-    assert confirmed == []  # hosted never confirms a pid
     assert inserted == [(7, "go do X", "user")]
     assert wakes == [(7, "0")]
 
@@ -1274,11 +1190,6 @@ async def test_launch_agent_op_hosted_fork_still_wakes(
     """A fork's inbounds were pre-inserted by create_agent_row as raw SQL (no
     wake inside) — the hosted launch must publish the wake explicitly, and must
     not insert a second prompt."""
-    monkeypatch.setattr(ops_launch.runner_mode, "is_hosted", lambda: True)
-    monkeypatch.setattr(ops_launch.agent_launch, "_launch_agent_process", lambda *_a, **_k: None)
-    monkeypatch.setattr(
-        ops_launch.agent_launch, "schedule_launch_confirm", lambda _id, _attempt=None: None
-    )
     inserted: list[int] = []
 
     def _fake_insert(_pool: object, _agent_id: int, _prompt: str, _source: str) -> int:
@@ -1309,17 +1220,16 @@ async def test_force_terminate_hosted_skips_process_kill_and_cancels_turn(
     """Hosted force-terminate: no process to SIGKILL — the DB fence runs with
     kill_process=False and the turn-cancel acceleration fires after the
     transaction. The durable terminate inbound inserted by the fence is the
+    captured: dict[str, object] = {}
     correctness mechanism; the cancel only accelerates a wedged turn."""
     from shared.agents import AgentStatus
 
-    monkeypatch.setattr(ops_lifecycle.runner_mode, "is_hosted", lambda: True)
     captured: dict[str, object] = {}
 
     def _fake_force_blocking(
-        aid: int, _body: object, _pool: object, *, kill_process: bool
+        aid: int, _body: object, _pool: object
     ) -> tuple[AgentStatus, int | None, list[str], int]:
         captured["agent_id"] = aid
-        captured["kill_process"] = kill_process
         return AgentStatus.RUNNING, None, [], 91
 
     monkeypatch.setattr(ops_lifecycle, "_terminate_force_blocking", _fake_force_blocking)
@@ -1341,47 +1251,8 @@ async def test_force_terminate_hosted_skips_process_kill_and_cancels_turn(
         stub_pool,  # type: ignore[arg-type]
     )
     assert resp.status == "enqueued"
-    assert captured == {"agent_id": 9, "kill_process": False}
+    assert captured == {"agent_id": 9}
     assert cancelled == [(9, 91)]
-
-
-@pytest.mark.asyncio
-async def test_force_terminate_process_mode_still_kills_the_process(
-    monkeypatch: pytest.MonkeyPatch, stub_pool: object
-) -> None:
-    """The regression guard: process mode keeps kill_process=True (the session
-    kill + SIGKILL path) and never calls the hosted turn-cancel acceleration."""
-    from shared.agents import AgentStatus
-
-    monkeypatch.setattr(ops_lifecycle.runner_mode, "is_hosted", lambda: False)
-    captured: dict[str, object] = {}
-
-    def _fake_force_blocking(
-        aid: int, _body: object, _pool: object, *, kill_process: bool
-    ) -> tuple[AgentStatus, int | None, list[str], int]:
-        captured["agent_id"] = aid
-        captured["kill_process"] = kill_process
-        return AgentStatus.RUNNING, 1234, [], 91
-
-    monkeypatch.setattr(ops_lifecycle, "_terminate_force_blocking", _fake_force_blocking)
-
-    async def _fake_cancel(_aid: int, _command_id: int) -> None:
-        raise AssertionError("process mode must not call the hosted cancel")
-
-    monkeypatch.setattr(ops_lifecycle, "_cancel_hosted_turn_best_effort", _fake_cancel)
-
-    async def _fake_page_closed(*_a: object, **_k: object) -> None:
-        return None
-
-    monkeypatch.setattr(ops_lifecycle, "publish_page_closed", _fake_page_closed)
-
-    resp = await ops_lifecycle.terminate_agent_op(
-        9,
-        TerminateAgentRequest(force=True),
-        stub_pool,  # type: ignore[arg-type]
-    )
-    assert resp.status == "force_killed"
-    assert captured == {"agent_id": 9, "kill_process": True}
 
 
 @pytest.mark.asyncio
@@ -1392,8 +1263,6 @@ async def test_launch_agent_op_hosted_failure_reclaims_its_row(
     a failed hosted launch must reclaim its own corpse: any failure after the
     row exists marks it terminated ('launch-confirm', the same class the
     process-mode launch confirm stamps) and re-raises."""
-    monkeypatch.setattr(ops_launch.runner_mode, "is_hosted", lambda: True)
-    monkeypatch.setattr(ops_launch.agent_launch, "_launch_agent_process", lambda *_a, **_k: None)
 
     def _boom(_pool: object, _agent_id: int, _prompt: str, _source: str) -> int:
         raise RuntimeError("prompt insert failed")
@@ -1421,7 +1290,6 @@ async def test_launch_agent_op_hosted_validation_failure_reclaims_its_row(
     must land inside the reclaim too: leaked outside it, the idling row has
     no restarter reaper and the heartbeat pokes it into a prompt-less zombie
     (QA #1029 required fix)."""
-    monkeypatch.setattr(ops_launch.runner_mode, "is_hosted", lambda: True)
 
     def _boom_validate(*_a: object, **_k: object) -> None:
         raise RuntimeError("bad model config")

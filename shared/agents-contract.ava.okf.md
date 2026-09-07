@@ -18,8 +18,8 @@ tags:
 
 ### Status and result enums
 - `AgentStatus` (StrEnum) lifecycle states: `RUNNING` (claimed process, including boot) → `IDLING` (waiting for wakeup between turns or unclaimed before boot) → `RESTARTING` (process replacement in progress) → `TERMINATED`.
-- `TerminationSource` (StrEnum) — who wrote `status='terminated'`: `USER`/`EXIT`/`REAPER`/`LAUNCH_CONFIRM`/`INTEGRITY`, stamped by EVERY terminated-write in the same statement (NULL is permanently unresurrectable — `scripts/lint_termination_source.py` enforces it). `resurrectable()` feeds the crash-resurrect allowlist ([[services/agent_runner_side/restarter/restarter.ava.okf.md]]).
-- Operation result enums: `TerminateResult` / `RestartResult` / `ResurrectResult` — encode idempotent operation outcomes (enqueued / already_terminated / force_killed / already_alive …) as wire strings.
+- `TerminationSource` (StrEnum) — who wrote `status='terminated'`: `USER`/`EXIT`/`REAPER`/`LAUNCH_CONFIRM`/`INTEGRITY`, stamped by EVERY terminated-write in the same statement (NULL is permanently unresurrectable — `scripts/lint_termination_source.py` enforces it). Historical termination-source values remain readable after retiring per-agent process supervision.
+- Operation result enums: `TerminateResult` / `RestartResult` / `ResurrectResult` — encode idempotent operation outcomes (enqueued / already_terminated / already_alive …) as wire strings.
 
 ### Wire error protocol
 - `ErrorReason` (StrEnum) is the error identifier on the SDK ↔ gateway HTTP wire (currently 9 values: `agent_not_found` / `fork_source_empty` / `fork_checkpoint_not_found` / `machine_not_registered` / `spawn_target_not_agent_runner` / `cross_machine_gateway_unavailable` / `indexer_unavailable` / `channel_not_configured` / `invalid_model_config`).
@@ -33,7 +33,7 @@ tags:
 
 - [[message_kwargs.ava.okf.md]] — the sibling contract module: the message-level half, typing the `ava_*` metadata inside a message's `additional_kwargs` where this module types the HTTP wire between the two processes
 - [[gateway-cli.ava.okf.md]] — spawn/respawn/launch/fork/resurrect implementations live behind `ops/agents.py` (`ops/agent_spawn.py` birth + `ops/agent_wake.py` wake); this module provides only types
-- [[services/agent_runner_side/restarter/restarter.ava.okf.md]] — the restarter daemon **does not** import `AgentStatus`: it uses SQL literal `status='restarting'` (`daemon.py:111`) to select rows + calls `ops.agents.respawn_agent`
+- [[agent/lifecycle.ava.okf.md]] — the host applies native lifecycle commands under exact-incarnation ownership.
 
 ## Entry points
 

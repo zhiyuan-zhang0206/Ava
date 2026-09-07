@@ -30,7 +30,7 @@ from tests.agent.test_lifecycle_intent import _command
 async def test_hosted_restart_marker_does_not_claim_completion() -> None:
     state = _BatchState()
     await _handle_restart(
-        AvaContext(hosted=True),
+        AvaContext(),
         1,
         ClaimedInbound(id=1, agent_id=1, content="", kind="restart", source="self", payload={}),
         state,
@@ -74,7 +74,7 @@ async def test_hosted_applies_only_after_continuation_returns(
             "SELECT status FROM inbound_messages WHERE id=%s", (inbound,)
         ).fetchone() == ("claimed",)
         task = asyncio.create_task(
-            host._invoke_until_done(agent_id, AvaContext(ops_pool=aops_pool, hosted=True))
+            host._invoke_until_done(agent_id, AvaContext(ops_pool=aops_pool))
         )
         await asyncio.wait_for(entered.wait(), 2)
         try:
@@ -155,7 +155,7 @@ async def test_hosted_terminate_crash_has_no_applied_unobserved_gap(
             else:
                 patch.setattr("services.agent_host.host.apply_hosted_lifecycle", fail_after_commit)
             with pytest.raises(RuntimeError, match="injected"):
-                await host._invoke_until_done(agent_id, AvaContext(ops_pool=aops_pool, hosted=True))
+                await host._invoke_until_done(agent_id, AvaContext(ops_pool=aops_pool))
         state = db_conn.execute(
             "SELECT status,applied_at IS NOT NULL,observed_at IS NOT NULL "
             "FROM inbound_messages WHERE id=%s",
@@ -167,9 +167,7 @@ async def test_hosted_terminate_crash_has_no_applied_unobserved_gap(
         db_conn.commit()
         if crash != "after_commit":
             # Same admitted continuation can retry; cache absence is not a new owner.
-            assert await host._invoke_until_done(
-                agent_id, AvaContext(ops_pool=aops_pool, hosted=True)
-            )
+            assert await host._invoke_until_done(agent_id, AvaContext(ops_pool=aops_pool))
     assert db_conn.execute(
         "SELECT lifecycle_command_id,status FROM agents_meta WHERE id=%s", (agent_id,)
     ).fetchone() == (None, "terminated")
@@ -195,7 +193,7 @@ async def test_hosted_force_cannot_be_undone_by_prior_restart(
         settings.data_plane.db_url, min_size=1, max_size=1, kwargs=PG_KEEPALIVE_KWARGS
     ) as pool:
         _, _, _, force = await asyncio.to_thread(
-            _force_terminate_transaction, agent_id, pool, source="user", kill_process=False
+            _force_terminate_transaction, agent_id, pool, source="user"
         )
     later = _command(db_conn, agent_id, "restart")
     assert await apply_hosted_lifecycle(aops_pool, owner) is None

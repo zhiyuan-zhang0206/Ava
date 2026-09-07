@@ -1,7 +1,6 @@
 """Per-turn settings view — the agent-scoped read path for `per_agent` fields.
 
-Implements work item (b) of `future/infra/agent-runner-as-server.md`: in the
-hosted runner model many agents' turns share one process, so the process-global
+Many agents' turns share one host process, so the process-global
 `settings` singleton is the wrong place for any `per_agent=True` field. The
 replacement is a **contextvar-bound pin map** resolved per agent:
 
@@ -13,24 +12,13 @@ Only the two DB-stored maps are pinned — an unpinned field always reads the
 singleton at access time, so a live cluster-default edit keeps reaching agents
 exactly as the `lifecycle: live` contract promises.
 
-Mode equivalence:
+The host binds the pin map around each agent's invocation. asyncio and
+LangGraph tasks inherit that context; binding inside one graph node would
+not carry the pin to the next node. Unbound service code reads live defaults.
+Exec children receive the same stored configuration through their bootstrap.
 
-- **Process mode (today)**: nothing binds the contextvar. `turn_settings.x.y`
-  is byte-for-byte `settings.x.y` — the boot-time `apply_config_overlay`
-  already wrote the overlay onto the singleton. Converting a read site is a
-  no-op.
-- **Hosted mode (Phase 1)**: the host binds `bind_agent_config(...)` before
-  creating an agent's turn task. `asyncio.create_task` copies the *current*
-  context, and LangGraph runs each node in its own task copying the loop-level
-  context — empirically a contextvar bound BEFORE the turn task spawns
-  propagates into every node task (one bound inside a node does not reach the
-  next node). So one bind at task creation covers the whole turn.
-
-Pin values are stored RAW, exactly as `apply_config_overlay` -> `set_field`
-stores them onto the singleton in process mode (plain setattr, no re-coercion)
-— the two modes must never disagree about what a pinned field reads as. Values
-were already validated by `validate_config_overlay` before they reached
-`agents_meta`.
+Pin values remain raw: validation happened before they reached agents_meta,
+and reading the stored value must not silently coerce it a second time.
 
 Scope: framework `Settings` fields only. Plugin-scope config
 (`shared/plugin_config_registry._PLUGIN_CONFIGS`) is a separate process-global
@@ -52,7 +40,7 @@ from typing import Any
 import shared.config_registry as _config_registry
 
 # The current context's pin map: flat field name -> raw pinned value. None =
-# no agent bound (process mode, or host code outside any turn).
+# no agent bound (host code outside any turn).
 _AGENT_CONFIG_PINS: ContextVar[Mapping[str, Any] | None] = ContextVar(
     "ava_agent_config_pins", default=None
 )
@@ -64,19 +52,15 @@ def resolve_agent_config_pins(
 ) -> dict[str, Any]:
     """Merge an agent's two stored config maps into the flat pin map.
 
-    birth_config first, config_overlay on top — the same last-writer-wins merge
-    `agent/_process_boot.py:_apply_per_agent_framework_config` performs against
-    the singleton in process mode. Only framework `Settings` fields are kept:
+    birth_config first, config_overlay on top. Only framework `Settings` fields are kept:
     plugin-scope overlay keys (dotted `plugin.field` or plugin-owned flat keys)
     are not pinnable through this view yet and are dropped here — the hosted
     host applies them via the plugin path separately.
 
     Unknown keys are dropped rather than raised: the maps were validated at
     write time (`validate_config_overlay`), so an unknown key here means the
-    field was deleted from Settings after the overlay was stored — the
-    process-mode boot tolerates exactly this by failing only in
-    apply_config_overlay's resolve, and a stored-config read must not be
-    stricter than the boot that would consume it.
+    field was deleted from Settings after the overlay was stored. Reading old
+    stored configuration does not restore a deleted field.
     """
     fields = _config_registry._fields()
     pins: dict[str, Any] = {}
@@ -105,7 +89,7 @@ def bind_agent_config(pins: Mapping[str, Any]) -> Generator[None, None, None]:
 
 
 def current_agent_config_pins() -> Mapping[str, Any] | None:
-    """The pin map bound in the current context, or None (process mode)."""
+    """The pin map bound in the current context, or None outside an agent turn."""
     return _AGENT_CONFIG_PINS.get()
 
 
@@ -138,7 +122,7 @@ class TurnSettings:
 
     Stateless — the per-agent half lives in the contextvar, so one module-level
     instance serves every context. Read-only by design: writes still go through
-    `shared.config.set_field` (process mode) or the stored maps (hosted mode).
+    `shared.config.set_field` for defaults or stored maps for agent pins.
     """
 
     __slots__ = ("_domains",)

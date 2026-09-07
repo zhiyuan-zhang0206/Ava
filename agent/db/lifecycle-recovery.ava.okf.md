@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Durable Lifecycle Recovery
-description: Fixed command targets, process exit evidence, safe hosted settlement and bounded user-wake recovery.
+description: Exact incarnation targets, host settlement and durable successor observation.
 tags: []
 ---
 
@@ -9,45 +9,42 @@ tags: []
 
 ## Completion evidence
 
-Process lifecycle application fixes server-reserved `target_process_identity`
-in the command under the admitted owner/target lock. Its PID is the actual
-Python runtime, with OS birth evidence, not a DB timestamp or Windows
-redirector. Controller and explicit resurrection share termination observation:
-exact process disappearance/reuse permits completion and pointer clearing;
-live, unreadable or missing historical evidence defers. Swept session records
-do not erase this evidence.
+Native restart and terminate target the generation and owner accepted under
+the metadata lock. Claim returns END; the host flushes the checkpoint and
+settles the actual continuation and managed resources before applying the
+command. Cache eviction, a NULL PID, an expired lease or a health endpoint
+alone cannot prove completion.
 
-Cold lifecycle acceptance revalidates the original applied command's exact
-process evidence under the fixed target lock. A cold terminate can apply and
-observe in that transaction because the entity is already proven absent; a
-NULL PID, argv-only probe or expired lease cannot establish this. Missing
-historical evidence remains pending. Hosted terminate applies and observes
-atomically after the real single-flight continuation returns and its cache is
-dropped; cache loss alone never proves quiescence.
+Restart keeps its applied command pointer for a successor admission to
+observe in its own transaction. Termination is observed after the original
+execution is settled. Cold recovery only completes a command when its
+original owner and resources are positively absent; unresolved evidence
+remains pending.
+
+Historical process-target evidence stays readable in existing rows. It is
+compatibility data for settlement, not authority to launch an agent process.
 
 ## Force and later commands
 
-Explicit force termination supersedes only earlier unfinished lifecycle
-commands for the same agent and clears the matching active pointer under the
-existing force fence. Original targets and applied timestamps remain audit
-facts; superseded is not observed exit. Later commands and ordinary chat are
-not acknowledged. Delayed old boots fail the actual command admission gate,
-and a later explicit restart still requires proven exit and settlement of the
-force. Already-running external effects cannot be retroactively undone.
+Explicit force fixes the original command and target, supersedes earlier
+unfinished commands for that identity, and cancels the actual host task.
+Superseded is not observed exit. Resource settlement still guards later
+admission; already-started external effects cannot be undone by a DB write.
+Later commands and chat are not acknowledged as a side effect of force.
 
-## Attempt confirmation and user wakes
+## Resurrection and user wakes
 
-Launch confirmation follows the exact boot-attempt record returned by the
-launcher, including off-path spawn confirmation. It does not require canonical
-publication before admission; missing attempt evidence retains the hard boot
-deadline rather than guessing a dead process from a missing canonical name.
+`ops/agent_wake.py` locks home placement and the pause latch, verifies the
+terminated state and outstanding lifecycle evidence, then commits idle intent,
+its resurrection marker and optional work. Only after commit does it publish
+the wake. The agent host admits the successor; no OS launcher is involved.
 
-A queued user wake arriving during old-process exit keeps its original inbound
-identity. The existing bounded resurrection caller persists a reserved
-blocked-terminate id and preparation-attempt count; it derives the fixed target
-from that original command and revalidates it under the actual preparation
-lock. Deadline is anchored to inbound creation, not HTTP redispatch. Exit-wait
-attempts do not expand launch budgets. Exhaustion or changed ownership leaves
-pending work with an explicit unresolved error, never a fabricated completion;
-no background scanner is added. Gateway wake selection and runner admission
-share the cluster-pinned boot grace value, retained in both config projections.
+A queued wake keeps its original inbound identity. A changed home, paused
+machine or unsettled prior execution cannot be bypassed by retrying the wake.
+
+## Entry Points
+
+- `agent/hosted_ownership.py` — native completion and resource settlement
+- `agent/lifecycle_observe.py` — successor admission observation
+- `ops/agent_wake.py` — transactional resurrection
+- `shared/lifecycle_termination_observe.py` — prior termination evidence

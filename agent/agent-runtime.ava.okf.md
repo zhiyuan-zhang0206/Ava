@@ -1,47 +1,48 @@
 ---
 type: doc
 title: Agent Runtime
-description: Ava Agent's core runtime—a self-looping execution graph based on LangGraph that drives the complete lifecycle of a single agent. Each OS process is permanently bound to one
+description: Hosted agent turns with durable identity and isolated code execution.
 tags: []
 ---
 
 # Agent Runtime
 
-## What it is
+One `services.agent_host.daemon` runs each machine's local agents as asyncio
+tasks. Agent identity, config, model state and checkpoint threads stay separate;
+an idle agent has no running task. There is one runtime architecture and no
+per-agent process launcher or runner-mode selector.
 
-Ava Agent's core runtime—a self-looping execution graph based on LangGraph that drives the complete lifecycle of a single agent. Each OS process is permanently bound to one `agent_id`, launched via `agent/loop.py` and then `graph.ainvoke()` runs in an infinite loop until a `terminate` inbound message is received.
+The graph is the eight-node self-loop `after_init -> init_context -> claim ->
+before_llm -> llm -> before_exec -> exec -> after_exec`. Claim returns to init
+context for compaction and to END for idle or lifecycle control. Routing uses
+`Command(goto=...)`; plugins extend the hook containers.
 
-The architecture is an **8-node self-looping topology**: `after_init → init_context → claim → before_llm → llm → before_exec → exec → after_exec`, always returning to `claim` (`claim` routes to `init_context` on compaction), all routed via `Command(goto=)`. Four hook containers (`after_init / before_llm / before_exec / after_exec`) between nodes expose extension points for plugins.
+## Responsibilities
 
-## Core Responsibilities
+- `services/agent_host/dispatcher.py` multiplexes Redis wake events, limits turn
+  concurrency and preserves single-flight per agent; durable pending work
+  supplies the backstop when a pub/sub event is missed.
+- `services/agent_host/host.py` admits the exact runtime incarnation, binds
+  per-agent context/config, reuses model state, drives graph invocations, flushes
+  checkpoints and settles lifecycle state before releasing the turn.
+- `services/agent_host/db_recovery.py` retains the original turn during a database
+  outage and revalidates ownership before repairing and continuing its checkpoint.
+- `agent/graph/_llm.py` streams model inference with retry and cancellation.
+- `agent/graph/_exec.py` runs `execute_code` in a disposable subprocess with an
+  owned POSIX process group or Windows Job Object. Cleanup reaps its child and
+  joins the output reader; this isolation is independent of host scheduling.
+- Persistent shell sessions run in their own PTY hosts and survive normal agent
+  restart and cluster pause. Full cluster stop closes them.
 
-- **Main loop** (`agent/loop.py`): Process entry point, parses `--agent-id`, initializes DB/Redis/LLM, starts the LangGraph graph loop
-- **Inbound listening** (`agent/graph/_claim.py`): Waits for messages via Redis pub/sub, dispatches to corresponding processing paths
-- **LLM invocation** (`agent/graph/_llm.py`): Streaming LLM inference with retry strategy and cancellation support
-- **Code execution** (`agent/graph/_exec.py`): Runs `execute_code` in one disposable subprocess; every exit closes its owned domain (POSIX process group / Windows Job Object), reaps the direct child, and boundedly joins the output reader before cleanup
-- **State management** (`agent/state.py`): LangGraph State, supports plugins registering their own BaseModel state blocks
-- **Message construction** (`agent/messages.py`): Ava-style HumanMessage/ToolMessage with metadata classification
+## Related contracts
 
-## Key Dependencies
+- [[graph.ava.okf.md]] — graph topology and hooks
+- [[state.ava.okf.md]] — state and checkpoints
+- [[loop.ava.okf.md]] — turn scheduling
+- [[lifecycle.ava.okf.md]] — native restart, terminate and resurrection
+- [[context.ava.okf.md]] — per-turn dependency injection
+- [[tool-calls.ava.okf.md]] — isolated code execution
 
-- [[graph.ava.okf.md]] — LangGraph execution graph definition
-- [[state.ava.okf.md]] — State channels and plugin state registration
-- [[messages.ava.okf.md]] — Message metadata and classification
-- [[llm.ava.okf.md]] — LLM interface and retry strategy
-- [[tool-calls.ava.okf.md]] — Code execution sandbox
-- [[system-prompt.ava.okf.md]] — System prompt assembly
-- [[lifecycle.ava.okf.md]] — Process lifecycle
-- [[hooks.ava.okf.md]] — Graph-edge hook subsystem
-- [[context.ava.okf.md]] — Dependency injection container
-
-## Entry Points
-
-- `agent/loop.py:main()` — Process entry, never returns (infinite loop until terminate)
-- `agent/__main__.py` — `.venv/bin/python -m agent --agent-id N`
-- `agent/_starting.py` — Early startup state declaration (runs before heavy imports)
-
-## Notes
-
-- Agent processes are created via the gateway's `POST /api/agents` and are never started directly
-- Shell sub-sessions are **not cleaned up** on process exit — background work can persist across terminate/restart
-- All inter-node routing uses `Command(goto=...)`, no conditional edges—cleaner control flow
+Agents are allocated through `POST /api/agents`; the gateway commits their row
+and work, then the home runner wakes its agent host. No agent Python process is
+started directly.

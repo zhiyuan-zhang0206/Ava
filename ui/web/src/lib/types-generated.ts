@@ -376,72 +376,18 @@ export interface paths {
         put?: never;
         /**
          * Post Agent Terminate
-         * @description Have the agent gracefully exit — INSERT one kind='terminate'
-         *     source=body.source inbound; after processing the current turn, when
-         *     claim runs, dispatch goto END and the process exits. An optional message
-         *     is committed as pending chat immediately before the terminate command, so
-         *     it is retained for resurrection without causing another LLM turn.
+         * @description Terminate through the home runner's durable native control path.
          *
-         *     With `force=true`, request interruption. Hosted force returns `enqueued`
-         *     while the original host drains actual work; acceptance and metadata status
-         *     are not proof of exit. Detached process force returns `force_killed`.
+         *     Claim returns to END and the host flushes before applying normal termination.
+         *     An optional message is committed as pending work before the command, retained
+         *     for later resurrection without causing another model turn. Force returns
+         *     enqueued while the exact original host settles its task and execution
+         *     resources; acceptance and metadata status are not proof of completed exit.
          *
-         *     Smart liveness detection: if the process corresponding to
-         *     agents_meta.pid is gone (zombie row, commonly from early-stage
-         *     EmptyInputError residuals / respawn_agent failures leaving an unclaimed
-         *     row), force UPDATE status='terminated' directly without the
-         *     inbound path — an inbound delivered to a dead process is pending
-         *     forever and the user can never clear it.
-         *
-         *     Always runs on the agent's home machine via its ops server
-         *     (`_forward_to_home_machine`). The force path must, because killing the
-         *     detached process / os.kill are physical local-host operations; the graceful
-         *     path must too, because zombie detection `process_alive(pid)` is
-         *     meaningless across machines (probing a cross-machine PID via signal 0
-         *     hits a remote PID space and gives false positives). Both paths run on
-         *     the home machine, symmetric in logic.
-         *
-         *     404: agent_id does not exist (AgentNotFound -> handler returns
-         *         404 + reason).
-         *     `already_terminated`: agent was already dead / process detected as
-         *         dead and cleaned up directly.
-         *     `force_killed`: force=true killed the process and marked terminated.
+         *     Both paths forward to the home runner. A missing agent returns 404; an
+         *     already-terminated identity is a no-op for graceful termination.
          */
         post: operations["post_agent_terminate_api_agents__agent_id__terminate_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/agents/{agent_id}/exited": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Post Agent Exited
-         * @description An agent process reports it has reached its own exit finally block —
-         *     finalize its status to 'terminated', close its agent-owned show() pages,
-         *     and keep daemon-supervised serve() pages open.
-         *
-         *     Called by the agent itself (`ava.self`'s exit path), not by a user/peer.
-         *     Distinct from `/terminate`, which *initiates* termination (inserts a
-         *     terminate inbound for a live agent, or force-kills): by the time `/exited`
-         *     arrives the process has already stopped, so this only records the
-         *     finalized state. The status flip is guarded (a concurrent restart leaves
-         *     status 'restarting' untouched), so a restart's process-exit hitting this
-         *     endpoint does not strand the restarter.
-         *
-         *     No cross-machine forwarding: the work is a status UPDATE + event publish,
-         *     both against the shared DB / events channel, so it runs on whichever
-         *     gateway receives it.
-         */
-        post: operations["post_agent_exited_api_agents__agent_id__exited_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -505,21 +451,12 @@ export interface paths {
         put?: never;
         /**
          * Post Agent Restart
-         * @description Have the agent self-restart — INSERT kind='restart' source=body.source
-         *     inbound; after processing the current turn, when claim runs it UPDATE
-         *     status='restarting' + goto END + process exits; the restarter daemon
-         *     sees status='restarting' and auto-respawns a fresh process attached to
-         *     the same agent_id (new PID, LangGraph state preserved).
+         * @description Enqueue native restart on the agent's home runner.
          *
-         *     Always forwards to the agent's home machine ops server — the restart
-         *     inbound INSERT hits the shared DB regardless of which host runs it, but
-         *     the uniform forwarding path (same as terminate/resurrect) keeps one
-         *     code path with no local shortcut.
-         *
-         *     404: agent_id does not exist (AgentNotFound -> handler returns
-         *         404 + reason).
-         *     `already_terminated`: agent is dead; restart does not apply — use
-         *         resurrect.
+         *     The current turn reaches claim, returns normally and flushes its checkpoint.
+         *     The host then applies the exact command and releases the incarnation for
+         *     new admission, retaining agent ID and context. Terminated agents require
+         *     resurrection; restart returns already_terminated for them.
          */
         post: operations["post_agent_restart_api_agents__agent_id__restart_post"];
         delete?: never;
@@ -1629,8 +1566,8 @@ export interface paths {
         put?: never;
         /**
          * Post Cluster Stop
-         * @description Phase A handler — pause this host (posture row -> 503 + stop the
-         *     restarter), executed by this host's ops server via a cluster_stop op.
+         * @description Phase A handler: drain native agent controls while SDK dependencies
+         *     remain available, then stop local services through cluster_stop.
          */
         post: operations["post_cluster_stop_api_cluster_stop_post"];
         delete?: never;
@@ -1650,7 +1587,7 @@ export interface paths {
         put?: never;
         /**
          * Post Cluster Resume
-         * @description Compensating unpause — posture row -> idle + respawn restarter,
+         * @description Compensating unpause: restore posture and release native admission holds,
          *     executed by this host's ops server via a cluster_resume op.
          *
          *     Symmetric inverse of `/api/cluster/stop`. The orchestration's failure path
@@ -3758,16 +3695,6 @@ export interface components {
             items: components["schemas"]["AgentEventRow"][];
         };
         /**
-         * AgentExitedRequest
-         * @description The actual admitted runtime reporting exit, never a freshly read token.
-         */
-        AgentExitedRequest: {
-            /** Generation */
-            generation?: string | null;
-            /** Owner */
-            owner?: string | null;
-        };
-        /**
          * AgentInspect
          * @description GET /api/agents/{id}/inspect response — the per-agent inspector panel.
          *
@@ -4494,8 +4421,8 @@ export interface components {
              * @default 0
              */
             shell_count: number;
-            /** Restarter Online */
-            restarter_online?: boolean | null;
+            /** Agent Host Online */
+            agent_host_online?: boolean | null;
             /** Watchdog Online */
             watchdog_online?: boolean | null;
             /**
@@ -5579,8 +5506,8 @@ export interface components {
              * @default 0
              */
             shell_count: number;
-            /** Restarter Online */
-            restarter_online?: boolean | null;
+            /** Agent Host Online */
+            agent_host_online?: boolean | null;
             /** Watchdog Online */
             watchdog_online?: boolean | null;
             /**
@@ -6473,9 +6400,8 @@ export interface components {
          * RestartAgentResponse
          * @description POST /api/agents/{id}/restart response.
          *
-         *     `enqueued`: restart inbound INSERTed; agent exits after the current
-         *         turn + restarter daemon auto-respawns a fresh process attached
-         *         to the same agent_id.
+         *     `enqueued`: native restart is durable; the host completes claim and
+         *         checkpoint settlement before admitting the next incarnation.
          *     `already_terminated`: agent is dead; restart does not apply — use
          *         resurrect.
          */
@@ -6892,7 +6818,7 @@ export interface components {
         /**
          * ServiceRestartRow
          * @description One service's boot count within the window — `name` is the daemon
-         *     identity passed to `init_gateway_process` (gateway / restarter / watchdog /
+         *     identity passed to `init_gateway_process` (gateway / agent-host / watchdog /
          *     delivery_watchdog / labeler / memory_indexer / heartbeat / ...).
          */
         ServiceRestartRow: {
@@ -7425,16 +7351,13 @@ export interface components {
          *     `already_terminated`: agent was already dead. Graceful termination is a
          *         no-op. Hosted force instead returns enqueued until its exact original
          *         host can prove quiescence; metadata status alone is not exit evidence.
-         *     `force_killed`: force=true killed the agent's detached process + force
-         *         marked terminated — agent may have been stuck and never took
-         *         the graceful path.
          */
         TerminateAgentResponse: {
             /**
              * Status
              * @enum {string}
              */
-            status: "enqueued" | "already_terminated" | "force_killed";
+            status: "enqueued" | "already_terminated";
         };
         /**
          * TextContentBlock
@@ -8291,39 +8214,6 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["TerminateAgentResponse"];
                 };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    post_agent_exited_api_agents__agent_id__exited_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                agent_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: {
-            content: {
-                "application/json": components["schemas"]["AgentExitedRequest"] | null;
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
             };
             /** @description Validation Error */
             422: {

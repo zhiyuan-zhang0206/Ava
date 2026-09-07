@@ -27,7 +27,7 @@ tags:
   sessions-gone exit states an elapsed time the surrounding timestamps contradict.
 
   **The gate is tiered** (C2, Task #2183): `_probe.CRITICAL_SERVICE_SESSIONS`
-  (gateway / frontend / restarter / agent-host — the hosted agent-runner —
+  (gateway / frontend / agent-host — the hosted agent-runner —
   im-bridge / the two watchdogs; the CTO ruling: critical = a failure cuts
   user-visible core function or the ops safety net) is the only roster that can
   fail a start and the only one that gets the full 180 s bound. Every other

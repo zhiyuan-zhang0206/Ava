@@ -489,5 +489,6 @@ def test_unit_port_map_overlays_health_ports(monkeypatch: pytest.MonkeyPatch, tm
     # block keys present (legacy fallback for a record-less home)
     assert ports["gateway"] == 8000 and ports["postgres"] == 5433
     # health ports overlay the block for the daemons that have them
-    assert ports["restarter"] == base + len("restarter")
+    assert ports["agent_host"] == base + len("agent_host")
+    assert ports["restarter"] == 8102  # Retired slot stays reserved, never a live probe.
     assert ports["ops"] == base + len("ops")

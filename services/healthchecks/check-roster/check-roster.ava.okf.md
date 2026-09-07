@@ -29,7 +29,6 @@ tags:
 | `pg_backup.py` | PG-backup scheduler | HTTP `/healthz` (identity-verified), backup last-success age | `respawn_and_verify` | scheduler progress: a fresh dump, boot grace, or running dump; otherwise 503 |
 | `pitr_uploader.py` | PITR uploader | HTTP `/healthz` (identity-verified): liveness + disk footprint (gating) + unacked-age (non-gating) | `respawn_and_verify` | loop ticking and disk under hard bound; unacked-age conditions report degraded without flipping 503 (no restart flaps) |
 | `pitr_base_backup.py` | PITR base | HTTP `/healthz` | `respawn_and_verify` | scheduler liveness and durable progress |
-| `restarter.py` | Restarter | HTTP `/healthz` (identity-verified) with Liveness beat | `respawn_and_verify`, **then** a stand-in `RespawnController` pass if the respawn never verifies — see Notes | our daemon's work loop is still ticking; the stand-in path runs the daemon's own dispatch controller (real DB traversal) |
 | `agent_host.py` | Agent host | HTTP `/healthz` (identity-verified) with Liveness beat | `respawn_and_verify` | our daemon's work loop is still ticking |
 | `page_server.py` | Page-server supervisor | HTTP `/healthz` (identity-verified) with Liveness beat | `respawn_and_verify` | our daemon's work loop is still ticking |
 | `ops.py` | Agent-ops | HTTP `/healthz` (identity-verified), update-lock and active-op age | `respawn_and_verify` | responsive ops; work past 30m 503s (saturation is informational) |

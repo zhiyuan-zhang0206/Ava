@@ -395,7 +395,7 @@ async def run() -> None:
         )
         sys.exit(1)
 
-    # Pidfile before the healthz bind — see services/restarter/daemon.py:run().
+    # Publish the pidfile before binding healthz so identity-aware probes can verify it.
     _write_pidfile()
     _log.info("[events-maintenance] pidfile written: %s", _PIDFILE)
 

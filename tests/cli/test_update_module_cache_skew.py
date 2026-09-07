@@ -143,7 +143,7 @@ def test_updater_hands_off_to_fresh_interpreter_after_sync(
         "_exec_post_checkout",
         lambda argv: handoff_argv.append(argv) or (_ for _ in ()).throw(SystemExit(0)),  # pyright: ignore[reportUnknownArgumentType]
     )
-    monkeypatch.setattr(_cli, "_do_stop", lambda *_args, **_kwargs: stopped.append(True))  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_cli, "_do_stop", lambda *_args, **_kwargs: stopped.append(True) or 0)  # pyright: ignore[reportUnknownArgumentType]
 
     with pytest.raises(SystemExit, match="0"):
         _runner._run_agent_runner_self_update(
@@ -251,7 +251,7 @@ def test_post_checkout_leg_runs_validate_to_start(
         "_quiesce_local_agents",
         lambda _mode: steps.append("quiesce") or True,  # pyright: ignore[reportUnknownArgumentType]
     )
-    monkeypatch.setattr(_cli, "_do_stop", lambda *_args, **_kwargs: steps.append("stop"))  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_cli, "_do_stop", lambda *_args, **_kwargs: steps.append("stop") or 0)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
         _runner.subprocess,
         "run",

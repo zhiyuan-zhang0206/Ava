@@ -562,7 +562,7 @@ def _configure_windows_event_loop_policy() -> None:
 
 def init_gateway_process(name: str = "gateway") -> None:
     """Called once at a gateway-style process startup — the gateway itself
-    and every long-running service daemon (restarter / watchdog / labeler /
+    and every long-running service daemon (agent-host / watchdog / labeler /
     memory_indexer / heartbeat / task_maintenance / ops). stderr (human) +
     file (`<name>.log`) + unified event pipeline (events table). Rows have
     agent_id NULL (extra agent_id sentinel `-`).

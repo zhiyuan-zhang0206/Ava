@@ -123,8 +123,7 @@ def _agent_jitter_seconds() -> float:
     (1s, 2s, 4s, ...) would re-synchronize the retry waves as each agent
     retries in lockstep. Offsetting every sleep by a stable per-agent amount
     keeps the waves de-phased. Deterministic on the agent id (the turn
-    contextvar in the hosted runner, else AVA_AGENT_ID set by agent/loop.py
-    at boot) so an agent keeps its own offset across restarts; no identity
+    contextvar in the host, or AVA_AGENT_ID carried by a launched child) so an agent keeps its own offset across restarts; no identity
     (tests, non-agent callers) → 0 (no offset).
     """
     from shared.turn_identity import effective_agent_id

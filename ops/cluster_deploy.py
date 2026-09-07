@@ -22,9 +22,9 @@ it fans out in two phases by dialing each agent-runner's ops server:
   Phase A: cluster_stop
     -> POST to the agent-runner's ops server, which calls
        `operations.cluster_stop_op` in-process
-    -> pauses the host (posture row) + kills ava-restarter
-    -> while the host is paused, the watchdog skips reconcile so the
-       restarter stays down through migration
+    -> closes new host admission, requests ordinary restart messages and waits
+       for durable checkpoints and completed hosted continuations
+    -> retains the admission hold through migration
   Phase B: cluster_update  (the gateway has already force-checked-out the
     pinned target_sha + migrated locally), payload carries `target_sha`
     -> the agent-runner's ops server calls `operations.cluster_update_op(target_sha=...)`
@@ -207,9 +207,10 @@ def spawn_update(  # noqa: PLR0915 — one pause-to-detached-child transaction
     after the stop has taken the host down (the 2026-06-17 dup-0049 outage). A
     broken layout raises here, leaving the cluster serving its current code.
 
-    Pause first: `pause_local_cluster()` kills the restarter + touches the
-    paused posture before spawning, so the restarter cannot respawn
-    an agent on old code during the checkout / uv sync window.
+    Pause first: `pause_local_cluster()` drains hosted continuations and holds
+    admission before spawning, so agents cannot execute old code during the
+    checkout / uv sync window. In-flight SDK dependencies remain available until
+    the drain completes.
 
     Returns {"session": "ava-updater", "log": <path>}.
 
@@ -229,8 +230,8 @@ def spawn_update(  # noqa: PLR0915 — one pause-to-detached-child transaction
     # endpoint, an operator's direct `ava cluster update` on a runner) quiesce
     # this host's agents before the bounce — the per-host analogue of the
     # rollout's stop-the-world. A rollout's Phase B passes mode='none' (the
-    # gateway-side quiesce already drained the fleet) plus force_reap when the
-    # quiesce timed out on stragglers.
+    # gateway-side quiesce already drained the fleet). Explicit force is an
+    # operator-selected resource-stop policy, never a timeout fallback.
     quiesce = mode != "none"
     updater_sess = shared.cluster.session_name(_UPDATER_SERVICE)
     handoff_generation = shared.updater_handoff.new_generation()

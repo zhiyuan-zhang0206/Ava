@@ -1,14 +1,9 @@
 """Shared fixtures for the CLI tests.
 
-The `ava cluster update` orchestration tests (`_run_gateway_orchestration` and friends)
-all reach one seam that is not obvious from the code under test: the `finally`
-unpauses the LOCAL host, and the real `ops.cluster.unpause_local_cluster` spawns
-a live `services.restarter.daemon` in a session. Every one of these tests
-stubbed the remote fan-out and left that leg real, so each run forked a real
-restarter — with no test health-port isolation it bound prod's 8102, the
-2026-07-24 outage. The top-level `_guard_cluster_spawn` now refuses the call
-outright; this replaces the refusal with a recorder for the whole directory, so
-no CLI test has to remember the seam and the local leg stays assertable.
+Orchestration tests record the local pause/resume seam while updating the
+actual host posture. Without that posture effect, a fake recovery would leave
+later gateway requests behind a stale 503 gate. Production service and OS job
+boundaries remain guarded by the root fixtures and the local gate stubs.
 """
 
 from __future__ import annotations
@@ -65,7 +60,7 @@ def _gate_probe_offline(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         gs,
         "_systemctl",
-        lambda *_args: subprocess.CompletedProcess(
+        lambda *_args, **_kwargs: subprocess.CompletedProcess(
             [], 1, "LoadState=not-found\nActiveState=inactive\n", ""
         ),  # pyright: ignore[reportUnknownArgumentType]
     )
@@ -74,21 +69,17 @@ def _gate_probe_offline(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         cg,
         "_launchctl",
-        lambda *_args: subprocess.CompletedProcess([], 1, "", "no such process"),  # pyright: ignore[reportUnknownArgumentType]
+        lambda *_args, **_kwargs: subprocess.CompletedProcess([], 1, "", "no such process"),  # pyright: ignore[reportUnknownArgumentType]
     )
 
 
 @pytest.fixture(autouse=True)
 def local_unpauses(monkeypatch: pytest.MonkeyPatch) -> list[bool]:
-    """Records each local unpause the orchestration performs, minus the spawn.
+    """Record orchestration resume while restoring its actual HTTP posture.
 
-    Clearing the posture is NOT optional bookkeeping: `unpause_local_cluster`
-    both writes the `idle` posture and respawns the restarter, and the
-    orchestration's `pause_local_cluster` really does write `paused` in the test
-    home. A stub that only recorded would leave it behind, and the pause
-    middleware then answers 503 to every `TestClient` request for the rest of the
-    session — a few hundred unrelated failures, in whichever test file happens to
-    run next."""
+    A stub that records without clearing posture leaks 503 responses into
+    unrelated TestClient requests later in the pytest process.
+    """
     calls: list[bool] = []
 
     def _unpause() -> None:
@@ -209,3 +200,24 @@ def _isolate_disabled_services_marker(
     uses: the marker is per-unit durable state, so each test gets a fresh one.
     """
     monkeypatch.setattr(ds, "disabled_services_file", lambda: tmp_path / "disabled_services")
+
+
+@pytest.fixture(autouse=True)
+def _isolate_local_pause_journal(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A failed stop intentionally retains its hold; it must not hold the next test."""
+    from shared import pause_owner
+
+    monkeypatch.setattr(pause_owner, "state_path", lambda: tmp_path / "pause-owner.json")
+    monkeypatch.setattr(pause_owner, "lock_path", lambda: tmp_path / "pause-owner.lock")
+
+
+@pytest.fixture(autouse=True)
+def local_pauses(monkeypatch: pytest.MonkeyPatch) -> list[bool]:
+    """Orchestration tests stub the native daemon boundary explicitly.
+
+    Kernel integration tests call ops.agent_pause or the public command kernel
+    directly; a phase-ordering test must not dial this host's real agent-host.
+    """
+    calls: list[bool] = []
+    monkeypatch.setattr("ops.cluster.pause_local_cluster", lambda: calls.append(True))
+    return calls

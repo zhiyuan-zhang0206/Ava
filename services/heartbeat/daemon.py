@@ -3,7 +3,7 @@
 It selects idle agents that have been parked past `AVA_HEARTBEAT_IDLE_THRESHOLD_SECONDS`
 (default 5 min) and have not paused their heartbeat, and INSERTs a `heartbeat`
 check-in inbound to each. The inbound-insert trigger wakes the agent (on any
-machine — this is cluster-wide, not machine-scoped: unlike the restarter it never
+machine — this is cluster-wide, not machine-scoped: unlike the agent host it never
 touches local sessions). Runs on the gateway, one per cluster.
 
 Dispatch is paced for fleet scale: rather than checking in on every due agent in
@@ -172,64 +172,31 @@ def _select_idle_agents_needing_heartbeat(
     No machine filter: the inbound-insert trigger wakes the agent wherever it
     runs.
 
-    R1 (Task #1021): an *idling* nudge target must hold an unexpired lease — an
-    idling row whose lease expired is a zombie the reaper is collecting, and
-    nudging it would only keep a corpse busy.
-
-    Hosted mode (Task #1999): the lease concept does not exist — a hosted
-    agent's idle row carries no lease renewer (idle is the absence of a turn
-    task, not a process to prove alive), so the lease guard would exclude
-    EVERY hosted agent and silently retire the heartbeat's resident-duty
-    nudge. In hosted mode the clause drops the guard: every idling row is
-    nudgeable (the dispatcher materializes the turn either way).
+    An idle agent has no running turn task and needs no live lease to receive
+    a check-in. The host dispatcher starts its next turn from the durable wake.
     """
-    from ops.runner_mode import runner_mode
-
     # Direct callers that inspect the raw idle predicate retain its historic
     # threshold cadence; the daemon supplies its configured check-in interval.
     reminder_interval_s = idle_threshold_s if heartbeat_interval_s is None else heartbeat_interval_s
 
-    # The mode picks BETWEEN two fully-static statements (never text spliced
-    # into one): the hosted clause drops the R1 lease guard because a hosted
-    # idle row has no lease concept, while the process clause keeps it.
-    if runner_mode() == "hosted":
-        sql = (
-            "SELECT id, EXTRACT(EPOCH FROM (now() - last_active_at)) / 60.0 AS idle_minutes "
-            "FROM agents_meta "
-            "WHERE status = 'idling' "
-            "AND now() >= GREATEST("
-            "  heartbeat_paused_until, "
-            "  last_active_at "
-            "  + make_interval(secs => %s + COALESCE(mod(id, NULLIF(%s, 0)::int), 0)), "
-            "  last_heartbeat_at "
-            "  + make_interval(secs => LEAST(%s * power(2.0, heartbeat_backoff_level), 86400))"
-            ") "
-            "AND NOT EXISTS ("
-            "  SELECT 1 FROM inbound_messages im "
-            "  WHERE im.agent_id = agents_meta.id AND im.status = 'pending' "
-            "    AND im.created_at >= now() - make_interval(secs => %s) "
-            ") "
-            "ORDER BY last_active_at ASC"
-        )
-    else:
-        sql = (
-            "SELECT id, EXTRACT(EPOCH FROM (now() - last_active_at)) / 60.0 AS idle_minutes "
-            "FROM agents_meta "
-            "WHERE (status = 'idling' AND lease_expires_at > now()) "
-            "AND now() >= GREATEST("
-            "  heartbeat_paused_until, "
-            "  last_active_at "
-            "  + make_interval(secs => %s + COALESCE(mod(id, NULLIF(%s, 0)::int), 0)), "
-            "  last_heartbeat_at "
-            "  + make_interval(secs => LEAST(%s * power(2.0, heartbeat_backoff_level), 86400))"
-            ") "
-            "AND NOT EXISTS ("
-            "  SELECT 1 FROM inbound_messages im "
-            "  WHERE im.agent_id = agents_meta.id AND im.status = 'pending' "
-            "    AND im.created_at >= now() - make_interval(secs => %s) "
-            ") "
-            "ORDER BY last_active_at ASC"
-        )
+    sql = (
+        "SELECT id, EXTRACT(EPOCH FROM (now() - last_active_at)) / 60.0 AS idle_minutes "
+        "FROM agents_meta "
+        "WHERE status = 'idling' "
+        "AND now() >= GREATEST("
+        "  heartbeat_paused_until, "
+        "  last_active_at "
+        "  + make_interval(secs => %s + COALESCE(mod(id, NULLIF(%s, 0)::int), 0)), "
+        "  last_heartbeat_at "
+        "  + make_interval(secs => LEAST(%s * power(2.0, heartbeat_backoff_level), 86400))"
+        ") "
+        "AND NOT EXISTS ("
+        "  SELECT 1 FROM inbound_messages im "
+        "  WHERE im.agent_id = agents_meta.id AND im.status = 'pending' "
+        "    AND im.created_at >= now() - make_interval(secs => %s) "
+        ") "
+        "ORDER BY last_active_at ASC"
+    )
     params: list[object] = [
         idle_threshold_s,
         jitter_span_s,
@@ -597,7 +564,7 @@ async def run() -> None:
         _log.info("[heartbeat] daemon already running (pidfile=%s), exiting", _PIDFILE)
         sys.exit(1)
 
-    # Pidfile before the healthz bind — see services/restarter/daemon.py:run().
+    # Publish the pidfile before binding healthz so identity-aware probes can verify it.
     _write_pidfile()
     _log.info("[heartbeat] pidfile written: %s", _PIDFILE)
 

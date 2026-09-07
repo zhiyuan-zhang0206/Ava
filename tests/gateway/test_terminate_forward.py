@@ -1,14 +1,12 @@
 """Cross-machine terminate forward (`gateway/routers/agents_lifecycle.py:post_agent_terminate`) unit tests —
 
-force=true must forward to the home machine (kill-session / os.kill are physical
-local operations). Graceful (force=false) also forwards because zombie detection via
-`process_alive` is meaningless for cross-machine PIDs. Forwarding keeps both paths
-on the home machine, keeping the logic symmetric.
+Both graceful and force requests route to the home runner. It owns the hosted
+turn and local execution resources; gateway placement must not choose a local
+shortcut for a remote agent.
 """
 
 from __future__ import annotations
 
-from subprocess import CompletedProcess
 from typing import Any
 
 import psycopg
@@ -62,17 +60,7 @@ class TestTerminateRouting:
         db_conn: psycopg.Connection,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """machine == local + force=true → takes local force-kill path (kill-session + os.kill stub)."""
-        import subprocess as _subprocess
-
-        from ops import runner_mode
-
-        monkeypatch.setattr(runner_mode, "is_hosted", lambda: False)
-        monkeypatch.setattr(
-            _subprocess,
-            "run",
-            lambda *_a, **_kw: CompletedProcess(args=[], returncode=0),  # pyright: ignore[reportUnknownArgumentType]
-        )
+        """A local force request is accepted by the same home-runner path."""
         with TestClient(app) as client:
             agent_id = client.post("/api/agents", json={}).json()["id"]
             _set_agent_machine(db_conn, agent_id, "local-test")
@@ -81,7 +69,7 @@ class TestTerminateRouting:
                 json={"force": True, "source": "user"},
             )
         assert resp.status_code == 200
-        assert resp.json()["status"] == "force_killed"
+        assert resp.json()["status"] == "enqueued"
 
     def test_remote_graceful_forwards(
         self,
@@ -123,7 +111,7 @@ class TestTerminateRouting:
 
         async def _capture_forward(agent_id: int, path: str, json_body: dict) -> dict:
             captured["json_body"] = json_body
-            return {"status": "force_killed"}
+            return {"status": "enqueued"}
 
         with TestClient(app) as client:
             agent_id = client.post("/api/agents", json={}).json()["id"]
@@ -134,7 +122,7 @@ class TestTerminateRouting:
                 json={"force": True, "source": "user"},
             )
         assert resp.status_code == 200
-        assert resp.json() == {"status": "force_killed"}
+        assert resp.json() == {"status": "enqueued"}
         assert captured["json_body"]["force"] is True
         assert captured["json_body"]["source"] == "user"
 

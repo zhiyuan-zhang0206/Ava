@@ -182,7 +182,7 @@ def _quiesce_agents() -> None:
     """Signal every live agent to restart and wait until none are left running.
 
     Retained for callers that use the gateway-only quiesce primitive. Cluster
-    rollback itself uses `_stop_the_world` so remote restarters are paused too.
+    rollback itself uses `_stop_the_world` so remote hosted agents are drained too.
     """
     from cli.commands.update import _quiesce_all_agents as _quiesce
     from cli.commands.update import _quiesce_timeout_s

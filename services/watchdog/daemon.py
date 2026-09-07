@@ -9,7 +9,7 @@ on the system scheduler.
 
 One watchdog runs PER CAPABILITY, selected by `--role`: `gateway` watches the
 gateway daemons (gateway/labeler/heartbeat/task-maintenance/milvus/memory-indexer/
-frontend), `agent-runner` watches ops/restarter (+ browser/browser-mcp).
+frontend), `agent-runner` watches ops/agent-host (+ browser/browser-mcp).
 The roster is derived from `build_services()` — see `_checks_for_capability`. A
 single-box gateway,agent-runner host
 runs BOTH (two supervised sessions, two pidfiles). The previous single role-union
@@ -490,8 +490,7 @@ async def _tick(role: MachineRole) -> None:
        reaches anything that can hang — this round IS the one blocked by that pause.
     1. **pause** — the paused posture the gateway writes during `ava cluster update`
        Phase A. A paused host skips the round entirely (`ALL`; otherwise this tick's
-       restarter healthcheck would revive the restarter Phase A killed and fight
-       back); stranded-pause recovery self-unpauses a pause that outlived its rollout.
+       host healthcheck would revive the host Phase A drained and stopped); stranded-pause recovery self-unpauses a pause that outlived its rollout.
     2. **schema** — DB applied vs local code required mismatch, or an unreachable DB.
        Blocks the services that USE the DB (`DB_DEPENDENT`) so a spawned old-code
        daemon does not immediately crash on the new schema; self-heals code-behind via

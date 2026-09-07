@@ -42,7 +42,6 @@ import shlex
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from ops.runner_mode import runner_mode
 from ops.service_spec import ServiceSpec as ServiceSpec  # re-export: generated plugin fixtures
 from shared.config import settings
 from shared.log import logger
@@ -241,13 +240,6 @@ def _gate_reason(spec: ServiceSpec) -> str | None:
         return "disabled (AVA_PITR_BASE_BACKUP_ENABLED off)"
     if session == "im-bridge" and not settings.services.im_bridge_enabled:
         return "disabled (AVA_IM_BRIDGE_ENABLED off)"
-    if session == "agent-host" and runner_mode() != "hosted":
-        return "disabled (AVA_RUNNER_MODE is process)"
-    if session == "restarter" and runner_mode() == "hosted":
-        # All four restarter controllers reason about agent PROCESSES (pid
-        # probes, lease rows, session relaunches); hosted rows have none of
-        # those, so a process reaper would harvest every healthy agent.
-        return "disabled (AVA_RUNNER_MODE is hosted — per-agent process supervision retired)"
     if session == "milvus" and settings.services.memory_search_backend != "milvus":
         # The milvus-lite server only serves the memory indexer's milvus
         # backend; numpy (default) and pgvector never dial it. Without the

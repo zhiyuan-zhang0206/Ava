@@ -207,25 +207,11 @@ CLUSTER_DISPATCH_TIMEOUT_S = 90.0
 # single-row UPDATEs rather than a poll-rate write stream.
 LEASE_RENEW_INTERVAL_S = 60.0
 
-# The agent-process lease (R1, Task #1021): `agents_meta.lease_expires_at`.
-# TTL = 10x the renewal interval — a healthy agent renews every 60 s and the
-# reaper runs every 30 s, so a transient renewal blip (a DB hiccup) never reads
-# as death; expiry is the crash-reclaim bound (the backfill granted the same
-# 600 s at migration, and the reaper's grace must outlast the renewal period).
+# The hosted agent ownership lease: `agents_meta.lease_expires_at`.
+# TTL = 10x the renewal interval, so transient DB renewal failures do not
+# immediately relinquish a live turn. Expiry bounds crash recovery.
 AGENT_LEASE_TTL_S = 600.0
 AGENT_LEASE_RENEW_INTERVAL_S = 60.0
-# Post-outage grace for the lease-zombie pass (2026-08-08 audit, P1-2): the
-# restarter daemon skips force-killing expired-lease rows for this long after
-# ITS OWN DB link recovers (laptop sleep / network black-hole), so a
-# paused-but-alive agent — whose lease expired while it could not renew — gets
-# time to renew instead of being killed on the first post-outage reap.
-# Registered in the clock lattice: MUST exceed AGENT_LEASE_RENEW_INTERVAL_S.
-AGENT_LEASE_ZOMBIE_GRACE_S = 180.0
-# The wall-clock tick gap (seconds) between restarter poll iterations that
-# means "the daemon or host was suspended" (time.time() advances through a
-# system sleep; time.monotonic() does not), arming the grace window above.
-AGENT_LEASE_SUSPEND_GAP_S = 10.0
-
 # How long the orchestration waits for its own gateway to be serving before it tells
 # any agent-runner to update (`cli.commands._gateway_ready`). A different question
 # from `NO_PROGRESS_TIMEOUT_S` — that one bounds a remote host doing

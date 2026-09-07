@@ -634,8 +634,8 @@ def _ambient_agent_id() -> int | None:
 
     Turn first, then the process binding: a hosted runner emits on behalf of
     every local agent, so its process binding is None and the turn contextvar
-    (`shared/turn_identity.py`) is the only truthful answer. In process mode
-    nothing binds the contextvar and this is the `init_telemetry` value."""
+    (`shared/turn_identity.py`) is the only truthful answer. An exec child or
+    standalone script may instead carry the process-level `init_telemetry` value."""
     from shared.turn_identity import current_turn_agent_id
 
     bound = current_turn_agent_id()

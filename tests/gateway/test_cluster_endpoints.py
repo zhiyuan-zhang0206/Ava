@@ -1,9 +1,8 @@
 """`/api/cluster/*` endpoint + 503 middleware + handler unit tests.
 
-Middleware short-circuits SDK paths to 503 while cluster_paused flag exists;
-`/api/cluster/*` paths bypass it. Handler logic (pause_local_cluster /
-spawn_update / status_snapshot) uses mock subprocess — no real child
-processes, no real sessions.
+Middleware short-circuits SDK paths only after service shutdown publishes the
+paused posture; native drain keeps those dependencies available. Session
+backends are recorded, while local drain uses the private test database.
 """
 
 from __future__ import annotations
@@ -67,7 +66,7 @@ def _pin_session_names(monkeypatch: pytest.MonkeyPatch) -> None:
     Patches ``session_name`` directly so ``machine_name()``
     stay untouched (other gateway tests call them via ``set_machine_identity``
     + ``status_snapshot()`` and assert the injected value).
-    Produces names like ``ava-test-restarter``, ``ava-test-updater`` etc.
+    Produces names like ``ava-test-agent-host``, ``ava-test-updater`` etc.
 
     ``session_name`` is patched at its source (``shared.cluster``) because the
     naming scheme is one fact for the whole process — the four ``ops.cluster*``
@@ -215,19 +214,6 @@ class TestPauseMiddleware:
             r = client.get("/openapi.json")
         assert r.status_code == 404
 
-    def test_agent_exited_bypasses_503_when_paused(self, fake_flag: Path) -> None:
-        """POST /api/agents/{id}/exited must land during the pause window — the
-        quiesce that owns the window waits for exactly this notification: a 503
-        leaves the drained agent's row running/idling with a dead pid and the
-        quiesce convergence poll sees a still-live agent until its timeout (the
-        2026-08-06 rollout-stall race). The 204 proves the request reached the
-        router instead of the pause short-circuit (a missing row is an
-        idempotent no-op there)."""
-        fake_flag.write_text("")
-        with TestClient(app) as client:
-            r = client.post("/api/agents/123/exited")
-        assert r.status_code == 204
-
     def test_other_agent_paths_still_503_when_paused(self, fake_flag: Path) -> None:
         """Only the agent SELF-REPORT paths bypass the pause — an externally
         initiated terminate stays 503 (business logic, not a drain signal)."""
@@ -269,9 +255,7 @@ class TestPauseMiddleware:
 
 
 class _FakeSessionBackend:
-    """In-memory session backend for the pause/unpause handler tests — the
-    restarter is a SERVICE, so these paths go through the session backend
-    (native supervisor on POSIX, winproc on Windows), never a raw spawn."""
+    """Record every service and orchestration session operation without spawning."""
 
     def __init__(self) -> None:
         self.killed: list[str] = []
@@ -309,14 +293,11 @@ class _FakeSessionBackend:
 
 @pytest.fixture
 def pause_backend(monkeypatch: pytest.MonkeyPatch) -> _FakeSessionBackend:
+    from ops import agent_pause
+
     backend = _FakeSessionBackend()
-
-    def _never_skipped(_name: str, _skipped: set[str]) -> bool:
-        return False
-
     monkeypatch.setattr("shared.session_backend.get_backend", lambda: backend)
-    # These tests exercise respawn behavior, independent of the operator's durable marker.
-    monkeypatch.setattr("shared.disabled_services.is_skipped", _never_skipped)
+    monkeypatch.setattr(agent_pause, "host_running", lambda: False)
     return backend
 
 
@@ -341,177 +322,81 @@ def spawn_backend(monkeypatch: pytest.MonkeyPatch) -> _FakeSessionBackend:
 
 
 class TestPauseLocalCluster:
-    def test_writes_paused_posture_and_kills_restarter(
-        self, monkeypatch: pytest.MonkeyPatch, pause_backend: _FakeSessionBackend
+    @pytest.fixture(autouse=True)
+    def _private_pause_owner(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        from shared import pause_owner
+
+        monkeypatch.setattr(pause_owner, "state_path", lambda: tmp_path / "pause.json")
+        monkeypatch.setattr(pause_owner, "lock_path", lambda: tmp_path / "pause.lock")
+
+    def test_completed_drain_keeps_sdk_requests_and_services_available(
+        self, pause_backend: _FakeSessionBackend
     ) -> None:
-        """pause_local_cluster: posture -> paused + session-backend kill ava-restarter."""
-        posture: list[str] = []
-        monkeypatch.setattr("shared.host_deploy_state.set_posture", posture.append)
+        """Phase A may finish while a peer still needs this gateway's SDK API."""
+        from shared import maintenance
+
+        pause_backend.alive_answer = True
 
         cluster_mod.pause_local_cluster()
-        assert posture and posture[-1] == "paused"
-        assert pause_backend.killed == ["ava-test-restarter"], pause_backend.killed
 
-    def test_idempotent_when_session_missing(
-        self, monkeypatch: pytest.MonkeyPatch, pause_backend: _FakeSessionBackend
-    ) -> None:
-        """An absent session is a silent noop (kill_session is idempotent) → does
-        not raise, paused posture still written."""
-        posture: list[str] = []
-        monkeypatch.setattr("shared.host_deploy_state.set_posture", posture.append)
+        current = maintenance.snapshot()
+        assert current is not None and current.maintenance is not None
+        assert current.maintenance.phase == "drained"
+        with TestClient(app) as client:
+            assert client.get("/api/agents").status_code == 200
+        assert not cluster_pause.is_paused()
+        assert pause_backend.killed == []
+        assert pause_backend.has_session("ava-test-agent-host")
+
+    def test_idempotent_when_session_missing(self, pause_backend: _FakeSessionBackend) -> None:
+        """Repeated Phase A reuses the same drain without starting services."""
+        from shared import pause_owner
+
         cluster_mod.pause_local_cluster()
-        assert posture and posture[-1] == "paused"
+        first = pause_owner.read()
+        cluster_mod.pause_local_cluster()
+        assert pause_owner.read() == first
+        assert first.maintenance is not None and first.maintenance.phase == "drained"
+        assert pause_backend.killed == pause_backend.spawned == []
 
 
 # Subject under test: these call the real ops.cluster spawn entry points (with
 # subprocess.run faked), so they opt out of the autouse guard that refuses them
 # suite-wide (tests/conftest.py:_guard_cluster_spawn).
-def _assert_shared_disabled_marker_clean() -> None:
-    """Tripwire for `TestUnpauseLocalCluster`'s marker hermeticity (task #2181).
-
-    The durable `--disable-service` marker lives in the worker-shared session
-    home (`$AVA_HOME/disabled_services`, tests/conftest.py), and these tests call
-    the real `unpause_local_cluster`, which reads it before respawning — a
-    'restarter' entry there means some earlier test leaked operator intent into
-    the shared home, and every unpause test below would silently exercise that
-    leak (no respawn, no raise) instead of the respawn contract (CI #1172/#1173
-    shard-5 flakes; the writer-side isolation landed in #1185). Fail with a
-    diagnosis rather than a cryptic `[]` / `DID NOT RAISE`.
-    """
-    from shared import disabled_services as ds
-
-    leaked = sorted(ds.read_skipped())
-    if "restarter" in leaked:
-        pytest.fail(
-            "worker-shared $AVA_HOME/disabled_services already lists 'restarter' "
-            f"(marker: {leaked}): a test wrote the durable --disable-service "
-            "marker into the shared session home instead of a per-test file, so "
-            "the unpause tests below would exercise that leak (no respawn, no "
-            "raise) rather than the respawn contract. Fix the leaking writer — "
-            "redirect its marker to a per-test tmp like "
-            "tests/cli/conftest.py::_isolate_disabled_services_marker — instead "
-            "of the victim."
-        )
-
-
 @pytest.mark.real_cluster_spawn
 class TestUnpauseLocalCluster:
     @pytest.fixture(autouse=True)
-    def _hermetic_disabled_marker(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-        """Two arms keeping the unpause tests independent of the worker-shared
-        `--disable-service` marker: a tripwire (a 'restarter' entry already in the
-        shared home -> fail with a diagnosis: a writer leaked) and hermeticity
-        (the marker read is redirected to a per-test tmp file, as
-        tests/cli/conftest.py and tests/shared/test_disabled_services.py do).
-        Each arm is pinned by a dedicated test: test_tripwire_pin_raises_on_shared_marker_pollution
-        and test_hermeticity_pin_keeps_marker_out_of_the_shared_home."""
-        _assert_shared_disabled_marker_clean()
-        from shared import disabled_services as ds
+    def _private_pause_owner(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        from shared import pause_owner
 
-        monkeypatch.setattr(ds, "disabled_services_file", lambda: tmp_path / "disabled_services")
+        monkeypatch.setattr(pause_owner, "state_path", lambda: tmp_path / "pause.json")
+        monkeypatch.setattr(pause_owner, "lock_path", lambda: tmp_path / "pause.lock")
 
-    def test_writes_idle_posture_and_respawns_restarter(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-        pause_backend: _FakeSessionBackend,
+    def test_unpause_restores_posture_and_releases_admission(
+        self, pause_backend: _FakeSessionBackend
     ) -> None:
-        """unpause: posture -> idle + session-backend new_session ava-<cluster>-restarter
-        (restarter not alive) — the restarter is a SERVICE, so it lands on the
-        service backend, not a raw orchestration path."""
-        posture: list[str] = []
-        monkeypatch.setattr("shared.host_deploy_state.set_posture", posture.append)
+        from shared import maintenance
+        from shared.host_deploy_state import set_posture
+
+        cluster_mod.pause_local_cluster()
+        set_posture("paused")
+        assert cluster_pause.is_paused()
 
         cluster_mod.unpause_local_cluster()
-        assert posture and posture[-1] == "idle"
-        assert pause_backend.spawned == ["ava-test-restarter"], pause_backend.spawned
 
-    def test_idempotent_when_restarter_alive(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-        pause_backend: _FakeSessionBackend,
+        assert not cluster_pause.is_paused()
+        assert not maintenance.held()
+        assert pause_backend.spawned == pause_backend.killed == []
+
+    def test_missing_pause_and_repeated_resume_do_not_start_services(
+        self, pause_backend: _FakeSessionBackend
     ) -> None:
-        """restarter already alive -> posture -> idle but do NOT spawn a second session."""
-        posture: list[str] = []
-        pause_backend.alive_answer = True
-        monkeypatch.setattr("shared.host_deploy_state.set_posture", posture.append)
         cluster_mod.unpause_local_cluster()
-        assert posture and posture[-1] == "idle"
-        assert pause_backend.spawned == [], "restarter alive -> no respawn"
-
-    def test_missing_pause_is_safe(
-        self, monkeypatch: pytest.MonkeyPatch, pause_backend: _FakeSessionBackend
-    ) -> None:
-        """Already idle (host self-recovered before the deferred resume): no raise."""
-        pause_backend.alive_answer = True
-        cluster_mod.unpause_local_cluster()  # must not raise
-
-    def test_respawn_race_is_tolerated(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-        pause_backend: _FakeSessionBackend,
-    ) -> None:
-        """new_session fails (a concurrent resume created the session first) but the
-        session is up on re-check -> treat as success, don't raise."""
-        posture: list[str] = []
-        monkeypatch.setattr("shared.host_deploy_state.set_posture", posture.append)
-        # guard: not alive -> spawn; re-check after the failed spawn: now alive.
-        pause_backend.alive_answer = [False, True]
-        pause_backend.spawn_ok = False
-        cluster_mod.unpause_local_cluster()  # must not raise
-        assert posture and posture[-1] == "idle"
-
-    def test_respawn_genuine_failure_raises(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-        pause_backend: _FakeSessionBackend,
-    ) -> None:
-        """new_session fails and the session is still not up -> RuntimeError."""
-        monkeypatch.setattr("shared.host_deploy_state.set_posture", lambda _p: None)  # pyright: ignore[reportUnknownArgumentType]
-        pause_backend.spawn_ok = False
-        with pytest.raises(RuntimeError, match="could not respawn"):
-            cluster_mod.unpause_local_cluster()
-
-    def test_hermeticity_pin_keeps_marker_out_of_the_shared_home(self) -> None:
-        """Pins the hermeticity arm: a marker write by a test in this class lands
-        in the per-test tmp file, never in the worker-shared session home — the
-        arm removed, this write leaks 'restarter' into the shared home and the
-        class is silently disabled again (CI #1172/#1173)."""
-        from shared import disabled_services as ds
-        from shared.config import settings
-
-        ds.write_skipped({"restarter"})
-
-        shared_marker = Path(settings.general.ava_home) / "disabled_services"
-        leaked = shared_marker.read_text() if shared_marker.exists() else ""
-        assert "restarter" not in leaked, (
-            "the hermeticity arm must keep the durable --disable-service marker "
-            "out of the worker-shared session home"
-        )
-        assert ds.read_skipped() == {"restarter"}  # the per-test marker still reads
+        cluster_mod.unpause_local_cluster()
+        assert not cluster_pause.is_paused()
+        assert pause_backend.spawned == pause_backend.killed == []
 
 
-def test_tripwire_pin_raises_on_shared_marker_pollution(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """Pins the tripwire arm: a 'restarter' entry in the marker read must raise
-    the diagnosis (the read is redirected to a tmp file here, so the real shared
-    home stays untouched). Arm removed, a leak would silently displace every
-    unpause test's assertions without any test going red."""
-    from shared import disabled_services as ds
-
-    marker = tmp_path / "disabled_services"
-    marker.write_text("restarter\n")
-    monkeypatch.setattr(ds, "disabled_services_file", lambda: marker)
-    with pytest.raises(pytest.fail.Exception, match="worker-shared"):
-        _assert_shared_disabled_marker_clean()
-
-    marker.write_text("")
-    _assert_shared_disabled_marker_clean()  # a clean marker must not raise
-
-
-# Subject under test: these call the real ops.cluster spawn entry points (with
-# subprocess.run faked), so they opt out of the autouse guard that refuses them
-# suite-wide (tests/conftest.py:_guard_cluster_spawn).
 @pytest.mark.real_cluster_spawn
 class TestSpawnUpdate:
     """spawn_update() must launch the `ava-updater` orchestration session through

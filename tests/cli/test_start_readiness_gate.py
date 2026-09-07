@@ -549,7 +549,7 @@ def test_live_update_lease_does_not_waive_on_a_pure_agent_runner(
     # A CRITICAL service, so the readiness gate still owns the verdict — the
     # waiver scope is what this test is about, and a non-critical straggler
     # (labeler) would no longer produce the readiness code at all (C2).
-    _roster(monkeypatch, (("restarter", None),))
+    _roster(monkeypatch, (("agent-host", None),))
     _probes(monkeypatch, ready=set())
     monkeypatch.setattr(_start_mod, "_update_in_flight", lambda: True)
 
@@ -1098,7 +1098,6 @@ def test_critical_service_manifest_is_pinned_and_real() -> None:
             {
                 "gateway",
                 "frontend",
-                "restarter",
                 "agent-host",
                 "gateway-watchdog",
                 "agent-runner-watchdog",
@@ -1460,7 +1459,7 @@ def test_recovered_non_critical_specs_excludes_critical_and_failed(
     same start that alerted it; it stays open for the next start."""
     from cli.commands import _probe as _probe_mod
 
-    started = (_spec("gateway"), _spec("restarter"), _spec("pitr-uploader"), _spec("browser"))
+    started = (_spec("gateway"), _spec("agent-host"), _spec("pitr-uploader"), _spec("browser"))
     failed = (_spec("pitr-uploader"),)
 
     recovered = _probe_mod._recovered_non_critical_specs(started, failed)

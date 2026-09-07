@@ -10,8 +10,7 @@ rollout with the cluster untouched:
   agent-runner; a gateway refuses it (rc=2) rather than ignore it.
 - `_resolve_rollout_target` — the single commit this rollout pins every node to.
 - `_run_preflight_fetch` — Phase 0: fan out a lightweight `git fetch` to every
-  agent-runner, aborting on a REACHABLE host that cannot fetch (it would strand
-  once paused) and skipping unreachable ones (their watchdog self-heals).
+  agent-runner, aborting on any missing acknowledgement before a host is paused.
 - `_rollout_preflight` — classify the imminent change + pin the target; returns
   an early rc for the docs-only / frontend-only fast paths.
 
@@ -100,7 +99,6 @@ def _run_preflight_fetch(
     agent_runners: list[tuple[str, str | None]],
     *,
     restart_only: bool,
-    skipped: list[str] | None = None,
 ) -> bool:
     """Phase 0: pre-flight `git fetch origin` on every agent-runner.
 
@@ -110,23 +108,9 @@ def _run_preflight_fetch(
     been paused, stranding it indefinitely (the 2026-07-25 runner
     incident). Failing early here aborts the rollout with nothing paused.
 
-    The failure split is the SAME one Phase A applies to its own fan-out, read
-    off the same statuses from the same probe (`_dispatch_one_and_wait`), so
-    the two phases cannot drift on what "offline" means:
-    - **unreachable** (the host is offline): skipped, not fatal. It is never
-      paused by Phase A and never told to update by Phase B, so it cannot
-      strand; when it comes back online its watchdog pin-drift self-heal
-      converges it to the pin. Aborting on it is what let one offline laptop
-      take down a whole rollout (the 2026-08-03 runner incident).
-    - **fatal** (reachable, but the fetch op failed): abort. A reachable host
-      whose fetch fails WILL be paused by Phase A and then fail its Phase-B
-      self-update — the exact stranding this phase exists to catch before
-      anything is paused.
-
-    Returns True when the rollout should abort (a REACHABLE host could not
-    fetch). The names of the skipped unreachable hosts are appended to
-    `skipped` (the same out-list pattern as `unconverged`) so the
-    orchestration's aftermath can name who still has to self-heal.
+    Every selected runner must answer. Unreachable is not proof of stopped
+    execution: its native agents may still have database connectivity. Failure
+    aborts before anyone pauses or any schema change begins.
     """
     import cli.commands as _ns
 
@@ -141,25 +125,16 @@ def _run_preflight_fetch(
     )
     ok_count = sum(1 for _, status, _ in fetch_results if status == "ok")
     print(f"  {ok_count}/{len(agent_runners)} fetched ok")
-    # The per-host verdict lines are printed by the same classifier Phase A uses
-    # (`_print_fan_out_results`: unreachable -> ⚠ skip + watchdog note, anything
-    # else -> ✗ fatal): one place decides what "offline" means for both phases.
+    # Phase 0 and Phase A share the same per-host diagnostic formatter.
     has_fatal = _print_fan_out_results("fetch", fetch_results)
-    if skipped is not None:
-        skipped.extend(name for name, status, _ in fetch_results if status == "unreachable")
-    if has_fatal:
+    acknowledged = {name for name, status, _ in fetch_results if status == "ok"}
+    if has_fatal or acknowledged != {name for name, _ in agent_runners}:
         print(
-            "\n✗ Phase 0: a reachable agent-runner could not fetch; "
+            "\n✗ Phase 0: not every selected agent-runner confirmed fetch; "
             "aborting before Phase A (nothing paused yet)",
             file=sys.stderr,
         )
         return True
-    if skipped:
-        print(
-            f"  · {len(skipped)} offline agent-runner(s) skipped: {', '.join(sorted(skipped))} "
-            "— the rollout proceeds; their watchdog self-heals them to the pin on return",
-            file=sys.stderr,
-        )
     return False
 
 

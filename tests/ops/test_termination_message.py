@@ -163,7 +163,6 @@ def test_force_termination_retries_command_before_message(
         running_agent_id,
         db_pool,
         source="user",
-        kill_process=False,
         message="final force note",
     )
 

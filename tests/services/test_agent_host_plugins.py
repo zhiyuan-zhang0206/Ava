@@ -76,20 +76,19 @@ async def test_watch_restarts_on_plugin_change(
     monkeypatch.setattr(runtime_interpreter, "external_plugin_read_root", lambda: tmp_path)
     monkeypatch.setattr(daemon, "_PLUGINS_POLL_INTERVAL_S", 0.01)
 
-    killed: list[tuple[int, signal.Signals]] = []
+    raised: list[signal.Signals] = []
 
-    def _fake_kill(pid: int, sig: signal.Signals) -> None:
-        killed.append((pid, sig))
+    def _raise(sig: signal.Signals) -> None:
+        raised.append(sig)
 
-    monkeypatch.setattr(daemon.os, "kill", _fake_kill)
+    monkeypatch.setattr(daemon.signal, "raise_signal", _raise)
 
     watcher = asyncio.create_task(daemon._watch_plugins_for_restart())
     await asyncio.sleep(0.05)  # first poll: empty == empty, no kill
-    assert killed == []
+    assert raised == []
 
     _make_plugin(tmp_path, "alpha")
     await asyncio.sleep(0.05)
-    assert len(killed) == 1
-    assert killed[0][1] == signal.SIGTERM
+    assert raised == [signal.SIGTERM]
 
     await watcher  # the watcher returns after the kill

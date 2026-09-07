@@ -6,10 +6,7 @@ that was down when someone ran `ava skill install` elsewhere, or a hosted daemon
 that has been up since before the install. `future/infra/extension-ownership.md`
 S2 puts the same pass at process boot for exactly that window.
 
-The two boot paths need it for opposite reasons, which is why both are pinned:
-process mode boots fresh on every agent spawn and would drift only until the next
-spawn, while a hosted daemon is long-lived and would never pick the skill up at
-all.
+The long-lived host runs this once before serving any agent.
 """
 
 from __future__ import annotations
@@ -88,28 +85,12 @@ def test_an_unreadable_registry_does_not_stop_the_boot(
     assert not (unit_home / "skills").exists()
 
 
-def test_process_mode_lands_them_before_the_plugin_load() -> None:
-    """Ordering inside `_boot_agent_process`, asserted on the real source.
-
-    It does not matter today — skills are read per turn and plugins still come
-    from the checkout — and that is the argument for pinning it now: once
-    plugins are registry-owned, a load that runs before the materialization
-    imports the previous version of the tree, and nothing about the call site
-    would look wrong.
-    """
-    from agent._process_boot import _boot_agent_process
-
-    src = inspect.getsource(_boot_agent_process)
-    assert src.index("land_cluster_extensions()") < src.index("load_process_extensions()")
-
-
 def test_the_hosted_daemon_lands_them_once_per_process() -> None:
     """The hosted runner runs this with the other process-scope halves at daemon
     boot, not per agent: the skills directory is a fact about the machine, shared
     by every agent the host serves.
 
-    A hosted daemon is also the only place where skipping it is unrecoverable
-    without an operator — process mode gets a fresh boot on the next spawn.
+    Skipping this step would leave an offline machine on its old skill image.
     """
     from services.agent_host.daemon import run
 

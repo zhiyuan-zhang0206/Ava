@@ -7,7 +7,7 @@ env alias so the .env surface is unchanged. Aggregated by shared/config.
 from __future__ import annotations
 
 import json
-from typing import Annotated, Literal
+from typing import Annotated
 
 from pydantic import Field, field_validator
 from pydantic_settings import NoDecode
@@ -16,19 +16,6 @@ from shared.config._base import EnvSettings
 
 
 class DaemonSettings(EnvSettings):
-    runner_mode: Literal["process", "hosted"] = Field(
-        default="hosted",
-        alias="AVA_RUNNER_MODE",
-        description="How the agent-runner hosts agents. `hosted` (the default since 2026-09, user ruling) = the runner daemon hosts every local agent's turns as asyncio tasks in its own process, and an idle agent is no task at all; it is what puts the `agent-host` service on this host's start roster. `process` = one OS process per agent, alive from spawn to terminate — the legacy model, kept as an explicit opt-out for rollback. Cluster-pinned because the model must be uniform: a cluster running both would need double bookkeeping for agent leases, since a hosted agent's liveness is an in-process fact while a process agent's is a lease row. Rollback is a restart with this flipped back — no schema shape changes with it.",
-        json_schema_extra={
-            "capability": "agent-runner",
-            "restart_required": "all",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-        },
-    )
-
     host_max_concurrent_turns: int = Field(
         default=16,
         alias="AVA_HOST_MAX_CONCURRENT_TURNS",
@@ -85,19 +72,6 @@ class DaemonSettings(EnvSettings):
         default=30.0,
         alias="AVA_HOST_TURN_PROGRESS_SCAN_INTERVAL_SECONDS",
         description="Hosted agent-runner: how often the no-progress stall guard polls the per-agent turn clock while a graph.ainvoke is running. Poll cadence only — it changes detection latency, never the abort threshold (AVA_HOST_TURN_NO_PROGRESS_TIMEOUT_SECONDS).",
-        json_schema_extra={
-            "capability": "agent-runner",
-            "restart_required": "all",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-        },
-    )
-
-    restarter_poll_interval_seconds: float = Field(
-        default=1.0,
-        alias="AVA_RESTARTER_POLL_INTERVAL_SECONDS",
-        description="Restarter daemon main-loop poll interval (seconds) for agents.status='restarting' rows. Shorter is lower latency but slightly higher DB load.",
         json_schema_extra={
             "capability": "agent-runner",
             "restart_required": "all",
@@ -206,34 +180,6 @@ class DaemonSettings(EnvSettings):
         description="Maximum automatic-wake suppression window after repeated terminated-owner resurrection failures.",
         json_schema_extra={
             "capability": "gateway",
-            "restart_required": "all",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-        },
-    )
-
-    revive_max_per_pass: int = Field(
-        default=50,
-        alias="AVA_REVIVE_MAX_PER_PASS",
-        description="Ceiling on how many dead-pid 'running'/'idling' rows the restarter revives per reap pass (Task #689 G5: a rebooted machine's agents are relaunched automatically instead of being reaped to 'terminated'). A backlog beyond the cap drains over successive passes (30s cadence); the cap is the anti-storm guard so a mass-death event (e.g. one host's whole fleet) cannot launch 300 processes in one tick.",
-        json_schema_extra={
-            "capability": "agent-runner",
-            "restart_required": "all",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-        },
-    )
-
-    boot_reap_grace_seconds: float = Field(
-        default=120.0,
-        alias="AVA_ALLOCATED_REAP_GRACE_SECONDS",
-        description="Grace (seconds) before the restarter reaps an unclaimed idling row to 'terminated' — a process that died before claiming or was never launched. The `AVA_ALLOCATED_REAP_GRACE_SECONDS` alias is retained for existing deployment configuration. Must exceed boot plus the launch-confirm window (launch_confirm_timeout_seconds, 45s), pinned by tests/shared/test_timing_topology.py. It is also the ceiling on the launch-confirm's one extension for a still-live child, so that wait never outlives the point where this reaper takes the row.",
-        json_schema_extra={
-            # The gateway's durable wake selector and runner admission must
-            # share this deadline; gateway profile construction must retain it.
-            "capability": "common",
             "restart_required": "all",
             "writable": True,
             "sensitive": False,
@@ -427,37 +373,10 @@ class DaemonSettings(EnvSettings):
         },
     )
 
-    wedged_agent_enabled: bool = Field(
-        default=True,
-        alias="AVA_WEDGED_AGENT_ENABLED",
-        description="Run the wedged-agent controller (agent-runner), which detects a running/idling agent with a live pid but a stale unconsumed pending inbound, then force-kills and resurrects it so it processes its backlog. It also identity-reaps a user-terminated row whose old process retains a live lease and pending terminate inbound, without resurrection. Off does not strand anything — a new inbound still wakes the agent; this controller only closes the gap where the existing pending inbound is ignored.",
-        json_schema_extra={
-            "capability": "agent-runner",
-            "restart_required": "",
-            "writable": False,
-            "sensitive": False,
-            "scope": "host",
-            "remote_writable": True,
-        },
-    )
-
     wedged_agent_inbound_age_seconds: float = Field(
         default=2400.0,
         alias="AVA_WEDGED_AGENT_INBOUND_AGE_SECONDS",
         description="Minimum age (seconds) of an unconsumed pending inbound or no-progress running turn before a running agent is considered wedged; the turn check uses the status_changed_at and last_active_at window. Default 2400s (40 min) — exec_node_timeout_seconds (1200s) + LLM retry budget plus margin. Raise for agents doing long-running work; lower for tighter detection.",
-        json_schema_extra={
-            "capability": "agent-runner",
-            "restart_required": "all",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-        },
-    )
-
-    wedged_idling_agent_inbound_age_seconds: float = Field(
-        default=180.0,
-        alias="AVA_WEDGED_IDLING_AGENT_INBOUND_AGE_SECONDS",
-        description="Minimum age (seconds) of an unconsumed pending inbound before an idling agent is considered wedged. Default 180s allows several 30-second claim-loop fallback checks plus recovery margin; it deliberately does not include running-turn exec or LLM budgets.",
         json_schema_extra={
             "capability": "agent-runner",
             "restart_required": "all",

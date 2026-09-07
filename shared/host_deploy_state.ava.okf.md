@@ -14,7 +14,7 @@ tags:
 
 `shared/host_deploy_state.py` is the read/write API for the `host_deploy_state` table — one row per machine in the central DB answering the two host-level questions the old signals (the `cluster_paused` file, `updating.flag`, session probing, updater-log mtime) answered with files and process-local guesses. Those file signals were retired by the old-signal sweep; this row is the contract.
 
-- **posture** (`idle` / `paused` / `converging`) — `paused` is the static "this host is drained, waiting for an update" window (the gateway's Phase A fan-out); `converging` is the updater actually running on this host (its lease is live). A missing row reads as `idle` — every consumer's default.
+- **posture** (`idle` / `paused` / `converging`) — `paused` marks service shutdown after native drain; the admission journal keeps in-flight APIs available during the drain; `converging` is the updater actually running on this host (its lease is live). A missing row reads as `idle` — every consumer's default.
 - **paused_at** — the moment the current pause window started: set entering `paused`, preserved through `converging`, cleared on `idle`. It anchors *both* readers that have to ask "does this evidence belong to the current update?" — the updater-outcome log reader (what the `cluster_paused` file mtime used to be) and `updater_expired` below; `updated_at` cannot serve because every transition inside the window bumps it.
 - **updater lease** (`updater_lease_expires_at`) — the updater process's liveness as a lease-expiry judgment: `updater_live` = still working; `updater_expired` = the stalled judgment (stalled-updater controller, Phase-B poll). The two are not complements. Nothing clears the column on the way into a pause (`set_posture` owns posture alone, so a pause landing mid-rollout cannot erase a live claim), so an uncleared expiry outlives its own update and the next one inherits it — `updater_expired` therefore dates the arming (`expires - UPDATER_LEASE_TTL_S`) against `paused_at` and reads a lease armed before this window as no evidence at all. **Every timestamp in that arithmetic is Postgres'** — the expiry is written as `now() + make_interval(...)` and the reader brings back `now()` as `db_now` in the same statement — because the row is written by the runner and judged on the gateway, and nothing bounds two machines' clock drift (a Windows host resuming from sleep before NTP converges reaches minutes). See [the decision record](../decisions/2026-08-12-a-written-ending-outranks-the-updater-lease.md).
 
@@ -22,9 +22,9 @@ tags:
 
 ### Posture transitions (writers)
 
-- `ops/cluster_pause.py` — `pause_local_cluster` / `unpause_local_cluster` write the posture row; `is_paused()` reads the row (a read failure reads as NOT paused — the conservative direction). The gateway 503 middleware and the `status`/`cluster` endpoints go through it.
+- `ops/cluster_pause.py` — `pause_local_cluster` drains through the admission journal without closing APIs; service shutdown sets paused posture and `unpause_local_cluster` restores idle posture. `is_paused()` reads the row (a read failure reads as NOT paused — the conservative direction). The gateway 503 middleware and the `status`/`cluster` endpoints go through it.
 - `cli/commands/start.py` tail — `set_posture('idle')` after a successful `ava start`; `spawn_update`'s failed-chain rollback does the same.
-- `ops/controllers/stranded_pause.py` — `paused` AND `converging` gate resurrection: while an updater may be running, the restarter must not revive what the rollout paused.
+- `ops/controllers/stranded_pause.py` — `paused` AND `converging` gate service resurrection while an updater may be running. The native maintenance journal also blocks watchdog admission and cannot be cleared by stranded-pause recovery.
 
 ### Updater lease (writers)
 

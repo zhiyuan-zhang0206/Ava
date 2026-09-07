@@ -25,7 +25,7 @@ A module-level constant whose name contains lattice vocabulary (`STALL`, `GRACE`
 `REAP_INTERVAL`) must be one of:
 
 1. **Defined in a lattice family module** — `shared/timing.py`,
-   `shared/boot_timing.py`, `shared/deploy_timing.py`, `shared/stop_timing.py`,
+   `shared/deploy_timing.py`, `shared/stop_timing.py`,
    `shared/schedule_timing.py`, `shared/cluster_lock.py`,
    `shared/host_deploy_state.py`. These are the lattice's homes; registering a
    new clock there and in `CLOCKS` is the correct way to add one.
@@ -96,7 +96,6 @@ _LATTICE_TERMS = (
 # deploy-lease and updater-lease clocks respectively.
 _FAMILY_MODULES = (
     "shared/timing.py",
-    "shared/boot_timing.py",
     "shared/deploy_timing.py",
     "shared/stop_timing.py",
     "shared/schedule_timing.py",
@@ -142,11 +141,6 @@ def _registered_clock_names() -> frozenset[str]:
 # (a flag, a key, a collection), or it is a genuinely independent clock with no
 # lattice neighbour. Every entry states which.
 _INDEPENDENT_CLOCKS: dict[tuple[str, str], str] = {
-    ("agent/_boot_deadline.py", "STALL_FLAG"): "argv flag name (--boot-stall-seconds), not a clock",
-    (
-        "agent/_boot_deadline.py",
-        "BUDGET_FLAG",
-    ): "argv flag name (--boot-budget-seconds), not a clock",
     (
         "agent/graph/_node_log.py",
         "_STALL_GUARD_EXEMPT",

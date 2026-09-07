@@ -11,16 +11,13 @@ from agent import db as agent_db
 from agent.db import (
     claim_inbound_batch,
     finalize_claimed_inbounds,
-    mark_agent_status,
     reconcile_claimed_inbounds,
-    wait_for_inbound,
 )
 from agent.graph._claim_batch import _defer_chats_to_pending
 from agent.hosted_ownership import admit_hosted_runtime
 from agent.inbound_ownership import RuntimeOwnershipLostError, lock_inbound_owner
 from shared.db import create_agent
 from shared.db_transaction import async_write_transaction
-from shared.redis_listener import RedisInboundListener
 from shared.runtime_incarnation import RuntimeIncarnation
 from shared.turn_identity import bind_turn_identity
 
@@ -183,8 +180,6 @@ async def test_expired_owner_zero_claim_then_takeover(
     assert new is not None
     with bind_turn_identity(agent_id, incarnation=new):
         assert [r.id for r in await claim_inbound_batch(aops_pool, agent_id)] == [inbound]
-    with bind_turn_identity(agent_id, incarnation=old), pytest.raises(RuntimeOwnershipLostError):
-        await mark_agent_status(aops_pool, agent_id, "idling", expected_from="running")
 
 
 async def test_owner_locked_queue_mutation_rolls_back(
@@ -260,16 +255,12 @@ async def test_claim_lock_timeout_releases_connection_for_retry(
 async def test_missing_redis_publish_recovers_from_durable_pg(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
-    aredis_inbound_listener: RedisInboundListener,
 ) -> None:
     agent_id = _agent(db_conn)
     owner = await _admit(aops_pool, agent_id)
     # Direct SQL deliberately omits all Redis notifications.
     inbound = _insert(db_conn, agent_id)
     with bind_turn_identity(agent_id, incarnation=owner):
-        await asyncio.wait_for(
-            wait_for_inbound(aops_pool, aredis_inbound_listener, agent_id=agent_id), 3
-        )
         assert [r.id for r in await claim_inbound_batch(aops_pool, agent_id)] == [inbound]
 
 

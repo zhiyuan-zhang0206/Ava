@@ -2,7 +2,7 @@
 
 The agent-runner's inbound ops service — the ONLY long-running ava process on
 an agent-runner that the gateway dials DIRECTLY over the private network
-(the runner's other services — restarter, watchdog, browser, mcp-daemon — are
+(the runner's other services — agent-host, watchdog, browser, mcp-daemon — are
 local or health-checked, not gateway-facing). Serves an inbound HTTP
 endpoint the gateway dials to run a cluster op on this host. Each request executes **in-process** by calling free
 functions in `ops/ops_*.py` and returns the result in the HTTP
@@ -753,17 +753,10 @@ def _shutdown_op_pool() -> None:
 
 
 def _hard_exit(code: int) -> int:
-    """End the process now, skipping interpreter teardown. Never returns.
-
-    Teardown is precisely what hangs: `asyncio.run`'s close awaits
-    `shutdown_default_executor`, and the atexit handler joins every non-daemon worker
-    unboundedly (see `_op_executor`). One wedged arm therefore holds a daemon that has
-    already finished every piece of cleanup it owns — `_main`'s `finally` layers run
-    first (health server, pidfile, DB pool), and what is skipped after them is
-    bookkeeping for an interpreter about to stop existing.
-
-    Logs are flushed first: they are the one thing a skipped teardown would lose, and
-    this log is where the next stall has to be legible.
+    """Exit after async service cleanup, without joining stuck worker threads.
+    ``main`` cancels and awaits loop tasks before reaching this point. Skipping
+    interpreter teardown avoids its unbounded default/op-executor joins; logs
+    are flushed explicitly because their atexit cleanup is also skipped.
     """
     with contextlib.suppress(Exception):
         from loguru import logger as _loguru
@@ -781,13 +774,22 @@ def main() -> None:
     init_gateway_process(name="ops")
     install_graceful_shutdown("ops")
     code = 0
-    # `asyncio.Runner`, not `asyncio.run`: `run` closes in a `finally` that awaits
-    # `shutdown_default_executor` — inside the very hang being escaped. Never closed.
+    # Drain async cleanup explicitly; Runner.close also joins the default
+    # executor, which may contain a stuck worker and must not delay this exit.
     runner = asyncio.Runner()
     try:
         runner.run(_main())
     except KeyboardInterrupt:
         _log.info("[ops] interrupted, shutting down")
+        loop = runner.get_loop()
+        tasks = asyncio.all_tasks(loop)
+        for task in tasks:
+            task.cancel()
+        results = loop.run_until_complete(asyncio.gather(*tasks, return_exceptions=True))
+        failures = [result for result in results if isinstance(result, Exception)]
+        if failures:
+            _log.error("[ops] async shutdown failed: %r", failures)
+            code = 1
     except Exception:
         _log.exception("[ops] daemon crashed — uncaught exception escaped _main()")
         code = 1

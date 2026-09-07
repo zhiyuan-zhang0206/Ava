@@ -7,6 +7,7 @@ from collections.abc import Generator
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 
+import psycopg
 import pytest
 
 from ops import cluster_status
@@ -73,7 +74,11 @@ def snapshot_dependencies(
 
     monkeypatch.setattr(cluster_status, "_check_pidfile", _dead_pidfile)
     monkeypatch.setattr(cluster_status, "_collect_sessions", _no_sessions)
-    monkeypatch.setattr(cluster_status, "_count_agent_processes", lambda: 0)
+
+    def _no_agents(_conn: object) -> int:
+        return 0
+
+    monkeypatch.setattr(cluster_status, "_count_local_agents", _no_agents)
     monkeypatch.setattr(cluster_status, "machine_name", lambda: "win")
     monkeypatch.setattr(cluster_status, "is_gateway", lambda: False)
     monkeypatch.setattr(cluster_status, "is_agent_runner", lambda: True)
@@ -102,7 +107,7 @@ class _BatchOnlyBackend:
 
 def test_collect_sessions_batches_timestamp_reads(monkeypatch: pytest.MonkeyPatch) -> None:
     """Each backend receives one timestamp batch, never one read per session."""
-    service = _BatchOnlyBackend("ava-main-restarter")
+    service = _BatchOnlyBackend("ava-main-agent-host")
     shell = _BatchOnlyBackend("ava-main-agent-7-shell-0")
     monkeypatch.setattr("shared.session_backend.get_backend", lambda: service)
     monkeypatch.setattr("shared.session_backend.get_shell_backend", lambda: shell)
@@ -122,7 +127,7 @@ def test_collect_sessions_stamps_cluster_zone(monkeypatch: pytest.MonkeyPatch) -
     import datetime as dt
     from zoneinfo import ZoneInfo
 
-    service = _BatchOnlyBackend("ava-main-restarter")
+    service = _BatchOnlyBackend("ava-main-agent-host")
     monkeypatch.setattr("shared.session_backend.get_backend", lambda: service)
     monkeypatch.setattr("shared.session_backend.get_shell_backend", lambda: _BatchOnlyBackend("x"))
     from shared.config import settings
@@ -288,6 +293,7 @@ def test_status_snapshot_degrades_when_the_pool_cannot_reach_db(
     assert snapshot.paused is False
     assert snapshot.current_orchestration is None
     assert snapshot.last_updater_outcome is None
+    assert snapshot.agent_count == 0
     assert snapshot.resource == _RESOURCE
 
 
@@ -318,3 +324,83 @@ def test_resource_sample_failure_still_degrades_to_none_from_worker(
     snapshot = cluster_status.status_snapshot(pool=pool)
 
     assert snapshot.resource is None
+
+
+def test_agent_count_reads_local_retained_identities_without_processes(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from shared.db import create_agent
+
+    monkeypatch.setattr(cluster_status, "machine_name", lambda: "count-host")
+    for machine, status in (
+        ("count-host", "running"),
+        ("count-host", "idling"),
+        ("count-host", "idling"),
+        ("count-host", "terminated"),
+        ("other-host", "idling"),
+    ):
+        agent = create_agent(db_conn)
+        db_conn.execute(
+            "INSERT INTO agents_meta(id,machine,status,runtime_kind,pid) "
+            "VALUES(%s,%s,%s,'hosted',NULL)",
+            (agent, machine, status),
+        )
+    db_conn.commit()
+    assert cluster_status._count_local_agents(db_conn) == 3
+
+
+def test_agent_count_uses_the_same_borrow_and_reaches_the_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+    snapshot_dependencies: tuple[HostDeployState, DeployLease],
+) -> None:
+    state, lease = snapshot_dependencies
+    conn = object()
+    pool = _Pool(conn)
+    seen: list[object] = []
+
+    def count(connection: object) -> int:
+        seen.append(connection)
+        return 7
+
+    def read_state(**_kwargs: object) -> HostDeployState:
+        return state
+
+    def read_lease(**_kwargs: object) -> DeployLease:
+        return lease
+
+    monkeypatch.setattr(cluster_status, "_count_local_agents", count)
+    monkeypatch.setattr("shared.host_deploy_state.read", read_state)
+    monkeypatch.setattr("shared.cluster_lock.read_update_lease", read_lease)
+    monkeypatch.setattr(cluster_status, "_read_resource_sample", lambda: None)
+    snapshot = cluster_status.status_snapshot(pool=pool)
+    assert snapshot.agent_count == 7
+    assert seen == [conn]
+    assert pool.timeouts == [2.0]
+
+
+@pytest.mark.parametrize("runner", [False, True])
+def test_agent_host_liveness_is_probed_only_on_a_runner(
+    monkeypatch: pytest.MonkeyPatch,
+    snapshot_dependencies: tuple[HostDeployState, DeployLease],
+    runner: bool,
+) -> None:
+    from shared.config import settings
+
+    probes: list[str] = []
+
+    def check(path: str) -> tuple[bool, int]:
+        probes.append(path)
+        return True, 1234
+
+    monkeypatch.setattr(cluster_status, "is_agent_runner", lambda: runner)
+    monkeypatch.setattr(cluster_status, "_check_pidfile", check)
+
+    def no_deploy(_pool: object) -> tuple[None, None, int]:
+        return None, None, 0
+
+    monkeypatch.setattr(cluster_status, "_read_deploy_snapshot", no_deploy)
+    monkeypatch.setattr(cluster_status, "_read_resource_sample", lambda: None)
+    snapshot = cluster_status.status_snapshot()
+    assert snapshot.agent_host_online is (True if runner else None)
+    assert (str(settings.services.agent_host_pidfile) in probes) is runner
+    assert "restarter_online" not in snapshot.model_dump()

@@ -1,65 +1,78 @@
 ---
 type: doc
-title: Explicit local maintenance
-description: A durable home-local hold around existing restart, claim and checkpoint boundaries.
+title: Native pause and maintenance
+description: A durable home-local admission hold around existing restart, claim and checkpoint boundaries, shared by pause, stop and update.
 status: current
 ---
 
-# Explicit local maintenance
+# Native pause and maintenance
 
 `maintenance.py`, `maintenance_state.py` and `maintenance_cohort.py` extend the
 existing [pause-owner journal](pause_owner.ava.okf.md). There is no new database
-pause table or native graph hook. The operation is the exact `(holder,
-acquired_at)` pair in `$AVA_HOME/run/deploy-pause-owner.json`; it has no TTL.
-Ordinary startup, update, compensation and stranded-pause recovery cannot clear
-it. Invalid/unreadable journal state refuses admission.
+pause table or agent graph hook. The exact `(holder, acquired_at)` operation is
+stored in `$AVA_HOME/run/deploy-pause-owner.json`; it has no TTL. Invalid or
+unreadable state refuses admission. External-agent identity leases are a
+separate protocol and are not acquired or released by native maintenance.
 
-Preparation publishes the hold before locking native `agents_meta` rows. Hosted
-admission checks it again after the same row lock. Existing native iterations
-continue normally until an ordinary `restart` inbound reaches claim; lifecycle
-priority preserves ordinary pending messages. A request just after claim can
-allow another iteration before the next claim. No new LLM/exec/compaction pause
-hook changes this behavior.
+`ops.agent_pause` publishes the hold before locking native `agents_meta` rows.
+Hosted admission checks it at the row-lock boundary. Existing
+iterations run until an ordinary `restart` reaches claim. Lifecycle priority
+preserves pending ordinary messages. A restart arriving after claim can allow
+one more iteration; this is not an instruction-level freeze.
 
-The journal records one restart ID per original live hosted incarnation.
-Preparation first records the cohort, then commits commands, then records their
-IDs. Repeating it after either file-write failure reuses the same commands.
-Normal claim owns target generation/owner binding. Clean, unowned idle rows
-without a PID, resources or unresolved claimed/lifecycle work are recorded as
-parked intent and left unchanged. Stale foreign owners, process-mode runtimes,
-external control leases and unknown work require separate resolution.
+The journal records one restart ID per captured live incarnation. Preparation
+first records the cohort, commits commands, then records their IDs. A retry
+reuses the same commands. Normal claim binds the target generation and owner.
+Clean unowned idle rows without resources or unresolved lifecycle work are
+parked without being relaunched. Stale owners and ambiguous work refuse drain.
 
-A host records drain only after the shielded continuation, final checkpoint
-flush, resource closure and owner settlement have returned. The DB restart must
-be applied, unobserved, and targeted to that same host boot. A successor cannot
-sign an absent original receipt. Failures latch in memory **before** any journal
-I/O and, where possible, in the journal; another wake cannot turn failure into
-drain. `applied_at`, an idle row, or a released lease alone is insufficient.
+Already-stopped hosted units also preserve legacy idle rows whose lease is
+NULL and whose PID/resources are empty, after proving the local host absent.
+An applied old restart and claimed ordinary work remain untouched for normal
+cold admission; an expired lease or an unapplied control does not qualify.
+This is preserved idle intent, not a fabricated continuation receipt.
+
+Hosted drain receipts require the shielded continuation, final checkpoint
+flush, resources and owner settlement to finish. The matching DB restart must
+be applied and unobserved. A successor cannot sign an absent original receipt.
+Failures latch before journal I/O;
+`applied_at`, an idle row, or a released lease alone is insufficient.
 
 Phases are `preparing → draining → drained → stopping → stopped → starting →
-ready`. Only explicit same-operation resume releases admission. Failed prepare,
-drain, stop or start retains its phase and hold; retries and `resume --cancel`
-are explicit. Cancel restores ordinary recovery, and does not promise replay
-safety for a failed arbitrary external effect. Successful resume wakes the
-saved restart IDs; their existing DB pointers also survive a lost Redis wake.
-Cold admission observes the pointer and reloads the checkpoint. Halted agents
-remain idle; unfinished native work continues; terminated rows are not revived.
+ready`. Failed prepare/drain/stop/start keeps the hold. Ordinary `ava start`
+authorizes the existing operation for bring-up and resumes after readiness;
+explicit `ava maintenance start` leaves resume to the operator. The internal
+`authorized_start` ContextVar is exact-operation authority for nested calls,
+not a service-process credential. Stranded-pause recovery cannot abandon a
+maintenance hold. A recorded continuation/flush failure blocks ordinary start
+and every resume path before admission is released. Resume wakes the saved restart IDs; DB pointers survive a
+lost Redis wake. Cold admission reloads checkpoints, leaves idle agents idle,
+continues unfinished work and does not revive terminated identities.
+Repeating `stop` after a completed, failure-free stop reads this same journal
+before configuration bootstrap, so an offline gateway does not prevent the
+idempotent stop. First-time normal drain still needs data-plane configuration.
 
-During prepare/drain, dependency APIs remain available. Explicit local stop
-changes phase to `stopping`, closes new ops admission and waits for both request
-handlers and actual executor futures before signalling services. The HTTP
-server's socket close is insufficient when a client disconnects before its
-handler finishes. This accounting does not cover detached jobs or OS services.
+SDK dependencies remain available through prepare/drain. Service stop closes
+new ops admission and waits for admitted handlers and executor work before
+signalling services. `ava pause` retains infrastructure and persistent PTYs;
+`ava stop` closes terminal jobs and shells and stops home-owned infrastructure
+unless explicitly preserved. `_maintenance_stop` verifies process identities
+and exits; `_maintenance_data_plane` saves Redis before its verified shutdown.
+`_stop_extras` covers home-owned Gate/helper/native LGTM outside the session
+roster, retaining desired configuration and data. None of these local checks
+proves that every remote or unregistered writer has stopped.
 
-Local `stop` and `stop-data-plane` refuse live terminals by default. Explicit
-`--keep-terminals` preserves them using an operator assertion of a separately
-verified work boundary. It does not prove PTY business writes have stopped.
-Windows SDK shell/schedule records are excluded from service signalling only
-under that assertion; drain, ops and service identity/exit checks still apply.
+Explicit force kills native processes without stamping a normal termination or
+inventing a restart/flush receipt. It preserves the original metadata for the
+existing crash-recovery policy, whose auto-resurrection and retry limits still
+apply; it does not promise the normal drain's continuation guarantee.
 
-The CLI-only `authorized_start` ContextVar is an exact-operation capability for
-nested startup/unpause calls in one process; it is not propagated to service
-processes and never replaces the persistent journal authority.
+The compatibility `ava maintenance` surface exposes intermediate phases.
+Its service/data-plane stop refuses live terminals unless `--keep-terminals`
+asserts a separately verified work boundary. This flag preserves the terminal,
+not proof that its script cannot write. `resume --cancel` restores ordinary
+recovery during preparation/drain; it cannot bypass a partial service stop or
+prove replay safety for a failed arbitrary external effect.
 
-See [the operator procedure](../conventions/graceful-maintenance.md) for the
-local/fleet distinction, external resources and first-deployment limitation.
+See the [operator procedure](../conventions/graceful-maintenance.md) for
+resource scopes, recovery and the first-deployment limitation.

@@ -32,7 +32,6 @@ from agent.graph._claim_dispatch import (
 )
 from agent.messages import NoteTag
 from agent.state import AgentState
-from shared.redis_listener import RedisInboundListener
 from tests.conftest import spawn_agent
 
 from .test_claim import _config, _insert_inbound_kind, _make_runtime  # reuse the claim harness
@@ -99,7 +98,6 @@ async def test_fork_end_to_end_single_copy_each_note(
     memory_plugin: Any,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
-    aredis_inbound_listener: RedisInboundListener,
 ) -> None:
     """The full fork claim with the real registry: the inherited head carries a
     source-id note, a source-memory note, a source-preloads note and the
@@ -126,7 +124,9 @@ async def test_fork_end_to_end_single_copy_each_note(
 
     cmd = await claim_node(
         AgentState(messages=list(inherited)),
-        _make_runtime(ops_pool=aops_pool, inbound_listener=aredis_inbound_listener),
+        _make_runtime(
+            ops_pool=aops_pool,
+        ),
         _config(tid),
     )
 

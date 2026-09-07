@@ -314,7 +314,7 @@ def _rebuild_stale_cron_watcher(row: dict[str, Any]) -> str | None:
 def reconcile() -> list[str]:
     """Rebuild / mark watchers whose sessions died — the #1014 fix (R1-8).
 
-    Called from the agent boot (`agent/loop.py`): every row in this agent's
+    Called from host runtime preparation (`agent/_process_boot.py`): every row in this agent's
     watcher registry whose session is gone is either rebuilt or marked:
 
     - `cron` — re-spawned from the stored expression only when its row belongs

@@ -436,7 +436,7 @@ class TestSendMessage:
 
 
 class TestLifecycle:
-    @pytest.mark.parametrize("wire_status", ["enqueued", "already_terminated", "force_killed"])
+    @pytest.mark.parametrize("wire_status", ["enqueued", "already_terminated"])
     @patch("ava._gateway_transport._client")
     def test_terminate_returns_status(self, mock_client: MagicMock, wire_status: str):
         from ava._gateway_client import terminate

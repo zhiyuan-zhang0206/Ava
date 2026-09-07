@@ -38,7 +38,6 @@ from agent.hooks.compact import (
 )
 from agent.state import AgentState, CircuitState
 from shared.event_publisher import AgentEventPublisher
-from shared.redis_listener import RedisInboundListener
 from tests.agent.test_claim import (
     _compact_tail,
     _config,
@@ -310,7 +309,6 @@ async def test_fatal_provider_error_does_not_reopen_already_open_breaker() -> No
 async def test_heartbeat_while_breaker_open_forces_compact(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
-    aredis_inbound_listener: RedisInboundListener,
 ) -> None:
     """Breaker open with context_overflow + heartbeat wake → the check-in note
     is NOT appended (no doomed call), and the wake routes into a compaction
@@ -324,7 +322,6 @@ async def test_heartbeat_while_breaker_open_forces_compact(
         state,
         _make_runtime(
             ops_pool=aops_pool,
-            inbound_listener=aredis_inbound_listener,
             llm=fake_llm,
         ),
         _config(tid),
@@ -340,7 +337,6 @@ async def test_heartbeat_while_breaker_open_forces_compact(
 async def test_heartbeat_while_breaker_open_falls_back_to_minimal_compact(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
-    aredis_inbound_listener: RedisInboundListener,
 ) -> None:
     """The 3962 shape: the compaction request itself is rejected (context over
     the effective input ceiling) — the wake must still be rescued by the
@@ -360,7 +356,6 @@ async def test_heartbeat_while_breaker_open_falls_back_to_minimal_compact(
         state,
         _make_runtime(
             ops_pool=aops_pool,
-            inbound_listener=aredis_inbound_listener,
             llm=llm,
         ),
         _config(tid),
@@ -373,7 +368,6 @@ async def test_heartbeat_while_breaker_open_falls_back_to_minimal_compact(
 async def test_heartbeat_while_breaker_open_non_overflow_parks(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
-    aredis_inbound_listener: RedisInboundListener,
 ) -> None:
     """Breaker open with a non-overflow reason (billing): the heartbeat is
     consumed without a note and parks at claim — no LLM call, no compact, no
@@ -387,7 +381,6 @@ async def test_heartbeat_while_breaker_open_non_overflow_parks(
         state,
         _make_runtime(
             ops_pool=aops_pool,
-            inbound_listener=aredis_inbound_listener,
             llm=fake_llm,
         ),
         _config(tid),
@@ -407,7 +400,6 @@ async def test_chat_cobatched_with_open_breaker_heartbeat_reaches_llm(
     second_kind: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
-    aredis_inbound_listener: RedisInboundListener,
 ) -> None:
     """A parked heartbeat must not bury a same-batch chat in either FIFO order."""
     tid = spawn_agent()
@@ -421,7 +413,6 @@ async def test_chat_cobatched_with_open_breaker_heartbeat_reaches_llm(
         _overflow_state(breaker_reason="billing"),
         _make_runtime(
             ops_pool=aops_pool,
-            inbound_listener=aredis_inbound_listener,
             llm=fake_llm,
         ),
         _config(tid),
@@ -453,7 +444,7 @@ async def test_claim_parks_idle_while_non_overflow_breaker_open(
     )
     cmd = await claim_node(
         state,
-        _make_runtime(ops_pool=aops_pool, hosted=True),
+        _make_runtime(ops_pool=aops_pool),
         _config(tid),
     )
 
@@ -473,7 +464,7 @@ async def test_claim_does_not_park_while_breaker_closed(
     )
     cmd = await claim_node(
         state,
-        _make_runtime(ops_pool=aops_pool, hosted=True),
+        _make_runtime(ops_pool=aops_pool),
         _config(tid),
     )
 
@@ -483,7 +474,6 @@ async def test_claim_does_not_park_while_breaker_closed(
 async def test_heartbeat_normal_when_breaker_closed(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
-    aredis_inbound_listener: RedisInboundListener,
 ) -> None:
     """Breaker closed: the heartbeat check-in note is appended and the wake
     routes to the LLM as before — the gate only exists while the breaker is
@@ -497,7 +487,6 @@ async def test_heartbeat_normal_when_breaker_closed(
         state,
         _make_runtime(
             ops_pool=aops_pool,
-            inbound_listener=aredis_inbound_listener,
             llm=fake_llm,
         ),
         _config(tid),
@@ -630,3 +619,53 @@ async def test_llm_node_cancel_does_not_close_circuit(fake_cancel_event) -> None
 
     assert cmd.update.get("circuit") is None, "cancel path must not close the breaker"  # pyright: ignore[reportOptionalMemberAccess]
     assert cmd.update["halted"] is True  # pyright: ignore[reportOptionalSubscript, reportUnknownMemberType]
+
+
+@pytest.mark.parametrize("overflow", [False, True])
+async def test_host_persists_provider_failure_before_releasing_turn(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    overflow: bool,
+) -> None:
+    """A real graph failure is flushed to PG; a fresh reader sees its breaker."""
+    from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+    from langgraph.graph import END, START, StateGraph
+
+    from agent.startup import _wrap_saver_writes_with_nstep_interval
+    from services.agent_host.host import AgentHost
+    from shared.config import settings
+
+    agent_id = spawn_agent()
+    calls = 0
+
+    def reject(state: AgentState) -> dict[str, object]:
+        nonlocal calls
+        calls += 1
+        raise FatalProviderError(
+            "synthetic provider refusal",
+            error_class="permanent",
+            provider="anthropic",
+            status=400 if overflow else 402,
+            context_overflow=overflow,
+        )
+
+    builder = StateGraph(AgentState, context_schema=AvaContext)
+    builder.add_node("reject", reject)  # pyright: ignore[reportUnknownMemberType]
+    builder.add_edge(START, "reject")
+    builder.add_edge("reject", END)
+    async with AsyncPostgresSaver.from_conn_string(settings.data_plane.db_url) as saver:
+        _wrap_saver_writes_with_nstep_interval(saver, 100)
+        graph = builder.compile(checkpointer=saver)  # pyright: ignore[reportUnknownMemberType]
+        host = AgentHost(pool=aops_pool, checkpointer=saver, graph=graph, machine="test")
+        assert not await host._invoke_until_done(agent_id, _breaker_ctx())
+    # New saver/connection prevents in-memory buffered state from faking success.
+    async with AsyncPostgresSaver.from_conn_string(settings.data_plane.db_url) as reader:
+        stored = await reader.aget_tuple({"configurable": {"thread_id": str(agent_id)}})
+    assert stored is not None
+    values = stored.checkpoint["channel_values"]
+    assert values["halted"] is True
+    circuit = CircuitState.model_validate(values["circuit"])
+    assert circuit.open is True
+    assert circuit.reason == ("context_overflow" if overflow else "billing")
+    assert circuit.opened_at is not None
+    assert calls == 1

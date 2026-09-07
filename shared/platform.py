@@ -279,7 +279,7 @@ def crontab_lock() -> Generator[None]:
     two co-located clusters (or a gateway restart racing a converge) both
     read the old crontab, and the second writer overwrites the first's
     just-added line — for the watchdog-probe that line is the last line of
-    supervision, and losing it silently leaves restarter/ops/browser
+    supervision, and losing it silently leaves agent-host/ops/browser
     sessions down with nobody watching (audit 2026-08-08 P1).
 
     The lock file lives OUTSIDE $AVA_HOME (a per-home lock would not

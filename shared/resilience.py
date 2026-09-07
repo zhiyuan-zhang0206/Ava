@@ -96,7 +96,7 @@ class ExponentialBackoff:
 def _agent_phase(span: float) -> float:
     """Deterministic per-process phase offset in [0, span).
 
-    Derived from AVA_AGENT_ID (set by agent/loop.py at boot) so an agent
+    Derived from AVA_AGENT_ID when carried by a launched child so an agent
     keeps its own phase across restarts; falls back to the pid for
     non-agent processes (gateway daemons, CLI); 0 when neither is available
     (tests). Same de-phasing idea as agent/graph/_build.py's

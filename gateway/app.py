@@ -269,10 +269,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     agent compact) go through writes to the inbound_messages table and are
     handed off to the kernel.
 
-    The restart watcher has been extracted to the standalone
-    services/restarter daemon — no longer managed by the gateway lifespan.
-    Auto label generation has likewise been extracted to the
-    services/labeler daemon.
+    The agent host handles native lifecycle work. Auto label generation
+    runs in the separate services/labeler daemon.
     """
     ensure_provider_plugins_loaded()
 
@@ -513,9 +511,8 @@ async def _cluster_pause_middleware(
     might step on a migrating schema.
 
     Exempt: every route whose doorplate declares CONTROL_PLANE (the
-    /api/cluster/* control plane, the Grafana alerting webhook, and the
-    agent self-report /api/agents/{id}/exited — the quiesce's drain
-    signal). Everything else 503.
+    /api/cluster/* control plane and the Grafana alerting webhook).
+    Everything else 503.
     """
     if await _cluster_is_paused(request) and not _pause_policy.should_bypass_pause(
         request.method, request.url.path
@@ -599,7 +596,7 @@ async def _cluster_auth_middleware(
       ``main()``).
     - ``auth_middleware_enabled=false`` — the e2e/test knob: bypass the
       middleware while keeping the cluster secret for internal
-      service-to-service auth (ops / restarter).
+      service-to-service auth (ops / agent-host).
     """
     from gateway.request_principal import AuthPrincipal
 

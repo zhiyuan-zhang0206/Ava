@@ -167,9 +167,14 @@ async def admit_hosted_runtime(
                 ):
                     # The row lock binds this monotonic exact-process observation
                     # to the resource transfer in the same transaction.
-                    if not await asyncio.to_thread(process_ended, prior_resources.host_process):
-                        _refuse_hosted_admission()
-                    exited_predecessor = prior_resources.host_process
+                    current_host = ResourceProcess(pid=native.pid, birth=native.create_time())
+                    if prior_resources.host_process != current_host:
+                        if not await asyncio.to_thread(process_ended, prior_resources.host_process):
+                            _refuse_hosted_admission()
+                        exited_predecessor = prior_resources.host_process
+                    # The same real host may transfer a closed incarnation only
+                    # through admit_resources_async's durable predecessor check.
+
             await admit_resources_async(
                 conn,
                 RuntimeIncarnation(agent_id, generation, owner),

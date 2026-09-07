@@ -197,7 +197,7 @@ async def test_force_waits_for_real_work_and_delayed_cancel_cannot_hit_successor
                 await asyncio.sleep(0.01)
         with ConnectionPool[psycopg.Connection](settings.data_plane.db_url) as pool:
             _, _, _, command = await asyncio.to_thread(
-                _force_terminate_transaction, agent_id, pool, source="user", kill_process=False
+                _force_terminate_transaction, agent_id, pool, source="user"
             )
         chat = _insert(db_conn, agent_id)
         payload = json.dumps({"agent_id": agent_id, "command_id": command}).encode()
@@ -244,7 +244,7 @@ async def test_idle_force_only_original_live_host_can_observe(
     )
     with ConnectionPool[psycopg.Connection](settings.data_plane.db_url) as pool:
         _, _, _, command = await asyncio.to_thread(
-            _force_terminate_transaction, agent_id, pool, source="user", kill_process=False
+            _force_terminate_transaction, agent_id, pool, source="user"
         )
     assert not await original_host_force(
         aops_pool, agent_id, uuid4(), "claim-test", command_id=command, quiescent=True
@@ -273,7 +273,7 @@ async def test_exclusive_host_boot_recovers_resource_free_applied_force(
     )
     with ConnectionPool[psycopg.Connection](settings.data_plane.db_url) as pool:
         _, _, _, command = await asyncio.to_thread(
-            _force_terminate_transaction, agent_id, pool, source="user", kill_process=False
+            _force_terminate_transaction, agent_id, pool, source="user"
         )
     monkeypatch.setattr("shared.hosted_force.exec_run_dir", lambda: tmp_path)
 
@@ -306,7 +306,7 @@ async def test_exclusive_host_boot_defers_force_with_persistent_exec_evidence(
     )
     with ConnectionPool[psycopg.Connection](settings.data_plane.db_url) as pool:
         _, _, _, command = await asyncio.to_thread(
-            _force_terminate_transaction, agent_id, pool, source="user", kill_process=False
+            _force_terminate_transaction, agent_id, pool, source="user"
         )
     agent_dir = tmp_path / str(agent_id)
     agent_dir.mkdir()

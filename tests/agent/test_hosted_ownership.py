@@ -10,7 +10,7 @@ import psutil
 import psycopg
 import pytest
 from psycopg.types.json import Jsonb
-from psycopg_pool import AsyncConnectionPool, ConnectionPool
+from psycopg_pool import AsyncConnectionPool
 
 from agent.db import claim_inbound_batch
 from agent.hosted_ownership import (
@@ -20,8 +20,7 @@ from agent.hosted_ownership import (
     renew_hosted_owner,
     settle_hosted_runtime,
 )
-from shared.config import settings
-from shared.db import PG_KEEPALIVE_KWARGS, create_agent, insert_inbound_message
+from shared.db import create_agent, insert_inbound_message
 from shared.incarnation_resources import IncarnationResources, ResourceProcess, decode_resources
 from shared.runtime_incarnation import RuntimeIncarnation, current_incarnation
 from shared.turn_identity import bind_turn_identity
@@ -311,32 +310,6 @@ async def test_hosted_incarnation_context_is_task_local_and_copies_to_thread() -
     first, second = await asyncio.gather(read(1), read(2))
     assert first != second
     assert current_incarnation(1) is None
-
-
-async def test_hosted_exit_matches_generation_and_owner(
-    db_conn: psycopg.Connection,
-    aops_pool: AsyncConnectionPool,
-) -> None:
-    import asyncio
-
-    from ops.ops_exit import _mark_exited_blocking
-
-    agent_id = _agent(db_conn)
-    incarnation = await admit_hosted_runtime(
-        aops_pool, agent_id, "host-test", uuid4(), expected_from="idling"
-    )
-    assert incarnation is not None
-    with ConnectionPool[psycopg.Connection](
-        settings.data_plane.db_url, min_size=1, max_size=2, kwargs=PG_KEEPALIVE_KWARGS
-    ) as pool:
-        stale = await asyncio.to_thread(
-            _mark_exited_blocking, agent_id, pool, uuid4(), incarnation.owner
-        )
-        assert stale[0] == 0
-        current = await asyncio.to_thread(
-            _mark_exited_blocking, agent_id, pool, incarnation.generation, incarnation.owner
-        )
-        assert current[0] == 1
 
 
 @pytest.mark.parametrize("status", ["running", "idling"])

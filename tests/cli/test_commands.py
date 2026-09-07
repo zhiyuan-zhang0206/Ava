@@ -19,6 +19,7 @@ import sys
 from collections.abc import Iterable
 from pathlib import Path
 from typing import cast
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -26,6 +27,7 @@ from cli import commands as _cli
 from cli.commands import _collect_setup_values as _real_collect_setup_values
 from cli.commands import _update_uv_sync
 from cli.commands._setup import SetupValues
+from cli.commands.stop import _force_stop
 from cli.commands.update import _poll_verdict_detail
 from shared.config import settings
 
@@ -504,7 +506,7 @@ def test_start_includes_watchdog_session(
     assert _sess("agent-runner-watchdog") not in service.created  # gateway-only host
 
 
-# ─── start (secondary node only starts ops/restarter/agent-runner-watchdog + skips local infra) ─
+# ─── start (secondary node only starts ops/agent-host/agent-runner-watchdog + skips local infra) ─
 
 
 def test_start_agent_runner_skips_local_infra(
@@ -549,13 +551,12 @@ def test_start_agent_runner_starts_only_minimal_services(
     tmp_path: Path,
     _fake_session_backends: tuple[_FakeSessionBackend, _FakeSessionBackend],
 ) -> None:
-    """secondary only starts ops + restarter + agent-runner-watchdog, 3 sessions."""
+    """secondary only starts ops, agent-host and agent-runner services."""
     _ = tmp_path
     monkeypatch.setattr("shared.config.settings.services.browser_enabled", False)  # env-independent
     # Pin computer-mcp's platform gate "available" (env-independent roster).
     monkeypatch.setattr("ops.spec._computer_mcp_gate_reason", lambda: None)
     # The process-mode startup shape (hosted is the default since 2026-09).
-    monkeypatch.setattr("ops.spec.runner_mode", lambda: "process")
 
     def _secondary_collect(_args: dict[str, str | None]) -> tuple[dict[str, str], list]:
         return {
@@ -578,7 +579,7 @@ def test_start_agent_runner_starts_only_minimal_services(
     _cli.cmd_start()
     assert set(service.created) == {
         _sess("ops"),
-        _sess("restarter"),
+        _sess("agent-host"),
         _sess("page-server"),
         _sess("agent-runner-watchdog"),
         _sess("computer-mcp"),
@@ -609,7 +610,6 @@ def test_services_for_role_gateway_excludes_ops(monkeypatch: pytest.MonkeyPatch)
         "browser-mcp",
         "mcp-daemon",
         "computer-mcp",
-        "restarter",
         "agent-runner-watchdog",
         # agent-host: agent-runner-only — never on a gateway-only host, in
         # either runner mode.
@@ -629,7 +629,7 @@ def test_services_for_role_gateway_excludes_ops(monkeypatch: pytest.MonkeyPatch)
 
 
 def test_services_for_role_agent_runner_subset(monkeypatch: pytest.MonkeyPatch) -> None:
-    """role=agent-runner → ops (inbound server) + restarter + agent-runner-watchdog.
+    """role=agent-runner → ops (inbound server), agent-host and agent-runner-watchdog.
     No local gateway, no gateway-watchdog."""
     monkeypatch.setattr("shared.config.settings.services.browser_enabled", False)  # env-independent
     # computer-mcp's gate is the platform's permissions-helper capability, not a
@@ -641,11 +641,10 @@ def test_services_for_role_agent_runner_subset(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr("ops.spec._otel_collector_gate_reason", lambda: None)
     # Pin the process partition: hosted (the default since 2026-09) swaps
     # restarter for agent-host on this roster.
-    monkeypatch.setattr("ops.spec.runner_mode", lambda: "process")
     sessions = {s.session for s in _cli._services_for_roles(frozenset({"agent-runner"}))}
     assert sessions == {
         "ops",
-        "restarter",
+        "agent-host",
         "page-server",
         "agent-runner-watchdog",
         "computer-mcp",
@@ -658,7 +657,7 @@ def test_services_for_role_agent_runner_subset(monkeypatch: pytest.MonkeyPatch) 
 def test_services_for_roles_single_box_unions_both(monkeypatch: pytest.MonkeyPatch) -> None:
     """A single-box gateway,agent-runner host runs the UNION — every gateway
     daemon PLUS ops (so its own gateway can dial it over localhost for spawn),
-    both capability watchdogs, and exactly one host-or-restarter."""
+    both capability watchdogs, and one agent host."""
     monkeypatch.setattr("shared.config.settings.services.browser_enabled", False)
     # computer-mcp's gate is the platform's permissions-helper capability, not a
     # setting — pin it "available" so the union is env-independent.
@@ -669,7 +668,6 @@ def test_services_for_roles_single_box_unions_both(monkeypatch: pytest.MonkeyPat
     # Pin the runner mode BEFORE computing the roster: hosted is the default
     # since 2026-09, so this asserts the default shape — agent-host in,
     # restarter out.
-    monkeypatch.setattr("ops.spec.runner_mode", lambda: "hosted")
     sessions = {s.session for s in _cli._services_for_roles(frozenset({"gateway", "agent-runner"}))}
     all_sessions = {s.session for s in _cli.build_services()}
     # union = everything that is not gated out; browser + browser-mcp are off
@@ -678,7 +676,6 @@ def test_services_for_roles_single_box_unions_both(monkeypatch: pytest.MonkeyPat
     assert sessions == all_sessions - {
         "browser",
         "browser-mcp",
-        "restarter",
         "pitr-uploader",
         "pitr-base-candidate",
         # milvus is gated out under the numpy memory-search backend (the
@@ -697,7 +694,7 @@ def test_services_for_roles_single_box_unions_both(monkeypatch: pytest.MonkeyPat
 
 
 def test_start_missing_capability_reports_serve_flags_only(
-    monkeypatch: pytest.MonkeyPatch, capsys
+    monkeypatch: pytest.MonkeyPatch, capsys, tmp_path: Path
 ) -> None:
     """serve-capability is the entry to the role-aware filter; when both are missing (host serves nothing)
     other fields cannot be judged for relevance, so the error lists only the two --serve-* flags
@@ -711,7 +708,7 @@ def test_start_missing_capability_reports_serve_flags_only(
     monkeypatch.setattr(settings.gateway, "gateway_url", "")
     from shared import paths
 
-    monkeypatch.setattr(paths, "ava_home", lambda: Path("/nonexistent-tmp-for-test"))
+    monkeypatch.setattr(paths, "ava_home", lambda: tmp_path / "unconfigured")
     monkeypatch.setattr(_cli, "_collect_setup_values", _real_collect_setup_values)
 
     rc = _cli.cmd_start()
@@ -726,7 +723,7 @@ def test_start_missing_capability_reports_serve_flags_only(
 
 
 def test_start_missing_agent_runner_fields_reports_agent_runner_flags(
-    monkeypatch: pytest.MonkeyPatch, capsys
+    monkeypatch: pytest.MonkeyPatch, capsys, tmp_path: Path
 ) -> None:
     """capability is agent-runner, other fields missing → error lists agent-runner needed flags (--gateway-url)."""
 
@@ -737,7 +734,7 @@ def test_start_missing_agent_runner_fields_reports_agent_runner_flags(
     monkeypatch.setattr(settings.gateway, "gateway_url", "")
     from shared import paths
 
-    monkeypatch.setattr(paths, "ava_home", lambda: Path("/nonexistent-tmp-for-test"))
+    monkeypatch.setattr(paths, "ava_home", lambda: tmp_path / "unconfigured")
     monkeypatch.setattr(_cli, "_collect_setup_values", _real_collect_setup_values)
 
     rc = _cli.cmd_start()
@@ -748,7 +745,7 @@ def test_start_missing_agent_runner_fields_reports_agent_runner_flags(
 
 
 def test_start_missing_gateway_fields_reports_gateway_flags(
-    monkeypatch: pytest.MonkeyPatch, capsys
+    monkeypatch: pytest.MonkeyPatch, capsys, tmp_path: Path
 ) -> None:
     """capability=gateway, other fields missing → error lists gateway needed flags (--gateway-url)."""
 
@@ -760,7 +757,7 @@ def test_start_missing_gateway_fields_reports_gateway_flags(
     monkeypatch.setattr(settings.gateway, "gateway_url", "")
     from shared import paths
 
-    monkeypatch.setattr(paths, "ava_home", lambda: Path("/nonexistent-tmp-for-test"))
+    monkeypatch.setattr(paths, "ava_home", lambda: tmp_path / "unconfigured")
     monkeypatch.setattr(_cli, "_collect_setup_values", _real_collect_setup_values)
 
     rc = _cli.cmd_start()
@@ -824,6 +821,7 @@ def test_cmd_restart_succeeds_non_interactively(monkeypatch: pytest.MonkeyPatch)
         "run",
         _git_aware(lambda *_a, **_kw: _FakeResult(returncode=0)),  # pyright: ignore[reportUnknownArgumentType]
     )
+    monkeypatch.setattr(_cli, "_do_stop", MagicMock(return_value=0))
     rc = _cli.cmd_restart()
     assert rc == 0
 
@@ -832,8 +830,11 @@ def test_cmd_restart_calls_stop_then_start(monkeypatch: pytest.MonkeyPatch) -> N
     """cmd_restart invokes stop (require_confirmation=False) then _cmd_start_body in order."""
     order: list[str] = []
 
-    def fake_do_stop(_repo, *, graceful, require_confirmation, keep_infra=False) -> int:
+    def fake_do_stop(
+        _repo, *, graceful, require_confirmation, keep_infra=False, force=False
+    ) -> int:
         assert require_confirmation is False, "cmd_restart must skip stdin confirmation"
+        assert force is False
         assert keep_infra is True, (
             "an internal restart must keep the shared pg/redis up — stopping the "
             "data plane kills the orchestrator's DB polling mid-rollout"
@@ -921,7 +922,7 @@ def test_stop_aborts_on_no(monkeypatch: pytest.MonkeyPatch) -> None:
         raise AssertionError(f"subprocess.run should not be called: {args}")
 
     monkeypatch.setattr(_cli.subprocess, "run", fake_run)  # pyright: ignore[reportUnknownArgumentType]
-    rc = _cli.cmd_stop()
+    rc = _cli.cmd_stop(force=True)
     assert rc == 0
 
 
@@ -944,7 +945,7 @@ def test_stop_proceeds_on_yes(
         lambda: infra_stops.append(1) or 0,
     )
 
-    rc = _cli.cmd_stop()
+    rc = _cli.cmd_stop(force=True)
     assert rc == 0
     # the force path kills the session on the service backend
     assert (gateway_sess, False) in service.killed
@@ -976,7 +977,6 @@ def test_stop_revokes_serving_before_stopping_sessions(
         keep_browser: bool,
         runner_only: bool,
         keep_infra: bool,
-        graceful: bool,
     ) -> None:
         return None
 
@@ -993,13 +993,7 @@ def test_stop_revokes_serving_before_stopping_sessions(
     ) -> None:
         return None
 
-    def _stop_sessions(
-        sessions: list[str],
-        *,
-        graceful: bool,
-        include_agent_processes: bool = False,
-        deadline: float | None = None,
-    ) -> None:
+    def _stop_sessions(sessions: list[str]) -> None:
         observed.append(start_serving.is_serving())
 
     monkeypatch.setattr(stop_mod, "_compute_stop_scope", _compute_stop_scope)
@@ -1008,7 +1002,7 @@ def test_stop_revokes_serving_before_stopping_sessions(
     monkeypatch.setattr(stop_mod, "_reap_orphan_step", _reap_orphan_step)
     monkeypatch.setattr(stop_mod, "_stop_sessions", _stop_sessions)
 
-    assert stop_mod._do_stop(tmp_path, graceful=False, require_confirmation=False) == 0
+    assert stop_mod._force_stop(tmp_path, require_confirmation=False) == 0
     assert observed == [False]
 
 
@@ -1028,85 +1022,19 @@ def test_do_stop_keep_infra_skips_infra_teardown(
     monkeypatch.setattr(_cli, "_has_session", lambda s: s == gateway_sess)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_cli, "_roles_or_none", lambda: frozenset({"gateway"}))
 
-    def _exit_on_signal(name: str) -> bool:
-        service.signalled.append(name)
-        service.alive.discard(name)
-        return True
-
-    monkeypatch.setattr(service, "graceful_signal", _exit_on_signal)
-
     infra_stops: list[int] = []
     monkeypatch.setattr(
         "cli.commands._cluster_instance.stop_cluster_instance",
         lambda: infra_stops.append(1) or 0,
     )
 
-    rc = _cli._do_stop(tmp_path, graceful=True, require_confirmation=False, keep_infra=True)
+    rc = _force_stop(tmp_path, require_confirmation=False, keep_infra=True)
     assert rc == 0
-    # the graceful stop reached the service backend (SIGTERM path): the session
-    # was signalled and exited; the shared-deadline force-kill fallback still
-    # visits it once (noop for an exited session, recorded with graceful=False)
-    assert gateway_sess in service.signalled
+    # The explicit force path ends the selected services and retains infra.
+    assert service.signalled == []
     assert (gateway_sess, False) in service.killed
     # this cluster's pg/redis **not** stopped (keep_infra keeps DB alive before migrate)
     assert infra_stops == []
-
-
-def test_update_stop_threads_one_absolute_deadline_through_agent_and_service_stop(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """Force-update agent cleanup joins the service batch under the one deadline
-    created by the stop orchestrator; neither child layer receives a fresh budget."""
-    from cli.commands import stop as _stop_mod
-
-    def _scope(**_kw: object) -> tuple[list[str], bool, bool]:
-        return ["ava-gateway"], False, True
-
-    monkeypatch.setattr(
-        _stop_mod,
-        "_compute_stop_scope",
-        _scope,
-    )
-    monkeypatch.setattr(_stop_mod, "_print_stop_plan", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_stop_mod.time, "monotonic", lambda: 100.0)
-    monkeypatch.setattr(_stop_mod, "_stop_data_plane", lambda **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_stop_mod, "_reap_orphan_step", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
-
-    agent_reap: list[bool] = []
-    stop_calls: list[dict[str, object]] = []
-
-    def _record_stop(sessions: list[str], **kwargs: object) -> None:
-        stop_calls.append({"sessions": sessions, **kwargs})
-
-    monkeypatch.setattr(
-        _cli,
-        "_force_reap_local_agents",
-        lambda *, defer_process_stop=False: agent_reap.append(defer_process_stop),
-    )
-    monkeypatch.setattr(
-        _stop_mod,
-        "_stop_sessions",
-        _record_stop,
-    )
-
-    rc = _stop_mod._do_stop(
-        tmp_path,
-        graceful=True,
-        require_confirmation=False,
-        keep_infra=True,
-        force_reap_agents=True,
-    )
-
-    assert rc == 0
-    assert agent_reap == [True]
-    assert stop_calls == [
-        {
-            "sessions": ["ava-gateway"],
-            "graceful": True,
-            "include_agent_processes": True,
-            "deadline": 100.0 + _stop_mod.stop_timing.REAP_KILL_WINDOW_S,
-        }
-    ]
 
 
 def test_do_stop_keeps_browser_by_default(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -1115,14 +1043,14 @@ def test_do_stop_keeps_browser_by_default(monkeypatch: pytest.MonkeyPatch, tmp_p
     monkeypatch.setattr(_cli, "_roles_or_none", lambda: frozenset({"gateway", "agent-runner"}))
     monkeypatch.setattr(_cli, "_has_session", lambda _s: True)  # pyright: ignore[reportUnknownArgumentType]
     killed: list[str] = []
-    monkeypatch.setattr(_cli, "_kill_session", lambda s, **_kw: killed.append(s))  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_cli, "_kill_session", lambda s, **_kw: killed.append(s) or True)  # pyright: ignore[reportUnknownArgumentType]
 
     monkeypatch.setattr("cli.commands._cluster_instance.stop_cluster_instance", lambda: 0)
 
     reaps: list[int] = []
     monkeypatch.setattr(_cli, "_reap_cluster_chrome", lambda: reaps.append(1))
 
-    rc = _cli._do_stop(tmp_path, graceful=False, require_confirmation=False)
+    rc = _force_stop(tmp_path, require_confirmation=False)
     assert rc == 0
     assert _sess("browser") not in killed, "browser session must be preserved by default"
     assert _sess("gateway") in killed, "non-browser services are still stopped"
@@ -1137,7 +1065,7 @@ def test_do_stop_stop_browser_kills_it(monkeypatch: pytest.MonkeyPatch, tmp_path
     monkeypatch.setattr(_cli, "_roles_or_none", lambda: frozenset({"gateway", "agent-runner"}))
     monkeypatch.setattr(_cli, "_has_session", lambda _s: True)  # pyright: ignore[reportUnknownArgumentType]
     killed: list[str] = []
-    monkeypatch.setattr(_cli, "_kill_session", lambda s, **_kw: killed.append(s))  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_cli, "_kill_session", lambda s, **_kw: killed.append(s) or True)  # pyright: ignore[reportUnknownArgumentType]
 
     monkeypatch.setattr("cli.commands._cluster_instance.stop_cluster_instance", lambda: 0)
 
@@ -1145,7 +1073,7 @@ def test_do_stop_stop_browser_kills_it(monkeypatch: pytest.MonkeyPatch, tmp_path
     monkeypatch.setattr(_cli, "_kill_session", lambda s, **_kw: (killed.append(s), order.append(s)))  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_cli, "_reap_cluster_chrome", lambda: order.append("reap"))
 
-    rc = _cli._do_stop(tmp_path, graceful=False, require_confirmation=False, keep_browser=False)
+    rc = _force_stop(tmp_path, require_confirmation=False, keep_browser=False)
     assert rc == 0
     assert _sess("browser") in killed, "keep_browser=False must stop the browser session"
     assert "reap" in order, "keep_browser=False must also sweep the cluster's Chrome"
@@ -1155,7 +1083,7 @@ def test_do_stop_stop_browser_kills_it(monkeypatch: pytest.MonkeyPatch, tmp_path
 
 
 def test_reap_cluster_chrome_reports_pids_and_survives_a_failure(
-    monkeypatch: pytest.MonkeyPatch, capsys
+    monkeypatch: pytest.MonkeyPatch, capsys, tmp_path: Path
 ) -> None:
     """The CLI seam: report what was reaped, stay silent when there was nothing,
     and never let a sweep failure fail the teardown around it."""
@@ -1193,7 +1121,7 @@ def test_cmd_stop_stop_browser_flag_threads_through(
     monkeypatch.setattr(_stop_mod, "_repo_root", lambda: tmp_path)
 
     _stop_mod.cmd_stop(require_confirmation=False)
-    assert seen["keep_browser"] is True, "default cmd_stop preserves the browser"
+    assert seen["keep_browser"] is False, "default cmd_stop closes the browser"
     _stop_mod.cmd_stop(require_confirmation=False, stop_browser=True)
     assert seen["keep_browser"] is False, "--stop-browser takes the browser down"
 
@@ -1244,119 +1172,29 @@ def test_graceful_kill_session_forced_fallback_is_reported(
 # ─── _stop_sessions: the printed marker must carry the confirmation ──────
 
 
-def test_stop_sessions_marks_unconfirmed_forced_kill_as_failure(
-    capsys: pytest.CaptureFixture[str],
+def test_force_stop_ends_controllers_before_dependents(
     _fake_session_backends: tuple[_FakeSessionBackend, _FakeSessionBackend],
 ) -> None:
-    """`_graceful_kill_session` returning (False, 'forced') — the session outlived
-    the force kill — must print ✗, not the ⚠ that used to be printed either way
-    (issue #1015)."""
     from cli.commands.stop import _stop_sessions
 
     service, _ = _fake_session_backends
-    service.alive.add("ava-gateway")
-    service.force_result = (False, "forced")
-
-    _stop_sessions(["ava-gateway"], graceful=True, deadline=0.0)
-
-    assert "✗ ava-gateway (forced)" in capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
-
-
-def test_stop_sessions_reports_graceful_exit_before_deadline(
-    capsys: pytest.CaptureFixture[str],
-    monkeypatch: pytest.MonkeyPatch,
-    _fake_session_backends: tuple[_FakeSessionBackend, _FakeSessionBackend],
-) -> None:
-    """A daemon that exits on SIGTERM (graceful_signal drops it from `alive`)
-    reads ✓ (graceful), never ⚠ (forced) — the exit-before-deadline path must
-    be locked too, not just the forced fallback (QA #863 nit 3)."""
-    from cli.commands.stop import _stop_sessions
-
-    service, _ = _fake_session_backends
-    service.alive.add("ava-gateway")
-
-    def _exit_on_signal(name: str) -> bool:
-        service.signalled.append(name)
-        service.alive.discard(name)
-        return True
-
-    monkeypatch.setattr(service, "graceful_signal", _exit_on_signal)
-
-    _stop_sessions(["ava-gateway"], graceful=True, deadline=0.0)
-
-    out = capsys.readouterr().out
-    assert "✓ ava-gateway (graceful)" in out  # pyright: ignore[reportUnknownMemberType]
-    assert "⚠" not in out
-
-
-def test_stop_sessions_keeps_warning_for_successful_force(
-    capsys: pytest.CaptureFixture[str],
-    _fake_session_backends: tuple[_FakeSessionBackend, _FakeSessionBackend],
-) -> None:
-    """A CONFIRMED force kill still reads ⚠ — the daemon did not exit gracefully,
-    which is worth a warning; only an unconfirmed one becomes ✗."""
-    from cli.commands.stop import _stop_sessions
-
-    service, _ = _fake_session_backends
-    service.alive.add("ava-gateway")
-
-    _stop_sessions(["ava-gateway"], graceful=True, deadline=0.0)
-
-    assert "⚠ ava-gateway (forced)" in capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
-
-
-def test_graceful_stop_signals_controllers_then_all_dependents_before_one_wait(
-    monkeypatch: pytest.MonkeyPatch,
-    _fake_session_backends: tuple[_FakeSessionBackend, _FakeSessionBackend],
-) -> None:
-    """A graceful stop is bounded by one roster deadline, never 15s per service.
-
-    Respawn owners receive their signal first, but no target is waited on until
-    every service and force-update agent process has received its signal.
-    """
-    from cli.commands.stop import _stop_sessions
-
-    service, _ = _fake_session_backends
-    targets = {
-        "ava-gateway-watchdog",
-        "ava-restarter",
-        "ava-gateway",
-        "ava-ops",
-        "ava-agent-7",
-    }
+    targets = ["ava-gateway", "ava-agent-host", "ava-gateway-watchdog", "ava-ops"]
     service.alive.update(targets)
-    clock = {"now": 10.0}
-    sleeps: list[float] = []
-
-    monkeypatch.setattr("cli.commands._session_lifecycle.time.monotonic", lambda: clock["now"])
-
-    def _sleep(seconds: float) -> None:
-        assert set(service.signalled) == targets, "every TERM precedes the first wait"
-        sleeps.append(seconds)
-        clock["now"] += seconds
-
-    monkeypatch.setattr("cli.commands._session_lifecycle.time.sleep", _sleep)
-
-    _stop_sessions(
-        ["ava-gateway", "ava-restarter", "ava-gateway-watchdog", "ava-ops"],
-        graceful=True,
-        include_agent_processes=True,
-        deadline=11.0,
-    )
-
-    assert service.signalled[:2] == ["ava-restarter", "ava-gateway-watchdog"]
-    assert abs(sum(sleeps) - 1.0) < 1e-9, "all targets share one absolute deadline"
-    assert {name for name, graceful in service.killed if not graceful} == targets
+    _stop_sessions(targets)
+    assert service.killed[0] == ("ava-gateway-watchdog", False)
+    assert {name for name, graceful in service.killed if not graceful} == set(targets)
+    assert service.signalled == []
 
 
 def test_stop_sessions_force_path_reports_failure(monkeypatch, capsys) -> None:
-    """The plain force path (`ava stop`) also stops printing ✓ for a kill that was
+    """The explicit force path (`ava stop --force`) also stops printing ✓ for a kill that was
     not confirmed: `_kill_session` answering False is ✗."""
     from cli.commands.stop import _stop_sessions
 
     monkeypatch.setattr(_cli, "_kill_session", lambda _s, **_kw: False)  # pyright: ignore[reportUnknownMemberType]
 
-    _stop_sessions(["ava-gateway"], graceful=False)
+    with pytest.raises(RuntimeError, match="force stop"):
+        _stop_sessions(["ava-gateway"])
 
     assert "✗ ava-gateway" in capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
 
@@ -1491,7 +1329,7 @@ def test_status_shows_the_gate_entry_row(monkeypatch: pytest.MonkeyPatch, capsys
 
 
 def test_status_shows_the_end_to_end_redis_bridge_row(
-    monkeypatch: pytest.MonkeyPatch, capsys
+    monkeypatch: pytest.MonkeyPatch, capsys, tmp_path: Path
 ) -> None:
     """The host-level relay must not disappear behind healthy service rows."""
     import cli.commands.status as status_mod
@@ -1541,7 +1379,7 @@ def test_start_prints_browser_skip_reason(monkeypatch, capsys, tmp_path) -> None
 
 
 def test_service_row_shows_live_session_with_skip_reason(
-    monkeypatch: pytest.MonkeyPatch, capsys
+    monkeypatch: pytest.MonkeyPatch, capsys, tmp_path: Path
 ) -> None:
     """A still-running session that is now gated reads as `✓ ... -- skipped: <reason>`
     — marks reflect real liveness, the suffix the gate — surfacing the mismatch the
@@ -2293,8 +2131,8 @@ def test_gateway_local_update_starts_in_fresh_process(
     # pty — the session PATH is forwarded authoritatively, so a plain
     # subprocess.run from the detached rollout works). --persist-services keeps this
     # internal restart from rewriting the operator's durable --disable-service marker.
-    # The restarter stays down until the orchestration finally unpauses this host,
-    # so agents cannot relaunch before gateway readiness and Phase B.
+    # Admission stays held until the orchestration unpauses this host, so agents
+    # cannot resume before gateway readiness and Phase B.
     # --no-readiness-gate: this leg's readiness question is answered at step 6.5 by the
     # off-box gateway gate, so the child must not also gate (and must not send a slow
     # non-gateway service into _recover_rc's rollback). See
@@ -2311,8 +2149,6 @@ def test_gateway_local_update_starts_in_fresh_process(
         "start",
         "--persist-services",
         "--no-readiness-gate",
-        "--disable-service",
-        "restarter",
     ]
 
 
@@ -2394,6 +2230,11 @@ def test_cmd_start_finalizes_a_paused_deploy_journal(
     acquired = datetime(2026, 8, 26, 14, 14, 42, tzinfo=UTC)
     pause_owner.mark_paused("macmini:pid65276", acquired)
 
+    def ready(*_args: object, **_kwargs: object) -> _cli.ReadinessWait:
+        assert pause_owner.read().status == "paused", "finalize must wait for readiness"
+        return _cli.ReadinessWait((), 0.0, sessions_gone=False)
+
+    monkeypatch.setattr(_cli, "_wait_for_services_ready", ready)
     assert _cli.cmd_start() == 0
 
     snapshot = pause_owner.read()
@@ -2409,7 +2250,7 @@ def test_rollout_child_start_does_not_finalize_the_pause_journal(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """A rollout child (gateway local leg) leaves posture `converging` and the
-    restarter down — the orchestrator's own finally owns that resume boundary, so
+    admission held — the orchestrator's own finally owns that resume boundary, so
     the start must not record the pause as completed while the host is still
     mid-transition."""
     from datetime import UTC, datetime
@@ -2459,7 +2300,7 @@ def test_rollout_child_start_does_not_finalize_the_pause_journal(
     assert snapshot.matches("rollout:42", datetime(2026, 8, 26, 14, 14, 42, tzinfo=UTC))
 
 
-def test_rollout_child_keeps_converging_and_restarter_down(
+def test_rollout_child_keeps_converging_before_parent_readiness(
     monkeypatch: pytest.MonkeyPatch,
     _fake_session_backends: tuple[_FakeSessionBackend, _FakeSessionBackend],
 ) -> None:
@@ -2515,7 +2356,7 @@ def test_handoff_capable_rollout_child_may_commit_credential_transition(
     _fake_session_backends: tuple[_FakeSessionBackend, _FakeSessionBackend],
 ) -> None:
     """The follow-up rollout carries v1 proof: credential mutation becomes
-    legal while the restarter remains behind the same resume boundary."""
+    legal while admission remains behind the same resume boundary."""
     from cli.commands import _data_plane_admin_secrets as secrets_mod
     from cli.commands import start as start_mod
     from shared.rollout_handoff import (
@@ -2556,7 +2397,7 @@ def test_handoff_capable_rollout_child_may_commit_credential_transition(
     assert ROLLOUT_PARENT_CREDENTIAL_HANDOFF_ENV not in os.environ
 
 
-def test_phase_b_pure_runner_restores_idle_posture_and_restarter(
+def test_phase_b_pure_runner_restores_idle_posture_and_agent_host(
     monkeypatch: pytest.MonkeyPatch,
     _fake_session_backends: tuple[_FakeSessionBackend, _FakeSessionBackend],
 ) -> None:
@@ -2565,10 +2406,6 @@ def test_phase_b_pure_runner_restores_idle_posture_and_restarter(
     transition instead of inheriting the gateway parent's resume boundary."""
     from cli.commands import start as start_mod
     from shared.cluster_lock import DeployLease
-
-    # The restarter-restoring path this exercises is the process shape (hosted
-    # is the default since 2026-09).
-    monkeypatch.setattr("ops.spec.runner_mode", lambda: "process")
 
     service, _shell = _fake_session_backends
     postures: list[str] = []
@@ -2596,7 +2433,7 @@ def test_phase_b_pure_runner_restores_idle_posture_and_restarter(
 
     assert _cli.cmd_start(persist_services=False) == 0
     assert postures[-1] == "idle"
-    assert _sess("restarter") in service.created
+    assert _sess("agent-host") in service.created
 
 
 def test_operator_start_refuses_executing_rollout_before_migrations(
@@ -4177,7 +4014,7 @@ def test_cmd_stop_announces_stopping_after_confirm_before_teardown(
     monkeypatch.setattr("httpx.post", _fake_post)  # pyright: ignore[reportUnknownArgumentType]
     _patch_stop_teardown(monkeypatch, events)
 
-    rc = _cli.cmd_stop(require_confirmation=False)
+    rc = _cli.cmd_stop(require_confirmation=False, force=True)
     assert rc == 0
     assert calls[0][0] == "http://gw:8000/api/cluster/stopping"
     assert calls[0][1]["params"] == {"machine": "test-host", "home": str(ava_home())}
@@ -4197,7 +4034,7 @@ def test_cmd_stop_aborted_confirm_does_not_announce(
     monkeypatch.setattr("httpx.post", lambda *_a, **_kw: events.append("announce"))  # pyright: ignore[reportUnknownArgumentType]
     _patch_stop_teardown(monkeypatch, events)
 
-    rc = _cli.cmd_stop()
+    rc = _cli.cmd_stop(force=True)
     assert rc == 0
     assert events == []  # no announce, no teardown
     assert "aborted" in capsys.readouterr().out
@@ -4218,7 +4055,7 @@ def test_cmd_stop_proceeds_when_announce_fails(
     events: list[str] = []
     _patch_stop_teardown(monkeypatch, events)
 
-    rc = _cli.cmd_stop(require_confirmation=False)
+    rc = _cli.cmd_stop(require_confirmation=False, force=True)
     assert rc == 0
     assert events == ["infra"]  # teardown still ran
     assert "could not announce shutdown" in capsys.readouterr().out
@@ -4298,7 +4135,7 @@ def test_status_prints_a_live_host_reading(monkeypatch: pytest.MonkeyPatch, caps
 
 
 def test_status_host_reading_failure_does_not_hide_the_rest(
-    monkeypatch: pytest.MonkeyPatch, capsys
+    monkeypatch: pytest.MonkeyPatch, capsys, tmp_path: Path
 ) -> None:
     """A host without psutil still gets the service table and the pin section —
     the reading degrades to its own reason line, it does not abort the verb."""
@@ -4320,3 +4157,19 @@ def test_status_host_reading_failure_does_not_hide_the_rest(
     out = cast(str, capsys.readouterr().out)  # pyright: ignore[reportUnknownMemberType]
     assert "unavailable (no psutil here)" in out
     assert "[ava status]" in out
+
+
+def test_retired_service_failure_prevents_start_converge_and_migrations(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from cli.commands import start
+
+    retired = MagicMock(side_effect=TimeoutError("retired service is still running"))
+    converge, migrate = MagicMock(), MagicMock()
+    monkeypatch.setattr("cli.commands._retired_services.stop_retired_services", retired)
+    monkeypatch.setattr(_cli, "converge_host", converge)
+    monkeypatch.setattr(start, "cmd_migrations_apply", migrate)
+    assert _cli.cmd_start() == 1
+    retired.assert_called_once()
+    converge.assert_not_called()
+    migrate.assert_not_called()

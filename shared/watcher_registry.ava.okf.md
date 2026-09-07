@@ -27,7 +27,7 @@ Keyed by `(agent_id, session_id)` — shell-session ids are per-agent counters, 
 - `delete_watcher` — the watcher child's clean-exit finally (a fired one-shot, an ended schedule, or a crashed script that still ran its finally) and `ava.shell.sessions.kill` (a deliberately killed watcher must NOT be rebuilt at the next boot). A missing row is a no-op.
 - `mark_status` — `running` → `rebuilt` / `missed` / `reaped` during reconcile.
 
-### The boot reconcile (`ava.watcher.reconcile`, called from `agent/loop.py`)
+### The boot reconcile (`ava.watcher.reconcile`, called from `agent/_process_boot.py`)
 
 For every row whose session is **gone**, reconcile first compares the row's
 generation with the host's current allocation generation. A superseded row is
@@ -41,10 +41,6 @@ current row continues through ordinary recovery:
 
 Fail-soft throughout: a registry read / session list / spawn failure is logged and skipped, never allowed to block the boot it runs in.
 
-### Stop-reaper annotation
-
-`killed_watcher_annotations(session_names)` — `cli/commands/stop.py:_reap_agent_sessions` prints, for each shell session it killed that the registry knows as a watcher, a line naming it and noting it will be rebuilt at the next boot. A session the registry does not know is a plain shell, gone for good. Fail-soft: a registry read failure yields no lines (the stop runs while the DB may already be down).
-
 ## Key Dependencies
 
 - [[ava/watcher.ava.okf.md|ava.watcher SDK]] — the spawn / reconcile surface
@@ -54,10 +50,9 @@ Fail-soft throughout: a registry read / session list / spawn failure is logged a
 
 ## Entry Points
 
-- `shared/watcher_registry.py:register_watcher` / `delete_watcher` / `mark_status` / `watcher_rows` / `watcher_session_ids` / `killed_watcher_annotations`
+- `shared/watcher_registry.py:register_watcher` / `delete_watcher` / `mark_status` / `watcher_rows` / `watcher_session_ids`
 - `ava/watcher.py:reconcile` — the rebuild / mark-missed pass
-- `agent/loop.py` — boot-time invocation
-- `cli/commands/stop.py:_reap_agent_sessions` — the kill annotation
+- `agent/_process_boot.py` — boot-time invocation
 
 ## Notes
 

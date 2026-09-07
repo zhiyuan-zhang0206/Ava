@@ -317,33 +317,3 @@ def watcher_session_ids(agent_id: int | None = None) -> set[int]:
         else:
             cur.execute("SELECT session_id FROM agent_watchers WHERE agent_id = %s", (agent_id,))
         return {r[0] for r in cur.fetchall()}
-
-
-def killed_watcher_annotations(session_names: list[str]) -> list[str]:
-    """The stop-output lines naming which of a reaper's killed shell sessions
-    the registry knows as watchers — a stopped host's watchers are exactly
-    what the next boot reconcile rebuilds from this table (a session the
-    registry does not know is a plain shell, gone for good). Empty when no
-    session matches. Fail-soft by contract: the stop reaper runs while the DB
-    may already be down, and a registry read must never block the stop it only
-    annotates — a read failure yields no lines, and the caller prints whatever
-    it gets.
-    """
-    import re
-
-    try:
-        rows = watcher_rows()
-    except Exception:
-        return []
-    # session ids are per-agent (agents_meta.session_index), so key by
-    # (agent_id, session_id); the session name carries both.
-    names = {(r["agent_id"], str(r["session_id"])): r["name"] for r in rows}
-    lines: list[str] = []
-    for session in session_names:
-        m = re.search(r"-agent-(\d+)-shell-(\d+)(?:-|$)", session)
-        if m and (int(m.group(1)), m.group(2)) in names:
-            lines.append(
-                f"  (watcher '{names[(int(m.group(1)), m.group(2))]}' — session {session}; "
-                "rebuilt from the registry at the next boot)"
-            )
-    return lines

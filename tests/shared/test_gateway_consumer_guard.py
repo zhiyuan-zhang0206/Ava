@@ -383,7 +383,6 @@ _KIND_ROOTS: dict[str, tuple[str, ...]] = {
     "runner": (
         "ops/",
         "services/agent_ops/",
-        "services/restarter/",
         "services/watchdog/",
         "services/browser/",
         "services/gate/",

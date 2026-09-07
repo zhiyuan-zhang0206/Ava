@@ -27,8 +27,7 @@ from psycopg_pool import ConnectionPool
 
 import shared.db
 from ops import cluster_rpc as _cluster_rpc
-from ops import ops_exit, runner_mode
-from ops.agent_identity import RESIDENT_IDENTITIES, probe_agent_process
+from ops import ops_exit
 from ops.agent_wake import ResurrectTriggerStaleError
 from ops.agents import (
     get_agent_machine,
@@ -60,9 +59,6 @@ from ops.ops_exit import (
 )
 from ops.ops_exit import (
     _publish_force_terminate_inbound as _publish_force_terminate_inbound,
-)
-from ops.ops_exit import (
-    mark_agent_exited_op as mark_agent_exited_op,
 )
 
 # Re-exported (explicit-alias form) so the gateway routers and tests keep their
@@ -134,14 +130,10 @@ async def terminate_agent_op(
 ) -> TerminateAgentResponse:
     """Local-target graceful or force terminate. Caller handles cross-machine."""
     if body.force:
-        hosted = runner_mode.is_hosted()
-        old_status, pid, killed_page_names, command_id = await asyncio.to_thread(
-            _terminate_force_blocking, agent_id, body, db_pool, kill_process=not hosted
+        _old_status, pid, killed_page_names, command_id = await asyncio.to_thread(
+            _terminate_force_blocking, agent_id, body, db_pool
         )
-        if old_status is AgentStatus.TERMINATED and not hosted:
-            return TerminateAgentResponse(status="already_terminated")
-        if hosted:
-            await _cancel_hosted_turn_best_effort(agent_id, command_id)
+        await _cancel_hosted_turn_best_effort(agent_id, command_id)
         for page_name in killed_page_names:
             await publish_page_closed(agent_id, page_name)
         _log.info(
@@ -151,7 +143,7 @@ async def terminate_agent_op(
             pid,
         )
         # Neither HTTP delivery nor Task.cancel proves resource quiescence.
-        return TerminateAgentResponse(status="enqueued" if hosted else "force_killed")
+        return TerminateAgentResponse(status="enqueued")
 
     s = await asyncio.to_thread(get_agent_status, agent_id)
     if s is AgentStatus.TERMINATED:
@@ -202,21 +194,12 @@ def _terminate_force_blocking(
     agent_id: int,
     body: TerminateAgentRequest,
     db_pool: ConnectionPool,
-    *,
-    kill_process: bool,
 ) -> tuple[AgentStatus, int | None, list[str], int]:
-    """Sync force-kill section — via to_thread: session kill + SIGKILL + status
-    flip + AgentUpdated + terminate inbound. Returns (old status, pid, page names).
-
-    `kill_process` is False in hosted mode: there is no process to kill, and
-    the turn-cancel acceleration happens asynchronously after the transaction
-    (the DB fence must commit first so a post-force chat cannot resurrect the
-    row between the kill and the cancel)."""
+    """Commit the force fence before publishing its wake and updated snapshot."""
     old_status, pid, killed_page_names, inbound_id = _force_terminate_transaction(
         agent_id,
         db_pool,
         source=body.source,
-        kill_process=kill_process,
         message=body.message,
     )
     _publish_force_terminate_inbound(agent_id, inbound_id, body.source)
@@ -228,24 +211,7 @@ def _terminate_force_blocking(
 def _terminate_graceful_blocking(
     agent_id: int, body: TerminateAgentRequest, db_pool: ConnectionPool
 ) -> tuple[str, int | None, list[str]]:
-    """Sync graceful-terminate section — via to_thread: zombie check + optional
-    zombie finalize, else the terminate inbound INSERT. Returns
-    (status, inbound_id, zombie_closed_page_names); status is
-    'already_terminated' (zombie) or 'enqueued'."""
-    with db_pool.connection() as conn, conn.cursor() as cur:
-        cur.execute("SELECT pid FROM agents_meta WHERE id=%s", (agent_id,))
-        row = cur.fetchone()
-    pid = row[0] if row else None
-    if pid is not None and probe_agent_process(pid, agent_id) not in RESIDENT_IDENTITIES:
-        zombie_closed_page_names = _force_mark_terminated(
-            agent_id,
-            db_pool,
-            source=body.source,
-            message=body.message,
-        )
-        with db_pool.connection() as conn:
-            publish_agent_updated_sync(conn, agent_id)
-        return "already_terminated", None, zombie_closed_page_names
+    """Insert the durable termination message and command."""
     iid = ops_exit._enqueue_termination_inbounds(
         agent_id,
         db_pool,
@@ -253,16 +219,6 @@ def _terminate_graceful_blocking(
         message=body.message,
     )
     return "enqueued", iid, []
-
-
-def _pending_allocation_can_resume(agent_id: int, trigger_inbound_id: int | None) -> bool:
-    from shared.db import connect
-    from shared.resurrection_launch import pending_allocation
-
-    if trigger_inbound_id is None:
-        return False
-    with connect() as conn:
-        return pending_allocation(conn, agent_id, trigger_inbound_id)
 
 
 def _wake_suppression_active(agent_id: int) -> bool:
@@ -298,10 +254,7 @@ async def resurrect_agent_op(
     runner; manual resurrects omit it and retain their unconditional contract.
     """
     s = await asyncio.to_thread(get_agent_status, agent_id)
-    if s is not AgentStatus.TERMINATED and (
-        s is not AgentStatus.IDLING
-        or not await asyncio.to_thread(_pending_allocation_can_resume, agent_id, trigger_inbound_id)
-    ):
+    if s is not AgentStatus.TERMINATED:
         return ResurrectAgentResponse(status="already_alive")
     try:
         # resurrect_agent synchronously launches the agent and polls up to
@@ -367,10 +320,7 @@ async def resurrect_if_terminated(
     TERMINATED instead.
     """
     status = await asyncio.to_thread(get_agent_status, agent_id)
-    if status is not AgentStatus.TERMINATED and (
-        status is not AgentStatus.IDLING
-        or not await asyncio.to_thread(_pending_allocation_can_resume, agent_id, trigger_inbound_id)
-    ):
+    if status is not AgentStatus.TERMINATED:
         return status
     if await asyncio.to_thread(_wake_suppression_active, agent_id):
         _log.debug(

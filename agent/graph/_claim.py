@@ -53,7 +53,6 @@ from langgraph.types import Command
 from agent import state as _state
 from agent.db import claim_inbound_batch
 from agent.graph._attach_drain import build_attach_drain
-from agent.graph._claim_batch import LifecycleCasLostError, _wait_for_batch
 from agent.graph._claim_decide import decide
 from agent.graph._claim_dispatch import _BatchState, dispatch_batch
 from agent.graph._claim_present import (
@@ -67,7 +66,6 @@ from agent.graph._nodes import BEFORE_LLM, CLAIM, END
 from agent.impersonation import claim_gate
 from agent.inbound_ownership import RuntimeOwnershipLostError
 from agent.messages import has_conversation
-from shared.log import logger
 
 # Names moved to co-located submodules during the Task #1006 split, re-exported
 # here so existing `from agent.graph._claim import ...` call sites (tests) keep
@@ -127,41 +125,13 @@ async def _claim_node_impl(
                 # invocation's claim does the long wait. exit_requested stays
                 # False: this END means "turn over", not "process exit".
                 return Command[ClaimGoto](update={"turn_active": False}, goto=END)
-            if ctx.hosted:
-                # Hosted: there is no process to park. `_wait_for_batch` would
-                # flip the row to `idling` and block this task on the inbound
-                # pub/sub forever — which is exactly the idle half the hosted
-                # runner exists to delete (future/infra/agent-runner-as-server.md).
-                # End the turn instead and let the host drop the task; its
-                # dispatcher holds one subscription for every local agent and
-                # creates a fresh task when a wake lands. Claim never owns a
-                # hosted status flip: the host marks the row running around a
-                # task and idling after it settles.
-                return Command[ClaimGoto](
-                    update={"turn_active": False, "turn_idle": True}, goto=END
-                )
-            try:
-                batch = await _wait_for_batch(ctx, agent_id, state.impersonation_request_id)
-            except LifecycleCasLostError as exc:
-                # Claim-time lifecycle race: between the idle flip and the
-                # IDLING→RUNNING flip, another op (terminate / reaper) took
-                # ownership of the row. End the process cleanly instead of
-                # crashing — a crash during a network outage cannot be
-                # resurrected (Task #688); the owning controller (restarter /
-                # resurrect)
-                # relaunches or leaves it dead as intended.
-                logger.warning(
-                    "claim wait aborted: {reason}",
-                    event="claim_cas_lost_exit",
-                    agent_id=agent_id,
-                    reason=str(exc),
-                )
-                return Command[ClaimGoto](update={"exit_requested": True}, goto=END)
-        else:
-            return Command[ClaimGoto](
-                update={"halted": False, "turn_active": True},
-                goto=BEFORE_LLM,
-            )
+            # The host owns the idle agent and its subscription. End this
+            # invocation; the dispatcher creates another task on the next wake.
+            return Command[ClaimGoto](update={"turn_active": False, "turn_idle": True}, goto=END)
+        return Command[ClaimGoto](
+            update={"halted": False, "turn_active": True},
+            goto=BEFORE_LLM,
+        )
 
     if not batch:
         return Command[ClaimGoto](goto=CLAIM)

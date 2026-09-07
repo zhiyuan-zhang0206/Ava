@@ -61,9 +61,9 @@ def _run_agent_runner_self_update(  # noqa: PLR0915 — one existing lock/handof
     --restart-only` directly on an agent-runner.)
 
     The child `ava start` returns the posture row to idle at the end, pulling
-    this host back from paused to serving, and finalizes the pause-owner journal
-    (generation-scoped `pause_owner.finalize_natural_resume`) — the natural
-    resume that Phase B's poll reads as converged. When invoked via the
+    this host back from paused to serving, then releases its exact maintenance
+    generation after readiness — the natural resume that Phase B's poll reads
+    as converged. When invoked via the
     ava-updater session (spawned by spawn_update()), this function runs in a
     detached pane so a mid-flow `ava stop` does not take itself out.
     """
@@ -447,26 +447,11 @@ def _run_agent_runner_self_update_inner(  # noqa: PLR0915 — the self-update's 
         with updater_stage("skills"):
             _refresh_builtin_skills(repo, ava_bin)
 
-    # 3.75) quiesce this host's agents BEFORE the stop — the per-host analogue of
-    #    the rollout's stop-the-world. A standalone self-update (operator `ava
-    #    cluster update` on a runner, watchdog pin/code self-heal, the management
-    #    endpoint) used to skip this entirely: no signal, no wait, no kill — every
-    #    agent rode the whole update on old code until the next rollout. Now:
-    #    the quiesce pauses this host's restarter, signals each live agent to
-    #    restart (system:update + Redis wake) and waits per mode (smooth: the
-    #    configured AVA_UPDATE_QUIESCE_TIMEOUT_SECONDS window, default 10s;
-    #    force: idle drain only). The quiesce stage stays within the mode's
-    #    budget; stragglers are reaped in the graceful stop's own force_reap
-    #    stage below — marked 'restarting' so the restarter respawns them on
-    #    the new code once `ava start` unpauses.
-    #    `mode='none'` (the rollout's Phase B) skips this: the gateway-side
-    #    quiesce already drained the fleet; only `force_reap` (the quiesce-timeout
-    #    backstop) applies there.
-    drained = True
-    if mode != "none":
-        with updater_stage("quiesce"):
-            drained = _ns._quiesce_local_agents(mode)
-    force_reap_agents = force_reap or mode == "force" or not drained
+    # Verify the same pause used by standalone restart and the gateway Phase A.
+    with updater_stage("quiesce"):
+        if not _ns._quiesce_local_agents(mode):
+            return 1
+    force_reap_agents = force_reap or mode == "force"
 
     # 4) graceful stop. keep_infra=True: an internal self-update bounces this
     #    host's service sessions, never the shared pg/redis — on a co-located
@@ -480,13 +465,16 @@ def _run_agent_runner_self_update_inner(  # noqa: PLR0915 — the self-update's 
     #    `sys.modules`, while the existing lazy session-kill chain remains a second
     #    defense against importing an unrelated stale dependency before the stop.
     with updater_stage("stop"):
-        _ns._do_stop(
+        stop_rc = _ns._do_stop(
             repo,
             graceful=True,
             require_confirmation=False,
             keep_infra=True,
             force_reap_agents=force_reap_agents,
+            force=force_reap_agents,
         )
+        if stop_rc != 0:
+            return stop_rc
 
     # 5) start in a FRESH process so it loads the just-synced new code. Calling
     #    cmd_start() in-process would mix already-imported old modules with the
@@ -539,10 +527,10 @@ def main(argv: list[str] | None = None) -> int:
     - `--target-sha <sha>` — the rollout's pinned commit; absent resolves
       origin/main itself (a watchdog self-heal catching the host up).
     - `--restart-only` — bounce services on the current code, no checkout/sync.
-    - `--mode <smooth|force|none>` — the agent-drain policy; `none` (the
-      rollout's Phase B) skips quiesce entirely.
-    - `--force-reap` — kill still-live agents before the bounce (Phase B's
-      quiesce-timeout backstop).
+    - `--mode <smooth|force|none>` — the stop policy; `none` (the rollout's
+      Phase B) reuses the completed drain before stopping local services.
+    - `--force-reap` — legacy explicit interruption flag; never implied by a
+      drain timeout.
 
     The repo resolves from this module's own location (`_repo_root`), not the
     session's cwd, so the `if cd <repo>` guard in the wrapper is belt-and-braces
@@ -600,7 +588,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--force-reap",
         action="store_true",
-        help="kill still-live agents before the bounce (Phase-B backstop)",
+        help="legacy explicit force interruption before restarting services",
     )
     parser.add_argument(
         "--handoff-generation",

@@ -12,7 +12,7 @@ tags:
 `agent/graph/_build.py:_load_extensions()` imports every enabled plugin's
 `plugin.py` itself, **by path** — built-in and external in one loop, no
 delegation to `ava._extend.scan_and_load` (that loader is external-only and is
-called once from `agent/loop.py`). Each import runs inside
+called once during host boot through `agent/_process_boot.py`). Each import runs inside
 `with PluginContext(name):`, which is what attributes the `register_*` calls
 the import triggers.
 

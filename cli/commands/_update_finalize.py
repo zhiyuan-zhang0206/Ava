@@ -15,7 +15,7 @@ def _unpause_local_via_tree(repo: Path) -> None:
     """Run compensating local unpause through the current tree's interpreter.
 
     `repo/.venv/bin/python` executes the code the rollout just deployed — the
-    roster-gated unpause — rather than this orchestration process's launch-time
+    admission-aware unpause — rather than this orchestration process's launch-time
     modules. Falls back to the in-process unpause when the tree venv is absent
     (abort before the local leg, or tests with a dummy repo). Never raises: it
     runs in a `finally` tail that must not mask the rollout outcome.
@@ -86,7 +86,6 @@ def finalize_orchestration(
     spawn_offsite_upload: Callable[[Path, Path | None], None],
     repo: Path,
     pull_recover: tuple[str, set[str], Path | None] | None,
-    skipped: list[str],
 ) -> None:
     """Resume hosts, close the record, and emit only clean commit telemetry.
 
@@ -114,12 +113,4 @@ def finalize_orchestration(
     if outcome is RolloutOutcome.CLEAN:
         finalize_commit_telemetry(telemetry)
     spawn_offsite_upload(repo, pull_recover[2] if pull_recover is not None else None)
-    if skipped:
-        print(
-            f"\n⚠ {len(skipped)} agent-runner(s) unreachable and skipped: "
-            f"{', '.join(sorted(skipped))} — never paused or updated by this rollout; "
-            "they converge at the next rollout, or when `ava cluster update` runs on "
-            "that host (`ava cluster status` shows them off-pin until then).",
-            file=sys.stderr,
-        )
     telemetry.print_summary()

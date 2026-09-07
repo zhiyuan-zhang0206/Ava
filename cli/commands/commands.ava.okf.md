@@ -36,15 +36,20 @@ Most command modules follow these two naming groups:
   `_update_git` /
   `_update_orchestration` / `_update_agent_runner` / `_update_uv_sync` /
   `_updater_lease` / `_updater_stage` (the cmd.exe ladder's per-step telemetry marker) / `_update_recover` /
-  `_gateway_ready` (the staged upgrade), `_probe`, `_setup`, `_session_lifecycle`, `_repo`, `_warmup`,
+  `_gateway_ready` (the staged upgrade), `_probe`, `_setup`, `_session_lifecycle`, `_repo`,
   `_ownership_preflight`,
   `_pkg_source`, `_pgbouncer`, `_lgtm`,
   `_claude_code_plugin`, `_cluster_health` /
   `_cluster_rollback` / `_cluster_cron` / `_cluster_watchdog_probe`.
 
-`cli/parsers/maintenance.py` dispatches the explicit local maintenance verbs to
-`_maintenance.py`; `_maintenance_probe`, `_maintenance_stop` and
-`_maintenance_data_plane` own the capability/progress and strict process checks.
+`stop.py` exposes `pause` and `stop` through `_temporary_stop`; update and
+restart reuse its native drain. `ops.agent_pause` and `ops.agent_pause_probe`
+own prepare/drain and runtime capability checks; `_maintenance_stop` and
+`_maintenance_data_plane` verify resource exits. `_stop_extras` and
+`_stop_supervised` stop home-owned Gate/helper/native LGTM. `_pause_resume`
+releases normal startup admission only after readiness.
+`cli/parsers/maintenance.py` retains explicit intermediate steps through
+`_maintenance.py` and `_maintenance_probe`.
 They reuse the [durable maintenance journal](../../shared/maintenance.ava.okf.md).
 See [the coordinated operator procedure](../../conventions/graceful-maintenance.md).
 
@@ -76,10 +81,9 @@ schema change catches the DB up on its own.
   failed-update recovery are one subject in [[rollout-boundary.ava.okf.md]].
 - A full agent-runner update checks out, syncs, and records the installed SHA in
   its pre-checkout image, then re-execs `_update_agent_runner` with its private
-  post-checkout flags before validation, quiesce, stop, or start. The gateway's
-  post-boot schedule-session bounce likewise runs `_update_local` in a fresh
-  subprocess; neither path imports new-tree modules into a process with old
-  `sys.modules` entries.
+  post-checkout flags before validation, quiesce, stop, or start. Persistent
+  schedule terminals are retained, including their currently loaded code;
+  an explicit schedule restart or full stop/start adopts new runner code.
 - `_converge_firewall` reconciles the per-binary Application Firewall manifest.
   Version-stamped Python, Postgres, Homebrew, browser, and observability paths mean
   an upgrade can orphan the old ALF identity while loopback keeps working — issue

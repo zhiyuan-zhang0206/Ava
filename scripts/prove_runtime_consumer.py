@@ -9,7 +9,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-from ops.agent_launch import _agent_interpreter
 from ops.spec import build_services
 from shared.cluster import frontend_service_cmd
 from shared.migrations import required_migration_set
@@ -67,7 +66,6 @@ def main() -> None:
     require(runtime_venv().resolve() == prefix, "venv escaped current prefix")
     python = runtime_python()
     prove_frontend_config_rejection(python, root)
-    require(Path(_agent_interpreter()[0]) == python, "agent interpreter mismatch")
     require(
         Path(get_backend().venv_python()).parent == python.parent, "platform interpreter mismatch"
     )

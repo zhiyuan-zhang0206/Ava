@@ -22,16 +22,17 @@ def prepare(
     conn: psycopg.Connection,
     *,
     machine: str,
-    host_owner: UUID,
+    host_owner: UUID | None,
     holder: str,
     acquired_at: datetime,
+    host_absent: bool = False,
 ) -> MaintenanceHold:
     """Freeze the original runnable set and enqueue one restart per member.
 
     A failure leaves the hold in place. Repeating preparation resumes the
     same cohort and finds already committed commands by the exact operation.
     Terminated agents never enter the cohort. A previous lifecycle operation,
-    stale/unknown runtime or external controller requires separate resolution.
+    stale/unknown runtime requires separate resolution.
     """
     current = maintenance.require_operation(holder, acquired_at)
     hold = current.maintenance
@@ -52,8 +53,13 @@ def prepare(
             (machine,),
         ).fetchall()
         applied = _applied_capture(conn, hold, host_owner, holder, acquired_at)
-        captured = _classify([_RuntimeRow(*row) for row in rows], hold, host_owner, applied)
-        _require_resolved(conn, captured)
+        captured = _classify(
+            [_RuntimeRow(*row) for row in rows], hold, host_owner, applied, host_absent=host_absent
+        )
+        cold = frozenset(
+            row[0] for row in rows if host_absent and _RuntimeRow(*row).cold_hosted_idle()
+        )
+        _require_resolved(conn, captured, cold=cold)
         if captured != hold:
             pause_owner.change_maintenance(holder, acquired_at, hold, captured)
             hold = captured
@@ -86,7 +92,19 @@ class _RuntimeRow(NamedTuple):
             and self.resources is None
         )
 
-    def active_for(self, owner: UUID) -> bool:
+    def cold_hosted_idle(self) -> bool:
+        # release_hosted_owner clears the lease only after normal host cleanup.
+        # A merely expired lease does not prove that boundary.
+        return (
+            self.status == "idling"
+            and self.kind in (None, "hosted")
+            and self.fresh is None
+            and self.pid is None
+            and self.resources is None
+            and (self.owner is None) == (self.generation is None)
+        )
+
+    def active_for(self, owner: UUID | None) -> bool:
         return (
             self.status in ("running", "idling")
             and self.kind == "hosted"
@@ -99,12 +117,17 @@ class _RuntimeRow(NamedTuple):
 def _classify(
     rows: list[_RuntimeRow],
     hold: MaintenanceHold,
-    owner: UUID,
+    owner: UUID | None,
     applied: set[int],
+    *,
+    host_absent: bool = False,
 ) -> MaintenanceHold:
     parked = tuple(
         sorted(
-            row.agent_id for row in rows if row.agent_id not in hold.commands and row.unowned_idle()
+            row.agent_id
+            for row in rows
+            if row.agent_id not in hold.commands
+            and (row.unowned_idle() or (host_absent and row.cold_hosted_idle()))
         )
     )
     captured = bool(hold.commands or hold.parked)
@@ -120,7 +143,7 @@ def _classify(
         if not row.active_for(owner) and row.agent_id not in applied
     ]
     if invalid:
-        raise RuntimeError(f"maintenance requires the live original hosted owner: {invalid}")
+        raise RuntimeError(f"maintenance requires the live original native owner: {invalid}")
     return (
         hold
         if captured
@@ -131,7 +154,7 @@ def _classify(
 def _applied_capture(
     conn: psycopg.Connection,
     hold: MaintenanceHold,
-    owner: UUID,
+    owner: UUID | None,
     holder: str,
     acquired_at: datetime,
 ) -> set[int]:
@@ -145,27 +168,23 @@ def _applied_capture(
         "WHERE m.id=ANY(%s) AND m.status='idling' AND m.runtime_owner IS NULL "
         "AND m.runtime_generation IS NULL AND m.incarnation_resources IS NULL "
         "AND i.kind='restart' AND i.source='system:maintenance' AND i.status='claimed' "
-        "AND i.target_owner=%s AND i.applied_at IS NOT NULL AND i.observed_at IS NULL "
+        "AND i.target_owner=%s "
+        "AND i.applied_at IS NOT NULL AND i.observed_at IS NULL "
         "AND i.payload->'maintenance'=%s",
         (list(hold.commands), owner, operation),
     ).fetchall()
     return {row[0] for row in rows}
 
 
-def _require_resolved(conn: psycopg.Connection, hold: MaintenanceHold) -> None:
-    external = conn.execute(
-        "SELECT agent_id FROM agent_impersonations WHERE agent_id=ANY(%s) "
-        "AND status IN ('requested','accepted','active')",
-        (sorted(set(hold.commands) | set(hold.parked)),),
-    ).fetchall()
-    if external:
-        raise RuntimeError(
-            f"external controllers must release first: {[row[0] for row in external]}"
-        )
+def _require_resolved(
+    conn: psycopg.Connection, hold: MaintenanceHold, *, cold: frozenset[int] = frozenset()
+) -> None:
     unresolved = conn.execute(
         "SELECT DISTINCT agent_id FROM inbound_messages WHERE agent_id=ANY(%s) "
-        "AND (status='claimed' OR (status='pending' AND kind IN ('restart','terminate')))",
-        (list(hold.parked),),
+        "AND ((status='claimed' AND (NOT (agent_id=ANY(%s)) OR kind='terminate' "
+        "OR (kind='restart' AND applied_at IS NULL))) "
+        "OR (status='pending' AND kind IN ('restart','terminate')))",
+        (list(hold.parked), list(cold)),
     ).fetchall()
     if unresolved:
         raise RuntimeError(
@@ -201,7 +220,8 @@ def verify_drained(conn: psycopg.Connection, hold: MaintenanceHold) -> None:
     if hold.parked:
         rows = conn.execute(
             "SELECT id FROM agents_meta WHERE id=ANY(%s) AND status='idling' "
-            "AND runtime_owner IS NULL AND runtime_generation IS NULL "
+            "AND ((runtime_owner IS NULL AND runtime_generation IS NULL) OR "
+            "(runtime_kind='hosted' AND lease_expires_at IS NULL)) "
             "AND pid IS NULL AND incarnation_resources IS NULL",
             (list(hold.parked),),
         ).fetchall()
@@ -213,8 +233,8 @@ def verify_drained(conn: psycopg.Connection, hold: MaintenanceHold) -> None:
             "ON i.id=m.lifecycle_command_id AND i.agent_id=m.id "
             "WHERE m.id=%s AND i.id=%s AND i.kind='restart' AND i.status='claimed' "
             "AND i.applied_at IS NOT NULL AND i.observed_at IS NULL "
-            "AND m.status='idling' AND m.runtime_owner IS NULL "
-            "AND m.runtime_generation IS NULL AND m.incarnation_resources IS NULL",
+            "AND m.status='idling' AND m.runtime_owner IS NULL AND m.runtime_generation IS NULL "
+            "AND m.incarnation_resources IS NULL",
             (agent_id, command_id),
         ).fetchone()
         if row is None:

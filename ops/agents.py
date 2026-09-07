@@ -16,28 +16,9 @@ Either way the *mechanics* of actually launching a detached native child
 process and confirming it came up live in `ops/agent_launch.py`
 (`_launch_agent_process` / `_launch_or_force_terminated` / `_require_released_agent_session`).
 
-Agent process / agents row is 1:1 by `agent_id`.
-
-At process start, `agent._starting.claim_agent_row` executes one CAS from an
-unclaimed idling row to `running`, writing pid, started_at, and the first lease.
-The `status='idling' AND pid IS NULL` predicate admits exactly one process for
-an agent id. `_launch_agent_process` confirms that the claim wrote a pid; a
-timeout leaves an unclaimed row for the boot reaper rather than adding a second
-status value for bootstrap.
-
-Spawn, resurrect, and respawn clear pid, started_at, and lease before
-launching a new child. The claim CAS re-fills those ownership columns atomically,
-so a prior process's values never masquerade as the new child.
-
-Two cleanup paths on launch failure:
-- spawn: leave an unclaimed idling row and re-raise — gives operators a way to
-  diagnose "why did it never start" (a weekly cleanup task's concern). This
-  avoids the non-atomic "INSERT first then launch" failure erasing the thread
-  history.
-- resurrect / respawn: `_launch_or_force_terminated` forces status to
-  'terminated' and re-raises — the agent already existed; the operator cares
-  about "did the wake succeed", and failure lets the caller retry resurrect
-  (re-run from 'terminated').
+One durable agent identity is served by its home agent-host. Spawn and
+resurrection commit native intent and messages before publishing a wake;
+admission binds the next turn to the host owner and a new generation.
 """
 
 from __future__ import annotations
@@ -57,9 +38,6 @@ from ops.agent_spawn import (
 )
 from ops.agent_spawn import (
     latest_checkpoint_id as latest_checkpoint_id,
-)
-from ops.agent_wake import (
-    respawn_agent as respawn_agent,
 )
 from ops.agent_wake import (
     resurrect_agent as resurrect_agent,

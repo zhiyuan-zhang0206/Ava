@@ -1,20 +1,10 @@
 """Every `ops.cluster` spawn site must reach the platform session backend.
 
-The four detached-session spawns (`unpause_local_cluster`, `spawn_update`,
-`spawn_rollout`, `spawn_restart`) used to hardcode a raw binary spawn, while
-`pause_local_cluster` already went through `shared.session_backend`. That
-half-port left a Windows agent-runner *one-way reachable*: the gateway could
-pause it, and nothing could ever start it again. `spawn_update` is the sole
-converge action of BOTH the schema and the pin controller, so every tick's
-self-heal died on a missing-backend error and no drift dimension could ever
-close — observed on the `win` box as a host stuck off-pin for hours, retrying
-every two minutes, with its restarter dead as collateral.
-
-S7 completed the migration: the orchestration sessions moved onto the same
-`SessionBackend.new_session` as services on EVERY platform, so these tests pin
-both halves — on a Windows host the command is the cmd.exe spelling, on a POSIX
-host it is the shell spelling with its tee / `[session-exit]` verdict. They swap
-the platform backend rather than the host, so they run anywhere.
+The orchestration spawns (`spawn_update`, `spawn_rollout`, `spawn_restart`)
+share the platform's session backend. Native
+drain retains services; resume releases admission without creating a service.
+Windows commands use cmd.exe syntax and POSIX commands use shell syntax.
+The tests swap the platform backend rather than the host, so they run anywhere.
 """
 
 from __future__ import annotations
@@ -187,7 +177,14 @@ def posix_native_host(
 
 
 def _drive_unpause() -> None:
+    from shared import maintenance, pause_owner
+
+    cluster_mod.pause_local_cluster()
+    paused = pause_owner.read()
+    assert paused.maintenance is not None and paused.maintenance.phase == "drained"
     cluster_mod.unpause_local_cluster()
+    assert not maintenance.held()
+    assert pause_owner.read().status == "resumed"
 
 
 def _drive_update() -> None:
@@ -309,7 +306,6 @@ def _drive_restart(monkeypatch: pytest.MonkeyPatch) -> None:
 
 # (label, driver, expected session, substring the native command must contain)
 _SPAWN_SITES: tuple[tuple[str, Callable[[pytest.MonkeyPatch], None], str, str], ...] = (
-    ("unpause", lambda _mp: _drive_unpause(), "ava-test-restarter", "services.restarter.daemon"),
     ("update", lambda _mp: _drive_update(), "ava-test-updater", "git checkout --force"),
     (
         "update-restart-only",
@@ -503,20 +499,14 @@ def test_parent_wait_fails_immediately_when_the_session_dies(
 
 
 @pytest.mark.real_cluster_spawn
-def test_unpause_respawns_the_restarter_on_the_native_backend(
-    posix_native_host: _FakeSessionBackend,
+def test_unpause_releases_admission_without_spawning_services(
+    posix_native_host: _FakeSessionBackend, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The restarter is a SERVICE: on a POSIX host post-switch, unpause spawns it
-    through the service backend (native supervisor) — the same backend `ava
-    start` and the healthcheck respawn use — never through a raw binary or the
-    orchestration shell path, or a start-spawned native restarter and an
-    unpause-spawned raw one would double-run against the same agents."""
-    _drive_unpause()
+    from ops import agent_pause
 
-    assert [s[0] for s in posix_native_host.spawned] == ["ava-test-restarter"]
-    _name, cmd, cwd = posix_native_host.spawned[0]
-    assert "services.restarter.daemon" in cmd
-    assert cwd == cluster_mod._REPO_ROOT
+    monkeypatch.setattr(agent_pause, "host_running", lambda: False)
+    _drive_unpause()
+    assert posix_native_host.spawned == []
 
 
 @pytest.mark.real_cluster_spawn

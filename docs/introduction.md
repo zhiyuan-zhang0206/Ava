@@ -276,14 +276,10 @@ see [`conventions/non-goals.md`](../conventions/non-goals.md).
 
 ### Deployment footprint & memory
 
-The dependencies are heavy on purpose — Postgres, Redis, a LangGraph
-checkpoint and a real OS process per agent — so Ava ships several independent
-memory-reclaim layers rather than pretending the stack is light. The flagship
-one is the **hosted runner** (`AVA_RUNNER_MODE=hosted`): one `agent-host`
-daemon runs every local agent's turns as asyncio tasks, and an idle agent is
-no task at all — its identity lives in `agents_meta` + its checkpoint, so
-idle costs nothing by construction (the older hibernation layer was deleted
-with it, 2026-08). Full verified breakdown:
+Postgres, Redis and LangGraph checkpoints retain durable agent context. One
+`agent-host` daemon runs local agents as asyncio tasks; idle has no active task.
+Bounded caches may retain model/runtime objects. Disposable execution children
+and persistent PTY shells have their own resource lifetimes. Full verified breakdown:
 [`conventions/runbook.md#deployment-footprint--memory`](../conventions/runbook.md#deployment-footprint--memory).
 
 ---
@@ -291,7 +287,7 @@ with it, 2026-08). Full verified breakdown:
 ## Security model
 
 Ava does not sandbox model-authored code. `execute_code` runs the agent's
-generated Python directly in the agent process, on the host, with the
+generated Python in a disposable subprocess on the host, with the
 permissions of whichever user started it. The `before_exec` hook
 ([`demos/permission-hooks/`](../demos/permission-hooks/)) can intercept dangerous
 patterns before they run, but it is a mitigation layer, not a boundary.

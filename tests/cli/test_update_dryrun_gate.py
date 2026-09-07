@@ -48,7 +48,10 @@ def _run_inner(*, dry_run: bool = False) -> int:
         Path("/unused"),
         origin="test-origin",
         dry_run=dry_run,
-        deploy_capability={"deploy_holder": "test", "deploy_acquired_at": "now"},
+        deploy_capability={
+            "deploy_holder": "test",
+            "deploy_acquired_at": "2026-08-25T00:00:00+00:00",
+        },
     )
 
 

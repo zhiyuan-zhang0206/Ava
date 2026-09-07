@@ -34,8 +34,6 @@ number) keeps the lint robust to surrounding edits; if the sentinel is missing,
 the lint errors out rather than silently passing.
 
 Exemptions:
-  - `_NON_SERVICE_ROWS` — rows that legitimately appear in the table but are not
-    `build_services()` entries (the per-agent `agent-{N}` row).
   - `_ROSTER_EXEMPT` — escape valve (normally empty), matching the allowlist
     convention of the other local lints.
 
@@ -60,7 +58,7 @@ _RUNBOOK = _REPO_ROOT / "conventions" / "runbook.md"
 _SENTINEL = "<!-- lint:roster-table -->"
 
 # Rows that appear in the roster table but are not build_services() entries.
-_NON_SERVICE_ROWS = {"agent-{N}"}
+_NON_SERVICE_ROWS: set[str] = set()
 # Escape valve (normally empty); same allowlist convention as the other lints.
 _ROSTER_EXEMPT: set[str] = set()
 

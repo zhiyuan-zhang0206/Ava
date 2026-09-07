@@ -19,7 +19,7 @@ from shared.config import settings
 _PORTS: cluster.ClusterPorts = {
     "gateway": 8000,
     "frontend": 3000,
-    "restarter": 8102,
+    "restarter": 8102,  # Reserved registry slot in existing home records.
     "labeler": 8103,
     "memory_indexer": 8105,
     "ops": 8106,
@@ -199,18 +199,18 @@ def test_collect_port_conflicts_env_layer_overrides_block_for_enrolled_unit(
     # no registry record -> block layer is the legacy segment
     monkeypatch.setattr(
         "shared.port_preflight.expected_cluster_ports",
-        lambda _home: {"restarter": 8102},  # pyright: ignore[reportUnknownArgumentType]
+        lambda _home: {"agent_host": 8121},  # pyright: ignore[reportUnknownArgumentType]
     )
     # the unit's own .env declares a per-unit block port (every health daemon
-    # resolves; only restarter's matters for the assertion)
-    per_unit = {"restarter": 20003}
+    # resolves; only agent_host's matters for the assertion)
+    per_unit = {"agent_host": 20003}
     monkeypatch.setattr(
         "shared.daemon_health.health_port",
         lambda svc: per_unit.get(svc, 20000 + len(svc)),  # pyright: ignore[reportUnknownArgumentType]
     )
 
     # occupy the .env port: it must be reported despite the block layer naming
-    # the legacy 8102
+    # the legacy 8121
     import socket
 
     sock = socket.socket()
@@ -218,6 +218,6 @@ def test_collect_port_conflicts_env_layer_overrides_block_for_enrolled_unit(
     sock.listen(1)
     try:
         lines = _pp.collect_port_conflicts(ctx)
-        assert any("restarter" in ln and "20003" in ln for ln in lines), lines
+        assert any("agent_host" in ln and "20003" in ln for ln in lines), lines
     finally:
         sock.close()

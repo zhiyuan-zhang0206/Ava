@@ -40,7 +40,7 @@ Browser (frontend:3000) ──HTTP──▶ Gateway (:8000) ──▶ Postgres /
    Gateway ──POST /ops──▶ agent-ops  │   Gateway ──▶ session backend (direct)
    daemon ──▶ detached process (runner) │   schedule_manager._launch
 ```
-- **agents**: spawn / lifecycle uniformly goes through `_forward_to_home_machine` → `cluster_rpc` POST `/ops` to the agent-ops daemon, agent processes are **detached, native** (native supervisor double fork reparent to init; `ops/agent_launch.py` → `shared/posixproc.py`|`winproc.py`), built on the runner side — **even if the target is the local machine, there is no in-process shortcut** (`gateway/routers/agents_forward.py:_forward_to_home_machine()`)
+- **agents**: spawn / lifecycle uniformly goes through `_forward_to_home_machine` → `cluster_rpc` POST `/ops` to the agent-ops daemon, the runner commits durable work and publishes a wake to its agent host — **even if the target is the local machine, there is no in-process shortcut** (`gateway/routers/agents_forward.py:_forward_to_home_machine()`)
 - **schedules**: `schedule_manager._launch` is gateway's **only** path that directly manages sessions (agent processes are hosted by the native supervisor on the runner side, not by the gateway)
 
 - Gateway connects to Postgres via one `shared.db.pool()` per process, borrowing one connection per request. Going through the factory rather than constructing a `ConnectionPool` is what gives the borrows `prepare_threshold=0` (transaction-pooling-safe under PgBouncer) and `PG_KEEPALIVE_KWARGS` (a request-serving pool outlives host sleeps; without keepalives a borrow on a half-dead socket stalls on the OS TCP-retransmit timeout). `scripts/lint_pool_keepalives.py` enforces it

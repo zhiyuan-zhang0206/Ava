@@ -69,7 +69,7 @@ def test_agent_runner_reverts_and_skips_stop_on_broken_layout(
     monkeypatch.setattr(ar.subprocess, "run", lambda *_a, **_k: _FakeCompleted())  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(ar, "run_uv_sync_verified", _sync_verified)
     monkeypatch.setattr(ar, "validate_migrations_at_ref", _raise_layout)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_ns, "_do_stop", lambda *_a, **_k: stopped.append(True))  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_ns, "_do_stop", lambda *_a, **_k: stopped.append(True) or 0)  # pyright: ignore[reportUnknownArgumentType]
 
     rc = ar._run_agent_runner_self_update(
         Path("/unused"),
@@ -95,7 +95,7 @@ def test_agent_runner_proceeds_to_stop_on_valid_layout(
     monkeypatch.setattr(ar.subprocess, "run", lambda *_a, **_k: _FakeCompleted())  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(ar, "run_uv_sync_verified", _sync_verified)
     monkeypatch.setattr(ar, "validate_migrations_at_ref", lambda _ref, **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_ns, "_do_stop", lambda *_a, **_k: stopped.append(True))  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_ns, "_do_stop", lambda *_a, **_k: stopped.append(True) or 0)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_ns, "_preflight_probes", lambda: 0)  # skip real gateway probe
     monkeypatch.setattr(_ns, "_quiesce_local_agents", lambda _mode: True)  # pyright: ignore[reportUnknownArgumentType]
 
@@ -122,7 +122,7 @@ def test_agent_runner_aborts_when_preflight_probes_fail(
     monkeypatch.setattr(ar.subprocess, "run", lambda *_a, **_k: _FakeCompleted())  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(ar, "run_uv_sync_verified", _sync_verified)
     monkeypatch.setattr(ar, "validate_migrations_at_ref", lambda _ref, **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_ns, "_do_stop", lambda *_a, **_k: stopped.append(True))  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_ns, "_do_stop", lambda *_a, **_k: stopped.append(True) or 0)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_ns, "_preflight_probes", lambda: 1)  # simulate failure
     monkeypatch.setattr(_ns, "_release_self_heal_pause", lambda: None)
 
@@ -150,7 +150,7 @@ def test_agent_runner_restart_only_also_runs_preflight(
         preflight_called.append(True)
         return 0
 
-    monkeypatch.setattr(_ns, "_do_stop", lambda *_a, **_k: stopped.append(True))  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_ns, "_do_stop", lambda *_a, **_k: stopped.append(True) or 0)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_ns, "_preflight_probes", fake_preflight)
     monkeypatch.setattr(_ns, "_quiesce_local_agents", lambda _mode: True)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(ar.subprocess, "run", lambda *_a, **_k: _FakeCompleted())  # pyright: ignore[reportUnknownArgumentType]
@@ -171,7 +171,7 @@ class TestLauncherGate:
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         stopped: list[bool] = []
-        monkeypatch.setattr(_ns, "_do_stop", lambda *_a, **_k: stopped.append(True))  # pyright: ignore[reportUnknownArgumentType]
+        monkeypatch.setattr(_ns, "_do_stop", lambda *_a, **_k: stopped.append(True) or 0)  # pyright: ignore[reportUnknownArgumentType]
         monkeypatch.setattr(_ns, "_preflight_probes", lambda: 0)
         monkeypatch.setattr(ar.subprocess, "run", lambda *_a, **_k: _FakeCompleted())  # pyright: ignore[reportUnknownArgumentType]
 
@@ -190,7 +190,7 @@ class TestLauncherGate:
             launched.append(argv)  # pyright: ignore[reportUnknownArgumentType]
             return _FakeCompleted()
 
-        monkeypatch.setattr(_ns, "_do_stop", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType]
+        monkeypatch.setattr(_ns, "_do_stop", lambda *_a, **_k: 0)  # pyright: ignore[reportUnknownArgumentType]
         monkeypatch.setattr(_ns, "_preflight_probes", lambda: 0)
         monkeypatch.setattr(_ns, "_quiesce_local_agents", lambda _mode: True)  # pyright: ignore[reportUnknownArgumentType]
         monkeypatch.setattr(ar.subprocess, "run", _run)  # pyright: ignore[reportUnknownArgumentType]
@@ -219,7 +219,7 @@ class TestLauncherGate:
             launched.append(argv)  # pyright: ignore[reportUnknownArgumentType]
             return _FakeCompleted()
 
-        monkeypatch.setattr(_ns, "_do_stop", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType]
+        monkeypatch.setattr(_ns, "_do_stop", lambda *_a, **_k: 0)  # pyright: ignore[reportUnknownArgumentType]
         monkeypatch.setattr(_ns, "_preflight_probes", lambda: 0)
         monkeypatch.setattr(_ns, "_quiesce_local_agents", lambda _mode: True)  # pyright: ignore[reportUnknownArgumentType]
         monkeypatch.setattr(ar.subprocess, "run", _run)  # pyright: ignore[reportUnknownArgumentType]
@@ -234,7 +234,7 @@ class TestLauncherGate:
         `win` box's layout — abort, do not stop."""
         monkeypatch.setattr(ar, "platform_backend", WindowsPlatformBackend)
         stopped: list[bool] = []
-        monkeypatch.setattr(_ns, "_do_stop", lambda *_a, **_k: stopped.append(True))  # pyright: ignore[reportUnknownArgumentType]
+        monkeypatch.setattr(_ns, "_do_stop", lambda *_a, **_k: stopped.append(True) or 0)  # pyright: ignore[reportUnknownArgumentType]
         monkeypatch.setattr(_ns, "_preflight_probes", lambda: 0)
         monkeypatch.setattr(ar.subprocess, "run", lambda *_a, **_k: _FakeCompleted())  # pyright: ignore[reportUnknownArgumentType]
 
@@ -246,7 +246,7 @@ class TestLauncherGate:
     ) -> None:
         """Vetted-then-vanished: services are already down, so the operator gets the
         path and the recovery instruction instead of a bare traceback."""
-        monkeypatch.setattr(_ns, "_do_stop", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType]
+        monkeypatch.setattr(_ns, "_do_stop", lambda *_a, **_k: 0)  # pyright: ignore[reportUnknownArgumentType]
         monkeypatch.setattr(_ns, "_preflight_probes", lambda: 0)
         monkeypatch.setattr(_ns, "_quiesce_local_agents", lambda _mode: True)  # pyright: ignore[reportUnknownArgumentType]
 

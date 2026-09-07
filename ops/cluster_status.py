@@ -2,7 +2,7 @@
 
 Assembles `ClusterStatus` from local probes — pidfiles for the daemons, the
 session backends' records for the services and the agents' persistent shells,
-the native supervisor's pid records for the agent processes themselves — and
+the database's local agent identities — and
 answers the one endpoint that stays readable while the cluster is paused.
 
   Observability: GET /api/cluster/status — bypasses 503 mode, always
@@ -109,12 +109,11 @@ class ClusterStatus(BaseModel):
     # Per-host daemon liveness (pidfile + signal). None = could not probe. Shown
     # per-machine in the roster; central-only daemons (labeler/memory-indexer) are not
     # here — they live in the gateway services panel.
-    restarter_online: bool | None = None
+    agent_host_online: bool | None = None
     watchdog_online: bool | None = None
     # Agent-runner detail surfaced on the Status Page. `agent_count` is this
-    # host's live agent PROCESSES (the native-supervisor pid records, not
-    # sessions); `session_count` counts this host's live sessions (daemons + the
-    # agents' persistent shells — agent processes are not sessions).
+    # host's non-terminated agent identities, including idle and paused agents.
+    # `session_count` counts live service and persistent terminal sessions.
     agent_count: int = 0
     session_count: int = 0
     # The agents' shell/watcher sessions grouped by agent for hierarchical
@@ -158,19 +157,15 @@ def _count_agent_shells(sessions: list[SessionInfo]) -> int:
     return sum(1 for s in sessions if re.search(r"-agent-(\d+)-shell-", s.name))
 
 
-def _count_agent_processes() -> int:
-    """Count this host's live agent PROCESSES (the pid source, not sessions).
-
-    Agent processes are detached sessions the native supervisor tracks
-    as pid records under `$AVA_HOME/run/sessions/` — one per `ava-agent-
-    <id>`, keyed by the exact process-session name. `list_sessions` reaps dead
-    records as it lists, so this reflects the live count. (The agents' persistent
-    shells live on the shell backend and are counted separately as `shell_count`.)"""
-    from shared.session_backend import native_proc
-
-    prefix = shared.cluster.session_name("agent-")  # ava-agent-
-    proc_re = re.compile(rf"^{re.escape(prefix)}\d+$")
-    return sum(1 for s in native_proc().list_sessions(prefix=prefix) if proc_re.match(s))
+def _count_local_agents(conn: Any) -> int:
+    """Count this machine's retained agent identities through the snapshot connection."""
+    row = conn.execute(
+        "SELECT count(*) FROM agents_meta WHERE machine=%s AND status<>'terminated'",
+        (machine_name(),),
+    ).fetchone()
+    if row is None:
+        raise RuntimeError("local agent count returned no row")
+    return int(row[0])
 
 
 def _group_agent_sessions(
@@ -386,8 +381,12 @@ def _collect_sessions() -> tuple[list[SessionInfo], int, int]:
 
 def _read_deploy_snapshot(
     pool: Any | None,
-) -> tuple[shared.host_deploy_state.HostDeployState | None, shared.cluster_lock.DeployLease | None]:
-    """Read both central deploy rows through one snapshot-local connection."""
+) -> tuple[
+    shared.host_deploy_state.HostDeployState | None,
+    shared.cluster_lock.DeployLease | None,
+    int,
+]:
+    """Read deploy state and local agent count through one snapshot-local connection."""
     try:
         connection = (
             shared.db.connect(autocommit=True)
@@ -397,16 +396,14 @@ def _read_deploy_snapshot(
         with connection as conn:
             state = shared.host_deploy_state.read(conn=conn)
             lease = shared.cluster_lock.read_update_lease(conn=conn)
-        return state, lease
+            agent_count = _count_local_agents(conn) if is_agent_runner() else 0
+        return state, lease, agent_count
     except Exception:  # fail-fast-ok: status degrades when the central DB is unavailable
-        # Deliberate coupling: paused / current_orchestration / last_updater_outcome
-        # now degrade TOGETHER from this one snapshot-scoped read, where each used
-        # to read its own row independently. Each degraded answer is exactly what
-        # its own failed read produced before (not paused / no orchestration / no
-        # outcome), so the only difference is that one failed read degrades all
-        # three instead of one.
+        # Deploy state and agent count share one bounded connection. During a
+        # data-plane outage the snapshot remains readable with no deploy claim
+        # and the existing zero-count default.
         _log.warning("deploy-state snapshot read failed; using degraded status", exc_info=True)
-        return None, None
+        return None, None, 0
 
 
 def _read_resource_sample() -> ResourceSample | None:
@@ -432,7 +429,9 @@ def status_snapshot(pool: Any | None = None) -> ClusterStatus:
     from shared.cluster_drift import prod_source_head_sha
     from shared.config import settings
 
-    restarter_alive, _ = _check_pidfile(str(settings.services.restarter_pidfile))
+    agent_host_alive = (
+        _check_pidfile(str(settings.services.agent_host_pidfile))[0] if is_agent_runner() else None
+    )
     # One watchdog per capability now; `watchdog_online` (single bool for the
     # frontend dot) means "every watchdog this host should run is alive". A
     # single-box host requires BOTH; a split unit requires only its own.
@@ -445,17 +444,16 @@ def status_snapshot(pool: Any | None = None) -> ClusterStatus:
         all(_check_pidfile(p)[0] for p in watchdog_pidfiles) if watchdog_pidfiles else False
     )
     sessions, shell_count, session_total = _collect_sessions()
-    agent_count = _count_agent_processes()
     # The producer is typed (AgentSessionGroup); ClusterStatus.agent_groups stays
     # an open dict list so the frontend-facing status schema (and its generated TS
     # types) is unchanged — serialize the models to JSON dicts at the boundary.
     agent_groups = [g.model_dump(mode="json") for g in _group_agent_sessions(sessions)]
     # The live one-shot resource sample blocks for its CPU interval. Run it in
-    # parallel with the two central-DB reads so snapshot latency pays the slower
+    # parallel with the central-DB reads so snapshot latency pays the slower
     # of those independent operations, not their sum.
     with ThreadPoolExecutor(max_workers=1) as executor:
         resource_future = executor.submit(_read_resource_sample)
-        state, lease = _read_deploy_snapshot(pool)
+        state, lease, agent_count = _read_deploy_snapshot(pool)
         resource = resource_future.result()
     return ClusterStatus(
         machine_name=machine_name(),
@@ -468,7 +466,7 @@ def status_snapshot(pool: Any | None = None) -> ClusterStatus:
         head_sha=prod_source_head_sha(),
         running_sha=_process_sha.get(),
         shell_count=shell_count,
-        restarter_online=restarter_alive,
+        agent_host_online=agent_host_alive,
         watchdog_online=watchdog_alive,
         agent_count=agent_count,
         session_count=session_total,

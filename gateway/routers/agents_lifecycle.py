@@ -1,12 +1,12 @@
 """Agent lifecycle endpoints — /api/agents/* lifecycle surface.
 
-Compact / cancel / terminate / exited / resurrect / restart.
+Compact / cancel / terminate / resurrect / restart.
 
 Lifecycle operations that mutate physical host state (session / OS
 process) always run on the agent's home machine via its ops server
 (`_forward_to_home_machine`, routers/agents_forward.py) — no local shortcut
 even when the target is the co-located box. Operations that are durable
-DB-row + event-publish work (cancel / exited) run on whichever
+DB-row + event-publish work (cancel) run on whichever
 gateway receives them. CRUD + spawn live in routers/agents.py; message +
 state reads in routers/agents_state.py.
 """
@@ -16,14 +16,13 @@ from __future__ import annotations
 import asyncio
 from typing import Literal
 
-from fastapi import APIRouter, Body, HTTPException, Request, Response
+from fastapi import APIRouter, Body, HTTPException, Request
 from psycopg_pool import ConnectionPool
 
 from gateway.routers.agents_forward import _forward_to_home_machine
 from gateway.schemas import CancelRequest, CompactEnqueued
 from ops import ops_lifecycle as _ops
 from ops.rpc_schemas import (
-    AgentExitedRequest,
     CancelRequested,
     RestartAgentRequest,
     RestartAgentResponse,
@@ -104,70 +103,20 @@ async def post_agent_terminate(
     agent_id: int,
     body: TerminateAgentRequest = Body(default_factory=TerminateAgentRequest),  # noqa: B008
 ) -> TerminateAgentResponse:
-    """Have the agent gracefully exit — INSERT one kind='terminate'
-    source=body.source inbound; after processing the current turn, when
-    claim runs, dispatch goto END and the process exits. An optional message
-    is committed as pending chat immediately before the terminate command, so
-    it is retained for resurrection without causing another LLM turn.
+    """Terminate through the home runner's durable native control path.
 
-    With `force=true`, request interruption. Hosted force returns `enqueued`
-    while the original host drains actual work; acceptance and metadata status
-    are not proof of exit. Detached process force returns `force_killed`.
+    Claim returns to END and the host flushes before applying normal termination.
+    An optional message is committed as pending work before the command, retained
+    for later resurrection without causing another model turn. Force returns
+    enqueued while the exact original host settles its task and execution
+    resources; acceptance and metadata status are not proof of completed exit.
 
-    Smart liveness detection: if the process corresponding to
-    agents_meta.pid is gone (zombie row, commonly from early-stage
-    EmptyInputError residuals / respawn_agent failures leaving an unclaimed
-    row), force UPDATE status='terminated' directly without the
-    inbound path — an inbound delivered to a dead process is pending
-    forever and the user can never clear it.
-
-    Always runs on the agent's home machine via its ops server
-    (`_forward_to_home_machine`). The force path must, because killing the
-    detached process / os.kill are physical local-host operations; the graceful
-    path must too, because zombie detection `process_alive(pid)` is
-    meaningless across machines (probing a cross-machine PID via signal 0
-    hits a remote PID space and gives false positives). Both paths run on
-    the home machine, symmetric in logic.
-
-    404: agent_id does not exist (AgentNotFound -> handler returns
-        404 + reason).
-    `already_terminated`: agent was already dead / process detected as
-        dead and cleaned up directly.
-    `force_killed`: force=true killed the process and marked terminated.
-    """
+    Both paths forward to the home runner. A missing agent returns 404; an
+    already-terminated identity is a no-op for graceful termination."""
     forwarded = await _forward_to_home_machine(
         agent_id, f"/api/agents/{agent_id}/terminate", body.model_dump()
     )
     return TerminateAgentResponse.model_validate(forwarded)
-
-
-@router.post("/api/agents/{agent_id}/exited", status_code=204)
-async def post_agent_exited(
-    agent_id: int, request: Request, body: AgentExitedRequest | None = None
-) -> Response:
-    """An agent process reports it has reached its own exit finally block —
-    finalize its status to 'terminated', close its agent-owned show() pages,
-    and keep daemon-supervised serve() pages open.
-
-    Called by the agent itself (`ava.self`'s exit path), not by a user/peer.
-    Distinct from `/terminate`, which *initiates* termination (inserts a
-    terminate inbound for a live agent, or force-kills): by the time `/exited`
-    arrives the process has already stopped, so this only records the
-    finalized state. The status flip is guarded (a concurrent restart leaves
-    status 'restarting' untouched), so a restart's process-exit hitting this
-    endpoint does not strand the restarter.
-
-    No cross-machine forwarding: the work is a status UPDATE + event publish,
-    both against the shared DB / events channel, so it runs on whichever
-    gateway receives it.
-    """
-    await _ops.mark_agent_exited_op(
-        agent_id,
-        request.app.state.db_pool,
-        generation=body.generation if body else None,
-        owner=body.owner if body else None,
-    )
-    return Response(status_code=204)
 
 
 @router.post("/api/agents/{agent_id}/resurrect")
@@ -216,22 +165,12 @@ async def post_agent_restart(
     agent_id: int,
     body: RestartAgentRequest = Body(default_factory=RestartAgentRequest),  # noqa: B008
 ) -> RestartAgentResponse:
-    """Have the agent self-restart — INSERT kind='restart' source=body.source
-    inbound; after processing the current turn, when claim runs it UPDATE
-    status='restarting' + goto END + process exits; the restarter daemon
-    sees status='restarting' and auto-respawns a fresh process attached to
-    the same agent_id (new PID, LangGraph state preserved).
+    """Enqueue native restart on the agent's home runner.
 
-    Always forwards to the agent's home machine ops server — the restart
-    inbound INSERT hits the shared DB regardless of which host runs it, but
-    the uniform forwarding path (same as terminate/resurrect) keeps one
-    code path with no local shortcut.
-
-    404: agent_id does not exist (AgentNotFound -> handler returns
-        404 + reason).
-    `already_terminated`: agent is dead; restart does not apply — use
-        resurrect.
-    """
+    The current turn reaches claim, returns normally and flushes its checkpoint.
+    The host then applies the exact command and releases the incarnation for
+    new admission, retaining agent ID and context. Terminated agents require
+    resurrection; restart returns already_terminated for them."""
     forwarded = await _forward_to_home_machine(
         agent_id, f"/api/agents/{agent_id}/restart", body.model_dump()
     )

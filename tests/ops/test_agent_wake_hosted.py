@@ -1,59 +1,18 @@
-"""Hosted-mode lifecycle ops — the same wake functions, minus the process.
-
-Process mode: resurrect / respawn / swap-in / revive all end in a detached
-process launch (`ops/agent_launch`). Hosted mode: the row flip IS the op —
-the dispatcher owns delivery, and the op's only extra duty is the explicit
-Redis wake (the inbound INSERTs inside these functions are raw SQL and do not
-publish). These tests pin that contract: the status transition and the
-inbound rows are untouched, the launch machinery is never called, and the
-wake is published exactly once.
-
-Locked here because the failure mode is not a crash: a hosted resurrect that
-silently forked a process would double-claim the same inbound with the
-dispatcher's turn task, and a missing wake would leave a flipped row pending
-forever.
-"""
+"""Real database resurrection: guarded status transition, durable inbound, and one host wake."""
 
 from __future__ import annotations
 
 from collections.abc import Iterator
-from typing import Any, cast
 
 import psycopg
 import pytest
-from psycopg_pool import ConnectionPool
+from psycopg_pool import AsyncConnectionPool
 
-from ops import agent_revive, agent_wake
+from ops import agent_wake
 from ops.agent_spawn import create_agent_row
-from ops.controllers import respawn as respawn_controller
 from shared.machine import machine_name
 
 _DEAD_PID = 424243
-
-
-@pytest.fixture(autouse=True)
-def _hosted_mode(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(agent_wake.runner_mode, "is_hosted", lambda: True)
-
-
-@pytest.fixture(autouse=True)
-def _healthy_hosted_consumer(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(agent_wake, "_hosted_agent_host_healthy", lambda: True)
-
-
-@pytest.fixture(autouse=True)
-def _guard_process_launch(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Hosted mode must never reach the process launchers — turn every launch
-    entry point into a loud failure so a regression fails fast instead of
-    forking a real child in the test suite."""
-
-    def _boom(*_a: object, **_k: object) -> object:
-        raise AssertionError("process launch reached in hosted mode")
-
-    monkeypatch.setattr(agent_wake.agent_launch, "_launch_agent_process", _boom)
-    monkeypatch.setattr(agent_wake.agent_launch, "_launch_or_force_terminated", _boom)
-    monkeypatch.setattr(agent_wake.agent_launch, "_require_released_agent_session", _boom)
-    monkeypatch.setattr(agent_wake.agent_launch, "_wait_for_agent_claim", _boom)
 
 
 @pytest.fixture
@@ -70,7 +29,6 @@ def _capture_wakes(monkeypatch: pytest.MonkeyPatch, wakes: list[tuple[int, str]]
     # Both wake modules publish through their own namespace (the split moved
     # swap-in / revive to `ops.agent_revive`), so capture both.
     monkeypatch.setattr(agent_wake, "publish_inbound_wake", _record)
-    monkeypatch.setattr(agent_revive, "publish_inbound_wake", _record)
     yield
 
 
@@ -141,76 +99,55 @@ def test_resurrect_agent_hosted_keeps_trigger_guard(
     assert wakes == []
 
 
-# ── respawn ──────────────────────────────────────────────────────────────────
-
-
-def test_respawn_agent_hosted_flips_and_wakes(
-    db_conn: psycopg.Connection, wakes: list[tuple[int, str]]
-) -> None:
-    """restarting -> idling + restart_completed inbound + one wake (defensive:
-    hosted restart never flips to 'restarting', but if a row lands here the
-    hosted answer must not fork)."""
-    aid = _park(db_conn, status="restarting")
-    with db_conn.cursor() as cur:
-        cur.execute(
-            "INSERT INTO inbound_messages (agent_id, content, kind, source) "
-            "VALUES (%s, '', 'restart', 'self')",
-            (aid,),
-        )
-    db_conn.commit()
-    assert agent_wake.respawn_agent(aid) is True
-    assert _row(db_conn, aid) == ("idling", None)
-    assert _kind_rows(db_conn, aid, "restart_completed") == 1
-    assert wakes == [(aid, "0")]
-
-
-def test_respawn_agent_hosted_unhealthy_leaves_restart_unclaimed(
+@pytest.mark.parametrize("guarded", [False, True])
+@pytest.mark.parametrize("managed", [False, True])
+async def test_resurrection_admits_a_new_incarnation_on_the_same_host(
     db_conn: psycopg.Connection,
-    wakes: list[tuple[int, str]],
-    monkeypatch: pytest.MonkeyPatch,
-    loguru_records: list[dict[str, Any]],
+    aops_pool: AsyncConnectionPool,
+    guarded: bool,
+    managed: bool,
 ) -> None:
-    """A dead agent-host cannot accept ownership, so the row remains retryable."""
-    aid = _park(db_conn, status="restarting")
-    monkeypatch.setattr(agent_wake, "_hosted_agent_host_healthy", lambda: False)
+    """An observed termination never revalidates its original runtime token."""
+    from uuid import uuid4
 
-    assert agent_wake.respawn_agent(aid) is False
+    from psycopg.types.json import Jsonb
 
-    assert _row(db_conn, aid) == ("restarting", None)
-    assert _kind_rows(db_conn, aid, "restart_completed") == 0
-    assert wakes == []
-    assert any(
-        record["extra"].get("event") == "restart_handoff_host_unhealthy"
-        for record in loguru_records
-    )
+    from agent.db import claim_inbound_batch
+    from agent.hosted_ownership import admit_hosted_runtime, apply_hosted_lifecycle
+    from agent.inbound_ownership import RuntimeOwnershipLostError
+    from shared.db import insert_inbound_message
+    from shared.incarnation_resources import ResourceBirth
+    from shared.turn_identity import bind_turn_identity
 
-
-def test_hosted_respawn_controller_does_not_reap_mid_turn_row(
-    db_conn: psycopg.Connection,
-) -> None:
-    """A hosted idling row has no pid by design and must not reach a reaper."""
     aid = _park(db_conn, status="idling")
-
-    result = respawn_controller.RespawnController(cast(ConnectionPool, object())).reconcile(
-        "agent-runner"
+    if managed:
+        db_conn.execute(
+            "UPDATE agents_meta SET incarnation_resources=%s WHERE id=%s",
+            (Jsonb(ResourceBirth(birth=uuid4()).model_dump(mode="json")), aid),
+        )
+        db_conn.commit()
+    owner = uuid4()
+    old = await admit_hosted_runtime(aops_pool, aid, machine_name(), owner, expected_from="idling")
+    assert old is not None
+    command = insert_inbound_message(db_conn, aid, "", "self", kind="terminate")
+    with bind_turn_identity(aid, incarnation=old):
+        assert [item.id for item in await claim_inbound_batch(aops_pool, aid)] == [command]
+        assert await apply_hosted_lifecycle(aops_pool, old) == "terminate"
+    trigger = insert_inbound_message(db_conn, aid, "continue", "user")
+    agent_wake.resurrect_agent(
+        aid,
+        resurrected_by="system" if guarded else "user",
+        trigger_inbound_id=trigger if guarded else None,
+        trigger_inbound_kind="chat" if guarded else None,
     )
-
-    assert result.acted is False
-    assert _row(db_conn, aid) == ("idling", None)
-
-
-# ── swap-in ──────────────────────────────────────────────────────────────────
-
-
-# ── revive ───────────────────────────────────────────────────────────────────
-
-
-def test_revive_agent_hosted_flips_and_wakes(
-    db_conn: psycopg.Connection, wakes: list[tuple[int, str]]
-) -> None:
-    """running-with-dead-pid -> idling + one wake, no process (defensive: the
-    hosted restarter is gated off, but a stale row must never fork)."""
-    aid = _park(db_conn, status="running", pid=_DEAD_PID)
-    assert agent_wake.revive_agent(aid, _DEAD_PID) is True
-    assert _row(db_conn, aid) == ("idling", None)
-    assert wakes == [(aid, "0")]
+    successor = await admit_hosted_runtime(
+        aops_pool, aid, machine_name(), owner, expected_from="idling"
+    )
+    assert successor is not None and successor.generation != old.generation
+    with bind_turn_identity(aid, incarnation=old), pytest.raises(RuntimeOwnershipLostError):
+        await claim_inbound_batch(aops_pool, aid)
+    with bind_turn_identity(aid, incarnation=successor):
+        assert {item.kind for item in await claim_inbound_batch(aops_pool, aid)} == {
+            "chat",
+            "resurrect",
+        }

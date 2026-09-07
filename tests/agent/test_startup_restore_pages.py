@@ -1,7 +1,7 @@
 """`reconcile_open_pages` — probe every open page's server and restore it.
 
 Runs at agent boot, on each heartbeat, and on the periodic page-reconcile
-loops (process mode and the hosted daemon), as the catch-all for page-server
+host scans, as the catch-all for page-server
 death after daemon supervision inside persistent page sessions. Per open row:
 server alive -> keep; dead + serve_dir -> re-serve; dead + no serve_dir ->
 close the row so the dead link stops showing as open (PageClosed event).

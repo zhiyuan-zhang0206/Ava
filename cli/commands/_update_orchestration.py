@@ -203,6 +203,21 @@ def _resolve_fanout_targets(*, clear_stale_markers: bool = True) -> list[tuple[s
     reconciled = list(targets)
     for name, url in stopped:
         verdict = verdicts[name]
+        if verdict != "live":
+            from shared.db import connect
+
+            with connect() as conn:
+                unsafe = conn.execute(
+                    "SELECT 1 FROM agents_meta WHERE machine=%s AND status<>'terminated' "
+                    "AND (runtime_owner IS NOT NULL OR pid IS NOT NULL "
+                    "OR lifecycle_command_id IS NOT NULL OR incarnation_resources IS NOT NULL) LIMIT 1",
+                    (name,),
+                ).fetchone()
+            if unsafe is not None:
+                raise RuntimeError(
+                    f"stopped marker is not execution proof for {name}; native runtime intent "
+                    "is unresolved and the runner cannot confirm drain"
+                )
         if verdict == "live":
             print(
                 f"  ⚠ {name}: marked stopped in `machines` but its ops server ANSWERED — "
@@ -223,7 +238,7 @@ def _resolve_fanout_targets(*, clear_stale_markers: bool = True) -> list[tuple[s
                 file=sys.stderr,
             )
         else:
-            print(f"  · {name}: stopped and unreachable — genuinely down, skipping")
+            print(f"  · {name}: stopped and unreachable with no admitted native runtime — excluded")
     reconciled.sort()
     print(
         f"\n→ rollout targets: {len(reconciled)} of {known} registered agent-runner(s)"

@@ -1,7 +1,7 @@
 ---
 type: doc
 title: MCP Daemon
-description: MCP (Model Context Protocol) server manager — ONE per-machine shared daemon process serving every agent via Unix socket, with per-connection session isolation. Implemented by `ava/_mcps_daemon.py`, run as ops roster service "mcp-daemon" (watchdog-managed). Agent-side handle `agent/mcp_daemon.py:_MCPDaemon` is a no-op kept for boot-path compatibility.
+description: MCP (Model Context Protocol) server manager — ONE per-machine shared daemon process serving every agent via Unix socket, with per-connection session isolation. Implemented by `ava/_mcps_daemon.py`, run as ops roster service "mcp-daemon" (watchdog-managed).
 tags: []
 ---
 
@@ -23,7 +23,6 @@ This replaced the previous design where each agent spawned its own ~12MB daemon 
 
 ## Key Dependencies
 - `ops/spec.py` — ServiceSpec "mcp-daemon" (agent-runner capability, `requires_db=False`, healthcheck `services.healthchecks.mcp_daemon`)
-- [[loop.ava.okf.md]] — boot calls `_MCPDaemon(agent_id).spawn()` (now a no-op)
 - [[sdk-surface.ava.okf.md]] — `ava.mcps` SDK connects to the shared socket
 - [[oauth.ava.okf.md]] — OAuth 2.1 authorization-code + PKCE flow for remote servers
 
@@ -33,7 +32,6 @@ This replaced the previous design where each agent spawned its own ~12MB daemon 
 - `ava/_mcp_browser.py:connect_browser_direct()` — in-daemon line-protocol client for the browser-mcp service (the `"shared": "browser"` path; no subprocess)
 - `ava/_mcps_daemon.py:_connect_http()` — remote Streamable HTTP / OAuth connect (no child process)
 - `services/healthchecks/mcp_daemon.py` — 60s watchdog probe (ping) + `respawn_service` restart
-- `agent/mcp_daemon.py:_MCPDaemon` — no-op handle (spawn/await_ready/start/stop), kept so the boot path and tests do not change shape
 
 ## Notes
 - Session cache lives per connection for non-shared servers: two agents listing the same server each spawn their own MCP server child (isolation for stateful servers). `"shared"` servers opt into one child for everyone: `"browser"` (chrome — process-less direct dial to the browser-mcp service, keeping per-connection page affinity) or `true` (x — one daemon-wide stdio child, serialized; safe because that server keeps no per-connection state)

@@ -1,66 +1,15 @@
-"""The clock lattice — every timing constant that must hold an ORDER relative to
-its neighbours, declared in one place.
+"""Load-bearing timing relationships for hosted agents and cluster maintenance.
 
-## What a lattice is, and why it exists
+Each registered clock is safe only relative to its declared neighbours: deploy
+leases outlast progress deadlines, agent leases outlast their renewal interval,
+and wedged detection allows the full exec and model retry budget. Independent
+HTTP deadlines remain beside their consumers.
 
-The cluster's lifecycle code is full of timeouts, grace periods, and poll
-intervals. Most are independent — a healthcheck probe timeout has no neighbour.
-But a subset forms a **partially ordered net**: each clock's value is only safe
-*because* of its position relative to other clocks. Examples:
-
-- agent spawn: `BOOT_STALL_SEC < LAUNCH_CONFIRM_TIMEOUT_SEC < BOOT_BUDGET_SEC
-  < BOOT_REAP_GRACE_SEC` — a stalled child must die before the launcher
-  adjudicates, and the launcher's wait must never outlive the reaper's grace
-  (the 2026-07-30 spawn incident was this chain inverted).
-- deploy: `NO_PROGRESS_TIMEOUT_S < LOCK_TTL_S` — the crash-reclaim bound must
-  outlast the no-progress judgment, or a slow-but-alive rollout loses its
-  protection mid-operation (the 2026-07-29 incident).
-- agent lease: `AGENT_LEASE_TTL_S = 10 x AGENT_LEASE_RENEW_INTERVAL_S` and
-  `CONTROLLER_SCAN_INTERVAL_S < AGENT_LEASE_RENEW_INTERVAL_S` — a healthy agent
-  renews every 60 s and the reaper scans every 30 s, so a transient renewal
-  blip never reads as death.
-
-These orderings used to exist only as prose in docstrings, cross-referencing each
-other, pinned by a few scattered tests. Changing one constant without respecting
-its neighbours silently re-opened a race — which is exactly how the 2026-07-30
-spawn incident stayed hidden ("two defaults in two files with an ordering between
-them, described only in prose"). This module is the **single authority** for the
-topology: every lattice clock is registered here with its value source and its
-neighbourhood, every ordering is declared here with its intent, and
-`validate_clock_lattice()` checks the live values against the declared orderings.
-
-## What belongs in the lattice
-
-A clock belongs here when **its safety depends on another clock's value**, or
-vice versa. Independent clocks (a per-call HTTP timeout, a healthcheck probe
-window) do not — they live beside their consumer, and `scripts/lint_clock_lattice.py`
-only flags names that use lattice vocabulary (STALL / CONFIRM / GRACE / REAP /
-WEDGED / NO_PROGRESS / LOCK_TTL / UPDATER_LEASE / SCAN_INTERVAL / ...).
-
-## Adding a clock
-
-1. Define its value in its family module (`shared/boot_timing.py` for the boot
-   family, `shared/deploy_timing.py` for the deploy family,
-   `shared/stop_timing.py` for the stop family, `shared/schedule_timing.py` for
-   the schedule-supervision family) or as a settings field when the operator
-   must be able to override it.
-2. Register it in `CLOCKS` with a one-line `doc`.
-3. Declare every ordering it participates in as a `Constraint`, with the intent
-   in `doc` — if it has no neighbours, it does not belong in the lattice.
-4. The topology test (`tests/shared/test_timing_topology.py`) and the runtime
-   check (restarter startup) now cover it automatically.
-
-## Enforcement
-
-- **Tests** (`tests/shared/test_timing_topology.py`): every constraint is
-  asserted against the settings defaults, plus one breaking test per constraint
-  kind to prove the checker itself works.
-- **Runtime** (`services/restarter/daemon.py`): `assert_clock_lattice()` runs at
-  startup, so an operator env override that inverts a load-bearing ordering
-  fails fast on the box that lives by these clocks — never silently mid-incident.
-- **Lint** (`scripts/lint_clock_lattice.py`): lattice-vocabulary constants may
-  only be defined in the family modules / settings, so a future bare
-  `_SOME_REAP_GRACE_S = 100` in a new module is caught at review time.
+Define values in the relevant family module (deploy, stop, or schedule timing),
+register them in CLOCKS, and declare their ordering in CONSTRAINTS. Tests check
+all defaults; agent-host startup rejects operator overrides that violate the
+same relationships. The clock-lattice lint prevents unregistered timing
+constants from silently introducing competing deadlines.
 """
 
 from __future__ import annotations
@@ -68,22 +17,12 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 
-import shared.boot_timing as boot
 import shared.deploy_timing as deploy
 import shared.stop_timing as stop
 from shared import cluster_lock
 from shared.config import settings
 from shared.host_deploy_state import UPDATER_LEASE_TTL_S
 from shared.schedule_timing import SCHEDULE_STALL_ALERT_AFTER_S
-
-# --- restarter family: the controller scan cadence ---------------------------
-# Shared by the three restarter controllers that scan agents (respawn reaper /
-# wedged / crash-resurrect), which used to each define their own `_SCAN_INTERVAL_S
-# = 30.0`. Must stay below `AGENT_LEASE_RENEW_INTERVAL_S` (60 s): the reaper runs
-# between renewals, so a single missed renewal (a DB hiccup) never reads as death
-# against the 600 s TTL.
-CONTROLLER_SCAN_INTERVAL_S = 30.0
-
 
 # --- schedule supervision family ---------------------------------------------
 # Value lives in shared/schedule_timing.py: the gateway's schedule manager
@@ -133,27 +72,6 @@ class Constraint:
 
 
 CLOCKS: dict[str, Clock] = {
-    # --- boot family (values in shared/boot_timing.py) ---
-    "BOOT_STALL_SEC": Clock(
-        "boot",
-        lambda: boot.BOOT_STALL_SEC,
-        "child boot watchdog: how long one boot phase may stall before the child kills itself",
-    ),
-    "LAUNCH_CONFIRM_TIMEOUT_SEC": Clock(
-        "boot",
-        lambda: boot.LAUNCH_CONFIRM_TIMEOUT_SEC,
-        "launcher confirm window: how long a spawn may remain unclaimed before force-terminate",
-    ),
-    "BOOT_BUDGET_SEC": Clock(
-        "boot",
-        lambda: boot.BOOT_BUDGET_SEC,
-        "child's hard ceiling on the whole pre-claim boot",
-    ),
-    "BOOT_REAP_GRACE_SEC": Clock(
-        "boot",
-        lambda: boot.BOOT_REAP_GRACE_SEC,
-        "restarter's grace before reaping an unclaimed idling row",
-    ),
     # --- deploy family (values in shared/deploy_timing.py / shared/cluster_lock.py) ---
     "NO_PROGRESS_TIMEOUT_S": Clock(
         "deploy",
@@ -250,27 +168,6 @@ CLOCKS: dict[str, Clock] = {
         lambda: deploy.AGENT_LEASE_RENEW_INTERVAL_S,
         "how often a healthy agent renews its lease",
     ),
-    "AGENT_LEASE_ZOMBIE_GRACE_S": Clock(
-        "agent-lease",
-        lambda: deploy.AGENT_LEASE_ZOMBIE_GRACE_S,
-        "post-outage window during which the lease-zombie reaper spares paused agents",
-    ),
-    "AGENT_LEASE_SUSPEND_GAP_S": Clock(
-        "agent-lease",
-        lambda: deploy.AGENT_LEASE_SUSPEND_GAP_S,
-        "restarter wall-clock tick gap that signals a suspend, arming the grace",
-    ),
-    # --- restarter family ---
-    "CONTROLLER_SCAN_INTERVAL_S": Clock(
-        "restarter",
-        CONTROLLER_SCAN_INTERVAL_S,
-        "restarter controllers' agent-scan cadence",
-    ),
-    "RESTARTER_POLL_INTERVAL_S": Clock(
-        "restarter",
-        lambda: settings.daemon.restarter_poll_interval_seconds,
-        "how often the restarter checks restarting-agent rows",
-    ),
     # --- schedule supervision family ---
     "SCHEDULE_STALL_ALERT_AFTER_S": Clock(
         "schedule-supervision",
@@ -288,16 +185,6 @@ CLOCKS: dict[str, Clock] = {
         "wedged",
         lambda: settings.daemon.wedged_agent_inbound_age_seconds,
         "running-agent age of an unconsumed pending inbound that presumes an agent wedged",
-    ),
-    "IDLING_WEDGED_AGE_SEC": Clock(
-        "wedged",
-        lambda: settings.daemon.wedged_idling_agent_inbound_age_seconds,
-        "idling-agent age of an unconsumed pending inbound that presumes its claim loop wedged",
-    ),
-    "IDLE_CLAIM_BACKSTOP_S": Clock(
-        "wedged",
-        lambda: settings.agent.db_notify_wait_timeout_seconds,
-        "process idle claim loop's Redis-wake fallback SELECT cadence",
     ),
     "EXEC_NODE_TIMEOUT_S": Clock(
         "wedged",
@@ -320,45 +207,10 @@ CLOCKS: dict[str, Clock] = {
         lambda: stop.CLOCK_READ_TIMEOUT_S,
         "stuck-clock read: how long the cancel path may wait for one clock read",
     ),
-    "REAP_KILL_WINDOW_S": Clock(
-        "stop",
-        lambda: stop.REAP_KILL_WINDOW_S,
-        "stop path's force-kill window: when the hosted runner is SIGKILLed if it has not exited",
-    ),
 }
 
 
 CONSTRAINTS: list[Constraint] = [
-    # --- boot chain: the child dies before the launcher adjudicates, and the
-    # launcher's wait never outlives the reaper ---
-    Constraint(
-        "<",
-        "BOOT_STALL_SEC",
-        "LAUNCH_CONFIRM_TIMEOUT_SEC",
-        "stalled child must have killed itself before the launcher first looks, "
-        "so a live process means a progressing boot",
-    ),
-    Constraint(
-        "<",
-        "LAUNCH_CONFIRM_TIMEOUT_SEC",
-        "BOOT_REAP_GRACE_SEC",
-        "the reaper must not take a row the launcher is still legitimately waiting "
-        "on (2026-07-30 spawn incident: confirm raised without the grace)",
-    ),
-    Constraint(
-        "<",
-        "BOOT_STALL_SEC",
-        "BOOT_BUDGET_SEC",
-        "the budget ceilings the stall window; a budget below the stall window "
-        "would make the stall window unreachable",
-    ),
-    Constraint(
-        "<",
-        "BOOT_BUDGET_SEC",
-        "BOOT_REAP_GRACE_SEC",
-        "the child must be gone before the reaper could claim its row — a live, "
-        "progressing child must never have its row reaped out from under it",
-    ),
     # --- deploy family: the lease must not expire before the operation it
     # protects can finish ---
     Constraint(
@@ -478,22 +330,6 @@ CONSTRAINTS: list[Constraint] = [
         "TTL = 10x the renewal interval, so a transient renewal blip never reads "
         "as death against the reaper cadence",
     ),
-    Constraint(
-        "<",
-        "CONTROLLER_SCAN_INTERVAL_S",
-        "AGENT_LEASE_RENEW_INTERVAL_S",
-        "the reaper scans between renewals (30 s < 60 s): a healthy agent renews "
-        "before the next scan can ever see a stale lease",
-    ),
-    Constraint(
-        "<",
-        "AGENT_LEASE_RENEW_INTERVAL_S",
-        "AGENT_LEASE_ZOMBIE_GRACE_S",
-        "the post-outage grace must outlast the renew cadence (60 s < 180 s): a "
-        "paused agent renews within one interval of the DB returning, so its "
-        "renewal lands inside the window — the grace exists to give it exactly "
-        "that chance (2026-08-08 audit P1-2)",
-    ),
     # --- updater family ---
     Constraint(
         "==",
@@ -509,24 +345,6 @@ CONSTRAINTS: list[Constraint] = [
         "EXEC_NODE_TIMEOUT_S + LLM_RETRY_BUDGET_ESTIMATE_S",
         "the wedged threshold must cover a healthy agent's longest legitimate "
         "stall: one exec node plus the LLM retry budget (2400 >= 1200 + 770)",
-    ),
-    Constraint(
-        ">=",
-        "IDLING_WEDGED_AGE_SEC",
-        "2 * IDLE_CLAIM_BACKSTOP_S",
-        "an idling claim loop gets at least two fallback SELECT rounds before wedged recovery; "
-        "it is deliberately independent of running-turn exec and LLM budgets",
-    ),
-    # --- stop family: the hosted runner's shutdown waits must fit inside the
-    # stop path's force-kill window, or the host is killed before it can emit
-    # host_turn_uncancellable (issue #196) ---
-    Constraint(
-        "<",
-        "CANCEL_UNWIND_TIMEOUT_S + CLOCK_READ_TIMEOUT_S",
-        "REAP_KILL_WINDOW_S",
-        "cancel unwind + stuck-clock read must finish inside the stop path's "
-        "force-kill window (5 + 2 < 15), so the uncancellable report is never "
-        "killed mid-emission",
     ),
 ]
 
@@ -567,7 +385,7 @@ class ClockLatticeError(RuntimeError):
 
 
 def assert_clock_lattice() -> None:
-    """Fail fast on any lattice violation. Called at restarter startup so an
+    """Fail fast on any lattice violation. Called at agent-host startup so an
     operator env override that inverts a load-bearing ordering dies loudly on
     the box that lives by these clocks, never silently mid-incident."""
     failures = validate_clock_lattice()

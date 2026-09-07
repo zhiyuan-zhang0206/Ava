@@ -168,7 +168,7 @@ def _make_runtime(
 ) -> Runtime[AvaContext]:
     """test helper: assemble Runtime the same way as test_cancel.py.
 
-    llm_node / exec_node don't directly touch ops_pool / inbound_listener, so use AsyncMock
+    llm_node / exec_node don't directly touch ops_pool, so use AsyncMock
     as placeholders. SSE fan-out goes through `ctx.event_publisher.emit`; default to a MagicMock
     so the node's `assert ctx.event_publisher` passes; tests that verify SSE can pass their own
     mock for assertions."""

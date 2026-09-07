@@ -101,35 +101,10 @@ class TestSelectIdleAgents:
         assert aid in selected
         assert float(selected[aid]) == pytest.approx(400 / 60.0, abs=0.5)  # pyright: ignore[reportUnknownMemberType]
 
-    def test_idling_without_a_live_lease_is_not_selected(
-        self, pool: ConnectionPool, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    def test_idling_without_a_lease_is_selected(
+        self, pool: ConnectionPool, db_conn: psycopg.Connection
     ) -> None:
-        """R1 (Task #1021): an idling row whose lease expired (or was never
-        granted) is a zombie the reaper is collecting — nudging it would only
-        keep a corpse busy. The daemon must not select it. (Process-shape
-        semantics: hosted is the default since 2026-09, and the hosted clause
-        deliberately drops this guard.)"""
-        monkeypatch.setattr("ops.runner_mode.runner_mode", lambda: "process")
-        from datetime import UTC, datetime, timedelta
-
-        aid = _make_idle(db_conn, status_changed_s_ago=400)
-        with db_conn.cursor() as cur:
-            cur.execute(
-                "UPDATE agents_meta SET lease_expires_at = %s WHERE id = %s",
-                (datetime.now(UTC) - timedelta(seconds=1), aid),
-            )
-        db_conn.commit()
-        assert aid not in _selected(pool)
-
-    def test_hosted_idling_without_a_lease_is_selected(
-        self, pool: ConnectionPool, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """Hosted mode (Task #1999): a hosted idle row carries no lease renewer —
-        idle is the absence of a turn task, not a process to prove alive — so
-        the R1 lease guard would exclude EVERY hosted agent and silently retire
-        the heartbeat's resident-duty nudge. The hosted clause drops the guard:
-        the lease-less idling row is selected (and woken by the check-in)."""
-        monkeypatch.setattr("ops.runner_mode.runner_mode", lambda: "hosted")
+        """An idle hosted agent has no turn lease and can still receive a check-in."""
         aid = _make_idle(db_conn, status_changed_s_ago=_THRESHOLD_S + 60)
         with db_conn.cursor() as cur:
             cur.execute(
@@ -138,24 +113,6 @@ class TestSelectIdleAgents:
             )
         db_conn.commit()
         assert aid in _selected(pool)
-
-    def test_preclaim_idling_row_is_not_selected(
-        self, pool: ConnectionPool, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """A just-spawned idling row has no process or lease yet. It is not an
-        idle process to nudge; launch confirmation and the dead-birth reaper own
-        that interval. (Process-shape semantics, pinned: hosted is the default
-        since 2026-09.)"""
-        monkeypatch.setattr("ops.runner_mode.runner_mode", lambda: "process")
-        aid = _make_idle(db_conn, status_changed_s_ago=400)
-        with db_conn.cursor() as cur:
-            cur.execute(
-                "UPDATE agents_meta SET pid = NULL, started_at = NULL, lease_expires_at = NULL "
-                "WHERE id = %s",
-                (aid,),
-            )
-        db_conn.commit()
-        assert aid not in _selected(pool)
 
     def test_idle_under_threshold_unpaused_excluded(
         self, pool: ConnectionPool, db_conn: psycopg.Connection

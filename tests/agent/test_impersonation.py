@@ -19,7 +19,6 @@ from psycopg_pool import AsyncConnectionPool
 from pydantic import BaseModel, Field
 
 from agent import impersonation
-from agent._runloop import _invoke_graph_with_lifecycle_logging
 from agent.graph._exec_protocol import read_request, write_request
 from agent.graph._exec_result import lifecycle_exception_from_name
 from agent.state import BaseAgentState
@@ -101,34 +100,6 @@ async def test_activation_waits_for_resource_closure(
     activate.assert_not_called()
     assert not await impersonation.settle_checkpoint(MagicMock(), 42, activate_accepted=False)
     activate.assert_not_called()
-
-
-async def test_process_activates_only_after_invocation_flush(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    events: list[str] = []
-    graph = MagicMock()
-
-    async def invoke(*args: Any, **kwargs: Any) -> dict[str, bool]:
-        events.append("invoke")
-        return {"exit_requested": len(events) > 1}
-
-    async def flush(_thread: str) -> None:
-        events.append("flush")
-
-    async def settle(*args: Any, **kwargs: Any) -> bool:
-        events.append("activate")
-        return True
-
-    graph.ainvoke = invoke
-    graph.checkpointer = SimpleNamespace(_ava_nstep_flush=flush)
-    monkeypatch.setattr("agent._runloop.prepare_invocation", AsyncMock(return_value=False))
-    monkeypatch.setattr("agent._runloop.settle_checkpoint", settle)
-    monkeypatch.setattr("agent._trace_checkpoint.attach_trace_checkpoint_ref", AsyncMock())
-    await _invoke_graph_with_lifecycle_logging(
-        graph, 42, AvaContext(ops_pool=MagicMock(), event_publisher=MagicMock())
-    )
-    assert events == ["invoke", "flush", "activate", "invoke", "flush"]
 
 
 async def test_checkpoint_receipt_prevents_reapplying_non_idempotent_delta(
@@ -222,29 +193,22 @@ async def test_control_claim_leaves_cancel_for_external_or_resumed_native(
     ).fetchone() == ("done",)
 
 
-@pytest.mark.parametrize("runtime_kind", ["process", "hosted"])
 @pytest.mark.parametrize("kind", ["restart", "terminate"])
 async def test_control_claim_records_superseded_accepted_intent(
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
-    runtime_kind: str,
     kind: str,
 ) -> None:
-    from agent._starting import claim_agent_row
+
     from agent.db import claim_inbound_batch
     from agent.hosted_ownership import admit_hosted_runtime
     from shared.machine import machine_name
-    from shared.runtime_incarnation import current_incarnation
     from tests.conftest import spawn_agent
 
     agent_id = spawn_agent()
-    if runtime_kind == "process":
-        claim_agent_row(agent_id)
-        owner = current_incarnation(agent_id)
-    else:
-        owner = await admit_hosted_runtime(
-            aops_pool, agent_id, machine_name(), uuid4(), expected_from="idling"
-        )
+    owner = await admit_hosted_runtime(
+        aops_pool, agent_id, machine_name(), uuid4(), expected_from="idling"
+    )
     assert owner is not None
     db_conn.execute(
         "INSERT INTO inbound_messages(agent_id,content,kind,source) VALUES(%s,'',%s,'user')",
@@ -354,31 +318,3 @@ async def test_held_host_refuses_unaccepted_control_batch(monkeypatch: pytest.Mo
     with pytest.raises(RuntimeError, match="held control claim returned an unaccepted command"):
         await host._run_held_controls(42, "idling")
     apply.assert_not_awaited()
-
-
-async def test_idle_request_wakes_without_claiming_an_inbound(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from agent.db import wait_for_inbound
-
-    pool, listener = MagicMock(), MagicMock()
-    listener.wait_one = AsyncMock()
-    await wait_for_inbound(pool, listener, agent_id=42, extra_ready=AsyncMock(return_value=True))
-    pool.connection.assert_not_called()
-    listener.wait_one.assert_not_awaited()
-
-
-async def test_changed_incarnation_presents_new_consent_version(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(
-        impersonation,
-        "native_status",
-        AsyncMock(return_value=_session("requested", consent_version=2)),
-    )
-    state = BaseAgentState(impersonation_request_id="lease-1:1")
-    message = await impersonation.claim_gate(state, 42)
-    assert message is not None
-    assert cast(dict[str, Any], message.update)["impersonation_request_id"] == "lease-1:2"
-    assert await impersonation.control_ready(42, "lease-1:1")
-    assert not await impersonation.control_ready(42, "lease-1:2")

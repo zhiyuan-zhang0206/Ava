@@ -35,10 +35,23 @@ def _restore_authority_env() -> Iterator[None]:
     from shared.env_registry import (
         agent_runner_cluster_aliases,
         cluster_scope_aliases,
+        env_authority_drop_set,
         env_identity_keys,
+        env_keep_set,
     )
 
-    touched = cluster_scope_aliases() | env_identity_keys() | agent_runner_cluster_aliases()
+    touched = (
+        cluster_scope_aliases()
+        | env_identity_keys()
+        | agent_runner_cluster_aliases()
+        | env_authority_drop_set("gateway")
+        | env_authority_drop_set("agent")
+        | env_keep_set("gateway")
+        | env_keep_set("agent")
+        # load_dotenv also installs legacy names from the file. They are not
+        # registered aliases, but a later load translates any leaked value.
+        | {alias for pair in dotenv_boot._LEGACY_INVERTED_BOOL_ALIASES for alias in pair}
+    )
     # Snapshot EVERY touched key (absent = None, restored as a pop): the
     # authority pass and the legacy-alias translation can ADD a touched key
     # (e.g. _translate_legacy_skip_aliases writes the canonical key), and a
@@ -285,13 +298,13 @@ def test_enforce_overrides_leaked_derived_key(
 ) -> None:
     """A sibling cluster's health port leaked into os.environ (load_dotenv leaves an
     already-set key untouched) is corrected by this cluster's own .env — the bug
-    where a preview restarter bound main's 8102."""
-    monkeypatch.setitem(os.environ, "AVA_RESTARTER_HEALTH_PORT", "8102")  # main's, leaked
+    where a preview service bound the production health port."""
+    monkeypatch.setitem(os.environ, "AVA_AGENT_HOST_HEALTH_PORT", "8102")  # main's, leaked
     env_file = tmp_path / ".env"
-    env_file.write_text("AVA_RESTARTER_HEALTH_PORT=18035\n")
+    env_file.write_text("AVA_AGENT_HOST_HEALTH_PORT=18035\n")
     _point_env_at(monkeypatch, env_file, tmp_path)
     dotenv_boot._enforce_cluster_env_authority()
-    assert os.environ["AVA_RESTARTER_HEALTH_PORT"] == "18035"
+    assert os.environ["AVA_AGENT_HOST_HEALTH_PORT"] == "18035"
 
 
 def test_enforce_ignores_non_enforced_keys(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -491,7 +504,7 @@ def test_enforce_keeps_unanchored_sentinel(monkeypatch: pytest.MonkeyPatch, tmp_
     # would not be undone by monkeypatch (it only restores keys it set).
     env_file = tmp_path / "no-db.env"
     env_file.write_text(
-        "AVA_RESTARTER_HEALTH_PORT=18035\n"
+        "AVA_AGENT_HOST_HEALTH_PORT=18035\n"
         + "\n".join(
             ln
             for ln in _IDENTITY_LINES
@@ -517,7 +530,7 @@ def test_enforce_keeps_boot_redis_placeholder(
     monkeypatch.setitem(os.environ, "AVA_REDIS_URL", dotenv_boot.BOOT_REDIS_PLACEHOLDER)
     env_file = tmp_path / "no-redis.env"
     env_file.write_text(
-        "AVA_RESTARTER_HEALTH_PORT=18035\n"
+        "AVA_AGENT_HOST_HEALTH_PORT=18035\n"
         + "\n".join(
             ln
             for ln in _IDENTITY_LINES
@@ -553,7 +566,7 @@ def test_enforce_keeps_unanchored_sentinel_over_a_declaring_env_file(
     env_file.write_text(
         "AVA_DB_URL=postgresql://someone_else@127.0.0.1:5433/not_ours\n"
         "AVA_EVENTS_CHANNEL=ava:thisunit:events\n"
-        "AVA_RESTARTER_HEALTH_PORT=18035\n"
+        "AVA_AGENT_HOST_HEALTH_PORT=18035\n"
         + "\n".join(
             ln
             for ln in _IDENTITY_LINES
@@ -582,7 +595,7 @@ def test_enforce_drops_a_leaked_redis_url(monkeypatch: pytest.MonkeyPatch, tmp_p
     monkeypatch.setitem(os.environ, "AVA_REDIS_URL", "redis://sibling:6379/0")
     env_file = tmp_path / "no-redis.env"
     env_file.write_text(
-        "AVA_RESTARTER_HEALTH_PORT=18035\n"
+        "AVA_AGENT_HOST_HEALTH_PORT=18035\n"
         + "\n".join(
             ln
             for ln in _IDENTITY_LINES

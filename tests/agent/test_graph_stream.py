@@ -31,7 +31,7 @@ from tests.agent._fakes import make_fake_ops_pool
 
 
 def _make_runtime(*, llm=None, event_publisher=None) -> Runtime[AvaContext]:
-    """test helper: assemble AvaContext into Runtime; ops_pool / inbound_listener
+    """test helper: assemble AvaContext into Runtime; ops_pool
     placeholders for nodes that don't actually borrow conns.
 
     llm_node now `ctx.llm.bind_tools(...)` then astream——set bind_tools

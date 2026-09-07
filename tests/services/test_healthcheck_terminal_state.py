@@ -25,15 +25,14 @@ stub, so the classification itself is under test and not just the branch on it.
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import os
 import socket
 from pathlib import Path
 
 import pytest
 
+from services.healthchecks import agent_host as agent_host_hc
 from services.healthchecks import ops as ops_hc
-from services.healthchecks import restarter as restarter_hc
 from shared import daemon_health
 from shared.config import settings
 from shared.daemon_health import EXIT_PORT_TAKEN, DaemonProbe
@@ -41,7 +40,7 @@ from shared.daemon_health import EXIT_PORT_TAKEN, DaemonProbe
 # The healthcheck module under test, its daemon name, its `settings.services`
 # pidfile attribute, and the respawn entry point a terminal verdict must not reach.
 _CASES = [
-    pytest.param(restarter_hc, "restarter", "restarter_pidfile", id="restarter"),
+    pytest.param(agent_host_hc, "agent_host", "agent_host_pidfile", id="agent-host"),
     pytest.param(ops_hc, "ops", "ops_pidfile", id="ops"),
 ]
 
@@ -54,11 +53,9 @@ def _free_port() -> int:
 
 @pytest.fixture(autouse=True)
 def _quiet_and_inert(monkeypatch: pytest.MonkeyPatch) -> None:
-    """`main()` calls init_gateway_process() and (restarter only) the DB-touching
-    stand-in dispatch; neither is what these tests are about."""
-    for mod in (restarter_hc, ops_hc):
+    """Keep logging initialization inert while probing real isolated servers."""
+    for mod in (agent_host_hc, ops_hc):
         monkeypatch.setattr(mod, "init_gateway_process", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(restarter_hc, "_standin_dispatch", lambda: None)
 
 
 def _point_at(
@@ -190,30 +187,3 @@ async def test_the_terminal_state_self_clears_with_no_stored_state(
     )
     await asyncio.to_thread(mod.main)  # type: ignore[attr-defined]
     assert respawns == [1]
-
-
-@pytest.mark.asyncio
-async def test_the_restarter_still_dispatches_in_the_daemons_place(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Terminal means "stop respawning", not "stop remediating".
-
-    With the restarter daemon unrevivable, its stand-in dispatch is the ONLY thing
-    still moving `restarting` rows — which is precisely what stayed frozen for 98
-    minutes on 2026-07-24. It runs on the terminal path too, where "until a human
-    intervenes" is literal, even though no respawn was attempted."""
-    port = _free_port()
-    server = await daemon_health.start_health_server("restarter", port=port)
-    ran: list[int] = []
-    try:
-        _point_at(restarter_hc, port, tmp_path / "restarter.pid", "restarter_pidfile", monkeypatch)
-        monkeypatch.setattr(daemon_health, "ava_home", lambda: tmp_path / "other-home")
-        monkeypatch.setattr(restarter_hc, "_standin_dispatch", lambda: ran.append(1))
-        monkeypatch.setattr(restarter_hc, "_restart_daemon", lambda: pytest.fail("no respawn"))
-
-        with contextlib.suppress(SystemExit):
-            await asyncio.to_thread(restarter_hc.main)
-    finally:
-        await daemon_health.stop_health_server(server)
-
-    assert ran == [1]

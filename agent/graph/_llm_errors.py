@@ -47,7 +47,7 @@ class FatalLLMStreamError(LLMStreamError):
     Raised by `_check_consecutive_error_cap` when the consecutive-same-error
     count reaches `settings.lm.llm_retry_max_consecutive_same_error`. LangGraph's
     retry policy must NOT retry this — it propagates out of the graph, where
-    the agent loop emits one ERROR event and re-enters the graph with a fresh
+    the agent host emits one ERROR event and re-enters the graph with a fresh
     run: the turn is aborted, the agent stays alive idling for the next
     inbound so the user can see the error and decide the next action.
     """
@@ -67,7 +67,7 @@ class FatalProviderError(Exception):
     402 billing, 403 forbidden, 404 unknown model, 422 schema) or a configured
     fatal error type (e.g. `engine_overloaded_error`). Retrying within the turn
     cannot succeed, so — like `FatalLLMStreamError` — it is excluded from the
-    retry policy and routed to the agent loop's idle path: the turn is aborted but
+    retry policy and routed to the agent host's idle path: the turn is aborted but
     the process stays alive idling, so when the underlying cause clears (balance
     topped up, key fixed, context compacted) the next wake-up retries on its own
     rather than needing a manual revive.
@@ -306,7 +306,7 @@ class LLMStreamTruncatedError(LLMStreamUnexpectedStopReasonError):
 # exhausting all 6 retries over ~16 minutes.
 #
 # Reset on successful stream completion. Also cleared when the cap fires:
-# FatalLLMStreamError aborts only the current turn (the agent loop catches it,
+# FatalLLMStreamError aborts only the current turn (the agent host catches it,
 # emits one ERROR event, and idles for the next inbound), so the next
 # inbound-triggered turn must start with a fresh retry budget rather than
 # instantly re-tripping the cap.
@@ -327,7 +327,7 @@ def _check_consecutive_error_cap(thread_id: str) -> None:
         return  # Disabled: always exhaust retries
     entry = _consecutive_errors.get(thread_id)
     if entry and entry[1] >= max_cap:
-        # Pop before raising: the agent loop aborts this turn and keeps the
+        # Pop before raising: the agent host aborts this turn and keeps the
         # agent alive idling, so the next inbound-triggered turn gets a fresh
         # retry budget instead of instantly re-tripping the cap.
         _consecutive_errors.pop(thread_id)

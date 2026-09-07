@@ -291,10 +291,9 @@ _init_complete = True
 # cover plugin WRAPPERS on existing members — `ava.agents.spawn(label=...)`
 # resolves the unwrapped core function without ever missing, then TypeErrors —
 # so such a child loads plugins at import, and lazy-on-miss stays as the
-# backstop. The agent process imports ava before it exports AVA_AGENT_ID
-# (agent/loop.py sets it post-establish, and its launcher passes the id via
-# argv, not env), and gateway / cli never carry the env var — none of them
-# reach this load.
+# backstop. The agent host binds identities per turn and does not
+# export a process-wide AVA_AGENT_ID; gateway / cli do not carry it either.
+# Only an agent-launched child reaches this load.
 from . import _boot as _boot_module
 
 if _boot_module.is_launched_child():

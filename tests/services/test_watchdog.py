@@ -404,28 +404,27 @@ def test_checks_for_capability_gateway_returns_gateway_set(
     # milvus before memory-indexer: memory-indexer cold-start connects to milvus.
     assert names.index("milvus") < names.index("memory-indexer")
     assert "ops" not in names  # ops only on agent-runner
-    assert "restarter" not in names  # restarter is agent-runner-only now
+    assert "agent-host" not in names  # agent host belongs to a runner
 
 
-def test_checks_for_capability_agent_runner_returns_ops_restarter(
+def test_checks_for_capability_agent_runner_returns_ops_and_agent_host(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr("shared.config.settings.services.browser_enabled", False)  # env-independent
     monkeypatch.setattr("shared.config.settings.services.permissions_helper_enabled", True)
-    monkeypatch.setattr("ops.spec.runner_mode", lambda: "process")
     # computer-mcp is gated on the platform's permissions-helper capability, not
     # on a setting — pin it "available" so the roster is env-independent (CI
     # hosts lack the helper and would otherwise drop the service).
     monkeypatch.setattr("ops.spec._computer_mcp_gate_reason", lambda: None)
     names = [c.name for c in wd._checks_for_capability("agent-runner")]
     # Host-policy and permissions-helper checks are hand-added; the remaining order follows
-    # build_services() (restarter before page-server before ops). Browser checks
+    # build_services() (page-server before agent-host before ops). Browser checks
     # are gated out above; computer-mcp / mcp-daemon have no browser gate.
     assert names == [
         "brew-pin",
         "permissions-helper",
-        "restarter",
         "page-server",
+        "agent-host",
         "ops",
         "computer-mcp",
         "mcp-daemon",

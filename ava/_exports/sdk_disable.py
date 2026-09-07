@@ -4,8 +4,8 @@ The env-var parse, the sentinel module, and the idempotent apply machinery
 (split out of `ava/__init__.py`) live here; the package entry imports
 `_apply_sdk_disable` / `_sdk_disable_entries` and applies the env entries at
 its own import-time point (after the submodule imports + `__all_for_ava__`
-exist), and `agent/loop.py` re-invokes `_apply_sdk_disable` for per-agent
-`config_overlay` additions.
+exist). The disposable exec child applies its agent overlay before
+importing the SDK; the shared host does not mutate exports per turn.
 """
 
 import inspect

@@ -50,26 +50,6 @@ def test_bootstrap_excludes_machine_local_fields() -> None:
         assert excluded not in vals
 
 
-def test_boot_reap_grace_is_retained_by_gateway_and_projected_to_runner(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    from shared import runtime_config as rt
-    from shared.config.daemon import DaemonSettings
-    from shared.env_registry import agent_runner_cluster_aliases, cluster_scope_aliases
-
-    alias = "AVA_ALLOCATED_REAP_GRACE_SECONDS"
-    # The gateway-only boot must not pop its own durable-wake deadline.
-    assert alias not in agent_runner_cluster_aliases()
-    assert alias in cluster_scope_aliases()
-    monkeypatch.setattr(rt, "_ava_home", lambda: tmp_path)
-    _write_runner_password(tmp_path)
-    monkeypatch.setattr(config.settings.daemon, "boot_reap_grace_seconds", 37.0)
-    values = config.bootstrap_config_values()
-    assert float(values[alias]) == 37.0
-    # An agent-runner consumes the exact same projected operator value.
-    assert DaemonSettings.model_validate({alias: values[alias]}).boot_reap_grace_seconds == 37.0
-
-
 def test_bootstrap_serves_explicit_set_to_empty(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

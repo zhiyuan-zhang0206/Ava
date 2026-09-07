@@ -135,7 +135,7 @@ async def _race_stream_vs_cancel(
             # billing / forbidden, 404 unknown model, 422 schema) or a configured
             # fatal error type (e.g. engine_overloaded_error that survived the
             # non-streaming fallback in _consume_llm) becomes a FatalProviderError:
-            # the retry policy skips it and the agent loop idles (stays alive)
+            # the retry policy skips it and the host settles the turn to idle
             # instead of exhausting the full backoff budget and dying into
             # terminated. A TRANSIENT / UNKNOWN class re-raises the original so the
             # RetryPolicy retries — unknown is never guessed into fail-fast.

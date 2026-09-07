@@ -106,7 +106,7 @@ class RestartBucket(BaseModel):
 
 class ServiceRestartRow(BaseModel):
     """One service's boot count within the window — `name` is the daemon
-    identity passed to `init_gateway_process` (gateway / restarter / watchdog /
+    identity passed to `init_gateway_process` (gateway / agent-host / watchdog /
     delivery_watchdog / labeler / memory_indexer / heartbeat / ...)."""
 
     model_config = ConfigDict(frozen=True)

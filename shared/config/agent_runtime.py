@@ -28,7 +28,7 @@ class AgentRuntimeSettings(EnvSettings):
     db_notify_wait_timeout_seconds: float = Field(
         default=30.0,
         alias="AVA_DB_NOTIFY_WAIT_TIMEOUT_SECONDS",
-        description="Default wait timeout (seconds) for the agent claim node's inbound Redis pub/sub wait. Fallback for a lost wake: SELECT once on expiry.",
+        description="Agent-host inbound subscription read timeout and durable pending-work scan interval (seconds). A lost Redis wake is recovered by the next database scan.",
         json_schema_extra={
             "restart_required": "agent",
             "writable": True,

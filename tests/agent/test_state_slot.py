@@ -31,7 +31,6 @@ Test coverage:
 import asyncio
 import time
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Annotated, Any, cast
 from unittest.mock import AsyncMock, MagicMock
 
@@ -43,7 +42,6 @@ from langgraph.runtime import Runtime
 from pydantic import BaseModel, Field
 
 import ava
-from agent import _config_carrier as agent_config_carrier
 from agent.graph._context import AvaContext
 from agent.graph._exec import _exec_node_impl
 from agent.messages_guard import MessagesMutationError
@@ -55,6 +53,7 @@ from agent.state import (
     clear_plugin_registrations,
     register_plugin_state,
 )
+from shared.config.turn_view import bind_agent_config
 from shared.plugin_context import PluginContext
 
 assert (
@@ -819,9 +818,7 @@ async def test_exec_node_orders_tool_security_then_plugin_notes(fake_cancel_even
     assert msgs[2].content == "project note"
 
 
-async def test_exec_node_checkpoints_child_attachment(
-    fake_cancel_event, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+async def test_exec_node_checkpoints_child_attachment(fake_cancel_event, tmp_path: Path):
     """A normal child registration drains into a media message in the exec update.
 
     User ruling 2026-08-26: the attach message lands right after the exec
@@ -835,21 +832,14 @@ async def test_exec_node_checkpoints_child_attachment(
     # 2026-08-28) — boot it with a media-capable model via the per-agent
     # config map the exec path re-emits into the child env (a bare home's
     # env-authority pass drops an inherited AVA_MODEL).
-    monkeypatch.setattr(
-        agent_config_carrier,
-        "_store",
-        SimpleNamespace(
-            config_overlay={"llm_model": "deepseek-v4-flash-vision-exp"},
-            birth_config=None,
-        ),
-    )
     image = tmp_path / "render.png"
     image.write_bytes(b"png")
     code = f"import ava\nava.self.attach({str(image)!r}, label='render result')"
     state = BaseAgentState(messages=[_ai_message_with_code(code)], halted=False)
     runtime, config = _make_runtime_and_config(AsyncMock())
 
-    cmd = await _exec_node_impl(state, runtime, config)
+    with bind_agent_config({"llm_model": "deepseek-v4-flash-vision-exp"}):
+        cmd = await _exec_node_impl(state, runtime, config)
 
     update = cast(dict[str, Any], cmd.update)
     # Pending is drained (cleared) in the same update — nothing parked.
@@ -871,7 +861,7 @@ async def test_exec_node_checkpoints_child_attachment(
 
 
 async def test_exec_node_compact_path_drops_notes_and_clears_findings(
-    fake_cancel_event, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    fake_cancel_event, tmp_path: Path
 ):
     """The compact path (_SystemHalt) writes nothing back — claim REMOVE_ALLs
     the whole history — so notes must not leak into the update, and the
@@ -884,14 +874,6 @@ async def test_exec_node_compact_path_drops_notes_and_clears_findings(
     # 2026-08-28) — boot it with a media-capable model via the per-agent
     # config map the exec path re-emits into the child env (a bare home's
     # env-authority pass drops an inherited AVA_MODEL).
-    monkeypatch.setattr(
-        agent_config_carrier,
-        "_store",
-        SimpleNamespace(
-            config_overlay={"llm_model": "deepseek-v4-flash-vision-exp"},
-            birth_config=None,
-        ),
-    )
     image = tmp_path / "render.png"
     image.write_bytes(b"png")
     code = (
@@ -909,7 +891,8 @@ async def test_exec_node_compact_path_drops_notes_and_clears_findings(
     )
     runtime, config = _make_runtime_and_config(AsyncMock())
 
-    cmd = await _exec_node_impl(state, runtime, config)
+    with bind_agent_config({"llm_model": "deepseek-v4-flash-vision-exp"}):
+        cmd = await _exec_node_impl(state, runtime, config)
 
     update = cast(dict, cmd.update)
     assert update.get("messages") == [], (  # pyright: ignore[reportUnknownMemberType]

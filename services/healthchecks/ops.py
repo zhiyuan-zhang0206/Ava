@@ -5,7 +5,7 @@ Checks whether the ops-server daemon is alive via its /healthz HTTP port:
 - dead        -> respawn the daemon in its session
 - port taken  -> report at ERROR and stop; no respawn can free it
 
-Same pattern as `services/healthchecks/restarter.py` — the three-way policy is shared
+The three-way probe policy is shared
 (`shared.service_respawn.run_keepalive`).
 
 This healthcheck and the restarter's are the pair that looped on the `win` box:

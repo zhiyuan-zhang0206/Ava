@@ -5,21 +5,15 @@ other three real: `dispatcher.py` turns wakes into turn tasks, `host.py` runs a
 turn, and this module is the long-running process they live in — pidfile,
 healthz, process-scope boot, and the shutdown that drains them.
 
-Runs only where `AVA_RUNNER_MODE` is `hosted`; the ops roster gates it out
-everywhere else (`ops/spec.py`), and `_refuse_in_process_mode` below refuses a
-hand-started one for the same reason. Both checks matter: the roster gate keeps
-it off the start path, and the in-process check keeps a stray `python -m
-services.agent_host.daemon` from quietly double-serving agents that already have
-processes of their own.
+Every agent-runner starts one instance through its service roster.
 
 Usage:
     .venv/bin/python -m services.agent_host.daemon
 
 ## Boot order, and why it is this one
 
-1. **Refuse unless hosted**, before anything expensive.
-2. **Pidfile**, so a second instance exits instead of racing the first for turns.
-3. **Process-scope boot** — `init_process_scope` (trace export; must precede any
+1. **Pidfile**, so a second instance exits instead of racing the first for turns.
+2. **Process-scope boot** — `init_process_scope` (trace export; must precede any
    model build so OpenLLMetry can instrument it), `land_cluster_extensions` (the
    cluster's installed skills onto this machine), then `load_process_extensions`
    (the external-plugin load). Exactly once per process: see
@@ -27,17 +21,16 @@ Usage:
    an option, and issue #170 for the behavioural change that follows. The
    materialization is once per process for a milder reason — the skills
    directory belongs to the machine, not to any agent — but it lands here rather
-   than per turn precisely because a hosted daemon is long-lived: without it a
-   host that booted before an install would never pick the skill up, where
-   process mode gets a fresh boot on every spawn.
-4. **The shared data plane** — isolated workload/control pools, checkpointer,
+   than per turn because the host is long-lived. Newly installed extensions
+   take effect after its normal restart.
+3. **The shared data plane** — isolated workload/control pools, checkpointer,
    graph. Before the scheduler exists, the control pool recovers any old
    applied hosted force whose durable exec evidence proves resource-free.
    `build_graph` runs the builtin-plugin load and the state-class build, which
    is the other half of "once per process".
-5. **Healthz**, published only after the above, so a green probe means the host
+4. **Healthz**, published only after the above, so a green probe means the host
    can actually take a turn.
-6. **The dispatcher**, last: subscribing before the host can serve would drop
+5. **The dispatcher**, last: subscribing before the host can serve would drop
    wakes on the floor.
 
 The daemon holds no agent identity. `init_gateway_process` leaves the log sink's
@@ -54,7 +47,6 @@ import logging
 import os
 import signal
 import sys
-import time
 from collections.abc import Collection
 from pathlib import Path
 from typing import cast
@@ -78,6 +70,7 @@ from shared.helper_chain_guard import parent_chain_intact
 from shared.hosted_force import recover_orphaned_hosted_forces
 from shared.log import init_gateway_process, logger
 from shared.machine import machine_name
+from shared.timing import assert_clock_lattice
 
 _log = logging.getLogger("services.agent_host.daemon")
 
@@ -101,137 +94,6 @@ _TURN_PROGRESS_PUBLISH_TIMEOUT_S = 3.0
 _STDOUT_LOG_ROTATE_BYTES = 1 << 30  # 1 GiB — rotate the raw transcript past this
 _STDOUT_LOG_ROTATE_POLL_S = 60.0  # cadence of the size check
 _STDOUT_LOG_NAME = "ava-agent-host"  # names $AVA_HOME/logs/<name>.out.log
-
-
-def _refuse_in_process_mode() -> None:
-    """Exit unless this cluster asked for hosted mode.
-
-    The roster gate in `ops/spec.py` is the primary control; this is the second
-    line, and it exists because the two failure directions are not symmetric.
-    Failing to start a host on a hosted cluster is visible immediately (agents
-    stop taking turns). Starting one on a PROCESS cluster is not: every agent
-    already has its own process, so the host would quietly become a second
-    claimant for the same inbound rows, and the claim CAS would hide the
-    duplication as ordinary contention.
-
-    Read the same defensive way the gate reads it — anything that is not exactly
-    `hosted` means process — so a config surprise stops the daemon rather than
-    starting it.
-    """
-    mode = _runner_mode()
-    if mode != "hosted":
-        _log.info(
-            "[agent-host] AVA_RUNNER_MODE is %r, not 'hosted' — this cluster runs a process "
-            "per agent and does not want a host; exiting",
-            mode,
-        )
-        sys.exit(0)
-
-
-def _runner_mode() -> str:
-    """The cluster's runner mode, read so that it cannot raise.
-
-    A byte-identical copy of `ops/spec.py:_runner_mode`, deliberately duplicated
-    rather than imported: that one runs inside `_gate_reason`'s fail-OPEN
-    wrapper, so an import failure there would start the service instead of
-    gating it out. Four lines with no dependencies cannot fail that way. Any
-    failure to read the setting resolves to `"process"`, which is the safe
-    answer in both places — the roster keeps the host out, and this daemon
-    refuses to start.
-    """
-    try:
-        return str(settings.daemon.runner_mode)
-    except Exception:  # see the docstring: unreadable means process, always
-        return "process"
-
-
-# How long a roster-gated service gets to drain after our SIGTERM before the
-# host gives up and leaves the stop to the watchdog's own round.
-_STRAY_STOP_GRACE_S = 20.0
-
-
-def _daemon_module(cmd: str) -> str | None:
-    """The ``python -m`` module a service command runs, if it runs one."""
-    marker = "-m "
-    if marker not in cmd:
-        return None
-    return cmd.split(marker, 1)[1].split(maxsplit=1)[0]
-
-
-def _stop_stray_mode_gated_services() -> None:
-    """Hosted bring-up reconcile: stop roster-gated process services still running.
-
-    The ops roster is the primary control — on a hosted runner ``restarter`` is
-    disabled and the watchdog will not respawn it (``ops/spec.py:_gate_reason``).
-    But the roster only stops a service on the watchdog's own round, and two
-    2026-09-02 rollouts restarted the restarter on this hosted box anyway
-    (pids 10113 / 60380): for minutes each it reaped healthy hosted-agent rows
-    every 30s before the round caught up. An agent-host about to become the
-    box's only agent supervisor cannot share it with such a service, so the
-    host stops them itself, at bring-up, before it opens the pool or the
-    dispatcher.
-
-    The stop set is derived, never hard-coded: every service whose roster gate
-    reason is a runner-mode exclusion for the CURRENT mode (``hosted``) and
-    whose daemon is verifiably running (pidfile + argv identity) receives a
-    graceful SIGTERM. Today that set is exactly {``restarter``}; a future
-    process-form service with the same mode exclusion falls under the same
-    rule. Config-toggle gates ("AVA_*_ENABLED off") do not match the
-    mode-exclusion prefix and are left alone — those services are off for
-    operator reasons, not because the mode forbids them.
-
-    Never raises: an unreadable roster or pidfile must not block the host from
-    serving agents. If a stop has not landed within ``_STRAY_STOP_GRACE_S`` the
-    watchdog round remains the backstop — it re-checks the roster every round
-    and stops the stray itself.
-    """
-    try:
-        from ops.spec import _gate_reason, build_services
-    except Exception:
-        _log.exception("[agent-host] roster reconcile: cannot read ops roster, skipping")
-        return
-    mode = _runner_mode()
-    for spec in build_services():
-        if spec.pidfile is None:
-            continue
-        reason = _gate_reason(spec)
-        if not reason or not reason.startswith("disabled (AVA_RUNNER_MODE is"):
-            continue
-        if mode not in reason:
-            continue
-        module = _daemon_module(spec.cmd)
-        if module is None or not pidfile_holds_daemon(spec.pidfile, module):
-            continue
-        try:
-            pid = int(spec.pidfile.read_text().strip())
-        except (OSError, ValueError):
-            _log.warning(
-                "[agent-host] roster reconcile: %s running but pidfile unreadable", spec.session
-            )
-            continue
-        _log.warning(
-            "[agent-host] roster reconcile: %s is roster-disabled in %s mode but still running "
-            "(pid %s) — SIGTERM before serving agents",
-            spec.session,
-            mode,
-            pid,
-        )
-        try:
-            os.kill(pid, signal.SIGTERM)
-        except ProcessLookupError:
-            continue
-        deadline = time.monotonic() + _STRAY_STOP_GRACE_S
-        while time.monotonic() < deadline:
-            if not pidfile_holds_daemon(spec.pidfile, module):
-                return
-            time.sleep(0.5)
-        _log.warning(
-            "[agent-host] roster reconcile: %s (pid %s) still up after %ss grace — "
-            "leaving it to the watchdog round",
-            spec.session,
-            pid,
-            _STRAY_STOP_GRACE_S,
-        )
 
 
 # Plugin-discovery watchdog (issue #170): the host loads external plugins
@@ -288,7 +150,7 @@ async def _watch_plugins_for_restart() -> None:
             "[agent-host] external plugins changed under $AVA_HOME/plugins — "
             "restarting to load them (issue #170)"
         )
-        os.kill(os.getpid(), signal.SIGTERM)
+        signal.raise_signal(signal.SIGTERM)
         return
 
 
@@ -297,11 +159,17 @@ async def _publish_turn_progress_heartbeat(
     active_agents: Collection[int],
 ) -> None:
     """Best-effort Redis snapshot for the gateway's out-of-process breaker."""
+    from shared.hosted_db_wait import database_wait_snapshot
+
     snapshots = {}
     for agent_id in sorted(active_agents):
         snapshot = turn_progress_snapshot(agent_id)
         if snapshot is not None:
-            snapshots[str(agent_id)] = snapshot
+            waiting = database_wait_snapshot(agent_id, last_progress=snapshot["last_marks"][-1])
+            snapshots[str(agent_id)] = {
+                **snapshot,
+                **({"db_wait": waiting} if waiting is not None else {}),
+            }
     try:
         async with asyncio.timeout(_TURN_PROGRESS_PUBLISH_TIMEOUT_S):
             await shared.redis_client.get_async_redis().set(
@@ -376,16 +244,10 @@ class _PageEventPublisher:
 async def _page_reconcile_forever(pool: AsyncConnectionPool) -> None:
     """Periodically probe + restore every hosted agent's open pages.
 
-    The heartbeat check-in only reaches idle agents, and this daemon runs no
-    per-agent page_reconcile_loop (task #2260: hosted turns are driven by
-    services/agent_host/host.py, not agent/loop.py:main()), so a busy hosted
-    agent's pages would otherwise stay dead for as long as its turn lasts —
-    the 2026-09-01 incident shape. The FIRST pass runs immediately at daemon
-    start (the process-mode equivalent of the boot scan), then every
-    heartbeat interval (AVA_HEARTBEAT_INTERVAL_SECONDS) — the process-mode
-    cadence — skipping agents another path (their heartbeat scan) already
-    reconciled within the interval. Self-protecting like the other daemon
-    loops: any failure is logged and the loop waits for the next interval.
+    Heartbeat check-ins only reach idle agents. The host therefore restores
+    pages for busy agents too: once at startup and then every heartbeat
+    interval, skipping pages already reconciled within that interval. A failed
+    pass logs and retries on the next interval without blocking other turns.
     """
     from agent.startup import reconcile_all_open_pages
     from shared.config import settings
@@ -532,12 +394,16 @@ async def _build_checkpointer(
     which is the correct outcome for a runner that should never have been
     pointed at an unmigrated database.
     """
-    from agent.startup import _wrap_saver_writes_with_nstep_interval
+    from agent.startup import (
+        _wrap_saver_writes_with_loud_failure,
+        _wrap_saver_writes_with_nstep_interval,
+    )
     from agent.state import build_checkpoint_serde
     from shared.config.turn_view import turn_settings
 
     saver_pool = cast(AsyncConnectionPool[psycopg.AsyncConnection[DictRow]], pool)
     checkpointer = AsyncPostgresSaver(conn=saver_pool, serde=build_checkpoint_serde())
+    _wrap_saver_writes_with_loud_failure(checkpointer)
     _wrap_saver_writes_with_nstep_interval(
         checkpointer,
         lambda: turn_settings.agent.checkpoint_interval,
@@ -558,6 +424,12 @@ async def _recover_hosted_forces_at_boot(
             agent_id=agent_id,
             evidence=[str(path) for path in evidence],
         )
+
+
+async def _schedule_watcher_recovery(host: AgentHost, scheduler: TurnScheduler) -> None:
+    """Once per host boot, prepare watcher owners even with an empty inbox."""
+    for agent_id in await host.watcher_boot_wakes():
+        scheduler.wake(agent_id)
 
 
 async def _open_host_pools(
@@ -591,19 +463,13 @@ def _is_running() -> bool:
 async def run() -> None:
     """Boot the host and serve wakes until cancelled. See the module docstring
     for why the order is what it is."""
-    _refuse_in_process_mode()
+    assert_clock_lattice()
     if _is_running():
         _log.info("[agent-host] daemon already running (pidfile=%s), exiting", _PIDFILE)
         sys.exit(1)
     if not acquire_pidfile(_PIDFILE, _MODULE):
         _log.info("[agent-host] could not acquire pidfile %s, exiting", _PIDFILE)
         sys.exit(1)
-
-    # Boot order step 2.5 (see the module docstring): the host is about to
-    # become this box's only agent supervisor — stop roster-gated process
-    # services (the restarter) before the pool or dispatcher exists, so no
-    # window opens for them to reap hosted rows during our bring-up.
-    _stop_stray_mode_gated_services()
 
     from agent._process_boot import (
         init_process_scope,
@@ -669,6 +535,7 @@ async def run() -> None:
         # no per-agent page_reconcile_loop (loop.py:main() is process-only).
         background = _spawn_background_tasks(workload_pool)
         try:
+            await _schedule_watcher_recovery(host, scheduler)
             await InboundWakeDispatcher(
                 settings.data_plane.redis_url,
                 scheduler,

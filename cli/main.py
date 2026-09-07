@@ -68,6 +68,7 @@ from cli.parsers.host import (
     _h_converge,
     _h_firewall_status,
     _h_firewall_sync,
+    _h_pause,
     _h_restart,
     _h_start,
     _h_status,
@@ -193,6 +194,7 @@ __all__ = [
     "_h_notices_clear",
     "_h_notices_list",
     "_h_notices_resolve",
+    "_h_pause",
     "_h_pitr_retention_inspect",
     "_h_pitr_snapshot_archive",
     "_h_pitr_snapshot_retire",
@@ -240,7 +242,7 @@ __all__ = [
 ]
 
 from shared.bootstrap import BootstrapFetchError
-from shared.platform import ensure_line_buffered_stdio, ensure_utf8_stdio
+from shared.platform import LockTimeoutError, ensure_line_buffered_stdio, ensure_utf8_stdio
 
 # Force UTF-8 stdio on Windows before any status glyph is printed (a cp1252
 # console raises UnicodeEncodeError on ✓/✗/→). No-op on POSIX. Also seeds
@@ -317,7 +319,7 @@ _LITE_VERBS = frozenset(
 # absent — both REQUIRE `--path` and address a home by name, so they never act on the
 # current one; and why the read-only (`ls`, `status`) and probe-registration
 # subcommands are absent too.
-_ANCHORED_HOME_VERBS = frozenset({"stop", "restart", "converge", "logs", "maintenance"})
+_ANCHORED_HOME_VERBS = frozenset({"stop", "pause", "restart", "converge", "logs", "maintenance"})
 _ANCHORED_HOME_CLUSTER_SUBVERBS = frozenset(
     {"update", "restart", "rollback", "recover", "cancel", "ensure-db-role", "ensure-runner-role"}
 )
@@ -391,7 +393,13 @@ def main(argv: list[str] | None = None) -> int:
     # every daemon/agent process fetches per its own role at Settings build.
     # shared.session_env does not forward this var, so processes a lite verb spawns
     # never inherit the opt-out.
-    if args_in and args_in[0] in _LITE_VERBS:
+    from cli.preflight import unit_already_stopped
+
+    if (
+        args_in
+        and args_in[0] in _LITE_VERBS
+        and (args_in[0] != "stop" or "--force" in args_in or unit_already_stopped())
+    ):
         os.environ.setdefault("AVA_CONFIG_FETCH", "skip")
     if args_in[:2] in (
         ["maintenance", "status"],
@@ -431,6 +439,12 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         return args.func(args)
+    except LockTimeoutError as exc:
+        print(
+            f"ava: another local lifecycle operation is active; retry after it finishes: {exc}",
+            file=sys.stderr,
+        )
+        return 1
     except ValidationError as exc:
         return _print_settings_load_failure(exc)
     except BootstrapFetchError as exc:
