@@ -358,6 +358,12 @@ async def reap_crash_corpses(
     a turn (clears the mark) or parks and keeps it.
 
     Returns the reaped agent ids (the caller publishes their snapshots).
+
+    Owner scope is lease-qualified, not owner-only: a host restart mints a
+    fresh owner UUID, so a corpse marked under a predecessor instance would
+    otherwise hang offline forever (never adopted, never reaped). A row whose
+    lease is live is protected — it belongs to some live host's beat — while
+    an ownerless or lease-expired row is dead-or-abandoned and fair game.
     """
     async with async_write_transaction(pool) as conn:
         rows = await (
@@ -365,11 +371,13 @@ async def reap_crash_corpses(
                 "UPDATE agents_meta SET status = 'terminated', "
                 "termination_source = 'reaper', lease_expires_at = NULL, "
                 "runtime_protocol_version = 0 "
-                "WHERE machine = %s AND runtime_kind = 'hosted' AND runtime_owner = %s "
-                "AND status = 'idling' AND last_turn_fatal_at IS NOT NULL "
+                "WHERE machine = %s AND runtime_kind = 'hosted' AND status = 'idling' "
+                "AND last_turn_fatal_at IS NOT NULL "
                 "AND last_turn_fatal_at <= now() - make_interval(secs => %s) "
+                "AND (runtime_owner = %s OR lease_expires_at IS NULL "
+                "OR lease_expires_at <= now()) "
                 "RETURNING id",
-                (machine, owner, CORPSE_REAP_GRACE_S),
+                (machine, CORPSE_REAP_GRACE_S, owner),
             )
         ).fetchall()
         for (agent_id,) in rows:
