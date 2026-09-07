@@ -118,7 +118,13 @@ export function ResolvedDetail({
       ? t("dismissed")
       : notice.resolution === "read"
         ? t("read")
-        : t("yourAnswer");
+        : notice.resolution === "expired"
+          ? t("expired")
+          : notice.resolution === "withdrawn"
+            ? t("withdrawn")
+            : notice.resolution === "superseded"
+              ? t("superseded")
+              : t("yourAnswer");
   return (
     <div className={cn("h-full", FLEX, FLEX_COL, MIN_H_0)}>
       <div className={cn("overflow-y-auto px-4 py-3", FLEX_1)}>

@@ -125,6 +125,14 @@ export function OpenNoticeDetail({
               </span>
             </>
           ) : null}
+          {notice.expire_at ? (
+            <>
+              <span aria-hidden className="text-[10px] text-muted-foreground">·</span>
+              <span className="text-[10px] text-muted-foreground">
+                {t("expires", { time: formatRelative(notice.expire_at) })}
+              </span>
+            </>
+          ) : null}
         </div>
         <h4 className="text-xs font-medium break-words">{notice.title}</h4>
         {notice.content && (

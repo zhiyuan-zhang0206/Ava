@@ -58,6 +58,12 @@ describe("OpenNoticeDetail — timestamp", () => {
 
     expect(screen.getByText(timestamp)).toBeTruthy();
   });
+
+  it("shows expiry time when expire_at is present", () => {
+    const expireAt = "2026-06-15T12:00:00Z";
+    render(<OpenNoticeDetail agentId={7} notice={ntc({ expire_at: expireAt })} />);
+    expect(screen.getByText(new RegExp(formatRelative(expireAt)))).toBeTruthy();
+  });
 });
 
 describe("OpenNoticeDetail — require_response", () => {

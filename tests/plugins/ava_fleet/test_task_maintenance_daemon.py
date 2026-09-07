@@ -164,8 +164,8 @@ def _seed_notice(db: psycopg.Connection, agent_id: int) -> None:
     """Give an agent one pre-existing open FYI notice."""
     with db.cursor() as cur:
         cur.execute(
-            "INSERT INTO agent_notices (agent_id, local_id, title, priority, require_response, blocking) "
-            "VALUES (%s, 0, 'pre-existing', 'P2', FALSE, FALSE)",
+            "INSERT INTO agent_notices (agent_id, local_id, title, priority, require_response, blocking, expire_at) "
+            "VALUES (%s, 0, 'pre-existing', 'P2', FALSE, FALSE, now() + interval '1 day')",
             (agent_id,),
         )
     db.commit()

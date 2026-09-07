@@ -17,12 +17,23 @@ export const NOTICES_RESOLVED_QUERY_KEY = ["notices-resolved"] as const;
 
 export function foldNotices(ev: SystemEvent): FoldOutcome {
   if (ev.role === "notice_posted") {
-    return { writes: [], invalidations: [{ key: NOTICES_QUERY_KEY }] };
+    const invalidations: { key: readonly unknown[] }[] = [{ key: NOTICES_QUERY_KEY }];
+    if ("agent_id" in ev && typeof ev.agent_id === "number") {
+      invalidations.push({ key: ["agent-inspect-live", ev.agent_id] });
+    }
+    return { writes: [], invalidations };
   }
   if (ev.role === "notice_resolved") {
+    const invalidations: { key: readonly unknown[] }[] = [
+      { key: NOTICES_QUERY_KEY },
+      { key: NOTICES_RESOLVED_QUERY_KEY },
+    ];
+    if ("agent_id" in ev && typeof ev.agent_id === "number") {
+      invalidations.push({ key: ["agent-inspect-live", ev.agent_id] });
+    }
     return {
       writes: [],
-      invalidations: [{ key: NOTICES_QUERY_KEY }, { key: NOTICES_RESOLVED_QUERY_KEY }],
+      invalidations,
     };
   }
   return NO_FOLD;

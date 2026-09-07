@@ -16,6 +16,7 @@ import importlib
 import inspect
 import sys
 from collections.abc import Iterator
+from datetime import UTC
 
 import psycopg
 import pytest
@@ -759,5 +760,53 @@ def test_notice_return_int_and_edit_dismiss_take_no_id(
         nid2 = ava.ui.notify("fresh fyi")  # type: ignore[attr-defined]
         assert nid2.pending_count == 1  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
         assert nid2.pending_notices[0]["id"] == nid2  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
+    finally:
+        ava._boot._agent_id = original
+
+
+def test_notify_with_expire_at_valid(_load_activity_plugin: None, db_conn: psycopg.Connection):
+    from datetime import datetime, timedelta
+
+    agent_id = _seed_agent(db_conn)
+    original = ava._boot._agent_id
+    ava._boot._agent_id = agent_id
+    try:
+        # timedelta
+        nid1 = ava.ui.notify("expires in 1h", expire_at=timedelta(hours=1))  # type: ignore[attr-defined]
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "SELECT expire_at FROM agent_notices WHERE agent_id = %s AND local_id = %s",
+                (agent_id, int(nid1)),  # pyright: ignore[reportUnknownArgumentType]
+            )
+            row = cur.fetchone()
+        assert row is not None
+        assert row[0] > datetime.now(UTC)
+
+        # ISO string
+        target = (datetime.now(UTC) + timedelta(hours=2)).isoformat()
+        nid2 = ava.ui.notify("expires at ISO", expire_at=target)  # type: ignore[attr-defined]
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "SELECT expire_at FROM agent_notices WHERE agent_id = %s AND local_id = %s",
+                (agent_id, int(nid2)),  # pyright: ignore[reportUnknownArgumentType]
+            )
+            row = cur.fetchone()
+        assert row is not None
+    finally:
+        ava._boot._agent_id = original
+
+
+def test_notify_with_expire_at_in_past_raises_value_error(
+    _load_activity_plugin: None, db_conn: psycopg.Connection
+):
+    from datetime import datetime, timedelta
+
+    agent_id = _seed_agent(db_conn)
+    original = ava._boot._agent_id
+    ava._boot._agent_id = agent_id
+    try:
+        past = datetime.now(UTC) - timedelta(minutes=5)
+        with pytest.raises(ValueError, match="expire_at is in the past"):
+            ava.ui.notify("past notice", expire_at=past)  # type: ignore[attr-defined]
     finally:
         ava._boot._agent_id = original

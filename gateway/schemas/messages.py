@@ -148,6 +148,7 @@ class NoticeCreateIn(BaseModel):
     Mirrors the SDK ava.ui.notify() contract: `priority` P0-P3, `blocking`
     meaningful only when `require_response` is true (an FYI never stalls).
     `task_id` optionally groups the notice under a task in the user's queue.
+    `expire_at` specifies the notice lifetime; omitted uses the configured default TTL.
     """
 
     title: str
@@ -156,6 +157,7 @@ class NoticeCreateIn(BaseModel):
     require_response: bool = False
     blocking: bool = False
     task_id: int | None = None
+    expire_at: datetime | None = None
 
 
 class NoticeEditIn(BaseModel):
@@ -198,6 +200,7 @@ class NoticeItem(BaseModel):
     reply: str | None = None
     # The task this notice belongs to, or None — lets the feed group by task.
     task_id: int | None = None
+    expire_at: datetime
 
 
 class EscalationNoticeItem(BaseModel):

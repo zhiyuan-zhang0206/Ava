@@ -11067,6 +11067,18 @@
               }
             ],
             "title": "Task Id"
+          },
+          "expire_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expire At"
           }
         },
         "type": "object",
@@ -11074,7 +11086,7 @@
           "title"
         ],
         "title": "NoticeCreateIn",
-        "description": "POST /api/agents/{id}/notices request body — the unified notice write API\n(R3 door ④).\n\nMirrors the SDK ava.ui.notify() contract: `priority` P0-P3, `blocking`\nmeaningful only when `require_response` is true (an FYI never stalls).\n`task_id` optionally groups the notice under a task in the user's queue."
+        "description": "POST /api/agents/{id}/notices request body — the unified notice write API\n(R3 door ④).\n\nMirrors the SDK ava.ui.notify() contract: `priority` P0-P3, `blocking`\nmeaningful only when `require_response` is true (an FYI never stalls).\n`task_id` optionally groups the notice under a task in the user's queue.\n`expire_at` specifies the notice lifetime; omitted uses the configured default TTL."
       },
       "NoticeEditIn": {
         "properties": {
@@ -11234,6 +11246,11 @@
               }
             ],
             "title": "Task Id"
+          },
+          "expire_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expire At"
           }
         },
         "type": "object",
@@ -11246,7 +11263,8 @@
           "priority",
           "require_response",
           "blocking",
-          "created_at"
+          "created_at",
+          "expire_at"
         ],
         "title": "NoticeItem",
         "description": "One agent_notices row — element of GET /api/notices/open (the FYI feed:\nrequire_response false, resolved_at None) and GET /api/notices/resolved (the\ncross-fleet resolution history). Joined to the agent label.\n\nServed as an independent feed kept off the agent snapshot — the snapshot\ncarries the open require_response notices inline + an unread FYI count, so a\nlarge FYI backlog never bloats the fleet-wide broadcast.\n\n`resolution` is NULL while open, else one of answered / dismissed / read /\nwithdrawn / superseded; `reply` is the cached user reply text (NULL when none)."
@@ -11352,6 +11370,18 @@
             "type": "string",
             "format": "date-time",
             "title": "Created At"
+          },
+          "expire_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expire At"
           },
           "task_id": {
             "anyOf": [

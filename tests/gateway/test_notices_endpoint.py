@@ -21,6 +21,7 @@ require_response, carries the whole agent->user queue. Covers:
 """
 
 from collections.abc import Callable
+from datetime import UTC, datetime, timedelta
 
 import psycopg
 import pytest
@@ -28,6 +29,7 @@ from fastapi.testclient import TestClient
 
 from gateway.app import app
 from shared.agent_snapshot import select_one
+from shared.config import settings
 
 
 def _seed_agent(db_conn: psycopg.Connection, status: str = "idling") -> int:
@@ -57,6 +59,7 @@ def _insert_notice(
     resolution: str | None = None,
     reply: str | None = None,
     task_id: int | None = None,
+    expire_at: str | None = None,
 ) -> int:
     """Insert one agent_notices row. `resolved_at`/`resolution` set it resolved;
     the CHECK constraints require a legal (require_response, resolution) pairing,
@@ -65,8 +68,8 @@ def _insert_notice(
         cur.execute(
             "INSERT INTO agent_notices "
             "(agent_id, local_id, title, content, priority, require_response, blocking, "
-            "resolved_at, resolution, reply, task_id) "
-            "VALUES (%s, COALESCE((SELECT MAX(local_id) FROM agent_notices WHERE agent_id = %s), -1) + 1, %s, %s, %s, %s, %s, %s::timestamptz, %s, %s, %s) RETURNING id",
+            "resolved_at, resolution, reply, task_id, expire_at) "
+            "VALUES (%s, COALESCE((SELECT MAX(local_id) FROM agent_notices WHERE agent_id = %s), -1) + 1, %s, %s, %s, %s, %s, %s::timestamptz, %s, %s, %s, COALESCE(%s::timestamptz, now() + interval '1 day')) RETURNING id",
             (
                 agent_id,
                 agent_id,
@@ -79,6 +82,7 @@ def _insert_notice(
                 resolution,
                 reply,
                 task_id,
+                expire_at,
             ),
         )
         row = cur.fetchone()
@@ -1025,8 +1029,8 @@ def test_check_constraints_reject_illegal_states(db_conn: psycopg.Connection) ->
             cur.execute(
                 "INSERT INTO agent_notices "
                 "(agent_id, local_id, title, priority, require_response, blocking, "
-                "resolved_at, resolution, reply) "
-                "VALUES (%s, COALESCE((SELECT MAX(local_id) FROM agent_notices WHERE agent_id = %s), -1) + 1, 'x', 'P2', %s, %s, %s::timestamptz, %s, %s)",
+                "resolved_at, resolution, reply, expire_at) "
+                "VALUES (%s, COALESCE((SELECT MAX(local_id) FROM agent_notices WHERE agent_id = %s), -1) + 1, 'x', 'P2', %s, %s, %s::timestamptz, %s, %s, now() + interval '1 day')",
                 (a, a, require_response, blocking, resolved_at, resolution, reply),
             )
 
@@ -1056,6 +1060,9 @@ def test_check_constraints_reject_illegal_states(db_conn: psycopg.Connection) ->
     # 'superseded' is valid for both kinds (migration 0062).
     _raw_insert(require_response=True, resolved_at=ts, resolution="superseded")
     _raw_insert(require_response=False, resolved_at=ts, resolution="superseded")
+    # 'expired' is valid for both kinds.
+    _raw_insert(require_response=True, resolved_at=ts, resolution="expired")
+    _raw_insert(require_response=False, resolved_at=ts, resolution="expired")
 
     # Positive control: the legal shapes the guards DO produce still insert, so the
     # constraints are proven to reject only the illegal combinations above.
@@ -1189,8 +1196,8 @@ def test_supersede_publishes_global_notice_id(
         assert row is not None
         local_skew = int(row[0]) + 100
         cur.execute(
-            "INSERT INTO agent_notices (agent_id, local_id, title, priority, require_response, reply, resolved_at, resolution) "
-            "VALUES (%s, %s, 'old closed', 'P2', TRUE, 'old reply', now(), 'answered')",
+            "INSERT INTO agent_notices (agent_id, local_id, title, priority, require_response, reply, resolved_at, resolution, expire_at) "
+            "VALUES (%s, %s, 'old closed', 'P2', TRUE, 'old reply', now(), 'answered', now() + interval '1 day')",
             (agent_id, local_skew),
         )
     db_conn.commit()
@@ -1221,3 +1228,93 @@ def test_supersede_publishes_global_notice_id(
     # matches on it) — the regression that made superseded notices linger in
     # the open feed until the next snapshot refresh.
     assert published == [open_id], f"expected global id {open_id}, got {published}"
+
+
+# --- expire_at TTL tests ----------------------------------------------------
+
+
+def test_post_notice_sets_default_expire_at(db_conn: psycopg.Connection) -> None:
+    """POST without expire_at sets default expire_at based on daemon setting."""
+    aid = _seed_agent(db_conn)
+    before = datetime.now(UTC)
+    with TestClient(app) as client:
+        resp = client.post(
+            f"/api/agents/{aid}/notices",
+            json={"title": "default expiry notice", "content": "detail"},
+        )
+    assert resp.status_code == 201
+    after = datetime.now(UTC)
+
+    with db_conn.cursor() as cur:
+        cur.execute("SELECT expire_at FROM agent_notices WHERE agent_id = %s", (aid,))
+        row = cur.fetchone()
+    assert row is not None
+    expire_at = row[0]
+    expected_sec = settings.daemon.notice_ttl_limit_seconds
+    assert (
+        before + timedelta(seconds=expected_sec - 5)
+        <= expire_at
+        <= after + timedelta(seconds=expected_sec + 5)
+    )
+
+
+def test_post_notice_with_explicit_expire_at(db_conn: psycopg.Connection) -> None:
+    """POST with explicit expire_at stores the requested timestamp."""
+    aid = _seed_agent(db_conn)
+    target = datetime.now(UTC) + timedelta(hours=2)
+    with TestClient(app) as client:
+        resp = client.post(
+            f"/api/agents/{aid}/notices",
+            json={
+                "title": "explicit expiry notice",
+                "expire_at": target.isoformat(),
+            },
+        )
+    assert resp.status_code == 201
+
+    with db_conn.cursor() as cur:
+        cur.execute("SELECT expire_at FROM agent_notices WHERE agent_id = %s", (aid,))
+        row = cur.fetchone()
+    assert row is not None
+    expire_at = row[0]
+    assert abs((expire_at - target).total_seconds()) < 2.0
+
+
+def test_post_notice_clamps_expire_at_when_exceeding_limit(db_conn: psycopg.Connection) -> None:
+    """POST with explicit expire_at exceeding the configured limit is clamped."""
+    aid = _seed_agent(db_conn)
+    now = datetime.now(UTC)
+    target = now + timedelta(days=10)
+    with TestClient(app) as client:
+        resp = client.post(
+            f"/api/agents/{aid}/notices",
+            json={
+                "title": "exceeding expiry notice",
+                "expire_at": target.isoformat(),
+            },
+        )
+    assert resp.status_code == 201
+
+    with db_conn.cursor() as cur:
+        cur.execute("SELECT expire_at FROM agent_notices WHERE agent_id = %s", (aid,))
+        row = cur.fetchone()
+    assert row is not None
+    expire_at = row[0]
+    expected_max = now + timedelta(seconds=settings.daemon.notice_ttl_limit_seconds)
+    assert abs((expire_at - expected_max).total_seconds()) < 5.0
+
+
+def test_post_notice_past_expire_at_is_422(db_conn: psycopg.Connection) -> None:
+    """POST with expire_at in the past returns 422."""
+    aid = _seed_agent(db_conn)
+    past = datetime.now(UTC) - timedelta(minutes=10)
+    with TestClient(app) as client:
+        resp = client.post(
+            f"/api/agents/{aid}/notices",
+            json={
+                "title": "past expiry notice",
+                "expire_at": past.isoformat(),
+            },
+        )
+    assert resp.status_code == 422
+    assert "expire_at is in the past" in resp.json()["detail"]

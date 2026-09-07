@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any, LiteralString, cast
 
 import psycopg
@@ -47,6 +47,7 @@ from gateway.schemas import (
     ResolveNoticeIn,
 )
 from ops import ops_lifecycle as _ops
+from shared.config import settings
 from shared.db import NOTICE_FYI_TTL_DAYS
 from shared.db_transaction import write_transaction
 from shared.live_announce import publish_agent_updated_sync
@@ -57,7 +58,7 @@ _log = logging.getLogger(__name__)
 _SELECT = (
     "SELECT n.id, n.agent_id, t.label, n.title, n.content, n.priority, "
     "n.require_response, n.blocking, n.created_at, n.updated_at, "
-    "n.resolved_at, n.resolution, n.reply, n.task_id "
+    "n.resolved_at, n.resolution, n.reply, n.task_id, n.expire_at "
     "FROM agent_notices n JOIN agents t ON t.id = n.agent_id "
 )
 
@@ -103,6 +104,7 @@ def _row_to_item(r: tuple[Any, ...]) -> NoticeItem:
         resolution=r[11],
         reply=r[12],
         task_id=r[13],
+        expire_at=r[14],
     )
 
 
@@ -483,6 +485,17 @@ async def post_notice_create(agent_id: int, body: NoticeCreateIn, request: Reque
             status_code=422,
             detail="blocking=True requires require_response=True (an FYI never stalls)",
         )
+    if body.expire_at is not None:
+        req_tz = (
+            body.expire_at
+            if body.expire_at.tzinfo is not None
+            else body.expire_at.replace(tzinfo=UTC)
+        )
+        if req_tz < datetime.now(UTC):
+            raise HTTPException(
+                status_code=422,
+                detail=f"expire_at is in the past: {req_tz.isoformat()}",
+            )
 
     def _create(pool: ConnectionPool) -> tuple[int, int, list[int], list[int]]:
         if body.task_id is not None:
@@ -520,12 +533,22 @@ async def post_notice_create(agent_id: int, body: NoticeCreateIn, request: Reque
                 superseded_response_required = superseded_response_required or bool(
                     require_response
                 )
+            now = datetime.now(UTC)
+            max_expire = now + timedelta(seconds=settings.daemon.notice_ttl_limit_seconds)
+            if body.expire_at is None:
+                final_expire_at = max_expire
+            else:
+                req_expire = body.expire_at
+                if req_expire.tzinfo is None:
+                    req_expire = req_expire.replace(tzinfo=UTC)
+                final_expire_at = min(req_expire, max_expire)
+
             # Insert the new notice with the agent's next local id.
             cur.execute(
                 "INSERT INTO agent_notices "
-                "(agent_id, local_id, title, content, priority, require_response, blocking, task_id) "
+                "(agent_id, local_id, title, content, priority, require_response, blocking, task_id, expire_at) "
                 "VALUES (%s, COALESCE((SELECT MAX(local_id) FROM agent_notices "
-                "WHERE agent_id = %s), -1) + 1, %s, %s, %s, %s, %s, %s) "
+                "WHERE agent_id = %s), -1) + 1, %s, %s, %s, %s, %s, %s, %s) "
                 "RETURNING id, local_id",
                 (
                     agent_id,
@@ -536,6 +559,7 @@ async def post_notice_create(agent_id: int, body: NoticeCreateIn, request: Reque
                     body.require_response,
                     body.blocking,
                     body.task_id,
+                    final_expire_at,
                 ),
             )
             row = cur.fetchone()

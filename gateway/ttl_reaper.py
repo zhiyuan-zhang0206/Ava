@@ -49,13 +49,14 @@ import psycopg
 from psycopg_pool import ConnectionPool
 
 from gateway.routers import work_failed as work_failed_router
-from ops import cluster_rpc
+from ops import cluster_rpc, ops_lifecycle
 from shared import telemetry
 from shared.config import cluster_tz, settings
 from shared.db import insert_inbound_message, publish_inbound_wake
 from shared.db_transaction import write_transaction
 from shared.impersonation_maintenance import reap_impersonations
 from shared.inbound_provenance import InboundProvenance
+from shared.live_announce import publish_agent_updated_sync
 from shared.live_events import PageClosed
 from shared.redis_client import publish_best_effort_sync
 
@@ -95,6 +96,8 @@ def _notify_owner(
     conn: psycopg.Connection,
     agent_id: int,
     content: str,
+    *,
+    source: str = "system",
 ) -> None:
     """Insert a system-sourced inbound for a live owner; never resurrects.
 
@@ -110,11 +113,51 @@ def _notify_owner(
         conn,
         agent_id,
         content,
-        source="system",
+        source=source,
         provenance=InboundProvenance(source_verified_by=None, source_transport="ops"),
     )
     with suppress(Exception):
         publish_inbound_wake(agent_id, str(inbound_id))
+
+
+def _reap_expired_notices_blocking(pool: ConnectionPool) -> list[tuple[int, int]]:
+    """Auto-resolve notices whose expire_at deadline has elapsed; return (agent_id, notice_id)."""
+    with write_transaction(pool) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT id, agent_id, title, require_response FROM agent_notices "
+                "WHERE expire_at <= now() AND resolved_at IS NULL "
+                "ORDER BY expire_at, id LIMIT %s "
+                "FOR UPDATE SKIP LOCKED",
+                (_PASS_BATCH,),
+            )
+            rows = cur.fetchall()
+        if not rows:
+            return []
+        reaped: list[tuple[int, int]] = []
+        updated_agents: set[int] = set()
+        for nid, agent_id, title, require_response in rows:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE agent_notices SET resolved_at = now(), resolution = 'expired' "
+                    "WHERE id = %s AND resolved_at IS NULL",
+                    (nid,),
+                )
+                if cur.rowcount == 0:
+                    continue
+            if require_response:
+                updated_agents.add(agent_id)
+            _notify_owner(
+                conn,
+                agent_id,
+                f'Re: "{title}"\n\n[This notice has expired.]',
+                source="system:notice-expire",
+            )
+            reaped.append((agent_id, nid))
+        for aid in updated_agents:
+            with suppress(Exception):
+                publish_agent_updated_sync(conn, aid)
+        return reaped
 
 
 def _reap_expired_pages_blocking(pool: ConnectionPool) -> list[tuple[int, str, int]]:
@@ -373,15 +416,20 @@ async def _reaper_loop(pool: ConnectionPool, stop: asyncio.Event) -> None:
             pages = await asyncio.to_thread(_reap_expired_pages_blocking, pool)
             shells = await _reap_expired_shells(pool)
             sessions = await asyncio.to_thread(_reap_expired_web_sessions_blocking, pool)
+            notices = await asyncio.to_thread(_reap_expired_notices_blocking, pool)
+            for agent_id, nid in notices:
+                with suppress(Exception):
+                    await ops_lifecycle.publish_notice_resolved(agent_id, nid)
             failures = await work_failed_router.reconcile_stale_work_failures(pool)
-            if pages or shells or sessions or impersonations or failures:
+            if pages or shells or sessions or impersonations or notices or failures:
                 _log.info(
-                    "[ttl-reaper] reclaimed %d page(s), %d shell(s), %d web session(s), %d impersonation(s); "
+                    "[ttl-reaper] reclaimed %d page(s), %d shell(s), %d web session(s), %d impersonation(s), %d notice(s); "
                     "completed %d stale work failure(s)",
                     len(pages),
                     len(shells),
                     sessions,
                     impersonations,
+                    len(notices),
                     failures,
                 )
         except Exception:

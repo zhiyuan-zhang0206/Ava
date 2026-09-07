@@ -5878,6 +5878,7 @@ export interface components {
          *     Mirrors the SDK ava.ui.notify() contract: `priority` P0-P3, `blocking`
          *     meaningful only when `require_response` is true (an FYI never stalls).
          *     `task_id` optionally groups the notice under a task in the user's queue.
+         *     `expire_at` specifies the notice lifetime; omitted uses the configured default TTL.
          */
         NoticeCreateIn: {
             /** Title */
@@ -5898,6 +5899,8 @@ export interface components {
             blocking: boolean;
             /** Task Id */
             task_id?: number | null;
+            /** Expire At */
+            expire_at?: string | null;
         };
         /**
          * NoticeEditIn
@@ -5959,6 +5962,11 @@ export interface components {
             reply?: string | null;
             /** Task Id */
             task_id?: number | null;
+            /**
+             * Expire At
+             * Format: date-time
+             */
+            expire_at: string;
         };
         /**
          * NoticesCursor
@@ -6035,6 +6043,8 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+            /** Expire At */
+            expire_at?: string | null;
             /** Task Id */
             task_id?: number | null;
         };
