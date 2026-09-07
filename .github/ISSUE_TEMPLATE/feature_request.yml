@@ -1,0 +1,28 @@
+name: Feature request
+description: Propose a capability or change
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / use case
+      description: What you are trying to do today, and what is blocked or clumsy.
+    validations:
+      required: true
+  - type: textarea
+    id: desired
+    attributes:
+      label: Desired behavior
+      description: What the feature should let you do, concretely.
+    validations:
+      required: true
+  - type: textarea
+    id: direction
+    attributes:
+      label: Proposed direction
+      description: How you imagine it working — UI, CLI, config, or API surface.
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Workarounds or other shapes you rejected, and why.

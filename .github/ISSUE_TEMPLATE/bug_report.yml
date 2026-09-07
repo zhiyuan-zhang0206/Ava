@@ -1,0 +1,61 @@
+name: Bug report
+description: Something doesn't work as documented
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing a bug. The more precise the repro, the faster it gets fixed.
+        Redact secrets from any pasted logs or screenshots.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: The observed behavior, with the exact error text if any.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Repro
+      description: Commands or minimal steps that trigger the bug.
+      placeholder: |
+        1. Run ...
+        2. Open ...
+        3. See the failure
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Ava version
+      description: As shown in the web UI's Control > Status section, or `git rev-parse --short HEAD`.
+  - type: dropdown
+    id: deployment
+    attributes:
+      label: Deployment form
+      options:
+        - Single machine
+        - Cluster (multiple machines)
+        - Hosted runner
+  - type: input
+    id: os
+    attributes:
+      label: OS
+      placeholder: e.g. macOS 26, Ubuntu 24.04, Windows 11
+  - type: input
+    id: model
+    attributes:
+      label: Model
+      placeholder: e.g. deepseek-v4-pro
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / screenshots
+      description: Agent stderr, gateway log, or a screenshot.
