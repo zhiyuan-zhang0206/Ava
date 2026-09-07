@@ -38,7 +38,7 @@ __description__: str = (
 )
 
 from collections.abc import Callable
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, TypedDict, cast
 
 import psycopg
@@ -162,6 +162,7 @@ def notify(
     blocking: bool = False,
     priority: str = "P2",
     task: int | None = None,
+    expire_at: datetime | timedelta | str | None = None,
 ) -> "Notice":
     """Post one notice, replacing any previous open notice.
 
@@ -183,6 +184,8 @@ def notify(
         content: optional detail. Offer discrete choices as A / B / C so the
             user can reply with one letter (the reply is always free text).
         task: groups your notices by task in the user's queue.
+        expire_at: lifetime deadline as datetime, timedelta, or ISO string;
+            omitted defaults to the cluster-configured TTL limit.
 
     Returns:
         The notice id (an int); its `.superseded` attribute lists the ids
@@ -199,6 +202,19 @@ def notify(
     validate_priority(priority)
     if blocking and not require_response:
         raise ValueError("blocking=True requires require_response=True (an FYI never stalls you)")
+
+    expire_at_iso: str | None = None
+    if expire_at is not None:
+        from shared.watcher import normalize_when
+
+        due_at = normalize_when(expire_at)
+        if due_at < datetime.now(UTC):
+            raise ValueError(
+                f"expire_at is in the past: {due_at.isoformat()}. "
+                "Provide a future time, or use a positive timedelta."
+            )
+        expire_at_iso = due_at.isoformat()
+
     aid = ava._boot.agent_id()
 
     # One unified write path (R3 door ④): the gateway performs the whole
@@ -215,6 +231,7 @@ def notify(
             "require_response": require_response,
             "blocking": blocking,
             "task_id": task,
+            "expire_at": expire_at_iso,
         },
     )
     _raise_as_value_error(resp)

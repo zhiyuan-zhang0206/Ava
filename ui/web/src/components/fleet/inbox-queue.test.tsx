@@ -98,6 +98,7 @@ function n(over: Partial<NoticeItem> & { id: number; title: string }): NoticeIte
     resolution: null,
     reply: null,
     task_id: over.task_id ?? null,
+    expire_at: over.expire_at ?? "2026-06-15T00:00:00Z",
   };
 }
 
@@ -116,6 +117,7 @@ function ni(over: Partial<NoticeItem> & { id: number; title: string }): NoticeIt
     resolved_at: over.resolved_at ?? null,
     resolution: over.resolution ?? null,
     reply: over.reply ?? null,
+    expire_at: over.expire_at ?? "2026-06-18T00:00:00Z",
   };
 }
 
@@ -451,6 +453,14 @@ describe("InboxQueue — resolved history (collapsed disclosure)", () => {
     fireEvent.click(screen.getByRole("button", { name: /Resolved/ }));
     fireEvent.click(screen.getByText("skipped"));
     expect(screen.getByText(/Dismissed/)).not.toBeNull();
+  });
+
+  it("labels an expired resolution", () => {
+    setFeed({ resolved: [ni({ id: 52, title: "timed out", require_response: true, resolution: "expired", reply: null })] });
+    renderQueue([]);
+    fireEvent.click(screen.getByRole("button", { name: /Resolved/ }));
+    fireEvent.click(screen.getByText("timed out"));
+    expect(screen.getByText(/Expired/)).not.toBeNull();
   });
 
   it("pages back with Show more once the disclosure is open", () => {

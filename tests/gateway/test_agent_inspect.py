@@ -2427,9 +2427,9 @@ def test_inspect_notice_when_agent_has_open_require_response(db_conn: psycopg.Co
     aid = _insert_agent(db_conn)
     with db_conn.cursor() as cur:
         cur.execute(
-            "INSERT INTO agent_notices (agent_id, local_id, title, content, priority, require_response, blocking) "
+            "INSERT INTO agent_notices (agent_id, local_id, title, content, priority, require_response, blocking, expire_at) "
             "VALUES (%s, COALESCE((SELECT MAX(local_id) FROM agent_notices WHERE agent_id = %s), -1) + 1, "
-            "'Approve deploy?', 'Can we deploy to prod?', 'P0', true, true) "
+            "'Approve deploy?', 'Can we deploy to prod?', 'P0', true, true, now() + interval '1 day') "
             "RETURNING id, created_at",
             (aid, aid),
         )
@@ -2454,9 +2454,9 @@ def test_inspect_notice_when_agent_has_open_fyi(db_conn: psycopg.Connection) -> 
     aid = _insert_agent(db_conn)
     with db_conn.cursor() as cur:
         cur.execute(
-            "INSERT INTO agent_notices (agent_id, local_id, title, content, priority, require_response, blocking) "
+            "INSERT INTO agent_notices (agent_id, local_id, title, content, priority, require_response, blocking, expire_at) "
             "VALUES (%s, COALESCE((SELECT MAX(local_id) FROM agent_notices WHERE agent_id = %s), -1) + 1, "
-            "'Milestone reached', NULL, 'P2', false, false) "
+            "'Milestone reached', NULL, 'P2', false, false, now() + interval '1 day') "
             "RETURNING id",
             (aid, aid),
         )
@@ -2489,15 +2489,15 @@ def test_inspect_notice_resolved_not_returned(db_conn: psycopg.Connection) -> No
     with db_conn.cursor() as cur:
         cur.execute(
             "INSERT INTO agent_notices (agent_id, local_id, title, priority, require_response, blocking, "
-            "resolved_at, resolution, reply) VALUES (%s, COALESCE((SELECT MAX(local_id) FROM agent_notices "
-            "WHERE agent_id = %s), -1) + 1, 'Old', 'P3', true, false, now(), 'answered', 'done')",
+            "resolved_at, resolution, reply, expire_at) VALUES (%s, COALESCE((SELECT MAX(local_id) FROM agent_notices "
+            "WHERE agent_id = %s), -1) + 1, 'Old', 'P3', true, false, now(), 'answered', 'done', now() + interval '1 day')",
             (aid, aid),
         )
         # And a newer open one — the newer wins since we ORDER BY created_at DESC LIMIT 1
         cur.execute(
-            "INSERT INTO agent_notices (agent_id, local_id, title, priority, require_response, blocking) "
+            "INSERT INTO agent_notices (agent_id, local_id, title, priority, require_response, blocking, expire_at) "
             "VALUES (%s, COALESCE((SELECT MAX(local_id) FROM agent_notices WHERE agent_id = %s), -1) + 1, "
-            "'Current', 'P1', false, false)",
+            "'Current', 'P1', false, false, now() + interval '1 day')",
             (aid, aid),
         )
     db_conn.commit()
@@ -2513,9 +2513,9 @@ def test_inspect_notice_other_agent_not_visible(db_conn: psycopg.Connection) -> 
     other = _insert_agent(db_conn)
     with db_conn.cursor() as cur:
         cur.execute(
-            "INSERT INTO agent_notices (agent_id, local_id, title, priority, require_response, blocking) "
+            "INSERT INTO agent_notices (agent_id, local_id, title, priority, require_response, blocking, expire_at) "
             "VALUES (%s, COALESCE((SELECT MAX(local_id) FROM agent_notices WHERE agent_id = %s), -1) + 1, "
-            "'Other notice', 'P0', true, true)",
+            "'Other notice', 'P0', true, true, now() + interval '1 day')",
             (other, other),
         )
     db_conn.commit()
@@ -2986,9 +2986,9 @@ def test_inspect_response_cache_absorbs_repeat_burst(
 
         # ... but a newly opened notice appears on the very next call.
         db_conn.cursor().execute(
-            "INSERT INTO agent_notices (agent_id, local_id, title, content, priority, require_response, blocking) "
+            "INSERT INTO agent_notices (agent_id, local_id, title, content, priority, require_response, blocking, expire_at) "
             "VALUES (%s, COALESCE((SELECT MAX(local_id) FROM agent_notices WHERE agent_id = %s), -1) + 1, "
-            "'q', 'q', 'P2', true, false)",
+            "'q', 'q', 'P2', true, false, now() + interval '1 day')",
             (aid, aid),
         )
         db_conn.commit()

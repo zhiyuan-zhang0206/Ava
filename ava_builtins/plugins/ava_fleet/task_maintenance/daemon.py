@@ -302,10 +302,18 @@ def _escalate_to_user_queue(
                 return False
             cur.execute(
                 "INSERT INTO agent_notices "
-                "(agent_id, local_id, task_id, title, content, priority, require_response, blocking) "
+                "(agent_id, local_id, task_id, title, content, priority, require_response, blocking, expire_at) "
                 "VALUES (%s, COALESCE((SELECT MAX(local_id) FROM agent_notices WHERE agent_id = %s), -1) + 1, "
-                "%s, %s, %s, %s, TRUE, FALSE)",
-                (owner, owner, task_id, notice_title, notice_content, priority),
+                "%s, %s, %s, %s, TRUE, FALSE, now() + make_interval(secs => %s))",
+                (
+                    owner,
+                    owner,
+                    task_id,
+                    notice_title,
+                    notice_content,
+                    priority,
+                    settings.daemon.notice_ttl_limit_seconds,
+                ),
             )
         # Refresh the snapshot so the queue shows the notice live — same publish
         # ava.ui.notify does after a require_response notice.

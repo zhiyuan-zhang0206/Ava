@@ -493,7 +493,8 @@
     "sendNote": "Send note",
     "marking": "Marking…",
     "answerPlaceholder": "Your answer… (Enter to send)",
-    "notePlaceholder": "Optional note… (Enter to mark read)"
+    "notePlaceholder": "Optional note… (Enter to mark read)",
+    "expires": "Expires {time}"
   },
   "pendingStrip": {
     "agent": "agent {id}",
@@ -811,6 +812,9 @@
       "blocking": "Blocking",
       "dismissed": "Dismissed",
       "read": "Read",
+      "expired": "Expired",
+      "withdrawn": "Withdrawn",
+      "superseded": "Superseded",
       "yourAnswer": "Your answer",
       "decision": "Decision",
       "fyi": "FYI"

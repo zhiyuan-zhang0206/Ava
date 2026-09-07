@@ -218,7 +218,7 @@ describe("invalidation policies", () => {
 
   it("notice_resolved invalidates the open queue AND the history", () => {
     const o = foldNotices({ role: "notice_resolved", agent_id: 1, notice_id: 1 } as unknown as SystemEvent);
-    expect(o.invalidations.map((i) => i.key)).toEqual([NOTICES_QUERY_KEY, NOTICES_RESOLVED_QUERY_KEY]);
+    expect(o.invalidations.map((i) => i.key)).toEqual([NOTICES_QUERY_KEY, NOTICES_RESOLVED_QUERY_KEY, ["agent-inspect-live", 1]]);
   });
 
   it("fleet-graph invalidates on spawn/update; tasks on create/update", () => {

@@ -10,7 +10,7 @@ goes red immediately.
 """
 
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from gateway.schemas import (
     AgentRow,
@@ -76,6 +76,7 @@ def test_notice_item_wire_shape() -> None:
         resolved_at=None,
         resolution=None,
         reply=None,
+        expire_at=t + timedelta(days=1),
     )
     d = json.loads(m.model_dump_json())
     assert set(d.keys()) == {
@@ -93,6 +94,7 @@ def test_notice_item_wire_shape() -> None:
         "resolution",
         "reply",
         "task_id",
+        "expire_at",
     }
     assert d["id"] == 5
     assert d["agent_label"] == "agent-3"
