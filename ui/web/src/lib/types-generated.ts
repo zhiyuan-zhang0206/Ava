@@ -6862,8 +6862,11 @@ export interface components {
          *     (the launch epoch + probe-time uptime); `expires_at` is the gateway-owned
          *     TTL deadline from `agent_shell_ttls`, falling back to the 24h cap counted
          *     from `created_at` when the session has no row — None only when there is
-         *     no launch epoch to count from. Together they let the monitor page's title
-         *     bar render runtime + TTL without a second probe.
+         *     no launch epoch to count from. `renewals` / `last_renewed_at` carry the
+         *     row's explicit-renewal facts (ava.shell.sessions.renew); the monitor page
+         *     shows a renewed-count badge so an extension is visible, never silent.
+         *     Together they let the monitor page's title bar render runtime + TTL
+         *     without a second probe.
          */
         ShellCaptureResponse: {
             /** Agent Id */
@@ -6883,6 +6886,13 @@ export interface components {
             uptime_seconds: number;
             /** Expires At */
             expires_at?: string | null;
+            /**
+             * Renewals
+             * @default 0
+             */
+            renewals: number;
+            /** Last Renewed At */
+            last_renewed_at?: string | null;
         };
         /**
          * ShellInfo

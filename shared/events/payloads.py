@@ -363,6 +363,21 @@ class HeartbeatPaused(TypedDict):
     duration_s: float
 
 
+class ShellTtlRenewed(TypedDict):
+    """`shell_ttl_renewed` payload — ava/shell/sessions.py renew().
+
+    One event per explicit deadline extension: the requested ttl and the
+    before/after deadlines (DB clock, ISO strings). The durable trail is the
+    `agent_shell_ttl_renewals` audit table; this event is the display
+    surface.
+    """
+
+    session_id: int
+    ttl_s: float
+    prev_expires_at: str
+    new_expires_at: str
+
+
 class HeartbeatNudged(TypedDict):
     """`heartbeat_nudged` payload — services/heartbeat/daemon.py."""
 

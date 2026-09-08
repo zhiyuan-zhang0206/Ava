@@ -85,8 +85,8 @@ async def get_agent_shell(
         ) from exc
 
     created_at = _parse_created_at(result.get("created_at"))
-    expires_at = await asyncio.to_thread(
-        _shell_expiry_blocking,
+    expires_at, renewals, last_renewed_at = await asyncio.to_thread(
+        _shell_ttl_row_blocking,
         request.app.state.db_pool,
         agent_id,
         session_id,
@@ -100,6 +100,8 @@ async def get_agent_shell(
         created_at=created_at,
         uptime_seconds=int(result.get("uptime_seconds") or 0),
         expires_at=expires_at,
+        renewals=renewals,
+        last_renewed_at=last_renewed_at,
     )
 
 
@@ -116,30 +118,32 @@ def _parse_created_at(value: object) -> datetime | None:
         return None
 
 
-def _shell_expiry_blocking(
+def _shell_ttl_row_blocking(
     pool: ConnectionPool,
     agent_id: int,
     session_id: int,
     created_at: datetime | None,
-) -> datetime | None:
-    """The session's TTL deadline from `agent_shell_ttls`.
+) -> tuple[datetime | None, int, datetime | None]:
+    """The session's TTL facts from `agent_shell_ttls`: (deadline, renewal
+    count, last renewal).
 
     A session without a row — legacy pre-mandate shell, or one created by a
     not-yet-updated runner during a rollout — falls back to the 24h cap
     counted from its launch epoch, so the monitor page always renders a
-    deadline. None only when there is no launch epoch to count from. The
-    table lives in the gateway's own Postgres — a split runner cannot answer
-    this, so the merge happens here, mirroring the inspector's shell list
-    enrichment."""
+    deadline; its renewal facts are then (0, None). The deadline itself is
+    None only when there is no launch epoch to count from. The table lives in
+    the gateway's own Postgres — a split runner cannot answer this, so the
+    merge happens here, mirroring the inspector's shell list enrichment."""
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
-            "SELECT expires_at FROM agent_shell_ttls WHERE agent_id = %s AND session_id = %s",
+            "SELECT expires_at, renewals, last_renewed_at FROM agent_shell_ttls "
+            "WHERE agent_id = %s AND session_id = %s",
             (agent_id, session_id),
         )
         row = cur.fetchone()
     if row is not None:
-        return row[0]
-    return fallback_expiry(created_at)
+        return row[0], row[1], row[2]
+    return fallback_expiry(created_at), 0, None
 
 
 def _agent_machine_blocking(pool: ConnectionPool, agent_id: int) -> str:
