@@ -197,6 +197,68 @@ def test_select_unlabeled_excludes_cooling_ids(db_conn: psycopg.Connection) -> N
         assert b in remaining
 
 
+def _set_label(db: psycopg.Connection, tid: int, label: str) -> None:
+    with db.cursor() as cur:
+        cur.execute("UPDATE agents SET label = %s WHERE id = %s", (label, tid))
+
+
+def _seed_task_note(db: psycopg.Connection, tid: int, content: str) -> None:
+    """Seed the task-assignment inbound shape: a system_note carrying
+    note_tag='task' (how create_and_assign briefs reach a new worker since
+    the 2026-08-27 task-notification change)."""
+    with db.cursor() as cur:
+        cur.execute(
+            "INSERT INTO inbound_messages (agent_id, content, kind, source, payload) "
+            "VALUES (%s, %s, 'system_note', 'agent:405', %s::jsonb)",
+            (tid, content, '{"note_tag": "task"}'),
+        )
+
+
+def test_select_unlabeled_treats_empty_label_as_unset(db_conn: psycopg.Connection) -> None:
+    """A stray label='' row is the same "unset" state as NULL: it must be
+    selected for re-labeling. Regression: the poll's `label IS NULL`
+    predicate skipped '' rows forever, wedging them out of auto-labeling
+    (the labeler's CAS matches the same predicate, so a selected '' row is
+    overwritten, never skipped)."""
+    a = create_agent(db_conn)
+    _set_label(db_conn, a, "")
+    _seed_chat(db_conn, a)
+    b = create_agent(db_conn)
+    _set_label(db_conn, b, "")  # '' but no request-bearing inbound -> EXISTS excludes
+    c = create_agent(db_conn)
+    _seed_chat(db_conn, c)
+    _set_label(db_conn, c, "already labeled")
+
+    with db_conn.cursor() as cur:
+        picked = {tid for tid, _prompt in daemon._select_unlabeled(cur, [])}
+    assert a in picked
+    assert b not in picked
+    assert c not in picked
+
+
+def test_select_unlabeled_prompts_from_task_system_note(db_conn: psycopg.Connection) -> None:
+    """Task-assignment briefs arrive as system_note inbounds (note_tag='task'),
+    not chat: a delegated worker whose only inbound is its assignment must
+    still be selected, with the note content as the label prompt. Regression
+    since the 2026-08-27 task-notification change left such workers without a
+    labelable prompt. Non-task system notes stay excluded."""
+    a = create_agent(db_conn)
+    _seed_task_note(db_conn, a, 'Task #2669 "ava.ui docs gap" is now assigned to you.')
+    b = create_agent(db_conn)
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO inbound_messages (agent_id, content, kind, source, payload) "
+            "VALUES (%s, %s, 'system_note', 'system', %s::jsonb)",
+            (b, "impersonation rolled back", '{"impersonation_id": "x"}'),
+        )
+    db_conn.commit()
+
+    with db_conn.cursor() as cur:
+        rows = dict(daemon._select_unlabeled(cur, []))
+    assert rows[a] == 'Task #2669 "ava.ui docs gap" is now assigned to you.'
+    assert b not in rows
+
+
 @pytest.mark.asyncio
 async def test_dispatch_loop_backs_off_on_llm_failure(
     db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch

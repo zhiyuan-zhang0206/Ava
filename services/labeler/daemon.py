@@ -1,7 +1,10 @@
 """Labeler daemon — standalone label auto-generation process.
 
-Polls `agents` rows where `label IS NULL AND NOT label_user_set` every
-second, takes the first chat inbound as the prompt, and calls
+Polls `agents` rows whose label is unset (NULL or empty string — the two
+are the same "not set" state) and not user-owned every second, takes the
+first request-bearing inbound as the prompt — a chat message, or a
+task-tagged system note (task assignment briefs arrive as system notes
+since the 2026-08-27 task-notification change) — and calls
 `generate_label_async` to generate a short name. Fully decoupled from
 the Gateway; can be deployed independently.
 
@@ -131,9 +134,26 @@ def _clear_backoff(tid: int) -> None:
     _BACKOFF.pop(tid, None)
 
 
+# The inbound condition a label prompt may come from: a chat peer message,
+# or a system note carrying a task notification (note_tag='task'). Task
+# assignment briefs — the delegator's request a fresh worker exists for —
+# have arrived as system notes since 2026-08-27 (Task #1838); a worker whose
+# only inbound is its assignment would otherwise never get a labelable
+# prompt. Heartbeat / impersonation / lifecycle notes carry other or no
+# note_tag and stay excluded.
+_PROMPT_INBOUND_CONDITION = (
+    "(im.kind = 'chat' OR (im.kind = 'system_note' AND im.payload->>'note_tag' = 'task'))"
+)
+
+
 def _select_unlabeled(cur: psycopg.Cursor, cooling: list[int]) -> list[tuple[int, str | None]]:
     """Poll up to 10 newest agents that still need a label, returning each
-    `(agent_id, first_chat_prompt)`.
+    `(agent_id, first_eligible_prompt)`.
+
+    A label is "missing" when it is NULL or the empty string — both are the
+    same unset state, and an empty string must not wedge the row out of the
+    poll (a stray '' is treated as NULL and overwritten by the labeler's
+    equally broadened CAS).
 
     ORDER BY t.id DESC prioritizes new agents — prevents old agents
     (spawn-without-prompt or with inbounds already cleaned) from clogging the
@@ -144,17 +164,17 @@ def _select_unlabeled(cur: psycopg.Cursor, cooling: list[int]) -> list[tuple[int
     nor occupies the window ahead of a fresh agent.
     """
     cur.execute(
-        "SELECT t.id, "
+        "SELECT t.id, "  # noqa: S608 — _PROMPT_INBOUND_CONDITION is a module constant, never user input
         "(SELECT im.content FROM inbound_messages im "
-        " WHERE im.agent_id = t.id AND im.kind = 'chat' "
+        f" WHERE im.agent_id = t.id AND {_PROMPT_INBOUND_CONDITION} "
         " ORDER BY im.id LIMIT 1) AS prompt "
         "FROM agents t "
-        "WHERE t.label IS NULL "
+        "WHERE (t.label IS NULL OR t.label = '') "
         "AND NOT t.label_user_set "
         "AND NOT (t.id = ANY(%s::bigint[])) "
         "AND EXISTS ("
-        "  SELECT 1 FROM inbound_messages im2 "
-        "  WHERE im2.agent_id = t.id AND im2.kind = 'chat'"
+        "  SELECT 1 FROM inbound_messages im "
+        f"  WHERE im.agent_id = t.id AND {_PROMPT_INBOUND_CONDITION}"
         ") "
         "ORDER BY t.id DESC "
         "LIMIT 10",
@@ -189,8 +209,9 @@ async def _dispatch_loop(pool: ConnectionPool, liveness: Liveness) -> None:
     generate label. A label that fails enters per-agent exponential backoff so a
     persistent failure does not become a hot retry loop.
 
-    generate_label_async writes via internal CAS (WHERE label IS NULL
-    AND NOT label_user_set), so user-edited labels are auto-skipped.
+    generate_label_async writes via internal CAS (WHERE label is unset —
+    NULL or empty string — AND NOT label_user_set), so user-edited labels
+    are auto-skipped.
     """
     _log.info("[labeler] daemon started, pid=%s", os.getpid())
     while True:
