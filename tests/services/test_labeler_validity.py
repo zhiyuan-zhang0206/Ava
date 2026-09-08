@@ -309,6 +309,58 @@ class TestGenerateLabelRejectsNonLabels:
 
 
 @pytest.mark.asyncio
+async def test_generated_label_overwrites_stray_empty_string(
+    db_conn: psycopg.Connection,
+    monkeypatch: pytest.MonkeyPatch,
+    _no_publish: list[str],
+) -> None:
+    """Regression: a stray label='' row was invisible to the CAS's `label IS
+    NULL` predicate, so it could never be auto-labeled — empty string must be
+    treated as the same "unset" state as NULL and overwritten."""
+    tid = create_agent(db_conn)
+    with db_conn.cursor() as cur:
+        cur.execute("UPDATE agents SET label = '' WHERE id = %s", (tid,))
+    db_conn.commit()
+    monkeypatch.setattr(
+        labeler_module,
+        "build_chat_model",
+        lambda _m, **_: _FakeLLM("ui docs fix"),  # pyright: ignore[reportUnknownArgumentType]
+    )
+
+    result = await generate_label_async(tid, "a long agent brief", "deepseek-v4-flash")
+
+    assert result is True
+    assert _label_of(db_conn, tid) == "ui docs fix"
+    assert len(_no_publish) == 1
+
+
+@pytest.mark.asyncio
+async def test_empty_string_label_with_user_sticky_bit_is_never_overwritten(
+    db_conn: psycopg.Connection,
+    monkeypatch: pytest.MonkeyPatch,
+    _no_publish: list[str],
+) -> None:
+    """The sticky bit still wins: label='' with label_user_set=TRUE means the
+    user owns the (unset) label — the CAS must skip it just like it skips a
+    user-owned non-empty label."""
+    tid = create_agent(db_conn)
+    with db_conn.cursor() as cur:
+        cur.execute("UPDATE agents SET label = '', label_user_set = TRUE WHERE id = %s", (tid,))
+    db_conn.commit()
+    monkeypatch.setattr(
+        labeler_module,
+        "build_chat_model",
+        lambda _m, **_: _FakeLLM("ui docs fix"),  # pyright: ignore[reportUnknownArgumentType]
+    )
+
+    result = await generate_label_async(tid, "a long agent brief", "deepseek-v4-flash")
+
+    assert result is None
+    assert _label_of(db_conn, tid) == ""
+    assert _no_publish == []
+
+
+@pytest.mark.asyncio
 async def test_label_generation_logs_batch_usage_for_the_target_agent(
     db_conn: psycopg.Connection,
     monkeypatch: pytest.MonkeyPatch,
