@@ -60,6 +60,7 @@ Messages carry a `kind` that tells you how to treat them:
 - `reminder` — a lease-expiry renewal reminder from Ava, pushed about five
   minutes before the TTL elapses (see Renewal below).
 - `cancel` — stop your current work now (see below).
+- `system_note` — platform lifecycle information (rare during a lease).
 
 After processing a batch, acknowledge exactly the ids you handled, within the
 five-minute ACK window:
