@@ -548,6 +548,14 @@ async def dispatch_batch(
                 await _handle_resurrect(item, st)
         elif kind == InboundKind.FORK:
             await _handle_fork(agent_id, item, st, state)
+        elif kind == InboundKind.REMINDER:
+            # Lease-expiry reminders are dismissed in the lease's release/expiry
+            # transaction, so one reaching the claim node means that invariant
+            # broke. Render it as a system-sourced chat message instead of
+            # failing the batch: the content is harmless ("lease N expires
+            # at ..."), and a ValueError here would wedge the claim loop on a
+            # stale row.
+            await _handle_chat(item, st)
         else:
             raise ValueError(f"Unknown inbound kind: {kind!r} (id={item.id})")
     if len(st.task_ids) > 1:

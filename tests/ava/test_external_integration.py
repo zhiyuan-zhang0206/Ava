@@ -94,7 +94,7 @@ def test_external_attach_reads_native_checkpoint_and_only_journals_delta(
         relay_provider="codex",
         relay_thread_id=str(uuid4()),
     )
-    leases.accept(lease["id"], agent_id, owner)
+    leases.accept(lease["id"], agent_id, owner, "Handoff brief")
     leases.activate(lease["id"], owner)
     with external.attach(lease["id"], token=lease["token"]):
         assert agent_id == ava.self.AGENT_ID
@@ -137,7 +137,7 @@ def test_borrowed_sender_reaches_peer_through_gateway_and_returns_real_provenanc
         relay_provider="codex",
         relay_thread_id=str(uuid4()),
     )
-    leases.accept(lease["id"], owner.agent_id, owner)
+    leases.accept(lease["id"], owner.agent_id, owner, "Handoff brief")
     leases.activate(lease["id"], owner)
 
     with external.attach(lease["id"], token=lease["token"]):
@@ -160,7 +160,7 @@ def test_borrowed_sender_reaches_peer_through_gateway_and_returns_real_provenanc
     assert handoff is not None
     assert handoff[:3] == (
         owner.agent_id,
-        "Delivered the implementation to the peer",
+        f"External session ended (lease {lease['id']}).\n\nDelivered the implementation to the peer",
         "external_agent:codex:test",
     )
     assert handoff[3]["caller_identity"] == caller.model_dump()
@@ -194,7 +194,7 @@ def test_external_memory_write_uses_borrowed_identity(
         relay_provider="codex",
         relay_thread_id=str(uuid4()),
     )
-    leases.accept(lease["id"], owner.agent_id, owner)
+    leases.accept(lease["id"], owner.agent_id, owner, "Handoff brief")
     leases.activate(lease["id"], owner)
 
     with external.attach(lease["id"], token=lease["token"]):
@@ -237,7 +237,7 @@ def test_external_memory_rechecks_lease_before_filesystem_effects(
         relay_provider="codex",
         relay_thread_id=str(uuid4()),
     )
-    leases.accept(lease["id"], owner.agent_id, owner)
+    leases.accept(lease["id"], owner.agent_id, owner, "Handoff brief")
     leases.activate(lease["id"], owner)
     attachment = external.attach(lease["id"], token=lease["token"])
     try:

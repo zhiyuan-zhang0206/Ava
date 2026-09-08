@@ -88,7 +88,11 @@ async def _prepare_graph(
     async def model(state: Any) -> Command[str]:
         model_calls.append(state)
         if len(model_calls) == 1:
-            code = f"import ava\nava.impersonation.accept({requested['id']!r})"
+            code = (
+                "import ava\n"
+                f"ava.impersonation.accept({requested['id']!r}, "
+                "'Hand the task to the external session.')"
+            )
             return Command(
                 update={
                     "messages": [
@@ -242,7 +246,7 @@ async def test_replacement_host_adopts_held_agent_without_model(
         relay_provider="codex",
         relay_thread_id=str(uuid4()),
     )
-    leases.accept(lease["id"], agent_id, owner)
+    leases.accept(lease["id"], agent_id, owner, "Handoff brief")
     leases.activate(lease["id"], owner)
     # The held-controls supervision may respawn the bound relay; a real codex
     # relay process must never start inside the test environment.

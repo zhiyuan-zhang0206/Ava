@@ -57,7 +57,7 @@ def _request(
 
 def _active(owner: RuntimeIncarnation) -> dict[str, Any]:
     lease = _request(owner)
-    leases.accept(lease["id"], owner.agent_id, owner)
+    leases.accept(lease["id"], owner.agent_id, owner, "Handoff brief")
     leases.activate(lease["id"], owner)
     return lease
 
@@ -108,7 +108,7 @@ def test_existing_lease_still_serializes_native_reconciliation(
 ) -> None:
     owner = _agent(db_conn)
     lease = _request(owner)
-    leases.accept(lease["id"], owner.agent_id, owner)
+    leases.accept(lease["id"], owner.agent_id, owner, "Handoff brief")
     db_conn.execute("SELECT id FROM agents_meta WHERE id=%s FOR UPDATE", (owner.agent_id,))
     with pytest.raises(psycopg.errors.LockNotAvailable):
         leases.native_status(owner.agent_id, owner)
@@ -136,6 +136,19 @@ def test_native_without_lease_still_requires_current_ownership(
         leases.native_status(owner.agent_id, owner)
 
 
+def test_accept_requires_a_nonempty_start_message(db_conn: psycopg.Connection) -> None:
+    owner = _agent(db_conn)
+    lease = _request(owner)
+    for empty in ("", "   "):
+        with pytest.raises(leases.ImpersonationError, match="start message is required"):
+            leases.accept(lease["id"], owner.agent_id, owner, empty)
+    assert _status(owner)["status"] == "requested"
+    leases.accept(lease["id"], owner.agent_id, owner, "Do the implementation, then summarize.")
+    state = _status(owner)
+    assert state["status"] == "accepted"
+    assert state["start_message"] == "Do the implementation, then summarize."
+
+
 def test_request_needs_consent_then_native_checkpoint_ack(db_conn: psycopg.Connection) -> None:
     owner = _agent(db_conn)
     lease = _request(owner)
@@ -146,7 +159,7 @@ def test_request_needs_consent_then_native_checkpoint_ack(db_conn: psycopg.Conne
     assert _status(owner)["reason"] == "Handle the next message"
     with pytest.raises(leases.ImpersonationError, match="not active"):
         leases.require_active(lease["id"], lease["token"])
-    leases.accept(lease["id"], owner.agent_id, owner)
+    leases.accept(lease["id"], owner.agent_id, owner, "Handoff brief")
     assert _status(owner)["status"] == "accepted"
     with pytest.raises(leases.ImpersonationError, match="not active"):
         leases.inbox(lease["id"], lease["token"])
@@ -159,8 +172,8 @@ def test_consent_and_activation_cannot_use_another_incarnation(db_conn: psycopg.
     lease = _request(owner)
     stale = RuntimeIncarnation(owner.agent_id, uuid4(), uuid4())
     with pytest.raises(leases.ImpersonationError, match="no longer owns"):
-        leases.accept(lease["id"], owner.agent_id, stale)
-    leases.accept(lease["id"], owner.agent_id, owner)
+        leases.accept(lease["id"], owner.agent_id, stale, "Handoff brief")
+    leases.accept(lease["id"], owner.agent_id, owner, "Handoff brief")
     db_conn.execute(
         "UPDATE agents_meta SET runtime_generation=%s,runtime_owner=%s WHERE id=%s",
         (stale.generation, stale.owner, owner.agent_id),
@@ -358,7 +371,7 @@ def test_replacement_requires_fresh_consent_before_checkpoint_ack(
 ) -> None:
     owner = _agent(db_conn)
     lease = _request(owner)
-    leases.accept(lease["id"], owner.agent_id, owner)
+    leases.accept(lease["id"], owner.agent_id, owner, "Handoff brief")
     replacement = RuntimeIncarnation(owner.agent_id, uuid4(), uuid4())
     db_conn.execute(
         "UPDATE agents_meta SET runtime_generation=%s,runtime_owner=%s WHERE id=%s",
@@ -368,7 +381,7 @@ def test_replacement_requires_fresh_consent_before_checkpoint_ack(
     state = _status(replacement)
     assert state["status"] == "requested"
     assert state["consent_version"] == 2
-    leases.accept(lease["id"], owner.agent_id, replacement)
+    leases.accept(lease["id"], owner.agent_id, replacement, "Handoff brief")
     assert leases.activate(lease["id"], replacement)["status"] == "active"
 
 
@@ -377,7 +390,7 @@ def test_expiry_between_driver_read_and_activation_returns_control(
 ) -> None:
     owner = _agent(db_conn)
     lease = _request(owner)
-    leases.accept(lease["id"], owner.agent_id, owner)
+    leases.accept(lease["id"], owner.agent_id, owner, "Handoff brief")
     assert _status(owner)["status"] == "accepted"
     db_conn.execute(
         "UPDATE agent_impersonations SET expires_at=clock_timestamp()-interval '1 second' "
@@ -547,13 +560,13 @@ def test_accept_without_relay_binding_fails_loudly(db_conn: psycopg.Connection) 
     )
     db_conn.commit()
     with pytest.raises(leases.ImpersonationError, match="no relay binding"):
-        leases.accept(str(legacy_id), owner.agent_id, owner)
+        leases.accept(str(legacy_id), owner.agent_id, owner, "Handoff brief")
 
 
 def test_provision_relay_only_for_the_accepting_incarnation(db_conn: psycopg.Connection) -> None:
     owner = _agent(db_conn)
     lease = _request(owner)
-    leases.accept(lease["id"], owner.agent_id, owner)
+    leases.accept(lease["id"], owner.agent_id, owner, "Handoff brief")
     foreign = RuntimeIncarnation(owner.agent_id, uuid4(), uuid4())
     with pytest.raises(leases.ImpersonationError):
         leases.provision_relay(lease["id"], foreign, "relay-credential")
@@ -565,7 +578,7 @@ def test_provision_relay_only_for_the_accepting_incarnation(db_conn: psycopg.Con
 def test_provision_relay_revokes_the_previous_credential(db_conn: psycopg.Connection) -> None:
     owner = _agent(db_conn)
     lease = _request(owner)
-    leases.accept(lease["id"], owner.agent_id, owner)
+    leases.accept(lease["id"], owner.agent_id, owner, "Handoff brief")
     leases.activate(lease["id"], owner)
     leases.provision_relay(lease["id"], owner, "first")
     leases.provision_relay(lease["id"], owner, "second")
@@ -604,7 +617,7 @@ def test_active_lease_binding_inherits_the_replacement_incarnation(
 def test_relay_inbox_uses_the_scoped_credential_only(db_conn: psycopg.Connection) -> None:
     owner = _agent(db_conn)
     lease = _request(owner, provider="claude", thread=None)
-    leases.accept(lease["id"], owner.agent_id, owner)
+    leases.accept(lease["id"], owner.agent_id, owner, "Handoff brief")
     leases.activate(lease["id"], owner)
     insert_inbound_message(db_conn, owner.agent_id, "hello", "user", kind="chat")
     db_conn.commit()
@@ -624,7 +637,7 @@ def test_relay_heartbeat_beats_while_open_and_stops_at_terminal(
     leases.relay_heartbeat(lease["id"], lease["relay_token"])
     row = leases.relay_get(lease["id"], lease["relay_token"])
     assert row["relay_heartbeat_at"] is not None
-    leases.accept(lease["id"], owner.agent_id, owner)
+    leases.accept(lease["id"], owner.agent_id, owner, "Handoff brief")
     leases.activate(lease["id"], owner)
     leases.relay_heartbeat(lease["id"], lease["relay_token"])
     leases.release(lease["id"], lease["token"], "Done")
@@ -637,7 +650,7 @@ def test_fail_acceptance_rolls_back_with_reason_and_native_note(
 ) -> None:
     owner = _agent(db_conn)
     lease = _request(owner)
-    leases.accept(lease["id"], owner.agent_id, owner)
+    leases.accept(lease["id"], owner.agent_id, owner, "Handoff brief")
     result = leases.fail_acceptance(lease["id"], owner, "relay process exited at startup")
     assert result["status"] == "rejected"
     assert result["rejection_reason"] == "relay process exited at startup"
@@ -654,7 +667,7 @@ def test_fail_acceptance_requires_an_accepted_lease(db_conn: psycopg.Connection)
     lease = _request(owner)
     with pytest.raises(leases.ImpersonationError):
         leases.fail_acceptance(lease["id"], owner, "too early")
-    leases.accept(lease["id"], owner.agent_id, owner)
+    leases.accept(lease["id"], owner.agent_id, owner, "Handoff brief")
     leases.activate(lease["id"], owner)
     with pytest.raises(leases.ImpersonationError):
         leases.fail_acceptance(lease["id"], owner, "too late")
@@ -696,3 +709,101 @@ def test_relay_liveness_alert_logs_only_for_stale_active_leases(
     assert errors == []
     leases.relay_liveness_alert(owner.agent_id + 1)
     assert errors == []
+
+
+def test_reminder_is_inserted_once_per_lease_and_wakes(
+    db_conn: psycopg.Connection,
+) -> None:
+    from shared.db import pool
+    from shared.impersonation_maintenance import remind_expiring_impersonations
+
+    owner = _agent(db_conn)
+    lease = _active(owner)
+    db_conn.execute(
+        "UPDATE agent_impersonations SET expires_at=clock_timestamp()+interval '4 minutes' "
+        "WHERE id=%s",
+        (lease["id"],),
+    )
+    db_conn.commit()
+    with pool(max_size=2) as reaper_pool:
+        assert remind_expiring_impersonations(reaper_pool) == 1
+        # Idempotent: a second scan in the same window inserts nothing new.
+        assert remind_expiring_impersonations(reaper_pool) == 0
+    reminder = db_conn.execute(
+        "SELECT content,kind,source,status,payload FROM inbound_messages "
+        "WHERE agent_id=%s AND kind='reminder'",
+        (owner.agent_id,),
+    ).fetchone()
+    assert reminder is not None
+    assert reminder[1:4] == ("reminder", "system", "pending")
+    assert reminder[4]["lease_id"] == str(lease["id"])
+    assert str(lease["id"]) in reminder[0]
+    assert "renew" in reminder[0] and "release" in reminder[0]
+
+
+def test_reminder_skips_leases_outside_the_window(db_conn: psycopg.Connection) -> None:
+    from shared.db import pool
+    from shared.impersonation_maintenance import remind_expiring_impersonations
+
+    owner = _agent(db_conn)
+    _active(owner)
+    db_conn.execute(
+        "UPDATE agent_impersonations SET expires_at=clock_timestamp()+interval '30 minutes' "
+        "WHERE agent_id=%s",
+        (owner.agent_id,),
+    )
+    db_conn.commit()
+    with pool(max_size=2) as reaper_pool:
+        assert remind_expiring_impersonations(reaper_pool) == 0
+    assert db_conn.execute(
+        "SELECT count(*) FROM inbound_messages WHERE agent_id=%s AND kind='reminder'",
+        (owner.agent_id,),
+    ).fetchone() == (0,)
+
+
+def test_release_dismisses_its_pending_reminder(db_conn: psycopg.Connection) -> None:
+    from shared.db import pool
+    from shared.impersonation_maintenance import remind_expiring_impersonations
+
+    owner = _agent(db_conn)
+    lease = _active(owner)
+    db_conn.execute(
+        "UPDATE agent_impersonations SET expires_at=clock_timestamp()+interval '2 minutes' "
+        "WHERE id=%s",
+        (lease["id"],),
+    )
+    db_conn.commit()
+    with pool(max_size=2) as reaper_pool:
+        assert remind_expiring_impersonations(reaper_pool) == 1
+    leases.release(lease["id"], lease["token"], "Done before expiry")
+    assert db_conn.execute(
+        "SELECT status FROM inbound_messages WHERE agent_id=%s AND kind='reminder'",
+        (owner.agent_id,),
+    ).fetchone() == ("done",)
+
+
+def test_expiry_dismisses_its_pending_reminder(db_conn: psycopg.Connection) -> None:
+    from shared.db import pool
+    from shared.impersonation_maintenance import reap_impersonations, remind_expiring_impersonations
+
+    owner = _agent(db_conn)
+    lease = _active(owner)
+    db_conn.execute(
+        "UPDATE agent_impersonations SET expires_at=clock_timestamp()+interval '1 minute' "
+        "WHERE id=%s",
+        (lease["id"],),
+    )
+    db_conn.commit()
+    with pool(max_size=2) as reaper_pool:
+        assert remind_expiring_impersonations(reaper_pool) == 1
+        db_conn.execute(
+            "UPDATE agent_impersonations SET expires_at=clock_timestamp()-interval '1 second' "
+            "WHERE id=%s",
+            (lease["id"],),
+        )
+        db_conn.commit()
+        assert reap_impersonations(reaper_pool) == 1
+    assert db_conn.execute(
+        "SELECT status FROM inbound_messages WHERE agent_id=%s AND kind='reminder'",
+        (owner.agent_id,),
+    ).fetchone() == ("done",)

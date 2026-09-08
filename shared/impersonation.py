@@ -16,6 +16,7 @@ from shared._impersonation_store import (
     OPEN,
     authenticate,
     authenticate_relay,
+    dismiss_reminders,
     expire,
     insert_handoff,
     local,
@@ -169,7 +170,24 @@ def require_active(lease_id: str, token: str) -> dict[str, Any]:
     return public(lease)
 
 
-def accept(lease_id: str, agent_id: int, incarnation: RuntimeIncarnation) -> dict[str, Any]:
+def accept(
+    lease_id: str,
+    agent_id: int,
+    incarnation: RuntimeIncarnation,
+    start_message: str,
+) -> dict[str, Any]:
+    """Record consent and the required handoff brief for the external session.
+
+    The brief becomes the relay's first host message at activation, so the
+    controller starts with the native agent's own words instead of a synthetic
+    hint. An empty brief is rejected: user ruling 2026-09-08 (decision C).
+    """
+    if not start_message.strip():
+        raise ImpersonationError(
+            "A nonempty start message is required: write the handoff brief the "
+            "external session needs (current work, context, expectations, how "
+            "to ACK inbox messages)."
+        )
     if incarnation.agent_id != agent_id:
         raise ImpersonationError("Consent belongs to a different agent")
     with write_transaction() as conn:
@@ -189,8 +207,8 @@ def accept(lease_id: str, agent_id: int, incarnation: RuntimeIncarnation) -> dic
             raise ImpersonationError("Impersonation request has expired")
         conn.execute(
             "UPDATE agent_impersonations SET status='accepted',accepted_generation=%s,"
-            "accepted_owner=%s WHERE id=%s",
-            (incarnation.generation, incarnation.owner, lease_id),
+            "accepted_owner=%s,start_message=%s WHERE id=%s",
+            (incarnation.generation, incarnation.owner, start_message, lease_id),
         )
         result = public(lock_lease(conn, lease_id))
     _wake(agent_id)
@@ -356,12 +374,17 @@ def release(lease_id: str, token: str, summary: str) -> dict[str, Any]:
         if lease["status"] == "released":
             return public(lease)
         require_active_locked(conn, lease, token)
-        inbound_id = insert_handoff(conn, lease, summary)
+        inbound_id = insert_handoff(
+            conn,
+            lease,
+            f"External session ended (lease {lease_id}).\n\n{summary}",
+        )
         conn.execute(
             "UPDATE agent_impersonations SET status='released',ended_at=clock_timestamp(),"
             "summary_inbound_id=%s WHERE id=%s",
             (inbound_id, lease_id),
         )
+        dismiss_reminders(conn, lease)
         result = public(lock_lease(conn, lease_id))
     _wake(lease["agent_id"])
     return result
@@ -376,7 +399,8 @@ def inbox(lease_id: str, token: str, *, limit: int = 100) -> list[dict[str, Any]
         with conn.cursor(row_factory=dict_row) as cur:
             cur.execute(
                 "SELECT id,content,kind,source,payload,created_at FROM inbound_messages "
-                "WHERE agent_id=%s AND status='pending' AND kind IN ('chat','system_note','cancel') "
+                "WHERE agent_id=%s AND status='pending' AND kind IN "
+                "('chat','system_note','cancel','reminder') "
                 "ORDER BY id LIMIT %s",
                 (lease["agent_id"], limit),
             )
@@ -475,7 +499,8 @@ def relay_inbox(lease_id: str, relay_token: str, *, limit: int = 100) -> list[di
         with conn.cursor(row_factory=dict_row) as cur:
             cur.execute(
                 "SELECT id,content,kind,source,payload,created_at FROM inbound_messages "
-                "WHERE agent_id=%s AND status='pending' AND kind IN ('chat','system_note','cancel') "
+                "WHERE agent_id=%s AND status='pending' AND kind IN "
+                "('chat','system_note','cancel','reminder') "
                 "ORDER BY id LIMIT %s",
                 (lease["agent_id"], limit),
             )
