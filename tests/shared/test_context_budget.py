@@ -35,7 +35,12 @@ def test_deepseek_budget_is_374k_soft_512k_hard() -> None:
     """User decision (2026-08-29): the deepseek entries opt out of the flat
     rule with per-model fractions — soft 374k / hard 512k on their 1M
     window."""
-    for model in ("deepseek-v4-pro", "deepseek-v4-flash", "deepseek-v4-flash-vision-exp"):
+    for model in (
+        "deepseek-v4-pro",
+        "deepseek-v4-flash",
+        "deepseek-v4-flash-vision-exp",
+        "deepseek-v4.1-flash-expires-on-0910",
+    ):
         budget = resolve_context_budget(model)
         assert budget.max_context_tokens == 1_000_000
         assert budget.soft_compact_tokens == 374_000, model
@@ -59,7 +64,12 @@ def test_every_non_deepseek_spawnable_model_runs_the_flat_thirty_forty_rule() ->
     test_deepseek_budget_is_374k_soft_512k_hard)."""
     for models in SUPPORTED_MODELS.values():
         for model in models:
-            if model in ("deepseek-v4-pro", "deepseek-v4-flash", "deepseek-v4-flash-vision-exp"):
+            if model in (
+                "deepseek-v4-pro",
+                "deepseek-v4-flash",
+                "deepseek-v4-flash-vision-exp",
+                "deepseek-v4.1-flash-expires-on-0910",
+            ):
                 continue
             budget = resolve_context_budget(model)
             window = budget.max_context_tokens

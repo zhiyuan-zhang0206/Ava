@@ -128,6 +128,7 @@ def test_deepseek_catalog_entries_live_only_in_the_archive() -> None:
         "deepseek-v4-pro",
         "deepseek-v4-flash",
         "deepseek-v4-flash-vision-exp",
+        "deepseek-v4.1-flash-expires-on-0910",
     }
 
     assert expected.isdisjoint(runtime_models)
@@ -485,6 +486,7 @@ def test_deepseek_plugin_prices_equal_archive_current_base_tier(
         "deepseek-v4-pro",
         "deepseek-v4-flash",
         "deepseek-v4-flash-vision-exp",
+        "deepseek-v4.1-flash-expires-on-0910",
     )
     outside_daily_override = datetime(2026, 9, 5, tzinfo=UTC)
     plugin_rates = {model: _plugin_rates(model, outside_daily_override) for model in model_ids}

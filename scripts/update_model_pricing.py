@@ -54,7 +54,17 @@ _METERS = {
     "1M INPUT TOKENS (CACHE HIT)": "cache_read",
     "1M OUTPUT TOKENS": "output",
 }
-_DEEPSEEK_MODELS = {"deepseek-v4-flash", "deepseek-v4-flash-vision-exp", "deepseek-v4-pro"}
+# Models refreshed from the official pricing page. deepseek-v4.1-flash-
+# expires-on-0910 is deliberately NOT here: it is an internal beta that the
+# page does not list (announced 2026-09-08, same pricing as v4-flash), so its
+# rates are pinned manually in the plugin + archive ledger entries, and it
+# expires 2026-09-10 — no auto-refresh is wired for a ~2-day model. An
+# equality check below keeps the fetched page in lockstep with this roster.
+_DEEPSEEK_MODELS = {
+    "deepseek-v4-flash",
+    "deepseek-v4-flash-vision-exp",
+    "deepseek-v4-pro",
+}
 _PEAK_HOURS = re.compile(
     r"\bPeak hours are\s+(\d{2}:\d{2})\s*-\s*(\d{2}:\d{2})\s+"
     r"and\s+(\d{2}:\d{2})\s*-\s*(\d{2}:\d{2})\s+UTC\b"
