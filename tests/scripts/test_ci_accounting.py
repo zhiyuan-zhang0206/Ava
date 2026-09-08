@@ -58,7 +58,7 @@ def _run(**overrides: object) -> dict[str, object]:
     return base
 
 
-def _jobs(*rows: tuple[str, str, str]) -> str:
+def _jobs(*rows: tuple[str | None, str | None, str | None]) -> str:
     return json.dumps(
         [
             {"name": name, "started": started, "completed": completed}
@@ -364,3 +364,56 @@ def test_branch_name_attributes_nonprefix_subject(monkeypatch: pytest.MonkeyPatc
     entries = ci_accounting.collect(ci_accounting.DEFAULT_REPO, _WINDOW_SINCE, _WINDOW_UNTIL)
     assert entries[0]["agent_id"] == 5810
     assert entries[0]["task_id"] == 2531
+
+
+def test_null_timestamps_bill_zero_and_do_not_crash(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Jobs whose started/completed are null (in-progress, cancelled, or
+    cancelled before start) must not crash reconciliation: they bill 0
+    minutes and other jobs in the run still bill normally."""
+    monkeypatch.setattr(
+        ci_accounting.subprocess,
+        "run",
+        _gh_queue(
+            [
+                (
+                    "actions/runs",
+                    _runs(
+                        [
+                            _run(
+                                id=109,
+                                head_branch="main",
+                                head_commit_msg="[Ava-5895] fix(ci): null job timestamps (task #2673)",
+                            )
+                        ]
+                    ),
+                ),
+                (
+                    "runs/109/jobs",
+                    _jobs(
+                        ("backend shard (1/16)", "2026-09-06T10:00:00Z", "2026-09-06T10:04:00Z"),
+                        ("still running (completed null)", "2026-09-06T10:00:00Z", None),
+                        ("cancelled before start (started null)", None, "2026-09-06T10:02:00Z"),
+                        ("queued (both null)", None, None),
+                    ),
+                ),
+            ]
+        ),
+    )
+    entries = ci_accounting.collect(ci_accounting.DEFAULT_REPO, _WINDOW_SINCE, _WINDOW_UNTIL)
+    assert len(entries) == 1
+    entry = entries[0]
+    assert entry["agent_id"] == 5895
+    assert entry["task_id"] == 2673
+    assert entry["linux_minutes"] == 4  # only the fully timestamped job bills
+    assert entry["jobs"] == 4
+
+
+def test_job_minutes_null_contract() -> None:
+    """job_minutes bills 0 whenever either timestamp is missing; both present
+    bills ceil of the wall duration."""
+    assert ci_accounting.job_minutes(None, "2026-09-06T10:05:00Z") == 0
+    assert ci_accounting.job_minutes("2026-09-06T10:00:00Z", None) == 0
+    assert ci_accounting.job_minutes(None, None) == 0
+    assert ci_accounting.job_minutes("2026-09-06T10:00:00Z", "2026-09-06T10:04:00Z") == 4

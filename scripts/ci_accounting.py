@@ -112,7 +112,11 @@ def _real_pr_of_trunk_branch(head_ref: str) -> int | None:
 
 
 def job_minutes(started: str | None, completed: str | None) -> int:
-    """Billable minutes of one job: ceil of its wall duration."""
+    """Billable minutes of one job: ceil of its wall duration.
+
+    The jobs API reports null started/completed for in-progress and
+    cancelled-before-start jobs — such jobs bill 0 minutes.
+    """
     if not started or not completed:
         return 0
     start = datetime.fromisoformat(started.replace("Z", "+00:00"))
@@ -182,7 +186,15 @@ def _fill_job_minutes(entry: dict, repo: str) -> None:
         jq="[.jobs[] | {name: .name, started: .started_at, completed: .completed_at}] | @json",
     )
     for job in jobs:
-        minutes = job_minutes(str(job.get("started")), str(job.get("completed")))
+        # The jobs API returns null started/completed for in-progress and
+        # cancelled jobs — pass them through as None so job_minutes bills 0
+        # (str(None) == "None" would reach fromisoformat and crash).
+        started = job.get("started")
+        completed = job.get("completed")
+        minutes = job_minutes(
+            started if isinstance(started, str) else None,
+            completed if isinstance(completed, str) else None,
+        )
         name = str(job.get("name") or "")
         if "macos" in name.lower():
             entry["macos_minutes"] += minutes
