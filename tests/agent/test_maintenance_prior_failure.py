@@ -116,7 +116,7 @@ async def test_prior_ordinary_failure_can_drain_without_replaying_work(
     ).fetchone() == (None, None, None)
 
 
-async def test_prior_tail_flush_failure_blocks_this_generation_before_claim(
+async def test_prior_tail_flush_outage_defers_receipt_until_reflushed(
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
     monkeypatch: pytest.MonkeyPatch,
@@ -141,12 +141,14 @@ async def test_prior_tail_flush_failure_blocks_this_generation_before_claim(
         patch.setattr(host_module, "flush_checkpoint", fail_flush)
         with pytest.raises(psycopg.OperationalError):
             await host.run_turn(agent)
-    # Restoring DB I/O cannot silently clear this generation's failed receipt.
-    await host.run_turn(agent)
-    assert await host.pending_inbound_wakes(300) == []
+    # A database-outage flush failure is crash-equivalent: recorded as an
+    # undelivered receipt, never latched as a blocking failure. The buffered
+    # tail is NOT silently cleared or dropped — it stays unflushed, and the
+    # drain must not certify before a real re-flush succeeds.
     current = maintenance.require_operation("failed-flush", WHEN)
     assert current.maintenance is not None
-    assert current.maintenance.failures == {agent: "OperationalError"}
+    assert current.maintenance.failures == {}
+    assert current.maintenance.undelivered == {agent: "OperationalError"}
     assert current.maintenance.drained == ()
     assert db_conn.execute(
         "SELECT status,claimed_at,applied_at FROM inbound_messages WHERE id=%s",
@@ -154,4 +156,26 @@ async def test_prior_tail_flush_failure_blocks_this_generation_before_claim(
     ).fetchone() == ("pending", None, None)
     cold = await AsyncPostgresSaver(aops_pool).aget_tuple(config)
     assert cold is not None and tail not in cold.checkpoint["channel_values"]["messages"]
+    # Restoring the channel re-drives the receipt through the held-control
+    # path: the wake scan keeps the agent woken (no failure fence), the held
+    # controls re-flush the buffered tail BEFORE claiming the restart, and
+    # only the resulting applied command certifies the drain.
+    assert [wake.agent_id for wake in await host.pending_inbound_wakes(300)] == [agent]
+    await host.run_turn(agent)
+    current = maintenance.require_operation("failed-flush", WHEN)
+    assert current.maintenance is not None
+    assert current.maintenance.undelivered == {agent: "OperationalError"}
+    assert current.maintenance.drained == (agent,)
+    maintenance_cohort.verify_drained(db_conn, current.maintenance)
+    assert await host.pending_inbound_wakes(300) == []
+    assert db_conn.execute(
+        "SELECT status,applied_at IS NOT NULL,observed_at FROM inbound_messages WHERE id=%s",
+        (hold.commands[agent],),
+    ).fetchone() == ("claimed", True, None)
+    assert db_conn.execute(
+        "SELECT runtime_owner,runtime_generation,incarnation_resources FROM agents_meta WHERE id=%s",
+        (agent,),
+    ).fetchone() == (None, None, None)
+    cold = await AsyncPostgresSaver(aops_pool).aget_tuple(config)
+    assert cold is not None and tail in cold.checkpoint["channel_values"]["messages"]
     assert calls == ["save", "fail"]

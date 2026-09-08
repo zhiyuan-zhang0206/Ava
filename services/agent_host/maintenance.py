@@ -5,12 +5,21 @@ from collections.abc import Awaitable, Callable
 from datetime import datetime
 from uuid import UUID
 
-from psycopg_pool import AsyncConnectionPool
+import psycopg
+from psycopg_pool import AsyncConnectionPool, PoolTimeout
 
 from services.agent_host.dispatcher import PendingInboundWake
 from shared import maintenance
 
 FailureFences = dict[int, tuple[str | None, datetime | None]]
+
+# The same database-outage family the turn loop and db_recovery already treat
+# as a recoverable channel break (host.py `_invoke_until_done`, db_recovery).
+# A turn raising one of these during a hold did not provably fail its
+# continuation: the restart pointer and checkpoint survive exactly as after a
+# host crash, and the crash-recovery path re-drives them. Such receipts are
+# graded as crash-equivalent: recorded for audit, never latched as blocking.
+CRASH_EQUIVALENT_FAILURES = (psycopg.OperationalError, PoolTimeout, TimeoutError)
 
 
 async def record_failure(agent_id: int, exc: BaseException, fences: FailureFences) -> None:
@@ -23,8 +32,18 @@ async def record_failure(agent_id: int, exc: BaseException, fences: FailureFence
         # An unreadable journal still leaves the unknown fence set above.
         fences.pop(agent_id, None)
         return
+    category = type(exc).__name__
+    if isinstance(exc, CRASH_EQUIVALENT_FAILURES):
+        # The receipt channel broke, not the continuation: the left-behind
+        # state is crash-equivalent and durable. Record it for audit WITHOUT
+        # latching a blocking failure or a fence — the next wake re-drives the
+        # held-control path, whose explicit re-flush must succeed before the
+        # restart is claimed and the drain can certify.
+        fences.pop(agent_id, None)
+        await asyncio.to_thread(maintenance.record_undelivered, agent_id, category)
+        return
     fences[agent_id] = (current.holder, current.acquired_at)
-    await asyncio.to_thread(maintenance.record_failure, agent_id, type(exc).__name__)
+    await asyncio.to_thread(maintenance.record_failure, agent_id, category)
 
 
 async def record_drained(pool: AsyncConnectionPool, owner: UUID, agent_id: int) -> None:
@@ -70,6 +89,8 @@ def pending_wakes(fences: FailureFences) -> list[PendingInboundWake] | None:
     if current is None or current.maintenance is None:
         return None
     # A stale-turn cancel could interrupt the action maintenance is draining.
+    # Undelivered receipts carry no fence, so their agents keep waking: the
+    # held-control re-drive is what completes a crash-equivalent receipt.
     return [
         PendingInboundWake(agent_id=agent, stale=False)
         for agent in current.maintenance.commands

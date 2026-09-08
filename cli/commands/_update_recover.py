@@ -453,6 +453,11 @@ def _print_rollout_aftermath(
             "    · per host with an unconfirmed resume: inspect `ava maintenance status` "
             "and `ava status` on that host before deciding whether recovery is needed."
         )
+        out.append(
+            "    · a host whose `ava maintenance status` shows failed receipts cannot resume "
+            "until the root cause is fixed: run `ava maintenance repair --operation "
+            "<operation> --acquired-at <timestamp>` on that host, then resume."
+        )
     # The three lines below are about hosts mid-transition. A rollout whose only
     # defect is a local session that would not launch has none — every runner
     # converged — so pointing the operator at updater logs and `ava cluster recover`

@@ -64,9 +64,13 @@ def unpause_local_cluster() -> None:
     if current is None:
         _unpause_local_cluster()
         return
-    if current.maintenance is not None and current.maintenance.failures:
-        raise RuntimeError("cannot resume failed continuation/flush receipts; hold retained")
     assert current.holder is not None and current.acquired_at is not None  # noqa: S101
+    if current.maintenance is not None and current.maintenance.failures:
+        raise RuntimeError(
+            "cannot resume failed continuation/flush receipts; fix the root cause, "
+            f"then ava maintenance repair --operation {current.holder} "
+            f"--acquired-at {current.acquired_at.isoformat()}"
+        )
     from shared import start_serving
 
     if (
@@ -75,6 +79,12 @@ def unpause_local_cluster() -> None:
         and not start_serving.is_serving()
     ):
         raise RuntimeError("services have stopped; ava start must pass readiness before resume")
+    if current.maintenance is not None and current.maintenance.undelivered:
+        _log.warning(
+            "[cluster] releasing with undelivered crash-equivalent receipts; "
+            "cold admission re-drives their continuations: %s",
+            sorted(current.maintenance.undelivered),
+        )
     with maintenance.authorized_start(current.holder, current.acquired_at):
         _unpause_local_cluster()
     resume_agents()

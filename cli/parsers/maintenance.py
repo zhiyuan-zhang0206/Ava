@@ -17,7 +17,16 @@ def _add_maintenance_parser(sub: argparse._SubParsersAction[argparse.ArgumentPar
         help="[host] hold, drain and stop this unit without force; coordinate other hosts explicitly",
     )
     verbs = parser.add_subparsers(dest="maintenance_cmd", required=True)
-    for verb in ("prepare", "status", "drain", "stop", "start", "resume", "stop-data-plane"):
+    for verb in (
+        "prepare",
+        "status",
+        "drain",
+        "stop",
+        "start",
+        "resume",
+        "repair",
+        "stop-data-plane",
+    ):
         command = verbs.add_parser(verb, help=f"[host] {verb} this unit's maintenance operation")
         command.set_defaults(func=_handle)
         if verb != "status":
@@ -50,4 +59,11 @@ def _add_maintenance_parser(sub: argparse._SubParsersAction[argparse.ArgumentPar
                 "--cancel",
                 action="store_true",
                 help="explicitly abandon an unfinished drain and restore ordinary lifecycle recovery",
+            )
+        if verb == "repair":
+            command.add_argument(
+                "--operator",
+                default=None,
+                help="operator identity recorded in the repair audit (e.g. 'Ava #1234'); "
+                "defaults to the OS login identity",
             )
