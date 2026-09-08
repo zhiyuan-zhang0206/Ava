@@ -1,5 +1,7 @@
 """Local CLI phases must retain the hold across failures and explicit startup."""
 
+import os
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
@@ -234,3 +236,104 @@ def test_data_plane_terminal_assertion_only_bypasses_terminal_guard(
         with pytest.raises(RuntimeError, match="live terminal"):
             command._stop_data("local", WHEN, 2, gateway_last=True)
         shutdown.assert_not_called()
+
+
+def failed_hold(*failures: int, phase_value: str = "draining") -> None:
+    before = pause_owner.begin_maintenance("local", WHEN)
+    assert before.maintenance is not None
+    hold = MaintenanceHold.decode(
+        {
+            **before.maintenance.encode(),
+            "phase": phase_value,
+            "failures": {str(agent): "RuntimeError" for agent in failures},
+        }
+    )
+    pause_owner.change_maintenance("local", WHEN, before.maintenance, hold)
+
+
+def test_repair_refuses_without_failed_receipts() -> None:
+    phase("draining")
+    with pytest.raises(RuntimeError, match="no failed receipts to repair"):
+        command._repair("local", WHEN, operator=None)
+
+
+def test_repair_refuses_past_drain_phases() -> None:
+    failed_hold(7, phase_value="stopped")
+    with pytest.raises(RuntimeError, match="repair cannot bypass a started stop"):
+        command._repair("local", WHEN, operator=None)
+
+
+def test_repair_refuses_while_agent_host_has_active_continuations(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    failed_hold(7)
+    monkeypatch.setattr(command, "host_identity", lambda: HostIdentity(uuid4(), frozenset({7})))
+    with pytest.raises(RuntimeError, match="still has active continuations"):
+        command._repair("local", WHEN, operator=None)
+
+
+def test_repair_moves_failures_to_repaired_with_operator_record(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    failed_hold(7, 9)
+    unpause = MagicMock()
+    monkeypatch.setattr("ops.cluster_pause.unpause_local_cluster", unpause)
+    command._repair("local", WHEN, operator="Ava #5870")
+    current = pause_owner.read()
+    assert current.status == "paused"
+    assert current.maintenance is not None
+    assert current.maintenance.failures == {}
+    assert current.maintenance.repaired == {7: "RuntimeError", 9: "RuntimeError"}
+    record = current.maintenance.repair_record
+    assert record is not None
+    assert record["by"] == "Ava #5870"
+    assert record["user"]
+    assert record["pid"] == str(os.getpid())
+    assert record["machine"]
+    assert datetime.fromisoformat(record["at"]).tzinfo is not None
+    unpause.assert_called_once()
+    err = capsys.readouterr().err
+    assert "Repaired 2 failed receipt(s)" in err
+    assert "Ava #5870" in err
+
+
+def test_repair_partial_release_is_completed_by_cancel(monkeypatch: pytest.MonkeyPatch) -> None:
+    failed_hold(7)
+
+    def failing_unpause() -> None:
+        raise RuntimeError("posture restore failed")
+
+    monkeypatch.setattr("ops.cluster_pause.unpause_local_cluster", failing_unpause)
+    with pytest.raises(RuntimeError, match="posture restore failed"):
+        command._repair("local", WHEN, operator=None)
+    current = pause_owner.read()
+    assert current.status == "paused"
+    assert current.maintenance is not None
+    assert current.maintenance.failures == {}
+    assert current.maintenance.repaired == {7: "RuntimeError"}
+    # The repaired journal no longer blocks the ordinary cancel path.
+    unpause = MagicMock()
+    monkeypatch.setattr("ops.cluster_pause.unpause_local_cluster", unpause)
+    command._resume("local", WHEN, cancel=True)
+    unpause.assert_called_once()
+
+
+def test_real_parser_exposes_repair_with_operator() -> None:
+    from cli.parsers import build_parser
+
+    parser = build_parser()
+    parsed = parser.parse_args(
+        [
+            "maintenance",
+            "repair",
+            "--operation",
+            "local",
+            "--acquired-at",
+            WHEN.isoformat(),
+            "--operator",
+            "Ava #5870",
+        ]
+    )
+    assert parsed.maintenance_cmd == "repair"
+    assert parsed.operation == "local"
+    assert parsed.operator == "Ava #5870"
