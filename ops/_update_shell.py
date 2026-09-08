@@ -65,7 +65,7 @@ def _restart_recovery_cmd(
     failed, so this run did not do what it was asked. Whether the `ava start` then
     rescued the host is a different question with a better answer — the posture row
     the started services write, which Phase B reads first and which outranks this
-    line anyway (a host back at `idle` is reported converged, whatever its log says).
+    line once native startup is released and the responding process is on the expected code.
     """
     flags = ""
     if quiesce:

@@ -1712,8 +1712,18 @@ class TestClusterUpdateCheckEndpoint:
 
 
 class TestStatusSnapshot:
-    def test_snapshot_reflects_flag_and_role(self, fake_flag: Path, set_machine_identity) -> None:
+    def test_snapshot_reflects_flag_and_role(
+        self,
+        fake_flag: Path,
+        set_machine_identity,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from shared import host_deploy_state, start_serving
+
+        monkeypatch.setattr(start_serving, "run_dir", lambda: fake_flag.parent)
         set_machine_identity(role="agent-runner", name="wsl")
+        host_deploy_state.set_posture("idle")
+        start_serving.mark_serving(start_serving.begin_start())
         # unpaused
         snap = cluster_mod.status_snapshot()
         assert snap.machine_name == "wsl"

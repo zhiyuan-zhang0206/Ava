@@ -290,7 +290,7 @@ def test_status_snapshot_degrades_when_the_pool_cannot_reach_db(
     snapshot = cluster_status.status_snapshot(pool=pool)
 
     assert pool.timeouts == [2.0]
-    assert snapshot.paused is False
+    assert snapshot.paused is True  # A missing DB snapshot cannot claim readiness.
     assert snapshot.current_orchestration is None
     assert snapshot.last_updater_outcome is None
     assert snapshot.agent_count == 0
