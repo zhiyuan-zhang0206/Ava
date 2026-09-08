@@ -102,6 +102,13 @@ def _dispatch(args: argparse.Namespace) -> int:
                 args.agent_id, caller=_caller(args.caller), ttl_seconds=args.ttl, reason=args.reason
             )
         )
+        print(
+            "Impersonation request does not start inbox delivery. Start impersonate relay "
+            "with this lease and an explicit host destination; see "
+            "conventions/agent-impersonation-hosts.md. Verify the control-active hint "
+            "arrives in the same conversation before relying on automatic wake-up.",
+            file=sys.stderr,
+        )
         return 0
     token = token_from_env()
     if command == "status":

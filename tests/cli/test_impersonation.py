@@ -85,7 +85,13 @@ def test_request_uses_external_identity_and_returns_token_once(
     )
     assert seen["caller"].source() == "external_agent:codex:task1"
     assert seen["ttl_seconds"] == 600
-    assert json.loads(capsys.readouterr().out)["token"] == "new-credential"
+    output = capsys.readouterr()
+    assert json.loads(output.out)["token"] == "new-credential"
+    assert "request does not start inbox delivery" in output.err
+    assert "impersonate relay" in output.err
+    assert "conventions/agent-impersonation-hosts.md" in output.err
+    assert "same conversation" in output.err
+    assert "new-credential" not in output.err
 
 
 def test_ack_uses_explicit_processed_ids_only(

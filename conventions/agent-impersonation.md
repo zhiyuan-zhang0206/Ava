@@ -33,6 +33,15 @@ Codex also filters subprocess environments; use the explicit
 [Codex launch policy and presence check](agent-impersonation-hosts.md#codex-cli)
 before doing AVA work.
 
+Start the [host relay](agent-impersonation-hosts.md) immediately after the request,
+using the lease credential and an explicit destination in the existing host.
+An active lease grants authority; it does not start message delivery. Before
+claiming that automatic wake-up works, receive the relay's control-active hint
+in this same conversation, then fetch and process the inbox. Process liveness
+and a successful queue command do not prove host receipt. If receipt fails,
+report automatic delivery as unavailable and resolve host routing before relying
+on background messages.
+
 The native agent receives the request in its normal context and decides:
 
 ```python
@@ -126,7 +135,8 @@ Inbox reads return durable inbound rows without marking them processed. Acknowle
 only the IDs actually handled; unacknowledged rows remain available after release.
 `--limit` accepts 1 through 1000 rows; `--wait` accepts finite, nonnegative seconds.
 The CLI uses the existing Redis inbound listener and a durable database recheck.
-For automatic same-session wake-up, use the [Codex and Claude host relay](agent-impersonation-hosts.md).
+Automatic same-session wake-up requires the [Codex and Claude host relay](agent-impersonation-hosts.md)
+and the receipt verification described above.
 The relay sends availability hints and never acknowledges work for the external model.
 
 An inbox row with `kind="cancel"` asks the controller to stop its current work.
