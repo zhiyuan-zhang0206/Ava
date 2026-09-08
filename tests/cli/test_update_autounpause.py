@@ -67,6 +67,45 @@ def test_phase_a_fatal_resumes_every_host(monkeypatch: pytest.MonkeyPatch) -> No
     ], calls
 
 
+def test_local_pause_failure_does_not_report_untouched_runners_as_paused(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Local drain fails before remote pause; rejected resume leaves pause state unknown."""
+    calls: list[tuple[str, list[str]]] = []
+    monkeypatch.setattr(_cli, "_changed_paths_vs_origin", lambda: ["gateway/app.py"])
+    monkeypatch.setattr(_cli, "_list_agent_runners", lambda: [("win", "http://win:8106")])
+
+    def _fail_local_pause() -> None:
+        raise RuntimeError("local drain failed")
+
+    def _fan_out(
+        hosts: list[tuple[str, str | None]],
+        path: str,
+        _timeout: float,
+        payload: _rec.ClusterOpPayload | None = None,
+    ) -> list[tuple[str, str, str]]:
+        calls.append((path, [name for name, _url in hosts]))
+        if path == "/api/cluster/resume":
+            return [(name, "fatal", "no matching native hold") for name, _url in hosts]
+        return [(name, "ok", "") for name, _url in hosts]
+
+    monkeypatch.setattr("ops.cluster.pause_local_cluster", _fail_local_pause)
+    monkeypatch.setattr(_cli, "_fan_out", _fan_out)
+    with pytest.raises(RuntimeError, match="local drain failed"):
+        _cli._run_gateway_orchestration(Path("/unused"), origin="test-origin")
+
+    assert not any(path == "/api/cluster/stop" for path, _names in calls)
+    assert [call for call in calls if call[0] == "/api/cluster/resume"] == [
+        ("/api/cluster/resume", ["win"])
+    ]
+    err = capsys.readouterr().err
+    assert "resume unconfirmed: ['win']" in err
+    assert "ava maintenance status" in err
+    assert "STILL PAUSED" not in err
+    assert "still-paused" not in err
+    assert "unpause its posture row" not in err
+
+
 def test_local_update_failure_resumes_every_host(monkeypatch: pytest.MonkeyPatch) -> None:
     """Local update fails (the 04:20 scenario) -> every paused host resumed."""
     calls: list[tuple[str, list[str]]] = []
@@ -439,12 +478,11 @@ def test_finalize_rollout_incomplete_is_not_reported_as_aborted(
 def test_the_pin_line_does_not_promise_a_self_heal_to_a_still_paused_host(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Issue #1114, in the banner. This block names the hosts the compensating resume
-    could not reach as STILL PAUSED, and one line later told the operator that every
-    remaining host "converges via Phase B / their watchdog self-heal". A paused host
-    reconciles nothing — `PauseController` blocks the round ahead of pin and code — so
-    for exactly the hosts listed above it, that sentence is the one promise this block
-    cannot make, and it reads as "wait"."""
+    """Issue #1114: unconfirmed resumes cannot promise unconditional self-heal.
+
+    A host may still be paused, but a failed resume does not establish that state.
+    The report must require native inspection and retain the conditional pause gate.
+    """
 
     def _failing_fan_out(hosts, path, _timeout, payload=None):  # type: ignore[no-untyped-def]
         return [(name, "unreachable", "connection refused") for name, _url in hosts]
@@ -458,11 +496,13 @@ def test_the_pin_line_does_not_promise_a_self_heal_to_a_still_paused_host(
         pin_advanced=True,
     )
     err = capsys.readouterr().err
-    assert "STILL PAUSED" in err and "'win'" in err
+    assert "resume unconfirmed: ['win']" in err
+    assert "STILL PAUSED" not in err
     assert "advanced" in err  # the pin fact itself is unchanged
+    assert "If native status confirms a pause" in err
     assert "skips every round while the pause holds" in err
-    assert "stranded-pause recovery" in err
-    assert "unpause its posture row" in err  # and the operator's own way out
+    assert "ava maintenance status" in err
+    assert "unpause its posture row" not in err
 
 
 def test_the_pin_line_quotes_no_recovery_deadline(
@@ -488,7 +528,7 @@ def test_the_pin_line_quotes_no_recovery_deadline(
     err = capsys.readouterr().err
     pin_line = next(ln for ln in err.splitlines() if "cluster pin:" in ln)
     assert not re.search(r"\d+\s*(m|min|s|sec)\b", pin_line), pin_line
-    assert "waits until nothing owns the pause" in pin_line
+    assert "convergence requires the pause to clear" in pin_line
     assert "ava cluster status" in pin_line
 
 
@@ -518,7 +558,7 @@ def test_finalize_rollout_never_raises_when_resume_dial_raises(
 ) -> None:
     """The 2026-07-20 incident: the compensating resume itself raised (its Postgres
     read), burying the root cause under a second traceback. finalize_rollout must
-    swallow that, flag the hosts as still paused, and still print the summary."""
+    swallow that, report unconfirmed resumes, and still print the summary."""
 
     def _raising_fan_out(hosts, path, _timeout, payload=None):  # type: ignore[no-untyped-def]
         raise RuntimeError("psycopg OperationalError: connection refused")
@@ -534,5 +574,6 @@ def test_finalize_rollout_never_raises_when_resume_dial_raises(
     )
     err = capsys.readouterr().err
     assert "compensating resume dial itself failed" in err
-    assert "STILL PAUSED" in err
+    assert "resume unconfirmed: ['a']" in err
+    assert "STILL PAUSED" not in err
     assert "'a'" in err
