@@ -275,6 +275,7 @@ async def test_held_host_wake_returns_before_runtime_or_slot(
     host._owner = uuid4()
     host._maintenance_failed = {}
     host._control_pool = MagicMock()
+    host._checkpointer = cast(Any, MemorySaver())
     host._read_stored_config = AsyncMock(
         return_value=_StoredConfig(
             machine="local", status="idling", config_overlay=None, birth_config=None
@@ -304,6 +305,7 @@ async def test_held_host_refuses_unaccepted_control_batch(monkeypatch: pytest.Mo
     host._machine = "local"
     host._owner = uuid4()
     host._control_pool = MagicMock()
+    host._checkpointer = cast(Any, MemorySaver())
     owner = RuntimeIncarnation(42, uuid4(), host._owner)
     monkeypatch.setattr(
         "services.agent_host.host.admit_hosted_runtime", AsyncMock(return_value=owner)

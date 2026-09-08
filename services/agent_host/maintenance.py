@@ -18,9 +18,13 @@ async def record_failure(agent_id: int, exc: BaseException, fences: FailureFence
     # The unknown generation remains a same-boot fence until explicit resume.
     fences[agent_id] = (None, None)
     current = maintenance.snapshot()
-    if current is not None:
-        fences[agent_id] = (current.holder, current.acquired_at)
-        await asyncio.to_thread(maintenance.record_failure, agent_id, type(exc).__name__)
+    if current is None:
+        # A successful read proves this ordinary failure belongs to no hold.
+        # An unreadable journal still leaves the unknown fence set above.
+        fences.pop(agent_id, None)
+        return
+    fences[agent_id] = (current.holder, current.acquired_at)
+    await asyncio.to_thread(maintenance.record_failure, agent_id, type(exc).__name__)
 
 
 async def record_drained(pool: AsyncConnectionPool, owner: UUID, agent_id: int) -> None:

@@ -356,6 +356,9 @@ class AgentHost:
         from agent.db import claim_inbound_batch
 
         with bind_turn_identity(agent_id, incarnation=incarnation):
+            # An earlier ordinary failure can leave a buffered tail. Preserve
+            # it before accepting maintenance intent, without replaying graph work.
+            await flush_checkpoint(self._checkpointer, agent_id)
             batch = await claim_inbound_batch(self._control_pool, agent_id, lifecycle_only=True)
             if len(batch) > 1 or any(not item.durable_lifecycle for item in batch):
                 raise RuntimeError("held control claim returned an unaccepted command")
