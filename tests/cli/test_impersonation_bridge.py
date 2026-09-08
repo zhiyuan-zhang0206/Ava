@@ -503,7 +503,7 @@ def test_command_passes_remote_to_queue(monkeypatch: pytest.MonkeyPatch) -> None
         _ = kwargs
         await asyncio.sleep(0)
 
-    def no_invalidation(_thread_id: UUID) -> int:
+    def no_invalidation(_thread_id: UUID, _agent_id: int, _lease_id: UUID) -> int:
         return 0
 
     monkeypatch.setattr(relay, "_write_heartbeat", heartbeat_ok)
@@ -742,13 +742,18 @@ def test_relay_inbox_does_not_invalidate_while_outstanding_is_unprocessed() -> N
     assert len(invalidations) == 2
 
 
-def test_invalidate_our_hints_deletes_only_marked_hints(
+def test_invalidate_our_hints_deletes_only_scoped_hints_real_input_shape(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """Real Codex 0.153.4 shape: submission.input is a list of content blocks.
+
+    Only this relay's own agent+lease-scoped hints are deleted; real user
+    messages and other relays' hints (other agent or other lease) survive.
+    """
     executable = tmp_path / "codex"
     log = tmp_path / "rpc.log"
     script = (
-        f"#!{sys.executable}\nLOG_PATH = {str(log)!r}\n"
+        f"#!{sys.executable}\nLOG_PATH = {str(log)!r}\nLEASE = {str(LEASE_ID)!r}\n"
         + """
 import json, sys
 for line in sys.stdin:
@@ -759,11 +764,23 @@ for line in sys.stdin:
     elif method == "thread/queue/list":
         page = [
             {"id": "hint-1", "clientUserMessageId": "c1",
-             "input": {"items": [{"type": "text", "text": "AVA inbox ready: agent=42 pending_page=1"}]}},
+             "input": [{"type": "text",
+                        "text": "AVA inbox ready: agent=42 lease=" + LEASE + " pending_page=1"}]},
             {"id": "user-1", "clientUserMessageId": "c2",
-             "input": {"items": [{"type": "text", "text": "please refactor the parser"}]}},
+             "input": [{"type": "text", "text": "please refactor the parser"}]},
             {"id": "hint-2", "clientUserMessageId": "c3",
-             "input": {"items": [{"type": "text", "text": "AVA control active: agent=42"}]}},
+             "input": [{"type": "text",
+                        "text": "AVA control active: agent=42 lease=" + LEASE + " pending_page=0"}]},
+            {"id": "other-agent", "clientUserMessageId": "c4",
+             "input": [{"type": "text",
+                        "text": "AVA inbox ready: agent=43 lease=" + LEASE + " pending_page=9"}]},
+            {"id": "other-lease", "clientUserMessageId": "c5",
+             "input": [{"type": "text",
+                        "text": "AVA inbox ready: agent=42 lease=00000000-0000-0000-0000-000000000000 "
+                                "pending_page=9"}]},
+            {"id": "hint-3", "clientUserMessageId": "c6",
+             "input": [{"type": "text",
+                        "text": "AVA control expired: agent=42 lease=" + LEASE + "."}]},
         ]
         print(json.dumps({"id": req["id"], "result": {"data": page, "nextCursor": None}}), flush=True)
     elif method == "thread/queue/delete":
@@ -777,8 +794,70 @@ for line in sys.stdin:
     executable.write_text(script)
     executable.chmod(0o700)
     monkeypatch.setenv("PATH", f"{tmp_path}{os.pathsep}{os.environ['PATH']}")
-    assert relay.invalidate_our_hints(THREAD_ID) == 2
-    assert log.read_text().splitlines() == ["hint-1", "hint-2"]
+    assert relay.invalidate_our_hints(THREAD_ID, 42, LEASE_ID) == 3
+    assert log.read_text().splitlines() == ["hint-1", "hint-2", "hint-3"]
+
+
+def test_invalidate_our_hints_accepts_legacy_dict_input_shape(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Defensive compatibility: the older dict-with-items input shape still works."""
+    executable = tmp_path / "codex"
+    log = tmp_path / "rpc.log"
+    script = (
+        f"#!{sys.executable}\nLOG_PATH = {str(log)!r}\nLEASE = {str(LEASE_ID)!r}\n"
+        + """
+import json, sys
+for line in sys.stdin:
+    req = json.loads(line)
+    method = req.get("method", "")
+    if method == "initialize":
+        print(json.dumps({"id": req["id"], "result": {}}), flush=True)
+    elif method == "thread/queue/list":
+        page = [
+            {"id": "hint-1", "clientUserMessageId": "c1",
+             "input": {"items": [{"type": "text",
+                                  "text": "AVA inbox ready: agent=42 lease=" + LEASE + " pending_page=1"}]}},
+            {"id": "user-1", "clientUserMessageId": "c2",
+             "input": {"items": [{"type": "text", "text": "please refactor the parser"}]}},
+        ]
+        print(json.dumps({"id": req["id"], "result": {"data": page, "nextCursor": None}}), flush=True)
+    elif method == "thread/queue/delete":
+        with open(LOG_PATH, "a") as handle:
+            handle.write(req["params"]["queuedSubmissionId"] + "\\n")
+        print(json.dumps({"id": req["id"], "result": {}}), flush=True)
+    elif not method:
+        continue  # initialized notification
+"""
+    )
+    executable.write_text(script)
+    executable.chmod(0o700)
+    monkeypatch.setenv("PATH", f"{tmp_path}{os.pathsep}{os.environ['PATH']}")
+    assert relay.invalidate_our_hints(THREAD_ID, 42, LEASE_ID) == 1
+    assert log.read_text().splitlines() == ["hint-1"]
+
+
+def test_hint_prefixes_are_scoped_to_agent_and_lease() -> None:
+    prefixes = relay._hint_prefixes(42, LEASE_ID)
+    scope = f"agent=42 lease={LEASE_ID}"
+    assert all(scope in prefix for prefix in prefixes)
+    assert len(prefixes) == 4
+    # The relay's own emitted hints all match one scoped prefix.
+    for text in (
+        relay.inbox_hint(42, LEASE_ID, frozenset({1})),
+        relay.activation_hint(42, LEASE_ID, frozenset()),
+        "AVA control rejected: agent=42 lease=" + str(LEASE_ID) + ".",
+        "AVA control expired: agent=42 lease=" + str(LEASE_ID) + ".",
+    ):
+        assert any(text.startswith(prefix) for prefix in prefixes), text
+    # Neighbour scopes and unrelated text never match.
+    for text in (
+        "AVA inbox ready: agent=43 lease=" + str(LEASE_ID),
+        "AVA inbox ready: agent=42 lease=00000000-0000-0000-0000-000000000000",
+        "please refactor the parser",
+        "AVA inbox ready: agent=42",
+    ):
+        assert not any(text.startswith(prefix) for prefix in prefixes), text
 
 
 def test_invalidate_our_hints_logs_loudly_when_the_rpc_is_unavailable(
@@ -797,7 +876,7 @@ def test_invalidate_our_hints_logs_loudly_when_the_rpc_is_unavailable(
             warnings.append(message)
 
     monkeypatch.setattr("shared.log.logger", FakeLogger())
-    assert relay.invalidate_our_hints(THREAD_ID) == 0
+    assert relay.invalidate_our_hints(THREAD_ID, 42, LEASE_ID) == 0
     assert len(warnings) == 1
     assert "invalidation unavailable" in warnings[0]
     _ = real_logger
