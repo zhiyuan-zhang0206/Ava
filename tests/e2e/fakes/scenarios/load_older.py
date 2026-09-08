@@ -2,10 +2,12 @@
 (DEFAULT_TIMELINE_LIMIT=50), so scroll-up history loading has a previous page
 to fetch (has_more=true).
 
-13 turns, each thinking + narration + a trivial execute_code tool call → the
+35 turns, each thinking + narration + a trivial execute_code tool call → the
 real exec runs → ~4 timeline items per turn (agent_reasoning, agent_chat,
 agent_code, code_output); the final turn replies only. One user message drives
-the whole script (the agent graph loops the SCRIPT per inbound).
+the whole script (the agent graph loops the SCRIPT per inbound). ~140 items
+means the 50-item tail window pages two more rounds — enough for the #2623
+multi-round drift regression.
 """
 
 from __future__ import annotations
@@ -35,7 +37,7 @@ def _turn(i: int) -> AIMessage:
 
 
 LOAD_OLDER_SCRIPT: tuple[AIMessage, ...] = (
-    *(_turn(i) for i in range(1, 14)),
+    *(_turn(i) for i in range(1, 36)),
     AIMessage(content="\u5168\u90e8\u6267\u884c\u5b8c\u6bd5\u3002", usage_metadata=_USAGE),
 )
 

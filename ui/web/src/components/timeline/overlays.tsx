@@ -48,7 +48,7 @@ export function PullToLoadIndicator({
         transform: `translate(-50%, ${loadingOlder ? 12 : Math.min(pullDistance * 0.4, 20)}px) scale(${loadingOlder ? 1 : 0.75 + 0.25 * progress})`,
       }}
       className={cn(
-        "absolute top-2 left-1/2 z-20 pointer-events-none",
+        "absolute top-14 left-1/2 z-20 pointer-events-none",
         "size-9 rounded-full",
         "bg-background border border-border shadow-md",
         "items-center justify-center text-primary",
@@ -100,6 +100,11 @@ export function PullToLoadIndicator({
 // hint for everyone, since the pull ring only appears mid-pull. Mounted
 // always (for the opacity transition) but unfocusable and pointer-events-none
 // while hidden, so an invisible control can never trap keyboard focus.
+// Positioned below the floating header (BAR_HEIGHT_PX 44 + 8px clearance →
+// top-14): at top-2 the translucent header overlays the button and intercepts
+// its pointer events. z-20 lifts it above #1954's stuck turn header
+// (sticky top-11 z-10), which otherwise sits in the same band at the top and
+// steals the click (the e2e round-2 click regression, second variant).
 export function LoadOlderButton({
   visible,
   onClick,
@@ -120,7 +125,7 @@ export function LoadOlderButton({
   return (
     <div
       className={cn(
-        "absolute top-2 left-1/2 -translate-x-1/2 z-10",
+        "absolute top-14 left-1/2 -translate-x-1/2 z-20",
         "transition-opacity duration-200",
         visible ? "opacity-100" : "opacity-0 pointer-events-none",
       )}
