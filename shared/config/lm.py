@@ -497,14 +497,18 @@ class LmSettings(EnvSettings):
     )
 
     gemini_explicit_cache_enabled: bool = Field(
-        default=True,
+        default=False,
         alias="AVA_GEMINI_EXPLICIT_CACHE_ENABLED",
         description=(
-            "Pin the system prompt + execute_code tool schema into a Gemini explicit "
-            "context cache (cachedContents API) instead of relying on implicit caching "
-            "alone — cache-bound requests reference the cache and omit "
-            "system_instruction/tools. Ignored by other providers; fail-open to "
-            "implicit caching on any cache-layer error."
+            "Opt-in: pin the system prompt + execute_code tool schema into a Gemini "
+            "explicit context cache (cachedContents API). Default off — Gemini 3.x "
+            "implicit caching covers the whole prompt prefix (threshold 4096 tokens) "
+            "and the API reports those hits honestly in cachedContentTokenCount, so "
+            "the reported cache-read share tracks the real billed share as "
+            "conversations grow (task #2660). Enable only for workloads dominated "
+            "by a huge stable system prompt: with an explicit cache attached the API "
+            "reports ONLY the explicit block, understating the hit rate. Ignored by "
+            "other providers; fail-open to implicit caching on any cache-layer error."
         ),
         json_schema_extra={
             "restart_required": "agent",

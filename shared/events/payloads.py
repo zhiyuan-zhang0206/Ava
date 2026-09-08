@@ -78,7 +78,13 @@ class LlmUsage(TypedDict):
     ``unpriced`` is 1 exactly when the price snapshot is absent (so unpriced
     call volume is countable in Prometheus); it is omitted on priced calls.
     ``task_id`` is present only when the turn was explicitly driven by a
-    task-associated system note; untagged calls do not belong to a task."""
+    task-associated system note; untagged calls do not belong to a task.
+
+    ``cache_mechanism`` / ``cache_scope`` are present only when the call site
+    knows the request's cache provenance (task #2660): the Gemini explicit
+    cache path labels ``mixed`` / ``explicit_block`` because the API reports
+    only the explicit block in ``cache_read``; absent keys mean unknown, never
+    fabricated."""
 
     model: str
     calls: int
@@ -96,6 +102,8 @@ class LlmUsage(TypedDict):
     task_id: NotRequired[int]
     usage_kind: str
     source: NotRequired[str]
+    cache_mechanism: NotRequired[str]
+    cache_scope: NotRequired[str]
 
 
 class TurnEnd(TypedDict):
