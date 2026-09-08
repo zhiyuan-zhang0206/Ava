@@ -13,6 +13,15 @@ import pytest
 from langchain_core.messages import AIMessage
 
 from agent.observe import log_llm_usage
+from shared.lm._plugin_providers import ensure_provider_plugins_loaded
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _load_provider_plugins() -> None:
+    """Provider vendor attribution needs the plugin registry populated; without
+    it `vendor_of_model` returns None, the billing span is skipped, and
+    order-dependent failures appear when this module runs standalone."""
+    ensure_provider_plugins_loaded()
 
 
 def _msgs(records: list[dict]) -> str:
@@ -301,3 +310,45 @@ def test_price_snapshot_absent_for_unpriced_model(
     assert "no-such-model" in warning
     assert "shared/lm/pricing_catalog_archive.json" in warning
     assert "plugin price registry" in warning
+
+
+def test_gemini_explicit_cache_provenance_labels(loguru_records: list[dict[str, Any]]):
+    """cache_mechanism/cache_scope ride the event extra when the call site
+    knows the request rode the Gemini explicit cache (task #2660) — the API
+    then reports only the explicit block, so the event must say so instead of
+    letting the dashboard misread the share as full-prefix."""
+    msg = AIMessage(
+        content="",
+        usage_metadata={
+            "input_tokens": 1000,
+            "output_tokens": 100,
+            "total_tokens": 1100,
+            "input_token_details": {"cache_read": 200},
+        },
+    )
+    log_llm_usage(
+        msg,
+        model="gemini-3.8-flash",
+        cache_mechanism="mixed",
+        cache_scope="explicit_block",
+    )
+    extra = loguru_records[0]["extra"]
+    assert extra["cache_mechanism"] == "mixed"
+    assert extra["cache_scope"] == "explicit_block"
+
+
+def test_no_provenance_labels_when_unknown(loguru_records: list[dict[str, Any]]):
+    """Without labels the event carries no cache_mechanism/cache_scope key —
+    an honest 'unknown' rather than a fabricated one."""
+    msg = AIMessage(
+        content="",
+        usage_metadata={
+            "input_tokens": 1000,
+            "output_tokens": 100,
+            "total_tokens": 1100,
+            "input_token_details": {"cache_read": 200},
+        },
+    )
+    log_llm_usage(msg, model="gemini-3.8-flash")
+    assert "cache_mechanism" not in loguru_records[0]["extra"]
+    assert "cache_scope" not in loguru_records[0]["extra"]

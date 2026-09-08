@@ -66,6 +66,7 @@ from shared.db_transaction import async_write_transaction
 from shared.event_publisher import AgentEventPublisher
 from shared.live_events import TokenUsage
 from shared.lm.content import content_blocks
+from shared.lm.usage import CACHE_MECHANISM_MIXED, CACHE_SCOPE_EXPLICIT_BLOCK
 from shared.log import logger
 from shared.message_kwargs import read_ava_kwargs
 
@@ -312,6 +313,11 @@ def _finalize_turn_observability(
         latency_ms=handler.llm_latency_ms,
         decode_ms=handler.llm_decode_ms,
         task_id=task_id,
+        # Gemini + explicit cachedContent reports only the explicit block in
+        # cache_read (implicit tail hits are billed but not reported), so the
+        # event carries the honest provenance instead of a bare number.
+        cache_mechanism=(CACHE_MECHANISM_MIXED if handler.used_explicit_cache else None),
+        cache_scope=(CACHE_SCOPE_EXPLICIT_BLOCK if handler.used_explicit_cache else None),
     )
     if task_id is not None and usage_tally is not None:
         try:

@@ -11,6 +11,16 @@ request — the cached share no longer depends on the implicit checkpoint
 cadence, and cache-read tokens bill at ~0.1x input (cache storage bills per
 token-hour; a ~10-20k-token prompt costs fractions of a cent per hour).
 
+Status (task #2660, 2026-09-09): this path is OPT-IN — the
+``AVA_GEMINI_EXPLICIT_CACHE_ENABLED`` default flipped to False. With an
+explicit cache attached, Gemini's ``cachedContentTokenCount`` reports only
+the explicit block (system+tools); implicit hits on the conversation tail are
+billed but not reported, so the reported hit-rate share shrinks as
+conversations grow. Implicit-only (the default) reports the real full-prefix
+hits. Enable this path only for workloads dominated by a huge stable system
+prompt; when it rides, the usage event is labeled
+``cache_mechanism=mixed, cache_scope=explicit_block``.
+
 Wire contract (verified live 2026-07-25 against gemini-3.6-flash; carries
 over to gemini-3.7-flash — same 3.x flash wire; re-verify if the 400/403
 shapes drift):

@@ -18,6 +18,7 @@ tags:
 - `log_usage_from_message()` is the accounting path for completed LangChain messages; it records the `llm_usage` event, usage-time price snapshot (or `unpriced=1`), and its matching billing span.
 - `log_usage_fields()` serves non-LangChain providers such as the Gemini embedding REST adapter. `for_agent_id` explicitly attributes a daemon-generated event to its target agent.
 - `usage_kind` distinguishes agent, chat, batch, and embedding consumption. `source` is an optional payload field for shared text callers (`web.fetch`, `understand`, and `understand.media`) and is kept distinct from the transport provenance column.
+- `cache_mechanism` / `cache_scope` are optional provenance labels for `cache_read`. Gemini with an explicit `cachedContent` attached reports ONLY the explicit block (implicit tail hits are billed but not reported), so callers that rode that path label the event `cache_mechanism=mixed, cache_scope=explicit_block` instead of letting the dashboard misread the share as full-prefix. Absent labels = unknown, never fabricated (task #2660).
 
 ## Notes
 

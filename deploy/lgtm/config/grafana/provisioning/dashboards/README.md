@@ -25,7 +25,7 @@ row header. All sections are **expanded by default** (`collapsed: false`,
 1. **`core`** — the user's daily first screen: twelve stat tiles cover the
    entire Statistics popover (LLM calls / Warning / Error / Unresolved Warning /
    Unresolved Error / Live agents / LLM cost /
-   Tokens / LLM input tokens / LLM output tokens / Cache hit rate / Avg turn
+   Tokens / LLM input tokens / LLM output tokens / Reported cache-read share / Avg turn
    duration). It then shows Event health,
    Event rate, Token usage — Input, Token usage — Output + Reasoning, Cache
    hit, Turn success rate, and the three full-width **Events** panels:
