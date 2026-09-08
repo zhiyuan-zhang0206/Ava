@@ -83,8 +83,15 @@ async def prepare_invocation(
     )
 
 
-async def ainvoke_with_cache_retry(llm: BaseChatModel, messages: list[AnyMessage]) -> AIMessage:
+async def ainvoke_with_cache_retry(
+    llm: BaseChatModel, messages: list[AnyMessage]
+) -> tuple[AIMessage, bool]:
     """Single-shot invoke through `prepare_invocation`, with one stale-cache retry.
+
+    Returns ``(response, used_explicit_cache)``: the bool mirrors the
+    successful attempt's provenance (True = rode the Gemini explicit cache,
+    whose usage underreports cache hits to the explicit block) so callers can
+    label their usage event honestly.
 
     A cache can die between preparation and the wire (TTL lapse); the API
     403s with "CachedContent not found". Invalidate the memo and rerun once on
@@ -102,8 +109,9 @@ async def ainvoke_with_cache_retry(llm: BaseChatModel, messages: list[AnyMessage
 
     from shared.config import settings
 
-    async def _invoke() -> AIMessage:
+    async def _invoke() -> tuple[AIMessage, bool]:
         invocation = await prepare_invocation(llm, messages)
+        used_explicit_cache = invocation.cache_ref is not None
         try:
             response = await invocation.runnable.ainvoke(invocation.messages)  # pyright: ignore[reportUnknownMemberType]
         except Exception as exc:
@@ -126,8 +134,9 @@ async def ainvoke_with_cache_retry(llm: BaseChatModel, messages: list[AnyMessage
             )
             invalidate(cache_ref)
             plain = await prepare_invocation(llm, messages)
+            used_explicit_cache = plain.cache_ref is not None  # plain path: always False
             response = await plain.runnable.ainvoke(plain.messages)  # pyright: ignore[reportUnknownMemberType]
         assert isinstance(response, AIMessage)  # noqa: S101 — chat models return AIMessage
-        return response
+        return response, used_explicit_cache
 
     return await asyncio.wait_for(_invoke(), timeout=settings.lm.llm_compact_timeout_seconds)

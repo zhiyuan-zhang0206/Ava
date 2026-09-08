@@ -92,6 +92,11 @@ class RedisStreamHandler:
         self._publisher = event_publisher
         self._agent_id = agent_id
         self._msg_idx = msg_idx
+        # Set by _llm_stream._stream_with_cache_retry after the successful
+        # attempt: True when the request rode the Gemini explicit cache (the
+        # API then reports only the explicit block in cache_read). Read by
+        # _llm.py when logging usage to label the event's cache provenance.
+        self.used_explicit_cache = False
         # *_started flags: per content_block_index, only emit *Start on the first
         # real delta, avoiding empty blocks (signature_delta only / boundary
         # chunks etc.) creating empty chat/reasoning items.

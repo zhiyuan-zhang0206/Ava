@@ -41,6 +41,14 @@ _BIG_PROMPT = "You are a test agent. " * 2000  # ~10k chars -> est ~2.5k tokens,
 _FAR_FUTURE = datetime.now(UTC) + timedelta(seconds=3600)
 
 
+@pytest.fixture(autouse=True)
+def _explicit_cache_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The flag default flipped to False (task #2660); this module exercises
+    the explicit-cache path, so pin it on per test — the off path has its own
+    test (`test_flag_off_returns_none`)."""
+    monkeypatch.setattr(settings.lm, "gemini_explicit_cache_enabled", True)
+
+
 class _FakeAsyncPager:
     def __init__(self, items: list[Any]):
         self._items = items

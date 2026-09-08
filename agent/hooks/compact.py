@@ -247,12 +247,24 @@ async def generate_summary(
     # Same request shape as the llm node via prepare_invocation: when a
     # Gemini explicit cache is live the summary call rides it too (and its
     # stale-retry recovers a lapsed TTL), otherwise plain bind_tools.
-    response = await ainvoke_with_cache_retry(llm, compaction_input)
+    response, used_explicit_cache = await ainvoke_with_cache_retry(llm, compaction_input)
     model = getattr(llm, "model_name", None) or turn_settings.lm.llm_model
     if isinstance(model, str) and model:
-        from shared.lm.usage import log_usage_from_message
+        from shared.lm.usage import (
+            CACHE_MECHANISM_MIXED,
+            CACHE_SCOPE_EXPLICIT_BLOCK,
+            log_usage_from_message,
+        )
 
-        log_usage_from_message(response, model=model, usage_kind="agent")
+        log_usage_from_message(
+            response,
+            model=model,
+            usage_kind="agent",
+            # Gemini + explicit cachedContent reports only the explicit block
+            # in cache_read — label the event's provenance honestly.
+            cache_mechanism=CACHE_MECHANISM_MIXED if used_explicit_cache else None,
+            cache_scope=CACHE_SCOPE_EXPLICIT_BLOCK if used_explicit_cache else None,
+        )
     summary = response.text
     if not summary.strip():
         raise RuntimeError(
