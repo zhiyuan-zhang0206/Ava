@@ -36,11 +36,11 @@ ava impersonate status '<lease id>'
 ```
 
 An export persists only in that shell and its children. If the external host starts
-a new shell for each tool call, supply the token in each AVA subprocess environment,
+a new shell for each tool call, supply the token in each Ava subprocess environment,
 use a persistent shell, or start the host with the token already in its environment.
 Codex also filters subprocess environments; use the explicit
 [Codex launch policy and presence check](agent-impersonation-hosts.md#codex-cli)
-before doing AVA work.
+before doing Ava work.
 
 The [host relay](agent-impersonation-hosts.md) is part of the takeover, not a
 manual step. The accepting runtime starts the codex relay automatically at

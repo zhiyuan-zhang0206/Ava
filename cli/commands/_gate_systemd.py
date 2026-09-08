@@ -25,7 +25,7 @@ def unit_name(home: Path) -> str:
 
 
 def unit_path(home: Path) -> Path:
-    """The current OS user's unit directory, independent of the AVA home."""
+    """The current OS user's unit directory, independent of the Ava home."""
     config = Path(os.environ.get("XDG_CONFIG_HOME", str(Path.home() / ".config")))
     if not config.is_absolute():
         raise RuntimeError("XDG_CONFIG_HOME must be absolute for the gate user unit")
@@ -43,7 +43,7 @@ def _argument(value: str) -> str:
 
 
 def unit_content(home: Path, repo: Path, python: str, content_hash: str) -> str:
-    """Render an explicit, clean child environment; no manager AVA vars leak in.
+    """Render an explicit, clean child environment; no manager Ava vars leak in.
 
     The colon disables systemd's dollar expansion, while percent specifiers are
     escaped separately. GNU env changes directory before exec so quoted paths

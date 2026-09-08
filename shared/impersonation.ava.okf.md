@@ -57,7 +57,7 @@ The native graph remains the only checkpoint writer: external state updates
 append serialized reducer inputs with a version CAS. On return, the driver
 applies those deltas and checkpoints a lease/version receipt before acknowledging
 the journal. A crash between those steps replays the receipt, not the mutation.
-Native shell/editor actions outside AVA are not intercepted or rolled back.
+Native shell/editor actions outside Ava are not intercepted or rolled back.
 
 ## Messages and wakeups
 
