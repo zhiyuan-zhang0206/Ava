@@ -16,7 +16,7 @@ import {
 } from "@/components/run-timeline/request-level";
 import { buttonVariants } from "@/components/ui/button";
 import { api } from "@/lib/api";
-import { formatTokensCompact } from "@/lib/item-summary";
+import { formatTokensCompact } from "@/lib/format-number";
 import { FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0 } from "@/lib/layout";
 import type { RunTimelineResponse } from "@/lib/types";
 import { useUserSettings } from "@/lib/use-user-settings";

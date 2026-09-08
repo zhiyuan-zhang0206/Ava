@@ -81,13 +81,6 @@ export function summarizeOutput(payload: string): OutputSummary {
 
 // --- formatting helpers (shared by the chip) ---
 
-/** Compact token count: `820` / `1.2k` / `3.4M`. */
-export function formatTokensCompact(n: number): string {
-  if (n < 1_000) return String(n);
-  if (n < 1_000_000) return `${(n / 1_000).toFixed(1)}k`;
-  return `${(n / 1_000_000).toFixed(1)}M`;
-}
-
 /** Human duration from milliseconds: `0.1s` / `0.3s` / `8s` / `1m 12s`. Shared
  *  by the thinking chip ("Thinking for Xs") and the output chip ("ran in Xs").
  *  Values <0.1s floor at 0.1s; 0.1–1s round to 0.1s; 1–60s round to whole
