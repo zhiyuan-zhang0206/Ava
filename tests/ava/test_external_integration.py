@@ -88,7 +88,12 @@ def test_external_attach_reads_native_checkpoint_and_only_journals_delta(
     owner, handle = native_checkpoint
     agent_id = owner.agent_id
 
-    lease = leases.request(agent_id, caller=CallerIdentity(kind="external_agent", subject="codex"))
+    lease = leases.request(
+        agent_id,
+        caller=CallerIdentity(kind="external_agent", subject="codex"),
+        relay_provider="codex",
+        relay_thread_id=str(uuid4()),
+    )
     leases.accept(lease["id"], agent_id, owner)
     leases.activate(lease["id"], owner)
     with external.attach(lease["id"], token=lease["token"]):
@@ -126,7 +131,12 @@ def test_borrowed_sender_reaches_peer_through_gateway_and_returns_real_provenanc
     )
     db_conn.commit()
     caller = CallerIdentity(kind="external_agent", subject="codex", instance="test")
-    lease = leases.request(owner.agent_id, caller=caller)
+    lease = leases.request(
+        owner.agent_id,
+        caller=caller,
+        relay_provider="codex",
+        relay_thread_id=str(uuid4()),
+    )
     leases.accept(lease["id"], owner.agent_id, owner)
     leases.activate(lease["id"], owner)
 
@@ -179,7 +189,10 @@ def test_external_memory_write_uses_borrowed_identity(
     monkeypatch.setattr(paths, "workspace_dir", workspace)
     monkeypatch.setattr(paths, "memory_dir", lambda: tmp_path / "shared")
     lease = leases.request(
-        owner.agent_id, caller=CallerIdentity(kind="external_agent", subject="codex")
+        owner.agent_id,
+        caller=CallerIdentity(kind="external_agent", subject="codex"),
+        relay_provider="codex",
+        relay_thread_id=str(uuid4()),
     )
     leases.accept(lease["id"], owner.agent_id, owner)
     leases.activate(lease["id"], owner)
@@ -219,7 +232,10 @@ def test_external_memory_rechecks_lease_before_filesystem_effects(
     monkeypatch.setattr(notes, "workspace_dir", workspace)
     monkeypatch.setattr(settings.agent, "memory_per_agent_inject_enabled", True)
     lease = leases.request(
-        owner.agent_id, caller=CallerIdentity(kind="external_agent", subject="codex")
+        owner.agent_id,
+        caller=CallerIdentity(kind="external_agent", subject="codex"),
+        relay_provider="codex",
+        relay_thread_id=str(uuid4()),
     )
     leases.accept(lease["id"], owner.agent_id, owner)
     leases.activate(lease["id"], owner)

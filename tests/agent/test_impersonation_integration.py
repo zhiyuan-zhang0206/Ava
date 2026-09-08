@@ -14,6 +14,7 @@ from langgraph.types import Command
 from psycopg_pool import AsyncConnectionPool
 from pydantic import BaseModel
 
+from agent import impersonation
 from agent import state as states
 from agent.graph._claim import claim_node
 from agent.graph._exec import exec_node
@@ -79,6 +80,8 @@ async def _prepare_graph(
         agent_id,
         caller=CallerIdentity(kind="external_agent", subject="codex"),
         reason="Do the task",
+        relay_provider="codex",
+        relay_thread_id=str(uuid4()),
     )
     model_calls: list[Any] = []
 
@@ -145,6 +148,13 @@ async def test_consent_exec_inbox_release_and_resume(
     )
     agent_id = owner.agent_id
 
+    # The relay establishment gate is unit-tested separately; the real graph
+    # handoff must not spawn a relay process in the test environment.
+
+    def relay_ready(_session: Any, _incarnation: Any) -> bool:
+        return True
+
+    monkeypatch.setattr(impersonation, "establish_relay", relay_ready)
     with bind_turn_identity(agent_id, incarnation=owner):
         first = await graph.ainvoke(reset, config, context=ctx)
         assert first["turn_idle"]
@@ -223,7 +233,12 @@ async def test_replacement_host_adopts_held_agent_without_model(
         aops_pool, agent_id, machine, uuid4(), expected_from="idling"
     )
     assert owner is not None
-    lease = leases.request(agent_id, caller=CallerIdentity(kind="external_agent", subject="codex"))
+    lease = leases.request(
+        agent_id,
+        caller=CallerIdentity(kind="external_agent", subject="codex"),
+        relay_provider="codex",
+        relay_thread_id=str(uuid4()),
+    )
     leases.accept(lease["id"], agent_id, owner)
     leases.activate(lease["id"], owner)
     graph = MagicMock()

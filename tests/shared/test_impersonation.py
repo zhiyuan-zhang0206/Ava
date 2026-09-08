@@ -39,12 +39,19 @@ def _status(owner: RuntimeIncarnation) -> dict[str, Any]:
     return result
 
 
-def _request(owner: RuntimeIncarnation) -> dict[str, Any]:
+def _request(
+    owner: RuntimeIncarnation, *, provider: str = "codex", thread: str | None = None
+) -> dict[str, Any]:
+    kwargs: dict[str, Any] = {}
+    if provider == "codex":
+        kwargs["relay_thread_id"] = thread or str(uuid4())
     return leases.request(
         owner.agent_id,
         caller=CallerIdentity(kind="external_agent", subject="codex", instance="test"),
         ttl_seconds=300,
         reason="Handle the next message",
+        relay_provider=provider,
+        **kwargs,
     )
 
 
@@ -453,3 +460,186 @@ def test_reaper_expires_offline_lease_and_keeps_unconsumed_handoff(
         reap_impersonations(reaper_pool)
     assert db_conn.execute("SELECT count(*) FROM agent_impersonations").fetchone() == (0,)
     assert db_conn.execute("SELECT count(*) FROM inbound_messages").fetchone() == (1,)
+
+
+def test_request_requires_a_relay_binding(db_conn: psycopg.Connection) -> None:
+    owner = _agent(db_conn)
+    with pytest.raises(ValueError, match="provider"):
+        leases.request(
+            owner.agent_id,
+            caller=CallerIdentity(kind="external_agent", subject="codex"),
+            relay_provider="nope",
+        )
+    with pytest.raises(ValueError, match="thread id"):
+        leases.request(
+            owner.agent_id,
+            caller=CallerIdentity(kind="external_agent", subject="codex"),
+            relay_provider="codex",
+        )
+    with pytest.raises(ValueError, match="thread id and remote are rejected"):
+        leases.request(
+            owner.agent_id,
+            caller=CallerIdentity(kind="external_agent", subject="codex"),
+            relay_provider="claude",
+            relay_thread_id=str(uuid4()),
+        )
+
+
+def test_claude_request_mints_a_scoped_relay_credential(db_conn: psycopg.Connection) -> None:
+    owner = _agent(db_conn)
+    lease = _request(owner, provider="claude", thread=None)
+    assert lease["relay_provider"] == "claude"
+    assert lease.get("relay_token")
+    assert "relay_token_hash" not in lease
+    assert leases.relay_get(lease["id"], lease["relay_token"])["status"] == "requested"
+    with pytest.raises(leases.ImpersonationError, match="Invalid relay token"):
+        leases.relay_get(lease["id"], lease["token"])
+    with pytest.raises(leases.ImpersonationError, match="Invalid relay token"):
+        leases.relay_get(lease["id"], "wrong")
+
+
+def test_codex_request_defers_relay_credential_to_activation(db_conn: psycopg.Connection) -> None:
+    owner = _agent(db_conn)
+    lease = _request(owner)
+    assert lease["relay_provider"] == "codex"
+    assert lease["relay_thread_id"]
+    assert "relay_token" not in lease
+    with pytest.raises(leases.ImpersonationError, match="Invalid relay token"):
+        leases.relay_get(lease["id"], "any")
+
+
+def test_accept_without_relay_binding_fails_loudly(db_conn: psycopg.Connection) -> None:
+    # A legacy-shape lease (created before the relay binding existed) has all
+    # relay fields NULL; accepting it must fail loudly, never guess an endpoint.
+    owner = _agent(db_conn)
+    legacy_id = uuid4()
+    db_conn.execute(
+        "INSERT INTO agent_impersonations(id,agent_id,source,machine,token_hash,reason,"
+        "status,ttl_seconds,expires_at) VALUES(%s,%s,'external_agent:codex:old',%s,%s,'',"
+        "'requested',300,clock_timestamp()+interval '5 minutes')",
+        (legacy_id, owner.agent_id, machine_name(), "legacy-hash"),
+    )
+    db_conn.commit()
+    with pytest.raises(leases.ImpersonationError, match="no relay binding"):
+        leases.accept(str(legacy_id), owner.agent_id, owner)
+
+
+def test_provision_relay_only_for_the_accepting_incarnation(db_conn: psycopg.Connection) -> None:
+    owner = _agent(db_conn)
+    lease = _request(owner)
+    leases.accept(lease["id"], owner.agent_id, owner)
+    foreign = RuntimeIncarnation(owner.agent_id, uuid4(), uuid4())
+    with pytest.raises(leases.ImpersonationError):
+        leases.provision_relay(lease["id"], foreign, "relay-credential")
+    provisioned = leases.provision_relay(lease["id"], owner, "relay-credential")
+    assert "relay_token_hash" not in provisioned
+    assert leases.relay_get(lease["id"], "relay-credential")["status"] == "accepted"
+
+
+def test_provision_relay_revokes_the_previous_credential(db_conn: psycopg.Connection) -> None:
+    owner = _agent(db_conn)
+    lease = _request(owner)
+    leases.accept(lease["id"], owner.agent_id, owner)
+    leases.activate(lease["id"], owner)
+    leases.provision_relay(lease["id"], owner, "first")
+    leases.provision_relay(lease["id"], owner, "second")
+    with pytest.raises(leases.ImpersonationError, match="Invalid relay token"):
+        leases.relay_get(lease["id"], "first")
+    assert leases.relay_get(lease["id"], "second")["status"] == "active"
+
+
+def test_relay_inbox_uses_the_scoped_credential_only(db_conn: psycopg.Connection) -> None:
+    owner = _agent(db_conn)
+    lease = _request(owner, provider="claude", thread=None)
+    leases.accept(lease["id"], owner.agent_id, owner)
+    leases.activate(lease["id"], owner)
+    insert_inbound_message(db_conn, owner.agent_id, "hello", "user", kind="chat")
+    db_conn.commit()
+    with pytest.raises(leases.ImpersonationError, match="Invalid relay token"):
+        leases.relay_inbox(lease["id"], lease["token"])
+    rows = leases.relay_inbox(lease["id"], lease["relay_token"])
+    assert [row["content"] for row in rows] == ["hello"]
+    with pytest.raises(leases.ImpersonationError):
+        leases.inbox(lease["id"], lease["relay_token"])
+
+
+def test_relay_heartbeat_beats_while_open_and_stops_at_terminal(
+    db_conn: psycopg.Connection,
+) -> None:
+    owner = _agent(db_conn)
+    lease = _request(owner, provider="claude", thread=None)
+    leases.relay_heartbeat(lease["id"], lease["relay_token"])
+    row = leases.relay_get(lease["id"], lease["relay_token"])
+    assert row["relay_heartbeat_at"] is not None
+    leases.accept(lease["id"], owner.agent_id, owner)
+    leases.activate(lease["id"], owner)
+    leases.relay_heartbeat(lease["id"], lease["relay_token"])
+    leases.release(lease["id"], lease["token"], "Done")
+    with pytest.raises(leases.ImpersonationError, match="ended"):
+        leases.relay_heartbeat(lease["id"], lease["relay_token"])
+
+
+def test_fail_acceptance_rolls_back_with_reason_and_native_note(
+    db_conn: psycopg.Connection,
+) -> None:
+    owner = _agent(db_conn)
+    lease = _request(owner)
+    leases.accept(lease["id"], owner.agent_id, owner)
+    result = leases.fail_acceptance(lease["id"], owner, "relay process exited at startup")
+    assert result["status"] == "rejected"
+    assert result["rejection_reason"] == "relay process exited at startup"
+    assert result["relay_last_failure_at"] is not None
+    notes = db_conn.execute(
+        "SELECT content FROM inbound_messages WHERE agent_id=%s AND kind='system_note'",
+        (owner.agent_id,),
+    ).fetchall()
+    assert any("rolled back" in row[0] for row in notes)
+
+
+def test_fail_acceptance_requires_an_accepted_lease(db_conn: psycopg.Connection) -> None:
+    owner = _agent(db_conn)
+    lease = _request(owner)
+    with pytest.raises(leases.ImpersonationError):
+        leases.fail_acceptance(lease["id"], owner, "too early")
+    leases.accept(lease["id"], owner.agent_id, owner)
+    leases.activate(lease["id"], owner)
+    with pytest.raises(leases.ImpersonationError):
+        leases.fail_acceptance(lease["id"], owner, "too late")
+
+
+def test_record_relay_failure_is_rate_limited(db_conn: psycopg.Connection) -> None:
+    owner = _agent(db_conn)
+    lease = _active(owner)
+    assert leases.record_relay_failure(lease["id"], owner) is True
+    assert leases.record_relay_failure(lease["id"], owner) is False
+
+
+def test_relay_liveness_alert_logs_only_for_stale_active_leases(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    owner = _agent(db_conn)
+    _active(owner)
+    errors: list[tuple[str, object]] = []
+
+    class FakeLogger:
+        def error(self, message: str, **fields: object) -> None:
+            errors.append((message, fields))
+
+        def exception(self, message: str, **fields: object) -> None:
+            errors.append((message, fields))
+
+    monkeypatch.setattr(leases, "logger", FakeLogger())
+    leases.relay_liveness_alert(owner.agent_id)
+    assert len(errors) == 1
+    assert "relay heartbeat is stale" in errors[0][0]
+    # A fresh heartbeat suppresses the alert.
+    db_conn.execute(
+        "UPDATE agent_impersonations SET relay_heartbeat_at=clock_timestamp() WHERE agent_id=%s",
+        (owner.agent_id,),
+    )
+    db_conn.commit()
+    errors.clear()
+    leases.relay_liveness_alert(owner.agent_id)
+    assert errors == []
+    leases.relay_liveness_alert(owner.agent_id + 1)
+    assert errors == []
