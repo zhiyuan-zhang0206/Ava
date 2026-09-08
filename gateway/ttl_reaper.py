@@ -58,7 +58,7 @@ from shared import telemetry
 from shared.config import cluster_tz, settings
 from shared.db import insert_inbound_message, publish_inbound_wake
 from shared.db_transaction import write_transaction
-from shared.impersonation_maintenance import reap_impersonations
+from shared.impersonation_maintenance import reap_impersonations, remind_expiring_impersonations
 from shared.inbound_provenance import InboundProvenance
 from shared.live_announce import publish_agent_updated_sync
 from shared.live_events import PageClosed
@@ -448,6 +448,7 @@ async def _reaper_loop(pool: ConnectionPool, stop: asyncio.Event) -> None:
     """Reclaim once at startup, then on the configured interval."""
     while not stop.is_set():
         try:
+            reminded = await asyncio.to_thread(remind_expiring_impersonations, pool)
             impersonations = await asyncio.to_thread(reap_impersonations, pool)
             pages = await asyncio.to_thread(_reap_expired_pages_blocking, pool)
             shells = await _reap_expired_shells(pool)
@@ -457,16 +458,17 @@ async def _reaper_loop(pool: ConnectionPool, stop: asyncio.Event) -> None:
                 with suppress(Exception):
                     await ops_lifecycle.publish_notice_resolved(agent_id, nid)
             failures = await work_failed_router.reconcile_stale_work_failures(pool)
-            if pages or shells or sessions or impersonations or notices or failures:
+            if pages or shells or sessions or impersonations or notices or failures or reminded:
                 _log.info(
                     "[ttl-reaper] reclaimed %d page(s), %d shell(s), %d web session(s), %d impersonation(s), %d notice(s); "
-                    "completed %d stale work failure(s)",
+                    "completed %d stale work failure(s); reminded %d impersonation lease(s)",
                     len(pages),
                     len(shells),
                     sessions,
                     impersonations,
                     len(notices),
                     failures,
+                    reminded,
                 )
         except Exception:
             _log.warning("[ttl-reaper] pass failed", exc_info=True)

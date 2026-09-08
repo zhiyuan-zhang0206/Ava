@@ -68,7 +68,7 @@ async def test_consent_carries_actual_source_and_survives_compaction(
     assert message.id == "impersonation-request:lease-1:1"
     content = cast(str, message.content)  # pyright: ignore[reportUnknownMemberType]
     assert "External agent" in content and "codex" in content
-    assert "ava.impersonation.accept('lease-1')" in content
+    assert "ava.impersonation.accept('lease-1', start_message=" in content
     compacted = BaseAgentState(impersonation_request_id="lease-1:1")
     assert await impersonation.claim_gate(compacted, 42) is None
 
@@ -155,8 +155,10 @@ def test_accept_stops_exec_and_uses_captured_incarnation(
     accepted = Mock()
     monkeypatch.setattr("shared.impersonation.accept", accepted)
     with pytest.raises(AgentImpersonation):
-        accept("lease-1")
-    accepted.assert_called_once_with("lease-1", 42, incarnation)
+        accept("lease-1", "Hand the task to the external session.")
+    accepted.assert_called_once_with(
+        "lease-1", 42, incarnation, "Hand the task to the external session."
+    )
     assert isinstance(lifecycle_exception_from_name("AgentImpersonation"), AgentImpersonation)
 
 

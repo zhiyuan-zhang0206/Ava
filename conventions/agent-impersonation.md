@@ -55,7 +55,12 @@ The native agent receives the request in its normal context and decides:
 
 ```python
 import ava
-ava.impersonation.accept(request_id)  # Ends this code execution immediately.
+ava.impersonation.accept(
+    request_id,
+    start_message="Brief for the external session: the current work, the "
+    "context it needs, and how to acknowledge incoming messages.",
+)  # Ends this code execution immediately. The start message is required and
+# is delivered to the external session when the takeover starts.
 # Or: ava.impersonation.reject(request_id, reason="Finish the current operation first")
 ```
 
@@ -135,28 +140,38 @@ or generate the code.
 
 ## Receive and acknowledge messages
 
+Messages are pushed into the external session by the bound
+[host relay](agent-impersonation-hosts.md): each push is one self-contained
+envelope carrying the full message bodies, their ids, and the exact ACK
+command. Process the batch, then acknowledge only the ids actually handled:
+
 ```bash
-ava impersonate inbox '<lease id>' --wait 30
 ava impersonate ack '<lease id>' 123 124
 ```
 
-Inbox reads return durable inbound rows without marking them processed. Acknowledge
-only the IDs actually handled; unacknowledged rows remain available after release.
-`--limit` accepts 1 through 1000 rows; `--wait` accepts finite, nonnegative seconds.
-The CLI uses the existing Redis inbound listener and a durable database recheck.
-Automatic same-session wake-up runs through the bound
-[Codex and Claude host relay](agent-impersonation-hosts.md), which sends at most
-one outstanding availability hint at a time and never acknowledges work for the
-external model. The relay heartbeats the lease row; while the lease is active,
-the accepting runtime respawns a dead codex relay and every inbound delivery
-path checks the heartbeat and alerts loudly when it is stale, so messages never
-silently sit in the inbox.
+A batch that is not acknowledged within five minutes is pushed again, marked
+as re-delivery, until it is ACKed or the lease ends. The ids make delivery
+idempotent: re-ACKing an already handled batch is harmless, and the relay
+never acknowledges work for the external model. Unacknowledged rows remain
+available after release.
 
-An inbox row with `kind="cancel"` asks the controller to stop its current work.
-Stop that work and explicitly ACK the request; an unacknowledged cancel remains
-for native processing when control returns. This reaches the external model at
-its next processing opportunity. To interrupt an in-flight external tool
-immediately, use that Codex or Claude session's own stop control.
+`ava impersonate inbox '<lease id>'` remains the fallback read (`--limit`
+1..1000 rows; `--wait` finite, nonnegative seconds); use it for missed or
+truncated content and for message payloads, which pushes do not carry.
+The relay heartbeats the lease row; while the lease is active, the accepting
+runtime respawns a dead codex relay and every inbound delivery path checks
+the heartbeat and alerts loudly when it is stale, so messages never silently
+sit in the inbox.
+
+An inbox row with `kind="cancel"` asks the controller to stop its current
+work. Stop that work and explicitly ACK the request; an unacknowledged cancel
+remains for native processing when control returns. This reaches the external
+model at its next processing opportunity. To interrupt an in-flight external
+tool immediately, use that Codex or Claude session's own stop control.
+
+A row with `kind="reminder"` is a lease-expiry renewal reminder sent by Ava
+five minutes before the TTL elapses; renew or release before expiry, and ACK
+it like any message.
 
 ## Return control
 
@@ -167,7 +182,8 @@ ava impersonate release '<lease id>' \
   --summary 'Implemented X and verified Y. Z remains open; resume with its failing case.'
 ```
 
-Release durably queues the summary with the external controller's real provenance.
+Release durably queues the summary as the session's end message with the
+external controller's real provenance.
 The native runtime applies staged plugin state and resumes from its checkpoint,
 killing the bound relay process it started at activation. TTL expiry also returns
 control, while preserving unprocessed inbound messages. Completing a subtask is

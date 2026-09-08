@@ -336,7 +336,8 @@ CREATE TABLE inbound_messages (
                    'restart_completed', -- INSERTed by respawn_agent; after the new process is up, claim appends lifecycle marker
                    'resurrect',         -- INSERTed by resurrect_agent; after the new process is up, claim appends lifecycle marker
                    'fork',              -- INSERTed by spawn_agent on a fork; the new process's first claim appends an identity marker (you are now agent N, forked from agent:M)
-                   'heartbeat'          -- INSERTed by heartbeat daemon; idle-agent nudge delivered as a system note
+                   'heartbeat',         -- INSERTed by heartbeat daemon; idle-agent nudge delivered as a system note
+                   'reminder'           -- INSERTed by the impersonation-maintenance pass; lease-expiry renewal reminder for the external controller
                )),
     -- 'web' / 'terminal' / 'telegram' / 'wechat' / 'eval' / 'cli' / 'system' / 'kernel'
     -- / 'unknown'. 'system' / 'kernel' means the kernel injected it itself, no envelope wrap.
@@ -1396,6 +1397,7 @@ CREATE TABLE IF NOT EXISTS agent_impersonations (
     plugin_delta JSONB NOT NULL DEFAULT '[]'::jsonb CHECK (jsonb_typeof(plugin_delta) = 'array'),
     delta_version INTEGER NOT NULL DEFAULT 0,
     applied_version INTEGER NOT NULL DEFAULT 0,
+    start_message TEXT NOT NULL DEFAULT '',
     relay_provider TEXT,
     relay_thread_id TEXT,
     relay_codex_remote TEXT,
@@ -1532,3 +1534,13 @@ INSERT INTO schema_migrations (name) VALUES ('20260908T063636_impersonation-rela
 -- above. Fresh DBs stamp the migration instead of replaying the strict
 -- ALTER ADD COLUMN / CREATE TABLE delta.
 INSERT INTO schema_migrations (name) VALUES ('20260908T230000_shell-ttl-renewal');
+
+-- system_note is already represented in the baseline kind CHECK. Fresh DBs
+-- stamp the migration instead of replaying its CHECK rebuild, which carries
+-- the pre-2026-09-08 kind list and would drop later kinds folded into the
+-- baseline (e.g. 'reminder' from the impersonation-push-ack fold below).
+INSERT INTO schema_migrations (name) VALUES ('20260827T073641_task-notify-system-note-inbound');
+
+-- start_message and the reminder kind are already represented above. Fresh
+-- DBs stamp the migration instead of replaying the strict ALTER deltas.
+INSERT INTO schema_migrations (name) VALUES ('20260908T225900_impersonation-push-ack');
