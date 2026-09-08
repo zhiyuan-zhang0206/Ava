@@ -25,7 +25,9 @@ THREAD_ID = UUID("b9d32d0d-bd27-40fc-83e8-692769b21523")
 
 class Inbox:
     def __init__(self, *pending: int, page_size: int | None = None) -> None:
-        self.pending = set(pending)
+        self.pending: set[int] = set(pending)
+        self.routine: set[int] = set()
+        self.batch_window = 0.0
         self.page_size = page_size
         self.status: relay.LeaseStatus = "active"
         self.expires_at = datetime.now(UTC) + timedelta(minutes=5)
@@ -34,7 +36,13 @@ class Inbox:
     async def read(self) -> relay.InboxSnapshot:
         self.reads += 1
         page = frozenset(sorted(self.pending)[: self.page_size])
-        return relay.InboxSnapshot(page, self.expires_at, self.status)
+        return relay.InboxSnapshot(
+            page,
+            self.expires_at,
+            self.status,
+            routine_ids=frozenset(sorted(self.routine)[: self.page_size]),
+            batch_window=self.batch_window,
+        )
 
     @property
     def active(self) -> bool:
@@ -71,6 +79,35 @@ class Listener:
             self.inbox.active = False
         else:
             self.waited(len(self.waits))
+
+    async def close(self) -> None:
+        self.closed = True
+
+
+class SleepingListener:
+    """Like Listener, but actually sleeps (bounded) so real-time windows elapse."""
+
+    def __init__(
+        self,
+        inbox: Inbox,
+        *,
+        waited: Callable[[int], None] | None = None,
+        sleep_cap: float = 0.03,
+    ) -> None:
+        self.inbox = inbox
+        self.waited = waited
+        self.sleep_cap = sleep_cap
+        self.waits: list[float] = []
+        self.closed = False
+
+    async def ensure_listening(self) -> None:
+        pass
+
+    async def wait_one(self, timeout: float) -> None:
+        self.waits.append(timeout)
+        if self.waited is not None:
+            self.waited(len(self.waits))
+        await asyncio.sleep(min(timeout, self.sleep_cap))
 
     async def close(self) -> None:
         self.closed = True
@@ -568,7 +605,14 @@ def test_shared_inbox_uses_lease_and_drops_message_bodies(
 
     def inbox(lease_id: str, token: str) -> list[dict[str, Any]]:
         calls.append((lease_id, token))
-        return [{"id": 7, "content": "message body must not enter host hints"}]
+        return [
+            {
+                "id": 7,
+                "kind": "chat",
+                "source": "user",
+                "content": "message body must not enter host hints",
+            }
+        ]
 
     monkeypatch.setattr(impersonation, "relay_get", get)
     monkeypatch.setattr(impersonation, "relay_inbox", inbox)
@@ -740,6 +784,109 @@ def test_relay_inbox_does_not_invalidate_while_outstanding_is_unprocessed() -> N
     assert len(hints) == 1
     # Startup sweep + the terminal sweep on release; nothing in between.
     assert len(invalidations) == 2
+
+
+def test_routine_page_coalesces_into_one_hint_per_window() -> None:
+    inbox = Inbox()
+    inbox.batch_window = 0.1
+
+    def waited(n: int) -> None:
+        if n == 1:
+            inbox.pending.add(1)
+            inbox.routine.add(1)
+        elif n == 2:
+            inbox.pending.add(2)
+            inbox.routine.add(2)
+
+    listener = SleepingListener(inbox, waited=waited)
+    hints: list[str] = []
+
+    def emit(hint: str) -> None:
+        hints.append(hint)
+        if "inbox ready" in hint:
+            inbox.active = False  # stop once the merged hint is delivered
+
+    asyncio.run(
+        relay.relay_inbox(
+            42, LEASE_ID, read_inbox=inbox.read, listener=listener, emit=emit, debounce=0
+        )
+    )
+    assert len(hints) == 2  # activation, then ONE merged inbox hint for both ids
+    assert "control active" in hints[0]
+    assert "newest_id=2" in hints[1]
+    assert listener.waits[0] == 30.0  # initial catchup
+    # The window wait is bounded by the merge window (the 0.5s anti-spin floor
+    # may lift a shorter window), never by a full catchup.
+    assert 0 < listener.waits[1] < 30.0
+    assert listener.closed
+
+
+def test_user_chat_bypasses_the_merge_window() -> None:
+    inbox = Inbox()
+    inbox.batch_window = 0.5
+
+    def waited(n: int) -> None:
+        if n == 1:
+            inbox.pending.add(1)
+            inbox.routine.add(1)
+        elif n == 2:
+            inbox.pending.add(2)  # a user chat: never routine
+
+    listener = SleepingListener(inbox, waited=waited)
+    hints: list[str] = []
+
+    def emit(hint: str) -> None:
+        hints.append(hint)
+        if "inbox ready" in hint:
+            inbox.active = False
+
+    asyncio.run(
+        relay.relay_inbox(
+            42, LEASE_ID, read_inbox=inbox.read, listener=listener, emit=emit, debounce=0
+        )
+    )
+    assert len(hints) == 2
+    assert "newest_id=2" in hints[1]
+    # The urgent arrival cut the window short: exactly one window-bounded wait.
+    assert len([w for w in listener.waits if 0 < w <= 0.5]) == 1
+
+
+def test_routine_page_hints_immediately_when_window_disabled() -> None:
+    inbox = Inbox()
+    inbox.batch_window = 0.0
+
+    def waited(n: int) -> None:
+        if n == 1:
+            inbox.pending.add(1)
+            inbox.routine.add(1)
+
+    listener = SleepingListener(inbox, waited=waited)
+    hints: list[str] = []
+
+    def emit(hint: str) -> None:
+        hints.append(hint)
+        if "inbox ready" in hint:
+            inbox.active = False
+
+    asyncio.run(
+        relay.relay_inbox(
+            42, LEASE_ID, read_inbox=inbox.read, listener=listener, emit=emit, debounce=0
+        )
+    )
+    assert len(hints) == 2
+    assert "newest_id=1" in hints[1]
+    assert listener.waits == [30.0, 30.0]  # no window wait at all
+
+
+def test_routine_ids_are_only_non_user_non_cancel_arrivals() -> None:
+    rows = [
+        {"id": 1, "kind": "chat", "source": "user"},
+        {"id": 2, "kind": "chat", "source": "agent:99"},
+        {"id": 3, "kind": "system_note", "source": "system:impersonation"},
+        {"id": 4, "kind": "cancel", "source": "system"},
+        {"id": 5, "kind": "chat", "source": "watcher:7"},
+    ]
+    assert relay._routine_ids(rows) == frozenset({2, 3, 5})
 
 
 def test_invalidate_our_hints_deletes_only_scoped_hints_real_input_shape(

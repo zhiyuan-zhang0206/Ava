@@ -1384,6 +1384,8 @@ CREATE TABLE IF NOT EXISTS agent_impersonations (
     relay_token_hash TEXT,
     relay_heartbeat_at TIMESTAMPTZ,
     relay_last_failure_at TIMESTAMPTZ,
+    relay_batch_window_seconds INTEGER NOT NULL DEFAULT 30
+        CHECK (relay_batch_window_seconds BETWEEN 0 AND 300),
     CHECK (applied_version >= 0 AND applied_version <= delta_version),
     CHECK (jsonb_array_length(plugin_delta) = delta_version),
     CHECK ((accepted_generation IS NULL) = (accepted_owner IS NULL)),
@@ -1506,3 +1508,4 @@ INSERT INTO schema_migrations (name) VALUES ('20260907T152552_corpse-fatal-marke
 -- Relay binding columns are already represented above. Fresh DBs stamp the
 -- migration instead of replaying the strict ALTER ADD COLUMN delta.
 INSERT INTO schema_migrations (name) VALUES ('20260908T042458_impersonation-relay-binding');
+INSERT INTO schema_migrations (name) VALUES ('20260908T063636_impersonation-relay-batch-window');
