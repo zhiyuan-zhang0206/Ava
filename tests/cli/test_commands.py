@@ -2571,12 +2571,7 @@ def test_fan_out_classifies_dispatch_outcomes(monkeypatch: pytest.MonkeyPatch) -
 def test_poll_until_unpaused_returns_ok_when_agent_runner_unpauses(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """`_poll_until_unpaused` resolves an agent-runner the moment its
-    host_deploy_state row returns to idle. The dispatch layer is stubbed to keep
-    the probe reachable; the deploy-state reader flips paused -> idle after the
-    first probe so the retry loop is exercised, not just the happy-first-shot
-    path (R1, Task #1021 — the row, not the probe's `paused` field, is the
-    verdict)."""
+    """A ready process on the checkout still waits for its DB posture to become idle."""
     from datetime import UTC, datetime
 
     from ops import cluster_rpc as cr
@@ -2591,7 +2586,7 @@ def test_poll_until_unpaused_returns_ok_when_agent_runner_unpauses(
         # the poll threads the pre-resolved ops URL so it never re-queries Postgres
         assert ops_url == "http://unused"
         calls[target_machine] += 1
-        return {}
+        return {"paused": False, "head_sha": "a" * 40, "running_sha": "a" * 40}
 
     def _fake_read(machine=None, **_kw):
         posture = "paused" if calls["wsl"] < 2 else "idle"
@@ -2889,7 +2884,7 @@ def test_other_hosts_converged_while_one_is_stuck_in_a_stage(
                     "current_stage_s": 700.0,
                 },
             }
-        return {}
+        return {"paused": False, "head_sha": "a" * 40, "running_sha": "a" * 40}
 
     def _fake_read(machine=None, **_kw):
         if machine == "win":
@@ -3109,7 +3104,7 @@ def test_probe_verdict_names_the_progress_fact(monkeypatch: pytest.MonkeyPatch) 
             )
 
         monkeypatch.setattr("cli.commands._update_phase_b.read", _read)  # pyright: ignore[reportUnknownArgumentType]
-        probe: dict[str, object] = {}
+        probe: dict[str, object] = {"paused": False, "head_sha": "a" * 40, "running_sha": "a" * 40}
         if stage_age is not None:
             probe["last_updater_outcome"] = {
                 "kind": "unknown",
@@ -3134,7 +3129,7 @@ def test_probe_verdict_names_the_progress_fact(monkeypatch: pytest.MonkeyPatch) 
     # A paused pre-lease window (no lease yet) is "cannot tell", not progress.
     _v, _s, _n, progressing = _row("paused", False, None)
     assert _v is None and progressing is False
-    # Idle is convergence, and it is not the progressing shape.
+    # Ready on-code idle is convergence, not the progressing shape.
     _v, _s, _n, progressing = _row("idle", False, None)
     assert _v is not None and _v.status == _cli.POLL_OK and progressing is False
 

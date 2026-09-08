@@ -43,3 +43,10 @@ The import boundary is `shared < ops < {gateway, cli}`. Shared RPC contracts
 stay in `ops/rpc_schemas.py`; gateway-only schemas stay in `gateway/schemas/`.
 Cluster identity remains the installed home path, resolved before runtime
 configuration construction.
+
+The host status snapshot's `paused` field includes native maintenance admission
+and startup that has not reached `start-serving` readiness, in addition to the
+business DB posture. A missing DB snapshot cannot claim ready. This status
+projection does not change the business API's pause middleware. Rollout polling
+combines it with the responding ops process SHA and the source checkout SHA;
+these fields do not certify every sibling daemon's running code.

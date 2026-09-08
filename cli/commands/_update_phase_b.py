@@ -3,7 +3,7 @@ Phase B of the gateway `ava cluster update` — fan out self-updates, poll back.
 
 Split out of `cli/commands/update.py` to keep that module within the file-size
 budget. Phase B tells every remote agent-runner to self-update, then polls each
-one's ops server until it reports paused=false, provably stops
+one's ops server until native startup is released on the expected code, provably stops
 (POLL_STALLED), the family's no-progress bound elapses (POLL_CONVERGING), or —
 for a host alive and making progress — the converging patience elapses and the
 host is handed to the settle hold (C3) — see `shared.deploy_timing` for why
@@ -93,26 +93,16 @@ _LEASE_ARM_GRACE_S = LEASE_ARM_GRACE_S
 # alive but its stage evidence stopped moving' need different operator responses
 # (wait / go look / check that machine), and none of them is 'the rollout finished
 # cleanly'.
-POLL_OK = "ok"  # reported paused=false: converged
+POLL_OK = "ok"  # native startup released and responding process on the expected code
 POLL_CONVERGING = "converging"  # patience ran out while it may still be working
 POLL_STALLED = "stalled"  # reachable, still paused, no updater running: not coming back
 POLL_NO_PROGRESS = "no_progress"  # updater alive, but its stage evidence has stopped moving
 
-# R1 (Task #1021): the stall fact is the host_deploy_state row, not a wire field.
-# The probe's `paused` alone cannot carry it — the updater's lease touch moves
-# posture to `converging` (read as "not paused") while the host is still
-# mid-transition, and a declined restart leaves the host stuck on old code with
-# no lease at all. The DB row is the authority:
-# - posture `idle` (or no row) -> converged;
-# - a LIVE updater lease -> still working, keep polling;
-# - `paused` with NO lease -> the fan-out window while inside the arm grace,
-#   a provable stop past it (the updater's clear ran without reaching idle);
-# - `paused` with an EXPIRED lease, or `converging` with no live lease (the
-#   updater finished or aborted and the host did not return to idle) -> the
-#   provable-stall fact, confirmed `_STALL_CONFIRMATIONS` times.
-# The two "keep polling" rows are lease readings, and a lease that is never
-# cleared claims liveness for as long as this poll would wait — so a terminal
-# `last_updater_outcome` (the updater wrote its own ending) overrides both.
+# Convergence combines the DB posture/lease with the responding host's native
+# startup and code facts. Phase A retains an idle DB posture while admission is
+# held, and checking out a target does not replace the process answering a probe.
+# Missing evidence never proves success. Non-idle rows retain the existing
+# lease, terminal-outcome and no-progress judgments below.
 
 # How many consecutive stall observations end the poll for a host. Two, not one: the
 # op acks after the updater session is spawned, so a single contrary reading is a
@@ -148,21 +138,18 @@ def _probe_verdict(
     no_progress: int,
     *,
     poll_elapsed: float = 0.0,
+    target_sha: str | None = None,
 ) -> tuple[PollVerdict | None, int, int, bool]:
     """One status_probe response + this host's deploy-state row →
     (verdict, stalls, no_progress, progressing).
 
-    Verdict None = keep polling. A non-dict result (unreachable / failed are
-    swallowed by the caller and leave result None) clears both counters — silence is
-    the expected mid-restart reading, never evidence. The verdict itself reads the
-    host_deploy_state row (the R1 authority), not the probe's `paused` field: posture
-    `idle` is convergence; a live updater lease is "still working"; `paused` with no
-    lease is the fan-out window inside the arm grace and a provable stop past it
-    (`_LEASE_ARM_GRACE_S`, the updater's clear ran without reaching idle); `paused`
-    with an expired lease or `converging` with no live lease is likewise the
-    provable-stall fact, confirmed `_STALL_CONFIRMATIONS` times before it ends the
-    poll. A row read failure is "cannot tell" (fail-soft — the poll keeps its
-    deadline, and neither counter advances).
+    Verdict None = keep polling. Unreachable probes clear both counters; an
+    unreadable or missing DB row is unknown. Success requires idle posture, no
+    live updater lease, an explicit native-ready ``paused=False`` snapshot, and
+    matching checkout/process SHAs (both the rollout target when supplied).
+    Restart-only has no checkout target, but still requires the hold to release
+    after startup. Idle without these facts gets the same spawn arm grace as a
+    paused row, then the existing confirmed-stall judgment.
 
     **The updater's own written verdict overrides both "keep polling" readings.**
     Those two read the lease, and a lease is one write at the run's start good for
@@ -216,8 +203,24 @@ def _probe_verdict(
         # host is still mid-transition — the wrong polarity. Keep polling, and
         # keep the no-progress streak too: an unreadable row is evidence-free.
         return None, stalls, no_progress, False
-    if state is None or state.posture == POSTURE_IDLE:
-        return PollVerdict(POLL_OK), stalls, no_progress, False
+    if state is None:
+        return None, stalls, no_progress, False
+    if state.posture == POSTURE_IDLE:
+        # Resume precedes the updater's finally/lease clear. A previous terminal
+        # log must not turn that healthy tail window into a stalled verdict.
+        if state.updater_live:
+            return None, 0, 0, False
+        head = result.get("head_sha")
+        if (
+            result.get("paused") is False
+            and isinstance(head, str)
+            and bool(head)
+            and result.get("running_sha") == head
+            and (target_sha is None or head == target_sha)
+        ):
+            return PollVerdict(POLL_OK), stalls, no_progress, False
+        if poll_elapsed < _LEASE_ARM_GRACE_S:
+            return None, 0, 0, False
     raw = result.get("last_updater_outcome")
     outcome = raw if isinstance(raw, dict) else None
     try:
@@ -281,6 +284,8 @@ async def _probe_one_until_unpaused(
     deadline: float,
     ops_url: str | None = None,
     host_outcomes: dict[str, dict[str, object]] | None = None,
+    *,
+    target_sha: str | None = None,
 ) -> tuple[str, PollVerdict]:
     """Repeatedly POST status_probe to one agent-runner's ops server until it
     converges, provably stops, the shared deadline expires — or, for a host that
@@ -366,7 +371,12 @@ async def _probe_one_until_unpaused(
         )
         _capture_host_stages(host_outcomes, name, result)
         verdict, stalls, no_progress, progressing = _probe_verdict(
-            result, stalls, name, no_progress, poll_elapsed=time.monotonic() - started
+            result,
+            stalls,
+            name,
+            no_progress,
+            poll_elapsed=time.monotonic() - started,
+            target_sha=target_sha,
         )
         if verdict is not None:
             if (
@@ -481,6 +491,8 @@ async def _renew_lease_while_polling(holder: str) -> None:
 def _poll_until_unpaused(
     agent_runners: list[tuple[str, str | None]],
     host_outcomes: dict[str, dict[str, object]] | None = None,
+    *,
+    target_sha: str | None = None,
 ) -> dict[str, PollVerdict]:
     """Poll each agent-runner's paused state via direct status_probe POSTs to its
     ops server until it converges, provably stops, `_POLL_TIMEOUT_S` elapses, or
@@ -511,7 +523,7 @@ def _poll_until_unpaused(
         try:
             tasks = [
                 _ns._probe_one_until_unpaused(
-                    name, deadline, ops_url=url, host_outcomes=host_outcomes
+                    name, deadline, ops_url=url, host_outcomes=host_outcomes, target_sha=target_sha
                 )
                 for name, url in agent_runners
             ]
@@ -612,9 +624,8 @@ def _phase_b_and_poll(
 ) -> dict[str, PollVerdict]:
     """Phase B + poll: fan out each agent-runner's self-update (or restart-only
     bounce), then poll each back to healthy; return name -> terminal poll state
-    ('ok' | 'degraded'). Each host's own `ava start` unlinks its flag (the natural
-    resume, which also finalizes the host's pause-owner journal — a converged
-    host must not keep a `paused` journal); the caller resumes whichever the poll
+    ('ok' | 'degraded'). Each host's own `ava start` proves readiness before
+    releasing its native admission hold; the caller resumes whichever the poll
     still reports non-'ok'. No abort on a Phase-B 5xx (already migrated); a failed
     host is only marked degraded.
 
@@ -661,11 +672,11 @@ def _phase_b_and_poll(
     to_poll = [(name, url) for name, url in fanout_targets if name in acked_names]
     print(
         f"\n→ Poll {len(to_poll)} acked agent-runner(s) until /api/cluster/status reports "
-        f"paused=false (up to {_POLL_TIMEOUT_S / 60:.0f}m each — or "
+        f"native startup released and matching checkout/running code (up to {_POLL_TIMEOUT_S / 60:.0f}m each — or "
         f"{_CONVERGING_TIMEOUT_S / 60:.0f}m of continuous progress, C3 — cut short the "
         f"moment a host provably stops)"
     )
-    polls = _ns._poll_until_unpaused(to_poll, host_outcomes=host_outcomes)
+    polls = _ns._poll_until_unpaused(to_poll, host_outcomes=host_outcomes, target_sha=target_sha)
     for name, status, _ in results:
         if status != "ok":
             polls.setdefault(name, PollVerdict(status))

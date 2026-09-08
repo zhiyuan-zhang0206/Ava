@@ -39,7 +39,12 @@ def poll_seams(
         assert kind == "status_probe"
         assert retries == 0
         calls["n"] += 1
-        return responses[min(calls["n"], len(responses)) - 1]
+        return {
+            "paused": False,
+            "head_sha": "a" * 40,
+            "running_sha": "a" * 40,
+            **responses[min(calls["n"], len(responses)) - 1],
+        }
 
     def _fake_read(machine=None, **_kw):  # type: ignore[no-untyped-def]
         threshold = idle_at["n"] or len(responses)
