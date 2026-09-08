@@ -461,7 +461,7 @@ def test_activation_hint_provides_independent_inbox_and_ack_commands() -> None:
     assert "same CLI" not in hint
 
 
-@pytest.mark.parametrize("remote", [None, "unix:///private/tmp/AVA queue $(literal).sock"])
+@pytest.mark.parametrize("remote", [None, "unix:///private/tmp/Ava queue $(literal).sock"])
 def test_codex_queues_exact_thread_and_literal_message(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, remote: str | None
 ) -> None:
@@ -480,7 +480,7 @@ def test_codex_queues_exact_thread_and_literal_message(
         return result
 
     monkeypatch.setattr(relay.shared.proc, "run_bounded", record)
-    message = "AVA hint with literal $(no-shell) and `no-shell`"
+    message = "Ava hint with literal $(no-shell) and `no-shell`"
     relay.host_emitter("codex", str(THREAD_ID), codex_remote=remote)(message)
     assert len(outputs) == 1
     assert json.loads(outputs[0].stdout) == [
@@ -912,22 +912,22 @@ for line in sys.stdin:
         page = [
             {"id": "hint-1", "clientUserMessageId": "c1",
              "input": [{"type": "text",
-                        "text": "AVA inbox ready: agent=42 lease=" + LEASE + " pending_page=1"}]},
+                        "text": "Ava inbox ready: agent=42 lease=" + LEASE + " pending_page=1"}]},
             {"id": "user-1", "clientUserMessageId": "c2",
              "input": [{"type": "text", "text": "please refactor the parser"}]},
             {"id": "hint-2", "clientUserMessageId": "c3",
              "input": [{"type": "text",
-                        "text": "AVA control active: agent=42 lease=" + LEASE + " pending_page=0"}]},
+                        "text": "Ava control active: agent=42 lease=" + LEASE + " pending_page=0"}]},
             {"id": "other-agent", "clientUserMessageId": "c4",
              "input": [{"type": "text",
-                        "text": "AVA inbox ready: agent=43 lease=" + LEASE + " pending_page=9"}]},
+                        "text": "Ava inbox ready: agent=43 lease=" + LEASE + " pending_page=9"}]},
             {"id": "other-lease", "clientUserMessageId": "c5",
              "input": [{"type": "text",
-                        "text": "AVA inbox ready: agent=42 lease=00000000-0000-0000-0000-000000000000 "
+                        "text": "Ava inbox ready: agent=42 lease=00000000-0000-0000-0000-000000000000 "
                                 "pending_page=9"}]},
             {"id": "hint-3", "clientUserMessageId": "c6",
              "input": [{"type": "text",
-                        "text": "AVA control expired: agent=42 lease=" + LEASE + "."}]},
+                        "text": "Ava control expired: agent=42 lease=" + LEASE + "."}]},
         ]
         print(json.dumps({"id": req["id"], "result": {"data": page, "nextCursor": None}}), flush=True)
     elif method == "thread/queue/delete":
@@ -964,7 +964,7 @@ for line in sys.stdin:
         page = [
             {"id": "hint-1", "clientUserMessageId": "c1",
              "input": {"items": [{"type": "text",
-                                  "text": "AVA inbox ready: agent=42 lease=" + LEASE + " pending_page=1"}]}},
+                                  "text": "Ava inbox ready: agent=42 lease=" + LEASE + " pending_page=1"}]}},
             {"id": "user-1", "clientUserMessageId": "c2",
              "input": {"items": [{"type": "text", "text": "please refactor the parser"}]}},
         ]
@@ -993,16 +993,16 @@ def test_hint_prefixes_are_scoped_to_agent_and_lease() -> None:
     for text in (
         relay.inbox_hint(42, LEASE_ID, frozenset({1})),
         relay.activation_hint(42, LEASE_ID, frozenset()),
-        "AVA control rejected: agent=42 lease=" + str(LEASE_ID) + ".",
-        "AVA control expired: agent=42 lease=" + str(LEASE_ID) + ".",
+        "Ava control rejected: agent=42 lease=" + str(LEASE_ID) + ".",
+        "Ava control expired: agent=42 lease=" + str(LEASE_ID) + ".",
     ):
         assert any(text.startswith(prefix) for prefix in prefixes), text
     # Neighbour scopes and unrelated text never match.
     for text in (
-        "AVA inbox ready: agent=43 lease=" + str(LEASE_ID),
-        "AVA inbox ready: agent=42 lease=00000000-0000-0000-0000-000000000000",
+        "Ava inbox ready: agent=43 lease=" + str(LEASE_ID),
+        "Ava inbox ready: agent=42 lease=00000000-0000-0000-0000-000000000000",
         "please refactor the parser",
-        "AVA inbox ready: agent=42",
+        "Ava inbox ready: agent=42",
     ):
         assert not any(text.startswith(prefix) for prefix in prefixes), text
 

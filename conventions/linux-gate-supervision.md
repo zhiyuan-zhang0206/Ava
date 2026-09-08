@@ -3,11 +3,11 @@
 On Linux gateways, `ava start` / `ava converge` registers the entry-port gate
 as a **systemd user service**. Run these commands as the unit's OS owner.
 The service is `com.ava.gate.<escaped-home-slug>.service`, in
-`${XDG_CONFIG_HOME:-~/.config}/systemd/user/`. Each AVA home has its own unit;
+`${XDG_CONFIG_HOME:-~/.config}/systemd/user/`. Each Ava home has its own unit;
 the checkout's venv interpreter and the explicit `AVA_HOME` select its code
 and configuration. The gate runs with a clean environment containing only
 HOME, PATH, AVA_HOME and its source hash; credentials stay in the ordinary
-AVA configuration files, never in the service definition.
+Ava configuration files, never in the service definition.
 
 ## Host prerequisite
 

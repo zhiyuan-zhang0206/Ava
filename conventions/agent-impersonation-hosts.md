@@ -1,6 +1,6 @@
 # External host inbox delivery
 
-An impersonation relay runs beside the external host on the AVA agent's machine.
+An impersonation relay runs beside the external host on the Ava agent's machine.
 It subscribes to the agent's existing Redis inbound channel and reads pending
 messages from the database. It sends only short inbox hints to an already-open
 host conversation; the external agent fetches and processes the full messages.
@@ -32,7 +32,7 @@ and queue acceptance establish different facts; none establishes host receipt.
 
 Give the interactive host a live PTY and keep its stdin open through workspace
 trust confirmation. An unattended launch with closed stdin can leave an accepted
-AVA lease active without a usable Codex session.
+Ava lease active without a usable Codex session.
 
 Use one explicitly addressed app server for both the TUI and the relay. Pass the
 token through that **server's** environment, with an explicit shell policy;
@@ -68,17 +68,17 @@ and hide a missing subprocess environment until the working directory changes.
 
 Before requesting a live lease, test the policy with a harmless sentinel value
 for `AVA_IMPERSONATION_TOKEN`. Have Codex run this presence check through its own
-shell tool both in the agent workspace and in the intended AVA checkout; repeat
-it with the real inherited credential before AVA work:
+shell tool both in the agent workspace and in the intended Ava checkout; repeat
+it with the real inherited credential before Ava work:
 
 ```sh
-python3 -c 'import os; assert os.environ.get("AVA_IMPERSONATION_TOKEN"), "AVA impersonation token missing"'
+python3 -c 'import os; assert os.environ.get("AVA_IMPERSONATION_TOKEN"), "Ava impersonation token missing"'
 ```
 
 The check must succeed in both directories without printing the token. Capture
 the request response in the supervisor; keep the credential out of prompts,
 command arguments, logs and token files. Retain that in-memory copy until handoff
-completes, so `finally` cleanup can release an active lease through the AVA CLI
+completes, so `finally` cleanup can release an active lease through the Ava CLI
 even if the host never starts, loses stdin or cannot inherit the token.
 Stop external work and close attachments before releasing; verify the terminal
 lease status before discarding the supervisor's credential. TTL remains the
@@ -116,7 +116,7 @@ instead calls its wake path immediately; see the tagged
 and [queue dispatch](https://github.com/openai/codex/blob/rust-v0.153.4/codex-rs/ext/queue/src/service.rs)
 implementations. Both TUI and relay must use the same endpoint. A successful
 queue command means accepted delivery, not that the model has started or ACKed
-the AVA message. `--codex-remote` is rejected for Claude Monitor.
+the Ava message. `--codex-remote` is rejected for Claude Monitor.
 
 Desktop and ChatGPT embedded sessions may use a different app-server instance
 or event consumer; a thread UUID alone does not establish delivery. Idle wake-up
@@ -140,7 +140,7 @@ Monitor cannot start (no fresh heartbeat), acceptance rolls back loudly.
 ```json
 {
   "command": "AVA_IMPERSONATION_RELAY_TOKEN=<relay token> /path/to/checkout/.venv/bin/ava impersonate relay 42 --lease-id LEASE_UUID --provider claude",
-  "description": "AVA agent 42 inbox",
+  "description": "Ava agent 42 inbox",
   "persistent": true
 }
 ```
@@ -182,7 +182,7 @@ the [channel protocol](https://code.claude.com/docs/en/channels-reference).
   discovers the next pending page, even when no new message has arrived.
   Repeating an ACK for already-done messages does not publish another wake.
   Treat `kind="cancel"` as a request to stop current work, then explicitly ACK it.
-  Native AVA does not consume cancellation on behalf of the external controller.
+  Native Ava does not consume cancellation on behalf of the external controller.
 - Reading or successfully queueing a hint does not mark a message done. The
   relay suppresses repeated hints for the same pending page in memory. Restart
   replays every still-pending page it encounters. This is at-least-once delivery,
@@ -224,4 +224,4 @@ the [channel protocol](https://code.claude.com/docs/en/channels-reference).
 The host receives a queued event at its next processing opportunity; there is
 no promise to interrupt a token or an in-flight tool. Transport success also
 does not prove that the model processed the message. Keep processing ACKs in
-AVA, and make actions safe to retry when their completion is ambiguous.
+Ava, and make actions safe to retry when their completion is ambiguous.
