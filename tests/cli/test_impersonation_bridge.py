@@ -12,6 +12,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
+from unittest.mock import Mock
 from uuid import UUID
 
 import pytest
@@ -147,12 +148,16 @@ def test_repeated_wakes_do_not_repeat_unacknowledged_hint() -> None:
     assert inbox.pending == {7}
 
 
-def test_later_commit_with_lower_id_is_not_hidden_by_watermark() -> None:
+def test_ack_reveals_a_lower_id_without_a_new_message() -> None:
+    # The host ACKed 10; a later-committed lower id 9 must surface on the next
+    # wake even though nothing new arrived. Outstanding tracking follows the
+    # pending set, so an ACK shrinks it and the residual page becomes hintable.
     inbox = Inbox(10)
 
     def waited(n: int) -> None:
         if n == 1:
-            inbox.pending.add(9)
+            inbox.pending.remove(10)  # controller ACKed the hinted message
+            inbox.pending.add(9)  # a lower id committed later
         else:
             inbox.active = False
 
@@ -160,8 +165,9 @@ def test_later_commit_with_lower_id_is_not_hidden_by_watermark() -> None:
     run(inbox, Listener(inbox, waited=waited), hints.append)
 
     assert len(hints) == 2
-    assert "pending_page=2" in hints[-1]
-    assert inbox.pending == {9, 10}
+    assert "newest_id=10" in hints[0]
+    assert "newest_id=9" in hints[1]
+    assert inbox.pending == {9}
 
 
 def test_ack_wake_exposes_next_inbox_page_without_a_new_message() -> None:
@@ -306,7 +312,9 @@ def test_local_clock_cannot_revoke_db_active_lease_or_busy_spin() -> None:
     assert listener.waits == [0.5]
 
 
-def test_bursts_are_coalesced_below_monitor_event_rate(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_hints_respect_the_monitor_event_rate_across_ack_cycles(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(relay, "_MIN_HINT_INTERVAL_SECONDS", 2.0)
     inbox = Inbox(1)
     delays: list[float] = []
@@ -318,7 +326,8 @@ def test_bursts_are_coalesced_below_monitor_event_rate(monkeypatch: pytest.Monke
 
     def waited(n: int) -> None:
         if n == 1:
-            inbox.pending.add(2)
+            inbox.pending.remove(1)  # ACK cycle closes the outstanding hint
+            inbox.pending.add(2)  # ... and new work arrives immediately
         else:
             inbox.active = False
 
@@ -327,8 +336,68 @@ def test_bursts_are_coalesced_below_monitor_event_rate(monkeypatch: pytest.Monke
     run(inbox, Listener(inbox, waited=waited), hints.append)
 
     assert len(hints) == 2
+    assert "newest_id=1" in hints[0]
+    assert "newest_id=3" in hints[1]
     assert 1.9 <= delays[1] <= 2.0
-    assert "pending_page=3" in hints[1]
+
+
+def test_new_message_under_an_outstanding_hint_does_not_queue_another() -> None:
+    inbox = Inbox(5)
+
+    def waited(n: int) -> None:
+        if n == 1:
+            inbox.pending.add(6)  # no ACK: the host has not processed hint one
+        else:
+            inbox.active = False
+
+    hints: list[str] = []
+    run(inbox, Listener(inbox, waited=waited), hints.append)
+
+    assert len(hints) == 1
+    assert "newest_id=5" in hints[0]
+
+
+def test_outstanding_hint_is_never_replayed() -> None:
+    # The host never ACKs: the pending page stays outstanding across many
+    # wakes, and the relay must not re-queue the same hint (user ruling:
+    # delivered hints invalidate, no replay).
+    inbox = Inbox(5)
+
+    def waited(n: int) -> None:
+        if n >= 4:
+            inbox.active = False
+
+    hints: list[str] = []
+    run(inbox, Listener(inbox, waited=waited), hints.append)
+
+    assert len(hints) == 1
+    assert "newest_id=5" in hints[0]
+
+
+def test_unprocessed_outstanding_hint_logs_a_stall_instead_of_replaying(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(relay, "_HINT_UNPROCESSED_ALERT_SECONDS", 0.0)
+    errors: list[tuple[str, dict[str, object]]] = []
+
+    class FakeLogger:
+        def error(self, message: str, **fields: object) -> None:
+            errors.append((message, fields))
+
+    monkeypatch.setattr("shared.log.logger", FakeLogger())
+    inbox = Inbox(5)
+
+    def waited(n: int) -> None:
+        if n >= 3:
+            inbox.active = False
+
+    hints: list[str] = []
+    run(inbox, Listener(inbox, waited=waited), hints.append)
+
+    assert len(hints) == 1
+    assert len(errors) == 1
+    assert "not replayed" in errors[0][0]
+    assert errors[0][1]["outstanding_ids"] == [5]
 
 
 @pytest.mark.parametrize(("pending", "newest"), [(frozenset[int](), 0), (frozenset({1, 2, 3}), 3)])
@@ -416,7 +485,7 @@ def test_command_passes_remote_to_queue(monkeypatch: pytest.MonkeyPatch) -> None
     inbox = Inbox()
     listener = Listener(inbox)
     queued: list[tuple[UUID, str | None]] = []
-    monkeypatch.setattr(impersonation, "token_from_env", lambda: "test-credential")
+    monkeypatch.setattr(impersonation, "relay_token_from_env", lambda: "test-credential")
 
     def read(*_args: object) -> relay.InboxSnapshot:
         return relay.InboxSnapshot(frozenset(), inbox.expires_at, inbox.status)
@@ -426,6 +495,20 @@ def test_command_passes_remote_to_queue(monkeypatch: pytest.MonkeyPatch) -> None
 
     monkeypatch.setattr(relay, "_read_inbox", read)
     monkeypatch.setattr(relay.shared.redis_listener, "RedisInboundListener", make_listener)
+
+    def heartbeat_ok(_lease_id: UUID, _token: str) -> bool:
+        return True
+
+    async def heartbeat_loop(_lease_id: UUID, _token: str, **kwargs: float) -> None:
+        _ = kwargs
+        await asyncio.sleep(0)
+
+    def no_invalidation(_thread_id: UUID) -> int:
+        return 0
+
+    monkeypatch.setattr(relay, "_write_heartbeat", heartbeat_ok)
+    monkeypatch.setattr(relay, "_heartbeat_loop", heartbeat_loop)
+    monkeypatch.setattr(relay, "invalidate_our_hints", no_invalidation)
 
     def queue(thread_id: UUID, _message: str, *, remote: str | None = None) -> None:
         queued.append((thread_id, remote))
@@ -487,8 +570,8 @@ def test_shared_inbox_uses_lease_and_drops_message_bodies(
         calls.append((lease_id, token))
         return [{"id": 7, "content": "message body must not enter host hints"}]
 
-    monkeypatch.setattr(impersonation, "get", get)
-    monkeypatch.setattr(impersonation, "inbox", inbox)
+    monkeypatch.setattr(impersonation, "relay_get", get)
+    monkeypatch.setattr(impersonation, "relay_inbox", inbox)
     snapshot = relay._read_inbox(42, LEASE_ID, "memory-only-token")
     assert snapshot.message_ids == frozenset({7})
     assert "message body" not in repr(snapshot)
@@ -509,8 +592,8 @@ def test_agent_mismatch_refuses_inbox_before_subscription(monkeypatch: pytest.Mo
     def inbox(_lease_id: str, _token: str) -> list[dict[str, Any]]:
         pytest.fail("Agent mismatch must not read this inbox")
 
-    monkeypatch.setattr(impersonation, "get", get)
-    monkeypatch.setattr(impersonation, "inbox", inbox)
+    monkeypatch.setattr(impersonation, "relay_get", get)
+    monkeypatch.setattr(impersonation, "relay_inbox", inbox)
     with pytest.raises(ValueError, match="does not belong"):
         relay._read_inbox(42, LEASE_ID, "test-token")
 
@@ -531,8 +614,8 @@ def test_release_racing_with_read_stops_cleanly(monkeypatch: pytest.MonkeyPatch)
     def inbox(_lease_id: str, _token: str) -> list[dict[str, Any]]:
         raise impersonation.ImpersonationError("Lease released concurrently")
 
-    monkeypatch.setattr(impersonation, "get", get)
-    monkeypatch.setattr(impersonation, "inbox", inbox)
+    monkeypatch.setattr(impersonation, "relay_get", get)
+    monkeypatch.setattr(impersonation, "relay_inbox", inbox)
     assert not relay._read_inbox(42, LEASE_ID, "test-token").active
 
 
@@ -553,8 +636,8 @@ def test_pending_consent_checks_status_without_opening_inbox(
     def inbox(_lease_id: str, _token: str) -> list[dict[str, Any]]:
         pytest.fail("Pending consent must not read the protected inbox")
 
-    monkeypatch.setattr(impersonation, "get", get)
-    monkeypatch.setattr(impersonation, "inbox", inbox)
+    monkeypatch.setattr(impersonation, "relay_get", get)
+    monkeypatch.setattr(impersonation, "relay_inbox", inbox)
     snapshot = relay._read_inbox(42, LEASE_ID, "test-token")
     assert snapshot.status == status
     assert not snapshot.message_ids
@@ -567,3 +650,154 @@ def test_pending_consent_checks_status_without_opening_inbox(
 def test_host_target_must_be_explicit(provider: str, thread_id: str | None) -> None:
     with pytest.raises(ValueError):
         relay.host_emitter(provider, thread_id)
+
+
+# ── Relay heartbeat ──────────────────────────────────────────────────────────
+
+
+def test_write_heartbeat_stops_at_a_terminal_lease(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from shared import impersonation as leases
+
+    beat = Mock()
+    monkeypatch.setattr("shared.impersonation.relay_heartbeat", beat)
+    assert relay._write_heartbeat(LEASE_ID, "relay-token") is True
+    beat.assert_called_once_with(str(LEASE_ID), "relay-token")
+    beat.side_effect = leases.ImpersonationError("Impersonation has ended")
+    assert relay._write_heartbeat(LEASE_ID, "relay-token") is False
+
+
+def test_heartbeat_loop_stops_when_the_lease_ends(monkeypatch: pytest.MonkeyPatch) -> None:
+    beat = Mock(return_value=False)
+    monkeypatch.setattr(relay, "_write_heartbeat", beat)
+
+    async def run() -> None:
+        await relay._heartbeat_loop(LEASE_ID, "relay-token", interval=0)
+
+    asyncio.run(run())
+    beat.assert_called_once_with(LEASE_ID, "relay-token")
+
+
+# ── Host queue invalidation (official RPC, no private store access) ───────────
+
+
+def test_relay_inbox_invalidates_at_startup_ack_clear_and_terminal() -> None:
+    inbox = Inbox(5)
+    invalidations: list[int] = []
+    waits_seen = iter([0, 0, 0])
+
+    def waited(n: int) -> None:
+        _ = next(waits_seen, None)
+        if n == 1:
+            inbox.pending.remove(5)  # ACK clears the outstanding page
+        elif n == 2:
+            inbox.status = "released"
+
+    async def invalidate() -> None:
+        invalidations.append(len(invalidations))
+
+    hints: list[str] = []
+    asyncio.run(
+        relay.relay_inbox(
+            42,
+            LEASE_ID,
+            read_inbox=inbox.read,
+            listener=Listener(inbox, waited=waited),
+            emit=hints.append,
+            debounce=0,
+            invalidate=invalidate,
+        )
+    )
+    # 1 = startup sweep, 2 = ACK-cleared transition, 3 = terminal sweep
+    assert len(invalidations) == 3
+    assert "newest_id=5" in hints[0]
+
+
+def test_relay_inbox_does_not_invalidate_while_outstanding_is_unprocessed() -> None:
+    inbox = Inbox(5)
+    invalidations: list[int] = []
+
+    def waited(n: int) -> None:
+        if n >= 4:
+            inbox.active = False
+
+    async def invalidate() -> None:
+        invalidations.append(len(invalidations))
+
+    hints: list[str] = []
+    asyncio.run(
+        relay.relay_inbox(
+            42,
+            LEASE_ID,
+            read_inbox=inbox.read,
+            listener=Listener(inbox, waited=waited),
+            emit=hints.append,
+            debounce=0,
+            invalidate=invalidate,
+        )
+    )
+    assert len(hints) == 1
+    # Startup sweep + the terminal sweep on release; nothing in between.
+    assert len(invalidations) == 2
+
+
+def test_invalidate_our_hints_deletes_only_marked_hints(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    executable = tmp_path / "codex"
+    log = tmp_path / "rpc.log"
+    script = (
+        f"#!{sys.executable}\nLOG_PATH = {str(log)!r}\n"
+        + """
+import json, sys
+for line in sys.stdin:
+    req = json.loads(line)
+    method = req.get("method", "")
+    if method == "initialize":
+        print(json.dumps({"id": req["id"], "result": {}}), flush=True)
+    elif method == "thread/queue/list":
+        page = [
+            {"id": "hint-1", "clientUserMessageId": "c1",
+             "input": {"items": [{"type": "text", "text": "AVA inbox ready: agent=42 pending_page=1"}]}},
+            {"id": "user-1", "clientUserMessageId": "c2",
+             "input": {"items": [{"type": "text", "text": "please refactor the parser"}]}},
+            {"id": "hint-2", "clientUserMessageId": "c3",
+             "input": {"items": [{"type": "text", "text": "AVA control active: agent=42"}]}},
+        ]
+        print(json.dumps({"id": req["id"], "result": {"data": page, "nextCursor": None}}), flush=True)
+    elif method == "thread/queue/delete":
+        with open(LOG_PATH, "a") as handle:
+            handle.write(req["params"]["queuedSubmissionId"] + "\\n")
+        print(json.dumps({"id": req["id"], "result": {}}), flush=True)
+    elif not method:
+        continue  # initialized notification
+"""
+    )
+    executable.write_text(script)
+    executable.chmod(0o700)
+    monkeypatch.setenv("PATH", f"{tmp_path}{os.pathsep}{os.environ['PATH']}")
+    assert relay.invalidate_our_hints(THREAD_ID) == 2
+    assert log.read_text().splitlines() == ["hint-1", "hint-2"]
+
+
+def test_invalidate_our_hints_logs_loudly_when_the_rpc_is_unavailable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from shared.log import logger as real_logger
+
+    executable = tmp_path / "codex"
+    executable.write_text(f"#!{sys.executable}\nimport sys\nsys.exit(3)\n")
+    executable.chmod(0o700)
+    monkeypatch.setenv("PATH", f"{tmp_path}{os.pathsep}{os.environ['PATH']}")
+    warnings: list[str] = []
+
+    class FakeLogger:
+        def warning(self, message: str, **fields: object) -> None:
+            warnings.append(message)
+
+    monkeypatch.setattr("shared.log.logger", FakeLogger())
+    assert relay.invalidate_our_hints(THREAD_ID) == 0
+    assert len(warnings) == 1
+    assert "invalidation unavailable" in warnings[0]
+    _ = real_logger

@@ -14,12 +14,21 @@ cluster. Direct Python tools must use that installation's interpreter too.
 
 ```bash
 ava impersonate request --agent 405 --as codex:work405 --ttl 3600 \
+  --provider codex --thread-id CODEX_SESSION_UUID \
   --reason 'Handle the outstanding implementation and return a summary'
 ```
 
-The JSON response contains the lease `id` and its newly minted `token`. The token
-appears only in that request response; subsequent commands read it from the process
-environment. No external conversation or token files are created.
+Every request must name its relay endpoint up front with `--provider`
+(`codex` or `claude`; `codex` also requires `--thread-id`, the existing
+session UUID the relay queues into, and accepts `--codex-remote`). A request
+without a relay binding is rejected at request time; the native side never
+guesses an endpoint.
+
+The JSON response contains the lease `id` and its newly minted `token`. The
+token appears only in that request response; subsequent commands read it from
+the process environment. A `claude` request additionally returns a scoped
+`relay_token` for the relay process. No external conversation or token files
+are created.
 
 ```bash
 export AVA_IMPERSONATION_TOKEN='<request token>'
@@ -33,14 +42,14 @@ Codex also filters subprocess environments; use the explicit
 [Codex launch policy and presence check](agent-impersonation-hosts.md#codex-cli)
 before doing AVA work.
 
-Start the [host relay](agent-impersonation-hosts.md) immediately after the request,
-using the lease credential and an explicit destination in the existing host.
-An active lease grants authority; it does not start message delivery. Before
-claiming that automatic wake-up works, receive the relay's control-active hint
-in this same conversation, then fetch and process the inbox. Process liveness
-and a successful queue command do not prove host receipt. If receipt fails,
-report automatic delivery as unavailable and resolve host routing before relying
-on background messages.
+The [host relay](agent-impersonation-hosts.md) is part of the takeover, not a
+manual step. The accepting runtime starts the codex relay automatically at
+activation; the claude relay starts inside the controller session right after
+the request (its `relay_token` travels in `AVA_IMPERSONATION_RELAY_TOKEN`).
+Activation gates on the relay's heartbeat: if the relay cannot start, the
+acceptance rolls back loudly — the lease becomes `rejected` with the reason,
+the native agent is told, and it keeps running. There is no silent
+half-takeover.
 
 The native agent receives the request in its normal context and decides:
 
@@ -135,9 +144,13 @@ Inbox reads return durable inbound rows without marking them processed. Acknowle
 only the IDs actually handled; unacknowledged rows remain available after release.
 `--limit` accepts 1 through 1000 rows; `--wait` accepts finite, nonnegative seconds.
 The CLI uses the existing Redis inbound listener and a durable database recheck.
-Automatic same-session wake-up requires the [Codex and Claude host relay](agent-impersonation-hosts.md)
-and the receipt verification described above.
-The relay sends availability hints and never acknowledges work for the external model.
+Automatic same-session wake-up runs through the bound
+[Codex and Claude host relay](agent-impersonation-hosts.md), which sends at most
+one outstanding availability hint at a time and never acknowledges work for the
+external model. The relay heartbeats the lease row; while the lease is active,
+the accepting runtime respawns a dead codex relay and every inbound delivery
+path checks the heartbeat and alerts loudly when it is stale, so messages never
+silently sit in the inbox.
 
 An inbox row with `kind="cancel"` asks the controller to stop its current work.
 Stop that work and explicitly ACK the request; an unacknowledged cancel remains
@@ -155,7 +168,16 @@ ava impersonate release '<lease id>' \
 ```
 
 Release durably queues the summary with the external controller's real provenance.
-The native runtime applies staged plugin state and resumes from its checkpoint.
-TTL expiry also returns control, while preserving unprocessed inbound messages.
-An external session ending does not require a new model conversation or a transcript
-file: the native agent retains its own context and receives the explicit handoff.
+The native runtime applies staged plugin state and resumes from its checkpoint,
+killing the bound relay process it started at activation. TTL expiry also returns
+control, while preserving unprocessed inbound messages. Completing a subtask is
+not release authority: the lease (and the relay) stay until the explicit release
+or expiry. An external session ending does not require a new model conversation
+or a transcript file: the native agent retains its own context and receives the
+explicit handoff.
+
+A lease whose relay could not be established is never active: it ends as
+`rejected` with the reason in `rejection_reason`, the native agent receives a
+system note, and it keeps running. `ava impersonate status` shows the relay
+fields (`relay_provider`, `relay_heartbeat_at`, `relay_last_failure_at`) for
+forensics.

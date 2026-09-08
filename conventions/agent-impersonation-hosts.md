@@ -5,22 +5,28 @@ It subscribes to the agent's existing Redis inbound channel and reads pending
 messages from the database. It sends only short inbox hints to an already-open
 host conversation; the external agent fetches and processes the full messages.
 
-Start the relay immediately after making an impersonation request. It waits
-natively for consent and quiescence, then sends one control-active hint even if
-the inbox is empty. That hint directs the controller to the inbox and to any
-relevant context it has not already loaded. It gives independent complete inbox
-and ACK commands; do not append them to the `agents timeline` command.
-Rejection or expiry also wakes the controller;
-waiting for a decision never requires a model to poll status. Pass the lease
-UUID explicitly and inherit its credential as `AVA_IMPERSONATION_TOKEN`.
-No relay session, token or message files are created.
+The relay is part of the takeover, not a manual step. The request records the
+relay endpoint on the lease row (`--provider`, `--thread-id`, `--codex-remote`).
+For codex, the accepting runtime provisions the relay's scoped credential,
+spawns the relay at activation and supervises it; for claude, the relay runs
+inside the controller session (see below) and the activation gate verifies its
+heartbeat. In both cases a relay that is not live when the takeover would
+activate rolls the acceptance back loudly: the lease ends `rejected` with the
+reason, the native agent receives a system note and keeps running.
+
+The relay waits natively for consent and quiescence, then sends one
+control-active hint even if the inbox is empty. That hint directs the
+controller to the inbox and to any relevant context it has not already
+loaded. It gives independent complete inbox and ACK commands; do not append
+them to the `agents timeline` command. Rejection or expiry also wakes the
+controller; waiting for a decision never requires a model to poll status.
+The relay authenticates with the lease's scoped `relay_token` — never the
+controller's `AVA_IMPERSONATION_TOKEN` — and no relay session, token or
+message files are created.
+
 Verify that the control-active hint actually arrives in the intended conversation
 before relying on automatic delivery. Lease activation, relay process liveness,
 and queue acceptance establish different facts; none establishes host receipt.
-The native agent cannot start this host-owned relay on acceptance: it lacks the
-external session's selected endpoint, process lifetime and credential handoff.
-Use the absolute AVA executable belonging to the intended cluster: a bare `ava`
-on PATH can point to production even when the current directory is a worktree.
 
 ## Codex CLI
 
@@ -78,7 +84,12 @@ Stop external work and close attachments before releasing; verify the terminal
 lease status before discarding the supervisor's credential. TTL remains the
 recovery path if the supervisor dies.
 
-Start the relay as a background shell process owned by the external session:
+The codex relay needs no manual start: the accepting runtime spawns it at
+activation from the recorded spec, handing the scoped relay credential over a
+private stdin pipe (`--token-stdin` — the credential never appears in argv,
+environment variables or files). If it cannot start, the acceptance rolls back.
+The runtime respawns it when its heartbeat goes stale while the lease is
+active. The manual form below remains for diagnostics:
 
 ```sh
 /path/to/checkout/.venv/bin/ava impersonate relay 42 \
@@ -120,11 +131,15 @@ into a CLI session is a separate host handoff.
 ## Claude Code Monitor
 
 Ask the existing Claude session, or the subagent taking the lease, to invoke its
-`Monitor` tool with this shape, substituting the executable and identifiers:
+`Monitor` tool with this shape, substituting the executable and identifiers.
+Start it immediately after the request: the activation gate requires its
+heartbeat. The request response carries the scoped `relay_token`; set it as
+`AVA_IMPERSONATION_RELAY_TOKEN` in the Monitor command's environment. If the
+Monitor cannot start (no fresh heartbeat), acceptance rolls back loudly.
 
 ```json
 {
-  "command": "/path/to/checkout/.venv/bin/ava impersonate relay 42 --lease-id LEASE_UUID --provider claude",
+  "command": "AVA_IMPERSONATION_RELAY_TOKEN=<relay token> /path/to/checkout/.venv/bin/ava impersonate relay 42 --lease-id LEASE_UUID --provider claude",
   "description": "AVA agent 42 inbox",
   "persistent": true
 }
@@ -149,6 +164,14 @@ the [channel protocol](https://code.claude.com/docs/en/channels-reference).
 - Redis is a latency optimization. The native process also catches up from the
   database every 30 seconds and after reconnect/wake, without invoking an LLM.
   It subscribes before its first delivery snapshot to close the startup race.
+- Single-outstanding delivery: at most one unprocessed hint per lease is ever
+  queued. A hint is emitted when pending work exists that the host has not been
+  told about, and re-emitted on a slow cadence (~2 minutes) while an outstanding
+  hint may have been lost. New messages arriving under an outstanding hint do
+  not queue another one — the hint already instructs the host to drain until
+  empty. This keeps a busy host from accumulating a queue of stale hints that
+  later wake empty turns; the trade-off is that a hint the host never processes
+  is not retried until the re-hint cadence.
 - Inbox hints are debounced (default 0.5 seconds, maximum 30) and emitted at most
   once every two seconds. Terminal control notices are immediate. Claude Monitor
   truncates and rate-limits output, so message bodies
@@ -164,12 +187,36 @@ the [channel protocol](https://code.claude.com/docs/en/channels-reference).
   relay suppresses repeated hints for the same pending page in memory. Restart
   replays every still-pending page it encounters. This is at-least-once delivery,
   with no exactly-once claim across provider acknowledgement or process crashes.
+- The relay heartbeats the lease row every 10 seconds; a heartbeat older than
+  45 seconds counts as stale. While the lease is active, the accepting runtime
+  respawns a dead codex relay on the next claim wake (at most once a minute),
+  and every inbound wake checks the heartbeat and logs loudly when it is stale,
+  so messages never sit silently. A claude relay cannot be respawned from the
+  native side; a stale heartbeat is stamped on the lease row
+  (`relay_last_failure_at`, visible in `impersonate status`) and logged.
+- The codex relay also invalidates its own stale queued hints through the
+  official `thread/queue/list` / `thread/queue/delete` app-server RPCs
+  (experimentalApi, Codex 0.153.4+), matching only submissions whose text
+  starts with the relay's own hint markers — real user messages and other
+  threads are never touched, and the private queue store is never written
+  directly. Invalidation runs at startup, when the outstanding page is fully
+  ACKed, and before a terminal control notice. It is best-effort: when the RPC
+  is unavailable the relay logs loudly and continues, and the single-outstanding
+  emission still bounds the queue to one hint. With `--codex-remote`, the
+  spawned stdio server reads the local store; if the remote owns a different
+  store the invalidation may not reach it (the no-replay bound still holds).
+  Coalescing prevents future accumulation; hints already queued before this
+  change are removed by the startup sweep, not retroactively recalled from a
+  running turn.
 - Release, expiry, rejection, an invalid lease, a failed host queue or a broken
   Monitor pipe stops delivery. Expiry sends a loss-of-control notice before
   stopping; the database's clock and status decide authority. A local clock
   difference only adjusts the next native status check. Pending messages remain
   in the database. Interruption
   closes the subscriber without releasing or extending the lease.
+  On release or expiry the native runtime also kills the relay process it
+  spawned — the teardown is symmetric with activation. Inbox emptiness or
+  subtask completion never stops delivery: only a terminal lease status does.
 - The relay **never renews a lease**. Renewal is an explicit controller action;
   TTL remains the recovery boundary if the controller or its relay dies.
   Native resume still requires the lease lifecycle's normal handoff checks.

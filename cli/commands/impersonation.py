@@ -28,6 +28,30 @@ def token_from_env() -> str:
     return token
 
 
+def relay_token_from_env() -> str:
+    """Read the scoped relay credential the controller received at request time."""
+    # env-ok: external controller credential handoff, not cluster configuration
+    token = os.environ.get("AVA_IMPERSONATION_RELAY_TOKEN")
+    if not token:
+        raise ValueError(
+            "set AVA_IMPERSONATION_RELAY_TOKEN to the request's relay token "
+            "(printed once in the request response)"
+        )
+    return token
+
+
+def relay_token_from_stdin() -> str:
+    """Read the scoped relay credential the accepting runtime piped over stdin.
+
+    The native spawn handoff keeps the credential out of argv, the environment
+    and any file.
+    """
+    line = sys.stdin.readline()
+    if not line:
+        raise ValueError("no relay token on stdin (use --token-stdin with a piped credential)")
+    return line.rstrip("\r\n")
+
+
 def _json_value(value: object) -> str:
     if isinstance(value, datetime):
         return value.isoformat()
@@ -99,16 +123,29 @@ def _dispatch(args: argparse.Namespace) -> int:
     if command == "request":
         _emit(
             control.request(
-                args.agent_id, caller=_caller(args.caller), ttl_seconds=args.ttl, reason=args.reason
+                args.agent_id,
+                caller=_caller(args.caller),
+                ttl_seconds=args.ttl,
+                reason=args.reason,
+                relay_provider=args.relay_provider,
+                relay_thread_id=args.relay_thread_id,
+                relay_codex_remote=args.relay_codex_remote,
             )
         )
-        print(
-            "Impersonation request does not start inbox delivery. Start impersonate relay "
-            "with this lease and an explicit host destination; see "
-            "conventions/agent-impersonation-hosts.md. Verify the control-active hint "
-            "arrives in the same conversation before relying on automatic wake-up.",
-            file=sys.stderr,
-        )
+        if args.relay_provider == "codex":
+            print(
+                "The accepting agent starts the codex relay automatically at activation; "
+                "no relay process starts here. A relay that cannot start rolls the "
+                "takeover back loudly (status becomes rejected with the reason).",
+                file=sys.stderr,
+            )
+        else:
+            print(
+                "Start the claude relay (ava impersonate relay) inside the controller "
+                "session immediately, with AVA_IMPERSONATION_RELAY_TOKEN set to the "
+                "relay token printed above. Acceptance fails loudly without its heartbeat.",
+                file=sys.stderr,
+            )
         return 0
     token = token_from_env()
     if command == "status":

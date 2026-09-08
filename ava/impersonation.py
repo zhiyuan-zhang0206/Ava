@@ -24,6 +24,11 @@ def accept(request_id: str) -> NoReturn:
     Save your working state first. The external agent starts only after your
     execution resources have closed and your conversation is durably saved.
     Your native loop resumes after release or lease expiry.
+
+    The takeover activates only after its bound inbox relay is live: the
+    runtime establishes it automatically from the request's recorded relay
+    spec. If the relay cannot start, the acceptance rolls back loudly (the
+    lease becomes rejected with the reason) and you keep running as native.
     """
     from shared.impersonation import accept as accept_request
 

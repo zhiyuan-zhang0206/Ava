@@ -60,7 +60,12 @@ from agent.hosted_ownership import (
     settle_and_stamp_turn,
     settle_hosted_runtime,
 )
-from agent.impersonation import active_lease, flush_checkpoint, settle_checkpoint
+from agent.impersonation import (
+    active_lease,
+    drop_relay_supervision,
+    flush_checkpoint,
+    settle_checkpoint,
+)
 from agent.startup import (
     _reconcile_claimed_inbounds_at_startup,
     _repair_dangling_tool_use_at_startup,
@@ -627,6 +632,7 @@ class AgentHost:
         fresh-process half of `ava.self.restart()`. The checkpointer thread, the
         real state, is untouched, exactly as a process restart leaves it."""
         self._runtimes.pop(agent_id, None)
+        drop_relay_supervision(agent_id)
 
     # ── the turn loop ────────────────────────────────────────────────────────
 

@@ -1,6 +1,7 @@
 """Takeover barriers: consent, resource closure, checkpoint ordering and replay."""
 
 from collections.abc import Iterator
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Annotated, Any, cast
@@ -45,6 +46,11 @@ def _session(status: str = "active", **values: Any) -> dict[str, Any]:
         "plugin_delta": [],
         "delta_version": 0,
         "applied_version": 0,
+        "relay_provider": "codex",
+        "relay_thread_id": "thread-1",
+        "relay_codex_remote": None,
+        "relay_heartbeat_at": datetime.now(UTC),
+        "relay_last_failure_at": None,
         **values,
     }
 
@@ -320,3 +326,211 @@ async def test_held_host_refuses_unaccepted_control_batch(monkeypatch: pytest.Mo
     with pytest.raises(RuntimeError, match="held control claim returned an unaccepted command"):
         await host._run_held_controls(42, "idling")
     apply.assert_not_awaited()
+
+
+# ── Relay establishment gate and supervision ────────────────────────────────
+
+
+def _relay_session(
+    status: str = "accepted", *, provider: str = "codex", **values: Any
+) -> dict[str, Any]:
+    base: dict[str, Any] = {
+        "relay_provider": provider,
+        "relay_thread_id": "thread-1" if provider == "codex" else None,
+        "relay_codex_remote": None,
+        "relay_heartbeat_at": None,
+        "relay_last_failure_at": None,
+    }
+    base.update(values)
+    return _session(status, **base)
+
+
+async def test_settle_checkpoint_rolls_back_when_relay_establishment_fails(
+    monkeypatch: pytest.MonkeyPatch, incarnation: RuntimeIncarnation
+) -> None:
+    monkeypatch.setattr(
+        impersonation, "native_status", AsyncMock(return_value=_relay_session("accepted"))
+    )
+    activate = Mock()
+    monkeypatch.setattr("shared.impersonation.activate", activate)
+    monkeypatch.setattr(impersonation, "hosted_resources_settled", lambda: True)
+
+    def refused(_session: dict[str, Any], _incarnation: RuntimeIncarnation) -> bool:
+        return False
+
+    monkeypatch.setattr(impersonation, "establish_relay", refused)
+    assert not await impersonation.settle_checkpoint(MagicMock(), 42)
+    activate.assert_not_called()
+
+
+async def test_settle_checkpoint_activates_only_after_relay_ready(
+    monkeypatch: pytest.MonkeyPatch, incarnation: RuntimeIncarnation
+) -> None:
+    monkeypatch.setattr(
+        impersonation, "native_status", AsyncMock(return_value=_relay_session("accepted"))
+    )
+    activate = Mock(return_value=_relay_session("active"))
+    monkeypatch.setattr("shared.impersonation.activate", activate)
+    monkeypatch.setattr(impersonation, "hosted_resources_settled", lambda: True)
+    establish = Mock(return_value=True)
+    monkeypatch.setattr(impersonation, "establish_relay", establish)
+    assert await impersonation.settle_checkpoint(MagicMock(), 42)
+    establish.assert_called_once()
+    activate.assert_called_once()
+
+
+def test_establish_relay_claude_requires_a_fresh_heartbeat(
+    monkeypatch: pytest.MonkeyPatch, incarnation: RuntimeIncarnation
+) -> None:
+    from datetime import UTC, datetime, timedelta
+
+    fail = Mock()
+    monkeypatch.setattr("shared.impersonation.fail_acceptance", fail)
+    stale = _relay_session(
+        "accepted",
+        provider="claude",
+        relay_heartbeat_at=datetime.now(UTC) - timedelta(minutes=5),
+    )
+    assert impersonation.establish_relay(stale, incarnation) is False
+    fail.assert_called_once()
+    fail.reset_mock()
+    fresh = _relay_session("accepted", provider="claude", relay_heartbeat_at=datetime.now(UTC))
+    assert impersonation.establish_relay(fresh, incarnation) is True
+    fail.assert_not_called()
+
+
+def test_establish_relay_codex_provisions_spawns_and_waits_for_heartbeat(
+    monkeypatch: pytest.MonkeyPatch, incarnation: RuntimeIncarnation
+) -> None:
+    from datetime import UTC, datetime
+
+    impersonation._relay_children.clear()
+    provision = Mock()
+    monkeypatch.setattr("shared.impersonation.provision_relay", provision)
+    spawn = Mock(return_value=MagicMock(poll=Mock(return_value=None)))
+    monkeypatch.setattr(impersonation, "_spawn_codex_relay", spawn)
+    ready = {"status": "accepted", "relay_heartbeat_at": datetime.now(UTC)}
+    monkeypatch.setattr("shared.impersonation.relay_get", Mock(return_value=ready))
+    assert impersonation.establish_relay(_relay_session(), incarnation) is True
+    provision.assert_called_once()
+    provision_token = provision.call_args.args[2]
+    spawn.assert_called_once_with(42, "lease-1", provision_token, "thread-1", None)
+    assert impersonation._relay_children[42].token == provision_token
+    impersonation._relay_children.clear()
+
+
+def test_establish_relay_codex_spawn_exit_rolls_back(
+    monkeypatch: pytest.MonkeyPatch, incarnation: RuntimeIncarnation
+) -> None:
+    impersonation._relay_children.clear()
+    child = MagicMock()
+    child.poll.return_value = 5
+    child.returncode = 5
+    monkeypatch.setattr("shared.impersonation.provision_relay", Mock())
+    monkeypatch.setattr(impersonation, "_spawn_codex_relay", Mock(return_value=child))
+    fail = Mock()
+    monkeypatch.setattr("shared.impersonation.fail_acceptance", fail)
+    assert impersonation.establish_relay(_relay_session(), incarnation) is False
+    fail.assert_called_once()
+    assert "exited during startup" in fail.call_args.args[2]
+    assert not impersonation._relay_children
+
+
+def test_establish_relay_codex_readiness_timeout_rolls_back(
+    monkeypatch: pytest.MonkeyPatch, incarnation: RuntimeIncarnation
+) -> None:
+    impersonation._relay_children.clear()
+    child = MagicMock()
+    child.poll.return_value = None
+    monkeypatch.setattr("shared.impersonation.provision_relay", Mock())
+    monkeypatch.setattr(impersonation, "_spawn_codex_relay", Mock(return_value=child))
+    terminate = Mock()
+    monkeypatch.setattr(impersonation, "_terminate_relay", terminate)
+    fail = Mock()
+    monkeypatch.setattr("shared.impersonation.fail_acceptance", fail)
+    monkeypatch.setattr(impersonation, "_RELAY_READY_TIMEOUT_S", 0.0)
+    assert impersonation.establish_relay(_relay_session(), incarnation) is False
+    terminate.assert_called_once()
+    fail.assert_called_once()
+    assert "did not become ready" in fail.call_args.args[2]
+    assert not impersonation._relay_children
+
+
+async def test_claim_gate_tears_down_the_relay_when_control_returns(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    impersonation._relay_children.clear()
+    monkeypatch.setattr(impersonation, "native_status", AsyncMock(return_value=None))
+    process = MagicMock()
+    process.poll.return_value = None
+    impersonation._relay_children[42] = impersonation._RelayChild("lease-1", process, "token", 0.0)
+    terminate = Mock()
+    monkeypatch.setattr(impersonation, "_terminate_relay", terminate)
+    assert await impersonation.claim_gate(BaseAgentState(), 42) is None
+    terminate.assert_called_once()
+    assert 42 not in impersonation._relay_children
+
+
+async def test_claim_gate_respawns_a_dead_codex_relay(
+    monkeypatch: pytest.MonkeyPatch, incarnation: RuntimeIncarnation
+) -> None:
+    from datetime import UTC, datetime, timedelta
+
+    impersonation._relay_children.clear()
+    stale = _relay_session("active", relay_heartbeat_at=datetime.now(UTC) - timedelta(minutes=5))
+    monkeypatch.setattr(impersonation, "native_status", AsyncMock(return_value=stale))
+    dead = MagicMock()
+    dead.poll.return_value = 1
+    impersonation._relay_children[42] = impersonation._RelayChild("lease-1", dead, "old-token", 0.0)
+    impersonation._relay_children[42].last_spawn_attempt = 0.0
+    new_process = MagicMock()
+    new_process.poll.return_value = None
+    spawn = Mock(return_value=new_process)
+    monkeypatch.setattr(impersonation, "_spawn_codex_relay", spawn)
+    from agent.nodes import END
+
+    decision = await impersonation.claim_gate(BaseAgentState(), 42)
+    assert decision is not None and decision.goto == END
+    spawn.assert_called_once_with(42, "lease-1", "old-token", "thread-1", None)
+    assert impersonation._relay_children[42].process is new_process
+    impersonation._relay_children.clear()
+
+
+async def test_claim_gate_respects_startup_grace_for_a_fresh_spawn(
+    monkeypatch: pytest.MonkeyPatch, incarnation: RuntimeIncarnation
+) -> None:
+    from datetime import UTC, datetime, timedelta
+
+    impersonation._relay_children.clear()
+    stale = _relay_session("active", relay_heartbeat_at=datetime.now(UTC) - timedelta(minutes=5))
+    monkeypatch.setattr(impersonation, "native_status", AsyncMock(return_value=stale))
+    alive = MagicMock()
+    alive.poll.return_value = None
+    now = impersonation.time.monotonic()
+    impersonation._relay_children[42] = impersonation._RelayChild("lease-1", alive, "token", now)
+    spawn = Mock()
+    monkeypatch.setattr(impersonation, "_spawn_codex_relay", spawn)
+    await impersonation.claim_gate(BaseAgentState(), 42)
+    spawn.assert_not_called()
+    impersonation._relay_children.clear()
+
+
+async def test_claim_gate_stamps_a_stale_claude_relay_failure(
+    monkeypatch: pytest.MonkeyPatch, incarnation: RuntimeIncarnation
+) -> None:
+    from datetime import UTC, datetime, timedelta
+
+    impersonation._relay_children.clear()
+    stale = _relay_session(
+        "active",
+        provider="claude",
+        relay_heartbeat_at=datetime.now(UTC) - timedelta(minutes=5),
+    )
+    monkeypatch.setattr(impersonation, "native_status", AsyncMock(return_value=stale))
+    from agent.nodes import END
+
+    record = Mock(return_value=True)
+    monkeypatch.setattr("shared.impersonation.record_relay_failure", record)
+    decision = await impersonation.claim_gate(BaseAgentState(), 42)
+    assert decision is not None and decision.goto == END
+    record.assert_called_once()
