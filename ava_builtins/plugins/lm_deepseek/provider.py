@@ -220,6 +220,32 @@ register(
                 compact_reminder_fraction=0.374,
             ),
         ),
+        # DeepSeek v4.1 Flash internal beta, announced 2026-09-08. The model id
+        # IS the official API model name (same base_url as v4-flash; withdrawn
+        # 2026-09-10 per the name's expires-on-0910 suffix) — Ava registers no
+        # separate wire name, the registered id goes straight into the request
+        # (build() passes ctx.model through unchanged). Spec matches v4-flash:
+        # DeepSeek has published no v4.1 knowledge cutoff, so it carries the v4
+        # family's value. Third-party notes mention native multimodal input;
+        # registered text-only like v4-flash pending a user decision on media.
+        "deepseek-v4.1-flash-expires-on-0910": ModelSpec(
+            provider="deepseek",
+            spawnable=True,
+            context_window=1_000_000,
+            max_output_tokens=384_000,
+            # No v4.1 cutoff published; carries the v4 family's value.
+            knowledge_cutoff="2026-04",
+            model_identity="You are running on DeepSeek V4.1 Flash (expires 2026-09-10).",
+            effort_levels=("high", "max"),
+            tuning=ModelTuning(
+                reasoning_effort="max",  # same as pro/flash: Ava is not an auto-promoted harness
+                llm_stream_ttft_timeout_seconds=600.0,  # same documented 10-minute queue
+                # Same decision as deepseek-v4-pro (2026-08-29): soft 374k /
+                # hard 512k on the 1M window — 0.512 / 0.374 exactly.
+                auto_compact_fraction=0.512,
+                compact_reminder_fraction=0.374,
+            ),
+        ),
     },
     pricing={
         "deepseek-v4-pro": PriceRates(
@@ -349,6 +375,53 @@ register(
                 ),
                 PricePeriod(
                     effective_from="2026-08-16T16:00:00Z",
+                    effective_until=None,
+                    tiers=(
+                        PriceTier(
+                            input_tokens_min=0,
+                            input_tokens_max=None,
+                            cache_miss="0.22",
+                            cache_hit="0.007",
+                            output="0.66",
+                            windows=(
+                                PriceWindow(
+                                    start="01:00:00",
+                                    end="04:00:00",
+                                    cache_miss="0.44",
+                                    cache_hit="0.014",
+                                    output="1.32",
+                                ),
+                                PriceWindow(
+                                    start="06:00:00",
+                                    end="10:00:00",
+                                    cache_miss="0.44",
+                                    cache_hit="0.014",
+                                    output="1.32",
+                                ),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        ),
+        "deepseek-v4.1-flash-expires-on-0910": PriceRates(
+            # v4.1 is an unlisted internal beta (announced 2026-09-08): DeepSeek
+            # has not published it on the pricing page. The announcement states
+            # pricing is the same as deepseek-v4-flash, so these are the
+            # v4-flash current rates — pending verification once v4.1 appears
+            # on the official page. A single current period only: unlike
+            # v4-flash there is no 2026-08-16 rate cut in this model's history
+            # (it launched 2026-09-08), so the half-rate pre-cutover period is
+            # deliberately not copied.
+            cache_miss=0.22,
+            cache_hit=0.007,
+            output=0.66,
+            source_url="https://api-docs.deepseek.com/quick_start/pricing/",
+            source_checked_at="2026-09-08",
+            vendor="deepseek",
+            periods=(
+                PricePeriod(
+                    effective_from=None,
                     effective_until=None,
                     tiers=(
                         PriceTier(

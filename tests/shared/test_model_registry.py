@@ -334,7 +334,12 @@ def test_shared_floor_applies_when_nothing_set() -> None:
 def test_deepseek_carries_per_model_compact_thresholds() -> None:
     """User decision (2026-08-29): the deepseek entries compact at soft
     374k / hard 512k on their 1M window — 0.374 / 0.512 of the window."""
-    for model in ("deepseek-v4-pro", "deepseek-v4-flash", "deepseek-v4-flash-vision-exp"):
+    for model in (
+        "deepseek-v4-pro",
+        "deepseek-v4-flash",
+        "deepseek-v4-flash-vision-exp",
+        "deepseek-v4.1-flash-expires-on-0910",
+    ):
         assert resolve_setting("auto_compact_fraction", model=model) == 0.512, model
         assert resolve_setting("compact_reminder_fraction", model=model) == 0.374, model
 

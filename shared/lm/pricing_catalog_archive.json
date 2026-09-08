@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "catalog_version": "2026-09-07.1",
+  "catalog_version": "2026-09-08.1",
   "currency": "USD",
   "unit_tokens": 1000000,
   "models": {
@@ -1040,6 +1040,48 @@
                 "output": "2.61"
               },
               "utc_daily_overrides": []
+            }
+          ]
+        }
+      ]
+    },
+    "deepseek-v4.1-flash-expires-on-0910": {
+      "vendor": "deepseek",
+      "source_url": "https://api-docs.deepseek.com/quick_start/pricing/",
+      "source_checked_at": "2026-09-08",
+      "periods": [
+        {
+          "effective_from": null,
+          "effective_until": null,
+          "tiers": [
+            {
+              "input_tokens_min": 0,
+              "input_tokens_max": null,
+              "rates": {
+                "input": "0.22",
+                "cache_read": "0.007",
+                "output": "0.66"
+              },
+              "utc_daily_overrides": [
+                {
+                  "start": "01:00:00",
+                  "end": "04:00:00",
+                  "rates": {
+                    "input": "0.44",
+                    "cache_read": "0.014",
+                    "output": "1.32"
+                  }
+                },
+                {
+                  "start": "06:00:00",
+                  "end": "10:00:00",
+                  "rates": {
+                    "input": "0.44",
+                    "cache_read": "0.014",
+                    "output": "1.32"
+                  }
+                }
+              ]
             }
           ]
         }
