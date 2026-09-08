@@ -148,9 +148,10 @@ def test_category_projection_matches_telemetry_whitelist() -> None:
     # #2579's C9 daily reconciliation) raises it to 157; the corpse reaper
     # (Task #2609's crash-dead hosted rows: host_turn_corpse_marked,
     # corpse_stamp_failed, corpse_reaper_terminated, corpse_reaper_failed,
-    # corpse_reaper_publish_failed) raises it to 162.
+    # corpse_reaper_publish_failed) raises it to 162; shell_ttl_renewed
+    # (Task #2647's explicit shell-TTL renewal) raises it to 163.
     assert "restart_cas_lost" not in _TELEMETRY_KINDS
-    assert len(_TELEMETRY_KINDS) == 162
+    assert len(_TELEMETRY_KINDS) == 163
 
 
 def test_delivery_wake_suppressed_payload_names_escalation_evidence() -> None:
