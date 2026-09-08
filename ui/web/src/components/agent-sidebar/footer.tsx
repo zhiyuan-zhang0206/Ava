@@ -17,6 +17,7 @@ import { useRouter } from "next/navigation";
 import { PluginNavIcons } from "@/components/plugin-nav";
 import { WindowSelect } from "@/components/window-select";
 import { errMsg as formatErrMsg } from "@/lib/errors";
+import { formatTokensCompact } from "@/lib/format-number";
 import {
   STATS_WINDOW_LABELS,
   STATS_WINDOWS,
@@ -364,12 +365,6 @@ function WarningErrorCard({
       )}
     </div>
   );
-}
-
-function formatTokensCompact(n: number): string {
-  if (n < 1_000) return String(n);
-  if (n < 1_000_000) return `${(n / 1_000).toFixed(1)}k`;
-  return `${(n / 1_000_000).toFixed(1)}M`;
 }
 
 // Placeholder row for an in-flight spawn. The row itself is direct feedback to

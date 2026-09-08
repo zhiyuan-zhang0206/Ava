@@ -1,11 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  formatDuration,
-  formatTokensCompact,
-  summarizeCode,
-  summarizeOutput,
-} from "./item-summary";
+import { formatDuration, summarizeCode, summarizeOutput } from "./item-summary";
 
 describe("summarizeCode", () => {
   it("groups ava.* calls by full method path, descending", () => {
@@ -107,14 +102,6 @@ describe("summarizeOutput", () => {
 
   it("does not flag the word error mid-sentence", () => {
     expect(summarizeOutput("no error here, all good").hasError).toBe(false);
-  });
-});
-
-describe("formatTokensCompact", () => {
-  it("formats across magnitudes", () => {
-    expect(formatTokensCompact(820)).toBe("820");
-    expect(formatTokensCompact(1234)).toBe("1.2k");
-    expect(formatTokensCompact(3_400_000)).toBe("3.4M");
   });
 });
 

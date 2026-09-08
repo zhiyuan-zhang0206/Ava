@@ -33,9 +33,9 @@ import {
 import { useTranslations } from "next-intl";
 import { memo, type ReactNode } from "react";
 
+import { formatTokensCompact } from "@/lib/format-number";
 import {
   formatDuration,
-  formatTokensCompact,
   summarizeCode,
   summarizeOutput,
   type SdkCall,
