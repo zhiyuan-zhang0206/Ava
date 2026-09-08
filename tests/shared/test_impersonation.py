@@ -498,6 +498,32 @@ def test_claude_request_mints_a_scoped_relay_credential(db_conn: psycopg.Connect
         leases.relay_get(lease["id"], "wrong")
 
 
+def test_request_validates_and_records_the_batch_window(db_conn: psycopg.Connection) -> None:
+    owner = _agent(db_conn)
+    lease = _request(owner, provider="codex")
+    assert lease["relay_batch_window_seconds"] == 30  # default: merge enabled
+    for bad in (-1, 301, 1.5, True, "30"):
+        with pytest.raises(ValueError, match="relay_batch_window_seconds"):
+            leases.request(
+                owner.agent_id,
+                caller=CallerIdentity(kind="external_agent", subject="codex"),
+                relay_provider="codex",
+                relay_thread_id=str(uuid4()),
+                relay_batch_window_seconds=bad,  # type: ignore[arg-type] — the runtime check rejects non-ints
+            )
+    with pytest.raises(leases.ImpersonationError, match="already has"):
+        _request(owner, provider="codex")  # first lease still open
+    leases.reject(lease["id"], owner.agent_id, owner, "window probe done")
+    window_off = leases.request(
+        owner.agent_id,
+        caller=CallerIdentity(kind="external_agent", subject="codex"),
+        relay_provider="codex",
+        relay_thread_id=str(uuid4()),
+        relay_batch_window_seconds=0,
+    )
+    assert window_off["relay_batch_window_seconds"] == 0
+
+
 def test_codex_request_defers_relay_credential_to_activation(db_conn: psycopg.Connection) -> None:
     owner = _agent(db_conn)
     lease = _request(owner)
