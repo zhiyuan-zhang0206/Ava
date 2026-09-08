@@ -14,6 +14,11 @@ Rejection or expiry also wakes the controller;
 waiting for a decision never requires a model to poll status. Pass the lease
 UUID explicitly and inherit its credential as `AVA_IMPERSONATION_TOKEN`.
 No relay session, token or message files are created.
+Verify that the control-active hint actually arrives in the intended conversation
+before relying on automatic delivery. Lease activation, relay process liveness,
+and queue acceptance establish different facts; none establishes host receipt.
+The native agent cannot start this host-owned relay on acceptance: it lacks the
+external session's selected endpoint, process lifetime and credential handoff.
 Use the absolute AVA executable belonging to the intended cluster: a bare `ava`
 on PATH can point to production even when the current directory is a worktree.
 
@@ -102,9 +107,15 @@ implementations. Both TUI and relay must use the same endpoint. A successful
 queue command means accepted delivery, not that the model has started or ACKed
 the AVA message. `--codex-remote` is rejected for Claude Monitor.
 
-The CLI daemon's session namespace is the tested destination. A Desktop session
-may use a different app-server instance; its UUID alone does not establish that
-the CLI can reach it. Use a CLI session when that connection is unavailable.
+Desktop and ChatGPT embedded sessions may use a different app-server instance
+or event consumer; a thread UUID alone does not establish delivery. Idle wake-up
+has also been verified in a ChatGPT embedded host through the shared CLI queue:
+a queued hint started a new turn after the active turn ended. Busy-turn delivery
+is not implied. Test receipt both while the host is busy and after it becomes
+idle; queued items during an active turn alone do not establish a delivery
+failure. Do not infer receipt from a shared database or a zero queue exit code.
+Verify the existing conversation's behavior before changing hosts; moving work
+into a CLI session is a separate host handoff.
 
 ## Claude Code Monitor
 
