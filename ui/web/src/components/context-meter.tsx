@@ -2,16 +2,10 @@
 
 import { useTranslations } from "next-intl";
 
+import { formatTokens } from "@/lib/format-number";
 import type { ContextMeterWidth } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { OVERFLOW_HIDDEN } from "@/lib/layout";
-
-/** Compact token count: 940 -> "940", 26_300 -> "26.3k", 1_000_000 -> "1.00M". */
-export function formatTokens(n: number): string {
-  if (n < 1000) return String(n);
-  if (n < 1_000_000) return `${(n / 1000).toFixed(1)}k`;
-  return `${(n / 1_000_000).toFixed(2)}M`;
-}
 
 // Width classes for the gauge track, keyed by the `display.context_meter_width`
 // setting. "compact" is the original fixed width (w-16); "wide" is 3x that —

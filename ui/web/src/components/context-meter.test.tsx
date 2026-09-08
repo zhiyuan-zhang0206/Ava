@@ -7,17 +7,9 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { ContextMeter, formatTokens, resolveContextMeterWidth } from "./context-meter";
+import { ContextMeter, resolveContextMeterWidth } from "./context-meter";
 
 afterEach(cleanup);
-
-describe("formatTokens", () => {
-  it("scales below 1k / thousands / millions", () => {
-    expect(formatTokens(940)).toBe("940");
-    expect(formatTokens(26_300)).toBe("26.3k");
-    expect(formatTokens(1_000_000)).toBe("1.00M");
-  });
-});
 
 describe("ContextMeter", () => {
   const full = {

@@ -7,11 +7,11 @@ import { useEffect, useRef, useState } from "react";
 import {
   CONTEXT_METER_WIDTH_CLASS,
   ContextMeter,
-  formatTokens,
   resolveContextMeterWidth,
 } from "@/components/context-meter";
 import { api } from "@/lib/api";
 import { errMsg } from "@/lib/errors";
+import { formatTokens } from "@/lib/format-number";
 import type { ContextBreakdownResponse, ContextSection } from "@/lib/types";
 import { useUserSettings } from "@/lib/use-user-settings";
 import { cn } from "@/lib/utils";

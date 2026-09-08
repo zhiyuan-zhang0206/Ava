@@ -26,6 +26,7 @@ import {
 import { OpenNoticeDetail } from "@/components/open-notice-detail";
 import { WindowSelect } from "@/components/window-select";
 import { api } from "@/lib/api";
+import { formatTokens } from "@/lib/format-number";
 import { useNow } from "@/lib/use-now";
 import { useBreakpoint } from "@/lib/breakpoint";
 import { useAgentPages } from "@/lib/use-agent-pages";
@@ -736,14 +737,6 @@ function Metric({
 // ---------------------------------------------------------------------------
 // Formatting
 // ---------------------------------------------------------------------------
-
-function formatTokens(n: number): string {
-  if (n < 1_000) return String(n);
-  if (n < 1_000_000) return `${(n / 1_000).toFixed(1)}k`;
-  if (n < 1_000_000_000) return `${(n / 1_000_000).toFixed(2)}M`;
-  if (n < 1_000_000_000_000) return `${(n / 1_000_000_000).toFixed(2)}B`;
-  return `${(n / 1_000_000_000_000).toFixed(2)}T`;
-}
 
 function formatTps(n: number): string {
   if (n === 0) return "—";
