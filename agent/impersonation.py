@@ -71,7 +71,7 @@ async def claim_gate(
 ) -> Command[NodeName] | None:
     """Present consent once, or end the invocation without claiming input."""
     session = await native_status(agent_id)
-    await _supervise_relay(session, agent_id)
+    await supervise_relay(session, agent_id)
     if session is None:
         return None
     if session["status"] == "requested":
@@ -379,12 +379,22 @@ def _roll_back_relay_failure(
     return False
 
 
-async def _supervise_relay(session: dict[str, Any] | None, agent_id: int) -> None:
-    """Per-claim supervision: respawn a dead bound relay, or tear it down.
+async def supervise_relay(session: dict[str, Any] | None, agent_id: int) -> None:
+    """Respawn a dead bound relay, or tear it down — the native supervision seam.
 
-    Runs at every claim gate while the native loop is paused or resuming. The
-    relay itself heartbeats the lease row; a stale heartbeat with pending
-    inbound must not be silent.
+    Two call sites: the claim gate (native loop paused or resuming) and the
+    held-controls pass while an active lease parks the agent outside the graph
+    (services/agent_host/host.py `_apply_held_controls`). The claim gate never
+    runs during an active lease, so the held-controls path is the lease's only
+    native supervision point there; the dispatcher's pending scan keeps waking
+    agents with an open lease, giving it a periodic trigger even without
+    inbound traffic.
+
+    Hot-path cost (fresh heartbeat): one `native_status` read plus a datetime
+    comparison — no model calls, no graph work, no polling. Only a stale
+    heartbeat escalates: at most one provision write, one relay spawn, and the
+    rate-limited failure stamp. The relay itself heartbeats the lease row; a
+    stale heartbeat with pending inbound must not be silent.
     """
     from shared.impersonation import (
         ImpersonationError,

@@ -574,6 +574,33 @@ def test_provision_relay_revokes_the_previous_credential(db_conn: psycopg.Connec
     assert leases.relay_get(lease["id"], "second")["status"] == "active"
 
 
+def test_active_lease_binding_inherits_the_replacement_incarnation(
+    db_conn: psycopg.Connection,
+) -> None:
+    """Every restart/host turnover mints a fresh incarnation; the active lease's
+    accepting binding must follow it so relay supervision can re-provision."""
+    owner = _agent(db_conn)
+    lease = _active(owner)
+    replacement = RuntimeIncarnation(owner.agent_id, uuid4(), uuid4())
+    db_conn.execute(
+        "UPDATE agents_meta SET runtime_generation=%s,runtime_owner=%s WHERE id=%s",
+        (replacement.generation, replacement.owner, owner.agent_id),
+    )
+    db_conn.commit()
+    state = _status(replacement)
+    assert state["status"] == "active"
+    assert (state["accepted_generation"], state["accepted_owner"]) == (
+        str(replacement.generation),
+        str(replacement.owner),
+    )
+    provisioned = leases.provision_relay(lease["id"], replacement, "relay-credential")
+    assert "relay_token_hash" not in provisioned
+    assert leases.relay_get(lease["id"], "relay-credential")["status"] == "active"
+    # The old incarnation cannot mint the relay credential after the transfer.
+    with pytest.raises(leases.ImpersonationError):
+        leases.provision_relay(lease["id"], owner, "old-incarnation-credential")
+
+
 def test_relay_inbox_uses_the_scoped_credential_only(db_conn: psycopg.Connection) -> None:
     owner = _agent(db_conn)
     lease = _request(owner, provider="claude", thread=None)

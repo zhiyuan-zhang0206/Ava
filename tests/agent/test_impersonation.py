@@ -289,6 +289,8 @@ async def test_held_host_wake_returns_before_runtime_or_slot(
     )
     host._runtime_for = AsyncMock()
     monkeypatch.setattr("services.agent_host.host.active_lease", AsyncMock(return_value=True))
+    monkeypatch.setattr("services.agent_host.host.native_status", AsyncMock(return_value=None))
+    monkeypatch.setattr("services.agent_host.host.supervise_relay", AsyncMock())
     monkeypatch.setattr("agent.db.claim_inbound_batch", AsyncMock(return_value=[]))
     monkeypatch.setattr(
         "services.agent_host.host.apply_hosted_lifecycle", AsyncMock(return_value=None)
@@ -316,6 +318,8 @@ async def test_held_host_refuses_unaccepted_control_batch(monkeypatch: pytest.Mo
     monkeypatch.setattr(
         "services.agent_host.host.admit_hosted_runtime", AsyncMock(return_value=owner)
     )
+    monkeypatch.setattr("services.agent_host.host.native_status", AsyncMock(return_value=None))
+    monkeypatch.setattr("services.agent_host.host.supervise_relay", AsyncMock())
     monkeypatch.setattr(
         "agent.db.claim_inbound_batch",
         AsyncMock(return_value=[SimpleNamespace(durable_lifecycle=False)]),
@@ -326,6 +330,35 @@ async def test_held_host_refuses_unaccepted_control_batch(monkeypatch: pytest.Mo
     with pytest.raises(RuntimeError, match="held control claim returned an unaccepted command"):
         await host._run_held_controls(42, "idling")
     apply.assert_not_awaited()
+
+
+async def test_held_controls_supervise_the_active_lease_relay(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The claim gate never runs during an active lease; the held-controls pass
+    must carry the relay supervision (task #2634)."""
+    from services.agent_host.host import AgentHost
+
+    host = object.__new__(AgentHost)
+    host._machine = "local"
+    host._owner = uuid4()
+    host._control_pool = MagicMock()
+    host._checkpointer = cast(Any, MemorySaver())
+    owner = RuntimeIncarnation(42, uuid4(), host._owner)
+    monkeypatch.setattr(
+        "services.agent_host.host.admit_hosted_runtime", AsyncMock(return_value=owner)
+    )
+    session = _relay_session("active")
+    monkeypatch.setattr("services.agent_host.host.native_status", AsyncMock(return_value=session))
+    supervise = AsyncMock()
+    monkeypatch.setattr("services.agent_host.host.supervise_relay", supervise)
+    monkeypatch.setattr("agent.db.claim_inbound_batch", AsyncMock(return_value=[]))
+    monkeypatch.setattr(
+        "services.agent_host.host.apply_hosted_lifecycle", AsyncMock(return_value=None)
+    )
+    monkeypatch.setattr("services.agent_host.host.settle_hosted_runtime", AsyncMock())
+    await host._run_held_controls(42, "idling")
+    supervise.assert_awaited_once_with(session, 42)
 
 
 # ── Relay establishment gate and supervision ────────────────────────────────

@@ -299,6 +299,36 @@ def native_status(agent_id: int, incarnation: RuntimeIncarnation) -> dict[str, A
             lease["accepted_generation"] = None
             lease["accepted_owner"] = None
             lease["consent_version"] += 1
+        if lease["status"] == "active" and (
+            lease["accepted_generation"],
+            lease["accepted_owner"],
+        ) != (incarnation.generation, incarnation.owner):
+            # Every hosted restart and host takeover mints a fresh incarnation
+            # (restart NULLs runtime_generation/owner and admission re-mints,
+            # agent/hosted_ownership.py). The active lease survives the
+            # replacement, so its accepting-incarnation binding must follow the
+            # native lineage — relay supervision re-provisions under the
+            # current incarnation and provision_relay's strict check would
+            # refuse a dead binding forever (task #2635's manual DB alignment).
+            # Legitimacy is require_native above: the caller is the row's one
+            # admitted incarnation. A lingering predecessor cannot race this
+            # transfer — admission fences a foreign owner behind the previous
+            # owner's lease expiry (a live host renews every beat), and every
+            # lease mutation the old incarnation attempts dies at its own
+            # require_native row check. accepted_* has no other writer.
+            conn.execute(
+                "UPDATE agent_impersonations SET accepted_generation=%s,accepted_owner=%s "
+                "WHERE id=%s",
+                (incarnation.generation, incarnation.owner, lease["id"]),
+            )
+            lease["accepted_generation"] = incarnation.generation
+            lease["accepted_owner"] = incarnation.owner
+            logger.info(
+                "active lease accepting-incarnation binding inherited by the replacement runtime",
+                agent_id=agent_id,
+                lease_id=str(lease["id"]),
+                generation=str(incarnation.generation),
+            )
         return public(lease)
 
 

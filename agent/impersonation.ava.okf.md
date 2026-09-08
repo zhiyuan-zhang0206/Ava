@@ -25,6 +25,17 @@ N-step checkpoint flush. A surviving process parks outside graph execution,
 retaining its liveness renewer and claim progress. Hosted turns return their
 slot and reject ordinary active-lease wakes before runtime preparation.
 
+`supervise_relay` is the native supervision seam for the bound relay, called
+from two places: the claim gate (native loop paused or resuming) and the
+held-controls pass (services/agent_host/host.py `_apply_held_controls`) while
+an active lease parks the agent outside the graph — the dispatcher's pending
+scan keeps waking agents with an open lease, so the held path re-checks the
+relay heartbeat periodically even without inbound traffic. The hot path is one
+native-status read plus a heartbeat comparison; only a stale heartbeat
+escalates to provision, spawn, or the rate-limited failure stamp. A dead codex
+relay is respawned (or re-provisioned after a host turnover); a claude relay's
+failure is stamped for the controller's own supervision.
+
 The claim gate leaves chat, heartbeat and compaction input pending while held.
 Node guards suppress initialization hooks, automatic compaction, and execution
 hooks; cold boot and database recovery defer checkpoint repair while held.
