@@ -40,10 +40,22 @@ _HINT_UNPROCESSED_ALERT_SECONDS = 300.0
 _RPC_TIMEOUT_SECONDS = 20.0
 _RPC_POLL_SECONDS = 0.5
 _TERMINAL = frozenset({"released", "rejected", "expired"})
-# Every text this relay queues starts with one of these; the invalidation pass
-# matches only its own submissions, never real user messages.
-_HINT_TEXT_MARKERS = ("AVA inbox ready:", "AVA control")
 type LeaseStatus = Literal["requested", "accepted", "active", "released", "rejected", "expired"]
+
+
+def _hint_prefixes(agent_id: int, lease_id: UUID) -> tuple[str, ...]:
+    """Exact agent+lease-scoped prefixes of every text this relay queues.
+
+    The invalidation pass matches only its own submissions by construction:
+    no other relay, and no real user message, carries this agent and lease.
+    """
+    scope = f"agent={agent_id} lease={lease_id}"
+    return (
+        f"AVA inbox ready: {scope}",
+        f"AVA control active: {scope}",
+        f"AVA control rejected: {scope}",
+        f"AVA control expired: {scope}",
+    )
 
 
 class _Lease(BaseModel):
@@ -93,7 +105,7 @@ def activation_hint(agent_id: int, lease_id: UUID, pending: frozenset[int]) -> s
     inbox = shlex.join([*prefix, "inbox", str(lease_id)])
     ack = shlex.join([*prefix, "ack", str(lease_id)])
     return (
-        f"AVA control active: agent={agent_id} "
+        f"AVA control active: agent={agent_id} lease={lease_id} "
         f"pending_page={len(pending)} newest_id={max(pending, default=0)}. "
         f"Read missing context as needed. Inbox: {inbox}. "
         f"After processing, explicitly ACK: {ack} ID...; drain pages until empty."
@@ -324,13 +336,16 @@ def _queue_rpc(
     raise TimeoutError(f"codex queue RPC {method} timed out")
 
 
-def _queued_hint_ids(process: subprocess.Popen[str], thread_id: UUID) -> list[str]:
+def _queued_hint_ids(
+    process: subprocess.Popen[str], thread_id: UUID, agent_id: int, lease_id: UUID
+) -> list[str]:
     """Ids of THIS relay's hint submissions still queued on the thread.
 
-    Identified by the hint text markers only — real user messages and other
-    threads' submissions are never touched. Read-only: the Codex store is
-    only accessed through the official queue RPCs.
+    Identified by the exact agent+lease-scoped hint prefixes only — real user
+    messages and other relays' submissions are never touched. Read-only: the
+    Codex store is only accessed through the official queue RPCs.
     """
+    prefixes = _hint_prefixes(agent_id, lease_id)
     ids: list[str] = []
     cursor: str | None = None
     ident = 1
@@ -349,25 +364,38 @@ def _queued_hint_ids(process: subprocess.Popen[str], thread_id: UUID) -> list[st
             raise TypeError("codex thread/queue/list returned no submission list")
         submissions = cast(list[dict[str, Any]], data)
         for submission in submissions:
-            raw_input = submission.get("input")
-            if not isinstance(raw_input, dict):
-                continue
-            input_spec = cast(dict[str, Any], raw_input)
-            items = input_spec.get("items")
-            if not isinstance(items, list):
-                continue
-            texts: list[str] = []
-            for item in cast(list[dict[str, Any]], items):
-                if item.get("type") == "text":
-                    texts.append(str(item.get("text", "")))
-            if any(text.startswith(_HINT_TEXT_MARKERS) for text in texts):
+            if any(text.startswith(prefixes) for text in _submission_texts(submission)):
                 ids.append(str(submission["id"]))
         cursor = result.get("nextCursor")
         if not cursor:
             return ids
 
 
-def invalidate_our_hints(thread_id: UUID) -> int:
+def _submission_texts(submission: dict[str, Any]) -> list[str]:
+    """Text blocks of one queued submission.
+
+    Real Codex (0.153.4) returns `input` as a list of content blocks; an older
+    shape carried it as a dict with an `items` list. Both are read; a block of
+    any other type is skipped.
+    """
+    raw_input = submission.get("input")
+    texts: list[str] = []
+    if isinstance(raw_input, list):
+        for block in cast(list[dict[str, Any]], raw_input):
+            if block.get("type") == "text":
+                texts.append(str(block.get("text", "")))
+        return texts
+    if isinstance(raw_input, dict):
+        input_spec = cast(dict[str, Any], raw_input)
+        items = input_spec.get("items")
+        if isinstance(items, list):
+            for item in cast(list[dict[str, Any]], items):
+                if item.get("type") == "text":
+                    texts.append(str(item.get("text", "")))
+    return texts
+
+
+def invalidate_our_hints(thread_id: UUID, agent_id: int, lease_id: UUID) -> int:
     """Best-effort removal of this relay's stale queued hints via the official
     Codex thread/queue RPCs (experimentalApi). Never touches Codex's private
     store. Returns the number of deleted submissions; failures log loudly and
@@ -396,7 +424,7 @@ def invalidate_our_hints(thread_id: UUID) -> int:
         if process.stdin is not None:
             process.stdin.write(json.dumps({"method": "initialized"}) + "\n")
             process.stdin.flush()
-        for queued_id in _queued_hint_ids(process, thread_id):
+        for queued_id in _queued_hint_ids(process, thread_id, agent_id, lease_id):
             _queue_rpc(
                 process,
                 1000 + deleted,
@@ -469,7 +497,9 @@ def cmd_relay(args: argparse.Namespace) -> int:
                 thread_id = UUID(args.thread_id)
 
                 async def invalidate_stale() -> None:
-                    await asyncio.to_thread(invalidate_our_hints, thread_id)
+                    await asyncio.to_thread(
+                        invalidate_our_hints, thread_id, args.agent_id, lease_id
+                    )
 
                 invalidate = invalidate_stale
 
