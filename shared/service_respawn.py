@@ -392,7 +392,7 @@ def run_keepalive(
         _unrevivable(
             EXIT_PORT_TAKEN,
             "[%s healthcheck] daemon NOT REVIVABLE by this unit (%s) — not respawning; "
-            "an operator must free the port or move this cluster's port block",
+            "resolve the reported ownership or inspection failure before retrying",
             result.detail,
         )
 
@@ -459,7 +459,7 @@ def run_keepalive(
         _unrevivable(
             EXIT_PORT_TAKEN,
             "[%s healthcheck] respawn cannot bind (%s) — not retrying; "
-            "an operator must free the port or move this cluster's port block",
+            "resolve the reported ownership or inspection failure before retrying",
             after.detail,
         )
     # The respawn did not come up: the next attempt is already scheduled above

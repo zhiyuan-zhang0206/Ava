@@ -148,15 +148,24 @@ def env_port_drift(home: Path, rec: ClusterRecord) -> list[str]:
 # consumers (Task #965).
 
 
-def listeners_on(port: int) -> list[int]:
-    """PIDs listening on `port` (any interface), best-effort.
+class ListenerDiscoveryError(RuntimeError):
+    """The socket table could not establish listener ownership."""
 
-    psutil is the primary scan and works on Linux/Windows. On macOS it raises
-    `AccessDenied` the moment ANY process's socket info is unreadable (a
-    root-owned or other-user process in the scan), so there we fall back to
-    `lsof -iTCP:<port> -sTCP:LISTEN`, which skips what it cannot read. An empty
-    result makes the caller treat the occupant as foreign — conservative: a
-    warning costs nothing, a hidden conflict costs a start."""
+
+def listeners_on(port: int) -> list[int]:
+    """Best-effort ownership lookup for preflight and orphan discovery."""
+    try:
+        return strict_listeners_on(port)
+    except ListenerDiscoveryError:
+        return []
+
+
+def strict_listeners_on(port: int) -> list[int]:
+    """Return listener PIDs, raising when discovery cannot establish absence.
+
+    macOS can deny the global psutil scan. Its lsof fallback must distinguish
+    no matches (exit 1, no diagnostics) from execution or inspection failure.
+    """
     import psutil
 
     try:
@@ -179,15 +188,18 @@ def listeners_on(port: int) -> list[int]:
 
     try:
         # S603: static argv; the only interpolated piece is an int port.
-        out = subprocess.run(  # noqa: S603
+        out = shared.proc.run_bounded(
             ["lsof", "-nP", "-Fp", "-sTCP:LISTEN", f"-iTCP:{port}"],
             capture_output=True,
             text=True,
             timeout=10,
-            check=False,
         )
-    except (OSError, subprocess.TimeoutExpired):
-        return []
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise ListenerDiscoveryError(f"listener discovery failed on port {port}: {exc}") from exc
+    if out.returncode not in (0, 1) or out.stderr.strip() or (out.returncode == 1 and out.stdout):
+        raise ListenerDiscoveryError(
+            f"listener discovery failed on port {port}: lsof exit {out.returncode}: {out.stderr.strip()}"
+        )
     pids = []
     for line in out.stdout.splitlines():
         if line.startswith("p"):

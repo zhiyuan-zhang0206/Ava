@@ -271,17 +271,7 @@ def gateway_otel_ingress_endpoint() -> str:
 
 
 def station_otel_ingress_endpoint() -> str:
-    """The remote observatory station's authenticated OTLP/HTTP ingress.
-
-    `http://<AVA_OBSERVABILITY_URL host>:<OTLP port>` — the one station
-    address a remote gateway collector relays to (WP4, task #1946). The
-    station side authenticates the sender with the cluster bearer
-    (bearertokenauth/cluster on its `otlp/remote` receiver, rendered by
-    `_remote_receiver_fragments`); the port follows
-    AVA_TELEMETRY_OTLP_PORT (single source, task #1945), so the relay target
-    and the station's advertised unit url (shared.machines.unit_dial_url)
-    can never drift apart.
-    """
+    """The selected station's ingress, independent of this unit's listen port."""
     from cli.commands._observatory_urls import _validated_observability_base
     from shared.config import settings
 
@@ -291,7 +281,9 @@ def station_otel_ingress_endpoint() -> str:
             "cannot build the remote-station OTLP relay without a valid "
             "AVA_OBSERVABILITY_URL (scheme://host, no port, no path)"
         )
-    return f"{base}:{_otlp_ingress_port()}"
+    from shared.station_endpoint import resolve_station_target
+
+    return resolve_station_target(base).url
 
 
 def _cluster_bearer() -> str:
@@ -424,7 +416,7 @@ def generate_config(repo: Path, ava_home: Path, roles: MachineRoles | None) -> s
     from shared.machine import machine_name
 
     obs = settings.observability
-    loki_base, prom_base = _lgtm_fanout_bases()
+    loki_base, prom_base = _lgtm_fanout_bases(remote=roles != frozenset({"agent-runner"}))
     data_plane_block, data_plane_pipeline = _data_plane_receivers(roles)
     substitutions = {
         "AVA_HOME": str(ava_home),
@@ -541,7 +533,7 @@ def _download_and_verify(tag: str, dest_dir: Path) -> None:
     (dest_dir / _VERSION_MARKER).write_text(OTELCOL_CONTRIB_VERSION + "\n", encoding="utf-8")
 
 
-def _lgtm_fanout_bases() -> tuple[str, str]:
+def _lgtm_fanout_bases(*, remote: bool = True) -> tuple[str, str]:
     """The gateway collector's LGTM fan-out base URLs (loki, prometheus).
 
     Two-state on AVA_OBSERVABILITY_URL (task #1791, A3): empty (default) keeps
@@ -555,11 +547,12 @@ def _lgtm_fanout_bases() -> tuple[str, str]:
 
     obs = settings.observability
     base = _validated_observability_base(obs.observability_url)
-    if base:
+    if base and remote:
         # Remote observatory: every signal enters the station through ONE
         # bearer-authenticated OTLP ingress (WP4) — the direct
         # /otlp fan-out to the station's loopback-bound backends is gone.
-        return f"{base}:{_otlp_ingress_port()}", f"{base}:{_otlp_ingress_port()}"
+        endpoint = station_otel_ingress_endpoint()
+        return endpoint, endpoint
     return (
         obs.telemetry_loki_url.rstrip("/") + "/otlp",
         obs.telemetry_prometheus_url.rstrip("/") + "/api/v1/otlp",

@@ -71,6 +71,7 @@ def test_resolve_target_uses_advertised_machine_units_url(monkeypatch: pytest.Mo
     """The probe target is the station's ADVERTISED machine_units url — the
     reachability contract — not the configured base."""
     monkeypatch.setattr(settings.observability, "observability_url", "http://10.0.0.9")
+    monkeypatch.setattr(settings.observability, "telemetry_otlp_port", 4319)
     _insert_station_unit()
     target = hc.resolve_target()
     assert target is not None
@@ -97,9 +98,14 @@ def test_resolve_target_skips_hybrid_gateway_station_units(
     """A hybrid gateway+station unit advertises its GATEWAY url (unit_dial_url
     lets the gateway capability win), not the OTLP ingress — probing it would
     hit the gateway API and alert forever (QA #1156 NIT-2). Only units whose
-    advertised url carries the OTLP ingress port qualify."""
+    capability set identifies an ingress advertisement qualify."""
     monkeypatch.setattr(settings.observability, "observability_url", "http://10.0.0.46")
-    _insert_station_unit(url="http://10.0.0.9:8000")  # gateway-form advertisement
+    _insert_station_unit(url="http://10.0.0.46:4318")
+    with shared.db.connect() as conn, conn.cursor() as cur:
+        cur.execute(
+            "UPDATE machine_units SET serve_gateway = true WHERE machine_name = 'station-test-a'"
+        )
+        conn.commit()
     target = hc.resolve_target()
     assert target is not None
     assert target.url == "http://10.0.0.46:4318"

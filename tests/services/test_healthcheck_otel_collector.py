@@ -182,11 +182,11 @@ def test_is_alive_ok(monkeypatch: pytest.MonkeyPatch) -> None:
     }
 
 
-def test_is_alive_probes_configured_otlp_endpoint(
+def test_is_alive_uses_local_port_despite_export_endpoint_override(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The liveness probe follows the settings OTLP endpoint, not a hardcoded URL
-    — and keeps any base path the endpoint carries."""
+    """Remote or stale producer export overrides cannot redirect local liveness."""
+    monkeypatch.setattr(hc.settings.observability, "telemetry_otlp_port", 4319)
     seen: list[str] = []
 
     class _Resp:
@@ -207,7 +207,7 @@ def test_is_alive_probes_configured_otlp_endpoint(
     )
     monkeypatch.setattr(urllib.request, "urlopen", _open)
     assert hc._is_alive() is True
-    assert seen == ["http://collector.example:4318/base/v1/traces"]
+    assert seen == ["http://127.0.0.1:4319/v1/traces"]
 
 
 def test_is_alive_connection_refused(monkeypatch: pytest.MonkeyPatch) -> None:

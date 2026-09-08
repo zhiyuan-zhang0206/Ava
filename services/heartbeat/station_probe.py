@@ -34,16 +34,14 @@ from __future__ import annotations
 import logging
 import urllib.error
 import urllib.request
-from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
-from urllib.parse import urlparse
-
-import psycopg
 
 import shared.db
 from shared.config import settings
 from shared.log import init_gateway_process, logger
+from shared.station_endpoint import StationTarget as _StationTarget
+from shared.station_endpoint import resolve_station_target
 from shared.transition import transition_severity
 
 _log = logging.getLogger("services.heartbeat.station_probe")
@@ -68,15 +66,6 @@ _ALERTNAME = "observatory station offline"
 _state: dict[str, Any] = {"failures": 0, "transition_since": None}
 
 
-@dataclass(frozen=True)
-class _StationTarget:
-    """The station's dial target: the advertised URL or the configured base."""
-
-    url: str
-    advertised: bool
-    name: str | None = None
-
-
 def _configured_observability_base() -> str:
     """The validated AVA_OBSERVABILITY_URL base, or "" when unset/malformed.
 
@@ -87,37 +76,6 @@ def _configured_observability_base() -> str:
     from cli.commands._observatory_urls import _validated_observability_base
 
     return _validated_observability_base(settings.observability.observability_url)
-
-
-def _advertised_station_unit(conn: psycopg.Connection) -> tuple[str, str] | None:
-    """The (machine_name, url) of a live observability-station unit that
-    advertises the OTLP ingress, or None.
-
-    The reachability contract: the address the station itself advertised at
-    registration (`shared.machines.unit_dial_url`). Read from machine_units
-    directly (not the composed machines row) because a co-located gateway
-    unit's URL wins the composed `machines.gateway_url` — the station's own
-    advertised address is what the probe must dial.
-
-    Only a unit whose advertised url carries the OTLP ingress port
-    (`AVA_TELEMETRY_OTLP_PORT`, single source) qualifies: a pure station
-    advertises exactly that, while a hybrid gateway+station unit advertises
-    its gateway URL (unit_dial_url lets the gateway capability win) — probing
-    that address would hit the gateway API and alert forever (QA #1156
-    NIT-2). No qualifying unit → None, and the caller falls back to the
-    configured observability base with a warning.
-    """
-    ingress_port = settings.observability.telemetry_otlp_port
-    with conn.cursor() as cur:
-        cur.execute(
-            "SELECT machine_name, url FROM machine_units "
-            "WHERE serve_observability_station AND stopped_at IS NULL "
-            "AND url IS NOT NULL ORDER BY machine_name, home"
-        )
-        for name, url in cur.fetchall():
-            if urlparse(str(url)).port == ingress_port:
-                return str(name), str(url)
-    return None
 
 
 def resolve_target() -> _StationTarget | None:
@@ -133,16 +91,14 @@ def resolve_target() -> _StationTarget | None:
     if not base:
         return None
     try:
-        with shared.db.connect() as conn:
-            advertised = _advertised_station_unit(conn)
+        target = resolve_station_target(base)
     except Exception:
         logger.bind(_no_emitter=True, component="station-healthcheck").exception(
             "station probe: cannot read the advertised station address — skipping this round (fail-open)"
         )
         return None
-    if advertised is not None:
-        name, url = advertised
-        return _StationTarget(url=url, advertised=True, name=name)
+    if target.advertised:
+        return target
     logger.bind(_no_emitter=True, component="station-healthcheck").warning(
         "station probe: AVA_OBSERVABILITY_URL is set but no observability-station "
         "unit advertises the OTLP ingress in machine_units (a pure station's "
@@ -151,9 +107,7 @@ def resolve_target() -> _StationTarget | None:
         "station registers (reachability contract, "
         "conventions/reachability-and-credentials.md)"
     )
-    return _StationTarget(
-        url=f"{base}:{settings.observability.telemetry_otlp_port}", advertised=False
-    )
+    return target
 
 
 def _station_answers(url: str) -> bool:

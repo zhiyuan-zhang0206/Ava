@@ -149,7 +149,9 @@ class ObservabilitySettings(EnvSettings):
             "(standard OTLP port, one sidecar per machine — task #1266; the "
             "default port follows `telemetry_otlp_port`). "
             "The live exporter appends /v1/logs + /v1/metrics and the trace "
-            "exporter appends /v1/traces. Always points at the local sidecar, "
+            "exporter appends /v1/traces. Explicit values override producer export "
+            "only; local collector health probes always use telemetry_otlp_port. "
+            "Normally points at the local sidecar, "
             "on every machine — agents never dial a backend directly; the "
             "gateway sidecar fans out to loopback backends while a pure runner "
             "sidecar relays to the gateway's authenticated OTLP receiver. "
@@ -420,6 +422,26 @@ class ObservabilitySettings(EnvSettings):
             ":5433) to this base. NOT used for the alert webhook target — that "
             "always points at this gateway's own reachable address (reachable_host), "
             "loopback 127.0.0.1 when the station is local."
+        ),
+        json_schema_extra={
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "host",
+            "remote_writable": False,
+        },
+    )
+
+    observability_otlp_port: int = Field(
+        default=_OTLP_INGRESS_PORT_DEFAULT,
+        ge=1,
+        le=65535,
+        alias="AVA_OBSERVABILITY_OTLP_PORT",
+        description=(
+            "Remote station OTLP ingress port when no pure station advertisement "
+            "exists (including hybrid gateway/station units). Must match the "
+            "station's AVA_TELEMETRY_OTLP_PORT; independent of this unit's local "
+            "collector port. A matching pure station advertisement is authoritative."
         ),
         json_schema_extra={
             "restart_required": "all",

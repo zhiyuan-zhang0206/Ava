@@ -10,7 +10,12 @@ tags:
 
 ## The rule
 
-A probe returns **alive or dead**. It never raises.
+A probe returns a verdict. It never raises. In addition to alive/down and
+foreign ownership, supervised native listeners can report **unavailable** when
+socket-table inspection fails. This is not proof of absence: status reports the
+inspection error and keepalive does not respawn until a later round establishes
+ownership. `shared.port_preflight.strict_listeners_on` preserves lsof timeouts,
+execution errors, and diagnostics for this decision.
 
 The watchdog isolates each check (`_run_check` catches `Exception`), so a raising probe does **not** take the round down — which is exactly why this was invisible for so long. What it does instead is worse in a quiet way: the service is never judged alive-or-dead, so **no restart is ever attempted**, while every 60s round writes a fresh multi-KB traceback.
 

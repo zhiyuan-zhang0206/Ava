@@ -42,3 +42,15 @@ publishes the read-only `AVA_GATEWAY_OTLP_ENDPOINT` derived from the gateway's
 reachable host and fresh OTLP port, overriding any stale copy of that derived
 field. Pure-runner collectors and trace replay consume it while retaining
 independent local listeners. The relay still requires the cluster bearer.
+
+Remote station ingress resolution lives in `shared/station_endpoint.py` and is
+shared by collector rendering and station health probing. Pure stations on the
+configured host supply their own ingress URL through `machine_units`; hybrid
+units advertise gateway/ops URLs and use the host-scoped
+`AVA_OBSERVABILITY_OTLP_PORT` projection (default 4318) instead. Local collector
+liveness always uses `telemetry_otlp_port` on loopback, while an explicit
+`telemetry_otlp_endpoint` remains a producer export override.
+
+Supervised listener probes use strict socket discovery. Failed inspection yields
+`DaemonProbe.unavailable`, which reports the failure and prevents automatic
+respawn for that round; it does not certify an absent or healthy listener.

@@ -1,6 +1,6 @@
 """OTel Collector sidecar healthcheck — called every 60s by the watchdog.
 
-Probes the sidecar's OTLP/HTTP receiver at the settings OTLP endpoint (default
+Probes the sidecar's local OTLP/HTTP receiver independently of export overrides (default
 http://127.0.0.1:4318 — the port follows AVA_TELEMETRY_OTLP_PORT, task #1945)
 with a valid empty ExportTraceServiceRequest and requires a 2xx. A socket that merely answers 401
 or 415 is not a working ingestion path. It also reads the collector's pinned
@@ -21,7 +21,6 @@ minute.
 
 import logging
 import re
-import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
@@ -86,11 +85,8 @@ def _labels(text: str) -> dict[str, str]:
 def _is_alive() -> bool:
     """A valid OTLP/JSON request accepted by the local pipeline = alive."""
     try:
-        req = urllib.request.Request(  # noqa: S310 — configured-endpoint probe, deliberate
-            urllib.parse.urljoin(
-                settings.observability.telemetry_otlp_endpoint.rstrip("/") + "/",
-                "v1/traces",
-            ),
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{settings.observability.telemetry_otlp_port}/v1/traces",
             method="POST",
             data=b'{"resourceSpans":[]}',
             headers={"Content-Type": "application/json"},
