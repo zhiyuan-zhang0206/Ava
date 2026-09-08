@@ -50,7 +50,11 @@ def _add_impersonation_parser(sub: argparse._SubParsersAction[argparse.ArgumentP
 
     group = sub.add_parser("impersonate", help="request and use an agent-approved external lease")
     commands = group.add_subparsers(dest="impersonation_cmd", required=True)
-    request = commands.add_parser("request", help="ask an agent to lend its identity")
+    request = commands.add_parser(
+        "request",
+        help="ask an agent to lend its identity",
+        description="Request identity authority; start and verify a host relay for inbox wake-up.",
+    )
     request.add_argument("--agent", dest="agent_id", required=True, type=int)
     request.add_argument(
         "--as", dest="caller", required=True, help="codex[:instance] or claude[:instance]"
