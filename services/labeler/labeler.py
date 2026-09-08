@@ -141,8 +141,9 @@ async def generate_label_async(agent_id: int, prompt: str, model: str) -> bool |
 
     Returns True when a label was written; False when generation failed
     (LLM error / empty result) — the caller records failure-backoff;
-    None when the write was skipped because a label already exists
-    (user-edited or raced — not an error).
+    None when the write was skipped because a non-empty label already
+    exists (user-edited or raced — not an error; an empty-string label is
+    treated as unset and replaced).
 
     Does not propagate exceptions from the LLM layer (audit round 2, P1:
     the daemon's backoff used to key on exceptions this function never
@@ -221,11 +222,18 @@ async def generate_label_async(agent_id: int, prompt: str, model: str) -> bool |
     # back to NULL), label_user_set sticky bit flips to true and the
     # WHERE here does not match. spawn defaults to label NULL +
     # label_user_set false; the LLM write matches that. Legacy
-    # 'agent-user' / 'thread-N' placeholder rows are non-NULL and also
+    # 'agent-user' / 'thread-N' placeholder rows are non-empty and also
     # do not match (no special migration needed for old rows).
+    #
+    # Empty string is treated as the same "unset" state as NULL: a stray ''
+    # (whatever wrote it) must be overwritable or the agent is wedged out of
+    # auto-labeling forever — the daemon poll matches the same predicate, so
+    # an '' row is re-selected and this CAS replaces it. This function never
+    # writes '' itself (the `if not label` guard above returns False first).
     with write_transaction() as conn, conn.cursor() as cur:
         cur.execute(
-            "UPDATE agents SET label=%s WHERE id=%s AND label IS NULL AND NOT label_user_set",
+            "UPDATE agents SET label=%s WHERE id=%s "
+            "AND (label IS NULL OR label = '') AND NOT label_user_set",
             (label, agent_id),
         )
         rowcount = cur.rowcount
