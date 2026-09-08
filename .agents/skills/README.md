@@ -4,15 +4,17 @@ This directory is the repo's project-skill root: skills written for Ava's own
 development, following the [open Agent Skills standard](https://agentskills.io)
 layout (each skill is a directory with its own `SKILL.md`).
 
-**Distribution: project-local only for the 11 real project-skill directories.**
+**Distribution: project-local only for the 12 real project-skill directories.**
 They are NOT a `converge` source (issue #146 /
 `decisions/2026-08-20-stop-fleet-distributing-kernel-contributor-skills.md`).
 An Ava agent sees them only through the project-local mount —
 `ava_builtins/plugins/ava_code/_walk.py:project_skill_roots` resolves this
 directory from `ava.cwd` at scan time — so they load exactly when the agent is
 working inside this checkout, never on a machine that only runs Ava. This
-project-local family covers repo-development workflow and Ava-cluster-operations
-skills (`ship-a-change`, `write-a-pr-description`, `ava-self-development`, …).
+project-local family covers repo-development workflow, Ava-cluster-operations
+skills (`ship-a-change`, `write-a-pr-description`, `ava-self-development`, …), and the
+platform's external-host guide (`impersonator-guide`, for agents acting under an
+impersonation lease).
 General methodology and user-service skills are built-ins instead, then appear
 here through mirrors for open-standard clients.
 
@@ -27,5 +29,5 @@ directory as a plain filesystem then see files instead of skills — treat the
 symlink entries as mirrors, not separate copies. (Ava's load dir is unaffected
 either way: built-ins converge from `ava_builtins/skills/` directly.)
 
-The 11 directories that are **not** symlinks are real project skills authored
+The 12 directories that are **not** symlinks are real project skills authored
 here (one dir = one skill; edit them in place).
