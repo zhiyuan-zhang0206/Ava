@@ -69,6 +69,7 @@ _REPO_MODEL_VENDORS = {
     "deepseek-v4-flash": "deepseek",
     "deepseek-v4-flash-vision-exp": "deepseek",
     "deepseek-v4-pro": "deepseek",
+    "deepseek-v4.1-flash-expires-on-0910": "deepseek",
     "gemini-2.5-flash": "google",
     "gemini-2.5-pro": "google",
     "gemini-3.1-pro-preview": "google",
@@ -293,7 +294,7 @@ def test_zero_provider_plugins_fail_loud_and_remain_retryable(
 def test_repo_model_vendor_vocabulary_is_complete() -> None:
     ensure_provider_plugins_loaded()
 
-    assert len(_REPO_MODEL_VENDORS) == 34
+    assert len(_REPO_MODEL_VENDORS) == 35
     assert set(MODELS) == _REPO_MODEL_VENDORS.keys()
     assert set(pricing._CATALOG) == {"gemini-embedding-2"}
     assert {
@@ -338,6 +339,7 @@ def test_repo_deepseek_provider_is_enabled_and_registers_complete_contract() -> 
         "deepseek-v4-pro",
         "deepseek-v4-flash",
         "deepseek-v4-flash-vision-exp",
+        "deepseek-v4.1-flash-expires-on-0910",
     }
     assert deepseek_models <= MODELS.keys()
     assert set(SUPPORTED_MODELS["deepseek"]) == deepseek_models
