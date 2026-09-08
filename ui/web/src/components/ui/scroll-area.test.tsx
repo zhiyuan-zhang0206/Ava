@@ -183,6 +183,48 @@ describe("ScrollArea", () => {
     expect(scrollbar.getAttribute("data-visible")).toBe("false");
   });
 
+  it("repositions the thumb on EVERY viewport scroll event, mid-gesture", () => {
+    // Regression (2026-09-08 user report): the thumb froze for the whole
+    // scroll gesture and only jumped at the next discrete event, because the
+    // position update depended on Radix's internal rAF polling loop (absent
+    // from the deployed bundle). ScrollArea now positions the thumb from the
+    // viewport's own scroll events, so a second event inside the same gesture
+    // must move the thumb again.
+    vi.useFakeTimers();
+    const flushResizeObservers = mockScrollableGeometry();
+    renderScrollArea();
+
+    const viewport = document.querySelector('[data-slot="scroll-area-viewport"]');
+    const track = document.querySelector('[data-slot="scroll-area-scrollbar"]');
+    expect(viewport).toBeInstanceOf(HTMLElement);
+    expect(track).toBeInstanceOf(HTMLElement);
+
+    // Element-level metrics (set BEFORE the resize flush so Radix's own size
+    // measurement agrees with ours): content 400 over a 100px viewport on a
+    // 100px track. Radix derives a 25px thumb (100 * 100/400); mirror that in
+    // the thumb's own offsetHeight below so every writer computes the same
+    // travel (100 - 25 = 75) and the same translate.
+    Object.defineProperty(viewport, "scrollHeight", { configurable: true, value: 400 });
+    Object.defineProperty(viewport, "clientHeight", { configurable: true, value: 100 });
+    Object.defineProperty(viewport, "scrollTop", { configurable: true, writable: true, value: 0 });
+    Object.defineProperty(track, "clientHeight", { configurable: true, value: 100 });
+    flushResizeObservers();
+
+    const thumb = document.querySelector('[data-slot="scroll-area-thumb"]');
+    expect(thumb).toBeInstanceOf(HTMLElement);
+    Object.defineProperty(thumb, "offsetHeight", { configurable: true, value: 25 });
+
+    viewport!.scrollTop = 100;
+    fireEvent.scroll(viewport as HTMLElement);
+    expect((thumb as HTMLElement).style.transform).toBe("translate3d(0, 25px, 0)");
+
+    // A second scroll event in the same gesture (no idle gap) must move the
+    // thumb again — the case that froze without the direct scroll listener.
+    viewport!.scrollTop = 200;
+    fireEvent.scroll(viewport as HTMLElement);
+    expect((thumb as HTMLElement).style.transform).toBe("translate3d(0, 50px, 0)");
+  });
+
   it("keeps the scrollbar visible for a pointer drag until the release idle window", () => {
     vi.useFakeTimers();
     renderScrollArea();
