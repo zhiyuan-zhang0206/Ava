@@ -333,6 +333,8 @@ def test_payload_keys_are_the_declared_attribute_contract() -> None:
         "task_id",
         "usage_kind",
         "source",
+        "cache_mechanism",
+        "cache_scope",
     )
     assert payload_keys("sse_drop") == ("kind", "n")
     assert payload_keys("spawn") == ("machine", "fork_from", "fork_checkpoint")

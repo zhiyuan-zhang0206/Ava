@@ -318,6 +318,9 @@ async def _stream_with_cache_retry(
     async def _run() -> None:
         call_started = time.monotonic()
         invocation = await prepare_invocation(llm, messages)
+        # Cache provenance for the usage event: only the attempt that actually
+        # succeeded counts (a stale-cache retry runs on the plain path).
+        handler.used_explicit_cache = invocation.cache_ref is not None
         try:
             first_ts, last_ts = await _consume_llm(
                 invocation.runnable,  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
@@ -350,6 +353,7 @@ async def _stream_with_cache_retry(
             # Reset to a fresh-stream state; msg_idx / agent_id survive by design.
             handler.reset()
             plain = await prepare_invocation(llm, messages)
+            handler.used_explicit_cache = plain.cache_ref is not None  # plain path: always False
             first_ts, last_ts = await _consume_llm(
                 plain.runnable,  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
                 plain.messages,

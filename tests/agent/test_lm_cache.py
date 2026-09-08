@@ -132,8 +132,11 @@ class TestAinvokeWithCacheRetry:
             "get_or_create_cache",
             lambda *_a, **_k: _async_return(_ref()),  # pyright: ignore[reportUnknownArgumentType]
         )
-        response = await ainvoke_with_cache_retry(cast(BaseChatModel, llm), [_SYSTEM, *_CONVO])
+        response, used_cache = await ainvoke_with_cache_retry(
+            cast(BaseChatModel, llm), [_SYSTEM, *_CONVO]
+        )
         assert response.content == "done"  # pyright: ignore[reportUnknownMemberType]
+        assert used_cache is True  # cache-bound attempt succeeded
         assert len(llm.runnable.calls) == 1  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
 
     async def test_stale_cache_retries_plain_once(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -159,8 +162,11 @@ class TestAinvokeWithCacheRetry:
             lambda *_a, **_k: _async_return(None if invalidated else _ref()),  # pyright: ignore[reportUnknownArgumentType]
         )
         monkeypatch.setattr(gemini_cache, "invalidate", lambda ref: invalidated.append(ref.name))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
-        response = await ainvoke_with_cache_retry(cast(BaseChatModel, llm), [_SYSTEM, *_CONVO])
+        response, used_cache = await ainvoke_with_cache_retry(
+            cast(BaseChatModel, llm), [_SYSTEM, *_CONVO]
+        )
         assert response.content == "done"  # pyright: ignore[reportUnknownMemberType]
+        assert used_cache is False  # stale-cache retry landed on the plain path
         assert invalidated == ["cachedContents/t1"]
         # first call stripped (cache path), retry full (plain path)
         assert llm.runnable.calls[0] == _CONVO  # pyright: ignore[reportUnknownMemberType]
@@ -234,5 +240,8 @@ class TestInvokeTimeout:
 
         monkeypatch.setattr(_settings.lm, "llm_compact_timeout_seconds", 60.0)
         llm = _StubLLM()
-        out = await ainvoke_with_cache_retry(cast(BaseChatModel, llm), [_SYSTEM, *_CONVO])
+        out, used_cache = await ainvoke_with_cache_retry(
+            cast(BaseChatModel, llm), [_SYSTEM, *_CONVO]
+        )
         assert out.content == "done"  # pyright: ignore[reportUnknownMemberType]
+        assert used_cache is False  # plain path (no cache memo)

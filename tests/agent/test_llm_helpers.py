@@ -52,9 +52,11 @@ def _fixed_task_usage_tally(
     decode_ms: float | None = None,
     priced_at: datetime | None = None,
     task_id: int | None = None,
+    cache_mechanism: str | None = None,
+    cache_scope: str | None = None,
 ) -> tuple[int, float]:
     """Stable usage tally for task-metering wiring tests."""
-    del model, latency_ms, decode_ms, priced_at, task_id
+    del model, latency_ms, decode_ms, priced_at, task_id, cache_mechanism, cache_scope
     return 15, 0.25
 
 

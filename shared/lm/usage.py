@@ -9,6 +9,15 @@ from langchain_core.messages import AIMessage
 
 from shared.log import logger
 
+# Cache provenance labels for the llm_usage event (task #2660). How much of a
+# provider's cache_read field covers depends on the provider + request shape:
+# Gemini with an explicit cachedContent attached reports ONLY the explicit
+# block (system+tools) — implicit hits on the conversation tail are billed but
+# not reported; Gemini implicit-only and DeepSeek's Anthropic endpoint report
+# the full prefix. The labels keep cross-provider comparisons honest.
+CACHE_MECHANISM_MIXED = "mixed"
+CACHE_SCOPE_EXPLICIT_BLOCK = "explicit_block"
+
 
 def log_usage_from_message(
     msg: AIMessage,
@@ -21,6 +30,8 @@ def log_usage_from_message(
     usage_kind: str = "agent",
     source: str | None = None,
     for_agent_id: int | None = None,
+    cache_mechanism: str | None = None,
+    cache_scope: str | None = None,
 ) -> tuple[int, float] | None:
     """Log one completed LangChain message's token usage and price snapshot."""
     from shared.lm.pricing import tally_tokens
@@ -56,6 +67,8 @@ def log_usage_from_message(
         usage_kind=usage_kind,
         source=source,
         for_agent_id=for_agent_id,
+        cache_mechanism=cache_mechanism,
+        cache_scope=cache_scope,
         emit_billing="input_tokens" in usage_metadata and "output_tokens" in usage_metadata,
     )
 
@@ -70,6 +83,8 @@ def log_usage_fields(
     latency_ms: float | None = None,
     usage_kind: str,
     for_agent_id: int | None = None,
+    cache_mechanism: str | None = None,
+    cache_scope: str | None = None,
 ) -> tuple[int, float]:
     """Log raw provider token counts when no LangChain message exists."""
     return _log_usage(
@@ -81,6 +96,8 @@ def log_usage_fields(
         latency_ms=latency_ms,
         usage_kind=usage_kind,
         for_agent_id=for_agent_id,
+        cache_mechanism=cache_mechanism,
+        cache_scope=cache_scope,
     )
 
 
@@ -98,6 +115,8 @@ def _log_usage(
     task_id: int | None = None,
     source: str | None = None,
     for_agent_id: int | None = None,
+    cache_mechanism: str | None = None,
+    cache_scope: str | None = None,
     emit_billing: bool = True,
 ) -> tuple[int, float]:
     """Emit one priced or explicitly unpriced usage event and billing span."""
@@ -156,6 +175,11 @@ def _log_usage(
         usage_kind=usage_kind,
         **({"task_id": task_id} if task_id is not None else {}),
         **({"source": source, "transport_source": "system"} if source is not None else {}),
+        **(
+            {"cache_mechanism": cache_mechanism, "cache_scope": cache_scope}
+            if cache_mechanism is not None
+            else {}
+        ),
         **snapshot,
     )
     return in_total + out_total, priced.cost_usd if priced is not None else 0.0
