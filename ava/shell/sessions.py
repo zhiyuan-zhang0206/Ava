@@ -515,7 +515,11 @@ def _apply_renewal(agent_id: int, session_id: int, ttl: float, prev_expires: dat
 
 
 def list() -> dict[int, str | None]:
-    """Your sessions: id -> display name (None for unnamed)."""
+    """Your sessions: id -> display name (None for unnamed).
+
+    Entries named `page-<name>` are live page servers for pages this agent
+    opened via `ava.ui.serve`, not leftovers; see `ava.ui` for their lifecycle.
+    """
     prefix = _shell_prefix()
     out: dict[int, str | None] = {}
     for full in _own_sessions():

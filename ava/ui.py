@@ -1,7 +1,8 @@
 """Show the user a rich web page your HTTP server serves.
 
-A page is declared with the platform, whose page-server daemon runs the
-server inside a persistent shell session owned by this agent.
+A page is declared with the platform, which can run its server inside one
+of this agent's own persistent shell sessions. Such a session appears under
+the page's name in your session list; an open page normally occupies one entry.
 You can have at most one open page at a time — opening a new one
 auto-closes the old one.
 
@@ -164,7 +165,9 @@ def show(
 
     Declares the page with the platform so the platform routes your
     server's URL — you started that server yourself; the platform's page
-    supervisor does not manage it.
+    supervisor does not manage it. No page-server session is created for you;
+    only the page registration is managed by the platform, and expiry
+    unregisters the page without stopping your server.
 
     Args:
         name: `^[a-zA-Z0-9_-]+$`, 1-64 chars.
@@ -193,6 +196,13 @@ def serve(
     ttl: float | None = None,
 ) -> Page:
     """Start an HTTP server for `dir` and show it to the user, in one call.
+
+    The platform starts the HTTP server in a persistent shell session for
+    this agent. It appears in `ava.shell.sessions.list()` as `page-<name>`
+    (lowercased, with underscores replaced by hyphens), normally occupying
+    one entry while the page is open. End the page with `close()` or TTL
+    expiry; killing the session only interrupts the server, which the
+    platform restarts, and does not close the page.
 
     Calling again auto-closes any existing page.
     A directory without `index.html` is not browsable: requests show a
@@ -257,7 +267,12 @@ def _close_existing() -> None:
 
 
 def close(name: str) -> None:
-    """Unregister the page (the platform stops its server)."""
+    """Unregister the page.
+
+    For a `serve()` page, the platform also stops its server and ends its
+    persistent shell session, removing the `page-<name>` session-list entry.
+    For a `show()` page, only the registration ends; your server keeps running.
+    """
     name = coerce_str(name, "name")
     _validate_name(name)
 
