@@ -1,4 +1,4 @@
-"""Push durable AVA inbox hints into an existing external agent session.
+"""Push durable Ava inbox hints into an existing external agent session.
 
 Redis is the wake signal; the database owns pending messages. This process runs
 under the lease's scoped relay credential (read inbox + heartbeat only), keeps
@@ -51,10 +51,10 @@ def _hint_prefixes(agent_id: int, lease_id: UUID) -> tuple[str, ...]:
     """
     scope = f"agent={agent_id} lease={lease_id}"
     return (
-        f"AVA inbox ready: {scope}",
-        f"AVA control active: {scope}",
-        f"AVA control rejected: {scope}",
-        f"AVA control expired: {scope}",
+        f"Ava inbox ready: {scope}",
+        f"Ava control active: {scope}",
+        f"Ava control rejected: {scope}",
+        f"Ava control expired: {scope}",
     )
 
 
@@ -101,7 +101,7 @@ def inbox_hint(agent_id: int, lease_id: UUID, pending: frozenset[int]) -> str:
     # worktree cluster. Keep the receiving agent on this exact interpreter.
     command = shlex.join([sys.executable, "-m", "cli", "impersonate", "inbox", str(lease_id)])
     return (
-        f"AVA inbox ready: agent={agent_id} lease={lease_id} "
+        f"Ava inbox ready: agent={agent_id} lease={lease_id} "
         f"pending_page={len(pending)} newest_id={max(pending, default=0)}. "
         f"Run {command}; "
         "process and explicitly ACK message IDs, draining pages until empty. "
@@ -114,7 +114,7 @@ def activation_hint(agent_id: int, lease_id: UUID, pending: frozenset[int]) -> s
     inbox = shlex.join([*prefix, "inbox", str(lease_id)])
     ack = shlex.join([*prefix, "ack", str(lease_id)])
     return (
-        f"AVA control active: agent={agent_id} lease={lease_id} "
+        f"Ava control active: agent={agent_id} lease={lease_id} "
         f"pending_page={len(pending)} newest_id={max(pending, default=0)}. "
         f"Read missing context as needed. Inbox: {inbox}. "
         f"After processing, explicitly ACK: {ack} ID...; drain pages until empty."
@@ -128,7 +128,7 @@ def _ended(
         return False
     if snapshot.status != "released":
         emit(
-            f"AVA control {snapshot.status}: agent={agent_id} lease={lease_id}. "
+            f"Ava control {snapshot.status}: agent={agent_id} lease={lease_id}. "
             "Do not use this identity. The native agent can continue its workflow. "
             "The relay did not ACK messages or renew the lease."
         )

@@ -1114,7 +1114,7 @@ class TestSpawnSessionsResolveAvaFromVenv:
         fake_bin = fake_repo / ".venv" / "bin"
         fake_bin.mkdir(parents=True)
         stub = fake_bin / "ava"
-        stub.write_text('#!/bin/sh\necho "STUB-AVA $*"\n')
+        stub.write_text('#!/bin/sh\necho "STUB-Ava $*"\n')
         stub.chmod(0o755)
         monkeypatch.setattr(runtime_interpreter_mod, "runtime_venv", lambda: fake_repo / ".venv")
         monkeypatch.setattr("shared.paths.ava_home", lambda: tmp_path)
@@ -1133,7 +1133,7 @@ class TestSpawnSessionsResolveAvaFromVenv:
             check=False,
             timeout=30,
         )
-        assert "STUB-AVA cluster update --local --origin cli:regression" in run.stdout, run.stdout
+        assert "STUB-Ava cluster update --local --origin cli:regression" in run.stdout, run.stdout
         assert "not found" not in run.stdout
         assert "[session-exit] rc=0" in run.stdout
 

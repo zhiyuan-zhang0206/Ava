@@ -39,7 +39,7 @@ def _home(path: Path, selected: Path | None) -> Path:
 def _probe(
     home: Path, system_bin: Path, *, inherited: str = "", entry: str = "boot"
 ) -> dict[str, Any]:
-    # Explicitly isolated config; no AVA imports in this child can dial production.
+    # Explicitly isolated config; no Ava imports in this child can dial production.
     env = {
         "HOME": str(home.parent),
         "PATH": str(system_bin),
