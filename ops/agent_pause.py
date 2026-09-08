@@ -74,7 +74,11 @@ def _drain(holder: str, at: datetime, timeout: float) -> None:
                 "preparation is incomplete; repeat prepare or explicitly resume --cancel"
             )
         if hold.failures:
-            raise RuntimeError(f"continuations failed; hold retained: {sorted(hold.failures)}")
+            raise RuntimeError(
+                f"continuations failed; hold retained: {sorted(hold.failures)} — "
+                "fix the root cause, then ava maintenance repair --operation "
+                f"{holder} --acquired-at {at.isoformat()}"
+            )
         if set(hold.drained) == set(hold.commands):
             with connect() as conn:
                 maintenance_cohort.verify_drained(conn, hold)
@@ -123,11 +127,13 @@ def resume_agents() -> None:
     if current is None:
         return
     assert current.maintenance is not None  # noqa: S101
+    assert current.holder is not None and current.acquired_at is not None  # noqa: S101
     if current.maintenance.failures:
         raise RuntimeError(
-            "cannot resume failed continuation/flush receipts; repair the failure first"
+            "cannot resume failed continuation/flush receipts; fix the root cause, "
+            "then ava maintenance repair --operation "
+            f"{current.holder} --acquired-at {current.acquired_at.isoformat()}"
         )
-    assert current.holder is not None and current.acquired_at is not None  # noqa: S101
     pause_owner.change_maintenance(
         current.holder, current.acquired_at, current.maintenance, current.maintenance, resumed=True
     )

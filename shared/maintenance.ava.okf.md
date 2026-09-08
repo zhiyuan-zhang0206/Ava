@@ -51,15 +51,32 @@ lifecycle controls flush any prior buffered checkpoint before claiming their
 restart, without invoking the graph or consuming ordinary messages;
 `applied_at`, an idle row, or a released lease alone is insufficient.
 
+Failure receipts are graded at record time by the turn exception. The
+database-outage family (`psycopg.OperationalError`, `PoolTimeout`,
+`TimeoutError`) is crash-equivalent: the continuation outcome is unknown but
+durable, exactly as after a host crash. Those receipts land in `undelivered`,
+never in `failures`: recorded for audit, they never block. They are re-driven
+through the held-control path — the wake scan keeps the agent woken (no
+failure fence), the held controls explicitly re-flush the buffered checkpoint
+BEFORE claiming the restart, and the certification SQL still requires the
+applied restart, so a drain never certifies through an un-flushed tail. Every
+other exception latches into `failures` and blocks as before.
+
 Phases are `preparing → draining → drained → stopping → stopped → starting →
 ready`. Failed prepare/drain/stop/start keeps the hold. Ordinary `ava start`
 authorizes the existing operation for bring-up and resumes after readiness;
 explicit `ava maintenance start` leaves resume to the operator. The internal
 `authorized_start` ContextVar is exact-operation authority for nested calls,
 not a service-process credential. Stranded-pause recovery cannot abandon a
-maintenance hold. A recorded continuation/flush failure blocks ordinary start
-and every resume path before admission is released. Resume wakes the saved restart IDs; DB pointers survive a
-lost Redis wake. Cold admission reloads checkpoints, leaves idle agents idle,
+maintenance hold. A recorded blocking continuation/flush failure blocks ordinary start
+and every resume path before admission is released; the sanctioned exit is
+`ava maintenance repair --operation <holder> --acquired-at <timestamp>` after
+the root cause is fixed. Repair requires the exact generation, refuses while
+the agent-host has active continuations, and moves the cleared `failures`
+verbatim into `repaired` with an operator-identity `repair_record` — both CAS
+sides stay visible in the journal tombstone via `ava maintenance status`.
+Undelivered receipts are never cleared by repair; they never block. Resume
+wakes the saved restart IDs; DB pointers survive a lost Redis wake. Cold admission reloads checkpoints, leaves idle agents idle,
 continues unfinished work and does not revive terminated identities.
 Repeating `stop` after a completed, failure-free stop reads this same journal
 before configuration bootstrap, so an offline gateway does not prevent the

@@ -124,6 +124,76 @@ def record_drained(agent_id: int, command_id: int, *, failure: str | None = None
             return
 
 
+def record_undelivered(agent_id: int, category: str) -> None:
+    """Record a crash-equivalent receipt without latching a blocking failure.
+
+    The turn raised a database-outage exception, so its continuation outcome is
+    unknown but durable: the restart pointer survives exactly as after a host
+    crash. This receipt is kept in the journal for audit only — it never blocks
+    resume, and the host re-drives the held-control path (explicit re-flush
+    before the restart claim) on the next wake, so the drain still certifies
+    only through a genuinely completed continuation.
+    """
+    while True:
+        current = snapshot()
+        if current is None or current.maintenance is None:
+            return
+        hold = current.maintenance
+        if agent_id in hold.undelivered:
+            return
+        updated = replace(hold, undelivered={**hold.undelivered, agent_id: category})
+        assert current.holder is not None and current.acquired_at is not None  # noqa: S101
+        try:
+            pause_owner.change_maintenance(
+                current.holder,
+                current.acquired_at,
+                hold,
+                updated,
+            )
+        except RuntimeError:
+            newer = snapshot()
+            if newer is None or not newer.matches(current.holder, current.acquired_at):
+                raise
+            if newer.maintenance == hold:
+                raise
+        else:
+            return
+
+
+def repair(
+    holder: str, acquired_at: datetime, record: dict[str, str]
+) -> pause_owner.PauseOwnerSnapshot:
+    """Sanctioned release of latched blocking failures, audited in the journal.
+
+    The operator fixed the root cause; this moves `failures` verbatim into
+    `repaired` (the CAS "before" side) together with the operator-identity
+    `record`, leaving the hold resumable through the ordinary release path.
+    Undelivered receipts are never cleared — they never block. The caller is
+    responsible for the host-quiescence and reachability proofs.
+    """
+    from shared.maintenance_state import validate_repair_record
+
+    validated = validate_repair_record(record)
+    current = require_operation(holder, acquired_at)
+    assert current.maintenance is not None  # noqa: S101
+    hold = current.maintenance
+    if not hold.failures:
+        raise RuntimeError(
+            "no failed receipts to repair; resume --cancel abandons a failure-free drain"
+        )
+    if hold.phase not in ("preparing", "draining"):
+        raise RuntimeError(
+            "repair cannot bypass a started stop; complete maintenance stop/start/resume"
+        )
+    updated = replace(
+        hold,
+        failures={},
+        repaired={**hold.repaired, **hold.failures},
+        repair_record=validated,
+    )
+    return pause_owner.change_maintenance(holder, acquired_at, hold, updated)
+
+
 def set_phase(holder: str, acquired_at: datetime, phase: str) -> pause_owner.PauseOwnerSnapshot:
     current = require_operation(holder, acquired_at)
     assert current.maintenance is not None  # noqa: S101
@@ -146,4 +216,6 @@ def set_phase(holder: str, acquired_at: datetime, phase: str) -> pause_owner.Pau
 def record_failure(agent_id: int, category: str) -> None:
     # A failure can occur between hold publication and cohort capture. Keep
     # that evidence too; preparation must not bless a now-idle broken runtime.
+    # Callers grade database-outage exceptions into `record_undelivered`
+    # instead: those are crash-equivalent and must not block resume.
     record_drained(agent_id, 0, failure=category)

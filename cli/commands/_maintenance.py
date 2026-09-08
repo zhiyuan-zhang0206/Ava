@@ -6,8 +6,11 @@ a backup, and proves only this home's declared services and owned descendants.
 """
 
 import argparse
+import getpass
 import json
-from datetime import datetime
+import os
+import sys
+from datetime import UTC, datetime
 
 from cli.commands._maintenance_probe import host_identity, ops_quiescent
 from cli.commands._maintenance_stop import (
@@ -23,7 +26,7 @@ from ops.agent_pause import _drain, _hold, _prepare
 from shared import maintenance, maintenance_cohort, pause_owner, start_serving
 from shared.db import connect
 from shared.exit_codes import SERVICES_NOT_READY_EXIT_CODE
-from shared.machine import machine_role
+from shared.machine import machine_name, machine_role
 
 
 def _gateway_last(*, confirmed: bool) -> None:
@@ -100,6 +103,84 @@ def _resume(holder: str, at: datetime, *, cancel: bool) -> None:
 
 
 @exclusive_resources
+def _repair(holder: str, at: datetime, *, operator: str | None) -> None:
+    """Sanctioned release of latched blocking failure receipts.
+
+    The exact (holder, acquired_at) capability plus the operator-identity audit
+    record is the sanction; the journal tombstone keeps both sides of the CAS
+    (`failures` moved verbatim into `repaired`) visible via
+    `ava maintenance status`. Refuses while the agent-host still has active
+    continuations, so no live receipt can be cleared from under a running turn.
+    """
+    from ops.cluster_pause import unpause_local_cluster
+
+    hold = _hold(holder, at)
+    if not hold.failures:
+        raise RuntimeError(
+            "no failed receipts to repair; resume --cancel abandons a failure-free drain"
+        )
+    if hold.phase not in ("preparing", "draining"):
+        raise RuntimeError(
+            "repair cannot bypass a started stop; complete maintenance stop/start/resume"
+        )
+    if "agent-runner" in machine_role():
+        identity = host_identity()
+        if identity.active:
+            raise RuntimeError(
+                "agent-host still has active continuations; wait for quiescence "
+                "before repairing failed receipts"
+            )
+    with connect() as conn:
+        conn.execute("SELECT 1")
+    record = _repair_record(operator)
+    maintenance.repair(holder, at, record)
+    # Preserve the hold if dependency/posture restoration fails. The repaired
+    # journal stays; a partial release is completed by resume --cancel.
+    with maintenance.authorized_start(holder, at):
+        unpause_local_cluster()
+    print(
+        f"Repaired {len(hold.failures)} failed receipt(s) "
+        f"({sorted(hold.failures)}); hold released. "
+        f"Operator: {record['by']} at {record['at']}",
+        file=sys.stderr,
+    )
+
+
+def _repair_record(operator: str | None) -> dict[str, str]:
+    """Operator-identity facts for a sanctioned repair.
+
+    The `by` label is explicit when an agent names itself via --operator and
+    falls back to the OS login identity; the uid/pid/parent facts are captured
+    from the process itself, so a repair is always attributable to the process
+    chain that invoked it.
+    """
+    now = datetime.now(UTC).isoformat()
+    return {
+        "at": now,
+        "by": operator if operator else f"{getpass.getuser()} (local operator)",
+        "user": getpass.getuser(),
+        "uid": str(getattr(os, "getuid", lambda: 0)()),
+        "pid": str(os.getpid()),
+        "parent": _parent_process_identity(),
+        "machine": machine_name(),
+    }
+
+
+def _parent_process_identity() -> str:
+    """The immediate parent's pid + command line, truncated for the journal."""
+    import psutil
+
+    try:
+        parent = psutil.Process().parent()
+    except psutil.Error:
+        return "unknown"
+    if parent is None:
+        return "unknown (reparented)"
+    cmdline = " ".join(parent.cmdline() or [])
+    return f"pid={parent.pid} {cmdline[:180]}"
+
+
+@exclusive_resources
 def _stop_data(
     holder: str, at: datetime, timeout: float, *, gateway_last: bool, keep_terminals: bool = False
 ) -> None:
@@ -152,6 +233,8 @@ def run(args: argparse.Namespace) -> int:
         return _start(args.operation, at)
     elif verb == "resume":
         _resume(args.operation, at, cancel=args.cancel)
+    elif verb == "repair":
+        _repair(args.operation, at, operator=args.operator)
     elif verb == "stop-data-plane":
         _stop_data(
             args.operation,

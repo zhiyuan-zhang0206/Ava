@@ -134,3 +134,22 @@ explicit `maintenance resume`; ordinary `ava start` can instead complete the
 same recovery and resume after its readiness gate. `resume --cancel` is for
 abandoning preparation/drain while services are usable, not for bypassing a
 partial stop or a failed startup.
+
+A drain aborted by failed receipts keeps the hold, and `resume --cancel`
+refuses while blocked failures remain. Receipts whose turn raised a
+database-outage exception (`psycopg.OperationalError`, `PoolTimeout`,
+`TimeoutError` — the crash-equivalent family) do not block: they are recorded
+as undelivered, and after the channel recovers the host re-drives the
+held-control path (explicit re-flush, then restart claim) before the drain can
+certify. For genuinely blocking failures, fix the root cause first, then run
+the sanctioned repair:
+
+```
+ava maintenance repair --operation <operation> --acquired-at <timestamp> [--operator "Ava #1234"]
+```
+
+Repair requires the exact generation capability, refuses while the agent-host
+still has active continuations, and records operator identity (timestamp,
+operator label, OS user/uid/pid, parent process, machine) in the journal —
+both sides of the repair CAS stay visible via `ava maintenance status`. A
+partial release after a successful repair is completed by `resume --cancel`.
