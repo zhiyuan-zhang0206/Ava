@@ -39,3 +39,4 @@ class InboundKind(StrEnum):
     RESURRECT = "resurrect"
     FORK = "fork"
     HEARTBEAT = "heartbeat"
+    REMINDER = "reminder"
