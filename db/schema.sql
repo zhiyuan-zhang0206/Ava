@@ -690,7 +690,7 @@ CREATE TABLE agent_shell_ttls (
 
 CREATE INDEX agent_shell_ttls_expiry_idx ON agent_shell_ttls (expires_at);
 
-COMMENT ON TABLE agent_shell_ttls IS 'Persistent shell sessions whose agent declared a TTL at creation (ava.shell.sessions.new/run_background ttl=). The owning agent may extend the deadline explicitly via ava.shell.sessions.renew before it passes (audit trail: agent_shell_ttl_renewals). Reaped by the gateway TTL reaper; rows are removed when reaped or when the session dies (the reaper self-cleans).';
+COMMENT ON TABLE agent_shell_ttls IS 'Persistent shell sessions whose agent declared a TTL at creation (ava.shell.sessions.new/run_background ttl=). Reaped by the gateway TTL reaper; rows are removed when reaped or when the session dies (the reaper self-cleans).';
 
 CREATE TABLE agent_shell_ttl_renewals (
     id                    BIGSERIAL PRIMARY KEY,
