@@ -63,15 +63,24 @@ class _Lease(BaseModel):
     agent_id: int
     status: LeaseStatus
     expires_at: datetime
+    relay_batch_window_seconds: int = 0
 
 
 @dataclass(frozen=True)
 class InboxSnapshot:
-    """Only message identities cross the host wake boundary, never their bodies."""
+    """Only message identities cross the host wake boundary, never their bodies.
+
+    ``routine_ids`` is the subset of ``message_ids`` that the merge window may
+    coalesce (not a user chat, not a cancel); anything outside it hints
+    immediately. ``batch_window`` is the lease's configured merge window in
+    seconds; 0 keeps the pre-window behaviour.
+    """
 
     message_ids: frozenset[int]
     expires_at: datetime
     status: LeaseStatus = "active"
+    routine_ids: frozenset[int] = frozenset()
+    batch_window: float = 0.0
 
     @property
     def active(self) -> bool:
@@ -183,7 +192,27 @@ def _read_inbox(agent_id: int, lease_id: UUID, token: str) -> InboxSnapshot:
         if latest.status in _TERMINAL:
             return InboxSnapshot(frozenset(), latest.expires_at, latest.status)
         raise
-    return InboxSnapshot(frozenset(row["id"] for row in rows), lease.expires_at)
+    return InboxSnapshot(
+        frozenset(row["id"] for row in rows),
+        lease.expires_at,
+        "active",
+        routine_ids=_routine_ids(rows),
+        batch_window=float(lease.relay_batch_window_seconds),
+    )
+
+
+def _routine_ids(rows: list[dict[str, Any]]) -> frozenset[int]:
+    """The pending ids the merge window may coalesce.
+
+    A user chat and a cancel are never routine: they hint immediately. Every
+    other arrival (peer/system notification, watcher wake, schedule trigger,
+    page message) may wait out the configured window.
+    """
+    return frozenset(
+        row["id"]
+        for row in rows
+        if row["kind"] != "cancel" and not (row["kind"] == "chat" and row["source"] == "user")
+    )
 
 
 def _seconds_left(snapshot: InboxSnapshot) -> float:
@@ -192,7 +221,36 @@ def _seconds_left(snapshot: InboxSnapshot) -> float:
     return (snapshot.expires_at - datetime.now(UTC)).total_seconds()
 
 
-async def relay_inbox(
+def _window_wait(
+    snapshot: InboxSnapshot,
+    *,
+    announced_active: bool,
+    routine_deadline: float | None,
+    now: float,
+) -> tuple[float | None, float | None]:
+    """(deadline, remaining) for a routine-only page still inside its merge window.
+
+    Returns (None, None) when the page is not window-eligible — the activation
+    hint, an empty page, any urgent id (user chat or cancel), or a disabled
+    window (0) — or when the window has already elapsed. ``deadline`` carries
+    an open window forward across polls so a burst keeps one shared deadline.
+    """
+    if (
+        not announced_active
+        or not snapshot.message_ids
+        or snapshot.message_ids - snapshot.routine_ids
+        or snapshot.batch_window <= 0
+    ):
+        return None, None
+    if routine_deadline is None:
+        routine_deadline = now + snapshot.batch_window
+    remaining = routine_deadline - now
+    if remaining <= 0:
+        return None, None
+    return routine_deadline, remaining
+
+
+async def relay_inbox(  # noqa: PLR0915 — one lease-driven state machine: terminal, window, emit, stall
     agent_id: int,
     lease_id: UUID,
     *,
@@ -235,6 +293,7 @@ async def relay_inbox(
     announced_active = False
     last_emit = float("-inf")
     stall_alerted = False
+    routine_deadline: float | None = None
 
     def due(snapshot: InboxSnapshot) -> bool:
         return snapshot.active and (
@@ -266,6 +325,22 @@ async def relay_inbox(
             if not outstanding:
                 stall_alerted = False  # a fresh page can only be hinted once
             if due(snapshot):
+                # Routine-only pages coalesce inside the configured merge window;
+                # user chats and cancels never wait.
+                routine_deadline, remaining = _window_wait(
+                    snapshot,
+                    announced_active=announced_active,
+                    routine_deadline=routine_deadline,
+                    now=asyncio.get_running_loop().time(),
+                )
+                if remaining is not None:
+                    await listener.wait_one(
+                        max(
+                            0.5,
+                            min(catchup_seconds, _seconds_left(snapshot), remaining),
+                        )
+                    )
+                    continue
                 # Re-read after a bounded debounce to merge bursts and catch a
                 # concurrent release/expiry before attempting host delivery.
                 # Claude Monitor replenishes one output-event allowance per
@@ -286,6 +361,7 @@ async def relay_inbox(
                     last_emit = asyncio.get_running_loop().time()
                     outstanding.update(snapshot.message_ids)
                     stall_alerted = False
+                    routine_deadline = None
             elif (
                 announced_active
                 and outstanding

@@ -1,0 +1,1 @@
+ALTER TABLE agent_impersonations DROP COLUMN relay_batch_window_seconds;

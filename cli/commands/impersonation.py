@@ -130,6 +130,7 @@ def _dispatch(args: argparse.Namespace) -> int:
                 relay_provider=args.relay_provider,
                 relay_thread_id=args.relay_thread_id,
                 relay_codex_remote=args.relay_codex_remote,
+                relay_batch_window_seconds=args.relay_batch_window_seconds,
             )
         )
         if args.relay_provider == "codex":

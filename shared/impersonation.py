@@ -65,6 +65,7 @@ def request(
     relay_provider: str,
     relay_thread_id: str | None = None,
     relay_codex_remote: str | None = None,
+    relay_batch_window_seconds: int = 30,
 ) -> dict[str, Any]:
     """Ask the native agent for consent; return the secret once, never store it raw.
 
@@ -72,11 +73,21 @@ def request(
     never guesses one. A claude request also mints the scoped relay credential
     here (its relay runs inside the controller's own session); the codex
     credential is minted by the native side at activation instead.
+
+    ``relay_batch_window_seconds`` is the relay's routine-message merge window:
+    arrivals that are neither a user chat nor a cancel coalesce into one hint
+    per window (user messages always hint immediately). 0 disables merging.
     """
     ttl = _ttl(ttl_seconds)
     if caller.kind != "external_agent":
         raise ValueError("Impersonation requires an external_agent caller")
     validate_relay_spec(relay_provider, relay_thread_id, relay_codex_remote)
+    if (
+        not isinstance(relay_batch_window_seconds, int)
+        or isinstance(relay_batch_window_seconds, bool)
+        or not 0 <= relay_batch_window_seconds <= 300
+    ):
+        raise ValueError("relay_batch_window_seconds must be an integer from 0 through 300")
     relay_token = secrets.token_urlsafe(32) if relay_provider == "claude" else None
     lease_id, token = uuid4(), secrets.token_urlsafe(32)
     with write_transaction() as conn:
@@ -103,8 +114,8 @@ def request(
         conn.execute(
             "INSERT INTO agent_impersonations(id,agent_id,source,machine,token_hash,reason,"
             "status,ttl_seconds,expires_at,relay_provider,relay_thread_id,relay_codex_remote,"
-            "relay_token_hash) VALUES(%s,%s,%s,%s,%s,%s,'requested',%s,"
-            "clock_timestamp()+%s*interval '1 second',%s,%s,%s,%s)",
+            "relay_token_hash,relay_batch_window_seconds) VALUES(%s,%s,%s,%s,%s,%s,'requested',%s,"
+            "clock_timestamp()+%s*interval '1 second',%s,%s,%s,%s,%s)",
             (
                 lease_id,
                 agent_id,
@@ -118,6 +129,7 @@ def request(
                 relay_thread_id,
                 relay_codex_remote,
                 token_hash(relay_token) if relay_token is not None else None,
+                relay_batch_window_seconds,
             ),
         )
         result = public(lock_lease(conn, str(lease_id)))

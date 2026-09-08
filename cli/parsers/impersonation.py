@@ -83,6 +83,14 @@ def _add_impersonation_parser(sub: argparse._SubParsersAction[argparse.ArgumentP
         dest="relay_codex_remote",
         help="Codex app-server endpoint owning that session, e.g. unix:///private/tmp/codex.sock",
     )
+    request.add_argument(
+        "--batch-window",
+        dest="relay_batch_window_seconds",
+        type=partial(_integer_range, maximum=300),
+        default=30,
+        help="relay merge window in seconds, 0..300: routine arrivals (not user "
+        "chats, not cancels) coalesce into one hint per window; 0 disables merging",
+    )
     request.set_defaults(func=_h_impersonate)
     parsers: dict[str, argparse.ArgumentParser] = {}
     for name in ("status", "renew", "release", "inbox", "ack", "exec"):
