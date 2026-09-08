@@ -66,6 +66,23 @@ def _add_impersonation_parser(sub: argparse._SubParsersAction[argparse.ArgumentP
         help="lease lifetime in seconds, 1..86400",
     )
     request.add_argument("--reason", default="", help="what the external agent will do")
+    request.add_argument(
+        "--provider",
+        dest="relay_provider",
+        required=True,
+        choices=("codex", "claude"),
+        help="relay host for automatic inbox wake-up: codex or claude",
+    )
+    request.add_argument(
+        "--thread-id",
+        dest="relay_thread_id",
+        help="existing Codex session UUID the relay queues into (codex only)",
+    )
+    request.add_argument(
+        "--codex-remote",
+        dest="relay_codex_remote",
+        help="Codex app-server endpoint owning that session, e.g. unix:///private/tmp/codex.sock",
+    )
     request.set_defaults(func=_h_impersonate)
     parsers: dict[str, argparse.ArgumentParser] = {}
     for name in ("status", "renew", "release", "inbox", "ack", "exec"):
@@ -114,5 +131,10 @@ def _add_impersonation_parser(sub: argparse._SubParsersAction[argparse.ArgumentP
         type=partial(_seconds_range, maximum=30),
         default=0.5,
         help="seconds to coalesce inbound hints, 0..30",
+    )
+    relay.add_argument(
+        "--token-stdin",
+        action="store_true",
+        help="read the relay credential from the first stdin line (native spawn handoff)",
     )
     relay.set_defaults(func=_h_impersonate_relay)

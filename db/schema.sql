@@ -1378,9 +1378,24 @@ CREATE TABLE IF NOT EXISTS agent_impersonations (
     plugin_delta JSONB NOT NULL DEFAULT '[]'::jsonb CHECK (jsonb_typeof(plugin_delta) = 'array'),
     delta_version INTEGER NOT NULL DEFAULT 0,
     applied_version INTEGER NOT NULL DEFAULT 0,
+    relay_provider TEXT,
+    relay_thread_id TEXT,
+    relay_codex_remote TEXT,
+    relay_token_hash TEXT,
+    relay_heartbeat_at TIMESTAMPTZ,
+    relay_last_failure_at TIMESTAMPTZ,
     CHECK (applied_version >= 0 AND applied_version <= delta_version),
     CHECK (jsonb_array_length(plugin_delta) = delta_version),
-    CHECK ((accepted_generation IS NULL) = (accepted_owner IS NULL))
+    CHECK ((accepted_generation IS NULL) = (accepted_owner IS NULL)),
+    CHECK (
+        (relay_provider IS NULL
+            AND relay_thread_id IS NULL
+            AND relay_codex_remote IS NULL)
+        OR (relay_provider = 'codex' AND relay_thread_id IS NOT NULL)
+        OR (relay_provider = 'claude'
+            AND relay_thread_id IS NULL
+            AND relay_codex_remote IS NULL)
+    )
 );
 CREATE UNIQUE INDEX IF NOT EXISTS agent_impersonations_one_open
     ON agent_impersonations(agent_id)
@@ -1389,6 +1404,9 @@ CREATE INDEX IF NOT EXISTS agent_impersonations_expiry ON agent_impersonations(e
     WHERE status IN ('requested', 'accepted', 'active');
 CREATE INDEX IF NOT EXISTS agent_impersonations_retention ON agent_impersonations(ended_at)
     WHERE status IN ('released', 'rejected', 'expired');
+CREATE INDEX IF NOT EXISTS agent_impersonations_relay_heartbeat
+    ON agent_impersonations(agent_id, relay_heartbeat_at)
+    WHERE status = 'active';
 
 -- Reading delivers without consuming. Only the explicit processing ACK changes
 -- an inbound to done; an expired borrower leaves every unacknowledged row pending.
@@ -1484,3 +1502,7 @@ INSERT INTO schema_migrations (name) VALUES ('20260907T190000_notice-expire-at')
 -- Corpse fatal marker is already represented above. Fresh DBs stamp the
 -- migration instead of replaying the strict ADD COLUMN delta.
 INSERT INTO schema_migrations (name) VALUES ('20260907T152552_corpse-fatal-marker');
+
+-- Relay binding columns are already represented above. Fresh DBs stamp the
+-- migration instead of replaying the strict ALTER ADD COLUMN delta.
+INSERT INTO schema_migrations (name) VALUES ('20260908T042458_impersonation-relay-binding');

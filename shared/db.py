@@ -121,8 +121,9 @@ def publish_inbound_wake(agent_id: int, payload: str) -> bool:
     disconnected listener is recovered on the listener's next (re)subscribe
     instead of waiting out the full recheck budget.
 
-    Never raises: a wake lost here is recovered by `wait_for_inbound`'s SELECT
-    within `timeout_s`, so the caller's INSERT+commit is never held hostage to
+    Also runs the best-effort impersonation relay liveness alert before
+    publishing. Never raises: a wake lost here is recovered by `wait_for_inbound`'s
+    SELECT within `timeout_s`, so the caller's INSERT+commit is never held hostage to
     Redis. Returns True when the wake reached Redis, False when the publish
     was rejected or skipped — callers that meter delivery (the delivery
     watchdog's dispatch counter) must read the return value, never assume
@@ -137,8 +138,14 @@ def publish_inbound_wake(agent_id: int, payload: str) -> bool:
     from redis.exceptions import ResponseError
 
     from shared.cluster import WAKE_KEY_TTL_S, inbound_channel, wake_key
+
+    # A wake for an impersonated agent whose relay heartbeat is stale must not
+    # be silent: the inbound can sit unread in the inbox forever. Best-effort,
+    # lazy-imported to keep this module importable without the lease layer.
+    from shared.impersonation import relay_liveness_alert
     from shared.redis_client import sync_redis
 
+    relay_liveness_alert(agent_id)
     channel = inbound_channel(agent_id)
     try:
         r = sync_redis()

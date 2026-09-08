@@ -79,19 +79,75 @@ def test_request_uses_external_identity_and_returns_token_once(
     monkeypatch.setattr(control, "request", request)
     assert (
         cli.cmd_impersonate(
-            _args("request", "--agent", "405", "--as", "codex:task1", "--ttl", "600")
+            _args(
+                "request",
+                "--agent",
+                "405",
+                "--as",
+                "codex:task1",
+                "--ttl",
+                "600",
+                "--provider",
+                "codex",
+                "--thread-id",
+                "thread-1",
+            )
         )
         == 0
     )
     assert seen["caller"].source() == "external_agent:codex:task1"
     assert seen["ttl_seconds"] == 600
+    assert seen["relay_provider"] == "codex"
+    assert seen["relay_thread_id"] == "thread-1"
+    assert seen["relay_codex_remote"] is None
     output = capsys.readouterr()
     assert json.loads(output.out)["token"] == "new-credential"
-    assert "request does not start inbox delivery" in output.err
-    assert "impersonate relay" in output.err
-    assert "conventions/agent-impersonation-hosts.md" in output.err
-    assert "same conversation" in output.err
+    assert "starts the codex relay automatically" in output.err
     assert "new-credential" not in output.err
+
+
+def test_claude_request_reports_the_relay_handoff(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def request(agent_id: int, **kwargs: Any) -> dict[str, Any]:
+        return {"id": "lease", "token": "controller-token", "relay_token": "relay-token"}
+
+    monkeypatch.setattr(control, "request", request)
+    assert (
+        cli.cmd_impersonate(
+            _args("request", "--agent", "405", "--as", "claude:task1", "--provider", "claude")
+        )
+        == 0
+    )
+    output = capsys.readouterr()
+    assert json.loads(output.out)["relay_token"] == "relay-token"
+    assert "AVA_IMPERSONATION_RELAY_TOKEN" in output.err
+    assert "controller-token" not in output.err
+    assert "relay-token" not in output.err
+
+
+def test_request_requires_a_relay_provider(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # --provider is mandatory at parse time; the codex thread requirement is
+    # enforced by shared.impersonation.request (covered in the shared tests).
+    with pytest.raises(SystemExit) as raised:
+        _args("request", "--agent", "405", "--as", "codex")
+    assert raised.value.code == 2
+
+
+def test_relay_token_channels(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AVA_IMPERSONATION_RELAY_TOKEN", "from-env")
+    assert cli.relay_token_from_env() == "from-env"
+    monkeypatch.delenv("AVA_IMPERSONATION_RELAY_TOKEN")
+    with pytest.raises(ValueError, match="AVA_IMPERSONATION_RELAY_TOKEN"):
+        cli.relay_token_from_env()
+
+    def readline(*_size: object) -> str:
+        return "from-stdin\n"
+
+    monkeypatch.setattr("sys.stdin", type("Stdin", (), {"readline": readline})())
+    assert cli.relay_token_from_stdin() == "from-stdin"
 
 
 def test_ack_uses_explicit_processed_ids_only(
@@ -149,12 +205,31 @@ def test_relay_parser(remote: str | None) -> None:
     assert args.thread_id == "thread"
     assert args.func.__name__ == "_h_impersonate_relay"
     assert args.codex_remote == remote
+    assert args.token_stdin is False
+    with_stdin = _args(
+        "relay", "405", "--lease-id", "lease", "--provider", "claude", "--token-stdin"
+    )
+    assert with_stdin.token_stdin is True
 
 
 @pytest.mark.parametrize(
     ("command", "option", "invalid_values"),
     [
-        (["request", "--agent", "405", "--as", "codex"], "--ttl", ["0", "86401"]),
+        (
+            [
+                "request",
+                "--agent",
+                "405",
+                "--as",
+                "codex",
+                "--provider",
+                "codex",
+                "--thread-id",
+                "t",
+            ],
+            "--ttl",
+            ["0", "86401"],
+        ),
         (["renew", "lease"], "--ttl", ["-1", "86401"]),
         (["inbox", "lease"], "--limit", ["0", "1001"]),
         (["inbox", "lease"], "--wait", ["-1", "nan", "inf"]),
@@ -184,7 +259,21 @@ def test_numeric_options_reject_out_of_bounds_values_during_parsing(
 @pytest.mark.parametrize(
     ("command", "option", "values"),
     [
-        (["request", "--agent", "405", "--as", "codex"], "--ttl", ["1", "86400"]),
+        (
+            [
+                "request",
+                "--agent",
+                "405",
+                "--as",
+                "codex",
+                "--provider",
+                "codex",
+                "--thread-id",
+                "t",
+            ],
+            "--ttl",
+            ["1", "86400"],
+        ),
         (["renew", "lease"], "--ttl", ["1", "86400"]),
         (["inbox", "lease"], "--limit", ["1", "1000"]),
         (["inbox", "lease"], "--wait", ["0", "0.5", "86400"]),

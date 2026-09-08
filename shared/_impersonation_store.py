@@ -54,7 +54,7 @@ def public(lease: dict[str, Any]) -> dict[str, Any]:
     return {
         key: str(value) if isinstance(value, UUID) else value
         for key, value in lease.items()
-        if key != "token_hash"
+        if key not in ("token_hash", "relay_token_hash")
     }
 
 
@@ -151,3 +151,41 @@ def require_active_locked(conn: psycopg.Connection, lease: dict[str, Any], token
     validate_active(
         lease, token, fresh=fresh == (True,), machine=meta["machine"], status=meta["status"]
     )
+
+
+RELAY_PROVIDERS = ("codex", "claude")
+
+
+def validate_relay_spec(
+    provider: str | None, thread_id: str | None, codex_remote: str | None
+) -> None:
+    """The request must name its relay endpoint up front; the native side
+    never guesses one."""
+    if provider not in RELAY_PROVIDERS:
+        raise ValueError("Relay provider must be 'codex' or 'claude'")
+    if provider == "codex":
+        if not thread_id:
+            raise ValueError("Codex relay requires the existing session's thread id")
+    elif thread_id is not None or codex_remote is not None:
+        raise ValueError("Claude relay routes to its owner; thread id and remote are rejected")
+
+
+def authenticate_relay(lease: dict[str, Any], relay_token: str) -> None:
+    """The relay's scoped credential: read/beat only, never controller authority."""
+    if lease["relay_token_hash"] is None or not hmac.compare_digest(
+        lease["relay_token_hash"], token_hash(relay_token)
+    ):
+        raise ImpersonationError("Invalid relay token")
+    local(lease)
+
+
+def require_relay_active_locked(
+    conn: psycopg.Connection, lease: dict[str, Any], relay_token: str
+) -> None:
+    meta = lock_agent(conn, lease["agent_id"])
+    fresh = conn.execute("SELECT %s > clock_timestamp()", (lease["expires_at"],)).fetchone()
+    authenticate_relay(lease, relay_token)
+    if lease["status"] != "active" or fresh != (True,):
+        raise ImpersonationError("Impersonation is not active or its TTL has expired")
+    if meta["machine"] != lease["machine"] or meta["status"] not in ("running", "idling"):
+        raise ImpersonationError("Agent placement or lifecycle changed")
