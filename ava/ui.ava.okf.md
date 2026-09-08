@@ -12,7 +12,7 @@ tags:
 
 ## What it is
 
-`ava.ui` allows agents to display rich web pages and notifications to users. `serve()` runs in a persistent shell session owned by the page-server daemon; `show()` registers an HTTP server the agent already owns. The page server binds the machine's reachable host (loopback on a single box) and is served to the user through the **gateway reverse proxy** — the link is the gateway's own authenticated URL (`/pages/<id>-<name>/`), so the browser never dials the page server directly.
+`ava.ui` allows agents to display rich web pages and notifications to users. `serve()` runs in a persistent shell session owned by the serving agent and managed by the page-server daemon; `show()` registers an HTTP server the agent already owns. The page server binds the machine's reachable host (loopback on a single box) and is served to the user through the **gateway reverse proxy** — the link is the gateway's own authenticated URL (`/pages/<id>-<name>/`), so the browser never dials the page server directly.
 
 ## Core API (core SDK: page serving)
 
@@ -25,7 +25,7 @@ Each agent has a default port reserved for itself (derived from agent id), used 
 `name` must match `^[a-zA-Z0-9_-]+$` (1-64 chars). Returned `Page`: id, name, port, title, url.
 
 ### Server lifecycle
-The daemon keeps each serve() page in an agent shell named with a `page-` suffix. It persists a per-page health token and adopts live page sessions after its own restart. A crashed server is relaunched in the same shell; a stale server that is still a child of that shell causes the daemon to replace the shell. Detached legacy servers and orphaned rows are reclaimed, while a foreign port occupant is left alone and retried with backoff.
+The daemon keeps each `serve()` page in one of the serving agent's own persistent shell sessions, visible in `ava.shell.sessions.list()` as `page-<name>` (name lowercased, underscores replaced by hyphens). One session entry per open `serve()` page is normal. The session ends when the page row closes through `close()`, TTL expiry, or replacement by a new page. If the session dies while the page remains open, the daemon recreates it; killing the session does not close the page. It persists a per-page health token and adopts live page sessions after its own restart. A crashed server is relaunched in the same shell; a stale server that is still a child of that shell causes the daemon to replace the shell. Detached legacy servers and orphaned rows are reclaimed, while a foreign port occupant is left alone and retried with backoff.
 
 ## ava_fleet Plugin Injections (Notifications)
 
