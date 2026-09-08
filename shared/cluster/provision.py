@@ -618,11 +618,26 @@ def ensure_runner_role(identity: str, *, base_admin_url: str, runner_password: s
         )
         # Every ava.shell.sessions.new(ttl=) / run_background(ttl=) records its
         # mandatory deadline directly from the runner process; the gateway TTL
-        # reaper (main identity) reads and deletes the rows.
+        # reaper (main identity) reads and deletes the rows. Renewal
+        # (sessions.renew) UPDATEs the deadline from the same process and
+        # appends the audit trail: SELECT+INSERT on the append-only table
+        # (runner holds blanket SELECT over public, but the explicit grant
+        # matches the table-specific surface) plus its BIGSERIAL sequence. No
+        # runner DELETE anywhere here — the reaper is the only reclaimer.
         conn.execute(
-            pgsql.SQL("GRANT INSERT ON agent_shell_ttls TO {}").format(
+            pgsql.SQL("GRANT INSERT, UPDATE ON agent_shell_ttls TO {}").format(
                 pgsql.Identifier(RUNNER_ROLE)
             )
+        )
+        conn.execute(
+            pgsql.SQL("GRANT SELECT, INSERT ON agent_shell_ttl_renewals TO {}").format(
+                pgsql.Identifier(RUNNER_ROLE)
+            )
+        )
+        conn.execute(
+            pgsql.SQL(
+                "GRANT USAGE, SELECT ON SEQUENCE agent_shell_ttl_renewals_id_seq TO {}"
+            ).format(pgsql.Identifier(RUNNER_ROLE))
         )
         # ava.self.pause_heartbeat: the pause trail (SELECT the previous window
         # + INSERT the new row; the sequence USAGE comes from the ALL SEQUENCES

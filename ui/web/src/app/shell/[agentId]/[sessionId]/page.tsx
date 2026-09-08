@@ -196,6 +196,11 @@ export default function ShellMonitorPage({
             ) : (
               <span className="hidden sm:inline">No TTL</span>
             )}
+            {data.renewals > 0 && (
+              <span className="hidden tabular-nums sm:inline" title={`last renewed ${data.last_renewed_at ?? "?"}`}>
+                renewed {data.renewals}×
+              </span>
+            )}
           </span>
         )}
 

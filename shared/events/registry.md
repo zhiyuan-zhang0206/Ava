@@ -24,7 +24,7 @@ generated from it and never hand-synced. event_names that violate the naming rul
 | mechanism | table/channel | registered event_names | destination |
 |------|------|-------------|------|
 | audit (category=audit) | `events` | 23 | events table |
-| telemetry (category=telemetry) | `events` | 162 | events table |
+| telemetry (category=telemetry) | `events` | 163 | events table |
 | log (category=log) | `events` | 9 | events table |
 | file-only (destination=file) | file log | 1 | file only (not the events table) |
 | SSE live | Redis → frontend (not persisted) | 28 role | live projection |
@@ -90,7 +90,7 @@ Emit sites and consumers: see the comments at each emit point.
 | `computer_session_end` | computer-use task session closed (idle timeout) | business | task_id, action_count, first_action_at, last_action_at, outcome | events |
 | `mcp_tool_call` | MCP tool invoked through the gateway /mcp endpoint (client-scoped, args redacted) | business | — | events |
 
-## 3. Telemetry events (category=telemetry, 162)
+## 3. Telemetry events (category=telemetry, 163)
 
 Telemetry-side event name resolution (`shared/log.py`): **explicit `event=` →
 `label=` fallback → default `"log"`**. Payload = logger extra fields + `msg`
@@ -188,6 +188,7 @@ consumers: see the comments at each emit point.
 | `sse_drop` | SSE event dropped | anomaly | kind, n | — | events |
 | `event_log_drop` | event-pipeline row shed | anomaly | n | — | events |
 | `heartbeat_paused` | heartbeat paused | observation | duration_s | — | events |
+| `shell_ttl_renewed` | shell TTL deadline renewed | observation | session_id, ttl_s, prev_expires_at, new_expires_at | — | events |
 | `code` | LLM generated code block | noise | body, ok, duration_seconds | — | events |
 | `text` | LLM text output | noise | — | — | events |
 | `syntax_fix` | syntax repair executed | noise | fixes | — | events |
