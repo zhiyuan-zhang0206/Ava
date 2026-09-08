@@ -282,7 +282,7 @@ def finalize_rollout(
     local_launch_failures: list[str] | None = None,
 ) -> None:
     """`finally`-clause tail of the gateway orchestration: record how the rollout
-    ended, best-effort resume every still-paused host, then — unless the rollout was
+    ended, best-effort resume every potentially paused host, then — unless the rollout was
     `CLEAN` — print the cluster's residual state and the recovery commands that fit
     what actually happened.
 
@@ -324,7 +324,7 @@ def finalize_rollout(
     unreached: list[str] = [name for name, _url in hosts_to_resume]
     if hosts_to_resume:
         print(
-            f"\n→ compensating unpause: resume {len(hosts_to_resume)} still-paused host(s)",
+            f"\n→ compensating unpause: request resume for {len(hosts_to_resume)} host(s)",
             file=sys.stderr,
         )
         try:
@@ -389,7 +389,7 @@ def _print_rollout_aftermath(
 ) -> None:
     """Print the residual-state + recovery block after a rollout that did not finish
     clean, so an operator does not have to reverse-engineer the cluster's state from a
-    traceback: which hosts are resumed vs still paused, whether the pin advanced, and
+    traceback: which resumes are confirmed vs unconfirmed, whether the pin advanced, and
     the exact recovery commands. stderr (the rollout log's error stream).
 
     The banner is keyed on `outcome` because the two cases need opposite instructions:
@@ -421,29 +421,21 @@ def _print_rollout_aftermath(
     if reached:
         out.append(f"  resumed now: {reached}")
     if unreached:
-        out.append(f"  STILL PAUSED (resume did not reach them): {unreached}")
+        out.append(f"  resume unconfirmed: {unreached} (native pause state is unknown)")
     if not reached and not unreached:
-        out.append("  paused hosts: none (nothing to resume)")
+        out.append("  resume targets: none")
     if not pin_advanced:
         out.append("  cluster pin: NOT advanced — the cluster is still on the pre-rollout commit")
     elif unreached:
-        # Issue #1114: this block lists these hosts as STILL PAUSED one line above, and
-        # then promised them a watchdog self-heal. A paused host's watchdog reconciles
-        # NOTHING — `PauseController` blocks the tick ahead of the pin and code
-        # controllers — so the promise cannot land until the flag comes off, and the
-        # operator reading it as "wait" waits on the wrong thing.
-        #
-        # The dependency is named instead of a duration, deliberately. How long the flag
-        # stands is not one number: stranded-pause recovery declines while anything owns
-        # the pause, and a rollout ending INCOMPLETE has just taken a deploy hold over
-        # these very hosts. Printing a bound here would be a second wrong promise.
+        # Issue #1114: do not promise watchdog convergence while a pause holds.
+        # A failed resume is not proof of a pause: local Phase A can fail before
+        # the remote pause fan-out. State the dependency without a recovery deadline.
         out.append(
             "  cluster pin: advanced — the gateway is on the new commit. A resumed host "
-            "converges via its watchdog self-heal; a STILL PAUSED one does not — its "
-            "watchdog skips every round while the pause holds, so it converges only once "
-            "the pause clears (stranded-pause recovery, which waits until nothing owns "
-            "the pause — `ava cluster status` shows the deploy hold — or the manual "
-            "command below)"
+            "converges via its watchdog self-heal. If native status confirms a pause, its "
+            "watchdog skips every round while the pause holds; convergence requires the "
+            "pause to clear. Inspect `ava maintenance status` on that host and "
+            "`ava cluster status` for the deploy hold before choosing recovery."
         )
     else:
         out.append(
@@ -458,8 +450,8 @@ def _print_rollout_aftermath(
         )
     if unreached:
         out.append(
-            "    · per STILL-PAUSED host: unpause its posture row (ava start, or wait for the stranded-pause controller) && "
-            "cd $AVA_HOME/source && ava start"
+            "    · per host with an unconfirmed resume: inspect `ava maintenance status` "
+            "and `ava status` on that host before deciding whether recovery is needed."
         )
     # The three lines below are about hosts mid-transition. A rollout whose only
     # defect is a local session that would not launch has none — every runner

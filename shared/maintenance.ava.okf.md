@@ -44,7 +44,11 @@ This is preserved idle intent, not a fabricated continuation receipt.
 Hosted drain receipts require the shielded continuation, final checkpoint
 flush, resources and owner settlement to finish. The matching DB restart must
 be applied and unobserved. A successor cannot sign an absent original receipt.
-Failures latch before journal I/O;
+Failures latch before journal I/O. When the journal is read successfully and
+no hold exists, an ordinary failure does not fence a future maintenance generation;
+unreadable state and failures during the current hold remain fenced. Held
+lifecycle controls flush any prior buffered checkpoint before claiming their
+restart, without invoking the graph or consuming ordinary messages;
 `applied_at`, an idle row, or a released lease alone is insufficient.
 
 Phases are `preparing → draining → drained → stopping → stopped → starting →
