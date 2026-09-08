@@ -14,10 +14,10 @@ in your start message.
 
 ## Operating contract
 
-- **Start.** Your work begins with a start message from the delegating Ava
-  agent, queued for the lease. It names the task and points at any context you
-  need (workspace paths, checkouts, people to report to). Your first inbox read
-  shows it; read it before acting.
+- **Start.** Your work begins with the start message: the Ava agent records a
+  handoff brief when it approves the lease, and that brief is pushed to you
+  first at activation. It names the task and points at any context you need
+  (workspace paths, checkouts, people to report to). Read it before acting.
 - **End.** You end by releasing control with a summary. The release summary is
   your end message: what you did, what you verified, what remains open and
   where to resume from. Release wakes the Ava agent to continue.
@@ -28,8 +28,8 @@ in your start message.
 
 Three values anchor every command in this skill:
 
-- **Lease id** — appears in your activation hint (`Ava control active:
-  agent=N lease=<uuid> ...`) and in the start message. Keep it handy.
+- **Lease id** — appears in the activation push and in the ACK command of
+  every delivered batch. Keep it handy.
 - **Token** — `AVA_IMPERSONATION_TOKEN` is set in your environment. Never print
   it, put it in a prompt, a command argument, a log, or a file.
 - **The cluster executable** — use the `ava` CLI and Python interpreter of the
@@ -49,43 +49,38 @@ The response shows the lease status and its expiry. Statuses you will see:
 
 ## Messages: receive, process, acknowledge
 
-Delivery is **push**, not poll. When inbound messages wait, a short hint lands
-in your session — `Ava inbox ready: agent=N lease=<uuid> pending_page=...
-newest_id=...`. The hint is only a wake-up: it carries no message bodies and is
-not an acknowledgment.
+Delivery is **push**, not poll. The bound relay delivers every inbound batch
+to your session as one self-contained envelope: the full message content, the
+message ids, and the exact ACK command to run. There is no inbox code to write
+and nothing to poll — process what arrives, then acknowledge it.
 
-On a hint (or right after activation, where the start message may still be
-arriving), read the inbox once:
-
-```bash
-ava impersonate inbox <lease_id> --wait 30
-```
-
-`--wait` holds for new input (finite seconds); a fresh activation commonly
-needs a short wait for the start message. Rows carry `id`, `content`, `kind`,
-`source`, and `created_at`:
+Messages carry a `kind` that tells you how to treat them:
 
 - `chat` — instructions and questions from the Ava agent or the user. The work.
-- `system_note` — lifecycle information: the renewal reminder, expiry notice.
+- `reminder` — a lease-expiry renewal reminder from Ava, pushed about five
+  minutes before the TTL elapses (see Renewal below).
 - `cancel` — stop your current work now (see below).
 
-Process the rows you can handle, then acknowledge exactly those ids, promptly —
-within about five minutes of reading:
+After processing a batch, acknowledge exactly the ids you handled, within the
+five-minute ACK window:
 
 ```bash
 ava impersonate ack <lease_id> 101 102
 ```
 
+(The envelope gives you the exact command, with the lease id filled in.)
+
 Rules that keep delivery honest:
 
-- **Acknowledge only what you actually handled.** An unacknowledged message is
-  treated as not processed: when its ACK window closes it is pushed again, and
-  it remains pending for the Ava agent once control returns. Never ACK a
-  message to silence delivery; if you cannot handle it, leave it
-  unacknowledged and say so in your release summary.
-- **Never poll, never write inbox code.** No watcher loops, no background
-  inbox readers, no scheduled reads. The push side was built so you do not need
-  any of that — react to hints when they arrive.
+- **Acknowledge only what you actually handled.** A batch that is not
+  acknowledged within the window is pushed again, explicitly marked as
+  re-delivery, until it is ACKed or the lease ends; the ids make re-ACKing a
+  batch you already handled harmless. Never ACK a message to silence delivery;
+  if you cannot handle it, leave it unacknowledged and say so in your release
+  summary.
+- **Never poll, never write inbox code.** `ava impersonate inbox <lease_id>`
+  remains only as a fallback read — for a missed or truncated push, or for a
+  message's payload. The pushes are the delivery.
 - **`cancel`**: stop the current work and ACK the cancel once stopped. To
   interrupt an in-flight tool immediately, use your own session's stop control;
   the ACK comes after the stop, not instead of it. An unacknowledged cancel
@@ -103,18 +98,18 @@ background renewer once kept a dead session's identity alive for hours —
 renewing every hour for a 24-hour TTL — until control was lost and the agent
 hung. Do not recreate that failure mode.
 
-> The reminder delivery described below is part of the impersonation delivery
-> rework (direct push + ACK window) and reaches the cluster together with that
-> batch. If reminders do not yet arrive in your inbox, decide by the remaining
+> If renewal reminders do not yet arrive in your inbox (reminder delivery
+> ships with the impersonation push-delivery batch), decide by the remaining
 > TTL that `ava impersonate status` reports: renew once, when the remaining
 > time no longer covers the work ahead — never on a schedule or in a loop.
 
 The correct model:
 
 1. Roughly **five minutes before the lease expires**, the Ava side delivers a
-   renewal-reminder message into your inbox (you will see an inbox hint for
-   it, like any other message).
-2. On that reminder, decide: renew once, or start wrapping up.
+   renewal reminder — a `reminder` message pushed through the same envelope
+   path as everything else.
+2. On that reminder, decide: renew once, or start wrapping up. Then ACK the
+   reminder like any other message.
 3. To renew, extend from now for the time you still need:
 
 ```bash
@@ -133,13 +128,12 @@ Hard rules:
   reminder, no background renewal process. If no reminder has arrived, you do
   not renew — the Ava side times reminders to the actual lease.
 - If the lease expires while you work, stop immediately: further CLI and SDK
-  calls fail validation. Your unacknowledged messages and staged state are
-  preserved; control returns to the Ava agent and you will see the expiry
-  notice. Do not keep acting under the identity, and do not request a new
-  lease on your own — a fresh takeover, if wanted, is arranged by the Ava
-  side. Finish with an honest handoff instead: if you cannot release in time,
-  the expiry notice itself reports the state, and anything still unacknowledged
-  stays for the agent.
+  calls fail validation. Control returns to the Ava agent with your
+  unacknowledged messages and staged state preserved. Do not keep acting
+  under the identity, and do not request a new lease on your own — a fresh
+  takeover, if wanted, is arranged by the Ava side. Hand back honestly
+  instead: release with a summary whenever you still can; if expiry catches
+  you, anything still unacknowledged stays for the agent.
 
 ## Using the Python SDK under the lease
 
@@ -153,7 +147,7 @@ Attach from the cluster's interpreter (the checkout's `.venv/bin/python`):
 import os
 import ava
 
-lease_id = "<lease_id>"          # from your activation hint / start message
+lease_id = "<lease_id>"          # from the activation push / ACK commands
 delegator_id = 405               # TODO: the Ava agent that delegated this work
 
 with ava.external.attach(lease_id, token=os.environ["AVA_IMPERSONATION_TOKEN"]):
