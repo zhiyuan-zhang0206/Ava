@@ -64,7 +64,9 @@ from agent.impersonation import (
     active_lease,
     drop_relay_supervision,
     flush_checkpoint,
+    native_status,
     settle_checkpoint,
+    supervise_relay,
 )
 from agent.startup import (
     _reconcile_claimed_inbounds_at_startup,
@@ -361,6 +363,16 @@ class AgentHost:
         from agent.db import claim_inbound_batch
 
         with bind_turn_identity(agent_id, incarnation=incarnation):
+            # An active external lease owns decisions and its claim gate never
+            # runs while held, so the held-controls wake is the lease's only
+            # native relay-supervision point. Hot path: one native_status read
+            # plus a heartbeat comparison (supervise_relay escalates only on a
+            # stale heartbeat — provision, spawn, rate-limited stamp; no model
+            # calls, no polling). A supervision failure rides the existing
+            # held-wake error path (record_failure is a no-op outside a
+            # maintenance hold) and the next wake re-drives.
+            session = await native_status(agent_id)
+            await supervise_relay(session, agent_id)
             # An earlier ordinary failure can leave a buffered tail. Preserve
             # it before accepting maintenance intent, without replaying graph work.
             await flush_checkpoint(self._checkpointer, agent_id)

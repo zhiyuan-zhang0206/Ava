@@ -75,6 +75,10 @@ the root cause is fixed. Repair requires the exact generation, refuses while
 the agent-host has active continuations, and moves the cleared `failures`
 verbatim into `repaired` with an operator-identity `repair_record` — both CAS
 sides stay visible in the journal tombstone via `ava maintenance status`.
+The host-quiescence proof and the CAS release are two steps, not one atomic
+transition: a turn admitted in between still lands its failure receipt through
+the journal CAS re-read onto the hold that already moved to `repaired`, so a
+sanctioned repair can never erase a failure that raced in.
 Undelivered receipts are never cleared by repair; they never block. Resume
 wakes the saved restart IDs; DB pointers survive a lost Redis wake. Cold admission reloads checkpoints, leaves idle agents idle,
 continues unfinished work and does not revive terminated identities.

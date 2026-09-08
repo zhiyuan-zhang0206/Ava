@@ -40,8 +40,15 @@ renders their real external sender and asks for consent. Native acceptance ends
 the current execute-code call. Only the invocation driver can activate after
 the result is durably checkpointed. A replacement incarnation before activation
 increments the consent version and asks again; a fully active lease survives
-native process/host restarts. Updated native drivers gate recovered graph nodes,
-automatic compaction and normal inbox claims. Hosted agents release their turn
+native process/host restarts. Every hosted restart or host takeover mints a
+fresh incarnation (restart clears the row's runtime identity; admission
+re-mints it), so at the first native-status read after the replacement the
+active lease's accepting-incarnation binding is inherited by the current
+runtime — `require_native` proves it is the row's one admitted owner, and a
+lingering predecessor fails its own row check, so the transfer can never race a
+dead incarnation. Relay supervision therefore re-provisions under the live
+incarnation instead of needing manual database alignment. Updated native
+drivers gate recovered graph nodes, automatic compaction and normal inbox claims. Hosted agents release their turn
 slot while paused. Administrative restart/terminate still reach the
 native lifecycle dispatcher, without consuming ordinary chats. Every database
 termination writer revokes the lease through the same status transaction's

@@ -19,6 +19,13 @@ FailureFences = dict[int, tuple[str | None, datetime | None]]
 # continuation: the restart pointer and checkpoint survive exactly as after a
 # host crash, and the crash-recovery path re-drives them. Such receipts are
 # graded as crash-equivalent: recorded for audit, never latched as blocking.
+#
+# The bare `TimeoutError` stays deliberately narrow, not a blanket timeout
+# catch: a hung database channel surfaces as the awaiting task's
+# `asyncio.TimeoutError` (an alias of the builtin since Python 3.11), and
+# `socket.timeout` has been an alias of the builtin since Python 3.10 — both
+# are channel-hang evidence for the same crash-equivalent reading, never proof
+# that the continuation itself failed.
 CRASH_EQUIVALENT_FAILURES = (psycopg.OperationalError, PoolTimeout, TimeoutError)
 
 

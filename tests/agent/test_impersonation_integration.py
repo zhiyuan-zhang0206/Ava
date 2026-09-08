@@ -219,7 +219,10 @@ async def test_consent_exec_inbox_release_and_resume(
 
 @pytest.mark.parametrize("control", ["restart", "terminate", "cancel"])
 async def test_replacement_host_adopts_held_agent_without_model(
-    db_conn: psycopg.Connection[Any], aops_pool: AsyncConnectionPool[Any], control: str
+    db_conn: psycopg.Connection[Any],
+    aops_pool: AsyncConnectionPool[Any],
+    monkeypatch: pytest.MonkeyPatch,
+    control: str,
 ) -> None:
     from services.agent_host.host import AgentHost
 
@@ -241,6 +244,11 @@ async def test_replacement_host_adopts_held_agent_without_model(
     )
     leases.accept(lease["id"], agent_id, owner)
     leases.activate(lease["id"], owner)
+    # The held-controls supervision may respawn the bound relay; a real codex
+    # relay process must never start inside the test environment.
+    spawn = MagicMock(return_value=MagicMock(poll=MagicMock(return_value=None)))
+    monkeypatch.setattr(impersonation, "_spawn_codex_relay", spawn)
+    impersonation._relay_children.clear()
     graph = MagicMock()
     host = AgentHost(pool=aops_pool, checkpointer=MagicMock(), graph=graph, machine=machine)
     assert agent_id in {wake.agent_id for wake in await host.pending_inbound_wakes(180)}
@@ -259,6 +267,21 @@ async def test_replacement_host_adopts_held_agent_without_model(
     db_conn.commit()
     assert leases.require_active(lease["id"], lease["token"])["status"] == "active"
     assert agent_id not in {wake.agent_id for wake in await host.pending_inbound_wakes(180)}
+    # The replacement incarnation inherited the accepting binding (task #2635)
+    # — without it the held-controls supervision could not re-provision, and
+    # the spawn above would not have happened (task #2634's respawn path).
+    runtime = db_conn.execute(
+        "SELECT runtime_generation, runtime_owner FROM agents_meta WHERE id=%s",
+        (agent_id,),
+    ).fetchone()
+    db_conn.commit()
+    accepted = db_conn.execute(
+        "SELECT accepted_generation, accepted_owner FROM agent_impersonations WHERE id=%s",
+        (lease["id"],),
+    ).fetchone()
+    db_conn.commit()
+    assert accepted == runtime
+    spawn.assert_called()
     db_conn.execute(
         "INSERT INTO inbound_messages(agent_id,content,kind,source) VALUES(%s,'',%s,'user')",
         (agent_id, control),
@@ -279,3 +302,4 @@ async def test_replacement_host_adopts_held_agent_without_model(
         await host.run_turn(agent_id)
         assert leases.require_active(lease["id"], lease["token"])["status"] == "active"
     graph.ainvoke.assert_not_called()
+    impersonation._relay_children.clear()
