@@ -83,7 +83,11 @@ async def claim_gate(
             f"External agent requests to impersonate you. Request: {request_id}.\n"
             f"Reason: {session['reason']}\n"
             "To accept, save your working state and call "
-            f"ava.impersonation.accept({request_id!r}); this ends your execution. "
+            f"ava.impersonation.accept({request_id!r}, start_message='your handoff "
+            "brief for the external session'); this ends your execution. The brief "
+            "is delivered to the external session when the takeover starts and is "
+            "required: cover the current work, the context it needs, and how to "
+            "acknowledge incoming messages. "
             f"To decline, call ava.impersonation.reject({request_id!r}, reason=...). "
             "Acceptance pauses your native loop until release or lease expiry."
         )

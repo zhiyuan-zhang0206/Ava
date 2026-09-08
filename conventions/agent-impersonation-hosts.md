@@ -2,8 +2,10 @@
 
 An impersonation relay runs beside the external host on the Ava agent's machine.
 It subscribes to the agent's existing Redis inbound channel and reads pending
-messages from the database. It sends only short inbox hints to an already-open
-host conversation; the external agent fetches and processes the full messages.
+messages from the database. It pushes each pending message's full content into
+an already-open host conversation, in self-contained envelopes that carry the
+message ids and the exact ACK command; the external agent processes messages
+as they arrive and ACKs by id.
 
 The relay is part of the takeover, not a manual step. The request records the
 relay endpoint on the lease row (`--provider`, `--thread-id`, `--codex-remote`).
@@ -14,17 +16,15 @@ heartbeat. In both cases a relay that is not live when the takeover would
 activate rolls the acceptance back loudly: the lease ends `rejected` with the
 reason, the native agent receives a system note and keeps running.
 
-The relay waits natively for consent and quiescence, then sends one
-control-active hint even if the inbox is empty. That hint directs the
-controller to the inbox and to any relevant context it has not already
-loaded. It gives independent complete inbox and ACK commands; do not append
-them to the `agents timeline` command. Rejection or expiry also wakes the
-controller; waiting for a decision never requires a model to poll status.
+The relay waits natively for consent and quiescence, then delivers the
+native agent's start message — the handoff brief recorded at acceptance —
+even if the inbox is empty. Rejection or expiry also wakes the controller;
+waiting for a decision never requires a model to poll status.
 The relay authenticates with the lease's scoped `relay_token` — never the
 controller's `AVA_IMPERSONATION_TOKEN` — and no relay session, token or
 message files are created.
 
-Verify that the control-active hint actually arrives in the intended conversation
+Verify that the start message actually arrives in the intended conversation
 before relying on automatic delivery. Lease activation, relay process liveness,
 and queue acceptance establish different facts; none establishes host receipt.
 
@@ -121,7 +121,7 @@ the Ava message. `--codex-remote` is rejected for Claude Monitor.
 Desktop and ChatGPT embedded sessions may use a different app-server instance
 or event consumer; a thread UUID alone does not establish delivery. Idle wake-up
 has also been verified in a ChatGPT embedded host through the shared CLI queue:
-a queued hint started a new turn after the active turn ended. Busy-turn delivery
+a queued push started a new turn after the active turn ended. Busy-turn delivery
 is not implied. Test receipt both while the host is busy and after it becomes
 idle; queued items during an active turn alone do not establish a delivery
 failure. Do not infer receipt from a shared database or a zero queue exit code.
@@ -164,29 +164,31 @@ the [channel protocol](https://code.claude.com/docs/en/channels-reference).
 - Redis is a latency optimization. The native process also catches up from the
   database every 30 seconds and after reconnect/wake, without invoking an LLM.
   It subscribes before its first delivery snapshot to close the startup race.
-- Single-outstanding delivery: at most one unprocessed hint per lease is ever
-  queued. A hint is emitted when pending work exists that the host has not been
-  told about, and re-emitted on a slow cadence (~2 minutes) while an outstanding
-  hint may have been lost. New messages arriving under an outstanding hint do
-  not queue another one — the hint already instructs the host to drain until
-  empty. This keeps a busy host from accumulating a queue of stale hints that
-  later wake empty turns; the trade-off is that a hint the host never processes
-  is not retried until the re-hint cadence.
-- Inbox hints are debounced (default 0.5 seconds, maximum 30) and emitted at most
-  once every two seconds. Terminal control notices are immediate. Claude Monitor
-  truncates and rate-limits output, so message bodies
-  never travel through its stdout channel. Fetch messages using `impersonate
+- Push with an ACK window: every pending inbox row is pushed once with its
+  full content in one envelope per batch, and every unacknowledged batch is
+  pushed again after five minutes, marked as re-delivery, until the host ACKs
+  it or the lease ends. Rows already pending at activation push immediately
+  (they waited through consent); fresh routine arrivals coalesce inside the
+  lease's configured merge window (default 30 seconds), while user chats,
+  cancels and renewal reminders never wait. New messages arriving under an
+  outstanding batch push as their own batch.
+- Pushes are debounced (default 0.5 seconds, maximum 30) and emitted at most
+  once every two seconds. Terminal control notices are immediate. For Claude
+  Monitor each content block is truncated to 2000 characters with a pointer to
+  the inbox command. Fetch messages (or full payloads) with `impersonate
   inbox LEASE_UUID`; process and explicitly `impersonate ack LEASE_UUID ID ...`.
-  Drain inbox pages until empty before waiting again.
+  The envelope's ACK line carries the exact command for its batch.
   An ACK that marks messages done publishes a wake so the relay immediately
-  discovers the next pending page, even when no new message has arrived.
+  drops the ids from its outstanding set, even when no new message has arrived.
   Repeating an ACK for already-done messages does not publish another wake.
   Treat `kind="cancel"` as a request to stop current work, then explicitly ACK it.
   Native Ava does not consume cancellation on behalf of the external controller.
-- Reading or successfully queueing a hint does not mark a message done. The
-  relay suppresses repeated hints for the same pending page in memory. Restart
-  replays every still-pending page it encounters. This is at-least-once delivery,
-  with no exactly-once claim across provider acknowledgement or process crashes.
+- Reading or successfully queueing a push does not mark a message done. The
+  relay tracks pushed-but-unacknowledged ids in memory. Restart replays every
+  still-pending row it encounters. This is at-least-once delivery, with the
+  envelope ids as the idempotency key: a host that already handled a batch
+  simply re-ACKs it. There is no exactly-once claim across provider
+  acknowledgement or process crashes.
 - The relay heartbeats the lease row every 10 seconds; a heartbeat older than
   45 seconds counts as stale. While the lease is active, the accepting runtime
   respawns a dead codex relay on the next claim wake (at most once a minute),
@@ -194,20 +196,11 @@ the [channel protocol](https://code.claude.com/docs/en/channels-reference).
   so messages never sit silently. A claude relay cannot be respawned from the
   native side; a stale heartbeat is stamped on the lease row
   (`relay_last_failure_at`, visible in `impersonate status`) and logged.
-- The codex relay also invalidates its own stale queued hints through the
-  official `thread/queue/list` / `thread/queue/delete` app-server RPCs
-  (experimentalApi, Codex 0.153.4+), matching only submissions whose text
-  starts with the relay's own hint markers — real user messages and other
-  threads are never touched, and the private queue store is never written
-  directly. Invalidation runs at startup, when the outstanding page is fully
-  ACKed, and before a terminal control notice. It is best-effort: when the RPC
-  is unavailable the relay logs loudly and continues, and the single-outstanding
-  emission still bounds the queue to one hint. With `--codex-remote`, the
-  spawned stdio server reads the local store; if the remote owns a different
-  store the invalidation may not reach it (the no-replay bound still holds).
-  Coalescing prevents future accumulation; hints already queued before this
-  change are removed by the startup sweep, not retroactively recalled from a
-  running turn.
+- Renewal reminders: five minutes before a lease expires, the gateway inserts
+  a durable inbox row of `kind="reminder"` (one per lease; the payload carries
+  the lease id) that the relay pushes like any message. Release or expiry
+  dismisses any still-pending reminder, so the native agent never sees a stale
+  one.
 - Release, expiry, rejection, an invalid lease, a failed host queue or a broken
   Monitor pipe stops delivery. Expiry sends a loss-of-control notice before
   stopping; the database's clock and status decide authority. A local clock

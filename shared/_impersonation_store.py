@@ -106,6 +106,21 @@ def insert_handoff(
     return row[0]
 
 
+def dismiss_reminders(conn: psycopg.Connection, lease: dict[str, Any]) -> None:
+    """Retire this lease's pending renewal reminders, in the lease transaction.
+
+    Reminders are written for the external controller only; once the lease
+    ends (release or expiry) they are meaningless to the native inbox. ACKed
+    rows are already done. The payload key matches the maintenance insert.
+    """
+    conn.execute(
+        "UPDATE inbound_messages SET status='done' "
+        "WHERE agent_id=%s AND kind='reminder' AND status='pending' "
+        "AND payload->>'lease_id'=%s",
+        (lease["agent_id"], str(lease["id"])),
+    )
+
+
 def expire(conn: psycopg.Connection, lease: dict[str, Any]) -> dict[str, Any]:
     if lease["status"] not in OPEN:
         return lease
@@ -127,6 +142,9 @@ def expire(conn: psycopg.Connection, lease: dict[str, Any]) -> dict[str, Any]:
         "summary_inbound_id=%s WHERE id=%s",
         (inbound_id, lease["id"]),
     )
+    # A pending renewal reminder only matters to the external session; the
+    # lease is over, so it must never reach the native agent's inbox.
+    dismiss_reminders(conn, lease)
     lease["status"] = "expired"
     lease["summary_inbound_id"] = inbound_id
     return lease
