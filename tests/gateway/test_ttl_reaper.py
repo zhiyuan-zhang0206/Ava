@@ -21,6 +21,7 @@ from psycopg_pool import ConnectionPool
 
 from gateway import ttl_reaper
 from gateway.ttl_reaper import (
+    _claim_shell_row_still_expired,
     _reap_expired_notices_blocking,
     _reap_expired_pages_blocking,
     _reap_expired_shells,
@@ -666,3 +667,96 @@ def test_reap_expired_notices_does_not_resurrect_terminated_agent(
         cur.execute("SELECT count(*) FROM inbound_messages WHERE agent_id = %s", (aid,))
         row = cur.fetchone()
         assert row is not None and row[0] == 0
+
+
+# ─────────────── shell TTL renewal vs the reaper (task #2647) ───────────────
+
+
+def _insert_shell_row(
+    db_conn: psycopg.Connection,
+    agent_id: int,
+    session_id: int,
+    *,
+    expires_at: datetime,
+) -> None:
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO agent_shell_ttls (agent_id, session_id, expires_at, created_at) "
+            "VALUES (%s, %s, %s, now() - interval '1 hour') "
+            "ON CONFLICT (agent_id, session_id) DO UPDATE SET expires_at = EXCLUDED.expires_at",
+            (agent_id, session_id, expires_at),
+        )
+    db_conn.commit()
+
+
+def test_claim_still_expired_true_for_expired_row(
+    db_conn: psycopg.Connection, reaper_pool: ConnectionPool
+) -> None:
+    aid = _running_agent(db_conn)
+    _insert_shell_row(db_conn, aid, 41, expires_at=datetime.now(UTC) - timedelta(minutes=1))
+    assert _claim_shell_row_still_expired(reaper_pool, aid, 41)
+
+
+def test_claim_still_expired_false_for_renewed_row(
+    db_conn: psycopg.Connection, reaper_pool: ConnectionPool
+) -> None:
+    """A row renewed between the expired select and the kill dispatch fails
+    the claim — the deadline moved forward, no kill may be dispatched."""
+    aid = _running_agent(db_conn)
+    _insert_shell_row(db_conn, aid, 42, expires_at=datetime.now(UTC) + timedelta(hours=1))
+    assert not _claim_shell_row_still_expired(reaper_pool, aid, 42)
+
+
+def test_claim_still_expired_false_for_missing_row(
+    db_conn: psycopg.Connection, reaper_pool: ConnectionPool
+) -> None:
+    aid = _running_agent(db_conn)
+    assert not _claim_shell_row_still_expired(reaper_pool, aid, 43)
+
+
+async def test_reap_expired_shells_skips_row_renewed_after_select(
+    db_conn: psycopg.Connection, reaper_pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The race the claim closes: the expired-row select ran first, then the
+    owner renewed (deadline now in the future). The pass must not kill —
+    the stale select's row fails the claim and the live row survives."""
+    aid = _running_agent(db_conn)
+    _insert_shell_row(db_conn, aid, 44, expires_at=datetime.now(UTC) - timedelta(minutes=1))
+    with db_conn.cursor() as cur:
+        cur.execute("UPDATE agents_meta SET machine = 'macmini' WHERE id = %s", (aid,))
+        # The renewal that landed after the (stale) select: deadline moved forward.
+        cur.execute(
+            "UPDATE agent_shell_ttls SET expires_at = now() + interval '1 hour', "
+            "renewals = renewals + 1 WHERE agent_id = %s AND session_id = %s",
+            (aid, 44),
+        )
+    db_conn.commit()
+
+    stale_rows: list[tuple[int, int, datetime, datetime]] = [
+        (aid, 44, datetime.now(UTC) - timedelta(minutes=1), datetime.now(UTC) - timedelta(hours=2))
+    ]
+
+    def _stale_select(_pool: ConnectionPool) -> list[tuple[int, int, datetime, datetime]]:
+        return stale_rows
+
+    monkeypatch.setattr(ttl_reaper, "_expired_shell_rows_blocking", _stale_select)
+    dispatched: list[tuple[str, object]] = []
+
+    async def _dispatch(
+        machine: str, kind: str, payload: dict[str, object], **kwargs: object
+    ) -> dict[str, object]:
+        dispatched.append((kind, payload))
+        return ShellKillResult(mode="killed", interrupted=True, name="x").model_dump()
+
+    monkeypatch.setattr(ttl_reaper.cluster_rpc, "dispatch_to_machine", _dispatch)
+    reaped = await _reap_expired_shells(reaper_pool)
+
+    assert reaped == []
+    assert dispatched == []
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "SELECT count(*) FROM agent_shell_ttls WHERE agent_id = %s AND session_id = %s",
+            (aid, 44),
+        )
+        row = cur.fetchone()
+        assert row is not None and row[0] == 1

@@ -1,11 +1,12 @@
 """Persistent shell sessions that preserve cwd, env, and background processes across calls."""
 
-__all_for_ava__ = ["capture", "kill", "list", "new", "send", "send_keys"]
+__all_for_ava__ = ["capture", "kill", "list", "new", "renew", "send", "send_keys"]
 
 import builtins
 import contextlib
 import math
 import re
+from datetime import datetime
 from pathlib import Path
 
 import ava
@@ -271,7 +272,8 @@ def new(name: str, *, ttl: float) -> int:
     Args:
         ttl: same semantics as `run_background` — required hard lifetime in
             seconds from creation; a deadline-bound task belongs in
-            `ava.watcher` instead."""
+            `ava.watcher` instead. Extend the deadline later, before it
+            passes, with `renew(id, ttl=)`."""
     name = coerce_str(name, "name")
     ttl = coerce_typed(ttl, "ttl", (int, float))
     session_id, _ = _create_session(name, ttl=ttl)
@@ -361,6 +363,155 @@ def kill_all() -> int:
         for session_id in watcher_session_ids(agent_id=agent_id):
             delete_watcher(agent_id, session_id)
     return len(sessions)
+
+
+def renew(id: int, *, ttl: float) -> datetime:
+    """Extend a live session's TTL deadline by `ttl` seconds, counted from now.
+
+    Explicit renewal (user ruling 2026-09-08): the deadline moves to
+    now + ttl — never stacked on the current deadline — and the owning agent
+    may renew as many times as it needs (no lifetime cap; every call is
+    audited, see `_record_renewal`). `ttl` is REQUIRED and capped at 24h per
+    call, the same cap as creation.
+
+    Only this agent's live, not-yet-expired sessions can be renewed. An
+    expired deadline means the session is reclaimed automatically (TTL expiry
+    = immediate reclamation; no renewable expired state — user ruling
+    2026-09-08), so renewal past the deadline is rejected. Watcher sessions
+    are rejected too: their lifetime is governed by the watcher registry /
+    timeout, not by the shell TTL, so renewing their row would be a no-op
+    that only pretends to extend anything.
+
+    Returns:
+        The new deadline (DB clock).
+    """
+    id = coerce_typed(id, "id", int)
+    ttl = _validate_ttl(coerce_typed(ttl, "ttl", (int, float)))
+    # Not this agent's / not alive -> ValueError, same rule as send/capture.
+    _resolve(id)
+    agent_id = int(ava._boot.agent_id())
+    from shared.watcher_registry import watcher_session_ids
+
+    if id in watcher_session_ids(agent_id):
+        raise ValueError(
+            f"session {id} is a watcher — its lifetime is governed by the watcher "
+            "registry/timeout, not the shell TTL; renewal would have no effect"
+        )
+    return _record_renewal(agent_id, id, ttl)
+
+
+def _record_renewal(agent_id: int, session_id: int, ttl: float) -> datetime:
+    """Extend the deadline row and write the audit trail.
+
+    The write UPDATEs the deadline in one transaction guarded by
+    ``expires_at > now()``: an expired row is never renewable. The guard is
+    what makes the pair with the reaper airtight — a successful renewal
+    proves the row was unexpired at its write, so no expired-row select
+    could have returned it before that write, and a renewal attempted after
+    the deadline loses (the reaper owns the session). ``SET TRANSACTION
+    READ WRITE`` leads the transaction — same pooled read-only poison
+    defense as `_record_ttl`.
+
+    Audit trail: one `agent_shell_ttl_renewals` row (requested ttl +
+    before/after deadlines) in the same transaction as the deadline write,
+    plus the `renewals` counter and `last_renewed_at` on the main row, plus
+    a telemetry `shell_ttl_renewed` event. The before/after read and the
+    write use separate connections on purpose: the guarded UPDATE re-checks
+    the deadline itself, so the read needs no lock, and a concurrent second
+    renewal from a background process can at worst stamp a slightly stale
+    `prev_expires_at` — deadlines stay monotone and this path is
+    single-agent, single-turn by construction, not worth locking for.
+    """
+    prev_expires = _read_expiry_row(agent_id, session_id)
+    if prev_expires is None:
+        raise RuntimeError(
+            f"session {session_id} has no TTL row — a pre-mandate session cannot be renewed"
+        )
+    new_expires = _apply_renewal(agent_id, session_id, ttl, prev_expires)
+    from shared import telemetry
+
+    telemetry.emit(
+        "telemetry",
+        "shell_ttl_renewed",
+        level="info",
+        agent_id=agent_id,
+        attributes={
+            "session_id": session_id,
+            "ttl_s": ttl,
+            "prev_expires_at": prev_expires.isoformat(),
+            "new_expires_at": new_expires.isoformat(),
+        },
+    )
+    return new_expires
+
+
+def _read_expiry_row(agent_id: int, session_id: int) -> datetime | None:
+    """The session's current deadline; None when the row is absent."""
+    import psycopg
+
+    from ava._settings import DB_URL
+    from shared.db import PG_STATEMENT_TIMEOUT_KWARGS
+
+    try:
+        with (
+            psycopg.connect(DB_URL, **PG_STATEMENT_TIMEOUT_KWARGS) as conn,
+            conn.cursor() as cur,
+        ):
+            cur.execute(
+                "SELECT expires_at FROM agent_shell_ttls WHERE agent_id = %s AND session_id = %s",
+                (agent_id, session_id),
+            )
+            row = cur.fetchone()
+    except psycopg.Error as exc:
+        raise RuntimeError(f"failed to renew session {session_id}") from exc
+    return row[0] if row is not None else None
+
+
+def _apply_renewal(agent_id: int, session_id: int, ttl: float, prev_expires: datetime) -> datetime:
+    """The guarded write: new deadline + audit row, one transaction.
+
+    Returns the new deadline; raises ValueError when the row expired (or
+    was reaped) between the read and this write — the owner renews before
+    the deadline or not at all (user ruling 2026-09-08).
+    """
+    import psycopg
+
+    from ava._settings import DB_URL
+    from shared.db import PG_STATEMENT_TIMEOUT_KWARGS
+
+    new_expires: datetime | None = None
+    try:
+        with (
+            psycopg.connect(DB_URL, **PG_STATEMENT_TIMEOUT_KWARGS) as conn,
+            conn.cursor() as cur,
+        ):
+            cur.execute("SET TRANSACTION READ WRITE")
+            cur.execute(
+                "UPDATE agent_shell_ttls "
+                "SET expires_at = now() + make_interval(secs => %s), "
+                "renewals = renewals + 1, last_renewed_at = now() "
+                "WHERE agent_id = %s AND session_id = %s AND expires_at > now() "
+                "RETURNING expires_at",
+                (ttl, agent_id, session_id),
+            )
+            updated = cur.fetchone()
+            if updated is not None:
+                new_expires = updated[0]
+                cur.execute(
+                    "INSERT INTO agent_shell_ttl_renewals "
+                    "(agent_id, session_id, requested_ttl_seconds, prev_expires_at, "
+                    "new_expires_at) VALUES (%s, %s, %s, %s, %s)",
+                    (agent_id, session_id, ttl, prev_expires, new_expires),
+                )
+                conn.commit()
+    except psycopg.Error as exc:
+        raise RuntimeError(f"failed to renew session {session_id}") from exc
+    if new_expires is None:
+        raise ValueError(
+            f"session {session_id} is already past its TTL — expired sessions "
+            "are reclaimed automatically; renew before the deadline"
+        )
+    return new_expires
 
 
 def list() -> dict[int, str | None]:

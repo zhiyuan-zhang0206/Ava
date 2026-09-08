@@ -17,7 +17,11 @@ This loop is the enforcer, scanning
   leave the open set (the daemon's existing two-layer teardown).
 - **Shells** — a ``shell_kill`` op is dispatched to the owning agent's machine;
   the tracking row is removed once the session is killed or found already
-  gone. A row whose machine is unreachable is left for the next pass.
+  gone. A row whose machine is unreachable is left for the next pass. The
+  owner's ``ava.shell.sessions.renew()`` extends a live session's deadline
+  before it passes; each kill dispatch re-checks the row is still expired
+  first (renewal's own ``expires_at > now()`` guard makes the pair airtight),
+  so a renewed session is never killed.
 - **Browser sessions** — expired rows are deleted in the gateway's periodic
   pass, so cleanup does not depend on the next login.
 - **Work failures** — a gateway crash after recording an event but before
@@ -269,6 +273,27 @@ def _expired_shell_rows_blocking(pool: ConnectionPool) -> list[tuple[int, int, d
         return [(row[0], row[1], row[2], row[3]) for row in cur.fetchall()]
 
 
+def _claim_shell_row_still_expired(pool: ConnectionPool, agent_id: int, session_id: int) -> bool:
+    """Re-verify one expired shell row just before dispatching its kill.
+
+    The expired-row select and the kill dispatch are separated by a machine
+    lookup, and the owner's ``sessions.renew()`` may land in between. A no-op
+    UPDATE claims the row only while it is STILL expired (rowcount 1); a
+    renewal in the gap makes the claim fail and the pass skips the kill —
+    the row is no longer expired and would not be selected next pass either.
+    Combined with renewal's ``expires_at > now()`` write guard the pair is
+    airtight: a successful renewal always precedes any expired-row select, so
+    the only losing renewal is one racing its own deadline.
+    """
+    with write_transaction(pool) as conn, conn.cursor() as cur:
+        cur.execute(
+            "UPDATE agent_shell_ttls SET expires_at = expires_at "
+            "WHERE agent_id = %s AND session_id = %s AND expires_at <= now()",
+            (agent_id, session_id),
+        )
+        return cur.rowcount == 1
+
+
 def _human_ttl(seconds: float) -> str:
     """A TTL duration as a compact human string: 1h, 30m, 90s."""
     seconds = max(0, int(seconds))
@@ -346,6 +371,15 @@ async def _reap_expired_shells(pool: ConnectionPool) -> list[tuple[int, int]]:
     rows = await asyncio.to_thread(_expired_shell_rows_blocking, pool)
     reaped: list[tuple[int, int]] = []
     for agent_id, session_id, expires_at, created_at in rows:
+        if not await asyncio.to_thread(_claim_shell_row_still_expired, pool, agent_id, session_id):
+            # Renewed between the select and this pass — the deadline moved
+            # forward, so the session is no longer reaper business.
+            _log.info(
+                "[ttl-reaper] shell %s of agent %s was renewed — skipping",
+                session_id,
+                agent_id,
+            )
+            continue
         machine = await asyncio.to_thread(_agent_machine, pool, agent_id)
         if machine is None:
             _log.warning(

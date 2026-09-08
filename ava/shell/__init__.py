@@ -36,6 +36,9 @@ from .sessions import (
     new as new,
 )
 from .sessions import (
+    renew as renew,
+)
+from .sessions import (
     send as send,
 )
 from .sessions import (
@@ -180,8 +183,9 @@ def run_background(
         cwd: defaults to your workspace.
         ttl: required hard lifetime in seconds, counted from creation — the
             session is force-killed once it elapses, with no idle/activity
-            renewal. Max 86400 (24 hours) — sessions live at most one day;
-            pass a large value for a long-resident command within that cap.
+            renewal; extend it explicitly with ava.shell.sessions.renew()
+            before the deadline passes. Max 86400 (24 hours) per call; pass
+            a large value for a long-resident command within that cap.
             `keep=True` does not extend or disable it.
     """
     cmd = coerce_str(cmd, "cmd")

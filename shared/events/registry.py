@@ -34,6 +34,7 @@ from shared.events.payloads import (
     RetentionClass,
     SdkCall,
     ServiceStarted,
+    ShellTtlRenewed,
     Spawn,
     SseDrop,
     StatusChange,
@@ -549,6 +550,9 @@ _EVENTS_RUNTIME: dict[str, EventSpec] = {
         "event_log_drop", "event-pipeline row shed", payload=EventLogDrop, tier="anomaly"
     ),
     "heartbeat_paused": _telemetry("heartbeat_paused", "heartbeat paused", payload=HeartbeatPaused),
+    "shell_ttl_renewed": _telemetry(
+        "shell_ttl_renewed", "shell TTL deadline renewed", payload=ShellTtlRenewed
+    ),
     "code": _telemetry("code", "LLM generated code block", payload=ExecPayload, tier="noise"),
     # label-fallback events kept in the registry
     "text": _telemetry("text", "LLM text output", tier="noise"),

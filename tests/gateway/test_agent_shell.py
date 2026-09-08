@@ -111,6 +111,8 @@ def test_shell_capture_success(
         "created_at": None,
         "uptime_seconds": 0,
         "expires_at": None,
+        "renewals": 0,
+        "last_renewed_at": None,
     }
     # Uniform path: dispatched to the agent's machine (a remote runner here),
     # never probed locally.
@@ -179,6 +181,8 @@ def test_shell_capture_carries_created_at_and_ttl_deadline(
     assert body["created_at"] == launched.astimezone(UTC).isoformat().replace("+00:00", "Z")
     assert body["uptime_seconds"] == 1800
     assert body["expires_at"] is not None  # agent_shell_ttls row -> deadline set
+    assert body["renewals"] == 0  # fresh row: no renewals yet
+    assert body["last_renewed_at"] is None
 
 
 def test_shell_capture_falls_back_to_launch_epoch_plus_24h_without_row(
@@ -295,3 +299,58 @@ def test_shell_machine_unreachable_503(
         resp = client.get(f"/api/agents/{aid}/shell/1")
     assert resp.status_code == 503
     assert "unreachable" in resp.json()["detail"]
+
+
+def test_shell_capture_carries_renewal_facts(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The monitor page's "renewed N×" badge: renewals + last_renewed_at ride
+    the capture response from the gateway-owned row, so a renewal is visible
+    on the next poll — never silent (user ruling 2026-09-08)."""
+    from datetime import UTC, datetime, timedelta
+
+    aid = _insert_agent(db_conn, machine="wsl")
+    renewed = datetime.now(tz=UTC) - timedelta(minutes=5)
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO agent_shell_ttls (agent_id, session_id, expires_at, renewals, "
+            "last_renewed_at) VALUES (%s, %s, %s, %s, %s)",
+            (aid, 4, datetime.now(tz=UTC) + timedelta(hours=2), 3, renewed),
+        )
+    db_conn.commit()
+    monkeypatch.setattr(shell_router._cluster_rpc, "dispatch_to_machine", _ok_dispatch)
+
+    with TestClient(app) as client:
+        body = client.get(f"/api/agents/{aid}/shell/4").json()
+    assert body["renewals"] == 3
+    assert body["last_renewed_at"] == renewed.astimezone(UTC).isoformat().replace("+00:00", "Z")
+
+
+def test_shell_capture_fallback_keeps_zero_renewal_facts(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A session without a TTL row (legacy) answers the fallback deadline with
+    zero renewal facts — the monitor page renders no badge."""
+    from datetime import UTC, datetime, timedelta
+
+    aid = _insert_agent(db_conn, machine="wsl")
+    launched = datetime.now(tz=UTC) - timedelta(hours=1)
+    db_conn.commit()
+
+    async def _dispatch(
+        target_machine: str, kind: str, payload: dict[str, object], **kwargs: object
+    ) -> dict[str, object]:
+        return {
+            "session_name": f"ava-agent-{aid}-shell-5-legacy",
+            "lines": [],
+            "created_at": launched.isoformat(),
+            "uptime_seconds": 3600,
+        }
+
+    monkeypatch.setattr(shell_router._cluster_rpc, "dispatch_to_machine", _dispatch)
+
+    with TestClient(app) as client:
+        body = client.get(f"/api/agents/{aid}/shell/5").json()
+    assert body["expires_at"] is not None
+    assert body["renewals"] == 0
+    assert body["last_renewed_at"] is None

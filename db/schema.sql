@@ -679,16 +679,34 @@ CREATE INDEX agent_pages_expiry_idx
     WHERE closed_at IS NULL AND expired_at IS NULL;
 
 CREATE TABLE agent_shell_ttls (
-    agent_id   BIGINT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
-    session_id BIGINT NOT NULL,
-    expires_at TIMESTAMPTZ NOT NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    agent_id        BIGINT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    session_id      BIGINT NOT NULL,
+    expires_at      TIMESTAMPTZ NOT NULL,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    renewals        INTEGER NOT NULL DEFAULT 0,
+    last_renewed_at TIMESTAMPTZ,
     PRIMARY KEY (agent_id, session_id)
 );
 
 CREATE INDEX agent_shell_ttls_expiry_idx ON agent_shell_ttls (expires_at);
 
-COMMENT ON TABLE agent_shell_ttls IS 'Persistent shell sessions whose agent declared a TTL at creation (ava.shell.sessions.new/run_background ttl=). Reaped by the gateway TTL reaper; rows are removed when reaped or when the session dies (the reaper self-cleans).';
+COMMENT ON TABLE agent_shell_ttls IS 'Persistent shell sessions whose agent declared a TTL at creation (ava.shell.sessions.new/run_background ttl=). The owning agent may extend the deadline explicitly via ava.shell.sessions.renew before it passes (audit trail: agent_shell_ttl_renewals). Reaped by the gateway TTL reaper; rows are removed when reaped or when the session dies (the reaper self-cleans).';
+
+CREATE TABLE agent_shell_ttl_renewals (
+    id                    BIGSERIAL PRIMARY KEY,
+    agent_id              BIGINT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    session_id            BIGINT NOT NULL,
+    requested_ttl_seconds DOUBLE PRECISION NOT NULL,
+    prev_expires_at       TIMESTAMPTZ NOT NULL,
+    new_expires_at        TIMESTAMPTZ NOT NULL,
+    created_at            TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX agent_shell_ttl_renewals_agent_session_idx
+    ON agent_shell_ttl_renewals (agent_id, session_id, created_at, id);
+
+COMMENT ON TABLE agent_shell_ttl_renewals IS
+    'Append-only shell-TTL renewal trail: one row per ava.shell.sessions.renew call, in the same transaction as the deadline UPDATE. prev/new_expires_at carry the before/after deadlines. No FK to agent_shell_ttls — the reaper deletes that row on reclamation while the audit history must survive.';
 
 CREATE OR REPLACE FUNCTION cascade_close_agent_pages() RETURNS TRIGGER AS $$
 BEGIN
@@ -1509,3 +1527,8 @@ INSERT INTO schema_migrations (name) VALUES ('20260907T152552_corpse-fatal-marke
 -- migration instead of replaying the strict ALTER ADD COLUMN delta.
 INSERT INTO schema_migrations (name) VALUES ('20260908T042458_impersonation-relay-binding');
 INSERT INTO schema_migrations (name) VALUES ('20260908T063636_impersonation-relay-batch-window');
+
+-- Shell TTL renewal columns and the audit trail are already represented
+-- above. Fresh DBs stamp the migration instead of replaying the strict
+-- ALTER ADD COLUMN / CREATE TABLE delta.
+INSERT INTO schema_migrations (name) VALUES ('20260908T230000_shell-ttl-renewal');

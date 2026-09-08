@@ -63,6 +63,7 @@ function shellData(overrides: Partial<ShellCapture> = {}): ShellCapture {
     created_at: new Date(Date.now() - 8040_000).toISOString(),
     uptime_seconds: 8040,
     expires_at: new Date(Date.now() + 7900_000).toISOString(),
+    renewals: 0,
     ...overrides,
   };
 }
@@ -100,6 +101,28 @@ describe("ShellMonitorPage", () => {
     // match the shape only).
     await waitFor(() => expect(screen.getByText("Runtime 2h 14m")).toBeTruthy());
     expect(screen.getByText(/TTL 2h 11m · expires \d{1,2}\/\d{1,2} \d{2}:\d{2}/)).toBeTruthy();
+  });
+
+  it("shows the renewed badge only when the session was renewed", async () => {
+    getAgentShell.mockResolvedValue(
+      shellData({
+        renewals: 3,
+        last_renewed_at: "2026-06-14T10:15:00Z",
+      }),
+    );
+    render();
+
+    await waitFor(() => expect(screen.getByText("renewed 3×")).toBeTruthy());
+  });
+
+  it("hides the renewed badge for a never-renewed session", async () => {
+    getAgentShell.mockResolvedValue(shellData());
+    render();
+
+    await waitFor(() =>
+      expect(screen.getByText(/TTL \d/)).toBeTruthy(),
+    );
+    expect(screen.queryByText(/renewed/)).toBeNull();
   });
 
   it("clamps an already-expired TTL deadline to 0s remaining", async () => {
