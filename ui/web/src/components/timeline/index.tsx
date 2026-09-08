@@ -522,8 +522,21 @@ export function TimelineView({
           const currentPull = wheelPullRef.current;
           schedulePullRender(currentPull);
           wheelTimerRef.current = setTimeout(() => {
+            const currentPull = wheelPullRef.current;
+            // A slow frame can let the 180ms settle fire before the pull's
+            // rAF render ran — the ring would never display while the load
+            // still fires (#2623 P2). Flush the full fill synchronously so it
+            // always paints once, then reset on the next frame (a new pull
+            // started in between keeps its ring: the reset frame renders
+            // latestPullRef, which a new pull updated).
+            if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current);
+            rafIdRef.current = requestAnimationFrame(() => {
+              rafIdRef.current = null;
+              setPullDistance(latestPullRef.current);
+            });
+            setPullDistance(currentPull);
             if (
-              wheelPullRef.current >= PULL_THRESHOLD_PX &&
+              currentPull >= PULL_THRESHOLD_PX &&
               hasMoreOlderRef.current &&
               !loadingOlderRef.current
             ) {
@@ -533,9 +546,6 @@ export function TimelineView({
             wheelPullRef.current = 0;
             pullDistanceRef.current = 0;
             latestPullRef.current = 0;
-            if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current);
-            rafIdRef.current = null;
-            setPullDistance(0);
           }, 180);
         } else if (e.deltaY > 0) {
           if (wheelPullRef.current > 0) {
@@ -811,26 +821,44 @@ export function TimelineView({
     // returns a position based on estimates. When the browser later renders
     // them (they are within the render threshold), their true heights replace
     // the estimates and the viewport jumps — the "load-older jitter".
-    // Toggling content-visibility to 'visible' for this one measurement,
-    // then restoring it, eliminates the jump. Only rows ABOVE the anchor are
-    // forced — rows below it cannot move it, and forcing the whole list
-    // (hundreds of items, a ~90k px prompt card) would defeat the
-    // content-visibility purpose every landing. All of this runs in a layout
-    // effect (before paint) so the user never sees the temporarily-rendered
-    // content.
+    // A single pass against the anchor's pre-force top is NOT enough: every
+    // forced element grows and pushes the elements below it down, so a row
+    // whose estimate-based gap to the anchor is smaller than the accumulated
+    // correction is skipped and keeps its 80px estimate — the measured delta
+    // under-counts the real growth and the reading position sinks (#2623:
+    // ~110px under-compensation on a real large window). Iterate to a
+    // fixpoint instead: re-measure the anchor after each pass and keep
+    // forcing rows whose CURRENT top is above its CURRENT top until the
+    // anchor stops moving. Only rows above the anchor are forced — rows
+    // below it cannot move it, and forcing the whole list (hundreds of
+    // items, a ~90k px prompt card) would defeat the content-visibility
+    // purpose every landing. Restoring `auto` afterwards is safe:
+    // contain-intrinsic-size: auto remembers the rendered real height, so the
+    // restored rows do not shrink back to the 80px estimate. All of this runs
+    // in a layout effect (before paint) so the user never sees the
+    // temporarily-rendered content.
     const anchorNode = findNode();
     if (!anchorNode) {
       pendingAnchorRef.current = null; // anchor gone (thread switch) — abandon
       return;
     }
-    const anchorTop = anchorNode.getBoundingClientRect().top;
     const cvSaved: { el: HTMLElement; cv: string }[] = [];
-    for (const el of viewport.querySelectorAll<HTMLElement>('.timeline-item')) {
-      if (el === anchorNode || el.contains(anchorNode)) break;
-      const r = el.getBoundingClientRect();
-      if (r.top >= anchorTop) break; // at/below the anchor — the above-set is complete
-      cvSaved.push({ el, cv: el.style.contentVisibility });
-      el.style.contentVisibility = 'visible';
+    let anchorTop = anchorNode.getBoundingClientRect().top;
+    for (;;) {
+      let forcedAny = false;
+      for (const el of viewport.querySelectorAll<HTMLElement>('.timeline-item')) {
+        if (el === anchorNode || el.contains(anchorNode)) break;
+        if (el.style.contentVisibility === 'visible') continue;
+        const r = el.getBoundingClientRect();
+        if (r.top >= anchorTop) break; // at/below the anchor — the above-set is complete
+        cvSaved.push({ el, cv: el.style.contentVisibility });
+        el.style.contentVisibility = 'visible';
+        forcedAny = true;
+      }
+      if (!forcedAny) break;
+      const nextTop = anchorNode.getBoundingClientRect().top;
+      if (nextTop === anchorTop) break;
+      anchorTop = nextTop;
     }
     void viewport.offsetHeight; // force synchronous layout
     const node = findNode();

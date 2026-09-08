@@ -1844,6 +1844,117 @@ describe("load-older prepend anchor & pull-down gesture (#659, #817, #1272)", ()
     expect(loadOlder).toHaveBeenCalledTimes(1);
   });
 
+  it("large-window prepend: fixpoint cv-forcing compensates the full real growth (no estimate-based under-compensation, #2623)", () => {
+    // Models a real large window: rows above the anchor are skipped
+    // (content-visibility: auto) and report 80px contain-intrinsic-size
+    // estimates until forced 'visible', when they report their real heights.
+    // The single-pass loop broke against the stale pre-force anchor top, so a
+    // row whose estimate gap was smaller than the accumulated correction kept
+    // its estimate — the measured delta under-counted the real growth and the
+    // reading position sank ~110px per round. The fixpoint loop must force
+    // EVERY row above the anchor.
+    const loadOlder = vi.fn();
+    const tallRect = (top: number, height: number): DOMRect =>
+      ({ top, bottom: top + height, left: 0, right: 0, width: 0, height, x: 0, y: 0, toJSON: () => ({}) });
+    const EST = 80;
+    const PROMPT = 100;
+    const CONTENT_TOP = -340;
+    const realHeights: Record<string, number> = { "5.0": 500, "6.0": 400, "7.0": 90, "8.0": 70 };
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
+      function (this: HTMLElement) {
+        const vp = document.querySelector<HTMLElement>('[data-testid="scroll-viewport"]');
+        if (this === vp) {
+          return { top: 0, bottom: 752, left: 0, right: 0, width: 0, height: 752, x: 0, y: 0, toJSON: () => ({}) };
+        }
+        if (!vp) return rect(0);
+        const rows = [...vp.querySelectorAll<HTMLElement>(".timeline-item")];
+        const idx = rows.indexOf(this);
+        if (idx < 0) return rect(0);
+        let top = CONTENT_TOP;
+        for (let j = 0; j < idx; j++) {
+          const row = rows[j];
+          const id = row.dataset.itemId ?? "";
+          const forced = row.style.contentVisibility === "visible";
+          top += id === "0.0" ? PROMPT : forced ? (realHeights[id] ?? EST) : EST;
+        }
+        const id = this.dataset.itemId ?? "";
+        const height =
+          id === "0.0" ? PROMPT : this.style.contentVisibility === "visible" ? (realHeights[id] ?? EST) : EST;
+        return tallRect(top, height);
+      },
+    );
+    const items = [
+      makeItem({ item_id: "0.0", kind: "system_prompt", payload: "prompt", created_at: null }),
+      makeItem({ item_id: "7.0", kind: "agent_chat", payload: "seven" }),
+      makeItem({ item_id: "8.0", kind: "agent_chat", payload: "eight" }),
+      makeItem({ item_id: "9.0", kind: "agent_chat", payload: "nine" }),
+    ];
+    const { rerender } = render(
+      <TimelineView items={items} hasMoreOlder onLoadOlder={loadOlder} />,
+    );
+    const viewport = screen.getByTestId("scroll-viewport");
+    triggerWheelPull(viewport);
+    expect(loadOlder).toHaveBeenCalledTimes(1);
+
+    // The older window lands: two tall rows (500/400 real vs 80 estimates)
+    // plus two medium rows (90/70 real) above the anchor. Correct
+    // compensation = the anchor's full real displacement in document space:
+    // anchor est top -80 at capture; after all above rows render real:
+    // -340 + 100 + 500 + 400 + 90 + 70 = 820 → delta = 820 - (-80) = 900.
+    // The stale-top single pass measured only 500 - (-80) = 580 (the #2623
+    // ~320px class of under-compensation on large windows).
+    rerender(
+      <TimelineView
+        items={[
+          items[0],
+          makeItem({ item_id: "5.0", kind: "agent_chat", payload: "five" }),
+          makeItem({ item_id: "6.0", kind: "agent_chat", payload: "six" }),
+          ...items.slice(1),
+        ]}
+        hasMoreOlder
+        onLoadOlder={loadOlder}
+      />,
+    );
+    expect(viewport.scrollTop).toBe(900);
+  });
+
+  it("wheel settle on a slow frame still flushes the filled ring before resetting (#2623 P2)", () => {
+    // Slow frames: the pull's rAF render never runs before the 180ms settle.
+    // The settle timer must flush the filled ring synchronously (one painted
+    // frame), fire the load, then reset on the next frame.
+    const rafCallbacks: FrameRequestCallback[] = [];
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((cb) => {
+      rafCallbacks.push(cb);
+      return rafCallbacks.length;
+    });
+    vi.spyOn(window, "cancelAnimationFrame").mockImplementation(() => undefined);
+
+    const loadOlder = vi.fn();
+    const items = [makeItem({ item_id: "10.0", kind: "agent_chat", payload: "ten" })];
+    render(<TimelineView items={items} hasMoreOlder onLoadOlder={loadOlder} />);
+    const viewport = screen.getByTestId("scroll-viewport");
+    const indicator = screen.getByTestId("pull-down-load-indicator");
+
+    viewport.scrollTop = 0;
+    act(() => {
+      viewport.dispatchEvent(new WheelEvent("wheel", { deltaY: -160, bubbles: true }));
+    });
+    // The pull's rAF (frame 1) never runs — slow frame. The settle timer
+    // fires: the ring must flush at full fill, and the load fires.
+    act(() => {
+      vi.advanceTimersByTime(180);
+    });
+    expect(loadOlder).toHaveBeenCalledTimes(1);
+    expect(indicator.getAttribute("data-filled")).toBe("true");
+
+    // The reset frame runs next — the ring resets to 0.
+    act(() => {
+      rafCallbacks.forEach((cb) => cb(performance.now()));
+      rafCallbacks.length = 0;
+    });
+    expect(Number(indicator.getAttribute("data-pull-progress"))).toBe(0);
+  });
+
   it("preserves the reading position when the user scrolled during the fetch (document-space delta, not the trigger-time viewport top)", () => {
     const loadOlder = vi.fn();
     const items = [

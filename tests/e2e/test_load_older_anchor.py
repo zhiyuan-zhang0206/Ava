@@ -91,6 +91,133 @@ _WHEEL_PULL_JS = """
 """
 
 
+def _assert_landing_holds(page: Page, sample_start: int, round_no: int) -> None:
+    """The reading position is the first real item's viewport top. Locate the
+    landing frame (the first sample whose item count differs from the previous
+    one) and require the anchor to have stayed put across it — a > 3 px move
+    is the #1272 yank / #2623 under-compensation."""
+    samples = page.evaluate("window.__tl.samples")[sample_start:]
+    landing_idx = next(
+        (i for i, s in enumerate(samples) if i > 0 and s["n"] != samples[i - 1]["n"]),
+        None,
+    )
+    assert landing_idx is not None, f"round {round_no}: no landing frame in the samples"
+    before = [s for s in samples[:landing_idx] if s["anchorTop"] is not None]
+    after = [s for s in samples[landing_idx:] if s["anchorTop"] is not None]
+    assert before and after, f"round {round_no}: no anchor measurements around the landing"
+    before_top = before[-1]["anchorTop"]
+    for s in after:
+        assert abs(s["anchorTop"] - before_top) < 3.0, (
+            f"round {round_no}: reading position moved by "
+            f"{s['anchorTop'] - before_top:.1f}px across the load-older landing "
+            f"(before={before_top:.1f}, after={s['anchorTop']:.1f}, "
+            f"st={s['st']}, sh={s['sh']}, n={s['n']}, anchor={s['anchorId']})"
+        )
+
+
+def _wait_landing(
+    page: Page,
+    before_n: int,
+    round_no: int,
+    agent_id: int,
+    gateway_url: str,
+    before_requests: list[str],
+) -> int:
+    deadline = time.monotonic() + 30.0
+    n = before_n
+    while time.monotonic() < deadline:
+        n = page.evaluate("window.__tl.vp.querySelectorAll('[data-item-id]').length")
+        if n > before_n:
+            return n  # the older window landed
+        page.wait_for_timeout(200)
+    rest_items = httpx.get(
+        f"{gateway_url}/api/agents/{agent_id}/timeline?limit=1000",
+        timeout=30.0,
+    ).json()["items"]
+    samples = page.evaluate("window.__tl.samples")
+    raise AssertionError(
+        f"round {round_no}: the older window never landed: "
+        f"rest_total={len(rest_items)}, before_requests={before_requests}, "
+        f"last_samples={samples[-6:]}"
+    )
+
+
+def _run_rounds(
+    page: Page, before_requests: list[str], init_n: int, agent_id: int, gateway_url: str
+) -> int:
+    """Round 1 uses the pull gesture (with the in-flight-scroll scenario);
+    rounds 2+ re-settle at the top and click the load-older fallback button —
+    the QA #2623 repro path. Each round must hold < 3px; the above-anchor
+    stack grows every round, which is exactly where the estimate-based
+    under-compensation lived. Returns the number of rounds completed."""
+    sample_start = page.evaluate("window.__tl.samples.length")
+    _pull_load_older(page, before_requests)
+    _wait_landing(page, init_n, 1, agent_id, gateway_url, before_requests)
+    page.wait_for_timeout(1200)
+    _assert_landing_holds(page, sample_start, 1)
+
+    round_no = 1
+    while round_no < 5:
+        round_no += 1
+        page.evaluate("window.__tl.vp.scrollTop = 0")
+        page.evaluate("window.__tl.vp.dispatchEvent(new Event('scroll'))")
+        # Let the settled-at-top state render, then snapshot the control state
+        # for the failure diagnostic below.
+        page.wait_for_timeout(300)
+        _dbg = page.evaluate(
+            """() => {
+              const b = document.querySelector('[data-testid="load-older-button"]');
+              const ring = document.querySelector('[data-testid="pull-down-load-indicator"]');
+              const vp = window.__tl.vp;
+              return {
+                present: !!b,
+                ariaHidden: b ? b.getAttribute('aria-hidden') : null,
+                tabindex: b ? b.getAttribute('tabindex') : null,
+                ringLoading: ring ? ring.getAttribute('data-loading') : null,
+                ringFilled: ring ? ring.getAttribute('data-filled') : null,
+                ringProgress: ring ? ring.getAttribute('data-pull-progress') : null,
+                st: vp.scrollTop, sh: vp.scrollHeight, ch: vp.clientHeight,
+                n: vp.querySelectorAll('[data-item-id]').length,
+              };
+            }"""
+        )
+        # (debug dump on failure only; see assert below)
+        try:
+            page.wait_for_selector(
+                '[data-testid="load-older-button"][aria-hidden="false"]',
+                timeout=5_000,
+            )
+        except Exception:
+            # The control legitimately stays hidden once history is exhausted.
+            # Distinguish that (everything already in the DOM) from a real
+            # regression (history remains but the control never showed).
+            rest = httpx.get(
+                f"{gateway_url}/api/agents/{agent_id}/timeline?limit=1000",
+                timeout=30.0,
+            ).json()["items"]
+            if _dbg["n"] < len(rest):
+                raise AssertionError(
+                    f"round {round_no}: fallback control did not appear at the top; "
+                    f"state={_dbg} rest_total={len(rest)}"
+                ) from None
+            break  # history exhausted — no more rounds
+        before_n = page.evaluate("window.__tl.vp.querySelectorAll('[data-item-id]').length")
+        sample_start = page.evaluate("window.__tl.samples.length")
+        page.click('[data-testid="load-older-button"]')
+        deadline = time.monotonic() + 30.0
+        n = before_n
+        while time.monotonic() < deadline:
+            n = page.evaluate("window.__tl.vp.querySelectorAll('[data-item-id]').length")
+            if n > before_n:
+                break
+            page.wait_for_timeout(200)
+        if n <= before_n:
+            break  # history exhausted — no more rounds
+        page.wait_for_timeout(1200)
+        _assert_landing_holds(page, sample_start, round_no)
+    return round_no
+
+
 def _pull_load_older(page: Page, before_requests: list[str]) -> None:
     """Trigger load-older via the new pull gesture (the old auto-trigger band
     is gone): scroll to the top, wheel-up past the pull threshold, then keep
@@ -183,52 +310,5 @@ def test_load_older_preserves_reading_position(e2e_env: E2EEnv) -> None:
     init = page.evaluate(_SAMPLER_JS)
     assert init.get("ok"), init
 
-    # Trigger load-older via the pull gesture (the old < 200px auto-trigger
-    # band is gone); the fetch is route-delayed 2s, and the user keeps
-    # scrolling while it is in flight.
-    _pull_load_older(page, before_requests)
-
-    deadline = time.monotonic() + 30.0
-    n = 0
-    while time.monotonic() < deadline:
-        n = page.evaluate("window.__tl.vp.querySelectorAll('[data-item-id]').length")
-        if n > init["n"]:
-            break  # the older window landed
-        page.wait_for_timeout(200)
-    if n <= init["n"]:
-        rest_items = httpx.get(
-            f"{e2e_env.gateway_url}/api/agents/{agent_id}/timeline?limit=1000",
-            timeout=30.0,
-        ).json()["items"]
-        samples = page.evaluate("window.__tl.samples")
-        raise AssertionError(
-            "the older window never landed: "
-            f"rest_total={len(rest_items)}, before_requests={before_requests}, "
-            f"last_samples={samples[-6:]}"
-        )
-
-    # Let the compensation + post-landing layout settle.
-    page.wait_for_timeout(1200)
-    samples = page.evaluate("window.__tl.samples")
-
-    # The reading position is the first real item's viewport top. Locate the
-    # landing frame (the first sample whose item count differs from the
-    # previous one) and require the anchor to have stayed put across it.
-    landing_idx = next(
-        (i for i, s in enumerate(samples) if i > 0 and s["n"] != samples[i - 1]["n"]),
-        None,
-    )
-    assert landing_idx is not None, "no landing frame in the samples"
-    before = [s for s in samples[:landing_idx] if s["anchorTop"] is not None]
-    after = [s for s in samples[landing_idx:] if s["anchorTop"] is not None]
-    assert before and after, "no anchor measurements around the landing"
-    before_top = before[-1]["anchorTop"]
-    # The user stopped scrolling long before the delayed fetch landed, so the
-    # reading position must hold on every post-landing frame — a > 3 px move
-    # is the #1272 yank.
-    for s in after:
-        assert abs(s["anchorTop"] - before_top) < 3.0, (
-            f"reading position moved by {s['anchorTop'] - before_top:.1f}px across the "
-            f"load-older landing (before={before_top:.1f}, after={s['anchorTop']:.1f}, "
-            f"st={s['st']}, sh={s['sh']}, n={s['n']}, anchor={s['anchorId']})"
-        )
+    rounds = _run_rounds(page, before_requests, init["n"], agent_id, e2e_env.gateway_url)
+    assert rounds >= 2, f"expected multiple load-older rounds, got {rounds}"
