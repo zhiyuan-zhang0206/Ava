@@ -79,10 +79,10 @@ ava impersonate ack <lease_id> 101 102
 Rules that keep delivery honest:
 
 - **Acknowledge only what you actually handled.** An unacknowledged message is
-  treated as not processed: it is redelivered with a fresh hint and remains
-  pending for the Ava agent once control returns. Never ACK a message to make a
-  hint go away; if you cannot handle it, leave it unacknowledged and say so in
-  your release summary.
+  treated as not processed: when its ACK window closes it is pushed again, and
+  it remains pending for the Ava agent once control returns. Never ACK a
+  message to silence delivery; if you cannot handle it, leave it
+  unacknowledged and say so in your release summary.
 - **Never poll, never write inbox code.** No watcher loops, no background
   inbox readers, no scheduled reads. The push side was built so you do not need
   any of that — react to hints when they arrive.
@@ -102,6 +102,12 @@ renewal is an explicit, human-scale action and never an automated loop. A
 background renewer once kept a dead session's identity alive for hours —
 renewing every hour for a 24-hour TTL — until control was lost and the agent
 hung. Do not recreate that failure mode.
+
+> The reminder delivery described below is part of the impersonation delivery
+> rework (direct push + ACK window) and reaches the cluster together with that
+> batch. If reminders do not yet arrive in your inbox, decide by the remaining
+> TTL that `ava impersonate status` reports: renew once, when the remaining
+> time no longer covers the work ahead — never on a schedule or in a loop.
 
 The correct model:
 
