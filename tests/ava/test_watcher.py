@@ -2237,26 +2237,68 @@ def test_cron_renewal_respects_exclude_session(
         ava.shell.kill(wid)
 
 
-def test_cron_explicit_end_same_expr_different_end_stacks(
+def test_cron_explicit_end_supersedes_standing_twin(
     _agent_row: int, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Explicit-end registrations keep the exact-match dedupe contract: the
-    same expression with a different explicit end is a different schedule
-    (pre-cap behavior — the cap/renewal semantics only apply to defaulted
-    ends)."""
+    """The #2061 ruling: an explicit `end_time` re-registration supersedes the
+    standing twin of the same schedule instead of stacking — one live watcher
+    per schedule (expression + timezone), whatever end times are in play. The
+    twin is killed (deliberate-kill drops its row) and exactly one running
+    row — the new session's, carrying the explicit end — remains."""
+    from ava.shell import sessions as _sessions
+    from shared.watcher import TEMPLATE_VERSION
+    from shared.watcher_registry import delete_watcher, register_watcher
+
+    monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType]
+    register_watcher(
+        _agent_row,
+        777001,
+        kind="cron",
+        name="daily",
+        message="daily",
+        cron_expr="0 12 * * *",
+        cron_timezone="UTC",
+        cron_end_at=datetime.datetime.now(datetime.UTC) + datetime.timedelta(days=3),
+        template_version=TEMPLATE_VERSION,
+    )
+    monkeypatch.setattr(_sessions, "list", lambda: {777001: "watcher:777001"})
+    killed: list[int] = []
+
+    def _fake_kill(session_id: int) -> None:
+        killed.append(session_id)
+        # The real kill's deliberate-kill semantics drop the registry row.
+        delete_watcher(_agent_row, session_id)
+
+    monkeypatch.setattr(_sessions, "kill", _fake_kill)  # pyright: ignore[reportUnknownArgumentType]
+    new_end = datetime.datetime.now(datetime.UTC) + datetime.timedelta(days=30)
+    wid = watcher.cron("0 12 * * *", "x", timezone="UTC", end_time=new_end, name="longer-schedule")
+    try:
+        assert wid != 777001
+        assert killed == [777001]
+        rows = [r for r in _registry_rows(_agent_row) if r["status"] == "running"]
+        assert len(rows) == 1, f"expected one running row, got {rows}"
+        assert rows[0]["session_id"] == wid
+        assert rows[0]["cron_end_at"] == new_end  # the explicit end, verbatim
+    finally:
+        ava.shell.kill(wid)
+
+
+def test_cron_explicit_end_no_twin_still_registers(
+    _agent_row: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The #2061 supersede must not swallow a plain first registration: with
+    no live twin, an explicit-end registration inserts its own row (and a
+    later same-schedule registration supersedes it)."""
     from ava.shell import sessions as _sessions
 
     monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType]
     end1 = datetime.datetime.now(datetime.UTC) + datetime.timedelta(hours=1)
-    end2 = datetime.datetime.now(datetime.UTC) + datetime.timedelta(hours=2)
     w1 = watcher.cron("0 12 * * *", "x", timezone="UTC", end_time=end1, name="stack-a")
     try:
-        w2 = watcher.cron("0 12 * * *", "x", timezone="UTC", end_time=end2, name="stack-b")
-        try:
-            assert w2 != w1
-            assert len([r for r in _registry_rows(_agent_row) if r["status"] == "running"]) == 2
-        finally:
-            ava.shell.kill(w2)
+        rows = [r for r in _registry_rows(_agent_row) if r["status"] == "running"]
+        assert len(rows) == 1
+        assert rows[0]["session_id"] == w1
+        assert rows[0]["cron_end_at"] == end1
     finally:
         ava.shell.kill(w1)
 

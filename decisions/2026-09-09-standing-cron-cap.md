@@ -65,3 +65,7 @@ pass an explicit `end_time`.
   standing crons — accepted as the price of never racing the resurrect path.
 - A resurrected agent does NOT get its pre-termination crons back (the rows
   are `reaped` history, never rebuilt) — it re-registers what it needs.
+
+<!-- Extended by: decisions/2026-09-10-cron-reap-notice-explicit-end-supersede.md — the
+     2026-09-10 rulings generalize point 2 to explicit-end re-registration and
+     add the reap notice (issues #2060 / #2061). -->

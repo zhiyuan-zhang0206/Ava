@@ -847,6 +847,46 @@ async def test_reap_terminated_owner_watcher_absent_marks_reaped(
 
     assert reaped == [(aid, 32)]
     assert _watcher_status(db_conn, aid, 32) == "reaped"
+    # The absent verdict is definitive too — the #2060 notice rides on it.
+    assert _system_inbounds(db_conn, aid) == [
+        f"Watcher schedule 'daily' (agent {aid}) was reclaimed after its TTL "
+        "expired. Re-register it with ava.watcher.cron() if it is still needed."
+    ]
+
+
+@pytest.mark.parametrize("source", ["user", "exit", "integrity", None])
+async def test_reap_terminated_owner_watcher_queues_reclamation_notice(
+    db_conn: psycopg.Connection,
+    reaper_pool: ConnectionPool,
+    monkeypatch: pytest.MonkeyPatch,
+    source: str | None,
+) -> None:
+    """The #2060 ruling: reaped is terminal — the schedule never auto-restores
+    — so the definitive reap must QUEUE a reclamation notice for the owner in
+    the same transaction. The owner is terminated at mark time, so the notice
+    is inserted as a pending inbound WITHOUT waking it (a reclamation notice
+    never resurrects); it delivers on the agent's next resurrect through any
+    channel and tells it to re-register."""
+    aid = _terminated_agent(db_conn, source=source)
+    _watcher_row(db_conn, aid, 35)
+
+    async def _dispatch(
+        machine: str, kind: str, payload: dict[str, object], **kwargs: object
+    ) -> dict[str, object]:
+        return ShellKillResult(mode="killed", interrupted=False, name="daily").model_dump()
+
+    monkeypatch.setattr(ttl_reaper.cluster_rpc, "dispatch_to_machine", _dispatch)
+    reaped = await _reap_terminated_owner_watchers(reaper_pool)
+
+    assert reaped == [(aid, 35)]
+    assert _watcher_status(db_conn, aid, 35) == "reaped"
+    assert _system_inbounds(db_conn, aid) == [
+        f"Watcher schedule 'daily' (agent {aid}) was reclaimed after its TTL "
+        "expired. Re-register it with ava.watcher.cron() if it is still needed."
+    ]
+    with db_conn.cursor() as cur:
+        cur.execute("SELECT status FROM agents_meta WHERE id = %s", (aid,))
+        assert cur.fetchone() == ("terminated",)  # the notice never resurrects
 
 
 async def test_reap_terminated_owner_watcher_unreachable_keeps_row(
@@ -897,6 +937,10 @@ async def test_reap_terminated_owner_watcher_resurrected_mid_pass_keeps_row_runn
 
     assert reaped == []
     assert _watcher_status(db_conn, aid, 34) == "running"
+    # The mark never happened, so no reclamation notice was queued either —
+    # the surviving row is the agent's own reconcile business (the #2060
+    # notice rides on the definitive reap only).
+    assert _system_inbounds(db_conn, aid) == []
 
 
 @pytest.mark.parametrize("source", ["reaper", "launch-confirm"])
