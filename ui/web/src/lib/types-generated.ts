@@ -155,6 +155,9 @@ export interface paths {
          *     never a standalone key). The main identity and all admin credentials remain
          *     gateway-local (see shared.config.bootstrap_config_values).
          *
+         *     `host_unlimited_admission` lets new runners receive zero as unlimited;
+         *     absent support, zero is projected to the older runner's usable default.
+         *
          *     Raises:
          *         HTTPException: 401 when the request does not carry
          *             `Authorization: Bearer <cluster secret>` (a no-secret cluster serves
@@ -7967,6 +7970,7 @@ export interface operations {
         parameters: {
             query?: {
                 role?: string | null;
+                host_unlimited_admission?: boolean;
             };
             header?: {
                 authorization?: string | null;

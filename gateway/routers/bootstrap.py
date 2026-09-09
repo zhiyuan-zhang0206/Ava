@@ -24,6 +24,8 @@ router = APIRouter()
 def get_bootstrap(
     authorization: str | None = Header(default=None),
     role: str | None = Query(default=None),
+    *,
+    host_unlimited_admission: bool = False,
 ) -> dict[str, str]:
     """Return cluster-common config ({ENV_ALIAS: value}, unmasked) for an
     agent-runner to load into its environment.
@@ -32,6 +34,9 @@ def get_bootstrap(
     `ava_runner` AVA_DB_URL (the role's own password, carried inside the URL —
     never a standalone key). The main identity and all admin credentials remain
     gateway-local (see shared.config.bootstrap_config_values).
+
+    `host_unlimited_admission` lets new runners receive zero as unlimited;
+    absent support, zero is projected to the older runner's usable default.
 
     Raises:
         HTTPException: 401 when the request does not carry
@@ -43,6 +48,8 @@ def get_bootstrap(
     if secret and not verify_bearer(authorization, secret):
         raise HTTPException(status_code=401, detail="cluster secret required")
     try:
-        return config.bootstrap_config_values(role=role)
+        return config.bootstrap_config_values(
+            role=role, host_unlimited_admission=host_unlimited_admission
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

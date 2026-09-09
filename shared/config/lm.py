@@ -162,12 +162,14 @@ class LmSettings(EnvSettings):
             "'provider:limit,provider:limit' (e.g. 'deepseek:31,anthropic:200'; "
             "provider keys are the model prefixes: deepseek/claude/gpt/gemini/"
             "mimo/kimi/glm/qwen). Empty disables all caps. The default "
-            "deepseek:31 divides DeepSeek Pro's 500 account slots across the "
-            "host's default 16 active-agent budget (31 * 16 = 496). The cap wraps "
+            "deepseek:31 caps concurrent async calls across the hosted process, "
+            "not per agent. Sync callers use a separate process-local limiter. "
+            "The cap wraps "
             "the whole SDK call (SDK-internal retries included) and queues "
             "excess calls instead of 429ing the provider. Reserved for when "
             "agent count or batch jobs approach a provider's account "
-            "concurrency ceiling (DeepSeek: flash 2500 / pro 500); an unknown "
+            "concurrency ceiling; allocate that budget across processes and "
+            "hosts independently of agent admission or database pool sizes. An unknown "
             "provider key fails fast at first use."
         ),
         json_schema_extra={

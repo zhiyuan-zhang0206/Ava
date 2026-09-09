@@ -470,16 +470,22 @@ class TestPendingInboundBackstop:
 
 
 class TestPoolIsolation:
-    def test_control_pool_has_reserved_capacity(self) -> None:
-        """The control boundary is a distinct fixed-capacity client pool."""
+    @pytest.mark.parametrize("turn_limit", [0, 2, 1000])
+    def test_pool_capacity_is_independent_of_agent_admission(
+        self, monkeypatch: pytest.MonkeyPatch, turn_limit: int
+    ) -> None:
+        """Admitting more agents must not expand either database client pool."""
         from services.agent_host.pools import build_control_pool, build_shared_pool
 
+        monkeypatch.setattr(settings.daemon, "host_max_concurrent_turns", turn_limit)
+        monkeypatch.setattr(settings.daemon, "host_db_pool_max_size", 12)
+        monkeypatch.setattr(settings.daemon, "host_control_pool_max_size", 3)
         workload_pool = build_shared_pool("postgresql://unused")
         control_pool = build_control_pool("postgresql://unused")
 
         assert workload_pool is not control_pool
-        assert workload_pool.max_size == settings.daemon.host_max_concurrent_turns + 4
-        assert control_pool.max_size == 4
+        assert workload_pool.max_size == 12
+        assert control_pool.max_size == 3
 
     async def test_turn_work_and_lifecycle_control_use_separate_pools(
         self, wired: _Build, monkeypatch: pytest.MonkeyPatch
@@ -1293,11 +1299,81 @@ class TestRejectedModelConfig:
 
 
 class TestBounds:
+    async def test_disabled_turn_limit_admits_sixty_four_agents(
+        self, wired: _Build, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Waiting on another agent's model must not consume a global turn slot."""
+        monkeypatch.setattr(settings.daemon, "host_max_concurrent_turns", 0)
+        agents = range(1, 65)
+        host, graph, _ = wired({agent_id: _Row() for agent_id in agents})
+        for agent_id in agents:
+            graph.gate(agent_id)
+
+        # Exercise admission directly so a pre-fix Semaphore(0) can be
+        # cancelled during cleanup without bypassing run_turn's resource shield.
+        tasks = [asyncio.create_task(host._run_turn(agent_id)) for agent_id in agents]
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(*(graph.arrival(agent_id).wait() for agent_id in agents)), 2
+            )
+            assert host._in_flight == set(agents)
+        finally:
+            for gate in graph.gates.values():
+                gate.set()
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+    async def test_completed_burst_restores_the_warm_cache_bound(
+        self, wired: _Build, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Active runtimes survive a burst; completion releases excess warm entries."""
+        monkeypatch.setattr(settings.daemon, "host_max_concurrent_turns", 64)
+        monkeypatch.setattr(settings.daemon, "host_agent_cache_size", 32)
+        agents = range(1, 65)
+        host, graph, _ = wired({agent_id: _Row() for agent_id in agents})
+        for agent_id in agents:
+            graph.gate(agent_id)
+
+        tasks = [asyncio.create_task(host.run_turn(agent_id)) for agent_id in agents]
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(*(graph.arrival(agent_id).wait() for agent_id in agents)), 2
+            )
+            assert set(host._runtimes) == set(agents)
+        finally:
+            for gate in graph.gates.values():
+                gate.set()
+            await asyncio.wait_for(asyncio.gather(*tasks), 2)
+
+        assert host._in_flight == set()
+        assert len(host._runtimes) <= 32
+
+    async def test_long_running_completion_refreshes_cache_recency(
+        self, wired: _Build, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Active time is not idle time; the last completion becomes most recent."""
+        monkeypatch.setattr(settings.daemon, "host_agent_cache_size", 2)
+        host, graph, _ = wired({agent_id: _Row() for agent_id in (1, 2, 3)})
+        graph.gate(1)
+        task = asyncio.create_task(host.run_turn(1))
+        try:
+            await asyncio.wait_for(graph.arrival(1).wait(), 2)
+            host._runtimes[1].last_used -= settings.daemon.host_agent_idle_ttl_seconds + 1
+            await asyncio.wait_for(host.run_turn(2), 2)
+            assert 1 in host._runtimes, "an active runtime must survive idle eviction"
+        finally:
+            graph.gates[1].set()
+            await asyncio.wait_for(task, 2)
+
+        assert list(host._runtimes) == [2, 1], "completion must refresh idle time and LRU"
+        await asyncio.wait_for(host.run_turn(3), 2)
+        assert set(host._runtimes) == {1, 3}, "the earlier completion is evicted first"
+
     async def test_concurrent_turns_are_capped(
         self, wired: _Build, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """The pool is sized as a statement about this bound, so the bound has
-        to actually hold."""
+        """An explicitly configured admission bound still queues excess agents."""
         from shared.config import settings
 
         monkeypatch.setattr(settings.daemon, "host_max_concurrent_turns", 2)
@@ -1343,7 +1419,7 @@ class TestBounds:
 
         host, _, _ = wired({i: _Row() for i in (1, 2)})
         await asyncio.wait_for(host.run_turn(1), 2)
-        monkeypatch.setattr(settings.daemon, "host_agent_idle_ttl_seconds", -1.0)
+        host._runtimes[1].last_used -= settings.daemon.host_agent_idle_ttl_seconds + 1
         await asyncio.wait_for(host.run_turn(2), 2)
         assert set(host._runtimes) == {2}, "1 aged out; 2 was just used"
 

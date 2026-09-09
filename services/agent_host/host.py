@@ -35,6 +35,7 @@ from __future__ import annotations
 import asyncio
 import time
 from collections import OrderedDict
+from contextlib import nullcontext
 from datetime import datetime
 from uuid import uuid4
 
@@ -141,7 +142,8 @@ class AgentHost:
         self._in_flight: set[int] = set()
         self._watcher_recovery_pending: set[int] = set()
         self._maintenance_failed: dict[int, tuple[str | None, datetime | None]] = {}
-        self._turn_slots = asyncio.Semaphore(settings.daemon.host_max_concurrent_turns)
+        turn_limit = settings.daemon.host_max_concurrent_turns
+        self._turn_slots = asyncio.Semaphore(turn_limit) if turn_limit else nullcontext()
         self.stats = HostStats()
 
     # ── the scheduler's entry point ──────────────────────────────────────────
@@ -341,7 +343,7 @@ class AgentHost:
                 outcome = TurnOutcome(exited=False, crashed=True)
                 raise
             finally:
-                self._in_flight.discard(agent_id)
+                self._cache_after_turn(agent_id)
                 await settle_and_stamp_turn(
                     self._control_pool,
                     incarnation,
@@ -439,6 +441,15 @@ class AgentHost:
 
     # ── the per-agent runtime cache ──────────────────────────────────────────
 
+    def _cache_after_turn(self, agent_id: int) -> None:
+        """Refresh retained runtime recency and return excess idle entries."""
+        cached = self._runtimes.get(agent_id)
+        if cached is not None:
+            cached.last_used = time.monotonic()
+            self._runtimes.move_to_end(agent_id)
+        self._in_flight.discard(agent_id)
+        self._evict()
+
     async def _runtime_for(self, agent_id: int, fingerprint: str) -> _AgentRuntime:
         """This agent's prepared runtime, building it when absent or stale.
 
@@ -485,22 +496,12 @@ class AgentHost:
         return _AgentRuntime(fingerprint=fingerprint, llm=llm)
 
     def _evict(self) -> None:
-        """Drop runtimes past the idle TTL and past the size cap (LRU first).
+        """Evict idle runtimes by age and least-recent use; misses rebuild on wake.
 
-        Two bounds because they answer different questions: the cap keeps a
-        fleet-wide wake burst from holding one runtime per local agent, and the
-        TTL keeps a lightly loaded runner from holding a long-silent agent's
-        runtime forever. Eviction is pure bookkeeping — a dropped runtime costs
-        its agent one rebuild on its next wake, nothing more.
-
-        Agents with a turn in flight are skipped by BOTH bounds. `last_used` is
-        stamped when a turn starts, so a turn that runs longer than the TTL —
-        an autonomous loop, which the design explicitly allows to run for days —
-        would otherwise evict its own runtime while still using it. The cap
-        therefore behaves as a soft bound whenever more turns are in flight than
-        it allows; the concurrency semaphore is what keeps that from being
-        unbounded, and a cache smaller than `host_max_concurrent_turns` is a
-        config error rather than a case to handle here.
+        Active runtimes survive both bounds, including turns longer than the
+        idle TTL. Completion refreshes idle time and LRU position before eviction.
+        Active-agent admission can exceed the cache budget; completion returns
+        the warm cache to its configured size as active runtimes settle.
         """
         cutoff = time.monotonic() - settings.daemon.host_agent_idle_ttl_seconds
         aged = [

@@ -24,7 +24,7 @@ from functools import lru_cache
 from typing import Any
 from urllib.parse import urlsplit
 
-from pydantic import ValidationError
+from pydantic import TypeAdapter, ValidationError
 
 __all__ = [
     "_all_domains_settings",
@@ -264,7 +264,9 @@ def _warn_undecodable_field(name: str, alias: str, _raw: str) -> None:
     )
 
 
-def bootstrap_config_values(role: str | None = None) -> dict[str, str]:
+def bootstrap_config_values(
+    role: str | None = None, *, host_unlimited_admission: bool = False
+) -> dict[str, str]:
     """Return {ENV_ALIAS: value} for the BOOTSTRAP_FIELDS that are set.
 
     Values are unmasked (the caller is an authenticated machine that needs the
@@ -294,6 +296,11 @@ def bootstrap_config_values(role: str | None = None) -> dict[str, str]:
     that has no runner credential yet raises: serving an empty password would fail
     at first connect with an unexplained auth error, so the operator is told to
     provision the role instead.
+
+    A runner must advertise `host_unlimited_admission` before receiving a zero
+    turn limit. Older runners construct Semaphore(0), which admits no work;
+    serve their existing default of 16 for zero only. Positive limits and every
+    other config value retain their authoritative projection.
     """
     from pydantic import SecretStr
 
@@ -323,6 +330,13 @@ def bootstrap_config_values(role: str | None = None) -> dict[str, str]:
         if isinstance(value, SecretStr):
             value = value.get_secret_value()
         out[alias] = runtime_config.env_value_text(value)
+    # Parse exactly as the recipient's integer Settings field: raw .env forms
+    # such as +0 and 0.0 are also zero. Invalid values remain explicit errors.
+    if (
+        not host_unlimited_admission
+        and TypeAdapter(int).validate_python(out["AVA_HOST_MAX_CONCURRENT_TURNS"]) == 0
+    ):
+        out["AVA_HOST_MAX_CONCURRENT_TURNS"] = "16"
     _serve_reachable_data_plane_hosts(out)
     out["AVA_GATEWAY_OTLP_ENDPOINT"] = _gateway_otlp_projection(aliases)
     # Provider keys are not Settings fields, so they cannot arrive through
