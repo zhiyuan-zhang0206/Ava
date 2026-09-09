@@ -57,7 +57,11 @@ notifications (P0 -> `send_message` to #3242 and #405, P2 -> `notify` queue).
   uses the real read-only auth check so a dead cookie fails loudly).
   Demo mode targets a loopback preview on a port in 3001..3100.
 - Runtime budget: the browser pass runs in-process under a 28-minute
-  SIGALRM budget (30-minute contract), matching the former container kill.
+  SIGALRM budget (30-minute contract). Expiry aborts the whole matrix — it
+  is a wave abort, never a per-surface runner-error — and the graceful
+  unwind gets a 30s grace before the hard-exit path SIGKILLs the gate's
+  process tree: the former docker rm --force equivalent, so a wedged
+  playwright driver cannot leave orphan Chromium on the host.
 - Engine: the repo-pinned Playwright Chromium (`playwright==1.59.0` in
   `uv.lock`), headless on the host. No Docker. The engine is deliberately
   pinned so goldens stay comparable across runs; upgrading Playwright

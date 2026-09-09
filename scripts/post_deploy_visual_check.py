@@ -24,10 +24,13 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+import psutil
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from scripts.post_deploy_visual_matrix import VisualGateBudgetExceeded  # noqa: E402
 from scripts.post_deploy_visual_policy import (  # noqa: E402
     extract_gateway_sha,
     extract_gateway_started_at,
@@ -150,6 +153,25 @@ def _expected_capture_names() -> set[str]:
 HARD_EXIT_DELAY_SECONDS = 30
 
 
+def _kill_descendants() -> None:
+    """Best-effort SIGKILL of the gate's process tree on the hard-exit path.
+
+    os._exit skips every finally block, so a wedged playwright driver would
+    otherwise leave orphan Chromium processes on the host (the leak the former
+    container stop used to clean up). Signals are never blocked on the target's
+    state, so this cannot wedge the hard exit itself.
+    """
+    try:
+        descendants = psutil.Process(os.getpid()).children(recursive=True)
+    except psutil.Error:
+        return
+    for descendant in descendants:
+        try:
+            descendant.kill()
+        except psutil.Error:
+            continue
+
+
 def _hard_exit(_signum: int, _frame: object) -> None:
     sys.stderr.write(
         json.dumps(
@@ -162,6 +184,7 @@ def _hard_exit(_signum: int, _frame: object) -> None:
         + "\n"
     )
     sys.stderr.flush()
+    _kill_descendants()
     os._exit(1)
 
 
@@ -171,7 +194,7 @@ def _budget_expired(_signum: int, _frame: object) -> None:
     # equivalent, so a wedged playwright driver cannot overrun the contract.
     signal.signal(signal.SIGALRM, _hard_exit)
     signal.alarm(HARD_EXIT_DELAY_SECONDS)
-    raise RuntimeError("visual gate exceeded its 28-minute budget")
+    raise VisualGateBudgetExceeded("visual gate exceeded its 28-minute budget")
 
 
 def _run_browser_pass(
