@@ -4,16 +4,18 @@ from __future__ import annotations
 
 import argparse
 import json
+import subprocess
+import sys
 from datetime import datetime
 from pathlib import Path
 
 import pytest
 
 from scripts.post_deploy_visual_check import (
+    REPO_ROOT,
     _accept_wave,
     _assert_gate_origin,
-    _container_command,
-    _cookie_mount,
+    _cookie_file,
     _expected_capture_names,
     _validate_demo_target,
 )
@@ -212,45 +214,51 @@ def test_health_url_defaults_to_base_url_api_health() -> None:
     assert args.health_url == "http://gate.example:8000/api/health"
 
 
-def test_demo_target_is_confined_to_the_local_preview_port_range() -> None:
-    assert _validate_demo_target("http://host.docker.internal:3001") is None
-    with pytest.raises(ValueError, match="demo container target"):
+def test_demo_target_is_confined_to_the_loopback_preview_port_range() -> None:
+    assert _validate_demo_target("http://127.0.0.1:3001") is None
+    assert _validate_demo_target("http://localhost:3100") is None
+    with pytest.raises(ValueError, match="demo target"):
         _validate_demo_target("https://production.example:3001")
+    with pytest.raises(ValueError, match="demo target"):
+        _validate_demo_target("http://127.0.0.1:8080")
 
 
-def test_cookie_mount_requires_a_regular_0600_file(tmp_path: Path) -> None:
+def test_cookie_file_requires_a_regular_0600_file(tmp_path: Path) -> None:
     cookie = tmp_path / "cookie.txt"
     cookie.write_text("ava_session=value")
     with pytest.raises(PermissionError, match="0600"):
-        _cookie_mount(cookie)
+        _cookie_file(cookie)
 
     cookie.chmod(0o600)
-    mount, target = _cookie_mount(cookie)
-    assert mount == f"{cookie}:/run/ava-visual-cookie:ro"
-    assert target == "/run/ava-visual-cookie"
+    assert _cookie_file(cookie) == cookie
 
 
-def test_container_recipe_is_pinned_and_passes_only_the_mounted_cookie_path(
-    tmp_path: Path,
+def test_ignore_registry_requires_version_one(tmp_path: Path) -> None:
+    from scripts.post_deploy_visual_matrix import load_ignore_registry
+
+    registry = tmp_path / "known-ignores.json"
+    registry.write_text(json.dumps({"version": 2}))
+    with pytest.raises(ValueError, match="registry version"):
+        load_ignore_registry(registry)
+
+
+def test_host_run_requires_the_cookie_env_var(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    cookie = tmp_path / "cookie.txt"
-    cookie.write_text("ava_session=value")
-    cookie.chmod(0o600)
-    wave = tmp_path / "abc123"
-    input_file = wave / "_input.json"
-    args = argparse.Namespace(base_url="https://gateway.example", wave_sha="abc123")
+    from scripts.post_deploy_visual_check import _run_host
 
-    command = _container_command(
-        args,
-        output_root=tmp_path,
-        input_file=input_file,
-        cookie_file=cookie,
+    monkeypatch.setattr("scripts.post_deploy_visual_check._assert_gate_origin", lambda _url: None)
+    monkeypatch.setattr(
+        "scripts.post_deploy_visual_check.inherited_process_env",
+        dict,
     )
-
-    assert "mcr.microsoft.com/playwright/python:v1.59.0-noble" in command
-    assert "--cookie-file" in command
-    assert "/run/ava-visual-cookie" in command
-    assert "-e" not in command
+    args = argparse.Namespace(
+        accept_wave=None,
+        demo_defect=False,
+        base_url="http://gate.example:3000",
+    )
+    with pytest.raises(ValueError, match="AVA_VISUAL_GATE_COOKIE_FILE"):
+        _run_host(args)
 
 
 def test_accept_wave_requires_complete_captures_and_resets_counter(tmp_path: Path) -> None:
@@ -285,3 +293,31 @@ def test_accept_wave_rejects_incomplete_matrix(tmp_path: Path) -> None:
 
     with pytest.raises(RuntimeError, match="44 required captures"):
         _accept_wave(args)
+
+
+def test_budget_hard_exits_after_a_short_grace_when_the_unwind_hangs() -> None:
+    """The two-stage budget must not depend on playwright's cooperation.
+
+    If the graceful unwind (finally: browser.close()) wedges, the second
+    SIGALRM hard-exits the process — the former docker rm --force equivalent.
+    """
+    script = (
+        "import signal, sys, time\n"
+        f"sys.path.insert(0, {str(REPO_ROOT)!r})\n"
+        "from scripts import post_deploy_visual_check as module\n"
+        "module.HARD_EXIT_DELAY_SECONDS = 1\n"
+        "signal.signal(signal.SIGALRM, module._budget_expired)\n"
+        "signal.alarm(1)\n"
+        "try:\n"
+        "    time.sleep(3600)\n"
+        "except RuntimeError:\n"
+        "    time.sleep(3600)  # simulated wedged unwind\n"
+    )
+    result = subprocess.run(  # noqa: S603 - fixed interpreter with inline script
+        [sys.executable, "-c", script],
+        check=False,
+        capture_output=True,
+        timeout=30,
+    )
+    assert result.returncode == 1
+    assert b"hard exit" in result.stderr
