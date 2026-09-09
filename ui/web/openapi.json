@@ -141,7 +141,7 @@
     "/api/bootstrap": {
       "get": {
         "summary": "Get Bootstrap",
-        "description": "Return cluster-common config ({ENV_ALIAS: value}, unmasked) for an\nagent-runner to load into its environment.\n\n`role=None` and `role=\"runner\"` both serve the least-privilege\n`ava_runner` AVA_DB_URL (the role's own password, carried inside the URL —\nnever a standalone key). The main identity and all admin credentials remain\ngateway-local (see shared.config.bootstrap_config_values).\n\nRaises:\n    HTTPException: 401 when the request does not carry\n        `Authorization: Bearer <cluster secret>` (a no-secret cluster serves\n        without auth — there is no credential to require); 400 for an\n        unknown role value, and when the runner credential is not provisioned.",
+        "description": "Return cluster-common config ({ENV_ALIAS: value}, unmasked) for an\nagent-runner to load into its environment.\n\n`role=None` and `role=\"runner\"` both serve the least-privilege\n`ava_runner` AVA_DB_URL (the role's own password, carried inside the URL —\nnever a standalone key). The main identity and all admin credentials remain\ngateway-local (see shared.config.bootstrap_config_values).\n\n`host_unlimited_admission` lets new runners receive zero as unlimited;\nabsent support, zero is projected to the older runner's usable default.\n\nRaises:\n    HTTPException: 401 when the request does not carry\n        `Authorization: Bearer <cluster secret>` (a no-secret cluster serves\n        without auth — there is no credential to require); 400 for an\n        unknown role value, and when the runner credential is not provisioned.",
         "operationId": "get_bootstrap_api_bootstrap_get",
         "parameters": [
           {
@@ -158,6 +158,16 @@
                 }
               ],
               "title": "Role"
+            }
+          },
+          {
+            "name": "host_unlimited_admission",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Host Unlimited Admission"
             }
           },
           {
