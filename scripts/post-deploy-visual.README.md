@@ -55,10 +55,13 @@ notifications (P0 -> `send_message` to #3242 and #405, P2 -> `notify` queue).
   inside the automation profile. The auth context is pinned per surface
   (data surfaces authenticated, login always renders the form, control
   uses the real read-only auth check so a dead cookie fails loudly).
-  Demo mode must target `host.docker.internal` on a port in 3001..3100.
-- Runtime budget: the pinned
-  `mcr.microsoft.com/playwright/python:v1.59.0-noble` container is killed at
-  28 minutes (30-minute contract).
+  Demo mode targets a loopback preview on a port in 3001..3100.
+- Runtime budget: the browser pass runs in-process under a 28-minute
+  SIGALRM budget (30-minute contract), matching the former container kill.
+- Engine: the repo-pinned Playwright Chromium (`playwright==1.59.0` in
+  `uv.lock`), headless on the host. No Docker. The engine is deliberately
+  pinned so goldens stay comparable across runs; upgrading Playwright
+  requires a golden re-accept afterwards.
 
 ## Health probe
 

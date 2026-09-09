@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the five-surface post-deploy visual gate in pinned Playwright Docker."""
+"""Run the five-surface post-deploy visual gate with the repo-pinned Playwright Chromium."""
 
 from __future__ import annotations
 
@@ -24,7 +24,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-PLAYWRIGHT_IMAGE = "mcr.microsoft.com/playwright/python:v1.59.0-noble"
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
@@ -34,11 +33,11 @@ from scripts.post_deploy_visual_policy import (  # noqa: E402
     extract_gateway_started_at,
     validate_wave_id,
 )
+from scripts.post_deploy_visual_runner import run_browser_gate  # noqa: E402
 from shared.process_env import inherited_process_env  # noqa: E402
 
 DEFAULT_OUTPUT_ROOT = Path.home() / "post-deploy-visual"
-IGNORE_REGISTRY = Path(__file__).with_name("post_deploy_visual_known_ignores.json")
-CONTAINER_TIMEOUT_SECONDS = 28 * 60
+VISUAL_PASS_TIMEOUT_SECONDS = 28 * 60
 
 
 def _health_payload(base_url: str) -> dict[str, object]:
@@ -119,79 +118,19 @@ def _write_json(path: Path, value: object) -> None:
     temporary.replace(path)
 
 
-def _cookie_mount(cookie_file: Path) -> tuple[str, str]:
+def _cookie_file(cookie_file: Path) -> Path:
     if not cookie_file.is_file():
         raise FileNotFoundError(f"cookie file does not exist: {cookie_file}")
     mode = stat.S_IMODE(cookie_file.stat().st_mode)
     if mode != 0o600:
         raise PermissionError(f"{cookie_file} must have mode 0600, found {mode:04o}")
-    return f"{cookie_file}:/run/ava-visual-cookie:ro", "/run/ava-visual-cookie"
-
-
-def _container_command(
-    args: argparse.Namespace,
-    *,
-    output_root: Path,
-    input_file: Path,
-    cookie_file: Path | None,
-    demo_internal: bool = False,
-) -> list[str]:
-    container_cookie: str | None = None
-    command = [
-        "docker",
-        "run",
-        "--rm",
-        "--name",
-        _container_name(),
-        "--platform",
-        "linux/amd64",
-        "-v",
-        f"{REPO_ROOT}:/workspace:ro",
-        "-v",
-        f"{output_root}:/artifacts",
-        "-w",
-        "/workspace",
-    ]
-    if cookie_file is not None:
-        mount, container_cookie = _cookie_mount(cookie_file)
-        command.extend(["-v", mount])
-    command.extend(
-        [
-            PLAYWRIGHT_IMAGE,
-            "bash",
-            "-lc",
-            (
-                "python -m pip install --quiet --disable-pip-version-check "
-                "--root-user-action=ignore playwright==1.59.0 && "
-                'exec python -m scripts.post_deploy_visual_check "$@"'
-            ),
-            "ava-visual",
-            "--inside-container",
-            "--base-url",
-            args.base_url,
-            "--wave-sha",
-            args.wave_sha,
-            "--output-root",
-            "/artifacts",
-            "--input-file",
-            f"/artifacts/{input_file.relative_to(output_root)}",
-        ]
-    )
-    if demo_internal:
-        command.append("--demo-internal")
-    elif container_cookie is not None:
-        command.extend(["--cookie-file", container_cookie])
-    return command
-
-
-def _container_name() -> str:
-    return f"ava-post-deploy-visual-{os.getpid()}"
+    return cookie_file
 
 
 def _validate_demo_target(value: str) -> None:
     parsed = urllib.parse.urlsplit(value)
-    if parsed.hostname != "host.docker.internal" or parsed.port not in range(3001, 3101):
-        raise ValueError("demo container target must be host.docker.internal on port 3001..3100")
+    if parsed.hostname not in {"127.0.0.1", "localhost"} or parsed.port not in range(3001, 3101):
+        raise ValueError("demo target must be a loopback address on port 3001..3100")
 
 
 def _expected_capture_names() -> set[str]:
@@ -208,27 +147,34 @@ def _expected_capture_names() -> set[str]:
     return names
 
 
-def _run_container(command: list[str]) -> int:
+def _budget_expired(_signum: int, _frame: object) -> None:
+    raise RuntimeError("visual gate exceeded its 28-minute budget")
+
+
+def _run_browser_pass(
+    *,
+    base_url: str,
+    wave_sha: str,
+    output_root: Path,
+    input_file: Path,
+    cookie_file: Path | None,
+    demo: bool,
+) -> int:
+    """Run the browser pass under the 28-minute budget (30-minute contract)."""
+    previous = signal.signal(signal.SIGALRM, _budget_expired)
+    signal.alarm(VISUAL_PASS_TIMEOUT_SECONDS)
     try:
-        return subprocess.run(  # noqa: S603 - argv is assembled without a shell
-            command,
-            check=False,
-            timeout=CONTAINER_TIMEOUT_SECONDS,
-        ).returncode
-    except subprocess.TimeoutExpired:
-        subprocess.run(  # noqa: S603 - exact name belongs to this process
-            ["docker", "rm", "--force", _container_name()],
-            check=False,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+        return run_browser_gate(
+            base_url=base_url,
+            wave_sha=wave_sha,
+            output_root=output_root,
+            input_file=input_file,
+            cookie_file=cookie_file,
+            demo=demo,
         )
-        print(
-            json.dumps(
-                {"result": "error", "detail": "visual container exceeded its 28-minute budget"}
-            ),
-            file=sys.stderr,
-        )
-        return 1
+    finally:
+        signal.alarm(0)
+        signal.signal(signal.SIGALRM, previous)
 
 
 def _accept_wave(args: argparse.Namespace) -> int:
@@ -329,6 +275,7 @@ def _isolated_frontend_preview() -> Generator[Path]:
 def _run_demo_preview(args: argparse.Namespace, preview: Path) -> int:
     port = _find_preview_port()
     host_url = f"http://127.0.0.1:{port}"
+    _validate_demo_target(host_url)
     process = subprocess.Popen(  # noqa: S603 - fixed local preview command
         [
             "npm",
@@ -336,7 +283,7 @@ def _run_demo_preview(args: argparse.Namespace, preview: Path) -> int:
             "dev",
             "--",
             "--hostname",
-            "0.0.0.0",  # noqa: S104 - Docker Desktop must reach this loopback-only demo host
+            "127.0.0.1",
             "--port",
             str(port),
         ],
@@ -344,24 +291,23 @@ def _run_demo_preview(args: argparse.Namespace, preview: Path) -> int:
         stdout=subprocess.DEVNULL,
         stderr=subprocess.STDOUT,
         text=True,
-        env=inherited_process_env({"AVA_DEV_ORIGINS": "host.docker.internal"}),
+        env=inherited_process_env({"AVA_DEV_ORIGINS": "127.0.0.1"}),
         start_new_session=True,
     )
     try:
         _wait_for_preview(host_url, process)
-        args.base_url = f"http://host.docker.internal:{port}"
+        args.base_url = host_url
         args.wave_sha = validate_wave_id(f"demo-{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}")
         wave_dir = args.output_root.resolve() / args.wave_sha
         input_file = wave_dir / "_input.json"
         _write_json(input_file, {"deployment_wave": False, "changed_paths": [], "commits": []})
-        return _run_container(
-            _container_command(
-                args,
-                output_root=args.output_root.resolve(),
-                input_file=input_file,
-                cookie_file=None,
-                demo_internal=True,
-            )
+        return _run_browser_pass(
+            base_url=args.base_url,
+            wave_sha=args.wave_sha,
+            output_root=args.output_root.resolve(),
+            input_file=input_file,
+            cookie_file=None,
+            demo=True,
         )
     finally:
         if process.poll() is None:
@@ -391,7 +337,7 @@ def _run_host(args: argparse.Namespace) -> int:
     cookie_value = inherited_process_env().get("AVA_VISUAL_GATE_COOKIE_FILE")
     if not cookie_value:
         raise ValueError("AVA_VISUAL_GATE_COOKIE_FILE is required")
-    cookie_file = Path(cookie_value).resolve()
+    cookie_file = _cookie_file(Path(cookie_value).resolve())
     health_base = args.health_url or args.base_url.rstrip("/")
     health = _health_payload(health_base)
     started_at = extract_gateway_started_at(health)
@@ -414,13 +360,13 @@ def _run_host(args: argparse.Namespace) -> int:
             "commits": commits,
         },
     )
-    return _run_container(
-        _container_command(
-            args,
-            output_root=output_root,
-            input_file=input_file,
-            cookie_file=cookie_file,
-        )
+    return _run_browser_pass(
+        base_url=args.base_url,
+        wave_sha=args.wave_sha,
+        output_root=output_root,
+        input_file=input_file,
+        cookie_file=cookie_file,
+        demo=False,
     )
 
 
@@ -442,36 +388,12 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--accept-wave")
     parser.add_argument("--accepted-by")
     parser.add_argument("--demo-defect", action="store_true")
-    parser.add_argument("--inside-container", action="store_true", help=argparse.SUPPRESS)
-    parser.add_argument("--demo-internal", action="store_true", help=argparse.SUPPRESS)
-    parser.add_argument("--input-file", type=Path, help=argparse.SUPPRESS)
-    parser.add_argument("--cookie-file", type=Path, help=argparse.SUPPRESS)
     return parser
-
-
-def _run_browser(args: argparse.Namespace) -> int:
-    if not args.base_url or not args.wave_sha or args.input_file is None:
-        raise ValueError("container mode requires --base-url, --wave-sha, and --input-file")
-    args.wave_sha = validate_wave_id(args.wave_sha)
-    if args.demo_internal:
-        _validate_demo_target(args.base_url)
-    from scripts.post_deploy_visual_runner import run_browser_gate
-
-    return run_browser_gate(
-        base_url=args.base_url,
-        wave_sha=args.wave_sha,
-        output_root=args.output_root,
-        input_file=args.input_file,
-        cookie_file=args.cookie_file,
-        demo=args.demo_internal,
-    )
 
 
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
-        if args.inside_container:
-            return _run_browser(args)
         return _run_host(args)
     except (
         KeyError,
