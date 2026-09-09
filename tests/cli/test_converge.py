@@ -1158,6 +1158,67 @@ def test_redis_url_identity_step_skips_when_username_present(
     assert (tmp_path / ".env").read_text() == original
 
 
+def test_redis_url_identity_step_skips_quoted_named_url(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """A quoted URL that already names its own Redis identity is left
+    byte-identical even when PostgreSQL uses a different one — the dotenv decode
+    must precede the identity check, or the raw line's quotes hide the username
+    and the backfill corrupts the URL with the PostgreSQL identity (#2046)."""
+    for original in (
+        "AVA_REDIS_URL='redis://ava:pw@127.0.0.1:6380/0'\n",
+        'AVA_REDIS_URL="redis://ava:pw@127.0.0.1:6380/0"\n',
+    ):
+        (tmp_path / ".env").write_text(original)
+        ctx = _redis_identity_ctx(
+            tmp_path,
+            monkeypatch,
+            db_url="postgresql://ava_main:s@127.0.0.1:5433/ava_main",
+            secret="s",  # noqa: S106 — test fixture
+        )
+        _converge._ensure_redis_url_identity_step(ctx)
+        assert (tmp_path / ".env").read_text() == original
+
+
+def test_redis_url_identity_step_backfills_quoted_legacy_url(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """A quoted username-less legacy URL is decoded and gets the same clean
+    backfill its unquoted form receives (previously the quotes corrupted it
+    into a host-less URL written into the .env) (#2046)."""
+    (tmp_path / ".env").write_text("AVA_REDIS_URL='redis://:pw@127.0.0.1:6380/0'\n")
+    ctx = _redis_identity_ctx(
+        tmp_path,
+        monkeypatch,
+        db_url="postgresql://ava_main:s@127.0.0.1:5433/ava_main",
+        secret="sek",  # noqa: S106 — test fixture
+    )
+    _converge._ensure_redis_url_identity_step(ctx)
+    assert (
+        tmp_path / ".env"
+    ).read_text() == "AVA_REDIS_URL=redis://ava_main:sek@127.0.0.1:6380/0\n"
+
+
+def test_redis_url_identity_step_rejects_malformed_url_before_write(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """A username-less value that cannot become a usable redis:// URL fails
+    loudly BEFORE the write — the .env stays byte-identical and the error
+    redacts the credential (#2046)."""
+    original = "AVA_REDIS_URL=redis://:sek@\n"
+    (tmp_path / ".env").write_text(original)
+    ctx = _redis_identity_ctx(
+        tmp_path,
+        monkeypatch,
+        db_url="postgresql://ava_main:s@127.0.0.1:5433/ava_main",
+        secret="sek",  # noqa: S106 — test fixture
+    )
+    with pytest.raises(RuntimeError, match="cannot backfill AVA_REDIS_URL identity") as excinfo:
+        _converge._ensure_redis_url_identity_step(ctx)
+    assert "sek" not in str(excinfo.value)
+    assert (tmp_path / ".env").read_text() == original
+
+
 def test_redis_url_identity_step_falls_back_to_birth_identity(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):

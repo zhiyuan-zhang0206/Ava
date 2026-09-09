@@ -11,6 +11,7 @@ the identifier is chosen (`shared.cluster.DATA_PLANE_IDENTITY`).
 
 from __future__ import annotations
 
+import re
 from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 
 
@@ -114,3 +115,19 @@ def url_host(url: str, fallback: str = "127.0.0.1") -> str:
     guard still matches the unanchored sentinel byte-for-byte.
     """
     return urlsplit(url).hostname or fallback
+
+
+_USERINFO_PASSWORD_RE = re.compile(r"(://[^/@]*:)[^/@]*(@)")
+
+
+def redacted_url(url: str) -> str:
+    """`url` with any userinfo password replaced by `***` — safe to embed in
+    exceptions and log lines.
+
+    Operates on the raw text (not `urlsplit`), so a value the parser would not
+    fully decode — an outer-quoted `.env` line, an unparseable host — still
+    loses its `scheme://user:secret@` password before reaching a log. The
+    username is names-as-data identity, never secret material, and stays
+    visible; a URL with no password is returned unchanged.
+    """
+    return _USERINFO_PASSWORD_RE.sub(r"\1***\2", url)

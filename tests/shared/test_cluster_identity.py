@@ -68,6 +68,15 @@ def test_identity_from_url_refuses_usernameless_url():
     assert cluster.DATA_PLANE_IDENTITY == "ava"
 
 
+def test_identity_from_url_error_redacts_password():
+    """The ValueError must never serialize the URL's password — the failing
+    input can be a full credential-bearing URL (#2046)."""
+    with pytest.raises(ValueError, match="carries no username") as excinfo:
+        cluster.identity_from_url("redis://:FICTIONAL_CREDENTIAL_DO_NOT_USE@127.0.0.1:20028/0")
+    assert "FICTIONAL_CREDENTIAL_DO_NOT_USE" not in str(excinfo.value)
+    assert "***" in str(excinfo.value)
+
+
 def test_db_identity_refuses_usernameless_settings_url(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(settings.data_plane, "db_url", "postgresql://h:5433/ava")
     with pytest.raises(ValueError, match="carries no username"):
