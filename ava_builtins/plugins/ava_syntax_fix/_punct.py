@@ -102,14 +102,46 @@ def _protected_at(protected: list[tuple[int, int]], p: int, idx: int) -> bool:
     return p < len(protected) and protected[p][0] <= idx < protected[p][1]
 
 
+_MAX_TOKENIZE_LINE_LENGTH = 1_000_000
+"""Lines longer than this are never tokenized by the syntax fixers. The C
+tokenizer that tokenize.generate_tokens drives tracks some column offsets in
+``int``, so pathologically long lines are refused up front; no model-generated
+line of valid Python comes close, and skipping a fixer leaves the code
+unchanged (downstream compile() / LLM repair still run)."""
+
+
+def _tokenize_fix_safe(code: str) -> list[tokenize.TokenInfo] | None:
+    """Tokenize code for the syntax fixers, or return None when it cannot be
+    tokenized safely. Shared by the punctuation and escape fixers: both degrade
+    to a no-op on None (broken syntax -- leave it for compile()).
+
+    The C tokenizer behind generate_tokens (CPython 3.12+) can crash instead
+    of raising a tokenize error: an f-string replacement field that mixes '='
+    (debug), ':'/'!' delimiters and invalid expressions makes it compute a
+    negative string length and raise SystemError("Negative size passed to
+    PyUnicode_New") (gh-149183; upstream fix gh-149445 targets 3.15+ only, and
+    on 3.14+ the same input surfaces as MemoryError instead). Fixing is a
+    best-effort convenience, so anything that is not a normal tokenizer error
+    degrades to a no-op rather than abort the agent host run.
+    """
+    if any(len(line) > _MAX_TOKENIZE_LINE_LENGTH for line in code.split("\n")):
+        return None
+    try:
+        # utf-8 encode rejects lone surrogates before the C tokenizer sees
+        # them; paired surrogates (e.g. emoji) round-trip unchanged.
+        code.encode("utf-8")
+        return list(tokenize.generate_tokens(io.StringIO(code).readline))
+    except (tokenize.TokenError, IndentationError, SyntaxError, SystemError, UnicodeError):
+        return None
+
+
 def _translate_outside_strings(code: str, charmap: dict[int, int | str]) -> tuple[str, int]:
     """Translate characters via charmap everywhere except inside string /
     f-string literals and comments. Returns (new_code, num_changes), or
     (code, 0) when tokenization fails (broken syntax -- leave it for compile()).
     """
-    try:
-        tokens = list(tokenize.generate_tokens(io.StringIO(code).readline))
-    except (tokenize.TokenError, IndentationError, SyntaxError):
+    tokens = _tokenize_fix_safe(code)
+    if tokens is None:
         return code, 0
 
     protected = _protected_token_spans(tokens, _line_starts(code))
