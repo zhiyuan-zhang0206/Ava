@@ -2,7 +2,14 @@
 
 from __future__ import annotations
 
+import contextlib
+import http.server
+import socket
 import subprocess
+import threading
+import urllib.error
+import urllib.request
+from collections.abc import Generator
 from pathlib import Path
 
 import pytest
@@ -11,7 +18,7 @@ import yaml
 from cli.commands import _lgtm_native
 from shared import lgtm_systemd
 from shared.config import settings
-from shared.lgtm_local import BACKENDS, backend_urls, binary_path
+from shared.lgtm_local import BACKENDS, HEALTH_PATHS, backend_urls, binary_path
 
 
 def _noop(*_args: object) -> None:
@@ -28,6 +35,59 @@ def _control(*args: str) -> subprocess.CompletedProcess[str]:
 
 def _loaded(*_args: object) -> dict[str, str]:
     return {"LoadState": "loaded", "ActiveState": "active", "MainPID": "123"}
+
+
+def _dead_port() -> int:
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        return sock.getsockname()[1]
+
+
+class _RedirectingBackend(http.server.BaseHTTPRequestHandler):
+    """A backend whose root redirects to the public Gateway — unavailable while
+    the Gateway is still waiting on this same backend's start() — while its own
+    health path answers. The exact topology that restarted a healthy Grafana
+    (#2047)."""
+
+    gateway_port = 1
+    health_status = 200
+
+    def do_GET(self) -> None:
+        body = b'{"database": "ok"}'
+        if self.path in HEALTH_PATHS.values():
+            self.send_response(self.health_status)
+        else:
+            self.send_response(302)
+            self.send_header("Location", f"http://127.0.0.1:{self.gateway_port}/grafana/")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, format: str, *_args: object) -> None:
+        return None
+
+
+class _UnreadyBackend(_RedirectingBackend):
+    health_status = 503
+
+
+@contextlib.contextmanager
+def _serving(handler: type[http.server.BaseHTTPRequestHandler]) -> Generator[str, None, None]:
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_address[1]}"
+    finally:
+        server.shutdown()
+        thread.join()
+
+
+def _make_units(home: Path) -> None:
+    for name in BACKENDS:
+        path = lgtm_systemd.unit_path(home, name)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.touch()
 
 
 def test_native_listener_ports_are_independent_of_external_query_urls(
@@ -305,3 +365,81 @@ def test_rendered_paths_pass_the_real_systemd_parser(tmp_path: Path) -> None:
     )
     assert parsed.returncode == 0, parsed.stderr
     assert not any(word in parsed.stderr for word in ("Failed to parse", "Unknown key", "Invalid"))
+
+
+def test_answers_uses_health_path_and_ignores_root_redirect() -> None:
+    """A backend whose root redirects to an unavailable public Gateway reads as
+    healthy: the probe hits the backend's own health path and never follows the
+    redirect (#2047)."""
+    dead = _dead_port()
+    with _serving(_RedirectingBackend) as base:
+        _RedirectingBackend.gateway_port = dead
+        # Precondition: the old root probe really did fail — following the
+        # redirect to the not-yet-listening Gateway raises.
+        with pytest.raises((urllib.error.URLError, TimeoutError, OSError)):
+            urllib.request.urlopen(f"{base}/", timeout=2)  # noqa: S310 — loopback test server
+        for name in BACKENDS:
+            assert lgtm_systemd._answers(base, name)
+
+
+def test_answers_counts_any_http_answer_as_live_listener() -> None:
+    """A health path answering 503 still proves a live local listener (the
+    probe is liveness, not readiness — the start() wait must not stretch past a
+    backend that answers while still initializing)."""
+    with _serving(_UnreadyBackend) as base:
+        for name in BACKENDS:
+            assert lgtm_systemd._answers(base, name)
+
+
+def test_answers_reports_unavailable_backend_down() -> None:
+    dead = _dead_port()
+    for name in BACKENDS:
+        assert not lgtm_systemd._answers(f"http://127.0.0.1:{dead}", name)
+
+
+def test_start_accepts_existing_unit_when_root_redirects_to_unavailable_gateway(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The Gateway-start dependency cycle is broken: with live backends whose
+    root redirects to the not-yet-started Gateway, start() accepts the existing
+    healthy units and restarts nothing (#2047)."""
+    calls: list[tuple[str, ...]] = []
+    dead = _dead_port()
+    with _serving(_RedirectingBackend) as base:
+        _RedirectingBackend.gateway_port = dead
+        home = tmp_path / "home"
+        _make_units(home)
+        monkeypatch.setattr(lgtm_systemd, "verify_loki", _noop)
+
+        def _pid(_home: Path, _name: str) -> int:
+            return 123
+
+        monkeypatch.setattr(lgtm_systemd, "running_pid", _pid)
+        monkeypatch.setattr(lgtm_systemd, "backend_urls", lambda: dict.fromkeys(BACKENDS, base))
+
+        def control(*args: str) -> subprocess.CompletedProcess[str]:
+            calls.append(args)
+            return _control(*args)
+
+        monkeypatch.setattr(lgtm_systemd, "_systemctl", control)
+        lgtm_systemd.start(home)
+        assert calls == []
+
+
+def test_start_fails_when_backend_never_answers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Failure detection survives the health-path probe: a genuinely
+    unavailable local backend still ends start() with a loud error."""
+    dead = _dead_port()
+    home = tmp_path / "home"
+    _make_units(home)
+    monkeypatch.setattr(lgtm_systemd, "verify_loki", _noop)
+    monkeypatch.setattr(lgtm_systemd, "running_pid", _noop)
+    monkeypatch.setattr(lgtm_systemd.time, "sleep", _noop)
+    monkeypatch.setattr(
+        lgtm_systemd, "backend_urls", lambda: dict.fromkeys(BACKENDS, f"http://127.0.0.1:{dead}")
+    )
+    monkeypatch.setattr(lgtm_systemd, "_systemctl", _control)
+    with pytest.raises(RuntimeError, match="loki did not become reachable"):
+        lgtm_systemd.start(home)

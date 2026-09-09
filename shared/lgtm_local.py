@@ -9,6 +9,17 @@ from shared.process_env import inherited_process_env
 
 BACKENDS = ("loki", "prometheus", "grafana")
 
+# Each backend's own supported health/readiness path. Local lifecycle probes
+# must use these, NOT the root URL: Grafana's root redirects to the public
+# Gateway root (serve_from_sub_path), and following that redirect while the
+# Gateway is still waiting on the same start() makes a healthy Grafana read
+# as down and gets it restarted (#2047).
+HEALTH_PATHS = {
+    "loki": "/ready",
+    "prometheus": "/-/ready",
+    "grafana": "/api/health",
+}
+
 
 def binary_path(home: Path, name: str) -> Path:
     """The exact installed executable owned by this home."""

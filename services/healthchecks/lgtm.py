@@ -65,14 +65,10 @@ def readiness_probes() -> tuple[tuple[str, str], ...]:
 
     Tempo is remote and cannot trigger a local backend restart.
     """
-    from shared.lgtm_local import backend_urls
+    from shared.lgtm_local import BACKENDS, HEALTH_PATHS, backend_urls
 
     urls = backend_urls()
-    return (
-        ("loki", f"{urls['loki']}/ready"),
-        ("prometheus", f"{urls['prometheus']}/-/ready"),
-        ("grafana", f"{urls['grafana']}/api/health"),
-    )
+    return tuple((name, f"{urls[name]}{HEALTH_PATHS[name]}") for name in BACKENDS)
 
 
 def lgtm_host_marker() -> Path:

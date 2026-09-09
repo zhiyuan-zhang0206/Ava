@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from shared.cluster import home_slug
-from shared.lgtm_local import BACKENDS, backend_urls, binary_path
+from shared.lgtm_local import BACKENDS, HEALTH_PATHS, backend_urls, binary_path
 from shared.platform import IS_LINUX, user_systemd_unit_dir
 
 
@@ -154,12 +154,24 @@ def verify_loki(home: Path) -> None:
         raise RuntimeError(f"Loki config verification failed: {result.stderr.strip()}")
 
 
-def _answers(url: str) -> bool:
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *_args: object, **_kwargs: object) -> None:
+        # A redirect (to the public Gateway or anywhere else) must never be
+        # followed by a local listener probe: the local backend answered, and
+        # that is the fact the probe reports.
+        return None
+
+
+def _answers(url: str, name: str) -> bool:
     try:
-        # Direct listener probes must not go through a machine HTTP proxy.
-        with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(url, timeout=2):
+        # Direct listener probes must not go through a machine HTTP proxy and
+        # must not follow redirects — probe the backend's own health path.
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect())
+        with opener.open(url + HEALTH_PATHS[name], timeout=2):
             return True
     except urllib.error.HTTPError:
+        # Any HTTP answer (redirect, readiness-503) proves a live local
+        # listener; liveness is the contract here, readiness is not.
         return True
     except (urllib.error.URLError, TimeoutError, OSError):
         return False
@@ -172,12 +184,12 @@ def start(home: Path) -> None:
         if not unit_path(home, name).is_file():
             raise RuntimeError(f"Native LGTM {name} unit is missing; run ava lgtm on")
         pid = running_pid(home, name)
-        if pid and _answers(urls[name]):
+        if pid and _answers(urls[name], name):
             continue
         _systemctl("enable", unit_name(home, name))
         _systemctl("restart" if pid else "start", unit_name(home, name))
         for _ in range(15):
-            if running_pid(home, name) and _answers(urls[name]):
+            if running_pid(home, name) and _answers(urls[name], name):
                 break
             time.sleep(2)
         else:
