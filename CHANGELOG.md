@@ -18,6 +18,16 @@ and the matching GitHub Releases, cut by `scripts/release_cut.py`.
 ### Fixed
 - New shell session transcripts start with a unique host-written identity line,
   preventing filelog fingerprint collisions from shared login or CLI banners.
+- Single-machine dual-unit telemetry port deviation: a unit whose local
+  collector deviates (`AVA_TELEMETRY_OTLP_PORT` 4319, e.g. the WSL unit beside
+  a Windows collector on 4318/8888) no longer derives its remote-station
+  export target from its own port — station relays and probes use the station's
+  advertised ingress (or `AVA_OBSERVABILITY_OTLP_PORT`), so telemetry stops
+  black-holing to a port the station never listens on. Local collector liveness
+  probes bind the unit's own receiver port independently of the producer export
+  override, and a failed listener inspection reports `unavailable` instead of
+  impersonating "nothing listening" (no unsafe respawn; task #2587).
+
 - Maintenance drain receipts are graded by failure class: a turn raising a
   database-outage exception (`psycopg.OperationalError`, `PoolTimeout`,
   `TimeoutError`) records a crash-equivalent `undelivered` receipt instead of a
