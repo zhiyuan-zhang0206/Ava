@@ -32,9 +32,22 @@ resource set plus its applied lifecycle decision. A same-machine hosted process
 restart is the narrow exception: while holding the metadata lock, it may transfer
 an empty, unfrozen set only after the admission-captured host PID/birth is proven
 ended. A live exact host, an expired lease, a missing host identity, a frozen set,
-or any request refuses that handoff. No default spawn stamps the birth marker:
+or any request refuses that handoff. No spawn stamps the birth marker:
 enabling new births still requires the publication/all-writer boundary, never an
 environment flag or an installed revision.
+
+Hosted admission resolves the loaded image once per host process and rechecks
+its cheap immutable binding without traversing the image on each turn. The
+existing publication decision locks deployment and registry before agent
+metadata. A pending publication returns no hosted admission and queued inbound
+is not consumed. Incomplete historical v2 publication without activation
+hash/challenge is not new-mode permission. Historical NULL resource rows remain
+unknown under current publication and cannot become empty through admission.
+
+Admission runs under the least-privilege `ava_runner` database identity and
+takes the publication row lock through the fixed security-definer
+`lock_runtime_publication_admission()` operation, which exposes no rollout
+mutation surface; publication columns remain ordinary read-only facts.
 
 Managed exec launches the fixed isolated read-only `agent.exec_domain_owner`
 entry (`-I -B -X utf8`) behind a permit gate, validates its actual PID/birth and
