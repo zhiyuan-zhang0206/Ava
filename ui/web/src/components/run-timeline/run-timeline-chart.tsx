@@ -32,19 +32,15 @@ const MIN_CANVAS_WIDTH = 1000;
 const MIN_DETAIL_CANVAS_WIDTH = 320;
 const EVENT_RAIL_LIMIT = 120;
 const TIMELINE_POPOVER_WIDTH = 288;
+// Rail kinds the backend still emits after the task #2591 narrowing: execution
+// and halt events no longer appear on the rail (they live in turn rows).
 const EVENT_RAIL_PRIORITY = new Set([
-  "exec_failed",
-  "exec(failed)",
-  "exec_timeout",
-  "exec(timeout)",
-  "llm_provider_error",
-  "stream_stalled_retry",
-  "llm_turn_aborted",
   "compact",
   "auto_compact",
   "restart_completed",
   "resurrect",
   "agent_terminated",
+  "terminate",
 ]);
 
 function eventChipClass(kind: string): string {

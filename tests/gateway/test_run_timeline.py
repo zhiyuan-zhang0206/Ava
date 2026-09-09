@@ -258,3 +258,33 @@ def test_aggregate_turn_timeline_counts_one_audit_event_per_restart_family() -> 
     )
 
     assert timeline.meta.n_restart == 2
+
+
+def test_aggregate_turn_timeline_rail_is_cross_turn_structural_only() -> None:
+    """Executions and halt markers belong to turn rows; the rail keeps only
+    cross-turn structural events (user ruling 2026-09-09, task #2591)."""
+    start = datetime(2026, 9, 9, 8, tzinfo=UTC)
+    events = [
+        _event("resurrect", start),
+        _event("exec", start + timedelta(seconds=1)),
+        _event(
+            "turn_end",
+            start + timedelta(seconds=2),
+            attributes={"duration_seconds": 2, "ok": True},
+        ),
+        _event("halt", start + timedelta(seconds=3), attributes={"body": "no tool_call (idle)"}),
+        _event("exec_failed", start + timedelta(seconds=4), attributes={"exc_type": "ValueError"}),
+        _event("compact", start + timedelta(seconds=5)),
+        _event("agent_terminated", start + timedelta(seconds=6)),
+    ]
+
+    timeline = aggregate_turn_timeline(events, start, start + timedelta(seconds=7))
+
+    assert [event.kind for event in timeline.events] == [
+        "resurrect",
+        "compact",
+        "agent_terminated",
+    ]
+    # Executions still land on their turn row; the failure stays a row badge.
+    assert [execution.ok for execution in timeline.rows[0].execs] == [True, False]
+    assert "exec_failed" in timeline.rows[0].anomalies

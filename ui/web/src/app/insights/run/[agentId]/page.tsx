@@ -24,7 +24,7 @@ import { cn } from "@/lib/utils";
 
 const ZOOM_WINDOWS = [24, 12, 6, 1, 0.5] as const;
 const RUN_TIMELINE_WINDOW_HOURS_SETTING = "display.run_timeline_window_hours";
-const RUN_TIMELINE_WINDOW_HOURS_DEFAULT = 2;
+const RUN_TIMELINE_WINDOW_HOURS_DEFAULT = 0.5;
 
 function runTimelineWindowHours(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) && value > 0
