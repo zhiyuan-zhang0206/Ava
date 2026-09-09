@@ -39,6 +39,7 @@ class _FakeShellBackend:
         self.killed: list[str] = []
         self.new_result = True
         self.supports_send = True
+        self.send_error: Exception | None = None
 
     def has_session(self, name: str) -> bool:
         return name in self.sessions
@@ -54,6 +55,8 @@ class _FakeShellBackend:
     def send(self, name: str, text: str) -> None:
         if not self.supports_send:
             raise NotImplementedError
+        if self.send_error is not None:
+            raise self.send_error
         self.sent.append((name, text))
 
     def send_keys(self, name: str, *keys: str) -> None:
@@ -324,6 +327,45 @@ def test_crashed_server_is_relaunched_in_same_session(
     ]
     assert backend.keys == [(page_session, ("Enter",))]
     assert backend.new_calls == []
+
+
+def test_wedged_session_relaunch_failure_kills_and_recreates_the_session(
+    sync_pool: ConnectionPool,
+    db_conn: psycopg.Connection,
+    backend: _FakeShellBackend,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A session whose shell cannot run the server command — its host gone
+    or wedged while the record still reads alive — is torn down and rebuilt
+    fresh instead of backing off against the dead transport forever
+    (task #2670: the page-server ghost record class)."""
+    agent_id = spawn_agent()
+    page_session = f"ava-agent-{agent_id}-shell-3-page-wedged"
+    backend.sessions.add(page_session)
+    backend.send_error = RuntimeError("pty session host is not answering")
+    _insert_page_row(
+        db_conn,
+        agent_id,
+        "wedged",
+        12016,
+        tmp_path,
+        token=secrets.token_hex(16),
+        session=page_session,
+    )
+    monkeypatch.setattr(psd, "_server_is_healthy", lambda *_args: False)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(psd, "_probe_port", lambda *_args: None)  # pyright: ignore[reportUnknownArgumentType]
+    managed: dict[tuple[int, str], psd._ServerHandle] = {}
+    backoff: dict[tuple[int, str], float] = {}
+
+    _reconcile(sync_pool, managed, backoff, {})
+
+    assert backend.killed == [page_session], "the wedged session must be torn down"
+    assert [call[0] for call in backend.new_calls] == [page_session], (
+        "the torn-down session must be recreated fresh"
+    )
+    assert set(managed) == {(agent_id, "wedged")}
+    assert backoff == {}, "relaunch failure must not wedge the row in a backoff loop"
 
 
 def test_windows_style_backend_recreates_the_session_when_it_cannot_send(

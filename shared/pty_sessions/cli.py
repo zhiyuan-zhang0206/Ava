@@ -76,13 +76,21 @@ from shared.pty_sessions._paths import (
     host_identity,
     host_log_path,
     host_starttime,
-    pty_dir,
     record_path,
     socket_path,
     transcript_path,
 )
 from shared.pty_sessions.allocation_freeze import locked_freeze_state, state_path
 from shared.pty_sessions.orphan_reaper import _reap_orphaned_hosts
+from shared.pty_sessions.records import (
+    _CREATE_TIME_TOLERANCE_S,
+    _record_alive,
+    _sweep_dead,
+    has_session,
+    live_sessions,
+    session_generation,
+    session_started_at,
+)
 from shared.session_record import SessionRecord, pid_starttime_ticks
 
 # ---------------------------------------------------------------------------
@@ -228,118 +236,11 @@ def write_env_file(env: dict[str, str]) -> Path:
 
 
 # ---------------------------------------------------------------------------
-# Record liveness + enumeration (no process to dial — the records ARE the
-# session listing; a dead record is swept as it is discovered).
 # ---------------------------------------------------------------------------
-
-# Legacy epoch identity tolerance (mirrors posixproc).
-_CREATE_TIME_TOLERANCE_S = 2.0
-
-
-def _record_alive(rec: SessionRecord) -> bool:
-    try:
-        proc = psutil.Process(rec.pid)
-        if not proc.is_running() or proc.status() == psutil.STATUS_ZOMBIE:
-            return False
-        if rec.starttime is not None:
-            return rec.identifies(rec.pid) is True
-        return abs(proc.create_time() - rec.create_time) <= _CREATE_TIME_TOLERANCE_S
-    except psutil.Error:
-        return False
-
-
-def has_session(name: str) -> bool:
-    """True if the named pty session's record points at a live, matching
-    shell process — the same liveness rule posixproc applies to its records."""
-    rec = SessionRecord.read(record_path(name))
-    return rec is not None and _record_alive(rec)
-
-
-def session_started_at(name: str) -> float | None:
-    """Epoch seconds the named pty session was launched, or None when it is
-    not alive. Same record + pid liveness rule as `has_session`."""
-    rec = SessionRecord.read(record_path(name))
-    if rec is None or not _record_alive(rec):
-        return None
-    return rec.started_at
-
-
-def session_generation(name: str) -> str | None:
-    """The live PTY session's persisted flip generation, if one exists."""
-    rec = SessionRecord.read(record_path(name))
-    if rec is None or not _record_alive(rec):
-        return None
-    return rec.generation
-
-
-# Last warning reason per retained record: a tick-scanning poller (the
-# page-server daemon scans every ~2s pass) would otherwise flood the log with
-# an identical warning every pass. Entries exist only while a record keeps
-# failing liveness; a swept record's entry is dropped so a re-created record
-# warns again.
-_retained_warning_reasons: dict[str, str] = {}
-
-
-def _sweep_dead(name: str) -> None:
-    """Drop a provably dead session's record + socket (its host is gone too)."""
-    rec = SessionRecord.read(record_path(name))
-    if rec is not None:
-        reapable, why = _record_reapable(rec)
-        if not reapable:
-            if _retained_warning_reasons.get(name) != why:
-                logger.warning(
-                    "pty retaining live session record {name}: {why}",
-                    name=name,
-                    why=why,
-                )
-                _retained_warning_reasons[name] = why
-            return
-    _retained_warning_reasons.pop(name, None)
-    with contextlib.suppress(OSError):
-        record_path(name).unlink(missing_ok=True)
-    with contextlib.suppress(OSError):
-        socket_path(name).unlink(missing_ok=True)
-
-
-def _record_reapable(rec: SessionRecord) -> tuple[bool, str]:
-    """Whether a pty record that failed liveness can safely be swept."""
-    if _record_alive(rec):
-        return False, "shell is still live"
-    try:
-        proc = psutil.Process(rec.pid)
-        if not proc.is_running():
-            return True, "shell pid is no longer running"
-        if proc.status() == psutil.STATUS_ZOMBIE:
-            return True, "shell exited and awaits parent reap"
-    except psutil.NoSuchProcess:
-        return True, "shell pid is gone"
-    except (psutil.AccessDenied, OSError):
-        return False, "shell pid could not be inspected"
-    if rec.identifies(rec.pid) is False:
-        return True, "shell pid was reused by another process"
-    return False, "live shell pid did not satisfy the legacy identity check"
-
-
-def live_sessions(prefix: str = "") -> dict[str, SessionRecord]:
-    """Every live session's record, filtered by name prefix.
-
-    The record scan is the session listing; a record whose shell is gone is
-    a crashed host's leftover and is swept as it is discovered (the same
-    lazy sweep posixproc.list_sessions performs on its dir).
-    """
-    out: dict[str, SessionRecord] = {}
-    for rec_file in sorted(pty_dir().glob("*.json")):
-        name = rec_file.stem
-        if not name.startswith(prefix):
-            continue
-        rec = SessionRecord.read(rec_file)
-        if rec is None or not _record_alive(rec):
-            _sweep_dead(name)
-            continue
-        out[name] = rec
-    return out
-
-
+# Record liveness + enumeration: see shared.pty_sessions.records (split out
+# 2026-09-09, task #2670 — the file-size ceiling). The CLI re-exports the
+# same names from the module-level import above.
+# ---------------------------------------------------------------------------
 # ---------------------------------------------------------------------------
 # Socket client + ops.
 # ---------------------------------------------------------------------------
@@ -651,8 +552,9 @@ def _kill_by_record(name: str) -> int:
     recycled pid is never signalled), then sweep the record + socket only
     when they are provably stale.
     """
-    rec = SessionRecord.read(record_path(name))
-    if rec is not None and _record_alive(rec):
+    path = record_path(name)
+    rec = SessionRecord.read(path)
+    if rec is not None and _record_alive(rec, path):
         with contextlib.suppress(ProcessLookupError, OSError):
             os.killpg(rec.pid, signal.SIGKILL)
         with contextlib.suppress(ProcessLookupError, OSError):
@@ -672,8 +574,8 @@ def _kill_by_record(name: str) -> int:
                 proc.kill()
     deadline = time.monotonic() + 3.0
     while time.monotonic() < deadline:
-        rec = SessionRecord.read(record_path(name))
-        if rec is None or not _record_alive(rec):
+        rec = SessionRecord.read(path)
+        if rec is None or not _record_alive(rec, path):
             break
         time.sleep(0.05)
     if has_session(name):

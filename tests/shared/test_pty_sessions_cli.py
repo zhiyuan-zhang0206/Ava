@@ -299,7 +299,9 @@ def test_zombie_is_not_a_live_pty_session(
     monkeypatch.setattr(SessionRecord, "identifies", identifies)
     try:
         observed = (
-            pty_cli._record_alive(session.record) if observer == "cli" else session.pid_matches()
+            pty_cli._record_alive(session.record, session.record_path)
+            if observer == "cli"
+            else session.pid_matches()
         )
         assert not observed
     finally:
@@ -464,6 +466,56 @@ def test_crashed_host_is_swept_lazily(sessions: Path) -> None:
     assert not socket_path(name).exists(), "list must sweep the dead socket"
 
 
+def test_hostless_record_reads_dead_and_is_swept(sessions: Path) -> None:
+    """A record whose host is provably gone must read dead and be swept even
+    while its shell survived the host's unclean death — the page-server ghost
+    class (task #2670: a session record whose host died kept listing while
+    the session answered no op).
+
+    The shell normally exits on the pty-master hangup; the phantom class is
+    the shell that stays alive anyway. Its record names no usable transport
+    (the socket, screen, and kill protocol all died with the host), so the
+    listing must filter it and the sweep must tear the identity-matched
+    orphan shell down — never by bare pid.
+    """
+    import shared.pty_sessions.cli as pty_cli_mod
+
+    name = "ava-test-hostless-1"
+    shell = subprocess.Popen(["/bin/sleep", "300"])
+    try:
+        raw = {
+            "pid": shell.pid,
+            "create_time": psutil.Process(shell.pid).create_time(),
+            "cmd": "/bin/sleep 300",
+            "cwd": str(sessions),
+            "started_at": time.time(),
+            "starttime": None,
+            "generation": None,
+            "control_mode": None,
+            "host_pid": 999999,
+            "host_create_time": 0.0,
+            "host_starttime": None,
+        }
+        record_path(name).write_text(json.dumps(raw))
+
+        rec = _record(home=sessions, name=name)
+        assert rec is not None
+        assert pty_cli_mod._record_alive(rec, record_path(name)) is False, (
+            "a live shell with a gone host must read dead"
+        )
+        assert _run_cli(sessions, name, "has").returncode == 1
+        assert _run_cli(sessions, "list").stdout.strip() == "", "the listing must filter the ghost"
+        assert not record_path(name).exists(), "the sweep must drop the hostless record"
+        assert _wait(lambda: _proc_exited(shell.pid)), "the sweep must reap the orphan shell"
+    finally:
+        with contextlib.suppress(ProcessLookupError):
+            shell.kill()
+        shell.wait(timeout=5)
+        with contextlib.suppress(OSError):
+            record_path(name).unlink()
+            socket_path(name).unlink()
+
+
 # ---------------------------------------------------------------------------
 # has / list / list-started-at
 # ---------------------------------------------------------------------------
@@ -562,7 +614,7 @@ def test_record_starttime_survives_wall_clock_drift(sessions: Path) -> None:
         rec.write(record_path(name))
 
         assert rec.identifies(child.pid) is True
-        assert pty_cli._record_alive(rec) is True
+        assert pty_cli._record_alive(rec, record_path(name)) is True
         assert pty_cli.live_sessions(prefix="ava-test-starttime-") == {name: rec}
         assert record_path(name).exists()
     finally:
@@ -589,7 +641,7 @@ def test_live_sessions_reaps_starttime_pid_reuse(sessions: Path) -> None:
     rec.write(record_path(name))
 
     assert rec.identifies(os.getpid()) is False
-    assert pty_cli._record_alive(rec) is False
+    assert pty_cli._record_alive(rec, record_path(name)) is False
     assert pty_cli.live_sessions(prefix="ava-test-starttime-") == {}
     assert not record_path(name).exists()
 
@@ -609,7 +661,7 @@ def test_live_sessions_keeps_live_legacy_record_with_clock_drift(
     )
     rec.write(record_path(name))
 
-    assert pty_cli._record_alive(rec) is False
+    assert pty_cli._record_alive(rec, record_path(name)) is False
     assert pty_cli.live_sessions(prefix="ava-test-legacy-") == {}
     assert record_path(name).exists()
     assert any(
@@ -627,6 +679,7 @@ def test_retained_record_warning_is_deduped_across_scans(
     unchanged warning would flood the log (2026-08-28 incident). A swept
     record's entry is dropped, so a re-created record warns again."""
     import shared.pty_sessions.cli as pty_cli_mod
+    import shared.pty_sessions.records as pty_records
 
     name = "ava-test-retain-dedupe"
     retained = SessionRecord(
@@ -636,7 +689,7 @@ def test_retained_record_warning_is_deduped_across_scans(
         cwd=str(sessions),
         started_at=time.time(),
     )
-    monkeypatch.setattr(pty_cli_mod, "_retained_warning_reasons", {})
+    monkeypatch.setattr(pty_records, "_retained_warning_reasons", {})
 
     def _warn_count() -> int:
         return sum(
@@ -645,7 +698,7 @@ def test_retained_record_warning_is_deduped_across_scans(
         )
 
     retained.write(record_path(name))
-    assert pty_cli_mod._record_alive(retained) is False
+    assert pty_cli_mod._record_alive(retained, record_path(name)) is False
     assert pty_cli_mod.live_sessions(prefix="ava-test-retain-") == {}
     assert record_path(name).exists()
     assert _warn_count() == 1
