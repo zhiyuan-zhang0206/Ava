@@ -29,6 +29,12 @@ def _records(path: str) -> list[dict[str, Any]]:
 
 def evaluate(pr_number: int) -> None:
     pr = _api(f"pulls/{pr_number}")
+    # A merged/closed PR needs no gate maintenance. Without this early
+    # return the same_head guard below would see only open PRs, find an
+    # empty set for this SHA, and overwrite the merged PR's success with
+    # an "Ambiguous shared HEAD" failure (#2676).
+    if pr["state"] != "open":
+        return
     sha = pr["head"]["sha"]
 
     def status(state: str, description: str) -> None:

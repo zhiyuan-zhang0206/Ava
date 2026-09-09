@@ -41,9 +41,10 @@ def _receipt_comment(verdict: str = "approved") -> dict:
     }
 
 
-def _pull(head_sha: str = SHA) -> dict:
+def _pull(head_sha: str = SHA) -> dict[str, Any]:
     return {
         "number": 42,
+        "state": "open",
         "user": {"id": 111, "type": "User"},
         "head": {
             "sha": head_sha,
@@ -161,6 +162,21 @@ def test_shared_head_publishes_failure(run: Any) -> None:
     qa_gate.evaluate(42)
     assert h.status_posts[-1]["state"] == "failure"
     assert "Ambiguous shared HEAD" in h.status_posts[-1]["description"]
+
+
+def test_non_open_pr_returns_without_writing_status(run: Any) -> None:
+    """A merged/closed PR (GitHub reports merged PRs as state "closed")
+    needs no gate maintenance. evaluate() must return before its first
+    status write: the same_head guard counts only open PRs, so on a closed
+    PR it would see an empty set and overwrite the merged PR's success with
+    an "Ambiguous shared HEAD" failure (#2676 — #1992/#1996/#2001/#2007/
+    #2010/#2013/#2011)."""
+    pull = _pull()
+    pull["state"] = "closed"
+    h = run({"pulls/42": [pull]}, {})
+    qa_gate.evaluate(42)
+    assert h.status_posts == []
+    assert h.calls == ["pulls/42"]
 
 
 def test_evidence_is_read_after_the_head_guards_immediately_before_write(run: Any) -> None:
