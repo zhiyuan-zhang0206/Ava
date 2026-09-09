@@ -184,8 +184,6 @@ def _prepare_resurrect_attempt(
     publish_inbound_wake(agent_id, "0")
 
 
-
-
 def resurrect_agent(
     agent_id: int,
     *,
