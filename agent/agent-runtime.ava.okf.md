@@ -26,7 +26,11 @@ context for compaction and to END for idle or lifecycle control. Routing uses
   per-agent context/config, reuses model state, drives graph invocations, flushes
   checkpoints and settles lifecycle state before releasing the turn.
 - `services/agent_host/db_recovery.py` retains the original turn during a database
-  outage and revalidates ownership before repairing and continuing its checkpoint.
+  or checkpoint failure. A 5s exact-owner probe precedes a separate 30s repair
+  budget: flush retained checkpoint writes, reconcile claimed inputs, revalidate
+  ownership, repair tool state, and validate ownership again. Retry logs identify
+  the failed phase, exception type, SQLSTATE and elapsed time. This repairs the
+  agent's checkpoint/inbound consistency; it does not mean PostgreSQL crashed.
 - `agent/graph/_llm.py` streams model inference with retry and cancellation.
 - `agent/graph/_exec.py` runs `execute_code` in a disposable subprocess with an
   owned POSIX process group or Windows Job Object. Cleanup reaps its child and

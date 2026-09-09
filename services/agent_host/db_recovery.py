@@ -1,6 +1,7 @@
 """Keep an interrupted host turn alive until its database is usable again."""
 
 import asyncio
+import time
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import Any
@@ -23,10 +24,10 @@ from shared.log import logger
 from shared.runtime_incarnation import RuntimeIncarnation, current_incarnation
 
 _PROBE_TIMEOUT_SECONDS = 5.0
-_RECOVERY_TIMEOUT_SECONDS = 5.0
+_DATABASE_PHASE_TIMEOUT_SECONDS = 30.0
+_RECOVERY_TIMEOUT_SECONDS = _DATABASE_PHASE_TIMEOUT_SECONDS
 _INITIAL_BACKOFF_SECONDS = 1.0
 _MAX_BACKOFF_SECONDS = 30.0
-_DATABASE_PHASE_TIMEOUT_SECONDS = 30.0
 
 
 @asynccontextmanager
@@ -92,6 +93,7 @@ async def recover_database(
 ) -> None:
     """Recover inside the original single-flight task, without an inbound wake.
 
+    A short owner probe precedes the independently bounded consistency repair.
     Cancellation interrupts both probe and backoff. A database flap retries the
     same repair; ownership loss and non-database failures escape to the host's
     existing failure/maintenance fence. No lifecycle receipt is produced here.
@@ -99,25 +101,49 @@ async def recover_database(
     if current_incarnation(incarnation.agent_id) != incarnation:
         raise RuntimeOwnershipLostError("database recovery needs the original bound incarnation")
     backoff = _INITIAL_BACKOFF_SECONDS
-    logger.warning("host turn waiting for database recovery", agent_id=incarnation.agent_id)
+    attempt = 0
+    logger.warning("host turn waiting for checkpoint recovery", agent_id=incarnation.agent_id)
     with database_wait(incarnation) as waiting:
         while True:
             waiting.renew()
+            attempt += 1
+            started = time.monotonic()
+            phase = "owner_probe"
             try:
+                await _refresh_owner(pool, incarnation)
                 async with asyncio.timeout(_RECOVERY_TIMEOUT_SECONDS):
-                    await _refresh_owner(pool, incarnation)
                     # Retained N-step writes are still this task's work. Persist them
                     # before deciding which claimed messages reached the checkpoint.
+                    phase = "checkpoint_flush"
                     await flush_checkpoint(checkpointer, incarnation.agent_id)
+                    phase = "inbound_reconciliation"
                     await _reconcile_claimed_inbounds_at_startup(
                         pool, checkpointer, incarnation.agent_id
                     )
+                    phase = "owner_revalidation"
                     await _refresh_owner(pool, incarnation)
+                    phase = "tool_state_repair"
                     await _repair_dangling_tool_use_at_startup(graph, incarnation.agent_id)
+                    phase = "repaired_owner_validation"
                     await _refresh_owner(pool, incarnation)
                 waiting.complete()
-                logger.info("host turn database recovered", agent_id=incarnation.agent_id)
+                logger.info(
+                    "host turn checkpoint recovered",
+                    agent_id=incarnation.agent_id,
+                    attempt=attempt,
+                    elapsed_seconds=time.monotonic() - started,
+                )
                 return
-            except (psycopg.OperationalError, PoolTimeout, TimeoutError):
+            except (psycopg.OperationalError, PoolTimeout, TimeoutError) as exc:
+                logger.warning(
+                    "host checkpoint recovery retry",
+                    agent_id=incarnation.agent_id,
+                    attempt=attempt,
+                    phase=phase,
+                    elapsed_seconds=time.monotonic() - started,
+                    error_type=type(exc).__name__,
+                    sqlstate=exc.sqlstate if isinstance(exc, psycopg.Error) else None,
+                    backoff_seconds=backoff,
+                )
                 await asyncio.sleep(backoff)
                 backoff = min(backoff * 2, _MAX_BACKOFF_SECONDS)

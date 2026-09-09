@@ -13,7 +13,8 @@ from shared.runtime_incarnation import RuntimeIncarnation
 
 # Covers two 30s DB-only handoff stages + a heartbeat delayed by 10s ownership
 # renewal, 3s publication and 15s sleep, with 12s scheduling allowance. Recovery
-# itself needs less: a 5s attempt + 30s backoff before another real attempt.
+# needs a 5s owner probe + 30s repair + 30s backoff + that 28s heartbeat delay
+# (93s total). The short probe does not cap the full consistency repair.
 # Publication does not renew this deadline: only a new bounded attempt does.
 DB_WAIT_PROOF_TTL_SECONDS = 100.0
 _CLOCK_SKEW_SECONDS = 5.0
