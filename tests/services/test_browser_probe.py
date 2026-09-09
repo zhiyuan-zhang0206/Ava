@@ -208,6 +208,77 @@ def test_an_unreadable_global_table_falls_back_to_the_walk(
     assert verdict.verdict is ProbeVerdict.ALIVE
 
 
+def _fake_urlopen(body: bytes = b"", status: int = 200) -> object:
+    """A urllib response stand-in for the CDP body tests."""
+
+    class _Resp:
+        def __init__(self, code: int) -> None:
+            self.status = code
+
+        def read(self) -> bytes:
+            return body
+
+        def __enter__(self) -> object:
+            return self
+
+        def __exit__(self, *_exc: object) -> bool:
+            return False
+
+    return _Resp(status)
+
+
+def _wire_cdp_body(monkeypatch: pytest.MonkeyPatch, body: bytes) -> None:
+    monkeypatch.setattr(
+        probe_mod.urllib.request,
+        "urlopen",
+        lambda *_args, **_kwargs: _fake_urlopen(body),  # pyright: ignore[reportUnknownArgumentType]
+    )
+
+
+def test_cdp_200_with_empty_body_is_unreachable(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The 2026-09-09 swap-pressure shape: HTTP 200 with an EMPTY body. A
+    status-only probe called that alive; the body check must call it dead."""
+    _wire_cdp_body(monkeypatch, b"")
+    assert probe_mod._cdp_unreachable(9222) is not None
+
+
+def test_cdp_200_with_non_json_body_is_unreachable(monkeypatch: pytest.MonkeyPatch) -> None:
+    _wire_cdp_body(monkeypatch, b"<html>not json</html>")
+    assert probe_mod._cdp_unreachable(9222) is not None
+
+
+def test_cdp_200_with_json_missing_browser_is_unreachable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _wire_cdp_body(monkeypatch, b'{"WebKit-Version": "537.36"}')
+    assert probe_mod._cdp_unreachable(9222) is not None
+
+
+def test_cdp_200_with_valid_version_body_is_reachable(monkeypatch: pytest.MonkeyPatch) -> None:
+    body = (
+        b'{"Browser": "Chrome/150.0.0.0", "Protocol-Version": "1.3", '
+        b'"webSocketDebuggerUrl": "ws://127.0.0.1:9222/devtools/browser/x"}'
+    )
+    _wire_cdp_body(monkeypatch, body)
+    assert probe_mod._cdp_unreachable(9222) is None
+
+
+def test_fake_alive_verdict_is_down_even_when_our_chrome_listens(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """2026-09-09 macmini: our orphaned Chrome still LISTENs on the port and
+    answers 200 with an empty body. The probe must read DOWN (so the
+    healthcheck's sweep + rebuild runs), never ALIVE."""
+    _wire_cdp_body(monkeypatch, b"")
+    monkeypatch.setattr(probe_mod, "find_cluster_chrome", lambda _profile: [42])  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(probe_mod, "_listens_on", lambda *_args: True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(probe_mod, "_listener_pid", lambda _port: 42)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(probe_mod.macos_readiness, "degraded_wait_reason", lambda: None)
+    verdict = probe_mod.probe_browser(9222, _PROFILE)
+    assert verdict.verdict is ProbeVerdict.DOWN
+    assert "wedged" in verdict.detail
+
+
 def test_cdp_url_is_the_one_definition() -> None:
     """The daemon's port guard, the healthcheck and this probe all dial the same
     endpoint; a second spelling is how they would drift apart."""
