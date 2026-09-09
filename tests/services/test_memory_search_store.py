@@ -173,6 +173,61 @@ def test_delete_missing_noop(tmp_path: Path) -> None:
     store.delete("/never_existed.md")  # must not raise
 
 
+def test_delete_stale_rows_removes_tail_per_kind(tmp_path: Path) -> None:
+    """Rows past the current file's per-kind count are removed (issue #1946)."""
+    store = _store(tmp_path)
+    _upsert_sequentially(
+        store,
+        [
+            _row("/a.md", 1.0, "ha", 0, kind="desc", chunk_idx=0),
+            _row("/a.md", 1.0, "ha", 1, kind="body", chunk_idx=0),
+            _row("/a.md", 1.0, "ha", 2, kind="body", chunk_idx=1),
+            _row("/a.md", 1.0, "ha", 3, kind="body", chunk_idx=2),
+            _row("/b.md", 2.0, "hb", 4, kind="body", chunk_idx=0),
+        ],
+    )
+    store.delete_stale_rows([("/a.md", {"desc": 1, "body": 1})])
+    assert store.all_meta() == {"/a.md": (1.0, "ha", _FP), "/b.md": (2.0, "hb", _FP)}
+    assert len(store) == 3  # a: desc + body0, b: body0
+
+
+def test_delete_stale_rows_removes_whole_kind_when_gone(tmp_path: Path) -> None:
+    """A kind the current file no longer produces (limit 0) is fully removed."""
+    store = _store(tmp_path)
+    _upsert_sequentially(
+        store,
+        [
+            _row("/a.md", 1.0, "ha", 0, kind="desc", chunk_idx=0),
+            _row("/a.md", 1.0, "ha", 1, kind="body", chunk_idx=0),
+        ],
+    )
+    store.delete_stale_rows([("/a.md", {"desc": 0, "body": 1})])
+    assert len(store) == 1
+    assert store.all_meta() == {"/a.md": (1.0, "ha", _FP)}
+
+
+def test_delete_stale_rows_removes_everything_for_empty_limits(tmp_path: Path) -> None:
+    """An empty file (no rows at all) removes the whole path (issue #1946)."""
+    store = _store(tmp_path)
+    _upsert_sequentially(
+        store,
+        [
+            _row("/a.md", 1.0, "ha", 0, kind="desc", chunk_idx=0),
+            _row("/a.md", 1.0, "ha", 1, kind="body", chunk_idx=0),
+        ],
+    )
+    store.delete_stale_rows([("/a.md", {})])
+    assert len(store) == 0
+    assert store.all_meta() == {}
+
+
+def test_delete_stale_rows_noop_for_unknown_path(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    store.upsert("/a.md", 1.0, "ha", _vec(0), kind="body", chunk_idx=0)
+    store.delete_stale_rows([("/b.md", {"body": 0})])
+    assert len(store) == 1
+
+
 def test_search_topk_exact_cosine_order_and_aggregation(tmp_path: Path) -> None:
     """Best chunk per path wins; ordering is cosine-descending — the exact
     counterpart of milvus's distance-ascending contract."""

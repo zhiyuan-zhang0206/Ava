@@ -96,6 +96,14 @@ ON CONFLICT (pk) DO UPDATE SET
 
 _DELETE_SQL = "DELETE FROM memory_embeddings WHERE path = %s"
 
+# The indexer writes contiguous chunk_idx from 0 per kind, so rows whose kind
+# is absent from the current file (limit 0) or past its last index are tails.
+_DELETE_STALE_SQL = (
+    "DELETE FROM memory_embeddings WHERE path = %s AND ("
+    "  (kind = 'desc' AND chunk_idx >= %s) OR"
+    "  (kind = 'body' AND chunk_idx >= %s))"
+)
+
 _ALL_META_SQL = "SELECT path, mtime, content_hash, embedder FROM memory_embeddings"
 
 _SEARCH_SQL = """
@@ -352,6 +360,22 @@ class PGVectorBackend:
         self._require_writable()
         with self._write_conn() as conn:
             conn.execute(_DELETE_SQL, (path,))
+
+    def delete_stale_rows(
+        self,
+        entries: Sequence[tuple[str, dict[str, int]]],
+    ) -> None:
+        """Tail-cleanup (issue #1946) — see the backend protocol. The whole
+        batch runs in one transaction."""
+        self._require_writable()
+        if not entries:
+            return
+        with self._write_conn() as conn:
+            for path, kind_limits in entries:
+                conn.execute(
+                    _DELETE_STALE_SQL,
+                    (path, kind_limits.get("desc", 0), kind_limits.get("body", 0)),
+                )
 
     def all_meta(self) -> dict[str, tuple[float, str, str]]:
         """Per-path (mtime, content_hash, provider_fingerprint) — one entry

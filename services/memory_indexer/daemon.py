@@ -286,6 +286,15 @@ def _process_paths(
     switch changes the semantic space, so old vectors must never be mixed
     with new ones (same dim is not the same space).
 
+    A re-embedded file REPLACES its rows as one unit (issue #1946): after
+    every row of the file is embedded, the new rows are upserted and the
+    rows the current content no longer produces (a removed description, a
+    shrunken body tail, an empty file) are deleted. If embedding fails part
+    way, only the files whose rows are ALL embedded are committed — a
+    partially-embedded file keeps its old rows intact, so its stored state
+    stays consistent (all-old) and the next fs event or cold-start reconcile
+    retries it against the still-mismatching content hash.
+
     Embedding failures (`EmbeddingAPIError`) propagate after the
     provider's internal retries — the caller (main loop) catches + logs
     + continues (the next fs event re-triggers, indexer stays available).
@@ -318,49 +327,89 @@ def _process_paths(
         backend.delete(str(p))
         _log.info("[indexer] deleted %s", p)
 
-    # Flatten each dirty file into its chunk rows (desc + body chunks). A file
-    # whose content hash is unchanged is skipped before this point, so a
-    # re-embed only happens when the file actually changed.
-    rows: list[
-        tuple[Path, float, str, str, int, str]
-    ] = []  # (path, mtime, hash, kind, chunk_idx, text)
-    for path, mtime, hash_, content in to_embed:
-        for kind, chunk_idx, text in _file_rows(content):
-            rows.append((path, mtime, hash_, kind, chunk_idx, text))
+    # Flatten each dirty file into its chunk rows (desc + body chunks), one
+    # file at a time so per-file completeness stays visible. A file whose
+    # content hash is unchanged is skipped before this point, so a re-embed
+    # only happens when the file actually changed.
+    file_rows: list[tuple[Path, list[tuple[float, str, str, int, str]]]] = []
+    for path, mtime, hash_, content in sorted(to_embed, key=lambda t: str(t[0])):
+        rows = [
+            (mtime, hash_, kind, chunk_idx, text) for kind, chunk_idx, text in _file_rows(content)
+        ]
+        file_rows.append((path, rows))
 
     upsert_rows: list[tuple[str, float, str, np.ndarray, str, int]] = []
-    indexed_paths: list[Path] = []
-    indexed_path_set: set[Path] = set()
+    total_by_file = {path: len(rows) for path, rows in file_rows}
+    # A file that produces no rows (empty body, no description) is complete
+    # by definition — committing it means deleting every row it used to have.
+    embedded_files: list[Path] = [path for path, total in total_by_file.items() if total == 0]
+    done_by_file: dict[Path, int] = {}
+    flat_rows = [
+        (path, mtime, hash_, kind, chunk_idx, text)
+        for path, rows in file_rows
+        for mtime, hash_, kind, chunk_idx, text in rows
+    ]
     try:
-        for i in range(0, len(rows), _BATCH_SIZE):
-            batch = rows[i : i + _BATCH_SIZE]
+        for i in range(0, len(flat_rows), _BATCH_SIZE):
+            batch = flat_rows[i : i + _BATCH_SIZE]
             texts = [text for *_, text in batch]
             vectors = provider.embed_batch(texts)
             for (path, mtime, hash_, kind, chunk_idx, _), vector in zip(
                 batch, vectors, strict=True
             ):
                 upsert_rows.append((str(path), mtime, hash_, vector, kind, chunk_idx))
-                if path not in indexed_path_set:
-                    indexed_path_set.add(path)
-                    indexed_paths.append(path)
+                done = done_by_file.get(path, 0) + 1
+                done_by_file[path] = done
+                if done == total_by_file[path] and path not in embedded_files:
+                    embedded_files.append(path)
     except EmbeddingAPIError:
-        if upsert_rows:
-            try:
-                backend.upsert_many(upsert_rows)
-            except Exception:
-                _log.warning(
-                    "[indexer] failed to flush %d embedded rows after an embedding failure",
-                    len(upsert_rows),
-                    exc_info=True,
-                )
-            else:
-                for path in indexed_paths:
-                    _log.info("[indexer] indexed %s", path)
+        # Only files whose rows are ALL embedded commit; a partially-embedded
+        # file keeps its old rows intact (consistent old state, re-embeds on
+        # the next trigger against its still-mismatching hash).
+        committed = _commit_files(backend, upsert_rows, embedded_files, file_rows)
+        for path in committed:
+            _log.info("[indexer] indexed %s", path)
         raise
 
-    backend.upsert_many(upsert_rows)
-    for path in indexed_paths:
+    committed = _commit_files(backend, upsert_rows, embedded_files, file_rows)
+    for path in committed:
         _log.info("[indexer] indexed %s", path)
+
+
+def _commit_files(
+    backend: MemorySearchBackend,
+    upsert_rows: list[tuple[str, float, str, np.ndarray, str, int]],
+    embedded_files: list[Path],
+    file_rows: list[tuple[Path, list[tuple[float, str, str, int, str]]]],
+) -> list[Path]:
+    """Commit the fully-embedded files: delete their obsolete tail rows first,
+    then upsert the new rows. Returns the committed paths (input order).
+
+    Delete-first is deliberate: if the upsert then fails, the file's
+    surviving rows still carry the OLD content hash, so `all_meta` keeps
+    disagreeing with the file and the next fs event / cold-start reconcile
+    re-embeds it. An upsert-first failure would leave the tail while the new
+    rows' mtime/hash make the file look current — the reconcile-blind state
+    issue #1946 is about.
+    """
+    if not embedded_files:
+        return []
+    embedded = set(embedded_files)
+    committed_rows = [row for row in upsert_rows if Path(row[0]) in embedded]
+    limits_by_file = {path: _kind_limits(rows) for path, rows in file_rows if path in embedded}
+    backend.delete_stale_rows([(str(path), limits_by_file[path]) for path in embedded_files])
+    backend.upsert_many(committed_rows)
+    return list(embedded_files)
+
+
+def _kind_limits(rows: list[tuple[float, str, str, int, str]]) -> dict[str, int]:
+    """kind -> how many rows the current file produces of that kind (the row
+    counts are contiguous from 0, so the count doubles as the keep limit)."""
+    limits: dict[str, int] = {}
+    for row in rows:
+        kind = row[2]
+        limits[kind] = limits.get(kind, 0) + 1
+    return limits
 
 
 def _cold_start_reconcile(backend: MemorySearchBackend, provider: EmbeddingProvider) -> None:
