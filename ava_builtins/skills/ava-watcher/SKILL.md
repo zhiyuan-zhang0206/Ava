@@ -22,9 +22,10 @@ waiting so you don't burn turns polling.
 - **A recurring schedule** — `ava.watcher.cron(expr, message, name="<slug>")`
   wakes you on a cron schedule until its `end_time` (or you kill its session).
   `end_time` defaults to **now + 7 days**: a standing schedule expires unless
-  renewed — re-registering the same expression + timezone renews it (fresh
-  session, fresh 7-day window), and a longer schedule must pass an explicit
-  `end_time`.
+  renewed — re-registering the same expression + timezone replaces the old
+  watcher (fresh session, fresh end), never stacks a double-firing duplicate,
+  and a longer schedule must pass an explicit `end_time` (which also replaces
+  a standing twin).
 
 ## Custom watcher
 
@@ -122,7 +123,10 @@ watchers are not automatically rebuilt).
 
 A cron schedule without an explicit `end_time` stops after 7 days (the
 standing cap). Renew by calling `ava.watcher.cron(...)` with the same
-expression and timezone again — the old watcher is replaced, never stacked.
+expression and timezone again — the old watcher is replaced, never stacked
+(an explicit `end_time` re-registration replaces a standing twin the same
+way). If your watcher was reclaimed while you were terminated, the reaper's
+notice tells you — re-register the schedule if you still need it.
 
 ## See also
 

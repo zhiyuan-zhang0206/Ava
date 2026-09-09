@@ -193,13 +193,15 @@ def register_cron_renewal(
     template_version: int | None = None,
     generation: str | None = None,
 ) -> list[int]:
-    """Renew one standing cron registration, atomically superseding EVERY live twin.
+    """Supersede every live different-end twin of one cron schedule, atomically.
 
-    The renewal half of the standing-cron cap (task #2617): re-registering the
-    same standing schedule extends it to the new end time instead of stacking a
-    second watcher — the Task #1825 dedupe matches end times exactly, so a
-    renewal (whose defaulted end is always later than the registered one) would
-    otherwise spawn a duplicate that double-fires until the old one expires.
+    The FIRST phase of every cron registration (task #2617 renewal + #2061
+    explicit-end supersede — one schedule, one live watcher): a re-registration
+    whose end differs from a live twin's replaces the twin instead of stacking
+    a second watcher — the Task #1825 dedupe matches end times exactly, so a
+    stacked pair (a defaulted renewal or an explicit longer-end registration)
+    would double-fire until the older one expires (user ruling 2026-09-10:
+    an explicit end_time re-registration supersedes the standing twin).
 
     One transaction on ONE connection, serialized on the END-INSENSITIVE
     schedule key (same (agent, expression, timezone) pair — different end times
@@ -207,8 +209,8 @@ def register_cron_renewal(
     same-schedule rows whose end time differs; when any exist, the new row is
     INSERTED and EVERY superseded session id is returned for the caller to kill
     (the deliberate-kill semantics drop each superseded row). Superseding ALL
-    twins (not just the newest) is what makes repeated renewal converge on a
-    single watcher even after a partial failure left two live rows behind
+    twins (not just the newest) is what makes repeated re-registration converge
+    on a single watcher even after a partial failure left two live rows behind
     (QA review of PR #2037). An empty list means no live twin — the caller
     falls through to `register_cron_atomic` for the ordinary exact-match
     dedupe (same-minute double registration, concurrent winners).
