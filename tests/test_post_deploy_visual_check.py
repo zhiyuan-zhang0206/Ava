@@ -4,12 +4,16 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
+from typing import cast
 
 import pytest
+from playwright.sync_api import Browser
 
 from scripts.post_deploy_visual_check import (
     REPO_ROOT,
@@ -321,3 +325,100 @@ def test_budget_hard_exits_after_a_short_grace_when_the_unwind_hangs() -> None:
     )
     assert result.returncode == 1
     assert b"hard exit" in result.stderr
+
+
+def test_run_matrix_lets_the_budget_exception_escape(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A budget expiry mid-combination is a whole-wave abort, not a runner-error."""
+    from scripts import post_deploy_visual_matrix as matrix_module
+    from scripts.post_deploy_visual_matrix import VisualGateBudgetExceeded
+
+    def budget(_browser: Browser, **_: object) -> dict[str, object]:
+        raise VisualGateBudgetExceeded("visual gate exceeded its 28-minute budget")
+
+    monkeypatch.setattr(matrix_module, "inspect_combination", budget)
+    with pytest.raises(VisualGateBudgetExceeded):
+        matrix_module.run_matrix(
+            cast(Browser, None),
+            base_url="http://gate.example:3000",
+            cookie_state=None,
+            registry={},
+            captures=tmp_path,
+            golden=tmp_path,
+        )
+
+
+def test_run_matrix_still_records_ordinary_failures_as_runner_errors(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The budget escape must not swallow the per-surface failure contract."""
+    from scripts import post_deploy_visual_matrix as matrix_module
+
+    def explode(_browser: Browser, **_: object) -> dict[str, object]:
+        raise ValueError("surface exploded")
+
+    monkeypatch.setattr(matrix_module, "inspect_combination", explode)
+    combinations = matrix_module.run_matrix(
+        cast(Browser, None),
+        base_url="http://gate.example:3000",
+        cookie_state=None,
+        registry={},
+        captures=tmp_path,
+        golden=tmp_path,
+    )
+    assert len(combinations) == len(STRUCTURAL_SPECS) * len(VIEWPORTS) * len(THEMES)
+    assert all(
+        cast(list[dict[str, object]], entry["structural_failures"])[0]["kind"] == "runner-error"
+        for entry in combinations
+    )
+
+
+def test_kill_descendants_reaps_the_whole_process_tree(tmp_path: Path) -> None:
+    """os._exit skips finally blocks, so the hard exit must reap the tree itself.
+
+    The kill runs inside a subprocess so the descendant tree it reaps is its
+    own (a playwright-driver stand-in and its Chromium stand-in), never the
+    test session's.
+    """
+    pidfile = tmp_path / "grandchild.pid"
+    grandchild_code = (
+        "import os, pathlib, time\n"
+        f"pathlib.Path({str(pidfile)!r}).write_text(str(os.getpid()))\n"
+        "time.sleep(120)\n"
+    )
+    driver_code = (
+        "import subprocess, sys, time\n"
+        f"subprocess.Popen([sys.executable, '-c', {grandchild_code!r}])\n"
+        "time.sleep(120)\n"
+    )
+    runner_code = (
+        "import subprocess, sys, time\n"
+        "from pathlib import Path\n"
+        f"sys.path.insert(0, {str(REPO_ROOT)!r})\n"
+        "from scripts.post_deploy_visual_check import _kill_descendants\n"
+        f"driver = subprocess.Popen([sys.executable, '-c', {driver_code!r}])\n"
+        "deadline = time.monotonic() + 10\n"
+        f"while not Path({str(pidfile)!r}).exists() and time.monotonic() < deadline:\n"
+        "    time.sleep(0.05)\n"
+        f"assert Path({str(pidfile)!r}).exists(), 'grandchild never reported its pid'\n"
+        "_kill_descendants()\n"
+        "driver.wait(timeout=5)\n"
+    )
+    result = subprocess.run(  # noqa: S603 - fixed interpreter with inline script
+        [sys.executable, "-c", runner_code],
+        capture_output=True,
+        timeout=60,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    grandchild = int(pidfile.read_text())
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        try:
+            os.kill(grandchild, 0)
+        except ProcessLookupError:
+            break
+        time.sleep(0.05)
+    else:
+        pytest.fail("grandchild survived the hard-exit cleanup")

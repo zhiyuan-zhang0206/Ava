@@ -32,6 +32,17 @@ from scripts.post_deploy_visual_policy import (
 from tests.e2e._layout_assertions import structural_failures, wait_for_layout_settled
 
 
+class VisualGateBudgetExceeded(RuntimeError):  # noqa: N818 - reads as the outcome, not an error kind
+    """The host's 28-minute wave budget expired mid-matrix.
+
+    Raised from the SIGALRM handler in post_deploy_visual_check. It is a
+    whole-wave abort, not a per-surface failure: run_matrix lets it escape
+    untouched so the consumer's finally chain (browser.close(), alarm
+    teardown) still runs and the hard-exit grace is not wasted on the
+    remaining combinations.
+    """
+
+
 def load_ignore_registry(path: Path) -> dict[str, object]:
     """Read the known-ignore registry with its version contract."""
     registry = json.loads(path.read_text())
@@ -286,7 +297,9 @@ def run_matrix(
 
     A combination that raises is recorded as a runner-error structural
     failure instead of aborting the wave — one broken surface must not
-    hide the other nineteen results.
+    hide the other nineteen results. The one exception is the host budget
+    signal (VisualGateBudgetExceeded), which aborts the whole wave so the
+    caller's graceful unwind runs instead of being swallowed mid-matrix.
     """
     combinations = []
     for surface in STRUCTURAL_SPECS:
@@ -304,6 +317,8 @@ def run_matrix(
                         captures=captures,
                         golden=golden,
                     )
+                except VisualGateBudgetExceeded:
+                    raise
                 except Exception as exc:
                     result = {
                         "surface": surface,
