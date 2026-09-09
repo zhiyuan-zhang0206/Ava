@@ -318,3 +318,26 @@ state,mergedAt`, `scripts/ci_utils.py`). The same discipline as *discriminate on
 the observed values, never the names*, applied to tool output instead of test
 output: a monitor keyed on vocabulary answers a question nobody asked, and it
 answers it confidently.
+
+
+### A matching install stamp is not a matching node_modules
+
+A stamp hashed from the lockfile proves the lockfile has not changed since the
+last install — it cannot see what a foreign tool did to node_modules afterwards.
+pnpm ignores `package-lock.json` entirely: it re-resolves ranges (^1.2.10 →
+1.2.18), installs, and leaves both lockfile and stamp byte-identical, so every
+converge pass trusts a tree the lockfile never described. The prod bundle then
+ships whatever the drifted dependency's new build emits — here, a
+`@__PURE__`-annotated polling loop that the minifier legitimately eliminated,
+freezing the scrollbar (task #2654, postmortems/0007).
+
+Why: the check answered "did the lockfile change", and the question the
+pipeline actually needed was "does node_modules still match the lockfile".
+
+How to apply: when a stamp or hash gates an installation, verify the
+installation state it is meant to represent — here, foreign package-manager
+markers plus installed versions of direct dependencies vs the lockfile,
+falling back to a clean reinstall on any drift. And when prod behavior and
+clean builds disagree, diff the dependency state the build consumed before
+reaching for cache theories: deterministic minifiers produce identical output
+from identical input.

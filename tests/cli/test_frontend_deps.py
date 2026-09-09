@@ -19,11 +19,14 @@ from cli.commands import _repo
 from shared.platform import IS_WINDOWS
 
 
-def _make_repo(tmp_path: Path, lock_body: str) -> Path:
-    """A repo skeleton with ui/web/package-lock.json holding `lock_body`."""
+def _make_repo(tmp_path: Path, lock_body: str, pkg_body: str = "{}") -> Path:
+    """A repo skeleton with ui/web/package-lock.json holding `lock_body` and
+    package.json holding `pkg_body` (the drift check compares their direct
+    dependency versions)."""
     fe = tmp_path / "ui" / "web"
     fe.mkdir(parents=True)
     (fe / "package-lock.json").write_text(lock_body)
+    (fe / "package.json").write_text(pkg_body)
     return tmp_path
 
 
@@ -122,3 +125,56 @@ def test_reinstalls_when_node_modules_exists_without_stamp(
     (repo / "ui" / "web" / "node_modules").mkdir()  # exists, but no .ava-lock-hash
     _repo._ensure_frontend_deps(repo)
     assert fake_npm_ci == [repo / "ui" / "web"]
+
+
+def test_reinstalls_when_foreign_package_manager_marker_present(
+    tmp_path: Path, fake_npm_ci: list[Path]
+) -> None:
+    """A pnpm install ignores package-lock.json and leaves the stamp matching —
+    the node_modules it produced must not be trusted (task #2654: radix drifted
+    ^1.2.10 → 1.2.18 under the converged stamp and shipped a minifier-emptied
+    function to prod)."""
+    repo = _make_repo(tmp_path, '{"lock": 1}')
+    _repo._ensure_frontend_deps(repo)  # npm ci, writes the stamp
+    fake_npm_ci.clear()
+    (repo / "ui" / "web" / "node_modules" / ".pnpm").mkdir(parents=True)
+    _repo._ensure_frontend_deps(repo)
+    assert fake_npm_ci == [repo / "ui" / "web"]
+
+
+def test_reinstalls_when_installed_version_drifts_from_lockfile(
+    tmp_path: Path, fake_npm_ci: list[Path]
+) -> None:
+    """`npm install <pkg>@x --no-save` leaves no foreign marker and no lockfile
+    change; the version check is the layer that still fires."""
+    repo = _make_repo(
+        tmp_path,
+        '{"lock": 1, "packages": {"node_modules/dep": {"version": "1.0.0"}}}',
+        '{"dependencies": {"dep": "^1.0.0"}}',
+    )
+    _repo._ensure_frontend_deps(repo)
+    fake_npm_ci.clear()
+    installed = repo / "ui" / "web" / "node_modules" / "dep"
+    installed.mkdir(parents=True)
+    (installed / "package.json").write_text('{"version": "2.0.0"}')
+    _repo._ensure_frontend_deps(repo)
+    assert fake_npm_ci == [repo / "ui" / "web"]
+
+
+def test_skips_when_installed_versions_match_lockfile(
+    tmp_path: Path, fake_npm_ci: list[Path]
+) -> None:
+    """The stamp-matched path verifies versions before trusting node_modules —
+    matching versions must keep the skip."""
+    repo = _make_repo(
+        tmp_path,
+        '{"lock": 1, "packages": {"node_modules/dep": {"version": "1.0.0"}}}',
+        '{"dependencies": {"dep": "^1.0.0"}}',
+    )
+    _repo._ensure_frontend_deps(repo)
+    fake_npm_ci.clear()
+    installed = repo / "ui" / "web" / "node_modules" / "dep"
+    installed.mkdir(parents=True)
+    (installed / "package.json").write_text('{"version": "1.0.0"}')
+    _repo._ensure_frontend_deps(repo)
+    assert fake_npm_ci == []

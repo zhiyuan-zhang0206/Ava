@@ -13,6 +13,7 @@ keep their `from cli.commands._repo import ...` imports. This module owns:
 from __future__ import annotations
 
 import hashlib
+import json
 import subprocess
 import sys
 import time
@@ -67,6 +68,41 @@ def _repo_root() -> Path:
     return Path(__file__).resolve().parents[2]
 
 
+_FOREIGN_NODE_MODULES_MARKERS = (".modules.yaml", ".pnpm")
+
+
+def _node_modules_drift(fe: Path, node_modules: Path) -> str | None:
+    """Detect a node_modules that no longer matches the npm lockfile.
+
+    Called only when the install stamp matches, i.e. the lockfile has not
+    changed since the last `npm ci` — the question is what happened to
+    node_modules afterwards. Two cheap layers:
+
+    - Foreign package-manager markers (pnpm's `.modules.yaml` / `.pnpm` store).
+      A pnpm install re-resolves ranges fresh (^1.2.10 -> 1.2.18) and touches
+      neither lockfile nor stamp, so the stamp path would trust it forever.
+    - Installed versions of direct dependencies vs the lockfile — catches drift
+      that leaves no marker, e.g. `npm install <pkg>@x --no-save`.
+    """
+    for marker in _FOREIGN_NODE_MODULES_MARKERS:
+        if (node_modules / marker).exists():
+            return f"foreign package-manager marker {marker!r}"
+    pkg_body = json.loads((fe / "package.json").read_text())
+    direct = {**pkg_body.get("dependencies", {}), **pkg_body.get("devDependencies", {})}
+    lock_packages = json.loads((fe / "package-lock.json").read_text()).get("packages", {})
+    for name in direct:
+        lock_entry = lock_packages.get(f"node_modules/{name}")
+        if lock_entry is None:
+            continue  # no lockfile entry to compare (e.g. a workspace link)
+        installed_pkg = node_modules / name / "package.json"
+        if not installed_pkg.is_file():
+            return f"{name}: not installed"
+        installed_version = json.loads(installed_pkg.read_text()).get("version")
+        if installed_version != lock_entry.get("version"):
+            return f"{name}: installed {installed_version}, lockfile {lock_entry.get('version')}"
+    return None
+
+
 def _ensure_frontend_deps(repo: Path) -> None:
     """Install frontend deps when node_modules is missing OR when
     package-lock.json changed since the last install — `npm run build` without
@@ -79,15 +115,28 @@ def _ensure_frontend_deps(repo: Path) -> None:
     last installed from; a missing/mismatched stamp means node_modules is stale
     against the current lockfile. Written *after* `npm ci` because `npm ci`
     wipes node_modules first.
+
+    A matching stamp only proves the lockfile has not changed since the last
+    `npm ci` — it does not prove node_modules still matches it. A foreign
+    package manager (pnpm) install ignores package-lock.json entirely, resolves
+    ranges fresh, and leaves both the lockfile and the stamp untouched; that
+    exact drift shipped a minifier-emptied dependency to prod while every
+    converge check passed (task #2654, postmortems/0007). So the stamp-matched
+    path additionally verifies node_modules against the lockfile and falls
+    through to `npm ci` on drift.
     """
     fe = repo / "ui" / "web"
     node_modules = fe / "node_modules"
     stamp = node_modules / ".ava-lock-hash"
     want = hashlib.sha256((fe / "package-lock.json").read_bytes()).hexdigest()
     if node_modules.is_dir() and stamp.is_file() and stamp.read_text().strip() == want:
-        return
-    reason = "missing" if not node_modules.is_dir() else "package-lock.json changed"
-    print(f"  · frontend deps {reason}, running npm ci (~30-60s)")
+        drift = _node_modules_drift(fe, node_modules)
+        if drift is None:
+            return
+        print(f"  · frontend deps drifted ({drift}), running npm ci (~30-60s)")
+    else:
+        reason = "missing" if not node_modules.is_dir() else "package-lock.json changed"
+        print(f"  · frontend deps {reason}, running npm ci (~30-60s)")
     # On Windows `npm` is `npm.cmd`, which CreateProcess won't resolve from a bare
     # "npm" argv — run it through the shell so the .cmd shim is found.
     subprocess.run(
