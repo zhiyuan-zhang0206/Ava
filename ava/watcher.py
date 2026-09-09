@@ -340,7 +340,6 @@ def _register_cron_spawn(
     cron_expr: str,
     cron_timezone: str,
     cron_end_at: Any,
-    renewable: bool,
     _exclude_session: int | None,
     generation: str | None,
 ) -> tuple[int | None, list[int]]:
@@ -348,10 +347,18 @@ def _register_cron_spawn(
 
     ``reused``: an identical live schedule already exists (the Task #1825
     dedupe won the race) — the caller disposes its fresh session and hands
-    back the winner's id. ``superseded``: every live standing twin with a
-    different end time was found (task #2617 renewal) — the new row is
-    registered here and the caller kills each twin AFTER the new child has
-    started. At most one of the two is non-empty.
+    back the winner's id. ``superseded``: every live twin with a different
+    end time was found — the new row is registered here and the caller kills
+    each twin AFTER the new child has started. At most one of the two is
+    non-empty.
+
+    The twin supersede runs FIRST for EVERY registration (task #2617
+    renewal and #2061 explicit-end supersede — one schedule, one live
+    watcher, whatever end times are in play): a defaulted re-registration
+    renews a standing schedule, and an explicit-end re-registration
+    REPLACES a standing twin instead of stacking a double-firing duplicate
+    (user ruling 2026-09-10). An already-live exact-end schedule falls
+    through to the atomic dedupe below and is reused.
     """
     from shared.watcher_registry import register_cron_atomic, register_cron_renewal
 
@@ -365,24 +372,23 @@ def _register_cron_spawn(
             # the schedule).
             return None
 
-    if renewable:
-        # The renewal re-check needs the FRESH session list fetched INSIDE
-        # the lock for the same reason as the dedupe (QA nit, #794 delta2).
-        superseded = register_cron_renewal(
-            agent_id,
-            session_id,
-            name=name,
-            message=message,
-            cron_expr=cron_expr,
-            cron_timezone=cron_timezone,
-            cron_end_at=cron_end_at,
-            alive_provider=_fresh_alive,
-            exclude_session=_exclude_session,
-            template_version=TEMPLATE_VERSION,
-            generation=generation,
-        )
-        if superseded:
-            return None, superseded
+    # The supersede re-check needs the FRESH session list fetched INSIDE
+    # the lock for the same reason as the dedupe (QA nit, #794 delta2).
+    superseded = register_cron_renewal(
+        agent_id,
+        session_id,
+        name=name,
+        message=message,
+        cron_expr=cron_expr,
+        cron_timezone=cron_timezone,
+        cron_end_at=cron_end_at,
+        alive_provider=_fresh_alive,
+        exclude_session=_exclude_session,
+        template_version=TEMPLATE_VERSION,
+        generation=generation,
+    )
+    if superseded:
+        return None, superseded
     reused = register_cron_atomic(
         agent_id,
         session_id,
@@ -411,7 +417,6 @@ def _spawn(
     cron_timezone: str | None = None,
     cron_end_at: Any = None,
     timeout_secs: float | None = None,
-    renewable: bool = False,
     _exclude_session: int | None = None,
 ) -> int:
     """Start a watcher child running ``code``; return its watcher id.
@@ -490,10 +495,11 @@ def _spawn(
     try:
         if kind == "cron":
             # Task #1825 dedupe (atomic: xact lock + re-check + insert) and
-            # the task #2617 standing renewal supersede — one registration
-            # helper, both semantics (see _register_cron_spawn). kind ==
-            # 'cron' guarantees the schedule payload (cron() always passes
-            # it); narrow for the registration contract.
+            # the twin supersede (task #2617 renewal, #2061 explicit-end) —
+            # one registration helper, both semantics (see
+            # _register_cron_spawn). kind == 'cron' guarantees the schedule
+            # payload (cron() always passes it); narrow for the registration
+            # contract.
             from typing import cast
 
             reused, superseded = _register_cron_spawn(
@@ -504,7 +510,6 @@ def _spawn(
                 cron_expr=cast(str, cron_expr),
                 cron_timezone=cast(str, cron_timezone),
                 cron_end_at=cron_end_at,
-                renewable=renewable,
                 _exclude_session=_exclude_session,
                 generation=generation,
             )
@@ -569,16 +574,16 @@ def _spawn(
             _sessions.kill(session_id)
         raise
     for old_session in superseded:
-        # The new child is running; retire each superseded standing watcher.
-        # A deliberate kill drops its registry row, so exactly one live row
-        # (this session's) describes the schedule — the renewal never stacks
-        # (Task #1825 double-fire shape). Superseding EVERY twin (not just
-        # the newest) is what makes a repeated renewal converge after a
-        # partial failure left two live rows behind (QA review of PR #2037).
-        # Fail-soft per twin: a kill failure leaves that twin until its own
-        # end_time expires.
+        # The new child is running; retire each superseded twin. A deliberate
+        # kill drops its registry row, so exactly one live row (this
+        # session's) describes the schedule — the re-registration never
+        # stacks (Task #1825 double-fire shape). Superseding EVERY twin (not
+        # just the newest) is what makes a repeated re-registration converge
+        # after a partial failure left two live rows behind (QA review of PR
+        # #2037). Fail-soft per twin: a kill failure leaves that twin until
+        # its own end_time expires.
         logger.info(
-            "[watcher] standing cron %r renewed — session %s superseded by %s",
+            "[watcher] cron %r re-registered — twin session %s superseded by %s",
             cron_expr,
             old_session,
             session_id,
@@ -631,12 +636,16 @@ def cron(
     `end_time` defaults to now + 7 days (user ruling 2026-09-09, task
     #2617): a standing schedule must be renewed, it cannot live forever
     silently. Pass an explicit `end_time` for a longer schedule.
-    Re-registering the same schedule (expression + timezone) RENEWS it — the
-    existing watcher is replaced by a fresh session with a fresh end, never
-    stacked into a duplicate that double-fires (Task #1825). A schedule
-    already live under the exact same (agent, expression, timezone, end
-    time) is REUSED instead; the returned session id is the existing
-    watcher's when reused. Kill the returned session to stop the schedule.
+    Re-registering the same schedule (expression + timezone) supersedes the
+    existing watcher with a fresh session carrying the new end — never
+    stacked into a duplicate that double-fires (Task #1825). One live
+    watcher per schedule, whatever end times are in play: a defaulted
+    re-registration renews a standing schedule, and an explicit-end
+    re-registration REPLACES a standing twin (user ruling 2026-09-10,
+    #2061). A schedule already live under the exact same (agent, expression,
+    timezone, end time) is REUSED instead; the returned session id is the
+    existing watcher's when reused. Kill the returned session to stop the
+    schedule.
 
     Args:
         expr: 5-field cron expression (`minute hour day-of-month month
@@ -667,14 +676,13 @@ def cron(
     # own zone — the same wall clock its other displays use.
     tz = timezone if timezone is not None else (cluster_tz_name() or host_tz_name())
     validate_timezone(tz)
-    renewable = end_time is None
-    if renewable:
+    if end_time is None:
         # Standing-cron cap (task #2617): no end_time means the DEFAULT
         # window — 7 days, counted from the current minute — not forever.
         # Minute truncation groups a double registration of the same
         # schedule into one exact-match dedupe (the Task #1825 reuse); a
-        # later re-registration carries a later end and renews instead of
-        # stacking. A longer schedule must pass an explicit end_time.
+        # later re-registration carries a later end and supersedes instead
+        # of stacking. A longer schedule must pass an explicit end_time.
         now = datetime.datetime.now(datetime.UTC)
         et = now.replace(second=0, microsecond=0) + datetime.timedelta(
             seconds=DEFAULT_STANDING_CRON_MAX_SECONDS
@@ -704,7 +712,6 @@ def cron(
         cron_expr=expr,
         cron_timezone=tz,
         cron_end_at=et,
-        renewable=renewable,
         _exclude_session=_exclude_session,
     )
 

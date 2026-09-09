@@ -31,11 +31,20 @@ This loop is the enforcer, scanning
   terminated for good (never auto-resurrect-eligible) has its session killed
   and its registry row marked ``reaped``. Watcher sessions deliberately carry
   no shell TTL row, so this pass is their only reclamation path (task #2617).
+  Each definitive reap queues a reclamation notice for the owner (delivered
+  on its next resurrect, never resurrecting it itself) — the #2060 ruling:
+  reaped is terminal and never auto-restored, so the agent must be told it
+  was reclaimed to re-register if it still needs the schedule.
 
 Owners are notified (inbound, source ``"system"``) only when the agent is
 running or idling — a terminated agent's page expiring is exactly the cleanup
-the TTL exists for, and must not resurrect it. Shell reclamations notify only
-when the reap interrupted a running job (the runner reports whether the
+the TTL exists for, and must not resurrect it. The one exception is the
+reaped-watcher notice above, which is queued for the TERMINATED owner
+precisely because the agent must learn of the reap when it comes back; the
+Redis wake publish reaches no listener of a terminated agent and the pending
+row is claimed on its next resurrect, so the notice never resurrects it.
+Shell reclamations notify
+only when the reap interrupted a running job (the runner reports whether the
 session carried live processes at kill time); an empty shell's reaping is
 silent, and an already-absent session never notifies. An interruption notice
 states when the TTL expired and how long it was.
@@ -123,15 +132,28 @@ def _terminated_owner_watcher_rows_blocking(
         return [(int(r[0]), int(r[1]), r[2]) for r in cur.fetchall()]
 
 
-def _mark_watcher_reaped_if_owner_still_terminated(
+def _mark_watcher_reaped_and_notify_if_owner_still_terminated(
     pool: ConnectionPool, agent_id: int, session_id: int
-) -> bool:
-    """Terminalize a reclaimed watcher row, re-verifying its owner in the SAME
-    statement (the #2589 atomic-guard discipline).
+) -> str | None:
+    """Terminalize a reclaimed watcher row and queue its reclamation notice,
+    re-verifying its owner in the SAME statement (the #2589 atomic-guard
+    discipline).
 
     The owner may have been resurrected between the scan and the kill — then
     the row must stay ``running`` so the resurrected agent's boot reconcile
-    rebuilds the schedule from it. Returns True when the row was marked.
+    rebuilds the schedule from it. When the row IS marked, the #2060 notice
+    (user ruling 2026-09-10: reaped is terminal, the schedule never
+    auto-restores — the owner must be told it was reclaimed so it can
+    re-register) is inserted in the SAME transaction, so a crash between the
+    mark and the notice cannot lose the notice.
+
+    The owner is terminated at mark time, so the notice is inserted WITHOUT
+    the live-owner gate of ``_notify_owner``: it stays a pending inbound and
+    delivers on the agent's next resurrect through any channel, without
+    resurrecting it (a reclamation notice never resurrects — the wake
+    publish reaches no listener of a terminated agent, and the pending row
+    is claimed when the agent comes back). Returns the watcher's name when
+    the row was marked, None otherwise.
     """
     with write_transaction(pool) as conn, conn.cursor() as cur:
         cur.execute(
@@ -144,10 +166,26 @@ def _mark_watcher_reaped_if_owner_still_terminated(
                     AND m.status = 'terminated'
                     AND COALESCE(m.termination_source, '') NOT IN ('reaper', 'launch-confirm')
               )
+            RETURNING name
             """,
             (agent_id, session_id),
         )
-        return cur.rowcount == 1
+        row = cur.fetchone()
+        if row is None:
+            return None
+        name = row[0]
+        insert_inbound_message(
+            conn,
+            agent_id,
+            (
+                f"Watcher schedule {name!r} (agent {agent_id}) was reclaimed "
+                "after its TTL expired. Re-register it with ava.watcher.cron() "
+                "if it is still needed."
+            ),
+            source="system",
+            provenance=InboundProvenance(source_verified_by=None, source_transport="ops"),
+        )
+        return name
 
 
 def _agent_machine(pool: ConnectionPool, agent_id: int) -> str | None:
@@ -517,7 +555,11 @@ async def _reap_terminated_owner_watchers(
     machine or a failed op leaves the row for the next pass — marking it
     first would orphan the live session. The post-kill mark re-checks the
     owner in SQL, so a mid-flight resurrect leaves the row ``running`` for
-    the agent's own reconcile to rebuild (never a silent loss).
+    the agent's own reconcile to rebuild (never a silent loss). A definitive
+    mark also queues the #2060 reclamation notice for the owner — reaped is
+    terminal, so the owner must be told to re-register if it still needs the
+    schedule (the notice delivers on the owner's next resurrect; it never
+    resurrects the owner itself).
     """
     rows = await asyncio.to_thread(_terminated_owner_watcher_rows_blocking, pool)
     reaped: list[tuple[int, int]] = []
@@ -547,7 +589,7 @@ async def _reap_terminated_owner_watchers(
             )
             continue
         marked = await asyncio.to_thread(
-            _mark_watcher_reaped_if_owner_still_terminated, pool, agent_id, session_id
+            _mark_watcher_reaped_and_notify_if_owner_still_terminated, pool, agent_id, session_id
         )
         if not marked:
             _log.info(

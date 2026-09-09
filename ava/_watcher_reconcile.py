@@ -90,9 +90,10 @@ def _live_cron_session(
     session died), and an exact-end match would rebuild the dead twin into a
     second live watcher that double-fires until the earlier end — with no
     path that ever converges. Schedule-level liveness converges: any live
-    same-schedule row subsumes a dead row's rebuild. (Registration-time
-    exact-end dedupe is unaffected — explicit different-end registrations
-    still stack by design; only the death-rebuild path collapses.)
+    same-schedule row subsumes a dead row's rebuild — the mirror image of
+    registration, whose supersede pass now replaces different-end twins for
+    EVERY registration (#2061), so a double-fire can be born in neither
+    direction.
 
     "Live" means the registry row is still `running` AND its session is in
     the caller's session list. A row whose session is gone is exactly what
