@@ -70,12 +70,12 @@ describe("RunTimelinePage initial window", () => {
     expect(getRunTimeline).not.toHaveBeenCalled();
   });
 
-  it("requests the most recent two hours by default", async () => {
+  it("requests the most recent thirty minutes by default", async () => {
     render();
 
     await waitFor(() =>
       expect(getRunTimeline).toHaveBeenCalledWith(42, {
-        from: "2026-09-05T12:26:00.000Z",
+        from: "2026-09-05T13:56:00.000Z",
         to: "2026-09-05T14:26:00.000Z",
         session: "compact",
       }),
@@ -122,7 +122,7 @@ describe("RunTimelinePage initial window", () => {
     expect(getRunTimeline).toHaveBeenCalledTimes(1);
   });
 
-  it.each([0, -1, Number.NaN, "4"])("falls back to two hours for invalid value %s", async (value) => {
+  it.each([0, -1, Number.NaN, "4"])("falls back to thirty minutes for invalid value %s", async (value) => {
     getSettings.mockResolvedValue({
       settings: [
         {
@@ -137,7 +137,7 @@ describe("RunTimelinePage initial window", () => {
 
     await waitFor(() =>
       expect(getRunTimeline).toHaveBeenCalledWith(42, {
-        from: "2026-09-05T12:26:00.000Z",
+        from: "2026-09-05T13:56:00.000Z",
         to: "2026-09-05T14:26:00.000Z",
         session: "compact",
       }),

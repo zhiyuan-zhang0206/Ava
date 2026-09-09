@@ -52,7 +52,6 @@ _TURN_EVENTS = (
     "exec(cancelled)",
     "exec_node_timeout",
     "exec_thread_stuck",
-    "halt",
     "compact",
     "auto_compact",
     "agent_spawned",
@@ -114,9 +113,11 @@ _ANOMALY_EVENTS = frozenset(
         "llm_turn_aborted",
     }
 )
-_RAIL_EVENTS = (
-    _COMPACT_EVENTS | _RESTART_EVENTS | _EXEC_EVENTS | {"halt", "agent_terminated", "terminate"}
-)
+# Cross-turn structural events only. Ordinary executions belong to their turn
+# row (see RunTimelineRow.execs); anomaly events surface as row badges, and
+# halt markers (per-turn idle/compact/system stops) are noise — none of them
+# earns an independent rail marker.
+_RAIL_EVENTS = _COMPACT_EVENTS | _RESTART_EVENTS | {"agent_terminated", "terminate"}
 
 
 @dataclass(frozen=True)
