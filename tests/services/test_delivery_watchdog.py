@@ -994,6 +994,70 @@ class TestDeadLetterStalePendingTerminated:
             assert dict(cur.fetchall()) == dict.fromkeys(rows, "pending")
 
 
+class TestDeadLetterStalePendingChats:
+    def test_old_pending_chat_of_terminated_owner_is_dead_lettered(
+        self, db_conn: psycopg.Connection, pool: ConnectionPool
+    ) -> None:
+        """Issue #2049: a chat that never claimed its terminated owner is
+        archived once past the threshold instead of resurrecting it forever."""
+        from services.delivery_watchdog.daemon import dead_letter_stale_pending_chats
+
+        aid = _make_terminated_agent(db_conn)
+        row = _insert_pending_resurrect_row(db_conn, aid, age_s=2 * 86400, kind="chat")
+
+        assert dead_letter_stale_pending_chats(pool, 86400.0) == 1
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "SELECT status, claimed_at IS NOT NULL FROM inbound_messages WHERE id = %s",
+                (row,),
+            )
+            assert cur.fetchone() == ("done", True)
+
+    def test_fresh_pending_chat_of_terminated_owner_is_untouched(
+        self, db_conn: psycopg.Connection, pool: ConnectionPool
+    ) -> None:
+        """A recent pending chat is still a live resurrect candidate — the G4
+        retry window must stay open until the threshold closes it."""
+        from services.delivery_watchdog.daemon import dead_letter_stale_pending_chats
+
+        aid = _make_terminated_agent(db_conn)
+        row = _insert_pending_resurrect_row(db_conn, aid, age_s=60, kind="chat")
+
+        assert dead_letter_stale_pending_chats(pool, 86400.0) == 0
+        with db_conn.cursor() as cur:
+            cur.execute("SELECT status, claimed_at FROM inbound_messages WHERE id = %s", (row,))
+            assert cur.fetchone() == ("pending", None)
+
+    def test_old_pending_chat_of_live_owner_is_untouched(
+        self, db_conn: psycopg.Connection, pool: ConnectionPool
+    ) -> None:
+        """Live owners keep their pending chats: only terminated owners have no
+        consumer, so the sweep never touches idling/running queues."""
+        from services.delivery_watchdog.daemon import dead_letter_stale_pending_chats
+
+        aid = _make_idling_agent(db_conn)
+        row = _insert_pending_resurrect_row(db_conn, aid, age_s=2 * 86400, kind="chat")
+
+        assert dead_letter_stale_pending_chats(pool, 86400.0) == 0
+        with db_conn.cursor() as cur:
+            cur.execute("SELECT status FROM inbound_messages WHERE id = %s", (row,))
+            assert cur.fetchone() == ("pending",)
+
+    def test_old_non_chat_pending_row_is_untouched(
+        self, db_conn: psycopg.Connection, pool: ConnectionPool
+    ) -> None:
+        """Lifecycle kinds keep their own sweep; this one is chat-only."""
+        from services.delivery_watchdog.daemon import dead_letter_stale_pending_chats
+
+        aid = _make_terminated_agent(db_conn)
+        row = _insert_pending_resurrect_row(db_conn, aid, age_s=2 * 86400, kind="terminate")
+
+        assert dead_letter_stale_pending_chats(pool, 86400.0) == 0
+        with db_conn.cursor() as cur:
+            cur.execute("SELECT status FROM inbound_messages WHERE id = %s", (row,))
+            assert cur.fetchone() == ("pending",)
+
+
 class TestSelectTerminatedOwnersWithPending:
     def test_force_fence_excludes_older_chat_but_accepts_newer_chat(
         self, db_conn: psycopg.Connection, pool: ConnectionPool
@@ -1019,11 +1083,11 @@ class TestSelectTerminatedOwnersWithPending:
         db_conn.commit()
 
         assert old_chat_id < fence_id
-        assert select_terminated_owners_with_pending(pool) == []
+        assert select_terminated_owners_with_pending(pool, 86400.0) == []
 
         new_chat_id = insert_inbound_message(db_conn, aid, "after force", source="user")
         assert new_chat_id > fence_id
-        assert select_terminated_owners_with_pending(pool) == [(aid, new_chat_id)]
+        assert select_terminated_owners_with_pending(pool, 86400.0) == [(aid, new_chat_id)]
 
     def test_ignores_pending_chat_that_predates_latest_termination(
         self, db_conn: psycopg.Connection, pool: ConnectionPool
@@ -1049,7 +1113,7 @@ class TestSelectTerminatedOwnersWithPending:
             )
         db_conn.commit()
 
-        assert select_terminated_owners_with_pending(pool) == []
+        assert select_terminated_owners_with_pending(pool, 86400.0) == []
 
     def test_returns_pending_chat_created_after_latest_termination(
         self, db_conn: psycopg.Connection, pool: ConnectionPool
@@ -1070,7 +1134,7 @@ class TestSelectTerminatedOwnersWithPending:
             )
         db_conn.commit()
 
-        assert select_terminated_owners_with_pending(pool) == [(aid, iid)]
+        assert select_terminated_owners_with_pending(pool, 86400.0) == [(aid, iid)]
 
     def test_returns_terminated_owners_with_pending_chat(
         self, db_conn: psycopg.Connection, pool: ConnectionPool
@@ -1080,7 +1144,7 @@ class TestSelectTerminatedOwnersWithPending:
         aid = _make_terminated_agent(db_conn)
         iid = insert_inbound_message(db_conn, aid, "hello?", source="user")
 
-        assert select_terminated_owners_with_pending(pool) == [(aid, iid)]
+        assert select_terminated_owners_with_pending(pool, 86400.0) == [(aid, iid)]
 
     def test_deduplicates_per_agent(
         self, db_conn: psycopg.Connection, pool: ConnectionPool
@@ -1093,7 +1157,7 @@ class TestSelectTerminatedOwnersWithPending:
         for _ in range(3):
             iids.append(insert_inbound_message(db_conn, aid, "hello?", source="user"))
 
-        assert select_terminated_owners_with_pending(pool) == [(aid, min(iids))]
+        assert select_terminated_owners_with_pending(pool, 86400.0) == [(aid, min(iids))]
 
     def test_ignores_live_owners_and_non_chat_kinds(
         self, db_conn: psycopg.Connection, pool: ConnectionPool
@@ -1111,7 +1175,7 @@ class TestSelectTerminatedOwnersWithPending:
             )
         db_conn.commit()
 
-        assert select_terminated_owners_with_pending(pool) == []
+        assert select_terminated_owners_with_pending(pool, 86400.0) == []
 
     def test_claimed_chat_is_not_retried(
         self, db_conn: psycopg.Connection, pool: ConnectionPool
@@ -1124,7 +1188,7 @@ class TestSelectTerminatedOwnersWithPending:
             cur.execute("UPDATE inbound_messages SET status = 'claimed' WHERE id = %s", (iid,))
         db_conn.commit()
 
-        assert select_terminated_owners_with_pending(pool) == []
+        assert select_terminated_owners_with_pending(pool, 86400.0) == []
 
     def test_wake_suppression_excludes_until_expiry(
         self, db_conn: psycopg.Connection, pool: ConnectionPool
@@ -1141,7 +1205,7 @@ class TestSelectTerminatedOwnersWithPending:
             )
         db_conn.commit()
 
-        assert select_terminated_owners_with_pending(pool) == []
+        assert select_terminated_owners_with_pending(pool, 86400.0) == []
 
         with db_conn.cursor() as cur:
             cur.execute(
@@ -1150,7 +1214,42 @@ class TestSelectTerminatedOwnersWithPending:
                 (aid,),
             )
         db_conn.commit()
-        assert select_terminated_owners_with_pending(pool) == [(aid, iid)]
+        assert select_terminated_owners_with_pending(pool, 86400.0) == [(aid, iid)]
+
+    def test_stale_pending_chat_does_not_resurrect_owner(
+        self, db_conn: psycopg.Connection, pool: ConnectionPool
+    ) -> None:
+        """Issue #2049: the ghost-alive state — a terminated owner whose only
+        pending chats are past the stale threshold — is not a resurrect trigger."""
+        from services.delivery_watchdog.daemon import select_terminated_owners_with_pending
+
+        aid = _make_terminated_agent(db_conn)
+        iid = insert_inbound_message(db_conn, aid, "stale peer mail", source="agent:1")
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "UPDATE inbound_messages SET created_at = now() - interval '2 days' WHERE id = %s",
+                (iid,),
+            )
+            cur.execute(
+                "UPDATE agents_meta SET status_changed_at = now() - interval '3 days' "
+                "WHERE id = %s",
+                (aid,),
+            )
+        db_conn.commit()
+
+        assert select_terminated_owners_with_pending(pool, 86400.0) == []
+
+    def test_recent_pending_chat_still_resurrects_owner(
+        self, db_conn: psycopg.Connection, pool: ConnectionPool
+    ) -> None:
+        """Inside the threshold the G4 retry window is unchanged: a recent
+        post-termination chat still wakes its terminated owner."""
+        from services.delivery_watchdog.daemon import select_terminated_owners_with_pending
+
+        aid = _make_terminated_agent(db_conn)
+        iid = insert_inbound_message(db_conn, aid, "fresh peer mail", source="agent:1")
+
+        assert select_terminated_owners_with_pending(pool, 86400.0) == [(aid, iid)]
 
 
 class TestResurrectRetry:
@@ -1224,7 +1323,7 @@ class TestResurrectRetry:
         # The durable selector, not the in-memory cooldown, prevents later
         # watchdog ticks from scheduling another attempt during suppression.
         dw._last_resurrect_attempt.clear()
-        dw._maybe_spawn_resurrects(pool, max_per_tick=5)
+        dw._maybe_spawn_resurrects(pool, 5, 86400.0)
         await asyncio.sleep(0)
         assert dw._resurrect_tasks == {}
         assert calls == [aid] * 5
@@ -1287,7 +1386,7 @@ class TestResurrectRetry:
                 (aid,),
             )
         db_conn.commit()
-        assert select_terminated_owners_with_pending(pool) == [(aid, trigger_id)]
+        assert select_terminated_owners_with_pending(pool, 86400.0) == [(aid, trigger_id)]
 
         await dw._resurrect_one(pool, aid, trigger_id)
         with db_conn.cursor() as cur:
@@ -1328,13 +1427,13 @@ class TestResurrectRetry:
         dw._last_resurrect_attempt.clear()
         dw._resurrect_tasks.clear()
 
-        dw._maybe_spawn_resurrects(pool, max_per_tick=5)
+        dw._maybe_spawn_resurrects(pool, 5, 86400.0)
         await asyncio.gather(*list(dw._resurrect_tasks.values()))
         await asyncio.sleep(0)
         assert dw._resurrect_tasks == {}
         assert aid in dw._last_resurrect_attempt
 
-        dw._maybe_spawn_resurrects(pool, max_per_tick=5)
+        dw._maybe_spawn_resurrects(pool, 5, 86400.0)
         await asyncio.sleep(0)
         assert calls == [aid]
 
@@ -1366,7 +1465,7 @@ class TestResurrectRetry:
         dw._last_resurrect_attempt.clear()
         dw._resurrect_tasks.clear()
 
-        dw._maybe_spawn_resurrects(pool, max_per_tick=5)
+        dw._maybe_spawn_resurrects(pool, 5, 86400.0)
         await started.wait()
         task = dw._resurrect_tasks[aid]
         task.cancel()
@@ -1375,7 +1474,7 @@ class TestResurrectRetry:
 
         assert dw._resurrect_tasks == {}
         assert aid in dw._last_resurrect_attempt
-        dw._maybe_spawn_resurrects(pool, max_per_tick=5)
+        dw._maybe_spawn_resurrects(pool, 5, 86400.0)
         assert dw._resurrect_tasks == {}
 
     async def test_in_flight_owner_does_not_consume_next_tick_cap(
@@ -1413,11 +1512,11 @@ class TestResurrectRetry:
         dw._resurrect_tasks.clear()
 
         try:
-            dw._maybe_spawn_resurrects(pool, max_per_tick=1)
+            dw._maybe_spawn_resurrects(pool, 1, 86400.0)
             await asyncio.sleep(0)
             assert started == {dead_a}
 
-            dw._maybe_spawn_resurrects(pool, max_per_tick=1)
+            dw._maybe_spawn_resurrects(pool, 1, 86400.0)
             await both_started.wait()
             assert started == {dead_a, dead_b}
             assert set(dw._resurrect_tasks) == {dead_a, dead_b}
@@ -1458,10 +1557,10 @@ class TestResurrectRetry:
         dw._resurrect_tasks.clear()
 
         try:
-            dw._maybe_spawn_resurrects(pool, max_per_tick=5)
+            dw._maybe_spawn_resurrects(pool, 5, 86400.0)
             await started.wait()
             for _ in range(3):
-                dw._maybe_spawn_resurrects(pool, max_per_tick=5)
+                dw._maybe_spawn_resurrects(pool, 5, 86400.0)
             await asyncio.sleep(0)
 
             assert calls == [(aid, iid, "chat")]
@@ -1507,14 +1606,14 @@ class TestResurrectRetry:
         dw._resurrect_tasks.clear()
 
         # First pass completes both attempts and naturally stamps cooldown.
-        dw._maybe_spawn_resurrects(pool, max_per_tick=5)
+        dw._maybe_spawn_resurrects(pool, 5, 86400.0)
         await asyncio.gather(*list(dw._resurrect_tasks.values()))
         await asyncio.sleep(0)  # run task done callbacks
         assert len(dw._resurrect_tasks) == 0
         assert set(calls) == {dead_a, dead_b}
 
         # Second pass inside the real cooldown: neither spawns again.
-        dw._maybe_spawn_resurrects(pool, max_per_tick=5)
+        dw._maybe_spawn_resurrects(pool, 5, 86400.0)
         await asyncio.sleep(0)
         assert len(dw._resurrect_tasks) == 0
         assert len(calls) == 2
@@ -1522,7 +1621,7 @@ class TestResurrectRetry:
         # Cap: once cooldown is cleared, max_per_tick=1 admits only one owner.
         hold = True
         dw._last_resurrect_attempt.clear()
-        dw._maybe_spawn_resurrects(pool, max_per_tick=1)
+        dw._maybe_spawn_resurrects(pool, 1, 86400.0)
         await asyncio.sleep(0)
         assert len(dw._resurrect_tasks) == 1
         release.set()

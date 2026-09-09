@@ -2708,7 +2708,7 @@ class TestMachinePauseResume:
         from shared.config import settings
 
         with ConnectionPool(settings.data_plane.db_url, min_size=1, max_size=2) as pool:
-            assert select_terminated_owners_with_pending(cast(ConnectionPool, pool)) == []
+            assert select_terminated_owners_with_pending(cast(ConnectionPool, pool), 86400.0) == []
 
     def test_pause_unknown_machine_404(self, db_conn, set_machine_identity) -> None:  # type: ignore[no-untyped-def]
         set_machine_identity(role="gateway", name="test-host")

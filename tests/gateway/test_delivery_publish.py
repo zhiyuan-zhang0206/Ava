@@ -261,7 +261,7 @@ async def test_peer_message_queues_during_suppression_and_watchdog_recovers_afte
         )
         assert cur.fetchone() == ("pending", "chat", "agent:42", "peer work")
     with _sync_pool() as pool:
-        assert select_terminated_owners_with_pending(pool) == []
+        assert select_terminated_owners_with_pending(pool, 86400.0) == []
 
     with db_conn.cursor() as cur:
         cur.execute(
@@ -270,7 +270,7 @@ async def test_peer_message_queues_during_suppression_and_watchdog_recovers_afte
         )
     db_conn.commit()
     with _sync_pool() as pool:
-        assert select_terminated_owners_with_pending(pool) == [(tid, delivery.inbound_id)]
+        assert select_terminated_owners_with_pending(pool, 86400.0) == [(tid, delivery.inbound_id)]
 
 
 async def test_concurrent_same_key_terminated_delivery_has_one_resurrect_effect(
