@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import argparse
 import json
+import subprocess
+import sys
 from datetime import datetime
 from pathlib import Path
 
 import pytest
 
 from scripts.post_deploy_visual_check import (
+    REPO_ROOT,
     _accept_wave,
     _assert_gate_origin,
     _cookie_file,
@@ -290,3 +293,31 @@ def test_accept_wave_rejects_incomplete_matrix(tmp_path: Path) -> None:
 
     with pytest.raises(RuntimeError, match="44 required captures"):
         _accept_wave(args)
+
+
+def test_budget_hard_exits_after_a_short_grace_when_the_unwind_hangs() -> None:
+    """The two-stage budget must not depend on playwright's cooperation.
+
+    If the graceful unwind (finally: browser.close()) wedges, the second
+    SIGALRM hard-exits the process — the former docker rm --force equivalent.
+    """
+    script = (
+        "import signal, sys, time\n"
+        f"sys.path.insert(0, {str(REPO_ROOT)!r})\n"
+        "from scripts import post_deploy_visual_check as module\n"
+        "module.HARD_EXIT_DELAY_SECONDS = 1\n"
+        "signal.signal(signal.SIGALRM, module._budget_expired)\n"
+        "signal.alarm(1)\n"
+        "try:\n"
+        "    time.sleep(3600)\n"
+        "except RuntimeError:\n"
+        "    time.sleep(3600)  # simulated wedged unwind\n"
+    )
+    result = subprocess.run(  # noqa: S603 - fixed interpreter with inline script
+        [sys.executable, "-c", script],
+        check=False,
+        capture_output=True,
+        timeout=30,
+    )
+    assert result.returncode == 1
+    assert b"hard exit" in result.stderr

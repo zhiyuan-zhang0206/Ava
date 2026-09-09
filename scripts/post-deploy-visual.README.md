@@ -61,7 +61,9 @@ notifications (P0 -> `send_message` to #3242 and #405, P2 -> `notify` queue).
 - Engine: the repo-pinned Playwright Chromium (`playwright==1.59.0` in
   `uv.lock`), headless on the host. No Docker. The engine is deliberately
   pinned so goldens stay comparable across runs; upgrading Playwright
-  requires a golden re-accept afterwards.
+  requires a golden re-accept afterwards. Prerequisite: the bundled browser
+  must be present on the host (`uv run playwright install chromium`, cached
+  under `~/Library/Caches/ms-playwright`).
 
 ## Health probe
 

@@ -147,7 +147,30 @@ def _expected_capture_names() -> set[str]:
     return names
 
 
+HARD_EXIT_DELAY_SECONDS = 30
+
+
+def _hard_exit(_signum: int, _frame: object) -> None:
+    sys.stderr.write(
+        json.dumps(
+            {
+                "result": "error",
+                "detail": "visual gate exceeded its 28-minute budget (hard exit)",
+            },
+            sort_keys=True,
+        )
+        + "\n"
+    )
+    sys.stderr.flush()
+    os._exit(1)
+
+
 def _budget_expired(_signum: int, _frame: object) -> None:
+    # Second stage: the graceful unwind (finally: browser.close()) gets a short
+    # grace, then the process hard-exits — the former docker rm --force
+    # equivalent, so a wedged playwright driver cannot overrun the contract.
+    signal.signal(signal.SIGALRM, _hard_exit)
+    signal.alarm(HARD_EXIT_DELAY_SECONDS)
     raise RuntimeError("visual gate exceeded its 28-minute budget")
 
 
