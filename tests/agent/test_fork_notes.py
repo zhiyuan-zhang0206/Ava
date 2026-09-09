@@ -18,11 +18,18 @@ registrations on teardown.
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 from typing import Any, cast
 
 import psycopg
 import pytest
-from langchain_core.messages import BaseMessage, HumanMessage, RemoveMessage, SystemMessage
+from langchain_core.messages import (
+    AnyMessage,
+    BaseMessage,
+    HumanMessage,
+    RemoveMessage,
+    SystemMessage,
+)
 from psycopg_pool import AsyncConnectionPool
 
 from agent.graph import _context_notes
@@ -207,3 +214,134 @@ def test_fork_rebuild_dropping_a_conversation_message_is_rejected() -> None:
         m for m in rebuilt if isinstance(m, BaseMessage) and not isinstance(m, RemoveMessage)
     ]
     assert {m.id for m in re_listed} == {"m-sys", "m-chat"}
+
+
+async def test_fork_rebuild_preserves_prefix_bytes_until_first_stripped_note(
+    memory_plugin: Any,
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+) -> None:
+    """The cache contract (task #2694): everything in front of the first
+    source-identity note survives the fork rebuild byte-identical — same
+    content, same order — so the provider's prefix cache stays valid. The
+    source-identity notes drop, and the conversation tail follows the grafted
+    sequence."""
+    tid = spawn_agent()
+    _insert_inbound_kind(db_conn, tid, "", "fork", source="agent:7")
+    inherited: list[AnyMessage] = [
+        SystemMessage(content="sys"),
+        _fake_note(NoteTag.MEMORY, "shared pool index (kept)", "note-cluster"),
+        _fake_note(NoteTag.AGENT_ID, "old agent id", "note-old-id"),
+        _fake_note(NoteTag.AGENT_MEMORY, "source's memory", "note-old-mem"),
+        _fake_note(NoteTag.PRELOADED_SKILLS, "source's preloaded skills", "note-old-preload"),
+        HumanMessage(content="conversation tail"),
+    ]
+    cmd = await claim_node(
+        AgentState(messages=list(inherited)),
+        _make_runtime(ops_pool=aops_pool),
+        _config(tid),
+    )
+    msgs = cast(list[BaseMessage], (cmd.update or {})["messages"])
+    assert isinstance(msgs[0], RemoveMessage)
+    survivors = [m for m in msgs[1:] if not isinstance(m, RemoveMessage)]
+    # Byte-identical prefix: the system prompt and the kept cluster note are
+    # the exact source messages, in order — nothing re-rendered in front of
+    # the first dropped note.
+    assert [m.content for m in survivors[:2]] == [  # pyright: ignore[reportUnknownMemberType]
+        "sys",
+        "[system] shared pool index (kept)",
+    ]
+    assert [m.id for m in survivors[:2]] == [inherited[0].id, inherited[1].id]
+    # The conversation tail survives — positioned right after the kept notes
+    # and before the grafted fork-marker sequence.
+    assert len(survivors) == 6
+    assert survivors[2].content == "conversation tail"  # pyright: ignore[reportUnknownMemberType]
+    grafted_tags = [
+        m.additional_kwargs.get("ava_note_tag")  # pyright: ignore[reportUnknownMemberType]
+        for m in survivors[3:]
+    ]
+    assert grafted_tags[0] == "lifecycle_fork"
+    assert set(grafted_tags[1:]) == {"agent_id", "agent_memory"}  # pyright: ignore[reportUnknownArgumentType]
+
+
+async def test_fork_tail_grafts_delta_skills_from_inbound_payload(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Scenario 2b: a skill the fork's config added (source never had it) rides
+    the fork inbound payload and lands as a full-body note at the TAIL — after
+    the fork marker and the on_fork notes, never inside the cached prefix."""
+    import ava.skills as skills_mod
+
+    skills_dir = tmp_path / "skills"
+    skills_dir.mkdir()
+    extra = skills_dir / "extra"
+    extra.mkdir()
+    (extra / "SKILL.md").write_text(
+        "---\nname: extra\ndescription: the extra skill\n---\n\nEXTRA SKILL BODY\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(skills_mod, "_skills_dir", lambda: skills_dir)
+
+    def _all_enabled() -> set[str]:
+        d = skills_mod._skills_dir()
+        return {p.name for p in d.iterdir() if p.is_dir()} if d.is_dir() else set()
+
+    monkeypatch.setattr(skills_mod, "enabled_skill_names", _all_enabled)
+
+    tid = spawn_agent()
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO inbound_messages (agent_id, content, kind, source, payload) "
+            "VALUES (%s, '', 'fork', 'agent:7', %s::jsonb)",
+            (tid, '{"tail_skills": ["extra"]}'),
+        )
+    db_conn.commit()
+
+    cmd = await claim_node(
+        AgentState(messages=[SystemMessage(content="sys"), HumanMessage(content="inherited tail")]),
+        _make_runtime(ops_pool=aops_pool),
+        _config(tid),
+    )
+    msgs = cast(list[BaseMessage], (cmd.update or {})["messages"])
+    tail_note = msgs[-1]
+    assert isinstance(tail_note, HumanMessage)
+    assert isinstance(tail_note.content, str)  # pyright: ignore[reportUnknownMemberType]
+    assert "EXTRA SKILL BODY" in tail_note.content
+    assert "## ava.skills.extra" in tail_note.content
+    assert tail_note.additional_kwargs.get("ava_note_tag") == "preloaded_skills"  # pyright: ignore[reportUnknownMemberType]
+    # The graft sits AFTER the fork marker: [RemoveMessage, sys, inherited, marker, ..., delta]
+    tags = [
+        m.additional_kwargs.get("ava_note_tag")  # pyright: ignore[reportUnknownMemberType]
+        for m in msgs
+        if isinstance(m, HumanMessage) and m.additional_kwargs.get("ava_note_tag")  # pyright: ignore[reportUnknownMemberType]
+    ]
+    assert tags[0] == "lifecycle_fork"
+    assert tags[-1] == "preloaded_skills"
+    # Prefix untouched: sys + inherited tail keep their order at the head.
+    first_two = list(msgs[1:3])
+    assert [m.content for m in first_two] == ["sys", "inherited tail"]  # pyright: ignore[reportUnknownMemberType]
+
+
+async def test_fork_without_payload_grafts_nothing(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+) -> None:
+    """Legacy fork rows (payload NULL) keep the pre-ruling behavior: no delta
+    note."""
+    tid = spawn_agent()
+    _insert_inbound_kind(db_conn, tid, "", "fork", source="agent:7")
+    cmd = await claim_node(
+        AgentState(messages=[SystemMessage(content="sys")]),
+        _make_runtime(ops_pool=aops_pool),
+        _config(tid),
+    )
+    msgs = cast(list[BaseMessage], (cmd.update or {})["messages"])
+    tags = [
+        m.additional_kwargs.get("ava_note_tag")  # pyright: ignore[reportUnknownMemberType]
+        for m in msgs
+        if isinstance(m, HumanMessage) and m.additional_kwargs.get("ava_note_tag")  # pyright: ignore[reportUnknownMemberType]
+    ]
+    assert "preloaded_skills" not in tags

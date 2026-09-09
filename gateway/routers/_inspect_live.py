@@ -33,6 +33,7 @@ class InspectDbRows(NamedTuple):
     paused_until: Any
     pending_inbound: bool
     config_overlay: dict[str, Any]
+    preset_name: str | None
     liveness_state: Literal["online", "offline", "unknown"]
     last_probe_at: Any
     observation: AgentObservation
@@ -42,7 +43,7 @@ def db_rows_blocking(pool: ConnectionPool[Any], agent_id: int) -> InspectDbRows:
     """Read agents_meta and the fresh pending-inbound flag in one DB borrow."""
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
-            "SELECT config_overlay, machine, status, last_active_at, last_heartbeat_at, "
+            "SELECT config_overlay, preset_name, machine, status, last_active_at, last_heartbeat_at, "
             "       spawned_at, started_at, "
             "       CASE WHEN heartbeat_paused_until > now() THEN heartbeat_paused_until END, "
             "       liveness_state, last_probe_at, lease_expires_at, "
@@ -63,21 +64,22 @@ def db_rows_blocking(pool: ConnectionPool[Any], agent_id: int) -> InspectDbRows:
         pending_row = cur.fetchone()
         assert pending_row is not None  # noqa: S101 — EXISTS always returns one row
         return InspectDbRows(
-            machine=row[1],
-            status=row[2],
-            last_active_at=row[3],
-            last_heartbeat_at=row[4],
-            spawned_at=row[5],
-            started_at=row[6],
-            paused_until=row[7],
+            machine=row[2],
+            status=row[3],
+            last_active_at=row[4],
+            last_heartbeat_at=row[5],
+            spawned_at=row[6],
+            started_at=row[7],
+            paused_until=row[8],
             pending_inbound=bool(pending_row[0]),
             config_overlay=row[0] if row[0] is not None else {},
+            preset_name=row[1],
             liveness_state=cast(
                 Literal["online", "offline", "unknown"],
-                row[8] if row[8] is not None else "unknown",
+                row[9] if row[9] is not None else "unknown",
             ),
-            last_probe_at=row[9],
-            observation=observation(row[11], row[10]),
+            last_probe_at=row[10],
+            observation=observation(row[12], row[11]),
         )
 
 

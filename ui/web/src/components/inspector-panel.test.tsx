@@ -24,7 +24,7 @@ import type { AgentInspect, AgentInspectLive, PageRow } from "@/lib/types";
 // vi.hoisted so the mock fn is initialized before the hoisted vi.mock factory
 // runs (the factory fires during the InspectorPanel import, before module-body
 // consts would otherwise initialize).
-const { getAgentInspect, getAgentInspectLive, listPages, resolveNotice } =
+const { getAgentInspect, getAgentInspectLive, listPages, listPresets, resolveNotice } =
   vi.hoisted(() => ({
     getAgentInspect:
       vi.fn<
@@ -42,11 +42,14 @@ const { getAgentInspect, getAgentInspectLive, listPages, resolveNotice } =
     // /inspect sections. The dedicated use-agent-pages.test.ts covers the fetch +
     // SSE fold.
     listPages: vi.fn<(agentId: number) => Promise<PageRow[]>>(() => Promise.resolve([])),
+    // Presets — the config-overlay diff display compares against them; default
+    // to an empty catalog (no preset used, plain overlay list).
+    listPresets: vi.fn(() => Promise.resolve([] as { id: number; name: string; label: string; description: string | null; config: Record<string, unknown>; created_at: string; updated_at: string }[])),
     // Notice resolve — default to success; the notice-reply tests drive it.
     resolveNotice: vi.fn(() => Promise.resolve({ status: "ok" })),
   }));
 vi.mock("@/lib/api", () => ({
-  api: { getAgentInspect, getAgentInspectLive, listPages, resolveNotice },
+  api: { getAgentInspect, getAgentInspectLive, listPages, listPresets, resolveNotice },
 }));
 
 // useAgentPages subscribes to the global SSE stream; stub it to a no-op so the
@@ -165,6 +168,7 @@ function fixture(overrides: Partial<AgentInspect> = {}): AgentInspect {
       },
     ],
     config_overlay: { llm_model: "claude-opus-4-8", auto_compact_fraction: 0.7 },
+    preset_name: null,
     cost: {
       cost_usd: 0.4213,
       unpriced_calls: 1,
@@ -211,6 +215,7 @@ function liveFixture(overrides: Partial<AgentInspectLive> = {}): AgentInspectLiv
     started_at: full.started_at,
     shells: full.shells,
     config_overlay: full.config_overlay,
+    preset_name: full.preset_name,
     notice: full.notice,
     heartbeat: full.heartbeat,
   };
@@ -799,6 +804,82 @@ describe("InspectorPanel", () => {
     // be gone and the canonical dash spelling present.
     expect(screen.getByText('["ava-qa-inspection","*"]')).toBeTruthy();
     expect(screen.queryByText(/ava_qa_inspection/)).toBeNull();
+    expect(screen.getByText("claude-opus-4-8")).toBeTruthy();
+  });
+
+
+  it("shows the preset reference and only the overlay fields that differ (diff display)", async () => {
+    // Task #2694: with a preset used, the panel shows the preset reference and
+    // the overlay fields the preset does not supply verbatim — preset-carried
+    // values are NOT duplicated.
+    listPresets.mockResolvedValue([
+      {
+        id: 1,
+        name: "coder",
+        label: "Coder",
+        description: null,
+        config: { llm_model: "claude-opus-4-8", skills_to_inject_into_system_prompt: ["a"] },
+        created_at: "2026-09-01T00:00:00Z",
+        updated_at: "2026-09-01T00:00:00Z",
+      },
+    ]);
+    getAgentInspectLive.mockResolvedValue(
+      liveFixture({
+        preset_name: "coder",
+        config_overlay: {
+          llm_model: "claude-opus-4-8", // equals the preset's value → suppressed
+          auto_compact_fraction: 0.7, // not in the preset → shown
+        },
+      }),
+    );
+    render(<InspectorPanel agentId={1} />);
+    await waitFor(() => expect(screen.getByText("Configuration overlay")).toBeTruthy());
+    // preset reference row
+    expect(screen.getByText("Preset")).toBeTruthy();
+    expect(screen.getByText("coder")).toBeTruthy();
+    // The diff applies once the presets query lands: the field that matches
+    // the preset is suppressed, the novel one renders.
+    await waitFor(() => expect(screen.queryByText("llm_model")).toBeNull());
+    expect(screen.getByText("auto_compact_fraction")).toBeTruthy();
+    expect(screen.getByText("0.7")).toBeTruthy();
+  });
+
+  it("shows a field that differs from the preset even when the key exists there", async () => {
+    listPresets.mockResolvedValue([
+      {
+        id: 1,
+        name: "coder",
+        label: "Coder",
+        description: null,
+        config: { llm_model: "claude-opus-4-8" },
+        created_at: "2026-09-01T00:00:00Z",
+        updated_at: "2026-09-01T00:00:00Z",
+      },
+    ]);
+    getAgentInspectLive.mockResolvedValue(
+      liveFixture({
+        preset_name: "coder",
+        config_overlay: { llm_model: "deepseek-v4-pro" },
+      }),
+    );
+    render(<InspectorPanel agentId={1} />);
+    await waitFor(() => expect(screen.getByText("Configuration overlay")).toBeTruthy());
+    expect(screen.getByText("llm_model")).toBeTruthy();
+    expect(screen.getByText("deepseek-v4-pro")).toBeTruthy();
+  });
+
+  it("falls back to the full overlay list when the preset no longer exists", async () => {
+    listPresets.mockResolvedValue([]);
+    getAgentInspectLive.mockResolvedValue(
+      liveFixture({
+        preset_name: "ghost",
+        config_overlay: { llm_model: "claude-opus-4-8" },
+      }),
+    );
+    render(<InspectorPanel agentId={1} />);
+    await waitFor(() => expect(screen.getByText("Configuration overlay")).toBeTruthy());
+    expect(screen.getByText("ghost")).toBeTruthy();
+    expect(screen.getByText("llm_model")).toBeTruthy();
     expect(screen.getByText("claude-opus-4-8")).toBeTruthy();
   });
 

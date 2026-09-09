@@ -173,6 +173,8 @@ def create_agent_row(
     label: str | None = None,
     prompt: str | None = None,
     prompt_source: str | None = None,
+    preset_name: str | None = None,
+    fork_tail_skills: list[str] | None = None,
 ) -> tuple[int, dict[str, object] | None]:
     """Create the agent row: agents + agents_meta + fork copy, NO launch.
 
@@ -209,6 +211,14 @@ def create_agent_row(
             fork_checkpoint into the new agent. Must be passed together with
             fork_checkpoint (None or both).
         fork_checkpoint: exact checkpoint id of the source agent. LangGraph
+            (see below).
+        preset_name: the spawn-time preset reference, stored for display next
+            to the RESOLVED config_overlay (decisions/2026-09-10-preset-in-
+            config-overlay-fork-cache.md); None = no preset.
+        fork_tail_skills: skill names a fork's config added to
+            skills_to_inject_into_system_prompt (minus its expand list); carried
+            in the fork inbound payload so the claim node grafts their bodies at
+            the context tail. Ignored unless fork_from is set.
             checkpoints are append-only; "latest" drifts under concurrent
             writes — the caller (gateway routing layer) resolves latest and
             passes an explicit id here.
@@ -289,8 +299,8 @@ def create_agent_row(
         lineage_spawner = f"agent:{fork_from}" if fork_from is not None else spawner
         cur.execute(
             "INSERT INTO agents_meta (id, spawner, born_spawner, fork_source_agent_id, "
-            "fork_source_checkpoint_id, status, machine, config_overlay, birth_config) "
-            "VALUES (%s, %s, %s, %s, %s, 'idling', %s, %s::jsonb, %s::jsonb)",
+            "fork_source_checkpoint_id, status, machine, config_overlay, birth_config, preset_name) "
+            "VALUES (%s, %s, %s, %s, %s, 'idling', %s, %s::jsonb, %s::jsonb, %s)",
             (
                 new_id,
                 lineage_spawner,
@@ -300,6 +310,7 @@ def create_agent_row(
                 target_machine,
                 json.dumps(config) if config else None,
                 json.dumps(birth_config, sort_keys=True),
+                preset_name,
             ),
         )
         if fork_from is not None and fork_checkpoint is not None:
@@ -311,10 +322,20 @@ def create_agent_row(
             # identity marker before any LLM turn. source carries the lineage
             # "agent:{fork_from}" (intrinsic — independent of `spawner`); the
             # claim node renders the new id from its own config.
+            # The fork inbound carries the tail-graft skill delta (skills the
+            # fork's config added to skills_to_inject_into_system_prompt beyond
+            # the source's, minus what the fork's expand list already grafts).
+            # The claim node's fork handler appends their SKILL.md bodies at the
+            # context tail — the inherited prefix stays byte-identical for the
+            # provider cache. payload NULL = nothing to graft (legacy forks too).
             cur.execute(
-                "INSERT INTO inbound_messages (agent_id, content, kind, source) "
-                "VALUES (%s, '', 'fork', %s)",
-                (new_id, f"agent:{fork_from}"),
+                "INSERT INTO inbound_messages (agent_id, content, kind, source, payload) "
+                "VALUES (%s, '', 'fork', %s, %s::jsonb)",
+                (
+                    new_id,
+                    f"agent:{fork_from}",
+                    json.dumps({"tail_skills": fork_tail_skills}) if fork_tail_skills else None,
+                ),
             )
         conn.commit()
         # --- lifecycle event ---

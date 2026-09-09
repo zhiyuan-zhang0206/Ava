@@ -101,6 +101,14 @@ class SpawnAgentRequest(BaseModel):
     internally and passes an explicit id to the underlying create_agent_row
     (consistent with SDK `ava.agents.spawn(fork_from=N)` logic).
 
+    Fork config rule: a fork keeps the source's effective config so the
+    inherited context stays cache-valid. The only allowed config change is
+    ADDING skills to `skills_to_inject_into_system_prompt` /
+    `skills_to_expand_at_start` (supersets); anything else is rejected with
+    `fork_config_change_not_allowed`. A fork WITHOUT config inherits the
+    source's resolved overlay + preset verbatim (the pre-2026-09-10 behavior
+    dropped the source's overlay).
+
     `spawner` default "user" — frontend spawn button does not need to
     pass it; external callers (claude-code / SDK paths `agent:N` etc.)
     pass their own identifier so the frontend sidebar groups them under
@@ -125,13 +133,17 @@ class SpawnAgentRequest(BaseModel):
     prompt_source: str | None = Field(default=None, min_length=1, max_length=64)
     # Target physical host (multi-machine placement); None = local. The gateway creates the row (create_agent_row) and forwards a launch op.
     machine: str | None = Field(default=None, min_length=1, max_length=64)
-    # Per-agent config overlay (currently {"llm_model": ...}); only per_agent=True
-    # fields are accepted (enforced at agent boot via apply_config_overlay).
+    # Per-agent config overlay; only per_agent=True fields are accepted (enforced
+    # at agent boot via apply_config_overlay). May carry `config["preset"] =
+    # "<name>"` — the spawn-boundary preset reference; the gateway resolves the
+    # named preset's stored overlay as the base, explicit fields win per-key, and
+    # the runner only ever sees the resolved map.
     config: dict[str, object] | None = Field(default=None)
-    # Optional named config preset. When set, the gateway seeds config from the
-    # preset's stored overlay, then lets `config` above win per-key. Resolved and
-    # merged into `config` at the spawn boundary (post_agents), so the spawn op on
-    # the runner never sees this field set.
+    # DEPRECATED top-level preset — kept for one compatibility window; the
+    # gateway normalizes it to `config["preset"]` (passing both is a 400). When
+    # set, the gateway seeds config from the preset's stored overlay, then lets
+    # `config` above win per-key. Resolved and merged into `config` at the spawn
+    # boundary (post_agents), so the spawn op on the runner never sees this set.
     preset: str | None = Field(default=None, max_length=64)
     # Optional initial label (spawner-assigned role). Stored sticky so the
     # labeler does not overwrite it; the agent can change it via ava.self.set_label.

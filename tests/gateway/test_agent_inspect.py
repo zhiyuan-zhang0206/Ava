@@ -607,6 +607,7 @@ def test_inspect_live_returns_only_window_independent_fields(
         "started_at",
         "shells",
         "config_overlay",
+        "preset_name",
         "notice",
         "heartbeat",
     }
@@ -3095,7 +3096,21 @@ def test_inspect_releases_live_db_borrow_before_cached_loki_fanout(
     class TrackingCursor:
         def __init__(self) -> None:
             self.rows: list[tuple[Any, ...]] = [
-                ({}, "runner", "running", now, None, now, now, None, "online", now, None, now),
+                (
+                    {},
+                    None,
+                    "runner",
+                    "running",
+                    now,
+                    None,
+                    now,
+                    now,
+                    None,
+                    "online",
+                    now,
+                    None,
+                    now,
+                ),
                 (False,),
             ]
 

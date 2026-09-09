@@ -16,6 +16,7 @@ from shared.agents import AgentNotFound as AgentNotFound
 from shared.agents import AgentStatus, RestartResult, ResurrectResult, TerminateResult
 from shared.agents import CrossMachineGatewayUnavailable as CrossMachineGatewayUnavailable
 from shared.agents import ForkCheckpointNotFound as ForkCheckpointNotFound
+from shared.agents import ForkConfigChangeNotAllowed as ForkConfigChangeNotAllowed
 from shared.agents import ForkError as ForkError
 from shared.agents import ForkSourceEmpty as ForkSourceEmpty
 from shared.agents import GatewayUnavailable as GatewayUnavailable
@@ -234,8 +235,16 @@ def spawn(
     `prompt` is the first message (make it self-contained — the new agent has
     no context about why you spawned it); omit to leave it idling. `fork_from`
     copies another agent's conversation state. `machine` defaults to your own.
-    `preset` names a saved config template to start the agent from; when both
-    `preset` and `config_overlay` are given, `config_overlay` wins per field.
+    `config_overlay` names a saved config template through its `preset` key
+    (`config_overlay={"preset": "name"}`); the preset's stored config is the
+    base and the explicit fields win per key. The legacy `preset` argument is
+    equivalent (deprecated) — passing both is a ValueError.
+
+    A fork keeps the source agent's effective config so its inherited context
+    stays cache-valid: at fork, `config_overlay` may only ADD skills to
+    `skills_to_inject_into_system_prompt` / `skills_to_expand_at_start`
+    (supersets — loaded at the context tail); any other change raises
+    ForkConfigChangeNotAllowed.
 
     Identity-class config you do not name — model, reasoning effort, skill set,
     prompt shaping — is taken from the cluster default at spawn time and frozen
@@ -267,9 +276,10 @@ def _spawn_impl(
 ) -> int:
     # Shared spawn body. `label` is exposed on the public `spawn` only when the
     # ava_fleet plugin wraps it (the plugin passes a real label through here);
-    # the unwrapped core spawn always passes label=None. `preset` is resolved to
-    # its config template on the gateway side; only the explicit `config` overlay
-    # is validated locally (the preset's own values are validated at child boot).
+    # the unwrapped core spawn always passes label=None. A preset — given as the
+    # legacy `preset` argument or inside `config["preset"]` — is resolved to its
+    # config template on the gateway side; only the explicit `config` fields are
+    # validated locally (the preset's own values are validated at child boot).
     prompt = coerce_str(prompt, "prompt", allow_none=True)
     fork_from = coerce_typed(fork_from, "fork_from", int, allow_none=True)
     machine = coerce_str(machine, "machine", allow_none=True)
@@ -277,10 +287,29 @@ def _spawn_impl(
     label = coerce_str(label, "label", allow_none=True)
     preset = coerce_str(preset, "preset", allow_none=True)
     spawner = ava._boot.require_actor()
+    if preset is not None:
+        merged = dict(config) if config else {}
+        if "preset" in merged:
+            raise ValueError(
+                "preset given twice — as the spawn `preset` argument and as "
+                "config_overlay['preset']; pass only one"
+            )
+        merged["preset"] = preset
+        config = merged
     if config:
-        from shared.plugin_config_registry import validate_config_overlay
+        # The `preset` key is spawn-boundary metadata, not a Settings field: it
+        # must not reach the overlay validators, which reject unknown keys.
+        overlay = {k: v for k, v in config.items() if k != "preset"}
+        if "preset" in config:
+            name = config["preset"]
+            if not isinstance(name, str) or not name.strip():
+                raise ValueError(
+                    f"config_overlay['preset'] must be a non-empty string, got {name!r}"
+                )
+        if overlay:
+            from shared.plugin_config_registry import validate_config_overlay
 
-        validate_config_overlay(config)
+            validate_config_overlay(overlay)
     return _client.spawn(
         spawner=spawner,
         prompt=prompt,
@@ -289,7 +318,7 @@ def _spawn_impl(
         machine=machine if machine is not None else ava.self.SELF_MACHINE_NAME,
         config=config,
         label=label,
-        preset=preset,
+        preset=None,
     )
 
 

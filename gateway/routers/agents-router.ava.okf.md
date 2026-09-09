@@ -20,6 +20,22 @@ helpers.
 `/api/cancel` cancels a running turn. `/api/models` exposes available models,
 and `/api/agents/{id}/exited` finalizes an agent exit.
 
+## Spawn boundary: presets and the fork config rule
+
+`POST /api/agents` resolves a preset named inside the config overlay
+(`config["preset"]`) at the spawn boundary: the preset's stored config is the
+base and the explicit fields win per key; the row stores the RESOLVED overlay
+plus `agents_meta.preset_name` for display (diff semantics in the inspector).
+The legacy top-level `preset` field is a deprecated alias for the overlay key.
+
+A fork must keep the source's effective config so its inherited context stays
+cache-valid: only ADDITIONS to `skills_to_inject_into_system_prompt` /
+`skills_to_expand_at_start` are allowed (supersets — rejected otherwise with
+`fork_config_change_not_allowed`); the added skills ride the fork inbound
+payload and load at the context tail. A fork without config inherits the
+source's overlay + preset verbatim. See
+[[decisions/2026-09-10-preset-in-config-overlay-fork-cache.md]].
+
 ## List projections
 
 `GET /api/agents` keeps `scope=all&fields=full` as its compatibility default

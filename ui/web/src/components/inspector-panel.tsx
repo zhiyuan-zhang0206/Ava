@@ -562,13 +562,40 @@ function displaySkillName(name: string): string {
 
 function ConfigOverlaySection({ inspect }: { inspect: AgentInspectLive }) {
   const entries = Object.entries(inspect.config_overlay);
+  const presetName = inspect.preset_name ?? null;
   const t = useTranslations("inspector");
-  if (entries.length === 0) return null;
+  // Shared with the spawn picker's ["presets"] query (TanStack dedupes) — the
+  // diff display compares the stored overlay against the preset's CURRENT
+  // config: fields the preset supplies verbatim are suppressed; only fields
+  // that differ (or the preset lacks) render next to the preset reference.
+  const { data: presetsData } = useQuery({
+    queryKey: ["presets"],
+    queryFn: () => api.listPresets(),
+    staleTime: 60_000,
+  });
+  const preset = presetsData?.find((p) => p.name === presetName) ?? null;
+  if (entries.length === 0 && presetName === null) return null;
+  // A preset deleted since spawn: no diff possible — show everything.
+  const visibleEntries =
+    presetName !== null && preset
+      ? entries.filter(
+          ([k, v]) =>
+            !(k in preset.config) ||
+            JSON.stringify(preset.config[k]) !== JSON.stringify(v),
+        )
+      : entries;
+  const presetRow = (key: string) => (
+    <div key={key} className="rounded bg-sidebar-accent/40 px-2 py-1 font-mono text-[11px]">
+      <dt className="break-all text-muted-foreground">{t("preset")}</dt>
+      <dd className="mt-0.5 break-all text-foreground">{presetName}</dd>
+    </div>
+  );
 
   return (
     <Section icon={<SlidersHorizontal className="size-3" />} title={t("sectionConfigOverlay")}>
       <dl className="space-y-1">
-        {entries.map(([k, v]) => (
+        {presetName !== null && presetRow("preset")}
+        {visibleEntries.map(([k, v]) => (
           <div
             key={k}
             className="rounded bg-sidebar-accent/40 px-2 py-1 font-mono text-[11px]"

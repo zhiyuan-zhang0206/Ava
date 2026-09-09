@@ -937,15 +937,63 @@ class TestSpawnConfig:
         assert seen["config"] == {"llm_model": "claude-sonnet-5"}
 
     def test_spawn_passes_preset(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """spawn(preset=...) forwards the preset name to _client.spawn (the gateway
-        resolves it to a config template; the SDK just passes the name)."""
+        """The legacy spawn(preset=...) argument folds into config_overlay.preset
+        (task #2694): the gateway resolves it to a config template; the SDK only
+        carries the name inside the config map."""
         from ava import agents
 
         seen: dict[str, Any] = {}
         monkeypatch.setattr(agents._client, "spawn", lambda **kw: seen.update(kw) or 3)  # pyright: ignore[reportUnknownArgumentType]
         monkeypatch.setattr(ava, "AGENT_ID", 1, raising=False)
         agents.spawn(preset="coder")
-        assert seen["preset"] == "coder"
+        assert seen["preset"] is None
+        assert seen["config"] == {"preset": "coder"}
+
+    def test_spawn_preset_inside_config_passes_through(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """config_overlay={"preset": name} is the primary input surface and rides
+        the config map untouched."""
+        from ava import agents
+
+        seen: dict[str, Any] = {}
+        monkeypatch.setattr(agents._client, "spawn", lambda **kw: seen.update(kw) or 3)  # pyright: ignore[reportUnknownArgumentType]
+        monkeypatch.setattr(ava, "AGENT_ID", 1, raising=False)
+        agents.spawn(config_overlay={"preset": "coder", "llm_model": "claude-sonnet-5"})
+        assert seen["config"] == {"preset": "coder", "llm_model": "claude-sonnet-5"}
+
+    def test_spawn_preset_given_twice_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from ava import agents
+
+        monkeypatch.setattr(ava, "AGENT_ID", 1, raising=False)
+        with pytest.raises(ValueError, match="twice"):
+            agents.spawn(preset="coder", config_overlay={"preset": "coder"})
+
+    def test_spawn_preset_key_must_be_nonempty_string(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from ava import agents
+
+        monkeypatch.setattr(ava, "AGENT_ID", 1, raising=False)
+        with pytest.raises(ValueError, match="non-empty string"):
+            agents.spawn(config_overlay={"preset": ""})
+
+    def test_spawn_config_with_preset_skips_preset_key_in_overlay_validation(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The `preset` key is spawn-boundary metadata: the overlay validators
+        (which reject unknown keys) must not see it, while the other fields are
+        still validated."""
+        from ava import agents
+        from shared.plugin_config_registry import InvalidConfigOverlay
+
+        seen: dict[str, Any] = {}
+        monkeypatch.setattr(agents._client, "spawn", lambda **kw: seen.update(kw) or 3)  # pyright: ignore[reportUnknownArgumentType]
+        monkeypatch.setattr(ava, "AGENT_ID", 1, raising=False)
+        agents.spawn(config_overlay={"preset": "coder", "llm_model": "claude-sonnet-5"})
+        assert seen["config"] == {"preset": "coder", "llm_model": "claude-sonnet-5"}
+        with pytest.raises(InvalidConfigOverlay):
+            agents.spawn(config_overlay={"preset": "coder", "db_url": "postgres://nope"})
 
     def test_spawn_rejects_non_per_agent_config(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """spawn(config_overlay=...) rejects fields not marked per_agent — raises before spawning."""

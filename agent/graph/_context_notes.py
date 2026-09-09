@@ -32,6 +32,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 from zoneinfo import ZoneInfo
 
 from langchain_core.messages import HumanMessage
@@ -284,7 +285,34 @@ def preloaded_skills_note() -> HumanMessage | None:
     )
     if not skills:
         return None
+    rendered = _render_skill_bodies(skills, label="preloaded-skills")
+    if rendered is None:
+        return None
+    sections, _injected = rendered
+    content = _PRELOADED_SKILLS_FRAMING + "\n\n" + "\n\n---\n\n".join(sections)
+    return system_note_message(
+        content=content, tag=NoteTag.PRELOADED_SKILLS, created_at=datetime.now(UTC)
+    )
 
+
+# Agent-visible framing for the fork tail-graft note — skills a fork's config
+# added that the inherited context does not carry. Appended at the very TAIL of
+# the rebuilt head (after the fork marker and the on_fork notes), so nothing in
+# front of it changes: the inherited prefix stays byte-identical for the
+# provider's prefix cache (decisions/2026-09-10-preset-in-config-overlay-fork-cache).
+_FORK_TAIL_SKILLS_FRAMING = (
+    "Skills added by your spawn configuration at fork time — they were not "
+    "loaded in the inherited context, so their full text is appended here at "
+    "the tail. Treat them as standing guidance you have already read."
+)
+
+
+def _render_skill_bodies(skills: list[Any], *, label: str) -> tuple[list[str], list[str]] | None:
+    """Read each resolved skill's SKILL.md into a `## ava.skills.<path>` section.
+
+    Returns ``(sections, injected_identifiers)``, or None when every skill is
+    unreadable. Unreadable bodies warn + skip (same posture as the whole-note
+    builder) rather than aborting the note."""
     import ava
 
     sections: list[str] = []
@@ -295,18 +323,41 @@ def preloaded_skills_note() -> HumanMessage | None:
             body = skill_md.read_text(encoding="utf-8").strip()
         except OSError as exc:
             logger.warning(
-                "[preloaded-skills] skill {} SKILL.md unreadable ({}), skipping",
+                "[{}] skill {} SKILL.md unreadable ({}), skipping",
+                label,
                 skill["name"],
                 exc,
             )
             continue
         sections.append(f"## ava.skills.{ava.skills.identifier(skill)}\n\n{body}")
         injected.append(ava.skills.identifier(skill))
-
     if not sections:
         return None
-    logger.info("[preloaded-skills] injecting {} skill(s): {}", len(injected), ", ".join(injected))
-    content = _PRELOADED_SKILLS_FRAMING + "\n\n" + "\n\n---\n\n".join(sections)
+    logger.info("[{}] injecting {} skill(s): {}", label, len(injected), ", ".join(injected))
+    return sections, injected
+
+
+def fork_tail_skills_note(names: list[str]) -> HumanMessage | None:
+    """The full SKILL.md bodies of the fork's skill ADDITIONS, for grafting at
+    the context tail.
+
+    `names` is the delta the gateway computed at spawn —
+    `(fork_inject - source_inject) - fork_expand` — carried in the fork
+    inbound's payload. Resolution (identifier-then-name, warn-and-skip) is
+    shared with the capabilities index and the preloaded-skills note. Tagged
+    `preloaded_skills` so the NEXT fork strips it with the other skill notes
+    and grafts its own. Returns None when the list is empty or nothing resolves.
+    """
+    if not names:
+        return None
+    from agent.graph._capabilities import resolve_prompt_skills
+
+    skills = resolve_prompt_skills(list(names), config_field="fork_tail_skills")
+    rendered = _render_skill_bodies(skills, label="fork-tail-skills")
+    if rendered is None:
+        return None
+    sections, _injected = rendered
+    content = _FORK_TAIL_SKILLS_FRAMING + "\n\n" + "\n\n---\n\n".join(sections)
     return system_note_message(
         content=content, tag=NoteTag.PRELOADED_SKILLS, created_at=datetime.now(UTC)
     )

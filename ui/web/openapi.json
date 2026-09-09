@@ -6655,6 +6655,17 @@
             "type": "object",
             "title": "Config Overlay"
           },
+          "preset_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preset Name"
+          },
           "notice": {
             "anyOf": [
               {
@@ -6696,7 +6707,7 @@
           "heartbeat"
         ],
         "title": "AgentInspect",
-        "description": "GET /api/agents/{id}/inspect response — the per-agent inspector panel.\n\nA single-agent view, in contrast to `/api/stats/dashboard` (the whole fleet\naggregated): the agent's live persistent shells, its frozen per-agent config\noverlay, its current open notice (since #152 at most one), its cumulative\nLLM cost, turn/exec stats, active-rate (working vs blocked-on-a-human),\nidle-heartbeat state, and delivery-obligation state.\n`config_overlay` is the spawn-time field-override map (empty when the agent\nruns on cluster defaults). `shells` is probed on the agent's own machine via\nthe `shell_probe` cluster op — the gateway never runs sessions itself, so a\nsplit deployment sees each agent's shells wherever that agent runs.\n\n`window_hours` echoes the `?hours=` request parameter: None = cumulative\nsince spawn (the default), else `cost` + `stats` + `tps` + `activity`\naggregate only over the past N hours. `applied_window_hours` is the\nactually served window in hours, no greater than `window_hours` and\nclamped to the Loki retention horizon; it is None for whole-life and\nsince-compact reads. `since_compact` echoes\n`?since_compact=`: True = those cover only events since the agent's latest\ncompact halt (`hours` is ignored and `window_hours` is None). `shells`,\n`config_overlay`, `notice`, and `heartbeat` are always current, independent\nof the window."
+        "description": "GET /api/agents/{id}/inspect response — the per-agent inspector panel.\n\nA single-agent view, in contrast to `/api/stats/dashboard` (the whole fleet\naggregated): the agent's live persistent shells, its frozen per-agent config\noverlay, its current open notice (since #152 at most one), its cumulative\nLLM cost, turn/exec stats, active-rate (working vs blocked-on-a-human),\nidle-heartbeat state, and delivery-obligation state.\n`config_overlay` is the spawn-time field-override map (empty when the agent\nruns on cluster defaults); `preset_name` names the spawn-time preset whose\nconfig was folded into it (None when no preset was used). `shells` is\nprobed on the agent's own machine via\nthe `shell_probe` cluster op — the gateway never runs sessions itself, so a\nsplit deployment sees each agent's shells wherever that agent runs.\n\n`window_hours` echoes the `?hours=` request parameter: None = cumulative\nsince spawn (the default), else `cost` + `stats` + `tps` + `activity`\naggregate only over the past N hours. `applied_window_hours` is the\nactually served window in hours, no greater than `window_hours` and\nclamped to the Loki retention horizon; it is None for whole-life and\nsince-compact reads. `since_compact` echoes\n`?since_compact=`: True = those cover only events since the agent's latest\ncompact halt (`hours` is ignored and `window_hours` is None). `shells`,\n`config_overlay`, `notice`, and `heartbeat` are always current, independent\nof the window."
       },
       "AgentInspectLive": {
         "properties": {
@@ -6778,6 +6789,17 @@
             "additionalProperties": true,
             "type": "object",
             "title": "Config Overlay"
+          },
+          "preset_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preset Name"
           },
           "notice": {
             "anyOf": [
@@ -13461,7 +13483,7 @@
         },
         "type": "object",
         "title": "SpawnAgentRequest",
-        "description": "POST /api/agents request body — for frontend / SDK; frontend does\nnot need to know checkpoint ids.\n\nIf `fork_from` is given, the gateway resolves the latest checkpoint\ninternally and passes an explicit id to the underlying create_agent_row\n(consistent with SDK `ava.agents.spawn(fork_from=N)` logic).\n\n`spawner` default \"user\" — frontend spawn button does not need to\npass it; external callers (claude-code / SDK paths `agent:N` etc.)\npass their own identifier so the frontend sidebar groups them under\na separate root section by spawner.\n\n`prompt_source` is **required only when prompt is given** —\nINSERTed into inbound_messages.source; the envelope wrap marks who\nthe message came from. Frontend passes \"user\"; SDK paths pass\nf\"agent:{my_id}\". This differs from spawner: spawner is \"who\ncreated the agent\", source is \"from whom the prompt arrived\".\n\nThe schema does not give prompt_source a default — to avoid the\n\"caller forgot to pass it and got silently tagged user,\ncontaminating envelope source\" anti-pattern (one of the\n`or default` forms CLAUDE.md prohibits); both kinds of callers must\nexplicitly identify themselves."
+        "description": "POST /api/agents request body — for frontend / SDK; frontend does\nnot need to know checkpoint ids.\n\nIf `fork_from` is given, the gateway resolves the latest checkpoint\ninternally and passes an explicit id to the underlying create_agent_row\n(consistent with SDK `ava.agents.spawn(fork_from=N)` logic).\n\nFork config rule: a fork keeps the source's effective config so the\ninherited context stays cache-valid. The only allowed config change is\nADDING skills to `skills_to_inject_into_system_prompt` /\n`skills_to_expand_at_start` (supersets); anything else is rejected with\n`fork_config_change_not_allowed`. A fork WITHOUT config inherits the\nsource's resolved overlay + preset verbatim (the pre-2026-09-10 behavior\ndropped the source's overlay).\n\n`spawner` default \"user\" — frontend spawn button does not need to\npass it; external callers (claude-code / SDK paths `agent:N` etc.)\npass their own identifier so the frontend sidebar groups them under\na separate root section by spawner.\n\n`prompt_source` is **required only when prompt is given** —\nINSERTed into inbound_messages.source; the envelope wrap marks who\nthe message came from. Frontend passes \"user\"; SDK paths pass\nf\"agent:{my_id}\". This differs from spawner: spawner is \"who\ncreated the agent\", source is \"from whom the prompt arrived\".\n\nThe schema does not give prompt_source a default — to avoid the\n\"caller forgot to pass it and got silently tagged user,\ncontaminating envelope source\" anti-pattern (one of the\n`or default` forms CLAUDE.md prohibits); both kinds of callers must\nexplicitly identify themselves."
       },
       "SpawnedAgent": {
         "properties": {

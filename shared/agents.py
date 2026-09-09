@@ -126,6 +126,7 @@ class ErrorReason(StrEnum):
     INDEXER_UNAVAILABLE = "indexer_unavailable"
     CHANNEL_NOT_CONFIGURED = "channel_not_configured"
     INVALID_MODEL_CONFIG = "invalid_model_config"
+    FORK_CONFIG_CHANGE_NOT_ALLOWED = "fork_config_change_not_allowed"
 
 
 # Reverse lookup table from wire reason -> exception class; used by
@@ -193,7 +194,9 @@ class ForkError(Exception):
 
     Concrete subclasses: `ForkSourceEmpty` (source has no checkpoint) /
     `ForkCheckpointNotFound` (explicit checkpoint id does not exist on
-    source). Both wire-encoded. The SDK re-exports as `ava.agents.X`.
+    source) / `ForkConfigChangeNotAllowed` (fork tried to change the
+    source's config beyond skill additions). All wire-encoded. The SDK
+    re-exports as `ava.agents.X`.
     """
 
 
@@ -232,6 +235,21 @@ class ForkCheckpointNotFound(ForkError, AvaAgentError):  # noqa: N818
 
     reason = ErrorReason.FORK_CHECKPOINT_NOT_FOUND
     http_status = 409
+
+
+class ForkConfigChangeNotAllowed(ForkError, AvaAgentError):  # noqa: N818 — state description, same style as AgentNotFound
+    """A fork may not change the source agent's config.
+
+    A fork runs the source agent's effective config so the inherited
+    context keeps its cached prefix. The only sanctioned change is
+    ADDING skills to `skills_to_inject_into_system_prompt` /
+    `skills_to_expand_at_start` (loaded at the context tail). Everything
+    else — model, effort, removals — is rejected here; change the fork
+    after it exists via restart(config_overlay=...) instead.
+    """
+
+    reason = ErrorReason.FORK_CONFIG_CHANGE_NOT_ALLOWED
+    http_status = 400
 
 
 class GatewayUnavailable(Exception):  # noqa: N818 — state description, no Error suffix, same style as AgentNotFound
