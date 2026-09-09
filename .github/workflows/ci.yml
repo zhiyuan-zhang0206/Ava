@@ -559,13 +559,55 @@ jobs:
           fi
           exit "$status"
 
-      - name: Upload test results to Trunk
+      - name: Trunk quarantine gate (upload test results)
+        id: trunk-gate
         if: ${{ !cancelled() && env.TRUNK_ORG_URL_SLUG != '' }}
         uses: trunk-io/analytics-uploader@385f1ccdf345b4532dc4b6c665dd432b702b8e28 # v2.1.2
         with:
+          cli-version: 0.15.4
           junit-paths: tmp/junit-backend-shard-${{ matrix.group }}-*.xml
           org-slug: ${{ secrets.TRUNK_ORG_URL_SLUG }}
           token: ${{ secrets.TRUNK_API_TOKEN }}
+      - name: Show unquarantined failure summary
+        # The test run above is continue-on-error, so this job's only
+        # hard-failing test step is the quarantine gate itself: this prints
+        # the failing tests from the uploaded JUnit when the gate rejects
+        # them, so a red step reads as "tests failed and were not
+        # quarantined" (a real gate block) instead of an uploader outage.
+        if: ${{ steps.trunk-gate.outcome == 'failure' }}
+        shell: bash
+        run: |
+          python3 - <<'EOF'
+          import glob
+          from xml.etree import ElementTree as ET
+
+          paths = set()
+          for pattern in ["tmp/junit-backend-shard-*.xml"]:
+              paths.update(glob.glob(pattern))
+          paths = sorted(paths)
+          if not paths:
+              print("No JUnit files found: the upload failed before test results were parsed (see the step log above).")
+              raise SystemExit(0)
+          failed = []
+          total = 0
+          for path in paths:
+              try:
+                  root = ET.parse(path).getroot()
+              except ET.ParseError:
+                  print("WARNING: could not parse " + path)
+                  continue
+              for tc in root.iter("testcase"):
+                  total += 1
+                  if tc.find("failure") is not None or tc.find("error") is not None:
+                      failed.append(tc.get("classname") + "::" + tc.get("name"))
+          print("Trunk quarantine gate: " + str(len(failed)) + " of " + str(total) + " test(s) failed and were NOT quarantined.")
+          for name in failed:
+              print("  FAILED " + name)
+          if failed:
+              print("Fix the test, or quarantine a known-flaky one in the Trunk Flaky Tests dashboard.")
+          else:
+              print("No failing tests in the JUnit: this red step is an uploader error, not a test failure.")
+          EOF
 
       - name: Upload flake telemetry (attempt-1 failure)
         if: ${{ always() && (steps.pytest-shard.outputs.retried == 'true' || matrix.group == 8) }}
@@ -692,13 +734,55 @@ jobs:
           --cov=ops --cov=services --cov=ava_builtins
           --junit-xml=tmp/junit-backend-serial.xml -o junit_family=xunit1
 
-      - name: Upload test results to Trunk
+      - name: Trunk quarantine gate (upload test results)
+        id: trunk-gate
         if: ${{ !cancelled() && env.TRUNK_ORG_URL_SLUG != '' }}
         uses: trunk-io/analytics-uploader@385f1ccdf345b4532dc4b6c665dd432b702b8e28 # v2.1.2
         with:
+          cli-version: 0.15.4
           junit-paths: tmp/junit-backend-serial.xml
           org-slug: ${{ secrets.TRUNK_ORG_URL_SLUG }}
           token: ${{ secrets.TRUNK_API_TOKEN }}
+      - name: Show unquarantined failure summary
+        # The test run above is continue-on-error, so this job's only
+        # hard-failing test step is the quarantine gate itself: this prints
+        # the failing tests from the uploaded JUnit when the gate rejects
+        # them, so a red step reads as "tests failed and were not
+        # quarantined" (a real gate block) instead of an uploader outage.
+        if: ${{ steps.trunk-gate.outcome == 'failure' }}
+        shell: bash
+        run: |
+          python3 - <<'EOF'
+          import glob
+          from xml.etree import ElementTree as ET
+
+          paths = set()
+          for pattern in ["tmp/junit-backend-serial.xml"]:
+              paths.update(glob.glob(pattern))
+          paths = sorted(paths)
+          if not paths:
+              print("No JUnit files found: the upload failed before test results were parsed (see the step log above).")
+              raise SystemExit(0)
+          failed = []
+          total = 0
+          for path in paths:
+              try:
+                  root = ET.parse(path).getroot()
+              except ET.ParseError:
+                  print("WARNING: could not parse " + path)
+                  continue
+              for tc in root.iter("testcase"):
+                  total += 1
+                  if tc.find("failure") is not None or tc.find("error") is not None:
+                      failed.append(tc.get("classname") + "::" + tc.get("name"))
+          print("Trunk quarantine gate: " + str(len(failed)) + " of " + str(total) + " test(s) failed and were NOT quarantined.")
+          for name in failed:
+              print("  FAILED " + name)
+          if failed:
+              print("Fix the test, or quarantine a known-flaky one in the Trunk Flaky Tests dashboard.")
+          else:
+              print("No failing tests in the JUnit: this red step is an uploader error, not a test failure.")
+          EOF
 
       - name: Upload coverage data
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -1121,13 +1205,55 @@ jobs:
         continue-on-error: true
         run: npx vitest run --config vitest.flaky.config.ts
 
-      - name: Upload test results to Trunk
+      - name: Trunk quarantine gate (upload test results)
+        id: trunk-gate
         if: ${{ !cancelled() && env.TRUNK_ORG_URL_SLUG != '' }}
         uses: trunk-io/analytics-uploader@385f1ccdf345b4532dc4b6c665dd432b702b8e28 # v2.1.2
         with:
+          cli-version: 0.15.4
           junit-paths: ui/web/junit.xml,ui/web/junit-flaky.xml
           org-slug: ${{ secrets.TRUNK_ORG_URL_SLUG }}
           token: ${{ secrets.TRUNK_API_TOKEN }}
+      - name: Show unquarantined failure summary
+        # The test run above is continue-on-error, so this job's only
+        # hard-failing test step is the quarantine gate itself: this prints
+        # the failing tests from the uploaded JUnit when the gate rejects
+        # them, so a red step reads as "tests failed and were not
+        # quarantined" (a real gate block) instead of an uploader outage.
+        if: ${{ steps.trunk-gate.outcome == 'failure' }}
+        shell: bash
+        run: |
+          python3 - <<'EOF'
+          import glob
+          from xml.etree import ElementTree as ET
+
+          paths = set()
+          for pattern in ["ui/web/junit.xml", "ui/web/junit-flaky.xml"]:
+              paths.update(glob.glob(pattern))
+          paths = sorted(paths)
+          if not paths:
+              print("No JUnit files found: the upload failed before test results were parsed (see the step log above).")
+              raise SystemExit(0)
+          failed = []
+          total = 0
+          for path in paths:
+              try:
+                  root = ET.parse(path).getroot()
+              except ET.ParseError:
+                  print("WARNING: could not parse " + path)
+                  continue
+              for tc in root.iter("testcase"):
+                  total += 1
+                  if tc.find("failure") is not None or tc.find("error") is not None:
+                      failed.append(tc.get("classname") + "::" + tc.get("name"))
+          print("Trunk quarantine gate: " + str(len(failed)) + " of " + str(total) + " test(s) failed and were NOT quarantined.")
+          for name in failed:
+              print("  FAILED " + name)
+          if failed:
+              print("Fix the test, or quarantine a known-flaky one in the Trunk Flaky Tests dashboard.")
+          else:
+              print("No failing tests in the JUnit: this red step is an uploader error, not a test failure.")
+          EOF
 
   e2e-shard:
     name: e2e shard (${{ matrix.group }}/4)
@@ -1200,13 +1326,55 @@ jobs:
           --splitting-algorithm least_duration
           --junit-xml=tmp/junit-e2e-shard-${{ matrix.group }}.xml -o junit_family=xunit1
 
-      - name: Upload test results to Trunk
+      - name: Trunk quarantine gate (upload test results)
+        id: trunk-gate
         if: ${{ !cancelled() && env.TRUNK_ORG_URL_SLUG != '' }}
         uses: trunk-io/analytics-uploader@385f1ccdf345b4532dc4b6c665dd432b702b8e28 # v2.1.2
         with:
+          cli-version: 0.15.4
           junit-paths: tmp/junit-e2e-shard-${{ matrix.group }}.xml
           org-slug: ${{ secrets.TRUNK_ORG_URL_SLUG }}
           token: ${{ secrets.TRUNK_API_TOKEN }}
+      - name: Show unquarantined failure summary
+        # The test run above is continue-on-error, so this job's only
+        # hard-failing test step is the quarantine gate itself: this prints
+        # the failing tests from the uploaded JUnit when the gate rejects
+        # them, so a red step reads as "tests failed and were not
+        # quarantined" (a real gate block) instead of an uploader outage.
+        if: ${{ steps.trunk-gate.outcome == 'failure' }}
+        shell: bash
+        run: |
+          python3 - <<'EOF'
+          import glob
+          from xml.etree import ElementTree as ET
+
+          paths = set()
+          for pattern in ["tmp/junit-e2e-shard-*.xml"]:
+              paths.update(glob.glob(pattern))
+          paths = sorted(paths)
+          if not paths:
+              print("No JUnit files found: the upload failed before test results were parsed (see the step log above).")
+              raise SystemExit(0)
+          failed = []
+          total = 0
+          for path in paths:
+              try:
+                  root = ET.parse(path).getroot()
+              except ET.ParseError:
+                  print("WARNING: could not parse " + path)
+                  continue
+              for tc in root.iter("testcase"):
+                  total += 1
+                  if tc.find("failure") is not None or tc.find("error") is not None:
+                      failed.append(tc.get("classname") + "::" + tc.get("name"))
+          print("Trunk quarantine gate: " + str(len(failed)) + " of " + str(total) + " test(s) failed and were NOT quarantined.")
+          for name in failed:
+              print("  FAILED " + name)
+          if failed:
+              print("Fix the test, or quarantine a known-flaky one in the Trunk Flaky Tests dashboard.")
+          else:
+              print("No failing tests in the JUnit: this red step is an uploader error, not a test failure.")
+          EOF
 
       - name: Upload e2e logs on failure
         if: failure()
@@ -1281,13 +1449,55 @@ jobs:
           -v -n 1
           --junit-xml=tmp/junit-e2e-hosted.xml -o junit_family=xunit1
 
-      - name: Upload test results to Trunk
+      - name: Trunk quarantine gate (upload test results)
+        id: trunk-gate
         if: ${{ !cancelled() && env.TRUNK_ORG_URL_SLUG != '' }}
         uses: trunk-io/analytics-uploader@385f1ccdf345b4532dc4b6c665dd432b702b8e28 # v2.1.2
         with:
+          cli-version: 0.15.4
           junit-paths: tmp/junit-e2e-hosted.xml
           org-slug: ${{ secrets.TRUNK_ORG_URL_SLUG }}
           token: ${{ secrets.TRUNK_API_TOKEN }}
+      - name: Show unquarantined failure summary
+        # The test run above is continue-on-error, so this job's only
+        # hard-failing test step is the quarantine gate itself: this prints
+        # the failing tests from the uploaded JUnit when the gate rejects
+        # them, so a red step reads as "tests failed and were not
+        # quarantined" (a real gate block) instead of an uploader outage.
+        if: ${{ steps.trunk-gate.outcome == 'failure' }}
+        shell: bash
+        run: |
+          python3 - <<'EOF'
+          import glob
+          from xml.etree import ElementTree as ET
+
+          paths = set()
+          for pattern in ["tmp/junit-e2e-hosted.xml"]:
+              paths.update(glob.glob(pattern))
+          paths = sorted(paths)
+          if not paths:
+              print("No JUnit files found: the upload failed before test results were parsed (see the step log above).")
+              raise SystemExit(0)
+          failed = []
+          total = 0
+          for path in paths:
+              try:
+                  root = ET.parse(path).getroot()
+              except ET.ParseError:
+                  print("WARNING: could not parse " + path)
+                  continue
+              for tc in root.iter("testcase"):
+                  total += 1
+                  if tc.find("failure") is not None or tc.find("error") is not None:
+                      failed.append(tc.get("classname") + "::" + tc.get("name"))
+          print("Trunk quarantine gate: " + str(len(failed)) + " of " + str(total) + " test(s) failed and were NOT quarantined.")
+          for name in failed:
+              print("  FAILED " + name)
+          if failed:
+              print("Fix the test, or quarantine a known-flaky one in the Trunk Flaky Tests dashboard.")
+          else:
+              print("No failing tests in the JUnit: this red step is an uploader error, not a test failure.")
+          EOF
 
       - name: Upload e2e logs on failure
         if: failure()
@@ -1368,13 +1578,55 @@ jobs:
           tests/test_home_isolation.py -v -n 1
           --junit-xml=tmp/junit-e2e-env-guard.xml -o junit_family=xunit1
 
-      - name: Upload test results to Trunk
+      - name: Trunk quarantine gate (upload test results)
+        id: trunk-gate
         if: ${{ !cancelled() && env.TRUNK_ORG_URL_SLUG != '' }}
         uses: trunk-io/analytics-uploader@385f1ccdf345b4532dc4b6c665dd432b702b8e28 # v2.1.2
         with:
+          cli-version: 0.15.4
           junit-paths: tmp/junit-e2e-env-guard.xml
           org-slug: ${{ secrets.TRUNK_ORG_URL_SLUG }}
           token: ${{ secrets.TRUNK_API_TOKEN }}
+      - name: Show unquarantined failure summary
+        # The test run above is continue-on-error, so this job's only
+        # hard-failing test step is the quarantine gate itself: this prints
+        # the failing tests from the uploaded JUnit when the gate rejects
+        # them, so a red step reads as "tests failed and were not
+        # quarantined" (a real gate block) instead of an uploader outage.
+        if: ${{ steps.trunk-gate.outcome == 'failure' }}
+        shell: bash
+        run: |
+          python3 - <<'EOF'
+          import glob
+          from xml.etree import ElementTree as ET
+
+          paths = set()
+          for pattern in ["tmp/junit-e2e-env-guard.xml"]:
+              paths.update(glob.glob(pattern))
+          paths = sorted(paths)
+          if not paths:
+              print("No JUnit files found: the upload failed before test results were parsed (see the step log above).")
+              raise SystemExit(0)
+          failed = []
+          total = 0
+          for path in paths:
+              try:
+                  root = ET.parse(path).getroot()
+              except ET.ParseError:
+                  print("WARNING: could not parse " + path)
+                  continue
+              for tc in root.iter("testcase"):
+                  total += 1
+                  if tc.find("failure") is not None or tc.find("error") is not None:
+                      failed.append(tc.get("classname") + "::" + tc.get("name"))
+          print("Trunk quarantine gate: " + str(len(failed)) + " of " + str(total) + " test(s) failed and were NOT quarantined.")
+          for name in failed:
+              print("  FAILED " + name)
+          if failed:
+              print("Fix the test, or quarantine a known-flaky one in the Trunk Flaky Tests dashboard.")
+          else:
+              print("No failing tests in the JUnit: this red step is an uploader error, not a test failure.")
+          EOF
 
       - name: Upload e2e logs on failure
         if: failure()
@@ -1448,11 +1700,12 @@ jobs:
           uv run pytest tests/e2e/ tests/test_home_isolation.py -v -n 1
           --junit-xml=tmp/junit-e2e-env-guard-full.xml -o junit_family=xunit1
 
-      - name: Upload test results to Trunk (shadow)
+      - name: Trunk quarantine gate (upload test results, shadow)
         if: ${{ !cancelled() && env.TRUNK_ORG_URL_SLUG != '' }}
         continue-on-error: true
         uses: trunk-io/analytics-uploader@385f1ccdf345b4532dc4b6c665dd432b702b8e28 # v2.1.2
         with:
+          cli-version: 0.15.4
           junit-paths: tmp/junit-e2e-env-guard-full.xml
           org-slug: ${{ secrets.TRUNK_ORG_URL_SLUG }}
           token: ${{ secrets.TRUNK_API_TOKEN }}
