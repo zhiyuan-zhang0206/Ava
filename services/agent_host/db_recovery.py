@@ -17,6 +17,7 @@ from agent.startup import (
     _reconcile_claimed_inbounds_at_startup,
     _repair_dangling_tool_use_at_startup,
 )
+from services.agent_host.recovery_interrupt import RecoveryInterrupt
 from shared.db_transaction import async_write_transaction
 from shared.deploy_timing import AGENT_LEASE_TTL_S
 from shared.hosted_db_wait import DatabaseWait, database_wait
@@ -115,10 +116,14 @@ async def recover_database(
     Cancellation interrupts both probe and backoff. A database flap retries the
     same repair; ownership loss and non-database failures escape to the host's
     existing failure/maintenance fence. No lifecycle receipt is produced here.
+    External interrupt intent shortens one backoff; repair still completes before
+    the normal claim applies control, so an unreadable checkpoint cannot be paused
+    by falsely acknowledging its pending cancel.
     """
     if current_incarnation(incarnation.agent_id) != incarnation:
         raise RuntimeOwnershipLostError("database recovery needs the original bound incarnation")
     backoff = _INITIAL_BACKOFF_SECONDS
+    interrupt = RecoveryInterrupt(pool, incarnation)
     attempt = 0
     logger.warning("host turn waiting for checkpoint recovery", agent_id=incarnation.agent_id)
     with database_wait(incarnation) as waiting:
@@ -173,5 +178,5 @@ async def recover_database(
                     sqlstate=exc.sqlstate if isinstance(exc, psycopg.Error) else None,
                     backoff_seconds=backoff,
                 )
-                await asyncio.sleep(backoff)
+                await interrupt.wait_backoff(backoff)
                 backoff = min(backoff * 2, _MAX_BACKOFF_SECONDS)
