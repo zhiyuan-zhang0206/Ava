@@ -27,6 +27,9 @@ This loop is the enforcer, scanning
 - **Work failures** — a gateway crash after recording an event but before
   finishing its route is retried through the original author/delegator/task
   fallback chain.
+- **Schedule fire log** — ``schedule_fire_log`` claims older than the configured
+  retention window (30 days by default) are deleted once per day, keeping the
+  newest claim per schedule so the catch-up baseline never regresses.
 - **Terminated owners' watchers** — a watcher whose owning agent is
   terminated for good (never auto-resurrect-eligible) has its session killed
   and its registry row marked ``reaped``. Watcher sessions deliberately carry
@@ -58,9 +61,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from contextlib import suppress
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 
 import psycopg
 from psycopg_pool import ConnectionPool
@@ -86,6 +90,16 @@ _PASS_BATCH = 200
 # Per-op dispatch budget: a reachable runner answers a shell_kill in
 # milliseconds; an unreachable one fails the connect within this bound.
 _SHELL_KILL_TIMEOUT_S = 5.0
+
+# Bound for the per-pass schedule_fire_log retention prune. The tables are
+# small by design; the cap keeps a backlog (e.g. after a long gateway outage)
+# from turning one pass into a multi-minute transaction.
+_FIRE_LOG_PASS_BATCH = 50_000
+
+# Monotonic stamp of the last schedule_fire_log retention prune — the prune is
+# a daily job, not a per-pass one (an empty-age DELETE every poll interval
+# would scan the whole table for nothing).
+_schedule_fire_log_last_pruned: float | None = None
 
 # The only agent states that can act on a reclamation notice. Terminated
 # agents must NOT be resurrected by an expiry notification.
@@ -610,6 +624,56 @@ async def _reap_terminated_owner_watchers(
     return reaped
 
 
+def _schedule_fire_log_prune_due() -> bool:
+    """True once per configured cleanup interval (daily by default).
+
+    The retention prune runs on the reaper's own cadence but is throttled to
+    the cleanup interval, so a full-table age scan does not repeat every poll.
+    """
+    global _schedule_fire_log_last_pruned  # noqa: PLW0603 — process-local prune cadence
+    now = time.monotonic()
+    interval = settings.daemon.schedule_fire_log_cleanup_interval_seconds
+    if _schedule_fire_log_last_pruned is None or now - _schedule_fire_log_last_pruned >= interval:
+        _schedule_fire_log_last_pruned = now
+        return True
+    return False
+
+
+def _prune_schedule_fire_log_blocking(pool: ConnectionPool) -> int:
+    """Delete ``schedule_fire_log`` claims older than the retention window.
+
+    The table is the at-most-once claim ledger for schedule catch-up
+    (``schedules/catchup.py``): the catch-up baseline is MAX(slot_fire_at) over
+    the remaining rows. The newest claim PER SCHEDULE is always kept, so a
+    sparse-cron schedule whose whole log is older than the window never
+    regresses its baseline to ``created_at`` — a regressed baseline would let
+    ``catch_up`` refire a slot the schedule already claimed. One bounded
+    DELETE per pass: a backlog (long gateway outage, many schedules) drains
+    over successive passes instead of one long transaction.
+    """
+    cutoff = datetime.now(UTC) - timedelta(days=settings.daemon.schedule_fire_log_retention_days)
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            DELETE FROM schedule_fire_log
+            WHERE id IN (
+                SELECT f.id
+                FROM schedule_fire_log f
+                WHERE f.slot_fire_at < %s
+                  AND f.id NOT IN (
+                    SELECT DISTINCT ON (schedule_id) id
+                    FROM schedule_fire_log
+                    ORDER BY schedule_id, slot_fire_at DESC
+                  )
+                ORDER BY f.id
+                LIMIT %s
+            )
+            """,
+            (cutoff, _FIRE_LOG_PASS_BATCH),
+        )
+        return cur.rowcount
+
+
 async def _reaper_loop(pool: ConnectionPool, stop: asyncio.Event) -> None:
     """Reclaim once at startup, then on the configured interval."""
     while not stop.is_set():
@@ -625,6 +689,9 @@ async def _reaper_loop(pool: ConnectionPool, stop: asyncio.Event) -> None:
                 with suppress(Exception):
                     await ops_lifecycle.publish_notice_resolved(agent_id, nid)
             failures = await work_failed_router.reconcile_stale_work_failures(pool)
+            pruned_fire_log = 0
+            if _schedule_fire_log_prune_due():
+                pruned_fire_log = await asyncio.to_thread(_prune_schedule_fire_log_blocking, pool)
             if (
                 pages
                 or shells
@@ -634,11 +701,13 @@ async def _reaper_loop(pool: ConnectionPool, stop: asyncio.Event) -> None:
                 or notices
                 or failures
                 or reminded
+                or pruned_fire_log
             ):
                 _log.info(
                     "[ttl-reaper] reclaimed %d page(s), %d shell(s), %d web session(s), "
                     "%d terminated-owner watcher(s), %d impersonation(s), %d notice(s); "
-                    "completed %d stale work failure(s); reminded %d impersonation lease(s)",
+                    "completed %d stale work failure(s); reminded %d impersonation lease(s); "
+                    "pruned %d schedule fire-log row(s)",
                     len(pages),
                     len(shells),
                     sessions,
@@ -647,6 +716,7 @@ async def _reaper_loop(pool: ConnectionPool, stop: asyncio.Event) -> None:
                     len(notices),
                     failures,
                     reminded,
+                    pruned_fire_log,
                 )
         except Exception:
             _log.warning("[ttl-reaper] pass failed", exc_info=True)
