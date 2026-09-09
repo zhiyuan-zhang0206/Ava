@@ -22,7 +22,7 @@ from shared import cluster
 from shared.config import settings
 from shared.env_registry import REDIS_PASSWORD_ENV, health_port_env_aliases
 from shared.platform import IS_WINDOWS
-from shared.url_secret import url_with_port, url_with_userinfo
+from shared.url_secret import redacted_url, url_with_port, url_with_userinfo
 
 # The db / Postgres-role / redis-ACL identifier a newly-born cluster uses. Fixed:
 # every cluster owns its instance (exactly one tenant), so the identifier carries
@@ -102,9 +102,10 @@ def identity_from_url(url: str) -> str:
     user = urlsplit(url).username
     if not user:
         raise ValueError(
-            f"data-plane URL carries no username (the db/role/ACL identity): {url!r}. "
-            "Identity is read from the URL as data, never guessed — fix the .env URL "
-            "(e.g. postgresql://ava:<secret>@host:port/ava, redis://ava:<secret>@host:port/0)."
+            f"data-plane URL carries no username (the db/role/ACL identity): "
+            f"{redacted_url(url)!r}. Identity is read from the URL as data, never "
+            "guessed — fix the .env URL (e.g. postgresql://ava:<secret>@host:port/ava, "
+            "redis://ava:<secret>@host:port/0)."
         )
     return user
 
