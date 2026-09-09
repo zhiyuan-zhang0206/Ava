@@ -1081,6 +1081,9 @@ jobs:
         run: |
           npm run build
           npm run check:first-load-js
+      - name: Production bundle integrity (minifier side-effect tripwires)
+        working-directory: ui/web
+        run: npm run check:bundle-integrity
       - name: ESLint
         working-directory: ui/web
         run: npm run lint

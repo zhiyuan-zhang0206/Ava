@@ -8,6 +8,7 @@
     "build": "next build",
     "build:analyze": "ANALYZE=true next build --webpack",
     "check:first-load-js": "node scripts/check-first-load-js.mjs",
+    "check:bundle-integrity": "node scripts/check-bundle-integrity.mjs",
     "start": "next start -H 127.0.0.1",
     "test": "vitest run",
     "lint": "eslint . --format json | node scripts/check-eslint-warnings.mjs",
