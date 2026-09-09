@@ -34,7 +34,7 @@ persistence.
 
 ## Entry Points
 - `services/memory_search/daemon.py` — `.venv/bin/python -m services.memory_search.daemon`
-- `services/memory_search/app.py:build_app()` — the FastAPI app (upsert / delete / meta / search / healthz)
+- `services/memory_search/app.py:build_app()` — the FastAPI app (upsert / upsert_batch / delete / delete_stale_batch / meta / search / healthz); `delete_stale_batch` is the tail-cleanup companion to `upsert_batch` (issue #1946)
 
 ## Notes
 - Port: `AVA_MEMORY_SEARCH_PORT` (default 19531), URI: `AVA_MEMORY_SEARCH_URI`

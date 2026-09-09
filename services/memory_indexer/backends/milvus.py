@@ -55,7 +55,7 @@ from typing import Any, cast
 import numpy as np
 from pymilvus import AsyncMilvusClient, DataType, MilvusClient
 
-from services.memory_indexer.backends.base import _PK_MAX_LENGTH, KIND_BODY, pk_of
+from services.memory_indexer.backends.base import _PK_MAX_LENGTH, KIND_BODY, KIND_DESC, pk_of
 from shared.config import settings
 
 _log = logging.getLogger("services.memory_indexer.index")
@@ -273,6 +273,30 @@ def _delete(client: MilvusClient, path: str) -> None:
     client.delete(collection_name=_COLLECTION, filter=expr)  # pyright: ignore[reportUnknownMemberType]
 
 
+def _delete_stale_rows(client: MilvusClient, path: str, kind_limits: dict[str, int]) -> None:
+    """Delete the tail rows of `path` the current file no longer produces.
+
+    The indexer writes contiguous chunk_idx from 0 per kind, so rows whose
+    kind is absent from `kind_limits`, or whose chunk_idx >= its limit, are
+    obsolete (issue #1946). All-zero limits mean the file no longer produces
+    any row — the whole path goes through `_delete`. A path that cannot be
+    expressed in a Milvus filter is logged and skipped, same as `_delete`.
+    """
+    if not any(kind_limits.values()):
+        _delete(client, path)
+        return
+    expr = _path_filter(path)
+    if expr is None:
+        _log.warning("[index] cannot express delete filter for %r — skipping", path)
+        return
+    clauses: list[str] = []
+    for kind in (KIND_DESC, KIND_BODY):
+        clauses.append(f'kind == "{kind}" and chunk_idx >= {kind_limits.get(kind, 0)}')
+    expr += f" and ({' or '.join(clauses)})"
+    # pymilvus client.delete types its **kwargs as Unknown; the call args are fully typed.
+    client.delete(collection_name=_COLLECTION, filter=expr)  # pyright: ignore[reportUnknownMemberType]
+
+
 def _all_meta(client: MilvusClient) -> dict[str, tuple[float, str, str]]:
     """Per-path (mtime, content_hash, provider_fingerprint) — one entry per
     **file**, not per chunk.
@@ -470,6 +494,16 @@ class MilvusBackend:
         """Delete every chunk row of `path` — see `_delete`."""
         self._require_writable()
         _delete(self._require_client(), path)
+
+    def delete_stale_rows(
+        self,
+        entries: Sequence[tuple[str, dict[str, int]]],
+    ) -> None:
+        """Tail-cleanup (issue #1946) — see the backend protocol; one delete
+        call per entry, no-op for an empty batch."""
+        self._require_writable()
+        for path, kind_limits in entries:
+            _delete_stale_rows(self._require_client(), path, kind_limits)
 
     def all_meta(self) -> dict[str, tuple[float, str, str]]:
         """Per-path (mtime, content_hash, provider_fingerprint) — see

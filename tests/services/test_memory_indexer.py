@@ -659,6 +659,77 @@ def test_process_paths_indexes_desc_and_body_chunks(
     assert kinds == [("body", 0), ("body", 1), ("desc", 0)]
 
 
+def _indexed_rows(milvus_client: Any, path: Path) -> set[tuple[str, int]]:
+    rows = milvus_client.query(  # pyright: ignore[reportUnknownMemberType]
+        collection_name=_COLLECTION,
+        filter=f'path == "{path.resolve()!s}"',
+        output_fields=["kind", "chunk_idx"],
+        limit=100,
+    )
+    return {(r["kind"], r["chunk_idx"]) for r in rows}  # pyright: ignore[reportUnknownArgumentType]
+
+
+def _long_note(paragraphs: int) -> str:
+    return "---\ntype: Memory\ndescription: hand off to 402\n---\n\n" + "\n\n".join(
+        f"paragraph-{i} " + "word " * 80 for i in range(paragraphs)
+    )
+
+
+def test_process_paths_removes_stale_tail_when_file_shrinks(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    milvus_client,
+) -> None:
+    """Issue #1946: after a file shrinks, the rows it no longer produces
+    (old body tail) are gone — every remaining chunk matches current content."""
+    f = tmp_path / "long.md"
+    f.write_text(_long_note(12), encoding="utf-8")
+    backend = _backend(milvus_client)
+    daemon._process_paths(backend, {f.resolve()}, _FakeProvider())
+    assert _indexed_rows(milvus_client, f) == {("desc", 0), ("body", 0), ("body", 1), ("body", 2)}
+
+    f.write_text(_long_note(3), encoding="utf-8")
+    daemon._process_paths(backend, {f.resolve()}, _FakeProvider())
+    assert _indexed_rows(milvus_client, f) == {("desc", 0), ("body", 0)}
+    assert backend.all_meta()[str(f.resolve())][1] == content_hash(f.read_text())
+
+
+def test_process_paths_removes_desc_row_when_description_deleted(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    milvus_client,
+) -> None:
+    """A removed description removes its row; the body stays current."""
+    f = tmp_path / "note.md"
+    f.write_text("---\ndescription: old description\n---\n\nbody text", encoding="utf-8")
+    backend = _backend(milvus_client)
+    daemon._process_paths(backend, {f.resolve()}, _FakeProvider())
+    assert _indexed_rows(milvus_client, f) == {("desc", 0), ("body", 0)}
+
+    f.write_text("body text", encoding="utf-8")
+    daemon._process_paths(backend, {f.resolve()}, _FakeProvider())
+    assert _indexed_rows(milvus_client, f) == {("body", 0)}
+    assert backend.all_meta()[str(f.resolve())][1] == content_hash(f.read_text())
+
+
+def test_process_paths_removes_all_rows_when_file_becomes_empty(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    milvus_client,
+) -> None:
+    """An emptied file leaves no rows behind (issue #1946)."""
+    f = tmp_path / "note.md"
+    f.write_text("---\ndescription: old description\n---\n\nbody text", encoding="utf-8")
+    backend = _backend(milvus_client)
+    daemon._process_paths(backend, {f.resolve()}, _FakeProvider())
+    assert _indexed_rows(milvus_client, f) == {("desc", 0), ("body", 0)}
+
+    f.write_text("", encoding="utf-8")
+    daemon._process_paths(backend, {f.resolve()}, _FakeProvider())
+    assert _indexed_rows(milvus_client, f) == set()
+    assert backend.all_meta() == {}
+
+
 def test_process_paths_calls_upsert_many_once_across_embed_batches(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -687,11 +758,15 @@ def test_process_paths_calls_upsert_many_once_across_embed_batches(
     assert {row[0] for row in backend.calls[0]} == {str(first.resolve()), str(second.resolve())}
 
 
-def test_process_paths_flushes_embedded_rows_before_embedding_error(
+def test_partial_embedding_failure_keeps_old_rows_intact(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     milvus_client,
 ) -> None:
+    """A file whose embedding fails part way keeps its previous rows whole —
+    all-old is the recoverable consistent state; the hash stays mismatching so
+    the next fs event or cold-start reconcile retries it (issue #1946)."""
+
     class _FailSecondBatchProvider(_FakeProvider):
         def embed_batch(self, texts: list[str]) -> np.ndarray:
             if self.embed_batch_count == 1:
@@ -711,12 +786,45 @@ def test_process_paths_flushes_embedded_rows_before_embedding_error(
     note.write_text("---\ndescription: description\n---\nbody", encoding="utf-8")
     monkeypatch.setattr(daemon, "_BATCH_SIZE", 1)
     backend = _RecordingBackend()
+    daemon._process_paths(backend, {note.resolve()}, _FakeProvider())
+    old_meta = backend.all_meta()
 
+    note.write_text("---\ndescription: new description\n---\nnew body", encoding="utf-8")
+    backend.calls.clear()
     with pytest.raises(EmbeddingAPIError, match="second batch failed"):
         daemon._process_paths(backend, {note.resolve()}, _FailSecondBatchProvider())
 
-    assert len(backend.calls) == 1
-    assert len(backend.calls[0]) == 1
-    assert backend.all_meta() == {
-        str(note.resolve()): (note.stat().st_mtime, content_hash(note.read_text()), _FP)
-    }
+    # Nothing was written for the partially-embedded file; the old rows stand.
+    assert backend.calls == []
+    assert backend.all_meta() == old_meta
+
+
+def test_complete_file_still_commits_when_another_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    milvus_client,
+) -> None:
+    """Files whose rows are ALL embedded commit even when a sibling file
+    fails mid-embedding (issue #1946)."""
+
+    class _FailOnSecondFileProvider(_FakeProvider):
+        def embed_batch(self, texts: list[str]) -> np.ndarray:
+            if self.embed_batch_count == 2:
+                raise EmbeddingAPIError("third batch failed")
+            return super().embed_batch(texts)
+
+    monkeypatch.setattr(daemon, "_BATCH_SIZE", 1)
+    backend = _backend(milvus_client)
+    complete = tmp_path / "complete.md"
+    complete.write_text("complete body", encoding="utf-8")
+    partial = tmp_path / "partial.md"
+    partial.write_text("---\ndescription: p\n---\nbody", encoding="utf-8")
+
+    with pytest.raises(EmbeddingAPIError, match="third batch failed"):
+        daemon._process_paths(
+            backend, {complete.resolve(), partial.resolve()}, _FailOnSecondFileProvider()
+        )
+
+    meta = backend.all_meta()
+    assert str(complete.resolve()) in meta
+    assert str(partial.resolve()) not in meta

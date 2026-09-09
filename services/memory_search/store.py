@@ -265,6 +265,36 @@ class MemoryStore:
         self._matrix = self._matrix[keep_idx]
         self._pk_index = {pk: idx for idx, pk in enumerate(self._pks)}
 
+    def delete_stale_rows(
+        self,
+        entries: Sequence[tuple[str, dict[str, int]]],
+    ) -> None:
+        """Delete tail rows the current files no longer produce (issue #1946).
+
+        See the backend protocol: `kind_limits` maps kind -> the current row
+        count; rows of the path whose kind is absent or whose chunk_idx >=
+        its limit are removed. A path with no rows is a no-op.
+        """
+        limits_by_path = dict(entries)
+        keep_idx = [
+            i
+            for i, (p, kind, idx) in enumerate(
+                zip(self._paths, self._kinds, self._chunk_idx, strict=True)
+            )
+            if p not in limits_by_path or idx < limits_by_path[p].get(kind, 0)
+        ]
+        if len(keep_idx) == len(self._paths):
+            return
+        self._pks = [self._pks[i] for i in keep_idx]
+        self._paths = [self._paths[i] for i in keep_idx]
+        self._kinds = [self._kinds[i] for i in keep_idx]
+        self._chunk_idx = [self._chunk_idx[i] for i in keep_idx]
+        self._mtimes = [self._mtimes[i] for i in keep_idx]
+        self._hashes = [self._hashes[i] for i in keep_idx]
+        self._embedders = [self._embedders[i] for i in keep_idx]
+        self._matrix = self._matrix[keep_idx]
+        self._pk_index = {pk: idx for idx, pk in enumerate(self._pks)}
+
     def all_meta(self) -> dict[str, tuple[float, str, str]]:
         """Per-path (mtime, content_hash, provider_fingerprint) — one entry
         per **file**, not per chunk (aggregation keeps the max mtime; same

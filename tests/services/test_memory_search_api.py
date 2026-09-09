@@ -70,6 +70,32 @@ def test_upsert_delete_meta_roundtrip(tmp_path: Path) -> None:
         assert client.get("/meta").json() == {}
 
 
+def test_delete_stale_batch_removes_tail_and_persists(tmp_path: Path) -> None:
+    """The /delete_stale_batch endpoint removes tail rows (issue #1946) and
+    persists before ack."""
+    with _client(tmp_path) as client:
+        for idx in range(3):
+            client.post(
+                "/upsert",
+                json=_upsert_body("/a.md", idx, mtime=1.0) | {"chunk_idx": idx},
+            )
+        assert client.get("/stats").json()["rows"] == 3
+        resp = client.post(
+            "/delete_stale_batch",
+            json={"entries": [{"path": "/a.md", "kind_limits": {"body": 1}}]},
+        )
+        assert resp.status_code == 200
+        assert client.get("/stats").json()["rows"] == 1
+        assert client.get("/meta").json() == {"/a.md": [1.0, "hash-0", _FP]}
+
+        # Persistence: a fresh store over the same npz sees the same rows.
+        from services.memory_search.store import MemoryStore as _Store
+
+        reloaded = _Store(tmp_path / "vectors.npz", dim=_DIM, fingerprint=_FP)
+        reloaded.load()
+        assert len(reloaded) == 1
+
+
 def test_search_returns_ordered_paths(tmp_path: Path) -> None:
     with _client(tmp_path) as client:
         ones = np.ones(_DIM, dtype=np.float32)

@@ -123,6 +123,20 @@ class NumPyBackend:
         self._require_writable()
         self._require_client().post("/delete", json={"path": path}).raise_for_status()
 
+    def delete_stale_rows(
+        self,
+        entries: Sequence[tuple[str, dict[str, int]]],
+    ) -> None:
+        """Tail-cleanup (issue #1946) — one HTTP call + one npz save for the
+        whole batch; see the backend protocol for the semantics."""
+        self._require_writable()
+        if not entries:
+            return
+        self._require_client().post(
+            "/delete_stale_batch",
+            json={"entries": [{"path": path, "kind_limits": limits} for path, limits in entries]},
+        ).raise_for_status()
+
     def all_meta(self) -> dict[str, tuple[float, str, str]]:
         """Per-path (mtime, content_hash, provider_fingerprint) — see
         `backends.base`."""
