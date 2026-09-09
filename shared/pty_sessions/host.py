@@ -437,10 +437,8 @@ def _session_busy(session: PtySession) -> bool:
     """Whether the session carries live work beyond its idle shell.
 
     Idle = the shell sits at its prompt: no foreground job owns the tty (the
-    same signal `_kill_target_groups` uses) and no descendant survives.
-    A shell that cannot be inspected answers busy (fail-open: a session we
-    cannot prove idle may well be running work).
-    """
+    same signal `_kill_target_groups` uses) and no descendant survives. An
+    uninspectable shell answers busy (fail-open: cannot prove it idle)."""
     if session.dead or not session.pid_matches():
         return False
     try:
@@ -460,8 +458,7 @@ def _op_kill(session: PtySession, req: dict[str, Any]) -> dict[str, Any]:
         return ok({"mode": "noop", "interrupted": False})  # idempotent, like posixproc
     graceful = bool(req.get("graceful", False))
     # The interrupted verdict is snapshotted HERE, in the same request that
-    # kills — a job starting after a separate idle probe could otherwise be
-    # cut short with no notice (the TOCTOU a standalone probe cannot close).
+    # kills — a separate idle probe cannot close that TOCTOU either.
     interrupted = _session_busy(session)
 
     if not session.pid_matches():
@@ -663,12 +660,15 @@ def _fork_shell(cwd: str, env: dict[str, str], cols: int, rows: int) -> tuple[in
         try:
             _set_winsz(0, cols, rows)  # fd 0 = the pty slave
             os.chdir(cwd)
-            # The host inherits the CREATING AGENT's env (it is spawned from
-            # the agent's process, via _reparent). A service-profile marker
-            # must still never leak into a shell child: `import ava` under a
-            # runner profile cannot construct the agent domain (Task #856
-            # fail-fast) and every watcher would die at boot. Dropped BEFORE
-            # the envfile overlay so an explicit caller-supplied marker rides.
+            # Ignored dispositions survive exec — reset them here or the
+            # shell's jobs never receive stop's per-job TERM (#2045).
+            for sig in (signal.SIGHUP, signal.SIGTERM, signal.SIGPIPE):
+                signal.signal(sig, signal.SIG_DFL)
+            # The host inherits the CREATING AGENT's env (spawned via
+            # _reparent); a service-profile marker must never leak into a
+            # shell child (`import ava` under a runner profile fails fast,
+            # Task #856). Dropped BEFORE the envfile overlay so an explicit
+            # caller-supplied marker rides.
             os.environ.pop("AVA_PROCESS_PROFILE", None)
             os.environ.update(env)  # envfile overlay, never argv
             os.environ.setdefault("TERM", "xterm-256color")

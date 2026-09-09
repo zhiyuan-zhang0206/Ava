@@ -277,7 +277,17 @@ def stop_services(
             record = records[name]
             if OwnedProcess(record.pid, record.create_time, record.starttime).live():
                 raise RuntimeError(f"graceful signal refused the captured service: {name}")
-    wait_for_exit(tracked, deadline, groups=groups)
+    try:
+        wait_for_exit(tracked, deadline, groups=groups)
+    except TimeoutError as exc:
+        surviving = sorted(
+            name
+            for name, record in records.items()
+            if OwnedProcess(record.pid, record.create_time, record.starttime).live()
+        )
+        raise TimeoutError(
+            f"service stop incomplete — {exc} surviving services: {surviving or 'unknown'}"
+        ) from exc
     remaining(deadline)
     if not keep_terminals:
         require_no_terminals()
