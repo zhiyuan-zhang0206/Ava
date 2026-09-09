@@ -192,8 +192,8 @@ def register_cron_renewal(
     exclude_session: int | None = None,
     template_version: int | None = None,
     generation: str | None = None,
-) -> int | None:
-    """Renew one standing cron registration, atomically superseding a live twin.
+) -> list[int]:
+    """Renew one standing cron registration, atomically superseding EVERY live twin.
 
     The renewal half of the standing-cron cap (task #2617): re-registering the
     same standing schedule extends it to the new end time instead of stacking a
@@ -203,19 +203,23 @@ def register_cron_renewal(
 
     One transaction on ONE connection, serialized on the END-INSENSITIVE
     schedule key (same (agent, expression, timezone) pair — different end times
-    of one schedule must not run concurrently). The check looks for a live
-    same-schedule row whose end time differs; when one exists, the new row is
-    INSERTED and the superseded session id is returned for the caller to kill
-    (the deliberate-kill semantics drop the superseded row). None means no live
-    twin — the caller falls through to `register_cron_atomic` for the ordinary
-    exact-match dedupe (same-second double registration, concurrent winners).
+    of one schedule must not run concurrently). The check looks for live
+    same-schedule rows whose end time differs; when any exist, the new row is
+    INSERTED and EVERY superseded session id is returned for the caller to kill
+    (the deliberate-kill semantics drop each superseded row). Superseding ALL
+    twins (not just the newest) is what makes repeated renewal converge on a
+    single watcher even after a partial failure left two live rows behind
+    (QA review of PR #2037). An empty list means no live twin — the caller
+    falls through to `register_cron_atomic` for the ordinary exact-match
+    dedupe (same-minute double registration, concurrent winners).
 
     `alive_provider` is called INSIDE the lock for the same reason as
     `register_cron_atomic` (the #794 delta2 fresh-liveness rule). A superseded
     row whose session is no longer in the list does not count (a dead row is
-    the boot reconcile's business, not a renewal target). `exclude_session`
-    skips one row — the stale-template rebuild replaces its own session and
-    must not treat it as a renewal twin (the caller kills it explicitly).
+    the boot reconcile's business, not a renewal target — the reconcile's
+    schedule-level liveness check drops it). `exclude_session` skips one row —
+    the stale-template rebuild replaces its own session and must not treat it
+    as a renewal twin (the caller kills it explicitly).
     """
     exclude = -1 if exclude_session is None else exclude_session
     with connect() as conn, conn.cursor() as cur:
@@ -234,13 +238,12 @@ def register_cron_renewal(
               AND generation IS NOT DISTINCT FROM %s
               AND session_id != %s
             ORDER BY created_at DESC, session_id DESC
-            LIMIT 1
             """,
             (agent_id, cron_expr, cron_timezone, cron_end_at, generation, exclude),
         )
-        row = cur.fetchone()
-        if row is None or alive is None or row[0] not in alive:
-            return None
+        twins = [int(r[0]) for r in cur.fetchall() if alive is not None and r[0] in alive]
+        if not twins:
+            return []
         cur.execute(
             _REGISTER_SQL,
             (
@@ -258,7 +261,7 @@ def register_cron_renewal(
                 generation,
             ),
         )
-        return int(row[0])
+        return twins
 
 
 def register_watcher(

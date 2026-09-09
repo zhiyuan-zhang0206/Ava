@@ -343,15 +343,15 @@ def _register_cron_spawn(
     renewable: bool,
     _exclude_session: int | None,
     generation: str | None,
-) -> tuple[int | None, int | None]:
-    """Register one cron spawn; return ``(reused_session, superseded_session)``.
+) -> tuple[int | None, list[int]]:
+    """Register one cron spawn; return ``(reused_session, superseded_sessions)``.
 
     ``reused``: an identical live schedule already exists (the Task #1825
     dedupe won the race) — the caller disposes its fresh session and hands
-    back the winner's id. ``superseded``: a live standing twin with a
+    back the winner's id. ``superseded``: every live standing twin with a
     different end time was found (task #2617 renewal) — the new row is
-    registered here and the caller kills the twin AFTER the new child has
-    started. At most one of the two is set.
+    registered here and the caller kills each twin AFTER the new child has
+    started. At most one of the two is non-empty.
     """
     from shared.watcher_registry import register_cron_atomic, register_cron_renewal
 
@@ -381,7 +381,7 @@ def _register_cron_spawn(
             template_version=TEMPLATE_VERSION,
             generation=generation,
         )
-        if superseded is not None:
+        if superseded:
             return None, superseded
     reused = register_cron_atomic(
         agent_id,
@@ -396,7 +396,7 @@ def _register_cron_spawn(
         template_version=TEMPLATE_VERSION,
         generation=generation,
     )
-    return reused, None
+    return reused, []
 
 
 def _spawn(
@@ -486,7 +486,7 @@ def _spawn(
     # that race, and a registry failure now FAILS the spawn instead of being
     # swallowed (the old fail-soft left a live watcher the boot reconcile can
     # never rebuild — the registry is the only record of "should exist").
-    superseded: int | None = None
+    superseded: list[int] = []
     try:
         if kind == "cron":
             # Task #1825 dedupe (atomic: xact lock + re-check + insert) and
@@ -568,20 +568,23 @@ def _spawn(
         with contextlib.suppress(Exception):
             _sessions.kill(session_id)
         raise
-    if superseded is not None:
-        # The new child is running; retire the superseded standing watcher.
+    for old_session in superseded:
+        # The new child is running; retire each superseded standing watcher.
         # A deliberate kill drops its registry row, so exactly one live row
         # (this session's) describes the schedule — the renewal never stacks
-        # (Task #1825 double-fire shape). Fail-soft: a kill failure leaves
-        # the twin until its own end_time expires.
+        # (Task #1825 double-fire shape). Superseding EVERY twin (not just
+        # the newest) is what makes a repeated renewal converge after a
+        # partial failure left two live rows behind (QA review of PR #2037).
+        # Fail-soft per twin: a kill failure leaves that twin until its own
+        # end_time expires.
         logger.info(
             "[watcher] standing cron %r renewed — session %s superseded by %s",
             cron_expr,
-            superseded,
+            old_session,
             session_id,
         )
         with contextlib.suppress(Exception):
-            _sessions.kill(superseded)
+            _sessions.kill(old_session)
     return session_id
 
 

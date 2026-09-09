@@ -14,9 +14,13 @@ pass an explicit `end_time`.
 
 1. `ava.watcher.cron(expr, ..., end_time=None)` defaults `end_time` to now
    (minute-truncated) + 7 days; explicit ends are untouched.
-2. Re-registering the same standing schedule **renews** it: the live twin is
-   superseded (new session + fresh end; the old session's deliberate kill
-   drops its row) — never stacked into a double-firing duplicate.
+2. Re-registering the same standing schedule **renews** it: EVERY live twin
+   is superseded (new session + fresh end; each old session's deliberate kill
+   drops its row) — never stacked into a double-firing duplicate. Superseding
+   all twins (not just the newest) is what lets a repeated renewal converge
+   after a partial failure left two live rows behind. The reconcile's dedupe
+   is schedule-level (expression + timezone, any end time): a live
+   same-schedule row subsumes a dead twin's rebuild.
 3. The gateway TTL reaper reclaims watchers whose owner is terminated for
    good (`termination_source` user / exit / integrity / legacy NULL): kill via
    `shell_kill`, then mark the row `reaped` only while the owner is STILL
@@ -46,6 +50,11 @@ pass an explicit `end_time`.
 - **Exact-end dedupe only (no renewal semantics)** — the #1825 dedupe matches
   end times exactly, so every re-registration of a defaulted schedule would
   stack a new watcher; all of them double-fire until each expires.
+- **Newest-only twin supersede** (QA review of PR #2037) — a partial failure
+  (crash after commit before kill, kill with failed row delete) leaves two
+  live different-end twins, and a newest-only supersede never reaches the
+  older one; superseding every live twin + the reconcile's schedule-level
+  liveness check are the converging pair.
 
 ## Consequences
 
