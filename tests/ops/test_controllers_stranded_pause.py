@@ -19,13 +19,16 @@ host's pause lost its owner."""
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Generator
+from pathlib import Path
 
 import pytest
 
 from ops.controllers import stranded_pause as sp
 from ops.controllers.base import BlockScope
 from shared.cluster_lock import DeployLease, settle_note
+
+_REPO = Path(__file__).resolve().parents[2]
 
 _THIS_HOST = "laptop-host"
 
@@ -72,6 +75,17 @@ def _settle_hold(*hosts: str) -> DeployLease:
         expires_in_s=600.0,
         note=settle_note(list(hosts)),
     )
+
+
+def _raising_lock(exc: Exception):
+    import contextlib
+
+    @contextlib.contextmanager
+    def _lock() -> Generator[None, None, None]:
+        raise exc
+        yield  # pragma: no cover
+
+    return _lock
 
 
 @pytest.fixture(autouse=True)
@@ -380,6 +394,106 @@ def test_skips_when_no_flag(
     monkeypatch.setattr(sp, "unpause_local_cluster", lambda: unpaused.append(True))
     assert sp.recover_stranded_pause() is False
     assert unpaused == []
+
+
+# ─── Lifecycle-lock contention (issue #1943) ─────────────────────────────────
+
+
+def test_lock_timeout_defers_recovery_and_keeps_the_pause(
+    fake_pause: Callable[[float | None], None],
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A `LockTimeoutError` from the lifecycle mutex is expected contention, not
+    a daemon error: the round cannot prove the pause is unowned, so recovery
+    defers, nothing is unpaused and no marker is cleared."""
+    from shared.platform import LockTimeoutError
+
+    fake_pause(sp.STRANDED_PAUSE_TIMEOUT_S + 60)
+    unpaused: list[bool] = []
+    marker_clears: list[str] = []
+    monkeypatch.setattr(sp, "unpause_local_cluster", lambda: unpaused.append(True))
+    monkeypatch.setattr(sp.ui_update_state, "clear", marker_clears.append)
+    monkeypatch.setattr(
+        sp.ui_update_state,
+        "lifecycle_lock",
+        _raising_lock(LockTimeoutError("lifecycle lock busy")),
+    )
+    with caplog.at_level("WARNING"):
+        assert sp.recover_stranded_pause() is False
+    assert unpaused == []
+    assert marker_clears == []
+    assert any("deferring stranded-pause recovery" in r.message for r in caplog.records)
+
+
+def test_other_lock_errors_still_raise(
+    fake_pause: Callable[[float | None], None], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Only the bounded-wait timeout is tolerated; a real I/O failure must still
+    surface (it names a broken deploy-state read-modify-write, not contention)."""
+    fake_pause(sp.STRANDED_PAUSE_TIMEOUT_S + 60)
+    monkeypatch.setattr(sp, "unpause_local_cluster", lambda: None)
+    monkeypatch.setattr(
+        sp.ui_update_state,
+        "lifecycle_lock",
+        _raising_lock(OSError("permission denied")),
+    )
+    with pytest.raises(OSError, match="permission denied"):
+        sp.recover_stranded_pause()
+
+
+def test_cross_process_lock_contention_defers_then_recovers(
+    fake_pause: Callable[[float | None], None],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """The real cross-process shape (issue #1943): another process holds the
+    lifecycle lock, the round defers without touching pause state; once it
+    releases, the next round runs the normal owner rules and recovers."""
+    import subprocess
+    import sys
+    import textwrap
+    import time
+
+    lock_file = tmp_path / "lifecycle.lock"
+    ready = tmp_path / "ready"
+    monkeypatch.setattr(sp.ui_update_state, "lifecycle_lock_path", lambda: lock_file)
+    monkeypatch.setattr(sp.ui_update_state, "_LOCK_TIMEOUT_S", 0.3)
+    fake_pause(sp.STRANDED_PAUSE_TIMEOUT_S + 60)
+    unpaused: list[bool] = []
+    monkeypatch.setattr(sp, "unpause_local_cluster", lambda: unpaused.append(True))
+    holder_code = textwrap.dedent(
+        f"""
+        import pathlib, sys, time
+        sys.path.insert(0, {str(_REPO)!r})
+        from shared.platform import file_lock
+        with file_lock(pathlib.Path({str(lock_file)!r}), timeout_s=60):
+            pathlib.Path({str(ready)!r}).write_text("1")
+            time.sleep(30)
+        """
+    )
+    holder = subprocess.Popen(  # noqa: S603
+        [sys.executable, "-c", holder_code],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    try:
+        deadline = time.monotonic() + 30
+        while not ready.exists():
+            assert holder.poll() is None, "holder exited before taking the lock"
+            assert time.monotonic() < deadline, "holder never took the lock"
+            time.sleep(0.02)
+        assert sp.recover_stranded_pause() is False
+        assert unpaused == []
+        res = sp.PauseController().reconcile("gateway")
+        assert res.blocks is BlockScope.ALL and res.acted is False
+    finally:
+        holder.terminate()
+        holder.wait(timeout=10)
+    # Lock released: the next round runs the ordinary no-owner rules.
+    assert sp.recover_stranded_pause() is True
+    assert unpaused == [True]
 
 
 # ─── PauseController gate ────────────────────────────────────────────────────
