@@ -1,6 +1,5 @@
 """Loaded-runtime input plus the existing locked publication admission decision."""
 
-import asyncio
 import os
 from dataclasses import dataclass
 from functools import lru_cache
@@ -13,7 +12,6 @@ from shared.managed_writer_publication import (
     AdmissionDecision,
     CurrentAdmission,
     DeferredAdmission,
-    LegacyProtocolZero,
     _admission_state,
     publication_admission,
     publication_admission_async,
@@ -76,11 +74,6 @@ class RuntimeAdmission:
         return decision
 
 
-def load_boot() -> asyncio.Task[RuntimeAdmission]:
-    """Start the per-host boot load; the caller shields it across turns."""
-    return asyncio.create_task(asyncio.to_thread(RuntimeAdmission.load))
-
-
 def require_current_for_managed(decision: AdmissionDecision, resource_value: object) -> None:
     """A marker cannot activate managed resources while legacy writers may exist.
 
@@ -89,28 +82,13 @@ def require_current_for_managed(decision: AdmissionDecision, resource_value: obj
     shape); the spawn-side producers this check was written against are
     retired. The surviving fences: a pending publication defers admission in
     decide/decide_async, and a committed publication refuses a row whose
-    resource closure cannot be inferred.
+    resource closure cannot be inferred. Raises ResourceEvidenceError so the
+    hosted caller converts the fence into a quiet refusal.
     """
     if resource_value is None and isinstance(decision, CurrentAdmission):
         from shared.incarnation_resources import ResourceEvidenceError
 
         raise ResourceEvidenceError("published runtime cannot infer closure of legacy resources")
-
-
-def legacy_boot_terminal_allowed(conn: psycopg.Connection) -> bool:
-    """Negative-only gate for old unowned boot cleanup, before metadata locks.
-
-    A deferred child has no admitted owner. That absence must not become a
-    terminal write after maintenance ends either. Only the exact never-enabled
-    legacy state permits that old fallback; managed attempts use their own
-    bounded launch authority. Corrupt evidence raises instead of falling back.
-    """
-    from psycopg.pq import TransactionStatus
-
-    if conn.info.transaction_status != TransactionStatus.INTRANS:
-        raise RuntimeError("boot terminal guard requires the caller transaction")
-    conn.execute(_ADMISSION_LOCK)
-    return isinstance(_admission_state(conn.execute(_ADMISSION_ROW).fetchone()), LegacyProtocolZero)
 
 
 @lru_cache(maxsize=1)

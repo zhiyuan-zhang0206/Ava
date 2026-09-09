@@ -16,6 +16,7 @@ from shared.log import logger
 from shared.runtime_admission import (
     PublicationAdmissionDeferredError,
     RuntimeAdmission,
+    process_runtime_admission,
     require_current_for_managed,
 )
 from shared.runtime_incarnation import RuntimeIncarnation
@@ -134,6 +135,7 @@ async def admit_hosted_runtime(
     from shared.exec_owner_recovery import process_ended
     from shared.incarnation_resources import (
         IncarnationResources,
+        ResourceEvidenceError,
         ResourceProcess,
         decode_resources,
     )
@@ -141,8 +143,9 @@ async def admit_hosted_runtime(
 
     host_identity = ResourceProcess(pid=native.pid, birth=native.create_time())
     if publication is None:
-        publication = await asyncio.to_thread(RuntimeAdmission.load)
-    await asyncio.to_thread(publication.revalidate)
+        publication = await asyncio.to_thread(process_runtime_admission)
+    else:
+        await asyncio.to_thread(publication.revalidate)
     try:
         async with async_write_transaction(pool) as conn:
             try:
@@ -167,7 +170,7 @@ async def admit_hosted_runtime(
                 _refuse_hosted_admission()
             try:
                 require_current_for_managed(publication_decision, previous[4])
-            except PublicationAdmissionDeferredError:
+            except ResourceEvidenceError:
                 return None
             generation = (
                 previous[0]

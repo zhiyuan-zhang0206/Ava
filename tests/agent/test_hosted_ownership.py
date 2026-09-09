@@ -288,6 +288,25 @@ async def test_new_host_owner_requires_exact_old_host_exit_for_managed_set(
             old_host.wait(timeout=5)
 
 
+async def test_committed_publication_refuses_unknown_null_resources(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+) -> None:
+    """A committed publication cannot infer closure of a historical NULL row."""
+    agent_id = _agent(db_conn)
+    successor = await admit_hosted_runtime(
+        aops_pool,
+        agent_id,
+        "host-test",
+        uuid4(),
+        expected_from="idling",
+        publication=_CurrentRuntimeAdmission(None),
+    )
+    assert successor is None
+    row = db_conn.execute("SELECT status FROM agents_meta WHERE id=%s", (agent_id,)).fetchone()
+    assert row is not None and row[0] == "idling"
+
+
 async def test_owner_beat_renews_idle_but_not_other_owner(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
