@@ -13,6 +13,12 @@ from shared.db_transaction import async_write_transaction
 from shared.deploy_timing import AGENT_LEASE_TTL_S, CORPSE_REAP_GRACE_S
 from shared.live_announce import publish_agent_updated
 from shared.log import logger
+from shared.runtime_admission import (
+    PublicationAdmissionDeferredError,
+    RuntimeAdmission,
+    process_runtime_admission,
+    require_current_for_managed,
+)
 from shared.runtime_incarnation import RuntimeIncarnation
 
 
@@ -106,6 +112,7 @@ async def admit_hosted_runtime(
     owner: UUID,
     *,
     expected_from: str,
+    publication: RuntimeAdmission | None = None,
 ) -> RuntimeIncarnation | None:
     """Keep this owner's logical incarnation across turns; reject live others."""
     from shared.exec_owner_recovery import recover_local_resources
@@ -128,13 +135,23 @@ async def admit_hosted_runtime(
     from shared.exec_owner_recovery import process_ended
     from shared.incarnation_resources import (
         IncarnationResources,
+        ResourceEvidenceError,
         ResourceProcess,
         decode_resources,
     )
     from shared.resource_admission import admit_resources_async
 
+    host_identity = ResourceProcess(pid=native.pid, birth=native.create_time())
+    if publication is None:
+        publication = await asyncio.to_thread(process_runtime_admission)
+    else:
+        await asyncio.to_thread(publication.revalidate)
     try:
         async with async_write_transaction(pool) as conn:
+            try:
+                publication_decision = await publication.decide_async(conn)
+            except PublicationAdmissionDeferredError:
+                return None
             previous = await (
                 await conn.execute(
                     "SELECT runtime_generation,runtime_owner,runtime_kind,machine,"
@@ -151,6 +168,10 @@ async def admit_hosted_runtime(
                 # A host crash during drain therefore retains the hold and
                 # requires explicit cancellation/recovery, never a fake ACK.
                 _refuse_hosted_admission()
+            try:
+                require_current_for_managed(publication_decision, previous[4])
+            except ResourceEvidenceError:
+                return None
             generation = (
                 previous[0]
                 if previous[1:3] == (owner, "hosted") and previous[0] is not None
@@ -178,7 +199,7 @@ async def admit_hosted_runtime(
             await admit_resources_async(
                 conn,
                 RuntimeIncarnation(agent_id, generation, owner),
-                ResourceProcess(pid=native.pid, birth=native.create_time()),
+                host_identity,
                 exited_predecessor=exited_predecessor,
             )
             row = await (

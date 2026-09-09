@@ -24,8 +24,16 @@ from agent.hosted_ownership import (
 )
 from shared.db import create_agent, insert_inbound_message
 from shared.incarnation_resources import IncarnationResources, ResourceProcess, decode_resources
+from shared.managed_writer_publication import AdmissionDecision, CurrentAdmission
+from shared.runtime_admission import RuntimeAdmission
 from shared.runtime_incarnation import RuntimeIncarnation, current_incarnation
 from shared.turn_identity import bind_turn_identity
+
+
+class _CurrentRuntimeAdmission(RuntimeAdmission):
+    async def decide_async(self, conn: psycopg.AsyncConnection) -> AdmissionDecision:
+        del conn
+        return CurrentAdmission(uuid4())
 
 
 def _agent(conn: psycopg.Connection) -> int:
@@ -253,7 +261,12 @@ async def test_new_host_owner_requires_exact_old_host_exit_for_managed_set(
         old_host.wait(timeout=5)
 
         successor = await admit_hosted_runtime(
-            aops_pool, agent_id, "host-test", uuid4(), expected_from="idling"
+            aops_pool,
+            agent_id,
+            "host-test",
+            uuid4(),
+            expected_from="idling",
+            publication=_CurrentRuntimeAdmission(None),
         )
         assert successor is not None and successor.generation != old.generation
         stored = db_conn.execute(
@@ -273,6 +286,25 @@ async def test_new_host_owner_requires_exact_old_host_exit_for_managed_set(
         if old_host.poll() is None:
             old_host.kill()
             old_host.wait(timeout=5)
+
+
+async def test_committed_publication_refuses_unknown_null_resources(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+) -> None:
+    """A committed publication cannot infer closure of a historical NULL row."""
+    agent_id = _agent(db_conn)
+    successor = await admit_hosted_runtime(
+        aops_pool,
+        agent_id,
+        "host-test",
+        uuid4(),
+        expected_from="idling",
+        publication=_CurrentRuntimeAdmission(None),
+    )
+    assert successor is None
+    row = db_conn.execute("SELECT status FROM agents_meta WHERE id=%s", (agent_id,)).fetchone()
+    assert row is not None and row[0] == "idling"
 
 
 async def test_owner_beat_renews_idle_but_not_other_owner(

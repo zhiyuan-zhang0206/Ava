@@ -26,6 +26,7 @@ from shared.cluster import (
     ensure_runner_role,
     provision_database,
 )
+from shared.managed_writer_publication import LegacyProtocolZero, publication_admission
 from shared.pg_tools import throwaway_postgres
 from shared.url_secret import url_with_userinfo
 
@@ -611,6 +612,21 @@ def test_runner_grant_matrix(runner_db: str) -> None:
             conn.execute("INSERT INTO agents_meta (id, spawner) VALUES (999, 'user')")
         with pytest.raises(psycopg.errors.InsufficientPrivilege):
             conn.execute("CREATE TABLE runner_must_not_ddl (id int)")
+
+
+def test_runner_publication_admission_locks_without_rollout_write(runner_db: str) -> None:
+    """Admission may serialize on deployment state without granting its writes."""
+    ensure_runner_role(
+        _IDENTITY,
+        base_admin_url=_admin_url(runner_db),
+        runner_password=_RUNNER_PW,
+    )
+
+    with psycopg.connect(_runner_url(runner_db), autocommit=True) as conn:
+        with conn.transaction():
+            assert isinstance(publication_admission(conn), LegacyProtocolZero)
+        with pytest.raises(psycopg.errors.InsufficientPrivilege):
+            conn.execute("UPDATE deployment_state SET phase = phase WHERE id = 1")
 
 
 def _exercise_pause_grants(conn: psycopg.Connection, agent_id: int) -> None:
