@@ -1,55 +1,26 @@
 """ava-ops — agent-runner inbound ops server.
 
-The agent-runner's inbound ops service — the ONLY long-running ava process on
-an agent-runner that the gateway dials DIRECTLY over the private network
-(the runner's other services — agent-host, watchdog, browser, mcp-daemon — are
-local or health-checked, not gateway-facing). Serves an inbound HTTP
-endpoint the gateway dials to run a cluster op on this host. Each request executes **in-process** by calling free
-functions in `ops/ops_*.py` and returns the result in the HTTP
-response.
+The ONLY long-running ava process on an agent-runner the gateway dials
+DIRECTLY (the runner's other services — agent-host, watchdog, browser,
+mcp-daemon — are local or health-checked). Serves POST /ops; each request
+executes in-process against `ops/ops_*.py` and returns {status, result}.
 
-Usage:
-    .venv/bin/python -m services.agent_ops.daemon
+Usage: .venv/bin/python -m services.agent_ops.daemon — a per-machine
+singleton via pidfile, kept alive by `services/watchdog/daemon.py`. Registers
+its own unit in `machines` once serving (`_register_boot`).
 
-Per-machine singleton via pidfile. Kept alive every 60s by
-`services/watchdog/daemon.py`.
+Idempotency keys: an envelope carrying `idempotency_key` is deduplicated
+against the shared `api_idempotency` table (method='ops' rows — migration
+20260808T200000_unify-ops-idempotency): the first dispatch runs the op and
+stores its outcome, later ones replay it, so the gateway's retry of
+non-idempotent ops (spawn / cluster_update / lifecycle) cannot duplicate the
+effect (Task #961).
 
-Transport:
-    Plain request/response. The gateway resolves this host's address from
-    the `machines` table and POSTs to `/ops`. No queue, no SSE, no reconnect
-    loop — the cluster's private network makes every node mutually dialable, so a
-    control op is one synchronous round-trip.
-
-    This daemon registers its own unit in that table once it is serving
-    (`_register_boot`), so the address and the "up" record are written by the
-    process that answers there, not only by the `ava start` that launched it.
-
-Endpoint:
-    POST /ops  {"kind": <work-kind>, "payload": {...}}
-        -> 200 {"status": "completed"|"failed", "result": {...}}
-    GET  /healthz  (watchdog liveness; served on the same port)
-
-Normal work kinds and payloads are declared by `ops.rpc_schemas.OpEnvelope`;
-the dispatch functions below route them to the corresponding `ops_*` operation.
-The explicit prepared bootstrap entry bypasses this normal dispatcher entirely.
-
-Idempotency keys: a request whose envelope carries `idempotency_key` is
-deduplicated — the first dispatch with a key runs the op and stores its
-outcome in the shared `api_idempotency` table (method='ops' rows — the same
-table the gateway's HTTP idempotency middleware uses; migration
-20260808T200000_unify-ops-idempotency merged the former
-`cluster_ops_idempotency` into it); every later dispatch with the same key
-replays the stored outcome instead of re-executing. This is what makes
-the gateway's retry of non-idempotent ops (spawn / cluster_update /
-lifecycle) safe: a lost response cannot duplicate the effect (Task #961).
-
-A central DB pool is opened at startup and shared across all ops; each op
-manages its own connection lifetime via `pool.connection()`.
-
-Threading: `spawn` / `lifecycle` are awaited on the event loop; every other arm is
-synchronous and runs on this daemon's own pool (`_dispatch_sync`). None may hold the
-loop — see that function for the two-hour prod wedge that established it, and
-`_hard_exit` for why the process still has to skip interpreter teardown.
+A central DB pool is shared across all ops; each op manages its connection
+lifetime via `pool.connection()`. Threading: `spawn` / `lifecycle` run on the
+event loop; every other arm is synchronous on this daemon's own pool
+(`_dispatch_sync`) — none may hold the loop (see that function; `_hard_exit`
+skips interpreter teardown).
 """
 
 from __future__ import annotations
@@ -83,7 +54,14 @@ import psycopg
 from psycopg_pool import ConnectionPool
 from pydantic import ValidationError
 
-from ops import ops_cluster, ops_config, ops_inventory, ops_lifecycle, ops_uploads
+from ops import (
+    ops_cluster,
+    ops_config,
+    ops_inventory,
+    ops_lifecycle,
+    ops_uploads,
+    pty_close_notices,
+)
 from ops.cluster_status import ShellNotFoundError
 from ops.rpc_schemas import (
     AgentSkillViewPayload,
@@ -125,45 +103,38 @@ _PIDFILE = settings.services.ops_pidfile
 
 # ── Idempotency-key dedup (Task #961) ────────────────────────────────────────
 # A request with `idempotency_key` is deduplicated against the shared
-# `api_idempotency` table, method='ops' rows (see `_dispatch_idempotent`): the
-# first dispatch with a key owns it, runs the op, and stores the outcome; later
-# dispatches with the same key replay the stored outcome. The gateway's retry
-# loop (ops/cluster_rpc.py) re-sends the SAME key on every attempt of one
-# logical op, so a lost response after a successful run cannot duplicate the
-# effect (spawn -> twin agent).
-# Rows are kept 7 days — matching the HTTP idempotency channel's retention
-# (one shared table, one policy; the gateway middleware prunes on its claims
-# too) — orders of magnitude past the longest retry window — and pruned
-# opportunistically on each new-key insert.
+# `api_idempotency` table (method='ops' rows — see `_dispatch_idempotent`): the
+# first dispatch owns the key, runs the op, and stores the outcome; later ones
+# replay it, so the gateway's retry of one logical op cannot duplicate its
+# effect (spawn -> twin agent). Rows are kept 7 days (matching the HTTP
+# channel's retention, one shared table) and pruned on each new-key insert.
 _DEDUP_TTL_S = 7 * 86_400.0
-# A same-key dispatch arriving while the owner is still executing is a caller
-# bug (the gateway's attempts are sequential); wait briefly for the owner's
-# stored outcome, then fail loud instead of re-executing.
+# A same-key dispatch while the owner is still executing is a caller bug
+# (gateway attempts are sequential); wait briefly for the stored outcome,
+# then fail loud instead of re-executing.
 _DEDUP_WAIT_STEP_S = 0.1
 _DEDUP_WAIT_ATTEMPTS = 30  # ~3s cap
-# A cluster update may spend 30s in validate-before-kill fetch, then pause and
-# spawn through winproc. 180s leaves margin while staying far below
-# NO_PROGRESS_TIMEOUT_S (900s); the 2026-08-12 wedged-spawn shape is still
-# loud after this bound rather than being mistaken for legitimate progress.
+# Cluster updates may legitimately take 180s (validate-before-kill + pause);
+# the 2026-08-12 wedged-spawn shape stays loud beyond it instead of being
+# mistaken for legitimate progress.
 _DEDUP_EXPECTED_DURATION_S: dict[str, float] = {"cluster_update": 180.0}
-# Bounded retry for a connection that dies mid-transaction (Task #1059):
-# `check_connections` (#1027) only guards the checkout; a conn that breaks
-# between checkout and commit still crashed the pass. The idempotency key
-# makes a re-run safe — if the claim committed, the retry replays/waits
-# instead of re-executing; if it did not, the retry re-claims and executes.
+# Bounded retry for a connection that dies mid-transaction (Task #1059): the
+# idempotency key makes a re-run safe — a committed claim replays/waits, an
+# uncommitted one re-claims and executes.
 _DISPATCH_RETRY_ATTEMPTS = 3
 _DISPATCH_RETRY_BACKOFF_S = 0.5
 _sleep = asyncio.sleep
 
-# Bounded concurrent dispatches — a burst of inbound /ops POSTs (e.g. a large
-# spawn fan-out) runs at most this many op calls in parallel; further requests
-# queue on the semaphore so one fan-out cannot overwhelm the agent-runner.
+# Bounded concurrent dispatches: a burst of /ops POSTs (a spawn fan-out) runs
+# at most this many op calls in parallel; the rest queue on the semaphore.
 _dispatch_sem: asyncio.Semaphore | None = None
 
-# Shared DB pool for all in-process ops calls. Opened in `_main`, closed in the
-# matching finally. None outside the daemon's lifetime — tests that bypass
-# `_main` must set this explicitly.
+# Shared DB pool for all in-process ops calls — opened in `_main`, closed in
+# its finally; tests that bypass `_main` set this explicitly.
 _db_pool: ConnectionPool | None = None
+
+# Background closure-notice flush (issue #2044) — daemon-lifetime like `_db_pool`.
+_close_notice_flush_task: asyncio.Task[object] | None = None
 
 
 def _write_pidfile() -> None:
@@ -676,14 +647,13 @@ async def _main() -> None:
     _write_pidfile()
 
     global _dispatch_sem, _db_pool  # noqa: PLW0603 — set once at startup, cleared in finally for test reuse
+    global _close_notice_flush_task  # noqa: PLW0603 — cancelled in the same finally
     _dispatch_sem = asyncio.Semaphore(settings.services.ops_concurrency)
 
     our_machine = machine_name()
 
-    # Schema-current assertion — the ops server dispatches in-process gateway ops
-    # that assume specific table columns. If the central DB is ahead of this
-    # checkout (the gateway ran `ava cluster update` while this host stayed behind),
-    # abort before serving any op rather than producing wire-level errors mid-flight.
+    # Schema-current assertion: if the central DB is ahead of this checkout,
+    # abort before serving any op that assumes its columns.
     from shared.migrations import assert_schema_current
 
     try:
@@ -697,13 +667,15 @@ async def _main() -> None:
 
     pool = _open_db_pool()
     _db_pool = pool
+    # Flush shell-closure notices the previous stop journaled (issue #2044) —
+    # the first moment the DB is reachable again. Never fatal.
+    _start_close_notice_flush(pool)
 
     try:
         bind_host = _ops_bind_host()
         if bind_host != "127.0.0.1":
             verify_transport_encryption(settings.data_plane.cluster_secret, bind_host)
-        # The gateway presents the cluster secret on every /ops dial when the
-        # cluster has one (including a single box's loopback self-dial); a
+        # The gateway presents the cluster secret on every /ops dial; a
         # no-secret cluster serves /ops unauthenticated on loopback.
         auth_token = _ops_auth_token()
         server = await start_health_server(
@@ -733,10 +705,38 @@ async def _main() -> None:
             await stop_health_server(server)
             _remove_pidfile()
     finally:
+        if _close_notice_flush_task is not None:
+            _close_notice_flush_task.cancel()
+            _close_notice_flush_task = None
         pool.close()
         _db_pool = None
         _dispatch_sem = None
         _shutdown_op_pool()
+
+
+def _start_close_notice_flush(pool: ConnectionPool) -> None:
+    """Begin delivering shell-closure notices recorded by the previous stop."""
+    global _close_notice_flush_task  # noqa: PLW0603 — daemon-lifetime, like _db_pool
+    _close_notice_flush_task = asyncio.create_task(_flush_close_notices(pool))
+
+
+async def _flush_close_notices(pool: ConnectionPool) -> None:
+    """Deliver the previous stop's shell-closure notices; bounded retries.
+
+    Undelivered records stay in place for the next start (issue #2044).
+    """
+    for delay in (0.0, 30.0, 120.0, 300.0):
+        if delay:
+            await asyncio.sleep(delay)
+        try:
+            remaining = await asyncio.to_thread(pty_close_notices.flush, pool)
+        except Exception:
+            _log.exception("[ops] shell-closure notice flush failed; records kept")
+            continue
+        if not remaining:
+            return
+        _log.warning("[ops] %d shell-closure notices undelivered; retrying", remaining)
+    _log.error("[ops] shell-closure notices undelivered after retries; kept for next start")
 
 
 def _shutdown_op_pool() -> None:
