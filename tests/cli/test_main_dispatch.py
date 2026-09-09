@@ -11,11 +11,34 @@ from __future__ import annotations
 
 import argparse
 import os
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
 from cli import main as _main
+
+
+def test_import_defers_detached_cli_logging_until_dispatch(tmp_path: Path) -> None:
+    """A settings-free entry can import the parser before choosing its path."""
+    code = """
+import sys
+import cli.main
+assert 'shared.log' not in sys.modules
+assert 'shared.config' not in sys.modules
+"""
+    result = subprocess.run(  # noqa: S603 - fixed interpreter and literal probe.
+        [sys.executable, "-B", "-c", code],
+        cwd=Path(__file__).resolve().parents[2],
+        env={**os.environ, "HOME": str(tmp_path), "AVA_CLI_LOG_NAME": "retained-entry-test"},
+        capture_output=True,
+        text=True,
+        timeout=20,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+
 
 # Each top-level (and nested) ava sub-command maps to a _h_* handler in cli.main.
 _HANDLERS: tuple[tuple[list[str], str], ...] = (
