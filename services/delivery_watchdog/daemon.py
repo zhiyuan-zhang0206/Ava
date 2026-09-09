@@ -31,8 +31,10 @@ in-flight turn is normal — the claim's turn-end SELECT picks it up. Boot state
 
 3. **Terminated-owner resurrect retry** — every tick, for each DISTINCT
    terminated agent that still holds a `pending` chat created after its latest
-   termination (the delivery-path auto-resurrect failed), re-run
-   `resurrect_if_terminated`.
+   termination (the delivery-path auto-resurrect failed) and younger than the
+   stale-claimed threshold, re-run `resurrect_if_terminated`. Older pending
+   chats are dead letters: the reaper closes them and they never resurrect
+   their owner again (issue #2049).
    This extends the delivery check from live owners to ALL agents (Task #689
    G4, user ruling 2026-08-03): a chat to a dead agent must wake it, and a
    missed auto-resurrect must be retried, not just alerted. Per-agent cooldown
@@ -100,7 +102,9 @@ _LIVENESS_BEAT_STEP_S = 15.0
 
 # Terminated-owner resurrect retry (G4): a pending chat whose owner is
 # terminated means the delivery-path auto-resurrect failed (or the delivery
-# predates it). Retry it here, bounded against storms:
+# predates it). Retry it here, bounded against storms and against unbounded
+# age: past the stale-claimed threshold the chat is a dead letter and its
+# owner is never resurrected for it again (issue #2049):
 #   * per-agent cooldown — a failed resurrect (unreachable home machine) is
 #     re-attempted at most once a minute, not every tick;
 #   * concurrency semaphore — at most 2 resurrects in flight at once;
@@ -144,7 +148,10 @@ select_pending_for_dispatch = dispatch_guard.select_pending_for_dispatch
 dispatch_wakes = dispatch_guard.dispatch_wakes
 
 
-def select_terminated_owners_with_pending(pool: ConnectionPool) -> list[tuple[int, int]]:
+def select_terminated_owners_with_pending(
+    pool: ConnectionPool,
+    threshold_s: float,
+) -> list[tuple[int, int]]:
     """One `(agent_id, trigger_inbound_id)` per terminated owner with a
     post-termination pending chat, ordered by agent id.
 
@@ -154,6 +161,12 @@ def select_terminated_owners_with_pending(pool: ConnectionPool) -> list[tuple[in
     trigger stale before it can launch. Chat only: lifecycle kinds (terminate /
     restart) must not resurrect a dead agent against the caller's intent. A
     pile of 250 dead letters for one agent still means one attempt, not 250.
+
+    `threshold_s` bounds how long a pending chat keeps its terminated owner a
+    resurrect candidate: past it the row is a dead letter (issue #2049) that
+    the reaper's `dead_letter_stale_pending_chats` closes. Retrying an
+    unbounded age resurrect-suicides the agent forever, so the same stale
+    threshold that closes the row also stops it from being a trigger.
     """
     from shared.lifecycle_acceptance import FAILED_RESTART_FOR_CURRENT_TARGET
 
@@ -166,14 +179,42 @@ def select_terminated_owners_with_pending(pool: ConnectionPool) -> list[tuple[in
                 "WHERE m.status = 'pending' AND m.kind = 'chat' "
                 "  AND agents_meta.status = 'terminated' AND NOT {} "
                 " AND m.created_at > agents_meta.status_changed_at "
+                "  AND m.created_at > now() - make_interval(secs => %s) "
                 "  AND m.id > COALESCE(agents_meta.last_force_terminate_inbound_id, 0) "
                 "  AND (agents_meta.wake_suppressed_until IS NULL "
                 "       OR agents_meta.wake_suppressed_until < now()) "
                 "GROUP BY m.agent_id "
                 "ORDER BY m.agent_id"
-            ).format(sql.SQL(FAILED_RESTART_FOR_CURRENT_TARGET))
+            ).format(sql.SQL(FAILED_RESTART_FOR_CURRENT_TARGET)),
+            (threshold_s,),
         )
         return [(r[0], r[1]) for r in cur.fetchall()]
+
+
+def dead_letter_stale_pending_chats(pool: ConnectionPool, threshold_s: float) -> int:
+    """Dead-letter stale pending chats whose terminated owner never claimed them.
+
+    A pending chat newer than the latest termination makes its terminated
+    owner a G4 resurrect candidate on every tick. That retry must not run
+    forever: a chat that stays pending past `threshold_s` is a dead letter, so
+    the reaper closes it here (issue #2049) — marked done, never deleted — and
+    the resurrect-suicide loop can no longer accumulate an ever-growing
+    pending queue. `select_terminated_owners_with_pending` applies the same
+    age gate, so the two stay in lockstep: a closed row is never a trigger and
+    a trigger row is never closed. Live owners are untouched; their pending
+    chats still wake through the normal dispatch path.
+    """
+    with write_transaction(pool) as conn, conn.cursor() as cur:
+        cur.execute(
+            "UPDATE inbound_messages m SET status = 'done', claimed_at = now() "
+            "FROM agents_meta am "
+            "WHERE m.agent_id = am.id "
+            "  AND am.status = 'terminated' "
+            "  AND m.status = 'pending' AND m.kind = 'chat' "
+            "  AND m.created_at < now() - make_interval(secs => %s)",
+            (threshold_s,),
+        )
+        return cur.rowcount
 
 
 def dead_letter_stale_claimed(
@@ -468,7 +509,11 @@ async def _resurrect_one(pool: ConnectionPool, agent_id: int, trigger_inbound_id
             _last_resurrect_attempt[agent_id] = time.monotonic()
 
 
-def _maybe_spawn_resurrects(pool: ConnectionPool, max_per_tick: int) -> None:
+def _maybe_spawn_resurrects(
+    pool: ConnectionPool,
+    max_per_tick: int,
+    threshold_s: float,
+) -> None:
     """Enqueue a resurrect retry per distinct terminated owner with a pending
     chat, honoring the per-agent cooldown and the per-tick cap. Fire-and-forget
     (the tick is not blocked on a resurrect's RPC timeouts); tasks are tracked
@@ -479,7 +524,7 @@ def _maybe_spawn_resurrects(pool: ConnectionPool, max_per_tick: int) -> None:
     per-tick quota, so two slow in-flight resurrects starved every later tick,
     and the backlog warning re-ran the owners query once per overflow."""
     now = time.monotonic()
-    owners = select_terminated_owners_with_pending(pool)
+    owners = select_terminated_owners_with_pending(pool, threshold_s)
     spawned = 0
     deferred = 0
     for agent_id, trigger_inbound_id in owners:
@@ -529,7 +574,7 @@ def _hosted_turn_threshold_seconds() -> float:
     return float(current_field_values()["wedged_agent_inbound_age_seconds"])
 
 
-def _maybe_sweep_stale_claimed(
+def _maybe_sweep_stale_inbounds(
     pool: ConnectionPool,
     threshold_s: float,
     idling_threshold_s: float,
@@ -537,7 +582,7 @@ def _maybe_sweep_stale_claimed(
 ) -> float:
     """Run stale-inbound dead-letter sweeps on the configured cadence.
 
-    Return the new monotonic sweep timestamp. Both sweeps are best-effort: a
+    Return the new monotonic sweep timestamp. All sweeps are best-effort: a
     failure is logged, never raised, and the next gate window retries.
     """
     now_mono = time.monotonic()
@@ -561,6 +606,12 @@ def _maybe_sweep_stale_claimed(
             _log.info(
                 "[delivery] dead-lettered %s stale pending terminated-owner row(s)",
                 stale_terminated,
+            )
+        stale_pending_chats = dead_letter_stale_pending_chats(pool, threshold_s)
+        if stale_pending_chats:
+            _log.info(
+                "[delivery] dead-lettered %s stale pending chat row(s) of terminated owner(s)",
+                stale_pending_chats,
             )
     except Exception:
         _log.exception("[delivery] stale-inbound dead-letter sweep failed")
@@ -647,9 +698,13 @@ async def _scan_loop(pool: ConnectionPool, liveness: Liveness) -> None:
                     gc_alerted(pool, _DEDUP_TTL_S)
             except Exception:
                 _log.exception("[delivery] alert-dedup persist/prune failed")
-            _maybe_spawn_resurrects(pool, settings.daemon.delivery_watchdog_max_resurrect_per_tick)
+            _maybe_spawn_resurrects(
+                pool,
+                settings.daemon.delivery_watchdog_max_resurrect_per_tick,
+                stale_claimed_threshold,
+            )
             await turn_liveness.scan_hosted_turn_liveness(pool, hosted_turn_threshold)
-            last_claimed_sweep = _maybe_sweep_stale_claimed(
+            last_claimed_sweep = _maybe_sweep_stale_inbounds(
                 pool,
                 stale_claimed_threshold,
                 stale_claimed_idling_threshold,
