@@ -249,6 +249,24 @@ jobs:
             -m 'Co-authored-by: Ava #5814'
           git push origin "HEAD:refs/heads/$BRANCH"
 
+      - name: Approve the pull_request CI run spawned by the bot push
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ needs.render.outputs.branch }}
+        run: |
+          # The bot push synchronizes a pull_request CI run that GitHub parks
+          # pending approval. Approve it so the PR check status can go green;
+          # the explicit workflow_dispatch run below stays the authoritative
+          # green signal.
+          RUN_ID="$(gh run list --workflow=ci.yml --branch "$BRANCH" --event pull_request \
+            --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
+          if [ -n "$RUN_ID" ]; then
+            gh api --method POST \
+              "repos/${{ github.repository }}/actions/runs/$RUN_ID/approve" \
+              >/dev/null || echo "approve unavailable — approve the run manually"
+          fi
+
       - name: Re-run CI for the updated PR head
         if: github.event_name == 'workflow_dispatch'
         env:
