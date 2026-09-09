@@ -247,6 +247,10 @@ def test_native_grafana_http_addr_is_settings_rendered_with_all_interfaces_defau
     grafana_ini = (native_dir / "config/grafana.ini").read_text(encoding="utf-8")
     assert "http_addr = 0.0.0.0" in grafana_ini
     assert "http_port = 3003" in grafana_ini
+    # #2048: the native deployment provisions no preinstalled plugins, so the
+    # Grafana 13 background installer must be off — its in-flight work can hold
+    # a normal SIGTERM past the unit's shutdown deadline (SendSIGKILL=no).
+    assert "preinstall_disabled = true" in grafana_ini
 
     monkeypatch.setattr("shared.config.settings.observability.lgtm_grafana_listen_host", "10.0.0.5")
     _lgtm_native._render_configs(repo, native_dir, home)
