@@ -27,6 +27,10 @@ This loop is the enforcer, scanning
 - **Work failures** — a gateway crash after recording an event but before
   finishing its route is retried through the original author/delegator/task
   fallback chain.
+- **Terminated owners' watchers** — a watcher whose owning agent is
+  terminated for good (never auto-resurrect-eligible) has its session killed
+  and its registry row marked ``reaped``. Watcher sessions deliberately carry
+  no shell TTL row, so this pass is their only reclamation path (task #2617).
 
 Owners are notified (inbound, source ``"system"``) only when the agent is
 running or idling — a terminated agent's page expiring is exactly the cleanup
@@ -85,6 +89,65 @@ class TtlReaper:
 
     task: asyncio.Task[None]
     stop: asyncio.Event
+
+
+def _terminated_owner_watcher_rows_blocking(
+    pool: ConnectionPool,
+) -> list[tuple[int, int, str]]:
+    """Watcher rows whose owner agent is terminated for good, newest first.
+
+    Only ``status='running'`` rows carry live sessions; the other statuses
+    are terminal history. Owners terminated by crash recovery
+    (``reaper`` / ``launch-confirm``) are KEPT — they are auto-resurrect-
+    eligible and their own cron wakes are a revival channel; killing them
+    would race the crash-resurrect controller (the #2589 / #1938 lesson:
+    never reap what may come back). Every other terminated source (user /
+    exit / integrity / legacy NULL) is permanent, so its watchers are dead
+    weight — exactly the task #2617 leak. The machine is carried in the
+    same SELECT so the kill dispatch never re-reads the owner.
+    """
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT w.agent_id, w.session_id, m.machine
+            FROM agent_watchers w
+            JOIN agents_meta m ON m.id = w.agent_id
+            WHERE m.status = 'terminated'
+              AND COALESCE(m.termination_source, '') NOT IN ('reaper', 'launch-confirm')
+              AND w.status = 'running'
+            ORDER BY w.created_at DESC, w.session_id DESC
+            LIMIT %s
+            """,
+            (_PASS_BATCH,),
+        )
+        return [(int(r[0]), int(r[1]), r[2]) for r in cur.fetchall()]
+
+
+def _mark_watcher_reaped_if_owner_still_terminated(
+    pool: ConnectionPool, agent_id: int, session_id: int
+) -> bool:
+    """Terminalize a reclaimed watcher row, re-verifying its owner in the SAME
+    statement (the #2589 atomic-guard discipline).
+
+    The owner may have been resurrected between the scan and the kill — then
+    the row must stay ``running`` so the resurrected agent's boot reconcile
+    rebuilds the schedule from it. Returns True when the row was marked.
+    """
+    with write_transaction(pool) as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            UPDATE agent_watchers SET status = 'reaped'
+            WHERE agent_id = %s AND session_id = %s AND status = 'running'
+              AND EXISTS (
+                  SELECT 1 FROM agents_meta m
+                  WHERE m.id = agent_watchers.agent_id
+                    AND m.status = 'terminated'
+                    AND COALESCE(m.termination_source, '') NOT IN ('reaper', 'launch-confirm')
+              )
+            """,
+            (agent_id, session_id),
+        )
+        return cur.rowcount == 1
 
 
 def _agent_machine(pool: ConnectionPool, agent_id: int) -> str | None:
@@ -444,6 +507,67 @@ async def _reap_expired_shells(pool: ConnectionPool) -> list[tuple[int, int]]:
     return reaped
 
 
+async def _reap_terminated_owner_watchers(
+    pool: ConnectionPool,
+) -> list[tuple[int, int]]:
+    """Kill watcher sessions whose owner agent is terminated for good.
+
+    Mirrors ``_reap_expired_shells`` discipline: the row is terminalized
+    only on a definitive kill verdict (killed / absent); an unreachable
+    machine or a failed op leaves the row for the next pass — marking it
+    first would orphan the live session. The post-kill mark re-checks the
+    owner in SQL, so a mid-flight resurrect leaves the row ``running`` for
+    the agent's own reconcile to rebuild (never a silent loss).
+    """
+    rows = await asyncio.to_thread(_terminated_owner_watcher_rows_blocking, pool)
+    reaped: list[tuple[int, int]] = []
+    for agent_id, session_id, machine in rows:
+        try:
+            result = await cluster_rpc.dispatch_to_machine(
+                machine,
+                "shell_kill",
+                {"agent_id": agent_id, "session_id": session_id},
+                timeout_s=_SHELL_KILL_TIMEOUT_S,
+            )
+        except (cluster_rpc.ClusterOpUnreachable, cluster_rpc.ClusterOpFailed) as exc:
+            _log.warning(
+                "[ttl-reaper] terminated-owner watcher kill for agent %s session %s deferred: %r",
+                agent_id,
+                session_id,
+                exc,
+            )
+            continue
+        mode = result.get("mode")
+        if mode not in ("killed", "absent"):
+            _log.warning(
+                "[ttl-reaper] terminated-owner watcher kill for agent %s session %s returned %r",
+                agent_id,
+                session_id,
+                result,
+            )
+            continue
+        marked = await asyncio.to_thread(
+            _mark_watcher_reaped_if_owner_still_terminated, pool, agent_id, session_id
+        )
+        if not marked:
+            _log.info(
+                "[ttl-reaper] watcher %s of agent %s — owner no longer terminated; "
+                "leaving the row for the agent's boot reconcile",
+                session_id,
+                agent_id,
+            )
+            continue
+        telemetry.emit(
+            "log",
+            "watcher_reaped",
+            level="info",
+            agent_id=agent_id,
+            attributes={"agent_id": agent_id, "session_id": session_id, "mode": mode},
+        )
+        reaped.append((agent_id, session_id))
+    return reaped
+
+
 async def _reaper_loop(pool: ConnectionPool, stop: asyncio.Event) -> None:
     """Reclaim once at startup, then on the configured interval."""
     while not stop.is_set():
@@ -453,18 +577,30 @@ async def _reaper_loop(pool: ConnectionPool, stop: asyncio.Event) -> None:
             pages = await asyncio.to_thread(_reap_expired_pages_blocking, pool)
             shells = await _reap_expired_shells(pool)
             sessions = await asyncio.to_thread(_reap_expired_web_sessions_blocking, pool)
+            terminated_watchers = await _reap_terminated_owner_watchers(pool)
             notices = await asyncio.to_thread(_reap_expired_notices_blocking, pool)
             for agent_id, nid in notices:
                 with suppress(Exception):
                     await ops_lifecycle.publish_notice_resolved(agent_id, nid)
             failures = await work_failed_router.reconcile_stale_work_failures(pool)
-            if pages or shells or sessions or impersonations or notices or failures or reminded:
+            if (
+                pages
+                or shells
+                or sessions
+                or terminated_watchers
+                or impersonations
+                or notices
+                or failures
+                or reminded
+            ):
                 _log.info(
-                    "[ttl-reaper] reclaimed %d page(s), %d shell(s), %d web session(s), %d impersonation(s), %d notice(s); "
+                    "[ttl-reaper] reclaimed %d page(s), %d shell(s), %d web session(s), "
+                    "%d terminated-owner watcher(s), %d impersonation(s), %d notice(s); "
                     "completed %d stale work failure(s); reminded %d impersonation lease(s)",
                     len(pages),
                     len(shells),
                     sessions,
+                    len(terminated_watchers),
                     impersonations,
                     len(notices),
                     failures,

@@ -16,6 +16,7 @@ from ava._sdk_validation import coerce_str
 from ava.shell import _background
 from ava.shell import sessions as _sessions
 from shared.watcher import (
+    DEFAULT_STANDING_CRON_MAX_SECONDS,
     TEMPLATE_VERSION,
     build_at_script,
     build_cron_script,
@@ -330,6 +331,74 @@ def _build_boot(script_path: _pl.Path, watchdog_secs: float | None, agent_id: in
     )
 
 
+def _register_cron_spawn(
+    agent_id: int,
+    session_id: int,
+    *,
+    name: str,
+    message: str | None,
+    cron_expr: str,
+    cron_timezone: str,
+    cron_end_at: Any,
+    renewable: bool,
+    _exclude_session: int | None,
+    generation: str | None,
+) -> tuple[int | None, int | None]:
+    """Register one cron spawn; return ``(reused_session, superseded_session)``.
+
+    ``reused``: an identical live schedule already exists (the Task #1825
+    dedupe won the race) — the caller disposes its fresh session and hands
+    back the winner's id. ``superseded``: a live standing twin with a
+    different end time was found (task #2617 renewal) — the new row is
+    registered here and the caller kills the twin AFTER the new child has
+    started. At most one of the two is set.
+    """
+    from shared.watcher_registry import register_cron_atomic, register_cron_renewal
+
+    def _fresh_alive() -> set[int] | None:
+        try:
+            return set(_sessions.list())
+        except Exception:
+            # Session list unavailable — cannot verify liveness, so no
+            # dedupe (spawning is the fail-safe: a duplicate is
+            # recoverable, a reused dead session would silently lose
+            # the schedule).
+            return None
+
+    if renewable:
+        # The renewal re-check needs the FRESH session list fetched INSIDE
+        # the lock for the same reason as the dedupe (QA nit, #794 delta2).
+        superseded = register_cron_renewal(
+            agent_id,
+            session_id,
+            name=name,
+            message=message,
+            cron_expr=cron_expr,
+            cron_timezone=cron_timezone,
+            cron_end_at=cron_end_at,
+            alive_provider=_fresh_alive,
+            exclude_session=_exclude_session,
+            template_version=TEMPLATE_VERSION,
+            generation=generation,
+        )
+        if superseded is not None:
+            return None, superseded
+    reused = register_cron_atomic(
+        agent_id,
+        session_id,
+        name=name,
+        message=message,
+        cron_expr=cron_expr,
+        cron_timezone=cron_timezone,
+        cron_end_at=cron_end_at,
+        alive_provider=_fresh_alive,
+        exclude_session=_exclude_session,
+        template_version=TEMPLATE_VERSION,
+        generation=generation,
+    )
+    return reused, None
+
+
 def _spawn(
     code: str,
     watchdog_secs: float | None,
@@ -342,6 +411,7 @@ def _spawn(
     cron_timezone: str | None = None,
     cron_end_at: Any = None,
     timeout_secs: float | None = None,
+    renewable: bool = False,
     _exclude_session: int | None = None,
 ) -> int:
     """Start a watcher child running ``code``; return its watcher id.
@@ -416,32 +486,17 @@ def _spawn(
     # that race, and a registry failure now FAILS the spawn instead of being
     # swallowed (the old fail-soft left a live watcher the boot reconcile can
     # never rebuild — the registry is the only record of "should exist").
+    superseded: int | None = None
     try:
         if kind == "cron":
-            # Task #1825 dedupe, atomic (N2): one transaction — xact lock,
-            # re-check, insert (shared.watcher_registry.register_cron_atomic).
-            # The re-check needs a FRESH session list (a just-registered
-            # winner must be visible), fetched INSIDE the lock via the
-            # provider — a snapshot taken here would have a window where a
-            # concurrent winner's session does not yet exist (QA nit,
-            # #794 delta2).
-            from shared.watcher_registry import register_cron_atomic
-
-            def _fresh_alive() -> set[int] | None:
-                try:
-                    return set(_sessions.list())
-                except Exception:
-                    # Session list unavailable — cannot verify liveness, so
-                    # no dedupe (spawning is the fail-safe: a duplicate is
-                    # recoverable, a reused dead session would silently lose
-                    # the schedule).
-                    return None
-
-            # kind == 'cron' guarantees the schedule payload (cron() always
-            # passes it); narrow for register_cron_atomic's str contract.
+            # Task #1825 dedupe (atomic: xact lock + re-check + insert) and
+            # the task #2617 standing renewal supersede — one registration
+            # helper, both semantics (see _register_cron_spawn). kind ==
+            # 'cron' guarantees the schedule payload (cron() always passes
+            # it); narrow for the registration contract.
             from typing import cast
 
-            reused = register_cron_atomic(
+            reused, superseded = _register_cron_spawn(
                 agent_id,
                 session_id,
                 name=name,
@@ -449,9 +504,8 @@ def _spawn(
                 cron_expr=cast(str, cron_expr),
                 cron_timezone=cast(str, cron_timezone),
                 cron_end_at=cron_end_at,
-                alive_provider=_fresh_alive,
-                exclude_session=_exclude_session,
-                template_version=TEMPLATE_VERSION,
+                renewable=renewable,
+                _exclude_session=_exclude_session,
                 generation=generation,
             )
             if reused is not None:
@@ -514,6 +568,20 @@ def _spawn(
         with contextlib.suppress(Exception):
             _sessions.kill(session_id)
         raise
+    if superseded is not None:
+        # The new child is running; retire the superseded standing watcher.
+        # A deliberate kill drops its registry row, so exactly one live row
+        # (this session's) describes the schedule — the renewal never stacks
+        # (Task #1825 double-fire shape). Fail-soft: a kill failure leaves
+        # the twin until its own end_time expires.
+        logger.info(
+            "[watcher] standing cron %r renewed — session %s superseded by %s",
+            cron_expr,
+            superseded,
+            session_id,
+        )
+        with contextlib.suppress(Exception):
+            _sessions.kill(superseded)
     return session_id
 
 
@@ -557,11 +625,15 @@ def cron(
 ) -> int:
     """Runs until `end_time`, or until you kill its session.
 
-    A schedule already live under the same (agent, expression, timezone,
-    end time) is REUSED instead of registered twice: two identical-schedule
-    crons fire the same wake-ups, and a kill/rebuild cycle that stacked them
-    made both fire concurrently (Task #1825). The returned session id is the
-    existing watcher's when reused; kill it to stop the schedule.
+    `end_time` defaults to now + 7 days (user ruling 2026-09-09, task
+    #2617): a standing schedule must be renewed, it cannot live forever
+    silently. Pass an explicit `end_time` for a longer schedule.
+    Re-registering the same schedule (expression + timezone) RENEWS it — the
+    existing watcher is replaced by a fresh session with a fresh end, never
+    stacked into a duplicate that double-fires (Task #1825). A schedule
+    already live under the exact same (agent, expression, timezone, end
+    time) is REUSED instead; the returned session id is the existing
+    watcher's when reused. Kill the returned session to stop the schedule.
 
     Args:
         expr: 5-field cron expression (`minute hour day-of-month month
@@ -569,7 +641,8 @@ def cron(
         timezone: IANA name (e.g. `"America/Los_Angeles"`); defaults to your
             configured timezone — the same wall clock your message timestamps
             are shown in.
-        end_time: same accepted types as `at()`'s `when`.
+        end_time: same accepted types as `at()`'s `when`; defaults to
+            now + 7 days.
         name: a lowercase slug like `"daily-check-in"`.
 
     Returns:
@@ -591,15 +664,29 @@ def cron(
     # own zone — the same wall clock its other displays use.
     tz = timezone if timezone is not None else (cluster_tz_name() or host_tz_name())
     validate_timezone(tz)
-    et = normalize_end_time(end_time)
+    renewable = end_time is None
+    if renewable:
+        # Standing-cron cap (task #2617): no end_time means the DEFAULT
+        # window — 7 days, counted from the current minute — not forever.
+        # Minute truncation groups a double registration of the same
+        # schedule into one exact-match dedupe (the Task #1825 reuse); a
+        # later re-registration carries a later end and renews instead of
+        # stacking. A longer schedule must pass an explicit end_time.
+        now = datetime.datetime.now(datetime.UTC)
+        et = now.replace(second=0, microsecond=0) + datetime.timedelta(
+            seconds=DEFAULT_STANDING_CRON_MAX_SECONDS
+        )
+    else:
+        et = normalize_end_time(end_time)
     code = build_cron_script(
         expr=expr,
         message=message,
         timezone=tz,
         end_time_iso=et.isoformat() if et is not None else None,
     )
-    # The generated script self-terminates (it stops looping past end_time, or
-    # recurs indefinitely by design for a standing reminder), so no watchdog.
+    # The generated script self-terminates (it stops looping past end_time —
+    # which every registration now carries, the default being now + 7 days),
+    # so no watchdog.
     # Registration carries the Task #1825 dedupe — atomically: one transaction
     # (pg_advisory_xact_lock + re-check + insert, shared.watcher_registry.
     # register_cron_atomic), so a concurrent registration of the same schedule
@@ -614,6 +701,7 @@ def cron(
         cron_expr=expr,
         cron_timezone=tz,
         cron_end_at=et,
+        renewable=renewable,
         _exclude_session=_exclude_session,
     )
 
