@@ -843,6 +843,7 @@
     "sectionShells": "Persistent shells",
     "unnamed": "(unnamed)",
     "sectionConfigOverlay": "Configuration overlay",
+    "preset": "Preset",
     "sectionCost": "Cost",
     "metricCost": "Cost",
     "metricLlmCalls": "LLM calls",

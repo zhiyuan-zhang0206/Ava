@@ -152,12 +152,20 @@ class TestPresetCrud:
 
 
 class TestSpawnWithPreset:
-    def _overlay(self, db_conn: psycopg.Connection, agent_id: int) -> dict:
+    def _row(
+        self, db_conn: psycopg.Connection, agent_id: int
+    ) -> tuple[dict[str, object], str | None]:
         with db_conn.cursor() as cur:
-            cur.execute("SELECT config_overlay FROM agents_meta WHERE id = %s", (agent_id,))
+            cur.execute(
+                "SELECT config_overlay, preset_name FROM agents_meta WHERE id = %s", (agent_id,)
+            )
             row = cur.fetchone()
         assert row is not None
-        return row[0]
+        return row[0], row[1]
+
+    def _overlay(self, db_conn: psycopg.Connection, agent_id: int) -> dict[str, object]:
+        overlay, _ = self._row(db_conn, agent_id)
+        return overlay
 
     def test_preset_seeds_config_and_explicit_wins(self, db_conn: psycopg.Connection) -> None:
         with TestClient(app) as client:
@@ -200,3 +208,68 @@ class TestSpawnWithPreset:
             r = client.post("/api/agents", json={"spawner": "user", "preset": "ghost"})
         assert r.status_code == 400
         assert "ghost" in r.json()["detail"]
+
+    def test_unknown_preset_in_config_400(self, db_conn: psycopg.Connection) -> None:
+        with TestClient(app) as client:
+            r = client.post("/api/agents", json={"spawner": "user", "config": {"preset": "ghost"}})
+        assert r.status_code == 400
+        assert "ghost" in r.json()["detail"]
+
+    def test_preset_inside_config_seeds_and_records_preset_name(
+        self, db_conn: psycopg.Connection
+    ) -> None:
+        """The new input surface (task #2694): config_overlay.preset resolves at
+        the spawn boundary; the row stores the RESOLVED overlay + the preset
+        name for display."""
+        with TestClient(app) as client:
+            _create(
+                client,
+                name="coder",
+                label="Coder",
+                config={
+                    "llm_model": "claude-sonnet-5",
+                    "skills_to_inject_into_system_prompt": ["a"],
+                },
+            )
+            r = client.post(
+                "/api/agents",
+                json={
+                    "spawner": "user",
+                    "config": {"preset": "coder", "llm_model": "deepseek-v4-pro"},
+                },
+            )
+            assert r.status_code == 201, r.text
+            agent_id = r.json()["id"]
+        overlay, preset_name = self._row(db_conn, agent_id)
+        assert preset_name == "coder"
+        assert overlay == {  # pyright: ignore[reportUnknownMemberType]
+            "llm_model": "deepseek-v4-pro",
+            "skills_to_inject_into_system_prompt": ["a"],
+        }
+
+    def test_preset_in_config_preserves_explicit_preset_overridden_values(
+        self, db_conn: psycopg.Connection
+    ) -> None:
+        with TestClient(app) as client:
+            _create(client, name="coder", label="Coder", config={"llm_model": "claude-sonnet-5"})
+            r = client.post("/api/agents", json={"spawner": "user", "config": {"preset": "coder"}})
+            assert r.status_code == 201, r.text
+            agent_id = r.json()["id"]
+        overlay, preset_name = self._row(db_conn, agent_id)
+        assert preset_name == "coder"
+        assert overlay == {"llm_model": "claude-sonnet-5"}  # pyright: ignore[reportUnknownMemberType]
+
+    def test_preset_given_twice_400(self, db_conn: psycopg.Connection) -> None:
+        with TestClient(app) as client:
+            r = client.post(
+                "/api/agents",
+                json={"spawner": "user", "preset": "coder", "config": {"preset": "coder"}},
+            )
+        assert r.status_code == 400
+        assert "twice" in r.json()["detail"]
+
+    def test_preset_key_must_be_nonempty_string(self, db_conn: psycopg.Connection) -> None:
+        with TestClient(app) as client:
+            r = client.post("/api/agents", json={"spawner": "user", "config": {"preset": ""}})
+        assert r.status_code == 400
+        assert "non-empty string" in r.json()["detail"]

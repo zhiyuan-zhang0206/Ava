@@ -3704,7 +3704,9 @@ export interface components {
          *     LLM cost, turn/exec stats, active-rate (working vs blocked-on-a-human),
          *     idle-heartbeat state, and delivery-obligation state.
          *     `config_overlay` is the spawn-time field-override map (empty when the agent
-         *     runs on cluster defaults). `shells` is probed on the agent's own machine via
+         *     runs on cluster defaults); `preset_name` names the spawn-time preset whose
+         *     config was folded into it (None when no preset was used). `shells` is
+         *     probed on the agent's own machine via
          *     the `shell_probe` cluster op — the gateway never runs sessions itself, so a
          *     split deployment sees each agent's shells wherever that agent runs.
          *
@@ -3755,6 +3757,8 @@ export interface components {
             config_overlay: {
                 [key: string]: unknown;
             };
+            /** Preset Name */
+            preset_name?: string | null;
             notice?: components["schemas"]["OpenNotice"] | null;
             cost: components["schemas"]["AgentCost"];
             stats: components["schemas"]["AgentStats"];
@@ -3801,6 +3805,8 @@ export interface components {
             config_overlay: {
                 [key: string]: unknown;
             };
+            /** Preset Name */
+            preset_name?: string | null;
             notice?: components["schemas"]["OpenNotice"] | null;
             heartbeat: components["schemas"]["HeartbeatInfo"];
         };
@@ -6973,6 +6979,14 @@ export interface components {
          *     If `fork_from` is given, the gateway resolves the latest checkpoint
          *     internally and passes an explicit id to the underlying create_agent_row
          *     (consistent with SDK `ava.agents.spawn(fork_from=N)` logic).
+         *
+         *     Fork config rule: a fork keeps the source's effective config so the
+         *     inherited context stays cache-valid. The only allowed config change is
+         *     ADDING skills to `skills_to_inject_into_system_prompt` /
+         *     `skills_to_expand_at_start` (supersets); anything else is rejected with
+         *     `fork_config_change_not_allowed`. A fork WITHOUT config inherits the
+         *     source's resolved overlay + preset verbatim (the pre-2026-09-10 behavior
+         *     dropped the source's overlay).
          *
          *     `spawner` default "user" — frontend spawn button does not need to
          *     pass it; external callers (claude-code / SDK paths `agent:N` etc.)

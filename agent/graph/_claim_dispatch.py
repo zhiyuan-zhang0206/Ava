@@ -495,6 +495,19 @@ async def _handle_fork(
         )
     )
     st.new_msgs.extend(fork_notes())
+    # Tail-graft skill additions (decisions/2026-09-10-preset-in-config-overlay-
+    # fork-cache): skills the fork's config added to
+    # skills_to_inject_into_system_prompt (minus what the expand list already
+    # grafts) arrive in the fork inbound's payload. Their full bodies append
+    # AFTER the fork marker + on_fork notes — the tail, never the cached prefix.
+    # Old fork rows carry no payload: skip.
+    tail_skills = (item.payload or {}).get("tail_skills")
+    if isinstance(tail_skills, list):
+        from agent.graph._context_notes import fork_tail_skills_note
+
+        note = fork_tail_skills_note([s for s in tail_skills if isinstance(s, str)])
+        if note is not None:
+            st.new_msgs.append(note)
 
 
 async def dispatch_batch(
