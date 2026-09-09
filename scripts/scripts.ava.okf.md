@@ -45,7 +45,9 @@ The full linter inventory — what each one enforces and where it runs: [[script
   static direct test imports, preserves conservative full-suite escapes, and
   emits the shadow-run JSON consumed by `ci.yml`
 - `release_cut.py`, `pre-push-check.sh`, `check_cross_branch_migrations.py`, `migration_smoke.py`, `test_migrations_apply.sh`, `test_uv_sync_write_window.sh`
-- `post_deploy_visual_check.py` — read-only five-surface production visual gate: a gateway `started_at` change distinguishes deployment waves from daily sentinels, the repo-pinned Playwright Chromium (headless, host-local) captures desktop/narrow light/dark combinations after an explicit settle predicate, shared structural probes fail P0, and stable two-frame pixel drift on static crops is attributed to the golden-to-wave frontend diff. It writes artifacts and exit codes only; the invoking agent owns notifications. Golden updates require an audited `--accept-wave`.
+- `post_deploy_visual_check.py` — read-only five-surface production visual gate: a gateway `started_at` change distinguishes deployment waves from daily sentinels, the repo-pinned Playwright Chromium (headless, host-local) captures desktop/narrow light/dark combinations after an explicit settle predicate, shared structural probes fail P0, and stable two-frame pixel drift on static crops is attributed to the golden-to-wave frontend diff. It writes artifacts and exit codes only; the invoking agent owns notifications. Golden updates require an audited `--accept-wave`. Its engine-agnostic capture
+matrix lives in `post_deploy_visual_matrix.py`, shared with the blocking CI
+preview gate (`tests/e2e/test_preview_visual_gate.py`).
 - `backfill_llm_usage_hourly.py` — operator-run one-shot that folds the frozen 2026-08-28 cold-archive `llm_usage` JSONL extract into (UTC hour x model) totals and upserts them into `llm_usage_hourly`, the restored historical LLM usage/cost curve for the window Loki's 7d retention lost; re-runnable, and never called by the migration that creates the table
 
 ### Code Generation

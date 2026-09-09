@@ -105,12 +105,25 @@ process follows the lifecycle trigger SCRIPT, and the later segment follows an i
 restarter / `resurrect_agent` INSERT of these rows is the only definitive marker that
 "a new process has started", and the `kind` field precisely corresponds.
 
+## Visual regression
+
+- `test_visual_regression.py` — three full-page snapshots (home, fleet,
+  mobile) against `tests/e2e/__snapshots__/test_visual_regression/`, compared
+  with the browser-native pixel diff (0.1% ratio, channel delta 16).
+- `test_preview_visual_gate.py` — the five-surface post-deploy matrix (same
+  shared engine as the deployment gate: `scripts/post_deploy_visual_matrix.py`)
+  against the committed goldens under
+  `tests/e2e/__snapshots__/preview-gate/`. Blocking on every PR. Goldens are
+  minted and refreshed only on the ubuntu CI runner via the
+  visual-baselines workflow (`workflow_dispatch` on the PR head) — generation
+  and comparison share one rendering environment; a structurally broken run
+  can never become the golden.
+
 ## Scope (not done in this phase)
 
 - Real character-level LLM streaming
 - Multi-turn cross-agent interactions
 - Record-and-replay (fake always follows SCRIPT)
-- Visual regression
 - Performance baseline
 - pytest-xdist parallelization
 ```

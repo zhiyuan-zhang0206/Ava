@@ -87,3 +87,26 @@ formats; a storage-state JSON export must be revoked from the logged-in UI.
 ```
 30 7 * * * AVA_VISUAL_GATE_COOKIE_FILE=/secure/ava-visual-cookies.txt /path/to/Ava/.venv/bin/python /path/to/Ava/scripts/post_deploy_visual_check.py --check --base-url https://gateway.example
 ```
+
+
+## CI preview gate
+
+`tests/e2e/test_preview_visual_gate.py` runs the same five-surface matrix
+against the committed golden set `tests/e2e/__snapshots__/preview-gate/` on
+every PR (blocking, inside the e2e shard): the production frontend build
+served by the e2e stack is captured on the GitHub ubuntu runner and compared
+with the goldens minted on that same runner. Generation and comparison share
+one rendering environment — cross-environment references hit font/FreeType
+churn (the original three-snapshot lesson), so goldens minted anywhere else
+are refused (`PREVIEW_GATE_REFRESH=1` only works on linux runners).
+
+Golden update flow: a UI change that intentionally shifts the crops fails the
+gate; after a reviewer confirms the drift matches the intent, the
+visual-baselines workflow (workflow_dispatch on the PR head) re-mints the
+goldens on the ubuntu runner and commits them to the same PR. A structurally
+broken run can never become the golden (same rule as `--accept-wave`).
+QA spot-checks the committed golden set (file count, meta provenance, sampled
+PNGs) before approving the re-mint PR — the 44 binary goldens are not readable
+in a plain PR review, so the gate's own weakening must be caught there.
+The deployment gate on macmini keeps its own machine-local goldens; the two
+sets never mix.
