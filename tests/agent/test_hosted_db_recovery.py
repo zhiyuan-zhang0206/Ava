@@ -8,7 +8,7 @@ from uuid import uuid4
 
 import psycopg
 import pytest
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.graph import START, StateGraph
@@ -17,8 +17,10 @@ from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool, PoolTimeout
 
 from agent import state as states
+from agent.db import claim_inbound_batch
 from agent.hosted_ownership import admit_hosted_runtime
 from agent.inbound_ownership import RuntimeOwnershipLostError
+from agent.startup import _wrap_saver_writes_with_nstep_interval
 from ops.agent_spawn import create_agent_row
 from services.agent_host import db_recovery
 from services.agent_host.host import AgentHost
@@ -29,6 +31,7 @@ from shared.db import insert_inbound_message
 from shared.hosted_force import install_hosted_force
 from shared.incarnation_resources import ResourceBirth
 from shared.machine import machine_name
+from shared.maintenance_state import MaintenanceHold
 from shared.runtime_incarnation import RuntimeIncarnation
 from shared.turn_identity import bind_turn_identity
 
@@ -287,7 +290,7 @@ async def test_repair_timeout_retries_and_remains_cancellable(
         raise AssertionError("repair never invokes agent work")
 
     graph, saver = await _graph(aops_pool, incarnation.agent_id, never)
-    monkeypatch.setattr(db_recovery, "_RECOVERY_TIMEOUT_SECONDS", 0.05)
+    monkeypatch.setattr(db_recovery, "_DATABASE_PHASE_TIMEOUT_SECONDS", 0.05)
     cancelled, retried = asyncio.Event(), asyncio.Event()
     attempts = 0
 
@@ -348,3 +351,149 @@ async def test_database_only_phase_bounds_real_pool_wait_and_preserves_cancellat
         finally:
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
+
+
+async def _seed_stalled_repair_scenario(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool[Any],
+    incarnation: RuntimeIncarnation,
+) -> tuple[AsyncPostgresSaver, Any, RunnableConfig, int, MaintenanceHold, list[int], datetime]:
+    """The issue #1972 repro state: a claimed inbound whose turn left a
+    dangling private tool call in the retained checkpoint, an unacked
+    maintenance hold, and a graph that must never run during recovery.
+
+    The state is seeded through one real graph superstep (a pass-through
+    node), because the repair stage's unattributed `aupdate_state` needs the
+    checkpoint's `versions_seen` to name a node — a pure update_state seed
+    leaves it empty and the update is ambiguous on current langgraph.
+    """
+    aid = incarnation.agent_id
+    graph_calls: list[int] = []
+
+    async def work(_state: states.AgentState) -> dict[str, Any]:
+        graph_calls.append(1)
+        return {
+            "messages": [
+                AIMessage(
+                    id="unfinished-tool",
+                    content="",
+                    tool_calls=[
+                        {"id": "private-tool", "name": "execute_code", "args": {"code": "pass"}}
+                    ],
+                )
+            ]
+        }
+
+    saver = AsyncPostgresSaver(aops_pool)
+    await saver.setup()
+    _wrap_saver_writes_with_nstep_interval(saver, 100)
+    builder: Any = StateGraph(states.AgentState, context_schema=AvaContext)
+    builder.add_node("work", work)
+    builder.add_edge(START, "work")
+    builder.add_edge("work", "__end__")
+    graph = builder.compile(checkpointer=saver)
+    config: RunnableConfig = {"configurable": {"thread_id": str(aid)}}
+    inbound = insert_inbound_message(db_conn, aid, "Original private request", "user")
+    db_conn.commit()
+    with bind_turn_identity(aid, incarnation=incarnation):
+        await claim_inbound_batch(aops_pool, aid)
+        await graph.ainvoke(
+            {
+                "messages": [
+                    HumanMessage(
+                        content="Original private request",
+                        additional_kwargs={"ava_inbound_id": inbound},
+                    )
+                ]
+            },
+            config,
+        )
+        # The superstep checkpoint (with the dangling tool call) stays in the
+        # nstep buffer, unflushed — exactly the crash shape: recovery's own
+        # flush_checkpoint must persist it before reconcile/repair see it.
+    at = datetime.now(UTC)
+    pause_owner.begin_maintenance("private-slow-recovery", at)
+    hold = maintenance_cohort.prepare(
+        db_conn,
+        machine=machine_name(),
+        host_owner=incarnation.owner,
+        holder="private-slow-recovery",
+        acquired_at=at,
+    )
+    db_conn.commit()
+    graph_calls.clear()
+    return saver, graph, config, inbound, hold, graph_calls, at
+
+
+async def test_healthy_stages_each_get_their_own_deadline(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Issue #1972: stages that each fit the old 5s aggregate but not together
+    must still complete — the chain is bounded per stage, not per attempt."""
+    import time
+
+    incarnation = await _admit(aops_pool)
+    saver, graph, config, inbound, hold, graph_calls, at = await _seed_stalled_repair_scenario(
+        db_conn, aops_pool, incarnation
+    )
+    cold = await AsyncPostgresSaver(aops_pool).aget(config)  # type: ignore[arg-type]
+    assert cold is not None
+    assert not any(
+        getattr(msg, "id", None) == "unfinished-tool" for msg in cold["channel_values"]["messages"]
+    )
+    events: list[tuple[str, str, float]] = []
+    reconcile = db_recovery._reconcile_claimed_inbounds_at_startup
+    repair = db_recovery._repair_dangling_tool_use_at_startup
+
+    async def delay(stage: str) -> None:
+        started = time.monotonic()
+        async with aops_pool.connection() as conn:
+            await conn.execute("SELECT pg_sleep(3.0)")
+        events.append((stage, "query_complete", round(time.monotonic() - started, 3)))
+
+    async def slow_reconcile(
+        pool: AsyncConnectionPool, checkpointer: AsyncPostgresSaver, agent: int
+    ) -> None:
+        await delay("reconcile")
+        await reconcile(pool, checkpointer, agent)
+        events.append(("reconcile", "done", 0))
+
+    async def slow_repair(compiled: Any, agent: int) -> None:
+        await delay("repair")
+        await repair(compiled, agent)
+        events.append(("repair", "done", 0))
+
+    monkeypatch.setattr(db_recovery, "_reconcile_claimed_inbounds_at_startup", slow_reconcile)
+    monkeypatch.setattr(db_recovery, "_repair_dangling_tool_use_at_startup", slow_repair)
+    try:
+        with bind_turn_identity(incarnation.agent_id, incarnation=incarnation):
+            await asyncio.wait_for(
+                db_recovery.recover_database(
+                    pool=aops_pool,
+                    checkpointer=saver,
+                    graph=graph,
+                    incarnation=incarnation,
+                ),
+                15,
+            )
+    finally:
+        cold = await AsyncPostgresSaver(aops_pool).aget(config)  # type: ignore[arg-type]
+        assert cold is not None
+        msgs = cold["channel_values"]["messages"]
+        assert any(getattr(msg, "id", None) == "unfinished-tool" for msg in msgs)
+        assert db_conn.execute(
+            "SELECT status FROM inbound_messages WHERE id=%s", (inbound,)
+        ).fetchone() == ("done",)
+        assert db_conn.execute(
+            "SELECT applied_at FROM inbound_messages WHERE id=%s",
+            (hold.commands[incarnation.agent_id],),
+        ).fetchone() == (None,)
+        current = maintenance.require_operation("private-slow-recovery", at)
+        assert current.maintenance is not None and not current.maintenance.drained
+    assert sum(event[:2] == ("reconcile", "done") for event in events) == 1
+    assert sum(event[:2] == ("repair", "done") for event in events) == 1
+    assert all(elapsed < 5 for _, kind, elapsed in events if kind == "query_complete")
+    assert any(isinstance(msg, ToolMessage) and msg.tool_call_id == "private-tool" for msg in msgs)
+    assert not graph_calls

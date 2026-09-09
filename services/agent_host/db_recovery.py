@@ -1,7 +1,7 @@
 """Keep an interrupted host turn alive until its database is usable again."""
 
 import asyncio
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -18,12 +18,11 @@ from agent.startup import (
 )
 from shared.db_transaction import async_write_transaction
 from shared.deploy_timing import AGENT_LEASE_TTL_S
-from shared.hosted_db_wait import database_wait
+from shared.hosted_db_wait import DatabaseWait, database_wait
 from shared.log import logger
 from shared.runtime_incarnation import RuntimeIncarnation, current_incarnation
 
 _PROBE_TIMEOUT_SECONDS = 5.0
-_RECOVERY_TIMEOUT_SECONDS = 5.0
 _INITIAL_BACKOFF_SECONDS = 1.0
 _MAX_BACKOFF_SECONDS = 30.0
 _DATABASE_PHASE_TIMEOUT_SECONDS = 30.0
@@ -83,6 +82,25 @@ async def _refresh_owner(pool: AsyncConnectionPool, incarnation: RuntimeIncarnat
         raise PoolTimeout("host database recovery probe timed out") from exc
 
 
+async def _run_bounded_stage(
+    waiting: DatabaseWait,
+    stage: Callable[[], Awaitable[None]],
+) -> None:
+    """Renew the database-wait evidence for one real bounded stage, then run it
+    under the shared 30s `database_phase()` bound.
+
+    Renewal happens only when this original task/incarnation actually enters a
+    stage — heartbeat snapshot reads (`database_wait_snapshot`) never renew —
+    and every renew keeps the same finite proof TTL. A stage that overruns its
+    bound raises `PoolTimeout` (from `database_phase`), which the recovery loop
+    already retries on its backoff ladder; external cancellation stays
+    `CancelledError` and propagates untouched.
+    """
+    waiting.renew()
+    async with database_phase():
+        await stage()
+
+
 async def recover_database(
     *,
     pool: AsyncConnectionPool,
@@ -102,19 +120,29 @@ async def recover_database(
     logger.warning("host turn waiting for database recovery", agent_id=incarnation.agent_id)
     with database_wait(incarnation) as waiting:
         while True:
-            waiting.renew()
             try:
-                async with asyncio.timeout(_RECOVERY_TIMEOUT_SECONDS):
-                    await _refresh_owner(pool, incarnation)
-                    # Retained N-step writes are still this task's work. Persist them
-                    # before deciding which claimed messages reached the checkpoint.
-                    await flush_checkpoint(checkpointer, incarnation.agent_id)
-                    await _reconcile_claimed_inbounds_at_startup(
+                # Each DB-only stage carries its own 30s `database_phase()`
+                # bound (issue #1972): one slow stage times out alone instead
+                # of eating the budget every following stage needs. The
+                # exact-owner probe keeps its independent 5s bound.
+                await _run_bounded_stage(waiting, lambda: _refresh_owner(pool, incarnation))
+                # Retained N-step writes are still this task's work. Persist them
+                # before deciding which claimed messages reached the checkpoint.
+                await _run_bounded_stage(
+                    waiting, lambda: flush_checkpoint(checkpointer, incarnation.agent_id)
+                )
+                await _run_bounded_stage(
+                    waiting,
+                    lambda: _reconcile_claimed_inbounds_at_startup(
                         pool, checkpointer, incarnation.agent_id
-                    )
-                    await _refresh_owner(pool, incarnation)
-                    await _repair_dangling_tool_use_at_startup(graph, incarnation.agent_id)
-                    await _refresh_owner(pool, incarnation)
+                    ),
+                )
+                await _run_bounded_stage(waiting, lambda: _refresh_owner(pool, incarnation))
+                await _run_bounded_stage(
+                    waiting,
+                    lambda: _repair_dangling_tool_use_at_startup(graph, incarnation.agent_id),
+                )
+                await _run_bounded_stage(waiting, lambda: _refresh_owner(pool, incarnation))
                 waiting.complete()
                 logger.info("host turn database recovered", agent_id=incarnation.agent_id)
                 return
