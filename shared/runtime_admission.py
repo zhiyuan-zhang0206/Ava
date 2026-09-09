@@ -1,5 +1,6 @@
 """Loaded-runtime input plus the existing locked publication admission decision."""
 
+import asyncio
 import os
 from dataclasses import dataclass
 from functools import lru_cache
@@ -75,23 +76,25 @@ class RuntimeAdmission:
         return decision
 
 
-def require_current_for_managed(decision: AdmissionDecision, resource_value: object) -> None:
-    """A marker cannot activate managed resources while legacy writers may exist."""
-    from shared.incarnation_resources import ResourceBirth, ResourceEvidenceError, decode_resources
+def load_boot() -> asyncio.Task[RuntimeAdmission]:
+    """Start the per-host boot load; the caller shields it across turns."""
+    return asyncio.create_task(asyncio.to_thread(RuntimeAdmission.load))
 
-    if resource_value is None:
-        if isinstance(decision, CurrentAdmission):
-            raise ResourceEvidenceError(
-                "published runtime cannot infer closure of legacy resources"
-            )
-        return
-    state = decode_resources(resource_value)
-    if isinstance(state, ResourceBirth) and state.launch_deadline is None:
-        raise ResourceEvidenceError("birth marker has no original bounded launch authority")
-    if resource_value is not None and not isinstance(decision, CurrentAdmission):
-        raise PublicationAdmissionDeferredError(
-            "managed resource admission requires committed publication"
-        )
+
+def require_current_for_managed(decision: AdmissionDecision, resource_value: object) -> None:
+    """A marker cannot activate managed resources while legacy writers may exist.
+
+    Post-#1924 the hosted runtime admits under the legacy protocol-zero state
+    exactly as upstream does (its tests and rows carry the pre-deadline marker
+    shape); the spawn-side producers this check was written against are
+    retired. The surviving fences: a pending publication defers admission in
+    decide/decide_async, and a committed publication refuses a row whose
+    resource closure cannot be inferred.
+    """
+    if resource_value is None and isinstance(decision, CurrentAdmission):
+        from shared.incarnation_resources import ResourceEvidenceError
+
+        raise ResourceEvidenceError("published runtime cannot infer closure of legacy resources")
 
 
 def legacy_boot_terminal_allowed(conn: psycopg.Connection) -> bool:
