@@ -105,5 +105,8 @@ gate; after a reviewer confirms the drift matches the intent, the
 visual-baselines workflow (workflow_dispatch on the PR head) re-mints the
 goldens on the ubuntu runner and commits them to the same PR. A structurally
 broken run can never become the golden (same rule as `--accept-wave`).
+QA spot-checks the committed golden set (file count, meta provenance, sampled
+PNGs) before approving the re-mint PR — the 44 binary goldens are not readable
+in a plain PR review, so the gate's own weakening must be caught there.
 The deployment gate on macmini keeps its own machine-local goldens; the two
 sets never mix.
