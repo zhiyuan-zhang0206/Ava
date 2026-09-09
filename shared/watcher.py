@@ -24,6 +24,7 @@ class CronExprError(Exception):
 
 
 __all__ = [
+    "DEFAULT_STANDING_CRON_MAX_SECONDS",
     "TEMPLATE_VERSION",
     "CronExprError",
     "build_at_script",
@@ -37,6 +38,14 @@ __all__ = [
 ]
 
 
+# Standing cron cap (user ruling 2026-09-09, task #2617): a cron registered
+# without an explicit end_time lives at most this long, counted from
+# registration — `ava.watcher.cron` defaults `end_time` to now + this. A longer
+# schedule must pass an explicit end_time. Re-registering the same standing
+# schedule renews it (see ava/watcher.py::cron and shared/watcher_registry.
+# register_cron_renewal).
+DEFAULT_STANDING_CRON_MAX_SECONDS = 7 * 24 * 3600
+
 # Template version: bumped whenever a generated watcher script's loop
 # semantics change (issue #1330). The registry stores the version a session was
 # spawned with; the boot reconcile rebuilds a live cron watcher whose version is
@@ -47,8 +56,10 @@ __all__ = [
 # watcher sleeping toward its next fire was indistinguishable from a stuck one —
 # 2026-08-25 false alarm, task #1620); v4 = orphan guard (a watcher child
 # hard-exits within seconds of its pty host dying — task #1726, 49/85 watchers
-# were multi-generation orphans still firing cron/at).
-TEMPLATE_VERSION = 4
+# were multi-generation orphans still firing cron/at); v5 = standing-cron cap
+# (the reconcile rebuilds live standing crons so the SDK's now+7d default end
+# replaces their NULL end — task #2617).
+TEMPLATE_VERSION = 5
 
 
 # Cron

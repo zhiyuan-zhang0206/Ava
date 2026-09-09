@@ -376,4 +376,10 @@ _EVENTS_OPS: dict[str, EventSpec] = {
         tier="observation",
         doc="the gateway TTL reaper killed a persistent shell whose declared TTL passed; attributes carry agent_id, session_id, mode",
     ),
+    "watcher_reaped": EventSpec(
+        name="watcher_reaped",
+        category="log",
+        tier="observation",
+        doc="the gateway TTL reaper reclaimed a watcher whose owner agent is terminated for good; attributes carry agent_id, session_id, mode",
+    ),
 }

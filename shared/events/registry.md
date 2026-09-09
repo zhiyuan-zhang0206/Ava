@@ -25,7 +25,7 @@ generated from it and never hand-synced. event_names that violate the naming rul
 |------|------|-------------|------|
 | audit (category=audit) | `events` | 23 | events table |
 | telemetry (category=telemetry) | `events` | 163 | events table |
-| log (category=log) | `events` | 9 | events table |
+| log (category=log) | `events` | 10 | events table |
 | file-only (destination=file) | file log | 1 | file only (not the events table) |
 | SSE live | Redis → frontend (not persisted) | 28 role | live projection |
 
@@ -278,6 +278,7 @@ consumers: see the comments at each emit point.
 | `page_proxy_502` | the gateway reverse proxy could not reach a registered page server; attributes carry trace_id, agent_id, page, host, port, exc_type, exc_message | anomaly | — | events |
 | `page_proxy_504` | the gateway reverse proxy timed out dialing a registered page server; attributes carry trace_id, agent_id, page, host, port, exc_type, exc_message | anomaly | — | events |
 | `shell_ttl_expired` | the gateway TTL reaper killed a persistent shell whose declared TTL passed; attributes carry agent_id, session_id, mode | observation | — | events |
+| `watcher_reaped` | the gateway TTL reaper reclaimed a watcher whose owner agent is terminated for good; attributes carry agent_id, session_id, mode | observation | — | events |
 
 ## 5. SSE roles (live channel, not persisted, 28)
 
