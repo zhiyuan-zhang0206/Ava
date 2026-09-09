@@ -9,11 +9,10 @@ escapes stay untouched. Split out of plugin.py (2026-08-07, Task #1011).
 
 from __future__ import annotations
 
-import io
 import re
 import tokenize
 
-from ._punct import _line_starts
+from ._punct import _line_starts, _tokenize_fix_safe
 
 # ---------------------------------------------------------------------------
 # 3. Invalid-escape-sequence fix
@@ -144,11 +143,11 @@ def _fix_invalid_escapes(code: str) -> tuple[str, int]:
     comments preserved verbatim.
 
     Returns the original code unchanged when tokenization fails (broken
-    syntax) — that's compile()'s job to surface downstream.
+    syntax, or inputs that crash the C tokenizer -- see _tokenize_fix_safe)
+    -- that's compile()'s job to surface downstream.
     """
-    try:
-        tokens = list(tokenize.generate_tokens(io.StringIO(code).readline))
-    except (tokenize.TokenError, IndentationError, SyntaxError):
+    tokens = _tokenize_fix_safe(code)
+    if tokens is None:
         return code, 0
 
     edits = _collect_escape_edits(tokens, _line_starts(code))

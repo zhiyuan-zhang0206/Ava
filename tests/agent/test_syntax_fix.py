@@ -38,6 +38,12 @@ from ava_builtins.plugins.ava_syntax_fix._imports import (
     _ruff_undefined_names,
     _warn_ruff_missing_once,
 )
+from ava_builtins.plugins.ava_syntax_fix._punct import (
+    _FULLWIDTH_QUOTE_MAP,
+    _MAX_TOKENIZE_LINE_LENGTH,
+    _PUNCT_MAP,
+    _translate_outside_strings,
+)
 from ava_builtins.plugins.ava_syntax_fix.plugin import (
     _detect_missing_imports,
     _extract_text,
@@ -142,6 +148,95 @@ class TestFixChinesePunctuation:
         code, n = _fix_chinese_punctuation(src)
         assert code == src
         assert n == 0
+
+
+# --- _translate_outside_strings crash guard (gh-149183) ---
+
+
+class TestTranslateOutsideStringsCrashGuard:
+    """The CPython 3.12+ C tokenizer crashes instead of raising a tokenize
+    error on f-string replacement fields that mix '=' (debug), ':'/'!'
+    delimiters and invalid expressions: it computes a negative string length
+    and raises SystemError("Negative size passed to PyUnicode_New")
+    (gh-149183; upstream fix gh-149445 targets 3.15+ only, and on 3.14+ the
+    same input surfaces as MemoryError). The punctuation translation must
+    degrade to a no-op instead of aborting the agent host run.
+    """
+
+    # Minimal gh-149183-style trigger, distilled from the 2026-09-09 agent
+    # 3428 incident input: '=' in the replacement field enables the debug
+    # metadata path, and the two '!' attribute expressions desync the
+    # expression buffer offsets so the C tokenizer computes a negative size.
+    CRASH_INPUT = (
+        "x = f'''() => {\n"
+        "      x = 1;\n"
+        "      return {height: r.height,\n"
+        "              brandAbsent: !h.query('a') && !h.query('b'),\n"
+        '    }""")\n'
+        "'''"
+    )
+
+    @pytest.mark.skipif(
+        sys.version_info >= (3, 13),
+        reason="3.13+ surfaces the same input as MemoryError, which the guard "
+        "deliberately does not catch (see the _punct docstring)",
+    )
+    def test_crash_input_degrades_to_noop_quote_pass(self):
+        code, n = _translate_outside_strings(self.CRASH_INPUT, _FULLWIDTH_QUOTE_MAP)
+        assert code == self.CRASH_INPUT
+        assert n == 0
+
+    @pytest.mark.skipif(
+        sys.version_info >= (3, 13),
+        reason="3.13+ surfaces the same input as MemoryError, which the guard "
+        "deliberately does not catch (see the _punct docstring)",
+    )
+    def test_crash_input_degrades_to_noop_punct_pass(self):
+        code, n = _translate_outside_strings(self.CRASH_INPUT, _PUNCT_MAP)
+        assert code == self.CRASH_INPUT
+        assert n == 0
+
+    @pytest.mark.skipif(
+        sys.version_info < (3, 12) or sys.version_info >= (3, 13),
+        reason="the guarded C-tokenizer crash is 3.12-only: 3.11 tokenizes the "
+        "input (and would translate the fullwidth comma), 3.13+ raises MemoryError",
+    )
+    def test_pipeline_degrades_on_crash_input(self):
+        src = self.CRASH_INPUT.replace("() => {", "() => {\uff0c")
+        code, n = _fix_chinese_punctuation(src)
+        assert code == src
+        assert n == 0
+
+    @pytest.mark.skipif(
+        sys.version_info < (3, 12) or sys.version_info >= (3, 13),
+        reason="the guarded C-tokenizer crash is 3.12-only: 3.11 tokenizes the "
+        "input (and would translate the fullwidth comma), 3.13+ raises MemoryError",
+    )
+    def test_escapes_fixer_degrades_on_crash_input(self):
+        # The escape fixer is the next in-process tokenize stage; the same
+        # input must degrade there too instead of crashing the pipeline.
+        from ava_builtins.plugins.ava_syntax_fix._escapes import _fix_invalid_escapes
+
+        code, n = _fix_invalid_escapes(self.CRASH_INPUT)
+        assert code == self.CRASH_INPUT
+        assert n == 0
+
+    def test_oversized_line_skips_translation(self):
+        src = "a" * _MAX_TOKENIZE_LINE_LENGTH + "\uff0c"
+        code, n = _translate_outside_strings(src, _PUNCT_MAP)
+        assert code == src
+        assert n == 0
+
+    def test_lone_surrogate_skips_translation(self):
+        src = "x = \uff0c\ud800"
+        code, n = _translate_outside_strings(src, _PUNCT_MAP)
+        assert code == src
+        assert n == 0
+
+    def test_guard_does_not_block_normal_translation(self):
+        code, n = _translate_outside_strings("print(1\uff0c2)", _PUNCT_MAP)
+        assert code == "print(1,2)"
+        assert n == 1
 
 
 # --- _detect_missing_imports ---
