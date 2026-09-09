@@ -216,6 +216,23 @@ def test_an_unowned_pause_recovers_at_the_short_bound(
     assert unpaused == [True]
 
 
+def test_retained_normal_recovery_blocks_generic_self_unpause(
+    fake_pause: Callable[[float | None], None], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake_pause(sp.STRANDED_PAUSE_TIMEOUT_S + 60)
+    monkeypatch.setattr(sp, "read_update_lease", lambda: None)
+
+    def refuse(_snapshot: sp.updater_handoff.UpdaterHandoffSnapshot) -> bool:
+        return False
+
+    monkeypatch.setattr(sp.updater_handoff, "allows_generic_recovery", refuse)
+    unpaused: list[bool] = []
+    monkeypatch.setattr(sp, "unpause_local_cluster", lambda: unpaused.append(True))
+
+    assert sp.recover_stranded_pause() is False
+    assert unpaused == []
+
+
 # ─── which lease shapes own a pause (issue #1116) ────────────────────────────
 
 

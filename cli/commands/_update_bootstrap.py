@@ -24,7 +24,6 @@ from typing import Literal
 
 import psutil
 import psycopg
-from pydantic import Field
 
 from cli.commands._release_inventory import (
     _regular_bytes,
@@ -55,6 +54,15 @@ from shared.runtime_release import (
 )
 from shared.session_backend import get_backend
 from shared.session_record import SessionRecord
+from shared.updater_recovery import (
+    BootstrapRecoveryJournal as BootstrapJournal,
+)
+from shared.updater_recovery import (
+    BootstrapRecoveryPhase as BootstrapPhase,
+)
+from shared.updater_recovery import (
+    BootstrapRecoveryStage,
+)
 
 
 class BootstrapHopRequest(EvidenceModel):
@@ -64,36 +72,7 @@ class BootstrapHopRequest(EvidenceModel):
     recovery_context: str
     inventory_receipt: str
     predecessor: ExpectedProcess
-
-
-class BootstrapPhase(EvidenceModel):
-    """Observed timings only; never lease or readiness authority."""
-
-    stage: str
-    observed_at: datetime
-    monotonic_s: float
-    pid: int
-    elapsed_s: float | None
-
-
-class BootstrapJournal(EvidenceModel):
-    request: str
-    request_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
-    inventory_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
-    candidate_context_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
-    recovery_context_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
-    stage: Literal[
-        "prepared",
-        "cron_quiesced",
-        "old_stopped",
-        "candidate_starting",
-        "candidate_started",
-        "candidate_ready",
-        "recovering",
-        "recovered",
-    ]
-    cron: str = Field(max_length=65536)
-    phases: tuple[BootstrapPhase, ...] = Field(default=(), max_length=64)
+    normal_release_path: str | None = None
 
 
 @dataclass(frozen=True)
@@ -387,7 +366,12 @@ def _cron_tables(plan: PreparedBootstrapHop) -> tuple[bytes, bytes]:
     return original, b"".join(retained)
 
 
-def _journal(plan: PreparedBootstrapHop, generation: str, stage: str, cron: bytes) -> None:
+def _journal(
+    plan: PreparedBootstrapHop,
+    generation: str,
+    stage: BootstrapRecoveryStage,
+    cron: bytes,
+) -> None:
     """Replace one bounded versioned recovery envelope under exact ownership."""
     recovery = updater_handoff.read_bootstrap_recovery()
     previous = (
@@ -419,6 +403,7 @@ def _journal(plan: PreparedBootstrapHop, generation: str, stage: str, cron: byte
             "recovery_context_digest": hashlib.sha256(
                 _regular_bytes(Path(plan.request.recovery_context))
             ).hexdigest(),
+            "normal_release_planned": plan.request.normal_release_path is not None,
             "stage": stage,
             # Only the validated secret-free restricted-A command shape reaches here.
             "cron": cron.decode("utf-8"),
