@@ -190,6 +190,7 @@ class AgentInspectLive(BaseModel):
     started_at: datetime | None = None
     shells: list[ShellInfo]
     config_overlay: dict[str, Any]
+    preset_name: str | None = None
     notice: OpenNotice | None = None
     heartbeat: HeartbeatInfo
 
@@ -203,7 +204,9 @@ class AgentInspect(BaseModel):
     LLM cost, turn/exec stats, active-rate (working vs blocked-on-a-human),
     idle-heartbeat state, and delivery-obligation state.
     `config_overlay` is the spawn-time field-override map (empty when the agent
-    runs on cluster defaults). `shells` is probed on the agent's own machine via
+    runs on cluster defaults); `preset_name` names the spawn-time preset whose
+    config was folded into it (None when no preset was used). `shells` is
+    probed on the agent's own machine via
     the `shell_probe` cluster op — the gateway never runs sessions itself, so a
     split deployment sees each agent's shells wherever that agent runs.
 
@@ -236,6 +239,7 @@ class AgentInspect(BaseModel):
     since_compact: bool = False
     shells: list[ShellInfo]
     config_overlay: dict[str, Any]
+    preset_name: str | None = None
     notice: OpenNotice | None = None
     cost: AgentCost
     stats: AgentStats

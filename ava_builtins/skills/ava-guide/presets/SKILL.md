@@ -8,7 +8,10 @@ description: Creates and manages reusable Ava agent config presets. Use when the
 A **preset** is a named, reusable agent config template — it bundles model
 choice, plugin config fields, and per-agent settings into a config overlay.
 Selecting a preset at spawn time seeds the new agent's config from it; an
-explicit config passed alongside wins per-key.
+explicit config passed alongside wins per-key. The preset is named inside the
+config overlay — `config_overlay={"preset": "name", ...}` — resolved at the
+spawn boundary (the legacy top-level `preset` spawn argument is a deprecated
+alias for the same key).
 
 Use this when:
 - The user asks to "add a new agent type" or "create a preset"
@@ -26,9 +29,16 @@ The core problem presets solve: when spawning an agent, you don't need to
 manually write config every time. Store a set of commonly used configurations
 as a template, and just reference it by name when spawning.
 
-**Preset vs `config_overlay`:** preset is the **base**, `config_overlay` is
-the **precise override** at spawn time. When both are passed, `config_overlay`
-fields with the same name override those from the preset.
+**Preset vs `config_overlay`:** preset is the **base**, the explicit
+`config_overlay` fields are the **precise override** at spawn time — fields
+with the same name override those from the preset. On the wire the preset is a
+key inside the overlay: `config_overlay={"preset": "name", "llm_model": ...}`.
+
+**Fork rule:** a fork keeps the source agent's effective config so its
+inherited context stays cache-valid. At fork, the only allowed config change
+is ADDING skills to `skills_to_inject_into_system_prompt` /
+`skills_to_expand_at_start` (supersets; anything else is rejected with
+`fork_config_change_not_allowed`). Added skills load at the context tail.
 
 **What does Config store?** The preset's `config` is a JSON object whose
 fields are per-agent config field name → value. Available per-agent fields are

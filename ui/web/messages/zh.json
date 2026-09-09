@@ -843,6 +843,7 @@
     "sectionShells": "持久 Shell",
     "unnamed": "（未命名）",
     "sectionConfigOverlay": "配置覆盖",
+    "preset": "预设",
     "sectionCost": "成本",
     "metricCost": "成本",
     "metricLlmCalls": "LLM 调用",

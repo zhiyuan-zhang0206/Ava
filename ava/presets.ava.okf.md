@@ -38,15 +38,29 @@ CRUD (create / update / delete) **is not in the SDK**—presets are operational 
 
 ## Usage
 ```python
-ava.agents.spawn(prompt="...", preset="fast-worker")
-# or
-preset = ava.agents.presets.get("fast-worker")
-ava.agents.spawn(prompt="...", config_overlay=preset.config)
+# The preset is a key INSIDE the config overlay (task #2694):
+ava.agents.spawn(prompt="...", config_overlay={"preset": "fast-worker"})
+# ...optionally with explicit overrides that win per key:
+ava.agents.spawn(
+    prompt="...",
+    config_overlay={"preset": "fast-worker", "llm_model": "deepseek-v4-pro"},
+)
 ```
-`preset` is the base, `config_overlay` is the precise override; when both are passed, `config_overlay` overrides field by field.
+`preset` is the base, the explicit overlay fields are the precise override
+(per key). The legacy `spawn(preset=...)` argument is a deprecated alias for
+the same key. The spawn boundary resolves the preset; the agent row stores the
+resolved overlay plus `agents_meta.preset_name`, and the inspector shows the
+preset reference plus only the fields that differ from the preset (diff
+display).
+
+**Fork rule:** a fork keeps the source agent's effective config so the
+inherited context stays cache-valid; only ADDING skills to
+`skills_to_inject_into_system_prompt` / `skills_to_expand_at_start` is allowed
+(supersets; anything else → `fork_config_change_not_allowed`). Added skills
+load at the context tail.
 
 ## Key Dependencies
-- [[agents.ava.okf.md]] — spawn accepts preset parameter
+- [[agents.ava.okf.md]] — spawn resolves `config_overlay.preset` at the spawn boundary
 - [[ava/skills.ava.okf.md|Skill System]] — name resolution for the two skill combination fields + index-vs-expand mechanism
 
 ## Notes

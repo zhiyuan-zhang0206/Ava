@@ -61,10 +61,18 @@ export function useAgentActions(
     }) =>
       api.spawnAgent({
         ...(machine !== undefined ? { machine } : {}),
-        ...(model !== undefined || reasoning_effort !== undefined
-          ? { config: { ...(model !== undefined ? { llm_model: model } : {}), ...(reasoning_effort !== undefined ? { reasoning_effort } : {}) } }
+        // The preset rides INSIDE the config overlay (config.preset) — the
+        // spawn boundary resolves it as the base; the explicit model/effort
+        // fields win per key (preset-in-config-overlay ruling, task #2694).
+        ...(model !== undefined || reasoning_effort !== undefined || preset !== undefined
+          ? {
+              config: {
+                ...(model !== undefined ? { llm_model: model } : {}),
+                ...(reasoning_effort !== undefined ? { reasoning_effort } : {}),
+                ...(preset !== undefined ? { preset } : {}),
+              },
+            }
           : {}),
-        ...(preset !== undefined ? { preset } : {}),
       }),
     onSuccess: () => track("spawn"),
     onError: (e: unknown) => showError(`Spawn failed: ${errMsg(e)}`),
