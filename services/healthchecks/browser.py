@@ -31,13 +31,22 @@ The failure shapes get different treatment, and the split is the standard
   code. This is the case a CDP-only probe could not even see.
 - **ours, but the session is gone** — an unsupervised Chrome of our own (a
   `SingletonLock` handoff, or a Chrome started by hand on our profile). The
-  healthcheck now closes this loop itself instead of naming a remedy an
-  operator would have to run: it sweeps the Chrome (identity-verified ours,
+  healthcheck closes this loop itself instead of naming a remedy an operator
+  would have to run: it sweeps the Chrome (identity-verified ours,
   `services/browser/orphan.reap_cluster_chrome`) and rebuilds the session in
   the same round — the automated equivalent of `ava stop --stop-browser` +
   `ava start`. The profile persists, so logins survive the rebuild.
-- **CDP down** (`DOWN`), session alive or not — nothing is serving. Respawn in
-  the ava-browser pane via `shared.service_respawn.respawn_service` (which kills
+- **the session is gone, whatever the probe says** — the sweep + rebuild above
+  runs for EVERY session-gone shape, not only when the probe reads ALIVE. A
+  probe that reads DOWN because our orphaned Chrome still holds the port with
+  a wedged DevTools endpoint (the 2026-09-09 swap-pressure outage: HTTP 200,
+  empty `/json/version` body, 8 minutes of CDP silence) must not fall through
+  to a plain respawn — the daemon refuses the occupied port, so a respawn
+  alone cannot win and only churns once per round. The reap frees the port;
+  when nothing is left to reap it is a no-op and the rebuild is all that runs.
+- **CDP down** (`DOWN`) with the session alive — nothing is serving (or the
+  endpoint is wedged, see `services/browser/probe.py`). Respawn in the
+  ava-browser pane via `shared.service_respawn.respawn_service` (which kills
   the stale session first, so a live-but-wedged pane is covered too).
 
 ## Episode-gated reporting
@@ -288,16 +297,20 @@ def main() -> None:
             return
         # Live session, dead CDP: Chrome crashed or hung inside its own pane.
         # respawn_service kills the stale session first, so the restart applies.
-    elif probe.alive:
-        # Our Chrome holds the port but the supervised session is gone — the
-        # shape that once waited on an operator. Close the loop here: sweep
-        # the unsupervised Chrome (identity-verified ours) and rebuild the
-        # session in the same round.
+    else:
+        # The supervised session is gone. Whether the probe reads ALIVE (our
+        # unsupervised Chrome holding the port — a SingletonLock handoff, or
+        # one started by hand) or DOWN (nothing serving, or the 2026-09-09
+        # swap-pressure shape: our orphaned Chrome still holding the port with
+        # a wedged DevTools endpoint), the remedy is the same: sweep this
+        # cluster's Chrome — identity-verified ours, a no-op when none is
+        # left — and rebuild the session. A plain respawn cannot win while an
+        # orphan still holds the port, because the daemon refuses to launch a
+        # second Chrome on it (and launching would collide on the profile
+        # SingletonLock anyway); the sweep is what frees the port.
         _log.info(
-            "[browser healthcheck] CDP port %d is served by this cluster's own Chrome (%s) "
-            "but the ava-browser session is gone — sweeping the unsupervised Chrome and "
-            "rebuilding the session",
-            _PORT,
+            "[browser healthcheck] ava-browser session gone (%s) — sweeping the "
+            "unsupervised Chrome (identity-verified ours) and rebuilding the session",
             probe.detail,
         )
         if _sweep_and_rebuild():

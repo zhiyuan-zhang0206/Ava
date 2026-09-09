@@ -83,10 +83,13 @@ def test_healthy_when_session_and_our_chrome_up(
 
 
 def test_restarts_when_both_down(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    restarts, *_ = _probes(
+    """Session gone AND CDP down: the sweep runs first (a no-op here — the reap
+    finds nothing) and the rebuild is all that is left."""
+    restarts, reaped, *_ = _probes(
         monkeypatch, tmp_path, probe=DaemonProbe.down("CDP unreachable"), session=False
     )
     hc.main()
+    assert reaped == ["reap"]
     assert restarts == ["restart"]
 
 
@@ -135,6 +138,25 @@ def test_orphan_of_our_own_is_swept_and_rebuilt(
     assert restarts == ["restart"]
     assert any("sweeping the unsupervised Chrome" in r.getMessage() for r in caplog.records)
     assert any("session rebuilt" in r.getMessage() for r in caplog.records)
+
+
+def test_session_gone_with_wedged_cdp_is_swept_and_rebuilt(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The 2026-09-09 shape: the session died (memory pressure killed the
+    daemon) and the orphaned Chrome still holds the port serving a wedged
+    DevTools endpoint — probe DOWN, session gone. A plain respawn cannot win
+    (the daemon refuses the occupied port), so the round must sweep the
+    unsupervised Chrome and rebuild the session."""
+    restarts, reaped, *_ = _probes(
+        monkeypatch,
+        tmp_path,
+        probe=DaemonProbe.down("CDP 200 but the body is not JSON — wedged DevTools endpoint"),
+        session=False,
+    )
+    hc.main()
+    assert reaped == ["reap"]
+    assert restarts == ["restart"]
 
 
 def test_orphan_with_nothing_left_to_reap_still_rebuilds(
@@ -271,7 +293,9 @@ def test_failed_restart_exits_nonzero(
     ):
         hc.main()
     assert exc.value.code == EXIT_RESPAWN_FAILED
-    assert any("restart FAILED" in r.getMessage() for r in caplog.records)
+    # Session gone routes through the sweep + rebuild path, whose failure is
+    # the episode reported; the exit code the watchdog keys on is unchanged.
+    assert any("sweep + session rebuild FAILED" in r.getMessage() for r in caplog.records)
 
 
 # ─── episode-gated reporting ────────────────────────────────────────────────

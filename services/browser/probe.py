@@ -21,6 +21,12 @@ is up", never "this unit's browser is up", and any Chrome that got the port firs
 Agents then drive the wrong browser, which is worse than a red check because
 nothing looks wrong.
 
+And even "a debuggable Chrome is up" is not established by the status code alone:
+`_cdp_unreachable` validates the body, not just the 200. An orphaned Chrome that
+keeps the port answered while its DevTools endpoint is wedged serves a 200 with
+an empty or invalid body (the 2026-09-09 macmini swap-pressure outage: ~8 minutes
+of CDP silence from exactly that shape), and reads as DOWN.
+
 ## Identity comes from the profile, and the port ties it to the answer
 
 Ava launches Chrome with `--user-data-dir=$AVA_HOME/chrome-profile`, a path
@@ -67,10 +73,12 @@ supervision are two questions and `services/healthchecks/browser.py` asks both.
 
 from __future__ import annotations
 
+import json
 import logging
 import urllib.error
 import urllib.request
 from pathlib import Path
+from typing import cast
 
 import psutil
 
@@ -101,7 +109,15 @@ def cdp_url(port: int) -> str:
 
 
 def _cdp_unreachable(port: int) -> str | None:
-    """None when a debuggable Chrome answers 200 on `port`; else why it did not.
+    """None when a debuggable Chrome answers 200 *and* serves a real
+    `/json/version` payload on `port`; else why it did not.
+
+    A bare 200 is not "a debuggable Chrome is up". A Chrome that survived its
+    daemon being killed (macmini swap-pressure incident 2026-09-09: HTTP 200,
+    EMPTY body, browser unusable for ~8 minutes) can keep the port answered
+    while its DevTools endpoint is wedged. The body must therefore parse as
+    JSON and carry the `Browser` field real Chrome always serves, or the
+    endpoint is dead for watchdog purposes.
 
     Deliberately does not say *whose* Chrome — that is the next question, and
     keeping the two separate is what lets a foreign occupant be reported as a
@@ -112,8 +128,19 @@ def _cdp_unreachable(port: int) -> str | None:
         with urllib.request.urlopen(url, timeout=_CDP_TIMEOUT_S) as resp:  # noqa: S310 — fixed loopback CDP URL
             if resp.status != 200:
                 return f"CDP {url} returned HTTP {resp.status}"
+            body = resp.read()
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
         return f"CDP unreachable on {url}: {type(exc).__name__}: {exc}"
+    try:
+        parsed: object = json.loads(body)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return f"CDP {url} answered 200 but the body is not JSON — wedged DevTools endpoint"
+    browser = cast("dict[str, object]", parsed).get("Browser") if isinstance(parsed, dict) else None
+    if not isinstance(browser, str) or not browser:
+        return (
+            f"CDP {url} answered 200 but the body is not a valid /json/version "
+            "payload (no Browser field) — wedged DevTools endpoint"
+        )
     return None
 
 
@@ -186,8 +213,12 @@ def _probe_browser(port: int | None, profile: Path | None) -> DaemonProbe:
     The three verdicts map onto `ProbeVerdict` the same way every other service's
     do — the line is whether a respawn can fix it:
 
-    - **CDP unreachable** → `DOWN`. No browser (or a hung one); `respawn_service`
-      kills the stale session and relaunches, which is exactly the fix.
+    - **CDP unreachable — refused, timed out, or a 200 whose `/json/version`
+      body is not valid JSON carrying `Browser` (the wedged-DevTools shape of
+      the 2026-09-09 swap-pressure outage)** → `DOWN`. `respawn_service` kills
+      the stale session and relaunches, and when the session is already gone
+      the healthcheck sweeps this cluster's Chrome before rebuilding — either
+      way a wedged endpoint is not called alive.
     - **CDP answers, but no Chrome of this cluster's profile listens there** →
       `PORT_TAKEN`, terminal. The occupant is another unit's browser or a Chrome
       on someone else's profile, and `services/browser/daemon.py` refuses to
