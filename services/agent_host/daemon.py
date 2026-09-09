@@ -62,6 +62,7 @@ from agent.hosted_ownership import settle_stale_running_rows
 from services._pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 from services.agent_host.dispatcher import InboundWakeDispatcher, TurnScheduler
 from services.agent_host.host import AgentHost
+from services.agent_host.pooled_checkpoint import PooledPostgresSaver
 from services.agent_host.pools import build_control_pool, build_shared_pool
 from shared import paths
 from shared.config import settings
@@ -403,7 +404,7 @@ async def _build_checkpointer(
     from shared.config.turn_view import turn_settings
 
     saver_pool = cast(AsyncConnectionPool[psycopg.AsyncConnection[DictRow]], pool)
-    checkpointer = AsyncPostgresSaver(conn=saver_pool, serde=build_checkpoint_serde())
+    checkpointer = PooledPostgresSaver(conn=saver_pool, serde=build_checkpoint_serde())
     _wrap_saver_writes_with_loud_failure(checkpointer)
     _wrap_saver_writes_with_nstep_interval(
         checkpointer,

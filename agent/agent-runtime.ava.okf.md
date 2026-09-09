@@ -12,6 +12,12 @@ tasks. Agent identity, config, model state and checkpoint threads stay separate;
 an idle agent has no running task. There is one runtime architecture and no
 per-agent process launcher or runner-mode selector.
 
+The host shares one compiled graph and logical `services/agent_host/pooled_checkpoint.py`
+checkpointer. Each cursor leases its own pool connection and delegates pipeline,
+transaction and cancellation cleanup to LangGraph's saver for that connection.
+Unrelated agents can therefore read and write concurrently. The N-step wrapper
+in `agent/startup.py` still serializes writes and flushes for the same thread.
+
 The graph is the eight-node self-loop `after_init -> init_context -> claim ->
 before_llm -> llm -> before_exec -> exec -> after_exec`. Claim returns to init
 context for compaction and to END for idle or lifecycle control. Routing uses
