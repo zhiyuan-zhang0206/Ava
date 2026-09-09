@@ -26,7 +26,8 @@ from typing import Literal
 from shared.cluster import session_name
 from shared.daemon_health import DaemonProbe
 from shared.paths import run_dir
-from shared.port_preflight import listeners_on
+from shared.port_preflight import ListenerDiscoveryError
+from shared.port_preflight import strict_listeners_on as listeners_on
 from shared.proc import force_kill, process_alive, request_stop
 
 _log = logging.getLogger("shared.supervised_listener")
@@ -71,7 +72,10 @@ def probe_supervised_listener(
 
     record = SessionRecord.read(run_dir() / "sessions" / f"{session}.json")
     supervised = record is not None and get_backend().has_session(session)
-    holders = {port: tuple(dict.fromkeys(listeners_on(port))) for port in ports}
+    try:
+        holders = {port: tuple(dict.fromkeys(listeners_on(port))) for port in ports}
+    except ListenerDiscoveryError as exc:
+        return SupervisedListenerProbe(DaemonProbe.unavailable(str(exc)))
     pids = tuple(dict.fromkeys(pid for port in ports for pid in holders[port]))
     expected = tuple(pid for pid in pids if _listener_matches_binary(pid, binary))
     stale = tuple(pid for pid in expected if not supervised or record is None or record.pid != pid)

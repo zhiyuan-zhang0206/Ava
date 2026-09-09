@@ -39,11 +39,21 @@ Three rules:
    — the gateway would dial itself and report the peer online under the wrong
    identity (the 2026-07-18 runner incident).
 3. **The station's advertised url is its OTLP ingress** (single source:
-   `AVA_TELEMETRY_OTLP_PORT`, default 4318) — the one station endpoint that
+   the station unit's `AVA_TELEMETRY_OTLP_PORT`, default 4318) — the one station endpoint that
    authenticates with the cluster bearer. The native backends (Loki 3100 /
    Prometheus 9090 / Grafana 3003) have no advertised url; they stay
    loopback-bound unless an operator widens the listen host,
    and they are never dialed cross-machine.
+   Collector rendering and the station probe share `shared.station_endpoint`:
+   they select the live pure-station advertisement on the configured
+   `AVA_OBSERVABILITY_URL` host and preserve its port. Gateway/station and
+   runner/station hybrids advertise gateway/ops URLs, so they are excluded by
+   capability. Without a matching pure station, both consumers append
+   `AVA_OBSERVABILITY_OTLP_PORT` (default 4318), which the operator must set to
+   the remote station's actual ingress port. The consumer's local port never
+   selects a remote target. Ambiguous advertisements fail rendering; discovery
+   failure aborts rendering and makes the watchdog skip its probe round.
+
 
 ## SSRF guard
 
