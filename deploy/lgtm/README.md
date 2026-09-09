@@ -60,6 +60,15 @@ knobs (`AVA_LGTM_LISTEN_HOST`, `AVA_LGTM_GRAFANA_LISTEN_HOST`): Loki and
 Prometheus default to loopback, Grafana defaults to all interfaces, and native
 Grafana dials Loki, Prometheus, and Postgres on the host loopback.
 
+**Plugin policy:** the native deployment needs no preinstalled plugins (every
+shipped datasource and dashboard panel is a Grafana-core one), so the rendered
+INI sets `[plugins] preinstall_disabled = true` — Grafana 13's background
+installer would otherwise install the distribution's default plugins on first
+start and auto-update them later, work that can still be in flight at SIGTERM
+and hold the process past the unit's shutdown deadline (2026-09-10 #2048).
+If a plugin ever becomes required, provision it deliberately at converge time;
+do not re-enable background installation.
+
 The observation data volume is a per-machine knob: `AVA_LGTM_STORAGE_DIR`
 (empty default = `$AVA_HOME/lgtm/native/data`, byte-identical to the historical
 layout) moves the Loki filesystem store and the Prometheus TSDB to a configured
