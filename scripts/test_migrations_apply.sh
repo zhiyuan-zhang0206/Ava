@@ -73,6 +73,32 @@ BEGIN
     END IF;
 END $$;
 
+-- Exercise lease closure on the fresh baseline.
+INSERT INTO agents (id, label) VALUES (991005, 'impersonation-owner-smoke');
+INSERT INTO agents_meta (id, status, machine, runtime_generation, runtime_owner)
+    VALUES (991005, 'idling', 'smoke-machine',
+            '00000000-0000-0000-0000-000000000003',
+            '00000000-0000-0000-0000-000000000004');
+INSERT INTO agent_impersonations (
+    id, agent_id, source, machine, token_hash, status, ttl_seconds, expires_at,
+    accepted_generation, accepted_owner
+) VALUES (
+    '00000000-0000-0000-0000-000000000005', 991005, 'external_agent:smoke',
+    'smoke-machine', 'smoke-token', 'active', 300, clock_timestamp() + interval '5 minutes',
+    '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000002'
+);
+UPDATE agent_impersonations SET status = 'released' WHERE agent_id = 991005;
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM agents_meta WHERE id = 991005
+          AND runtime_generation = '00000000-0000-0000-0000-000000000001'
+          AND runtime_owner = '00000000-0000-0000-0000-000000000002'
+    ) THEN
+        RAISE EXCEPTION 'lease closure did not restore the native incarnation';
+    END IF;
+END $$;
+
 -- Lifecycle status transitions preserve spawn lineage, even when the parent is
 -- terminated. This protects against a trigger reintroducing a spawner rewrite.
 INSERT INTO agents (id, label) VALUES

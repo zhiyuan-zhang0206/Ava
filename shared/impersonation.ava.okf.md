@@ -79,7 +79,12 @@ commit; repeated ACKs do not emit another completion event.
 Host relay delivery is at least once: a relay restart repeats pending hints.
 
 Voluntary release atomically inserts a normal inbound with the actual external
-sender and summary, then closes the lease. This narrow handoff follows explicit
+sender and summary, then closes the lease. Every transition from an open lease
+to released or expired restores its recorded accepting generation and owner in the same
+transaction through `agent_impersonations_restore_native_owner`. The trigger
+only updates running/idling rows on the lease's machine with non-NULL ownership;
+already-consistent identities are not rewritten. Runtime kind, protocol version
+and runtime lease deadline remain unchanged. This narrow handoff follows explicit
 native consent to this protocol; it does not enable generic caller-protocol v1
 or weaken the existing external-message/lifecycle write fences. Expiration
 instead records a system notice, without inventing an external summary. Redis
