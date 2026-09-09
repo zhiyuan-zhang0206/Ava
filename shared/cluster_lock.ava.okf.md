@@ -20,8 +20,8 @@ This row is the cluster's single **"intentionally mid-transition" signal, not ju
 
 ### The lease (mutual exclusion with crash-reclaim)
 
-- `acquire_update_lock(holder, *, kind, ttl_s)` — the atomic compare-and-set (CAS) against a free row or an expired holder; on success writes `phase='updating'` + `kind`. Returns False when a *live* holder still holds it.
-- `renew_update_lock` / `release_update_lock` — renewal is driven from the Phase-B poll, so `LOCK_TTL_S` (1800 s) bounds only how long a *crashed* holder blocks the next rollout; release returns the row to `phase='stable'` and clears `kind` + settle fields.
+- `acquire_update_lock(holder, *, kind, ttl_s)` — the atomic compare-and-set (CAS) against a free row or an expired holder; on success writes `phase='updating'` + `kind`. Returns False when a *live* holder still holds it or `managed_writer_evidence.pending` requires its own exact publication recovery. Generic recovery has the same pending guard: publication state outlives lease expiry and cannot be stranded by replacing only its holder.
+- `renew_update_lock` / `release_update_lock` — renewal is driven from the Phase-B poll, so `LOCK_TTL_S` (1800 s) bounds only how long a *crashed* holder blocks the next rollout; release returns the row to `phase='stable'` and clears `kind` + settle fields only after checked publication handling has cleared durable `pending`. Settle conversion and settle release carry the same atomic guard, so no generic lease transition can strand retained publication evidence.
 - `read_update_lease` → `DeployLease` (holder / held_for_s / expires_in_s / note / kind) — the row itself, for consumers that must explain the hold or tell an executing rollout apart from a settle hold (`DeployLease.awaits`); `update_lock_holder()` is the bare "is it held".
 
 ### Phase & kind (the explicit model)
