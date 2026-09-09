@@ -1053,8 +1053,9 @@ then run `scripts/post_deploy_visual_check.py --check --base-url <production-gat
 unauthenticated /api, so the health probe must target the gateway origin
 explicitly; the script appends `/api/health`).
 The wrapper calls the public gateway health API to compare process `started_at`,
-runs the browser pass inside `mcr.microsoft.com/playwright/python:v1.59.0-noble`,
-and writes `probes.json`, `meta.json`, and capture artifacts beneath
+runs the browser pass with the repo-pinned Playwright Chromium headless on the
+host (no Docker), and writes `probes.json`, `meta.json`, and capture artifacts
+beneath
 `~/post-deploy-visual/<wave-sha>/`. It never routes notifications: the invoking
 agent sends a P0 result to #3242 and #405 with `send_message`, or queues P2 with
 `notify`. It runs after rollout and cannot block deployment. Exit 20 is P0,
