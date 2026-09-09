@@ -1600,3 +1600,7 @@ INSERT INTO schema_migrations (name) VALUES ('20260908T225900_impersonation-push
 
 -- Native ownership restoration is already represented above.
 INSERT INTO schema_migrations (name) VALUES ('20260909T232714_impersonation-restore-native-owner');
+
+-- The runtime-admission runner lock function is already represented above.
+-- Fresh DBs stamp the migration instead of replaying its delta.
+INSERT INTO schema_migrations (name) VALUES ('20260904T155441_runtime-admission-runner-lock');

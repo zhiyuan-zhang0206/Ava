@@ -235,7 +235,6 @@ class AgentHost:
         """
         if self._publication_boot is None:
             self._publication_boot = asyncio.create_task(asyncio.to_thread(RuntimeAdmission.load))
-        publication = await asyncio.shield(self._publication_boot)
         stored = await self._read_stored_config(agent_id)
         if stored is None or not self._is_runnable(agent_id, stored):
             self._watcher_recovery_pending.discard(agent_id)
@@ -298,7 +297,7 @@ class AgentHost:
                 self._machine,
                 self._owner,
                 expected_from=stored.status,
-                publication=publication,
+                publication=await asyncio.shield(self._publication_boot),
             )
             if incarnation is None:
                 logger.info(

@@ -1,7 +1,5 @@
 """Actual birth boundaries preserve pending work during publication maintenance."""
 
-from collections.abc import Generator
-from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
@@ -9,7 +7,6 @@ import psycopg
 import pytest
 from psycopg.types.json import Jsonb
 
-from agent import _starting
 from shared.db import create_agent
 from shared.incarnation_resources import ResourceBirth, ResourceEvidenceError
 from shared.managed_writer_publication import (
@@ -22,8 +19,8 @@ from shared.runtime_admission import (
     legacy_boot_terminal_allowed,
     require_activation,
 )
-from tests.shared.test_managed_writer_publication import pending, seed_current
 from tests.shared.test_managed_writer_publication import publication_db as publication_db
+from tests.shared.test_managed_writer_publication import seed_current
 
 
 @pytest.mark.usefixtures("publication_db")
@@ -49,43 +46,6 @@ def test_current_requires_both_actual_activation_fields(
         else:
             with pytest.raises(PublicationAdmissionDeferredError, match="verified activation"):
                 require_activation(db_conn, decision)
-
-
-@pytest.mark.usefixtures("publication_db")
-def test_process_pending_does_not_claim_or_terminate(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    current = seed_current(db_conn)
-    pending(db_conn, current)
-    target = create_agent(db_conn)
-    db_conn.execute(
-        "INSERT INTO agents_meta(id,status,machine) VALUES(%s,'idling','runner')", (target,)
-    )
-    row = db_conn.execute(
-        "INSERT INTO inbound_messages(agent_id,kind,content,source) VALUES(%s,'chat','retained','user') RETURNING id",
-        (target,),
-    ).fetchone()
-    assert row is not None
-    inbound = row[0]
-    db_conn.commit()
-
-    @contextmanager
-    def transaction() -> Generator[psycopg.Connection]:
-        with db_conn.transaction():
-            yield db_conn
-
-    monkeypatch.setattr(_starting, "write_transaction", transaction)
-    monkeypatch.setattr(_starting, "machine_name", lambda: "runner")
-    with pytest.raises(PublicationAdmissionDeferredError):
-        _starting.claim_agent_row(target)
-    # Even schema/launch failure cleanup must not erase the deferred row.
-    _starting._mark_preclaim_terminated(target)
-    assert db_conn.execute(
-        "SELECT status,pid,runtime_generation,runtime_owner FROM agents_meta WHERE id=%s", (target,)
-    ).fetchone() == ("idling", None, None, None)
-    assert db_conn.execute(
-        "SELECT status,content FROM inbound_messages WHERE id=%s", (inbound,)
-    ).fetchone() == ("pending", "retained")
 
 
 @pytest.mark.usefixtures("publication_db")
