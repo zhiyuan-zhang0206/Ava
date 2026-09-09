@@ -45,6 +45,7 @@ from typing import Any, cast
 
 import psutil
 
+from shared import session_log
 from shared.log import logger
 from shared.pty_sessions._paths import DEFAULT_COLS, DEFAULT_ROWS, err, ok, write_record
 from shared.session_record import SessionRecord, pid_starttime_ticks
@@ -147,13 +148,12 @@ class PtySession:
         self.rows = rows
         self.record = record
         self.record_path = rec_path
-        # The pyte screen, typed as Any: naming PtyScreen here would import
-        # the screen module (and pyte) at module load — the laziness this
-        # class exists to provide (no TYPE_CHECKING by repo convention).
+        # Any keeps the screen module and pyte lazy; naming PtyScreen here
+        # would import them eagerly (no TYPE_CHECKING by repo convention).
         self._screen: Any = None
         self._ring = bytearray()
-        self._log_fd = os.open(log_path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)
-        self._log_written = 0
+        self._log_fd, created = session_log.open_session_log(log_path, name, pid=pid)
+        self._log_written = os.fstat(self._log_fd).st_size if created else 0
         self._log_cap = log_cap
         self._lock = threading.Lock()
         self._dead = False

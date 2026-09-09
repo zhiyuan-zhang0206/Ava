@@ -326,15 +326,19 @@ def test_transcript_log_is_capped(tmp_path: Path) -> None:
     """The byte transcript stops growing at the per-session cap (the D6
     unbounded-growth guard): past the cap the host keeps the session but
     stops appending."""
-    s = _make_session(tmp_path, "ava-test-logcap-1", log_cap=100)
+    s = _make_session(tmp_path, "ava-test-logcap-1", log_cap=200)
+    header = (tmp_path / "ava-test-logcap-1.out.log").read_bytes()
+    assert header.startswith(b"--- ava session ava-test-logcap-1 start=")
+    assert header.endswith(f" pid={s.pid} ---\n".encode())
+    assert s._log_written == len(header)
     s.log_write(b"a" * 60)
-    s.log_write(b"b" * 60)
+    s.log_write(b"b" * 200)
     log_file = tmp_path / "ava-test-logcap-1.out.log"
-    assert len(log_file.read_bytes()) == 100
-    assert log_file.read_bytes().startswith(b"a" * 60)
+    assert len(log_file.read_bytes()) == 200
+    assert log_file.read_bytes() == header + b"a" * 60 + b"b" * (140 - len(header))
     s.log_write(b"c" * 50)
-    assert s._log_written == 100
-    assert len(log_file.read_bytes()) == 100, "log must not grow past the cap"
+    assert s._log_written == 200
+    assert len(log_file.read_bytes()) == 200, "log must not grow past the cap"
 
 
 def test_host_startup_leaves_log_retention_to_the_cli(

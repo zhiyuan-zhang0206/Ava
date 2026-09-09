@@ -16,6 +16,8 @@ and the matching GitHub Releases, cut by `scripts/release_cut.py`.
   admission).
 
 ### Fixed
+- New shell session transcripts start with a unique host-written identity line,
+  preventing filelog fingerprint collisions from shared login or CLI banners.
 - Maintenance drain receipts are graded by failure class: a turn raising a
   database-outage exception (`psycopg.OperationalError`, `PoolTimeout`,
   `TimeoutError`) records a crash-equivalent `undelivered` receipt instead of a

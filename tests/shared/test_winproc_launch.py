@@ -194,8 +194,8 @@ class _Call:
 
     command: str | list[str]
     creationflags: int
-    stdout: str
-    stderr: str
+    stdout: os.stat_result
+    stderr: os.stat_result
 
 
 class _FakePopen:
@@ -212,7 +212,9 @@ class _FakePopen:
         stderr: IO[bytes],
         **_: object,
     ) -> None:
-        _FakePopen.calls.append(_Call(command, creationflags, stdout.name, stderr.name))
+        _FakePopen.calls.append(
+            _Call(command, creationflags, os.fstat(stdout.fileno()), os.fstat(stderr.fileno()))
+        )
         # A pid psutil can resolve, so new_session records a real create_time.
         self.pid = os.getpid()
 
@@ -276,8 +278,13 @@ def test_new_session_launches_a_daemon_with_the_log_handles(
     assert call.command == ["python", "-m", "services.browser.daemon"]
     assert call.creationflags == winproc._PRIVATE_CONSOLE_FLAGS
     log = winproc.session_log_path("zz-daemon")
-    assert call.stdout == str(log)
-    assert call.stderr == str(log)
+    assert call.stdout == log.stat()
+    assert call.stderr == log.stat()
+
+    header = log.read_bytes()
+    assert header.startswith(b"--- ava session zz-daemon start=")
+    assert header.endswith(b" ---\n")
+    assert b" pid=" not in header
 
     rec = winproc._read_record("zz-daemon")
     assert rec is not None
@@ -295,8 +302,8 @@ def test_new_session_splits_stderr_when_asked(
         "zz-agent", ["python", "-m", "agent"], tmp_path, env={}, stderr_append=stderr_log
     )
     call = fake_popen.calls[-1]
-    assert call.stderr == str(stderr_log)
-    assert call.stdout == str(winproc.session_log_path("zz-agent"))
+    assert call.stderr == stderr_log.stat()
+    assert call.stdout == winproc.session_log_path("zz-agent").stat()
 
 
 def test_new_session_shell_command_reaches_popen_as_a_string(
@@ -308,7 +315,7 @@ def test_new_session_shell_command_reaches_popen_as_a_string(
     call = fake_popen.calls[-1]
     assert call.command == 'cmd /s /c "git fetch && ava restart"'
     assert call.creationflags == winproc._PRIVATE_CONSOLE_FLAGS
-    assert call.stdout == str(winproc.session_log_path("zz-updater"))
+    assert call.stdout == winproc.session_log_path("zz-updater").stat()
 
 
 @pytest.mark.parametrize(
