@@ -11,7 +11,8 @@ cluster's ports, stated here beside the record code they read:
 - `occupied_ports` / `listeners_on` / `listener_addrs` — the ports currently
   bound on this host, the pids holding them, and their local bind addresses (a
   bind probe, with an optional `is_ours` filter so an idempotent restart's own
-  daemons do not read as conflicts);
+  daemons do not read as conflicts; the lsof fallback resolves through
+  standard absolute locations when a restricted context's PATH omits it);
 - `process_mentions` / `listener_is_ours` — the pid ownership predicate (the
   #1603/#1606 lineage): a listener counts as this unit's when its argv,
   resolved executable, or working directory mentions the unit's repo or home
@@ -23,6 +24,8 @@ cluster's ports, stated here beside the record code they read:
 
 from __future__ import annotations
 
+import os
+import shutil
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import cast
@@ -160,47 +163,94 @@ def listeners_on(port: int) -> list[int]:
         return []
 
 
-def strict_listeners_on(port: int) -> list[int]:
-    """Return listener PIDs, raising when discovery cannot establish absence.
+# Restricted contexts (cron, forced ssh commands, minimal login shells)
+# carry a PATH that often omits the platform's lsof location — macOS keeps
+# lsof in /usr/sbin, which cron's /usr/bin:/bin PATH never reaches — so PATH
+# lookup alone cannot be trusted. PATH wins when it resolves (fast, and it
+# honours an operator's own binary), then these candidates, in order.
+_LSOF_CANDIDATE_PATHS = (
+    "/usr/sbin/lsof",  # macOS and most Linux distros
+    "/usr/bin/lsof",
+    "/sbin/lsof",
+    "/bin/lsof",
+    "/usr/local/bin/lsof",
+    "/usr/local/sbin/lsof",
+    "/opt/homebrew/bin/lsof",  # Homebrew on Apple Silicon
+)
 
-    macOS can deny the global psutil scan. Its lsof fallback must distinguish
-    no matches (exit 1, no diagnostics) from execution or inspection failure.
+
+def _lsof_argv(*args: str) -> list[str] | None:
+    """Resolved lsof argv for `args`, or None when no lsof is reachable.
+
+    None means the inspection cannot run at all — the caller reports a
+    discovery failure rather than reading the missing inspection as absence.
+    """
+    binary = shutil.which("lsof")
+    if binary is None:
+        for candidate in _LSOF_CANDIDATE_PATHS:
+            if os.access(candidate, os.X_OK):
+                binary = candidate
+                break
+    if binary is None:
+        return None
+    return [binary, *args]
+
+
+def _psutil_listeners_on(port: int) -> tuple[list[int], bool] | None:
+    """`(pids, conclusive)` from the psutil scan, or None when the scan failed.
+
+    conclusive=True means the table was read and every LISTEN socket on
+    `port` was attributed — including the empty case, where `port` is absent
+    from the table. conclusive=False means a LISTEN socket on `port` exists
+    but psutil could not name its pid (the `pid is None` rows a restricted
+    /proc or socket table yields) — the caller must not read that as absence.
     """
     import psutil
 
     try:
         conns = psutil.net_connections(kind="tcp")
     except (psutil.Error, OSError):
-        conns = None
-    if conns is not None:
-        pids: list[int] = []
-        for conn in conns:
-            if conn.status != "LISTEN" or conn.pid is None:
-                continue
-            addr = conn.laddr
-            if len(addr) < 2:
-                continue
-            if addr[1] == port:  # psutil addr = (ip, port); `addr.port` is
-                pids.append(conn.pid)  # un-narrowable against `tuple[()]`
-        return pids
+        return None
+    pids: list[int] = []
+    for conn in conns:
+        if conn.status != "LISTEN":
+            continue
+        addr = conn.laddr
+        if len(addr) < 2:
+            continue
+        if addr[1] == port:  # psutil addr = (ip, port); `addr.port` is
+            if conn.pid is None:  # un-narrowable against `tuple[()]`
+                return [], False
+            pids.append(conn.pid)
+    return list(dict.fromkeys(pids)), True
 
+
+def _lsof_listeners_on(port: int) -> list[int]:
+    """Listener PIDs from lsof, raising ListenerDiscoveryError on failure.
+
+    lsof's exit 1 with no diagnostics is its "no match" answer — genuine
+    absence. Anything else (unreachable binary, timeout, non-empty stderr,
+    or exit 1 WITH output) is an inspection failure the caller must not
+    read as absence.
+    """
     import subprocess
 
+    argv = _lsof_argv("-nP", "-Fp", "-sTCP:LISTEN", f"-iTCP:{port}")
+    if argv is None:
+        raise ListenerDiscoveryError(
+            f"listener discovery failed on port {port}: lsof is not on PATH "
+            "and not in the standard locations"
+        )
     try:
         # S603: static argv; the only interpolated piece is an int port.
-        out = shared.proc.run_bounded(
-            ["lsof", "-nP", "-Fp", "-sTCP:LISTEN", f"-iTCP:{port}"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
+        out = shared.proc.run_bounded(argv, capture_output=True, text=True, timeout=10)
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise ListenerDiscoveryError(f"listener discovery failed on port {port}: {exc}") from exc
     if out.returncode not in (0, 1) or out.stderr.strip() or (out.returncode == 1 and out.stdout):
         raise ListenerDiscoveryError(
             f"listener discovery failed on port {port}: lsof exit {out.returncode}: {out.stderr.strip()}"
         )
-    pids = []
+    pids: list[int] = []
     for line in out.stdout.splitlines():
         if line.startswith("p"):
             try:
@@ -208,6 +258,27 @@ def strict_listeners_on(port: int) -> list[int]:
             except ValueError:
                 continue
     return list(dict.fromkeys(pids))
+
+
+def strict_listeners_on(port: int) -> list[int]:
+    """Return listener PIDs, raising when discovery cannot establish absence.
+
+    The psutil scan is trusted only when conclusive: a read failure (macOS
+    denies the global scan) or an unattributed LISTEN socket both fall back
+    to lsof. A psutil sighting that lsof cannot confirm is an inspection
+    failure — two disagreeing inspections prove nothing, and "saw a
+    listener, cannot name it" must never be reported as "nothing listens".
+    """
+    scan = _psutil_listeners_on(port)
+    if scan is not None and scan[1]:
+        return scan[0]
+    lsof_pids = _lsof_listeners_on(port)
+    if scan is not None and not lsof_pids:
+        raise ListenerDiscoveryError(
+            f"listener discovery failed on port {port}: the socket table shows "
+            "a listener that neither psutil nor lsof could attribute to a pid"
+        )
+    return lsof_pids
 
 
 def listener_addrs(port: int) -> set[str]:
@@ -240,14 +311,12 @@ def listener_addrs(port: int) -> set[str]:
 
     import subprocess
 
+    argv = _lsof_argv("-nP", "-Fpn", "-sTCP:LISTEN", f"-iTCP:{port}")
+    if argv is None:
+        return set()
     try:
         # S603: static argv; the only interpolated piece is an int port.
-        out = shared.proc.run_bounded(
-            ["lsof", "-nP", "-Fpn", "-sTCP:LISTEN", f"-iTCP:{port}"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
+        out = shared.proc.run_bounded(argv, capture_output=True, text=True, timeout=10)
     except (OSError, subprocess.TimeoutExpired):
         return set()
     if out.returncode != 0:

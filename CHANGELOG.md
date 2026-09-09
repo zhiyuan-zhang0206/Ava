@@ -16,6 +16,15 @@ and the matching GitHub Releases, cut by `scripts/release_cut.py`.
   admission).
 
 ### Fixed
+- Listener discovery no longer reads a restricted inspection context as
+  absence: the lsof fallback resolves through standard absolute locations when
+  a context's PATH omits it (macOS keeps lsof in /usr/sbin, which cron's
+  /usr/bin:/bin PATH never reaches — company-air `ava status` reported a
+  healthy collector as "nothing listening on port 4318" for exactly this
+  reason), and a psutil scan that cannot attribute the port's LISTEN socket
+  (a `pid is None` row) falls back to lsof instead of reporting empty; when
+  psutil sights a listener that lsof cannot confirm, discovery raises instead
+  of certifying absence (task #2665).
 - New shell session transcripts start with a unique host-written identity line,
   preventing filelog fingerprint collisions from shared login or CLI banners.
 - Single-machine dual-unit telemetry port deviation: a unit whose local
