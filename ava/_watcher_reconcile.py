@@ -70,21 +70,29 @@ def _live_cron_session(
     *,
     cron_expr: str,
     cron_timezone: str,
-    cron_end_at: datetime.datetime | None,
     generation: str | None,
     alive: set[int] | None,
     exclude_session: int | None = None,
 ) -> int | None:
     """Return the session id of an existing LIVE cron watcher with the same
-    schedule (Task #1825), or None.
+    schedule — expression + timezone, ANY end time — or None.
 
-    Two watchers with the same (agent, kind, schedule) — expression,
-    timezone, end time — are duplicates: they fire the same wake-ups, and a
+    Two watchers with the same (agent, schedule) fire the same wake-ups; a
     kill/rebuild cycle that stacked them (a killed cron resurrected as a new
     session while the old registration survived) made both fire concurrently
     (observed twice: #2811's triple instance, CEO #228's escalation-check-6h
-    sessions 52+53). The reconcile and cron() dedupe through this: a live
-    duplicate is reused instead of stacking a new generation.
+    sessions 52+53). The reconcile dedupes through this: a live duplicate is
+    reused instead of stacking a new generation.
+
+    The match is deliberately END-INSENSITIVE (QA review of PR #2037, task
+    #2617): the standing-cron cap made different-end twins of one schedule a
+    first-class state (a renewal whose kill half-failed, or a twin whose
+    session died), and an exact-end match would rebuild the dead twin into a
+    second live watcher that double-fires until the earlier end — with no
+    path that ever converges. Schedule-level liveness converges: any live
+    same-schedule row subsumes a dead row's rebuild. (Registration-time
+    exact-end dedupe is unaffected — explicit different-end registrations
+    still stack by design; only the death-rebuild path collapses.)
 
     "Live" means the registry row is still `running` AND its session is in
     the caller's session list. A row whose session is gone is exactly what
@@ -120,11 +128,7 @@ def _live_cron_session(
             continue
         if row["session_id"] not in alive:
             continue
-        if (
-            row["cron_expr"] == cron_expr
-            and row["cron_timezone"] == cron_timezone
-            and row["cron_end_at"] == cron_end_at
-        ):
+        if row["cron_expr"] == cron_expr and row["cron_timezone"] == cron_timezone:
             return row["session_id"]
     return None
 
@@ -167,16 +171,17 @@ def _reconcile_missing(
             if end_at is not None and end_at < now:
                 delete_watcher(agent_id, session_id)
                 return f"cron watcher '{name}': schedule ended; row dropped"
-            # Dedupe (Task #1825): the schedule may already be live under
-            # another session (a duplicate registration survived a
-            # kill/restart cycle — #2811, CEO #228). Rebuild would stack a
-            # second generation on it and both would fire; reuse it instead
-            # and drop this dead duplicate row.
+            # Dedupe (Task #1825, schedule-level): the schedule may already be
+            # live under another session (a duplicate registration survived a
+            # kill/restart cycle — #2811, CEO #228; or a renewal's kill half
+            # failed — QA review of PR #2037). Rebuild would stack a second
+            # generation on it and both would fire; drop this dead row
+            # instead — ANY live same-schedule row (regardless of end time)
+            # subsumes the rebuild.
             existing = _live_cron_session(
                 agent_id,
                 cron_expr=row["cron_expr"],
                 cron_timezone=row["cron_timezone"],
-                cron_end_at=end_at,
                 generation=generation,
                 alive=alive,
                 exclude_session=session_id,

@@ -21,6 +21,10 @@ waiting so you don't burn turns polling.
   you once at a datetime / after a delay.
 - **A recurring schedule** — `ava.watcher.cron(expr, message, name="<slug>")`
   wakes you on a cron schedule until its `end_time` (or you kill its session).
+  `end_time` defaults to **now + 7 days**: a standing schedule expires unless
+  renewed — re-registering the same expression + timezone renews it (fresh
+  session, fresh 7-day window), and a longer schedule must pass an explicit
+  `end_time`.
 
 ## Custom watcher
 
@@ -115,6 +119,10 @@ A time watcher occupies one background session that sleeps until its target
 time. It does not survive a machine restart — if the host reboots, re-arm any
 watcher you still need (your own process is restarted by the framework, but
 watchers are not automatically rebuilt).
+
+A cron schedule without an explicit `end_time` stops after 7 days (the
+standing cap). Renew by calling `ava.watcher.cron(...)` with the same
+expression and timezone again — the old watcher is replaced, never stacked.
 
 ## See also
 

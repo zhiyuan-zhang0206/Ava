@@ -179,6 +179,91 @@ def register_cron_atomic(
     return None
 
 
+def register_cron_renewal(
+    agent_id: int,
+    session_id: int,
+    *,
+    name: str,
+    message: str | None,
+    cron_expr: str,
+    cron_timezone: str,
+    cron_end_at: Any,
+    alive_provider: Callable[[], set[int] | None],
+    exclude_session: int | None = None,
+    template_version: int | None = None,
+    generation: str | None = None,
+) -> list[int]:
+    """Renew one standing cron registration, atomically superseding EVERY live twin.
+
+    The renewal half of the standing-cron cap (task #2617): re-registering the
+    same standing schedule extends it to the new end time instead of stacking a
+    second watcher — the Task #1825 dedupe matches end times exactly, so a
+    renewal (whose defaulted end is always later than the registered one) would
+    otherwise spawn a duplicate that double-fires until the old one expires.
+
+    One transaction on ONE connection, serialized on the END-INSENSITIVE
+    schedule key (same (agent, expression, timezone) pair — different end times
+    of one schedule must not run concurrently). The check looks for live
+    same-schedule rows whose end time differs; when any exist, the new row is
+    INSERTED and EVERY superseded session id is returned for the caller to kill
+    (the deliberate-kill semantics drop each superseded row). Superseding ALL
+    twins (not just the newest) is what makes repeated renewal converge on a
+    single watcher even after a partial failure left two live rows behind
+    (QA review of PR #2037). An empty list means no live twin — the caller
+    falls through to `register_cron_atomic` for the ordinary exact-match
+    dedupe (same-minute double registration, concurrent winners).
+
+    `alive_provider` is called INSIDE the lock for the same reason as
+    `register_cron_atomic` (the #794 delta2 fresh-liveness rule). A superseded
+    row whose session is no longer in the list does not count (a dead row is
+    the boot reconcile's business, not a renewal target — the reconcile's
+    schedule-level liveness check drops it). `exclude_session` skips one row —
+    the stale-template rebuild replaces its own session and must not treat it
+    as a renewal twin (the caller kills it explicitly).
+    """
+    exclude = -1 if exclude_session is None else exclude_session
+    with connect() as conn, conn.cursor() as cur:
+        cur.execute("SET TRANSACTION READ WRITE")
+        cur.execute(
+            "SELECT pg_advisory_xact_lock(%s)",
+            (cron_advisory_key(agent_id, cron_expr, cron_timezone, None),),
+        )
+        alive = alive_provider()
+        cur.execute(
+            """
+            SELECT session_id FROM agent_watchers
+            WHERE agent_id = %s AND kind = 'cron' AND status = 'running'
+              AND cron_expr = %s AND cron_timezone = %s
+              AND cron_end_at IS DISTINCT FROM %s
+              AND generation IS NOT DISTINCT FROM %s
+              AND session_id != %s
+            ORDER BY created_at DESC, session_id DESC
+            """,
+            (agent_id, cron_expr, cron_timezone, cron_end_at, generation, exclude),
+        )
+        twins = [int(r[0]) for r in cur.fetchall() if alive is not None and r[0] in alive]
+        if not twins:
+            return []
+        cur.execute(
+            _REGISTER_SQL,
+            (
+                session_id,
+                agent_id,
+                "cron",
+                name,
+                message,
+                None,
+                cron_expr,
+                cron_timezone,
+                cron_end_at,
+                None,
+                template_version,
+                generation,
+            ),
+        )
+        return twins
+
+
 def register_watcher(
     agent_id: int,
     session_id: int,

@@ -2056,3 +2056,342 @@ def test_cron_advisory_key_is_stable_and_schedule_scoped() -> None:
     assert cron_advisory_key(1, "0 9 * * *", "UTC", None) != cron_advisory_key(
         1, "0 9 * * *", "UTC", end
     )
+
+
+# ─── standing-cron cap + renewal (task #2617) ────────────────────────────────
+
+
+def _assert_defaulted_cron_end(
+    end: datetime.datetime, before: datetime.datetime, after: datetime.datetime
+) -> None:
+    """The default standing end: 7 days from the registration minute (minute
+    truncation groups a double registration into one dedupe). Asserted as a
+    minute-bounded window so a minute boundary crossing mid-test cannot
+    flake."""
+    lo = before.replace(second=0, microsecond=0) + datetime.timedelta(seconds=7 * 24 * 3600)
+    hi = after.replace(second=0, microsecond=0) + datetime.timedelta(seconds=7 * 24 * 3600)
+    assert lo <= end <= hi
+    assert end.second == 0 and end.microsecond == 0
+
+
+def test_cron_without_end_time_defaults_to_seven_day_cap(
+    _agent_row: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A standing cron registered without `end_time` carries the 7-day default
+    cap (user ruling 2026-09-09, task #2617) — never a NULL (forever) end."""
+    from ava.shell import sessions as _sessions
+
+    monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType]
+    before = datetime.datetime.now(datetime.UTC)
+    wid = watcher.cron("0 9 * * *", "daily", timezone="UTC", name="test-cap-default")
+    after = datetime.datetime.now(datetime.UTC)
+    try:
+        rows = [r for r in _registry_rows(_agent_row) if r["session_id"] == wid]
+        assert len(rows) == 1
+        _assert_defaulted_cron_end(rows[0]["cron_end_at"], before, after)
+    finally:
+        ava.shell.kill(wid)
+
+
+def test_cron_explicit_end_time_is_not_defaulted(
+    _agent_row: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An explicit `end_time` is stored verbatim — the cap only applies when
+    the caller passes none."""
+    from ava.shell import sessions as _sessions
+
+    monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType]
+    end = datetime.datetime.now(datetime.UTC) + datetime.timedelta(hours=2)
+    wid = watcher.cron("0 9 * * *", "daily", timezone="UTC", end_time=end, name="test-explicit-end")
+    try:
+        rows = [r for r in _registry_rows(_agent_row) if r["session_id"] == wid]
+        assert len(rows) == 1
+        assert rows[0]["cron_end_at"] == end
+    finally:
+        ava.shell.kill(wid)
+
+
+def test_cron_renewal_supersedes_live_twin(
+    _agent_row: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Re-registering a standing schedule renews it: the live twin is killed
+    (deliberate-kill drops its row) and exactly one running row — the new
+    session's — remains, with the fresh 7-day end. Renewal must never stack
+    a second firing watcher (the Task #1825 double-instance shape)."""
+    from ava.shell import sessions as _sessions
+    from shared.watcher import TEMPLATE_VERSION
+    from shared.watcher_registry import delete_watcher, register_watcher
+
+    monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType]
+    old_end = datetime.datetime.now(datetime.UTC) + datetime.timedelta(days=3)
+    register_watcher(
+        _agent_row,
+        777001,
+        kind="cron",
+        name="daily",
+        message="daily",
+        cron_expr="0 9 * * *",
+        cron_timezone="UTC",
+        cron_end_at=old_end,
+        template_version=TEMPLATE_VERSION,
+    )
+    monkeypatch.setattr(_sessions, "list", lambda: {777001: "watcher:777001"})
+    killed: list[int] = []
+
+    def _fake_kill(session_id: int) -> None:
+        killed.append(session_id)
+        # The real kill's deliberate-kill semantics drop the registry row.
+        delete_watcher(_agent_row, session_id)
+
+    monkeypatch.setattr(_sessions, "kill", _fake_kill)  # pyright: ignore[reportUnknownArgumentType]
+    before = datetime.datetime.now(datetime.UTC)
+    wid = watcher.cron("0 9 * * *", "daily", timezone="UTC", name="renewed")
+    after = datetime.datetime.now(datetime.UTC)
+    try:
+        assert wid != 777001
+        assert killed == [777001]
+        rows = [r for r in _registry_rows(_agent_row) if r["status"] == "running"]
+        assert len(rows) == 1, f"expected one running row, got {rows}"
+        assert rows[0]["session_id"] == wid
+        _assert_defaulted_cron_end(rows[0]["cron_end_at"], before, after)
+    finally:
+        ava.shell.kill(wid)
+
+
+def test_cron_renewal_leaves_dead_twin_alone(
+    _agent_row: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A same-schedule row whose session is NOT alive is the boot reconcile's
+    business, not a renewal target — the new registration must not kill (and
+    cannot — there is nothing to kill) or otherwise supersede it."""
+    from ava.shell import sessions as _sessions
+    from shared.watcher import TEMPLATE_VERSION
+    from shared.watcher_registry import register_watcher
+
+    monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType]
+    register_watcher(
+        _agent_row,
+        777002,
+        kind="cron",
+        name="daily-dead",
+        message="daily",
+        cron_expr="0 10 * * *",
+        cron_timezone="UTC",
+        cron_end_at=datetime.datetime.now(datetime.UTC) + datetime.timedelta(days=3),
+        template_version=TEMPLATE_VERSION,
+    )
+    killed: list[int] = []
+
+    def _fake_kill(session_id: int) -> None:
+        killed.append(session_id)
+
+    monkeypatch.setattr(_sessions, "kill", _fake_kill)  # pyright: ignore[reportUnknownArgumentType]
+    wid = watcher.cron("0 10 * * *", "daily", timezone="UTC", name="fresh")
+    try:
+        assert killed == []  # the dead twin was never a kill target
+        assert any(
+            r["session_id"] == wid and r["status"] == "running" for r in _registry_rows(_agent_row)
+        )
+    finally:
+        ava.shell.kill(wid)
+
+
+def test_cron_renewal_respects_exclude_session(
+    _agent_row: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The stale-template rebuild replaces its own session via
+    `_exclude_session` — the renewal path must NOT supersede that session
+    (the rebuild caller kills it explicitly; a double kill would report the
+    rebuild as failed)."""
+    from ava.shell import sessions as _sessions
+    from shared.watcher import TEMPLATE_VERSION
+    from shared.watcher_registry import register_watcher
+
+    monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType]
+    register_watcher(
+        _agent_row,
+        777003,
+        kind="cron",
+        name="daily-rebuild",
+        message="daily",
+        cron_expr="0 11 * * *",
+        cron_timezone="UTC",
+        cron_end_at=None,  # a pre-cap standing row being rebuilt
+        template_version=TEMPLATE_VERSION - 1,
+    )
+    monkeypatch.setattr(_sessions, "list", lambda: {777003: "watcher:777003"})
+    killed: list[int] = []
+
+    def _fake_kill(session_id: int) -> None:
+        killed.append(session_id)
+
+    monkeypatch.setattr(_sessions, "kill", _fake_kill)  # pyright: ignore[reportUnknownArgumentType]
+    wid = watcher.cron(
+        "0 11 * * *", "daily", timezone="UTC", name="rebuilt", _exclude_session=777003
+    )
+    try:
+        assert killed == []  # the caller kills the stale session itself
+        rows = [r for r in _registry_rows(_agent_row) if r["status"] == "running"]
+        assert any(r["session_id"] == wid for r in rows)
+    finally:
+        ava.shell.kill(wid)
+
+
+def test_cron_explicit_end_same_expr_different_end_stacks(
+    _agent_row: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Explicit-end registrations keep the exact-match dedupe contract: the
+    same expression with a different explicit end is a different schedule
+    (pre-cap behavior — the cap/renewal semantics only apply to defaulted
+    ends)."""
+    from ava.shell import sessions as _sessions
+
+    monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType]
+    end1 = datetime.datetime.now(datetime.UTC) + datetime.timedelta(hours=1)
+    end2 = datetime.datetime.now(datetime.UTC) + datetime.timedelta(hours=2)
+    w1 = watcher.cron("0 12 * * *", "x", timezone="UTC", end_time=end1, name="stack-a")
+    try:
+        w2 = watcher.cron("0 12 * * *", "x", timezone="UTC", end_time=end2, name="stack-b")
+        try:
+            assert w2 != w1
+            assert len([r for r in _registry_rows(_agent_row) if r["status"] == "running"]) == 2
+        finally:
+            ava.shell.kill(w2)
+    finally:
+        ava.shell.kill(w1)
+
+
+def test_cron_renewal_supersedes_all_live_twins(
+    _agent_row: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A renewal supersedes EVERY live twin of the schedule, not just the
+    newest (QA review of PR #2037): after a partial failure left two
+    different-end twins live, the next renewal must converge on one watcher —
+    a newest-only supersede would leave the older twin double-firing
+    forever."""
+    from ava.shell import sessions as _sessions
+    from shared.watcher import TEMPLATE_VERSION
+    from shared.watcher_registry import delete_watcher, register_watcher
+
+    monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType]
+    now = datetime.datetime.now(datetime.UTC)
+    register_watcher(
+        _agent_row,
+        777101,
+        kind="cron",
+        name="daily",
+        message="daily",
+        cron_expr="0 9 * * *",
+        cron_timezone="UTC",
+        cron_end_at=now + datetime.timedelta(days=3),
+        template_version=TEMPLATE_VERSION,
+    )
+    register_watcher(
+        _agent_row,
+        777102,
+        kind="cron",
+        name="daily",
+        message="daily",
+        cron_expr="0 9 * * *",
+        cron_timezone="UTC",
+        cron_end_at=now + datetime.timedelta(days=4),
+        template_version=TEMPLATE_VERSION,
+    )
+    monkeypatch.setattr(_sessions, "list", lambda: {777101: "a", 777102: "b"})
+    killed: list[int] = []
+
+    def _fake_kill(session_id: int) -> None:
+        killed.append(session_id)
+        delete_watcher(_agent_row, session_id)
+
+    monkeypatch.setattr(_sessions, "kill", _fake_kill)  # pyright: ignore[reportUnknownArgumentType]
+    wid = watcher.cron("0 9 * * *", "daily", timezone="UTC", name="renewed-all")
+    try:
+        assert wid not in (777101, 777102)
+        assert set(killed) == {777101, 777102}
+        rows = [r for r in _registry_rows(_agent_row) if r["status"] == "running"]
+        assert len(rows) == 1, f"expected one running row, got {rows}"
+        assert rows[0]["session_id"] == wid
+    finally:
+        ava.shell.kill(wid)
+
+
+def test_reconcile_drops_dead_row_when_live_different_end_row_exists(
+    _agent_row: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Schedule-level convergence (QA review of PR #2037): a dead cron row
+    whose same schedule (expression + timezone, ANY end time) is already live
+    is DELETED, not rebuilt — an exact-end check would rebuild the dead twin
+    into a second live watcher that double-fires until its end."""
+    from ava.shell import sessions as _sessions
+    from shared.watcher import TEMPLATE_VERSION
+    from shared.watcher_registry import register_watcher
+
+    monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType]
+    calls: list[tuple[Any, ...]] = []
+    monkeypatch.setattr(_watcher_reconcile, "cron", lambda *a, **k: calls.append((a, k)) or 999)  # pyright: ignore[reportUnknownArgumentType]
+    now = datetime.datetime.now(datetime.UTC)
+    register_watcher(
+        _agent_row,
+        777201,  # dead session — the reconcile's rebuild target
+        kind="cron",
+        name="daily",
+        message="daily",
+        cron_expr="0 9 * * *",
+        cron_timezone="UTC",
+        cron_end_at=now + datetime.timedelta(days=3),
+        template_version=TEMPLATE_VERSION,
+    )
+    register_watcher(
+        _agent_row,
+        777202,  # live session, SAME schedule, DIFFERENT end
+        kind="cron",
+        name="daily",
+        message="daily",
+        cron_expr="0 9 * * *",
+        cron_timezone="UTC",
+        cron_end_at=now + datetime.timedelta(days=4),
+        template_version=TEMPLATE_VERSION,
+    )
+    monkeypatch.setattr(_sessions, "list", lambda: {777202: "b"})
+
+    actions = watcher.reconcile()
+
+    assert calls == []  # no rebuild — the dead row is subsumed by the live one
+    rows = {r["session_id"]: r for r in _registry_rows(_agent_row)}
+    assert 777201 not in rows  # dead twin deleted, not marked 'rebuilt'
+    assert rows[777202]["status"] == "running"  # live row untouched
+    assert any("duplicate of live session 777202" in a for a in actions)
+
+
+def test_reconcile_rebuilds_dead_row_without_live_schedule(
+    _agent_row: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The converse of the schedule-level dedupe: a dead cron row with NO live
+    same-schedule row (any end) is rebuilt as before — the dedupe must not
+    swallow the only copy of a schedule."""
+    from ava.shell import sessions as _sessions
+    from shared.watcher import TEMPLATE_VERSION
+    from shared.watcher_registry import register_watcher
+
+    monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType]
+    calls: list[tuple[Any, ...]] = []
+    monkeypatch.setattr(_watcher_reconcile, "cron", lambda *a, **k: calls.append((a, k)) or 999)  # pyright: ignore[reportUnknownArgumentType]
+    register_watcher(
+        _agent_row,
+        777203,
+        kind="cron",
+        name="daily",
+        message="daily",
+        cron_expr="0 9 * * *",
+        cron_timezone="UTC",
+        cron_end_at=datetime.datetime.now(datetime.UTC) + datetime.timedelta(days=3),
+        template_version=TEMPLATE_VERSION,
+    )
+
+    actions = watcher.reconcile()
+
+    assert calls  # rebuilt — the schedule has no other live copy
+    rows = {r["session_id"]: r for r in _registry_rows(_agent_row)}
+    assert rows[777203]["status"] == "rebuilt"
+    assert any("rebuilt as session 999" in a for a in actions)
