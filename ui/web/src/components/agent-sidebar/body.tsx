@@ -89,6 +89,19 @@ export function SidebarBody(props: InnerProps & { wide: boolean }) {
   const isEmpty = visibleAgents.length === 0 && pendingSpawnCount === 0;
   const hasPending = pendingSpawnCount > 0;
 
+  // While the initial roster load is still in flight, tree mode must not
+  // paint a partial tree. The merged live + terminated roster is the tree's
+  // lineage input, and the terminated half (thousands of rows) resolves
+  // seconds after the live half on a cold load. Painting from live-only
+  // data would surface alive agents whose parent chain runs through
+  // terminated intermediates (#312 -> #240 -> #228, #2894 -> #2147) as
+  // top-level roots, then re-parent them when the terminated roster lands —
+  // a user-visible hierarchy flip. Waiting for the merged roster makes the
+  // tree's first paint final. Flat mode carries no hierarchy claim and may
+  // paint as soon as any row exists.
+  const rosterPending =
+    isLoading && (visibleAgents.length === 0 || viewMode === "tree");
+
   const treeProps: InnerProps & { wide: boolean } = hasPending
     ? { ...props, activeId: null }
     : props;
@@ -257,7 +270,7 @@ export function SidebarBody(props: InnerProps & { wide: boolean }) {
 
       {/* ── Agent list ── */}
       <ScrollArea className={cn(FLEX_1, MIN_H_0)}>
-        {isLoading && visibleAgents.length === 0 ? (
+        {rosterPending ? (
           <div className={cn("items-center justify-center gap-2 py-4 text-xs text-muted-foreground", FLEX)}>
             <Loader2 className="size-3.5 animate-spin" />
             {t("loadingAgents")}

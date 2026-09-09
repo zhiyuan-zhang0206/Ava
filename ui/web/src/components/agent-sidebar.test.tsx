@@ -24,6 +24,7 @@ const state = {
   activeId: null as number | null,
   pendingActions: {} as Record<number, "restarting" | "terminating" | "resurrecting">,
   pendingSpawnCount: 0,
+  isLoading: false,
   mobileSidebarOpen: false,
   sidebarCollapsed: false,
   stats: undefined as StatsDashboard | undefined,
@@ -284,7 +285,7 @@ const handlers = new Proxy(handlerFns, {
     if (prop === "agents") return state.agents;
     if (prop === "pendingActions") return state.pendingActions;
     if (prop === "pendingSpawnCount") return state.pendingSpawnCount;
-    if (prop === "isLoading") return false;
+    if (prop === "isLoading") return state.isLoading;
     return Reflect.get(target, prop, receiver);
   },
   ownKeys() {
@@ -324,6 +325,7 @@ beforeEach(() => {
   state.statsWindowHours = 24;
   state.showTerminated = false;
   state.sidebarViewMode = "tree";
+  state.isLoading = false;
   state.searchQuery = "";
   state.userSettings = {};
   bpMock.mockReturnValue({ tier: "xl", isNarrow: false, isLarge: true });
@@ -481,6 +483,37 @@ describe("SidebarBody empty / tree / spawning placeholder", () => {
     ];
     wrap(<AgentSidebar {...handlers} />);
     // Desktop mock: the rail is the only mounted surface.
+    expect(screen.getByTestId("row-1")).toBeTruthy();
+    expect(screen.getByTestId("row-2")).toBeTruthy();
+  });
+
+  it("tree mode + roster still loading with live rows present → loading state, no tree rows (no hierarchy flip)", () => {
+    // Cold-load regression (#312/#2894 flash): the live roster resolves before
+    // the terminated roster, and painting the tree from live-only data would
+    // temporarily root alive agents whose parent chain runs through terminated
+    // intermediates, then re-parent them — a user-visible hierarchy flip.
+    // Tree mode must wait for the merged roster so its first paint is final.
+    state.isLoading = true;
+    state.agents = [
+      makeAgent({ agent_id: 1, label: "first" }),
+      makeAgent({ agent_id: 2, label: "second" }),
+    ];
+    wrap(<AgentSidebar {...handlers} />);
+    expect(screen.getByText("Loading agents…")).toBeTruthy();
+    expect(screen.queryByTestId("row-1")).toBeNull();
+    expect(screen.queryByTestId("row-2")).toBeNull();
+  });
+
+  it("flat mode + roster still loading with live rows present → renders rows immediately", () => {
+    // Flat mode carries no hierarchy claim, so it keeps its instant first
+    // paint from the live roster (no regression for the default view mode).
+    state.isLoading = true;
+    state.sidebarViewMode = "flat";
+    state.agents = [
+      makeAgent({ agent_id: 1, label: "first" }),
+      makeAgent({ agent_id: 2, label: "second" }),
+    ];
+    wrap(<AgentSidebar {...handlers} />);
     expect(screen.getByTestId("row-1")).toBeTruthy();
     expect(screen.getByTestId("row-2")).toBeTruthy();
   });
