@@ -23,7 +23,7 @@ from shared.config import DataPlaneSettings, data_plane, settings
 from shared.config.data_plane import _self_machine_host
 from shared.dotenv_boot import UNANCHORED_DB_SENTINEL
 from shared.machine import reachable_host, reset_identity
-from shared.url_secret import url_with_password, url_with_userinfo
+from shared.url_secret import redacted_url, url_with_password, url_with_userinfo
 
 _SECRET = "new-secret_v2"  # noqa: S105 — test fixture, not a real credential
 
@@ -460,3 +460,24 @@ class TestSelfMachineHostParity:
     def test_localhost_default(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         self._pin(monkeypatch, tmp_path, env=None)
         assert _self_machine_host() == reachable_host() == "localhost"
+
+
+class TestRedactedUrl:
+    """Error/log rendering must not serialize credential-bearing URL input."""
+
+    def test_password_is_redacted_username_stays(self) -> None:
+        assert redacted_url(_redis("sek", user="ava")) == "redis://ava:***@cache.host:6379/0"
+        assert redacted_url(_pg(_SECRET)) == "postgresql://ava:***@db.host:5432/ava"
+
+    def test_empty_username_password_is_redacted(self) -> None:
+        assert redacted_url(_redis("sek")) == "redis://:***@cache.host:6379/0"
+
+    def test_url_without_password_is_unchanged(self) -> None:
+        assert redacted_url("redis://127.0.0.1:6379/0") == "redis://127.0.0.1:6379/0"
+        assert redacted_url("postgresql://ava@h:5432/ava") == "postgresql://ava@h:5432/ava"
+
+    def test_outer_quoted_raw_env_value_loses_its_secret(self) -> None:
+        # The redaction must survive the exact raw shape the bug carried: a
+        # single-quoted .env line the parser has not yet decoded (#2046).
+        raw = "'redis://ava:FICTIONAL_CREDENTIAL_DO_NOT_USE@127.0.0.1:20028/0'"
+        assert "FICTIONAL_CREDENTIAL_DO_NOT_USE" not in redacted_url(raw)

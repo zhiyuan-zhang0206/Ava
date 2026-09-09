@@ -199,26 +199,41 @@ def _ensure_redis_url_identity_step(ctx: ConvergeCtx) -> None:
 
     The URL is read from the .env FILE, never from settings — the in-memory dial
     value is host-rewritten (loopback self-dial), and persisting that would
-    clobber the reachable host. Idempotent: a URL already carrying a username is
-    left byte-identical. A repaired URL is adopted by the same start process;
-    no-auth homes receive a named `nopass` identity without minting a password.
+    clobber the reachable host. The value is decoded through the dotenv parser
+    before the identity check, so a quoted URL reads as itself (#2046). The
+    intended replacement is validated before the write, so malformed input fails
+    loudly instead of corrupting an otherwise recoverable .env. Idempotent: a
+    URL already carrying a username is left byte-identical. A repaired URL is
+    adopted by the same start process; no-auth homes receive a named `nopass`
+    identity without minting a password.
     """
+    from io import StringIO
     from urllib.parse import urlsplit
+
+    from dotenv import dotenv_values
 
     from shared.cluster import DATA_PLANE_IDENTITY, identity_from_url, redis_password_from_env
     from shared.config.data_plane import DataPlaneSettings
     from shared.envfile import upsert_env
     from shared.process_env import update_process_env
-    from shared.url_secret import url_with_userinfo
+    from shared.url_secret import redacted_url, url_with_userinfo
 
     env_path = ctx.ava_home / ".env"
     if not env_path.exists():
         return
-    raw = ""
-    for line in env_path.read_text().splitlines():
-        if line.split("=", 1)[0].strip() == "AVA_REDIS_URL" and "=" in line:
-            raw = line.split("=", 1)[1].strip()
+    line = ""
+    for candidate in env_path.read_text().splitlines():
+        if candidate.split("=", 1)[0].strip() == "AVA_REDIS_URL" and "=" in candidate:
+            line = candidate
             break
+    if not line:
+        return
+    # Decode the value through the dotenv parser: a quoted (or trailing-comment)
+    # value must read as the URL it denotes, not as raw text. `urlsplit` on the
+    # raw line misreads a quoted URL's username as absent, and the backfill then
+    # corrupts a valid, already-named URL with the PostgreSQL identity (#2046).
+    decoded = dotenv_values(stream=StringIO(line), interpolate=False).get("AVA_REDIS_URL")
+    raw = (decoded or "").strip()
     if not raw or urlsplit(raw).username:
         return
     runtime_password = redis_password_from_env() or settings.data_plane.cluster_secret
@@ -227,6 +242,15 @@ def _ensure_redis_url_identity_step(ctx: ConvergeCtx) -> None:
     except ValueError:
         identity = DATA_PLANE_IDENTITY
     rewritten = url_with_userinfo(raw, identity, runtime_password)
+    parts = urlsplit(rewritten)
+    if parts.scheme not in ("redis", "rediss") or not parts.hostname:
+        # Fail loudly BEFORE the write: malformed input must not damage an
+        # otherwise recoverable .env (the old path wrote first and left the
+        # later settings validation to discover the damage).
+        raise RuntimeError(
+            f"cannot backfill AVA_REDIS_URL identity: {redacted_url(raw)!r} is not "
+            "a usable redis URL (expected redis://[user:secret@]host[:port]/db)"
+        )
     upsert_env(
         env_path,
         {"AVA_REDIS_URL": rewritten},
