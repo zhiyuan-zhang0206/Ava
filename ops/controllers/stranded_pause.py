@@ -76,6 +76,7 @@ from ops.controllers.base import BlockScope, ReconcileResult
 from shared import pause_owner, ui_update_state, updater_handoff
 from shared.cluster_lock import read_update_lease
 from shared.machine import MachineRole, machine_name
+from shared.platform import LockTimeoutError
 
 _log = logging.getLogger("ops.controllers.stranded_pause")
 
@@ -249,60 +250,78 @@ def recover_stranded_pause() -> bool:
       "the gateway is on the wrong commit" became "nothing gets revived" for two hours
       (issue #1074).
 
+    Lock contention on the lifecycle mutex (another process writing maintenance
+    state) is expected, not fatal: recovery defers with False and the pause is
+    kept. Only a real I/O or ownership error raises.
+
     Safe to call standalone: with no paused posture / a fresh pause it returns False
     without acting."""
     paused_for = _stranded_pause_seconds()
     if paused_for is None or paused_for <= STRANDED_PAUSE_TIMEOUT_S:
         return False
-    with ui_update_state.lifecycle_lock():
-        # The first age check avoids taking the cross-process mutex on ordinary
-        # ticks. Re-read under it so a fresh owner cannot appear between proof
-        # and the destructive unpause/marker clear.
-        paused_for = _stranded_pause_seconds()
-        if paused_for is None or paused_for <= STRANDED_PAUSE_TIMEOUT_S:
-            return False
-        handoff = updater_handoff.read()
-        owner = _pause_owner(handoff)
-        if owner is not None:
-            _log.info(
-                "[ops.pause] paused for %.0fs but %s — that transition still owns this "
-                "pause, not unpausing",
-                paused_for,
-                owner,
-            )
-            return False
-        if not updater_handoff.allows_generic_recovery(handoff):
+    try:
+        with ui_update_state.lifecycle_lock():
+            # The first age check avoids taking the cross-process mutex on ordinary
+            # ticks. Re-read under it so a fresh owner cannot appear between proof
+            # and the destructive unpause/marker clear.
+            paused_for = _stranded_pause_seconds()
+            if paused_for is None or paused_for <= STRANDED_PAUSE_TIMEOUT_S:
+                return False
+            handoff = updater_handoff.read()
+            owner = _pause_owner(handoff)
+            if owner is not None:
+                _log.info(
+                    "[ops.pause] paused for %.0fs but %s — that transition still owns this "
+                    "pause, not unpausing",
+                    paused_for,
+                    owner,
+                )
+                return False
+            if not updater_handoff.allows_generic_recovery(handoff):
+                _log.warning(
+                    "[ops.pause] retained updater recovery requires an explicit checked "
+                    "recovery; refusing generic self-unpause"
+                )
+                return False
+            snapshot = ui_update_state.read()
+            pause_snapshot = pause_owner.read()
             _log.warning(
-                "[ops.pause] retained updater recovery requires an explicit checked "
-                "recovery; refusing generic self-unpause"
+                "[ops.pause] paused for %.0fs and no update is executing (no live lease, or "
+                "only a settle hold waiting for this very host) and no updater is live here, "
+                "so nothing is coming back to resume it; self-unpausing",
+                paused_for,
             )
-            return False
-        snapshot = ui_update_state.read()
-        pause_snapshot = pause_owner.read()
+            unpause_local_cluster()
+            # This is the automatic counterpart to `ava cluster recover`: the same
+            # no-owner proof has matured past its safety bound and unpause succeeded.
+            # Clear only afterwards so an unpause failure keeps the maintenance marker
+            # honest and retryable rather than exposing a still-paused broken app.
+            if snapshot.status == "updating" and snapshot.generation is not None:
+                ui_update_state.clear(snapshot.generation)
+            elif snapshot.status == "invalid":
+                ui_update_state.force_clear()
+            if handoff.generation is not None:
+                updater_handoff.clear(handoff.generation)
+            elif handoff.status == "invalid":
+                updater_handoff.force_clear()
+            if pause_snapshot.holder is not None and pause_snapshot.acquired_at is not None:
+                pause_owner.clear(pause_snapshot.holder, pause_snapshot.acquired_at)
+            elif pause_snapshot.status == "invalid":
+                pause_owner.force_clear()
+            return True
+    except LockTimeoutError:
+        # Expected cross-process contention during maintenance, not a daemon
+        # error: another process (an update's UI write, the other watchdog)
+        # holds the lifecycle mutex past its bounded wait. This round cannot
+        # prove the pause is unowned, so recovery defers — the tick stays
+        # blocked and the pause is kept exactly as it was. Never clear the
+        # maintenance hold or unpause on missing evidence; other I/O failures
+        # still raise through to the daemon.
         _log.warning(
-            "[ops.pause] paused for %.0fs and no update is executing (no live lease, or "
-            "only a settle hold waiting for this very host) and no updater is live here, "
-            "so nothing is coming back to resume it; self-unpausing",
-            paused_for,
+            "[ops.pause] could not take the lifecycle lock; deferring stranded-pause "
+            "recovery, pause kept"
         )
-        unpause_local_cluster()
-        # This is the automatic counterpart to `ava cluster recover`: the same
-        # no-owner proof has matured past its safety bound and unpause succeeded.
-        # Clear only afterwards so an unpause failure keeps the maintenance marker
-        # honest and retryable rather than exposing a still-paused broken app.
-        if snapshot.status == "updating" and snapshot.generation is not None:
-            ui_update_state.clear(snapshot.generation)
-        elif snapshot.status == "invalid":
-            ui_update_state.force_clear()
-        if handoff.generation is not None:
-            updater_handoff.clear(handoff.generation)
-        elif handoff.status == "invalid":
-            updater_handoff.force_clear()
-        if pause_snapshot.holder is not None and pause_snapshot.acquired_at is not None:
-            pause_owner.clear(pause_snapshot.holder, pause_snapshot.acquired_at)
-        elif pause_snapshot.status == "invalid":
-            pause_owner.force_clear()
-        return True
+        return False
 
 
 class PauseController:
