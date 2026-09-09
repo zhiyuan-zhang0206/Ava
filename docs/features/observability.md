@@ -41,6 +41,12 @@ gateway collector ──▶ loopback Tempo + Loki + Prometheus ──▶ Grafana
   the pure-runner relay endpoint, and the roster/healthcheck port probes all
   derive from it (WP3, task #1945); the agent-side export URL
   `AVA_TELEMETRY_OTLP_ENDPOINT` keeps its own full-URL override.
+- **Remote observatory station** — a unit consuming a remote station
+  (`AVA_OBSERVABILITY_URL`) derives the station's OTLP ingress from the
+  station's advertised `machine_units` url when a pure station has registered,
+  otherwise from `AVA_OBSERVABILITY_OTLP_PORT` (default the standard 4318);
+  the consuming unit's own `AVA_TELEMETRY_OTLP_PORT` never leaks into the
+  station target (single-machine dual-unit port deviation, task #2587).
 - **Backend** — `../../deploy/lgtm/` runs the Tempo + Loki + Prometheus +
   Grafana stack (lifecycle-owned on the marked host — see its README). It
   writes nothing to the mirror or the main flow, but the gateway's /ops +

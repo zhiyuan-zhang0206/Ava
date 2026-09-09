@@ -349,6 +349,9 @@ class ProbeVerdict(Enum):
       Address already in use`` and cannot ever verify. Retrying is not
       remediation, it is a loop.
 
+    ``UNAVAILABLE`` means inspection itself failed. It is not evidence of a
+    missing listener and forbids automatic respawn during this round.
+
     The line is the UNIT, not the cluster: two agent-runners of one cluster on
     one machine are as unkillable to each other as two clusters would be.
 
@@ -359,6 +362,7 @@ class ProbeVerdict(Enum):
     ALIVE = "alive"
     DOWN = "down"
     PORT_TAKEN = "port-taken"
+    UNAVAILABLE = "unavailable"
 
 
 # Exit codes a daemon healthcheck's `main()` uses, so the watchdog's
@@ -392,12 +396,12 @@ class DaemonProbe:
     def terminal(self) -> bool:
         """No respawn this process can perform will change this verdict.
 
-        True only for ``PORT_TAKEN``. A caller that sees this must report and
+        True for ``PORT_TAKEN`` or unavailable inspection. A caller must report and
         stop, not retry — see ``ProbeVerdict`` for why respawning cannot win.
         Nothing is persisted to remember it: the state self-clears, because once
         the occupant goes away the next probe simply reads ``DOWN`` and the
         normal respawn path runs."""
-        return self.verdict is ProbeVerdict.PORT_TAKEN
+        return self.verdict in (ProbeVerdict.PORT_TAKEN, ProbeVerdict.UNAVAILABLE)
 
     @classmethod
     def up(cls, detail: str) -> DaemonProbe:
@@ -406,6 +410,11 @@ class DaemonProbe:
     @classmethod
     def down(cls, detail: str) -> DaemonProbe:
         return cls(verdict=ProbeVerdict.DOWN, detail=detail)
+
+    @classmethod
+    def unavailable(cls, detail: str) -> DaemonProbe:
+        """Inspection failed; no safe restart decision can be made this round."""
+        return cls(verdict=ProbeVerdict.UNAVAILABLE, detail=detail)
 
     @classmethod
     def port_taken(cls, detail: str) -> DaemonProbe:
