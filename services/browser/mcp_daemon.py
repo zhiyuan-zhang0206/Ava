@@ -63,6 +63,7 @@ from services.browser.page_lifecycle import (
     _text_of,
     dead_page_reaper,
     handle_release_agent_page,
+    touch_agent_page,
 )
 from services.browser.protocol import Request, Response
 from services.browser.session import (
@@ -228,6 +229,11 @@ class ChromeMcpDaemon:
         path.
         """
         async with self._lock:
+            # Stamp inside the lock: the idle sweep reads the stamp under the
+            # same lock, so a call that lands mid-sweep must serialize with it
+            # (either its stamp is visible before the candidate phase, or the
+            # page is already closed and the next call cold-starts).
+            touch_agent_page(agent_id)
             result, updated = await self._affinity_call(name, args, _AGENT_AFFINITY.get(agent_id))
             _AGENT_AFFINITY[agent_id] = updated
             return result

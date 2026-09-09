@@ -13,6 +13,11 @@ mechanisms, both scoped to agent-owned pages only:
   pages whose URL is localhost / 127.0.0.1 with nothing listening on the port.
   This covers the deaths that never reach the exit hook (SIGKILL / OOM /
   force-terminate) and dev servers that died under a still-alive agent.
+- ``reap_idle_agent_pages`` — the other half of the safety net: agent-owned
+  pages whose owner has not touched the browser for ``_TAB_IDLE_TIMEOUT_S``
+  are closed. A terminated agent's tab to any URL (not just dead localhost)
+  ages out through this pass, because its last-use stamp stops moving; a
+  live agent's tab is never cut short as long as it keeps using the browser.
 
 Everything here is strictly scoped: only pages with a slot in
 ``_AGENT_AFFINITY`` are ever inspected or closed, so the user's tabs and other
@@ -25,6 +30,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+import time
 from contextlib import suppress
 from typing import Any, Protocol
 from urllib.parse import urlsplit
@@ -46,6 +52,12 @@ from shared.log import logger
 # wrapper clients) keep the per-connection fallback in the daemon.
 _AGENT_AFFINITY: dict[int, int | None] = {}
 
+# Monotonic last-use stamp per agent, updated on every agent-keyed browser
+# call (``touch_agent_page``). The idle sweep reads it; an agent with no
+# affinity page (None) is not a candidate. Module-level for the same reason
+# as the affinity registry — it must survive daemon replacement.
+_AGENT_LAST_USE: dict[int, float] = {}
+
 # Dead-page sweep cadence: agent-owned pages pointing at localhost /
 # 127.0.0.1 with nothing listening on the port are closed on this pass. Ten
 # minutes is far inside the hours a leaked tab sits, and the probe cost is one
@@ -56,6 +68,13 @@ _DEAD_PAGE_SWEEP_INTERVAL_S = 600.0
 # dead — closing a live tab is the one failure mode that hurts — so anything
 # the probe cannot decide within this window is treated as alive.
 _PORT_PROBE_TIMEOUT_S = 1.0
+
+# Idle timeout for the agent-page sweep: an agent-owned page whose owner has
+# gone this long without a browser call is recycled. Six hours keeps an
+# actively-working agent untouched (its stamp moves on every call) while
+# still reaping the tabs left behind by finished or terminated work the same
+# day it ends.
+_TAB_IDLE_TIMEOUT_S = 6 * 60 * 60
 
 # Hosts that name this machine's loopback interface (the dev-server tabs
 # worker agents point at). A page on any other host is never a sweep candidate,
@@ -109,6 +128,7 @@ async def release_agent_page(daemon: _PageDaemon, agent_id: int) -> int | None:
                 f"errored ({_text_of(result)!r}); clearing the slot"
             )
         _AGENT_AFFINITY[agent_id] = None
+        _AGENT_LAST_USE.pop(agent_id, None)
         return page_id
 
 
@@ -254,10 +274,73 @@ async def reap_dead_agent_pages(daemon: _PageDaemon) -> None:
             )
 
 
+def touch_agent_page(agent_id: int) -> None:
+    """Stamp the agent's last browser-use time (monotonic).
+
+    Called by the daemon on every agent-keyed call. The stamp is the idle
+    signal for :func:`reap_idle_agent_pages`; it is never used to judge the
+    user's tabs or any page without an affinity slot.
+    """
+    _AGENT_LAST_USE[agent_id] = time.monotonic()
+
+
+async def reap_idle_agent_pages(daemon: _PageDaemon) -> int:
+    """Close agent-owned pages whose owner has been idle past the timeout.
+
+    The affinity registry is the only candidate source, exactly like the
+    dead-page sweep: the user's tabs and other agents' tabs are never
+    inspected. Idle means the agent's last ``touch_agent_page`` is older
+    than ``_TAB_IDLE_TIMEOUT_S`` — a terminated agent's stamp stops moving,
+    so its tab (to any URL) ages out here even when nothing localhost-dead
+    is involved. A live agent that keeps using the browser is never a
+    candidate. A slot without a stamp (should not happen — every affinity
+    page is created through an agent-keyed call) is treated as just-touched:
+    the sweep never closes a page it knows nothing about. The candidate
+    phase and the closes both run under the daemon's serial lock, and the
+    page list is re-read before closing: a page that moved (re-purposed or
+    closed) mid-pass is skipped.
+    """
+    now = time.monotonic()
+    async with daemon._lock:
+        listing = await daemon._call("list_pages", {})
+        if listing.is_error:
+            return 0
+        page_urls = parse_page_listing(_text_of(listing))
+        candidates: list[tuple[int, int]] = [
+            (agent_id, page_id)
+            for agent_id, page_id in list(_AGENT_AFFINITY.items())
+            if page_id is not None
+            and now - _AGENT_LAST_USE.get(agent_id, now) > _TAB_IDLE_TIMEOUT_S
+        ]
+        if not candidates:
+            return 0
+        closed = 0
+        for agent_id, page_id in candidates:
+            if page_urls.get(page_id) is None:
+                # already closed upstream; drop the stale stamp alongside the slot
+                _AGENT_LAST_USE.pop(agent_id, None)
+                continue
+            result = await daemon._call("close_page", {"pageId": page_id})
+            if result.is_error:
+                logger.warning(
+                    f"[browser-mcp] idle sweep could not close page {page_id} "
+                    f"for agent {agent_id}: {_text_of(result)!r}"
+                )
+                continue
+            if _AGENT_AFFINITY.get(agent_id) == page_id:
+                _AGENT_AFFINITY[agent_id] = None
+            _AGENT_LAST_USE.pop(agent_id, None)
+            closed += 1
+            logger.info(f"[browser-mcp] idle sweep closed page {page_id} for agent {agent_id}")
+        return closed
+
+
 async def dead_page_reaper(daemon: _PageDaemon, stop: asyncio.Event) -> None:
-    """Periodically sweep agent-owned dead localhost pages (see
-    ``reap_dead_agent_pages``). Runs per upstream connection like the daemon's
-    watchdog; a pass that hits upstream death returns so the daemon reconnects.
+    """Periodically sweep agent-owned pages: dead localhost pages (see
+    ``reap_dead_agent_pages``) and idle-owned pages whose owner has gone quiet
+    (see ``reap_idle_agent_pages``). Runs per upstream connection like the
+    daemon's watchdog; a pass that hits upstream death returns so the daemon
+    reconnects.
     """
     while not stop.is_set():
         with suppress(asyncio.TimeoutError):
@@ -266,6 +349,7 @@ async def dead_page_reaper(daemon: _PageDaemon, stop: asyncio.Event) -> None:
             return
         try:
             await reap_dead_agent_pages(daemon)
+            await reap_idle_agent_pages(daemon)
         except RuntimeError:
             # Upstream died mid-pass — daemon.dead is set; the daemon reconnects
             # and recreates this task on the new connection.

@@ -12,6 +12,7 @@ interrupted a running job; an idle or already-absent shell's reaping is silent.
 from __future__ import annotations
 
 import asyncio
+import time
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 
@@ -30,6 +31,7 @@ from gateway.ttl_reaper import (
     _reaper_loop,
 )
 from ops.rpc_schemas import ShellKillResult
+from shared.config import settings
 from shared.db import create_agent
 
 
@@ -190,6 +192,94 @@ def test_reap_expired_pages_skips_already_terminal(
     db_conn.commit()
 
     assert _reap_expired_pages_blocking(reaper_pool) == []
+
+
+def _new_schedule(conn: psycopg.Connection, name: str) -> int:
+    with conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO schedules (name, script, command) VALUES (%s, 'x', 'x') RETURNING id",
+            (name,),
+        )
+        row = cur.fetchone()
+        assert row is not None
+        return int(row[0])
+
+
+def _insert_fire_log(conn: psycopg.Connection, schedule_id: int, age_hours: list[int]) -> None:
+    with conn.cursor() as cur:
+        for hours in age_hours:
+            cur.execute(
+                "INSERT INTO schedule_fire_log (schedule_id, slot_fire_at) "
+                "VALUES (%s, now() - %s * interval '1 hour')",
+                (schedule_id, hours),
+            )
+
+
+def test_prune_schedule_fire_log_respects_retention_and_keeps_newest_per_schedule(
+    db_conn: psycopg.Connection, reaper_pool: ConnectionPool
+) -> None:
+    """The retention prune deletes only rows past the window, and always keeps
+    the newest claim per schedule — a sparse cron (all claims past the window)
+    must not lose its baseline, or catch-up could refire an already-claimed
+    slot."""
+    s1 = _new_schedule(db_conn, "fire-log-s1")
+    _insert_fire_log(db_conn, s1, [40 * 24 + 2, 40 * 24 + 1, 40 * 24, 1])
+    s2 = _new_schedule(db_conn, "fire-log-s2")
+    _insert_fire_log(db_conn, s2, [50 * 24, 45 * 24])
+    db_conn.commit()
+
+    pruned = ttl_reaper._prune_schedule_fire_log_blocking(reaper_pool)
+
+    assert pruned == 4
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "SELECT schedule_id, slot_fire_at FROM schedule_fire_log "
+            "ORDER BY schedule_id, slot_fire_at"
+        )
+        rows = cur.fetchall()
+    # s1: only its 1-hour-old claim remains; s2: only its newest (45d) claim
+    # remains — the oldest-ever claim per schedule is never pruned away.
+    assert len(rows) == 2
+    assert rows[0][0] == s1 and rows[0][1] > datetime.now(UTC) - timedelta(hours=2)
+    assert rows[1][0] == s2 and rows[1][1] > datetime.now(UTC) - timedelta(days=46)
+
+
+def test_prune_schedule_fire_log_is_bounded_per_pass(
+    db_conn: psycopg.Connection,
+    reaper_pool: ConnectionPool,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One pass deletes at most _FIRE_LOG_PASS_BATCH rows; the backlog drains
+    over successive passes (and the newest claim is never a candidate)."""
+    monkeypatch.setattr(ttl_reaper, "_FIRE_LOG_PASS_BATCH", 2)
+    s1 = _new_schedule(db_conn, "fire-log-bounded")
+    _insert_fire_log(db_conn, s1, [50 * 24, 49 * 24, 48 * 24, 47 * 24, 46 * 24])
+    db_conn.commit()
+
+    assert ttl_reaper._prune_schedule_fire_log_blocking(reaper_pool) == 2
+    with db_conn.cursor() as cur:
+        cur.execute("SELECT count(*) FROM schedule_fire_log WHERE schedule_id = %s", (s1,))
+        remaining = cur.fetchone()
+        assert remaining is not None and remaining[0] == 3
+
+    assert ttl_reaper._prune_schedule_fire_log_blocking(reaper_pool) == 2
+    with db_conn.cursor() as cur:
+        cur.execute("SELECT count(*) FROM schedule_fire_log WHERE schedule_id = %s", (s1,))
+        # the newest claim is retained as the catch-up baseline
+        remaining = cur.fetchone()
+        assert remaining is not None and remaining[0] == 1
+
+
+def test_schedule_fire_log_prune_due_throttles(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The prune fires on the first pass, then only after the cleanup interval."""
+    monkeypatch.setattr(ttl_reaper, "_schedule_fire_log_last_pruned", None)
+    monkeypatch.setattr(settings.daemon, "schedule_fire_log_cleanup_interval_seconds", 3600.0)
+    assert ttl_reaper._schedule_fire_log_prune_due() is True
+    assert ttl_reaper._schedule_fire_log_prune_due() is False
+    monkeypatch.setattr(ttl_reaper, "_schedule_fire_log_last_pruned", time.monotonic() - 7200.0)
+    assert ttl_reaper._schedule_fire_log_prune_due() is True
 
 
 async def test_reaper_reconciles_stale_work_failures_on_its_startup_pass(
