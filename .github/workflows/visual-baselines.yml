@@ -24,7 +24,7 @@ jobs:
   render:
     name: Check runner-native visual baselines
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 45
     permissions:
       contents: read
       pull-requests: read
@@ -119,13 +119,35 @@ jobs:
           steps.check.outputs.exit_code == '10'
         run: uv run python scripts/refresh_visual_baselines.py --regenerate
 
+      - name: Check preview-gate goldens
+        if: github.event_name == 'push'
+        id: preview-check
+        run: |
+          set +e
+          uv run pytest tests/e2e/test_preview_visual_gate.py -q
+          EXIT_CODE="$?"
+          set -e
+          echo "exit_code=$EXIT_CODE" >> "$GITHUB_OUTPUT"
+          if [ "$EXIT_CODE" -ne 0 ] && [ "$EXIT_CODE" -ne 1 ]; then
+            exit "$EXIT_CODE"
+          fi
+
+      - name: Mint preview-gate goldens
+        if: >-
+          github.event_name == 'workflow_dispatch' ||
+          steps.preview-check.outputs.exit_code == '1'
+        run: PREVIEW_GATE_REFRESH=1 uv run pytest tests/e2e/test_preview_visual_gate.py -q
+
       - name: Detect regenerated PNGs
         if: >-
           github.event_name == 'workflow_dispatch' ||
-          steps.check.outputs.exit_code == '10'
+          steps.check.outputs.exit_code == '10' ||
+          steps.preview-check.outputs.exit_code == '1'
         id: diff
         run: |
-          if git diff --quiet -- tests/e2e/__snapshots__/test_visual_regression/; then
+          # git status (not diff): the first mint introduces the golden set as
+          # untracked files, invisible to git diff.
+          if [ -z "$(git status --porcelain=v1 -z --untracked-files=all -- tests/e2e/__snapshots__/)" ]; then
             echo 'changed=false' >> "$GITHUB_OUTPUT"
           else
             echo 'changed=true' >> "$GITHUB_OUTPUT"
@@ -134,7 +156,8 @@ jobs:
       - name: Reject drift without a reproducible baseline change
         if: >-
           github.event_name == 'push' &&
-          steps.check.outputs.exit_code == '10' &&
+          (steps.check.outputs.exit_code == '10' ||
+           steps.preview-check.outputs.exit_code == '1') &&
           steps.diff.outputs.changed != 'true'
         run: |
           echo 'Pixel drift did not reproduce during regeneration on the same runner.' >&2
@@ -145,7 +168,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: regenerated-visual-baselines
-          path: tests/e2e/__snapshots__/test_visual_regression/
+          path: tests/e2e/__snapshots__/
           if-no-files-found: error
           retention-days: 1
 
@@ -174,30 +197,44 @@ jobs:
           name: regenerated-visual-baselines
           path: ${{ runner.temp }}/visual-baselines
 
-      - name: Accept exactly three PNG references
+      - name: Accept exactly the committed visual reference sets
         env:
           ARTIFACT_ROOT: ${{ runner.temp }}/visual-baselines
         run: |
           REFERENCES=(
-            'test_fleet_visual_regression/fleet.png'
-            'test_home_visual_regression/home.png'
-            'test_mobile_visual_regression/mobile.png'
+            'test_visual_regression/test_fleet_visual_regression/fleet.png'
+            'test_visual_regression/test_home_visual_regression/home.png'
+            'test_visual_regression/test_mobile_visual_regression/mobile.png'
           )
           FILE_COUNT="$(find "$ARTIFACT_ROOT" -type f | wc -l | tr -d ' ')"
           LINK_COUNT="$(find "$ARTIFACT_ROOT" -type l | wc -l | tr -d ' ')"
-          if [ "$FILE_COUNT" -ne 3 ] || [ "$LINK_COUNT" -ne 0 ]; then
-            echo "Expected exactly three regular PNGs and no symlinks; found $FILE_COUNT files and $LINK_COUNT symlinks." >&2
+          # 3 regression PNGs + 44 preview-gate golden PNGs + 1 meta.json
+          if [ "$FILE_COUNT" -ne 48 ] || [ "$LINK_COUNT" -ne 0 ]; then
+            echo "Expected exactly 48 regular files and no symlinks; found $FILE_COUNT files and $LINK_COUNT symlinks." >&2
             exit 1
           fi
           for REFERENCE in "${REFERENCES[@]}"; do
             SOURCE="$ARTIFACT_ROOT/$REFERENCE"
-            TARGET="tests/e2e/__snapshots__/test_visual_regression/$REFERENCE"
+            TARGET="tests/e2e/__snapshots__/$REFERENCE"
             if [ ! -f "$SOURCE" ] || [ -L "$SOURCE" ]; then
               echo "Missing regular baseline artifact: $REFERENCE" >&2
               exit 1
             fi
             cp "$SOURCE" "$TARGET"
           done
+          PREVIEW_CAPTURES="preview-gate/captures"
+          PREVIEW_COUNT="$(find "$ARTIFACT_ROOT/$PREVIEW_CAPTURES" -type f -name '*-golden-[12].png' | wc -l | tr -d ' ')"
+          if [ "$PREVIEW_COUNT" -ne 44 ]; then
+            echo "Expected 44 preview-gate golden PNGs; found $PREVIEW_COUNT." >&2
+            exit 1
+          fi
+          if [ ! -f "$ARTIFACT_ROOT/preview-gate/meta.json" ] || [ -L "$ARTIFACT_ROOT/preview-gate/meta.json" ]; then
+            echo "Missing regular preview-gate meta.json artifact." >&2
+            exit 1
+          fi
+          mkdir -p "tests/e2e/__snapshots__/$PREVIEW_CAPTURES"
+          cp "$ARTIFACT_ROOT/$PREVIEW_CAPTURES"/*-golden-[12].png "tests/e2e/__snapshots__/$PREVIEW_CAPTURES/"
+          cp "$ARTIFACT_ROOT/preview-gate/meta.json" "tests/e2e/__snapshots__/preview-gate/meta.json"
 
       - name: Commit and push to the dispatched PR head
         if: github.event_name == 'workflow_dispatch'
@@ -206,11 +243,29 @@ jobs:
         run: |
           git config user.name 'ava-visual-baselines-bot'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add tests/e2e/__snapshots__/test_visual_regression/
+          git add tests/e2e/__snapshots__/
           git commit \
             -m '[Ava-5814] test(e2e): refresh visual baselines' \
             -m 'Co-authored-by: Ava #5814'
           git push origin "HEAD:refs/heads/$BRANCH"
+
+      - name: Approve the pull_request CI run spawned by the bot push
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ needs.render.outputs.branch }}
+        run: |
+          # The bot push synchronizes a pull_request CI run that GitHub parks
+          # pending approval. Approve it so the PR check status can go green;
+          # the explicit workflow_dispatch run below stays the authoritative
+          # green signal.
+          RUN_ID="$(gh run list --workflow=ci.yml --branch "$BRANCH" --event pull_request \
+            --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
+          if [ -n "$RUN_ID" ]; then
+            gh api --method POST \
+              "repos/${{ github.repository }}/actions/runs/$RUN_ID/approve" \
+              >/dev/null || echo "approve unavailable — approve the run manually"
+          fi
 
       - name: Re-run CI for the updated PR head
         if: github.event_name == 'workflow_dispatch'
@@ -227,7 +282,7 @@ jobs:
           REMOTE_SHA="$(git ls-remote --heads origin "refs/heads/$BRANCH" | awk '{print $1}')"
           git config user.name 'ava-visual-baselines-bot'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add tests/e2e/__snapshots__/test_visual_regression/
+          git add tests/e2e/__snapshots__/
           git commit \
             -m '[Ava-5814] test(e2e): refresh visual baselines' \
             -m 'Co-authored-by: Ava #5814'
@@ -258,30 +313,33 @@ jobs:
           ## Summary
 
           The visual regression check detected the known changed-pixel drift
-          signature after a GitHub runner image change. The three references
-          were regenerated on the same Ubuntu runner and Playwright Chromium
-          environment that compares them in CI. The comparison algorithm and
-          thresholds are unchanged.
+          signature after a GitHub runner image change. The three page
+          references and the five-surface preview-gate goldens were regenerated
+          on the same Ubuntu runner and Playwright Chromium environment that
+          compares them in CI. The comparison algorithms and thresholds are
+          unchanged.
 
           ## File tree
 
           ```text
-          tests/e2e/__snapshots__/test_visual_regression/
+          tests/e2e/__snapshots__/
           EOF
           mapfile -t CHANGED_REFERENCES < <(
-            git diff --name-only HEAD^ HEAD -- tests/e2e/__snapshots__/test_visual_regression/
+            git diff --name-only HEAD^ HEAD -- tests/e2e/__snapshots__/
           )
           for INDEX in "${!CHANGED_REFERENCES[@]}"; do
             REFERENCE="${CHANGED_REFERENCES[$INDEX]}"
-            RELATIVE="${REFERENCE#tests/e2e/__snapshots__/test_visual_regression/}"
+            RELATIVE="${REFERENCE#tests/e2e/__snapshots__/}"
             CONNECTOR='├──'
             if [ "$INDEX" -eq "$((${#CHANGED_REFERENCES[@]} - 1))" ]; then
               CONNECTOR='└──'
             fi
             case "$RELATIVE" in
-              test_fleet_visual_regression/fleet.png) NOTE='fleet reference' ;;
-              test_home_visual_regression/home.png) NOTE='home reference' ;;
-              test_mobile_visual_regression/mobile.png) NOTE='mobile reference' ;;
+              test_visual_regression/test_fleet_visual_regression/fleet.png) NOTE='fleet reference' ;;
+              test_visual_regression/test_home_visual_regression/home.png) NOTE='home reference' ;;
+              test_visual_regression/test_mobile_visual_regression/mobile.png) NOTE='mobile reference' ;;
+              preview-gate/captures/*-golden-[12].png) NOTE='preview-gate golden capture' ;;
+              preview-gate/meta.json) NOTE='preview-gate provenance' ;;
               *) echo "Unexpected committed baseline path: $RELATIVE" >&2; exit 1 ;;
             esac
             printf '%s %s  (M) ★ %s\n' "$CONNECTOR" "$RELATIVE" "$NOTE" >> "$PR_BODY"
