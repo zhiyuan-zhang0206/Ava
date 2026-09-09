@@ -20,6 +20,7 @@ from pathlib import Path
 
 import psutil
 
+from shared import session_log
 from shared.log import logger
 from shared.paths import logs_dir, run_dir
 from shared.platform import IS_WINDOWS
@@ -247,12 +248,13 @@ def new_session(
     creationflags = launch.creationflags
     if in_attached_exec_job():
         creationflags |= _BREAKAWAY
-    out = session_log_path(name).open("ab")
     startup = None
     if sys.platform == "win32":  # narrows Windows-only stdlib types for static checking
         startup = subprocess.STARTUPINFO()
         startup.dwFlags |= subprocess.STARTF_USESHOWWINDOW
         startup.wShowWindow = subprocess.SW_HIDE
+    fd, _ = session_log.open_session_log(session_log_path(name), name)
+    out = os.fdopen(fd, "ab")
     try:
         err = stderr_append.open("ab") if stderr_append is not None else out
         try:
