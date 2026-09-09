@@ -124,10 +124,22 @@ def gh(monkeypatch: pytest.MonkeyPatch):
         runs = json.dumps(scheduled or [])
 
         def _run(cmd, *_a, **_k):
+            if "api" not in cmd:
+                stdout = rollup
+            elif "actions/runs?" in cmd[-1] and "--jq" not in cmd:
+                # ci_job_rerun reads the raw REST runs payload (issue #1945);
+                # keep its view empty so diagnose tests stay deterministic.
+                stdout = json.dumps({"total_count": 0, "workflow_runs": []})
+            elif "/jobs?" in cmd[-1]:
+                stdout = json.dumps({"total_count": 0, "jobs": []})
+            else:
+                stdout = runs
+
             class _R:
-                returncode = 0
-                stdout = runs if "api" in cmd else rollup
-                stderr = ""
+                def __init__(self) -> None:
+                    self.returncode = 0
+                    self.stderr = ""
+                    self.stdout = stdout
 
             return _R()
 
@@ -840,6 +852,35 @@ def test_rerun_failed_jobs_success_exits_zero(monkeypatch: pytest.MonkeyPatch, c
     assert "Re-ran lint" in capsys.readouterr().out
 
 
+def test_rerun_failed_jobs_query_failure_is_an_error(
+    monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    """A failed GitHub query must not read as "no failed jobs" (issue #1945):
+    the error is reported on stderr and the exit code flips to 1."""
+
+    def _boom(_pr: Any, _repo: Any) -> list[dict]:
+        raise ci_utils.CiJobRerunError("gh api runs failed: rate limited")
+
+    monkeypatch.setattr(ci_utils, "list_failed_jobs", _boom)
+    assert ci_utils.main(["42", "--rerun-failed-jobs", "--dry-run"]) == 1
+    captured = capsys.readouterr()
+    assert "Failed to list failed jobs" in captured.err
+    assert "No failed jobs" not in captured.out
+
+
+def test_rerun_failed_jobs_query_failure_non_dry_run_exits_one(
+    monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    """The non-dry-run path reports the same query failure instead of exiting 0."""
+
+    def _boom(_pr: Any, _repo: Any) -> list[dict]:
+        raise ci_utils.CiJobRerunError("gh pr view failed: not found")
+
+    monkeypatch.setattr(ci_utils, "rerun_failed_jobs", _boom)
+    assert ci_utils.main(["42", "--rerun-failed-jobs"]) == 1
+    assert "Failed to list failed jobs" in capsys.readouterr().err
+
+
 def test_rerun_failed_jobs_exclusive_with_wait() -> None:
     with pytest.raises(SystemExit):
         ci_utils.main(["42", "--rerun-failed-jobs", "--wait"])
@@ -1040,7 +1081,23 @@ def _diag_check(name: str, conclusion: str = "FAILURE") -> dict:
 
 
 def _diag_job(name: str, job_id: int = 9, conclusion: str = "FAILURE") -> dict:
-    return {"name": name, "job_id": job_id, "run_id": 10, "conclusion": conclusion}
+    """Real-shaped REST job object: numeric `.id`, lowercase conclusion."""
+    return {"name": name, "id": job_id, "run_id": 10, "conclusion": conclusion.lower()}
+
+
+def _diag_runs(run_id: int = 10) -> str:
+    """Real-shaped REST runs payload with one CI run (issue #1945)."""
+    return json.dumps(
+        {
+            "total_count": 1,
+            "workflow_runs": [{"id": run_id, "name": "CI", "created_at": "2026-09-09T10:00:00Z"}],
+        }
+    )
+
+
+def _diag_jobs_payload(job: dict) -> str:
+    """Real-shaped REST jobs payload wrapping one projected job (issue #1945)."""
+    return json.dumps({"total_count": 1, "jobs": [job]})
 
 
 def test_diagnose_merge_conflict(diag_gh, monkeypatch, capsys) -> None:
@@ -1050,7 +1107,7 @@ def test_diagnose_merge_conflict(diag_gh, monkeypatch, capsys) -> None:
             ("--json baseRefOid --jq", "cccc3333cccc3333cccc3333cccc3333cccc3333"),
             ("ls-remote", "cccc3333cccc3333cccc3333cccc3333cccc3333\trefs/heads/main"),
             ("json headRefOid --jq", "aaaa1111aaaa1111aaaa1111aaaa1111aaaa1111"),
-            ("head_sha=", "[]"),
+            ("head_sha=", '{"total_count": 0, "workflow_runs": []}'),
             ("state=all", "[]"),
         ]
     )
@@ -1068,8 +1125,8 @@ def test_diagnose_lint_hard_limit(diag_gh, monkeypatch, capsys) -> None:
             ("--json baseRefOid --jq", "cccc3333cccc3333cccc3333cccc3333cccc3333"),
             ("ls-remote", "cccc3333cccc3333cccc3333cccc3333cccc3333\trefs/heads/main"),
             ("json headRefOid --jq", "aaaa1111aaaa1111aaaa1111aaaa1111aaaa1111"),
-            ("head_sha=", '["10"]'),
-            ("/jobs", json.dumps([_diag_job(check)])),
+            ("head_sha=", _diag_runs()),
+            ("/jobs", _diag_jobs_payload(_diag_job(check))),
             ("/logs", "scripts/host.py file is 812 lines, over the 800-line hard ceiling"),
             ("state=all", "[]"),
         ]
@@ -1088,8 +1145,8 @@ def test_diagnose_first_load_budget(diag_gh, monkeypatch, capsys) -> None:
             ("--json baseRefOid --jq", "cccc3333cccc3333cccc3333cccc3333cccc3333"),
             ("ls-remote", "cccc3333cccc3333cccc3333cccc3333cccc3333\trefs/heads/main"),
             ("json headRefOid --jq", "aaaa1111aaaa1111aaaa1111aaaa1111aaaa1111"),
-            ("head_sha=", '["10"]'),
-            ("/jobs", json.dumps([_diag_job(check)])),
+            ("head_sha=", _diag_runs()),
+            ("/jobs", _diag_jobs_payload(_diag_job(check))),
             ("/logs", "First Load JS shared by all is 512 kB (budget 500 kB)"),
             ("state=all", "[]"),
         ]
@@ -1106,8 +1163,8 @@ def test_diagnose_visual_regression(diag_gh, monkeypatch, capsys) -> None:
             ("--json baseRefOid --jq", "cccc3333cccc3333cccc3333cccc3333cccc3333"),
             ("ls-remote", "cccc3333cccc3333cccc3333cccc3333cccc3333\trefs/heads/main"),
             ("json headRefOid --jq", "aaaa1111aaaa1111aaaa1111aaaa1111aaaa1111"),
-            ("head_sha=", '["10"]'),
-            ("/jobs", json.dumps([_diag_job(check)])),
+            ("head_sha=", _diag_runs()),
+            ("/jobs", _diag_jobs_payload(_diag_job(check))),
             ("/logs", "toMatchImageSnapshot failed: baseline image differs"),
             ("state=all", "[]"),
         ]
@@ -1126,8 +1183,8 @@ def test_diagnose_truncate_lint_delta_case(diag_gh, monkeypatch, capsys) -> None
             ("--json baseRefOid --jq", "cccc3333cccc3333cccc3333cccc3333cccc3333"),
             ("ls-remote", "cccc3333cccc3333cccc3333cccc3333cccc3333\trefs/heads/main"),
             ("json headRefOid --jq", "aaaa1111aaaa1111aaaa1111aaaa1111aaaa1111"),
-            ("head_sha=", '["10"]'),
-            ("/jobs", json.dumps([_diag_job(check)])),
+            ("head_sha=", _diag_runs()),
+            ("/jobs", _diag_jobs_payload(_diag_job(check))),
             (
                 "/logs",
                 "truncate-isolation lint: comment-stripping regex captured CREATE TABLE delta",
@@ -1148,8 +1205,8 @@ def test_diagnose_clock_lattice_gateway_case(diag_gh, monkeypatch, capsys) -> No
             ("--json baseRefOid --jq", "cccc3333cccc3333cccc3333cccc3333cccc3333"),
             ("ls-remote", "cccc3333cccc3333cccc3333cccc3333cccc3333\trefs/heads/main"),
             ("json headRefOid --jq", "aaaa1111aaaa1111aaaa1111aaaa1111aaaa1111"),
-            ("head_sha=", '["10"]'),
-            ("/jobs", json.dumps([_diag_job(check)])),
+            ("head_sha=", _diag_runs()),
+            ("/jobs", _diag_jobs_payload(_diag_job(check))),
             ("/logs", "lattice-vocabulary clock constant defined outside its family module"),
             ("state=all", "[]"),
         ]
@@ -1189,8 +1246,8 @@ def test_diagnose_known_flake_matches_quarantined(diag_gh, monkeypatch, capsys) 
             ("--json baseRefOid --jq", "cccc3333cccc3333cccc3333cccc3333cccc3333"),
             ("ls-remote", "cccc3333cccc3333cccc3333cccc3333cccc3333\trefs/heads/main"),
             ("json headRefOid --jq", "aaaa1111aaaa1111aaaa1111aaaa1111aaaa1111"),
-            ("head_sha=", '["10"]'),
-            ("/jobs", json.dumps([_diag_job(check)])),
+            ("head_sha=", _diag_runs()),
+            ("/jobs", _diag_jobs_payload(_diag_job(check))),
             (
                 "/logs",
                 "FAILED tests/agent/test_consumer_guard.py::test_consumer_guard_queue_backpressure",
@@ -1212,8 +1269,8 @@ def test_diagnose_runner_network_flake(diag_gh, monkeypatch, capsys) -> None:
             ("--json baseRefOid --jq", "cccc3333cccc3333cccc3333cccc3333cccc3333"),
             ("ls-remote", "cccc3333cccc3333cccc3333cccc3333cccc3333\trefs/heads/main"),
             ("json headRefOid --jq", "aaaa1111aaaa1111aaaa1111aaaa1111aaaa1111"),
-            ("head_sha=", '["10"]'),
-            ("/jobs", json.dumps([_diag_job(check)])),
+            ("head_sha=", _diag_runs()),
+            ("/jobs", _diag_jobs_payload(_diag_job(check))),
             ("/logs", "apt-get install failed: archive cache is empty — no offline fallback"),
             ("state=all", "[]"),
         ]
@@ -1229,7 +1286,7 @@ def test_diagnose_reports_synthetic_test_pr(diag_gh, monkeypatch, capsys) -> Non
             ("--json baseRefOid --jq", "cccc3333cccc3333cccc3333cccc3333cccc3333"),
             ("ls-remote", "cccc3333cccc3333cccc3333cccc3333cccc3333\trefs/heads/main"),
             ("json headRefOid --jq", "aaaa1111aaaa1111aaaa1111aaaa1111aaaa1111"),
-            ("head_sha=", "[]"),
+            ("head_sha=", '{"total_count": 0, "workflow_runs": []}'),
             (
                 "state=all",
                 json.dumps(
@@ -1259,7 +1316,7 @@ def test_diagnose_stale_base(diag_gh, monkeypatch, capsys) -> None:
             ("--json baseRefOid --jq", "bbbb2222bbbb2222bbbb2222bbbb2222bbbb2222"),
             ("ls-remote", "cccc3333cccc3333cccc3333cccc3333cccc3333\trefs/heads/main"),
             ("json headRefOid --jq", "aaaa1111aaaa1111aaaa1111aaaa1111aaaa1111"),
-            ("head_sha=", "[]"),
+            ("head_sha=", '{"total_count": 0, "workflow_runs": []}'),
             ("state=all", "[]"),
         ]
     )
@@ -1274,7 +1331,7 @@ def test_diagnose_json_machine_readable(diag_gh, monkeypatch, capsys) -> None:
             ("--json baseRefOid --jq", "cccc3333cccc3333cccc3333cccc3333cccc3333"),
             ("ls-remote", "cccc3333cccc3333cccc3333cccc3333cccc3333\trefs/heads/main"),
             ("json headRefOid --jq", "aaaa1111aaaa1111aaaa1111aaaa1111aaaa1111"),
-            ("head_sha=", "[]"),
+            ("head_sha=", '{"total_count": 0, "workflow_runs": []}'),
             ("state=all", "[]"),
         ]
     )
@@ -1301,7 +1358,7 @@ def test_diagnose_merged_pr_reports_no_conflict_or_stale_base(diag_gh, monkeypat
         [
             ("--json mergeable", json.dumps(view)),
             ("json headRefOid --jq", "aaaa1111aaaa1111aaaa1111aaaa1111aaaa1111"),
-            ("head_sha=", "[]"),
+            ("head_sha=", '{"total_count": 0, "workflow_runs": []}'),
             ("state=all", "[]"),
         ]
     )

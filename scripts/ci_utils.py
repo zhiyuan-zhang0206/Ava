@@ -68,7 +68,7 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from scripts.ci_accounting import DEFAULT_LEDGER, load_ledger, report_rows
-from scripts.ci_job_rerun import list_failed_jobs, rerun_failed_jobs
+from scripts.ci_job_rerun import CiJobRerunError, list_failed_jobs, rerun_failed_jobs
 
 # The Ava checkout root this script ships in — anchors base-freshness git reads
 # against THIS repo's origin regardless of the caller's cwd (task #2496).
@@ -813,15 +813,20 @@ def _rerun_command(args: argparse.Namespace, parser: argparse.ArgumentParser) ->
         return None
     if args.wait or args.merge or args.json:
         parser.error("--rerun-failed-jobs is exclusive with --wait/--merge/--json")
-    if args.dry_run:
-        jobs = list_failed_jobs(args.pr, args.repo)
-        if not jobs:
-            print("No failed jobs to re-run")
+    try:
+        if args.dry_run:
+            jobs = list_failed_jobs(args.pr, args.repo)
+            if not jobs:
+                print("No failed jobs to re-run")
+                return 0
+            for j in jobs:
+                print(f"{j['name']} (job {j['job_id']}, run {j['run_id']}, {j['conclusion']})")
             return 0
-        for j in jobs:
-            print(f"{j['name']} (job {j['job_id']}, run {j['run_id']}, {j['conclusion']})")
-        return 0
-    reran, errors = rerun_failed_jobs(args.pr, args.repo)
+        reran, errors = rerun_failed_jobs(args.pr, args.repo)
+    except CiJobRerunError as error:
+        # A failed GitHub query must not read as "no failed jobs" (issue #1945).
+        print(f"Failed to list failed jobs: {error}", file=sys.stderr, flush=True)
+        return 1
     for j in reran:
         print(f"Re-ran {j['name']} (job {j['job_id']})")
     for e in errors:
@@ -1124,7 +1129,12 @@ def _diagnose_pr(pr: str, repo: str, *, token: str | None) -> dict[str, Any]:
         )
 
     quarantined = _quarantined_tests(repo, token=token)
-    failed_jobs = list_failed_jobs(pr, repo)
+    try:
+        failed_jobs = list_failed_jobs(pr, repo)
+    except CiJobRerunError:
+        # Diagnosis stays best-effort: the rollup still names the failing
+        # checks; only the per-job log tail enrichment degrades.
+        failed_jobs = []
     raw_rollup = view.get("statusCheckRollup", [])
     rollup_rows = raw_rollup if isinstance(raw_rollup, list) else []
     rollup = [c for c in rollup_rows if isinstance(c, dict)]
