@@ -19,7 +19,7 @@ Ava's web user interface — Next.js 16 (App Router) + React 19 + Tailwind CSS 4
 | Styling | Tailwind CSS 4 |
 | Component library | shadcn/ui (Radix primitives) |
 | Font | Inter + Geist Mono |
-| Theme | next-themes (class strategy, follow system) |
+| Theme | next-themes (class strategy, follow system) + explicit `color-scheme` meta/CSS |
 | Server data | TanStack React Query |
 | Real-time comms | EventSource (SSE) |
 

@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { headers } from "next/headers";
 import { Inter, Geist_Mono } from "next/font/google";
 import { connection } from "next/server";
@@ -22,6 +22,16 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Ava",
   description: "Ava agent web UI",
+};
+
+// Declares both schemes the console supports; the browser follows
+// prefers-color-scheme for UA-rendered parts (scrollbars, form controls)
+// when the app has not set its own. The explicit `color-scheme` rules in
+// globals.css track the ACTIVE theme (light/dark class), so they take
+// precedence over this static hint and keep native widgets in step with
+// what the palette shows (task #2695 — Dark Reader reads the same signals).
+export const viewport: Viewport = {
+  colorScheme: "dark light",
 };
 
 export default async function RootLayout({
