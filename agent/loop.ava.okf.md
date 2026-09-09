@@ -24,8 +24,10 @@ an error without discarding conversation history.
 Database connection loss keeps the original single-flight task waiting with
 bounded, cancellable backoff. Recovery revalidates the exact incarnation, flushes
 retained writes, reconciles claimed input and repairs dangling tool pairs before
-continuing. It creates no inbound, model call or maintenance acknowledgement;
-ownership loss stops the old continuation.
+continuing — each stage under its own 30s `database_phase` bound (issue #1972),
+never one aggregate deadline across the chain, so a healthy stage is not starved
+by the combined time of the stages before it. It creates no inbound, model call
+or maintenance acknowledgement; ownership loss stops the old continuation.
 An abort awaiting its halted/breaker write remains pending across a database
 outage; recovery retries that write instead of invoking the model again.
 Database-only invocation boundaries have a retry deadline; it does not bound
