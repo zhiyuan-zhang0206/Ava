@@ -43,17 +43,21 @@ import json
 import re
 import signal
 from contextlib import AsyncExitStack, suppress
-from datetime import timedelta
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
 import anyio
-from mcp import ClientSession, StdioServerParameters, types
-from mcp.client.stdio import get_default_environment, stdio_client
+from mcp import ClientSession, types
 from mcp.shared.exceptions import MCPError
 from mcp.types import CONNECTION_CLOSED, REQUEST_TIMEOUT
 
+from services.browser.mcp_upstream import (
+    _bounded,
+    _bounded_stack_close,
+    _create_upstream,
+    _StoppingError,
+)
 from services.browser.page_lifecycle import (
     _AGENT_AFFINITY,
     _text_of,
@@ -74,19 +78,6 @@ from shared.paths import chrome_mcp_socket
 # A single tool result (screenshot / DOM snapshot) can be multi-MB on one line;
 # lift the stream buffer cap well above StreamReader's 64KiB default.
 _LINE_LIMIT = 64 * 1024 * 1024
-
-# Pinned exact version — do NOT go back to @latest. npx re-resolves @latest on
-# every daemon (re)start, so an upstream release can silently break the browser
-# MCP overnight: on 2026-08-02 a newer chrome-devtools-mcp raised its engines
-# floor to node ^20.19.0 || ^22.12.0 || >=23 while the session's PATH resolved
-# node 18 first, and the upstream refused to start ("chrome upstream session is
-# down"). An exact pin keeps deploys reproducible; bump it deliberately with a
-# verified node version + a real chrome-MCP smoke test.
-_UPSTREAM_PACKAGE = "chrome-devtools-mcp@1.6.0"
-
-# Same lean flags as the standalone path used: drop the usage-statistics
-# telemetry (and its watchdog subprocess) + the periodic update check.
-_LEAN_FLAGS = ["--usageStatistics=false"]
 
 # Page-management tools: they CHANGE which page a connection owns (or are
 # browser-global) and so must not be re-pinned to the connection's current page
@@ -129,11 +120,6 @@ def _is_upstream_down(exc: BaseException) -> bool:
 # Reconnect backoff parameters for upstream death recovery.
 _RECONNECT_INITIAL_DELAY_S = 1.0
 _RECONNECT_MAX_DELAY_S = 30.0
-
-# A wedged (not dead) upstream call must not hold the serial lock forever and
-# freeze every client; bound each upstream request. Generous so a slow real
-# navigation never trips it -- only a true hang does.
-_READ_TIMEOUT = timedelta(seconds=180)
 
 # Upstream watchdog: with no client calling, a wedged upstream would sit
 # undetected forever (ping answers from the daemon, list_tools serves its
@@ -397,43 +383,6 @@ def _write(writer: asyncio.StreamWriter, obj: Response) -> None:
     writer.write((json.dumps(obj, ensure_ascii=False) + "\n").encode())
 
 
-async def _create_upstream(browser_url: str) -> tuple[ClientSession, AsyncExitStack]:
-    """Create a new chrome-devtools-mcp upstream session.
-
-    Returns (session, stack) — the caller owns the stack and must close it on
-    teardown. The stack owns the subprocess + stdio pipes; when aclosed, the
-    npx child is terminated.
-    """
-    upstream_params = StdioServerParameters(
-        command="npx",
-        args=[
-            "-y",
-            _UPSTREAM_PACKAGE,
-            "--browserUrl",
-            browser_url,
-            "--allow-unrestricted-paths",
-            *_LEAN_FLAGS,
-        ],
-        env={**get_default_environment(), "CHROME_DEVTOOLS_MCP_NO_UPDATE_CHECKS": "1"},
-    )
-
-    stack = AsyncExitStack()
-    try:
-        read, write = await stack.enter_async_context(stdio_client(upstream_params))
-        session = await stack.enter_async_context(
-            ClientSession(read, write, read_timeout_seconds=_READ_TIMEOUT.total_seconds())
-        )
-        # Bounded: if Chrome is not up yet, initialize hangs — time out so the
-        # reconnect loop retries instead of blocking forever.
-        await asyncio.wait_for(
-            session.initialize(), timeout=settings.sandbox.mcp_connect_timeout_seconds
-        )
-        return session, stack
-    except BaseException:
-        await stack.aclose()
-        raise
-
-
 async def _await_stop_or_timeout(stop: asyncio.Event, timeout: float) -> None:
     """Sleep for *timeout* seconds, waking early if *stop* is set."""
     with suppress(asyncio.TimeoutError):
@@ -688,7 +637,9 @@ async def run() -> None:  # noqa: PLR0915 — upstream watchdog lifecycle keeps 
     try:
         while not stop.is_set():
             try:
-                session, stack = await _create_upstream(browser_url)
+                session, stack = await _create_upstream(browser_url, stop)
+            except _StoppingError:
+                break
             except Exception as e:
                 logger.error(
                     f"[browser-mcp] upstream creation failed: {e}; "
@@ -702,8 +653,7 @@ async def run() -> None:  # noqa: PLR0915 — upstream watchdog lifecycle keeps 
 
             # Successfully connected — swap in the new daemon and stack.
             if current_stack is not None:
-                with suppress(Exception):
-                    await current_stack.aclose()
+                await _bounded_stack_close(current_stack, "previous upstream stack close")
             current_stack = stack
             daemon_ref[0] = ChromeMcpDaemon(session)
             watchdog_task = asyncio.create_task(_upstream_watchdog(daemon_ref[0], stop))
@@ -734,12 +684,13 @@ async def run() -> None:  # noqa: PLR0915 — upstream watchdog lifecycle keeps 
                 # Close the dead upstream stack NOW — its npx/node children
                 # used to linger until the next successful reconnect (audit
                 # round 2, P2), holding resources for the whole backoff window.
+                # The close is bounded: a child that ignores termination must
+                # not wedge the reconnect loop (2026-09-09 #2043).
                 # current_stack is non-None here by construction: this branch
                 # sits after a successful _create_upstream (which assigns it);
                 # the None reset makes the next loop iteration's assignment the
                 # only path that matters (pyright: comparison is always true).
-                with suppress(Exception):
-                    await current_stack.aclose()
+                await _bounded_stack_close(current_stack, "dead upstream stack close")
                 current_stack = None
     finally:
         logger.info("[browser-mcp] shutting down")
@@ -752,13 +703,16 @@ async def run() -> None:  # noqa: PLR0915 — upstream watchdog lifecycle keeps 
             with suppress(BaseException):
                 await reaper_task
         session_task.cancel()
-        with suppress(Exception):
+        # CancelledError is a BaseException, not an Exception: suppressing
+        # only Exception here let a cancelled session loop escape the finally
+        # and skip every remaining cleanup step — upstream stack, server, and
+        # socket close (2026-09-09 #2043: SIGTERM left a live daemon that
+        # blocked `cluster update` for the whole 300s stop budget).
+        with suppress(BaseException):
             await session_task
-        if current_stack is not None:
-            with suppress(Exception):
-                await current_stack.aclose()
+        await _bounded_stack_close(current_stack, "upstream stack close during shutdown")
         server.close()
-        await server.wait_closed()
+        await _bounded(server.wait_closed(), "server close")
         with suppress(OSError):
             sock.unlink()
 
