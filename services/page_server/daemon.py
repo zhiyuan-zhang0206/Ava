@@ -518,33 +518,47 @@ def _supervise_handle(
     occupants: dict[int, tuple[int, str | None]],
     shell_pids: dict[int, tuple[int, str]],
     now: float,
-) -> None:
-    """Health-check one page server and repair the matching shell as needed."""
+) -> bool:
+    """Health-check one page server and repair the matching shell as needed.
+
+    Returns True when this pass tore the session down after a failed
+    relaunch — the caller recreates it in the same pass so the page outage
+    is one poll, not two.
+    """
     if now < backoff.get(key, 0.0) or now - handle.last_launch_monotonic < _SPAWN_VERIFY_TIMEOUT_S:
-        return
+        return False
     if _server_is_healthy(row.host, row.port, handle.token):
         backoff.pop(key, None)
-        return
+        return False
     if _probe_port(row.host, row.port) is None:
         try:
             _launch_in_session(backend, handle, row)
         except RuntimeError as exc:
             _log.error("[page-server] relaunch failed for %s: %s", key, exc)
-            backoff[key] = now + _SPAWN_BACKOFF_S
-            return
+            # The shell cannot run the server command — its host is gone or
+            # wedged while the record still reads alive. A bare backoff
+            # would retry the dead transport forever; tear the session down
+            # instead (kill_session's record-based fallback reaches an
+            # unresponsive host) and drop the handle so the caller
+            # recreates a fresh session this pass (task #2670).
+            _kill_page_session(backend, handle)
+            del managed[key]
+            backoff.pop(key, None)
+            return True
         handle.last_launch_monotonic = now
         backoff.pop(key, None)
         _log.warning("[page-server] relaunched server in session %s", handle.session_name)
-        return
+        return False
     occupant = occupants.get(row.port)
     if occupant is not None and _page_session_owner(occupant[0], shell_pids) == key:
         _log.warning("[page-server] replacing stale server in session %s", handle.session_name)
         _kill_page_session(backend, handle)
         del managed[key]
         backoff.pop(key, None)
-        return
+        return False
     _log.warning("[page-server] port %s is occupied by a foreign server; backing off", row.port)
     backoff[key] = now + _SPAWN_BACKOFF_S
+    return False
 
 
 def _reconcile_once(
@@ -594,10 +608,17 @@ def _reconcile_once(
             handle, _ = _ensure_handle(
                 pool, backend, row, key, managed, backoff, degraded, now, live_names
             )
-        if handle is not None:
-            _supervise_handle(
-                backend, row, key, handle, managed, backoff, occupants, shell_pids, now
-            )
+        if handle is not None and _supervise_handle(
+            backend, row, key, handle, managed, backoff, occupants, shell_pids, now
+        ):
+            # _supervise_handle tore the wedged session down. The pass's
+            # record scan predates the kill and still names the dead
+            # session — drop it so the re-ensure below cannot re-adopt
+            # the just-killed shell, then recreate in this same pass
+            # (task #2670).
+            if live_names is not None:
+                live_names.discard(handle.session_name)
+            _ensure_handle(pool, backend, row, key, managed, backoff, degraded, now, live_names)
 
 
 async def _reconcile_loop(pool: ConnectionPool, liveness: Liveness) -> None:
