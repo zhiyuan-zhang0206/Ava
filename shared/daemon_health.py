@@ -239,6 +239,12 @@ def _healthz_payload(
     refreshed without a restart — which makes a per-daemon `curl /healthz` the
     way to tell a daemon still holding pre-rollout code from one that restarted
     onto it."""
+    # Method-local: keeps session_record out of this module's import closure —
+    # the agent-runner self-update stops services in-process after checkout +
+    # uv sync, so the identity code must load from the just-pulled image, not
+    # the pre-pull one (PR #932 import-closure invariant).
+    from shared.runtime_service_identity import normal_runtime_identity
+
     payload: dict[str, object] = {
         "name": name,
         "pid": pid,
@@ -246,6 +252,9 @@ def _healthz_payload(
         "started_at": started_at,
         "sha": process_sha.get(),
     }
+    runtime = normal_runtime_identity(home)
+    if runtime is not None:
+        payload["runtime"] = runtime
     from shared import health_schema
 
     stale_for = None

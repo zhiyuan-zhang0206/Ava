@@ -34,7 +34,8 @@ Most command modules follow these two naming groups:
   `_converge_legacy_permission_watcher` (one-shot cleanup of the removed
   permission-prompt watcher),
   `_update_git` /
-  `_update_orchestration` / `_update_agent_runner` / `_update_uv_sync` /
+  `_update_orchestration` / `_update_agent_runner` / `_update_bootstrap` /
+  `_update_normal_release` / `_update_uv_sync` /
   `_updater_lease` / `_updater_stage` (the cmd.exe ladder's per-step telemetry marker) / `_update_recover` /
   `_gateway_ready` (the staged upgrade), `_probe`, `_setup`, `_session_lifecycle`, `_repo`,
   `_ownership_preflight`,
@@ -86,25 +87,16 @@ schema change catches the DB up on its own.
   service becomes exit code 4 are one subject, in [[start-readiness.ava.okf.md]].
 - The gateway/runner update boundary, readiness proof, Phase-B verdicts, and
   failed-update recovery are one subject in [[rollout-boundary.ava.okf.md]].
+- The restricted immutable `ava-ops` hop is [[update-bootstrap.ava.okf.md]];
+  its sealed normal-service planning contract and disabled activation boundary are
+  [[normal-release.ava.okf.md]].
 - A full agent-runner update checks out, syncs, and records the installed SHA in
   its pre-checkout image, then re-execs `_update_agent_runner` with its private
   post-checkout flags before validation, quiesce, stop, or start. Persistent
   schedule terminals are retained, including their currently loaded code;
   an explicit schedule restart or full stop/start adopts new runner code.
-- `_converge_firewall` reconciles the per-binary Application Firewall manifest.
-  Version-stamped Python, Postgres, Homebrew, browser, and observability paths mean
-  an upgrade can orphan the old ALF identity while loopback keeps working — issue
-  #949. The step adds and unblocks resolved manifest paths, then removes stale
-  managed rules. These `socketfilterfw` mutations were empirically verified without
-  elevation on the macmini running macOS 15.3.1; other versions fall back to
-  `sudo -n` and then an exact manual command without blocking `ava start`.
-  `_gateway_ready` uses the same audit when an off-box probe fails. See
-  [[shared/shared.ava.okf.md|Shared Libraries]].
-- `_converge_redis_bridge` installs the repo-owned pure-stdlib relay into
-  `$AVA_HOME`, converges or retires its macOS KeepAlive job as the cluster shape
-  changes, and exposes the authenticated Redis PING used by `ava status` and the
-  alert-only cluster health check. The listener recreates its socket after an
-  interface or descriptor failure; Redis itself never widens beyond loopback.
+- Host-level Application Firewall and Redis bridge wiring are one subject:
+  [[converge-host-wiring.ava.okf.md]].
 - The prod editable-install assertion and update write window are one lifecycle
   guard: [[editable-install-guard.ava.okf.md]]; the prod source checkout's
   integrity (periodic reset + probe detection) is its sibling guard:
