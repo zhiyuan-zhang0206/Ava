@@ -1,9 +1,11 @@
 """The memory search backend contract + the indexer-layer row vocabulary.
 
 The protocol is the CTO-frozen interface (memory search backend
-abstraction, 2026-08-30): every backend implements exactly these eight
+abstraction, 2026-08-30): every backend implements exactly these nine
 methods, so switching storage is one env var + a restart — the cold-start
 reconcile rebuilds the index on the new backend without hand-copying data.
+`delete_stale_rows` joined in 2026-09 (issue #1946): the indexer's chunk
+vocabulary gained a tail-cleanup write, which every backend must honor.
 
 The chunk/pk helpers live here because every backend shares them: they
 are the indexer layer's row vocabulary (chunking itself stays in the
@@ -101,6 +103,22 @@ class MemorySearchBackend(Protocol):
         ...
 
     def delete(self, path: str) -> None: ...
+
+    def delete_stale_rows(
+        self,
+        entries: Sequence[tuple[str, dict[str, int]]],
+    ) -> None:
+        """Delete chunk rows a re-indexed file no longer produces (issue #1946).
+
+        One `(path, kind_limits)` pair per file: `kind_limits` maps kind ->
+        how many rows of that kind the file's CURRENT content produces (0
+        means the kind is gone). The indexer writes contiguous chunk_idx from
+        0, so every row of `path` whose kind is absent from the map, or whose
+        chunk_idx >= its limit, is an obsolete tail. Called by the indexer
+        only, after `upsert_many` of the file's new rows; an entry whose
+        path has no rows is a no-op.
+        """
+        ...
 
     def all_meta(
         self,

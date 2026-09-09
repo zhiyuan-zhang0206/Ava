@@ -67,6 +67,15 @@ class DeleteBody(BaseModel):
     path: str
 
 
+class DeleteStaleRow(BaseModel):
+    path: str
+    kind_limits: dict[str, int]
+
+
+class DeleteStaleBatchBody(BaseModel):
+    entries: list[DeleteStaleRow] = Field(min_length=1, max_length=_MAX_BATCH_ROWS)
+
+
 class SearchBody(BaseModel):
     vector: list[float] = Field(max_length=_EMBED_DIM)
     k: int = Field(ge=1, le=_MAX_K)
@@ -116,6 +125,68 @@ async def _stats_flusher(store: MemoryStore, lock: asyncio.Lock) -> None:
             _log.warning("[memory_search] stats emit failed", exc_info=True)
 
 
+def _mount_mutations(app: FastAPI, store: MemoryStore, lock: asyncio.Lock) -> None:
+    """The four protocol write endpoints (upsert / upsert_batch / delete /
+    delete_stale_batch) — extracted so build_app stays a router, not a wall
+    of handlers. Each mutation persists the npz before responding."""
+    from fastapi import HTTPException
+
+    @app.post("/upsert")
+    async def upsert(body: UpsertBody) -> dict[str, str]:
+        vector = np.asarray(body.vector, dtype=np.float32)
+        try:
+            async with lock:
+                store.upsert(
+                    body.path,
+                    body.mtime,
+                    body.content_hash,
+                    vector,
+                    kind=body.kind,
+                    chunk_idx=body.chunk_idx,
+                )
+                await asyncio.to_thread(store.save)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        return {"status": "ok"}
+
+    @app.post("/upsert_batch")
+    async def upsert_batch(body: UpsertBatchBody) -> dict[str, str]:
+        rows = [
+            (
+                row.path,
+                row.mtime,
+                row.content_hash,
+                np.asarray(row.vector, dtype=np.float32),
+                row.kind,
+                row.chunk_idx,
+            )
+            for row in body.rows
+        ]
+        try:
+            async with lock:
+                store.upsert_many(rows)
+                await asyncio.to_thread(store.save)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        return {"status": "ok"}
+
+    @app.post("/delete")
+    async def delete(body: DeleteBody) -> dict[str, str]:
+        async with lock:
+            store.delete(body.path)
+            await asyncio.to_thread(store.save)
+        return {"status": "ok"}
+
+    @app.post("/delete_stale_batch")
+    async def delete_stale_batch(body: DeleteStaleBatchBody) -> dict[str, str]:
+        """Tail-cleanup companion to /upsert_batch (issue #1946): one lock +
+        one npz save for every path the current files no longer fully cover."""
+        async with lock:
+            store.delete_stale_rows([(row.path, row.kind_limits) for row in body.entries])
+            await asyncio.to_thread(store.save)
+        return {"status": "ok"}
+
+
 def build_app(store: MemoryStore) -> FastAPI:
     """Wire the store into a FastAPI app. One mutation lock serializes every
     operation (search included) — the store is pure in-memory state and a
@@ -145,55 +216,7 @@ def build_app(store: MemoryStore) -> FastAPI:
         async with lock:
             return {"rows": len(store), "last_save_seconds": store.last_save_seconds}
 
-    @app.post("/upsert")
-    async def upsert(body: UpsertBody) -> dict[str, str]:
-        vector = np.asarray(body.vector, dtype=np.float32)
-        try:
-            async with lock:
-                store.upsert(
-                    body.path,
-                    body.mtime,
-                    body.content_hash,
-                    vector,
-                    kind=body.kind,
-                    chunk_idx=body.chunk_idx,
-                )
-                await asyncio.to_thread(store.save)
-        except ValueError as exc:
-            from fastapi import HTTPException
-
-            raise HTTPException(status_code=422, detail=str(exc)) from exc
-        return {"status": "ok"}
-
-    @app.post("/upsert_batch")
-    async def upsert_batch(body: UpsertBatchBody) -> dict[str, str]:
-        rows = [
-            (
-                row.path,
-                row.mtime,
-                row.content_hash,
-                np.asarray(row.vector, dtype=np.float32),
-                row.kind,
-                row.chunk_idx,
-            )
-            for row in body.rows
-        ]
-        try:
-            async with lock:
-                store.upsert_many(rows)
-                await asyncio.to_thread(store.save)
-        except ValueError as exc:
-            from fastapi import HTTPException
-
-            raise HTTPException(status_code=422, detail=str(exc)) from exc
-        return {"status": "ok"}
-
-    @app.post("/delete")
-    async def delete(body: DeleteBody) -> dict[str, str]:
-        async with lock:
-            store.delete(body.path)
-            await asyncio.to_thread(store.save)
-        return {"status": "ok"}
+    _mount_mutations(app, store, lock)
 
     @app.get("/meta")
     async def meta() -> dict[str, tuple[float, str, str]]:
