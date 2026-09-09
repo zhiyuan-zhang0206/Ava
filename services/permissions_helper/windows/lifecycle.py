@@ -18,6 +18,8 @@ import subprocess
 import time
 from pathlib import Path
 
+from shared.log import logger
+
 _WINDOWS_DIR = Path(__file__).resolve().parent
 _SOURCE = _WINDOWS_DIR / "helper.cs"
 _TASK_NAME = "AvaPermissionsHelper"
@@ -183,6 +185,17 @@ def register_and_launch(exe: Path) -> None:
             raise RuntimeError(
                 f"schtasks /Create failed ({proc.returncode}): {proc.stderr.decode(errors='replace').strip()}"
             )
+    from shared.windows_session import active_console_session_id
+
+    if active_console_session_id() is None:
+        # Nobody is logged on interactively: an /IT task has no session to run
+        # in. Say so plainly instead of silently no-opping — GUI automation is
+        # unavailable until the next interactive logon, when ONLOGON fires.
+        logger.warning(
+            "permissions helper: no interactive session — desktop automation stays "
+            "unavailable until the next interactive logon (task will start it)"
+        )
+        return
     subprocess.run(  # noqa: S603 — fixed schtasks tool, literal args
         ["schtasks", "/Run", "/TN", _TASK_NAME], capture_output=True, check=False
     )

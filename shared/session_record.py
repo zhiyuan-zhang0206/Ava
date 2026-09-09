@@ -62,6 +62,13 @@ class SessionRecord:
     starttime: int | None = None
     generation: str | None = None
     control_mode: str | None = None
+    # Windows only: the resident cross-session control steward (issue #1930).
+    # Both fields are absent on legacy records, which therefore support
+    # same-session console delivery only. `steward_socket` is the absolute
+    # AF_UNIX path under $AVA_HOME/run/ctrl; its name embeds this record's
+    # exact (pid, create_time) identity.
+    steward_pid: int | None = None
+    steward_socket: str | None = None
 
     @classmethod
     def read(cls, path: Path) -> SessionRecord | None:
@@ -89,6 +96,14 @@ class SessionRecord:
                 else None
             ),
             control_mode=record.get("control_mode"),
+            steward_pid=(
+                int(record["steward_pid"]) if isinstance(record.get("steward_pid"), int) else None
+            ),
+            steward_socket=(
+                record["steward_socket"]
+                if isinstance(record.get("steward_socket"), str) and record["steward_socket"]
+                else None
+            ),
         )
 
     def identifies(self, pid: int) -> bool | None:
