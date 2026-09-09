@@ -11,6 +11,7 @@ socket wiring is left to dev-cluster testing.
 import asyncio
 import json
 import tempfile
+import time
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -318,8 +319,10 @@ def _fresh_agent_affinity() -> Iterator[None]:
     reconnects); a test session outlives every test, so clear it around each
     one the way the production process would start fresh."""
     _AGENT_AFFINITY.clear()
+    page_lifecycle._AGENT_LAST_USE.clear()
     yield
     _AGENT_AFFINITY.clear()
+    page_lifecycle._AGENT_LAST_USE.clear()
 
 
 async def test_agent_affinity_shares_page_across_connections() -> None:
@@ -720,3 +723,83 @@ async def test_reap_dead_agent_pages_midpass_slot_move_keeps_live_affinity(
     closes = [c[:2] for c in up.calls if c[0] == "close_page"]
     assert closes == [("close_page", {"pageId": 1})]
     assert _AGENT_AFFINITY[7] == 2
+
+
+# ── Idle-tab recycling (task #2618) ──────────────────────────────────────
+
+
+def _stamp_idle(agent_id: int, seconds: int) -> None:
+    """Force the agent's last-use stamp back by `seconds`."""
+    page_lifecycle._AGENT_LAST_USE[agent_id] = time.monotonic() - seconds
+
+
+async def test_call_tool_for_agent_stamps_last_use() -> None:
+    """Every agent-keyed call moves the idle stamp, so a working agent is
+    never an idle-recycle candidate."""
+    d, _up = _daemon()
+    await d.call_tool_for_agent("new_page", {"url": "a"}, 7)
+    assert 7 in page_lifecycle._AGENT_LAST_USE
+    assert time.monotonic() - page_lifecycle._AGENT_LAST_USE[7] < 5
+
+
+async def test_reap_idle_agent_pages_closes_only_idle_owned_pages() -> None:
+    """The idle sweep closes agent-owned pages whose owner has been idle past
+    the timeout, clears the slot + stamp, and leaves recent-use agents and
+    slotless (user) tabs untouched."""
+    d, up = _daemon()
+    await d.call_tool_for_agent("new_page", {"url": "https://example.com/old"}, 7)
+    await d.call_tool_for_agent("new_page", {"url": "https://example.com/live"}, 8)
+    up.pages[99] = "https://user.example.com/mine"  # the user's own tab
+    up.calls.clear()
+
+    # agent 7 idle past the timeout; agent 8 used the browser just now
+    _stamp_idle(7, page_lifecycle._TAB_IDLE_TIMEOUT_S + 60)
+
+    closed = await page_lifecycle.reap_idle_agent_pages(d)
+
+    assert closed == 1
+    assert up.pages == {
+        2: "https://example.com/live",
+        99: "https://user.example.com/mine",
+    }
+    assert _AGENT_AFFINITY[7] is None
+    assert _AGENT_AFFINITY[8] == 2
+    assert 7 not in page_lifecycle._AGENT_LAST_USE
+    assert [c[:2] for c in up.calls if c[0] == "close_page"] == [("close_page", {"pageId": 1})]
+
+
+async def test_reap_idle_agent_pages_idempotent() -> None:
+    """A second pass has nothing left to close — slot cleared, stamp gone."""
+    d, up = _daemon()
+    await d.call_tool_for_agent("new_page", {"url": "x"}, 7)
+    _stamp_idle(7, page_lifecycle._TAB_IDLE_TIMEOUT_S + 1)
+    up.calls.clear()
+
+    await page_lifecycle.reap_idle_agent_pages(d)
+    await page_lifecycle.reap_idle_agent_pages(d)
+
+    assert [c[:2] for c in up.calls if c[0] == "close_page"] == [("close_page", {"pageId": 1})]
+    assert _AGENT_AFFINITY == {7: None}
+
+
+async def test_reap_idle_agent_pages_within_timeout_keeps_page() -> None:
+    """An agent that used the browser inside the timeout window keeps its
+    page even if its URL points at a dead host — idle is the only signal."""
+    d, up = _daemon()
+    await d.call_tool_for_agent("new_page", {"url": "https://example.com/x"}, 7)
+    _stamp_idle(7, page_lifecycle._TAB_IDLE_TIMEOUT_S - 1)
+    up.calls.clear()
+
+    assert await page_lifecycle.reap_idle_agent_pages(d) == 0
+    assert up.pages == {1: "https://example.com/x"}
+    assert _AGENT_AFFINITY[7] == 1
+
+
+async def test_release_agent_page_clears_idle_stamp() -> None:
+    """A deterministic release also drops the last-use stamp, so a released
+    agent never lingers in the idle registry."""
+    d, _up = _daemon()
+    await d.call_tool_for_agent("new_page", {"url": "x"}, 7)
+    assert 7 in page_lifecycle._AGENT_LAST_USE
+    await page_lifecycle.release_agent_page(d, 7)
+    assert 7 not in page_lifecycle._AGENT_LAST_USE

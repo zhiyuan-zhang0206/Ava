@@ -133,6 +133,32 @@ class DaemonSettings(EnvSettings):
         },
     )
 
+    schedule_fire_log_retention_days: int = Field(
+        default=30,
+        alias="AVA_SCHEDULE_FIRE_LOG_RETENTION_DAYS",
+        description="Days of schedule_fire_log claims kept by the gateway reaper's retention prune. schedule_fire_log is the at-most-once claim ledger for schedule catch-up; the prune deletes rows whose slot is older than this window but always keeps the newest claim per schedule so the catch-up baseline never regresses (a regressed baseline would refire a sparse-cron schedule's already-claimed slot).",
+        json_schema_extra={
+            "capability": "gateway",
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    schedule_fire_log_cleanup_interval_seconds: float = Field(
+        default=86400.0,
+        alias="AVA_SCHEDULE_FIRE_LOG_CLEANUP_INTERVAL_SECONDS",
+        description="How often the gateway reaper runs the schedule_fire_log retention prune. One bounded DELETE per pass; the default keeps a single daily pass.",
+        json_schema_extra={
+            "capability": "gateway",
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
     health_probe_agent_min: int = Field(
         default=1,
         alias="AVA_HEALTH_PROBE_AGENT_MIN",
