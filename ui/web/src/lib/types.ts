@@ -755,7 +755,7 @@ export const USER_SETTING_DEFAULTS: Record<string, unknown> = {
   "display.sidebar_sort": { key: "id", dir: "desc" },
   // Sidebar stats aggregation window (`?hours=`). Must stay within STATS_WINDOWS.
   "display.stats_window_hours": 24,
-  "display.run_timeline_window_hours": 2,
+  "display.run_timeline_window_hours": 0.5,
   // Fleet view surfaces.
   "display.fleet_left_view": "graph",
   "display.fleet_queue_collapsed": false,
