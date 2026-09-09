@@ -12,6 +12,7 @@ from scripts.qa_receipt import QA_ACCOUNT_ID, REPOSITORY, TRUNK_ACCOUNT_ID, appr
 def _pr() -> dict[str, Any]:
     return {
         "number": 42,
+        "state": "open",
         "user": {"id": QA_ACCOUNT_ID, "type": "User"},
         "head": {"sha": "a" * 40, "ref": "feature", "repo": {"full_name": REPOSITORY}},
         "base": {"ref": "main", "repo": {"full_name": REPOSITORY}},
