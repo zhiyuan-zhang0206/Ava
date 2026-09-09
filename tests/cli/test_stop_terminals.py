@@ -252,3 +252,95 @@ def test_stop_keeps_hold_when_job_ignores_termination(
         assert name in err, "the failure must name the owning session"
     finally:
         terminal.kill_session(name)
+
+
+def _notice_files(home: Path) -> list[Path]:
+    from ops import pty_close_notices
+
+    journal = pty_close_notices.journal_dir()
+    return list(journal.iterdir()) if journal.is_dir() else []
+
+
+def test_stop_records_notice_for_verified_closed_busy_session(
+    home: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A busy session verified closed leaves one durable notice; delivery to
+    its owner happens at the next ops-daemon startup (issue #2044)."""
+    dependencies(monkeypatch)
+    terminal = PtySessionBackend()
+    _stop_env(monkeypatch, home, terminal)
+    (home / "machine_name").write_text("test-host")
+    name = "ava-agent-987-shell-2044-busy"
+    shell = _start_busy_session(terminal, home, name, _TERM_OK_JOB)
+    try:
+        deadline = time.monotonic() + 15
+        while time.monotonic() < deadline and not _shell_children(shell):
+            time.sleep(0.1)
+        assert _shell_children(shell), "the job never started"
+
+        assert entry.cmd_stop(require_confirmation=False, keep_infra=True, timeout=15) == 0
+        files = _notice_files(home)
+        assert len(files) == 1
+        import json as _json
+
+        notice = _json.loads(files[0].read_text())
+        assert notice["agent_id"] == 987
+        assert notice["session_id"] == 2044
+        assert notice["name"] == name
+        assert notice["machine"]
+        assert notice["operation"]
+        assert "operator stop" in notice["reason"]
+    finally:
+        terminal.kill_session(name)
+
+
+def test_stop_records_nothing_for_idle_shell(home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """An idle shell (no jobs) closed by stop is silent — the TTL reaper's
+    quiet-empty policy, never a blanket close notification (issue #2044 #3)."""
+    dependencies(monkeypatch)
+    terminal = PtySessionBackend()
+    _stop_env(monkeypatch, home, terminal)
+    name = "ava-agent-987-shell-2044-idle"
+    assert terminal.new_session(name, "bash --norc", home, env={"AVA_HOME": str(home)})
+    record = SessionRecord.read(run_dir() / "pty" / f"{name}.json")
+    assert record is not None
+    shell = OwnedProcess(record.pid, record.create_time, record.starttime)
+    try:
+        deadline = time.monotonic() + 15
+        while time.monotonic() < deadline and _shell_children(shell):
+            time.sleep(0.1)
+        assert not _shell_children(shell), "the idle shell spawned children"
+
+        assert entry.cmd_stop(require_confirmation=False, keep_infra=True, timeout=15) == 0
+        assert _notice_files(home) == []
+    finally:
+        terminal.kill_session(name)
+
+
+def test_stop_records_nothing_on_timeout(
+    home: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A stop that timed out never claims a closure — only verified exits are
+    recorded, partial success records nothing (issue #2044 #2)."""
+    dependencies(monkeypatch)
+    terminal = PtySessionBackend()
+    _stop_env(monkeypatch, home, terminal)
+    name = "ava-agent-987-shell-2044-stubborn"
+    shell = _start_busy_session(terminal, home, name, _STUBBORN_JOB)
+    try:
+        jobs: list[int] = []
+        deadline = time.monotonic() + 15
+        while time.monotonic() < deadline and not jobs:
+            jobs = [
+                child.pid
+                for child in _shell_children(shell)
+                if child.status() != psutil.STATUS_ZOMBIE
+            ]
+            time.sleep(0.1)
+        assert jobs, "the stubborn job never started"
+
+        assert entry.cmd_stop(require_confirmation=False, keep_infra=True, timeout=1) == 1
+        assert "terminals" in capsys.readouterr().err
+        assert _notice_files(home) == []
+    finally:
+        terminal.kill_session(name)
