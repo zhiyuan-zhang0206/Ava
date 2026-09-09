@@ -1,4 +1,4 @@
-name: Install Postgres 17 + Redis
+name: Install Postgres 17 + Redis + PgBouncer
 description: >
   Server binaries on PATH for the self-provisioned test clusters
   (tests/_containers.py). Every network phase degrades instead of failing: the
@@ -6,8 +6,8 @@ description: >
   is allowed to fail when the archive cache is already warm, and the install
   falls back to dpkg over the cached archives when apt cannot resolve at all.
   Every network command carries a per-connection timeout, an outer timeout and
-  a retry that announces its own exhaustion: CI *infrastructure* legitimately
-  retries, the test suite itself never does.
+  a retry that announces its own exhaustion. These installation retries are
+  independent of the workflow's test retry policy.
 runs:
   using: composite
   steps:
@@ -22,7 +22,7 @@ runs:
       uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: /tmp/apt-archives
-        key: apt-pg17-redis-${{ runner.os }}-v3
+        key: apt-pg17-redis-pgbouncer-${{ runner.os }}-v4
 
     - name: Install (pgdg repo, cached archives, timeout+retry)
       shell: bash
@@ -65,7 +65,7 @@ runs:
           -o APT::Get::List-Cleanup=0
         )
         archives=(-o Dir::Cache::archives=/tmp/apt-archives)
-        pkgs=(postgresql-17 redis-server postgresql-17-pgvector)
+        pkgs=(postgresql-17 redis-server postgresql-17-pgvector pgbouncer)
 
         sudo sh -c 'echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
         sudo gpg --yes --dearmor -o /etc/apt/trusted.gpg.d/pgdg.gpg "${{ github.action_path }}/ACCC4CF8.asc"
@@ -114,6 +114,10 @@ runs:
           fi
         fi
 
+        # An archive-only fallback must not silently omit the pooler and turn
+        # the real transaction-pooling tests into successful skips.
+        pgbouncer --version
+
         # The cache save step reads the dir as the runner user: `X` grants the
         # traverse bit on directories only, leaving file modes alone.
         sudo chmod -R a+rX /tmp/apt-archives
@@ -125,4 +129,4 @@ runs:
       uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: /tmp/apt-archives
-        key: apt-pg17-redis-${{ runner.os }}-v3
+        key: apt-pg17-redis-pgbouncer-${{ runner.os }}-v4
