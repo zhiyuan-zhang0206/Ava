@@ -290,7 +290,7 @@ async def _proxy_page_get_impl(agent_id: int, name: str, rest: str, request: Req
     query = request.url.query
     if query:
         target += f"?{query}"
-    client = httpx.AsyncClient(timeout=_PROXY_TIMEOUT)
+    client = httpx.AsyncClient(timeout=_PROXY_TIMEOUT, trust_env=False)
     try:
         req = client.build_request("GET", target)
         resp = await client.send(req, stream=True)
