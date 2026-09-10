@@ -52,15 +52,15 @@ restart, without invoking the graph or consuming ordinary messages;
 `applied_at`, an idle row, or a released lease alone is insufficient.
 
 Failure receipts are graded at record time by the turn exception. The
-database-outage family (`psycopg.OperationalError`, `PoolTimeout`,
-`TimeoutError`) is crash-equivalent: the continuation outcome is unknown but
-durable, exactly as after a host crash. Those receipts land in `undelivered`,
-never in `failures`: recorded for audit, they never block. They are re-driven
-through the held-control path — the wake scan keeps the agent woken (no
-failure fence), the held controls explicitly re-flush the buffered checkpoint
-BEFORE claiming the restart, and the certification SQL still requires the
-applied restart, so a drain never certifies through an un-flushed tail. Every
-other exception latches into `failures` and blocks as before.
+database-outage family (`psycopg.OperationalError`, `PoolTimeout`) is
+crash-equivalent: the continuation outcome is unknown but durable, as after
+a crash. Every DB channel hang surfaces as one of these, so the bare
+`TimeoutError` — since 3.11 also the LLM `wait_for` timeout — grades
+as an ordinary blocking failure. Those land in `undelivered`, never
+`failures`; they never block. They are re-driven through the held-control
+path (no failure fence), and certification still requires the applied
+restart, so a drain never certifies an un-flushed tail. Any other exception
+latches into `failures`.
 
 Phases are `preparing → draining → drained → stopping → stopped → starting →
 ready`. Failed prepare/drain/stop/start keeps the hold. Ordinary `ava start`

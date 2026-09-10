@@ -38,8 +38,8 @@ and the matching GitHub Releases, cut by `scripts/release_cut.py`.
   impersonating "nothing listening" (no unsafe respawn; task #2587).
 
 - Maintenance drain receipts are graded by failure class: a turn raising a
-  database-outage exception (`psycopg.OperationalError`, `PoolTimeout`,
-  `TimeoutError`) records a crash-equivalent `undelivered` receipt instead of a
+  database-outage exception (`psycopg.OperationalError`, `PoolTimeout`)
+  records a crash-equivalent `undelivered` receipt instead of a
   blocking failure — the hold stays resumable, and the host re-drives the
   held-control path (explicit re-flush before the restart claim) on the next
   wake, so a drain can never certify through an un-flushed tail. Blocking
