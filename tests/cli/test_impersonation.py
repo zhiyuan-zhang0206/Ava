@@ -188,6 +188,27 @@ def test_release_preserves_summary(monkeypatch: pytest.MonkeyPatch) -> None:
     assert seen == ["Completed X.\nNext Y."]
 
 
+def test_batch_window_zero_disables_merge() -> None:
+    """--batch-window 0 is the documented merge-off value; the CLI must reach
+    the DB layer's 0..300 contract (issue #2056: the parser hardcoded min=1,
+    so 0 was unreachable from the CLI)."""
+    for value in ("0", "300"):
+        args = _args(
+            "request",
+            "--agent",
+            "405",
+            "--as",
+            "codex",
+            "--provider",
+            "codex",
+            "--thread-id",
+            "t",
+            "--batch-window",
+            value,
+        )
+        assert args.relay_batch_window_seconds == int(value)
+
+
 @pytest.mark.parametrize("remote", [None, "unix:///tmp/ava-codex.sock"])
 def test_relay_parser(remote: str | None) -> None:
     args = _args(
@@ -237,6 +258,21 @@ def test_relay_parser(remote: str | None) -> None:
             ["relay", "405", "--lease-id", "lease", "--provider", "claude"],
             "--debounce",
             ["-1", "30.1", "nan", "inf"],
+        ),
+        (
+            [
+                "request",
+                "--agent",
+                "405",
+                "--as",
+                "codex",
+                "--provider",
+                "codex",
+                "--thread-id",
+                "t",
+            ],
+            "--batch-window",
+            ["-1", "301"],
         ),
     ],
 )
