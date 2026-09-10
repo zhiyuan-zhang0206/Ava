@@ -838,3 +838,33 @@ def test_write_leaves_caller_block_sequences_alone(memory_plugin: Any, tmp_path:
     assert "  - type/project\n  - demo\n" in written
     frontmatter = _frontmatter(written)
     assert frontmatter["tags"] == ["type/project", "demo"]
+
+
+def test_write_leaves_caller_multiline_quoted_scalars_alone(
+    memory_plugin: Any, tmp_path: Path
+) -> None:
+    """A quote that does not close on its line opens a multi-line scalar -
+    quoting it shut would break a block the block read still accepts."""
+    _pool_with_pointers(tmp_path)
+
+    entry = ava.memory.write(
+        "projects/demo/caller-multiline-quote",
+        "---\n"
+        "type: Memory\n"
+        "ava_agent: 17\n"
+        "title: 'single\n"
+        "  line'\n"
+        'description: "double\n'
+        '  line"\n'
+        "tags: [type/project]\n"
+        "---\n"
+        "Body.\n",
+        store="shared",
+    )
+
+    written = entry.read_text(encoding="utf-8")
+    assert "title: 'single\n  line'\n" in written
+    assert 'description: "double\n  line"\n' in written
+    frontmatter = _frontmatter(written)
+    assert frontmatter["title"] == "single line"
+    assert frontmatter["description"] == "double line"

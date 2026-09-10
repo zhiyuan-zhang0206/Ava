@@ -315,19 +315,38 @@ def _flow_closes(value: str) -> bool:
     return value.count("[") == value.count("]") and value.count("{") == value.count("}")
 
 
+def _quote_closes(value: str) -> bool:
+    """Whether a value opening `'` or `"` closes its quote on the same line."""
+    quote = value[0]
+    index = 1
+    while index < len(value):
+        char = value[index]
+        if quote == '"' and char == "\\":
+            index += 2
+            continue
+        if char == quote:
+            if quote == "'" and index + 1 < len(value) and value[index + 1] == "'":
+                index += 2
+                continue
+            return True
+        index += 1
+    return False
+
+
 def _caller_value(value: str) -> str | None:
     """A caller's own text for one value line, or None when the line already
     reads back as written.
 
     A quoted string, a complete flow collection, a block scalar header, an
     anchor, an alias, a tag or a comment is the caller's YAML and stays as
-    it is. Anything else that would not read back as the written text -
-    truncated at a ` #`, rejected as a `: ` or a trailing colon, or retyped
-    like `null`, `123` or a date - is quoted on the same terms as a
-    generated value."""
+    it is; so does a quote or a flow that does not close on its line, which
+    may still be a multi-line scalar the block read accepts. Anything else
+    that would not read back as the written text - truncated at a ` #`,
+    rejected as a `: ` or a trailing colon, or retyped like `null`, `123`
+    or a date - is quoted on the same terms as a generated value."""
     if not value or value[0] == "#" or value[0] in _YAML_OWN_START:
         return None
-    if value[0] in "\"'" and isinstance(_load_value(value), str):
+    if value[0] in "\"'" and (isinstance(_load_value(value), str) or not _quote_closes(value)):
         return None
     if value[0] in "[{" and (
         isinstance(_load_value(value), (list, dict)) or not _flow_closes(value)
