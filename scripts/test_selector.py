@@ -1,10 +1,11 @@
-"""Conservatively select backend tests for informational PR CI shadow runs."""
+"""Conservatively select backend tests for PR CI (enforce or shadow mode)."""
 
 from __future__ import annotations
 
 import argparse
 import ast
 import json
+import os
 import re
 import sys
 from dataclasses import dataclass
@@ -70,7 +71,7 @@ class SelectionResult:
         return {
             "decision": self.decision,
             "reason": self.reason,
-            "mode": "shadow",
+            "mode": _selection_mode(),
             "tests": list(self.tests),
             "count": self.count,
             "est_seconds": self.est_seconds,
@@ -79,6 +80,16 @@ class SelectionResult:
             "forced_roots": list(self.forced_roots),
             "map_source_count": self.map_source_count,
         }
+
+
+def _selection_mode() -> str:
+    """The mode CI is running: the ci.yml TEST_SELECTION_MODE value.
+
+    The selector itself behaves identically in either mode — the mode only
+    decides how CI routes its decision — so this is audit metadata for the
+    recorded payload, defaulting to the repository's enforce default.
+    """
+    return os.environ.get("TEST_SELECTION_MODE", "enforce")
 
 
 def collectable_test_paths(repo_root: Path) -> set[str]:
@@ -223,7 +234,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.json:
         print(json.dumps(result.as_json(), sort_keys=True))
     else:
-        print(f"selector mode=shadow decision={result.decision} reason={result.reason}")
+        print(
+            f"selector mode={_selection_mode()} decision={result.decision} reason={result.reason}"
+        )
         print(f"changed files={args.changed_files}")
         print(
             f"tests={result.count} estimate={result.est_seconds:.3f}s full={result.full_est_seconds:.3f}s"
