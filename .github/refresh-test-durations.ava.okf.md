@@ -14,11 +14,11 @@ tags:
 UTC backstop, and on manual dispatch. A guard skips all measurements when any
 manual or scheduled refresh succeeded in the preceding five hours, so the
 backstop covers a missing or failed primary run without duplicate daily work.
-It re-measures the 12 backend and four e2e CI shard shapes on isolated runners.
+It re-measures the 16 backend and four e2e CI shard shapes on isolated runners.
 Each shard uses the matching CI pytest arguments, records a clean duration
 artifact, and retries independently when a timing-sensitive failure occurs.
 
-The merge job accepts only the complete 16-artifact set. It atomically updates
+The merge job accepts only the complete 20-artifact set. It atomically updates
 `.test_durations` after dropping sub-0.2-second entries, so a failed or missing
 shard cannot publish a partial timing model. This preserves CI's environmental
 isolation rather than running the whole suite in one timing-coupled runner.

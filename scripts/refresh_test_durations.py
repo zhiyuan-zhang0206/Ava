@@ -16,13 +16,13 @@ same way CI runs them and rewrites the file:
   faster and the split under-estimates);
 * e2e: `pytest tests/e2e/ -v -n 2` (CI's e2e job carries no --cov).
 
-The nightly workflow invokes `measure` once per CI-shaped shard (12 backend,
+The nightly workflow invokes `measure` once per CI-shaped shard (16 backend,
 four e2e), each on its own runner. A measurement retries its isolated shard
 three times, reseeding its temporary duration input before every attempt, so a
 failed attempt cannot affect selection or leak partial measurements into its
 retry. Every successful measurement uses `--store-durations --clean-durations`;
 therefore its artifact contains only the tests that ran in that shard.
-`merge` requires all 16 artifacts, combines them, drops entries below 0.2s,
+`merge` requires all 20 artifacts, combines them, drops entries below 0.2s,
 rounds values to three decimals, and atomically rewrites `.test_durations` in
 the committed compact format (sorted keys, no indent, trailing newline). An
 interrupted run can never leave a truncated file behind.
@@ -56,7 +56,7 @@ from pathlib import Path
 _MIN_DURATION_SECONDS = 0.2
 _BACKEND_WORKERS = 4  # mirrors the backend-shard job (-n 4)
 _E2E_WORKERS = 2  # mirrors the e2e-shard job (-n 2)
-_BACKEND_SHARDS = 12
+_BACKEND_SHARDS = 16
 _E2E_SHARDS = 4
 _MEASUREMENT_ATTEMPTS = 3
 # The exact --cov module list of the backend-shard job (ci.yml): the refresh

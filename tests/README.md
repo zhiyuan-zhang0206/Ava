@@ -150,11 +150,11 @@ Refresh the file manually after a significant test-suite change:
 uv run python scripts/refresh_test_durations.py
 ```
 
-The nightly workflow runs the CI-shaped backend 12-way and e2e four-way shard
+The nightly workflow runs the CI-shaped backend 16-way and e2e four-way shard
 matrices: backend carries `-n 4`, `-m "not flaky"`, and CI's `--cov` module
 list (coverage tracing is part of the shard environment); e2e carries `-n 2`.
 Each shard records a clean duration artifact with `--store-durations
---clean-durations` and retries independently. The merge accepts only all 16
+--clean-durations` and retries independently. The merge accepts only all 20
 successful artifacts, keeps entries `>= 0.2s`, and atomically rewrites
 `.test_durations` in the committed compact-JSON format (sorted keys,
 3-decimal values, one trailing newline). A failed or missing shard therefore
