@@ -145,6 +145,44 @@ def test_orphaned_captured_descendant_converges_after_leader_exit(launch: Launch
     assert not child_identity.live()
 
 
+def test_each_descendant_receives_term_at_most_once(home: Path, launch: Launcher) -> None:
+    # QA round-1 (#2898): "at most once" was only implicit in the final state —
+    # this counts deliveries directly. The descendant handles TERM, records the
+    # running count, and lives on briefly, so any repeated delivery inside the
+    # escalation loop would be counted and caught.
+    marker = home / "term-count"
+    child_code = (
+        "import signal,time,pathlib\n"
+        "count=[0]\n"
+        f"mark=pathlib.Path({str(marker)!r})\n"
+        "def handler(*_):\n"
+        "    count[0]+=1\n"
+        "    mark.write_text(str(count[0]))\n"
+        "    time.sleep(0.5)\n"
+        "    raise SystemExit(0)\n"
+        "signal.signal(signal.SIGTERM,handler)\n"
+        "print('ready',flush=True)\n"
+        "time.sleep(60)\n"
+    )
+    code = (
+        "import subprocess,sys,time;"
+        f"subprocess.Popen([sys.executable,'-u','-c',{child_code!r}]);"
+        "print('ready',flush=True);"
+        "time.sleep(60)"
+    )
+    parent = launch("parent", code)
+    children = psutil.Process(parent.pid).children()
+    assert len(children) == 1
+    child_identity = stop.OwnedProcess.capture(children[0])
+
+    assert stop.stop_services(3) == ["parent"]
+    assert parent.wait(timeout=1) == -signal.SIGTERM
+    # The stop returned only once the descendant exited; exactly one TERM must
+    # have reached it despite the escalation loop having many chances.
+    assert not child_identity.live()
+    assert marker.read_text() == "1"
+
+
 def test_descendant_refusing_term_keeps_hold_and_reports(launch: Launcher) -> None:
     # The convergence is TERM only: a descendant that ignores TERM keeps the
     # hold until the deadline and is reported by name and pid — never SIGKILL,
