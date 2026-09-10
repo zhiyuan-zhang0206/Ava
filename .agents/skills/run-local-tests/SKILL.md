@@ -16,6 +16,18 @@ description: Runs the Ava repo's Python, frontend, and end-to-end checks and dia
   Failures must be fixed before pushing; do not rely on CI to catch them.
   A new test must be **shown to fail without the fix** — run it against the
   stashed pre-change code, or invert its assertion momentarily.
+- **A fresh worktree's `.venv` must be its own real directory — never a
+  symlink to a shared venv.** `ln -s ~/Ava/.venv .venv` looks convenient,
+  but a later `uv sync` in that worktree writes through the symlink and
+  re-points the shared venv's editable `.pth` here — breaking every other
+  checkout that uses that venv
+  ([rationale](../../../conventions/dev-setup.md#per-worktree-cluster-dev-flow)).
+  No venv yet? Build the worktree's own
+  (`python scripts/guard_editable_venv.py . && env -u VIRTUAL_ENV uv sync`),
+  or for a test-only run reuse another worktree's real venv:
+  `PYTHONPATH=<this-worktree> <other-worktree>/.venv/bin/python -m pytest ...`
+  (PYTHONPATH outranks that venv's `.pth`, so the tests run against this
+  worktree's code).
 - **Pick the areas by dependency, not by directory.** "Touched areas" means the
   areas a change can break, and for anything in `shared/` that is the whole
   suite: `shared/` sits at the bottom of the import layering, and the repo
