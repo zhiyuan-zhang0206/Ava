@@ -67,6 +67,23 @@ async def test_no_blocker_runs_all_and_returns_none_scope() -> None:
     assert record == ["a", "b"]
 
 
+async def test_reports_the_blocking_dimension() -> None:
+    """The watchdog's scope resolution needs to know WHICH dimension blocked
+    (a pause-scoped ALL block exempts the gateway healthcheck; a pin-scoped one
+    does not)."""
+    mgr = ControllerManager(
+        [
+            _FakeController("a", BlockScope.NONE, []),
+            _FakeController("b", BlockScope.ALL, []),
+        ]
+    )
+    await mgr.reconcile("gateway")
+    assert mgr.blocking_dimension() == "b"
+    mgr._controllers = (_FakeController("a", BlockScope.NONE, []),)
+    await mgr.reconcile("gateway")
+    assert mgr.blocking_dimension() is None
+
+
 async def test_records_last_result_per_dimension() -> None:
     mgr = ControllerManager(
         [

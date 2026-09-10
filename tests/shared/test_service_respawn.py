@@ -391,6 +391,40 @@ def test_run_keepalive_does_not_respawn_a_terminal_verdict(caplog) -> None:
     assert "another unit's daemon holds this port" in caplog.text  # pyright: ignore[reportUnknownMemberType]
 
 
+def test_run_keepalive_respawn_gate_declines_without_touching_state() -> None:
+    """A declined respawn is "not yet", not "a respawn cannot cure it": the
+    failure count and breaker must not accumulate over declined rounds, so the
+    first round the gate opens can respawn immediately."""
+    label = "gateway-gate-test"
+    respawns: list[int] = []
+    declined: list[bool] = [True]
+
+    def _respawn() -> DaemonProbe:
+        respawns.append(1)
+        return DaemonProbe.up("pid 42")
+
+    for _ in range(3):
+        _sr_mod.run_keepalive(
+            label,
+            _log,
+            probe=lambda: DaemonProbe.down("healthz unreachable"),
+            respawn=_respawn,
+            respawn_gate=lambda: (False, "the pause still has an owner (rollout)"),
+        )
+    assert respawns == []
+    declined[0] = False
+    _sr_mod.run_keepalive(
+        label,
+        _log,
+        probe=lambda: DaemonProbe.down("healthz unreachable"),
+        respawn=_respawn,
+        respawn_gate=lambda: (True, ""),
+    )
+    # A single allowed round respawns at once — the declined rounds left no
+    # failure count behind.
+    assert respawns == [1]
+
+
 def test_run_keepalive_probes_before_attempting_respawn() -> None:
     order: list[str] = []
     _sr_mod.run_keepalive(

@@ -45,13 +45,17 @@ class _FakeManager:
     """Stand-in for the ControllerManager: reconcile returns a fixed BlockScope and
     records the role it was called with."""
 
-    def __init__(self, blocks: BlockScope) -> None:
+    def __init__(self, blocks: BlockScope, dimension: str | None = None) -> None:
         self._blocks = blocks
+        self._dimension = dimension
         self.seen_roles: list[str] = []
 
     async def reconcile(self, role: str) -> BlockScope:
         self.seen_roles.append(role)
         return self._blocks
+
+    def blocking_dimension(self) -> str | None:
+        return self._dimension
 
 
 # ─── _run_check de-duplicates a persistent failure line ──────────────────────
@@ -136,6 +140,17 @@ async def test_tick_skips_checks_when_a_controller_blocks(
     monkeypatch.setattr(wd, "_manager", _FakeManager(blocks=BlockScope.ALL))
     await wd._tick("gateway")
     assert counted_checks == []
+
+
+async def test_tick_exempts_the_gateway_check_on_a_pause_scoped_block(
+    counted_checks: list[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A pause-scoped ALL block suppresses everything except the gateway
+    healthcheck, whose respawn stays gated on the pause having no live owner
+    (issue #2101)."""
+    monkeypatch.setattr(wd, "_manager", _FakeManager(blocks=BlockScope.ALL, dimension="pause"))
+    await wd._tick("gateway")
+    assert counted_checks == ["gateway"]
 
 
 async def test_tick_runs_only_db_free_checks_on_a_db_scoped_block(

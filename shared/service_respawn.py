@@ -283,6 +283,35 @@ def respawn_and_verify(
     return probe
 
 
+def _declined_by_respawn_gate(
+    label: str,
+    log: logging.Logger,
+    result: DaemonProbe,
+    respawn_gate: Callable[[], tuple[bool, str]] | None,
+) -> bool:
+    """Ask the respawn gate once; a decline logs, resets the keepalive state and
+    returns True (the caller returns without respawning).
+
+    A declined round is "not yet allowed", never "a respawn cannot cure it": the
+    failure count and the breaker must not accumulate over rounds the gate held
+    back (issue #2101 — the gateway healthcheck under a pause whose transition
+    still has a live owner), so the first round the gate opens can respawn.
+    """
+    if respawn_gate is None:
+        return False
+    allowed, why = respawn_gate()
+    if allowed:
+        return False
+    _reset_keepalive_state(label)
+    log.info(
+        "[%s healthcheck] daemon dead (%s) but %s — not respawning this round",
+        label,
+        result.detail,
+        why,
+    )
+    return True
+
+
 def run_keepalive(
     label: str,
     log: logging.Logger,
@@ -290,6 +319,7 @@ def run_keepalive(
     probe: Callable[[], DaemonProbe],
     respawn: Callable[[], DaemonProbe],
     consecutive_failures_before_respawn: int = 1,
+    respawn_gate: Callable[[], tuple[bool, str]] | None = None,
 ) -> None:
     """The whole body of a daemon healthcheck's ``main()`` — probe, then act once.
 
@@ -318,6 +348,12 @@ def run_keepalive(
       attempt, and later the breaker alert); once ``breaker_rounds`` consecutive
       non-alive rounds pass, the breaker holds — see the backoff/breaker
       paragraph below.
+
+    ``respawn_gate``, when supplied, is asked on every down verdict before any
+    state accumulates: a declined round logs and returns with the failure count
+    and breaker reset — a decline is "not yet allowed", never "a respawn cannot
+    cure it" (the gateway healthcheck declines under a pause whose transition
+    still has a live owner, issue #2101).
 
     **Backoff and circuit breaker** (task #1941 — the third incident of the same
     shape: #920 ENOSPC crash-loop, #903/3962 heartbeat, #927 GCS-unreachable 2h+
@@ -396,6 +432,8 @@ def run_keepalive(
             result.detail,
         )
 
+    if _declined_by_respawn_gate(label, log, result, respawn_gate):
+        return
     failures = _record_consecutive_probe_failure(label)
     if failures >= breaker_rounds and _open_breaker(label):
         # The breaker just tripped: breaker_rounds consecutive rounds without a

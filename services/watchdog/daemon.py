@@ -345,7 +345,9 @@ def _checks_for_capability(role: MachineRole) -> list[_Check]:
     return checks
 
 
-def _checks_for_round(role: MachineRole, blocks: BlockScope) -> list[_Check]:
+def _checks_for_round(
+    role: MachineRole, blocks: BlockScope, blocking_dimension: str | None = None
+) -> list[_Check]:
     """The checks this round may actually run, given what the controllers blocked.
 
     THE one place a ``BlockScope`` is resolved against the roster — the controllers
@@ -355,9 +357,25 @@ def _checks_for_round(role: MachineRole, blocks: BlockScope) -> list[_Check]:
     which would be a safety decision made by omission.
 
     ``ALL`` returns before the roster is even built, so a paused / mid-update host
-    keeps doing exactly no work per round, capability probes included.
+    keeps doing exactly no work per round, capability probes included — with one
+    exemption (issue #2101): an ``ALL`` block from the **pause** dimension still
+    runs the gateway healthcheck on the gateway capability. A pause suppresses
+    every check to keep a rollout's restarts from being fought, but a gateway
+    that is completely down is worse than that fight — the healthcheck probes
+    each round and its respawn stays gated on the pause actually having no live
+    owner, so a rollout's own restart leg is never raced.
     """
     if blocks is BlockScope.ALL:
+        # The gateway check exists only on the gateway capability; the role guard
+        # keeps a pause-blocked runner round as cheap as before (no roster build).
+        if blocking_dimension == "pause" and role == "gateway":
+            exempt = [c for c in _checks_for_capability(role) if c.name == "gateway"]
+            if exempt:
+                _log.info(
+                    "[watchdog] pause-scoped block: exempting the gateway healthcheck "
+                    "(probe + owner-gated respawn); holding back the rest of the roster"
+                )
+            return exempt
         return []
     roster = _checks_for_capability(role)
     if blocks is BlockScope.NONE:
@@ -510,7 +528,7 @@ async def _tick(role: MachineRole) -> None:
     controller reports is resolved against the roster by `_checks_for_round`.
     """
     blocks = await _manager.reconcile(role)
-    for check in _checks_for_round(role, blocks):
+    for check in _checks_for_round(role, blocks, _manager.blocking_dimension()):
         await _run_check(check.name, check.run)
 
 
