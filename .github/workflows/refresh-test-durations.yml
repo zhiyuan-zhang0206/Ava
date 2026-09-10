@@ -273,7 +273,7 @@ jobs:
 
           A nightly re-measure of the pytest-split duration data. The backend
           and e2e suites ran in their CI-shaped isolated shards, each artifact
-          was recorded with --store-durations --clean-durations, and the 16
+          was recorded with --store-durations --clean-durations, and the 20
           successful measurements were merged into the refreshed timings.
 
           ## File tree
@@ -284,7 +284,7 @@ jobs:
 
           ## Data flow
 
-          CI-shaped shard measurements (backend 12 × -n 4, e2e 4 × -n 2)
+          CI-shaped shard measurements (backend 16 × -n 4, e2e 4 × -n 2)
           → per-shard clean duration artifacts → complete merge + drop <0.2s
           entries → commit.
 
