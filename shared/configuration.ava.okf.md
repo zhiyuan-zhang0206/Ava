@@ -29,7 +29,11 @@ that capability, the gateway projects only a zero limit to the legacy positive
 default of 16; explicit positive limits remain unchanged. This prevents an old
 runner from constructing a zero-slot semaphore after a partial cluster update.
 New clients can also fetch from an older gateway, which ignores the extra query
-parameter. Bootstrap still overwrites stale forwarded or local config values.
+parameter. Snapshot version 2 isolates capable clients from legacy version 1:
+upgraded runners refetch instead of keeping a legacy positive limit, and older
+code cannot load a cached zero after rollback. Same-version snapshots retain
+the existing 300s freshness and transport-outage behavior. Bootstrap still
+overwrites stale forwarded or local config values when a snapshot or fetch applies.
 
 `redis_bin_dir` is a host-scoped executable selection. The unit's own `.env`
 forces or clears `AVA_REDIS_BIN_DIR` at boot through the env registry's

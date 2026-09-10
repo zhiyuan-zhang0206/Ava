@@ -58,7 +58,10 @@ _FETCH_TIMEOUT_S = 10.0
 # because during a gateway outage no cluster config edit can have happened
 # since the snapshot was written.
 _SNAPSHOT_NAME = "bootstrap-snapshot.json"
-_SNAPSHOT_VERSION = 1
+# Admission zero means unlimited only for capable clients. Version the cache
+# across that boundary so legacy readers cannot reuse a zero-slot projection,
+# and upgraded runners negotiate instead of retaining a legacy positive limit.
+_SNAPSHOT_VERSION = 2
 # Freshness window: how long a snapshot may stand in for a live fetch. Bounds
 # cluster-edit propagation to a few minutes in steady state (the first child
 # past the window re-fetches and refreshes the snapshot) while keeping the

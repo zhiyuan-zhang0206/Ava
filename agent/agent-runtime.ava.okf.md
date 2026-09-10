@@ -61,8 +61,8 @@ context for compaction and to END for idle or lifecycle control. Routing uses
   checkpoints and settles lifecycle state before releasing the turn.
 - `services/agent_host/db_recovery.py` retains the original turn during a database
   or checkpoint failure. A 5s exact-owner probe precedes repair stages with
-  independent 30s budgets: flush retained checkpoint writes, reconcile claimed inputs, revalidate
-  ownership, repair tool state, and validate ownership again. Retry logs identify
+  independent 30s budgets: flush retained checkpoint writes, reconcile claimed
+  inputs, revalidate ownership, repair tool state, and validate ownership again. Retry logs identify
   the failed phase, exception type, SQLSTATE and elapsed time. This repairs the
   agent's checkpoint/inbound consistency; it does not mean PostgreSQL crashed.
 - `services/agent_host/recovery_interrupt.py` checks external cancel/terminate

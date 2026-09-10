@@ -1,6 +1,9 @@
 """Rolling-version bootstrap preserves usable admission on old runners."""
 
+import json
+import time
 from collections.abc import Iterator
+from pathlib import Path
 from types import SimpleNamespace
 from urllib.parse import parse_qs, urlsplit
 
@@ -112,6 +115,73 @@ def test_new_runner_advertises_capability_and_replaces_stale_admission(
     assert env[_TURN_LIMIT] == "0"
     assert env["AVA_HOST_DB_POOL_MAX_SIZE"] == "64"
     assert env["AVA_HOST_CONTROL_POOL_MAX_SIZE"] == "8"
+
+
+@pytest.mark.parametrize("age_seconds", [1.0, 10_000.0], ids=["fresh", "stale"])
+def test_new_runner_refreshes_a_legacy_admission_snapshot(
+    gateway_snapshot: dict[str, str],
+    gateway_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    age_seconds: float,
+) -> None:
+    env = {
+        "AVA_HOME": str(tmp_path),
+        "AVA_GATEWAY_URL": "http://gateway",
+        "AVA_CLUSTER_SECRET": _SECRET,
+    }
+    snapshot = tmp_path / "run" / "bootstrap-snapshot.json"
+    snapshot.parent.mkdir()
+    snapshot.write_text(
+        json.dumps(
+            {
+                "v": 1,
+                "base_url": "http://gateway",
+                "written_at": time.time() - age_seconds,
+                "values": {_TURN_LIMIT: "16"},
+            }
+        )
+    )
+    monkeypatch.setattr(bootstrap, "os", SimpleNamespace(**{**vars(bootstrap.os), "environ": env}))
+    assert bootstrap._read_config_snapshot("http://gateway") is None
+
+    def dial(url: str, *, timeout: float, headers: dict[str, str]) -> httpx2.Response:
+        return gateway_client.get(url, headers=headers)
+
+    monkeypatch.setattr(bootstrap, "dial_get", dial)
+    bootstrap.inject_config_from_gateway()
+    assert env[_TURN_LIMIT] == "0"
+    written = bootstrap._read_config_snapshot("http://gateway")
+    assert written is not None and written[0][_TURN_LIMIT] == "0"
+
+
+def test_unlimited_snapshot_is_not_readable_by_a_legacy_client(
+    gateway_snapshot: dict[str, str],
+    gateway_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    env = {"AVA_HOME": str(tmp_path), "AVA_GATEWAY_URL": "http://gateway"}
+    monkeypatch.setattr(bootstrap, "os", SimpleNamespace(**{**vars(bootstrap.os), "environ": env}))
+    bootstrap._write_config_snapshot("http://gateway", {_TURN_LIMIT: "0"})
+    current = bootstrap._read_config_snapshot("http://gateway")
+    assert current is not None and current[0][_TURN_LIMIT] == "0"
+
+    # The previous client uses the same reader with snapshot version 1. It
+    # must fetch its positive admission projection instead of loading zero.
+    monkeypatch.setattr(bootstrap, "_SNAPSHOT_VERSION", 1)
+    assert bootstrap._read_config_snapshot("http://gateway") is None
+
+    def legacy_fetch(base_url: str, *, role: str | None = None) -> dict[str, str]:
+        response = gateway_client.get(
+            f"{base_url}/api/bootstrap", params={"role": role}, headers=bearer_header(_SECRET)
+        )
+        assert response.status_code == 200
+        return response.json()
+
+    monkeypatch.setattr(bootstrap, "fetch_bootstrap_config", legacy_fetch)
+    bootstrap.inject_config_from_gateway()
+    assert env[_TURN_LIMIT] == "16"
 
 
 @pytest.mark.parametrize("role", [None, "runner"])
