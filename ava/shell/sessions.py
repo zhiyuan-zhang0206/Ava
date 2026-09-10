@@ -8,6 +8,7 @@ import math
 import re
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 import ava
 import ava._boot
@@ -404,11 +405,11 @@ def _record_renewal(agent_id: int, session_id: int, ttl: float) -> datetime:
     """Extend the deadline row and write the audit trail.
 
     The write UPDATEs the deadline in one transaction guarded by
-    ``expires_at > now()``: an expired row is never renewable. The guard is
-    what makes the pair with the reaper airtight — a successful renewal
-    proves the row was unexpired at its write, so no expired-row select
-    could have returned it before that write, and a renewal attempted after
-    the deadline loses (the reaper owns the session). ``SET TRANSACTION
+    ``expires_at > clock_timestamp()``: an expired row is never renewable.
+    The guard is what makes the pair with the reaper airtight — a successful
+    renewal proves the row was unexpired at its write, so no expired-row
+    select could have returned it before that write, and a renewal attempted
+    after the deadline loses (the reaper owns the session). ``SET TRANSACTION
     READ WRITE`` leads the transaction — same pooled read-only poison
     defense as `_record_ttl`.
 
@@ -467,6 +468,29 @@ def _read_expiry_row(agent_id: int, session_id: int) -> datetime | None:
     return row[0] if row is not None else None
 
 
+def _renewal_update(cur: Any, agent_id: int, session_id: int, ttl: float) -> datetime | None:
+    """The guarded deadline write; None when the row is no longer unexpired.
+
+    The guard compares against ``clock_timestamp()`` — the statement time,
+    evaluated after the row lock is acquired — never ``now()`` (transaction
+    start). A renewal whose transaction began before the deadline but whose
+    UPDATE only executes after the reaper already claimed the row must lose
+    (issue #2053): with ``now()`` the guard would still pass on a session the
+    kill was already dispatched for, and the row would show renewed while the
+    session is dead.
+    """
+    cur.execute(
+        "UPDATE agent_shell_ttls "
+        "SET expires_at = clock_timestamp() + make_interval(secs => %s), "
+        "renewals = renewals + 1, last_renewed_at = clock_timestamp() "
+        "WHERE agent_id = %s AND session_id = %s AND expires_at > clock_timestamp() "
+        "RETURNING expires_at",
+        (ttl, agent_id, session_id),
+    )
+    row = cur.fetchone()
+    return row[0] if row is not None else None
+
+
 def _apply_renewal(agent_id: int, session_id: int, ttl: float, prev_expires: datetime) -> datetime:
     """The guarded write: new deadline + audit row, one transaction.
 
@@ -486,17 +510,9 @@ def _apply_renewal(agent_id: int, session_id: int, ttl: float, prev_expires: dat
             conn.cursor() as cur,
         ):
             cur.execute("SET TRANSACTION READ WRITE")
-            cur.execute(
-                "UPDATE agent_shell_ttls "
-                "SET expires_at = now() + make_interval(secs => %s), "
-                "renewals = renewals + 1, last_renewed_at = now() "
-                "WHERE agent_id = %s AND session_id = %s AND expires_at > now() "
-                "RETURNING expires_at",
-                (ttl, agent_id, session_id),
-            )
-            updated = cur.fetchone()
+            updated = _renewal_update(cur, agent_id, session_id, ttl)
             if updated is not None:
-                new_expires = updated[0]
+                new_expires = updated
                 cur.execute(
                     "INSERT INTO agent_shell_ttl_renewals "
                     "(agent_id, session_id, requested_ttl_seconds, prev_expires_at, "

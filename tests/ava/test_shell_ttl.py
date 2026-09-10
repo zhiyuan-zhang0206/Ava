@@ -252,3 +252,34 @@ def test_renew_audits_every_call(db_conn: psycopg.Connection, _agent_row: int) -
     finally:
         with contextlib.suppress(ValueError, RuntimeError):
             ava.shell.sessions.kill(session_id)
+
+
+def test_renewal_guard_evaluates_at_statement_time_not_transaction_start(
+    db_conn: psycopg.Connection, _agent_row: int
+) -> None:
+    """Issue #2053: a renewal whose transaction began before the deadline must
+    still lose when its UPDATE executes after the deadline.
+
+    The guard compares against clock_timestamp() (statement time, after the
+    row lock), not now() (transaction start). With now() the guarded UPDATE
+    would renew a row the reaper may already have claimed and killed.
+    """
+    import time
+
+    from ava.shell import sessions
+
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO agent_shell_ttls (agent_id, session_id, expires_at, created_at) "
+            "VALUES (%s, %s, clock_timestamp() + interval '1 second', clock_timestamp()) "
+            "ON CONFLICT (agent_id, session_id) DO UPDATE SET expires_at = EXCLUDED.expires_at",
+            (_agent_row, 301),
+        )
+    db_conn.commit()
+    with db_conn.cursor() as cur:
+        # The transaction starts before the deadline passes.
+        cur.execute("SET TRANSACTION READ WRITE")
+        time.sleep(2.0)
+        assert sessions._renewal_update(cur, _agent_row, 301, 600.0) is None
+    db_conn.rollback()
+    assert _facts(db_conn, _agent_row, 301) == (0, None)

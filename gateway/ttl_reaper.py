@@ -20,7 +20,7 @@ This loop is the enforcer, scanning
   gone. A row whose machine is unreachable is left for the next pass. The
   owner's ``ava.shell.sessions.renew()`` extends a live session's deadline
   before it passes; each kill dispatch re-checks the row is still expired
-  first (renewal's own ``expires_at > now()`` guard makes the pair airtight),
+  first (renewal's own ``expires_at > clock_timestamp()`` guard makes the pair airtight),
   so a renewed session is never killed.
 - **Browser sessions** — expired rows are deleted in the gateway's periodic
   pass, so cleanup does not depend on the next login.
@@ -65,6 +65,7 @@ import time
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import psycopg
 from psycopg_pool import ConnectionPool
@@ -376,7 +377,7 @@ def _expired_shell_rows_blocking(pool: ConnectionPool) -> list[tuple[int, int, d
         cur.execute(
             "SELECT t.agent_id, t.session_id, t.expires_at, t.created_at "
             "FROM agent_shell_ttls t "
-            "WHERE t.expires_at <= now() "
+            "WHERE t.expires_at <= clock_timestamp() "
             "AND NOT EXISTS ("
             "SELECT 1 FROM agent_watchers w "
             "WHERE w.agent_id = t.agent_id AND w.session_id = t.session_id "
@@ -388,6 +389,25 @@ def _expired_shell_rows_blocking(pool: ConnectionPool) -> list[tuple[int, int, d
         return [(row[0], row[1], row[2], row[3]) for row in cur.fetchall()]
 
 
+def _claim_still_expired(cur: psycopg.Cursor[Any], agent_id: int, session_id: int) -> bool:
+    """The claim UPDATE; True only while the row is STILL expired.
+
+    The guard compares against ``clock_timestamp()`` — the statement time,
+    evaluated after the row lock is acquired — never ``now()`` (transaction
+    start). The claim transaction can begin long before the deadline while it
+    waits on the machine lookup or a busy row; with ``now()`` it would skip a
+    row that expired after its transaction started, and it would not
+    serialize correctly against a renewal whose own guard also evaluates at
+    statement time (issue #2053).
+    """
+    cur.execute(
+        "UPDATE agent_shell_ttls SET expires_at = expires_at "
+        "WHERE agent_id = %s AND session_id = %s AND expires_at <= clock_timestamp()",
+        (agent_id, session_id),
+    )
+    return cur.rowcount == 1
+
+
 def _claim_shell_row_still_expired(pool: ConnectionPool, agent_id: int, session_id: int) -> bool:
     """Re-verify one expired shell row just before dispatching its kill.
 
@@ -396,17 +416,12 @@ def _claim_shell_row_still_expired(pool: ConnectionPool, agent_id: int, session_
     UPDATE claims the row only while it is STILL expired (rowcount 1); a
     renewal in the gap makes the claim fail and the pass skips the kill —
     the row is no longer expired and would not be selected next pass either.
-    Combined with renewal's ``expires_at > now()`` write guard the pair is
-    airtight: a successful renewal always precedes any expired-row select, so
-    the only losing renewal is one racing its own deadline.
+    Combined with renewal's ``expires_at > clock_timestamp()`` write guard the
+    pair is airtight: whichever of the claim and the renewal acquires the row
+    lock first wins, and the loser re-evaluates at its own statement time.
     """
     with write_transaction(pool) as conn, conn.cursor() as cur:
-        cur.execute(
-            "UPDATE agent_shell_ttls SET expires_at = expires_at "
-            "WHERE agent_id = %s AND session_id = %s AND expires_at <= now()",
-            (agent_id, session_id),
-        )
-        return cur.rowcount == 1
+        return _claim_still_expired(cur, agent_id, session_id)
 
 
 def _human_ttl(seconds: float) -> str:
