@@ -474,7 +474,11 @@ def _cmd_restart_body(
     from shared import lifecycle_status
     from shared.deploy_timing import SERVICE_READY_TIMEOUT_S
 
-    lifecycle_status.begin("restart")
+    # Only the journal's opener closes it — the same owns_journal contract
+    # _temporary_stop keeps (task #2898). When an outer operation's journal is
+    # still running, this restart records phases into it and leaves the finish
+    # to that caller instead of clobbering its diagnosis.
+    owns_journal = lifecycle_status.begin("restart")
     print(
         f"[ava restart] budget contract: stop up to {PAUSE_TIMEOUT_SECONDS:.0f}s + "
         f"start readiness up to {SERVICE_READY_TIMEOUT_S:.0f}s + bounded preflight probes; "
@@ -499,7 +503,8 @@ def _cmd_restart_body(
     if rc != 0:
         print("  ✗ refusing restart: preflight probes failed — host still serving", file=sys.stderr)
         _release_self_heal_pause()
-        lifecycle_status.finish(RESTART_DECLINED_EXIT_CODE, error="preflight probes failed")
+        if owns_journal:
+            lifecycle_status.finish(RESTART_DECLINED_EXIT_CODE, error="preflight probes failed")
         return RESTART_DECLINED_EXIT_CODE
 
     # Every restart uses the shared hosted pause kernel; a timeout never
@@ -523,13 +528,15 @@ def _cmd_restart_body(
         # it (same contract as the refusal paths above). The stop leg's own
         # journal phases (drain / services / ...) remain readable.
         _release_self_heal_pause()
-        lifecycle_status.finish(rc, error="stop leg failed")
+        if owns_journal:
+            lifecycle_status.finish(rc, error="stop leg failed")
         return rc
     # Internal restart: preserve the operator's durable --disable-service marker
     # (a no-flag operator start would rewrite it to empty and re-enable everything).
     with updater_stage("start"), lifecycle_status.phase("start"):
         rc = _ns._cmd_start_body(persist_services=False, updater_telemetry=True)
-    lifecycle_status.finish(rc, error=None if rc == 0 else f"start leg failed with rc={rc}")
+    if owns_journal:
+        lifecycle_status.finish(rc, error=None if rc == 0 else f"start leg failed with rc={rc}")
     return rc
 
 

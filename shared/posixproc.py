@@ -426,7 +426,7 @@ def session_started_at(name: str) -> float | None:
     return rec.started_at
 
 
-def _record_reapable(rec: SessionRecord) -> tuple[bool, str]:
+def _record_reapable(rec: SessionRecord) -> tuple[bool, str, int | None]:
     """Whether a failed liveness check proves a record can be discarded.
 
     A dead leader whose recorded process group still has live members keeps
@@ -434,25 +434,44 @@ def _record_reapable(rec: SessionRecord) -> tuple[bool, str]:
     surviving descendants belong to this session (issue #2123). Deleting the
     record here would let a later stop silently certify a unit whose port a
     surviving orphan still answers on.
+
+    Ordering boundary (task #2898): the group gate runs BEFORE the reuse
+    criterion, so a record whose pid was recycled by an unrelated process
+    while its recorded group is still occupied is retained — and later
+    listed, warned about on every listing — on the group's strength alone;
+    the reuse criterion never runs for it. The order is deliberate: a
+    recycled pid proves the LEADER is gone, not that its group is empty, and
+    checking reuse first would reap exactly the records whose surviving
+    descendants are the orphans #2123 preserves. A recycled pid whose
+    recorded group is empty (or absent — a legacy record) is still reaped by
+    the reuse criterion below.
+
+    Returns:
+        (reapable, why, occupied_group): `occupied_group` carries the
+        recorded pgid whose live members are keeping the record — the one
+        retention case `list_sessions` lists — so the caller does not have to
+        scan the group a second time; None in every other outcome.
     """
     if _process_for_record(rec) is not None:
-        return False, "process is still live"
+        return False, "process is still live", None
     if rec.pgid is not None and not _group_empty(rec.pgid):
-        return False, (
+        return (
+            False,
             f"leader is gone but process group {rec.pgid} still has live members "
-            "(surviving descendants keep the ownership record)"
+            "(surviving descendants keep the ownership record)",
+            rec.pgid,
         )
     try:
         proc = psutil.Process(rec.pid)
         if not proc.is_running() or not _process_is_live(proc):
-            return True, "pid is no longer running"
+            return True, "pid is no longer running", None
     except psutil.NoSuchProcess:
-        return True, "pid is gone"
+        return True, "pid is gone", None
     except (psutil.AccessDenied, OSError):
-        return False, "pid could not be inspected"
+        return False, "pid could not be inspected", None
     if rec.identifies(rec.pid) is False:
-        return True, "pid was reused by another process"
-    return False, "live pid did not satisfy the legacy identity check"
+        return True, "pid was reused by another process", None
+    return False, "live pid did not satisfy the legacy identity check", None
 
 
 def list_sessions(prefix: str = "") -> list[str]:
@@ -461,7 +480,10 @@ def list_sessions(prefix: str = "") -> list[str]:
     Reaps records whose process is gone so the listing reflects reality —
     except a record whose recorded process group still has live members: that
     name stays listed because its surviving descendants are still owned and a
-    stop must converge them, not lose them (issue #2123).
+    stop must converge them, not lose them (issue #2123). A retained record
+    warns on every listing — the incident state stays loud until a stop
+    converges the group; `_record_reapable` documents the pid-reuse ordering
+    boundary that warning can surface.
     """
     out: list[str] = []
     for rec_file in _sessions_dir().glob("*.json"):
@@ -474,7 +496,7 @@ def list_sessions(prefix: str = "") -> list[str]:
         elif _process_for_record(rec) is not None:
             out.append(name)
         else:
-            reapable, why = _record_reapable(rec)
+            reapable, why, occupied_group = _record_reapable(rec)
             if not reapable:
                 logger.warning(
                     "posixproc retaining live session record {name}: {why}",
@@ -484,8 +506,10 @@ def list_sessions(prefix: str = "") -> list[str]:
                 # Only the occupied-group case is listed: it carries the
                 # durable ownership proof a stop must converge. A live pid
                 # with an uncertain legacy identity stays invisible — nothing
-                # provable may be claimed from it.
-                if rec.pgid is not None and not _group_empty(rec.pgid):
+                # provable may be claimed from it. The group occupancy was
+                # already read inside _record_reapable; never scan it again
+                # per listing (task #2898).
+                if occupied_group is not None:
                     out.append(name)
                 continue
             rec_file.unlink(missing_ok=True)

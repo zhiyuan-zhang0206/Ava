@@ -390,6 +390,54 @@ def test_list_sessions_keeps_live_legacy_record_with_clock_drift(
     )
 
 
+def test_list_sessions_keeps_recycled_pid_record_while_group_occupied(
+    unit_home: Path,
+    loguru_records: list[dict[str, object]],
+) -> None:
+    """A recycled pid cannot reap a record whose recorded group is occupied.
+
+    The pid-reuse boundary (task #2898): the group gate runs BEFORE the reuse
+    criterion, so a record whose pid a later process recycled — while its
+    recorded group still has live members — is retained and listed on the
+    group's strength alone; the reuse criterion is never consulted for it.
+    Reordering the checks would reap exactly the records whose surviving
+    descendants are the orphans #2123 preserves, so the order is pinned here.
+    """
+    name = "ava-test-agent-reuse-held-group"
+    holder = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(60)"],
+        start_new_session=True,
+    )
+    try:
+        pgid = os.getpgid(holder.pid)
+        rec = SessionRecord(
+            pid=os.getpid(),  # a live pid that is *not* this record's process
+            create_time=1.0,
+            cmd="test",
+            cwd=str(unit_home),
+            started_at=time.time(),
+            starttime=0,
+            pgid=pgid,
+        )
+        rec.write(posixproc._record_path(name))
+        assert posixproc._process_for_record(rec) is None
+
+        reapable, why, occupied_group = posixproc._record_reapable(rec)
+        assert reapable is False
+        assert occupied_group == pgid
+        # The group gate decided; the reuse criterion never ran.
+        assert "process group" in why and "reused" not in why
+        assert posixproc.list_sessions(prefix="ava-test-agent-reuse-") == [name]
+        assert posixproc._record_path(name).exists()
+        assert any(
+            "retaining live session record" in str(record["message"]) for record in loguru_records
+        )
+    finally:
+        holder.kill()
+        holder.wait(timeout=5)
+        posixproc._record_path(name).unlink(missing_ok=True)
+
+
 def test_new_session_idempotent_when_live(unit_home) -> None:
     """A second new_session for a still-live name is a no-op (returns True without
     relaunching) — matching winproc + the has-session guard at the call site."""
