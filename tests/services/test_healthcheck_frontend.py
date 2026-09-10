@@ -239,7 +239,7 @@ def test_main_refuses_to_respawn_into_an_orphans_port(monkeypatch: pytest.Monkey
     monkeypatch.setattr(hc, "init_gateway_process", lambda **_kwargs: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(hc, "_is_alive", lambda: False)
     monkeypatch.setattr(hc, "_session_exists", lambda: False)
-    monkeypatch.setattr(hc, "_listener_pids", lambda _port: {4242})
+    monkeypatch.setattr(hc, "_listener_pids", lambda _port: {4242})  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
         hc, "_restart", lambda: calls.__setitem__("restart", calls["restart"] + 1) or True
     )
@@ -253,7 +253,7 @@ def test_main_respawns_when_the_port_is_free(monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.setattr(hc, "init_gateway_process", lambda **_kwargs: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(hc, "_is_alive", lambda: False)
     monkeypatch.setattr(hc, "_session_exists", lambda: False)
-    monkeypatch.setattr(hc, "_listener_pids", lambda _port: set())
+    monkeypatch.setattr(hc, "_listener_pids", lambda _port: set())  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
         hc, "_restart", lambda: calls.__setitem__("restart", calls["restart"] + 1) or True
     )

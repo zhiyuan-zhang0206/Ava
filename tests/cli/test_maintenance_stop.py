@@ -676,6 +676,7 @@ def test_bash_node_layered_chain_converges(home: Path) -> None:
         start_new_session=True,
     )
     leader_pid: int | None = None
+    grandchildren: list[psutil.Process] = []
     try:
         deadline = time.monotonic() + 10
         while time.monotonic() < deadline:

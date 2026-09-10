@@ -155,17 +155,22 @@ def read() -> LifecycleOp | None:
     raw_phases = data.get("phases", [])
     phases: list[LifecyclePhase] = []
     if isinstance(raw_phases, list):
-        for raw in raw_phases:
-            if not isinstance(raw, dict) or not isinstance(raw.get("name"), str):
+        for raw in cast("list[object]", raw_phases):
+            if not isinstance(raw, dict):
                 continue
+            entry = cast("dict[str, object]", raw)
+            name = entry.get("name")
+            if not isinstance(name, str):
+                continue
+            started = entry.get("started_at", 0.0)
+            finished = entry.get("finished_at")
+            ok = entry.get("ok")
             phases.append(
                 LifecyclePhase(
-                    name=raw["name"],
-                    started_at=float(raw.get("started_at", 0.0)),
-                    finished_at=(
-                        None if raw.get("finished_at") is None else float(raw["finished_at"])
-                    ),
-                    ok=(None if raw.get("ok") is None else bool(raw["ok"])),
+                    name=name,
+                    started_at=float(started) if isinstance(started, (int, float)) else 0.0,
+                    finished_at=float(finished) if isinstance(finished, (int, float)) else None,
+                    ok=None if ok is None else bool(ok),
                 )
             )
     return LifecycleOp(
