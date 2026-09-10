@@ -158,9 +158,10 @@ class TestTranslateOutsideStringsCrashGuard:
     error on f-string replacement fields that mix '=' (debug), ':'/'!'
     delimiters and invalid expressions: it computes a negative string length
     and raises SystemError("Negative size passed to PyUnicode_New")
-    (gh-149183; upstream fix gh-149445 targets 3.15+ only, and on 3.14+ the
-    same input surfaces as MemoryError). The punctuation translation must
-    degrade to a no-op instead of aborting the agent host run.
+    (gh-149183; upstream fix gh-149445 targets 3.15+ only; on 3.13+ the same
+    input surfaces as MemoryError -- the guard degrades both). The
+    punctuation translation must degrade to a no-op instead of aborting the
+    agent host run.
     """
 
     # Minimal gh-149183-style trigger, distilled from the 2026-09-09 agent
@@ -177,9 +178,9 @@ class TestTranslateOutsideStringsCrashGuard:
     )
 
     @pytest.mark.skipif(
-        sys.version_info >= (3, 13),
-        reason="3.13+ surfaces the same input as MemoryError, which the guard "
-        "deliberately does not catch (see the _punct docstring)",
+        sys.version_info < (3, 12),
+        reason="the guarded C-tokenizer crash exists on 3.12+ (SystemError on "
+        "3.12, MemoryError on 3.13+; the guard degrades both)",
     )
     def test_crash_input_degrades_to_noop_quote_pass(self):
         code, n = _translate_outside_strings(self.CRASH_INPUT, _FULLWIDTH_QUOTE_MAP)
@@ -187,9 +188,9 @@ class TestTranslateOutsideStringsCrashGuard:
         assert n == 0
 
     @pytest.mark.skipif(
-        sys.version_info >= (3, 13),
-        reason="3.13+ surfaces the same input as MemoryError, which the guard "
-        "deliberately does not catch (see the _punct docstring)",
+        sys.version_info < (3, 12),
+        reason="the guarded C-tokenizer crash exists on 3.12+ (SystemError on "
+        "3.12, MemoryError on 3.13+; the guard degrades both)",
     )
     def test_crash_input_degrades_to_noop_punct_pass(self):
         code, n = _translate_outside_strings(self.CRASH_INPUT, _PUNCT_MAP)
@@ -197,9 +198,9 @@ class TestTranslateOutsideStringsCrashGuard:
         assert n == 0
 
     @pytest.mark.skipif(
-        sys.version_info < (3, 12) or sys.version_info >= (3, 13),
-        reason="the guarded C-tokenizer crash is 3.12-only: 3.11 tokenizes the "
-        "input (and would translate the fullwidth comma), 3.13+ raises MemoryError",
+        sys.version_info < (3, 12),
+        reason="3.11 tokenizes the input (and would translate the fullwidth "
+        "comma); the guard degrades the 3.12+ crash manifestations",
     )
     def test_pipeline_degrades_on_crash_input(self):
         src = self.CRASH_INPUT.replace("() => {", "() => {\uff0c")
@@ -208,9 +209,9 @@ class TestTranslateOutsideStringsCrashGuard:
         assert n == 0
 
     @pytest.mark.skipif(
-        sys.version_info < (3, 12) or sys.version_info >= (3, 13),
-        reason="the guarded C-tokenizer crash is 3.12-only: 3.11 tokenizes the "
-        "input (and would translate the fullwidth comma), 3.13+ raises MemoryError",
+        sys.version_info < (3, 12),
+        reason="3.11 tokenizes the input (and would translate the fullwidth "
+        "comma); the guard degrades the 3.12+ crash manifestations",
     )
     def test_escapes_fixer_degrades_on_crash_input(self):
         # The escape fixer is the next in-process tokenize stage; the same
@@ -220,6 +221,29 @@ class TestTranslateOutsideStringsCrashGuard:
         code, n = _fix_invalid_escapes(self.CRASH_INPUT)
         assert code == self.CRASH_INPUT
         assert n == 0
+
+    def test_memoryerror_from_tokenizer_degrades_to_noop(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # 3.13+ surfaces the gh-149183 input as MemoryError; the guard must
+        # degrade that too instead of aborting the agent host run. Injected
+        # so the branch runs on every interpreter (CI pins 3.12, where the
+        # real input raises SystemError).
+        import tokenize
+
+        def boom(_readline: object) -> object:
+            raise MemoryError("simulated C-tokenizer MemoryError")
+
+        monkeypatch.setattr(tokenize, "generate_tokens", boom)
+        code, n = _translate_outside_strings(self.CRASH_INPUT, _PUNCT_MAP)
+        assert code == self.CRASH_INPUT
+        assert n == 0
+
+        from ava_builtins.plugins.ava_syntax_fix._escapes import _fix_invalid_escapes
+
+        esc, esc_n = _fix_invalid_escapes(self.CRASH_INPUT)
+        assert esc == self.CRASH_INPUT
+        assert esc_n == 0
 
     def test_oversized_line_skips_translation(self):
         src = "a" * _MAX_TOKENIZE_LINE_LENGTH + "\uff0c"

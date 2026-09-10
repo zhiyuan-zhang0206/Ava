@@ -119,10 +119,17 @@ def _tokenize_fix_safe(code: str) -> list[tokenize.TokenInfo] | None:
     of raising a tokenize error: an f-string replacement field that mixes '='
     (debug), ':'/'!' delimiters and invalid expressions makes it compute a
     negative string length and raise SystemError("Negative size passed to
-    PyUnicode_New") (gh-149183; upstream fix gh-149445 targets 3.15+ only, and
-    on 3.14+ the same input surfaces as MemoryError instead). Fixing is a
+    PyUnicode_New") (gh-149183; upstream fix gh-149445 targets 3.15+ only;
+    on 3.13+ the same input surfaces as MemoryError instead). Fixing is a
     best-effort convenience, so anything that is not a normal tokenizer error
     degrades to a no-op rather than abort the agent host run.
+
+    MemoryError is caught alongside the rest: the line-length ceiling above
+    already refuses the inputs whose tokenization could genuinely exhaust
+    memory, so a MemoryError from generate_tokens on this path is the
+    pathological-input manifestation, not a real allocation failure -- and
+    if memory is truly gone, the unfixed code proceeds to compile() where the
+    same condition surfaces anyway.
     """
     if any(len(line) > _MAX_TOKENIZE_LINE_LENGTH for line in code.split("\n")):
         return None
@@ -131,7 +138,14 @@ def _tokenize_fix_safe(code: str) -> list[tokenize.TokenInfo] | None:
         # them; paired surrogates (e.g. emoji) round-trip unchanged.
         code.encode("utf-8")
         return list(tokenize.generate_tokens(io.StringIO(code).readline))
-    except (tokenize.TokenError, IndentationError, SyntaxError, SystemError, UnicodeError):
+    except (
+        tokenize.TokenError,
+        IndentationError,
+        SyntaxError,
+        SystemError,
+        UnicodeError,
+        MemoryError,
+    ):
         return None
 
 
