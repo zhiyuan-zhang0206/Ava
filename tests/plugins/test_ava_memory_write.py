@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
+import re
 import sys
 from collections.abc import Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
-from importlib import import_module
+from importlib import import_module, util
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
+import yaml
 
 import ava
 from agent.state import build_agent_state, clear_plugin_registrations
@@ -334,3 +336,236 @@ def test_memory_namespace_importable_as_submodule(memory_plugin: Any) -> None:
     assert mod.IndexerUnavailable is ava.memory.IndexerUnavailable
     assert callable(mod.write)
     assert callable(mod.search)
+
+
+_ISO_SECONDS_RE = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(Z|[+-]\d{2}:\d{2})")
+
+
+def _pool_validator() -> Any:
+    """The pool's per-file validator, as shipped with the plugin template.
+
+    Loading the shipped artifact keeps the assertion on the gate the pool
+    actually runs, instead of a paraphrase that could pass while it fails.
+    """
+    path = (
+        Path(__file__).resolve().parents[2] / "ava_builtins/plugins/ava_memory/template/validate.py"
+    )
+    spec = util.spec_from_file_location("_pool_validate", path)
+    assert spec is not None and spec.loader is not None
+    module = util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _frontmatter(text: str) -> dict[str, Any]:
+    """First frontmatter block, parsed the way the pool validator reads it."""
+    assert text.startswith("---\n")
+    parts = text.split("---\n", 2)
+    assert len(parts) >= 3
+    parsed = yaml.safe_load(parts[1])
+    assert isinstance(parsed, dict)
+    return cast("dict[str, Any]", parsed)
+
+
+def _pool_with_pointers(tmp_path: Path) -> Path:
+    pool = tmp_path / "pool"
+    pool.mkdir()
+    (pool / "MEMORY.md").write_text("# Shared\n\n## Pointers\n", encoding="utf-8")
+    return pool
+
+
+def test_shared_write_defaults_title_and_description_to_file_name(
+    memory_plugin: Any, tmp_path: Path
+) -> None:
+    """A blank description is not an option (the field is required), and the
+    title defaults to the file name — not the topic path the stub defect
+    wrote into every reader's index."""
+    pool = _pool_with_pointers(tmp_path)
+
+    entry = ava.memory.write("projects/demo/alpha-note", "Body.\n", store="shared")
+
+    frontmatter = _frontmatter(entry.read_text(encoding="utf-8"))
+    assert frontmatter["title"] == "alpha-note"
+    assert frontmatter["description"] == "alpha-note"
+    index = (pool / "MEMORY.md").read_text(encoding="utf-8")
+    assert "- [alpha-note](projects/demo/alpha-note.md) — alpha-note" in index
+
+
+def test_shared_write_timestamp_is_second_precision(memory_plugin: Any, tmp_path: Path) -> None:
+    _pool_with_pointers(tmp_path)
+
+    entry = ava.memory.write("projects/demo/beta-note", "Body.\n", store="shared")
+
+    timestamp = _frontmatter(entry.read_text(encoding="utf-8"))["timestamp"]
+    assert isinstance(timestamp, str)
+    assert _ISO_SECONDS_RE.fullmatch(timestamp)
+
+
+def test_write_keeps_caller_frontmatter_as_the_only_block(
+    memory_plugin: Any, tmp_path: Path
+) -> None:
+    """Content carrying its own block keeps it, completed — never a second
+    block (the defect: the validator read the stub block while the caller's
+    real block sat in the body)."""
+    pool = _pool_with_pointers(tmp_path)
+    content = (
+        "---\n"
+        "type: Memory\n"
+        "ava_agent: 17\n"
+        "title: Caller title\n"
+        "description: Caller description\n"
+        "tags: [type/project, demo]\n"
+        "---\n"
+        "<!-- agent-17 @ memory-host, 2026-09-10 13:00 -->\n"
+        "\n"
+        "Body.\n"
+    )
+
+    entry = ava.memory.write(
+        "projects/demo/gamma-note",
+        content,
+        title="Arg title",
+        description="Arg description",
+        store="shared",
+    )
+
+    written = entry.read_text(encoding="utf-8")
+    parts = written.split("---\n", 2)
+    assert len(parts) == 3
+    frontmatter = _frontmatter(written)
+    assert frontmatter["title"] == "Caller title"
+    assert frontmatter["description"] == "Caller description"
+    assert frontmatter["tags"] == ["type/project", "demo"]
+    assert frontmatter["ava_machine"] == "memory-host"
+    timestamp = frontmatter["timestamp"]
+    assert isinstance(timestamp, str)
+    assert _ISO_SECONDS_RE.fullmatch(timestamp)
+    assert written.count("type: Memory") == 1
+    assert parts[2] == "<!-- agent-17 @ memory-host, 2026-09-10 13:00 -->\n\nBody.\n"
+    index = (pool / "MEMORY.md").read_text(encoding="utf-8")
+    assert "- [Caller title](projects/demo/gamma-note.md) — Caller description" in index
+
+
+def test_shared_write_completes_partial_frontmatter(memory_plugin: Any, tmp_path: Path) -> None:
+    _pool_with_pointers(tmp_path)
+
+    entry = ava.memory.write(
+        "projects/demo/delta-note",
+        "---\ntitle: Partial title\n---\nBody.\n",
+        store="shared",
+        tags=["type/reference"],
+    )
+
+    frontmatter = _frontmatter(entry.read_text(encoding="utf-8"))
+    assert frontmatter["title"] == "Partial title"
+    assert frontmatter["type"] == "Memory"
+    assert frontmatter["ava_agent"] == 17
+    assert frontmatter["description"] == "Partial title"
+    assert frontmatter["tags"] == ["type/reference"]
+    assert frontmatter["ava_machine"] == "memory-host"
+    timestamp = frontmatter["timestamp"]
+    assert isinstance(timestamp, str)
+    assert _ISO_SECONDS_RE.fullmatch(timestamp)
+
+
+def test_shared_write_normalizes_fractional_timestamp(memory_plugin: Any, tmp_path: Path) -> None:
+    """A caller block with microsecond precision is normalized: the pool
+    format is second precision and the validator rejects the longer stamp."""
+    _pool_with_pointers(tmp_path)
+
+    entry = ava.memory.write(
+        "projects/demo/epsilon-note",
+        "---\ntype: Memory\nava_agent: 17\ntitle: Epsilon\n"
+        "description: Epsilon description\ntags: [type/reference]\n"
+        "timestamp: '2026-09-10T05:15:02.406986+00:00'\n---\nBody.\n",
+        store="shared",
+    )
+
+    written = entry.read_text(encoding="utf-8")
+    assert "timestamp: '2026-09-10T05:15:02+00:00'" in written
+    assert ".406986" not in written
+
+
+def test_personal_write_keeps_complete_frontmatter_byte_for_byte(
+    memory_plugin: Any, tmp_path: Path
+) -> None:
+    content = (
+        "---\nname: pers-note\ndescription: Caller description\ntags: [type/feedback]\n---\nBody.\n"
+    )
+
+    entry = ava.memory.write("pers-note", content)
+
+    assert entry.read_text(encoding="utf-8") == content
+
+
+def test_personal_write_completes_partial_frontmatter(memory_plugin: Any) -> None:
+    entry = ava.memory.write("partial-note", "---\ntags: [type/feedback]\n---\nBody.\n")
+
+    frontmatter = _frontmatter(entry.read_text(encoding="utf-8"))
+    assert frontmatter["name"] == "partial-note"
+    assert frontmatter["description"] == "partial-note"
+    assert frontmatter["tags"] == ["type/feedback"]
+
+
+def test_write_quotes_values_yaml_would_misread(memory_plugin: Any, tmp_path: Path) -> None:
+    """` #` starts a YAML comment mid-value and `: ` opens a mapping inside
+    it — the block must read back every value exactly as given."""
+    _pool_with_pointers(tmp_path)
+    entry = ava.memory.write(
+        "projects/demo/tricky-note",
+        "Body.\n",
+        title="Release #42: notes",
+        description="Trap #1: quoted",
+        store="shared",
+    )
+    frontmatter = _frontmatter(entry.read_text(encoding="utf-8"))
+    assert frontmatter["title"] == "Release #42: notes"
+    assert frontmatter["description"] == "Trap #1: quoted"
+
+    plain = ava.memory.write(
+        "projects/demo/plain-note",
+        "Body.\n",
+        title="Plain title",
+        description="Plain description",
+        store="shared",
+    )
+    assert "title: Plain title\ndescription: Plain description\n" in plain.read_text(
+        encoding="utf-8"
+    )
+
+
+def test_write_rejects_block_that_is_not_a_mapping(memory_plugin: Any) -> None:
+    with pytest.raises(ValueError, match="not a non-empty"):
+        ava.memory.write("bad-block-note", "---\njust prose\n---\nBody.\n")
+
+
+def test_written_notes_pass_the_pool_validator(memory_plugin: Any, tmp_path: Path) -> None:
+    """Every output shape passes the pool's own per-file validator — the gate
+    the stub defect tripped on the shared store."""
+    _pool_with_pointers(tmp_path)
+    validate = _pool_validator()
+
+    entries = [
+        ava.memory.write("projects/demo/valid-plain", "Body.\n", store="shared"),
+        ava.memory.write(
+            "projects/demo/valid-args",
+            "Body.\n",
+            store="shared",
+            title="With args",
+            description="Described by an argument",
+        ),
+        ava.memory.write(
+            "projects/demo/valid-caller",
+            "---\ntype: Memory\nava_agent: 17\ntitle: Caller\n---\nBody.\n",
+            store="shared",
+        ),
+        ava.memory.write(
+            "projects/demo/valid-tricky",
+            "Body.\n",
+            store="shared",
+            title="Tricky #1: value",
+            description="Also # tricky: yes",
+        ),
+    ]
+    for entry in entries:
+        assert validate.validate_file(entry) == [], entry
