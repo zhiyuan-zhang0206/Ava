@@ -270,6 +270,12 @@ def _first_text(*values: object) -> str | None:
 _YAML_SENSITIVE_START = "#\"'@`%*&!|>[]{},?-:"
 
 
+def _quote_text(value: str) -> str:
+    """Render a text value as a double-quoted YAML string."""
+    escaped = value.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
+    return f'"{escaped}"'
+
+
 def _yaml_value(value: str) -> str:
     """Render a value so YAML reads it back exactly as written.
 
@@ -277,10 +283,7 @@ def _yaml_value(value: str) -> str:
     `: ` or a trailing colon breaks the mapping, a leading indicator changes
     the parse, and bare `null`, booleans, numbers or dates come back as
     another type. Anything failing that read-back is double-quoted."""
-    if not _reads_back_plain(value):
-        escaped = value.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
-        return f'"{escaped}"'
-    return value
+    return value if _reads_back_plain(value) else _quote_text(value)
 
 
 def _reads_back_plain(value: str) -> bool:
@@ -294,6 +297,67 @@ def _reads_back_plain(value: str) -> bool:
     except yaml.YAMLError:
         return False
     return isinstance(parsed, str) and parsed == value
+
+
+def _load_value(value: str) -> object:
+    """The single-value YAML read of a text, or None when it does not parse."""
+    try:
+        return yaml.safe_load(value)
+    except yaml.YAMLError:
+        return None
+
+
+_YAML_OWN_START = "|>&*!"
+
+
+def _flow_closes(value: str) -> bool:
+    """Whether a value opening `[` or `{` closes its flow on the same line."""
+    return value.count("[") == value.count("]") and value.count("{") == value.count("}")
+
+
+def _caller_value(value: str) -> str | None:
+    """A caller's own text for one value line, or None when the line already
+    reads back as written.
+
+    A quoted string, a complete flow collection, a block scalar header, an
+    anchor, an alias, a tag or a comment is the caller's YAML and stays as
+    it is. Anything else that would not read back as the written text -
+    truncated at a ` #`, rejected as a `: ` or a trailing colon, or retyped
+    like `null`, `123` or a date - is quoted on the same terms as a
+    generated value."""
+    if not value or value[0] == "#" or value[0] in _YAML_OWN_START:
+        return None
+    if value[0] in "\"'" and isinstance(_load_value(value), str):
+        return None
+    if value[0] in "[{" and (
+        isinstance(_load_value(value), (list, dict)) or not _flow_closes(value)
+    ):
+        return None
+    if _reads_back_plain(value):
+        return None
+    return _quote_text(value)
+
+
+_CALLER_VALUE_LINE = re.compile(r"(?P<key>[A-Za-z0-9_.-]+):(?P<gap>[ \t]+)(?P<value>\S.*)")
+
+
+def _quote_caller_values(block: str) -> str:
+    """Quote each value line of a caller's block that YAML would not read
+    back as written.
+
+    Line order, blank lines and comments stay put, and a line that already
+    reads back as written - including an already-quoted one - is left
+    byte-identical."""
+    lines = block.split("\n")
+    for index, line in enumerate(lines):
+        match = _CALLER_VALUE_LINE.match(line)
+        if match is None:
+            continue
+        quoted = _caller_value(match.group("value").rstrip())
+        if quoted is None:
+            continue
+        lines[index] = f"{match.group('key')}:{match.group('gap')}{quoted}"
+    return "\n".join(lines)
 
 
 _TIMESTAMP_FRACTION_RE = re.compile(r"(?<=T\d{2}:\d{2}:\d{2})\.\d+")
@@ -351,7 +415,8 @@ def write(
     Both targets are absolute store paths.
 
     Content may open with its own frontmatter block: that block is kept as
-    the note's only one and gains whichever required fields it is missing.
+    the note's only one, gains whichever required fields it is missing, and
+    has each of its bare values quoted on the same terms as a generated one.
     Otherwise the writer generates the block, followed by the attribution
     line on the shared store. A missing title defaults to the file name and
     a missing description falls back to the title, so a written note never
@@ -381,6 +446,7 @@ def write(
         existing: dict[str, object] = {}
     else:
         block, rest = parts
+        block = _quote_caller_values(block)
         existing = _parse_frontmatter(block)
         block = _drop_timestamp_fraction(block)
     note_title = _first_text(existing.get("title"), title) or entry.stem

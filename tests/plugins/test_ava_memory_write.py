@@ -640,3 +640,201 @@ def test_write_replaces_blank_fields_in_caller_block(memory_plugin: Any, tmp_pat
     frontmatter = _frontmatter(written)
     assert frontmatter["title"] == "Filled title"
     assert frontmatter["description"] == "Filled title"
+
+
+def test_write_quotes_caller_values_yaml_would_misread(memory_plugin: Any, tmp_path: Path) -> None:
+    """A caller block's bare values get the same quoting as generated ones:
+    an unquoted ` #` truncates the text at a comment, so the pool read would
+    show less than the caller wrote."""
+    pool = _pool_with_pointers(tmp_path)
+
+    entry = ava.memory.write(
+        "projects/demo/caller-hash-note",
+        "---\n"
+        "type: Memory\n"
+        "ava_agent: 17\n"
+        "title: Release #42 notes\n"
+        "description: Task #770 pylint baseline\n"
+        "---\n"
+        "Body.\n",
+        store="shared",
+    )
+
+    written = entry.read_text(encoding="utf-8")
+    frontmatter = _frontmatter(written)
+    assert frontmatter["title"] == "Release #42 notes"
+    assert frontmatter["description"] == "Task #770 pylint baseline"
+    block = written.split("---\n", 2)[1]
+    assert 'title: "Release #42 notes"' in block
+    index = (pool / "MEMORY.md").read_text(encoding="utf-8")
+    assert (
+        "- [Release #42 notes](projects/demo/caller-hash-note.md) — Task #770 pylint baseline"
+        in index
+    )
+
+
+def test_write_quotes_caller_values_the_block_read_would_reject(
+    memory_plugin: Any, tmp_path: Path
+) -> None:
+    """A trailing colon or a `: ` inside a bare value makes the whole block
+    unreadable YAML; the value is quoted, so the write lands with the text
+    the caller wrote instead of raising."""
+    _pool_with_pointers(tmp_path)
+
+    entry = ava.memory.write(
+        "projects/demo/caller-colon-note",
+        "---\n"
+        "type: Memory\n"
+        "ava_agent: 17\n"
+        "title: Release notes:\n"
+        'description: Steps: "build" then ship\n'
+        "---\n"
+        "Body.\n",
+        store="shared",
+    )
+
+    written = entry.read_text(encoding="utf-8")
+    frontmatter = _frontmatter(written)
+    assert frontmatter["title"] == "Release notes:"
+    assert frontmatter["description"] == 'Steps: "build" then ship'
+    block = written.split("---\n", 2)[1]
+    assert 'description: "Steps: \\"build\\" then ship"' in block
+
+
+def test_write_quotes_caller_values_yaml_would_retype(memory_plugin: Any, tmp_path: Path) -> None:
+    """Bare numbers and dates parse back as another type; a caller's `123`
+    title and `17` agent id stay the text they wrote."""
+    _pool_with_pointers(tmp_path)
+
+    entry = ava.memory.write(
+        "projects/demo/caller-retyped-note",
+        "---\n"
+        "type: Memory\n"
+        "ava_agent: 17\n"
+        "title: 123\n"
+        "description: 2026-09-10\n"
+        "tags: [type/reference]\n"
+        "---\n"
+        "Body.\n",
+        store="shared",
+    )
+
+    frontmatter = _frontmatter(entry.read_text(encoding="utf-8"))
+    assert frontmatter["title"] == "123"
+    assert frontmatter["description"] == "2026-09-10"
+    assert frontmatter["ava_agent"] == "17"
+
+
+def test_write_keeps_caller_flow_collections_and_quotes_lookalikes(
+    memory_plugin: Any, tmp_path: Path
+) -> None:
+    """A complete flow collection is the caller's own YAML and stays one
+    (`tags` must read back as a list); a value that only opens like one is
+    text, so it is quoted. Line order and untouched lines are preserved."""
+    _pool_with_pointers(tmp_path)
+
+    entry = ava.memory.write(
+        "projects/demo/caller-collection-note",
+        "---\n"
+        "type: Memory\n"
+        "ava_agent: 17\n"
+        "title: [WIP] release notes\n"
+        "description: {draft} notes\n"
+        "tags: [type/project, demo]\n"
+        'authors: ["#2481", "#1609"]\n'
+        "timestamp: '2026-09-10T05:15:02+00:00'\n"
+        "ava_machine: memory-host\n"
+        "---\n"
+        "Body.\n",
+        store="shared",
+    )
+
+    written = entry.read_text(encoding="utf-8")
+    frontmatter = _frontmatter(written)
+    assert frontmatter["title"] == "[WIP] release notes"
+    assert frontmatter["description"] == "{draft} notes"
+    assert frontmatter["tags"] == ["type/project", "demo"]
+    assert frontmatter["authors"] == ["#2481", "#1609"]
+    block = written.split("---\n", 2)[1]
+    assert block == (
+        'type: Memory\nava_agent: "17"\ntitle: "[WIP] release notes"\n'
+        'description: "{draft} notes"\ntags: [type/project, demo]\n'
+        'authors: ["#2481", "#1609"]\ntimestamp: \'2026-09-10T05:15:02+00:00\'\n'
+        "ava_machine: memory-host\n"
+    )
+
+
+def test_write_caller_quoting_is_idempotent(memory_plugin: Any, tmp_path: Path) -> None:
+    """A quoted value reads back as written, so writing the note's own text
+    again changes no byte of it."""
+    _pool_with_pointers(tmp_path)
+    content = (
+        "---\n"
+        "type: Memory\n"
+        "ava_agent: 17\n"
+        "title: Release #42 notes\n"
+        "description: Steps: build then ship\n"
+        "tags: [type/project]\n"
+        "---\n"
+        "Body.\n"
+    )
+
+    entry = ava.memory.write("projects/demo/caller-idempotent", content, store="shared")
+    first = entry.read_text(encoding="utf-8")
+
+    entry = ava.memory.write("projects/demo/caller-idempotent", first, store="shared")
+
+    assert entry.read_text(encoding="utf-8") == first
+
+
+def test_write_leaves_caller_quoting_in_place(memory_plugin: Any, tmp_path: Path) -> None:
+    """A value the caller already quoted - single or double - is left exactly
+    as written and still reads back as its content."""
+    _pool_with_pointers(tmp_path)
+
+    entry = ava.memory.write(
+        "projects/demo/caller-quoted-note",
+        "---\n"
+        "type: Memory\n"
+        "ava_agent: 17\n"
+        'title: "Release #42 notes"\n'
+        "description: 'Trap #1: quoted'\n"
+        "tags: [type/project]\n"
+        "---\n"
+        "Body.\n",
+        store="shared",
+    )
+
+    written = entry.read_text(encoding="utf-8")
+    block = written.split("---\n", 2)[1]
+    assert 'title: "Release #42 notes"' in block
+    assert "description: 'Trap #1: quoted'" in block
+    frontmatter = _frontmatter(written)
+    assert frontmatter["title"] == "Release #42 notes"
+    assert frontmatter["description"] == "Trap #1: quoted"
+
+
+def test_write_leaves_caller_block_sequences_alone(memory_plugin: Any, tmp_path: Path) -> None:
+    """A block sequence under a key is YAML structure on its own lines - the
+    line pass may not quote the entries or reorder them."""
+    _pool_with_pointers(tmp_path)
+
+    entry = ava.memory.write(
+        "projects/demo/caller-block-sequence",
+        "---\n"
+        "type: Memory\n"
+        "ava_agent: 17\n"
+        "title: Sequence note\n"
+        "description: Sequence description\n"
+        "tags:\n"
+        "  - type/project\n"
+        "  - demo\n"
+        "---\n"
+        "Body.\n",
+        store="shared",
+    )
+
+    written = entry.read_text(encoding="utf-8")
+    assert "  - type/project\n  - demo\n" in written
+    frontmatter = _frontmatter(written)
+    assert frontmatter["tags"] == ["type/project", "demo"]
