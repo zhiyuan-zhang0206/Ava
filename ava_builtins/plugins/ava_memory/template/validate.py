@@ -27,6 +27,35 @@ _LEGACY_OFFSETLESS_DATETIME_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{
 _OFFSET_DATETIME_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(Z|[+-]\d{2}:\d{2})$")
 
 
+_FM_KEY_LINE_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*): (.*)$")
+_MISREAD_STRING_KEYS = ("title", "description", "name", "type", "ava_machine", "timestamp")
+
+
+def _misread_frontmatter_keys(fm_raw: str) -> list[str]:
+    """Return keys whose raw line text differs from the YAML-parsed string value.
+
+    An unquoted ' #' or ': ' inside a value silently truncates it (comment /
+    nested mapping), so the parsed value drops the tail (2026-09-10: 143 pool
+    files affected). Writer-side quoting is the real fix; this is the backstop.
+    """
+    bad: list[str] = []
+    for line in fm_raw.splitlines():
+        m = _FM_KEY_LINE_RE.match(line)
+        if not m:
+            continue
+        key, raw = m.group(1), m.group(2)
+        if key not in _MISREAD_STRING_KEYS or not raw or raw.startswith(('"', "'", "|", ">")):
+            continue
+        try:
+            parsed = yaml.safe_load(line)
+        except yaml.YAMLError:
+            continue
+        value = parsed.get(key) if isinstance(parsed, dict) else None
+        if isinstance(value, str) and value != raw:
+            bad.append(key)
+    return bad
+
+
 def validate_file(file_path: Path) -> list[str]:  # noqa: PLR0915
     """Validate a single OKF concept file. Returns list of error messages."""
     errors: list[str] = []
@@ -90,6 +119,12 @@ def validate_file(file_path: Path) -> list[str]:  # noqa: PLR0915
         errors.append(
             "Missing or empty 'description' — it is the only part of a note a "
             "pointer line and a search result show"
+        )
+
+    for key in _misread_frontmatter_keys(parts[1]):
+        errors.append(
+            f"Field '{key}' is YAML-misread: raw text differs from the parsed value "
+            f"(an unquoted ' #' or ': ' truncates it) — wrap the value in double quotes"
         )
 
     if "timestamp" in fm:
