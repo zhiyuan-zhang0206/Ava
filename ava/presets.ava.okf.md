@@ -43,7 +43,7 @@ ava.agents.spawn(prompt="...", config_overlay={"preset": "fast-worker"})
 # ...optionally with explicit overrides that win per key:
 ava.agents.spawn(
     prompt="...",
-    config_overlay={"preset": "fast-worker", "llm_model": "deepseek-v4-pro"},
+    config_overlay={"preset": "fast-worker", "llm_model": "deepseek-v4-flash"},
 )
 ```
 `preset` is the base, the explicit overlay fields are the precise override

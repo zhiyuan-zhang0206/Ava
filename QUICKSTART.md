@@ -67,7 +67,7 @@ derived values). At minimum, add model configuration:
 
 ```ini
 # Pick a model and its API key (choose one)
-AVA_MODEL=deepseek-v4-pro
+AVA_MODEL=deepseek-v4-flash
 DEEPSEEK_API_KEY=sk-your-key-here
 ```
 
