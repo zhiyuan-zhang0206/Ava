@@ -1,4 +1,5 @@
-"""Crash-journaled archive and PITR environment application."""
+"""Crash-journaled archive and PITR environment application, including the
+config-owned gate-key posture enforcement and its operator re-entry guidance."""
 
 from __future__ import annotations
 
@@ -12,6 +13,7 @@ from psycopg import sql
 
 from cli.commands._cluster_instance import pg_admin_url
 from services.pitr.activation_runtime import (
+    _PITR_ENV_FIELDS,
     _enable_pitr_services,
     _file_evidence,
     _settings_digest,
@@ -20,6 +22,7 @@ from services.pitr.activation_runtime import (
 )
 from services.pitr.activation_state import ActivationRecord, write_record_cas
 from shared.cluster import get_record, record_postgres_port
+from shared.config import settings
 from shared.paths import ava_home
 
 
@@ -262,3 +265,42 @@ def apply_wal_config(
     )
     write_record_cas(home, expected=record, replacement=replacement)
     return replacement
+
+
+def gate_unset_command() -> str:
+    return "ava config unset " + " ".join(_PITR_ENV_FIELDS)
+
+
+def require_inactive_gate_posture(boundary: str) -> None:
+    """The activation starts from — and freezes its baseline in — the inactive
+    posture: the four config-owned gate keys stay off until the activation
+    provisions them (all four absent), and a rollback never reverts them."""
+    config = settings.physical_backup
+    enabled = [
+        name
+        for name, flag in (
+            ("pitr_enabled", config.pitr_enabled),
+            ("pitr_base_backup_enabled", config.pitr_base_backup_enabled),
+            ("pitr_restore_proof_enabled", config.pitr_restore_proof_enabled),
+        )
+        if flag
+    ]
+    if not enabled:
+        return
+    raise RuntimeError(
+        f"{boundary} requires all PITR service flags to remain off "
+        f"(enabled: {', '.join(enabled)}); unset the four gate keys: "
+        f"`{gate_unset_command()}`"
+    )
+
+
+def rollback_gate_hint(home: Path) -> str | None:
+    """Rollback never touches the config-owned gate keys; point at the unset
+    step when any of the four is still set."""
+    env = home / ".env"
+    if not env.is_file() or pitr_env_absent(env.read_bytes()):
+        return None
+    return (
+        "PITR gate keys are config-owned and were not reverted by the rollback; "
+        f"for a fresh activation unset them with `{gate_unset_command()}`"
+    )
