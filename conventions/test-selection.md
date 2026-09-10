@@ -2,13 +2,12 @@
 
 ## Purpose
 
-Backend CI uses two layers. A real pull request keeps the full backend suite
-that branch protection already requires, and, in shadow mode, also runs a
-direct-import-selected subset as an informational measurement. A Trunk
-merge-tree branch (trunk-merge/ or trunk-temp/) always
-uses the full suite. The merge queue therefore continues to verify the combined
-tree with its full regression net; test selection does not change broken-main
-risk.
+Backend CI uses two layers. A Trunk merge-tree branch (trunk-merge/ or
+trunk-temp/) always runs the full backend suite. A real pull request runs
+either the full suite or, when the selector returns SELECTED and the workflow
+is in enforce mode (the default), a direct-import-selected subset in its place.
+The merge queue therefore continues to verify the combined tree with its full
+regression net; test selection does not change broken-main risk.
 
 The selector is [scripts/test_selector.py](../scripts/test_selector.py). It is
 stdlib-only and builds a direct static import reverse map for the checked-out
@@ -21,10 +20,9 @@ serial process whenever either side changes; no selector output feeds it.
 
 ## Decision rules
 
-The first matching rule decides the outcome. FULL means the informational
-subset is not useful for this change; the existing full backend suite still
-runs. SKIP means the change is documentation-only. SELECTED contains a sorted
-backend test-file list.
+The first matching rule decides the outcome. FULL keeps the full backend suite;
+SKIP keeps the existing documentation-only behavior (no backend suite); only
+SELECTED replaces the backend pytest fan-out, and only in enforce mode.
 
 | Order | Changed-path or event condition | Result |
 | --- | --- | --- |
@@ -81,51 +79,70 @@ starts with each selected test file plus ::; a file with no timing entry costs
 the average present backend timing entry. The same model estimates the
 complete collectable backend universe, and only subsets at or below 80% run.
 
-## Shadow status and artifacts
+## Selection modes and artifacts
 
-TEST_SELECTION_MODE is currently shadow in
-[ci.yml](../.github/workflows/ci.yml). A selected real PR therefore runs:
+`TEST_SELECTION_MODE` in [ci.yml](../.github/workflows/ci.yml) is the single
+switch. The `test-select` job republishes its value as a job output — job-level
+routing (`if`, `continue-on-error`) cannot read `env`, only `needs` — and every
+routing expression keys off it.
 
-- test selection, which prints the JSON decision used as the audit trail;
-- backend selected subset (shadow), which records every pytest exit status
-  without failing its job and uploads test-selection-subset-log;
-- test selection shadow report, which records the existing full backend result
-  and compares the subset to backend-shard, the complete non-flaky pytest
-  population that uses the same marker filter, then uploads
-  test-selection-shadow-report.
+**enforce** (the default since 2026-09-11):
 
-The report emits FALSE GREEN only when the selected subset passes but the full
-non-flaky pytest population fails. Static, structure, coverage, pgvector, and
-flaky-serial failures remain visible through the unchanged backend aggregator,
-but cannot be attributed to selection. A subset failure with a successful full
-non-flaky pytest population is an informational false-negative: expand the
-static map or identify why the full suite alone covers that change.
+- A SELECTED real PR runs `backend-selected` instead of the shard fan-out: the
+  selected subset is the backend pytest gate, and the aggregator (the
+  branch-protection check `backend (pytest + pyright)`) requires it.
+- `backend-selected` uploads its JUnit to the same Trunk quarantine gate as
+  the shards, so quarantined flaky failures pass and real failures block.
+- The aggregator still requires static / structure / serial flaky / pgvector
+  smoke / helper signing exactly as before.
+- No coverage artifacts are produced on that path: the 85% full-tree coverage
+  gate stays on the full fan-out — every Trunk merge-tree branch runs one, as
+  does every non-SELECTED PR.
+- `test-select` remains non-gating: a selector or setup failure leaves its
+  outputs empty, which routes every consumer down the full-suite path.
 
-All three shadow jobs use job-level failure containment, so selector, setup,
-artifact, and report faults are informational too. None of their check names is
-in branch protection or .trunk/trunk.yaml. The existing backend aggregator and
-all required checks remain the only gates.
+**shadow** (the revert switch):
 
-## Maintenance and an enforce switch
+- No PR gates on the subset. The full fan-out gates exactly as before the
+  enforcement switch; the subset runs informationally; the
+  `test-selection-shadow-report` job records the divergence comparison — FALSE
+  GREEN only when a passing subset meets a failing full non-flaky pytest
+  population.
 
-Review a false-green immediately and close its blind-map gap; no false-green is
-accepted as a known exception. Keep selector unit tests focused on observable
-decisions, AST resolution, current-test filtering, duration estimates, queue
-branches, and deterministic JSON. Refresh .test_durations through its normal
-nightly workflow after material suite changes.
+Trunk merge-tree branches never take the enforced path: rule 1 returns FULL,
+so the fan-out runs regardless of the mode.
 
-Move real PRs from shadow to enforce only in a separate PR, after all of these
-conditions hold:
+## Maintenance and the revert switch
 
-1. The false-green rate is below 1% over at least 100 PRs, re-measured monthly.
-   The initial stronger target is either 100 consecutive PRs with zero
-   false-greens, or fewer than one false-green per 500 PRs. Record the measured
-   numerator, denominator, and observation window here as data accumulates.
-2. Every observed false-green has been fixed as a blind-map gap; none remains
-   classified as an accepted known cause.
-3. Trunk merge-tree branches remain full regardless of any real-PR enforcement
-   decision.
+- Review any false green immediately and close a real blind-map gap; no false
+  green is accepted as a known exception.
+- Keep selector unit tests focused on observable decisions, AST resolution,
+  current-test filtering, duration estimates, queue branches, and
+  deterministic JSON.
+- Refresh .test_durations through its normal nightly workflow after material
+  suite changes.
+- Revert: set `TEST_SELECTION_MODE: "shadow"` in ci.yml (one line) and update
+  the enforce-default assertion in tests/scripts/test_ci_test_selection.py.
+  The wiring contracts deliberately turn red when the switch moves — that
+  tripwire is what keeps a revert from silently losing a gate.
 
-This change adds shadow measurement only. An enforcement change would require
-its own review of branch protection, job dependencies, observed report data,
-and this document.
+## History: the shadow window and the enforcement decision
+
+Shadow mode ran from 2026-09-03 (its introduction) through 2026-09-10. Its
+comparison artifacts recorded 978 distinct CI runs: 716 on pull requests (464
+distinct PRs) and 262 push runs, where the selector does not run and the
+report is a no-op. Decisions: FULL 680 (forced roots and unmapped paths
+dominated), SELECTED 31 runs / 25 PRs, empty 267 (262 push runs plus a handful
+of concurrency-cancelled runs). One run recorded FALSE GREEN (PR #1842,
+2026-09-06): triage attributed it to a time-dependent assertion in
+tests/services/test_pitr_base_scheduler.py — unrelated to that PR's diff, and
+fixed the same morning by #1840 (merged five minutes after this run's decision
+was recorded). Its decision payload had no changed blind file, so no static-map
+gap was involved. No other false green was observed, and no informational
+false-negative (subset red while the full population passed) either.
+
+2026-09-10 23:26 user ruling: switch to enforcement directly; the earlier
+staged criteria (a 100+ PR window with a monthly re-measure, every false green
+fixed as a blind-map gap) are not a precondition for this switch. They stay
+recorded here as history, and the false-green rate remains the review signal
+while enforce is live.

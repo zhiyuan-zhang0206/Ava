@@ -47,8 +47,9 @@ visual gate consume it so their definitions cannot drift.
 - `tests/scripts/test_test_selector.py` — synthetic-checkout contracts for
   the static PR test selector, including queue, blind-file, duration, and
   process-determinism escapes
-- `tests/scripts/test_ci_test_selection.py` — workflow contracts keeping shadow
-  selection non-gating and comparing the matching non-flaky pytest population
+- `tests/scripts/test_ci_test_selection.py` — workflow contracts for the
+  test-selection routing: the single mode switch, the enforced-subset gate,
+  the shadow fallback, and the matching non-flaky pytest comparison
 
 ### Global fixture (`conftest.py`, ~70KB)
 - **Per xdist worker / session** a pair of throwaway pg/redis + per-session databases; per-test isolation via autouse TRUNCATE + checkpoint re-setup (**not** a full instance per test)
