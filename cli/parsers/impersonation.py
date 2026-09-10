@@ -7,13 +7,13 @@ import math
 from functools import partial
 
 
-def _integer_range(value: str, *, maximum: int) -> int:
-    message = f"must be an integer from 1 through {maximum}"
+def _integer_range(value: str, *, maximum: int, minimum: int = 1) -> int:
+    message = f"must be an integer from {minimum} through {maximum}"
     try:
         parsed = int(value)
     except ValueError as exc:
         raise argparse.ArgumentTypeError(message) from exc
-    if not 1 <= parsed <= maximum:
+    if not minimum <= parsed <= maximum:
         raise argparse.ArgumentTypeError(message)
     return parsed
 
@@ -86,7 +86,7 @@ def _add_impersonation_parser(sub: argparse._SubParsersAction[argparse.ArgumentP
     request.add_argument(
         "--batch-window",
         dest="relay_batch_window_seconds",
-        type=partial(_integer_range, maximum=300),
+        type=partial(_integer_range, minimum=0, maximum=300),
         default=30,
         help="relay merge window in seconds, 0..300: routine arrivals (not user "
         "chats, not cancels) coalesce into one hint per window; 0 disables merging",
