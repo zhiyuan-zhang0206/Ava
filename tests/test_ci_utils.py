@@ -420,14 +420,81 @@ def test_nothing_scheduled_is_still_did_not_run(gh: Any, has_workflows: Any) -> 
     assert r.verdict == CIStatus.NO_WORKFLOW_RUNS
 
 
+def test_partial_suite_green_with_a_run_still_queued_is_pending(
+    gh: Any, has_workflows: Any
+) -> None:
+    """2026-09-10, MonsoraV2 #774: guardrails / e2e / contracts had attached and
+    passed while the main CI run was still queued and had attached nothing. The
+    rollup alone looked complete and green; only the runs API shows the missing
+    remainder. This is the early-green window — part of the suite is in, the
+    rest is still coming."""
+    gh(
+        [
+            _check("guardrails (impacted)", "SUCCESS"),
+            _check("e2e (smoke)", "SUCCESS"),
+            _check("contracts", "SUCCESS"),
+        ],
+        scheduled=["CI"],
+    )
+    has_workflows(True)
+
+    r = ci_utils.check_ci("774")
+
+    assert r.verdict is CIStatus.PENDING
+    assert "CI" in r.pending
+    assert "guardrails (impacted)" in r.passed
+
+
+def test_partial_suite_green_with_an_unanswerable_probe_is_error(
+    gh: Any, has_workflows: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Closed asymmetry (QA review, 2026-09-11): every attached check passed but
+    the probe cannot confirm nothing is still queued. None must not read as
+    green — ERROR (unknown) makes --wait print the reason and exit 3 when it
+    persists, instead of ALL_PASSED or a fabricated PENDING."""
+    gh(
+        [
+            _check("guardrails (impacted)", "SUCCESS"),
+            _check("e2e (smoke)", "SUCCESS"),
+        ]
+    )
+    has_workflows(True)
+    monkeypatch.setattr(ci_utils, "_runs_not_yet_reporting", lambda *_a, **_k: None)
+
+    r = ci_utils.check_ci("776")
+
+    assert r.verdict is CIStatus.ERROR
+    assert "probe" in r.error_detail
+
+
+def test_partial_suite_green_with_nothing_scheduled_is_green(gh: Any, has_workflows: Any) -> None:
+    """The mirror of the early-green window: the same partially attached rollup,
+    but the runs API reports nothing left to come — the suite is done, and the
+    verdict is green."""
+    gh(
+        [
+            _check("guardrails (impacted)", "SUCCESS"),
+            _check("e2e (smoke)", "SUCCESS"),
+            _check("contracts", "SUCCESS"),
+        ],
+        scheduled=[],
+    )
+    has_workflows(True)
+
+    assert ci_utils.check_ci("775").verdict is CIStatus.ALL_PASSED
+
+
 def test_runs_api_failure_keeps_the_conservative_verdict(
     gh: Any, has_workflows: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A probe that cannot answer must not invent a reason to wait — an
-    unreachable API is not evidence that CI is coming."""
+    unreachable API is not evidence that CI is coming. Without any attached
+    workflow check the not-green NO_WORKFLOW_RUNS verdict is kept, exactly as
+    when the probe answered []; only the all-passed path (below) has to tell
+    None from []."""
     gh([_APP_CHECK])
     has_workflows(True)
-    monkeypatch.setattr(ci_utils, "_runs_not_yet_reporting", lambda *_a, **_k: [])
+    monkeypatch.setattr(ci_utils, "_runs_not_yet_reporting", lambda *_a, **_k: None)
 
     assert ci_utils.check_ci("886").verdict == CIStatus.NO_WORKFLOW_RUNS
 
@@ -454,7 +521,10 @@ def test_runs_probe_reads_only_incomplete_runs(monkeypatch: pytest.MonkeyPatch) 
     assert 'select(.status != "completed")' in joined
 
 
-def test_runs_probe_returns_empty_on_gh_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_runs_probe_returns_none_on_gh_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A failed query is None (unanswerable), not [] (nothing scheduled) — the
+    distinction is what keeps an unanswerable probe from reading as green."""
+
     class _R:
         returncode = 1
         stdout = ""
@@ -462,10 +532,10 @@ def test_runs_probe_returns_empty_on_gh_failure(monkeypatch: pytest.MonkeyPatch)
 
     monkeypatch.setattr(ci_utils.subprocess, "run", lambda *_a, **_k: _R())
 
-    assert ci_utils._runs_not_yet_reporting("abc123", None) == []
+    assert ci_utils._runs_not_yet_reporting("abc123", None) is None
 
 
-def test_runs_probe_survives_unparseable_output(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_runs_probe_returns_none_on_unparseable_output(monkeypatch: pytest.MonkeyPatch) -> None:
     class _R:
         returncode = 0
         stdout = "not json"
@@ -473,7 +543,7 @@ def test_runs_probe_survives_unparseable_output(monkeypatch: pytest.MonkeyPatch)
 
     monkeypatch.setattr(ci_utils.subprocess, "run", lambda *_a, **_k: _R())
 
-    assert ci_utils._runs_not_yet_reporting("abc123", None) == []
+    assert ci_utils._runs_not_yet_reporting("abc123", None) is None
 
 
 _QA_APPROVED_GATE_FAILURE = _check("qa-approved-gate", "FAILURE", workflow="QA approved gate")
