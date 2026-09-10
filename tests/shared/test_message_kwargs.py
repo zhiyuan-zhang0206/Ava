@@ -51,6 +51,7 @@ def test_note_tag_value_set() -> None:
         "context",
         "agent_id",
         "agent_memory",
+        "inherited_memory",
         "project_skills",
         "preloaded_skills",
         "new_skills",
