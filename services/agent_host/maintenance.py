@@ -20,13 +20,19 @@ FailureFences = dict[int, tuple[str | None, datetime | None]]
 # host crash, and the crash-recovery path re-drives them. Such receipts are
 # graded as crash-equivalent: recorded for audit, never latched as blocking.
 #
-# The bare `TimeoutError` stays deliberately narrow, not a blanket timeout
-# catch: a hung database channel surfaces as the awaiting task's
-# `asyncio.TimeoutError` (an alias of the builtin since Python 3.11), and
-# `socket.timeout` has been an alias of the builtin since Python 3.10 — both
-# are channel-hang evidence for the same crash-equivalent reading, never proof
-# that the continuation itself failed.
-CRASH_EQUIVALENT_FAILURES = (psycopg.OperationalError, PoolTimeout, TimeoutError)
+# The bare `TimeoutError` is deliberately NOT in the family (issue #2051):
+# since Python 3.11 `asyncio.TimeoutError` is the builtin, so a plain
+# `TimeoutError` cannot tell a database channel hang from any other bounded
+# await — an LLM TTFT/compact timeout raises exactly this. Grading those as
+# crash-equivalent swallowed them as undelivered: no fence, no failure latch,
+# the held-control path re-drove (including real model calls) forever and the
+# drain could never certify nor be repaired. Every database channel hang
+# already surfaces as a family member: libpq `connect_timeout` and the server
+# `statement_timeout` raise `psycopg.OperationalError`, pool acquisition
+# raises `PoolTimeout`, and the drain path's bounded DB phases
+# (db_recovery.database_phase / _refresh_owner) convert their asyncio
+# timeouts into `PoolTimeout`.
+CRASH_EQUIVALENT_FAILURES = (psycopg.OperationalError, PoolTimeout)
 
 
 async def record_failure(agent_id: int, exc: BaseException, fences: FailureFences) -> None:

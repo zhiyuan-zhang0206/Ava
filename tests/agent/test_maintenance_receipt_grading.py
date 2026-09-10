@@ -25,7 +25,6 @@ def _held() -> None:
     [
         (PoolTimeout("pool exhausted"), "PoolTimeout"),
         (psycopg.OperationalError("connection refused"), "OperationalError"),
-        (TimeoutError("dial timed out"), "TimeoutError"),
     ],
 )
 def test_database_outage_failures_are_recorded_undelivered(
@@ -45,6 +44,25 @@ def test_database_outage_failures_are_recorded_undelivered(
     assert current.maintenance.failures == {}
     assert current.maintenance.undelivered == {7: category}
     assert current.maintenance.drained == ()
+
+
+def test_bare_timeout_error_latches_a_blocking_failure() -> None:
+    """A bare TimeoutError is not crash-equivalent (issue #2051).
+
+    Since Python 3.11 ``asyncio.TimeoutError`` is the builtin, an LLM
+    TTFT/compact timeout raises exactly this. Grading it as undelivered would
+    leave no fence and no failure latch — the held-control path would re-drive
+    forever and the drain could never certify nor be repaired. It must latch
+    like any ordinary failure.
+    """
+    _held()
+    fences: receipts.FailureFences = {}
+    asyncio.run(receipts.record_failure(7, TimeoutError("llm ttft bound"), fences))
+    current = maintenance.require_operation("grade", WHEN)
+    assert current.maintenance is not None
+    assert fences == {7: (current.holder, current.acquired_at)}
+    assert current.maintenance.failures == {7: "TimeoutError"}
+    assert current.maintenance.undelivered == {}
 
 
 def test_ordinary_failure_still_latches_blocking_and_fenced() -> None:
