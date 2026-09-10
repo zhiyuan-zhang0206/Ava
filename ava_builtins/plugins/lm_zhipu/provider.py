@@ -221,9 +221,9 @@ register(
             ),
         ),
         "glm-5.3-flash": PriceRates(
-            cache_miss=0.075,
-            cache_hit=0.015,
-            output=0.25,
+            cache_miss=0.15,
+            cache_hit=0.03,
+            output=0.50,
             source_url="https://docs.z.ai/guides/overview/pricing",
             source_checked_at="2026-08-27",
             vendor="zhipu",
