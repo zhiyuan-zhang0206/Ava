@@ -1,7 +1,7 @@
 ---
 type: doc
 title: "Stopping a process — the kill contract and the non-session trio"
-description: "How Ava stops what it started: `kill_session`'s (ok, mode) contract and its graceful/forced escalation for named sessions, `shared/proc.py`'s `process_alive` / `request_stop` / `force_kill` trio for the processes that are not sessions (pooler, port orphans, the gate daemon) — including why the obvious POSIX spellings do not survive the crossing to Windows — and how a stop converges a service tree whose leader already died (recorded process group, retry path)."
+description: "How Ava stops what it started: `kill_session`'s (ok, mode) contract and its graceful/forced escalation for named sessions, `shared/proc.py`'s `process_alive` / `request_stop` / `force_kill` trio for the processes that are not sessions (pooler, port orphans, the gate daemon) — including why the obvious POSIX spellings do not survive the crossing to Windows — how a stop converges a service tree whose leader already died (recorded process group, retry path), and what the deadline report names when convergence fails (per-process identity, stage, durable journal payload)."
 tags:
 - shared
 - process
@@ -57,12 +57,39 @@ exactly while that group still has members, so a stop re-entered after the
 incident converges the orphan through the recorded group instead of certifying
 the unit stopped. Legacy records without a `pgid` reap as before.
 
+### The deadline report when convergence fails
+
+A held stop that runs its deadline out must not leave the operator with a bare
+pid list — that is a diagnosis no one can act on, and the only remaining move
+is a blind rerun (issue #2162). `cli/commands/_maintenance_stop_report.py`
+builds the failure report instead: for every process still alive (and every
+member of a recorded process group that is still occupied, even one that
+appeared after the capture) it records the owning recorded session, whether the
+process is that session's leader, a captured descendant, or a group member, the
+birth pair the stop path itself revalidates, and the best-effort cmdline —
+plus the stop stage (the phase label) that hit the deadline. `stop_services`
+raises it as `StopIncompleteError` (a `TimeoutError`, so every existing catch
+keeps working); `_stop_terminals` reports its phase the same way.
+
+Reads are best-effort but never dishonest: a process that cannot be inspected
+is listed as unreadable rather than dropped, and a PID recycled since capture
+is never described with its new occupant's facts. Nothing in the report path
+signals — the no-force-kill contract is unchanged.
+
+The report is persisted, not just printed. The printable message carries the
+inventory inline, and when the stop owns the lifecycle journal the same data
+lands on `$AVA_HOME/run/lifecycle-op.json` as structured fields
+(`result.stage` + `result.survivors`, one JSON object per process), so the
+diagnosis survives the process that printed it and a later operator can read
+it back.
+
 ### Stops that do not go through a session
 
 Not every process Ava stops is a named session: the pooler, an orphan holding a unit port, the gate daemon. Those go through `shared/proc.py`'s trio — `process_alive` (probe) / `request_stop` (ask) / `force_kill` (force) — and **must**, because two of the obvious spellings do not survive the crossing to Windows: `os.kill(pid, 0)` *terminates* the target there rather than probing it, and `signal.SIGKILL` is undefined. `cli/commands/_pgbouncer.py:_terminate_verified` is a lower-level escalating stop built on them (ask -> poll -> force -> verdict). Normal pause/stop instead use the non-escalating data-plane boundary in `cli/commands/_maintenance_data_plane.py`. A pid this user may not signal is handled the same way on all three legs: alive, undeliverable, reported as a survivor — never an exception out of the middle of a stop. Same file: `kill_process_tree` (parent + descendants, enumerated before the kill) and `run_bounded` (a timeout that bounds the work, not just the wrapper).
 
 ## Entry points
 
+- `cli/commands/_maintenance_stop_report.py` — the deadline survivor report (raise, render, journal payload)
 - `shared/session_backend.py:SessionBackend.kill_session` — the session stop, per backend
 - `shared/proc.py:process_alive` / `request_stop` / `force_kill` — the non-session trio
 - `shared/proc.py:kill_process_tree` / `run_bounded` — tree teardown and a bounded run

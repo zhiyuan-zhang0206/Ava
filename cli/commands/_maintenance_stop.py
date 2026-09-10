@@ -16,6 +16,12 @@ from collections.abc import Callable
 
 import psutil
 
+from cli.commands._maintenance_stop_report import (
+    StopIncompleteError,
+    live_identities,
+    occupied_groups,
+    service_inventory,
+)
 from shared.paths import run_dir
 from shared.proc_tree import OwnedProcess, capture_tree
 from shared.pty_sessions._paths import host_identity, host_starttime
@@ -61,7 +67,7 @@ def wait_for_exit(
     """
     while True:
         living = {identity for identity in tracked if identity.live()}
-        occupied = _occupied_groups(groups)
+        occupied = occupied_groups(groups)
         if not living and not occupied:
             return
         for identity in living:
@@ -76,25 +82,6 @@ def wait_for_exit(
                 f"{sorted(identity.pid for identity in living)}; occupied process groups: {occupied}"
             ) from None
         time.sleep(min(0.05, budget))
-
-
-def _occupied_groups(groups: tuple[int, ...]) -> list[int]:
-    if not groups:
-        return []
-    occupied: set[int] = set()
-    # killpg(..., 0) can report EPERM for an empty group on macOS. Read the
-    # actual membership instead; an unreadable member cannot certify emptiness.
-    for process in psutil.process_iter():
-        try:
-            group = os.getpgid(process.pid)
-            if group in groups and process.status() not in (
-                psutil.STATUS_ZOMBIE,
-                psutil.STATUS_DEAD,
-            ):
-                occupied.add(group)
-        except (psutil.NoSuchProcess, ProcessLookupError):
-            continue
-    return sorted(occupied)
 
 
 def _terminate_owned(identity: OwnedProcess) -> bool:
@@ -304,6 +291,11 @@ def stop_services(
     separately registered resources remain caller duties.
     keep_terminals is an operator assertion of a separately verified work
     boundary; it preserves terminals without proving they have stopped writing.
+
+    When the deadline expires anyway, the raised error carries every survivor's
+    full identity — owning session, leader/descendant role, birth pair,
+    cmdline, and the recorded groups still occupied — so an operator can act on
+    the exact resource instead of rerunning blind (issue #2162).
     """
     deadline = deadline_after(timeout)
     if not keep_terminals:
@@ -365,15 +357,18 @@ def stop_services(
     try:
         wait_for_exit(tracked, deadline, groups=groups, escalate=escalate)
     except TimeoutError as exc:
-        surviving = sorted(
-            name
-            for name, record in records.items()
-            if OwnedProcess(record.pid, record.create_time, record.starttime).live()
+        live_leaders = live_identities(leaders.values())
+        surviving = sorted(name for name, identity in leaders.items() if identity in live_leaders)
+        surviving_tracked = [identity.pid for identity in live_identities(tracked)]
+        inventory = service_inventory(
+            records=records, leaders=leaders, by_service=by_service, tracked=tracked, groups=groups
         )
-        surviving_tracked = sorted(identity.pid for identity in tracked if identity.live())
-        raise TimeoutError(
+        raise StopIncompleteError(
             f"service stop incomplete — {exc} surviving services: {surviving or 'unknown'}; "
-            f"surviving tracked descendants: {surviving_tracked}"
+            f"surviving tracked descendants: {surviving_tracked}\n"
+            f"{inventory.render(stage='services')}",
+            stage="services",
+            survivors=inventory.payload(),
         ) from exc
     remaining(deadline)
     if not keep_terminals:
