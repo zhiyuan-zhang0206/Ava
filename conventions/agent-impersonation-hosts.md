@@ -173,11 +173,14 @@ the [channel protocol](https://code.claude.com/docs/en/channels-reference).
   cancels and renewal reminders never wait. New messages arriving under an
   outstanding batch push as their own batch.
 - Pushes are debounced (default 0.5 seconds, maximum 30) and emitted at most
-  once every two seconds. Terminal control notices are immediate. For Claude
-  Monitor each content block is truncated to 2000 characters with a pointer to
-  the inbox command. Fetch messages (or full payloads) with `impersonate
-  inbox LEASE_UUID`; process and explicitly `impersonate ack LEASE_UUID ID ...`.
-  The envelope's ACK line carries the exact command for its batch.
+  once every two seconds. Terminal control notices are immediate. Every relay
+  provider truncates each content block to 2000 characters with a pointer to
+  the inbox command: it fits Claude Monitor's per-line budget and keeps the
+  codex `queue --message` argv bounded, so one oversized inbound cannot fail
+  every emit and wedge the relay. Fetch messages (or full payloads) with
+  `impersonate inbox LEASE_UUID`; process and explicitly
+  `impersonate ack LEASE_UUID ID ...`. The envelope's ACK line carries the
+  exact command for its batch.
   An ACK that marks messages done publishes a wake so the relay immediately
   drops the ids from its outstanding set, even when no new message has arrived.
   Repeating an ACK for already-done messages does not publish another wake.
