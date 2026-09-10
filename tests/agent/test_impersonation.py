@@ -569,3 +569,104 @@ async def test_claim_gate_stamps_a_stale_claude_relay_failure(
     decision = await impersonation.claim_gate(BaseAgentState(), 42)
     assert decision is not None and decision.goto == END
     record.assert_called_once()
+
+
+async def test_successor_admission_aligns_active_lease_binding_before_release(
+    db_conn: psycopg.Connection[Any],
+    aops_pool: AsyncConnectionPool[Any],
+) -> None:
+    """Issue #2052: a lease released between hosted restart and the first
+    native_status must not write the dead incarnation back into agents_meta.
+
+    The successor admission aligns the active lease's accepted_* binding in
+    the admission transaction, so the restore trigger's write-back is already
+    a no-op when the controller releases before any held wake.
+    """
+    from agent.hosted_ownership import admit_hosted_runtime
+    from shared import impersonation as leases
+    from shared.caller_identity import CallerIdentity
+    from shared.machine import machine_name
+    from tests.conftest import spawn_agent
+
+    agent_id = spawn_agent()
+    first = await admit_hosted_runtime(
+        aops_pool, agent_id, machine_name(), uuid4(), expected_from="idling"
+    )
+    assert first is not None
+    lease = leases.request(
+        agent_id,
+        caller=CallerIdentity(kind="external_agent", subject="codex", instance="test"),
+        ttl_seconds=3600,
+        reason="Handle the next message",
+        relay_provider="codex",
+        relay_thread_id=str(uuid4()),
+    )
+    leases.accept(lease["id"], agent_id, first, "Handoff brief")
+    leases.activate(lease["id"], first)
+    db_conn.execute(
+        "UPDATE agents_meta SET lease_expires_at = clock_timestamp() - interval '1 second' "
+        "WHERE id=%s",
+        (agent_id,),
+    )
+    db_conn.commit()
+    successor = await admit_hosted_runtime(
+        aops_pool, agent_id, machine_name(), uuid4(), expected_from="running"
+    )
+    assert successor is not None
+    assert successor.generation != first.generation
+    assert db_conn.execute(
+        "SELECT accepted_generation,accepted_owner FROM agent_impersonations WHERE id=%s",
+        (lease["id"],),
+    ).fetchone() == (successor.generation, successor.owner)
+    # Release before any native_status: the restore trigger fires, but the
+    # binding already matches the live incarnation — agents_meta is untouched.
+    leases.release(lease["id"], lease["token"], "Done before the first held wake")
+    db_conn.commit()
+    assert db_conn.execute(
+        "SELECT runtime_generation,runtime_owner FROM agents_meta WHERE id=%s",
+        (agent_id,),
+    ).fetchone() == (successor.generation, successor.owner)
+
+
+async def test_successor_admission_resets_a_stale_accepted_binding(
+    db_conn: psycopg.Connection[Any],
+    aops_pool: AsyncConnectionPool[Any],
+) -> None:
+    """Issue #2052: an accepted (not yet active) lease whose accepting
+    incarnation died restarts at 'requested' under the successor admission —
+    the same crash-before-ACK semantics as the lazy native_status path."""
+    from agent.hosted_ownership import admit_hosted_runtime
+    from shared import impersonation as leases
+    from shared.caller_identity import CallerIdentity
+    from shared.machine import machine_name
+    from tests.conftest import spawn_agent
+
+    agent_id = spawn_agent()
+    first = await admit_hosted_runtime(
+        aops_pool, agent_id, machine_name(), uuid4(), expected_from="idling"
+    )
+    assert first is not None
+    lease = leases.request(
+        agent_id,
+        caller=CallerIdentity(kind="external_agent", subject="codex", instance="test"),
+        ttl_seconds=3600,
+        reason="Handle the next message",
+        relay_provider="codex",
+        relay_thread_id=str(uuid4()),
+    )
+    leases.accept(lease["id"], agent_id, first, "Handoff brief")
+    db_conn.execute(
+        "UPDATE agents_meta SET lease_expires_at = clock_timestamp() - interval '1 second' "
+        "WHERE id=%s",
+        (agent_id,),
+    )
+    db_conn.commit()
+    successor = await admit_hosted_runtime(
+        aops_pool, agent_id, machine_name(), uuid4(), expected_from="running"
+    )
+    assert successor is not None
+    assert db_conn.execute(
+        "SELECT status,accepted_generation,accepted_owner,consent_version "
+        "FROM agent_impersonations WHERE id=%s",
+        (lease["id"],),
+    ).fetchone() == ("requested", None, None, 2)
