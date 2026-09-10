@@ -667,11 +667,42 @@ def test_cron_invalid_timezone_raises(_agent_row: int) -> None:
 
 def test_at_past_time_raises(_agent_row: int) -> None:
     """at() with a past datetime raises ValueError."""
-    from datetime import UTC, datetime, timedelta
+    from datetime import UTC, datetime
 
     past = datetime(2020, 1, 1, tzinfo=UTC)
     with pytest.raises(ValueError, match="past"):
         watcher.at(past, "too late", name="test-past")
+
+
+def test_cron_past_end_time_raises(_agent_row: int) -> None:
+    """cron() with an explicit past `end_time` raises ValueError, aligned
+    with at() (issue #2078: a past end otherwise supersedes the live twin
+    and registers a watcher that self-terminates immediately)."""
+    from datetime import UTC, datetime
+
+    past = datetime(2020, 1, 1, tzinfo=UTC)
+    with pytest.raises(ValueError, match="end_time is in the past"):
+        watcher.cron("0 3 * * *", "daily", timezone="UTC", end_time=past, name="test-cron-past-end")
+
+
+def test_cron_future_end_time_ok(_agent_row: int, monkeypatch: pytest.MonkeyPatch) -> None:
+    """An explicit future `end_time` registers normally (no past rejection)."""
+    from datetime import UTC, datetime, timedelta
+
+    captured: dict[str, Any] = {}
+
+    def fake_spawn(code: str, watchdog_secs: float | None, name: str, **kw: object) -> int:
+        captured.update(code=code, cron_end_at=kw.get("cron_end_at"))
+        return 7
+
+    monkeypatch.setattr(watcher, "_spawn", fake_spawn)
+    end = datetime.now(UTC) + timedelta(days=2)
+    wid = watcher.cron(
+        "0 3 * * *", "daily", timezone="UTC", end_time=end, name="test-cron-future-end"
+    )
+    assert wid == 7
+    assert captured["cron_end_at"] == end
+    assert "daily" in captured["code"]
 
     # timedelta going backwards should also fail
     with pytest.raises(ValueError):
