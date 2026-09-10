@@ -68,13 +68,16 @@ policy bug, not a preference, so the frontier is actively maintained:
 - A dominance pair is worth stating explicitly, so a later reader does not
   resurrect the dominated name out of habit.
 
-Standing dominance (user ruling 2026-09-03):
+Standing dominance (user ruling 2026-09-10, flipped from 2026-09-03):
 
-- `deepseek-v4-flash-vision-exp` **dominates** `deepseek-v4-flash` — identical
-  price (the catalog carries the same rates), same 1M context, plus vision and
-  strictly better intelligence. There is no reason to select
-  `deepseek-v4-flash` again: wherever a doc, script or spawn choice names it,
-  use the vision-exp id.
+- `deepseek-v4-flash` **dominates** `deepseek-v4-flash-vision-exp` — same
+  price (the catalog carries the same rates), same 1M context, and its
+  default backend is now DeepSeek V4.1 Flash, strictly stronger than the
+  vision experimental sibling. There is no reason to keep selecting
+  `deepseek-v4-flash-vision-exp` as the default tier: wherever a doc, script
+  or spawn choice names it, use the plain `deepseek-v4-flash` id. The
+  vision-exp id stays registered for tasks that genuinely need vision — the
+  V4.1 Flash backend's vision capability is not yet verified.
 
 ## Current cost policy
 
@@ -84,17 +87,17 @@ reaching for anything more expensive):
 | Tier | Model | Use for |
 |---|---|---|
 | **Judgment (main)** | `gemini-3.7-flash` | orchestration, planning, synthesis, reviewing/judging other agents' output, writing for humans |
-| **Mechanical** | `deepseek-v4-flash-vision-exp` | high-volume parallel workers, extraction, format transforms, checklist verification, scanning/sweeping |
+| **Mechanical** | `deepseek-v4-flash` | high-volume parallel workers, extraction, format transforms, checklist verification, scanning/sweeping |
 
 `gemini-3.8-flash` is spawnable on the production picker since 2026-09-06
 (user order; fresh-spawn verified clean by agent #5834). Caveat: restarting an
 EXISTING agent onto 3.8 (history written by another model) still 400s with
 "Corrupted thought signature" — the cross-model message-projection protocol is
-not landed yet, so switch only fresh agents to 3.8. The mechanical tier replaced
-`deepseek-v4-flash` with its vision-exp sibling (same price, strictly smarter —
-see the dominance pair above). Claude and other models stay registered and
-spawnable, but they sit outside the default policy — use them only when the
-user explicitly asks for them.
+not landed yet, so switch only fresh agents to 3.8. The mechanical tier is the
+plain `deepseek-v4-flash` id — its default backend is now DeepSeek V4.1 Flash,
+stronger than the vision-exp sibling (see the dominance pair above). Claude and
+other models stay registered and spawnable, but they sit outside the default
+policy — use them only when the user explicitly asks for them.
 
 ## How to decide the tier
 
@@ -114,8 +117,8 @@ The typical dynamic-workflow shape that falls out:
 
 ```
 gemini-3.7-flash orchestrator
-  → deepseek-v4-flash-vision-exp worker fleet
-  → deepseek-v4-flash-vision-exp cross-checkers
+  → deepseek-v4-flash worker fleet
+  → deepseek-v4-flash cross-checkers
   → gemini-3.7-flash synthesizer
 ```
 
@@ -127,7 +130,8 @@ gemini-3.7-flash orchestrator
   unverified — pair flash breadth with judgment-tier (or cross-flash) checking.
 - Don't scatter hardcoded model names where the cluster default would do —
   an explicit overlay should mean a deliberate tier choice.
-- Don't pick `deepseek-v4-flash` while `deepseek-v4-flash-vision-exp` is
-  registered — same price, strictly smarter.
+- Don't pick `deepseek-v4-flash-vision-exp` out of habit — the plain
+  `deepseek-v4-flash` id is the default tier now: same price, and its
+  V4.1 Flash backend is strictly stronger.
 - Don't trust a model name from an old spawn, an old chat, or a stale doc —
   enumerate first (`GET /api/models` or the registry).
