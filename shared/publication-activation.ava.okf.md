@@ -32,7 +32,11 @@ unit flock and absolute deadline; no database transaction spans OS work.
 readbacks, selector predecessor/new bytes, challenge, image paths and observation
 windows. It writes current and clears pending atomically, retaining the existing
 deployment phase/lease for the existing finalizer. Ordinary admission therefore
-still defers until phase stable. Exact commit replay returns the original UUID;
+still defers until phase stable; the one
+continuation exempt from that freeze is a held maintenance command the
+same boot already owns (`admit_hosted_runtime`), because a rollout's own
+pause must not defer the drain it requires — otherwise every held wake
+returns without a receipt and the hold is retained 300s later (#2159). Exact commit replay returns the original UUID;
 different evidence does not replace it. Database clock checks occur after locks.
 
 Detached unit updaters use `record_pending_unit_readback` to persist their exact
