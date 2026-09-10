@@ -58,9 +58,13 @@ def remind_expiring_impersonations(
     several scan chances. The reminder is an ordinary durable inbox row of
     kind='reminder' tagged with the lease id in its payload; the bound relay
     pushes it through the same envelope as any inbox message, and the external
-    controller ACKs it the same way (with the same re-delivery window). The
-    reaper's expiry pass dismisses pending reminders whose lease ended, so a
-    leftover can never reach the native agent's inbox.
+    controller ACKs it the same way (with the same re-delivery window). One
+    reminder per lease, ever: the NOT EXISTS below considers ANY reminder row
+    for the lease — an ACKed ('done') row still counts, so a controller that
+    ACKs without renewing or releasing is not nagged again every reaper cycle
+    (issue #2054); an un-ACKed row is re-delivered by the relay until ACK or
+    lease end. The reaper's expiry pass dismisses pending reminders whose
+    lease ended, so a leftover can never reach the native agent's inbox.
     """
     reminded_agents: list[int] = []
     with write_transaction(pool) as conn:
@@ -69,7 +73,7 @@ def remind_expiring_impersonations(
             "WHERE l.status='active' "
             "AND l.expires_at<=clock_timestamp()+make_interval(secs=>%s) "
             "AND NOT EXISTS (SELECT 1 FROM inbound_messages r "
-            "WHERE r.agent_id=l.agent_id AND r.kind='reminder' AND r.status='pending' "
+            "WHERE r.agent_id=l.agent_id AND r.kind='reminder' "
             "AND r.payload->>'lease_id'=l.id::text) "
             "ORDER BY l.expires_at LIMIT %s",
             (window_seconds, 200),
