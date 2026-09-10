@@ -333,7 +333,10 @@ def native_status(agent_id: int, incarnation: RuntimeIncarnation) -> dict[str, A
             # transfer — admission fences a foreign owner behind the previous
             # owner's lease expiry (a live host renews every beat), and every
             # lease mutation the old incarnation attempts dies at its own
-            # require_native row check. accepted_* has no other writer.
+            # require_native row check. The other accepted_* writer is hosted
+            # admission itself (agent/hosted_ownership.align_accepting_binding,
+            # issue #2052), which holds the same agents_meta row lock — after
+            # it lands, this lazy sync is already a no-op.
             conn.execute(
                 "UPDATE agent_impersonations SET accepted_generation=%s,accepted_owner=%s "
                 "WHERE id=%s",
