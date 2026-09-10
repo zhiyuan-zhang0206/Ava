@@ -48,7 +48,8 @@ NoteBuilder = Callable[[], HumanMessage | None]
 # The rank scale for the standing head — the reading order, lowest first:
 # the operational constants (exec timeout, then the cluster clock), then the
 # shared world (cluster memory index), then identity (agent id), then the
-# personal store (per-agent memory index), then preloaded skill bodies. The
+# personal store (per-agent memory index, then the inheritable blocks read
+# from the chain above), then preloaded skill bodies. The
 # ava_memory plugin pins the two memory ranks; everything else registered
 # without a rank defaults to `DEFAULT_RANK` and renders after all ranked notes.
 #
@@ -65,6 +66,7 @@ RANK_TIMEZONE = 15
 RANK_CLUSTER_MEMORY = 20
 RANK_AGENT_ID = 30
 RANK_PER_AGENT_MEMORY = 40
+RANK_INHERITED_MEMORY = 45
 RANK_PRELOADED_SKILLS = 50
 DEFAULT_RANK = 100
 

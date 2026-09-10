@@ -143,13 +143,13 @@ _NO_TIMESTAMP_NOTE_TAGS = frozenset(
         NoteTag.AGENT_REPLY,
         NoteTag.SILENT_IDLE_CONTINUE,
         NoteTag.SECURITY,
-        # Historical heartbeat-pause notes are one-time guidance, same family
-        # as the security note beside it.
+        # Historical heartbeat-pause notes: one-time guidance, same family.
         NoteTag.HEARTBEAT_PAUSE,
         NoteTag.CONTEXT,
         NoteTag.PROJECT_SKILLS,
         NoteTag.PRELOADED_SKILLS,
         NoteTag.AGENT_MEMORY,
+        NoteTag.INHERITED_MEMORY,
         NoteTag.EXEC_TIMEOUT,
         NoteTag.TIMEZONE,
     }

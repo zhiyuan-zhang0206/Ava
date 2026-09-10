@@ -80,6 +80,7 @@ import ava as _ava
 from agent.graph._context import AvaContext
 from agent.graph._context_notes import (
     RANK_CLUSTER_MEMORY,
+    RANK_INHERITED_MEMORY,
     RANK_PER_AGENT_MEMORY,
     register_context_note,
 )
@@ -94,6 +95,7 @@ from shared.config.turn_view import turn_settings
 from shared.log import logger
 
 from . import sdk as _memory_sdk
+from .inherit import inherited_memory_note
 from .notes import memory_index_note, per_agent_memory_note
 
 # The two memory indexes join the framework's ordered context-note registry, so
@@ -112,9 +114,12 @@ from .notes import memory_index_note, per_agent_memory_note
 # (issue #1320). Same reasoning as the framework's timezone note. The per-agent
 # index IS `on_fork`: it names the source agent's store, which the inherited
 # history renders wrong for the new agent — `_handle_fork` strips the inherited
-# copy before grafting the new agent's own.
+# copy before grafting the new agent's own. The inherited-memory note is
+# `on_fork` for the same reason: the source's history carries the blocks read
+# from the SOURCE's chain, which is not the new agent's chain.
 register_context_note(rank=RANK_CLUSTER_MEMORY)(memory_index_note)
 register_context_note(on_fork=True, rank=RANK_PER_AGENT_MEMORY)(per_agent_memory_note)
+register_context_note(on_fork=True, rank=RANK_INHERITED_MEMORY)(inherited_memory_note)
 
 
 # ── Memory discipline (system prompt section) ──────────────────────────

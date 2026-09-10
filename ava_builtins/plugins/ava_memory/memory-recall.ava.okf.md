@@ -50,5 +50,5 @@ These point into your note pool at ava.memory.PATH -- read a path in full when i
 - [[ava_builtins/plugins/ava_memory/memory-api.ava.okf.md]] — Memory pool SDK
 - [[services/gateway_side/memory_indexer/memory-indexer.ava.okf.md]] — Vector index service
 - [[shared/lm/lm.ava.okf.md]] — Embedding model for semantic search
-- [[agent/graph/context-notes.ava.okf.md]] — the standing head recall notes are injected beside
+- [[agent/graph/context-notes/context-notes.ava.okf.md]] — the standing head recall notes are injected beside
 - [[agent/graph/context-window.ava.okf.md]] — injection is constrained by context window capacity

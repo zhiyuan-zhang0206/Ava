@@ -23,6 +23,21 @@ Two types of memory, each serving different audiences:
 - **Shared pool** (`ava.memory.PATH`): notes visible to all agents. Write durable facts that other agents need when taking over your role — user preferences, hard constraints, long-term decisions.
 - **Per-agent memory** (`<workspace>/memory/`): your own durable state, maintained by yourself, surviving across compactions.
 
+### Inheritable blocks (personal store → descendants)
+
+A personal entry may fence content descendants should receive:
+
+```markdown
+<!-- ava:inheritable -->
+Standing guidance descendants should receive.
+<!-- /ava:inheritable -->
+```
+
+- Read at every context-window establishment (cold start / post-compact / fork regraft) from the first `memory_inherit_depth` (default 1, 0=off, ≤10) hops up the birth chain, nearest ancestor first; multiple fences and multiple entries concatenate in order.
+- Only ancestors that ran on the same machine contribute; a remote ancestor is skipped and named in the note's footer.
+- Size guardrails: `memory_inherit_max_block_chars` (4000) / `memory_inherit_max_total_chars` (16000) — over either, the note carries a visible `[truncated …]` marker and the log a warning; 0 disables one. Malformed fences (unclosed / stray close) drop the block with a warning — never a silent over-share.
+- Content is a pure function of (chain, files, settings) — no timestamps — so unchanged state re-renders byte-identical (fork prefix-cache stability).
+
 ## Core API
 
 - `PATH: PosixPath` — shared memory pool root directory `~/.ava/memory`

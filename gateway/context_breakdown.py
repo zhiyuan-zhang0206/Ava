@@ -163,7 +163,9 @@ def bucket_messages(messages: Sequence[BaseMessage]) -> tuple[dict[str, int], st
                 tag = kwargs.get("ava_note_tag")
                 if tag == NoteTag.MEMORY:
                     add("cluster_memory", chars)
-                elif tag == NoteTag.AGENT_MEMORY:
+                elif tag in (NoteTag.AGENT_MEMORY, NoteTag.INHERITED_MEMORY):
+                    # Inherited-memory blocks are agent memory too (the chain's
+                    # copy of it), so they share the agent_memory bucket.
                     add("agent_memory", chars)
                 else:
                     add("context_note", chars)

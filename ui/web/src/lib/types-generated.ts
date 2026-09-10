@@ -303,6 +303,36 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/agents/{agent_id}/born-chain": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Agent Born Chain
+         * @description The immutable birth chain above `agent_id`, nearest ancestor first
+         *     (1 = direct birth parent) — one recursive `agents_meta.born_spawner` walk.
+         *
+         *     The light half of `/neighbors`, and separate on purpose: the inherited
+         *     memory context note resolves this chain at every window establishment, and
+         *     it must not drag the tie graph's frozen-archive read + Loki live tail into
+         *     that path. Adds `machine` (which ancestors a reader can open locally) and
+         *     keeps `status` (the chain includes terminated ancestors). Terminates only
+         *     when `born_spawner` is not an `agent:N` value (a user / external spawn).
+         *
+         *     404: agent_id does not exist (AgentNotFound -> handler returns 404 + reason).
+         */
+        get: operations["get_agent_born_chain_api_agents__agent_id__born_chain_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/agents/{agent_id}/compact": {
         parameters: {
             query?: never;
@@ -4314,6 +4344,34 @@ export interface components {
             files: string[];
         };
         /**
+         * BornChainResponse
+         * @description GET /api/agents/{id}/born-chain response.
+         */
+        BornChainResponse: {
+            /** Ancestors */
+            ancestors: components["schemas"]["BornChainRow"][];
+        };
+        /**
+         * BornChainRow
+         * @description One ancestor in GET /api/agents/{id}/born-chain — the immutable birth
+         *     chain above the queried agent, nearest ancestor first (1 = direct birth
+         *     parent). Carries what the inherited-memory context note needs (`machine`
+         *     decides which ancestors it can read locally); no tie score, because this
+         *     route reads no tie graph.
+         */
+        BornChainRow: {
+            /** Agent Id */
+            agent_id: number;
+            /** Label */
+            label: string | null;
+            /** Status */
+            status: string;
+            /** Machine */
+            machine: string | null;
+            /** Depth */
+            depth: number;
+        };
+        /**
          * CancelRequest
          * @description POST /api/cancel request body — pause/stop the agent, addressed by id.
          */
@@ -8158,6 +8216,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SpawnedAgent"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_agent_born_chain_api_agents__agent_id__born_chain_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                agent_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BornChainResponse"];
                 };
             };
             /** @description Validation Error */

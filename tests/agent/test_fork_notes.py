@@ -93,10 +93,17 @@ def test_cluster_memory_index_is_not_on_fork(memory_plugin: Any) -> None:
 
 
 def test_strip_tag_set_is_exactly_the_source_identity_notes() -> None:
-    """The strip tags are closed over exactly the three source-identity notes —
+    """The strip tags are closed over exactly the four source-identity notes —
     the cluster index must never join them (it is what the fork keeps)."""
     assert (
-        frozenset({NoteTag.AGENT_ID, NoteTag.AGENT_MEMORY, NoteTag.PRELOADED_SKILLS})
+        frozenset(
+            {
+                NoteTag.AGENT_ID,
+                NoteTag.AGENT_MEMORY,
+                NoteTag.INHERITED_MEMORY,
+                NoteTag.PRELOADED_SKILLS,
+            }
+        )
         == _STRIP_ON_FORK_TAGS
     )
 
@@ -125,6 +132,7 @@ async def test_fork_end_to_end_single_copy_each_note(
         SystemMessage(content="sys"),
         _tagged(NoteTag.AGENT_ID, "old agent id", "note-old-id"),
         _tagged(NoteTag.AGENT_MEMORY, "source's memory", "note-old-mem"),
+        _tagged(NoteTag.INHERITED_MEMORY, "source's inherited memory", "note-old-inherit"),
         _tagged(NoteTag.PRELOADED_SKILLS, "source's preloaded skills", "note-old-preload"),
         _tagged(NoteTag.MEMORY, "shared pool index", "note-cluster-index"),
     ]
@@ -147,7 +155,12 @@ async def test_fork_end_to_end_single_copy_each_note(
 
     assert isinstance(msgs[0], RemoveMessage) and msgs[0].id == REMOVE_ALL_MESSAGES
     rebuilt_ids = {m.id for m in msgs[1:] if not isinstance(m, RemoveMessage)}
-    assert {"note-old-id", "note-old-mem", "note-old-preload"} & rebuilt_ids == set()
+    assert {
+        "note-old-id",
+        "note-old-mem",
+        "note-old-inherit",
+        "note-old-preload",
+    } & rebuilt_ids == set()
     assert "note-cluster-index" in rebuilt_ids
     # Grafted sequence: fork marker, new agent id, new per-agent memory (the
     # preloaded-skills builder is empty in this env, and the cluster index is

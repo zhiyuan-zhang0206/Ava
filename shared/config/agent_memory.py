@@ -64,6 +64,68 @@ class AgentMemorySettings(EnvSettings):
         },
     )
 
+    memory_inherit_depth: int = Field(
+        default=1,
+        ge=0,
+        le=10,
+        alias="AVA_MEMORY_INHERIT_DEPTH",
+        description=(
+            "How many ancestors up the birth chain an agent inherits from, in "
+            "hops (1 = the direct birth parent), nearest first. 0 disables "
+            "inheritance. An ancestor declares shareable content by wrapping it "
+            "in `<!-- ava:inheritable -->` … `<!-- /ava:inheritable -->` inside "
+            "a personal memory entry; the child reads those blocks when its "
+            "context window is established. Cap 10: chains are short, so a "
+            "higher value only invites an accidental whole-family pull."
+        ),
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+            "per_agent": True,
+            "lifecycle": "live",
+        },
+    )
+
+    memory_inherit_max_block_chars: int = Field(
+        default=4000,
+        ge=0,
+        alias="AVA_MEMORY_INHERIT_MAX_BLOCK_CHARS",
+        description=(
+            "Size guardrail for inherited-memory blocks: one declared block "
+            "injects at most this many characters; over it the block is "
+            "truncated with a visible `[truncated …]` marker plus a warning, so "
+            "an oversized declaration cannot balloon every descendant's "
+            "context. 0 disables the per-block cap."
+        ),
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    memory_inherit_max_total_chars: int = Field(
+        default=16000,
+        ge=0,
+        alias="AVA_MEMORY_INHERIT_MAX_TOTAL_CHARS",
+        description=(
+            "Size guardrail for the whole inherited-memory note: once the "
+            "accumulated block text reaches this budget, the crossing block is "
+            "truncated to the remainder and further blocks are omitted — both "
+            "marked visibly in the note and logged as warnings. 0 disables the "
+            "total cap."
+        ),
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
     passive_memory_recall_enabled: bool = Field(
         default=True,
         alias="AVA_PASSIVE_MEMORY_RECALL",
