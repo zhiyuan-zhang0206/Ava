@@ -137,8 +137,9 @@ partial stop or a failed startup.
 
 A drain aborted by failed receipts keeps the hold, and `resume --cancel`
 refuses while blocked failures remain. Receipts whose turn raised a
-database-outage exception (`psycopg.OperationalError`, `PoolTimeout`,
-`TimeoutError` — the crash-equivalent family) do not block: they are recorded
+database-outage exception (`psycopg.OperationalError`, `PoolTimeout` — the
+crash-equivalent family; every database channel hang surfaces as one of
+these) do not block: they are recorded
 as undelivered, and after the channel recovers the host re-drives the
 held-control path (explicit re-flush, then restart claim) before the drain can
 certify. For genuinely blocking failures, fix the root cause first, then run
