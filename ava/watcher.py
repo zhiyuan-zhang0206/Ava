@@ -20,7 +20,6 @@ from shared.watcher import (
     TEMPLATE_VERSION,
     build_at_script,
     build_cron_script,
-    normalize_end_time,
     normalize_when,
     validate_cron,
     validate_timezone,
@@ -653,7 +652,8 @@ def cron(
         timezone: IANA name (e.g. `"America/Los_Angeles"`); defaults to your
             configured timezone — the same wall clock your message timestamps
             are shown in.
-        end_time: same accepted types as `at()`'s `when`; defaults to
+        end_time: same accepted types as `at()`'s `when`; must be in the
+            future (a past end raises ValueError, like `at()`); defaults to
             now + 7 days.
         name: a lowercase slug like `"daily-check-in"`.
 
@@ -688,12 +688,23 @@ def cron(
             seconds=DEFAULT_STANDING_CRON_MAX_SECONDS
         )
     else:
-        et = normalize_end_time(end_time)
+        # normalize_when (not normalize_end_time): this branch excludes None,
+        # so the result is a non-optional datetime for the type checker.
+        et = normalize_when(end_time)
+        # Align with at(): a past end must not register. Under the #2061
+        # supersede-first semantics a past end would otherwise kill the live
+        # standing twin and register a watcher that self-terminates at once —
+        # recoverable only by re-registering (issue #2078).
+        if et < datetime.datetime.now(datetime.UTC):
+            raise ValueError(
+                f"end_time is in the past: {et.isoformat()}. "
+                "Provide a future time, or use a positive timedelta."
+            )
     code = build_cron_script(
         expr=expr,
         message=message,
         timezone=tz,
-        end_time_iso=et.isoformat() if et is not None else None,
+        end_time_iso=et.isoformat(),
     )
     # The generated script self-terminates (it stops looping past end_time —
     # which every registration now carries, the default being now + 7 days),
@@ -769,23 +780,14 @@ _reconcile.bind(
     target_logger=logger,
 )
 
-_kill_watcher_orphan_processes = _reconcile._kill_watcher_orphan_processes
-_live_cron_session = _reconcile._live_cron_session
-_notify_missed_watcher = _reconcile._notify_missed_watcher
-_reconcile_missing = _reconcile._reconcile_missing
-_reap_superseded_watcher = _reconcile._reap_superseded_watcher
-_rebuild_stale_cron_watcher = _reconcile._rebuild_stale_cron_watcher
-reconcile = _reconcile.reconcile
+from ava import (  # noqa: E402 — back-compat aliases split out at the 800-line ceiling (issue #2078)
+    _watcher_reexports as _reexports,
+)
 
-# Preserve the historical defining module for introspection and pickling.
-for _moved_function in (
-    _kill_watcher_orphan_processes,
-    _live_cron_session,
-    _notify_missed_watcher,
-    _reconcile_missing,
-    _reap_superseded_watcher,
-    _rebuild_stale_cron_watcher,
-    reconcile,
-):
-    _moved_function.__module__ = __name__
-del _moved_function
+_kill_watcher_orphan_processes = _reexports._kill_watcher_orphan_processes
+_live_cron_session = _reexports._live_cron_session
+_notify_missed_watcher = _reexports._notify_missed_watcher
+_reconcile_missing = _reexports._reconcile_missing
+_reap_superseded_watcher = _reexports._reap_superseded_watcher
+_rebuild_stale_cron_watcher = _reexports._rebuild_stale_cron_watcher
+reconcile = _reexports.reconcile
