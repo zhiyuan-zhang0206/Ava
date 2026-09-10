@@ -25,10 +25,12 @@ import socketserver
 import threading
 from collections.abc import Iterator
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
 from gateway.app import app
+from gateway.routers import grafana as grafana_router
 from shared import config
 
 _SECRET = "test-cluster-secret"  # noqa: S105 — test fixture
@@ -267,3 +269,19 @@ def test_proxy_requires_auth(grafana_server: int, monkeypatch: pytest.MonkeyPatc
             headers={"Authorization": f"Bearer {_SECRET}"},
         )
         assert with_auth.status_code == 404
+
+
+def test_proxy_client_ignores_ambient_proxy_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The Grafana upstream is a co-located cluster host — the shared client
+    must never route it through the machine's ambient HTTP proxy (mirrors the
+    page-proxy hardening, 2026-09-10 incident)."""
+    real_client = httpx.AsyncClient
+    seen: dict[str, object] = {}
+
+    def _client_factory(**kwargs):  # type: ignore[no-untyped-def]
+        seen["trust_env"] = kwargs["trust_env"]
+        return real_client(**kwargs)  # pyright: ignore[reportUnknownArgumentType]
+
+    monkeypatch.setattr(grafana_router.httpx, "AsyncClient", _client_factory)  # pyright: ignore[reportUnknownArgumentType]
+    grafana_router.build_proxy_client()
+    assert seen["trust_env"] is False

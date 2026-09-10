@@ -59,6 +59,7 @@ def build_proxy_client() -> httpx.AsyncClient:
     shutdown); handlers reach it via `request.app.state.grafana_client`."""
     return httpx.AsyncClient(
         timeout=_PROXY_TIMEOUT,
+        trust_env=False,
         limits=httpx.Limits(max_connections=32, max_keepalive_connections=10),
     )
 
