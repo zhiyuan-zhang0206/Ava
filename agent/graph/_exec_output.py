@@ -154,6 +154,31 @@ def wrap_code_output(
     return header + "\n\n" + body
 
 
+def crashed_no_output_body(exc: BaseException, *, code_reached: bool | None) -> str:
+    """Agent-facing body for a crash whose stdout is empty — the honest
+    replacement for the "(no output)" fallback when the crash may have
+    happened BEFORE the agent's code ran (P0 #2100: a boot-crash must never
+    read as "ran, produced no output").
+
+    `code_reached` is the child's own flag: False = boot-phase crash (the code
+    was NOT executed), True = the code ran and printed nothing before the
+    crash, None = unknown (older child / parent-side construction failure).
+    The type and message name the failure so the agent can stop retrying
+    something a retry cannot fix (e.g. a bootstrap fetch failure).
+    """
+    exc_type = getattr(exc, "exc_type", None) or type(exc).__name__
+    exc_msg = getattr(exc, "exc_msg", None) or str(exc)
+    if code_reached is False:
+        verdict = "the exec child crashed before running your code — the code was NOT executed"
+    elif code_reached is True:
+        verdict = (
+            "your code executed and produced no output, then the exec crashed reporting the result"
+        )
+    else:
+        verdict = "the exec child crashed before producing any output — whether the code executed is unknown"
+    return f"[exec crashed: {verdict}]\n{exc_type}: {exc_msg}".rstrip() + "\n"
+
+
 def truncate_both_ends(output: str, max_chars: int, *, stream_cap: StreamCap | None = None) -> str:
     """Keep the first + last `max_chars // 2` chars (head carries an overview /
     a help() listing, tail carries the result / traceback), drop the middle,

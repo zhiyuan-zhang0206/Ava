@@ -70,7 +70,9 @@ def test_fetch_bootstrap_config_against_live_endpoint(
 # setenv, but bypasses the lint_no_os_environ Rule 2 ban on monkeypatch.setenv
 # of Settings-managed aliases (which is the right ban for code that reads
 # settings.X, the wrong one for code that reads os.environ).
-def test_inject_config_updates_environ(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_inject_config_updates_environ(
+    monkeypatch: pytest.MonkeyPatch, _snapshot_home: Path
+) -> None:
     monkeypatch.setitem(os.environ, "AVA_GATEWAY_URL", "http://cp")
     monkeypatch.setattr(
         bootstrap,
@@ -82,7 +84,9 @@ def test_inject_config_updates_environ(monkeypatch: pytest.MonkeyPatch) -> None:
     assert os.environ["AVA_DB_URL"] == "postgresql://injected/x"
 
 
-def test_inject_derives_missing_gateway_health_url(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_inject_derives_missing_gateway_health_url(
+    monkeypatch: pytest.MonkeyPatch, _snapshot_home: Path
+) -> None:
     """A pure runner probes the remote gateway, never localhost, when enroll
     carries no explicit health override."""
     monkeypatch.setitem(os.environ, "AVA_GATEWAY_URL", "http://gateway.tailnet:8123/")
@@ -98,7 +102,9 @@ def test_inject_derives_missing_gateway_health_url(monkeypatch: pytest.MonkeyPat
     assert os.environ["AVA_GATEWAY_HEALTH_URL"] == ("http://gateway.tailnet:8123/api/health")
 
 
-def test_inject_preserves_explicit_gateway_health_url(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_inject_preserves_explicit_gateway_health_url(
+    monkeypatch: pytest.MonkeyPatch, _snapshot_home: Path
+) -> None:
     monkeypatch.setitem(os.environ, "AVA_GATEWAY_URL", "http://gateway.tailnet:8123")
     monkeypatch.setitem(os.environ, "AVA_GATEWAY_HEALTH_URL", "http://health-proxy.tailnet/ready")
     monkeypatch.setattr(
@@ -112,7 +118,9 @@ def test_inject_preserves_explicit_gateway_health_url(monkeypatch: pytest.Monkey
     assert os.environ["AVA_GATEWAY_HEALTH_URL"] == "http://health-proxy.tailnet/ready"
 
 
-def test_inject_overwrites_existing_env(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_inject_overwrites_existing_env(
+    monkeypatch: pytest.MonkeyPatch, _snapshot_home: Path
+) -> None:
     # Fetched values are authoritative (2026-08-01): a stale value in env/.env —
     # a pre-cutover materialization `_enforce_cluster_env_authority` pushed in,
     # or a forwarded copy from a spawning process — is overridden by the
@@ -134,7 +142,9 @@ def test_inject_overwrites_existing_env(monkeypatch: pytest.MonkeyPatch) -> None
     assert os.environ["DEEPSEEK_API_KEY"] == "fetched-key"  # fetch wins
 
 
-def test_inject_without_gateway_url_fails_fast(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_inject_without_gateway_url_fails_fast(
+    monkeypatch: pytest.MonkeyPatch, _snapshot_home: Path
+) -> None:
     # A pure runner with no AVA_GATEWAY_URL (never enrolled) must not start with
     # no config — the error names the remedy.
     monkeypatch.delitem(os.environ, "AVA_GATEWAY_URL", raising=False)
@@ -151,7 +161,7 @@ def test_inject_without_gateway_url_fails_fast(monkeypatch: pytest.MonkeyPatch) 
     assert called == []  # never fetched without a URL
 
 
-def test_inject_wraps_fetch_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_inject_wraps_fetch_failure(monkeypatch: pytest.MonkeyPatch, _snapshot_home: Path) -> None:
     # The raw httpx error is wrapped with the operator's remedy; the process
     # must not start with no config.
     monkeypatch.setitem(os.environ, "AVA_GATEWAY_URL", "http://gw:8000")
@@ -164,7 +174,9 @@ def test_inject_wraps_fetch_failure(monkeypatch: pytest.MonkeyPatch) -> None:
         bootstrap.inject_config_from_gateway()
 
 
-def test_inject_treats_blank_as_absent(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_inject_treats_blank_as_absent(
+    monkeypatch: pytest.MonkeyPatch, _snapshot_home: Path
+) -> None:
     # defense in depth: the spawn path UNSETS these keys, but inject must also
     # overwrite a stale empty value from the fetch rather than keep it.
     monkeypatch.setitem(os.environ, "AVA_GATEWAY_URL", "http://cp")
@@ -178,7 +190,9 @@ def test_inject_treats_blank_as_absent(monkeypatch: pytest.MonkeyPatch) -> None:
     assert os.environ["DEEPSEEK_API_KEY"] == "real-fetched-key"
 
 
-def test_inject_uses_deprecated_gateway_url_alias(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_inject_uses_deprecated_gateway_url_alias(
+    monkeypatch: pytest.MonkeyPatch, _snapshot_home: Path
+) -> None:
     # AVA_PRIMARY_GATEWAY_URL is honored pre-Settings (Settings' AliasChoices
     # hasn't run yet at fetch time).
     monkeypatch.delitem(os.environ, "AVA_GATEWAY_URL", raising=False)
@@ -324,3 +338,183 @@ def test_should_fetch_reads_the_serve_file(monkeypatch: pytest.MonkeyPatch, tmp_
     monkeypatch.setitem(os.environ, "AVA_GATEWAY_URL", "http://gw:8000")
     (home / "machine_serve_agent_runner").write_text("true")
     assert bootstrap.should_fetch_from_gateway() is True
+
+
+# ── P0 #2100: the parent config snapshot ─────────────────────────────────────
+
+
+def _write_snapshot(home: Path, *, base_url: str, age_s: float, values: dict[str, str]) -> Path:
+    import json as _json
+    import time as _time
+
+    snap = home / "run" / "bootstrap-snapshot.json"
+    snap.parent.mkdir(parents=True, exist_ok=True)
+    snap.write_text(
+        _json.dumps(
+            {
+                "v": 1,
+                "base_url": base_url,
+                "written_at": _time.time() - age_s,
+                "values": values,
+            }
+        ),
+        encoding="utf-8",
+    )
+    return snap
+
+
+@pytest.fixture
+def _snapshot_home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
+    """Pin AVA_HOME to a fresh tmp home so snapshot state never leaks across tests.
+
+    Also delitem every key a fake fetch below injects into os.environ:
+    `inject_config_from_gateway` applies fetched values straight to the env, so
+    without the deletion a test would leave e.g. a bogus AVA_DB_URL behind for
+    every later test — including exec children, which inherit env AVA_DB_URL
+    verbatim on the config-fetch-skip path (AVA_PROCESS_PROFILE=agent).
+    monkeypatch restores the pre-test value at teardown."""
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setitem(os.environ, "AVA_HOME", str(home))
+    monkeypatch.setitem(os.environ, "AVA_GATEWAY_URL", "http://gw:8000")
+    for _key in ("AVA_DB_URL", "DEEPSEEK_API_KEY", "AVA_GATEWAY_HEALTH_URL"):
+        monkeypatch.delitem(os.environ, _key, raising=False)
+    return home
+
+
+def test_inject_skips_fetch_on_fresh_snapshot(
+    monkeypatch: pytest.MonkeyPatch, _snapshot_home: Path
+) -> None:
+    """P0 #2100: a fresh parent snapshot is authoritative — no HTTP fetch at all."""
+    _write_snapshot(
+        _snapshot_home,
+        base_url="http://gw:8000",
+        age_s=1.0,
+        values={"AVA_DB_URL": "postgresql://snapshot/x", "DEEPSEEK_API_KEY": "snap-key"},
+    )
+
+    def _no_fetch(*_a: object, **_k: object) -> dict[str, str]:
+        raise AssertionError("a fresh snapshot must skip the fetch entirely")
+
+    monkeypatch.setattr(bootstrap, "fetch_bootstrap_config", _no_fetch)  # pyright: ignore[reportUnknownArgumentType]
+    bootstrap.inject_config_from_gateway()
+    assert os.environ["AVA_DB_URL"] == "postgresql://snapshot/x"
+    assert os.environ["DEEPSEEK_API_KEY"] == "snap-key"
+    assert os.environ["AVA_GATEWAY_HEALTH_URL"] == "http://gw:8000/api/health"
+
+
+def test_inject_fetches_and_refreshes_stale_snapshot(
+    monkeypatch: pytest.MonkeyPatch, _snapshot_home: Path
+) -> None:
+    """A stale snapshot fetches as before; the fetch wins AND refreshes the cache."""
+    _write_snapshot(
+        _snapshot_home,
+        base_url="http://gw:8000",
+        age_s=10_000.0,
+        values={"AVA_DB_URL": "postgresql://old/x"},
+    )
+    monkeypatch.setattr(
+        bootstrap,
+        "fetch_bootstrap_config",
+        lambda *_a, **_k: {"AVA_DB_URL": "postgresql://fresh/x"},  # pyright: ignore[reportUnknownArgumentType]
+    )
+    bootstrap.inject_config_from_gateway()
+    assert os.environ["AVA_DB_URL"] == "postgresql://fresh/x"  # fetch is authoritative
+    values, age = bootstrap._read_config_snapshot("http://gw:8000")  # type: ignore[misc]
+    assert values == {"AVA_DB_URL": "postgresql://fresh/x"}
+    assert age < 10.0  # refreshed for the next process
+
+
+def test_inject_falls_back_to_stale_snapshot_on_transport_failure(
+    monkeypatch: pytest.MonkeyPatch, _snapshot_home: Path
+) -> None:
+    """Gateway unreachable + a (stale) snapshot → continue on last-known config.
+
+    The outage scenario behind P0 #2100: no cluster edit can land while the
+    gateway is down, so the snapshot is the safest config there is."""
+    _write_snapshot(
+        _snapshot_home,
+        base_url="http://gw:8000",
+        age_s=10_000.0,
+        values={"AVA_DB_URL": "postgresql://last-known/x"},
+    )
+
+    def _boom(*_a: object, **_k: object) -> dict[str, str]:
+        raise httpx.ConnectError("connection refused")
+
+    monkeypatch.setattr(bootstrap, "fetch_bootstrap_config", _boom)  # pyright: ignore[reportUnknownArgumentType]
+    bootstrap.inject_config_from_gateway()  # must not raise
+    assert os.environ["AVA_DB_URL"] == "postgresql://last-known/x"
+
+
+def test_inject_still_raises_on_transport_failure_without_snapshot(
+    monkeypatch: pytest.MonkeyPatch, _snapshot_home: Path
+) -> None:
+    """No snapshot to fall back on: the honest loud failure is unchanged."""
+
+    def _boom(*_a: object, **_k: object) -> dict[str, str]:
+        raise httpx.ReadTimeout("read timed out")
+
+    monkeypatch.setattr(bootstrap, "fetch_bootstrap_config", _boom)  # pyright: ignore[reportUnknownArgumentType]
+    with pytest.raises(bootstrap.BootstrapFetchError, match="no snapshot"):
+        bootstrap.inject_config_from_gateway()
+
+
+def test_inject_does_not_fall_back_on_auth_failure(
+    monkeypatch: pytest.MonkeyPatch, _snapshot_home: Path
+) -> None:
+    """401 (wrong/rotated secret) must fail loud — the snapshot fallback is for
+    transport failures only, never for a gateway that rejects this runner."""
+    monkeypatch.delitem(os.environ, "AVA_DB_URL", raising=False)
+    _write_snapshot(
+        _snapshot_home,
+        base_url="http://gw:8000",
+        age_s=10_000.0,
+        values={"AVA_DB_URL": "postgresql://old/x"},
+    )
+
+    def _unauthorized(*_a: object, **_k: object) -> dict[str, str]:
+        request = httpx.Request("GET", "http://gw:8000/api/bootstrap")
+        raise httpx.HTTPStatusError(
+            "401 Unauthorized", request=request, response=httpx.Response(401, request=request)
+        )
+
+    monkeypatch.setattr(bootstrap, "fetch_bootstrap_config", _unauthorized)  # pyright: ignore[reportUnknownArgumentType]
+    with pytest.raises(bootstrap.BootstrapFetchError):
+        bootstrap.inject_config_from_gateway()
+    assert "AVA_DB_URL" not in os.environ  # nothing applied
+
+
+def test_inject_ignores_snapshot_from_another_gateway(
+    monkeypatch: pytest.MonkeyPatch, _snapshot_home: Path
+) -> None:
+    """A re-enrolled runner must never reuse the previous gateway's config."""
+    _write_snapshot(
+        _snapshot_home,
+        base_url="http://old-gateway:9000",
+        age_s=1.0,
+        values={"AVA_DB_URL": "postgresql://old-gw/x"},
+    )
+    monkeypatch.setattr(
+        bootstrap,
+        "fetch_bootstrap_config",
+        lambda *_a, **_k: {"AVA_DB_URL": "postgresql://new-gw/x"},  # pyright: ignore[reportUnknownArgumentType]
+    )
+    bootstrap.inject_config_from_gateway()
+    assert os.environ["AVA_DB_URL"] == "postgresql://new-gw/x"
+
+
+def test_inject_ignores_malformed_snapshot(
+    monkeypatch: pytest.MonkeyPatch, _snapshot_home: Path
+) -> None:
+    """Garbage on disk degrades to the fetch path, never kills the boot."""
+    snap = _snapshot_home / "run" / "bootstrap-snapshot.json"
+    snap.parent.mkdir(parents=True, exist_ok=True)
+    snap.write_text("{not json", encoding="utf-8")
+    monkeypatch.setattr(
+        bootstrap,
+        "fetch_bootstrap_config",
+        lambda *_a, **_k: {"AVA_DB_URL": "postgresql://fetched/x"},  # pyright: ignore[reportUnknownArgumentType]
+    )
+    bootstrap.inject_config_from_gateway()
+    assert os.environ["AVA_DB_URL"] == "postgresql://fetched/x"

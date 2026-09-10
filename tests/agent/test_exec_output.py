@@ -190,3 +190,111 @@ def test_wrap_code_output_no_timestamp_when_disabled(monkeypatch: pytest.MonkeyP
     out = wrap_code_output("part\n", cancelled=True)
     assert "Code execution output [cancelled by user]:\n\n" in out
     assert _TS not in out
+
+
+# ── P0 #2100: a crashed exec with empty output must never read as "(no output)" ──
+
+
+def _boot_crash(exc: Exception, code_reached: bool | None) -> object:
+    from agent.graph._exec_result import _ExecCrashed
+
+    return _ExecCrashed(output="", exc=exc, full_traceback=None, code_reached=code_reached)
+
+
+def _dispatch(result: object, monkeypatch: pytest.MonkeyPatch) -> tuple[bool, str, int]:
+    from agent.graph._exec import _dispatch_exec_result
+
+    calls: list[tuple[int, object]] = []
+    monkeypatch.setattr(
+        "agent.graph._exec.maybe_alert_exec_boot_failure",
+        lambda agent_id, exc: calls.append((agent_id, exc)),  # pyright: ignore[reportUnknownArgumentType]
+    )
+    halted, text, code = _dispatch_exec_result(result, None, 7, referenced_messages=())  # type: ignore[arg-type]
+    return halted, text, code
+
+
+def test_dispatch_boot_crash_reports_not_executed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The outage shape: child crashed on bootstrap fetch, stdout empty. The
+    agent must read "code was NOT executed", never "(no output)"."""
+    from agent.graph._exec_result import ExecChildError
+
+    exc = ExecChildError("BootstrapFetchError", "could not fetch cluster config", "tb")
+    halted, text, _code = _dispatch(_boot_crash(exc, False), monkeypatch)
+    assert halted is False
+    assert "Code execution output" in text
+    assert "the code was NOT executed" in text
+    assert "BootstrapFetchError: could not fetch cluster config" in text
+    assert "(no output)" not in text
+
+
+def test_dispatch_crash_with_unknown_code_reached_stays_honest(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Older child / missing envelope: say execution status is unknown."""
+    from agent.graph._exec_result import ExecChildError
+
+    exc = ExecChildError("exec_subprocess_aborted", "child exited without a result envelope", None)
+    halted, text, _code = _dispatch(_boot_crash(exc, None), monkeypatch)
+    assert halted is False
+    assert "whether the code executed is unknown" in text
+    assert "(no output)" not in text
+
+
+def test_dispatch_crash_after_code_ran_but_printed_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """code_reached=True: the code ran — the envelope says so instead of lying."""
+    from agent.graph._exec_result import ExecChildError
+
+    exc = ExecChildError("OSError", "result envelope write failed", None)
+    halted, text, _code = _dispatch(_boot_crash(exc, True), monkeypatch)
+    assert halted is False
+    assert "executed and produced no output" in text
+    assert "(no output)" not in text
+
+
+def test_dispatch_crash_with_output_keeps_the_output(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A crash WITH stdout keeps the agent-facing traceback — no marker added."""
+    from agent.graph._exec_result import ExecChildError, _ExecCrashed
+
+    result = _ExecCrashed(
+        output="Traceback (most recent call last):\n  boom\n",
+        exc=ExecChildError("ValueError", "boom", None),
+        code_reached=True,
+    )
+    halted, text, _code = _dispatch(result, monkeypatch)
+    assert halted is False
+    assert "Traceback (most recent call last)" in text
+    assert "(no output)" not in text
+
+
+def test_dispatch_boot_crash_alerts_the_operator(monkeypatch: pytest.MonkeyPatch) -> None:
+    """P2 #2102: a boot-phase failure (code_reached=False) fires the
+    rate-limited alert; the unknown case does not."""
+    from agent.graph._exec import _dispatch_exec_result
+    from agent.graph._exec_result import ExecChildError
+
+    calls: list[tuple[int, object]] = []
+    monkeypatch.setattr(
+        "agent.graph._exec.maybe_alert_exec_boot_failure",
+        lambda agent_id, exc: calls.append((agent_id, exc)),  # pyright: ignore[reportUnknownArgumentType]
+    )
+    boot_exc = ExecChildError("BootstrapFetchError", "down", None)
+    _dispatch_exec_result(_boot_crash(boot_exc, False), None, 42, referenced_messages=())  # type: ignore[arg-type]
+    assert calls == [(42, boot_exc)]
+
+    calls.clear()
+    unknown_exc = ExecChildError("exec_subprocess_aborted", "gone", None)
+    _dispatch_exec_result(_boot_crash(unknown_exc, None), None, 42, referenced_messages=())  # type: ignore[arg-type]
+    assert calls == []
+
+
+def test_crashed_no_output_body_forms() -> None:
+    from agent.graph._exec_output import crashed_no_output_body
+    from agent.graph._exec_result import ExecChildError
+
+    body = crashed_no_output_body(ExecChildError("X", "y", None), code_reached=False)
+    assert "NOT executed" in body
+    assert "X: y" in body
+    body2 = crashed_no_output_body(ValueError("plain"), code_reached=None)
+    assert "ValueError: plain" in body2
