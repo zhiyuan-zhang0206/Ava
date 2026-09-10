@@ -27,7 +27,8 @@ from ops import pty_close_notices
 from ops.agent_pause import PAUSE_TIMEOUT_SECONDS, pause_agents
 from ops.agent_pause_probe import ops_quiescent
 from shared import maintenance, start_serving
-from shared.machine import machine_name, machine_role
+from shared.lifecycle_status import begin, finish, phase
+from shared.machine import MachineRoles, machine_name, machine_role
 from shared.paths import run_dir
 from shared.session_backend import WinprocSessionBackend, get_shell_backend
 from shared.session_record import SessionRecord
@@ -167,6 +168,22 @@ def _stop_extras(deadline: float) -> None:
     stop_lgtm_services(timeout_s=remaining(deadline))
 
 
+def _report_incomplete(
+    exc: BaseException, phases: list[tuple[str, float]], *, owns_journal: bool
+) -> None:
+    """Print the stop's real failure with its per-phase budget accounting and
+    close the lifecycle journal when this stop owns it."""
+    timing = "; ".join(f"{label} {elapsed:.1f}s" for label, elapsed in phases)
+    print(
+        f"Pause/stop incomplete; resources were not force-killed: {exc}. "
+        f"phases: {timing or 'before the first phase'}. "
+        "Retry the command, or use ava start to resume.",
+        file=sys.stderr,
+    )
+    if owns_journal:
+        finish(1, error=f"{type(exc).__name__}: {exc}", extra={"phases": timing})
+
+
 def _mark_stopped(holder: str, acquired_at: datetime) -> None:
     """Move the held maintenance generation to stopped (re-validating it)."""
     current = maintenance.require_operation(holder, acquired_at)
@@ -175,14 +192,48 @@ def _mark_stopped(holder: str, acquired_at: datetime) -> None:
 
 
 def _timed_phase(phases: list[tuple[str, float]], label: str, step: Callable[[], object]) -> None:
-    """Run one stop phase, recording its wall time even when it raises."""
+    """Run one stop phase, recording its wall time even when it raises.
+
+    The phase name is printed BEFORE the step runs so a caller whose outer
+    budget cuts the command off mid-phase still saw which stage it entered —
+    and the lifecycle journal carries the same timeline durably.
+    """
     started = time.monotonic()
-    try:
-        step()
-    except BaseException:
+    print(f"  · stop phase: {label}", flush=True)
+    with phase(label):
+        try:
+            step()
+        except BaseException:
+            phases.append((label, time.monotonic() - started))
+            raise
         phases.append((label, time.monotonic() - started))
-        raise
-    phases.append((label, time.monotonic() - started))
+
+
+def _stop_plan(
+    *, preserve_sessions: frozenset[str], keep_browser: bool, keep_infra: bool
+) -> tuple[MachineRoles, frozenset[str], frozenset[str]]:
+    """Resolve this stop's service selection from the roster and roles.
+
+    Refuses unknown preserved sessions and preserved services that need the
+    data plane while it is being stopped.
+    """
+    roles = machine_role()
+    preserved = preserve_sessions | (frozenset({"browser"}) if keep_browser else frozenset[str]())
+    specs = build_services()
+    known = {spec.session for spec in specs}
+    unknown = preserved - known
+    if unknown:
+        raise ValueError(f"unknown preserved service(s): {sorted(unknown)}")
+    if "gateway" in roles and not keep_infra:
+        dependent = sorted(
+            spec.session for spec in specs if spec.session in preserved and spec.requires_db
+        )
+        if dependent:
+            raise ValueError(f"preserved services require --keep-infra: {dependent}")
+    selected = frozenset(
+        session_name(spec.session) for spec in specs if spec.session not in preserved
+    )
+    return roles, selected, preserved
 
 
 def stop(
@@ -204,21 +255,8 @@ def stop(
 
     if hosting_supervised_session() is not None:
         raise RuntimeError("pause/stop must run outside the work it drains; use a login shell")
-    roles = machine_role()
-    preserved = preserve_sessions | (frozenset({"browser"}) if keep_browser else frozenset[str]())
-    specs = build_services()
-    known = {spec.session for spec in specs}
-    unknown = preserved - known
-    if unknown:
-        raise ValueError(f"unknown preserved service(s): {sorted(unknown)}")
-    if "gateway" in roles and not keep_infra:
-        dependent = sorted(
-            spec.session for spec in specs if spec.session in preserved and spec.requires_db
-        )
-        if dependent:
-            raise ValueError(f"preserved services require --keep-infra: {dependent}")
-    selected = frozenset(
-        session_name(spec.session) for spec in specs if spec.session not in preserved
+    roles, selected, preserved = _stop_plan(
+        preserve_sessions=preserve_sessions, keep_browser=keep_browser, keep_infra=keep_infra
     )
     print(
         f"[ava {'pause' if keep_terminals else 'stop'}] local services; "
@@ -228,6 +266,10 @@ def stop(
     if not _confirm_stop(require_confirmation=require_confirmation):
         return 0
     deadline = deadline_after(timeout)
+    owns_journal = begin(
+        "pause" if keep_terminals else "stop",
+        deadline=deadline,
+    )
     # Per-phase accounting: a failed stop names each phase and how much of the
     # shared budget it consumed, so the operator sees WHERE the budget went
     # (agent drain vs services vs terminals) — never a bare timeout (#2045).
@@ -272,12 +314,8 @@ def stop(
             )
         _mark_stopped(current.holder, current.acquired_at)
     except (RuntimeError, TimeoutError, OSError, subprocess.TimeoutExpired) as exc:
-        timing = "; ".join(f"{label} {elapsed:.1f}s" for label, elapsed in phases)
-        print(
-            f"Pause/stop incomplete; resources were not force-killed: {exc}. "
-            f"phases: {timing or 'before the first phase'}. "
-            "Retry the command, or use ava start to resume.",
-            file=sys.stderr,
-        )
+        _report_incomplete(exc, phases, owns_journal=owns_journal)
         return 1
+    if owns_journal:
+        finish(0)
     return 0

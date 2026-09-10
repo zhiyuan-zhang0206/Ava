@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import contextlib
 import os
+import shutil
 import signal
 import subprocess
 import sys
@@ -62,6 +64,7 @@ def launch(home: Path) -> Iterator[Callable[[str, str], subprocess.Popen[str]]]:
             str(home),
             time.time(),
             pid_starttime_ticks(proc.pid),
+            pgid=os.getpgid(proc.pid),
         ).write(home / "run/sessions" / f"{name}.json")
         return proc
 
@@ -121,7 +124,11 @@ def test_timeout_leaves_both_services_alive_under_one_deadline(launch: Launcher)
     assert first.poll() is None and second.poll() is None
 
 
-def test_orphaned_captured_descendant_prevents_success(launch: Launcher) -> None:
+def test_orphaned_captured_descendant_converges_after_leader_exit(launch: Launcher) -> None:
+    # issue #2123: a leader that exits on TERM without closing its children
+    # (the frontend chain's npm / Next.js shape) must not stall the stop until
+    # the deadline. Once the leader is confirmed gone, its captured descendants
+    # receive TERM too — birth-validated, at most once — and the stop converges.
     code = (
         "import subprocess,sys,time; "
         "subprocess.Popen([sys.executable,'-c','import time; time.sleep(60)']); "
@@ -130,11 +137,95 @@ def test_orphaned_captured_descendant_prevents_success(launch: Launcher) -> None
     parent = launch("parent", code)
     children = psutil.Process(parent.pid).children()
     assert len(children) == 1
+    child_identity = stop.OwnedProcess.capture(children[0])
+    assert stop.stop_services(3) == ["parent"]
+    assert parent.wait(timeout=1) == -signal.SIGTERM
+    # The stop only returns once the tracked descendant is gone; init may have
+    # reaped it already, so assert on the birth identity, not a stale wait().
+    assert not child_identity.live()
+
+
+def test_descendant_refusing_term_keeps_hold_and_reports(launch: Launcher) -> None:
+    # The convergence is TERM only: a descendant that ignores TERM keeps the
+    # hold until the deadline and is reported by name and pid — never SIGKILL,
+    # never silent success (issue #2123 acceptance: refusing processes report
+    # the real failure and the waiting stage).
+    code = (
+        "import subprocess,sys,time; "
+        "subprocess.Popen([sys.executable,'-c',"
+        "'import signal,time; signal.signal(signal.SIGTERM,signal.SIG_IGN); time.sleep(60)']); "
+        "print('ready',flush=True); time.sleep(60)"
+    )
+    parent = launch("parent", code)
+    children = psutil.Process(parent.pid).children()
+    assert len(children) == 1
     try:
-        with pytest.raises(TimeoutError, match="did not exit"):
+        with pytest.raises(TimeoutError, match="did not exit") as excinfo:
             stop.stop_services(0.15)
         assert parent.wait(timeout=1) == -signal.SIGTERM
         assert children[0].is_running()
+        message = str(excinfo.value)
+        assert "surviving tracked descendants" in message
+        assert str(children[0].pid) in message
+    finally:
+        children[0].kill()  # Exact child created by this fixture, not production.
+
+
+def test_retry_converges_dead_leader_surviving_group(home: Path, launch: Launcher) -> None:
+    # Retry close: the leader died before the stop ran (TERM delivered by an
+    # earlier interrupted pass). The listing retains the record while the
+    # recorded process group is occupied, and the retry converges the group
+    # members instead of silently certifying a stopped unit.
+    code = (
+        "import subprocess,sys,time; "
+        "subprocess.Popen([sys.executable,'-c','import time; time.sleep(60)']); "
+        "print('ready',flush=True); time.sleep(60)"
+    )
+    parent = launch("parent", code)
+    children = psutil.Process(parent.pid).children()
+    assert len(children) == 1
+    record_path = home / "run/sessions/parent.json"
+    record = SessionRecord.read(record_path)
+    assert record is not None and record.pgid is not None
+    child_identity = stop.OwnedProcess.capture(children[0])
+    parent.send_signal(signal.SIGTERM)
+    assert parent.wait(timeout=1) == -signal.SIGTERM
+    assert children[0].is_running()
+    from shared.posixproc import list_sessions
+
+    assert "parent" in list_sessions()  # reap gate: occupied group keeps the record
+    assert stop.stop_services(3) == ["parent"]
+    assert not child_identity.live()
+    # The converged record reaps once its group is empty (next listing).
+    assert "parent" not in list_sessions()
+    assert stop.stop_services(1) == []
+
+
+def test_legacy_dead_leader_record_without_group_reaps(home: Path, launch: Launcher) -> None:
+    # A pre-pgid record whose leader is already dead carries no ownership
+    # proof for its survivors — it reaps at listing (the legacy contract) and
+    # no signal is ever derived from an unprovable claim. Records born after
+    # the fix carry pgid, so this shape stops occurring for new sessions.
+    from dataclasses import replace
+
+    code = (
+        "import subprocess,sys,time; "
+        "subprocess.Popen([sys.executable,'-c','import time; time.sleep(60)']); "
+        "print('ready',flush=True); time.sleep(60)"
+    )
+    parent = launch("parent", code)
+    children = psutil.Process(parent.pid).children()
+    assert len(children) == 1
+    path = home / "run/sessions/parent.json"
+    record = SessionRecord.read(path)
+    assert record is not None
+    replace(record, pgid=None).write(path)
+    parent.send_signal(signal.SIGTERM)
+    assert parent.wait(timeout=1) == -signal.SIGTERM
+    try:
+        assert stop.stop_services(1) == []
+        assert not path.exists()
+        assert children[0].is_running()  # no signal derived from an unprovable claim
     finally:
         children[0].kill()  # Exact child created by this fixture, not production.
 
@@ -252,7 +343,11 @@ def test_linux_ticks_win_over_changed_epoch_birth(
     def read_tick(_pid: int) -> int | None:
         return tick
 
-    monkeypatch.setattr(stop, "pid_starttime_ticks", read_tick)
+    # OwnedProcess lives in shared.proc_tree (the stop path and the frontend
+    # identity probe share it); patch the reference its live() consults.
+    import shared.proc_tree
+
+    monkeypatch.setattr(shared.proc_tree, "pid_starttime_ticks", read_tick)
     identity = stop.OwnedProcess(proc.pid, 0, 123)
     assert identity.live()
     tick = 124
@@ -552,3 +647,71 @@ def test_redis_cleanup_cannot_turn_deadline_into_an_unbounded_wait(
     with pytest.raises(TimeoutError):
         stop.stop_data_plane(0.1)
     assert time.monotonic() - started < 0.7
+
+
+@pytest.mark.skipif(
+    shutil.which("node") is None or shutil.which("bash") is None, reason="real shell/node layering"
+)
+def test_bash_node_layered_chain_converges(home: Path) -> None:
+    # The frontend's launch layering (issue #2123): a bash -lc leader whose
+    # node middle layer exits on TERM without closing the node child — the
+    # exact shape npm shows on the WSL chain. bash may exec into the node
+    # leader (single-command optimization) or keep it as a child; either way
+    # the stop must TERM the surviving descendants and converge.
+    leader = home / "leader.js"
+    child = home / "child.js"
+    leader.write_text(
+        "const { spawn } = require('child_process');\n"
+        "const c = spawn(process.execPath, [" + repr(str(child)) + "], { stdio: 'inherit' });\n"
+        "process.on('SIGTERM', () => process.exit(0));\n"
+        "setInterval(() => {}, 1000);\n"
+    )
+    child.write_text("setInterval(() => {}, 1000);\n")
+    proc = subprocess.Popen(  # noqa: S603 — test-owned bash + node, fixed fixture scripts
+        ["bash", "-lc", f"node {leader}"],
+        cwd=home,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        start_new_session=True,
+    )
+    leader_pid: int | None = None
+    try:
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            candidates = [proc.pid] + [c.pid for c in psutil.Process(proc.pid).children()]
+            for candidate in candidates:
+                if psutil.Process(candidate).name() == "node":
+                    leader_pid = candidate
+                    break
+            if leader_pid is not None and psutil.Process(leader_pid).children():
+                break
+            time.sleep(0.05)
+        assert leader_pid is not None
+        grandchildren = psutil.Process(leader_pid).children()
+        assert len(grandchildren) == 1
+        grandchild = grandchildren[0]
+        leader_identity = stop.OwnedProcess.capture(psutil.Process(leader_pid))
+        grandchild_identity = stop.OwnedProcess.capture(grandchild)
+        SessionRecord(
+            leader_pid,
+            psutil.Process(leader_pid).create_time(),
+            "layered-test",
+            str(home),
+            time.time(),
+            pid_starttime_ticks(leader_pid),
+            pgid=os.getpgid(leader_pid),
+        ).write(home / "run/sessions" / "layered.json")
+        assert stop.stop_services(3) == ["layered"]
+        assert not leader_identity.live()
+        assert not grandchild_identity.live()
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+        with contextlib.suppress(subprocess.TimeoutExpired):
+            proc.wait(timeout=5)
+        for pid in (leader_pid, grandchildren[0].pid if grandchildren else None):
+            if pid is not None:
+                # exact private fixtures, post-assertion
+                with contextlib.suppress(psutil.NoSuchProcess):
+                    psutil.Process(pid).kill()

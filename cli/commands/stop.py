@@ -470,6 +470,19 @@ def _cmd_restart_body(
 
     repo = _repo_root()
     print(f"[ava restart] cwd = {repo}")
+    from ops.agent_pause import PAUSE_TIMEOUT_SECONDS
+    from shared import lifecycle_status
+    from shared.deploy_timing import SERVICE_READY_TIMEOUT_S
+
+    lifecycle_status.begin("restart")
+    print(
+        f"[ava restart] budget contract: stop up to {PAUSE_TIMEOUT_SECONDS:.0f}s + "
+        f"start readiness up to {SERVICE_READY_TIMEOUT_S:.0f}s + bounded preflight probes; "
+        "an outer caller's timeout must exceed this total. Status journal: "
+        f"{lifecycle_status.status_path()} (phase progress and the final diagnosis "
+        "stay readable there even if this process is cut off)",
+        flush=True,
+    )
 
     # Each step below is timed as an `[updater] stage=` line (Task #1820): the
     # Windows updater ladder runs this command behind a cmd.exe chain whose
@@ -481,11 +494,12 @@ def _cmd_restart_body(
     # host in "services dead, can't start" after the stop below.
     # On failure the host keeps serving — abort without stopping.
     print("\n→ preflight probes (validate-before-kill)")
-    with updater_stage("preflight"):
+    with updater_stage("preflight"), lifecycle_status.phase("preflight"):
         rc = _ns._preflight_probes()
     if rc != 0:
         print("  ✗ refusing restart: preflight probes failed — host still serving", file=sys.stderr)
         _release_self_heal_pause()
+        lifecycle_status.finish(RESTART_DECLINED_EXIT_CODE, error="preflight probes failed")
         return RESTART_DECLINED_EXIT_CODE
 
     # Every restart uses the shared hosted pause kernel; a timeout never
@@ -495,7 +509,7 @@ def _cmd_restart_body(
     # never this cluster's own pg/redis instance — stopping the data plane mid-orchestration
     # kills the gateway orchestrator's own DB polling (same failure mode as
     # the self-update leg; see _run_agent_runner_self_update).
-    with updater_stage("stop"):
+    with updater_stage("stop"), lifecycle_status.phase("stop"):
         rc = _ns._do_stop(
             repo,
             graceful=True,
@@ -506,13 +520,17 @@ def _cmd_restart_body(
     if rc != 0:
         # The quiesce paused this host; a failed stop means no `ava start` is
         # coming to restore it. Release the pause unless a cluster update owns
-        # it (same contract as the refusal paths above).
+        # it (same contract as the refusal paths above). The stop leg's own
+        # journal phases (drain / services / ...) remain readable.
         _release_self_heal_pause()
+        lifecycle_status.finish(rc, error="stop leg failed")
         return rc
     # Internal restart: preserve the operator's durable --disable-service marker
     # (a no-flag operator start would rewrite it to empty and re-enable everything).
-    with updater_stage("start"):
-        return _ns._cmd_start_body(persist_services=False, updater_telemetry=True)
+    with updater_stage("start"), lifecycle_status.phase("start"):
+        rc = _ns._cmd_start_body(persist_services=False, updater_telemetry=True)
+    lifecycle_status.finish(rc, error=None if rc == 0 else f"start leg failed with rc={rc}")
+    return rc
 
 
 def cmd_restart(*, quiesce: bool = False, mode: str = "smooth", force_reap: bool = False) -> int:

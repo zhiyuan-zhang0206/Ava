@@ -22,7 +22,19 @@ def test_is_alive_curl_ok(monkeypatch: pytest.MonkeyPatch) -> None:
         return _FakeResult(returncode=0)
 
     monkeypatch.setattr(hc.subprocess, "run", fake_run)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(hc, "_session_owns_listener", lambda _port: True)  # pyright: ignore[reportUnknownArgumentType]
     assert hc._is_alive() is True
+
+
+def test_is_alive_rejects_200_outside_the_session(monkeypatch: pytest.MonkeyPatch) -> None:
+    # issue #2123: an old orphan answering 200 on the app port is not frontend
+    # health — the answering listener must belong to the current session.
+    def fake_run(args, **kwargs):
+        return _FakeResult(returncode=0)
+
+    monkeypatch.setattr(hc.subprocess, "run", fake_run)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(hc, "_session_owns_listener", lambda _port: False)  # pyright: ignore[reportUnknownArgumentType]
+    assert hc._is_alive() is False
 
 
 def test_is_alive_curl_fails(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -216,3 +228,34 @@ def test_session_exists_asks_the_session_backend(monkeypatch: pytest.MonkeyPatch
 
     monkeypatch.setattr("shared.session_backend.get_backend", lambda: _FakeBackend(False))
     assert hc._session_exists() is False
+
+
+def test_main_refuses_to_respawn_into_an_orphans_port(monkeypatch: pytest.MonkeyPatch) -> None:
+    # issue #2123: no live session + the app port answered by an orphan — the
+    # watchdog must NOT respawn into the occupied port (every new session's
+    # `next start` would die on EADDRINUSE and restart the loop).
+    calls: dict[str, int] = {"restart": 0}
+    monkeypatch.setattr("shared.platform.raise_fd_limit", lambda _limit: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(hc, "init_gateway_process", lambda **_kwargs: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(hc, "_is_alive", lambda: False)
+    monkeypatch.setattr(hc, "_session_exists", lambda: False)
+    monkeypatch.setattr(hc, "_listener_pids", lambda _port: {4242})
+    monkeypatch.setattr(
+        hc, "_restart", lambda: calls.__setitem__("restart", calls["restart"] + 1) or True
+    )
+    hc.main()
+    assert calls["restart"] == 0
+
+
+def test_main_respawns_when_the_port_is_free(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: dict[str, int] = {"restart": 0}
+    monkeypatch.setattr("shared.platform.raise_fd_limit", lambda _limit: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(hc, "init_gateway_process", lambda **_kwargs: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(hc, "_is_alive", lambda: False)
+    monkeypatch.setattr(hc, "_session_exists", lambda: False)
+    monkeypatch.setattr(hc, "_listener_pids", lambda _port: set())
+    monkeypatch.setattr(
+        hc, "_restart", lambda: calls.__setitem__("restart", calls["restart"] + 1) or True
+    )
+    hc.main()
+    assert calls["restart"] == 1
