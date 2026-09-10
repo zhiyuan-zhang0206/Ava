@@ -222,9 +222,13 @@ async def test_expired_owner_replacement_fences_old_settlement(
     assert not await settle_hosted_runtime(aops_pool, old)
 
 
+@pytest.mark.parametrize("status", ["running", "idling"])
+@pytest.mark.parametrize("release_lease", [False, True])
 async def test_new_host_owner_requires_exact_old_host_exit_for_managed_set(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
+    status: str,
+    release_lease: bool,
 ) -> None:
     """A normal agent-host restart transfers only an empty set whose host died."""
     agent_id = _agent(db_conn)
@@ -243,17 +247,23 @@ async def test_new_host_owner_requires_exact_old_host_exit_for_managed_set(
             requests={},
         )
         db_conn.execute(
-            "UPDATE agents_meta SET status='idling',runtime_generation=%s,runtime_owner=%s,"
+            "UPDATE agents_meta SET status=%s,runtime_generation=%s,runtime_owner=%s,"
             "runtime_kind='hosted',lease_expires_at=clock_timestamp()+interval '1 minute',"
             "incarnation_resources=%s WHERE id=%s",
-            (old.generation, old.owner, Jsonb(evidence.model_dump(mode="json")), agent_id),
+            (status, old.generation, old.owner, Jsonb(evidence.model_dump(mode="json")), agent_id),
         )
         db_conn.commit()
-        await release_hosted_owner(aops_pool, "host-test", old.owner, set())
+        if release_lease:
+            await release_hosted_owner(aops_pool, "host-test", old.owner, set())
 
         assert (
             await admit_hosted_runtime(
-                aops_pool, agent_id, "host-test", uuid4(), expected_from="idling"
+                aops_pool,
+                agent_id,
+                "host-test",
+                uuid4(),
+                expected_from=status,
+                publication=_CurrentRuntimeAdmission(None),
             )
             is None
         )
@@ -265,7 +275,7 @@ async def test_new_host_owner_requires_exact_old_host_exit_for_managed_set(
             agent_id,
             "host-test",
             uuid4(),
-            expected_from="idling",
+            expected_from=status,
             publication=_CurrentRuntimeAdmission(None),
         )
         assert successor is not None and successor.generation != old.generation
@@ -282,6 +292,7 @@ async def test_new_host_owner_requires_exact_old_host_exit_for_managed_set(
         assert transferred.requests == {}
         assert transferred.host_process is not None
         assert transferred.host_process.pid == psutil.Process().pid
+        assert not await settle_hosted_runtime(aops_pool, old)
     finally:
         if old_host.poll() is None:
             old_host.kill()

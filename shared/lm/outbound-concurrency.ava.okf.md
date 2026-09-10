@@ -12,9 +12,10 @@ tags:
 
 `LLMConcurrencyLimiter` holds one synchronous or asynchronous slot across the
 entire provider call, including SDK-internal retries. Its default `deepseek:31`
-conservatively allocates DeepSeek Pro's 500 account-level slots across the
-host's default 16 concurrent turns; an explicit empty `AVA_LLM_MAX_CONCURRENT`
-disables caps, and other provider caps remain operator-configured.
+limits asynchronous calls across the hosted process; synchronous calls have a
+separate process-local limiter. Agent admission and database pool sizes do not
+resize these caps. Operators allocate the provider's account budget across hosts
+and processes; an explicit empty `AVA_LLM_MAX_CONCURRENT` disables caps.
 
 `shared/lm/errors.py:emit_provider_error()` emits `llm_provider_error` for both
 agent streams and synchronous SDK calls, so Grafana's provider-grouped HTTP 429

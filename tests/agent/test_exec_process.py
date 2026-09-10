@@ -429,10 +429,13 @@ async def test_runner_cancelled_owners_leave_no_exec_process_group(
     """Runner-wide cancellation must not strand the exec child or an observer
     thread that makes ``shutdown_default_executor`` wait for that child."""
     descendant_pid_path = tmp_path / "descendant.pid"
+    temporary_pid_path = tmp_path / "descendant.pid.tmp"
     code = (
-        "import subprocess, sys, time; "
-        f"p=subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)']); "
-        f"open({str(descendant_pid_path)!r}, 'w').write(str(p.pid)); "
+        "import os, subprocess, sys, time\n"
+        "p=subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])\n"
+        f"with open({str(temporary_pid_path)!r}, 'w') as ready:\n"
+        "    ready.write(str(p.pid))\n"
+        f"os.replace({str(temporary_pid_path)!r}, {str(descendant_pid_path)!r})\n"
         "time.sleep(60)"
     )
     proc = subprocess.Popen(  # noqa: S603 — fixed test-only interpreter command

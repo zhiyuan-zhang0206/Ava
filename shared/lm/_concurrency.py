@@ -1,12 +1,11 @@
 """Per-provider outbound LLM concurrency caps.
 
-The default `AVA_LLM_MAX_CONCURRENT=deepseek:31` reserves 31 calls for each
-of the default 16 active turns (496 of DeepSeek Pro's 500 account slots). The
-cap applies per provider *around the whole SDK call* — SDK-internal retries
-included — so a burst of agents or a batch `ava.understand` / `ava.web.fetch`
-job cannot push a provider past its account concurrency ceiling. An explicit
-empty value disables all caps; operators changing the active-turn budget must
-adjust the configured cap to preserve the account-wide allocation.
+The default `AVA_LLM_MAX_CONCURRENT=deepseek:31` caps concurrent async calls
+across the hosted process, not per agent. Sync callers use a separate limiter.
+The cap applies per provider *around the whole SDK call* — SDK-internal retries
+included. An explicit empty value disables all caps. Operators allocate provider
+account capacity across processes and hosts independently of agent admission
+and database pools; these process-local caps do not enforce an account-wide sum.
 
 Two acquire flavors, both pass-through when the provider is unconfigured:
 

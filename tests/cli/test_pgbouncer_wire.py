@@ -10,8 +10,8 @@ Postgres. Proves the load-bearing wire behaviour the unit tests cannot:
 - LangGraph's PostgresSaver setup() DDL + put/get through the pooler (the flagged
   DDL-through-transaction-pooling risk).
 
-Skipped when pgbouncer is not installed (CI installs it via scripts/provision;
-a dev box gets it from `brew install pgbouncer`).
+Skipped when pgbouncer is not installed (CI installs it through the
+install-pg-redis composite action; a dev box uses `brew install pgbouncer`).
 """
 
 from __future__ import annotations

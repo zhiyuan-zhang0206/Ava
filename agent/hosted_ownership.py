@@ -269,6 +269,8 @@ async def admit_hosted_runtime(
                 host_identity,
                 exited_predecessor=exited_predecessor,
             )
+            # Exact local host death and resource closure are stronger than
+            # its remaining lease; the same row lock protects both proofs.
             row = await (
                 await conn.execute(
                     "UPDATE agents_meta SET status = 'running', runtime_kind = 'hosted', "
@@ -285,7 +287,7 @@ async def admit_hosted_runtime(
                     "AND force.observed_at IS NULL) "
                     "AND (runtime_kind IS NULL OR runtime_kind = 'hosted') "
                     "AND (runtime_owner IS NULL OR runtime_owner = %s "
-                    "OR lease_expires_at IS NULL OR lease_expires_at <= now()) "
+                    "OR lease_expires_at IS NULL OR lease_expires_at <= now() OR %s) "
                     "RETURNING runtime_generation",
                     (
                         owner,
@@ -296,6 +298,7 @@ async def admit_hosted_runtime(
                         machine,
                         expected_from,
                         owner,
+                        exited_predecessor is not None,
                     ),
                 )
             ).fetchone()
