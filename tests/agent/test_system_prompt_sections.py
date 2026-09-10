@@ -10,6 +10,7 @@ fourth member, 'off', which is a gate like any other and renders nothing.
 """
 
 import re
+from pathlib import Path
 
 import pytest
 
@@ -640,6 +641,30 @@ def test_cross_machine_delegation_hint_absent_from_full_prompt_when_off(
     prompt = build_system_prompt()
 
     assert _CROSS_MACHINE_DELEGATION_SENTENCE not in prompt
+
+
+# ── workspace section: pre-compact history dump pointer ─────────────────────
+
+
+def test_workspace_section_names_the_history_dump(
+    workspace: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With the dump on (default), the workspace section names the
+    `message-history/` folder and shows the grep recipe — the standing pointer
+    behind "the summary dropped a detail I need". With it off, the sentence is
+    absent so the prompt never points at a folder that stays empty. (The
+    `workspace` fixture pins the agent id the section needs.)"""
+    monkeypatch.setattr(settings.agent, "workspace_in_system_prompt", True)
+    monkeypatch.setattr(settings.agent, "history_dump_enabled", True)
+
+    from agent.graph._system_prompt import _workspace_section
+
+    rendered = _workspace_section()
+    assert "message-history/" in rendered
+    assert "grep -rn 'keyword' message-history/" in rendered
+
+    monkeypatch.setattr(settings.agent, "history_dump_enabled", False)
+    assert "message-history" not in _workspace_section()
 
 
 # ── activation telemetry (issue #40) ────────────────────────────────────────

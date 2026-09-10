@@ -129,6 +129,10 @@ Your state splits across three stores with different audiences:
 | **When** | Replaced at each compaction | Persists across compactions |
 | **Contains** | Requests, progress, dead ends, verbatim tail | Role, preferences, responsibilities, pitfalls |
 
+Each compaction also dumps the raw pre-compact message history into your
+workspace under `message-history/` (JSONL, one message per line) — grep it when
+the summary misses a detail you need.
+
 ### Maintaining your memory
 
 Your memory index (`memory/MEMORY.md`) is injected into your context after

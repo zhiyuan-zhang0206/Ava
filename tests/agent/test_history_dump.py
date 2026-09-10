@@ -1,8 +1,11 @@
 """Pre-compact history dump tests (`agent/history_dump.py`).
 
 Covers the four contracts of the feature:
-- config gating: `settings.agent.history_dump_enabled` off (default) → no file,
-  no note; on → dump written + note injected;
+- config gating: on (the declared default) → dump written + note injected; off
+  → no file, no note (the suite's autouse fixture keeps it off for every test
+  outside this file);
+- filename: `<start>__<end>.jsonl` — start = the earliest message
+  `ava_created_at` (falls back to the write moment), end = the write moment;
 - dump content completeness + replayability: one JSONL line per message, each
   line a LangChain BaseMessage `model_dump(mode="json")` that round-trips
   through `langchain_core.load.loads` with type / content / kwargs intact;
@@ -14,7 +17,9 @@ Covers the four contracts of the feature:
 """
 
 import json
-from datetime import UTC, datetime
+import re
+from datetime import UTC, datetime, tzinfo
+from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -42,6 +47,7 @@ from agent.hooks.compact import auto_compact_before_llm, compose_summary_message
 from agent.messages import NoteTag, system_note_message
 from agent.state import AgentState
 from shared.config import settings
+from shared.config.agent_compaction import AgentCompactionSettings
 from shared.lm.context_budget import ContextBudget
 from tests.conftest import spawn_agent
 
@@ -68,20 +74,36 @@ def _patch_dump_enabled(
     return ws
 
 
-class _FakeClock:
-    """Controllable `datetime` replacement for `agent.history_dump` — lets a
-    test write several dumps with distinct, ordered timestamps without sleeping."""
+class _FakeClock(datetime):
+    """Controllable `datetime` subclass for `agent.history_dump` — lets a test
+    write several dumps with distinct, ordered timestamps without sleeping.
+    Subclassing (not a bare stub) keeps the whole datetime API, so the module's
+    parse path (`datetime.fromisoformat`) keeps working under the patch."""
 
     _counter = 0
 
     @classmethod
-    def now(cls, _tz: Any | None = None):
+    def now(cls, tz: tzinfo | None = None) -> "_FakeClock":  # noqa: ARG003 — the fake pins its own instant
         cls._counter += 1
-        return datetime(2026, 8, 13, 12, 0, 0, cls._counter, tzinfo=UTC)
+        return cls(2026, 8, 13, 12, 0, 0, cls._counter, tzinfo=UTC)
 
 
 def _patch_clock(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("agent.history_dump.datetime", _FakeClock)
+
+
+# `<start>__<end>.jsonl`, both UTC: start with second precision, end with
+# microsecond precision (the collision guard).
+_DUMP_NAME_RE = re.compile(r"^(\d{8}T\d{6}Z)__(\d{8}T\d{6}\.\d{6}Z)\.jsonl$")
+
+
+def _parse_dump_name(path: Path) -> tuple[datetime, datetime]:
+    """The (start, end) stamps a dump filename carries."""
+    m = _DUMP_NAME_RE.match(path.name)
+    assert m is not None, path.name
+    start = datetime.strptime(m.group(1), "%Y%m%dT%H%M%SZ").replace(tzinfo=UTC)
+    end = datetime.strptime(m.group(2), "%Y%m%dT%H%M%S.%fZ").replace(tzinfo=UTC)
+    return start, end
 
 
 def _sample_messages() -> list[AnyMessage]:
@@ -197,22 +219,72 @@ def _config(tid: int) -> RunnableConfig:
 # ── dump_history: config gating ──
 
 
-def test_dump_disabled_by_default_returns_none(monkeypatch: pytest.MonkeyPatch, tmp_path: Any):
-    """Config off (the default) → dump_history returns None and creates nothing."""
+def test_dump_enabled_by_default() -> None:
+    """The feature is on by default (the Task #1249 opt-in flipped, 2026-09-11).
+    The suite's autouse fixture disables it per test, so assert the field's
+    *declared* default — a silent flip back must fail here."""
+    assert AgentCompactionSettings.model_fields["history_dump_enabled"].default is True
+
+
+def test_dump_disabled_returns_none(monkeypatch: pytest.MonkeyPatch, tmp_path: Any):
+    """Config off → dump_history returns None and creates nothing."""
     ws = _patch_dump_enabled(monkeypatch, tmp_path, enabled=False)
     assert history_dump.dump_history(_sample_messages(), 1) is None
-    assert not (ws / "compact_dumps").exists()
+    assert not (ws / "message-history").exists()
 
 
 def test_dump_enabled_writes_file(monkeypatch: pytest.MonkeyPatch, tmp_path: Any):
-    """Config on → the dump is written under <workspace>/compact_dumps/ and the
-    path is returned."""
+    """Config on → the dump is written under <workspace>/message-history/ and
+    the path is returned."""
     ws = _patch_dump_enabled(monkeypatch, tmp_path)
     path = history_dump.dump_history(_sample_messages(), 1)
     assert path is not None
-    assert path.parent == ws / "compact_dumps"
+    assert path.parent == ws / "message-history"
     assert path.name.endswith(".jsonl")
     assert path.exists()
+
+
+# ── dump_history: filename = round start + compaction moment ──
+
+
+def test_dump_filename_is_start_and_end(monkeypatch: pytest.MonkeyPatch, tmp_path: Any):
+    """The name stamps the round: start = the earliest message `ava_created_at`,
+    end = the write moment (here the fake clock's first tick)."""
+    _FakeClock._counter = 0
+    _patch_clock(monkeypatch)
+    _patch_dump_enabled(monkeypatch, tmp_path)
+    messages: list[AnyMessage] = [
+        SystemMessage(content="<sys>"),
+        HumanMessage(
+            content="later",
+            additional_kwargs={"ava_created_at": "2026-08-13T09:30:00+00:00"},
+        ),
+        HumanMessage(
+            content="earlier",
+            additional_kwargs={"ava_created_at": "2026-08-13T08:15:00+00:00"},
+        ),
+    ]
+    path = history_dump.dump_history(messages, 1)
+    assert path is not None
+    start, end = _parse_dump_name(path)
+    assert start == datetime(2026, 8, 13, 8, 15, tzinfo=UTC)
+    assert end == datetime(2026, 8, 13, 12, 0, 0, 1, tzinfo=UTC)
+
+
+def test_dump_filename_falls_back_to_write_moment(monkeypatch: pytest.MonkeyPatch, tmp_path: Any):
+    """A stamp-less (or unparseable) history degrades to start == end — the name
+    stays well-formed and every dump remains parseable/sortable."""
+    _FakeClock._counter = 0
+    _patch_clock(monkeypatch)
+    _patch_dump_enabled(monkeypatch, tmp_path)
+    messages: list[AnyMessage] = [
+        HumanMessage(content="no stamp", additional_kwargs={"ava_created_at": "not-a-date"}),
+        SystemMessage(content="<sys>"),
+    ]
+    path = history_dump.dump_history(messages, 1)
+    assert path is not None
+    start, end = _parse_dump_name(path)
+    assert start == end.replace(microsecond=0)
 
 
 # ── dump_history: content completeness + replayability ──
@@ -260,14 +332,17 @@ def test_dump_is_replayable_jsonl(monkeypatch: pytest.MonkeyPatch, tmp_path: Any
 def test_dump_rotates_to_newest_keep(monkeypatch: pytest.MonkeyPatch, tmp_path: Any):
     """After each write only the newest `history_dump_keep` dumps remain — disk
     growth is bounded (each dump is a full conversation snapshot)."""
+    _FakeClock._counter = 0
     _patch_clock(monkeypatch)
     _patch_dump_enabled(monkeypatch, tmp_path, keep=2)
+    messages: list[AnyMessage] = [HumanMessage(content="old")]  # no stamps → start == end tick
     for _ in range(4):
-        history_dump.dump_history(_sample_messages(), 1)
-    dump_dir = tmp_path / "workspace" / "compact_dumps"
+        history_dump.dump_history(messages, 1)
+    dump_dir = tmp_path / "workspace" / "message-history"
     dumps = sorted(p.name for p in dump_dir.glob("*.jsonl"))
     assert len(dumps) == 2
     assert dumps == sorted(dumps)  # lexicographic == chronological
+    assert dumps[-1].endswith("20260813T120000.000004Z.jsonl")  # the newest write
 
 
 def test_dump_failure_is_best_effort(monkeypatch: pytest.MonkeyPatch, tmp_path: Any):
@@ -307,14 +382,15 @@ async def test_auto_compact_injects_dump_note_after_summary(
     note = tail[1]
     assert note.additional_kwargs["ava_msg_type"] == "system_note"  # pyright: ignore[reportUnknownMemberType]
     assert note.additional_kwargs["ava_note_tag"] == "history_dump"  # pyright: ignore[reportUnknownMemberType]
-    # The note names the real, existing dump.
-    (dump_path,) = (ws / "compact_dumps").glob("*.jsonl")
+    # The note names the real, existing dump and advertises the grep recipe.
+    (dump_path,) = (ws / "message-history").glob("*.jsonl")
     assert dump_path.name in note.content  # pyright: ignore[reportUnknownMemberType]
+    assert "grep" in str(note.content).lower()  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
     assert dump_path.exists()
 
 
 async def test_auto_compact_no_note_when_disabled(monkeypatch: pytest.MonkeyPatch, tmp_path: Any):
-    """Config off (default) → the auto-compact transition is exactly today's:
+    """Config off → the auto-compact transition is exactly the old shape:
     tail = the summary alone, no note (and no dump file)."""
     _patch_dump_enabled(monkeypatch, tmp_path, enabled=False)
     _patch_compact_config(monkeypatch)

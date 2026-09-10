@@ -573,7 +573,7 @@ async def auto_compact_before_llm(
     # frontend renders the red "UNRECOGNIZED SYSTEM_MARKER" alarm. Force and
     # auto compaction must produce identical message contracts.
     #
-    # Opt-in forensics: snapshot the full pre-compact conversation to the agent
+    # Pre-compact history dump: snapshot the full conversation to the agent
     # workspace and point the fresh context at it. The note rides the parked
     # tail (after the summary), never the live channel — the wipe is a clean
     # REMOVE_ALL, and a note between an AIMessage and its ToolMessage would be
