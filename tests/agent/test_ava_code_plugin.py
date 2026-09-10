@@ -1028,6 +1028,9 @@ def test_coding_tools_section_all_expanded_keeps_preamble_only(
     text = _coding_tools_section()
     assert text.startswith("# Coding tools")
     assert "Prefer the tools below" in text
+    # search steering: rg over recursive grep/find (recursive grep times out on
+    # the worktree-heavy checkout) — guard for the user-reported slowness
+    assert "`rg` (ripgrep)" in text
     assert "## ava." not in text
     assert not text.endswith("\n\n")
 

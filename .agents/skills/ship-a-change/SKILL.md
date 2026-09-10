@@ -88,7 +88,17 @@ Still on you:
 
 1. `git worktree add -b ava-<id>-<task> .worktrees/ava-<id>-<task> main`
 2. Develop and commit in the new worktree (run `bash scripts/setup-worktree.sh`
-   on first use)
+   on first use — it builds the worktree's own real `.venv`). A worktree
+   `.venv` must be a real directory under this checkout, **never a symlink**
+   to a shared venv (`ln -s ~/Ava/.venv .venv`): a later `uv sync` then writes
+   through the symlink and re-points the shared venv's editable `.pth` at this
+   worktree — breaking every other checkout that uses that venv (pyright
+   phantom-error storms; a prod exec outage). Setting up manually:
+   `python scripts/guard_editable_venv.py . && env -u VIRTUAL_ENV uv sync`,
+   then confirm `.venv/lib/python3.12/site-packages/_editable_impl_ava.pth`
+   names this worktree. For a test-only run with no worktree venv of its own,
+   reuse another worktree's real venv instead — see
+   [run-local-tests](../run-local-tests/SKILL.md).
 3. Rebase onto latest main: `git fetch origin main && git rebase origin/main`
 4. Run local tests before pushing — see [`.agents/skills/run-local-tests/SKILL.md`](../run-local-tests/SKILL.md).
    An explicit user CI-only constraint overrides local execution; record the
