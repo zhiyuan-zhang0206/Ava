@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "catalog_version": "2026-09-08.1",
+  "catalog_version": "2026-09-10.1",
   "currency": "USD",
   "unit_tokens": 1000000,
   "models": {
@@ -274,6 +274,29 @@
                 "input": "1.5",
                 "cache_read": "0.15",
                 "output": "9.0"
+              },
+              "utc_daily_overrides": []
+            }
+          ]
+        }
+      ]
+    },
+    "gemini-flash-lite-latest": {
+      "vendor": "google",
+      "source_url": "https://ai.google.dev/gemini-api/docs/pricing",
+      "source_checked_at": "2026-09-10",
+      "periods": [
+        {
+          "effective_from": null,
+          "effective_until": null,
+          "tiers": [
+            {
+              "input_tokens_min": 0,
+              "input_tokens_max": null,
+              "rates": {
+                "input": "0.30",
+                "cache_read": "0.03",
+                "output": "2.50"
               },
               "utc_daily_overrides": []
             }
