@@ -8,7 +8,7 @@ import psutil
 import pytest
 
 from shared.pty_sessions import cli
-from shared.pty_sessions._paths import record_path, socket_path
+from shared.pty_sessions._paths import record_path, socket_path, transcript_path
 from shared.session_record import SessionRecord
 
 
@@ -203,3 +203,38 @@ def test_sweep_cannot_unlink_a_record_written_under_the_lock(  # noqa: PLR0915 -
     surviving = SessionRecord.read(record_path(name))
     assert surviving is not None
     assert surviving.started_at == 2.0
+
+
+def test_bring_up_defers_while_record_lock_is_held(
+    unit_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The creation side of the issue #2063 mutex: the host's bring-up takes
+    the same record lock as the sweep, so while another holder owns the lock
+    it refuses with the failure exit code and never runs any bind/write work
+    outside the lock."""
+    from shared.platform import file_lock
+    from shared.pty_sessions import launch as launch_module
+    from shared.pty_sessions._paths import records_lock_path
+
+    entered: list[object] = []
+
+    def fake_bring_up_locked(*_args: object, **_kw: object) -> object:
+        entered.append(True)
+        raise AssertionError("bring-up body must not run while the lock is held")
+
+    monkeypatch.setattr(launch_module, "_bring_up_locked", fake_bring_up_locked)
+    monkeypatch.setattr(launch_module, "_BRING_UP_LOCK_TIMEOUT_S", 0.1)
+    name = "ava-test-locked-bringup"
+    with file_lock(records_lock_path(), timeout_s=1):
+        result = launch_module._bring_up(
+            name,
+            str(unit_home),
+            {},
+            None,
+            record_path(name),
+            socket_path(name),
+            transcript_path(name),
+            None,
+        )
+    assert result == 1
+    assert not entered

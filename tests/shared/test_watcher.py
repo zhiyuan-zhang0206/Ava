@@ -10,7 +10,6 @@ from shared.watcher import (
     build_at_script,
     build_cron_script,
     next_fire,
-    normalize_end_time,
     normalize_when,
     previous_fire,
     validate_cron,
@@ -110,10 +109,6 @@ def test_normalize_when_timedelta() -> None:
 def test_normalize_when_iso_z() -> None:
     out = normalize_when("2026-01-01T12:00:00Z")
     assert out == dt.datetime(2026, 1, 1, 12, 0, tzinfo=dt.UTC)
-
-
-def test_normalize_end_time_none() -> None:
-    assert normalize_end_time(None) is None
 
 
 def test_build_at_script_has_wake_and_sleep() -> None:

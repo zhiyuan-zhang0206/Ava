@@ -674,12 +674,17 @@ def test_at_past_time_raises(_agent_row: int) -> None:
         watcher.at(past, "too late", name="test-past")
 
 
-def test_cron_past_end_time_raises(_agent_row: int) -> None:
+def test_cron_past_end_time_raises(_agent_row: int, monkeypatch: pytest.MonkeyPatch) -> None:
     """cron() with an explicit past `end_time` raises ValueError, aligned
     with at() (issue #2078: a past end otherwise supersedes the live twin
-    and registers a watcher that self-terminates immediately)."""
+    and registers a watcher that self-terminates immediately). The raise
+    fires BEFORE any registration: _spawn must never run for a past end."""
     from datetime import UTC, datetime
 
+    def fail_if_spawned(*_args: object, **_kw: object) -> int:
+        raise AssertionError("_spawn must not run for a past end_time")
+
+    monkeypatch.setattr(watcher, "_spawn", fail_if_spawned)
     past = datetime(2020, 1, 1, tzinfo=UTC)
     with pytest.raises(ValueError, match="end_time is in the past"):
         watcher.cron("0 3 * * *", "daily", timezone="UTC", end_time=past, name="test-cron-past-end")
