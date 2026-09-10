@@ -275,6 +275,112 @@ async def test_start_connects_with_credentials(
     assert ws_client.disconnected.is_set()
 
 
+# -- ws proxy (issue #2089) -------------------------------------------------
+
+
+def test_ws_connect_kwargs_defer_to_the_machine_proxy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A host that reaches the network only through a proxy must keep its long
+    connection. The SDK pins ``proxy=None`` on websockets>=15 (its historical
+    direct behavior), which turns the environment discovery off — the builder
+    restores it whenever the machine names a proxy, and keeps the SDK's own
+    direct behavior when it does not.
+
+    A wss target is covered by ``HTTPS_PROXY`` (websockets' per-target discovery
+    also honors ``NO_PROXY``); an ``ALL_PROXY``-only environment still connects
+    directly, because that discovery maps no ``all`` scheme onto a websocket
+    target. The key list is the env registry's — the same one ``child_env``
+    forwards to service children.
+    """
+    import inspect
+
+    import websockets
+
+    from services.im_bridge.adapters import feishu_ws_proxy
+    from shared.env_registry import NETWORK_PROXY_KEYS
+
+    for key in NETWORK_PROXY_KEYS:
+        monkeypatch.delenv(key, raising=False)
+    proxy_param = inspect.signature(websockets.connect).parameters.get("proxy")
+    # The fix rests on websockets' "argument omitted = discover from the
+    # environment" default (proxy=True). If a future websockets flips it, fail
+    # here rather than letting the long connection go direct-only again.
+    assert proxy_param is not None and proxy_param.default is True
+    assert feishu_ws_proxy.ws_connect_kwargs() == {"proxy": None}
+
+    monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:7897")
+    assert feishu_ws_proxy.ws_connect_kwargs() == {}
+    monkeypatch.delenv("HTTPS_PROXY")
+
+    monkeypatch.setenv("ALL_PROXY", "http://127.0.0.1:7897")
+    assert feishu_ws_proxy.ws_connect_kwargs() == {}
+
+
+def test_ws_connect_kwargs_mirror_the_sdk_version_guard(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """websockets<15 has no ``proxy`` parameter and its ``connect()`` rejects
+    unknown keyword arguments — so the builder must mirror the SDK's version
+    guard and emit nothing on such an install, regardless of the environment."""
+    import websockets
+
+    from services.im_bridge.adapters import feishu_ws_proxy
+
+    def legacy_connect(uri: str) -> None:
+        """A pre-15 ``connect`` — no ``proxy`` parameter."""
+
+    monkeypatch.setattr(websockets, "connect", legacy_connect)
+    monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:7897")
+    assert feishu_ws_proxy.ws_connect_kwargs() == {}
+
+
+async def test_sdk_connect_call_site_resolves_the_patched_builder() -> None:
+    """The seam is a NAME contract: ``Client._connect`` resolves
+    ``_ws_connect_kwargs`` as a module global at connect time, so the adapter's
+    ``setattr`` lands only while the SDK keeps calling that name. A lark-oapi
+    rename (a dependency bump is the realistic path) would leave the replacement
+    installed but unused — silent direct-only behavior again — so fingerprint
+    the call site (QA review of #2105, guard suggestion)."""
+    import inspect
+
+    # Warm the COLD lark import inside the running loop (see the sibling test).
+    import lark_oapi.ws.client as ws_client_module
+
+    source = inspect.getsource(ws_client_module.Client._connect)
+    assert "_ws_connect_kwargs()" in source, (
+        "lark-oapi's Client._connect no longer calls _ws_connect_kwargs(): the "
+        "env-proxy seam in services/im_bridge/adapters/feishu_ws_proxy.py is now "
+        "inert (the WS handshake is direct-only again)"
+    )
+
+
+async def test_build_ws_client_installs_the_env_proxy_kwargs_builder(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``lark.ws.Client`` takes no proxy parameter, so the SDK's module-level
+    kwargs builder is the only seam (``Client._connect`` resolves it by name at
+    connect time). Building the ws client must install the env-aware builder in
+    its place."""
+    # Warm the COLD lark import inside the running loop, like
+    # test_start_connects_with_credentials does: the SDK binds a module-level
+    # event loop on its first import.
+    import lark_oapi.ws.client as ws_client_module
+
+    from services.im_bridge.adapters import feishu_ws_proxy
+
+    adapter = FeishuAdapter(FakeCore())
+    adapter._app_id = "cli_x"
+    adapter._app_secret = "secret_x"  # noqa: S105 — a literal, never a real credential
+    monkeypatch.setattr(ws_client_module, "_ws_connect_kwargs", lambda: {"proxy": None})
+
+    adapter._build_ws_client()
+
+    assert ws_client_module._ws_connect_kwargs is feishu_ws_proxy.ws_connect_kwargs
+    monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:7897")
+    assert ws_client_module._ws_connect_kwargs() == {}
+
+
 # -- outbound ---------------------------------------------------------------
 
 
