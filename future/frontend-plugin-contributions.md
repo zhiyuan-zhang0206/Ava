@@ -4,8 +4,10 @@ Design for issue #57. Evidence base: the DeepSeek Harness plugin-ecosystem
 survey (2026-08-19; 1849 npm packages / 1569 curated entries within 6 days of
 their plugin platform shipping). Status: **U1-U3 shipped** (plus the U1a
 `darkTokens` amendment) — the `contributions.ui` manifest key + validator,
-themes end to end, and the plugin page mount + nav entries. The remaining
-slices are at the bottom.
+themes end to end, and the plugin page mount + nav entries — plus the
+**inspector-widget registry** (task #2909, below): the host-rendered
+interactive lane, which is deliberately NOT a `contributions.ui` key. The
+remaining slices are at the bottom.
 
 ## Why now
 
@@ -355,6 +357,22 @@ composer/plugin extension point.
 - **U4 — agent-inspect sections**: generic markdown/kv/table renderers over
   proxied `source` endpoints + the `page` variant; plus finishing the reserved
   `inspector` surface of `shared/plugin_metrics.py`.
+
+  **U4a — inspector widgets (shipped, task #2909)** — the one inspector
+  surface a declaration cannot carry: per-agent interactive targets. A plugin
+  registers `InspectWidgetSpec` at its `inspector.py` import
+  (`shared/plugin_inspector.py`); the gateway imports the ENABLED builtin
+  plugins' modules under their `PluginContext` (the plugin-metric loader's
+  shape) and serves `GET /api/agents/{id}/inspect/widgets` with the closed
+  target set (`notice` → the agent's open notice, `task` → the queue's
+  ownership rule) resolved server-side. The console renders closed-set kinds
+  (`jumpButtons` first) with its own components: no third-party code, no
+  markup — unknown kinds/targets are skipped, never interpreted. Widgets
+  interleave with the panel's built-in sections by an `order` key (keys table
+  in `conventions/plugin-spec-v2.md`). Deliberate boundary vs U4: this lane is
+  host-rendered closed-set data for targets that exist per agent; U4's
+  sections stay for plugin-served content (markdown/kv/table/page over the
+  plugin's own mount).
 - **U5 — bless the API**: serve `openapi.json` from the gateway + the
   `conventions/` contract page with the stability statement (Lane 1).
 

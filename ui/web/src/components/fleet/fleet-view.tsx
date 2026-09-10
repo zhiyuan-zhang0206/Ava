@@ -23,6 +23,8 @@ import { memo, useEffect, useMemo, useRef, useState } from "react";
 
 import { GraphView } from "@/components/fleet/graph-view";
 import { InboxQueue } from "@/components/fleet/inbox-queue";
+import { LeftGraphPanel } from "@/components/fleet/left-graph-panel";
+import { readFleetRouteIds } from "@/components/fleet/fleet-route";
 import { TaskGraph } from "@/components/fleet/task-graph";
 import { PluginNavIcons } from "@/components/plugin-nav";
 import {
@@ -35,7 +37,7 @@ import { useFleetAgents } from "@/lib/use-fleet-agents";
 import { useBreakpoint } from "@/lib/breakpoint";
 import { useUserSettings } from "@/lib/use-user-settings";
 import { cn } from "@/lib/utils";
-import { BAR_HEIGHT_CLASS, FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0 } from "@/lib/layout";
+import { FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0 } from "@/lib/layout";
 
 // Which mobile tab is on screen is an EPHEMERAL, per-device selection ("which
 // surface am I looking at right now"), not a durable preference — so it stays
@@ -49,8 +51,6 @@ const LS_MOBILE_TAB = "ava.fleet.mobileTab";
 // display.fleet_queue_collapsed) so they follow the user across frontends.
 
 type MobileTab = "agents" | "tasks" | "inbox";
-type LeftView = "graph" | "tasks";
-
 export function FleetView() {
   const agents = useFleetAgents();
   const { isLarge } = useBreakpoint();
@@ -60,6 +60,9 @@ export function FleetView() {
   const [selectedAgentId, setSelectedAgentId] = useState<number | null>(null);
   const [selectedTaskId, setSelectedTaskId] = useState<number | null>(null);
   const [anchorAgentId, setAnchorAgentId] = useState<number | null>(null);
+  // Route jumps from an inspector widget button (task #2909).
+  const [focusNoticeId, setFocusNoticeId] = useState<number | null>(null);
+  const [routeTaskId, setRouteTaskId] = useState<number | null>(null);
   // Mobile tab selection (Agents | Decisions | Reviews).
   const [mobileTab, setMobileTab] = useState<MobileTab>("agents");
 
@@ -78,16 +81,21 @@ export function FleetView() {
     hydrated.current = true;
   }, []);
   useEffect(() => {
-    const hash = window.location.hash;
     const search = new URLSearchParams(window.location.search);
-    const tab = search.get("tab");
-    const rawAgentId = search.get("agent_id");
-    const routeAgentId = rawAgentId === null ? Number.NaN : Number.parseInt(rawAgentId, 10);
-    if (Number.isFinite(routeAgentId) && routeAgentId > 0) {
+    const route = readFleetRouteIds(search);
+    if (route.agentId != null) {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- Route state is hydrated after mount to avoid an SSR mismatch.
-      setAnchorAgentId(routeAgentId);
+      setAnchorAgentId(route.agentId);
     }
-    if (hash === "#inbox" || tab === "inbox") {
+    if (route.noticeId != null) {
+      setFocusNoticeId(route.noticeId);
+      setMobileTab("inbox");
+    }
+    if (route.taskId != null) {
+      setSelectedTaskId(route.taskId);
+      setRouteTaskId(route.taskId);
+      setMobileTab("tasks");
+    } else if (window.location.hash === "#inbox" || search.get("tab") === "inbox") {
       setMobileTab("inbox");
     }
   }, []);
@@ -123,6 +131,8 @@ export function FleetView() {
           selectedTaskId={selectedTaskId}
           setSelectedTaskId={setSelectedTaskId}
           anchorAgentId={anchorAgentId}
+          focusNoticeId={focusNoticeId}
+          routeTasksView={routeTaskId != null}
         />
       ) : (
         <MobileLayout
@@ -136,6 +146,7 @@ export function FleetView() {
           setMobileTab={setMobileTab}
           inboxCount={inboxCount}
           anchorAgentId={anchorAgentId}
+          focusNoticeId={focusNoticeId}
         />
       )}
     </div>
@@ -152,6 +163,8 @@ const DesktopLayout = memo(function DesktopLayout({
   selectedTaskId,
   setSelectedTaskId,
   anchorAgentId,
+  focusNoticeId,
+  routeTasksView,
 }: {
   aliveCount: number;
   agents: AgentRow[];
@@ -160,6 +173,8 @@ const DesktopLayout = memo(function DesktopLayout({
   selectedTaskId: number | null;
   setSelectedTaskId: (id: number | null) => void;
   anchorAgentId: number | null;
+  focusNoticeId: number | null;
+  routeTasksView: boolean;
 }) {
   const t = useTranslations("fleet");
   // Queue panel collapse (RCS): collapsed leaves only a STATIC handle — no
@@ -199,6 +214,7 @@ const DesktopLayout = memo(function DesktopLayout({
               setSelectedAgentId={setSelectedAgentId}
               selectedTaskId={selectedTaskId}
               setSelectedTaskId={setSelectedTaskId}
+              routeTasksView={routeTasksView}
             />
           </div>
           {/* Static expand handle — deliberately free of any dynamic signal. */}
@@ -230,6 +246,7 @@ const DesktopLayout = memo(function DesktopLayout({
               setSelectedAgentId={setSelectedAgentId}
               selectedTaskId={selectedTaskId}
               setSelectedTaskId={setSelectedTaskId}
+              routeTasksView={routeTasksView}
             />
           </ResizablePanel>
           <ResizableHandle />
@@ -241,6 +258,7 @@ const DesktopLayout = memo(function DesktopLayout({
               onSelectAgent={setSelectedAgentId}
               onCollapse={() => setQueueCollapsed(true)}
               anchorAgentId={anchorAgentId}
+              focusNoticeId={focusNoticeId}
             />
           </ResizablePanel>
         </ResizablePanelGroup>
@@ -262,6 +280,7 @@ const MobileLayout = memo(function MobileLayout({
   setMobileTab,
   inboxCount,
   anchorAgentId,
+  focusNoticeId,
 }: {
   aliveCount: number;
   agents: AgentRow[];
@@ -273,6 +292,7 @@ const MobileLayout = memo(function MobileLayout({
   setMobileTab: (t: MobileTab) => void;
   inboxCount: number;
   anchorAgentId: number | null;
+  focusNoticeId: number | null;
 }) {
   const t = useTranslations("fleet");
   return (
@@ -319,6 +339,7 @@ const MobileLayout = memo(function MobileLayout({
             className="h-full"
             onSelectAgent={setSelectedAgentId}
             anchorAgentId={anchorAgentId}
+            focusNoticeId={focusNoticeId}
             compact
           />
         ) : null}
@@ -354,93 +375,6 @@ const MobileLayout = memo(function MobileLayout({
 });
 
 // ── Shared sub-components ──
-
-// The left pane = a tab switcher over the two agent_graph surfaces: the weighted
-// relationship Graph (default, unchanged) and the Task Graph. The view choice
-// persists so a refresh returns to it. Both feed the same shared selection.
-const LeftGraphPanel = memo(function LeftGraphPanel({
-  selectedAgentId,
-  setSelectedAgentId,
-  selectedTaskId,
-  setSelectedTaskId,
-}: {
-  selectedAgentId: number | null;
-  setSelectedAgentId: (id: number | null) => void;
-  selectedTaskId: number | null;
-  setSelectedTaskId: (id: number | null) => void;
-}) {
-  const t = useTranslations("fleet");
-  const { settings, setSetting } = useUserSettings();
-  const view: LeftView = settings["display.fleet_left_view"] === "tasks" ? "tasks" : "graph";
-  const setView = (v: LeftView) => setSetting("display.fleet_left_view", v);
-
-  return (
-    <div className={cn("h-full", FLEX, FLEX_COL, MIN_H_0)}>
-      {/* BAR_HEIGHT_CLASS — the same fixed height as the Inbox's QueueHeader,
-          so the two side-by-side bars (and their bottom borders) line up
-          exactly. Padding alone cannot: the two bars hold different content
-          heights. */}
-      <div className={cn("shrink-0 items-center gap-1 border-b border-border px-2", BAR_HEIGHT_CLASS, FLEX)}>
-        <TabButton label={t("agents")} count={0} active={view === "graph"} onClick={() => setView("graph")} />
-        <TabButton
-          label={t("tasks")}
-          count={0}
-          active={view === "tasks"}
-          onClick={() => setView("tasks")}
-        />
-      </div>
-      <div className={cn("relative", FLEX_1, MIN_H_0)}>
-        {/* One graph mounted at a time (R4 layer 4: breakpoint + conditional
-            render — the dual always-mounted display:none pattern is deleted). */}
-        {view === "graph" ? (
-          <div className="absolute inset-0">
-            <GraphView selectedAgentId={selectedAgentId} onSelectAgent={setSelectedAgentId} />
-          </div>
-        ) : (
-          <div className="absolute inset-0">
-            <TaskGraph
-              selectedTaskId={selectedTaskId}
-              onSelectTask={setSelectedTaskId}
-              selectedAgentId={selectedAgentId}
-              onSelectAgent={setSelectedAgentId}
-            />
-          </div>
-        )}
-      </div>
-    </div>
-  );
-});
-
-function TabButton({
-  label,
-  count,
-  active,
-  onClick,
-}: {
-  label: string;
-  count: number;
-  active: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        "items-center gap-1.5 rounded px-3 py-1 text-xs font-medium",
-        active ? "bg-sidebar-accent text-foreground" : "text-muted-foreground hover:text-foreground",
-        FLEX
-      )}
-    >
-      {label}
-      {count > 0 && (
-        <span className="rounded-full bg-muted px-1.5 text-[10px] tabular-nums text-foreground">
-          {count}
-        </span>
-      )}
-    </button>
-  );
-}
 
 // Mobile tab button — full-width, equal share; same visual vocabulary as TabButton.
 function MobileTabButton({
