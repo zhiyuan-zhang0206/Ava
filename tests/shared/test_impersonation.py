@@ -741,6 +741,51 @@ def test_reminder_is_inserted_once_per_lease_and_wakes(
     assert "renew" in reminder[0] and "release" in reminder[0]
 
 
+def test_reminder_ack_suppresses_further_reminders(
+    db_conn: psycopg.Connection,
+) -> None:
+    """Issue #2054: an ACKed reminder still counts for the once-per-lease rule.
+
+    A controller that ACKs the reminder without renewing or releasing must not
+    get a fresh reminder row on every reaper cycle while the lease stays inside
+    the window (the old NOT EXISTS only excluded 'pending' rows, so each cycle
+    re-inserted — a nag storm with urgent pushes and re-delivery on top).
+    """
+    from shared.db import pool
+    from shared.impersonation_maintenance import remind_expiring_impersonations
+
+    owner = _agent(db_conn)
+    lease = _active(owner)
+    db_conn.execute(
+        "UPDATE agent_impersonations SET expires_at=clock_timestamp()+interval '4 minutes' "
+        "WHERE id=%s",
+        (lease["id"],),
+    )
+    db_conn.commit()
+    with pool(max_size=2) as reaper_pool:
+        assert remind_expiring_impersonations(reaper_pool) == 1
+    reminder_row = db_conn.execute(
+        "SELECT id FROM inbound_messages WHERE agent_id=%s AND kind='reminder'",
+        (owner.agent_id,),
+    ).fetchone()
+    assert reminder_row is not None
+    reminder_id = reminder_row[0]
+    # The relay binds each pushed page to the lease before the controller ACKs.
+    db_conn.execute(
+        "INSERT INTO agent_impersonation_messages(lease_id,inbound_id) VALUES(%s,%s)",
+        (lease["id"], reminder_id),
+    )
+    db_conn.commit()
+    leases.ack(lease["id"], lease["token"], [reminder_id])
+    db_conn.commit()
+    with pool(max_size=2) as reaper_pool:
+        assert remind_expiring_impersonations(reaper_pool) == 0
+    assert db_conn.execute(
+        "SELECT count(*), max(status) FROM inbound_messages WHERE agent_id=%s AND kind='reminder'",
+        (owner.agent_id,),
+    ).fetchone() == (1, "done")
+
+
 def test_reminder_skips_leases_outside_the_window(db_conn: psycopg.Connection) -> None:
     from shared.db import pool
     from shared.impersonation_maintenance import remind_expiring_impersonations
