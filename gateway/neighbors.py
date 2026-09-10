@@ -438,6 +438,18 @@ def _walk(
     return ranked[:limit]
 
 
+def born_chain(pool: Any, *, root: int, gamma: float = 0.5) -> list[tuple[int, int, float]]:
+    """The immutable birth-parent chain above `root` — (agent_id, depth, score)
+    rows, nearest ancestor first.
+
+    The light half of `compute`: one recursive born_spawner SQL plus the
+    upward walk, with none of the tie graph's archive / Loki reads. Callers
+    that need only the chain (the inherited-memory context note, read at every
+    window establishment) must not drag the tie computation into their path."""
+    parents = _fetch_born_spawner_parents(pool, root=root)
+    return _walk_ancestors(parents, root=root, gamma=gamma)
+
+
 def compute(
     *,
     root: int,

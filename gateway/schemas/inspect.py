@@ -280,6 +280,31 @@ class NeighborsResponse(BaseModel):
     degraded: bool = False
 
 
+class BornChainRow(BaseModel):
+    """One ancestor in GET /api/agents/{id}/born-chain — the immutable birth
+    chain above the queried agent, nearest ancestor first (1 = direct birth
+    parent). Carries what the inherited-memory context note needs (`machine`
+    decides which ancestors it can read locally); no tie score, because this
+    route reads no tie graph."""
+
+    model_config = ConfigDict(frozen=True)
+
+    agent_id: int
+    label: str | None
+    status: str
+    machine: str | None
+    depth: int
+
+
+class BornChainResponse(BaseModel):
+    """GET /api/agents/{id}/born-chain response."""
+
+    model_config = ConfigDict(frozen=True)
+
+    # The spawn/fork chain above the queried agent, nearest ancestor first.
+    ancestors: list[BornChainRow]
+
+
 class MetricPoint(BaseModel):
     """One sample of a plugin metric's inspector series — the bucket start
     (`ts`) and the aggregated `value` for that bucket. Series come back

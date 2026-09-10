@@ -12,7 +12,7 @@ tags:
 
 ## What it is
 
-`ava_memory` provides shared memory pool capability: passive memory recall (`AVA_PASSIVE_MEMORY_RECALL`) and the `ava.memory.*` SDK surface. Whether recall runs, and the knobs that shape it, are [[ava_builtins/plugins/ava_memory/memory-recall.ava.okf.md]]'s to state.
+`ava_memory` provides shared memory pool capability: passive memory recall (`AVA_PASSIVE_MEMORY_RECALL`), the `ava.memory.*` SDK surface, and the standing memory context notes — the shared pool index, the per-agent index, and the chain-inherited `inheritable` blocks (`inherit.py`). Whether recall runs, and the knobs that shape it, are [[ava_builtins/plugins/ava_memory/memory-recall.ava.okf.md]]'s to state.
 
 ## Registered hooks
 
@@ -61,7 +61,7 @@ This plugin **owns** the `ava.memory` namespace — `plugin.py` assembles it and
 ## Key dependencies
 
 - [[agent/hooks/hooks.ava.okf.md]] — before_llm hook system
-- [[agent/graph/context-notes.ava.okf.md]] — where this plugin's index notes are laid down
+- [[agent/graph/context-notes/context-notes.ava.okf.md]] — where this plugin's index + inherited notes are laid down
 - [[context-window.ava.okf.md]] — memory injection affects context
 - [[memory-indexer.ava.okf.md]] — background indexing service
 - [[shared/lm/lm.ava.okf.md]] — semantic search uses LLM embeddings
@@ -70,6 +70,7 @@ This plugin **owns** the `ava.memory` namespace — `plugin.py` assembles it and
 
 - Memory pool path = `$AVA_HOME/memory` (computed by `ava/memory.py` at process load using `ava_home()`; no `AVA_MEMORY_POOL` variable)
 - `settings.passive_memory_recall_enabled`: passive recall feature toggle (default in [[ava_builtins/plugins/ava_memory/memory-recall.ava.okf.md]])
+- `settings.agent.memory_inherit_depth`: ancestor hops a descendant inherits `inheritable` blocks from (per-agent, default 1; 0 disables). Size guardrails: `memory_inherit_max_block_chars` / `memory_inherit_max_total_chars` (0 disables one)
 - Memory note format: YAML frontmatter (`type: Memory`, `ava_agent`, etc.) + markdown body
 
 ## Notes

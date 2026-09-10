@@ -1,6 +1,8 @@
 """Agent CRUD + spawn endpoints — /api/agents/*.
 
-Covers list / get / spawn / label patch plus the model registry
+Covers list / get / spawn / label patch, the birth-chain read
+(`GET /api/agents/{id}/born-chain` — the light half of `/neighbors` that the
+inherited-memory context note resolves), plus the model registry
 (`GET /api/models`) the spawn dialog renders. The lifecycle surface
 (compact / cancel / terminate / exited / resurrect / restart)
 lives in routers/agents_lifecycle.py; message + state reads (messages /
@@ -18,8 +20,17 @@ from typing import Annotated
 from fastapi import APIRouter, HTTPException, Query, Request, Response
 from psycopg_pool import ConnectionPool
 
+from gateway import neighbors
 from gateway.routers.agents_forward import _forward_spawn_to_remote
-from gateway.schemas import AgentCompact, AgentRow, AgentSummary, LabelPatchRequest, ModelsResponse
+from gateway.schemas import (
+    AgentCompact,
+    AgentRow,
+    AgentSummary,
+    BornChainResponse,
+    BornChainRow,
+    LabelPatchRequest,
+    ModelsResponse,
+)
 from ops.agent_spawn import create_agent_row
 from ops.ops_lifecycle import _spawn_prechecks_blocking
 from ops.rpc_schemas import LaunchAgentRequest, SpawnAgentRequest, SpawnedAgent
@@ -462,3 +473,50 @@ def get_agent(agent_id: int, request: Request) -> AgentRow:
     if snap is None:
         raise AgentNotFound(f"agent {agent_id} does not exist")
     return AgentRow.model_validate(snap.model_dump())
+
+
+@router.get("/api/agents/{agent_id}/born-chain")
+def get_agent_born_chain(agent_id: int, request: Request) -> BornChainResponse:
+    """The immutable birth chain above `agent_id`, nearest ancestor first
+    (1 = direct birth parent) — one recursive `agents_meta.born_spawner` walk.
+
+    The light half of `/neighbors`, and separate on purpose: the inherited
+    memory context note resolves this chain at every window establishment, and
+    it must not drag the tie graph's frozen-archive read + Loki live tail into
+    that path. Adds `machine` (which ancestors a reader can open locally) and
+    keeps `status` (the chain includes terminated ancestors). Terminates only
+    when `born_spawner` is not an `agent:N` value (a user / external spawn).
+
+    404: agent_id does not exist (AgentNotFound -> handler returns 404 + reason).
+    """
+    with request.app.state.db_pool.connection() as conn, conn.cursor() as cur:
+        cur.execute("SELECT 1 FROM agents_meta WHERE id = %s", (agent_id,))
+        if cur.fetchone() is None:
+            raise AgentNotFound(f"agent {agent_id} does not exist")
+    chain = neighbors.born_chain(request.app.state.db_pool, root=agent_id)
+    detail: dict[int, tuple[str | None, str, str | None]] = {}
+    ids = [r[0] for r in chain]
+    if ids:
+        with request.app.state.db_pool.connection() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT t.id, t.label, m.status, m.machine
+                FROM agents t
+                JOIN agents_meta m ON m.id = t.id
+                WHERE t.id = ANY(%s)
+                """,
+                (ids,),
+            )
+            detail = {r[0]: (r[1], r[2], r[3]) for r in cur.fetchall()}
+    return BornChainResponse(
+        ancestors=[
+            BornChainRow(
+                agent_id=agent,
+                label=detail.get(agent, (None, "terminated", None))[0],
+                status=detail.get(agent, (None, "terminated", None))[1],
+                machine=detail.get(agent, (None, "terminated", None))[2],
+                depth=depth_found,
+            )
+            for agent, depth_found, _score in chain
+        ]
+    )
