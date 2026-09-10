@@ -9,7 +9,8 @@ import math
 import os
 import time
 from datetime import UTC, datetime
-from uuid import uuid4
+from typing import NamedTuple
+from uuid import UUID, uuid4
 
 from ops.agent_pause_probe import host_identity, host_running
 from shared import maintenance, maintenance_cohort, pause_owner
@@ -96,8 +97,100 @@ def _drain(holder: str, at: datetime, timeout: float) -> None:
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             pending = sorted(set(hold.commands) - set(hold.drained))
-            raise TimeoutError(f"drain timed out without force; hold retained for agents {pending}")
+            raise TimeoutError(
+                "drain timed out without force; hold retained for agents "
+                f"{pending}\n{_stall_report(hold, pending)}"
+            )
         time.sleep(min(0.2, remaining))
+
+
+def _stall_report(hold: MaintenanceHold, pending: list[int]) -> str:
+    """One line per unfinished agent: delivery state, row fences and host view.
+
+    A bare agent list leaves a consuming agent indistinguishable from one
+    the host will never admit — issue #2159 spent its whole 300s timeout on
+    exactly that ambiguity. The report names the facts an operator routes on: the
+    restart command's delivery state, the row's owner/lease/resource facts,
+    the agent's last activity, and whether the live host still sees the
+    agent's turn running.
+    """
+    host_owner: UUID | None = None
+    host_active: frozenset[int] = frozenset()
+    notes: list[str] = []
+    try:
+        if "agent-runner" in machine_role() and host_running():
+            identity = host_identity()
+            host_owner, host_active = identity.owner, identity.active
+        else:
+            notes.append("live agent-host not observed; row facts only")
+    except Exception as exc:  # diagnostics never mask the timeout
+        notes.append(f"host identity unavailable: {exc}")
+    commands = {agent: hold.commands[agent] for agent in pending}
+    try:
+        with connect() as conn:
+            raw_rows = conn.execute(
+                "SELECT m.status, m.runtime_kind, m.runtime_owner, "
+                "m.lease_expires_at IS NOT NULL AND m.lease_expires_at > clock_timestamp(), "
+                "m.incarnation_resources IS NULL, m.last_active_at, "
+                "i.status, i.applied_at IS NOT NULL "
+                "FROM unnest(%s::int[], %s::bigint[]) AS cohort(agent_id, command_id) "
+                "LEFT JOIN agents_meta m ON m.id = cohort.agent_id "
+                "LEFT JOIN inbound_messages i ON i.id = cohort.command_id "
+                "AND i.agent_id = cohort.agent_id ORDER BY cohort.agent_id",
+                (list(commands), list(commands.values())),
+            ).fetchall()
+    except Exception as exc:  # diagnostics never mask the timeout
+        notes.append(f"row diagnostics unavailable: {exc}")
+        return "".join(f"  {note}\n" for note in notes).rstrip("\n")
+    rows = [_StallRow(*row) for row in raw_rows]
+    lines = [
+        _stall_line(agent, command, row, host_owner, host_active)
+        for (agent, command), row in zip(commands.items(), rows, strict=True)
+    ]
+    lines.extend(notes)
+    return "\n".join(f"  {line}" for line in lines)
+
+
+class _StallRow(NamedTuple):
+    """One unfinished cohort agent's row facts and command delivery state."""
+
+    status: str | None
+    kind: str | None
+    runtime_owner: UUID | None
+    lease_fresh: bool | None
+    resources_settled: bool | None
+    last_active: datetime | None
+    delivery: str | None
+    applied: bool | None
+
+
+def _stall_line(
+    agent: int,
+    command: int,
+    row: _StallRow,
+    host_owner: UUID | None,
+    host_active: frozenset[int],
+) -> str:
+    status = row.status
+    if status is None:
+        return f"agent {agent}: row missing; its restart command {command} is unreachable"
+    seen = "yes" if agent in host_active else "no"
+    line = (
+        f"agent {agent}: command {command} {row.delivery}, "
+        f"applied={'yes' if row.applied else 'no'}; "
+        f"row {status} kind={row.kind} owner={row.runtime_owner} "
+        f"lease_fresh={'yes' if row.lease_fresh else 'no'} "
+        f"resources_settled={'yes' if row.resources_settled else 'no'} "
+        f"last_active={row.last_active.isoformat() if row.last_active is not None else 'never'}; "
+        f"host active={seen}"
+    )
+    if host_owner is not None and row.runtime_owner is not None and row.runtime_owner != host_owner:
+        line += (
+            f"\n  fence: runtime owned by {row.runtime_owner}, not the live boot {host_owner} — "
+            "a successor host cannot certify its predecessor flushed; resolve explicitly "
+            "(ava maintenance status, then resume --cancel or repair)"
+        )
+    return line
 
 
 def pause_agents(timeout: float = PAUSE_TIMEOUT_SECONDS) -> None:

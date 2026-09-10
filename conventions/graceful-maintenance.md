@@ -51,7 +51,14 @@ already-admitted handlers and executor work before signalling services.
 
 The existing home-local journal survives a CLI crash, host reboot and an
 offline database. An incomplete drain or stop retains the hold and reports
-failure. Retry the command, or run `ava start` to restore services and release
+failure. A drain that hits its deadline reports every unfinished agent — its
+restart command's delivery state, the row's owner/lease/resource facts, the
+agent's last activity and the live host's view — and names the predecessor-owner
+fence explicitly when a successor boot is looking at a row its predecessor left:
+that one needs `ava maintenance status` plus an explicit `resume --cancel` or
+`repair`, never a retry loop. A rollout's own pause no longer defers the held
+continuation it requires, so the ordinary update drain consumes and certifies.
+Retry the command, or run `ava start` to restore services and release
 the hold after readiness succeeds. A failed start keeps admission closed.
 A recorded checkpoint/continuation failure blocks ordinary start and resume
 before services are launched; repair and inspect that failure first. A healthy
