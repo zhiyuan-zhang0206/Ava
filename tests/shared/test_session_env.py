@@ -118,6 +118,35 @@ def test_forward_env_dict_carries_temp_dir_and_windows_system_keys(
     assert env["USERNAME"] == "ava"
 
 
+def test_forward_env_dict_carries_the_machine_proxy_configuration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Issue #2095: the service/session child env carries the machine's proxy
+    configuration (`ava start` and the watchdog respawn both hand this dict to
+    the session backend). The frontend's `npm run build` fetches Google Fonts for
+    next/font through it, so a host whose egress is proxy-only produced a build
+    that could never download a font. The value's only home is the machine's own
+    environment (an exporting shell, or `.env` / `mirror.env`); an empty value is
+    not forwarded (that would mean "no proxy" to a client that reads env)."""
+    monkeypatch.setattr(
+        os,
+        "environ",
+        {
+            "AVA_HOME": "/tmp/ava-home",  # noqa: S108 — a literal env value, never opened
+            "PATH": "/usr/bin",
+            "HTTPS_PROXY": "http://127.0.0.1:7897",
+            "no_proxy": "localhost,127.0.0.1",
+            "ALL_PROXY": "",
+        },
+    )
+
+    env = session_env.forward_env_dict()
+
+    assert env["HTTPS_PROXY"] == "http://127.0.0.1:7897"
+    assert env["no_proxy"] == "localhost,127.0.0.1"
+    assert "ALL_PROXY" not in env
+
+
 def test_windows_system_keys_include_username() -> None:
     """Task #963 lock: the single Windows system-keys declaration must carry
     USERNAME and USERDOMAIN. It lives in the env registry

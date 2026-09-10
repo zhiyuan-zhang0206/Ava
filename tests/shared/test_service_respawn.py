@@ -107,6 +107,27 @@ def test_respawn_kills_stale_session_then_starts(monkeypatch: pytest.MonkeyPatch
     assert env["AVA_HOME"]  # forward_env_dict() carried the unit's config
 
 
+def test_respawn_carries_the_machine_proxy_configuration_to_the_service_child(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Issue #2095, the watchdog half: a dead frontend is rebuilt by this helper,
+    which hands the relaunched session `forward_env_dict()` — so the machine's
+    proxy configuration reaches the rebuild exactly as it reaches the canonical
+    `ava start` launch (both paths are the same forward view; the command never
+    carries a proxy address — argv env-splices stay forbidden)."""
+    monkeypatch.setattr(_sr_mod, "session_name", lambda svc: f"t-{svc}")  # pyright: ignore[reportUnknownArgumentType]
+    service = _FakeBackend("service")
+    monkeypatch.setattr("shared.session_backend.get_backend", lambda: service)
+    monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:7897")
+    monkeypatch.setenv("NO_PROXY", "localhost,127.0.0.1")
+
+    assert respawn_service("frontend", "npm run build", Path("/repo")) is True
+
+    _name, _cmd, _cwd, env = service.launched[0]
+    assert env["HTTPS_PROXY"] == "http://127.0.0.1:7897"
+    assert env["NO_PROXY"] == "localhost,127.0.0.1"
+
+
 def test_respawn_can_give_a_session_a_bounded_graceful_stop(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

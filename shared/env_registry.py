@@ -91,6 +91,47 @@ class EnvField:
 _HOST_PASSTHROUGH_ROWS = tuple(EnvField(key) for key in ("DISPLAY", "WAYLAND_DISPLAY", "HOME"))
 HOST_PASSTHROUGH_KEYS = frozenset(row.key for row in _HOST_PASSTHROUGH_ROWS)
 
+# The machine's network proxy configuration (issue #2095). A service child that
+# builds or installs (the frontend's `npm run build` fetching Google Fonts for
+# next/font is the one that bit us) egresses through the environment these keys
+# describe, and the positive allowlist used to drop them — so a host that
+# reaches the network only through a proxy had no service child that could
+# build. Both spellings ride: the machine's shell / Clash-style tooling exports
+# the uppercase set, while npm, node and curl read the lowercase one. NO_PROXY
+# is the operator's tool for keeping loopback and the private network direct.
+#
+# Values are machine-local by construction — the parent environment is the only
+# source (an exporting shell, or `$AVA_HOME/.env` / `mirror.env`, which
+# `load_ava_env` loads into os.environ before any child env is built), so no
+# repo file ever carries an address. Copied non-empty only, like the display
+# passthroughs above.
+_NETWORK_PROXY_ROWS = tuple(
+    EnvField(key)
+    for key in (
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+        "NO_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "all_proxy",
+        "no_proxy",
+    )
+)
+NETWORK_PROXY_KEYS = frozenset(row.key for row in _NETWORK_PROXY_ROWS)
+
+
+def network_proxy_configured() -> bool:
+    """Whether the launching environment names a network proxy (either spelling).
+
+    The single reader for `NETWORK_PROXY_KEYS`: `child_env` forwards whichever of
+    the keys it finds, and a consumer that has to *decide* whether to leave a
+    library's own proxy discovery alone (the Feishu ws handshake, issue #2089)
+    asks this instead of re-listing the keys.
+    """
+    return any(os.environ.get(key) for key in NETWORK_PROXY_KEYS)
+
+
 # Windows system keys a child env MUST carry (Task #945 follow-up): on Windows a
 # child env dict is a wholesale replacement (CreateProcess / winproc — no login
 # shell rebuilds it), so without these a child dies in winsock init before its
@@ -161,6 +202,7 @@ _TEMP_DIR_KEYS = frozenset({"TMPDIR", "TEMP", "TMP"})
 _PASSTHROUGH_ROWS = (
     _HOST_PASSTHROUGH_ROWS
     + _WINDOWS_SYSTEM_ROWS
+    + _NETWORK_PROXY_ROWS
     + tuple(
         EnvField(key)
         for key in _GUIDE_PASSTHROUGH_KEYS | {AVA_PRIMARY_GATEWAY_URL, REDIS_PASSWORD_ENV}
@@ -548,8 +590,10 @@ def child_env(role: ProcessRole, platform: str) -> dict[str, str]:
     `platform` ("posix" | "windows") selects the delivery semantics: on
     Windows the dict replaces the child env wholesale, so the system keys ride
     (non-empty); POSIX needs none of them (the child's login shell rebuilds).
-    Host passthroughs (DISPLAY/WAYLAND_DISPLAY/HOME) and the temp-dir vars are
-    carried non-empty only — an empty $DISPLAY means "no display".
+    Host passthroughs (DISPLAY/WAYLAND_DISPLAY/HOME), the temp-dir vars and the
+    machine's network proxy configuration (NETWORK_PROXY_KEYS — the one egress
+    channel a build child needs; issue #2095) are carried non-empty only — an
+    empty $DISPLAY means "no display".
 
     The allow/drop decision is the DATA in this registry; the callers
     (shared.session_env / ops.agent_launch) are the mechanism that applies it.
@@ -566,7 +610,7 @@ def child_env(role: ProcessRole, platform: str) -> dict[str, str]:
         env.update(
             {key: os.environ[key] for key in _enabled_provider_key_envs() if key in os.environ}
         )
-    for key in HOST_PASSTHROUGH_KEYS | _TEMP_DIR_KEYS:
+    for key in HOST_PASSTHROUGH_KEYS | _TEMP_DIR_KEYS | NETWORK_PROXY_KEYS:
         if os.environ.get(key):
             env[key] = os.environ[key]
     if platform == "windows":
