@@ -535,7 +535,7 @@ def test_claude_envelope_truncates_long_content_but_keeps_the_ack_line() -> None
     inbox = Inbox(1)
     inbox.messages[1] = msg(1, content="x" * 5000)
     emitted: list[str] = []
-    run(inbox, Listener(inbox), emitted.append, max_chars=relay._CLAUDE_MAX_CHARS)
+    run(inbox, Listener(inbox), emitted.append, max_chars=relay._PUSH_MAX_CHARS)
 
     assert len(emitted) == 2
     push = emitted[1]
@@ -543,7 +543,7 @@ def test_claude_envelope_truncates_long_content_but_keeps_the_ack_line() -> None
     assert relay.ack_command(LEASE_ID, [1]) in push
     body_line = [line for line in push.splitlines() if line.startswith("x" * 10)]
     assert body_line
-    assert len(body_line[0]) <= relay._CLAUDE_MAX_CHARS + len(
+    assert len(body_line[0]) <= relay._PUSH_MAX_CHARS + len(
         " (truncated; run the inbox command to read the full message)"
     )
 
@@ -744,6 +744,86 @@ def test_command_passes_remote_to_queue(monkeypatch: pytest.MonkeyPatch) -> None
     monkeypatch.setattr(relay, "queue_codex", queue)
     assert args.func(args) == 0
     assert queued == [(THREAD_ID, remote)]
+    assert listener.closed
+
+
+def test_codex_relay_caps_pushed_content_before_queue(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Issue #2055: the codex relay bounds each pushed content block.
+
+    One oversized inbound (a large compact summary) used to queue the full
+    text as a `codex queue --message` argv; the queue then failed on every
+    emit and the supervised relay crash-looped on the same row, blocking all
+    later messages until lease expiry. The cap keeps the argv small and the
+    envelope still carries the ACK command.
+    """
+    from cli.commands import impersonation
+    from cli.parsers import build_parser
+
+    args = build_parser().parse_args(
+        [
+            "impersonate",
+            "relay",
+            "42",
+            "--lease-id",
+            str(LEASE_ID),
+            "--provider",
+            "codex",
+            "--thread-id",
+            str(THREAD_ID),
+            "--debounce",
+            "0",
+        ]
+    )
+    inbox = Inbox(5)
+    inbox.messages[5] = msg(5, content="x" * 5000)
+    listener = Listener(inbox)
+    queued: list[str] = []
+    monkeypatch.setattr(impersonation, "relay_token_from_env", lambda: "test-credential")
+
+    def read(*_args: object) -> relay.InboxSnapshot:
+        page = frozenset(sorted(inbox.messages)[: inbox.page_size])
+        return relay.InboxSnapshot(
+            page,
+            {i: inbox.messages[i] for i in page},
+            inbox.expires_at,
+            inbox.status,
+            routine_ids=frozenset(i for i in page if i in inbox.routine),
+            batch_window=inbox.batch_window,
+            start_message=inbox.start_message,
+        )
+
+    def make_listener(*_args: object) -> Listener:
+        return listener
+
+    monkeypatch.setattr(relay, "_read_inbox", read)
+    monkeypatch.setattr(relay.shared.redis_listener, "RedisInboundListener", make_listener)
+
+    def heartbeat_ok(_lease_id: UUID, _token: str) -> bool:
+        return True
+
+    async def heartbeat_loop(_lease_id: UUID, _token: str, **kwargs: float) -> None:
+        _ = kwargs
+        await asyncio.sleep(0)
+
+    monkeypatch.setattr(relay, "_write_heartbeat", heartbeat_ok)
+    monkeypatch.setattr(relay, "_heartbeat_loop", heartbeat_loop)
+
+    def queue(_thread_id: UUID, message: str, *, remote: str | None = None) -> None:
+        _ = remote
+        queued.append(message)
+
+    monkeypatch.setattr(relay, "queue_codex", queue)
+    assert args.func(args) == 0
+    push = queued[-1]
+    assert "truncated" in push
+    assert relay.ack_command(LEASE_ID, [5]) in push
+    body_line = [line for line in push.splitlines() if line.startswith("x" * 10)]
+    assert body_line
+    assert len(body_line[0]) <= relay._PUSH_MAX_CHARS + len(
+        " (truncated; run the inbox command to read the full message)"
+    )
     assert listener.closed
 
 

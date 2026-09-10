@@ -41,7 +41,13 @@ _CATCHUP_SECONDS = 30.0
 _QUEUE_TIMEOUT_SECONDS = 10.0
 _MIN_EMIT_INTERVAL_SECONDS = 2.0
 _ACK_WINDOW_SECONDS = 300.0
-_CLAUDE_MAX_CHARS = 2000
+# Every provider's per-message content cap. Claude Monitor enforces its own
+# per-line budget; for codex the cap keeps the `codex queue --message` argv
+# small — one oversized inbound (a large compact summary) used to overflow the
+# argv/queue limit, fail every emit, and crash-loop the relay on the same row
+# until lease expiry (issue #2055). The envelope points the host at the inbox
+# command for the full text either way.
+_PUSH_MAX_CHARS = 2000
 _TERMINAL = frozenset({"released", "rejected", "expired"})
 type LeaseStatus = Literal["requested", "accepted", "active", "released", "rejected", "expired"]
 
@@ -121,8 +127,9 @@ def message_push(
     command, so the external session processes messages without reading or
     parsing the inbox. A re-delivery push says so explicitly; the ids make it
     idempotent for a host that already handled the batch. ``max_chars`` bounds
-    each content block (Claude Monitor's per-line budget); the tail points at
-    the inbox command for the full text.
+    each content block — Claude Monitor's per-line budget, and the codex
+    ``queue --message`` argv safety cap; the tail points at the inbox command
+    for the full text.
     """
     ids = [message.id for message in messages]
     header = f"Ava message agent={agent_id} lease={lease_id} ids={','.join(map(str, ids))}"
@@ -496,7 +503,7 @@ def cmd_relay(args: argparse.Namespace) -> int:
         else:
             token = impersonation.relay_token_from_env()
         emit = host_emitter(args.provider, args.thread_id, codex_remote=args.codex_remote)
-        max_chars = _CLAUDE_MAX_CHARS if args.provider == "claude" else None
+        max_chars = _PUSH_MAX_CHARS
 
         async def run() -> None:
             async def read_inbox() -> InboxSnapshot:
