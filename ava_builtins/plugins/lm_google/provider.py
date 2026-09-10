@@ -200,6 +200,25 @@ register(
             ),
             media_types=frozenset({"image", "pdf", "audio", "video"}),
         ),
+        "gemini-flash-lite-latest": ModelSpec(
+            provider="gemini",
+            spawnable=True,
+            # The registered id is Google's official `latest` alias, which
+            # tracks the newest stable Flash-Lite; it resolves to
+            # gemini-3.5-flash-lite (GA 2026-07; ai.google.dev models page,
+            # checked 2026-09-10). The user's dev channel verified the alias
+            # answers while the concrete gemini-2.5-flash-lite id 404s. Facts
+            # below are the 3.5 Flash-Lite ones; re-verify them when the
+            # alias moves to a newer Flash-Lite.
+            context_window=1_048_576,
+            knowledge_cutoff="2026-03",
+            # The Gemini thinking guide lists minimal/low/medium/high for
+            # 3.5 Flash-Lite; its default thinking is `minimal` (the flash
+            # models default to `medium`).
+            effort_levels=("minimal", "low", "medium", "high"),
+            tuning=ModelTuning(reasoning_effort="minimal"),
+            media_types=frozenset({"image", "pdf", "audio", "video"}),
+        ),
         "gemini-3.1-pro-preview": ModelSpec(
             provider="gemini",
             spawnable=True,
@@ -333,6 +352,29 @@ register(
                             cache_miss="1.5",
                             cache_hit="0.15",
                             output="9.0",
+                        ),
+                    ),
+                ),
+            ),
+        ),
+        "gemini-flash-lite-latest": PriceRates(
+            cache_miss=0.30,
+            cache_hit=0.03,
+            output=2.50,
+            source_url="https://ai.google.dev/gemini-api/docs/pricing",
+            source_checked_at="2026-09-10",
+            vendor="google",
+            periods=(
+                PricePeriod(
+                    effective_from=None,
+                    effective_until=None,
+                    tiers=(
+                        PriceTier(
+                            input_tokens_min=0,
+                            input_tokens_max=None,
+                            cache_miss="0.30",
+                            cache_hit="0.03",
+                            output="2.50",
                         ),
                     ),
                 ),

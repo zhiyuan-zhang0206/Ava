@@ -76,6 +76,7 @@ _REPO_MODEL_VENDORS = {
     "gemini-3.5-flash": "google",
     "gemini-3.7-flash": "google",
     "gemini-3.8-flash": "google",
+    "gemini-flash-lite-latest": "google",
     "glm-5.2": "zhipu",
     "glm-5.3": "zhipu",
     "glm-5.3-flash": "zhipu",
@@ -294,7 +295,7 @@ def test_zero_provider_plugins_fail_loud_and_remain_retryable(
 def test_repo_model_vendor_vocabulary_is_complete() -> None:
     ensure_provider_plugins_loaded()
 
-    assert len(_REPO_MODEL_VENDORS) == 35
+    assert len(_REPO_MODEL_VENDORS) == 36
     assert set(MODELS) == _REPO_MODEL_VENDORS.keys()
     assert set(pricing._CATALOG) == {"gemini-embedding-2"}
     assert {
@@ -367,6 +368,7 @@ def test_repo_google_provider_is_enabled_and_registers_complete_contract() -> No
         "gemini-3.8-flash",
         "gemini-3.7-flash",
         "gemini-3.5-flash",
+        "gemini-flash-lite-latest",
         "gemini-3.1-pro-preview",
         "gemini-2.5-pro",
         "gemini-2.5-flash",
@@ -376,6 +378,7 @@ def test_repo_google_provider_is_enabled_and_registers_complete_contract() -> No
         "gemini-3.8-flash",
         "gemini-3.7-flash",
         "gemini-3.5-flash",
+        "gemini-flash-lite-latest",
         "gemini-3.1-pro-preview",
     }
     assert pricing.model_vendor("gemini-3.8-flash") == "google"

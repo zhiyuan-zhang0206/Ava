@@ -142,6 +142,7 @@ def test_gemini_chat_catalog_entries_live_only_in_the_archive() -> None:
         "gemini-3.8-flash",
         "gemini-3.7-flash",
         "gemini-3.5-flash",
+        "gemini-flash-lite-latest",
         "gemini-3.1-pro-preview",
         "gemini-2.5-pro",
         "gemini-2.5-flash",
