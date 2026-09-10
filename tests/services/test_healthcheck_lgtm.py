@@ -111,6 +111,63 @@ def test_down_probes_names_connection_failures(monkeypatch: pytest.MonkeyPatch) 
     assert hc.down_probes() == ["prometheus"]
 
 
+def _all_up(_url: str) -> bool:
+    return True
+
+
+def test_probe_statuses_endpoint_only_when_user_bus_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An unreachable user bus (WSL without the logind bus variables) does
+    not make healthy backends read as down: the probe degrades to the
+    endpoint-only verdict, with one stderr note per episode, not one per
+    60-second round (#2096)."""
+    monkeypatch.setattr(hc.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(hc, "_endpoint_answers", _all_up)
+    monkeypatch.setattr(hc, "_bus_unavailable_episode", {"noted": False})
+    stderr = io.StringIO()
+    monkeypatch.setattr(hc.sys, "stderr", stderr)
+
+    def unavailable(_home: object, _name: str) -> None:
+        raise shared.lgtm_systemd.UserBusUnavailableError("no bus")
+
+    def with_pid(_home: object, _name: str) -> int:
+        return 123
+
+    monkeypatch.setattr(shared.lgtm_systemd, "running_pid", unavailable)
+    up = [("loki", True), ("prometheus", True), ("grafana", True)]
+    assert hc.probe_statuses() == up
+    first_note = stderr.getvalue()
+    assert "endpoint-only verdict" in first_note
+    # Same episode: a second round stays quiet.
+    assert hc.probe_statuses() == up
+    assert stderr.getvalue() == first_note
+    # A round that reaches the user manager closes the episode; the next
+    # outage is a new first sight.
+    monkeypatch.setattr(shared.lgtm_systemd, "running_pid", with_pid)
+    assert hc.probe_statuses() == up
+    assert stderr.getvalue() == first_note
+    monkeypatch.setattr(shared.lgtm_systemd, "running_pid", unavailable)
+    assert hc.probe_statuses() == up
+    assert stderr.getvalue().count("endpoint-only verdict") == 2
+
+
+def test_probe_statuses_propagates_non_bus_unit_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Only bus-unavailability degrades the verdict; a genuine lifecycle
+    failure (e.g. a foreign fragment) stays loud."""
+    monkeypatch.setattr(hc.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(hc, "_endpoint_answers", _all_up)
+
+    def foreign(_home: object, _name: str) -> None:
+        raise RuntimeError("Refusing a foreign native LGTM unit: com.ava.loki.slug")
+
+    monkeypatch.setattr(shared.lgtm_systemd, "running_pid", foreign)
+    with pytest.raises(RuntimeError, match="Refusing a foreign native LGTM unit"):
+        hc.probe_statuses()
+
+
 def test_write_path_probe_rejects_400_push(monkeypatch: pytest.MonkeyPatch) -> None:
     def _raise(_request: object, **_kwargs: object) -> None:
         raise urllib.error.HTTPError("http://loki/otlp/v1/logs", 400, "rejected", {}, None)  # pyright: ignore[reportArgumentType]

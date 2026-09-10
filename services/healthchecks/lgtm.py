@@ -15,6 +15,11 @@ connection-level failure means a local backend is down, and then the fix is
 re-running the idempotent deploy/lgtm/start.sh. Same connection-level contract
 as the otel_collector sidecar check.
 
+On Linux the verdict additionally requires the canonical systemd unit to own
+the listener. When the user bus is unreachable from this process the unit
+check is skipped and the endpoint-only verdict stands, with one stderr note
+per unavailable episode (#2096).
+
 Once all listeners answer, sends a unique Loki OTLP log and queries it back.
 Three consecutive generic write/read failures re-run start.sh. A stuck ingester
 is force-restarted immediately once its storage disk drops below the configured
@@ -100,14 +105,47 @@ def _endpoint_answers(url: str) -> bool:
         return False
 
 
-def probe_statuses() -> list[tuple[str, bool]]:
-    """(backend name, listener answered) for each local readiness probe."""
-    statuses = [(name, _endpoint_answers(url)) for name, url in readiness_probes()]
-    if platform.system() == "Linux":
-        from shared.lgtm_systemd import running_pid
+_bus_unavailable_episode: dict[str, bool] = {"noted": False}
 
-        return [(name, up and running_pid(ava_home(), name) is not None) for name, up in statuses]
-    return statuses
+
+def _note_bus_unavailable_once() -> None:
+    """One stderr line per unavailable episode, not one per 60-second round."""
+    if _bus_unavailable_episode["noted"]:
+        return
+    _bus_unavailable_episode["noted"] = True
+    sys.stderr.write("lgtm readiness: user systemd bus unavailable — endpoint-only verdict\n")
+
+
+def _bus_round_succeeded() -> None:
+    """A round that reached the user manager closes the episode."""
+    _bus_unavailable_episode["noted"] = False
+
+
+def probe_statuses() -> list[tuple[str, bool]]:
+    """(backend name, listener answered) for each local readiness probe.
+
+    On Linux the verdict also requires the canonical systemd unit to own
+    the listener. When the user bus is unreachable from this process (a
+    box without systemd, or a caller without the logind bus variables) the
+    unit check is impossible, so the probe degrades to the endpoint-only
+    verdict the non-Linux path uses — backends read as up while their
+    readiness listeners answer, and no ERROR pollutes the watchdog log
+    every round (#2096). Genuine lifecycle failures stay loud.
+    """
+    statuses = [(name, _endpoint_answers(url)) for name, url in readiness_probes()]
+    if platform.system() != "Linux":
+        return statuses
+    from shared.lgtm_systemd import UserBusUnavailableError, running_pid
+
+    try:
+        verdicts = [
+            (name, up and running_pid(ava_home(), name) is not None) for name, up in statuses
+        ]
+    except UserBusUnavailableError:
+        _note_bus_unavailable_once()
+        return statuses
+    _bus_round_succeeded()
+    return verdicts
 
 
 def down_probes() -> list[str]:
