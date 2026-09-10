@@ -71,8 +71,9 @@ network form.
   backpressure before the mirror, so the system makes no absolute no-loss
   promise.
 - Distinct from the pre-compact conversation dump (`../../agent/history_dump.py`):
-  that JSONL holds full conversation content for audit/replay (opt-in), while
-  the trace mirror is metadata-only OTel.
+  that JSONL holds full conversation content for audit/replay (on by default;
+  `AVA_COMPACT_HISTORY_DUMP` turns it off), while the trace mirror is
+  metadata-only OTel.
 
 ### Who consumes the mirror
 

@@ -134,16 +134,17 @@ class AgentCompactionSettings(EnvSettings):
     )
 
     history_dump_enabled: bool = Field(
-        default=False,
+        default=True,
         alias="AVA_COMPACT_HISTORY_DUMP",
         description=(
             "Dump the full pre-compact conversation history (state.messages) to "
-            "a JSONL file in the agent workspace (<workspace>/compact_dumps/"
-            "<timestamp>.jsonl) whenever a compaction runs, and inject a system "
-            "note in the fresh post-compact context pointing at the dump. Off by "
-            "default: the dump is a forensics / trace-replay aid, not a retention "
-            "mechanism (the summary remains the only memory that survives a "
-            "compaction). Disk growth is bounded by history_dump_keep."
+            "a JSONL file in the agent workspace (<workspace>/message-history/"
+            "<start>__<end>.jsonl, both UTC: start = the earliest message "
+            "timestamp, end = the compaction) whenever a compaction runs, and "
+            "inject a system note in the fresh post-compact context pointing at "
+            "the dump — grep it to recover details the summary dropped. On by "
+            "default: the dump is the agent's raw-history retrieval aid. Turn "
+            "off to save disk; growth is bounded by history_dump_keep."
         ),
         json_schema_extra={
             "restart_required": "agent",
@@ -160,7 +161,7 @@ class AgentCompactionSettings(EnvSettings):
         alias="AVA_COMPACT_HISTORY_DUMP_KEEP",
         description=(
             "How many pre-compact history dumps to keep per agent: after writing "
-            "a new dump, older files in <workspace>/compact_dumps/ beyond this "
+            "a new dump, older files in <workspace>/message-history/ beyond this "
             "count are deleted. Each dump is a full conversation snapshot, so "
             "this bounds disk usage. Values below 1 are clamped to 1 (the new "
             "dump is always kept)."

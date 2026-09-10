@@ -15,6 +15,7 @@ from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from typing import Any
 
+from agent.history_dump import workspace_section_hint
 from shared import plugin_activation, plugin_contributions
 from shared.config import settings
 from shared.config.turn_view import turn_settings
@@ -713,7 +714,7 @@ def _workspace_section() -> str:
         "in file and shell operations resolve here by default. Using it is "
         "optional: work that has a natural home — a repo checkout, a location "
         "the user names — belongs there, not in the workspace. Other agents "
-        "have their own; share a file by sending its absolute path."
+        "have their own; share a file by sending its absolute path." + workspace_section_hint()
     )
 
 

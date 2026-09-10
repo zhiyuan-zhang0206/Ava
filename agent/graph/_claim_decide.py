@@ -172,8 +172,8 @@ async def decide(
         # gone (Task #823).
         await finalize_claimed_inbounds(ctx.ops_pool, agent_id)
         halted = st.restart_preserves_idle and not st.committed_chat_ids
-        # Opt-in forensics: snapshot the full pre-compact conversation before
-        # the wipe. The note rides the fresh context tail (after the summary),
+        # Pre-compact history dump: snapshot the full conversation before the
+        # wipe. The note rides the fresh context tail (after the summary),
         # never the pre-compact messages channel — a note between an AIMessage
         # and its ToolMessage is rejected by the DeepSeek anthropic endpoint,
         # and this whole window is about to be REMOVE_ALL'd anyway.
