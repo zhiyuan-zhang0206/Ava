@@ -425,6 +425,46 @@ def test_run_keepalive_respawn_gate_declines_without_touching_state() -> None:
     assert respawns == [1]
 
 
+def test_run_keepalive_respawn_gate_decline_clears_pre_existing_residue() -> None:
+    """A gate decline must clear residue accrued BEFORE the gate started
+    declining, not only what the declined rounds would have added. A daemon
+    that failed `breaker_rounds` rounds before a pause began (the gateway then
+    gate-declines every round) would otherwise trip the breaker on the first
+    open round and hold the respawn forever — the decline round's reset is the
+    only automatic clearing path (QA review of PR #2119, issue #2101)."""
+    label = "gateway-gate-residue-test"
+    respawns: list[int] = []
+    breaker_rounds = _sr_mod.settings.services.watchdog_respawn_breaker_rounds
+
+    def _respawn() -> DaemonProbe:
+        respawns.append(1)
+        return DaemonProbe.up("pid 42")
+
+    # Residue: the failure count is already at the breaker threshold when the
+    # pause begins. One more non-alive round without a reset opens the breaker.
+    with _sr_mod._keepalive_state_lock:
+        _sr_mod._consecutive_probe_failures[label] = breaker_rounds
+
+    _sr_mod.run_keepalive(
+        label,
+        _log,
+        probe=lambda: DaemonProbe.down("healthz unreachable"),
+        respawn=_respawn,
+        respawn_gate=lambda: (False, "the pause still has an owner (rollout)"),
+    )
+    assert respawns == []
+    _sr_mod.run_keepalive(
+        label,
+        _log,
+        probe=lambda: DaemonProbe.down("healthz unreachable"),
+        respawn=_respawn,
+        respawn_gate=lambda: (True, ""),
+    )
+    # The open round must respawn immediately: without the decline-round reset,
+    # the pre-existing residue (+1) would trip the breaker and hold instead.
+    assert respawns == [1]
+
+
 def test_run_keepalive_probes_before_attempting_respawn() -> None:
     order: list[str] = []
     _sr_mod.run_keepalive(
