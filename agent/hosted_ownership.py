@@ -15,6 +15,7 @@ from shared.deploy_timing import AGENT_LEASE_TTL_S, CORPSE_REAP_GRACE_S
 from shared.live_announce import publish_agent_updated
 from shared.log import logger
 from shared.runtime_admission import (
+    AdmissionDecision,
     PublicationAdmissionDeferredError,
     RuntimeAdmission,
     process_runtime_admission,
@@ -172,6 +173,24 @@ async def align_accepting_binding(
         )
 
 
+async def _held_owner_matches(pool: AsyncConnectionPool, agent_id: int, owner: UUID) -> bool:
+    """A held unit may continue only the row this exact boot already owns.
+
+    The pending-command check keeps non-cohort wakes out; the owner check is
+    the successor fence — a crash that replaced the boot retains the hold and
+    requires explicit cancellation or repair, never a fake ACK.
+    """
+    if maintenance.pending_command(agent_id) is None:
+        return False
+    async with pool.connection() as conn:
+        held_owner = await (
+            await conn.execute(
+                "SELECT runtime_owner,runtime_kind FROM agents_meta WHERE id=%s", (agent_id,)
+            )
+        ).fetchone()
+    return held_owner == (owner, "hosted")
+
+
 async def admit_hosted_runtime(
     pool: AsyncConnectionPool,
     agent_id: int,
@@ -184,18 +203,8 @@ async def admit_hosted_runtime(
     """Keep this owner's logical incarnation across turns; reject live others."""
     from shared.exec_owner_recovery import recover_local_resources
 
-    if maintenance.held():
-        if maintenance.pending_command(agent_id) is None:
-            return None
-        async with pool.connection() as conn:
-            held_owner = await (
-                await conn.execute(
-                    "SELECT runtime_owner,runtime_kind FROM agents_meta WHERE id=%s",
-                    (agent_id,),
-                )
-            ).fetchone()
-        if held_owner != (owner, "hosted"):
-            return None
+    if maintenance.held() and not await _held_owner_matches(pool, agent_id, owner):
+        return None
 
     await asyncio.to_thread(recover_local_resources, agent_id, machine)
     native = psutil.Process()
@@ -215,10 +224,23 @@ async def admit_hosted_runtime(
         await asyncio.to_thread(publication.revalidate)
     try:
         async with async_write_transaction(pool) as conn:
+            publication_decision: AdmissionDecision | None
             try:
                 publication_decision = await publication.decide_async(conn)
             except PublicationAdmissionDeferredError:
-                return None
+                # A pending publication / non-stable deployment phase freezes
+                # ordinary *births*. A pending maintenance command is not one:
+                # the held gates above already proved this boot owns the row
+                # and has a command to consume, and the continuation runs no
+                # graph work — it applies exactly that agent's restart after
+                # the checkpoint flush. Deferring it here silently starved the
+                # 2026-09-10 rollout's own drain: every held wake returned
+                # without a receipt until the 300s timeout retained the hold
+                # (issue #2159). The alternative fence below (a successor
+                # boot) stays in force.
+                if maintenance.pending_command(agent_id) is None:
+                    return None
+                publication_decision = None
             previous = await (
                 await conn.execute(
                     "SELECT runtime_generation,runtime_owner,runtime_kind,machine,"
@@ -235,10 +257,11 @@ async def admit_hosted_runtime(
                 # A host crash during drain therefore retains the hold and
                 # requires explicit cancellation/recovery, never a fake ACK.
                 _refuse_hosted_admission()
-            try:
-                require_current_for_managed(publication_decision, previous[4])
-            except ResourceEvidenceError:
-                return None
+            if publication_decision is not None:
+                try:
+                    require_current_for_managed(publication_decision, previous[4])
+                except ResourceEvidenceError:
+                    return None
             generation = (
                 previous[0]
                 if previous[1:3] == (owner, "hosted") and previous[0] is not None
