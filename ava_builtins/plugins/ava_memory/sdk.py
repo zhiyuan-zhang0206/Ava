@@ -26,9 +26,12 @@ except ImportError:  # Windows ships no fcntl module; the index lock degrades (s
 import os
 import re
 import tempfile
-from collections.abc import Callable
+from collections.abc import Callable, Sized
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import cast
+
+import yaml
 
 import ava as _ava
 import shared.machine
@@ -215,6 +218,123 @@ def _upsert_index(
     _locked_update(index_path, update)
 
 
+_FRONTMATTER_OPEN = "---\n"
+
+
+def _frontmatter_parts(content: str) -> tuple[str, str] | None:
+    """Split a leading frontmatter block into (block, rest); None when the
+    content carries none. Mirrors the split the pool's validator reads with."""
+    if not content.startswith(_FRONTMATTER_OPEN):
+        return None
+    parts = content.split(_FRONTMATTER_OPEN, 2)
+    if len(parts) < 3:
+        return None
+    return parts[1], parts[2]
+
+
+def _parse_frontmatter(block: str) -> dict[str, object]:
+    """Parse a caller-provided block; it must be a non-empty YAML mapping."""
+    try:
+        parsed = yaml.safe_load(block)
+    except yaml.YAMLError as error:
+        raise ValueError(
+            "content frontmatter is not valid YAML - fix the block or drop it"
+        ) from error
+    if not isinstance(parsed, dict) or not parsed:
+        raise ValueError(
+            "content opens with a frontmatter block that is not a non-empty "
+            "YAML mapping - write `key: value` fields or drop the block"
+        )
+    return cast("dict[str, object]", parsed)
+
+
+def _filled(value: object) -> bool:
+    """Whether a frontmatter value counts as present (blank strings do not)."""
+    if isinstance(value, str):
+        return bool(value.strip())
+    if value is None:
+        return False
+    if isinstance(value, Sized):
+        return len(value) > 0
+    return True
+
+
+def _first_text(*values: object) -> str | None:
+    """First non-blank string among the candidates."""
+    for value in values:
+        if isinstance(value, str) and value.strip():
+            return value
+    return None
+
+
+_YAML_SENSITIVE_START = "#\"'@`%*&!|>[]{},?-:"
+
+
+def _yaml_value(value: str) -> str:
+    """Render a value so YAML reads it back exactly as written.
+
+    Printed plain, a value must parse back as itself: ` #` opens a comment,
+    `: ` or a trailing colon breaks the mapping, a leading indicator changes
+    the parse, and bare `null`, booleans, numbers or dates come back as
+    another type. Anything failing that read-back is double-quoted."""
+    if not _reads_back_plain(value):
+        escaped = value.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
+        return f'"{escaped}"'
+    return value
+
+
+def _reads_back_plain(value: str) -> bool:
+    """Whether YAML parses `value` back as exactly this string, unquoted."""
+    if not value or value != value.strip() or value[0] in _YAML_SENSITIVE_START:
+        return False
+    if ": " in value or " #" in value or value.endswith(":") or "\n" in value:
+        return False
+    try:
+        parsed = yaml.safe_load(value)
+    except yaml.YAMLError:
+        return False
+    return isinstance(parsed, str) and parsed == value
+
+
+_TIMESTAMP_FRACTION_RE = re.compile(r"(?<=T\d{2}:\d{2}:\d{2})\.\d+")
+
+
+def _drop_timestamp_fraction(block: str) -> str:
+    """Strip sub-second digits from a caller's timestamp - the pool stores
+    second precision and its validator rejects a `12:00:00.5` stamp."""
+    if "timestamp:" not in block:
+        return block
+    return "\n".join(
+        _TIMESTAMP_FRACTION_RE.sub("", line) if line.startswith("timestamp:") else line
+        for line in block.split("\n")
+    )
+
+
+def _merge_frontmatter(
+    block: str, existing: dict[str, object], generated: list[tuple[str, str]]
+) -> str:
+    """Keep the caller's block text and complete the fields it is missing.
+
+    A blank value is replaced in place; only a field with no line at all is
+    appended, so a completed block never carries the same key twice."""
+    lines = block.split("\n")
+    while lines and not lines[-1]:
+        lines.pop()
+    while lines and not lines[0]:
+        lines.pop(0)
+    for key, value in generated:
+        if _filled(existing.get(key)):
+            continue
+        replacement = f"{key}: {value}"
+        for index, line in enumerate(lines):
+            if line.startswith(f"{key}:"):
+                lines[index] = replacement
+                break
+        else:
+            lines.append(replacement)
+    return "\n".join(lines) + "\n"
+
+
 def write(
     slug: str,
     content: str,
@@ -230,6 +350,16 @@ def write(
     workspace; shared entries may use topic directories in the memory pool.
     Both targets are absolute store paths.
 
+    Content may open with its own frontmatter block: that block is kept as
+    the note's only one and gains whichever required fields it is missing.
+    Otherwise the writer generates the block, followed by the attribution
+    line on the shared store. A missing title defaults to the file name and
+    a missing description falls back to the title, so a written note never
+    carries a blank one. A value YAML would otherwise misread (a leading
+    indicator, a `: ` or trailing colon, a ` #` comment marker, or text it
+    would retype like `null`, `123` or a date) is quoted to survive as
+    written.
+
     Each index update holds an advisory lock on the store's `MEMORY.md`, so
     concurrent writers in this and other processes are serialized.
     """
@@ -244,23 +374,46 @@ def write(
     agent_id = require_agent_id()
     entry, is_shared = _entry_path(slug, store, agent_id)
     values = _validated_tags(tags)
-    note_title = title or slug
-    note_description = description or ""
-    if is_shared:
-        now = datetime.now(UTC)
-        machine = shared.machine.machine_name()
-        frontmatter = (
-            f"---\ntype: Memory\nava_agent: {agent_id}\ntitle: {note_title}\n"
-            f"description: {note_description}\ntags: [{', '.join(values)}]\n"
-            f"timestamp: '{now.isoformat()}'\nava_machine: {machine}\n---\n"
-            f"<!-- agent-{agent_id} @ {machine}, {now:%Y-%m-%d %H:%M} -->\n\n"
-        )
+
+    parts = _frontmatter_parts(content)
+    if parts is None:
+        block, rest = None, content
+        existing: dict[str, object] = {}
     else:
-        frontmatter = (
-            f"---\nname: {slug}\ndescription: {note_description}\n"
-            f"tags: [{', '.join(values)}]\n---\n\n"
-        )
-    _write_atomically(entry, frontmatter + content)
+        block, rest = parts
+        existing = _parse_frontmatter(block)
+        block = _drop_timestamp_fraction(block)
+    note_title = _first_text(existing.get("title"), title) or entry.stem
+    note_description = _first_text(existing.get("description"), description) or note_title
+
+    now = datetime.now(UTC).replace(microsecond=0)
+    if is_shared:
+        machine = shared.machine.machine_name()
+        generated = [
+            ("type", "Memory"),
+            ("ava_agent", str(agent_id)),
+            ("title", _yaml_value(note_title)),
+            ("description", _yaml_value(note_description)),
+            ("tags", f"[{', '.join(_yaml_value(tag) for tag in values)}]"),
+            ("timestamp", f"'{now.isoformat()}'"),
+            ("ava_machine", _yaml_value(machine)),
+        ]
+        attribution = f"<!-- agent-{agent_id} @ {machine}, {now:%Y-%m-%d %H:%M} -->\n\n"
+    else:
+        generated = [
+            ("name", _yaml_value(slug)),
+            ("description", _yaml_value(note_description)),
+            ("tags", f"[{', '.join(_yaml_value(tag) for tag in values)}]"),
+        ]
+        attribution = "\n"
+
+    if block is None:
+        header = "".join(f"{key}: {value}\n" for key, value in generated)
+        written = f"---\n{header}---\n{attribution}{rest}"
+    else:
+        merged = _merge_frontmatter(block, existing, generated)
+        written = f"---\n{merged}---\n{rest}"
+    _write_atomically(entry, written)
     root = (
         shared.paths.memory_dir() if is_shared else shared.paths.workspace_dir(agent_id) / "memory"
     )
