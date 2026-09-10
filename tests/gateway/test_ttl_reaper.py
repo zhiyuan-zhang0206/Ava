@@ -798,6 +798,33 @@ def test_claim_still_expired_false_for_renewed_row(
     assert not _claim_shell_row_still_expired(reaper_pool, aid, 42)
 
 
+def test_claim_still_expired_evaluates_at_statement_time(
+    db_conn: psycopg.Connection,
+) -> None:
+    """Issue #2053: the claim re-check reads the deadline at statement time.
+
+    A claim transaction that began before the deadline still claims the row
+    once the deadline has actually passed; with now() (transaction start) it
+    would skip the row and the pass would never dispatch the kill.
+    """
+    import time
+
+    aid = _running_agent(db_conn)
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO agent_shell_ttls (agent_id, session_id, expires_at, created_at) "
+            "VALUES (%s, %s, clock_timestamp() + interval '1 second', clock_timestamp())",
+            (aid, 45),
+        )
+    db_conn.commit()
+    with db_conn.cursor() as cur:
+        # The transaction starts before the deadline passes.
+        cur.execute("SET TRANSACTION READ WRITE")
+        time.sleep(2.0)
+        assert ttl_reaper._claim_still_expired(cur, aid, 45)
+    db_conn.rollback()
+
+
 def test_claim_still_expired_false_for_missing_row(
     db_conn: psycopg.Connection, reaper_pool: ConnectionPool
 ) -> None:
