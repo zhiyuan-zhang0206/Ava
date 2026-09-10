@@ -9,19 +9,13 @@ from agent.db import LoggingConnectionPool
 from shared.config import settings
 from shared.db import PG_KEEPALIVE_KWARGS, _restore_pooled_session_async
 
-# Spare workload connections above the concurrent-turn bound. Every running
-# turn may hold one for checkpoint writes or kernel SQL; the spares cover
-# checkpoint/background overlap. Lifecycle and durable scans have a separate
-# control pool and cannot be starved by these borrowers.
-_POOL_HEADROOM = 4
-_CONTROL_POOL_SIZE = 4
-
 
 def build_shared_pool(dsn: str) -> AsyncConnectionPool[psycopg.AsyncConnection]:
-    """The host's turn/checkpoint pool, sized from the concurrent-turn bound.
+    """The host's turn/checkpoint pool, independent of active agent count.
 
-    `max_size` is the bound plus headroom rather than a round number, so the
-    sizing states its reason (see `_POOL_HEADROOM`). `autocommit=True` +
+    Agents waiting on models or tools need no dedicated connection. The client
+    budget covers short database borrows and is shared by all active agents.
+    `autocommit=True` +
     `prepare_threshold=None` satisfy the saver and pooler: the saver expects
     autocommit, and never preparing
     is what keeps borrows safe across PgBouncer's transaction pooling.
@@ -30,7 +24,7 @@ def build_shared_pool(dsn: str) -> AsyncConnectionPool[psycopg.AsyncConnection]:
         dsn,
         pool_name="agent-host",
         min_size=1,
-        max_size=settings.daemon.host_max_concurrent_turns + _POOL_HEADROOM,
+        max_size=settings.daemon.host_db_pool_max_size,
         kwargs={"autocommit": True, "prepare_threshold": None, **PG_KEEPALIVE_KWARGS},
         check=_restore_pooled_session_async,
         timeout=settings.agent.db_pool_acquire_timeout_seconds,
@@ -42,15 +36,15 @@ def build_control_pool(dsn: str) -> AsyncConnectionPool[psycopg.AsyncConnection]
     """Reserved capacity for host ownership, recovery, and durable scans.
 
     PgBouncer remains the downstream server-connection multiplexer. This
-    small client pool is a correctness boundary inside agent-host: turn or
-    checkpoint borrowers cannot consume it, so saturation cannot hide pending
-    work or strand lifecycle settlement.
+    separate client pool cannot be consumed by turn or checkpoint borrowers.
+    Both pools use the same database role, so backend capacity and queueing
+    remain shared in PgBouncer; this is not a reserved PostgreSQL server pool.
     """
     return LoggingConnectionPool[psycopg.AsyncConnection](
         dsn,
         pool_name="agent-host-control",
         min_size=1,
-        max_size=_CONTROL_POOL_SIZE,
+        max_size=settings.daemon.host_control_pool_max_size,
         kwargs={"autocommit": True, "prepare_threshold": None, **PG_KEEPALIVE_KWARGS},
         check=_restore_pooled_session_async,
         timeout=settings.agent.db_pool_acquire_timeout_seconds,

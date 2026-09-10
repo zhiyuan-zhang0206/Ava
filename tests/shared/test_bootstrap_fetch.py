@@ -352,7 +352,7 @@ def _write_snapshot(home: Path, *, base_url: str, age_s: float, values: dict[str
     snap.write_text(
         _json.dumps(
             {
-                "v": 1,
+                "v": bootstrap._SNAPSHOT_VERSION,
                 "base_url": base_url,
                 "written_at": _time.time() - age_s,
                 "values": values,

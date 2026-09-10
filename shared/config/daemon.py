@@ -17,9 +17,38 @@ from shared.config._base import EnvSettings
 
 class DaemonSettings(EnvSettings):
     host_max_concurrent_turns: int = Field(
-        default=16,
+        default=0,
+        ge=0,
         alias="AVA_HOST_MAX_CONCURRENT_TURNS",
-        description="Hosted agent-runner: how many agents may have a turn RUNNING at once. Wakes beyond this queue rather than run, so the host's shared Postgres pool can be sized as a statement about this bound (bound + headroom) instead of a hope. An agent waiting on the bound still holds no task-level cost beyond the coroutine itself; the whole point of the hosted model is that an idle agent is no task at all.",
+        description="Hosted agent-runner: optional limit on active agent continuations. Zero (default) disables this admission limit; positive values queue excess agents until a running agent idles or exits. A continuation includes model/tool waits and may span many steps. Database client pools and provider concurrency have separate budgets; this setting does not resize them. Set a positive limit when host memory or execution capacity requires one.",
+        json_schema_extra={
+            "capability": "agent-runner",
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    host_db_pool_max_size: int = Field(
+        default=64,
+        gt=0,
+        alias="AVA_HOST_DB_POOL_MAX_SIZE",
+        description="Hosted agent-runner: maximum workload/checkpoint client connections per host, independent of active agent count. Connections open on demand. Budget the sum of all hosts' workload and control pools plus other clients below PgBouncer max_client_conn (or PostgreSQL max_connections when connecting directly). This is a client connection budget, not a measured database throughput limit.",
+        json_schema_extra={
+            "capability": "agent-runner",
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    host_control_pool_max_size: int = Field(
+        default=8,
+        gt=0,
+        alias="AVA_HOST_CONTROL_POOL_MAX_SIZE",
+        description="Hosted agent-runner: maximum client connections reserved for ownership, lifecycle, recovery, and durable scans. Workload borrowers cannot consume this pool. Both pools still share the same PgBouncer backend pool; this reserves client capacity only. Include it in the cluster-wide client connection budget.",
         json_schema_extra={
             "capability": "agent-runner",
             "restart_required": "all",

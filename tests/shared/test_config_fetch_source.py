@@ -269,7 +269,7 @@ def test_pure_runner_settings_build_fetches_and_overrides(tmp_path: Path) -> Non
         assert lines[0] == "postgresql://ava_runner:runner-fetched@db:5432/ava", lines
         assert lines[1] == "ava:events", lines
         # The runner's Settings-build fetch requests the runner projection.
-        assert handler.queries == ["role=runner"], handler.queries
+        assert handler.queries == ["role=runner&host_unlimited_admission=true"], handler.queries
     finally:
         server.shutdown()
         server.server_close()
