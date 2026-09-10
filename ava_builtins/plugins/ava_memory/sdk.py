@@ -273,20 +273,27 @@ _YAML_SENSITIVE_START = "#\"'@`%*&!|>[]{},?-:"
 def _yaml_value(value: str) -> str:
     """Render a value so YAML reads it back exactly as written.
 
-    A ` #` inside a plain scalar starts a comment, `: ` opens a mapping in
-    it, and a leading indicator character (`#`, a quote, `[`, ...) changes
-    its type; the pool's convention is to double-quote those values."""
-    if (
-        not value
-        or value[0] in _YAML_SENSITIVE_START
-        or ": " in value
-        or " #" in value
-        or "\n" in value
-        or value != value.strip()
-    ):
+    Printed plain, a value must parse back as itself: ` #` opens a comment,
+    `: ` or a trailing colon breaks the mapping, a leading indicator changes
+    the parse, and bare `null`, booleans, numbers or dates come back as
+    another type. Anything failing that read-back is double-quoted."""
+    if not _reads_back_plain(value):
         escaped = value.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
         return f'"{escaped}"'
     return value
+
+
+def _reads_back_plain(value: str) -> bool:
+    """Whether YAML parses `value` back as exactly this string, unquoted."""
+    if not value or value != value.strip() or value[0] in _YAML_SENSITIVE_START:
+        return False
+    if ": " in value or " #" in value or value.endswith(":") or "\n" in value:
+        return False
+    try:
+        parsed = yaml.safe_load(value)
+    except yaml.YAMLError:
+        return False
+    return isinstance(parsed, str) and parsed == value
 
 
 _TIMESTAMP_FRACTION_RE = re.compile(r"(?<=T\d{2}:\d{2}:\d{2})\.\d+")
@@ -306,13 +313,25 @@ def _drop_timestamp_fraction(block: str) -> str:
 def _merge_frontmatter(
     block: str, existing: dict[str, object], generated: list[tuple[str, str]]
 ) -> str:
-    """Keep the caller's block text and append the fields it is missing."""
+    """Keep the caller's block text and complete the fields it is missing.
+
+    A blank value is replaced in place; only a field with no line at all is
+    appended, so a completed block never carries the same key twice."""
     lines = block.split("\n")
     while lines and not lines[-1]:
         lines.pop()
     while lines and not lines[0]:
         lines.pop(0)
-    lines.extend(f"{key}: {value}" for key, value in generated if not _filled(existing.get(key)))
+    for key, value in generated:
+        if _filled(existing.get(key)):
+            continue
+        replacement = f"{key}: {value}"
+        for index, line in enumerate(lines):
+            if line.startswith(f"{key}:"):
+                lines[index] = replacement
+                break
+        else:
+            lines.append(replacement)
     return "\n".join(lines) + "\n"
 
 
@@ -336,9 +355,10 @@ def write(
     Otherwise the writer generates the block, followed by the attribution
     line on the shared store. A missing title defaults to the file name and
     a missing description falls back to the title, so a written note never
-    carries a blank one. A value that YAML would otherwise misread (a ` #`
-    comment marker, a `: ` mapping, a leading quote or bracket) is quoted
-    to survive as written.
+    carries a blank one. A value YAML would otherwise misread (a leading
+    indicator, a `: ` or trailing colon, a ` #` comment marker, or text it
+    would retype like `null`, `123` or a date) is quoted to survive as
+    written.
 
     Each index update holds an advisory lock on the store's `MEMORY.md`, so
     concurrent writers in this and other processes are serialized.

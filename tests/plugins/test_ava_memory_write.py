@@ -569,3 +569,74 @@ def test_written_notes_pass_the_pool_validator(memory_plugin: Any, tmp_path: Pat
     ]
     for entry in entries:
         assert validate.validate_file(entry) == [], entry
+
+
+def test_write_quotes_values_yaml_would_retype(memory_plugin: Any, tmp_path: Path) -> None:
+    """Bare `null`, booleans, numbers and dates parse back as another type —
+    a written `description: null` reads as empty and trips the pool gate."""
+    _pool_with_pointers(tmp_path)
+
+    for index, value in enumerate(["null", "123", "true", "2026-09-10"]):
+        entry = ava.memory.write(
+            f"projects/demo/retyped-{index}",
+            "Body.\n",
+            title=value,
+            description=value,
+            store="shared",
+        )
+        frontmatter = _frontmatter(entry.read_text(encoding="utf-8"))
+        assert frontmatter["title"] == value
+        assert frontmatter["description"] == value
+
+
+def test_write_quotes_trailing_colon_values(memory_plugin: Any, tmp_path: Path) -> None:
+    _pool_with_pointers(tmp_path)
+
+    entry = ava.memory.write(
+        "projects/demo/colon-note",
+        "Body.\n",
+        title="Release notes:",
+        description="Steps:",
+        store="shared",
+    )
+
+    frontmatter = _frontmatter(entry.read_text(encoding="utf-8"))
+    assert frontmatter["title"] == "Release notes:"
+    assert frontmatter["description"] == "Steps:"
+
+
+def test_write_quotes_tags_yaml_would_retype(memory_plugin: Any, tmp_path: Path) -> None:
+    """A numeric tag parses back as an int, which the pool's validator
+    rejects — it requires every tag to be a string."""
+    _pool_with_pointers(tmp_path)
+
+    entry = ava.memory.write(
+        "projects/demo/tag-note",
+        "Body.\n",
+        tags=["type/reference", "123"],
+        store="shared",
+    )
+
+    frontmatter = _frontmatter(entry.read_text(encoding="utf-8"))
+    assert frontmatter["tags"] == ["type/reference", "123"]
+
+
+def test_write_replaces_blank_fields_in_caller_block(memory_plugin: Any, tmp_path: Path) -> None:
+    """A blank caller field is completed in place — the same key must not
+    appear on two lines of the block."""
+    _pool_with_pointers(tmp_path)
+
+    entry = ava.memory.write(
+        "projects/demo/blank-note",
+        '---\ntitle:\ndescription: ""\ntags: [type/project]\n---\nBody.\n',
+        store="shared",
+        title="Filled title",
+    )
+
+    written = entry.read_text(encoding="utf-8")
+    block = written.split("---\n", 2)[1]
+    assert block.count("title:") == 1
+    assert block.count("description:") == 1
+    frontmatter = _frontmatter(written)
+    assert frontmatter["title"] == "Filled title"
+    assert frontmatter["description"] == "Filled title"
