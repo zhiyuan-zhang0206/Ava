@@ -22,6 +22,25 @@ lives. It is shared rather than local because `ava status` and
 second copy here is how the operator surface came to read green against an
 occupant in the first place.
 
+**Pause-scoped exemption + respawn gate** (issue #2101): a pause-scoped watchdog
+block still runs this check (the gateway capability watchdog exempts it — see
+`services/watchdog/daemon.py:_checks_for_round`), because a gateway that is
+completely down is worse than a probe under a paused host. The respawn itself is
+gated: while the pause still has a live owner (an executing lease, a live local
+orchestration, a maintenance hold) the respawn declines — a rollout's own
+restart leg is never raced. Once the owner determination (with the gateway
+reachability evidence) reads unowned, the respawn proceeds even while the pause
+controller has not recovered yet.
+
+**Off-pin converge-back** (issue #2101): when the checkout drifted off the
+cluster pin (a dead rollout checked out the target but never migrated), the
+gateway cannot boot from its own tree — `assert_schema_current` refuses code
+ahead of the DB. `_restart` then converges the checkout back to the pinned
+commit before respawning, so the gateway returns on the code the whole cluster
+runs. The cluster pin is never written, no update mechanism runs, and the
+converge is skipped while any orchestration session, live deploy lease, or
+source switch is in flight.
+
 Usage (watchdog daemon):
     every 60s `services.watchdog.daemon` spawns a thread to call this main().
 """
@@ -29,6 +48,7 @@ Usage (watchdog daemon):
 import logging
 import os
 import signal
+import subprocess
 from pathlib import Path
 
 from shared.config import settings
@@ -73,6 +93,7 @@ def _restart() -> DaemonProbe:
     # before the respawn kills it.
     _thread_dump()
     project_root = settings.services.project_root or Path(__file__).resolve().parent.parent.parent
+    _converge_off_pin_checkout(project_root)
     return respawn_and_verify(
         "gateway",
         ".venv/bin/python -m gateway",
@@ -80,6 +101,96 @@ def _restart() -> DaemonProbe:
         extra_env={"AVA_PROCESS_PROFILE": "gateway"},
         verify=_probe,
     )
+
+
+def _converge_off_pin_checkout(repo: Path) -> None:
+    """Converge a drifted checkout back to the cluster pin before the respawn.
+
+    A dead rollout can leave the prod source on the target commit with the pin
+    un-advanced and the migrations unapplied; the gateway cannot boot from that
+    tree (`assert_schema_current` refuses code ahead of the DB), and respawning
+    it there only burns backoff rounds. The pinned binary is the one that
+    matches the applied schema, so the checkout returns to the pin — the same
+    converge direction the agent-runner pin heal takes, minus the update
+    machinery: no lease, no fan-out, no migration, no pin write, nothing else
+    restarted. Guards skip the converge while any orchestration session, live
+    deploy lease, or source switch is in flight (a live rollout owns its own
+    checkout), and every read is conservative: unreadable evidence skips.
+    """
+    from ops.cluster_session import live_orchestration_session
+    from ops.controllers.pin import read_pin_and_head
+    from shared import source_switch
+    from shared.cluster_lock import read_update_lease
+    from shared.gitenv import git_env
+    from shared.proc import run_bounded
+
+    try:
+        if live_orchestration_session() is not None or read_update_lease() is not None:
+            return
+    except Exception:
+        _log.warning(
+            "[gateway healthcheck] could not confirm no orchestration is in "
+            "flight; skipping the off-pin converge"
+        )
+        return
+    if source_switch.is_switching():
+        return
+    pin_head = read_pin_and_head()
+    if pin_head is None:
+        return
+    pin, head = pin_head
+    if head == pin:
+        return
+    _log.warning(
+        "[gateway healthcheck] off-pin (HEAD %s != pin %s) and the gateway is down — "
+        "converging the checkout back to the pin before respawning (the cluster pin "
+        "is not moved)",
+        head,
+        pin,
+    )
+    source_switch.mark_switching()
+    try:
+        try:
+            result = run_bounded(
+                ["git", "-C", str(repo), "checkout", "--detach", "--force", pin],
+                capture_output=True,
+                text=True,
+                env=git_env(),
+                timeout=30.0,
+            )
+        except (OSError, subprocess.SubprocessError):
+            _log.warning(
+                "[gateway healthcheck] off-pin converge checkout failed; "
+                "respawn proceeds on the existing tree",
+                exc_info=True,
+            )
+            return
+    finally:
+        source_switch.clear_switching()
+    if result.returncode != 0:
+        _log.warning(
+            "[gateway healthcheck] off-pin converge checkout failed (rc=%s); "
+            "respawn proceeds on the existing tree",
+            result.returncode,
+        )
+
+
+def _pause_respawn_gate() -> tuple[bool, str]:
+    """Decline the respawn while a paused host's transition still has an owner.
+
+    The pause-scoped exemption runs this check under a paused host; probing is
+    always allowed, but respawning must not fight a live rollout's own restart
+    leg. The owner determination is the stranded-pause controller's own
+    (including the gateway reachability evidence), so the two recoveries agree.
+    """
+    from ops.controllers.stranded_pause import is_paused, pause_owner_verdict
+
+    if not is_paused():
+        return True, ""
+    owner = pause_owner_verdict()
+    if owner is None:
+        return True, ""
+    return False, f"the pause still has an owner ({owner})"
 
 
 def main() -> None:
@@ -94,6 +205,7 @@ def main() -> None:
         probe=_probe,
         respawn=_restart,
         consecutive_failures_before_respawn=2,
+        respawn_gate=_pause_respawn_gate,
     )
 
 

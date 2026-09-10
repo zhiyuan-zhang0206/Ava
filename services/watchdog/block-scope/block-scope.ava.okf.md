@@ -17,6 +17,8 @@ tags: []
 ## The division of knowledge
 A controller states only the **blast radius of its own finding** and never names services. Each service states what it needs, on its own spec: `ServiceSpec.requires_db` (required, no default — see [[services/services.ava.okf.md]]). `services/watchdog/daemon.py:_checks_for_round` is the ONE place the two meet: `ALL` runs nothing (returning before the roster is even built, so a paused host costs nothing per round), `DB_DEPENDENT` keeps the `requires_db=False` entries, `NONE` keeps everything. It is total over the enum — an unhandled member raises rather than defaulting to "run everything" (unsafe) or "run nothing" (the bug below).
 
+One exemption narrows `ALL` (issue #2101): an `ALL` block **from the pause dimension** still runs the gateway healthcheck on the gateway capability. The block's blast radius is "a rollout deliberately took every service down", but a gateway that stays down is the one failure that blocks the rollout's own recovery — so the check probes each round, and its respawn is separately gated on the pause having no live owner (so a live rollout's restart leg is never raced). The other `ALL` shapes (a spawned force-update, a spawned restart) still run nothing: they own the very restart the exemption would fight.
+
 The hand-added pseudo-checks classify themselves the same way: `redis-acl`, `pgbouncer`, `lgtm`, `brew-pin`, and `permissions-helper` are DB-free (`False`); `station-probe` is DB-dependent because it resolves the remote station from Postgres. `pg-backup` is a regular DB-dependent `ServiceSpec` service.
 
 ## Why (the defect it replaced)

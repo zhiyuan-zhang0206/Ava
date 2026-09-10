@@ -212,3 +212,126 @@ def test_probe_passes_through_a_normal_verdict(monkeypatch: pytest.MonkeyPatch) 
     probe = hc._probe()
     assert probe.alive is True
     assert probe.detail == "home /x"
+
+
+# ─── pause respawn gate (issue #2101) ────────────────────────────────────────
+
+
+def test_respawn_gate_allows_when_not_paused(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("ops.controllers.stranded_pause.is_paused", lambda: False)
+    allowed, why = hc._pause_respawn_gate()
+    assert allowed is True and why == ""
+
+
+def test_respawn_gate_allows_an_unowned_pause(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("ops.controllers.stranded_pause.is_paused", lambda: True)
+    monkeypatch.setattr("ops.controllers.stranded_pause.pause_owner_verdict", lambda: None)
+    allowed, why = hc._pause_respawn_gate()
+    assert allowed is True and why == ""
+
+
+def test_respawn_gate_declines_an_owned_pause(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("ops.controllers.stranded_pause.is_paused", lambda: True)
+    monkeypatch.setattr(
+        "ops.controllers.stranded_pause.pause_owner_verdict",
+        lambda: "a cluster update holds the lock (cloud:pid1)",
+    )
+    allowed, why = hc._pause_respawn_gate()
+    assert allowed is False
+    assert "still has an owner" in why
+
+
+# ─── off-pin converge-back (issue #2101) ─────────────────────────────────────
+
+
+def _patch_converge_env(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+    """Plant the off-pin world: no orchestration, no lease, no switch in
+    flight, HEAD drifted off the pin. Returns the recording dict."""
+    recorded: dict[str, Any] = {"checkouts": [], "marks": [], "clears": []}
+
+    monkeypatch.setattr("ops.cluster_session.live_orchestration_session", lambda: None)
+    monkeypatch.setattr("shared.cluster_lock.read_update_lease", lambda: None)
+    monkeypatch.setattr("shared.source_switch.is_switching", lambda: False)
+    monkeypatch.setattr("shared.source_switch.mark_switching", lambda: recorded["marks"].append(1))
+    monkeypatch.setattr(
+        "shared.source_switch.clear_switching", lambda: recorded["clears"].append(1)
+    )
+    monkeypatch.setattr(
+        "ops.controllers.pin.read_pin_and_head",
+        lambda: ("pin-sha", "head-sha"),
+    )
+
+    def _fake_run_bounded(argv: list[str], **_kw: object) -> _FakeGit:
+        recorded["checkouts"].append(argv)
+        return _FakeGit()
+
+    monkeypatch.setattr("shared.proc.run_bounded", _fake_run_bounded)
+    monkeypatch.setattr("shared.gitenv.git_env", dict)
+    return recorded
+
+
+class _FakeGit:
+    returncode = 0
+
+
+def test_restart_converges_an_off_pin_checkout_before_the_respawn(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A gateway whose checkout drifted off the pin cannot boot (code ahead of
+    the applied schema), so the respawn converges it back to the pinned commit
+    first — and the respawn must see the converge happen before it."""
+    recorded = _patch_converge_env(monkeypatch)
+    order: list[str] = []
+    monkeypatch.setattr(
+        hc,
+        "respawn_and_verify",
+        lambda *_a, **_kw: (order.append("respawn"), DaemonProbe.up("pid 1"))[1],  # pyright: ignore[reportUnknownArgumentType]
+    )
+    probe = hc._restart()
+    assert probe.alive is True
+    assert order == ["respawn"]
+    assert len(recorded["checkouts"]) == 1
+    argv = recorded["checkouts"][0]
+    assert "checkout" in argv and argv[-1] == "pin-sha"
+    assert recorded["marks"] == [1] and recorded["clears"] == [1]
+
+
+def test_restart_skips_the_converge_when_on_pin(monkeypatch: pytest.MonkeyPatch) -> None:
+    recorded = _patch_converge_env(monkeypatch)
+    monkeypatch.setattr("ops.controllers.pin.read_pin_and_head", lambda: ("same", "same"))
+    monkeypatch.setattr(hc, "respawn_and_verify", lambda *_a, **_kw: DaemonProbe.up("pid 1"))  # pyright: ignore[reportUnknownArgumentType]
+    hc._restart()
+    assert recorded["checkouts"] == []
+
+
+def test_restart_skips_the_converge_when_an_orchestration_is_live(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A live orchestration owns its own checkout — converging under it is the
+    mixed-tree fight the source-switch guard exists to prevent."""
+    recorded = _patch_converge_env(monkeypatch)
+    monkeypatch.setattr("ops.cluster_session.live_orchestration_session", lambda: "ava-updater")
+    monkeypatch.setattr(hc, "respawn_and_verify", lambda *_a, **_kw: DaemonProbe.up("pid 1"))  # pyright: ignore[reportUnknownArgumentType]
+    hc._restart()
+    assert recorded["checkouts"] == []
+
+
+def test_restart_skips_the_converge_when_a_deploy_lease_is_live(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    recorded = _patch_converge_env(monkeypatch)
+    live_lease = object()
+    monkeypatch.setattr("shared.cluster_lock.read_update_lease", lambda: live_lease)
+    monkeypatch.setattr(hc, "respawn_and_verify", lambda *_a, **_kw: DaemonProbe.up("pid 1"))  # pyright: ignore[reportUnknownArgumentType]
+    hc._restart()
+    assert recorded["checkouts"] == []
+
+
+def test_restart_skips_the_converge_while_a_source_switch_is_in_flight(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    recorded = _patch_converge_env(monkeypatch)
+    monkeypatch.setattr("shared.source_switch.is_switching", lambda: True)
+    monkeypatch.setattr(hc, "respawn_and_verify", lambda *_a, **_kw: DaemonProbe.up("pid 1"))  # pyright: ignore[reportUnknownArgumentType]
+    hc._restart()
+    assert recorded["checkouts"] == []

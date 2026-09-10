@@ -19,6 +19,7 @@ host's pause lost its owner."""
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable, Generator
 from pathlib import Path
 
@@ -34,14 +35,16 @@ _THIS_HOST = "laptop-host"
 
 
 @pytest.fixture
-def fake_pause(monkeypatch: pytest.MonkeyPatch) -> Callable[[float | None], None]:
+def fake_pause(monkeypatch: pytest.MonkeyPatch) -> Callable[..., None]:
     """Plant a paused `host_deploy_state` row aged `seconds`; None = no row.
 
-    The row is the R1 posture truth (Task #1021) the controller reads; the
-    age controls `_stranded_pause_seconds` via the row's `updated_at`.
+    The row is the R1 posture truth (Task #1021) the controller reads. The
+    second argument plants `paused_at` (the pause-window anchor) independently of
+    `updated_at` (bumped by every in-window transition, updater-lease renewals
+    included) — the two clocks the issue #2101 age fix separates.
     """
 
-    def _plant(age_s: float | None) -> None:
+    def _plant(age_s: float | None, paused_at_age_s: float | None = None) -> None:
         if age_s is None:
             monkeypatch.setattr("shared.host_deploy_state.read", lambda machine=None, **_kw: None)  # noqa: ARG005  # pyright: ignore[reportUnknownArgumentType]
             return
@@ -53,6 +56,11 @@ def fake_pause(monkeypatch: pytest.MonkeyPatch) -> Callable[[float | None], None
             machine=_THIS_HOST,
             posture="paused",
             updated_at=datetime.now(UTC) - timedelta(seconds=age_s),
+            paused_at=(
+                datetime.now(UTC) - timedelta(seconds=paused_at_age_s)
+                if paused_at_age_s is not None
+                else None
+            ),
             updater_lease_expires_at=None,
         )
         monkeypatch.setattr("shared.host_deploy_state.read", lambda machine=None, **_kw: state)  # noqa: ARG005  # pyright: ignore[reportUnknownArgumentType]
@@ -143,6 +151,166 @@ def test_defers_when_update_lock_held(
     monkeypatch.setattr(sp, "unpause_local_cluster", lambda: unpaused.append(True))
     assert sp.recover_stranded_pause() is False
     assert unpaused == []
+
+
+# ─── the pause-age anchor is `paused_at`, not `updated_at` (issue #2101) ─────
+
+
+def test_age_is_measured_from_paused_at_not_updated_at(
+    fake_pause: Callable[..., None], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`updated_at` is bumped by every in-window transition — updater-lease
+    renewals included — so a stranded pause whose owner was dead kept reading
+    "fresh" forever and the owner check never ran (the 122-round outage). The
+    pause window's own anchor is `paused_at`, which survives those bumps."""
+    fake_pause(5, paused_at_age_s=sp.STRANDED_PAUSE_TIMEOUT_S + 60)
+    monkeypatch.setattr(sp, "read_update_lease", lambda: None)
+    unpaused: list[bool] = []
+    monkeypatch.setattr(sp, "unpause_local_cluster", lambda: unpaused.append(True))
+    assert sp.recover_stranded_pause() is True
+    assert unpaused == [True]
+
+
+def test_age_falls_back_to_updated_at_when_paused_at_absent(
+    fake_pause: Callable[..., None], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Rows from before the `paused_at` column existed still age by `updated_at`."""
+    fake_pause(sp.STRANDED_PAUSE_TIMEOUT_S + 60)
+    monkeypatch.setattr(sp, "read_update_lease", lambda: None)
+    unpaused: list[bool] = []
+    monkeypatch.setattr(sp, "unpause_local_cluster", lambda: unpaused.append(True))
+    assert sp.recover_stranded_pause() is True
+    assert unpaused == [True]
+
+
+# ─── gateway reachability evidence in the owner determination (issue #2101) ──
+
+
+def test_live_lease_with_sustained_gateway_outage_is_not_an_owner(
+    fake_pause: Callable[..., None],
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The incident shape: pause owned (live executing lease) while the lease
+    holder's gateway has been unreachable past the grace bound — the lease is
+    dead evidence, the local-session check still says no, so recovery fires."""
+    fake_pause(sp.STRANDED_PAUSE_TIMEOUT_S + 60)
+    monkeypatch.setattr(sp, "read_update_lease", _executing_lease)
+    monkeypatch.setattr(sp, "_gateway_down_seconds", lambda: sp.GATEWAY_DOWN_OWNER_GRACE_S + 60)
+    unpaused: list[bool] = []
+    monkeypatch.setattr(sp, "unpause_local_cluster", lambda: unpaused.append(True))
+    with caplog.at_level("WARNING"):
+        assert sp.recover_stranded_pause() is True
+    assert unpaused == [True]
+    assert any("dead evidence" in r.message for r in caplog.records)
+
+
+def test_live_lease_with_a_recent_gateway_outage_still_owns(
+    fake_pause: Callable[..., None], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Inside the grace window the lease still owns the pause: a rollout's own
+    restart leg keeps the gateway down for a minute or three, and that is
+    exactly the transition this pause belongs to."""
+    fake_pause(sp.STRANDED_PAUSE_TIMEOUT_S + 60)
+    monkeypatch.setattr(sp, "read_update_lease", _executing_lease)
+    monkeypatch.setattr(sp, "_gateway_down_seconds", lambda: 60.0)
+    unpaused: list[bool] = []
+    monkeypatch.setattr(sp, "unpause_local_cluster", lambda: unpaused.append(True))
+    assert sp.recover_stranded_pause() is False
+    assert unpaused == []
+
+
+def test_live_lease_without_reachability_evidence_still_owns(
+    fake_pause: Callable[..., None], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No marker (a pure runner never records one, an unreadable one reads as
+    none) keeps the conservative reading: the lease owns the pause."""
+    fake_pause(sp.STRANDED_PAUSE_TIMEOUT_S + 60)
+    monkeypatch.setattr(sp, "read_update_lease", _executing_lease)
+    monkeypatch.setattr(sp, "_gateway_down_seconds", lambda: None)
+    unpaused: list[bool] = []
+    monkeypatch.setattr(sp, "unpause_local_cluster", lambda: unpaused.append(True))
+    assert sp.recover_stranded_pause() is False
+    assert unpaused == []
+
+
+def test_gateway_outage_does_not_bypass_a_live_local_updater(
+    fake_pause: Callable[..., None], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The lease downgrade only opens the door: the local-session signal is still
+    consulted and still authoritative. A live local updater owns the pause even
+    while the gateway is unreachable."""
+    fake_pause(sp.STRANDED_PAUSE_TIMEOUT_S + 60)
+    monkeypatch.setattr(sp, "read_update_lease", _executing_lease)
+    monkeypatch.setattr(sp, "_gateway_down_seconds", lambda: sp.GATEWAY_DOWN_OWNER_GRACE_S + 60)
+    monkeypatch.setattr("ops.cluster.current_orchestration", lambda: "update")
+    unpaused: list[bool] = []
+    monkeypatch.setattr(sp, "unpause_local_cluster", lambda: unpaused.append(True))
+    assert sp.recover_stranded_pause() is False
+    assert unpaused == []
+
+
+def test_pause_owner_verdict_exposes_the_shared_determination(
+    fake_pause: Callable[..., None], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The gateway healthcheck's respawn gate reads the same owner determination."""
+    fake_pause(sp.STRANDED_PAUSE_TIMEOUT_S + 60)
+    monkeypatch.setattr(sp, "read_update_lease", _executing_lease)
+    monkeypatch.setattr(sp, "_gateway_down_seconds", lambda: sp.GATEWAY_DOWN_OWNER_GRACE_S + 60)
+    monkeypatch.setattr("ops.cluster.current_orchestration", lambda: None)
+    assert sp.pause_owner_verdict() is None
+
+
+def test_record_gateway_reachability_stamps_and_clears_the_marker(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Down stamps the FIRST down round (later probes keep the anchor); reachable
+    clears the marker; the reader returns the continuous outage duration."""
+    marker = tmp_path / "gw-down"
+    monkeypatch.setattr(sp, "_gateway_down_marker_path", lambda: marker)
+    monkeypatch.setattr(sp, "_probe_gateway_reachable", lambda: False)
+    sp.record_gateway_reachability()
+    assert marker.exists()
+    first = sp._gateway_down_seconds()
+    assert first is not None and 0 <= first < 5
+    real_time = time.time
+    monkeypatch.setattr(sp.time, "time", lambda: real_time() + 90)
+    sp.record_gateway_reachability()
+    elapsed = sp._gateway_down_seconds()
+    assert elapsed is not None
+    assert elapsed >= 90
+    monkeypatch.setattr(sp, "_probe_gateway_reachable", lambda: True)
+    sp.record_gateway_reachability()
+    assert not marker.exists()
+    assert sp._gateway_down_seconds() is None
+
+
+def test_unreadable_marker_reads_as_no_evidence(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Fail closed: garbage in the marker is not evidence against the lease."""
+    marker = tmp_path / "gw-down"
+    monkeypatch.setattr(sp, "_gateway_down_marker_path", lambda: marker)
+    marker.write_text("not-a-timestamp")
+    assert sp._gateway_down_seconds() is None
+
+
+def test_runner_role_does_not_record_reachability(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Only the gateway-capability watchdog maintains the evidence; a pure
+    runner's pause controller never probes, so it keeps the lease-owns reading."""
+    probed: list[bool] = []
+    monkeypatch.setattr(sp, "_probe_gateway_reachable", lambda: probed.append(True) or False)
+    res = sp.PauseController().reconcile("agent-runner")
+    assert res.blocks is BlockScope.NONE
+    assert probed == []
+
+
+def test_gateway_role_records_reachability(monkeypatch: pytest.MonkeyPatch) -> None:
+    probed: list[bool] = []
+    monkeypatch.setattr(sp, "_probe_gateway_reachable", lambda: probed.append(True) or True)
+    res = sp.PauseController().reconcile("gateway")
+    assert res.blocks is BlockScope.NONE
+    assert probed == [True]
 
 
 # ─── who owns the pause is two signals, not one (issue #1074) ────────────────
