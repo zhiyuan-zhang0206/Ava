@@ -420,6 +420,48 @@ def test_nothing_scheduled_is_still_did_not_run(gh: Any, has_workflows: Any) -> 
     assert r.verdict == CIStatus.NO_WORKFLOW_RUNS
 
 
+def test_partial_suite_green_with_a_run_still_queued_is_pending(
+    gh: Any, has_workflows: Any
+) -> None:
+    """2026-09-10, MonsoraV2 #774: guardrails / e2e / contracts had attached and
+    passed while the main CI run was still queued and had attached nothing. The
+    rollup alone looked complete and green; only the runs API shows the missing
+    remainder. This is the early-green window — part of the suite is in, the
+    rest is still coming."""
+    gh(
+        [
+            _check("guardrails (impacted)", "SUCCESS"),
+            _check("e2e (smoke)", "SUCCESS"),
+            _check("contracts", "SUCCESS"),
+        ],
+        scheduled=["CI"],
+    )
+    has_workflows(True)
+
+    r = ci_utils.check_ci("774")
+
+    assert r.verdict is CIStatus.PENDING
+    assert "CI" in r.pending
+    assert "guardrails (impacted)" in r.passed
+
+
+def test_partial_suite_green_with_nothing_scheduled_is_green(gh: Any, has_workflows: Any) -> None:
+    """The mirror of the early-green window: the same partially attached rollup,
+    but the runs API reports nothing left to come — the suite is done, and the
+    verdict is green."""
+    gh(
+        [
+            _check("guardrails (impacted)", "SUCCESS"),
+            _check("e2e (smoke)", "SUCCESS"),
+            _check("contracts", "SUCCESS"),
+        ],
+        scheduled=[],
+    )
+    has_workflows(True)
+
+    assert ci_utils.check_ci("775").verdict is CIStatus.ALL_PASSED
+
+
 def test_runs_api_failure_keeps_the_conservative_verdict(
     gh: Any, has_workflows: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:

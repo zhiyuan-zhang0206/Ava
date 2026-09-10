@@ -12,7 +12,11 @@ Distinguishes "Actions never scheduled" (NO_WORKFLOW_RUNS — not green, stop an
 investigate) from "Actions is scheduled but has not attached a check yet"
 (PENDING — keep waiting). The rollup alone cannot tell them apart: for the first
 seconds after a push both look like a rollup carrying no workflow checks, and
-that window is exactly when a poll right after pushing lands.
+that window is exactly when a poll right after pushing lands. The same gap
+affects rollups that DO carry workflow checks: in a multi-workflow repo some
+checks attach and pass long before the main run is scheduled, so every green
+verdict is gated on a runs-API probe for still-incomplete runs
+(2026-09-10 early-green window).
 
 Usage as CLI:
     .venv/bin/python scripts/ci_utils.py <PR_NUMBER> [--repo owner/repo] [--json]
@@ -376,6 +380,12 @@ def _runs_not_yet_reporting(head_sha: str, repo: str | None) -> list[str]:
     An empty list means nothing is scheduled, which is the real failure the
     NO_WORKFLOW_RUNS guard exists for.
 
+    `check_ci` probes this before every would-be-green verdict — not only when
+    the rollup has no workflow checks — because a rollup with part of the suite
+    attached and green is otherwise indistinguishable from a finished suite
+    (2026-09-10: MonsoraV2 #774 reported ALL_PASSED while its main run sat
+    queued).
+
     On any error this returns empty — the caller then keeps its conservative
     not-green verdict rather than inventing a reason to wait.
     """
@@ -480,23 +490,29 @@ def check_ci(pr_number: str | int, *, repo: str | None = None) -> CIResult:
         result.verdict = CIStatus.FAILED
     elif result.pending:
         result.verdict = CIStatus.PENDING
-    elif not result.workflow_checks and _repo_has_workflows():
-        # Everything present passed — but nothing present came from a workflow,
-        # while this checkout does define workflows. Either the suite did not run
-        # (reporting ALL_PASSED here is how a broken `runs-on` — 2026-07-28,
-        # hosted runners a private repo could not schedule — reads as green: the
-        # only check left standing was a GitHub App's, and it passed), or it is
-        # scheduled and has not attached a check yet. Only the runs API can tell
-        # those apart.
+    else:
+        # Every check attached so far has passed. Attached, though, is not the
+        # same as finished: a run that is queued / in progress has attached
+        # nothing to this commit yet, so a rollup carrying part of the suite —
+        # all green — is indistinguishable from a finished suite. Multi-workflow
+        # repos on self-hosted runners sit in that window routinely (2026-09-10,
+        # MonsoraV2 #774: ALL_PASSED in ~2s while ci.yml run 34487002348 was
+        # still queued), and a green verdict there ends the watch early. Ask the
+        # runs API once, before any green verdict, whether more is coming.
         scheduled = _runs_not_yet_reporting(data.get("headRefOid", ""), repo)
         if scheduled:
             result.pending.extend(scheduled)
             result.verdict = CIStatus.PENDING
-        else:
+        elif not result.workflow_checks and _repo_has_workflows():
+            # Nothing from a workflow is attached and nothing is scheduled,
+            # while this checkout does define workflows: the suite did not run.
+            # Reporting ALL_PASSED here is how a broken `runs-on` — 2026-07-28,
+            # hosted runners a private repo could not schedule — reads as green:
+            # the only check left standing was a GitHub App's, and it passed.
             result.verdict = CIStatus.NO_WORKFLOW_RUNS
-    else:
-        # All completed, none failed
-        result.verdict = CIStatus.ALL_PASSED
+        else:
+            # All completed, none failed, nothing left scheduled
+            result.verdict = CIStatus.ALL_PASSED
 
     return result
 
