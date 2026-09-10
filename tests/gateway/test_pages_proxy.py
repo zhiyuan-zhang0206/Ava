@@ -21,6 +21,7 @@ import threading
 from collections.abc import Iterator
 from pathlib import Path
 
+import httpx
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
@@ -173,6 +174,29 @@ def test_proxy_serves_page_content(db_conn, page_server: int) -> None:
         with_qs = client.get(f"/pages/{aid}-p/?v=2")
         assert with_qs.status_code == 200
         assert "<h1>hello</h1>" in with_qs.text
+
+
+def test_proxy_client_ignores_ambient_proxy_env(
+    db_conn, page_server: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The page-proxy dial target is a registry-validated cluster host — the
+    client must never route it through the machine's ambient HTTP proxy
+    (proxy-configured gateway hosts forwarded Clash's own 502, 2026-09-10)."""
+    aid = create_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
+    real_client = httpx.AsyncClient
+    seen: dict[str, object] = {}
+
+    def _client_factory(**kwargs):  # type: ignore[no-untyped-def]
+        seen["trust_env"] = kwargs["trust_env"]
+        return real_client(**kwargs)  # pyright: ignore[reportUnknownArgumentType]
+
+    monkeypatch.setattr(pages_router.httpx, "AsyncClient", _client_factory)  # pyright: ignore[reportUnknownArgumentType]
+    with TestClient(app) as client:
+        _register(client, aid, "p", page_server)
+        resp = client.get(f"/pages/{aid}-p/")
+    assert resp.status_code == 200
+    assert "<h1>hello</h1>" in resp.text
+    assert seen["trust_env"] is False
 
 
 def test_proxy_redirects_root_without_trailing_slash(db_conn, page_server: int) -> None:
