@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import IO, ClassVar
@@ -219,6 +220,21 @@ class _FakePopen:
         self.pid = os.getpid()
 
 
+def _is_steward(call: _Call) -> bool:
+    """The steward launch is the one argv call `new_session` makes second."""
+    command = call.command
+    return isinstance(command, list) and len(command) > 1 and command[1] == "-I"
+
+
+def _target_calls(fake_popen: type[_FakePopen]) -> list[_Call]:
+    """The Popen calls that are the *session* launches, not the steward."""
+    return [c for c in fake_popen.calls if not _is_steward(c)]
+
+
+def _steward_calls(fake_popen: type[_FakePopen]) -> list[_Call]:
+    return [c for c in fake_popen.calls if _is_steward(c)]
+
+
 @pytest.fixture
 def fake_popen(monkeypatch: pytest.MonkeyPatch) -> type[_FakePopen]:
     _FakePopen.calls = []
@@ -274,7 +290,7 @@ def test_new_session_launches_a_daemon_with_the_log_handles(
     assert winproc.new_session(
         "zz-daemon", ".venv/bin/python -m services.browser.daemon", tmp_path, env={"A": "b"}
     )
-    call = fake_popen.calls[-1]
+    call = _target_calls(fake_popen)[-1]
     assert call.command == ["python", "-m", "services.browser.daemon"]
     assert call.creationflags == winproc._PRIVATE_CONSOLE_FLAGS
     log = winproc.session_log_path("zz-daemon")
@@ -301,9 +317,89 @@ def test_new_session_splits_stderr_when_asked(
     assert winproc.new_session(
         "zz-agent", ["python", "-m", "agent"], tmp_path, env={}, stderr_append=stderr_log
     )
-    call = fake_popen.calls[-1]
+    call = _target_calls(fake_popen)[-1]
     assert call.stderr == stderr_log.stat()
     assert call.stdout == winproc.session_log_path("zz-agent").stat()
+
+
+def test_new_session_spawns_a_control_steward_bound_to_the_record_identity(
+    unit_home: Path, fake_popen: type[_FakePopen], tmp_path: Path
+) -> None:
+    """Every Windows session gets a resident cross-session control steward in
+    the same session as the target, with its socket path bound to the exact
+    (pid, create_time) identity the record carries — a caller can only address
+    it by knowing that identity (issue #1930)."""
+    assert winproc.new_session("zz-daemon", ["python", "-m", "svc"], tmp_path, env={})
+    steward_calls = _steward_calls(fake_popen)
+    assert len(steward_calls) == 1
+    call = steward_calls[0]
+    command = call.command
+    assert isinstance(command, list)
+    assert command[0] == sys.executable and command[1] == "-I"
+    assert command[2].endswith("windows_session_steward.py")
+    # record path, pid, create_time, socket path, session name
+    assert len(command) == 8
+    rec = winproc._read_record("zz-daemon")
+    assert rec is not None and rec.steward_pid is not None and rec.steward_socket is not None
+    assert command[3] == str(winproc._record_path("zz-daemon"))
+    assert command[4] == str(rec.pid)
+    assert command[5] == str(rec.create_time)
+    assert command[6] == rec.steward_socket
+    assert command[7] == "zz-daemon"
+    # No console for the steward (it only transiently attaches the target's
+    # via the helper); the ABI constant, asserted off-box like the other flags.
+    assert call.creationflags == winproc._DETACHED
+    # Identity + lifecycle metadata only: its own control log, not the session log.
+    ctrl_log = unit_home / "logs" / "zz-daemon.ctrl.log"
+    assert call.stdout == ctrl_log.stat()
+    assert call.stderr == ctrl_log.stat()
+    assert rec.steward_socket == str(winproc._steward_socket_path(rec.pid, rec.create_time))
+
+
+def test_list_sessions_reaps_a_crashed_stewards_dead_socket(
+    unit_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A steward that crashed (not a graceful exit) leaves its socket file
+    behind; reaping the dead session's record must take the socket with it so
+    no later steward can mistake it for a live channel."""
+    from shared.session_record import SessionRecord
+
+    rec = SessionRecord(
+        900000,
+        1.0,
+        "gone",
+        str(unit_home),
+        1.0,
+        steward_pid=900001,
+        steward_socket=str(unit_home / "run" / "ctrl" / "ava-ctrl-900000-1.000000.sock"),
+    )
+    rec.write(winproc._record_path("zz-gone"))
+    assert rec.steward_socket is not None
+    socket_path = Path(rec.steward_socket)
+    socket_path.parent.mkdir(parents=True, exist_ok=True)
+    socket_path.write_text("")
+    assert winproc.list_sessions() == []
+    assert not winproc._record_path("zz-gone").exists()
+    assert not socket_path.exists()
+
+
+def test_dead_child_gets_no_steward_and_no_control_fields(
+    unit_home: Path, fake_popen: type[_FakePopen], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A session whose child died before the record write (sentinel create_time)
+    names no real process, so no steward is spawned — and the record must not
+    claim a control channel it cannot back."""
+    monkeypatch.setattr(winproc.psutil, "Process", _DeadProcess)
+    assert winproc.new_session("zz-dead", ["python", "-m", "svc"], tmp_path, env={})
+    assert _steward_calls(fake_popen) == []
+    rec = winproc._read_record("zz-dead")
+    assert rec is not None
+    assert rec.steward_pid is None and rec.steward_socket is None
+
+
+class _DeadProcess:
+    def __init__(self, pid: int) -> None:
+        raise winproc.psutil.NoSuchProcess(pid)
 
 
 def test_new_session_shell_command_reaches_popen_as_a_string(
@@ -312,7 +408,7 @@ def test_new_session_shell_command_reaches_popen_as_a_string(
     """A chained command reaches Win32 as one verbatim command line with the
     console flag — the log handles we opened are the ones cmd's children get."""
     assert winproc.new_session("zz-updater", "git fetch && ava restart", tmp_path, env={})
-    call = fake_popen.calls[-1]
+    call = _target_calls(fake_popen)[-1]
     assert call.command == 'cmd /s /c "git fetch && ava restart"'
     assert call.creationflags == winproc._PRIVATE_CONSOLE_FLAGS
     assert call.stdout == winproc.session_log_path("zz-updater").stat()
@@ -339,10 +435,10 @@ def test_persistent_session_breaks_away_only_from_an_exec_job(
     monkeypatch.setattr(winjob._exec_job_state, "attached", False)
     monkeypatch.setenv("AVA_EXEC_JOB_MEMBER", "1")
     assert winproc.new_session(f"{name}-plain", cmd, tmp_path, env={})
-    assert fake_popen.calls[-1].creationflags == base_flags
+    assert _target_calls(fake_popen)[-1].creationflags == base_flags
 
     gate = tmp_path / f"{name}.job-ready"
     winjob.publish_parent_job_gate(gate)
     winjob.await_parent_job_gate(str(gate))
     assert winproc.new_session(name, cmd, tmp_path, env={})
-    assert fake_popen.calls[-1].creationflags == base_flags | winproc._BREAKAWAY
+    assert _target_calls(fake_popen)[-1].creationflags == base_flags | winproc._BREAKAWAY

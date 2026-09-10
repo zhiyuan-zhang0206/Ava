@@ -34,7 +34,18 @@ def record(monkeypatch: pytest.MonkeyPatch) -> SessionRecord:
 
     monkeypatch.setattr(winproc, "_read_record", read)
     monkeypatch.setattr(winproc, "_process_for_record", process)
+    # Same-session by default: these tests exercise the direct helper path.
+    monkeypatch.setattr(winproc, "process_session_id", _session_of)
+    monkeypatch.setattr(winproc, "current_session_id", _caller_session)
     return value
+
+
+def _session_of(_pid: int) -> int:
+    return 7
+
+
+def _caller_session() -> int:
+    return 7
 
 
 def test_replacement_is_refused_before_helper(

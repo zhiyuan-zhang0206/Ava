@@ -91,6 +91,17 @@ def test_build_fails_without_csc(monkeypatch: pytest.MonkeyPatch, tmp_path: Path
         lifecycle.build(tmp_path)
 
 
+def _interactive_session(monkeypatch: pytest.MonkeyPatch, session: int | None) -> None:
+    """register_and_launch imports this at call time from the shared module."""
+    import shared.windows_session
+
+    monkeypatch.setattr(
+        shared.windows_session,
+        "active_console_session_id",
+        lambda: session,  # pyright: ignore[reportUnknownArgumentType]
+    )
+
+
 def test_register_creates_logon_task_and_runs_it(monkeypatch: pytest.MonkeyPatch) -> None:
     recorded: list[list[str]] = []
     exists = [False]
@@ -102,6 +113,7 @@ def test_register_creates_logon_task_and_runs_it(monkeypatch: pytest.MonkeyPatch
         return subprocess.CompletedProcess(cmd, 0, b"", b"")  # pyright: ignore[reportUnknownArgumentType]
 
     monkeypatch.setattr(lifecycle.subprocess, "run", fake_run)  # pyright: ignore[reportUnknownArgumentType]
+    _interactive_session(monkeypatch, 1)
 
     lifecycle.register_and_launch(Path("C:/x/AvaPermissionsHelper.exe"))
 
@@ -117,6 +129,33 @@ def test_register_creates_logon_task_and_runs_it(monkeypatch: pytest.MonkeyPatch
     exists[0] = True
     lifecycle.register_and_launch(Path("C:/x/AvaPermissionsHelper.exe"))
     assert "/Create" not in recorded[3]
+
+
+def test_register_reports_unavailable_without_an_interactive_session(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With nobody logged on an /IT task has no session to run in: register the
+    task for the next logon, report it, and do NOT issue a doomed /Run
+    (issue #1930)."""
+    recorded: list[list[str]] = []
+    warnings: list[object] = []
+
+    def fake_run(cmd, **kwargs):
+        recorded.append(list(cmd))  # pyright: ignore[reportUnknownArgumentType]
+        return subprocess.CompletedProcess(cmd, 0, b"", b"")  # pyright: ignore[reportUnknownArgumentType]
+
+    def fake_warning(message: str) -> None:
+        warnings.append(message)
+
+    monkeypatch.setattr(lifecycle.subprocess, "run", fake_run)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(lifecycle.logger, "warning", fake_warning)
+    _interactive_session(monkeypatch, None)
+
+    lifecycle.register_and_launch(Path("C:/x/AvaPermissionsHelper.exe"))
+
+    assert recorded and recorded[0][1] == "/Query"
+    assert all("/Run" not in cmd for cmd in recorded), "no /Run with no interactive session"
+    assert warnings and "no interactive session" in str(warnings[0])
 
 
 def _stale_exe_setup(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> tuple[Path, Path, Path]:
