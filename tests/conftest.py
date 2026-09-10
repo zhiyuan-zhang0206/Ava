@@ -147,6 +147,23 @@ os.environ["AVA_CONFIG_FETCH"] = "skip"
 # spawn from this checkout (`ava` CLI, e2e gateway) inherit the same permission.
 os.environ["AVA_HOME_OVERRIDE"] = "1"
 
+# ── Pre-compact history dump: pinned OFF for the suite, like a cluster that
+# configures the flag off ──
+#
+# The flag defaults ON (2026-09-11); left on, every compaction path would write
+# a JSONL dump into the test home and inject the dump note after the summary.
+# compact-behavior tests assert exact post-compact tails, and test_config
+# compares fresh Settings instances against the singleton under "the same env"
+# — so every layer must agree on the value: the singleton built below, the D5
+# pre-warmed fallback, fresh instances, and spawned subprocesses. A fixture-time
+# attribute patch reaches only the singleton (the D5 pre-warm snapshots at
+# import) — pin the environment before the first Settings construction instead,
+# and declare the same key in the test home's .env below so the cluster-env
+# authority pass takes its force branch (an undeclared cluster-scope key is
+# DROPPED). Feature tests (tests/agent/test_history_dump.py) flip the singleton
+# back on per test.
+os.environ["AVA_COMPACT_HISTORY_DUMP"] = "false"
+
 # ── Process-profile marker: the suite is profile-less, like CI ──
 #
 # `Settings()` reads AVA_PROCESS_PROFILE at construction to build only the
@@ -324,6 +341,10 @@ for _provider_key_env in _TEST_PROVIDER_KEY_ENVS:
 (_TEST_AVA_HOME / ".env").write_text(
     "\n".join(
         [
+            # Cluster-scope pin carried by both channels (see the block above):
+            # the env side sets it before Settings construction, the file side
+            # keeps the authority pass on its force branch.
+            f"AVA_COMPACT_HISTORY_DUMP={os.environ['AVA_COMPACT_HISTORY_DUMP']}",
             f"AVA_DB_URL={os.environ['AVA_DB_URL']}",
             f"AVA_REDIS_URL={os.environ['AVA_REDIS_URL']}",
             f"AVA_EVENTS_CHANNEL={_TEST_EVENTS_CHANNEL}",
