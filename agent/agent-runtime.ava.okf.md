@@ -59,6 +59,10 @@ context for compaction and to END for idle or lifecycle control. Routing uses
 - `services/agent_host/host.py` admits the exact runtime incarnation, binds
   per-agent context/config, reuses model state, drives graph invocations, flushes
   checkpoints and settles lifecycle state before releasing the turn.
+- `agent/hosted_ownership.py` can replace a local owner before its lease expires
+  only when the same locked row proves its exact host process has exited and
+  its managed resource set is empty and unfrozen. A living host, another machine,
+  unknown process identity or unclosed resources retain the admission fences.
 - `services/agent_host/db_recovery.py` retains the original turn during a database
   or checkpoint failure. A 5s exact-owner probe precedes repair stages with
   independent 30s budgets: flush retained checkpoint writes, reconcile claimed
