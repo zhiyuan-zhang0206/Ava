@@ -1,6 +1,6 @@
 """The deploy window — the one question every pin-moving actor asks.
 
-Two regressions are pinned here, and they pull in opposite directions:
+Three regressions are pinned here, and they pull in different directions:
 
 - **The lease must hold while the transitioning host is unreachable.** A runner's
   self-update stops `ops`, the very daemon that answers `status_probe`, so a
@@ -11,14 +11,21 @@ Two regressions are pinned here, and they pull in opposite directions:
   out — a hold that outlives its condition is the bug class of that whole night
   (the stale `stopped_at` latch, the orphaned launchd probe). That is
   `test_settle_hold_is_released_once_every_host_reaches_the_pin`.
+- **A stale posture on an operator-excluded machine must not refuse the next
+  update**, while a live updater behind the same row still must — the cohort
+  filter plus its freshness/exclusion diagnostics (issue #2160). That is the
+  `signal 2: the cohort filter...` section below.
 """
 
 from __future__ import annotations
+
+from typing import Any
 
 import pytest
 
 from ops import deploy_window as dw
 from shared.cluster_lock import DeployLease, settle_hosts, settle_note
+from shared.host_deploy_state import HostDeployState
 
 _PIN = "abc1234abc1234"
 _OLD = "0ld0ld0ld0ld0l"
@@ -44,6 +51,7 @@ def _quiet_cluster(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("shared.cluster_lock.read_update_lease", lambda: None)
     monkeypatch.setattr("ops.cluster.current_orchestration", lambda: None)
     monkeypatch.setattr("shared.machines.list_all", list)
+    monkeypatch.setattr("shared.machine_exclusions.list_excluded_machines", list)
     monkeypatch.setattr(dw, "_read_deploy_states", dict)
     monkeypatch.setattr("shared.cluster_pin.get_cluster_target_sha", lambda: _PIN)
 
@@ -136,6 +144,165 @@ def test_remote_leg_is_skippable(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("shared.machines.list_all", lambda: [("win", "http://win:8600")])
     monkeypatch.setattr(dw, "_read_deploy_states", _never)
     assert dw.deploy_in_flight(include_remote=False).active is False
+
+
+# ─── signal 2: the cohort filter, freshness and exclusion (issue #2160) ──────
+
+
+def _posture(machine: str, posture: str, *, age_s: float, lease_s: float | None) -> HostDeployState:
+    """A `host_deploy_state` row anchored the way `read_all()` anchors it: the
+    "now" the liveness judgment compares against is the DB's own, selected with
+    the row, so tests date a row relative to its own clock, not the wall's."""
+    from datetime import UTC, datetime, timedelta
+
+    now = datetime.now(UTC)
+    return HostDeployState(
+        machine=machine,
+        posture=posture,
+        updated_at=now - timedelta(seconds=age_s),
+        updater_lease_expires_at=None if lease_s is None else now + timedelta(seconds=lease_s),
+        db_now=now,
+    )
+
+
+def _paused_since_0909():
+    from datetime import UTC, datetime
+
+    return datetime(2026, 9, 9, 13, 54, 31, tzinfo=UTC)
+
+
+def test_excluded_machines_stale_posture_does_not_block(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """**The 2026-09-10 production refusal, replayed** (issue #2160). `win` was
+    operator-excluded on 09-09 (paused 13:54:31Z, then stopped) and its posture
+    froze at `paused` — no live updater lease, and no rollout roster that
+    contains it. The recovery that would clear such a row on a live host never
+    runs on an excluded machine (leaving it alone is what preserving the
+    exclusion means), so before the cohort filter this one row refused every
+    update cluster-wide until the operator resumed the machine or learned to
+    pass `--force`."""
+    monkeypatch.setattr("shared.machines.list_all", lambda: [("win", "http://win:18121")])
+    monkeypatch.setattr(
+        "shared.machine_exclusions.list_excluded_machines",
+        lambda: [("win", "paused", _paused_since_0909())],
+    )
+    monkeypatch.setattr(
+        dw,
+        "_read_deploy_states",
+        lambda: {"win": _posture("win", "paused", age_s=31 * 3600, lease_s=None)},
+    )
+
+    assert dw.deploy_in_flight().active is False
+
+
+def test_a_live_updater_outranks_the_exclusion(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Exclusion withholds stale *history*, not a live owner: a converging row
+    whose updater lease is unexpired is a deploy wherever it runs, so the very
+    machine that must not block above still blocks here — and `detail` says
+    both facts, because a refusal that names an excluded machine owes the
+    reader the reason."""
+    monkeypatch.setattr("shared.machines.list_all", lambda: [("win", "http://win:18121")])
+    monkeypatch.setattr(
+        "shared.machine_exclusions.list_excluded_machines",
+        lambda: [("win", "paused", _paused_since_0909())],
+    )
+    monkeypatch.setattr(
+        dw,
+        "_read_deploy_states",
+        lambda: {"win": _posture("win", "converging", age_s=30, lease_s=900)},
+    )
+
+    window = dw.deploy_in_flight()
+    assert window.active is True
+    assert "machine 'win' is mid-deploy" in window.detail
+    assert "live updater lease" in window.detail
+    assert "operator-excluded (paused since 2026-09-09T13:54:31+00:00)" in window.detail
+
+
+def test_stale_posture_on_a_cohort_machine_still_blocks(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The filter must not widen. Without an operator latch a lease-less row
+    keeps the conservative reading — the machine is a rollout target, its
+    checkout may have moved, and the cluster's own recovery (not this window)
+    is what ends the state. `detail` now dates the evidence so the reader can
+    tell how stale "mid-deploy" is."""
+    monkeypatch.setattr("shared.machines.list_all", lambda: [("macmini", "http://m:8106")])
+    monkeypatch.setattr(
+        dw,
+        "_read_deploy_states",
+        lambda: {"macmini": _posture("macmini", "converging", age_s=2 * 86400, lease_s=None)},
+    )
+
+    window = dw.deploy_in_flight()
+    assert window.active is True
+    assert "no live updater lease" in window.detail
+    assert "2d ago" in window.detail
+
+
+def test_a_staging_machine_with_a_stale_posture_does_not_block(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The third latch. A staging host is registered and visible but never a
+    rollout target, and the flag carries no date column — the diagnostic reads
+    it bare."""
+    monkeypatch.setattr("shared.machines.list_all", lambda: [("stage", "http://stage:9000")])
+    monkeypatch.setattr(
+        "shared.machine_exclusions.list_excluded_machines", lambda: [("stage", "staging", None)]
+    )
+    monkeypatch.setattr(
+        dw,
+        "_read_deploy_states",
+        lambda: {"stage": _posture("stage", "converging", age_s=86400, lease_s=None)},
+    )
+
+    assert dw.deploy_in_flight().active is False
+
+
+def test_the_skip_line_names_exclusion_freshness_and_lease(
+    monkeypatch: pytest.MonkeyPatch, loguru_records: list[dict[str, Any]]
+) -> None:
+    """Issue #2160 diagnostics: a skipped row is neither silent nor a bare
+    "not blocking" — the line carries the machine, the exclusion and its date,
+    the posture's age and the absence of a live lease, so "deliberately
+    ignored" cannot be confused with "never read"."""
+    monkeypatch.setattr("shared.machines.list_all", lambda: [("win", "http://win:18121")])
+    monkeypatch.setattr(
+        "shared.machine_exclusions.list_excluded_machines",
+        lambda: [("win", "paused", _paused_since_0909())],
+    )
+    monkeypatch.setattr(
+        dw,
+        "_read_deploy_states",
+        lambda: {"win": _posture("win", "paused", age_s=3600, lease_s=None)},
+    )
+
+    assert dw.deploy_in_flight().active is False
+    lines = [r["message"] for r in loguru_records if "[deploy-window]" in r["message"]]
+    assert len(lines) == 1
+    assert "machine 'win'" in lines[0]
+    assert "operator-excluded (paused since 2026-09-09T13:54:31+00:00)" in lines[0]
+    assert "posture=paused" in lines[0]
+    assert "no live updater lease" in lines[0]
+
+
+def test_an_unreadable_exclusion_read_still_refuses(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The failure direction: the exclusion map can only withhold a refusal, so
+    "could not read" must not come back as "nothing is excluded" — a Postgres
+    hiccup degrades to the pre-#2160 reading (every non-idle posture blocks),
+    never to a pardoned stale deploy."""
+
+    def _fail():
+        raise RuntimeError("db down")
+
+    monkeypatch.setattr("shared.machine_exclusions.list_excluded_machines", _fail)
+    monkeypatch.setattr("shared.machines.list_all", lambda: [("win", "http://win:18121")])
+    monkeypatch.setattr(
+        dw,
+        "_read_deploy_states",
+        lambda: {"win": _posture("win", "paused", age_s=31 * 3600, lease_s=None)},
+    )
+
+    assert dw.deploy_in_flight().active is True
 
 
 # ─── the settle hold ends on convergence, not on its timer ───────────────────
@@ -312,6 +479,7 @@ def test_an_executing_lease_is_never_convergence_released(
     [
         "shared.cluster_lock.read_update_lease",
         "shared.machines.list_all",
+        "shared.machine_exclusions.list_excluded_machines",
         "ops.deploy_window._read_deploy_states",
     ],
 )
