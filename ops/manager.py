@@ -116,11 +116,19 @@ class ControllerManager:
             tuple(controllers) if controllers is not None else build_controllers()
         )
         self._last: dict[str, ReconcileResult] = {}
+        # The dimension of the controller currently blocking rounds, for the
+        # watchdog's scope resolution (a pause-scoped ALL block exempts the
+        # gateway healthcheck, issue #2101); None while nothing blocks.
+        self._blocking_dimension: str | None = None
         # Consecutive rounds this manager has blocked something. Counted across
         # dimensions, not per dimension: the operator question is "how long has this
         # host not been fully reconciling", and a streak that hands off from pause to
         # schema mid-rollout is still one uninterrupted gap.
         self._blocked_streak = 0
+
+    def blocking_dimension(self) -> str | None:
+        """The dimension of the controller currently blocking rounds (None when clear)."""
+        return self._blocking_dimension
 
     async def reconcile(self, role: MachineRole) -> BlockScope:
         """Run the controllers in order; return the scope the first blocker blocked.
@@ -176,6 +184,7 @@ class ControllerManager:
         cleared from one that has been holding for hours — which is exactly the
         ambiguity that forced a forensic log reconstruction.
         """
+        self._blocking_dimension = result.dimension
         self._blocked_streak += 1
         level = (
             logging.ERROR
@@ -202,6 +211,7 @@ class ControllerManager:
                 self._blocked_streak,
             )
             self._blocked_streak = 0
+            self._blocking_dimension = None
 
     def last_results(self) -> dict[str, ReconcileResult]:
         """The last ``ReconcileResult`` seen per dimension (for Status). Empty until

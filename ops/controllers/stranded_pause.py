@@ -51,6 +51,19 @@ It does not shortcut the wait: such a pause becomes UNOWNED and serves
 ``STRANDED_PAUSE_TIMEOUT_S`` like any other, because the spawn gap that bound covers
 is still there.
 
+**A live lease whose gateway has been unreachable is dead evidence** (issue #2101).
+A cluster update runs on the gateway host, and every leg of it — Phase A fan-out,
+the gateway's own restart, Phase B — needs that host's gateway process. When the
+gateway the lease holder manages has answered no probe for
+``GATEWAY_DOWN_OWNER_GRACE_S`` (healthz unreachable, not merely degraded), the
+orchestration cannot be executing anything: it is dead, or stuck where the
+controllers ahead of this one reap it. The lease then does not own the pause and
+the local-session check still decides — consulted, and still authoritative. The
+evidence is a host-local down-since marker maintained by the gateway-capability
+watchdog (``record_gateway_reachability``); it survives watchdog restarts, and a
+pure agent-runner never accumulates it (a runner cannot tell a gateway outage from
+a partition, so it keeps the conservative reading).
+
 **Why it had to be fixed here rather than downstream.** ``PauseController`` blocks
 with ``BlockScope.ALL``, so ``ops.manager`` short-circuits and the pin and code
 controllers never run on a paused host — the two that carry that same settle-hold
@@ -67,14 +80,18 @@ capability watchdogs run it.
 
 from __future__ import annotations
 
+import contextlib
 import logging
+import os
 import time
+from pathlib import Path
 
 from ops import cluster_session
 from ops.cluster import unpause_local_cluster
 from ops.controllers.base import BlockScope, ReconcileResult
 from shared import pause_owner, ui_update_state, updater_handoff
 from shared.cluster_lock import read_update_lease
+from shared.deploy_timing import GATEWAY_DOWN_OWNER_GRACE_S
 from shared.machine import MachineRole, machine_name
 from shared.platform import LockTimeoutError
 
@@ -93,6 +110,71 @@ _log = logging.getLogger("ops.controllers.stranded_pause")
 # watchdog round. Every second beyond that is a second `ops.manager` blocks this
 # host's whole roster on a pause nobody is coming back for.
 STRANDED_PAUSE_TIMEOUT_S = 120.0  # 2 min
+
+# The reachability-evidence grace (value, ordering and rationale live in the
+# clock lattice — see the module-level import of `GATEWAY_DOWN_OWNER_GRACE_S`).
+_GATEWAY_DOWN_MARKER = "gateway-down-since"
+
+
+def _gateway_down_marker_path() -> Path:
+    import shared.paths
+
+    return shared.paths.run_dir() / _GATEWAY_DOWN_MARKER
+
+
+def _probe_gateway_reachable() -> bool:
+    """Whether the gateway answers its health URL at all.
+
+    Any HTTP response (even a 503 — the process is alive but degraded) counts as
+    reachable: the question is "can the gateway-side orchestration still be
+    executing", and a process that answers can be driven. Only connection errors
+    and timeouts (the event-loop freeze shape) read as unreachable."""
+    import httpx
+
+    from shared.config import settings
+
+    try:
+        httpx.get(settings.services.gateway_health_url, timeout=2.0)
+    except httpx.HTTPError:
+        return False
+    return True
+
+
+def record_gateway_reachability() -> None:
+    """Maintain the host-local gateway-down-since marker.
+
+    Called by the pause controller each round on the gateway-capability watchdog.
+    Reachable clears the marker; unreachable stamps it once (the FIRST down round
+    is the evidence's anchor — a later probe keeps the original timestamp so the
+    grace bound measures the continuous outage, not the last failed probe).
+
+    Best-effort on both sides: an unwritable run dir must not break the tick, and
+    a missing marker reads as no evidence (the conservative, lease-owns path)."""
+    path = _gateway_down_marker_path()
+    if _probe_gateway_reachable():
+        with contextlib.suppress(OSError):
+            path.unlink(missing_ok=True)
+        return
+    with contextlib.suppress(OSError):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if path.exists():
+            return
+        tmp = path.with_name(f".{_GATEWAY_DOWN_MARKER}.tmp")
+        tmp.write_text(str(time.time()))
+        os.replace(tmp, path)  # noqa: PTH105 — explicit atomic replace injection seam
+
+
+def _gateway_down_seconds() -> float | None:
+    """How long the gateway has been unreachable, or None when there is no
+    evidence (marker absent, unreadable, or a backwards clock — all read as
+    no-evidence so the lease keeps owning the pause)."""
+    path = _gateway_down_marker_path()
+    try:
+        ts = float(path.read_text().strip())
+    except (OSError, ValueError):
+        return None
+    elapsed = time.time() - ts
+    return elapsed if elapsed >= 0 else None
 
 
 def is_paused() -> bool:
@@ -123,9 +205,15 @@ def is_paused() -> bool:
 
 
 def _stranded_pause_seconds() -> float | None:
-    """How long this host has been paused/converging (now - the posture row's
-    `updated_at`, written by the pause transition), or None when it is not
-    paused or the row cannot be read."""
+    """How long this host has been paused/converging, or None when it is not
+    paused or the row cannot be read.
+
+    The anchor is `paused_at` (set when the posture enters `paused`, preserved
+    through `converging`), NOT `updated_at`: every transition inside the pause
+    window bumps `updated_at`, including each updater-lease renewal — which is
+    what kept a stranded 2026-09-10 pause reading "fresh" for 122 rounds while
+    its owner was dead, so the owner check never ran (issue #2101). Rows from
+    before the `paused_at` column existed fall back to `updated_at`."""
     from shared.host_deploy_state import read
 
     try:
@@ -135,7 +223,8 @@ def _stranded_pause_seconds() -> float | None:
         return None
     if state is None or state.posture not in ("paused", "converging"):
         return None
-    return time.time() - state.updated_at.timestamp()
+    anchor = state.paused_at if state.paused_at is not None else state.updated_at
+    return time.time() - anchor.timestamp()
 
 
 def _pause_owner(
@@ -193,15 +282,25 @@ def _pause_owner(
             "names this host is unanswerable; deferring stranded-pause recovery"
         )
         return "unresolvable machine name"
-    if lease is not None and not awaited:
-        return f"a cluster update holds the lock ({lease.holder})"
-    if lease is not None:
+    if lease is not None and awaited:
         _log.warning(
             "[ops.pause] the deploy lease is a settle hold waiting for THIS host (%s) — nothing "
             "executes under it and it is the record that this pause lost its owner, so it does "
             "not own the pause; the local-session check still decides",
             lease.describe(),
         )
+    elif lease is not None:
+        down_s = _gateway_down_seconds()
+        if down_s is not None and down_s > GATEWAY_DOWN_OWNER_GRACE_S:
+            _log.warning(
+                "[ops.pause] the gateway has been unreachable for %.0fs (grace %.0fs) — the "
+                "lease holder's orchestration cannot be executing this pause, so the lease is "
+                "dead evidence; the local-session check still decides",
+                down_s,
+                GATEWAY_DOWN_OWNER_GRACE_S,
+            )
+        else:
+            return f"a cluster update holds the lock ({lease.holder})"
     try:
         live_session = cluster_session.live_orchestration_session()
     except Exception:
@@ -223,6 +322,18 @@ def _pause_owner(
         )
         return "unreadable orchestration session"
     return f"a local {orchestration} is in flight" if orchestration is not None else None
+
+
+def pause_owner_verdict(
+    handoff: updater_handoff.UpdaterHandoffSnapshot | None = None,
+) -> str | None:
+    """Public spelling of the pause owner determination.
+
+    The gateway healthcheck's respawn gate (issue #2101) asks the same question
+    this controller does, so the two share one reading: None = unowned, any
+    string = the owner that is still executing the transition.
+    """
+    return _pause_owner(handoff)
 
 
 def recover_stranded_pause() -> bool:
@@ -337,7 +448,11 @@ class PauseController:
     name = "pause"
     timeout_s: float | None = None
 
-    def reconcile(self, role: MachineRole) -> ReconcileResult:  # noqa: ARG002 — host-level, uniform Controller signature
+    def reconcile(self, role: MachineRole) -> ReconcileResult:
+        # The gateway-capability watchdog maintains the reachability evidence the
+        # owner determination consumes; a pure runner never accumulates it.
+        if role == "gateway":
+            record_gateway_reachability()
         if not is_paused():
             return ReconcileResult(dimension=self.name, blocks=BlockScope.NONE)
         if recover_stranded_pause():

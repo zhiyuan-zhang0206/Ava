@@ -221,6 +221,49 @@ def test_host_scoped_block_runs_nothing(monkeypatch: pytest.MonkeyPatch) -> None
     assert wd._checks_for_round("agent-runner", BlockScope.ALL) == []
 
 
+def test_pause_scoped_block_exempts_only_the_gateway_check(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A pause still suppresses every check except the gateway healthcheck, which
+    must keep probing (its respawn stays gated on the pause having no live owner).
+    Any other ALL-scoped block still runs nothing."""
+    roster = [
+        wd._Check("gateway", lambda: None, requires_db=True),
+        wd._Check("labeler", lambda: None, requires_db=True),
+        wd._Check("frontend", lambda: None, requires_db=False),
+    ]
+    monkeypatch.setattr(wd, "_checks_for_capability", lambda _role: roster)  # pyright: ignore[reportUnknownArgumentType]
+    exempt = wd._checks_for_round("gateway", BlockScope.ALL, "pause")
+    assert [c.name for c in exempt] == ["gateway"]
+
+
+def test_pause_scoped_block_on_a_runner_round_runs_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The gateway check does not exist on the agent-runner capability, so the
+    pause exemption is empty there — and the roster is not even built."""
+
+    def _unexpected(_role: str) -> list[wd._Check]:
+        raise AssertionError("a pause-blocked runner round must not build the roster")
+
+    monkeypatch.setattr(wd, "_checks_for_capability", _unexpected)
+    assert wd._checks_for_round("agent-runner", BlockScope.ALL, "pause") == []
+
+
+def test_all_block_from_other_dimensions_still_runs_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The exemption is exactly pause-scoped: an off-pin force-update or a spawned
+    restart still blocks the whole roster, gateway check included."""
+
+    def _unexpected(_role: str) -> list[wd._Check]:
+        raise AssertionError("a non-pause ALL block must not build the roster")
+
+    monkeypatch.setattr(wd, "_checks_for_capability", _unexpected)
+    assert wd._checks_for_round("gateway", BlockScope.ALL, "pin") == []
+    assert wd._checks_for_round("gateway", BlockScope.ALL) == []
+
+
 def test_unblocked_round_gets_the_full_roster(monkeypatch: pytest.MonkeyPatch) -> None:
     roster = [wd._Check("a", lambda: None, requires_db=True)]
     monkeypatch.setattr(wd, "_checks_for_capability", lambda _role: roster)  # pyright: ignore[reportUnknownArgumentType]
