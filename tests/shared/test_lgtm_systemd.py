@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import http.server
+import os
 import socket
 import subprocess
 import threading
@@ -11,6 +12,7 @@ import urllib.error
 import urllib.request
 from collections.abc import Generator
 from pathlib import Path
+from typing import cast
 
 import pytest
 import yaml
@@ -260,6 +262,57 @@ def test_systemctl_failure_is_not_reported_as_success(monkeypatch: pytest.Monkey
     monkeypatch.setattr(lgtm_systemd.subprocess, "run", failed)
     with pytest.raises(RuntimeError, match="user manager unavailable"):
         lgtm_systemd._systemctl("daemon-reload")
+
+
+def test_systemctl_passes_explicit_user_bus_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Minimal-env callers (cron @reboot, the scrubbed gate unit env) never
+    carry XDG_RUNTIME_DIR / DBUS_SESSION_BUS_ADDRESS; the seam fills both so
+    `systemctl --user` reaches the logind user manager (#2059)."""
+    monkeypatch.setattr(lgtm_systemd, "IS_LINUX", True)
+    monkeypatch.delenv("XDG_RUNTIME_DIR", raising=False)
+    monkeypatch.delenv("DBUS_SESSION_BUS_ADDRESS", raising=False)
+    captured: dict[str, str] = {}
+
+    def record(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        captured.update(cast(dict[str, str], kwargs["env"]))
+        return subprocess.CompletedProcess([str(arg) for arg in args], 0, "", "")
+
+    monkeypatch.setattr(lgtm_systemd.subprocess, "run", record)
+    lgtm_systemd._systemctl("daemon-reload")
+    runtime = f"/run/user/{os.getuid()}"
+    assert captured["XDG_RUNTIME_DIR"] == runtime
+    assert captured["DBUS_SESSION_BUS_ADDRESS"] == f"unix:path={runtime}/bus"
+
+
+def test_systemctl_bus_failure_raises_distinguishable_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A bus-connection failure raises UserBusUnavailable (still a
+    RuntimeError) so callers that keep a degraded verdict can tell it from
+    a genuine lifecycle failure."""
+    monkeypatch.setattr(lgtm_systemd, "IS_LINUX", True)
+
+    def no_bus(*args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(
+            [str(arg) for arg in args], 1, "", "Failed to connect to bus: No medium found"
+        )
+
+    monkeypatch.setattr(lgtm_systemd.subprocess, "run", no_bus)
+    assert issubclass(lgtm_systemd.UserBusUnavailableError, RuntimeError)
+    with pytest.raises(lgtm_systemd.UserBusUnavailableError, match="No medium found"):
+        lgtm_systemd._systemctl("show", "com.ava.loki.slug.service")
+
+    def other_failure(*args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(
+            [str(arg) for arg in args], 1, "", "some other systemctl failure"
+        )
+
+    monkeypatch.setattr(lgtm_systemd.subprocess, "run", other_failure)
+    with pytest.raises(RuntimeError, match="some other systemctl failure") as excinfo:
+        lgtm_systemd._systemctl("daemon-reload")
+    assert not isinstance(excinfo.value, lgtm_systemd.UserBusUnavailableError)
 
 
 def test_stop_removes_all_owned_units_without_touching_foreign_home(

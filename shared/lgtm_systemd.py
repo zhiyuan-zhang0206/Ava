@@ -7,6 +7,7 @@ No system services, foreign homes, or existing container deployments are changed
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import subprocess
 import tempfile
@@ -72,14 +73,52 @@ def render_unit(home: Path, name: str, command: Command) -> str:
     )
 
 
+class UserBusUnavailableError(RuntimeError):
+    """The user systemd manager cannot be reached from this process.
+
+    Raised instead of a plain RuntimeError so callers that can keep a
+    degraded verdict (the gateway watchdog healthcheck) can distinguish
+    "the bus is unreachable" from a genuine lifecycle failure.
+    """
+
+
+_BUS_UNAVAILABLE_MARKERS = ("Failed to connect to bus", "not been booted with systemd")
+
+
+def _user_bus_environment() -> dict[str, str]:
+    """Explicit user-bus environment for minimal-env callers.
+
+    The crontab `@reboot` line and the gate daemon's scrubbed unit env
+    (env --ignore-environment) both lack the logind runtime variables, so
+    `systemctl --user` fails with "Failed to connect to bus: No medium
+    found" (#2059). Fill them here — same values as
+    `cli/commands/_gate_systemd.py` — so the LGTM lifecycle never depends
+    on the caller's environment.
+    """
+    runtime = f"/run/user/{os.getuid()}"
+    return {
+        **os.environ,
+        "XDG_RUNTIME_DIR": runtime,
+        "DBUS_SESSION_BUS_ADDRESS": f"unix:path={runtime}/bus",
+    }
+
+
 def _systemctl(*args: str) -> subprocess.CompletedProcess[str]:
     if not IS_LINUX:
         raise RuntimeError("Native LGTM user systemd lifecycle requires Linux")
     result = subprocess.run(  # noqa: S603 — fixed user-manager command and owned unit identity
-        ["systemctl", "--user", *args], capture_output=True, text=True, check=False, timeout=45
+        ["systemctl", "--user", *args],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=45,
+        env=_user_bus_environment(),
     )
     if result.returncode:
-        raise RuntimeError(f"LGTM systemctl {' '.join(args)} failed: {result.stderr.strip()}")
+        message = f"LGTM systemctl {' '.join(args)} failed: {result.stderr.strip()}"
+        if any(marker in (result.stderr or "") for marker in _BUS_UNAVAILABLE_MARKERS):
+            raise UserBusUnavailableError(message)
+        raise RuntimeError(message)
     return result
 
 
