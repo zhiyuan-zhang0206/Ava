@@ -113,6 +113,21 @@ def test_gemini_3_8_flash_is_spawnable_again() -> None:
     assert resolve_available_model("gemini-3.8-flash") == "gemini-3.8-flash"
 
 
+def test_gemini_flash_lite_latest_registry_facts() -> None:
+    """The `latest` alias resolves to Gemini 3.5 Flash-Lite (ai.google.dev
+    models page + thinking guide, checked 2026-09-10): 1M window, March 2026
+    cutoff, the full thinking vocabulary with a `minimal` default, and the
+    multimodal matrix of the 3.x flash family."""
+    spec = MODELS["gemini-flash-lite-latest"]
+    assert spec.provider == "gemini"
+    assert spec.spawnable
+    assert spec.context_window == 1_048_576
+    assert spec.knowledge_cutoff == "2026-03"
+    assert spec.effort_levels == ("minimal", "low", "medium", "high")
+    assert spec.media_types == frozenset({"image", "pdf", "audio", "video"})
+    assert resolve_setting("reasoning_effort", model="gemini-flash-lite-latest") == "minimal"
+
+
 def test_superseded_chain_validation_rejects_self_link(monkeypatch: pytest.MonkeyPatch) -> None:
     """The import-time chain guard refuses a model that names itself as its
     own replacement (would hide it from the picker with nothing to show)."""
@@ -266,6 +281,7 @@ def test_image_media_types_match_the_verified_model_matrix() -> None:
         "gemini-3.8-flash",
         "gemini-3.7-flash",
         "gemini-3.5-flash",
+        "gemini-flash-lite-latest",
         "gemini-3.1-pro-preview",
         "gemini-2.5-pro",
         "gemini-2.5-flash",
