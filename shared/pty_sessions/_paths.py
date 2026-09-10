@@ -55,6 +55,13 @@ def record_path(name: str) -> Path:
     return pty_dir() / f"{name}.json"
 
 
+def records_lock_path() -> Path:
+    """The pty record lock — one mutex serializing every record/socket file
+    mutation (sweep unlinks, host bind + record write) across all session
+    names. Never unlinked: flock files must keep one inode while in use."""
+    return pty_dir() / ".records.lock"
+
+
 def socket_path(name: str) -> Path:
     """The session host's unix socket; ``$AVA_HOME/run/pty/<name>.sock``."""
     from shared.paths import run_dir

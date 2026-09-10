@@ -24,11 +24,9 @@ from __future__ import annotations
 
 import base64
 import contextlib
-import errno
 import fcntl
 import json
 import os
-import pty
 import re
 import select
 import shlex
@@ -47,17 +45,16 @@ import psutil
 
 from shared import session_log
 from shared.log import logger
-from shared.pty_sessions._paths import DEFAULT_COLS, DEFAULT_ROWS, err, ok, write_record
-from shared.session_record import SessionRecord, pid_starttime_ticks
+from shared.pty_sessions._paths import (
+    err,
+    ok,
+)
+from shared.session_record import SessionRecord
 
 # A pid is "the same process we launched" only if its start-time matches to
 # within this tolerance — guards against the OS recycling the pid onto an
 # unrelated process after ours exits (mirrors posixproc).
 _CREATE_TIME_TOLERANCE_S = 2.0
-
-# Sentinel for a child whose create_time could not be read (died at spawn —
-# the pid is at its most reusable moment): can never match a reused pid.
-_DEAD_CHILD_SENTINEL = -1.0
 
 # Graceful kill: SIGTERM to the shell's group, wait this long for the reader
 # to observe the exit before escalating to SIGKILL.
@@ -599,86 +596,6 @@ def _schedule_initial_command(session: PtySession, cmd: str) -> None:
     threading.Thread(target=_submit, daemon=True).start()
 
 
-def _socket_answers(path: Path) -> bool:
-    """True when a live host answers an OK ping on `path`.
-
-    Strict: the reply must parse as a successful ping — a dying host answers
-    err 3 (see ``_op_ping``) and must NOT count as an owner, and random bytes
-    from something else on the path must not either (P2 review).
-    """
-    with (
-        contextlib.suppress(OSError, ValueError),
-        socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as probe,
-    ):
-        probe.settimeout(2.0)
-        probe.connect(str(path))
-        probe.sendall(b'{"op": "ping"}\n')
-        raw = probe.recv(65536)
-        resp = json.loads(raw.split(b"\n", 1)[0].decode("utf-8"))
-        if not isinstance(resp, dict):
-            return False
-        return bool(cast("dict[str, Any]", resp).get("ok"))
-    return False
-
-
-def _bind_session_socket(sock_file: Path, name: str) -> socket.socket | None:
-    """Bind the session socket, bind-first (P2 TOCTOU review).
-
-    Try the bind before any probe: two concurrent spawns then serialize on
-    the kernel's EADDRINUSE instead of racing a probe→unlink→bind window
-    (where each could unlink the other's freshly bound socket). Only the
-    loser of the bind probes the path — a live answer means the name is
-    genuinely owned; a dead one means a stale file from a crashed host,
-    unlinked and re-bound (one retry: a second EADDRINUSE means a live race
-    winner took it meanwhile).
-    """
-    for attempt in (0, 1):
-        server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        try:
-            server.bind(str(sock_file))
-            sock_file.chmod(0o600)
-            server.listen(32)
-        except OSError as exc:
-            server.close()
-            if exc.errno != errno.EADDRINUSE or attempt == 1:
-                sys.stderr.write(f"cannot bind session socket {sock_file}: {exc}\n")
-                return None
-            if _socket_answers(sock_file):
-                sys.stderr.write(f"a live host already owns session {name!r}\n")
-                return None
-            with contextlib.suppress(OSError):
-                sock_file.unlink()  # stale socket from a crashed host
-            continue
-        return server
-    return None
-
-
-def _fork_shell(cwd: str, env: dict[str, str], cols: int, rows: int) -> tuple[int, int]:
-    """pty.fork the login shell; returns (pid, master_fd). Child never returns."""
-    pid, master = pty.fork()
-    if pid == 0:  # child: the login shell (the pane shape)
-        try:
-            _set_winsz(0, cols, rows)  # fd 0 = the pty slave
-            os.chdir(cwd)
-            # Ignored dispositions survive exec — reset them here or the
-            # shell's jobs never receive stop's per-job TERM (#2045).
-            for sig in (signal.SIGHUP, signal.SIGTERM, signal.SIGPIPE):
-                signal.signal(sig, signal.SIG_DFL)
-            # The host inherits the CREATING AGENT's env (spawned via
-            # _reparent); a service-profile marker must never leak into a
-            # shell child (`import ava` under a runner profile fails fast,
-            # Task #856). Dropped BEFORE the envfile overlay so an explicit
-            # caller-supplied marker rides.
-            os.environ.pop("AVA_PROCESS_PROFILE", None)
-            os.environ.update(env)  # envfile overlay, never argv
-            os.environ.setdefault("TERM", "xterm-256color")
-            os.environ.setdefault("LANG", "en_US.UTF-8")
-            os.execvp("/bin/bash", ["/bin/bash", "-l", "-i"])  # noqa: S606 — the pty child execs the login shell directly; a wrapper would defeat the pty
-        except BaseException:
-            os._exit(127)
-    return pid, master
-
-
 def main(argv: list[str] | None = None) -> int:
     """Bring up one session, serve it until it dies."""
     args = list(sys.argv[1:] if argv is None else argv)
@@ -739,62 +656,14 @@ def main(argv: list[str] | None = None) -> int:
         threading.Thread(target=_handle_conn, args=(conn, session), daemon=True).start()
 
 
-def _bring_up(
-    name: str,
-    cwd: str,
-    env: dict[str, str],
-    cmd: str | None,
-    rec_path: Path,
-    sock_file: Path,
-    transcript: Path,
-    generation: str | None,
-) -> tuple[socket.socket, PtySession] | int:
-    """Bind the session socket, fork the shell, persist the record, start the
-    reader. Returns (server, session), or an exit code on failure."""
-    server = _bind_session_socket(sock_file, name)
-    if server is None:
-        return 1
-    cols, rows = DEFAULT_COLS, DEFAULT_ROWS
-    try:
-        pid, master = _fork_shell(cwd, env, cols, rows)
-    except OSError as exc:
-        # EAGAIN = the box hit kern.tty.ptmx_max (511 on macOS) — fail the
-        # create cleanly; the spawner reports this log.
-        sys.stderr.write(f"cannot allocate pty for {name}: {exc}\n")
-        with contextlib.suppress(OSError):
-            sock_file.unlink()
-        return 1
-    _set_winsz(master, cols, rows)
-    try:
-        create_time = psutil.Process(pid).create_time()
-    except psutil.NoSuchProcess:
-        create_time = _DEAD_CHILD_SENTINEL
-    starttime = None if create_time == _DEAD_CHILD_SENTINEL else pid_starttime_ticks(pid)
-    now = time.time()
-    record = SessionRecord(pid, create_time, "/bin/bash -l -i", cwd, now, starttime, generation)
-    session = PtySession(name, pid, master, cols, rows, record, rec_path, transcript)
-    write_record(
-        rec_path,
-        record,
-        host_pid=os.getpid(),
-        host_create_time=_own_create_time(),
-        host_starttime=pid_starttime_ticks(os.getpid()),
-    )
-    threading.Thread(target=_reader_loop, args=(session, sock_file), daemon=True).start()
-    logger.info(
-        "pty session started: {name} (pid={pid}, host={host})", name=name, pid=pid, host=os.getpid()
-    )
-    if cmd is not None:
-        _schedule_initial_command(session, cmd)
-    return server, session
+# `python -m shared.pty_sessions.host` executes this file as __main__ without
+# registering it under its canonical name; launch.py imports the host module
+# lazily, so register the running module to keep exactly one instance.
+sys.modules.setdefault("shared.pty_sessions.host", sys.modules[__name__])
 
-
-def _own_create_time() -> float:
-    try:
-        return psutil.Process(os.getpid()).create_time()
-    except psutil.Error:  # fail-fast-ok: identity extras degrade, liveness key is the shell
-        return 0.0
-
+from shared.pty_sessions.launch import (  # noqa: E402 — bring-up lives in launch.py (host.py split at the 800-line ceiling, issue #2063)
+    _bring_up,
+)
 
 if __name__ == "__main__":
     raise SystemExit(main())
