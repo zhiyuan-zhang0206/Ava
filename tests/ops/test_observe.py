@@ -15,7 +15,10 @@ def test_probe_set_gateway_classifies_signal_types() -> None:
     # The gateway's `/api/health` carries `home`, so it is probed for identity,
     # not liveness — a 2xx from another cluster's gateway is not this one being up.
     assert views["gateway"].kind == "identity"
-    assert views["frontend"].kind == "http"  # Next.js — 2xx is all the endpoint has
+    # Next.js serves no /healthz it can sign, so the frontend is identified
+    # by process ownership instead — the app-port listener must belong to the
+    # current frontend session (issue #2123).
+    assert views["frontend"].kind == "identity"
     assert views["milvus"].kind == "tcp"  # gRPC — TCP-connect probe, not curl
     assert views["gateway-watchdog"].kind == "pid"  # pidfile only, no HTTP/TCP
     assert views["gateway"].healthcheck_module == "services.healthchecks.gateway"
@@ -68,9 +71,15 @@ def test_observe_runs_probe_for_active_service(monkeypatch: pytest.MonkeyPatch) 
         "shared.daemon_health._probe_daemon",
         lambda *_a, **_kw: DaemonProbe.down("x"),  # pyright: ignore[reportUnknownArgumentType]
     )
+    # The frontend identity probe owns the app-port listener question; stubbing
+    # HTTP liveness alone must not make it look alive.
+    monkeypatch.setattr(
+        "ops.roster._frontend_probe",
+        lambda: DaemonProbe.up("frontend session owns the listener"),
+    )
     statuses = {s.session: s for s in observe.observe_services(frozenset({"gateway"}))}
     assert statuses["frontend"].alive is True
-    assert statuses["frontend"].kind == "http"
+    assert statuses["frontend"].kind == "identity"
 
 
 def test_observe_asks_identity_where_the_endpoint_carries_one(
@@ -143,10 +152,14 @@ def test_observe_leaves_detail_empty_on_a_healthy_service(monkeypatch: pytest.Mo
         lambda *_a, **_kw: DaemonProbe.up("ok"),  # pyright: ignore[reportUnknownArgumentType]
     )
     monkeypatch.setattr("shared.daemon_health._probe_home", lambda *_a, **_kw: DaemonProbe.up("ok"))  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(
+        "ops.roster._frontend_probe",
+        lambda: DaemonProbe.up("frontend session owns the listener"),
+    )
     statuses = {s.session: s for s in observe.observe_services(frozenset({"gateway"}))}
     assert statuses["gateway"].alive is True
     assert statuses["gateway"].detail == ""
-    assert statuses["frontend"].detail == ""  # liveness-only, and it passed
+    assert statuses["frontend"].detail == ""  # identity-backed, and it passed
 
 
 def test_observe_liveness_only_failure_says_which_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -170,6 +183,10 @@ def test_observe_liveness_only_failure_says_which_endpoint(monkeypatch: pytest.M
         "shared.daemon_health._probe_home",
         lambda *_a, **_kw: DaemonProbe.down("x"),  # pyright: ignore[reportUnknownArgumentType]
     )
+    monkeypatch.setattr(
+        "ops.roster._frontend_probe",
+        lambda: DaemonProbe.down("no frontend listener on the app port"),
+    )
     statuses = {s.session: s for s in observe.observe_services(frozenset({"gateway"}))}
-    assert "no 2xx/3xx from" in statuses["frontend"].detail
+    assert "no frontend listener" in statuses["frontend"].detail
     assert "nothing accepting on port" in statuses["milvus"].detail

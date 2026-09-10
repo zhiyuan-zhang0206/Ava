@@ -19,23 +19,32 @@ import subprocess
 import sys
 from pathlib import Path
 
+import psutil
+
 from shared.cluster import frontend_service_cmd, session_name
 from shared.config import settings
+from shared.daemon_health import DaemonProbe
 from shared.log import init_gateway_process
 from shared.service_respawn import respawn_service
 
 _log = logging.getLogger("services.healthchecks.frontend")
 
 
-def _app_url() -> str:
-    """The Next.js app URL the healthcheck probes and respawns — the `app`
-    port (AVA_APP_PORT, default entry+1), NOT the entry port: the entry is
-    owned by the always-up gate, which answers 200 even while the app is
-    down. Probing the entry would make a dead app look alive."""
+def _app_port() -> int:
+    """The Next.js app port (AVA_APP_PORT, default entry+1) — NOT the entry
+    port: the entry is owned by the always-up gate, which answers 200 even
+    while the app is down. Probing the entry would make a dead app look
+    alive, and probing a port answered by an old orphan would make it look
+    alive too (issue #2123)."""
     from urllib.parse import urlsplit
 
     entry = urlsplit(settings.services.frontend_healthcheck_url).port or 3000
-    return f"http://localhost:{settings.services.app_port or (entry + 1)}"
+    return settings.services.app_port or (entry + 1)
+
+
+def _app_url() -> str:
+    """The Next.js app URL the healthcheck probes and respawns."""
+    return f"http://localhost:{_app_port()}"
 
 
 _FRONTEND_URL = _app_url()
@@ -46,8 +55,40 @@ def _session_name() -> str:
     return session_name("frontend")
 
 
-def _is_alive() -> bool:
-    """curl -fs HEAD probe; `-f` makes non-2xx exit non-zero, `-s` is silent."""
+def _listener_pids(port: int) -> set[int]:
+    """PIDs of the processes with a LISTEN socket on `port`."""
+    pids: set[int] = set()
+    for proc in psutil.process_iter():
+        try:
+            connections = proc.net_connections(kind="tcp")
+        except (psutil.AccessDenied, psutil.NoSuchProcess):
+            continue
+        for conn in connections:
+            if conn.status == psutil.CONN_LISTEN and conn.laddr.port == port:
+                pids.add(proc.pid)
+    return pids
+
+
+def _session_owns_listener(port: int) -> bool:
+    """Whether the recorded frontend session owns a LISTEN socket on `port`.
+
+    A bare HTTP 200 is not frontend health: the answering process must be the
+    current session's leader or one of its descendants (birth-validated). An
+    old orphan that answers the port after its own session record is gone
+    fails this check (issue #2123).
+    """
+    from shared.paths import run_dir
+    from shared.proc_tree import session_owns_pids
+    from shared.session_record import SessionRecord
+
+    record = SessionRecord.read(run_dir() / "sessions" / f"{_session_name()}.json")
+    if record is None:
+        return False
+    return session_owns_pids(record, _listener_pids(port))
+
+
+def _http_ok() -> bool:
+    """curl -fs probe; `-f` makes non-2xx exit non-zero, `-s` is silent."""
     try:
         result = subprocess.run(
             ["curl", "-fs", "-o", "/dev/null", _FRONTEND_URL],
@@ -58,6 +99,34 @@ def _is_alive() -> bool:
     except (FileNotFoundError, subprocess.TimeoutExpired):
         return False
     return result.returncode == 0
+
+
+def _is_alive() -> bool:
+    """Identity-bound liveness: 2xx AND the answering listener belongs to the
+    current frontend session. An anonymous 200 (old orphan, gate proxy) does
+    not count."""
+    return _http_ok() and _session_owns_listener(_app_port())
+
+
+def probe_frontend() -> DaemonProbe:
+    """The `ava status` / start-path identity probe for the frontend.
+
+    Same identity question the watchdog asks, with the verdict granularity a
+    human reading a status row needs: ALIVE only when the session owns the
+    app-port listener and it answers 2xx; PORT_TAKEN when the port is answered
+    by something outside the current session (an old orphan — respawn cannot
+    evict it); DOWN otherwise.
+    """
+    port = _app_port()
+    listeners = sorted(_listener_pids(port))
+    if _is_alive():
+        return DaemonProbe.up(f"frontend session owns the {port} listener and it answers 2xx")
+    if listeners:
+        return DaemonProbe.port_taken(
+            f"port {port} is answered by pid(s) {listeners} outside the current "
+            "frontend session — an old orphan's 200 is not frontend health"
+        )
+    return DaemonProbe.down(f"no frontend listener on {port}")
 
 
 def _session_exists() -> bool:
@@ -142,8 +211,23 @@ def main() -> None:
     # accepted.
     if _session_exists():
         _log.info(
-            "[frontend healthcheck] session present but curl unreachable, "
+            "[frontend healthcheck] session present but app not answering, "
             "assume build / startup in progress, skip restart"
+        )
+        return
+
+    # No session AND the app port is answered: an orphan outside any live
+    # session (issue #2123). Respawning cannot evict it — the new session's
+    # `next start` would walk into EADDRINUSE and die, restarting this loop
+    # forever. Refuse loudly; the operator reaps the orphan.
+    listeners = _listener_pids(_app_port())
+    if listeners:
+        _log.error(
+            "[frontend healthcheck] app port %s is answered by pid(s) %s outside "
+            "the frontend session — refusing to respawn into an occupied port; "
+            "reap the orphan first",
+            _app_port(),
+            sorted(listeners),
         )
         return
 

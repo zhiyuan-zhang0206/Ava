@@ -207,6 +207,10 @@ def new_session(
         starttime = None
     else:
         starttime = pid_starttime_ticks(child_pid)
+    try:
+        pgid = os.getpgid(child_pid)
+    except (ProcessLookupError, OSError):
+        pgid = None
     SessionRecord(
         pid=child_pid,
         create_time=create_time,
@@ -214,6 +218,7 @@ def new_session(
         cwd=str(cwd),
         started_at=time.time(),
         starttime=starttime,
+        pgid=pgid,
     ).write(_record_path(name))
     return True
 
@@ -293,8 +298,8 @@ def _group_empty(pgid: int | None) -> bool:
         os.killpg(pgid, 0)
     except ProcessLookupError:
         return True
-    except OSError:
-        return False  # exists but un-signallable — treat as occupied
+    except OSError:  # fail-fast-ok: macOS EPERM for a zombie-only group falls through to the member scan below (the authoritative reading)
+        pass
     for process in psutil.process_iter():
         try:
             if os.getpgid(process.pid) == pgid and process.status() != psutil.STATUS_ZOMBIE:
@@ -422,9 +427,21 @@ def session_started_at(name: str) -> float | None:
 
 
 def _record_reapable(rec: SessionRecord) -> tuple[bool, str]:
-    """Whether a failed liveness check proves a record can be discarded."""
+    """Whether a failed liveness check proves a record can be discarded.
+
+    A dead leader whose recorded process group still has live members keeps
+    its record: the group occupancy is the only durable proof that the
+    surviving descendants belong to this session (issue #2123). Deleting the
+    record here would let a later stop silently certify a unit whose port a
+    surviving orphan still answers on.
+    """
     if _process_for_record(rec) is not None:
         return False, "process is still live"
+    if rec.pgid is not None and not _group_empty(rec.pgid):
+        return False, (
+            f"leader is gone but process group {rec.pgid} still has live members "
+            "(surviving descendants keep the ownership record)"
+        )
     try:
         proc = psutil.Process(rec.pid)
         if not proc.is_running() or not _process_is_live(proc):
@@ -441,7 +458,10 @@ def _record_reapable(rec: SessionRecord) -> tuple[bool, str]:
 def list_sessions(prefix: str = "") -> list[str]:
     """Names of all live sessions, optionally filtered by `prefix`.
 
-    Reaps records whose process is gone so the listing reflects reality.
+    Reaps records whose process is gone so the listing reflects reality —
+    except a record whose recorded process group still has live members: that
+    name stays listed because its surviving descendants are still owned and a
+    stop must converge them, not lose them (issue #2123).
     """
     out: list[str] = []
     for rec_file in _sessions_dir().glob("*.json"):
@@ -461,6 +481,12 @@ def list_sessions(prefix: str = "") -> list[str]:
                     name=name,
                     why=why,
                 )
+                # Only the occupied-group case is listed: it carries the
+                # durable ownership proof a stop must converge. A live pid
+                # with an uncertain legacy identity stays invisible — nothing
+                # provable may be claimed from it.
+                if rec.pgid is not None and not _group_empty(rec.pgid):
+                    out.append(name)
                 continue
             rec_file.unlink(missing_ok=True)
     return out
