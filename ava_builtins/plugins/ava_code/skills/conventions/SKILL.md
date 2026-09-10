@@ -43,5 +43,8 @@ Benchmark on this repo:
 - ✅ `ava.shell.run("rg -n 'pattern' --type py")` — limit to Python files
 - ❌ `ava.shell.run("grep -rn 'pattern' . --include='*.py' | grep -v ...")` — slow, times out
 
-`rg` is present on a standard Ava machine. If on a machine without it, fall back to
+`rg` is present on a standard Ava machine (verified on every live agent machine
+2026-09-11: macmini / company-mini / macbook-air / company-air = Homebrew `/opt/homebrew/bin/rg`;
+wsl = apt `/usr/bin/rg`). If a machine is missing it, install it the same way first,
+or fall back to
 `grep -rn --exclude-dir=.worktrees --exclude-dir=.venv --exclude-dir=node_modules`.
