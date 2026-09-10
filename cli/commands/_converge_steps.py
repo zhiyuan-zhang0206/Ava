@@ -291,7 +291,19 @@ def _backfill_health_port_keys_step(ctx: ConvergeCtx) -> None:
     and written under the env lock, exactly as enroll would have written them.
     A legacy unit's fixed 8102-8111 pins are not offset-consistent, so it is
     never touched; a complete key set is a no-op. Idempotent by construction.
+
+    Values are read through the dotenv parser (the same decode
+    `_ensure_redis_url_identity_step` uses): a quoted port or a value with a
+    trailing comment must read as the port it denotes — the raw text kept the
+    quotes, `int()` rejected it downstream, and the whole backfill was silently
+    suppressed (#2704). A value the parser cannot decode makes this run write
+    nothing at all (never mis-write) and is reported on stderr instead of being
+    silently dropped.
     """
+    from io import StringIO
+
+    from dotenv import dotenv_values
+
     from shared.env_registry import (
         backfill_missing_health_ports,
         health_port_env_aliases,
@@ -303,10 +315,29 @@ def _backfill_health_port_keys_step(ctx: ConvergeCtx) -> None:
         return
     wanted = set(health_port_env_aliases().values())
     existing: dict[str, str] = {}
+    undecodable: list[str] = []
     for line in env_path.read_text().splitlines():
-        key, sep, value = line.partition("=")
-        if sep and key.strip() in wanted:
-            existing[key.strip()] = value.strip()
+        key, sep, _ = line.partition("=")
+        key = key.strip()
+        if not sep or key not in wanted:
+            continue
+        # Decode through the dotenv parser so a quoted port (or one carrying a
+        # trailing comment) reads as the port it denotes — not as the raw text
+        # `int()` rejects downstream (#2704, same class as the #2046 read).
+        decoded = dotenv_values(stream=StringIO(line), interpolate=False).get(key)
+        if decoded is None:
+            undecodable.append(key)
+        else:
+            existing[key] = decoded.strip()
+    if undecodable:
+        # A value the parser cannot decode leaves the file byte-identical (no
+        # key is rewritten) and is reported here — never a silent no-op.
+        print(
+            "  · health-port backfill skipped: cannot decode the value of "
+            + ", ".join(sorted(undecodable)),
+            file=sys.stderr,
+        )
+        return
     missing = backfill_missing_health_ports(existing)
     if not missing:
         return
