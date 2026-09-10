@@ -879,6 +879,40 @@ def test_cmd_restart_records_its_full_wall_time_as_an_updater_stage(
     assert seen[0] == "restart"
 
 
+def test_cmd_restart_finishes_the_journal_only_when_it_owns_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An outer operation's still-running journal is never closed by the nested
+    restart — the owns_journal guard _temporary_stop keeps (task #2898)."""
+    from shared import lifecycle_status
+
+    monkeypatch.setattr(_cli, "_preflight_probes", lambda: 0)
+    monkeypatch.setattr(_cli, "_do_stop", lambda *_args, **_kwargs: 0)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_cli, "_cmd_start_body", lambda **_kwargs: 0)  # pyright: ignore[reportUnknownArgumentType]
+    finished: list[int] = []
+    monkeypatch.setattr(
+        lifecycle_status,
+        "finish",
+        lambda rc, **_kwargs: finished.append(rc),  # pyright: ignore[reportUnknownArgumentType]
+    )
+
+    monkeypatch.setattr(
+        lifecycle_status,
+        "begin",
+        lambda _operation, **_kwargs: False,  # pyright: ignore[reportUnknownArgumentType]
+    )
+    assert _cli.cmd_restart() == 0
+    assert finished == []  # the outer operation still owns the journal
+
+    monkeypatch.setattr(
+        lifecycle_status,
+        "begin",
+        lambda _operation, **_kwargs: True,  # pyright: ignore[reportUnknownArgumentType]
+    )
+    assert _cli.cmd_restart() == 0
+    assert finished == [0]
+
+
 def test_cmd_restart_short_circuits_on_stop_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     """If stop returns non-zero, cmd_restart propagates without calling start."""
     start_called: list[bool] = []

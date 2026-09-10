@@ -10,6 +10,12 @@ the outcome stays readable after the process is gone (issue #2123).
 
 Writers never fail the operation they journal: a journal write failure is
 reported on stderr and the stop/restart proceeds.
+
+Durability boundary: writes are atomic (temp file + rename) but never
+fsynced. The journal exists to outlive its WRITER PROCESS — a kill or an
+outer timeout leaves the page cache intact, so the file stays readable — not
+to survive a machine crash: a power loss may lose the last write, which this
+diagnostic journal accepts instead of paying an fsync on every phase.
 """
 
 from __future__ import annotations
@@ -25,6 +31,8 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, cast
 
+import psutil
+
 from shared.log import logger
 from shared.paths import run_dir
 
@@ -38,6 +46,20 @@ class LifecyclePhase:
 
 
 @dataclass
+class ResumedFrom:
+    """Identity of the finished run whose journal this operation took over.
+
+    The previous writer's process is gone (the cut-off this journal exists
+    for): `begin` refreshed the journal's pid and carried the dead run's
+    phase timeline forward, recording the superseded identity here.
+    """
+
+    pid: int
+    operation: str
+    started_at: float
+
+
+@dataclass
 class LifecycleOp:
     operation: str
     pid: int
@@ -46,6 +68,7 @@ class LifecycleOp:
     phases: list[LifecyclePhase] = field(default_factory=list[LifecyclePhase])
     complete: bool = False
     result: dict[str, Any] | None = None
+    resumed_from: ResumedFrom | None = None
 
 
 def _path() -> Path:
@@ -70,17 +93,56 @@ def _write(op: LifecycleOp) -> None:
         logger.warning("lifecycle status journal write failed: {}", exc)
 
 
+def _writer_alive(op: LifecycleOp) -> bool:
+    """Whether `op`'s writer process can still be recording into the journal.
+
+    A zombie counts as dead: it has finished executing and can never write
+    another phase. An unreadable pid (AccessDenied) counts as alive — the
+    conservative reading, so a possibly-live outer operation's journal is
+    kept instead of being clobbered.
+    """
+    try:
+        proc = psutil.Process(op.pid)
+        return proc.is_running() and proc.status() != psutil.STATUS_ZOMBIE
+    except psutil.NoSuchProcess:
+        return False
+    except (psutil.AccessDenied, OSError):
+        return True
+
+
 def begin(operation: str, *, deadline: float | None = None) -> bool:
     """Start journaling `operation` (pause / stop / restart).
 
-    Returns True when this call OWNS the journal: it either started a fresh
-    one or replaced a completed one. An outer operation's still-running
+    Returns True when this call OWNS the journal: it started a fresh one,
+    replaced a completed one, or took over an unfinished one whose writer is
+    gone. A takeover refreshes the journal's pid to this process, keeps the
+    dead run's phase timeline, and names the superseded writer in
+    `resumed_from` — the journal must never keep reporting a dead pid as its
+    current operation (task #2898). An outer operation's still-running
     journal (a restart wrapping a stop leg) is kept — the inner caller then
     records phases into it but never begins or finishes it.
+
+    Boundary: ownership is judged by pid liveness alone. A stale journal
+    whose pid a later process recycled reads as still-running and is not
+    taken over — the conservative direction.
     """
     op = read()
     if op is not None and not op.complete:
-        return False
+        if _writer_alive(op):
+            return False
+        _write(
+            LifecycleOp(
+                operation=operation,
+                pid=os.getpid(),
+                started_at=time.monotonic(),
+                deadline=deadline,
+                phases=op.phases,
+                resumed_from=ResumedFrom(
+                    pid=op.pid, operation=op.operation, started_at=op.started_at
+                ),
+            )
+        )
+        return True
     _write(
         LifecycleOp(
             operation=operation,
@@ -185,6 +247,21 @@ def read() -> LifecycleOp | None:
         # types) is as unreadable as a corrupt one: readers on the
         # stop/pause/restart path must see "absent", never a raise.
         return None
+    resumed_from: ResumedFrom | None = None
+    raw_resumed = data.get("resumed_from")
+    if isinstance(raw_resumed, dict):
+        entry = cast("dict[str, object]", raw_resumed)
+        prev_pid = entry.get("pid")
+        prev_operation = entry.get("operation")
+        prev_started = entry.get("started_at")
+        if (
+            isinstance(prev_pid, int)
+            and isinstance(prev_operation, str)
+            and isinstance(prev_started, (int, float))
+        ):
+            resumed_from = ResumedFrom(
+                pid=prev_pid, operation=prev_operation, started_at=float(prev_started)
+            )
     return LifecycleOp(
         operation=data["operation"],
         pid=pid,
@@ -193,6 +270,7 @@ def read() -> LifecycleOp | None:
         phases=phases,
         complete=bool(data.get("complete", False)),
         result=data.get("result"),
+        resumed_from=resumed_from,
     )
 
 

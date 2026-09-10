@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -259,3 +260,33 @@ def test_main_respawns_when_the_port_is_free(monkeypatch: pytest.MonkeyPatch) ->
     )
     hc.main()
     assert calls["restart"] == 1
+
+
+def test_listener_pids_finds_the_real_socket_owner() -> None:
+    # QA round-1 (#2898): every other test here monkeypatches _listener_pids,
+    # so the psutil scan itself was never exercised. A real bound-and-listening
+    # socket must resolve to the pid that owns it — and stop resolving once
+    # that socket is gone.
+    child_code = (
+        "import socket,time;"
+        "sock=socket.socket();"
+        "sock.bind(('127.0.0.1',0));"
+        "sock.listen(1);"
+        "print(sock.getsockname()[1],flush=True);"
+        "time.sleep(60)"
+    )
+    child = subprocess.Popen(  # noqa: S603 — test-owned Python and fixed fixture script
+        [sys.executable, "-u", "-c", child_code],
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        assert child.stdout is not None
+        port = int(child.stdout.readline().strip())
+        assert hc._listener_pids(port) == {child.pid}
+    finally:
+        child.kill()
+        child.wait(timeout=5)
+        if child.stdout is not None:
+            child.stdout.close()
+    assert hc._listener_pids(port) == set()

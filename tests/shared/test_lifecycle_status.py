@@ -8,9 +8,13 @@ when the operation fails or the process is cut off.
 from __future__ import annotations
 
 import json
+import os
+import subprocess
+import sys
 import time
 from pathlib import Path
 
+import psutil
 import pytest
 
 from shared import lifecycle_status as journal
@@ -127,3 +131,79 @@ def test_phase_without_begin_still_journals(home: Path) -> None:
     assert op is not None
     assert op.operation == "unknown"
     assert [p.name for p in op.phases] == ["mystery"]
+
+
+def _reaped_pid() -> int:
+    """A pid whose process has exited and been reaped (a dead journal writer)."""
+    child = subprocess.Popen([sys.executable, "-c", "pass"])
+    assert child.wait(timeout=30) == 0
+    return child.pid
+
+
+def _op_with_pid(pid: int) -> journal.LifecycleOp:
+    return journal.LifecycleOp(operation="pause", pid=pid, started_at=0.0, deadline=None)
+
+
+def test_begin_takes_over_a_dead_writers_journal(home: Path) -> None:
+    # The cut-off this journal exists for: a rerun must not keep writing under
+    # the dead run's pid. begin() takes the journal over — refreshing the pid,
+    # carrying the dead run's phase timeline forward, and recording the
+    # superseded identity (task #2898).
+    journal.begin("restart")
+    with journal.phase("stop"):
+        pass
+    raw = json.loads(journal.status_path().read_text())
+    raw["pid"] = _reaped_pid()  # simulate the writer dying mid-operation
+    journal.status_path().write_text(json.dumps(raw))
+
+    assert journal.begin("restart") is True
+    op = journal.read()
+    assert op is not None
+    assert op.operation == "restart" and op.complete is False
+    assert op.pid == os.getpid()
+    assert op.resumed_from is not None
+    assert op.resumed_from.pid == raw["pid"]
+    assert op.resumed_from.operation == "restart"
+    assert [p.name for p in op.phases] == ["stop"]  # the dead run's timeline survives
+
+
+def test_writer_alive_tracks_pid_state(home: Path) -> None:
+    assert journal._writer_alive(_op_with_pid(os.getpid())) is True
+    assert journal._writer_alive(_op_with_pid(_reaped_pid())) is False
+
+    # A zombie has finished executing and can never write again — but it still
+    # holds the pid, so a liveness check that misses it would block takeover.
+    if sys.platform == "win32":
+        return
+    zombie = subprocess.Popen([sys.executable, "-c", "pass"])
+    try:
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline:
+            if psutil.Process(zombie.pid).status() == psutil.STATUS_ZOMBIE:
+                break
+            time.sleep(0.01)
+        assert psutil.Process(zombie.pid).status() == psutil.STATUS_ZOMBIE
+        assert journal._writer_alive(_op_with_pid(zombie.pid)) is False
+    finally:
+        zombie.wait(timeout=30)
+
+
+def test_journal_write_failure_never_breaks_the_operation(
+    home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    loguru_records: list[dict[str, object]],
+) -> None:
+    # QA round-1 (#2898): the journal is best-effort by contract — a failing
+    # write warns and the stop/restart proceeds. A parent that is a regular
+    # file makes every mkdir inside _write fail.
+    blocked = home / "blocked"
+    blocked.write_text("not a directory")
+    monkeypatch.setattr(journal, "_path", lambda: blocked / "lifecycle-op.json")
+
+    journal.begin("pause")
+    with journal.phase("drain"):
+        pass
+    journal.finish(0)
+
+    assert journal.read() is None
+    assert any("journal write failed" in str(record["message"]) for record in loguru_records)
