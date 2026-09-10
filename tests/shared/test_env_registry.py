@@ -17,6 +17,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 # Ensure settings-lite so we can import config without a real .env
 os.environ["AVA_CONFIG_FETCH"] = (
     "skip"  # assignment, not setdefault: a setdefault would silently keep an inherited value (the login-shell .env leak class) instead of pinning settings-lite
@@ -76,6 +78,44 @@ class TestScopeDerivationRules:
         from shared.env_registry import HOST_PASSTHROUGH_KEYS
 
         assert frozenset({"DISPLAY", "WAYLAND_DISPLAY", "HOME"}) == HOST_PASSTHROUGH_KEYS
+
+    def test_child_env_carries_the_machine_network_proxy_configuration(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Issue #2095: the machine's proxy configuration is ambient host config —
+        the egress a building child (`npm run build` fetching Google Fonts for
+        next/font) cannot re-source itself — so every role's child env carries it,
+        in both spellings (a shell exports HTTP(S)_PROXY; npm/node/curl read the
+        lowercase set), non-empty only (an empty ALL_PROXY means "direct")."""
+        from shared.env_registry import NETWORK_PROXY_KEYS, child_env, network_proxy_configured
+
+        assert {
+            "HTTP_PROXY",
+            "HTTPS_PROXY",
+            "ALL_PROXY",
+            "NO_PROXY",
+            "http_proxy",
+            "https_proxy",
+            "all_proxy",
+            "no_proxy",
+        } == NETWORK_PROXY_KEYS
+        for key in NETWORK_PROXY_KEYS:
+            monkeypatch.delenv(key, raising=False)
+        assert network_proxy_configured() is False
+        for role in ("gateway", "runner", "agent"):
+            assert not (NETWORK_PROXY_KEYS & set(child_env(role, "posix")))
+        monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:7897")
+        monkeypatch.setenv("no_proxy", "localhost,127.0.0.1")
+        monkeypatch.setenv("ALL_PROXY", "")
+        # The family's single reader (the Feishu ws handshake asks it): any
+        # non-empty proxy key, either spelling.
+        assert network_proxy_configured() is True
+        for role in ("gateway", "runner", "agent"):
+            for platform in ("posix", "windows"):
+                env = child_env(role, platform)
+                assert env["HTTPS_PROXY"] == "http://127.0.0.1:7897"
+                assert env["no_proxy"] == "localhost,127.0.0.1"
+                assert "ALL_PROXY" not in env
 
     def test_agent_forward_is_session_plus_agent_scope_plus_guide(self) -> None:
         from shared.env_registry import agent_forward_keys, session_forward_keys

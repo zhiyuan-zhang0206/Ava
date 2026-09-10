@@ -25,6 +25,7 @@ import threading
 from collections import deque
 from typing import Any
 
+from services.im_bridge.adapters.feishu_ws_proxy import allow_env_proxy_for_ws
 from services.im_bridge.types import IMAdapter, InboundMessage
 from shared.log import logger
 
@@ -194,6 +195,10 @@ class FeishuAdapter(IMAdapter):
         except (AttributeError, TypeError):
             logger.warning("FeishuAdapter: card.action.trigger not available in lark-oapi")
         handler = handler.build()
+        # Let the handshake use the machine's proxy configuration (issue #2089):
+        # the SDK pins proxy=None on websockets>=15, which makes the long
+        # connection direct-only and therefore unreachable behind a proxy.
+        allow_env_proxy_for_ws()
         client: Any = lark.ws.Client(  # pyright: ignore[reportUnknownMemberType]
             self._app_id, self._app_secret, event_handler=handler
         )
