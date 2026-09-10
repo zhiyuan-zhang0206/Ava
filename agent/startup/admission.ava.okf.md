@@ -19,6 +19,11 @@ original incarnation, so a late turn cannot rewrite a replacement's state.
 
 Restart and terminate are durable inbounds. Native claim returns to END, the
 host flushes the final checkpoint, then applies the accepted lifecycle command.
+A held maintenance command keeps that continuation admissible while a rollout
+defers ordinary births (`deployment_state.phase` / a pending publication): the
+continuation runs no graph work and applies exactly the one command, so the
+rollout's own drain can consume and certify instead of timing out with the
+hold retained (#2159).
 Single-flight remains held through the original continuation and settlement.
 Restart releases the incarnation for the next admission; terminate leaves the
 agent identity terminal. There is no child-process admission, OS launch budget,
