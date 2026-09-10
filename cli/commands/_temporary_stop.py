@@ -21,13 +21,19 @@ from cli.commands._maintenance_stop import (
     stop_services,
     wait_for_exit,
 )
+from cli.commands._maintenance_stop_report import (
+    StopIncompleteError,
+    SurvivorInventory,
+    capture_survivor,
+    live_identities,
+)
 from cli.commands._repo import build_services, session_name
 from cli.commands._retired_services import stop_retired_services
 from ops import pty_close_notices
 from ops.agent_pause import PAUSE_TIMEOUT_SECONDS, pause_agents
 from ops.agent_pause_probe import ops_quiescent
 from shared import maintenance, start_serving
-from shared.lifecycle_status import begin, finish, phase
+from shared.lifecycle_status import begin, finish, phase, status_path
 from shared.machine import MachineRoles, machine_name, machine_role
 from shared.paths import run_dir
 from shared.session_backend import WinprocSessionBackend, get_shell_backend
@@ -84,13 +90,24 @@ def _stop_terminals(deadline: float, operation: str, acquired_at: datetime) -> N
     except TimeoutError as exc:
         # A shell that HUP'd out may have dropped its record while a
         # signal-ignoring job survives as an orphan — report the owning
-        # session by name either way so the operator can find the survivor.
-        surviving = sorted(
-            {owner[identity.pid] for identity in set(shells) | jobs if identity.live()}
-        )
-        raise TimeoutError(
+        # session by name and each survivor's identity (issue #2162) so the
+        # operator can find and judge the exact process.
+        live = live_identities(set(shells) | jobs)
+        survivors = [
+            capture_survivor(
+                identity,
+                service=owner.get(identity.pid),
+                role="terminal" if identity in shells else "job",
+            )
+            for identity in live
+        ]
+        surviving = sorted({owner[identity.pid] for identity in live})
+        raise StopIncompleteError(
             f"terminal stop incomplete — {exc} surviving terminal processes "
-            f"from sessions: {surviving}"
+            f"from sessions: {surviving}\n"
+            f"{SurvivorInventory(survivors=survivors, groups=[]).render(stage='terminals')}",
+            stage="terminals",
+            survivors=[survivor.payload() for survivor in survivors],
         ) from exc
     # Hosts finish naturally after their child exits. Their protocol deliberately
     # ignores SIGTERM, so sending signals to every host process is not a stop API.
@@ -172,16 +189,29 @@ def _report_incomplete(
     exc: BaseException, phases: list[tuple[str, float]], *, owns_journal: bool
 ) -> None:
     """Print the stop's real failure with its per-phase budget accounting and
-    close the lifecycle journal when this stop owns it."""
+    close the lifecycle journal when this stop owns it.
+
+    The journal record carries the structured evidence too: the failing stage
+    and the surviving-process inventory a `StopIncompleteError` collected, so the
+    diagnosis survives the process that printed it (issue #2162).
+    """
     timing = "; ".join(f"{label} {elapsed:.1f}s" for label, elapsed in phases)
     print(
         f"Pause/stop incomplete; resources were not force-killed: {exc}. "
         f"phases: {timing or 'before the first phase'}. "
-        "Retry the command, or use ava start to resume.",
+        f"Retry the command, or use ava start to resume. "
+        f"Status journal: {status_path()}.",
         file=sys.stderr,
     )
     if owns_journal:
-        finish(1, error=f"{type(exc).__name__}: {exc}", extra={"phases": timing})
+        extra: dict[str, object] = {"phases": timing}
+        stage = getattr(exc, "stage", None)
+        survivors = getattr(exc, "survivors", None)
+        if stage:
+            extra["stage"] = stage
+        if survivors:
+            extra["survivors"] = survivors
+        finish(1, error=f"{type(exc).__name__}: {exc}", extra=extra)
 
 
 def _mark_stopped(holder: str, acquired_at: datetime) -> None:
