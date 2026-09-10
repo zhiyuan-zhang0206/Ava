@@ -116,6 +116,11 @@ class ResultPayload:
     exc_type: str | None = None
     exc_msg: str | None = None
     full_traceback: str | None = None
+    # True once the child reached the agent-authored code (set immediately
+    # before exec); False on a boot-phase crash (before user code ran); None =
+    # unknown (envelope without the field — pre-#2100 children). Lets the
+    # parent tell "the code never ran" from "it ran and printed nothing".
+    code_reached: bool | None = None
     state_update: dict[str, Any] | None = None
     state_update_error: str | None = None
     findings: list[dict[str, Any]] | None = None
@@ -237,6 +242,7 @@ def write_result(path: Path, payload: ResultPayload) -> None:
         "exc_type": payload.exc_type,
         "exc_msg": payload.exc_msg,
         "full_traceback": payload.full_traceback,
+        "code_reached": payload.code_reached,
         "state_update_error": payload.state_update_error,
         "findings": payload.findings,
         "attachments": payload.attachments,
@@ -269,12 +275,14 @@ def read_result(path: Path) -> ResultPayload:
         raise ValueError(
             f"exec result update blob decoded to {type(state_update).__name__}, expected dict"
         )
+    code_reached = envelope.get("code_reached")
     payload = ResultPayload(
         kind=kind,
         lifecycle_type=envelope.get("lifecycle_type"),
         exc_type=envelope.get("exc_type"),
         exc_msg=envelope.get("exc_msg"),
         full_traceback=envelope.get("full_traceback"),
+        code_reached=(code_reached if isinstance(code_reached, bool) else None),
         state_update=cast("dict[str, Any] | None", state_update),
         state_update_error=envelope.get("state_update_error"),
         findings=envelope.get("findings"),

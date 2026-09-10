@@ -3,7 +3,11 @@
 Every process on a configured pure agent-runner (serve_agent_runner flag on,
 enrolled with a gateway URL) fetches the cluster's config from the gateway at
 startup and injects it into os.environ before Settings is built — there is no
-materialized `.env` cache of cluster facts anymore (retired 2026-08-01). A
+materialized `.env` cache of cluster facts anymore (retired 2026-08-01). The
+one cache that does exist is a transient 0600 config snapshot under
+`$AVA_HOME/run/`: a successful fetch writes it, and a later process skips the
+fetch while it is fresh, falling back to it (with a warning) when the gateway
+is unreachable — see the snapshot helpers below. A
 gateway-capable unit keeps the cluster's config in its own `$AVA_HOME/.env` and
 never fetches; which side a unit is on is derived from its serve flags (see
 `config_source_is_local` / `should_fetch_from_gateway`), not from an env var
@@ -19,6 +23,8 @@ shared.netutil (all pure stdlib / config-free, so they're safe this early in boo
 
 from __future__ import annotations
 
+import contextlib
+import json
 import os
 import time
 from pathlib import Path
@@ -39,6 +45,36 @@ from shared.http_dial import get as dial_get
 # first fetch would have eventually returned.
 _FETCH_ATTEMPTS = 2
 _FETCH_TIMEOUT_S = 10.0
+
+# The parent config snapshot (P0 #2100): a successful fetch writes the payload
+# to `$AVA_HOME/run/bootstrap-snapshot.json` (0600). A later process on the same
+# unit — most importantly the exec child the agent process spawns per turn —
+# SKIPS the fetch while the snapshot is fresh, so a gateway that is down or
+# restarting is no longer a single point that silently kills every execute_code
+# call. When the snapshot is stale the process fetches as before; if that fetch
+# then fails on a transport error the process falls back to the snapshot anyway
+# (last-known cluster config — the same values its parent already runs on),
+# because during a gateway outage no cluster config edit can have happened
+# since the snapshot was written.
+_SNAPSHOT_NAME = "bootstrap-snapshot.json"
+_SNAPSHOT_VERSION = 1
+# Freshness window: how long a snapshot may stand in for a live fetch. Bounds
+# cluster-edit propagation to a few minutes in steady state (the first child
+# past the window re-fetches and refreshes the snapshot) while keeping the
+# common per-turn child boot fetch-free.
+_SNAPSHOT_FRESH_S = 300.0
+
+# Transport-level httpx failures mean "gateway unreachable / mid-restart" —
+# the class that may fall back to a stale snapshot. Auth and status failures
+# (401 wrong secret, 400, 5xx) still fail loud: a runner the gateway rejects
+# must not keep running on old config.
+_TRANSPORT_FAILURES = (
+    httpx.ConnectError,
+    httpx.ConnectTimeout,
+    httpx.ReadTimeout,
+    httpx.RemoteProtocolError,
+    httpx.PoolTimeout,
+)
 
 # The maintenance-verb opt-out (settings-lite). `ava stop` / `ava status` / the
 # watchdog probe / the thin-client verbs must still construct Settings while the
@@ -207,6 +243,102 @@ def fetch_bootstrap_config(
             time.sleep(0.5 * attempt)
 
 
+def _snapshot_path() -> Path | None:
+    """The unit's config snapshot path, or None when this process has no
+    AVA_HOME (bare checkout / CI — the snapshot only exists on an enrolled unit)."""
+    home = os.environ.get("AVA_HOME")
+    if not home:
+        return None
+    return Path(home) / "run" / _SNAPSHOT_NAME
+
+
+def _read_config_snapshot(base_url: str) -> tuple[dict[str, str], float] | None:
+    """The last-known cluster config and its age in seconds, or None.
+
+    Guards: the snapshot must have been written for the SAME gateway URL (a
+    re-enrolled runner must not reuse another gateway's values), carry the
+    current version, and hold a flat ``{str: str}`` map. Absent / unreadable /
+    malformed reads as None — the caller falls through to the fetch."""
+    path = _snapshot_path()
+    if path is None:
+        return None
+    try:
+        raw = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return None
+    if not isinstance(raw, dict):
+        return None
+    data = cast("dict[str, Any]", raw)
+    if data.get("v") != _SNAPSHOT_VERSION:
+        return None
+    if data.get("base_url") != base_url:
+        return None
+    written_at = data.get("written_at")
+    if not isinstance(written_at, (int, float)):
+        return None
+    try:
+        values = _validated_bootstrap_payload(data.get("values"))
+    except TypeError:
+        return None
+    return values, max(0.0, time.time() - float(written_at))
+
+
+def _write_config_snapshot(base_url: str, values: dict[str, str]) -> None:
+    """Best-effort owner-only snapshot write (atomic replace).
+
+    The snapshot carries cluster credentials, so it is 0600 like the rest of
+    the unit's private storage. It never raises and never fails the boot: it
+    is a cache, and the worst case of losing it is one extra fetch next time."""
+    path = _snapshot_path()
+    if path is None:
+        return
+    payload = json.dumps(
+        {
+            "v": _SNAPSHOT_VERSION,
+            "base_url": base_url,
+            "written_at": time.time(),
+            "values": values,
+        },
+        sort_keys=True,
+    ).encode()
+    temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    fd = -1
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        if os.name != "nt":
+            os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "wb") as file:
+            fd = -1
+            file.write(payload)
+            file.flush()
+            os.fsync(file.fileno())
+        os.replace(temporary, path)  # noqa: PTH105 — explicit atomic replacement primitive
+    except OSError:
+        return
+    finally:
+        if fd != -1:
+            with contextlib.suppress(OSError):
+                os.close(fd)
+        with contextlib.suppress(OSError):
+            temporary.unlink()
+
+
+def _apply_bootstrap_values(base_url: str, values: dict[str, str]) -> None:
+    """Inject one bootstrap payload into os.environ — the shared tail of the
+    fetch path and the snapshot path."""
+    # ``AVA_GATEWAY_HEALTH_URL`` is host-scoped, so the gateway correctly does
+    # not serve it in the cluster bootstrap payload.  A pure runner that was
+    # enrolled without an explicit override must still probe the gateway it
+    # actually fetched from, not ServiceSettings' single-box localhost default.
+    # Keep a deliberate host override; otherwise the enrollment base URL is the
+    # one reachability fact this process already proved.
+    if not os.environ.get("AVA_GATEWAY_HEALTH_URL"):
+        os.environ["AVA_GATEWAY_HEALTH_URL"] = f"{base_url.rstrip('/')}/api/health"
+    for key, value in values.items():
+        os.environ[key] = value
+
+
 def inject_config_from_gateway() -> None:
     """Fetch the cluster's config from the gateway and inject it into os.environ.
 
@@ -216,8 +348,17 @@ def inject_config_from_gateway() -> None:
     pre-cutover `.env` still materializes (`_enforce_cluster_env_authority`
     forces file values in at `load_ava_env`, and this runs after it) and a
     forwarded copy from a spawning process. The gateway's `.env` is the single
-    cluster-wide copy; a runner holds no cache that could go stale, so a cluster
-    edit reaches it on the next process restart.
+    cluster-wide copy.
+
+    P0 #2100 snapshot contract: when the unit's last successful fetch is fresh
+    (`_SNAPSHOT_FRESH_S`), this skips the fetch entirely and applies the
+    snapshot — the exec child an agent process spawns per turn is the main
+    beneficiary, so a gateway outage no longer strands every execute_code call.
+    When the snapshot is stale the fetch runs as before; a transport failure
+    then falls back to the snapshot (whatever its age — no cluster edit can
+    land while the gateway is unreachable) with a logged warning, and a
+    non-transport failure (401/5xx) still fails loud. A successful fetch
+    refreshes the snapshot for the next process.
 
     The gateway URL is AVA_GATEWAY_URL (enroll wrote it; the deprecated
     AVA_PRIMARY_GATEWAY_URL alias is honored too, since this runs before
@@ -236,26 +377,49 @@ def inject_config_from_gateway() -> None:
             "    ava enroll --gateway <url> --machine-name <name> --machine-host "
             "<this-host-addr>"
         )
+    snapshot = _read_config_snapshot(base_url)
+    if snapshot is not None and snapshot[1] <= _SNAPSHOT_FRESH_S:
+        # Fresh parent snapshot: the authoritative values this unit fetched
+        # moments ago. Skip the fetch — a gateway that is down or restarting
+        # must not block this process (P0 #2100).
+        _apply_bootstrap_values(base_url, snapshot[0])
+        return
     try:
         # A runner process dials as the least-privilege ava_runner role (the
         # gateway projects AVA_DB_URL onto that credential — Task #1236). The
         # gateway itself never fetches (config_source_is_local), so every
         # fetch this module makes is a runner fetch.
         values = fetch_bootstrap_config(base_url, role="runner")
+    except _TRANSPORT_FAILURES as exc:
+        if snapshot is not None:
+            # Gateway unreachable: continue on the last-known cluster config
+            # (the same values the parent process already holds). A gateway
+            # outage is exactly when exec children must keep running, and no
+            # cluster edit can have landed since the gateway went down.
+            from shared.log import logger
+
+            logger.warning(
+                "[bootstrap] gateway unreachable ({exc}) — continuing on the "
+                "last-known cluster config snapshot (age {age:.0f}s)",
+                exc=type(exc).__name__,
+                age=snapshot[1],
+            )
+            _apply_bootstrap_values(base_url, snapshot[0])
+            return
+        raise BootstrapFetchError(
+            f"could not fetch cluster config from the gateway at {base_url} ({exc}).\n"
+            "    A pure agent-runner fetches GET /api/bootstrap at every process start "
+            "(a fresh parent snapshot skips the fetch); this host has no snapshot to "
+            "fall back on. Bring the gateway up (or check AVA_GATEWAY_URL / the "
+            "cluster secret / private-network reachability), then retry."
+        ) from exc
     except Exception as exc:
         raise BootstrapFetchError(
             f"could not fetch cluster config from the gateway at {base_url} ({exc}).\n"
-            "    A pure agent-runner fetches GET /api/bootstrap at every process start — "
-            "there is no cached copy. Bring the gateway up (or check AVA_GATEWAY_URL / "
-            "the cluster secret / private-network reachability), then retry."
+            "    A pure agent-runner fetches GET /api/bootstrap at every process start "
+            "(a fresh parent snapshot skips the fetch). Bring the gateway up (or check "
+            "AVA_GATEWAY_URL / the cluster secret / private-network reachability), "
+            "then retry."
         ) from exc
-    # ``AVA_GATEWAY_HEALTH_URL`` is host-scoped, so the gateway correctly does
-    # not serve it in the cluster bootstrap payload.  A pure runner that was
-    # enrolled without an explicit override must still probe the gateway it
-    # actually fetched from, not ServiceSettings' single-box localhost default.
-    # Keep a deliberate host override; otherwise the enrollment base URL is the
-    # one reachability fact this process already proved.
-    if not os.environ.get("AVA_GATEWAY_HEALTH_URL"):
-        os.environ["AVA_GATEWAY_HEALTH_URL"] = f"{base_url.rstrip('/')}/api/health"
-    for key, value in values.items():
-        os.environ[key] = value
+    _write_config_snapshot(base_url, values)
+    _apply_bootstrap_values(base_url, values)

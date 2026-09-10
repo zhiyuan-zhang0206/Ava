@@ -25,6 +25,7 @@ from ops import updater_outcome as uo
 from shared.config import settings
 from shared.exit_codes import RESTART_DECLINED_EXIT_CODE
 from shared.platform_backend import MacPlatformBackend, WindowsPlatformBackend
+from shared.session_record import SessionRecord, record_path
 
 _REAL_WAIT_FOR_UI_OWNER = cluster_deploy._wait_for_ui_owner
 
@@ -844,6 +845,61 @@ def test_backend_decline_raises_orchestration_spawn_failed(
     with pytest.raises(cluster_mod.OrchestrationSpawnFailed):
         cluster_mod.spawn_update(restart_only=True)
     assert calls and calls[-1] == "idle"
+    # P2 #2102: the pre-written session record must not survive a definitive
+    # decline — no chain started, no record remains.
+    assert SessionRecord.read(record_path("ava-test-updater")) is None
+
+
+class TestPrerecordedUpdaterSession:
+    """P2 #2102: the update chain persists its session record BEFORE it lands
+    (the pause is the first landing step), so a death anywhere in the
+    pause->spawn gap still leaves a record of the chain that began."""
+
+    @pytest.mark.real_cluster_spawn
+    def test_session_record_exists_before_the_pause(
+        self,
+        posix_native_host: _FakeSessionBackend,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        from ops import cluster_pause as _cluster_pause
+
+        seen_at_pause: list[SessionRecord | None] = []
+        real_pause = _cluster_pause.pause_local_cluster
+
+        def _probe_pause() -> None:
+            seen_at_pause.append(SessionRecord.read(record_path("ava-test-updater")))
+            real_pause()
+
+        monkeypatch.setattr(_cluster_pause, "pause_local_cluster", _probe_pause)
+        cluster_mod.spawn_update(restart_only=True)
+
+        assert seen_at_pause, "the pause never ran"
+        pre = seen_at_pause[0]
+        assert pre is not None and pre.pid == 0 and pre.create_time == -1.0
+        # The recording backend never launches the child, so the pre-record
+        # (pid=0) stands — in production new_session replaces it with the real
+        # record. The liveness-relevant property is what pid=0 means: no probe
+        # can mistake it for a live session.
+        after = SessionRecord.read(record_path("ava-test-updater"))
+        assert after is not None and after.pid == 0
+
+    @pytest.mark.real_cluster_spawn
+    def test_pause_failure_removes_the_prerecord(
+        self,
+        posix_native_host: _FakeSessionBackend,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        from ops import cluster_pause as _cluster_pause
+
+        def _boom_pause() -> None:
+            raise RuntimeError("synthetic pause failure")
+
+        monkeypatch.setattr(_cluster_pause, "pause_local_cluster", _boom_pause)
+        with pytest.raises(RuntimeError, match="synthetic pause failure"):
+            cluster_mod.spawn_update(restart_only=True)
+        assert SessionRecord.read(record_path("ava-test-updater")) is None
 
 
 class TestNativeArg:

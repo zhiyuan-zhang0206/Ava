@@ -101,6 +101,7 @@ def test_child_simple_code_done_envelope(tmp_path: Path) -> None:
     assert request.exists()  # child leaves it; the parent machinery cleans up
     payload = read_result(result)
     assert payload.kind == "done"
+    assert payload.code_reached is True  # P0 #2100: the code really ran
     assert payload.state_update is None
     assert payload.findings == []
     assert payload.attachments == []
@@ -149,6 +150,7 @@ def test_boot_config_failure_writes_crashed_envelope(
     assert "viewer-only OSS credential" in (payload.exc_msg or "")
     assert "exec_child" in (payload.full_traceback or "")
     assert result.stat().st_mode & 0o777 == 0o600
+    assert payload.code_reached is False  # P0 #2100: boot crash, the code never ran
 
 
 def test_missing_request_writes_crashed_envelope_after_healthy_boot(tmp_path: Path) -> None:
@@ -160,6 +162,7 @@ def test_missing_request_writes_crashed_envelope_after_healthy_boot(tmp_path: Pa
     assert payload.kind == "crashed"
     assert payload.exc_type == "FileNotFoundError"
     assert "exec_child" in (payload.full_traceback or "")
+    assert payload.code_reached is False  # request-read failure precedes user code
 
 
 def test_crash_envelope_uses_stdlib_fallback_when_protocol_writer_fails(
@@ -183,6 +186,7 @@ def test_crash_envelope_uses_stdlib_fallback_when_protocol_writer_fails(
     assert payload.exc_msg == "fallback boom"
     assert "ValueError: fallback boom" in (payload.full_traceback or "")
     assert result.stat().st_mode & 0o777 == 0o600
+    assert payload.code_reached is False  # the default: this writer is the boot path
 
 
 def test_child_builtin_help_routes_only_ava_targets(tmp_path: Path) -> None:

@@ -38,6 +38,20 @@ def pid_starttime_ticks(pid: int) -> int | None:
         return None
 
 
+def record_path(name: str) -> Path:
+    """Where the named session's on-disk record lives —
+    ``$AVA_HOME/run/sessions/<name>.json`` (the path both platform supervisors
+    write through their own ``_record_path`` mirrors).
+
+    Public so a caller can PRE-write a record before the session process
+    exists (the update chain lands its session record before it lands its
+    pause/checkout work — P2 #2102); the real record written at spawn replaces
+    it atomically."""
+    import shared.paths
+
+    return shared.paths.run_dir() / "sessions" / f"{name}.json"
+
+
 @dataclass(frozen=True)
 class SessionRecord:
     """A launched background session's identity + provenance.

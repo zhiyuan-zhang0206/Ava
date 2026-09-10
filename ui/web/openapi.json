@@ -5449,7 +5449,7 @@
     "/api/memory/refresh": {
       "post": {
         "summary": "Post Memory Refresh",
-        "description": "Fast-forward the gateway memory checkout to the consolidated pool.\n\nThe gateway indexes `main`; once the pool's per-machine branches are\nmerged into `main`, calling this pulls those changes into the local checkout\n(fast-forward only). The memory indexer then re-embeds the changed files on\nits own. Returns the HEAD sha after the pull.\n\nThis runs only on the gateway (the gateway + memory checkout live\nthere); a runner reaches it via its configured gateway URL.",
+        "description": "Fast-forward the gateway memory checkout to the consolidated pool.\n\nThe gateway indexes `main`; once the pool's per-machine branches are\nmerged into `main`, calling this pulls those changes into the local checkout\n(fast-forward only). The memory indexer then re-embeds the changed files on\nits own. Returns the HEAD sha after the pull.\n\nThis runs only on the gateway (the gateway + memory checkout live\nthere); a runner reaches it via its configured gateway URL.\n\n`pull_main` shells out to git (network-bound fetch against the memory\nremote): it must run OFF the event loop, or a slow/dead remote blocks the\nwhole gateway until the watchdog kills it (P2 #2102: the 2026-09-10\n04:06-04:35 watchdog kill loop). `asyncio.to_thread` — the same hop the\nmemory indexer uses for its own pull.",
         "operationId": "post_memory_refresh_api_memory_refresh_post",
         "responses": {
           "200": {
