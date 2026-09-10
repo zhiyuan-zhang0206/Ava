@@ -364,7 +364,7 @@ def _partition_checks(checks: list[dict], result: CIResult) -> None:
             result.pending.append(name)
 
 
-def _runs_not_yet_reporting(head_sha: str, repo: str | None) -> list[str]:
+def _runs_not_yet_reporting(head_sha: str, repo: str | None) -> list[str] | None:
     """Names of workflow runs for `head_sha` that are scheduled but have not
     attached a check to the commit yet.
 
@@ -386,8 +386,11 @@ def _runs_not_yet_reporting(head_sha: str, repo: str | None) -> list[str]:
     (2026-09-10: MonsoraV2 #774 reported ALL_PASSED while its main run sat
     queued).
 
-    On any error this returns empty — the caller then keeps its conservative
-    not-green verdict rather than inventing a reason to wait.
+    On any error this returns None — distinct from [] ("nothing is
+    scheduled"), because an unanswerable probe must never read as green. The
+    no-workflow-checks caller keeps its not-green NO_WORKFLOW_RUNS verdict
+    either way; the all-passed caller reports ERROR (unknown) rather than
+    guessing that nothing is coming.
     """
     r = subprocess.run(  # noqa: S603
         [
@@ -404,12 +407,12 @@ def _runs_not_yet_reporting(head_sha: str, repo: str | None) -> list[str]:
         check=False,
     )
     if r.returncode != 0:
-        return []
+        return None
     try:
         names = json.loads(r.stdout.strip() or "[]")
     except json.JSONDecodeError:
-        return []
-    return [str(n) for n in names] if isinstance(names, list) else []
+        return None
+    return [str(n) for n in names] if isinstance(names, list) else None
 
 
 def check_ci(pr_number: str | int, *, repo: str | None = None) -> CIResult:
@@ -504,12 +507,24 @@ def check_ci(pr_number: str | int, *, repo: str | None = None) -> CIResult:
             result.pending.extend(scheduled)
             result.verdict = CIStatus.PENDING
         elif not result.workflow_checks and _repo_has_workflows():
-            # Nothing from a workflow is attached and nothing is scheduled,
+            # Nothing from a workflow is attached — and nothing is confirmed
+            # scheduled (an unanswerable probe, None, reads the same here) —
             # while this checkout does define workflows: the suite did not run.
             # Reporting ALL_PASSED here is how a broken `runs-on` — 2026-07-28,
             # hosted runners a private repo could not schedule — reads as green:
             # the only check left standing was a GitHub App's, and it passed.
             result.verdict = CIStatus.NO_WORKFLOW_RUNS
+        elif scheduled is None:
+            # The attached checks all passed, but the probe could not answer
+            # whether more runs are still queued. Unanswerable is not "nothing
+            # scheduled": report ERROR (unknown) — --wait prints it and exits 3
+            # if it persists — rather than guess green, and rather than a
+            # PENDING that would claim checks are pending when none are.
+            result.verdict = CIStatus.ERROR
+            result.error_detail = (
+                "runs API probe failed: cannot confirm no workflow run is still "
+                "queued for this head"
+            )
         else:
             # All completed, none failed, nothing left scheduled
             result.verdict = CIStatus.ALL_PASSED
