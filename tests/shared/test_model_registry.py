@@ -113,6 +113,18 @@ def test_gemini_3_8_flash_is_spawnable_again() -> None:
     assert resolve_available_model("gemini-3.8-flash") == "gemini-3.8-flash"
 
 
+def test_deepseek_v4_pro_is_withdrawn_to_the_flash_fallback() -> None:
+    """User order 2026-09-10: DeepSeek serves only the flash tier, so V4 Pro
+    leaves the spawn picker; a config that still names it resolves to
+    deepseek-v4-flash before provider construction — the withdrawal shape of
+    PR #1582 (gemini-3.8-flash), not a removal."""
+    spec = MODELS["deepseek-v4-pro"]
+    assert not spec.spawnable
+    assert spec.unavailable_fallback == "deepseek-v4-flash"
+    assert "deepseek-v4-pro" not in SUPPORTED_MODELS["deepseek"]
+    assert resolve_available_model("deepseek-v4-pro") == "deepseek-v4-flash"
+
+
 def test_gemini_flash_lite_latest_registry_facts() -> None:
     """The `latest` alias resolves to Gemini 3.5 Flash-Lite (ai.google.dev
     models page + thinking guide, checked 2026-09-10): 1M window, March 2026

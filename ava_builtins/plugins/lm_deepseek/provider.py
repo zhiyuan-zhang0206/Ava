@@ -150,9 +150,16 @@ register(
         stop_spec=None,
     ),
     models={
+        # Withdrawn from new selections 2026-09-10 (user order): DeepSeek serves
+        # only the flash tier now, and its pricing page confirms V4 Pro's
+        # orderly retirement — from 2026-09-14, requests to `deepseek-v4-pro`
+        # are routed to V4.1 Flash. The entry stays registered so its facts,
+        # tuning and final price remain; existing configurations keep working
+        # by resolving to `deepseek-v4-flash` before provider construction.
         "deepseek-v4-pro": ModelSpec(
             provider="deepseek",
-            spawnable=True,
+            spawnable=False,
+            unavailable_fallback="deepseek-v4-flash",
             context_window=1_000_000,
             max_output_tokens=384_000,
             knowledge_cutoff="2026-04",
