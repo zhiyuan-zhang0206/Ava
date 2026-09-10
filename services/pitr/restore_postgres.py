@@ -35,6 +35,37 @@ def _migration_hash(conn: psycopg.Connection[tuple[object, ...]]) -> str:
     return hashlib.sha256("\n".join(names).encode()).hexdigest()
 
 
+def _smoke_samples(cur: psycopg.Cursor[tuple[object, ...]]) -> list[str]:
+    """Anchor-table samples for the restore-proof evidence fingerprint.
+
+    A table a migration dropped (events, per the 2026-08-29 ruling) is
+    recorded as absent instead of failing the proof: the migration-set hash
+    already pins the schema, so absence is evidence, not a mismatch."""
+    evidence: list[str] = []
+    for table, order in (
+        ("agents_meta", "id"),
+        ("checkpoints", "thread_id, checkpoint_id"),
+        ("events", "id"),
+    ):
+        cur.execute("SELECT to_regclass(%s)", (table,))
+        found = cur.fetchone()
+        if found is None or found[0] is None:
+            evidence.append(f"absent:{table}")
+            continue
+        query = sql.SQL(
+            "SELECT to_jsonb(sample)::text FROM {} AS sample ORDER BY {} LIMIT 16"
+        ).format(
+            sql.Identifier(table),
+            sql.SQL(", ").join(sql.Identifier(part) for part in order.split(", ")),
+        )
+        cur.execute(query)
+        rows = [str(item[0]) for item in cur.fetchall()]
+        if not rows:
+            raise RestoreProofError(f"restored {table} smoke sample is empty")
+        evidence.extend((table, *rows))
+    return evidence
+
+
 def _live_identity(db_url: str, data_directory: str) -> LivePostgresIdentity:
     with psycopg.connect(db_url) as conn, conn.cursor() as cur:
         cur.execute(
@@ -467,27 +498,14 @@ class IsolatedPostgresRestoreExecutor:
         with psycopg.connect(db_url, connect_timeout=5) as conn, conn.cursor() as cur:
             cur.execute("SELECT system_identifier FROM pg_control_system()")
             row = cur.fetchone()
-            if row != (candidate.system_identifier,):
+            # The identifier arrives as a bigint; the manifest carries the
+            # frozen text form (_live_identity normalizes the same way).
+            if row is None or str(row[0]) != candidate.system_identifier:
                 raise RestoreProofError("restored system identifier differs")
             if _migration_hash(conn) != candidate.migration_set_sha256:
                 raise RestoreProofError("restored migration set differs")
             evidence: list[str] = [candidate.system_identifier, candidate.migration_set_sha256]
-            for table, order in (
-                ("agents_meta", "id"),
-                ("checkpoints", "thread_id, checkpoint_id"),
-                ("events", "id"),
-            ):
-                query = sql.SQL(
-                    "SELECT to_jsonb(sample)::text FROM {} AS sample ORDER BY {} LIMIT 16"
-                ).format(
-                    sql.Identifier(table),
-                    sql.SQL(", ").join(sql.Identifier(part) for part in order.split(", ")),
-                )
-                cur.execute(query)
-                rows = [str(row[0]) for row in cur.fetchall()]
-                if not rows:
-                    raise RestoreProofError(f"restored {table} smoke sample is empty")
-                evidence.extend((table, *rows))
+            evidence.extend(_smoke_samples(cur))
             cur.execute(
                 "SELECT n.nspname, c.relname, c.relkind, "
                 "pg_get_userbyid(c.relowner) FROM pg_class c "

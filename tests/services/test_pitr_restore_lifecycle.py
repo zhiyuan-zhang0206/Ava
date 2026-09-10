@@ -14,7 +14,7 @@ import pytest
 from pytest import MonkeyPatch
 
 from services.pitr import restore_manifest, restore_postgres, restore_proof
-from services.pitr.base_manifest import BaseObject, CandidateManifest, WalRange
+from services.pitr.base_manifest import SCHEMA_VERSION, BaseObject, CandidateManifest, WalRange
 from services.pitr.checksums import CRC32C, ObjectChecksum
 from services.pitr.object_store import RemoteObjectAck
 from services.pitr.restore_manifest import RestoreObject
@@ -702,3 +702,77 @@ def test_executor_run_reaps_the_sandbox_postmaster_on_failure(
             psutil.Process(child.pid)
     finally:
         child.wait(timeout=10)
+
+
+def test_smoke_probe_accepts_a_bigint_identifier_and_a_dropped_anchor_table() -> None:
+    """The restore-proof smoke, exercised here against a real cluster: the
+    system identifier arrives as a bigint while the manifest froze it as text,
+    and the anchor set must read a table a migration dropped (events,
+    2026-08-29) as absent evidence rather than a mismatch — the two defects
+    that blocked the first live execution of this probe."""
+    import getpass
+    import hashlib
+    from urllib.parse import urlsplit
+
+    import psycopg
+    from psycopg import sql
+
+    from shared.pg_tools import throwaway_postgres
+
+    with throwaway_postgres() as url:
+        with psycopg.connect(url, autocommit=True) as conn, conn.cursor() as cur:
+            # The sandbox cluster is a physical copy of the live one, whose
+            # bootstrap superuser is the installing OS user; the probe dials
+            # with no user name, so libpq falls back to that role.
+            cur.execute(
+                sql.SQL("CREATE ROLE {} LOGIN SUPERUSER").format(sql.Identifier(getpass.getuser()))
+            )
+            cur.execute("CREATE TABLE schema_migrations (name text PRIMARY KEY)")
+            cur.execute(
+                "INSERT INTO schema_migrations (name) VALUES "
+                "('20260101T000000_alpha'), ('20260102T000000_beta')"
+            )
+            cur.execute("CREATE TABLE agents_meta (id bigint PRIMARY KEY, title text)")
+            cur.execute("INSERT INTO agents_meta VALUES (1, 'agent')")
+            cur.execute("CREATE TABLE checkpoints (thread_id text, checkpoint_id text)")
+            cur.execute("INSERT INTO checkpoints VALUES ('thread-1', 'checkpoint-1')")
+            cur.execute("SELECT name FROM schema_migrations ORDER BY name")
+            names = [str(row[0]) for row in cur.fetchall()]
+            cur.execute("SELECT system_identifier FROM pg_control_system()")
+            identity_row = cur.fetchone()
+            assert identity_row is not None
+            assert isinstance(identity_row[0], int)
+            cur.execute("SHOW unix_socket_directories")
+            socket_row = cur.fetchone()
+            assert socket_row is not None
+        candidate = CandidateManifest(
+            SCHEMA_VERSION,
+            "activation-test",
+            False,
+            17,
+            "ava_citest",
+            str(identity_row[0]),
+            16 * 1024 * 1024,
+            1,
+            "0/1000000",
+            "0/2000000",
+            (WalRange(1, "0/1000000", "0/2000000"),),
+            BaseObject("base", "7", 1, "crc", "crc32c", "crc", "sha", 1, "key", "AVAPITRB1"),
+            "native",
+            "backup_manifest",
+            "base",
+            "7",
+            hashlib.sha256("\n".join(names).encode()).hexdigest(),
+        )
+        port = urlsplit(url).port
+        assert port is not None
+        socket_dir = Path(str(socket_row[0]))
+
+        fingerprint = IsolatedPostgresRestoreExecutor._smoke(socket_dir, port, candidate)
+        assert fingerprint == IsolatedPostgresRestoreExecutor._smoke(socket_dir, port, candidate)
+
+        with psycopg.connect(url) as conn, conn.cursor() as cur:
+            samples = restore_postgres._smoke_samples(cur)
+    assert "agents_meta" in samples
+    assert "checkpoints" in samples
+    assert "absent:events" in samples
