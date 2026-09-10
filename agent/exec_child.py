@@ -283,6 +283,10 @@ def _run_code(code: str, payload: Any) -> None:
         "__builtins__": builtins_map,
     }
     try:
+        # From here on the agent-authored code has run (or is about to) — the
+        # envelope flag the parent uses to tell "the code never executed" from
+        # "it executed and printed nothing" (P0 #2100).
+        payload.code_reached = True
         # `recording()` arms SDK-usage metering for exactly this agent-authored
         # code, so framework-internal ava.* calls are never counted (same
         # contract as the old in-process worker had).
@@ -312,7 +316,7 @@ def _run_code(code: str, payload: Any) -> None:
         sys.stdout.flush()
 
 
-def _run(request_path: str, result_path: str) -> None:
+def _run(request_path: str, result_path: str) -> None:  # noqa: PLR0915 — one child lifecycle: boot, run, deliver, envelope
     """Child body: read the request, set up identity + plugins + state, run the
     code, write the result envelope."""
     _import_runtime()
@@ -366,6 +370,11 @@ def _run(request_path: str, result_path: str) -> None:
 
     try:
         _emit_child_boot_timing()
+    except BaseException as exc:
+        # Boot-timing failure: the code never ran.
+        _write_crashed_result(result_path, exc, code_reached=False)
+        return
+    try:
         _run_code(request.code, payload)
         # Deliver queued SDK-call events before a clean exit. sync() lands the
         # pipeline's held batch (queue + drain-thread batch), flush() then
@@ -379,14 +388,26 @@ def _run(request_path: str, result_path: str) -> None:
 
             telemetry.sync()
             telemetry_otlp.flush()
+    except BaseException as exc:
+        # Only a post-run telemetry sync/flush failure lands here (_run_code
+        # catches everything): report it with the REAL code_reached flag —
+        # letting it reach main() would stamp a ran-code crash as a boot
+        # crash (P0 #2100).
+        _write_crashed_result(result_path, exc, code_reached=payload.code_reached)
+        return
     finally:
         _take_result_state_update(payload, state_injected=request.state is not None)
         payload.findings = [f.model_dump() for f in take_findings()]
         payload.attachments = take_attachments()
-        try:
-            write_result(Path(result_path), payload)
-        except BaseException as write_exc:
-            _write_crashed_result(result_path, write_exc)
+    # Outside the try: a boot-phase exception (config fetch, request read,
+    # plugin load) propagates to main(), which writes the crash envelope with
+    # code_reached=False. A write failure here falls back to the best-effort
+    # crash envelope carrying the REAL code_reached, and is swallowed so
+    # main() does not overwrite it with the boot-crash reading (P0 #2100).
+    try:
+        write_result(Path(result_path), payload)
+    except BaseException as write_exc:
+        _write_crashed_result(result_path, write_exc, code_reached=payload.code_reached)
 
 
 def main() -> None:
@@ -409,8 +430,14 @@ def main() -> None:
         _write_crashed_result(result_path, exc)
 
 
-def _write_crashed_result(result_path: str, exc: BaseException) -> None:
-    """Best-effort crash envelope that cannot itself hide the original failure."""
+def _write_crashed_result(
+    result_path: str, exc: BaseException, *, code_reached: bool | None = False
+) -> None:
+    """Best-effort crash envelope that cannot itself hide the original failure.
+
+    `code_reached` defaults to False: this is the boot-crash writer (main()'s
+    handler) — the code never ran. `_run`'s envelope-write failure passes the
+    payload's own value, which is True after the code reached exec."""
     exc_type = type(exc).__name__
     exc_msg = str(exc)[:2000]
     full_traceback = _format_current_traceback(exc)
@@ -421,6 +448,7 @@ def _write_crashed_result(result_path: str, exc: BaseException) -> None:
         "exc_type": exc_type,
         "exc_msg": exc_msg,
         "full_traceback": full_traceback,
+        "code_reached": code_reached,
         "state_update_error": None,
         "findings": None,
         "attachments": None,
@@ -436,6 +464,7 @@ def _write_crashed_result(result_path: str, exc: BaseException) -> None:
                 exc_type=exc_type,
                 exc_msg=exc_msg,
                 full_traceback=full_traceback,
+                code_reached=code_reached,
             ),
         )
         return

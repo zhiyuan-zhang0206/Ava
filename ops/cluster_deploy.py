@@ -252,6 +252,12 @@ def spawn_update(  # noqa: PLR0915 — one pause-to-detached-child transaction
                 f"$AVA_HOME/run/sessions/{updater_sess}.json if it is hung."
             )
 
+    # The update chain records itself BEFORE it lands (P2 #2102): the log file
+    # is created before the validate/fetch below, so an attempt that dies early
+    # still leaves a log — "the day's zero logs" must never be the chain's own
+    # doing again.
+    log_path = _new_update_log("updater")
+
     # Validate before kill: vet target migrations from git read-only before pause/spawn.
     # Otherwise boot discovers a duplicate/non-contiguous layout after `ava restart`
     # stops every service (the 2026-06-17 dup-0049 outage); restart-only reuses current code.
@@ -287,7 +293,6 @@ def spawn_update(  # noqa: PLR0915 — one pause-to-detached-child transaction
             )
         shared.migrations.validate_migrations_at_ref(ref, repo_root=_REPO_ROOT)
 
-    log_path = _new_update_log("updater")
     repo = _REPO_ROOT
     if restart_only:
         # The detached session runs the in-process self-update (R1-6 execution-shape
@@ -449,10 +454,30 @@ def spawn_update(  # noqa: PLR0915 — one pause-to-detached-child transaction
                 "an updater spawn handoff still has a live/fresh owner or is "
                 "unreadable; wait for it or recover the host"
             ) from exc
+        # P2 #2102: persist the updater's SESSION RECORD before the pause lands,
+        # so a death anywhere in the pause->spawn gap (the 2026-09-10 outage
+        # class) still leaves a record of the chain that began — the day is
+        # never zero-record for an update that started. pid=0 with the -1.0
+        # dead-child create_time sentinel can never match a real process, so
+        # liveness probes treat it as absent and recovery reaps it; the
+        # backend's new_session atomically replaces it with the real record at
+        # spawn. Definitive aborts below remove it.
+        from shared.platform_backend import get_backend as _get_platform_backend
+        from shared.session_record import SessionRecord, record_path
+
+        SessionRecord(
+            pid=0,
+            create_time=-1.0,
+            cmd=inner_cmd if _get_platform_backend().is_posix() else native_cmd,
+            cwd=str(repo),
+            started_at=time.time(),
+        ).write(record_path(updater_sess))
         try:
             cluster_pause.pause_local_cluster()
         except BaseException:
             shared.updater_handoff.clear(handoff_generation)
+            with contextlib.suppress(Exception):
+                record_path(updater_sess).unlink()
             with contextlib.suppress(Exception):
                 cluster_pause.unpause_local_cluster()
             raise
@@ -463,10 +488,13 @@ def spawn_update(  # noqa: PLR0915 — one pause-to-detached-child transaction
         except cluster_session.OrchestrationSpawnFailed as exc:
             if exc.started is False:
                 # A definitive backend decline means there is no child that can
-                # recover this pause. An ambiguous post-fork/Popen failure keeps
-                # posture paused: the child may be running, and recovery will
-                # prove liveness or clear it after the safety bound.
+                # recover this pause, and the pre-record must not survive it
+                # either. An ambiguous post-fork/Popen failure keeps posture
+                # paused: the child may be running, and recovery will prove
+                # liveness or clear it after the safety bound.
                 shared.updater_handoff.clear(handoff_generation)
+                with contextlib.suppress(Exception):
+                    record_path(updater_sess).unlink()
                 cluster_pause.unpause_local_cluster()
             raise
     _log.info("[cluster] spawned updater session %s log=%s", updater_sess, log_path)

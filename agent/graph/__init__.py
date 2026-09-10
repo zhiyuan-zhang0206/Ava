@@ -15,6 +15,7 @@ Submodules split by node (one file per node, `_` prefix marks internal impl):
   - `_llm_errors.py`   — llm stream error taxonomy + consecutive-error tracking
   - `_exec.py`         — exec node (one disposable subprocess per execute_code call)
   - `_exec_output.py`  — code execution output envelope: format / truncate / overflow-to-file
+  - `_exec_alerts.py`  — best-effort operator alert for boot-phase exec child crashes
   - `_build.py`        — build_graph: assemble 8-Node self-cycling topology
   - `_node_log.py`     — node enter/exit lifecycle log + publish timeline snapshot
   - `_system_prompt.py`— system prompt dynamic assembly (base + plugin contributions)

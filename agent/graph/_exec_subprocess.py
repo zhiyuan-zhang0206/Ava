@@ -728,6 +728,7 @@ def _result_from_payload(
         cancelled=cancelled,
         timed_out=timed_out,
         stream_cap=stream_cap,
+        code_reached=(payload.code_reached if payload is not None else None),
     )
     if (
         isinstance(result, _ExecCrashed)
@@ -740,6 +741,7 @@ def _result_from_payload(
             output=result.output,
             exc=result.exc,
             full_traceback=payload.full_traceback,
+            code_reached=result.code_reached,
             stream_cap=result.stream_cap,
         )
     return result

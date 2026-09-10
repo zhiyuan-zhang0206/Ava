@@ -93,7 +93,8 @@ from shared.plugin_config_view import current_agent_plugin_pins
 
 from ._agent_traceback import format_full_traceback
 from ._context import AvaContext, agent_id_from_config
-from ._exec_output import wrap_code_output
+from ._exec_alerts import maybe_alert_exec_boot_failure
+from ._exec_output import crashed_no_output_body, wrap_code_output
 from ._exec_protocol import ResultPayload
 from ._exec_result import (
     _ExecCancelled,
@@ -385,7 +386,9 @@ def _dispatch_exec_result(
             logger.info(
                 "[{label}] {body}", label="exec-timeout", body=result_text, event="exec_timeout"
             )
-        case _ExecCrashed(output=output, exc=exc, full_traceback=child_traceback):
+        case _ExecCrashed(
+            output=output, exc=exc, full_traceback=child_traceback, code_reached=code_reached
+        ):
             # Ordinary exception: `output` carries the agent-facing (filtered)
             # traceback; the log gets the full unfiltered chain (framework/SDK
             # bugs invisible in the agent view stay diagnosable). INFO +
@@ -394,7 +397,15 @@ def _dispatch_exec_result(
             # The child ships its formatted traceback in the envelope
             # (`child_traceback`); parent-side construction failures (spawn
             # error, unserializable state) format from `exc`.
+            #
+            # P0 #2100: an EMPTY output on a crash means nothing reached the
+            # agent's stdout — never wrap it as "(no output)", which asserts
+            # the code ran. Say what happened instead: with the child's
+            # code_reached flag, "the code was NOT executed" (boot crash),
+            # "ran, printed nothing" or "unknown".
             halted = False
+            if not output:
+                output = crashed_no_output_body(exc, code_reached=code_reached)
             result_text = wrap_code_output(
                 output, stream_cap=stream_cap, referenced_messages=referenced_messages
             )
@@ -407,6 +418,12 @@ def _dispatch_exec_result(
                 event="exec_failed",
                 exc_type=type(exc).__name__,
             )
+            if code_reached is False:
+                # Bootstrap-class failure: the child died before the agent's
+                # code ever ran — the class that used to vanish as "(no
+                # output)". Alert the operator (best-effort, rate-limited)
+                # so an outage that silently strands agents is seen (P2 #2102).
+                maybe_alert_exec_boot_failure(agent_id, exc)
         case _ExecDone(output=output):
             halted = False
             result_text = wrap_code_output(

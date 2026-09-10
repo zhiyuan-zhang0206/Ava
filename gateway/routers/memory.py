@@ -398,10 +398,16 @@ async def post_memory_refresh() -> MemoryRefreshResponse:
 
     This runs only on the gateway (the gateway + memory checkout live
     there); a runner reaches it via its configured gateway URL.
+
+    `pull_main` shells out to git (network-bound fetch against the memory
+    remote): it must run OFF the event loop, or a slow/dead remote blocks the
+    whole gateway until the watchdog kills it (P2 #2102: the 2026-09-10
+    04:06-04:35 watchdog kill loop). `asyncio.to_thread` — the same hop the
+    memory indexer uses for its own pull.
     """
     from shared import memory_repo
 
-    head = memory_repo.pull_main()
+    head = await asyncio.to_thread(memory_repo.pull_main)
     return MemoryRefreshResponse(head=head)
 
 

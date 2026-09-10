@@ -3057,6 +3057,12 @@ export interface paths {
          *
          *     This runs only on the gateway (the gateway + memory checkout live
          *     there); a runner reaches it via its configured gateway URL.
+         *
+         *     `pull_main` shells out to git (network-bound fetch against the memory
+         *     remote): it must run OFF the event loop, or a slow/dead remote blocks the
+         *     whole gateway until the watchdog kills it (P2 #2102: the 2026-09-10
+         *     04:06-04:35 watchdog kill loop). `asyncio.to_thread` — the same hop the
+         *     memory indexer uses for its own pull.
          */
         post: operations["post_memory_refresh_api_memory_refresh_post"];
         delete?: never;

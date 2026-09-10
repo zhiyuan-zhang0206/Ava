@@ -101,6 +101,11 @@ class _ExecCrashed:
     output: str
     exc: BaseException
     full_traceback: str | None = None
+    # False = the child died before reaching the agent's code (boot-phase
+    # crash); True = the code ran; None = unknown (older child / parent-side
+    # construction failure). With empty output, False lets the dispatcher say
+    # "the code was NOT executed" instead of the "(no output)" lie (P0 #2100).
+    code_reached: bool | None = None
     stream_cap: StreamCap | None = None
 
 
@@ -132,12 +137,16 @@ def _construct_exec_result(
     cancelled: bool,
     timed_out: bool,
     stream_cap: StreamCap | None = None,
+    code_reached: bool | None = None,
 ) -> _ExecResult:
     """Dispatch priority: lifecycle > cancel > timeout > crashed > done.
 
     Lifecycle always wins (the agent actively calling terminate/restart/compact
     has higher semantic priority than "was interrupted"; SDK already INSERTed
     inbound). Cancel > timeout (CLAUDE design: cancel always wins).
+
+    `code_reached` rides the crash variant only (see `_ExecCrashed`): the
+    child's envelope reports whether the agent-authored code ever started.
     """
     if isinstance(exc, _LifecycleExit):
         return _ExecLifecycle(output=output, exc=exc, stream_cap=stream_cap)
@@ -146,5 +155,7 @@ def _construct_exec_result(
     if timed_out:
         return _ExecTimedOut(output=output, stream_cap=stream_cap)
     if exc is not None:
-        return _ExecCrashed(output=output, exc=exc, stream_cap=stream_cap)
+        return _ExecCrashed(
+            output=output, exc=exc, stream_cap=stream_cap, code_reached=code_reached
+        )
     return _ExecDone(output=output, stream_cap=stream_cap)
