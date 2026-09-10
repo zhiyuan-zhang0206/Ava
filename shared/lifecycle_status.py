@@ -147,9 +147,12 @@ def finish(rc: int, *, error: str | None = None, extra: dict[str, Any] | None = 
 def read() -> LifecycleOp | None:
     """The current journal, or None when absent or unreadable."""
     try:
-        data = cast("dict[str, Any]", json.loads(_path().read_text()))
+        raw = json.loads(_path().read_text())
     except (OSError, ValueError):
         return None
+    if not isinstance(raw, dict):
+        return None
+    data = cast("dict[str, Any]", raw)
     if not isinstance(data.get("operation"), str):
         return None
     raw_phases = data.get("phases", [])
@@ -173,11 +176,20 @@ def read() -> LifecycleOp | None:
                     ok=None if ok is None else bool(ok),
                 )
             )
+    try:
+        pid = int(data["pid"])
+        started_at = float(data.get("started_at", 0.0))
+        deadline = None if data.get("deadline") is None else float(data["deadline"])
+    except (KeyError, TypeError, ValueError):
+        # A parseable-but-wrong-shape journal (missing identity fields, bad
+        # types) is as unreadable as a corrupt one: readers on the
+        # stop/pause/restart path must see "absent", never a raise.
+        return None
     return LifecycleOp(
         operation=data["operation"],
-        pid=int(data["pid"]),
-        started_at=float(data.get("started_at", 0.0)),
-        deadline=(None if data.get("deadline") is None else float(data["deadline"])),
+        pid=pid,
+        started_at=started_at,
+        deadline=deadline,
         phases=phases,
         complete=bool(data.get("complete", False)),
         result=data.get("result"),

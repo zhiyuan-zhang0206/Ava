@@ -85,6 +85,24 @@ def test_malformed_journal_reads_as_absent(home: Path) -> None:
     assert journal.read() is None
 
 
+def test_wrong_shape_journal_reads_as_absent(home: Path) -> None:
+    # Parseable JSON with a wrong shape must read as "absent" too: `read()`
+    # sits on the stop/pause/restart path, so a missing pid or a bad field
+    # type must not raise KeyError/TypeError/ValueError mid-operation.
+    path = journal.status_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps([{"operation": "pause"}]))  # not an object
+    assert journal.read() is None
+    path.write_text(json.dumps({"operation": "pause"}))  # missing pid
+    assert journal.read() is None
+    path.write_text(json.dumps({"operation": "pause", "pid": "x"}))  # bad type
+    assert journal.read() is None
+    path.write_text(json.dumps({"operation": "pause", "pid": 1, "started_at": []}))
+    assert journal.read() is None
+    path.write_text(json.dumps({"operation": "pause", "pid": 1, "deadline": "soon"}))
+    assert journal.read() is None
+
+
 def test_journal_survives_an_unfinished_process(home: Path) -> None:
     # The acceptance shape: the writer dies mid-phase; the last phase shows
     # started-but-not-finished and complete=False, so a later reader sees the
