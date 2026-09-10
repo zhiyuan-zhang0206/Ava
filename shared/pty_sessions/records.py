@@ -18,11 +18,13 @@ from pathlib import Path
 import psutil
 
 from shared.log import logger
+from shared.platform import LockTimeoutError, file_lock
 from shared.pty_sessions._paths import (
     host_identity,
     host_starttime,
     pty_dir,
     record_path,
+    records_lock_path,
     socket_path,
 )
 from shared.session_record import SessionRecord, pid_starttime_ticks
@@ -151,8 +153,31 @@ def _kill_recorded_shell(rec: SessionRecord) -> None:
         os.kill(rec.pid, signal.SIGKILL)
 
 
+_SWEEP_LOCK_TIMEOUT_S = 5.0
+"""How long a sweep waits for the pty record lock before skipping. Sweeps are
+opportunistic (they run inside listings), so a skip is always safe: the record
+stays until the next scan, when the lock is likely free."""
+
+
 def _sweep_dead(name: str) -> None:
-    """Drop a provably dead session's record + socket (its host is gone too)."""
+    """Drop a provably dead session's record + socket (its host is gone too).
+
+    Runs under the pty record lock (issue #2063): the session host's bind +
+    record write takes the same lock, so a sweep that read the previous
+    incarnation's dead record can never unlink the fresh record + socket a
+    concurrent ``new`` just created — the sweep either finishes before the
+    fresh record exists, or re-reads it as live and retains it. A sweep that
+    cannot take the lock within ``_SWEEP_LOCK_TIMEOUT_S`` skips.
+    """
+    try:
+        with file_lock(records_lock_path(), timeout_s=_SWEEP_LOCK_TIMEOUT_S):
+            _sweep_dead_locked(name)
+    except LockTimeoutError:
+        logger.debug("pty sweep of {name} skipped: record lock is busy", name=name)
+
+
+def _sweep_dead_locked(name: str) -> None:
+    """The sweep body — caller holds the pty record lock."""
     path = record_path(name)
     rec = SessionRecord.read(path)
     if rec is not None:
