@@ -121,9 +121,10 @@ so the fan-out runs regardless of the mode.
   deterministic JSON.
 - Refresh .test_durations through its normal nightly workflow after material
   suite changes.
-- Revert: set `TEST_SELECTION_MODE: "shadow"` in ci.yml (one line). The wiring
-  contracts in tests/scripts/test_ci_test_selection.py pin both routings, so a
-  revert cannot silently lose a gate.
+- Revert: set `TEST_SELECTION_MODE: "shadow"` in ci.yml (one line) and update
+  the enforce-default assertion in tests/scripts/test_ci_test_selection.py.
+  The wiring contracts deliberately turn red when the switch moves — that
+  tripwire is what keeps a revert from silently losing a gate.
 
 ## History: the shadow window and the enforcement decision
 

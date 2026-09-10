@@ -82,6 +82,16 @@ def test_subset_job_gates_only_in_enforce() -> None:
     assert "--junit-xml=tmp/junit-backend-selected.xml" in run_step["run"]
 
 
+def test_zero_execution_never_reads_green() -> None:
+    """Fail-closed guard: a SELECTED run with no JUnit (empty TESTS -> status
+    5, or a hard pytest crash) must red the enforce gate even though the Trunk
+    uploader tolerates missing files."""
+    guard = _step(_workflow_jobs()["backend-selected"], "Require a subset JUnit report")
+    assert guard["if"] == "${{ !cancelled() && needs.test-select.outputs.mode == 'enforce' }}"
+    assert "junit-backend-selected.xml" in guard["run"]
+    assert "exit 1" in guard["run"]
+
+
 def test_subset_and_shard_quarantine_gates_have_the_same_shape() -> None:
     """The subset must not red on quarantined flaky failures any more than a
     shard does — same uploader, same summary step; subset gate enforce-only."""

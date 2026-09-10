@@ -725,6 +725,20 @@ jobs:
           # Shadow failures belong in the report, never in this check result;
           # the step-level continue-on-error carries that either way.
 
+      - name: Require a subset JUnit report
+        # Fail-closed guard (QA review 2026-09-11): the selector's no-tests
+        # rule returns FULL for an empty candidate, so a SELECTED decision
+        # should always have tests — but if that ever breaks, the run step
+        # records status 5 with no JUnit, and the Trunk uploader tolerates a
+        # missing file. Zero executed tests must never read green.
+        if: ${{ !cancelled() && needs.test-select.outputs.mode == 'enforce' }}
+        shell: bash
+        run: |
+          if [ ! -s tmp/junit-backend-selected.xml ]; then
+            echo "::error::the enforced subset produced no JUnit report (TESTS='$TESTS') — refusing green without executing tests"
+            exit 1
+          fi
+
       - name: Trunk quarantine gate (upload test results)
         id: trunk-gate
         # Enforce mode only: in shadow the subset never gates, so it uploads
