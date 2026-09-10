@@ -702,8 +702,14 @@ viewer proves object-list/read access without requiring bucket-metadata access; 
 objectCreator + objectViewer uploader is identity-checked without creating or deleting a probe. Never edit PostgreSQL or `.env` manually
 during this sequence. Resume a pending restart through the command; do not call
 `pg_ctl` or introduce another restart mechanism. `ava cluster pitr rollback`
-persists rollback intent, restores the frozen settings, disables PITR and
-retention gates, and uses the same durable whole-cluster restart continuation.
+persists rollback intent, restores the frozen settings, and uses the same
+durable whole-cluster restart continuation. The four PITR gate keys are
+config-owned and are never reverted or stripped by a rollback; a fresh
+activation after a rollback needs them absent — unset them with `ava config unset
+pitr_enabled pitr_base_backup_enabled pitr_restore_proof_enabled
+pitr_retention_planner_enabled`, and the activation provisions them — or
+resume an already-prepared operation with the keys aligned to their desired
+values.
 Each of the four owned PostgreSQL settings has its own intent and applied
 journal entry: resume distinguishes pre-ALTER from post-ALTER/pre-journal
 failure without replaying a completed setting. Rollback restores only those

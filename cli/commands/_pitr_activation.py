@@ -19,7 +19,12 @@ import psutil
 import psycopg
 from psycopg.conninfo import make_conninfo
 
-from cli.commands._pitr_activation_config import apply_wal_config, restore_archive_settings
+from cli.commands._pitr_activation_config import (
+    apply_wal_config,
+    require_inactive_gate_posture,
+    restore_archive_settings,
+    rollback_gate_hint,
+)
 from services.pitr.activation_credentials import (
     credential_app_key,
     credential_identity,
@@ -284,8 +289,7 @@ def _shadow_readiness() -> ShadowReadiness:
             raise RuntimeError(f"private PITR directory is unsafe: {directory}")
     credential_evidence = _validate_secrets()
     require_store_config(config)
-    if config.pitr_enabled or config.pitr_base_backup_enabled or config.pitr_restore_proof_enabled:
-        raise RuntimeError("shadow readiness requires all PITR service flags to remain off")
+    require_inactive_gate_posture("shadow readiness")
     pg_version = (ava_home() / "pg" / "PG_VERSION").read_text().strip()
     if pg_version != "17":
         raise RuntimeError(f"PITR activation requires PostgreSQL 17, found {pg_version!r}")
@@ -450,6 +454,7 @@ def _advance_activation(home: Path, record: ActivationRecord, holder: str) -> Ac
         write_record(home, record)
     desired = _desired_archive_settings(home)
     if record.phase == "wal_config_pending":
+        require_inactive_gate_posture("the pre-activation baseline")
         _validate_snapshot(record)
         _require_same_pre_mutation_state(record)
         before = _archive_settings(_read_pg_state())
@@ -788,4 +793,7 @@ def cmd_pitr_rollback(*, continuation: str | None = None) -> int:
             return 1
     _print_record(record)
     print("PITR rollback preserves all logical and remote backup data")
+    hint = rollback_gate_hint(home)
+    if hint is not None:
+        print(hint)
     return 0
