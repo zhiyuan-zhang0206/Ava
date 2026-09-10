@@ -54,7 +54,7 @@ This plugin **owns** the `ava.memory` namespace — `plugin.py` assembles it and
 - `ava.memory.PATH` — memory pool root path (`$AVA_HOME/memory`, computed by `ava_home()`), shared by all agents
 - `ava.memory.search(query, k=5)` — semantic search, returns `list[(path, description, tags)]`
   (description empty string when absent; tags include the note's `type/<x>` tag so a caller can weigh a hit by its kind)
-- `ava.memory.write(slug, content, *, title=None, description=None, tags=None, store="personal")` — canonical entry writer for personal and shared stores; resolves the target from the agent/store rather than cwd, writes generated frontmatter atomically, and upserts the relevant `MEMORY.md` pointer
+- `ava.memory.write(slug, content, *, title=None, description=None, tags=None, store="personal")` — canonical entry writer for personal and shared stores; resolves the target from the agent/store rather than cwd, writes the note's frontmatter (a caller-supplied block stays the note's only one and is completed with the fields it is missing), and upserts the relevant `MEMORY.md` pointer
 
 `write()` is the preferred way to author memory because it preserves store ownership and the index invariant. `IndexerUnavailable` remains reachable but deliberately excluded from `help(ava.memory)`.
 
