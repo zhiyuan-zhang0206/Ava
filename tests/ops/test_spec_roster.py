@@ -349,7 +349,6 @@ def test_mcp_daemon_ungated_with_af_unix(monkeypatch: pytest.MonkeyPatch) -> Non
 # not derived, so adding a service forces a decision instead of defaulting into
 # liveness-only.
 _LIVENESS_ONLY_SESSIONS = {
-    "frontend",  # Next.js — serves no Ava payload; a 2xx is all there is
     "milvus",  # gRPC — TCP connect only, uncurlable
     "memory-search",  # the search API carries no Ava identity payload; its healthcheck traverses a real /search
     "browser-mcp",  # MCP over a Unix socket its own healthcheck dials

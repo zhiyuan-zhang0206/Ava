@@ -83,6 +83,12 @@ class SessionRecord:
     # exact (pid, create_time) identity.
     steward_pid: int | None = None
     steward_socket: str | None = None
+    # POSIX only: the session's process group at spawn (the reparent helper's
+    # setsid pgid). The durable ownership proof for a leader that already died:
+    # while the group is occupied, its surviving members are still this
+    # session's descendants and a stop may converge them instead of silently
+    # losing them. None on Windows and legacy records.
+    pgid: int | None = None
 
     @classmethod
     def read(cls, path: Path) -> SessionRecord | None:
@@ -118,6 +124,7 @@ class SessionRecord:
                 if isinstance(record.get("steward_socket"), str) and record["steward_socket"]
                 else None
             ),
+            pgid=int(record["pgid"]) if isinstance(record.get("pgid"), int) else None,
         )
 
     def identifies(self, pid: int) -> bool | None:

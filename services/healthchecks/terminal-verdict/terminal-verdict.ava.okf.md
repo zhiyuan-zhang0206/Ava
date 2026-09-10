@@ -24,6 +24,7 @@ A respawn kills `ava-<svc>` on **this unit's** session backend first, then re-sp
 | `name` mismatch | `PORT_TAKEN` | a different daemon kind; killing `ava-<svc>` frees nothing |
 | body is not an Ava `/healthz` | `PORT_TAKEN` | not a process this unit supervises at all |
 | `pid` not in our pidfile | `DOWN` | reached only after name+home matched — a stray of *this* unit, which kill-session does clear |
+| app port answered, LISTEN socket outside the current frontend session | `PORT_TAKEN` | an orphan of a dead session (or a foreign process) holds the port — `kill_session` frees nothing, so the watchdog refuses to respawn into it; recovery is converging the recorded group (`pause`/`stop`) |
 | no pidfile, but answering | `DOWN` | same: same home, same kind |
 | unreachable / 503 / non-2xx | `DOWN` | free port, or our own daemon with a wedged loop — respawn is the cure |
 | probe raised unexpectedly | `DOWN` | fail closed *toward retrying*; an unforeseen failure is not evidence of an occupant |
@@ -31,6 +32,8 @@ A respawn kills `ava-<svc>` on **this unit's** session backend first, then re-sp
 | CDP answers, our Chrome's sockets unreadable | `PORT_TAKEN` | cannot confirm ownership; CDP *is* served, so a respawn meets that same refusal whoever owns it |
 
 The browser reaches those two rows without a `/healthz`: CDP carries no field we control, so its identity is a Chrome on this unit's `--user-data-dir` holding the LISTEN socket on the CDP port (`services/browser/probe.py`). The probe asks in BOTH directions — the profile walk asks each of our Chromes whether it listens, and a global-TCP-table read asks who owns the LISTEN socket and whether THAT pid is ours (by the walk, or by its own argv). Either direction may win; the second exists because the walk direction alone has blind spots (an unreadable argv, a failed socket read) that would misread our own listener as a foreign occupant.
+
+The frontend row resolves ownership the same way — its 2xx proves a renderer, not ownership: the app-port LISTEN socket must resolve to a pid of the current frontend session (`services/healthchecks/frontend.py`).
 
 ## What "stops retrying" means
 

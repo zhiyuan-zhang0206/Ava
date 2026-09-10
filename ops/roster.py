@@ -53,6 +53,20 @@ def daemon_identity(name: str, pidfile: Path) -> Callable[[], DaemonProbe]:
     return partial(probe_daemon, name, _hz(name), pidfile=pidfile)
 
 
+def _frontend_probe() -> DaemonProbe:
+    """The frontend's identity probe, imported at call time.
+
+    Next.js serves no /healthz it can sign, so the frontend is identified by
+    process ownership: the app-port listener must belong to the current
+    frontend session's recorded identity (services/healthchecks/frontend.py).
+    An old orphan that answers 200 without a live session is not frontend
+    health (issue #2123).
+    """
+    from services.healthchecks.frontend import probe_frontend
+
+    return probe_frontend()
+
+
 def _browser_probe() -> DaemonProbe:
     """The headed browser's identity probe, imported at call time.
 
@@ -227,6 +241,7 @@ def build_services() -> tuple[ServiceSpec, ...]:
             # operator UI back to report the outage rather than leaving it dark.
             requires_db=False,
             curl_url=_fe_url,
+            identity_probe=_frontend_probe,
             healthcheck_module="services.healthchecks.frontend",
         ),
         ServiceSpec(

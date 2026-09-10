@@ -1,7 +1,7 @@
 ---
 type: doc
 title: "Stopping a process — the kill contract and the non-session trio"
-description: "How Ava stops what it started: `kill_session`'s (ok, mode) contract and its graceful/forced escalation for named sessions, and `shared/proc.py`'s `process_alive` / `request_stop` / `force_kill` trio for the processes that are not sessions (pooler, port orphans, the gate daemon) — including why the obvious POSIX spellings do not survive the crossing to Windows."
+description: "How Ava stops what it started: `kill_session`'s (ok, mode) contract and its graceful/forced escalation for named sessions, `shared/proc.py`'s `process_alive` / `request_stop` / `force_kill` trio for the processes that are not sessions (pooler, port orphans, the gate daemon) — including why the obvious POSIX spellings do not survive the crossing to Windows — and how a stop converges a service tree whose leader already died (recorded process group, retry path)."
 tags:
 - shared
 - process
@@ -39,6 +39,23 @@ helper from inside the target's session. A cross-session target with no
 steward is an explicit refusal — the stop reports incomplete, never escalates.
 The ops daemon explicitly cancels and awaits loop tasks before its final exit,
 without joining stuck executor threads. See [[session-backend.ava.okf.md|session backend]].
+
+### Stop convergence when a service leader is gone
+
+`cli/commands/_maintenance_stop.py` treats a confirmed-dead leader as one step,
+not the end of the stop. A live leader still runs its own graceful cleanup
+first; once the leader is confirmed dead, its captured, birth-validated
+descendants are signalled — at most once each, SIGTERM on POSIX — so a
+descendant that outlived a non-forwarding launcher cannot hold the stop open.
+Refusals stay refusals: a descendant that will not accept the signal keeps the
+hold and is reported at the deadline — no implicit SIGKILL, no certificate
+while it lives.
+
+The retry handle is the spawn-time process group on the session record
+(`SessionRecord.pgid`): a record whose leader died is retained and listed
+exactly while that group still has members, so a stop re-entered after the
+incident converges the orphan through the recorded group instead of certifying
+the unit stopped. Legacy records without a `pgid` reap as before.
 
 ### Stops that do not go through a session
 
