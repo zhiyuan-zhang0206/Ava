@@ -30,11 +30,15 @@
 # Flaky-marked backend tests run in their own serial job; the parallel shards
 # exclude them with `-m "not flaky"`, mirroring the frontend flaky isolation.
 #
-# TEST-SELECTION SHADOW MODE: real PRs retain that full backend net and also
-# run one direct-import-selected backend subset for measurement only. The
-# selector never runs for enforcement, and Trunk merge-tree branches always
-# choose the full suite, so branch protection and batched-tree safety are
-# unchanged while false-greens are measured.
+# TEST SELECTION (TEST_SELECTION_MODE, default enforce): when the direct
+# import selector returns SELECTED for a real PR, backend-selected runs that
+# subset as the backend pytest gate and backend-shard (the 16-way fan-out) is
+# skipped. Every other decision — FULL, SKIP, selector failure — keeps the
+# full fan-out, and Trunk merge-tree branches (trunk-merge/*, trunk-temp/*)
+# always choose FULL by the selector's first rule, so branch protection, the
+# coverage gate, and batched-tree safety are untouched by enforcement. In
+# shadow mode nothing gates on the subset: the fan-out gates and the subset
+# plus comparison report run informational beside it.
 #
 # AVA_DB_URL / AVA_REDIS_URL are pointed at unreachable sentinel ports on
 # purpose. The suite must provision its own throwaway cluster; a sentinel turns
@@ -62,11 +66,16 @@ permissions:
   contents: read
 
 env:
-  # Test-selection mode for PR CI. shadow (current): PRs run the selected
-  # subset (informational) side by side with the full backend suite; nothing
-  # gates on the subset. Switch to "enforce" only when the shadow report's
-  # false-green rate is measurably ~0 — see conventions/test-selection.md.
-  TEST_SELECTION_MODE: "shadow"
+  # Test-selection mode for PR CI — the single revert switch for the
+  # enforcement decision (2026-09-11). enforce (default): a real PR whose
+  # selector decision is SELECTED runs its selected backend subset as the
+  # backend pytest gate, and the 16-shard fan-out is skipped; every other
+  # decision and every Trunk merge-tree branch keeps the full suite. shadow:
+  # no PR gates on the subset — the full fan-out gates and the subset plus its
+  # comparison report run informational beside it. Set back to "shadow" to
+  # restore that behavior; all routing below derives from this one value.
+  # See conventions/test-selection.md.
+  TEST_SELECTION_MODE: "enforce"
 
 concurrency:
   # Reruns retain the original ref/SHA. Isolate immutable heads so a stale
@@ -120,17 +129,21 @@ jobs:
           cat "$GITHUB_OUTPUT"
 
   test-select:
-    # Shadow mode needs an auditable selected subset for real PRs, while the
-    # existing backend fan-out remains the branch-protection gate. Queue test
-    # branches are allowed through only to record their forced FULL decision.
+    # Publishes the selector decision (and the active mode) that routes the
+    # backend jobs: SELECTED + enforce swaps the shard fan-out for the subset;
+    # every other combination — including this job failing, which leaves the
+    # outputs empty — keeps the full fan-out. Queue test branches pass through
+    # only to record their forced FULL decision.
     name: test selection
     runs-on: ubuntu-24.04
     timeout-minutes: 5
-    # Any setup or selector failure is shadow telemetry, never a merge gate.
+    # A setup or selector failure is telemetry: the routing outputs stay empty
+    # and the full shard suite runs instead.
     continue-on-error: true
     needs: [classify]
     if: ${{ github.event_name == 'pull_request' && (github.event.pull_request.draft == false || startsWith(github.head_ref, 'trunk-merge/') || startsWith(github.head_ref, 'trunk-temp/')) && needs.classify.outputs.backend == 'true' }}
     outputs:
+      mode: ${{ steps.selector.outputs.mode }}
       decision: ${{ steps.selector.outputs.decision }}
       tests: ${{ steps.selector.outputs.tests }}
       count: ${{ steps.selector.outputs.count }}
@@ -154,6 +167,10 @@ jobs:
           EVENT: ${{ github.event_name }}
         run: |
           echo "test-selection mode=$TEST_SELECTION_MODE"
+          # Publish the mode before anything else can fail: job-level routing
+          # (if / continue-on-error) cannot read env, only needs, and an empty
+          # mode degrades to the full-suite path.
+          echo "mode=$TEST_SELECTION_MODE" >> "$GITHUB_OUTPUT"
           python3 scripts/test_selector.py \
             --changed-files /tmp/changed.txt \
             --head-ref "$HEAD_REF" \
@@ -486,8 +503,15 @@ jobs:
     name: backend shard (${{ matrix.group }}/16)
     runs-on: ubuntu-24.04
     timeout-minutes: 20
-    needs: [classify]
-    if: ${{ needs.classify.outputs.backend == 'true' }}
+    # Skipped only on the enforced-subset path (mode==enforce and the selector
+    # returned SELECTED — backend-selected takes over as the gate). Shadow
+    # mode, FULL/SKIP decisions, selector failures (empty decision) and
+    # non-PR events all run the full fan-out.
+    needs: [classify, test-select]
+    # always(): on push-to-main test-select is skipped, and a skip must not
+    # propagate down the needs chain into skipped shards — the full suite is
+    # exactly what that case wants.
+    if: ${{ always() && needs.classify.outputs.backend == 'true' && (needs.test-select.outputs.mode != 'enforce' || needs.test-select.outputs.decision != 'SELECTED') }}
     strategy:
       fail-fast: false
       # 16 shards (was 12): measured 2026-09-03 over 20 push-to-main runs, the
@@ -633,22 +657,26 @@ jobs:
           if-no-files-found: ignore
           path: tmp/pg-fixture-logs/
 
-  backend-selected-shadow:
-    # This is deliberately an informational second run. It never contributes
-    # coverage artifacts or a backend aggregator dependency: full shards remain
-    # the only protection gate while shadow data measures selector quality.
-    name: backend selected subset (shadow)
+  backend-selected:
+    # Enforce mode: the backend pytest gate for a SELECTED pull request
+    # (backend-shard is skipped in that same combination). Shadow mode: it
+    # stays informational and the full fan-out gates — the mode split is
+    # exactly the continue-on-error expression below. It never contributes
+    # coverage artifacts: the coverage gate lives on the full fan-out, which
+    # every queue test branch still runs.
+    name: backend selected subset
     runs-on: ubuntu-24.04
     timeout-minutes: 20
-    # Keep checkout, provisioning, and artifact faults informational as well as
-    # the captured pytest result below.
-    continue-on-error: true
+    # In shadow mode checkout, provisioning, and artifact faults stay
+    # informational as well; in enforce mode the job is a real gate.
+    continue-on-error: ${{ needs.test-select.outputs.mode != 'enforce' }}
     needs: [classify, test-select]
     if: ${{ github.event_name == 'pull_request' && needs.classify.outputs.backend == 'true' && needs.test-select.outputs.decision == 'SELECTED' }}
     outputs:
       subset_status: ${{ steps.run-subset.outputs.subset_status }}
       subset_duration_secs: ${{ steps.run-subset.outputs.subset_duration_secs }}
     env:
+      TRUNK_ORG_URL_SLUG: ${{ secrets.TRUNK_ORG_URL_SLUG }}
       AVA_DB_URL: postgresql://unused@127.0.0.1:1/unused
       AVA_REDIS_URL: redis://127.0.0.1:1/0
       TESTS: ${{ needs.test-select.outputs.tests }}
@@ -667,8 +695,13 @@ jobs:
       - name: Install Python deps
         uses: ./.github/actions/uv-sync
 
-      - name: Run selected pytest subset without gating
+      - name: Run selected pytest subset
         id: run-subset
+        # Same split as a shard: pytest's exit code alone is not the gate —
+        # the Trunk quarantine gate below decides what is a real failure
+        # (quarantined flaky failures pass, real failures still block). The
+        # exit status is recorded either way for the shadow report.
+        continue-on-error: true
         shell: bash
         run: |
           mkdir -p tmp
@@ -678,6 +711,7 @@ jobs:
             set +e
             set -o pipefail
             uv run pytest "${selected_tests[@]}" -q -m "not flaky" -n 4 \
+              --junit-xml=tmp/junit-backend-selected.xml -o junit_family=xunit1 \
               2>&1 | tee tmp/test-selection-subset.log
             status=$?
           else
@@ -688,8 +722,74 @@ jobs:
           finished=$(date +%s)
           echo "subset_status=$status" >> "$GITHUB_OUTPUT"
           echo "subset_duration_secs=$((finished - started))" >> "$GITHUB_OUTPUT"
-          # Shadow failures belong in the report, never in this check result.
-          exit 0
+          # Shadow failures belong in the report, never in this check result;
+          # the step-level continue-on-error carries that either way.
+
+      - name: Require a subset JUnit report
+        # Fail-closed guard (QA review 2026-09-11): the selector's no-tests
+        # rule returns FULL for an empty candidate, so a SELECTED decision
+        # should always have tests — but if that ever breaks, the run step
+        # records status 5 with no JUnit, and the Trunk uploader tolerates a
+        # missing file. Zero executed tests must never read green.
+        if: ${{ !cancelled() && needs.test-select.outputs.mode == 'enforce' }}
+        shell: bash
+        run: |
+          if [ ! -s tmp/junit-backend-selected.xml ]; then
+            echo "::error::the enforced subset produced no JUnit report (TESTS='$TESTS') — refusing green without executing tests"
+            exit 1
+          fi
+
+      - name: Trunk quarantine gate (upload test results)
+        id: trunk-gate
+        # Enforce mode only: in shadow the subset never gates, so it uploads
+        # nothing and a subset failure cannot red anything.
+        if: ${{ !cancelled() && env.TRUNK_ORG_URL_SLUG != '' && needs.test-select.outputs.mode == 'enforce' }}
+        uses: trunk-io/analytics-uploader@385f1ccdf345b4532dc4b6c665dd432b702b8e28 # v2.1.2
+        with:
+          cli-version: 0.15.4
+          junit-paths: tmp/junit-backend-selected.xml
+          org-slug: ${{ secrets.TRUNK_ORG_URL_SLUG }}
+          token: ${{ secrets.TRUNK_API_TOKEN }}
+      - name: Show unquarantined failure summary
+        # The test run above is continue-on-error, so this job's only
+        # hard-failing test step is the quarantine gate itself: this prints
+        # the failing tests from the uploaded JUnit when the gate rejects
+        # them, so a red step reads as "tests failed and were not
+        # quarantined" (a real gate block) instead of an uploader outage.
+        if: ${{ steps.trunk-gate.outcome == 'failure' }}
+        shell: bash
+        run: |
+          python3 - <<'EOF'
+          import glob
+          from xml.etree import ElementTree as ET
+
+          paths = set()
+          for pattern in ["tmp/junit-backend-selected.xml"]:
+              paths.update(glob.glob(pattern))
+          paths = sorted(paths)
+          if not paths:
+              print("No JUnit files found: the upload failed before test results were parsed (see the step log above).")
+              raise SystemExit(0)
+          failed = []
+          total = 0
+          for path in paths:
+              try:
+                  root = ET.parse(path).getroot()
+              except ET.ParseError:
+                  print("WARNING: could not parse " + path)
+                  continue
+              for tc in root.iter("testcase"):
+                  total += 1
+                  if tc.find("failure") is not None or tc.find("error") is not None:
+                      failed.append(tc.get("classname") + "::" + tc.get("name"))
+          print("Trunk quarantine gate: " + str(len(failed)) + " of " + str(total) + " test(s) failed and were NOT quarantined.")
+          for name in failed:
+              print("  FAILED " + name)
+          if failed:
+              print("Fix the test, or quarantine a known-flaky one in the Trunk Flaky Tests dashboard.")
+          else:
+              print("No failing tests in the JUnit: this red step is an uploader error, not a test failure.")
+          EOF
 
       - name: Upload selected-subset log
         if: ${{ always() }}
@@ -979,21 +1079,49 @@ jobs:
           security delete-keychain "$RUNNER_TEMP/ava-signing.keychain-db" || true
 
   backend:
-    # The aggregator carrying the branch-protection check name:
-    # skipped (= satisfied) when the diff has no backend side; otherwise green
-    # iff the static and native smoke jobs, every pytest shard, and the combined
-    # coverage gate are green.
+    # The aggregator carrying the branch-protection check name. Skipped
+    # (= satisfied) when the diff has no backend side; otherwise green iff the
+    # static and native smoke jobs are green and the enforced pytest path is
+    # green — the selected subset when mode==enforce and the selector returned
+    # SELECTED (shards skipped), the 16-shard fan-out in every other case.
     name: backend (pytest + pyright)
     runs-on: ubuntu-24.04
     timeout-minutes: 10
-    needs: [classify, backend-static, backend-structure, backend-shard, backend-serial, backend-pgvector-smoke, helper-signing-smoke]
+    needs: [classify, test-select, backend-static, backend-structure, backend-shard, backend-selected, backend-serial, backend-pgvector-smoke, helper-signing-smoke]
     if: ${{ always() && needs.classify.result == 'success' && needs.classify.outputs.backend == 'true' }}
     steps:
-      - name: Verify shard results
-        if: ${{ needs.backend-static.result != 'success' || needs.backend-structure.result != 'success' || needs.backend-shard.result != 'success' || needs.backend-serial.result != 'success' || needs.backend-pgvector-smoke.result != 'success' || needs.helper-signing-smoke.result != 'success' }}
+      - name: Verify backend job results
+        env:
+          DECISION: ${{ needs.test-select.outputs.decision }}
         run: |
-          echo "a backend job did not succeed: static=${{ needs.backend-static.result }} structure=${{ needs.backend-structure.result }} shards=${{ needs.backend-shard.result }} serial=${{ needs.backend-serial.result }} pgvector-smoke=${{ needs.backend-pgvector-smoke.result }} helper-signing-smoke=${{ needs.helper-signing-smoke.result }}"
-          exit 1
+          # One required check covers both pytest paths: the enforced subset
+          # when mode==enforce and the selector returned SELECTED, the full
+          # fan-out otherwise. A job that should have run and did not leaves a
+          # non-success result, which fails here rather than silently
+          # satisfying the check.
+          ok=true
+          fail() { echo "::error::$1"; ok=false; }
+          check() { if [ "$2" != "success" ]; then fail "$1: $2"; fi; }
+          check backend-static "${{ needs.backend-static.result }}"
+          check backend-structure "${{ needs.backend-structure.result }}"
+          check backend-serial "${{ needs.backend-serial.result }}"
+          check backend-pgvector-smoke "${{ needs.backend-pgvector-smoke.result }}"
+          check helper-signing-smoke "${{ needs.helper-signing-smoke.result }}"
+          if [ "$TEST_SELECTION_MODE" = "enforce" ] && [ "$DECISION" = "SELECTED" ]; then
+            check backend-selected "${{ needs.backend-selected.result }}"
+            # Shards should be skipped here; a shard run that failed anyway is
+            # a real failure and must not be masked by a green subset.
+            case "${{ needs.backend-shard.result }}" in
+              failure|cancelled) fail "backend-shard: ${{ needs.backend-shard.result }} (enforce+SELECTED)";;
+            esac
+          else
+            check backend-shard "${{ needs.backend-shard.result }}"
+          fi
+          if [ "$ok" = "false" ]; then
+            echo "a backend job did not succeed: static=${{ needs.backend-static.result }} structure=${{ needs.backend-structure.result }} shards=${{ needs.backend-shard.result }} selected=${{ needs.backend-selected.result }} serial=${{ needs.backend-serial.result }} pgvector-smoke=${{ needs.backend-pgvector-smoke.result }} helper-signing-smoke=${{ needs.helper-signing-smoke.result }} mode=$TEST_SELECTION_MODE decision=$DECISION"
+            exit 1
+          fi
+          echo "backend jobs verified (mode=$TEST_SELECTION_MODE decision=$DECISION)"
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -1013,6 +1141,11 @@ jobs:
           merge-multiple: true
 
       - name: Combine coverage + gate
+        # Skipped on the enforced-subset path: a SELECTED PR runs no shards,
+        # so there is nothing to combine. The 85% full-tree gate lives on the
+        # full fan-out runs instead — every queue test branch runs one, as
+        # does every non-SELECTED PR.
+        if: ${{ !(env.TEST_SELECTION_MODE == 'enforce' && needs.test-select.outputs.decision == 'SELECTED') }}
         env:
           BACKEND_COVERAGE_THRESHOLD: "85"
         run: |
@@ -1037,9 +1170,12 @@ jobs:
           uv run python scripts/coverage_gates.py coverage.json
 
   test-selection-shadow-report:
-    # The report is the shadow-mode measurement point. It observes the existing
-    # full backend result and the informational subset, then records divergence
-    # without becoming a required check or changing either result.
+    # The shadow-mode measurement point. It only exists while the mode is
+    # shadow: it observes the full backend result and the informational subset
+    # and records divergence without becoming a required check or changing
+    # either result. Under enforce there is no full pytest result on a SELECTED
+    # PR to compare against, so the report stands down; flipping
+    # TEST_SELECTION_MODE back to shadow revives it.
     name: test selection shadow report
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -1047,8 +1183,8 @@ jobs:
     # population. The backend aggregator remains recorded separately because it
     # also includes static, coverage, flaky, and pgvector gates.
     continue-on-error: true
-    needs: [classify, backend, backend-shard, backend-selected-shadow, test-select]
-    if: ${{ always() && needs.classify.outputs.backend == 'true' }}
+    needs: [classify, backend, backend-shard, backend-selected, test-select]
+    if: ${{ always() && needs.classify.outputs.backend == 'true' && needs.test-select.outputs.mode != 'enforce' }}
     steps:
       - name: Compare full and selected subset outcomes
         continue-on-error: false
@@ -1056,7 +1192,7 @@ jobs:
         env:
           FULL_BACKEND_RESULT: ${{ needs.backend.result }}
           FULL_PYTEST_RESULT: ${{ needs.backend-shard.result }}
-          SUBSET_STATUS: ${{ needs.backend-selected-shadow.outputs.subset_status }}
+          SUBSET_STATUS: ${{ needs.backend-selected.outputs.subset_status }}
           DECISION: ${{ needs.test-select.outputs.decision }}
           REASON: ${{ needs.test-select.outputs.reason }}
           EST_SECONDS: ${{ needs.test-select.outputs.est_seconds }}

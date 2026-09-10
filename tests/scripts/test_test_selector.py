@@ -228,7 +228,7 @@ def test_json_cli_output_is_machine_readable_and_deterministic(
     payload = json.loads(capsys.readouterr().out)
 
     assert payload["decision"] == "SELECTED"
-    assert payload["mode"] == "shadow"
+    assert payload["mode"] == "enforce"  # ci.yml default when the env is unset
     assert payload["tests"] == ["tests/unit/test_changed.py", "tests/unit/test_imports.py"]
     assert payload["map_source_count"] == 4
 
@@ -238,8 +238,18 @@ def test_json_cli_output_is_machine_readable_and_deterministic(
     assert repeated.as_json() == payload
 
 
+def test_selector_mode_is_audit_metadata_from_the_workflow_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The recorded mode follows ci.yml's switch; the default matches it."""
+    monkeypatch.delenv("TEST_SELECTION_MODE", raising=False)
+    assert test_selector._selection_mode() == "enforce"
+    monkeypatch.setenv("TEST_SELECTION_MODE", "shadow")
+    assert test_selector._selection_mode() == "shadow"
+
+
 def test_duration_estimates_are_identical_across_python_hash_seeds() -> None:
-    """Hash-randomized set iteration must not change shadow audit JSON."""
+    """Hash-randomized set iteration must not change the audit JSON."""
     snippet = """\
 from scripts.test_selector import _estimate_seconds
 
