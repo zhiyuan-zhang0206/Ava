@@ -14,7 +14,7 @@ Your task: Use config_overlay to demonstrate Ava's multi-model switching capabil
 2. Use `ava.agents.spawn()` to create 3 agents, each specifying a different `llm_model`:
    - `claude-sonnet-4-6`
    - `gpt-5.4-mini`
-   - `deepseek-v4-pro`
+   - `deepseek-v4-flash`
 
    Example:
    ```python

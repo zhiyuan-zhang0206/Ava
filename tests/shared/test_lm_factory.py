@@ -42,7 +42,7 @@ def test_plugin_key_env_injection_authorizes_without_env_file(
     monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-env")
     ensure_provider_plugins_loaded()
 
-    assert validate_model_config(model="deepseek-v4-pro", config={}) == "deepseek-v4-pro"
+    assert validate_model_config(model="deepseek-v4-flash", config={}) == "deepseek-v4-flash"
 
 
 def test_plugin_key_missing_in_both_channels_raises(
@@ -54,7 +54,7 @@ def test_plugin_key_missing_in_both_channels_raises(
     ensure_provider_plugins_loaded()
 
     with pytest.raises(ValueError, match="DEEPSEEK_API_KEY"):
-        validate_model_config(model="deepseek-v4-pro", config={})
+        validate_model_config(model="deepseek-v4-flash", config={})
 
 
 def test_plugin_key_ignores_legacy_settings_field(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -67,7 +67,7 @@ def test_plugin_key_ignores_legacy_settings_field(monkeypatch: pytest.MonkeyPatc
 
     assert provider_key_map()["deepseek-"] == ("DeepSeek", None, "DEEPSEEK_API_KEY")
     with pytest.raises(ValueError, match="DEEPSEEK_API_KEY"):
-        validate_model_config(model="deepseek-v4-pro", config={})
+        validate_model_config(model="deepseek-v4-flash", config={})
 
 
 def test_gemini_plugin_key_ignores_legacy_settings_field(
@@ -178,7 +178,7 @@ def test_mimo_plugin_key_ignores_legacy_settings_field(
 def test_file_fallback_allows_key_after_gateway_pop(env_file: Path) -> None:
     """A plugin key declared in the cluster `.env` authorizes the model."""
     env_file.write_text("DEEPSEEK_API_KEY=sk-file-value\n")
-    assert validate_model_config(model="deepseek-v4-pro", config={}) == "deepseek-v4-pro"
+    assert validate_model_config(model="deepseek-v4-flash", config={}) == "deepseek-v4-flash"
 
 
 def test_missing_key_still_fails(env_file: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -186,7 +186,19 @@ def test_missing_key_still_fails(env_file: Path, monkeypatch: pytest.MonkeyPatch
     env_file.write_text("SOME_OTHER_KEY=x\n")
     monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
     with pytest.raises(ValueError, match="DEEPSEEK_API_KEY"):
-        validate_model_config(model="deepseek-v4-pro", config={})
+        validate_model_config(model="deepseek-v4-flash", config={})
+
+
+def test_withdrawn_model_resolves_to_its_fallback_at_the_spawn_boundary(env_file: Path) -> None:
+    """A spawn that still names the withdrawn deepseek-v4-pro degrades to the
+    registered flash fallback instead of failing — both as the cluster default
+    and via a per-agent overlay (user order 2026-09-10)."""
+    env_file.write_text("DEEPSEEK_API_KEY=sk-file-value\n")
+    assert validate_model_config(model="deepseek-v4-pro", config={}) == "deepseek-v4-flash"
+    assert (
+        validate_model_config(model=None, config={"llm_model": "deepseek-v4-pro"})
+        == "deepseek-v4-flash"
+    )
 
 
 def test_unknown_model_still_fails(env_file: Path) -> None:

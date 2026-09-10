@@ -1373,9 +1373,9 @@ class TestValidateModelConfig:
         self._set_plugin_keys(monkeypatch)
         result = validate_model_config(
             model="claude-sonnet-5",
-            config={"llm_model": "deepseek-v4-pro"},
+            config={"llm_model": "deepseek-v4-flash"},
         )
-        assert result == "deepseek-v4-pro"
+        assert result == "deepseek-v4-flash"
 
     def test_fallback_to_cluster_default_when_config_omits_model(
         self, monkeypatch: pytest.MonkeyPatch
@@ -1384,10 +1384,10 @@ class TestValidateModelConfig:
         self._clear_all_keys(monkeypatch)
         self._set_plugin_keys(monkeypatch)
         result = validate_model_config(
-            model="deepseek-v4-pro",
+            model="deepseek-v4-flash",
             config={"some_other_key": "value"},
         )
-        assert result == "deepseek-v4-pro"
+        assert result == "deepseek-v4-flash"
 
     def test_fallback_to_cluster_default_when_config_is_none(
         self, monkeypatch: pytest.MonkeyPatch
@@ -1395,8 +1395,8 @@ class TestValidateModelConfig:
         """When config=None, use the cluster default."""
         self._clear_all_keys(monkeypatch)
         self._set_plugin_keys(monkeypatch)
-        result = validate_model_config(model="deepseek-v4-pro", config=None)
-        assert result == "deepseek-v4-pro"
+        result = validate_model_config(model="deepseek-v4-flash", config=None)
+        assert result == "deepseek-v4-flash"
 
     def test_no_model_configured_raises(self) -> None:
         """Neither cluster default nor config has a model → ValueError."""
@@ -1419,8 +1419,8 @@ class TestValidateModelConfig:
         """Registered model → returns model name."""
         self._clear_all_keys(monkeypatch)
         self._set_plugin_keys(monkeypatch)
-        result = validate_model_config(model="deepseek-v4-pro")
-        assert result == "deepseek-v4-pro"
+        result = validate_model_config(model="deepseek-v4-flash")
+        assert result == "deepseek-v4-flash"
 
     def test_all_supported_models_pass_name_check(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Every model in SUPPORTED_MODELS passes the name check."""
@@ -1557,10 +1557,10 @@ class TestValidateModelConfig:
         self._clear_all_keys(monkeypatch)
         self._set_plugin_keys(monkeypatch)
         result = validate_model_config(
-            model="deepseek-v4-pro",
+            model="deepseek-v4-flash",
             config={"llm_model": 42},  # not a string
         )
-        assert result == "deepseek-v4-pro"
+        assert result == "deepseek-v4-flash"
 
     def test_override_skips_api_key_check(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """AVA_LLM_OVERRIDE is set → skip API key check. e2e tests depend on this behavior."""

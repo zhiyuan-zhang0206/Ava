@@ -343,7 +343,10 @@ def test_repo_deepseek_provider_is_enabled_and_registers_complete_contract() -> 
         "deepseek-v4.1-flash-expires-on-0910",
     }
     assert deepseek_models <= MODELS.keys()
-    assert set(SUPPORTED_MODELS["deepseek"]) == deepseek_models
+    # V4 Pro stays registered (facts + final price) but is withdrawn from the
+    # spawn picker (user order 2026-09-10); it resolves to deepseek-v4-flash.
+    assert set(SUPPORTED_MODELS["deepseek"]) == deepseek_models - {"deepseek-v4-pro"}
+    assert MODELS["deepseek-v4-pro"].unavailable_fallback == "deepseek-v4-flash"
     assert pricing.model_vendor("deepseek-v4-pro") == "deepseek"
 
     from shared.lm.factory import _MODEL_KEY_MAP, provider_key_map

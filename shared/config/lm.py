@@ -16,7 +16,7 @@ class LmSettings(EnvSettings):
         default="deepseek-v4-flash-vision-exp",
         alias="AVA_MODEL",
         description=(
-            "Agent model name, e.g. deepseek-v4-pro or claude-*. Per-agent "
+            "Agent model name, e.g. deepseek-v4-flash or claude-*. Per-agent "
             "overridable; a cross-provider override needs that provider's API key "
             "set on the host, or model build fails fast."
         ),
@@ -40,16 +40,14 @@ class LmSettings(EnvSettings):
     )
 
     labeler_model: str = Field(
-        # pro, not flash, by measurement (issue #178): prompts on this path are
-        # frequently the long English second-person imperative brief that
-        # `ava.agents.spawn()` writes, and flash *executes* that shape instead
-        # of summarizing it — replaying real stored prompts, 15 of 56 attempts
-        # answered the brief or emitted scaffolding, against 0 of 56 for pro.
-        # Staying inside DeepSeek keeps the gateway's required-key surface
-        # unchanged; the cheaper models that also scored 0 lost on output
-        # quality (gpt-5.6-luna emitted stray private-use and Malayalam
-        # codepoints into labels).
-        default="deepseek-v4-pro",
+        # The flash tier is the only DeepSeek tier left after the V4 Pro
+        # withdrawal (user order 2026-09-10; the provider serves flash only).
+        # The pro-over-flash pick here was a measurement against the pre-V4.1
+        # Flash backend (issue #178: flash *executed* machine-authored briefs
+        # instead of summarizing them, 15 of 56 attempts) — re-measure if
+        # label quality regresses. Staying inside DeepSeek keeps the
+        # gateway's required-key surface unchanged.
+        default="deepseek-v4-flash",
         alias="AVA_LABELER_MODEL",
         description=(
             "Model used only to generate a conversation's short display name "
