@@ -1,10 +1,11 @@
 """Hosted incarnation admission and settlement, replacing status-only writes."""
 
 import asyncio
-from typing import Never
+from typing import Any, Never
 from uuid import UUID, uuid4
 
 import psutil
+import psycopg
 from psycopg_pool import AsyncConnectionPool
 
 from shared import maintenance
@@ -103,6 +104,72 @@ async def apply_hosted_lifecycle(
     if lifecycle_kind == "terminate":
         await publish_agent_updated(pool, incarnation.agent_id)
     return lifecycle_kind
+
+
+async def align_accepting_binding(
+    conn: psycopg.AsyncConnection[Any],
+    agent_id: int,
+    incarnation: RuntimeIncarnation,
+) -> None:
+    """Align an open lease's accepting-incarnation binding with the admitted
+    incarnation, in the admission transaction (issue #2052).
+
+    The lazy inheritance in ``shared.impersonation.native_status`` runs only at
+    the replacement's first held wake. A lease released or expired between a
+    hosted restart and that wake still fires
+    ``restore_native_impersonation_owner``, which writes the recorded
+    ``accepted_*`` snapshot back into ``agents_meta`` — the dead pre-restart
+    incarnation, breaking every ``require_native`` check of the live process
+    (task #2635's manual DB alignment was the same class of damage). Aligning
+    here closes the window: by the time the new incarnation is visible, the
+    trigger's write-back is already a no-op.
+
+    Mirrors ``native_status``'s two branches. Legitimacy is the admission
+    itself: the ``agents_meta`` row lock serializes this writer against the
+    lazy sync (``require_native`` takes the same lock), and a lingering
+    predecessor dies at its own row check before it can touch ``accepted_*``.
+    """
+    cursor = await conn.execute(
+        "SELECT id,status,accepted_generation,accepted_owner FROM agent_impersonations "
+        "WHERE agent_id=%s AND status IN ('requested','accepted','active') "
+        "ORDER BY created_at LIMIT 1 FOR UPDATE",
+        (agent_id,),
+    )
+    lease = await cursor.fetchone()
+    if lease is None:
+        return
+    lease_id, status, accepted_generation, accepted_owner = lease
+    if status == "accepted" and (accepted_generation, accepted_owner) != (
+        incarnation.generation,
+        incarnation.owner,
+    ):
+        # A crash before the checkpoint ACK never transfers control: ask the
+        # replacement to decide again from its saved state, exactly as the
+        # lazy native_status path would at its first wake.
+        await conn.execute(
+            "UPDATE agent_impersonations SET status='requested',accepted_generation=NULL,"
+            "accepted_owner=NULL,consent_version=consent_version+1 WHERE id=%s",
+            (lease_id,),
+        )
+        logger.info(
+            "accepted lease binding reset for the replacement runtime",
+            agent_id=agent_id,
+            lease_id=str(lease_id),
+        )
+    elif status == "active" and (accepted_generation, accepted_owner) != (
+        incarnation.generation,
+        incarnation.owner,
+    ):
+        await conn.execute(
+            "UPDATE agent_impersonations SET accepted_generation=%s,accepted_owner=%s WHERE id=%s",
+            (incarnation.generation, incarnation.owner, lease_id),
+        )
+        logger.info(
+            "active lease accepting-incarnation binding aligned at admission",
+            agent_id=agent_id,
+            lease_id=str(lease_id),
+            generation=str(incarnation.generation),
+        )
 
 
 async def admit_hosted_runtime(
@@ -238,6 +305,9 @@ async def admit_hosted_runtime(
             from agent.lifecycle_observe import observe_hosted_admission
 
             await observe_hosted_admission(conn, RuntimeIncarnation(agent_id, row[0], owner))
+            await align_accepting_binding(
+                conn, agent_id, RuntimeIncarnation(agent_id, row[0], owner)
+            )
             await insert_event_log_async(
                 event_type="status_change",
                 agent_id=agent_id,
