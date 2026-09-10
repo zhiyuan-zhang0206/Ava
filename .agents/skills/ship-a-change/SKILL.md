@@ -88,7 +88,9 @@ Still on you:
 
 1. `git worktree add -b ava-<id>-<task> .worktrees/ava-<id>-<task> main`
 2. Develop and commit in the new worktree (run `bash scripts/setup-worktree.sh`
-   on first use — it builds the worktree's own real `.venv`). A worktree
+   on first use; a fresh worktree needs its own real `.venv` first — worktree uv
+   iron rule in [runbook](../../../conventions/runbook.md): `python
+   scripts/guard_editable_venv.py . && env -u VIRTUAL_ENV uv sync`). A worktree
    `.venv` must be a real directory under this checkout, **never a symlink**
    to a shared venv (`ln -s ~/Ava/.venv .venv`): a later `uv sync` then writes
    through the symlink and re-points the shared venv's editable `.pth` at this
