@@ -14,8 +14,11 @@ import json
 from pathlib import Path
 
 import pytest
+import yaml
 
 from scripts import refresh_test_durations as refresh
+
+_REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_load_durations_missing_file_is_empty(tmp_path: Path) -> None:
@@ -192,7 +195,7 @@ def test_measure_backend_retries_and_reseeds_the_ci_durations(
             "-n",
             "4",
             "--splits",
-            "12",
+            "16",
             "--group",
             "3",
             "--splitting-algorithm",
@@ -251,7 +254,7 @@ def test_measure_e2e_uses_the_ci_pytest_arguments(
 
 def _write_complete_measurements(durations_dir: Path) -> None:
     """Write one unique timing record for every CI-shaped measurement shard."""
-    for group in range(1, 13):
+    for group in range(1, 17):
         (durations_dir / f"backend-{group}.json").write_text(
             json.dumps({f"tests/agent/test_{group}.py::test_one": 1.0})
         )
@@ -323,6 +326,30 @@ def test_merge_all_ci_shards_writes_the_compact_combined_durations(
 
     assert refresh.main(["merge", "--durations-dir", str(durations_dir)]) == 0
     combined = json.loads(target.read_text())
-    assert len(combined) == 16
+    assert len(combined) == 20
     assert combined["tests/agent/test_12.py::test_one"] == 1.0
     assert combined["tests/e2e/test_4.py::test_one"] == 1.0
+
+
+def _workflow_matrix_groups(workflow_name: str, job_name: str) -> list[int]:
+    """Return the shard fan-out a workflow job publishes via its matrix."""
+    path = _REPO_ROOT / ".github" / "workflows" / workflow_name
+    document = yaml.safe_load(path.read_text(encoding="utf-8"))
+    return document["jobs"][job_name]["strategy"]["matrix"]["group"]
+
+
+def test_shard_counts_track_both_workflow_matrices() -> None:
+    """The script constants must equal both workflows' shard fan-outs.
+
+    Drift here is how the nightly refresh went red for eight nights (September
+    2026): ci.yml and the refresh workflow moved the backend suite to 16 shards
+    while ``_BACKEND_SHARDS`` stayed 12, so groups 13-16 were rejected at
+    measure time and the merge never ran (task #2956).
+    """
+    ci_backend = _workflow_matrix_groups("ci.yml", "backend-shard")
+    nightly_backend = _workflow_matrix_groups("refresh-test-durations.yml", "measure-backend")
+    ci_e2e = _workflow_matrix_groups("ci.yml", "e2e-shard")
+    nightly_e2e = _workflow_matrix_groups("refresh-test-durations.yml", "measure-e2e")
+
+    assert refresh._BACKEND_SHARDS == len(ci_backend) == len(nightly_backend)
+    assert refresh._E2E_SHARDS == len(ci_e2e) == len(nightly_e2e)
