@@ -448,6 +448,53 @@ def test_wal_config_pending_drift_refuses_before_any_config_mutation(
     assert load_record(tmp_path) == record
 
 
+def test_wal_config_pending_requires_inactive_gates_before_baseline(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A service gate that came back on during preparation refuses at the
+    baseline boundary: the frozen evidence must record the inactive posture."""
+    record = _wal_config_pending_record()
+    write_record(tmp_path, record)
+    (tmp_path / ".env").write_text("OTHER=kept\n")
+    (tmp_path / "pg").mkdir()
+    (tmp_path / "pg" / "postgresql.auto.conf").write_text("")
+    monkeypatch.setattr(activation, "_validate_snapshot", lambda _record: None)
+    monkeypatch.setattr(
+        activation,
+        "_validate_secrets",
+        lambda: dict(record.pre_activation_credential_evidence or {}),
+    )
+    monkeypatch.setattr(
+        activation, "_read_pg_state", lambda: dict(record.pre_activation_pg_settings or {})
+    )
+    monkeypatch.setattr(settings.physical_backup, "pitr_enabled", True)
+    called = False
+
+    def mutate(*_args: object, **_kwargs: object) -> ActivationRecord:
+        nonlocal called
+        called = True
+        raise AssertionError("config mutation ran with an enabled service gate")
+
+    monkeypatch.setattr(activation, "apply_wal_config", mutate)
+
+    with pytest.raises(
+        RuntimeError, match="pre-activation baseline requires all PITR service flags"
+    ):
+        activation._advance_activation(tmp_path, record, "holder")
+    assert called is False
+    assert load_record(tmp_path) == record
+
+
+def test_inactive_gate_posture_names_the_enabled_flags_and_the_unset_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings.physical_backup, "pitr_restore_proof_enabled", True)
+    with pytest.raises(
+        RuntimeError, match=r"enabled: pitr_restore_proof_enabled.*ava config unset pitr_enabled"
+    ):
+        activation_config.require_inactive_gate_posture("shadow readiness")
+
+
 def test_config_apply_journals_intent_before_alter_and_resumes_partial_crash(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -576,7 +623,7 @@ def test_rollback_setting_crash_matrix_resumes_each_owned_alter(
 
 
 def test_rollback_leaves_config_owned_env_untouched(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """The four PITR gate keys are config-owned since the 2026-08-31
     rework: rolling an activation back must never strip them (that used to
@@ -638,6 +685,9 @@ def test_rollback_leaves_config_owned_env_untouched(
     monkeypatch.setattr("ops.cluster_deploy.spawn_restart", spawn_restart)
 
     assert activation.cmd_pitr_rollback() == 0
+    output = capsys.readouterr().out
+    assert "config-owned" in output
+    assert "ava config unset pitr_enabled" in output
     lines = (tmp_path / ".env").read_text().splitlines()
     assert lines == [
         "AVA_PITR_ENABLED=true",
