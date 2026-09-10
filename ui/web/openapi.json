@@ -427,6 +427,46 @@
         }
       }
     },
+    "/api/agents/{agent_id}/born-chain": {
+      "get": {
+        "summary": "Get Agent Born Chain",
+        "description": "The immutable birth chain above `agent_id`, nearest ancestor first\n(1 = direct birth parent) — one recursive `agents_meta.born_spawner` walk.\n\nThe light half of `/neighbors`, and separate on purpose: the inherited\nmemory context note resolves this chain at every window establishment, and\nit must not drag the tie graph's frozen-archive read + Loki live tail into\nthat path. Adds `machine` (which ancestors a reader can open locally) and\nkeeps `status` (the chain includes terminated ancestors). Terminates only\nwhen `born_spawner` is not an `agent:N` value (a user / external spawn).\n\n404: agent_id does not exist (AgentNotFound -> handler returns 404 + reason).",
+        "operationId": "get_agent_born_chain_api_agents__agent_id__born_chain_get",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Agent Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BornChainResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/agents/{agent_id}/compact": {
       "post": {
         "summary": "Post Compact",
@@ -7876,6 +7916,71 @@
           "files"
         ],
         "title": "Body_upload_files_api_agents__agent_id__uploads_post"
+      },
+      "BornChainResponse": {
+        "properties": {
+          "ancestors": {
+            "items": {
+              "$ref": "#/components/schemas/BornChainRow"
+            },
+            "type": "array",
+            "title": "Ancestors"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ancestors"
+        ],
+        "title": "BornChainResponse",
+        "description": "GET /api/agents/{id}/born-chain response."
+      },
+      "BornChainRow": {
+        "properties": {
+          "agent_id": {
+            "type": "integer",
+            "title": "Agent Id"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "machine": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Machine"
+          },
+          "depth": {
+            "type": "integer",
+            "title": "Depth"
+          }
+        },
+        "type": "object",
+        "required": [
+          "agent_id",
+          "label",
+          "status",
+          "machine",
+          "depth"
+        ],
+        "title": "BornChainRow",
+        "description": "One ancestor in GET /api/agents/{id}/born-chain — the immutable birth\nchain above the queried agent, nearest ancestor first (1 = direct birth\nparent). Carries what the inherited-memory context note needs (`machine`\ndecides which ancestors it can read locally); no tie score, because this\nroute reads no tie graph."
       },
       "CancelRequest": {
         "properties": {

@@ -80,6 +80,7 @@ class NoteTag(StrEnum):
     CONTEXT = "context"
     AGENT_ID = "agent_id"
     AGENT_MEMORY = "agent_memory"
+    INHERITED_MEMORY = "inherited_memory"
     PROJECT_SKILLS = "project_skills"
     PRELOADED_SKILLS = "preloaded_skills"
     NEW_SKILLS = "new_skills"

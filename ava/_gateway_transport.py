@@ -323,22 +323,37 @@ def _post(
     ) from last_err
 
 
-def _get(path: str, *, params: dict | None = None) -> httpx.Response:  # noqa: F821  # pyright: ignore[reportUndefinedVariable]
+def _get(
+    path: str,
+    *,
+    params: dict | None = None,
+    timeout: httpx.Timeout | None = None,  # noqa: F821  # pyright: ignore[reportUndefinedVariable]
+    max_retries: int | None = None,
+) -> httpx.Response:  # noqa: F821  # pyright: ignore[reportUndefinedVariable]
     """Unified GET wrapper + transient-failure retry + failure → GatewayUnavailable conversion.
 
     Same policy as `_post`; a GET is always idempotent, so transient HTTP
     429/5xx responses are retried too.
+
+    `timeout` overrides the per-client default for this single request;
+    `max_retries` overrides the module-wide attempt count. Both exist for the
+    same reason `_post` has them: a caller on a hot, must-not-stall path (the
+    born-chain read at context establishment) shrinks its budget for a request
+    whose failure it already knows how to degrade — re-sending it only parks
+    the agent's birth behind backoff it cannot use.
     """
     import httpx
 
+    per_call = httpx.USE_CLIENT_DEFAULT if timeout is None else timeout
+    retries = _MAX_RETRIES if max_retries is None else max_retries
     last_err: Exception | None = None
-    for attempt in range(_MAX_RETRIES):
+    for attempt in range(retries):
         try:
-            resp = _client_singleton().get(path, params=params)
+            resp = _client_singleton().get(path, params=params, timeout=per_call)
         except httpx.TransportError as e:
             last_err = e
         else:
-            if resp.status_code in _TRANSIENT_HTTP_STATUSES and attempt < _MAX_RETRIES - 1:
+            if resp.status_code in _TRANSIENT_HTTP_STATUSES and attempt < retries - 1:
                 last_err = httpx.HTTPStatusError(
                     f"transient HTTP {resp.status_code} for GET {path}",
                     request=resp.request,
@@ -346,10 +361,10 @@ def _get(path: str, *, params: dict | None = None) -> httpx.Response:  # noqa: F
                 )
             else:
                 return resp
-        if attempt < _MAX_RETRIES - 1:
+        if attempt < retries - 1:
             _time.sleep(_retry_delay_seconds(attempt))
     raise GatewayUnavailable(
-        f"Gateway transport error at {_client_singleton().base_url} (after {_MAX_RETRIES} retries): {last_err!s}"
+        f"Gateway transport error at {_client_singleton().base_url} (after {retries} retries): {last_err!s}"
     ) from last_err
 
 

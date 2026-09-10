@@ -50,23 +50,26 @@ def _framework_only() -> list[str]:
     return [e.build.__name__ for e in _CONTEXT_NOTES[:_FRAMEWORK_NOTE_COUNT]]
 
 
-def test_plugin_registers_both_index_notes(memory_plugin: Any) -> None:
-    """Importing the plugin appends its two notes past the framework tail."""
+def test_plugin_registers_every_memory_note(memory_plugin: Any) -> None:
+    """Importing the plugin appends its three notes past the framework tail."""
     names = [e.build.__name__ for e in _CONTEXT_NOTES]
     assert "memory_index_note" in names
     assert "per_agent_memory_note" in names
+    assert "inherited_memory_note" in names
     # ...and they are plugin-contributed, i.e. beyond the framework count, so
     # `clear_plugin_registrations` drops them on a reload.
     assert "memory_index_note" not in _framework_only()
     assert "per_agent_memory_note" not in _framework_only()
+    assert "inherited_memory_note" not in _framework_only()
 
 
 def test_notes_render_in_the_documented_rank_order(memory_plugin: Any) -> None:
     """The reading order the user pinned — exec timeout, cluster timezone,
-    shared memory index, agent id, per-agent memory index, preloaded skills —
-    holds across the framework/plugin registration boundary: the two memory
-    notes are plugin-registered, the other four are framework-registered, and
-    the registry alone (registration order) cannot express the interleave.
+    shared memory index, agent id, per-agent memory index, inherited memory,
+    preloaded skills — holds across the framework/plugin registration
+    boundary: the three memory notes are plugin-registered, the other four are
+    framework-registered, and the registry alone (registration order) cannot
+    express the interleave.
 
     The two stable-band notes lead for prompt-cache reasons, not taste: they
     are cluster-identical and change only on a restart-forcing config edit,
@@ -82,6 +85,7 @@ def test_notes_render_in_the_documented_rank_order(memory_plugin: Any) -> None:
         "memory_index_note",
         "agent_id_note",
         "per_agent_memory_note",
+        "inherited_memory_note",
         "preloaded_skills_note",
     ]
     # Every note pins a distinct rank today, so the rendered order is total —
@@ -102,6 +106,8 @@ def test_only_the_shared_index_is_grafted_onto_a_fork(memory_plugin: Any) -> Non
     on_fork = {e.build.__name__ for e in _CONTEXT_NOTES if e.on_fork}
     assert "memory_index_note" not in on_fork
     assert "per_agent_memory_note" in on_fork
+    # The inherited note carries the SOURCE chain's blocks — also regrafted.
+    assert "inherited_memory_note" in on_fork
     # Nor the cluster timezone: a fork stays in the cluster it forked from, so
     # the declaration it inherited is still true.
     assert "timezone_note" not in on_fork

@@ -1,7 +1,9 @@
-"""The two memory context notes this plugin registers, plus their framings.
+"""The two memory index context notes this plugin registers, plus their framings.
 
 Both stores put an index in front of the agent at the start of every context
-window, and only the index — each memory is one file beside it, read on demand:
+window, and only the index — each memory is one file beside it, read on demand
+(the plugin's third memory note — the `inheritable` blocks read off the
+ancestor chain — lives in `inherit.py`; these two remain the index notes):
 
 - Shared MEMORY.md (memory pool root): a pointer index into the pool, visible
   to every agent.
@@ -101,7 +103,11 @@ _PER_AGENT_FRAMING = (
     "Read an entry on demand with `ava.files.read('memory/<slug>.md')`. To "
     "remember something, use `ava.memory.write(slug, content, ..., "
     "store='personal')`; it writes the entry and maintains the index. Keep the index one line per "
-    "memory; never put entry content in it. Detailed task notes, logs, and "
+    "memory; never put entry content in it. Content your descendants should "
+    "inherit: fence it inside an entry with `<!-- ava:inheritable -->` and "
+    "`<!-- /ava:inheritable -->` on their own lines — children read those "
+    "blocks when their context is established (depth: memory_inherit_depth). "
+    "Detailed task notes, logs, and "
     "artifacts stay in workspace files; facts other agents need go to the "
     "shared pool (ava.memory)."
 )

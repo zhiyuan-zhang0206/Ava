@@ -50,6 +50,12 @@ surface.
 
 ## Per-agent observability
 
+- `/api/agents/{id}/born-chain` returns the immutable birth chain above an
+  agent (nearest ancestor first, each row carrying label / status / machine /
+  depth) — one recursive `agents_meta.born_spawner` walk with none of
+  `/neighbors`' tie graph. It is the read the inherited-memory context note
+  resolves at every window establishment (`plugins/ava_memory/inherit.py`), so
+  it is kept deliberately light: no neighbor ranking, no Loki live tail.
 - `/api/agents/{id}/token-usage` exposes per-model soft and hard compact
   thresholds for the ContextMeter gauge.
 - `/api/agents/{id}/context-breakdown` reports checkpoint messages by kind and

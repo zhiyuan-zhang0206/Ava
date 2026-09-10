@@ -312,6 +312,9 @@ class TestAiMessageItems:
             NoteTag.PROJECT_SKILLS,
             NoteTag.PRELOADED_SKILLS,
             NoteTag.AGENT_MEMORY,
+            # Inherited memory is standing context (the ancestor chain's
+            # blocks), same family as the memory notes above.
+            NoteTag.INHERITED_MEMORY,
             NoteTag.EXEC_TIMEOUT,
             # Standing head content, like the exec timeout beside it: its ts
             # would only say when the window opened, and the note's whole point

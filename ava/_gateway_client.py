@@ -268,6 +268,35 @@ def get_ancestors(agent_id: int) -> list[dict]:
     return resp.json()["ancestors"]
 
 
+# The born-chain read runs at every context establishment, on the agent
+# host's event loop. One attempt with a tight bound is deliberate: a gateway
+# hiccup skips the inherited note for this window (the next establishment
+# retries — the chain is immutable, so nothing is lost) instead of parking
+# the agent's birth behind seconds of retry backoff it cannot use.
+_BORN_CHAIN_TIMEOUT_S = 5.0
+
+
+def get_born_chain(agent_id: int) -> list[dict]:
+    """GET /api/agents/{id}/born-chain → the `ancestors` rows: the immutable
+    birth chain above `agent_id`, nearest ancestor first (1 = direct birth
+    parent). Each dict carries agent_id / label / status / machine / depth.
+
+    Unlike `get_ancestors`, this route reads no tie graph — no neighbor
+    ranking, no Loki live tail — so turn-path callers (the inherited-memory
+    context note at window establishment) can resolve the chain cheaply.
+    The call itself is one-shot with a tight timeout (see
+    `_BORN_CHAIN_TIMEOUT_S`); callers degrade on `GatewayUnavailable`."""
+    import httpx
+
+    resp = _get(
+        f"/api/agents/{agent_id}/born-chain",
+        timeout=httpx.Timeout(_BORN_CHAIN_TIMEOUT_S),
+        max_retries=1,
+    )
+    _raise_from_response(resp)
+    return resp.json()["ancestors"]
+
+
 def list_agents(filter_by_status: tuple[AgentStatus, ...] | None = None) -> list[dict[str, Any]]:
     """GET /api/agents → AgentSummary roster rows (optional status filter).
 

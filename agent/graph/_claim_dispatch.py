@@ -423,15 +423,20 @@ async def _handle_resurrect(
 
 
 # Notes the inherited history renders wrong for the new agent: each names the
-# SOURCE (its id, its personal memory store, its preloaded-skill set). The fork
-# drops the inherited copies in its full-wipe head rebuild and grafts the new
-# agent's own — exactly one of each, owned by the agent reading it (issue
-# #1320). The cluster memory index is deliberately NOT here: it is
-# cluster-wide, so the inherited copy is the same content a graft would add
-# (grafting it duplicated the index — the timezone note's reasoning applies to
-# it too).
+# SOURCE (its id, its personal memory store, the inheritable blocks read from
+# ITS chain, its preloaded-skill set). The fork drops the inherited copies in
+# its full-wipe head rebuild and grafts the new agent's own — exactly one of
+# each, owned by the agent reading it (issue #1320). The cluster memory index
+# is deliberately NOT here: it is cluster-wide, so the inherited copy is the
+# same content a graft would add (grafting it duplicated the index — the
+# timezone note's reasoning applies to it too).
 _STRIP_ON_FORK_TAGS: frozenset[NoteTag] = frozenset(
-    {NoteTag.AGENT_ID, NoteTag.AGENT_MEMORY, NoteTag.PRELOADED_SKILLS}
+    {
+        NoteTag.AGENT_ID,
+        NoteTag.AGENT_MEMORY,
+        NoteTag.INHERITED_MEMORY,
+        NoteTag.PRELOADED_SKILLS,
+    }
 )
 
 

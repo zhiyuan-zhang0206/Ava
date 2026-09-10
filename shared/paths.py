@@ -238,6 +238,15 @@ def workspace_dir(agent_id: int) -> Path:
     return target
 
 
+def workspace_dir_readonly(agent_id: int) -> Path:
+    """Per-agent workspace path ($AVA_HOME/workspaces/<agent_id>) with NO
+    create side effect — the read path for ANOTHER agent's workspace (the
+    inherited-memory note scans an ancestor's `memory/`). `workspace_dir`
+    deliberately ensures its target; a reader must not manufacture a
+    workspace that does not exist."""
+    return ava_home() / "workspaces" / str(agent_id)
+
+
 def exec_run_dir() -> Path:
     """Per-unit exec-subprocess scratch dir ($AVA_HOME/run/exec) — request /
     result envelopes for one execute_code run each (agent/graph/_exec_protocol.py),
