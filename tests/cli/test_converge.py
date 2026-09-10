@@ -1262,6 +1262,127 @@ def test_redis_url_identity_step_skips_without_env_file(
     assert not (tmp_path / ".env").exists()
 
 
+# --- health-port backfill value decoding (#2704) ---------------------------
+
+_HEALTH_BACKFILL_BASE = 18114
+
+
+def _health_block(base: int) -> dict[str, str]:
+    from shared.env_registry import health_port_env
+
+    return {alias: str(int(port)) for alias, port in health_port_env(base).items()}
+
+
+def _health_block_present(full: dict[str, str]) -> dict[str, str]:
+    """Two agreeing keys are enough to prove the unit's block base."""
+    return {
+        "AVA_OPS_HEALTH_PORT": full["AVA_OPS_HEALTH_PORT"],
+        "AVA_LABELER_HEALTH_PORT": full["AVA_LABELER_HEALTH_PORT"],
+    }
+
+
+def _run_health_backfill(ava_home: Path) -> None:
+    _converge._backfill_health_port_keys_step(_ctx(ava_home / "repo", ava_home))
+
+
+def _assert_health_block_healed(
+    ava_home: Path, full: dict[str, str], present: dict[str, str]
+) -> None:
+    env = (ava_home / ".env").read_text()
+    unwritten = [
+        alias for alias in full if alias not in present and f"{alias}={full[alias]}\n" not in env
+    ]
+    assert not unwritten, f"derived health-port keys not written: {unwritten}"
+
+
+def test_health_port_backfill_decodes_quoted_present_values(tmp_path: Path) -> None:
+    """A quoted present value must read as the port it denotes: the raw text kept
+    the quotes, `int()` rejected it downstream, and the block derivation was
+    silently suppressed into a no-op backfill (#2704)."""
+    full = _health_block(_HEALTH_BACKFILL_BASE)
+    present = _health_block_present(full)
+    for quote in ("'", '"'):
+        lines = [
+            f"AVA_OPS_HEALTH_PORT={quote}{present['AVA_OPS_HEALTH_PORT']}{quote}",
+            f"AVA_LABELER_HEALTH_PORT={quote}{present['AVA_LABELER_HEALTH_PORT']}{quote}",
+        ]
+        (tmp_path / ".env").write_text("\n".join(lines) + "\n")
+        _run_health_backfill(tmp_path)
+        env = (tmp_path / ".env").read_text()
+        for line in lines:  # quoted lines stay byte-identical -- never rewritten
+            assert f"{line}\n" in env
+        _assert_health_block_healed(tmp_path, full, present)
+
+
+def test_health_port_backfill_decodes_trailing_comment_values(tmp_path: Path) -> None:
+    """`AVA_OPS_HEALTH_PORT=18121 # hand-set` must read as 18121: the raw text
+    carried the comment into the value (same silent suppression, #2704)."""
+    full = _health_block(_HEALTH_BACKFILL_BASE)
+    present = _health_block_present(full)
+    lines = [
+        f"AVA_OPS_HEALTH_PORT={present['AVA_OPS_HEALTH_PORT']} # hand-set",
+        f"AVA_LABELER_HEALTH_PORT={present['AVA_LABELER_HEALTH_PORT']} # hand-set",
+    ]
+    (tmp_path / ".env").write_text("\n".join(lines) + "\n")
+    _run_health_backfill(tmp_path)
+    env = (tmp_path / ".env").read_text()
+    for line in lines:
+        assert f"{line}\n" in env
+    _assert_health_block_healed(tmp_path, full, present)
+
+
+def test_health_port_backfill_mixed_styles_and_idempotent(tmp_path: Path) -> None:
+    """Mixed quoting styles in one file all decode, and a healed block is a
+    byte-identical no-op on the next converge run."""
+    full = _health_block(_HEALTH_BACKFILL_BASE)
+    present = {
+        "AVA_OPS_HEALTH_PORT": full["AVA_OPS_HEALTH_PORT"],
+        "AVA_LABELER_HEALTH_PORT": full["AVA_LABELER_HEALTH_PORT"],
+        "AVA_HEARTBEAT_HEALTH_PORT": full["AVA_HEARTBEAT_HEALTH_PORT"],
+    }
+    (tmp_path / ".env").write_text(
+        f"AVA_OPS_HEALTH_PORT='{present['AVA_OPS_HEALTH_PORT']}'\n"
+        f'AVA_LABELER_HEALTH_PORT="{present["AVA_LABELER_HEALTH_PORT"]}" # named by hand\n'
+        f"AVA_HEARTBEAT_HEALTH_PORT={present['AVA_HEARTBEAT_HEALTH_PORT']}\n"
+    )
+    _run_health_backfill(tmp_path)
+    _assert_health_block_healed(tmp_path, full, present)
+    healed = (tmp_path / ".env").read_text()
+    _run_health_backfill(tmp_path)
+    assert (tmp_path / ".env").read_text() == healed
+
+
+def test_health_port_backfill_plain_values_regression(tmp_path: Path) -> None:
+    """The unquoted form keeps working exactly as before the dotenv read."""
+    full = _health_block(_HEALTH_BACKFILL_BASE)
+    present = _health_block_present(full)
+    (tmp_path / ".env").write_text(
+        f"AVA_OPS_HEALTH_PORT={present['AVA_OPS_HEALTH_PORT']}\n"
+        f"AVA_LABELER_HEALTH_PORT={present['AVA_LABELER_HEALTH_PORT']}\n"
+    )
+    _run_health_backfill(tmp_path)
+    _assert_health_block_healed(tmp_path, full, present)
+
+
+def test_health_port_backfill_skips_entirely_on_undecodable_value(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """An undecodable line (here: an unterminated quote) means the file is not
+    stably understood: no key is rewritten, and the suppressed run is reported on
+    stderr instead of staying silent (#2704 — never mis-write)."""
+    full = _health_block(_HEALTH_BACKFILL_BASE)
+    present = _health_block_present(full)
+    original = (
+        f"AVA_OPS_HEALTH_PORT={present['AVA_OPS_HEALTH_PORT']}\n"
+        f"AVA_LABELER_HEALTH_PORT={present['AVA_LABELER_HEALTH_PORT']}\n"
+        f'AVA_AGENT_HOST_HEALTH_PORT="{full["AVA_AGENT_HOST_HEALTH_PORT"]}\n'
+    )
+    (tmp_path / ".env").write_text(original)
+    _run_health_backfill(tmp_path)
+    assert (tmp_path / ".env").read_text() == original  # nothing rewritten
+    assert "AVA_AGENT_HOST_HEALTH_PORT" in capsys.readouterr().err
+
+
 # --- watchdog probe registration ------------------------------------------
 # The step fans out over the unit's capability SET. A single box carries both
 # capabilities and therefore runs TWO watchdog daemons; registering one probe
