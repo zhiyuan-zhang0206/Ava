@@ -4,6 +4,19 @@ Each new session records private-console-v1. A bounded isolated helper verifies
 PID/birth and console membership before Ctrl-Break; no daemon changes its own
 console. Legacy records cannot authorize graceful delivery. Tree force-stop
 still preserves unrelated recorded sessions and the caller ancestry.
+
+Cross-session control (issue #1930): `AttachConsole` cannot cross a session
+boundary, so every new session also spawns a resident control steward in the
+*same* session as the target (the spawner's own session) — see
+`shared/windows_session_steward.py`. A graceful-stop caller in a different
+session routes the break request over the steward's AF_UNIX control socket
+(whose path embeds the record's exact pid + create_time identity); the steward
+executes the same verified private-console helper. Same-session callers keep
+the direct one-shot helper. A cross-session target without a steward (legacy
+record) or with a dead steward is an explicit refusal — never an escalation to
+force. The kill boundary spares recorded stewards the same way it spares
+recorded sessions, so stopping a spawner does not silently remove another
+session's control channel.
 """
 
 from __future__ import annotations
@@ -12,6 +25,7 @@ import contextlib
 import math
 import os
 import shlex
+import socket
 import subprocess
 import sys
 import time
@@ -25,6 +39,7 @@ from shared.log import logger
 from shared.paths import logs_dir, run_dir
 from shared.platform import IS_WINDOWS
 from shared.session_record import SessionRecord
+from shared.windows_session import current_session_id, process_session_id
 from shared.winjob import in_attached_exec_job
 from shared.winjob_spawn import run_job_process
 
@@ -42,6 +57,9 @@ _GONE = (psutil.NoSuchProcess, psutil.AccessDenied, OSError)
 # Object. The flag is added only in the explicit exec-job context; outside it,
 # an unrelated outer Job may forbid breakaway and reject the launch.
 _BREAKAWAY = getattr(subprocess, "CREATE_BREAKAWAY_FROM_JOB", 0x01000000)
+# The steward needs no console (it only transiently attaches the target's via
+# the helper). ABI fallback, never 0 — see the comment above.
+_DETACHED = getattr(subprocess, "DETACHED_PROCESS", 0x00000008)
 # NEW_CONSOLE ignores NEW_PROCESS_GROUP. Control is private-console scoped,
 # never a group inferred from the PID. STARTUPINFO hides its window.
 _PRIVATE_CONSOLE_FLAGS = getattr(subprocess, "CREATE_NEW_CONSOLE", 0x00000010)
@@ -72,6 +90,32 @@ def _sessions_dir() -> Path:
     d = run_dir() / "sessions"
     d.mkdir(parents=True, exist_ok=True)
     return d
+
+
+def _ctrl_dir() -> Path:
+    """Control sockets for the resident per-session stewards ($AVA_HOME/run/ctrl).
+
+    Under the run dir so the socket files inherit the home's access control:
+    opening a control socket requires the session owner's token (plus SYSTEM /
+    Administrators via the inherited directory ACL).
+    """
+    d = run_dir() / "ctrl"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _steward_socket_path(pid: int, create_time: float) -> Path:
+    """The control socket for one exact session identity.
+
+    The path embeds (pid, create_time) so it cannot collide with a restarted
+    session on a recycled pid, and so a caller can only address a steward by
+    knowing the record's verified identity.
+    """
+    return _ctrl_dir() / f"ava-ctrl-{pid}-{create_time:.6f}.sock"
+
+
+def _steward_script() -> Path:
+    return Path(__file__).resolve().with_name("windows_session_steward.py")
 
 
 def _record_path(name: str) -> Path:
@@ -201,6 +245,55 @@ def has_session(name: str) -> bool:
     return _process_for_record(rec) is not None
 
 
+def _spawn_steward(
+    name: str, record_path: Path, pid: int, create_time: float
+) -> tuple[int, str] | None:
+    """Launch the resident control steward beside a freshly spawned session.
+
+    Same session as the target by construction (the spawner's own session),
+    no console (it never needs one — the helper it runs attaches transiently),
+    stdio to ``$AVA_HOME/logs/<name>.ctrl.log``. Returns (steward pid, socket
+    path) so the session record can bind the control channel to this exact
+    identity, or None when the spawn fails — the session still runs, but
+    cross-session graceful control is unavailable for it (logged below).
+    """
+    socket_path = _steward_socket_path(pid, create_time)
+    creationflags = _DETACHED
+    if in_attached_exec_job():
+        creationflags |= _BREAKAWAY
+    with contextlib.suppress(OSError):
+        socket_path.unlink()  # a crashed predecessor may have left a dead socket
+    log = logs_dir() / f"{name}.ctrl.log"
+    try:
+        with log.open("ab") as out:
+            proc = subprocess.Popen(  # noqa: S603 — fixed leaf argv, repo-internal literals
+                [
+                    sys.executable,
+                    "-I",
+                    str(_steward_script()),
+                    str(record_path),
+                    str(pid),
+                    str(create_time),
+                    str(socket_path),
+                    name,
+                ],
+                stdin=subprocess.DEVNULL,
+                stdout=out,
+                stderr=out,
+                creationflags=creationflags,
+                close_fds=True,
+            )
+    except OSError as exc:
+        logger.error(
+            "winproc steward for {name} did not start — cross-session graceful control "
+            "unavailable for this session: {exc}",
+            name=name,
+            exc=exc,
+        )
+        return None
+    return proc.pid, str(socket_path)
+
+
 def kill_session_with_verdict(
     name: str, *, graceful: bool = False, timeout: float = 15.0
 ) -> tuple[bool, str, bool]:
@@ -285,6 +378,11 @@ def new_session(
         # accept the pid's next innocent occupant — a later kill_session
         # could then kill an unrelated process tree (audit 2026-08-08 P2).
         create_time = _DEAD_CHILD_SENTINEL
+    steward: tuple[int, str] | None = None
+    if create_time != _DEAD_CHILD_SENTINEL:
+        # A sentinel create_time names no real process, so a steward could
+        # never verify the target — spawn one only for a live identity.
+        steward = _spawn_steward(name, _record_path(name), proc.pid, create_time)
     SessionRecord(
         pid=proc.pid,
         create_time=create_time,
@@ -292,6 +390,8 @@ def new_session(
         cwd=str(cwd),
         started_at=time.time(),
         control_mode="private-console-v1",
+        steward_pid=steward[0] if steward else None,
+        steward_socket=steward[1] if steward else None,
     ).write(_record_path(name))
     return True
 
@@ -325,6 +425,19 @@ def graceful_signal(
         return False
     if rec.control_mode != "private-console-v1":
         raise RuntimeError("graceful delivery requires a verified private-console session")
+    target_session = process_session_id(rec.pid)
+    if target_session is None:
+        # The target vanished between the liveness check and this read — the
+        # same "already gone" the caller's wait treats as a success.
+        return False
+    caller_session = current_session_id()
+    if caller_session is None:
+        raise RuntimeError(
+            f"cannot determine the caller's own session — refusing to guess a control "
+            f"channel for {name}"
+        )
+    if target_session != caller_session:
+        return _steward_deliver(name, rec, deadline)
     helper = Path(__file__).resolve().with_name("windows_console_signal.py")
     result = run_job_process(
         [
@@ -347,8 +460,67 @@ def graceful_signal(
     return True
 
 
+def _steward_deliver(name: str, rec: SessionRecord, deadline: float) -> bool:
+    """Deliver a graceful break through the session's resident control steward.
+
+    Only called when the target lives in a different session than the caller,
+    where the direct helper cannot attach its console. Failure raises (never
+    force-escalates): the stop flow reports an incomplete stop and the operator
+    decides. The socket path embeds the record's verified (pid, create_time)
+    identity, so a caller can only address a steward by knowing that identity;
+    the steward re-verifies record and target before the helper runs.
+    """
+    if rec.steward_socket is None or rec.steward_pid is None:
+        raise RuntimeError(
+            f"graceful stop of {name} would cross a session boundary, but its session "
+            f"record predates the resident control channel — restart the service once, "
+            f"then stop works from any entry"
+        )
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise TimeoutError(f"graceful delivery deadline passed before reaching {name}'s steward")
+    connection = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    connection.settimeout(remaining)
+    try:
+        try:
+            connection.connect(rec.steward_socket)
+        except TimeoutError:
+            raise  # a connect timeout is already the explicit "did not answer"
+        except OSError as exc:
+            raise RuntimeError(
+                f"control steward for {name} is not reachable (pid {rec.steward_pid}): "
+                f"cross-session graceful stop unavailable for this session"
+            ) from exc
+        try:
+            connection.sendall(b"break\n")
+            reply = connection.recv(512)
+        except TimeoutError as exc:
+            raise TimeoutError(
+                f"control steward for {name} did not answer within the stop deadline"
+            ) from exc
+        except OSError as exc:
+            raise RuntimeError(
+                f"control steward for {name} dropped the connection during delivery: {exc}"
+            ) from exc
+    finally:
+        connection.close()
+    if time.monotonic() >= deadline:
+        raise TimeoutError("control steward answered after the graceful delivery deadline")
+    if reply.startswith(b"ok"):
+        return True
+    detail = reply.decode("utf-8", errors="replace").strip() or "no detail"
+    raise RuntimeError(f"control steward for {name} refused delivery: {detail}")
+
+
 def _live_session_pids(exclude: str) -> set[int]:
-    """Recorded pids of every live session on this host except `exclude`."""
+    """Recorded pids of every live session on this host except `exclude`.
+
+    Includes each live record's steward pid: a steward is a child of the
+    session's spawner (not of the session process), so a tree kill of that
+    spawner must spare it exactly like the recorded session root — otherwise
+    stopping one daemon silently removes another session's cross-session
+    control channel (issue #1930).
+    """
     pids: set[int] = set()
     for rec_file in _sessions_dir().glob("*.json"):
         if rec_file.stem == exclude:
@@ -356,6 +528,8 @@ def _live_session_pids(exclude: str) -> set[int]:
         rec = SessionRecord.read(rec_file)
         if rec is not None and _process_for_record(rec) is not None:
             pids.add(rec.pid)
+            if rec.steward_pid is not None:
+                pids.add(rec.steward_pid)
     return pids
 
 
@@ -386,7 +560,9 @@ def _spared_pids(name: str, proc: psutil.Process) -> frozenset[int]:
     *spawned* session dies before its spawner does. Two rules restore the same
     invariant that a session's lifetime belongs only to the caller that names it:
 
-    - **every other live session.** This is the bug of 2026-07-29: a
+    - **every other live session** (its recorded root *and* its steward — a
+      steward is a child of the spawner, not of the session, but its lifetime
+      belongs to the session). This is the bug of 2026-07-29: a
       gateway-triggered self-update spawns the `ava-updater` session from inside
       the ops daemon, and the updater's own `ava restart` stops this host's
       services — including `ava-ops`. Killing `ava-ops`'s tree killed the updater
@@ -549,6 +725,11 @@ def list_sessions(prefix: str = "") -> list[str]:
             continue
         if has_session(name):
             out.append(name)
-        else:
-            rec_file.unlink(missing_ok=True)
+            continue
+        rec = SessionRecord.read(rec_file)
+        rec_file.unlink(missing_ok=True)
+        if rec is not None and rec.steward_socket is not None:
+            # The steward self-exits when its target dies and unlinks its own
+            # socket; this removes the socket a *crashed* steward left behind.
+            Path(rec.steward_socket).unlink(missing_ok=True)
     return out

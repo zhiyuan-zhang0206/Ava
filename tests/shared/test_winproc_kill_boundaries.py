@@ -133,17 +133,29 @@ def fleet(unit_home: Path, monkeypatch: pytest.MonkeyPatch) -> _Fleet:
     updater = _FakeProc(_PID_BASE + 2)
     restart = _FakeProc(_PID_BASE + 3)
     agent = _FakeProc(_PID_BASE + 4)
+    # 900005 stays free for the unregistered-grandchild test below.
+    steward = _FakeProc(_PID_BASE + 7)
     updater.kids = [restart]
-    ops.kids = [worker, updater, agent]
-    procs = {p.pid: p for p in (ops, worker, updater, restart, agent)}
+    # The updater session's control steward: a child of the *spawner* (ops),
+    # not of the updater — exactly the shape `new_session` produces.
+    ops.kids = [worker, updater, agent, steward]
+    procs = {p.pid: p for p in (ops, worker, updater, restart, agent, steward)}
 
-    for name, pid in (
-        ("ava-ops", ops.pid),
-        ("ava-updater", updater.pid),
-        ("ava-agent-42", agent.pid),
+    for name, pid, steward_pid in (
+        ("ava-ops", ops.pid, None),
+        ("ava-updater", updater.pid, steward.pid),
+        ("ava-agent-42", agent.pid, None),
     ):
         SessionRecord(
-            pid=pid, create_time=1.0, cmd=name, cwd=str(unit_home), started_at=time.time()
+            pid=pid,
+            create_time=1.0,
+            cmd=name,
+            cwd=str(unit_home),
+            started_at=time.time(),
+            steward_pid=steward_pid,
+            steward_socket=(
+                f"/ctrl/ava-ctrl-{pid}-1.000000.sock" if steward_pid is not None else None
+            ),
         ).write(winproc._record_path(name))
 
     def _for_record(rec: SessionRecord) -> _FakeProc | None:
@@ -207,6 +219,18 @@ def test_killing_a_daemon_spares_the_updater_session_it_spawned(fleet: _Fleet) -
     assert (ok, mode) == (True, "forced")
     assert not fleet.proc(_PID_BASE + 2).killed, "the ava-updater session was killed"
     assert not fleet.proc(_PID_BASE + 3).killed, "the updater's `ava restart` was killed"
+
+
+def test_killing_a_daemon_spares_the_sessions_control_stewards(fleet: _Fleet) -> None:
+    """A session's control steward is a child of the spawner, not of the
+    session; its lifetime belongs to the session (issue #1930), so an
+    ops-tree kill must leave it serving — otherwise a rollback that stops ops
+    while the updater runs would silently remove the updater's cross-session
+    control channel."""
+    ok, mode = winproc.kill_session("ava-ops", graceful=False)
+
+    assert (ok, mode) == (True, "forced")
+    assert not fleet.proc(_PID_BASE + 7).killed, "the updater's control steward was killed"
 
 
 def test_killing_a_daemon_spares_the_agent_processes_it_launched(fleet: _Fleet) -> None:

@@ -31,6 +31,12 @@ exec into the daemon, so SIGTERM reaches the recorded PID directly. Windows
 uses a private console; its recorded root may be a venv redirector, while
 Ctrl-Break reaches the interpreter as SIGBREAK. `shared/daemon_shutdown.py`
 maps both service stop signals to the daemon's KeyboardInterrupt cleanup.
+On Windows the caller's session decides the control channel: same-session
+delivery attaches the target's private console directly; a caller in another
+session (SSH = session 0 vs desktop services = session 1) routes the request
+through the session's resident control steward, which runs the same verified
+helper from inside the target's session. A cross-session target with no
+steward is an explicit refusal — the stop reports incomplete, never escalates.
 The ops daemon explicitly cancels and awaits loop tasks before its final exit,
 without joining stuck executor threads. See [[session-backend.ava.okf.md|session backend]].
 
