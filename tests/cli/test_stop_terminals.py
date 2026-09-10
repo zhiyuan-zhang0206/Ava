@@ -110,7 +110,7 @@ def test_fork_shell_child_resets_term_and_hup_dispositions(
     fake exec that snapshots the dispositions the real exec would carry.
     """
     import shared.pty_sessions.host as host_mod
-    from shared.pty_sessions.host import _fork_shell
+    from shared.pty_sessions.launch import _fork_shell
 
     probe_file = tmp_path / "dispositions.txt"
 
