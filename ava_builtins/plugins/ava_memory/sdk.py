@@ -366,7 +366,10 @@ def _quote_caller_values(block: str) -> str:
 
     Line order, blank lines and comments stay put, and a line that already
     reads back as written - including an already-quoted one - is left
-    byte-identical."""
+    byte-identical. Only the block's own unindented `key: value` lines are
+    inspected; an indented line under a key is left to YAML. A ` # note`
+    inside a bare value is part of it - the value is quoted so that text
+    survives as written."""
     lines = block.split("\n")
     for index, line in enumerate(lines):
         match = _CALLER_VALUE_LINE.match(line)
