@@ -335,6 +335,26 @@ def test_ws_connect_kwargs_mirror_the_sdk_version_guard(
     assert feishu_ws_proxy.ws_connect_kwargs() == {}
 
 
+async def test_sdk_connect_call_site_resolves_the_patched_builder() -> None:
+    """The seam is a NAME contract: ``Client._connect`` resolves
+    ``_ws_connect_kwargs`` as a module global at connect time, so the adapter's
+    ``setattr`` lands only while the SDK keeps calling that name. A lark-oapi
+    rename (a dependency bump is the realistic path) would leave the replacement
+    installed but unused — silent direct-only behavior again — so fingerprint
+    the call site (QA review of #2105, guard suggestion)."""
+    import inspect
+
+    # Warm the COLD lark import inside the running loop (see the sibling test).
+    import lark_oapi.ws.client as ws_client_module
+
+    source = inspect.getsource(ws_client_module.Client._connect)
+    assert "_ws_connect_kwargs()" in source, (
+        "lark-oapi's Client._connect no longer calls _ws_connect_kwargs(): the "
+        "env-proxy seam in services/im_bridge/adapters/feishu_ws_proxy.py is now "
+        "inert (the WS handshake is direct-only again)"
+    )
+
+
 async def test_build_ws_client_installs_the_env_proxy_kwargs_builder(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
