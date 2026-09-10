@@ -30,7 +30,6 @@ __all__ = [
     "build_at_script",
     "build_cron_script",
     "next_fire",
-    "normalize_end_time",
     "normalize_when",
     "previous_fire",
     "validate_cron",
@@ -189,15 +188,6 @@ def normalize_when(when: _dt.datetime | _dt.timedelta | str) -> _dt.datetime:
             )
         return parsed.astimezone(_dt.UTC)
     raise TypeError(f"when must be datetime / timedelta / str, got {type(when).__name__}")
-
-
-def normalize_end_time(
-    end_time: _dt.datetime | _dt.timedelta | str | None,
-) -> _dt.datetime | None:
-    """Normalize end_time — same as normalize_when, but allows None."""
-    if end_time is None:
-        return None
-    return normalize_when(end_time)
 
 
 # Script generation
