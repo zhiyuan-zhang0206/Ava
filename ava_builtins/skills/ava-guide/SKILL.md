@@ -40,7 +40,7 @@ and the design intent.
 | Install, upgrade, remove skills & plugins; understand the difference | [packages](packages/SKILL.md) |
 | Understand agents, commands, presets, schedules — the agent-level concepts | [agents](agents/SKILL.md) |
 | Create, update, or manage agent config presets — turn user needs into a preset | [presets](presets/SKILL.md) |
-| Pick the model a spawned agent runs on — tier judgment, cost policy, `config_overlay` | [models](models/SKILL.md) |
+| Pick the model a spawned agent runs on — flash-only model policy, `config_overlay` | [models](models/SKILL.md) |
 | Onboard a new user — interview preferences, discover intent, record memory, start the first task; migrate a user from Claude Code / Codex / OpenClaw / Hermes | [onboarding](onboarding/SKILL.md) |
 
 Cluster + host config cuts across all of these: `ava config get/set/unset`
