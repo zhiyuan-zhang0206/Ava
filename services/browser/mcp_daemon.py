@@ -22,6 +22,17 @@ Two invariants make one upstream safe for many clients:
   whatever is globally selected (that could be another client's tab) -- it
   cold-starts (navigate -> new_page) or returns the no-page error.
 
+Page lifetime (2026-09-11 ruling): every page this stack
+CREATES (an explicit `new_page`, or the auto-created page on a page-less first
+navigate) carries a hard TTL deadline (`AVA_CHROME_PAGE_DEFAULT_TTL_SECONDS`,
+24h default) and is closed by the expiry sweep next to the other reapers when
+the deadline passes -- activity never extends it. `renew_page`, a daemon-owned
+tool appended to the upstream tool list, moves the deadline to now + ttl (at
+most 24h per call); pages this stack never created (the user's own tabs) are
+out of scope by construction, and expiry surfaces as the page simply being
+gone (next page-scoped call takes the existing no-page path) -- never as an
+invented "page expired" error. See `services.browser.page_lifecycle`.
+
 Wire protocol (JSON line per request, mirrors `ava._mcps_daemon`):
   Request:  {"id": 1, "method": "list_tools"}
             {"id": 2, "method": "call_tool", "tool": "click", "args": {...}}
@@ -60,9 +71,14 @@ from services.browser.mcp_upstream import (
 )
 from services.browser.page_lifecycle import (
     _AGENT_AFFINITY,
+    RENEW_PAGE_TOOL,
     _text_of,
     dead_page_reaper,
+    drop_page_ttl,
     handle_release_agent_page,
+    register_created_page,
+    renew_agent_page,
+    renew_page_tool_dump,
     touch_agent_page,
 )
 from services.browser.protocol import Request, Response
@@ -154,6 +170,19 @@ def _no_page_result() -> types.CallToolResult:
     )
 
 
+def _renew_requires_agent_result() -> types.CallToolResult:
+    """`renew_page` resolves its target from the per-AGENT affinity registry, so
+    a connection presenting no agent id (a legacy wrapper client) has no page
+    to renew. Refused locally instead of forwarded: the name is daemon-owned,
+    so the upstream would only answer with a less legible unknown-tool error."""
+    return types.CallToolResult(
+        content=[
+            types.TextContent(type="text", text=f"{RENEW_PAGE_TOOL} requires an agent identity")
+        ],
+        is_error=True,
+    )
+
+
 class ChromeMcpDaemon:
     """Owns the single upstream session + the serial lock + the cached tool list.
 
@@ -204,7 +233,12 @@ class ChromeMcpDaemon:
                         self.dead.set()
                         raise RuntimeError(_UPSTREAM_DOWN_MSG) from e
                     raise
-        return [t.model_dump(mode="json", by_alias=True) for t in self._tools]
+        # Daemon-owned tool appended after the upstream's verbatim passthrough:
+        # `chrome-devtools-mcp` has no TTL concept, so `renew_page` is
+        # implemented entirely on this side (see `page_lifecycle`).
+        return [t.model_dump(mode="json", by_alias=True) for t in self._tools] + [
+            renew_page_tool_dump()
+        ]
 
     async def call_tool(
         self, name: str, args: dict[str, Any], current_page: int | None
@@ -213,6 +247,10 @@ class ChromeMcpDaemon:
 
         Returns the result and the connection's updated current page.
         """
+        if name == RENEW_PAGE_TOOL:
+            # `renew_page` is daemon-owned and per-AGENT; a connection without
+            # an agent id has no page to renew (see `_renew_requires_agent_result`).
+            return _renew_requires_agent_result(), current_page
         async with self._lock:
             return await self._affinity_call(name, args, current_page)
 
@@ -226,8 +264,13 @@ class ChromeMcpDaemon:
         child) lands on the tab the agent process selected. Same serial lock +
         re-pin machinery as `call_tool`; a re-pin failure (tab closed
         underneath) drops the slot to no-page exactly like the per-connection
-        path.
+        path. `renew_page` (daemon-owned, see `page_lifecycle`) is resolved
+        here without an upstream call.
         """
+        if name == RENEW_PAGE_TOOL:
+            # Daemon-owned tool, handled entirely on this side (no upstream
+            # round-trip); `renew_agent_page` takes the serial lock itself.
+            return await renew_agent_page(self, agent_id, args)
         async with self._lock:
             # Stamp inside the lock: the idle sweep reads the stamp under the
             # same lock, so a call that lands mid-sweep must serialize with it
@@ -264,6 +307,11 @@ class ChromeMcpDaemon:
                 # anything else fails fast instead of touching another client's tab.
                 if name == "navigate_page" and isinstance(args.get("url"), str):
                     result = await self._call("new_page", args)
+                    if not result.is_error:
+                        # The auto-created page gets its TTL deadline like an
+                        # explicit new_page (the two creation paths are the
+                        # whole coverage of the TTL registry).
+                        register_created_page(_selected_id(result))
                     if verify_after and not result.is_error:
                         _spawn_verify()
                     return result, (_selected_id(result) or current_page)
@@ -272,6 +320,17 @@ class ChromeMcpDaemon:
         result = await self._call(name, args)
         if verify_after and not result.is_error:
             _spawn_verify()
+        if not result.is_error:
+            if name == "new_page":
+                # Page created -> TTL slot (see `page_lifecycle`); a listing
+                # that drifted off the parseable shape registers nothing.
+                register_created_page(_selected_id(result))
+            elif name == "close_page":
+                # A clean close drops the TTL slot with the page; bool is
+                # rejected so a JSON `true` can never alias page id 1.
+                closed_id = args.get("pageId")
+                if isinstance(closed_id, int) and not isinstance(closed_id, bool):
+                    drop_page_ttl(closed_id)
         return result, self._next_page(name, args, result, current_page)
 
     @staticmethod
@@ -724,6 +783,13 @@ async def run() -> None:  # noqa: PLR0915 — upstream watchdog lifecycle keeps 
 
 
 def main() -> None:
+    # Same boot seam every long-running service shares (cf. computer-mcp): a
+    # per-daemon log file plus the event pipeline, so this daemon's expiry /
+    # renewal events land attributed to `browser-mcp` and an uncaught
+    # traceback is postmortem-able. Idempotent.
+    from shared.log import init_gateway_process
+
+    init_gateway_process(name="browser-mcp")
     asyncio.run(run())
 
 

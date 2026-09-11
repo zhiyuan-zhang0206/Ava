@@ -18,26 +18,40 @@ mechanisms, both scoped to agent-owned pages only:
   are closed. A terminated agent's tab to any URL (not just dead localhost)
   ages out through this pass, because its last-use stamp stops moving; a
   live agent's tab is never cut short as long as it keeps using the browser.
+- ``reap_expired_pages`` — the hard deadline (2026-09-11 ruling): every page
+  this stack CREATED (an explicit new_page, or the auto-created page on a
+  page-less first navigate) is registered in ``_PAGE_TTL_DEADLINES`` with a
+  deadline of ``now + AVA_CHROME_PAGE_DEFAULT_TTL_SECONDS`` (24h default), and
+  the sweep closes it once that deadline passes. Activity never extends the
+  deadline; ``renew_agent_page`` (the ``renew_page`` tool) moves it to
+  ``now + ttl`` explicitly, at most 24h per call. This is what bounds a page
+  an agent keeps USING across days — the idle sweep never fires for it.
 
-Everything here is strictly scoped: only pages with a slot in
-``_AGENT_AFFINITY`` are ever inspected or closed, so the user's tabs and other
-agents' tabs cannot be touched. The registry is module-level so it survives
+Scoping: the reapers' candidate sources are the affinity registry and the TTL
+registry — both contain only pages this stack created — so the user's tabs and
+pages this stack never created are never inspected or closed. A user tab the
+agent merely selected has no TTL slot and no renewal path; it is out of scope
+by construction. The registries are module-level so they survive
 ``ChromeMcpDaemon`` replacement across upstream reconnects (the daemon
-re-imports it; the object is shared).
+re-imports them; the objects are shared).
 """
 
 from __future__ import annotations
 
 import asyncio
+import math
 import re
 import time
 from contextlib import suppress
+from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol
 from urllib.parse import urlsplit
 
 from mcp import types
 
 from services.browser.protocol import Request, Response
+from shared import telemetry
+from shared.config import settings
 from shared.log import logger
 
 # Per-agent page affinity — agent id -> that agent's current page. The
@@ -80,6 +94,60 @@ _TAB_IDLE_TIMEOUT_S = 6 * 60 * 60
 # worker agents point at). A page on any other host is never a sweep candidate,
 # even when its port answers nothing.
 _LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1"})
+
+# Hard cap on one renewal grant — at most 24h, the same cap persistent shell
+# sessions live under (user ruling 2026-09-01). The initial (creation) deadline
+# is the configured default, `chrome_page_default_ttl_seconds`.
+_MAX_TTL_SECONDS = 86_400.0
+
+# TTL deadline per page — page id -> monotonic deadline. Every page THIS STACK
+# created (an explicit new_page call, or the auto-created page on a page-less
+# first navigate) gets a slot from ``register_created_page``; the expiry sweep
+# closes a page once its deadline passes. Monotonic (never wall clock): a
+# clock step must not move a deadline. The registry is the ONLY candidate
+# source for the TTL sweep, so pages this stack never created (the user's own
+# tabs) are never inspected or closed. Module-level for the same reason as the
+# affinity registry: it must survive daemon replacement across upstream
+# reconnects.
+_PAGE_TTL_DEADLINES: dict[int, float] = {}
+
+# The ``renew_page`` tool this module owns. Lives beside the TTL machinery
+# because the daemon appends it to the upstream tool list verbatim passthrough
+# (``chrome-devtools-mcp`` has no TTL concept of its own).
+RENEW_PAGE_TOOL = "renew_page"
+
+_RENEW_PAGE_DESCRIPTION = (
+    "Renew the TTL deadline of this agent's current page. Pages opened through "
+    "this browser carry a hard deadline (24h default) after which they are "
+    "closed; renewal moves the deadline to now + ttl (default: the configured "
+    "page TTL)."
+)
+
+
+def renew_page_tool_dump() -> dict[str, Any]:
+    """The daemon-owned ``renew_page`` tool dict, in the same wire shape as the
+    upstream tools the daemon passes through verbatim (``types.Tool`` dump):
+    appended to ``list_tools`` by ``ChromeMcpDaemon``."""
+    return types.Tool(
+        name=RENEW_PAGE_TOOL,
+        description=_RENEW_PAGE_DESCRIPTION,
+        input_schema={
+            "type": "object",
+            "properties": {
+                "ttl": {
+                    "type": "number",
+                    "description": (
+                        "Seconds from now until the new deadline. Defaults to the "
+                        "cluster's default page TTL; must be greater than zero and "
+                        "at most 86400 (24 hours)."
+                    ),
+                }
+            },
+            "required": [],
+            "additionalProperties": False,
+        },
+    ).model_dump(mode="json", by_alias=True)
+
 
 # Page-list line shape: `  <id>: <url> [selected]` — management tools render
 # ids and URLs from the shared page namespace; `[selected]` marks the active
@@ -129,6 +197,7 @@ async def release_agent_page(daemon: _PageDaemon, agent_id: int) -> int | None:
             )
         _AGENT_AFFINITY[agent_id] = None
         _AGENT_LAST_USE.pop(agent_id, None)
+        drop_page_ttl(page_id)
         return page_id
 
 
@@ -269,6 +338,7 @@ async def reap_dead_agent_pages(daemon: _PageDaemon) -> None:
                 )
             if _AGENT_AFFINITY.get(agent_id) == page_id:
                 _AGENT_AFFINITY[agent_id] = None
+            drop_page_ttl(page_id)
             logger.info(
                 f"[browser-mcp] reaper closed dead page {page_id} ({url}) for agent {agent_id}"
             )
@@ -282,6 +352,122 @@ def touch_agent_page(agent_id: int) -> None:
     user's tabs or any page without an affinity slot.
     """
     _AGENT_LAST_USE[agent_id] = time.monotonic()
+
+
+def _default_page_ttl_seconds() -> float:
+    """The configured default TTL for a newly created page."""
+    return float(settings.daemon.chrome_page_default_ttl_seconds)
+
+
+def _tool_ok(text: str) -> types.CallToolResult:
+    return types.CallToolResult(content=[types.TextContent(type="text", text=text)], is_error=False)
+
+
+def _tool_error(text: str) -> types.CallToolResult:
+    return types.CallToolResult(content=[types.TextContent(type="text", text=text)], is_error=True)
+
+
+def register_created_page(page_id: int | None) -> None:
+    """Give a freshly created page its initial TTL deadline.
+
+    Called by the daemon right after a ``new_page`` it forwarded (an explicit
+    call, or the auto-created page on a page-less first navigate) resolved to
+    a page id. Best-effort like the affinity parse it rides on: a listing
+    that drifted off the parseable shape yields ``None`` and the page simply
+    carries no TTL. Callers hold the daemon's serial lock.
+    """
+    if page_id is None:
+        return
+    _PAGE_TTL_DEADLINES[page_id] = time.monotonic() + _default_page_ttl_seconds()
+
+
+def drop_page_ttl(page_id: int | None) -> None:
+    """Forget the page's TTL slot — the page is closed (or was never ours)."""
+    if page_id is not None:
+        _PAGE_TTL_DEADLINES.pop(page_id, None)
+
+
+def _clear_affinity_for_page(page_id: int) -> int | None:
+    """Clear every agent slot naming ``page_id`` (the page is gone);
+
+    returns one cleared owner for logs / the expiry event (None when no slot
+    named the page). Every slot is cleared — a slot left naming a closed page
+    would make the owner's next call re-pin against a dead id first.
+    """
+    owner: int | None = None
+    for agent_id, current in list(_AGENT_AFFINITY.items()):
+        if current == page_id:
+            _AGENT_AFFINITY[agent_id] = None
+            if owner is None:
+                owner = agent_id
+    return owner
+
+
+async def renew_agent_page(
+    daemon: _PageDaemon, agent_id: int, args: dict[str, Any]
+) -> types.CallToolResult:
+    """Handle one ``renew_page`` tool call: move the agent page's TTL deadline.
+
+    Semantics mirror ``ava.shell.sessions.renew`` (the shell-TTL ruling): the
+    deadline becomes ``now + ttl`` — never stacked on the old one — each call
+    grants at most 24h, and an already-passed deadline is NOT renewable (the
+    sweep owns the page; there is no renewable expired state). ``ttl`` is
+    optional and defaults to the configured page TTL. Renewal targets the
+    CALLER's current page: a page this stack never created has no TTL slot
+    and no renewal path, so the user's tabs are out of scope by construction.
+    Runs under the serial lock, so a renewal and the expiry sweep can never
+    interleave — a successful renewal proves the deadline had not passed.
+    """
+    unknown = set(args) - {"ttl"}
+    if unknown:
+        return _tool_error(f"renew_page got unexpected argument(s): {sorted(unknown)}")
+    raw = args.get("ttl")
+    if raw is None:
+        ttl = _default_page_ttl_seconds()
+    elif (
+        isinstance(raw, bool)
+        or not isinstance(raw, (int, float))
+        or not math.isfinite(raw)
+        or raw <= 0
+    ):
+        return _tool_error("ttl must be a finite number of seconds greater than zero")
+    else:
+        ttl = float(raw)
+    if ttl > _MAX_TTL_SECONDS:
+        return _tool_error(f"ttl must be at most {_MAX_TTL_SECONDS:.0f} seconds (24 hours)")
+    async with daemon._lock:
+        touch_agent_page(agent_id)
+        page_id = _AGENT_AFFINITY.get(agent_id)
+        if page_id is None:
+            return _tool_error("this agent has no current page to renew; open one first")
+        deadline = _PAGE_TTL_DEADLINES.get(page_id)
+        if deadline is None:
+            return _tool_error(
+                f"page {page_id} has no page TTL to renew (not created through this "
+                "browser, or already closed); open a new page"
+            )
+        now = time.monotonic()
+        if now >= deadline:
+            return _tool_error(
+                f"page {page_id} is past its TTL deadline and cannot be renewed; open a new page"
+            )
+        _PAGE_TTL_DEADLINES[page_id] = now + ttl
+        new_expires = datetime.now(UTC) + timedelta(seconds=ttl)
+        telemetry.emit(
+            "telemetry",
+            "chrome_page_ttl_renewed",
+            level="info",
+            agent_id=agent_id,
+            attributes={
+                "page_id": page_id,
+                "ttl_s": ttl,
+                "new_expires_at": new_expires.isoformat(),
+            },
+        )
+        logger.info(f"[browser-mcp] agent {agent_id} renewed page {page_id} TTL to {ttl:g}s")
+        return _tool_ok(
+            f"Page {page_id} TTL renewed: extends to {new_expires.isoformat()} ({ttl:g}s from now)."
+        )
 
 
 async def reap_idle_agent_pages(daemon: _PageDaemon) -> int:
@@ -319,6 +505,7 @@ async def reap_idle_agent_pages(daemon: _PageDaemon) -> int:
             if page_urls.get(page_id) is None:
                 # already closed upstream; drop the stale stamp alongside the slot
                 _AGENT_LAST_USE.pop(agent_id, None)
+                drop_page_ttl(page_id)
                 continue
             result = await daemon._call("close_page", {"pageId": page_id})
             if result.is_error:
@@ -330,17 +517,83 @@ async def reap_idle_agent_pages(daemon: _PageDaemon) -> int:
             if _AGENT_AFFINITY.get(agent_id) == page_id:
                 _AGENT_AFFINITY[agent_id] = None
             _AGENT_LAST_USE.pop(agent_id, None)
+            drop_page_ttl(page_id)
             closed += 1
             logger.info(f"[browser-mcp] idle sweep closed page {page_id} for agent {agent_id}")
         return closed
 
 
+async def reap_expired_pages(daemon: _PageDaemon) -> int:
+    """Close stack-created pages whose TTL deadline has passed.
+
+    Candidate source is ``_PAGE_TTL_DEADLINES`` alone — only pages this stack
+    created have a slot, so the user's tabs are never candidates. The whole
+    pass runs under the serial lock (like the idle sweep): the candidate
+    read, the page-list read, and the closes cannot interleave with a
+    renewal or another close, so a renewed page is never closed off a stale
+    read, and a close racing a concurrent ``close_page`` / release loses
+    cleanly (the page is simply absent from the re-read listing). For a page
+    still listed, the close re-checks nothing else: the deadline is the
+    whole contract. After the close — whatever it said — the TTL slot and
+    any affinity slot naming the page are dropped. The deadline is terminal,
+    the same doctrine as the shell-TTL ruling's "no renewable expired
+    state": a page already closed elsewhere is filtered by the listing
+    re-check before any close attempt, so an errored close from here is
+    anomalous — warned about, never retried (a retryable slot would keep a
+    terminal deadline alive past its deadline). Expiry is surfaced to the
+    agent only by the page being gone: the next page-scoped call hits the
+    daemon's existing no-page path — no invented "page expired" error.
+    Returns the number of pages closed.
+    """
+    async with daemon._lock:
+        now = time.monotonic()
+        expired = [
+            page_id for page_id, deadline in list(_PAGE_TTL_DEADLINES.items()) if now >= deadline
+        ]
+        if not expired:
+            return 0
+        listing = await daemon._call("list_pages", {})
+        if listing.is_error:
+            return 0  # upstream hiccup — retry on the next pass
+        page_urls = parse_page_listing(_text_of(listing))
+        closed = 0
+        for page_id in expired:
+            url = page_urls.get(page_id)
+            if url is None:
+                # Already closed underneath us (close_page / release / a
+                # manual tab close) — nothing to close; just drop the slot.
+                drop_page_ttl(page_id)
+                continue
+            result = await daemon._call("close_page", {"pageId": page_id})
+            if result.is_error:
+                logger.warning(
+                    f"[browser-mcp] TTL sweep could not close page {page_id} ({url}): "
+                    f"{_text_of(result)!r}"
+                )
+            drop_page_ttl(page_id)
+            owner = _clear_affinity_for_page(page_id)
+            telemetry.emit(
+                "log",
+                "chrome_page_ttl_expired",
+                level="info",
+                agent_id=owner,
+                attributes={"page_id": page_id, "url": url, "agent_id": owner},
+            )
+            closed += 1
+            logger.info(
+                f"[browser-mcp] TTL sweep closed page {page_id} ({url})"
+                + (f" for agent {owner}" if owner is not None else "")
+            )
+        return closed
+
+
 async def dead_page_reaper(daemon: _PageDaemon, stop: asyncio.Event) -> None:
     """Periodically sweep agent-owned pages: dead localhost pages (see
-    ``reap_dead_agent_pages``) and idle-owned pages whose owner has gone quiet
-    (see ``reap_idle_agent_pages``). Runs per upstream connection like the
-    daemon's watchdog; a pass that hits upstream death returns so the daemon
-    reconnects.
+    ``reap_dead_agent_pages``), idle-owned pages whose owner has gone quiet
+    (see ``reap_idle_agent_pages``), and pages past their hard TTL deadline
+    (see ``reap_expired_pages`` — up to one sweep interval of lag on the
+    deadline). Runs per upstream connection like the daemon's watchdog; a
+    pass that hits upstream death returns so the daemon reconnects.
     """
     while not stop.is_set():
         with suppress(asyncio.TimeoutError):
@@ -350,6 +603,7 @@ async def dead_page_reaper(daemon: _PageDaemon, stop: asyncio.Event) -> None:
         try:
             await reap_dead_agent_pages(daemon)
             await reap_idle_agent_pages(daemon)
+            await reap_expired_pages(daemon)
         except RuntimeError:
             # Upstream died mid-pass — daemon.dead is set; the daemon reconnects
             # and recreates this task on the new connection.

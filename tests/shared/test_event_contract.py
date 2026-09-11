@@ -151,9 +151,10 @@ def test_category_projection_matches_telemetry_whitelist() -> None:
     # corpse_reaper_publish_failed) raises it to 162; shell_ttl_renewed
     # (Task #2647's explicit shell-TTL renewal) raises it to 163;
     # exec_request_quarantine (issue #2157's stale exec-evidence preservation)
-    # raises it to 164.
+    # raises it to 164; chrome_page_ttl_renewed (task #3035's Chrome page TTL)
+    # raises it to 165.
     assert "restart_cas_lost" not in _TELEMETRY_KINDS
-    assert len(_TELEMETRY_KINDS) == 164
+    assert len(_TELEMETRY_KINDS) == 165
 
 
 def test_delivery_wake_suppressed_payload_names_escalation_evidence() -> None:

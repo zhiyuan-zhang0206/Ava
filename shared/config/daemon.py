@@ -136,6 +136,20 @@ class DaemonSettings(EnvSettings):
         },
     )
 
+    chrome_page_default_ttl_seconds: float = Field(
+        default=86400.0,
+        gt=0,
+        alias="AVA_CHROME_PAGE_DEFAULT_TTL_SECONDS",
+        description="Default lifetime in seconds for a Chrome page created through the shared browser (an explicit new_page call, or the auto-created page on a page-less first navigation). The browser-mcp daemon closes the page when the deadline passes; an agent extends it with the renew_page tool, at most 24h per renewal. Mirrors the persistent-shell TTL ruling: a page is a bounded resource, never extended by activity alone.",
+        json_schema_extra={
+            "capability": "agent-runner",
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
     notice_ttl_limit_seconds: float = Field(
         default=86400.0,
         alias="AVA_NOTICE_TTL_LIMIT_SECONDS",
