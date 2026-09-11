@@ -278,6 +278,20 @@ export const HEADER_CLS =
   "text-muted-foreground/80 hover:text-foreground hover:bg-accent/30 " +
   "transition-colors select-none rounded-tr-sm";
 
+// Sticky header contract shared by the two expandable surfaces: CardHeader
+// (top-level message cards) and the work-block header in run-block.tsx. When
+// expanded, the header pins below the floating HeaderBar — top-11 must match
+// BAR_HEIGHT_PX / BAR_HEIGHT_CLASS in @/lib/layout (h-11 = 44px), the same
+// line findClosestStuckHeaderId measures against. While `isStuck`, the header
+// switches to the elevated opaque variant that masks the body scrolling
+// beneath it, then fades back to transparent once the block's range is left.
+export const STICKY_HEADER_CLS = "sticky top-11 z-10";
+export const STUCK_HEADER_CLS =
+  "bg-background/95 backdrop-blur-md shadow-xs border-b border-border/60 " +
+  "transition-[background-color,box-shadow,border-color] duration-150 ease-out motion-reduce:transition-none";
+export const UNSTUCK_HEADER_CLS =
+  "bg-transparent transition-[background-color,box-shadow,border-color] duration-150 ease-out motion-reduce:transition-none";
+
 // The colored left-border container. cardText tints the whole card (markers).
 // `actions` (copy / fork) is an optional overlay pinned to the block's
 // bottom-right corner, revealed on hover — a null actions prop (collapsed /
@@ -367,11 +381,21 @@ export const CardHeader = memo(function CardHeader({
   config,
   expanded,
   onToggle,
+  stickyHeader = false,
+  isStuck = false,
 }: {
   item: BackendTimelineItem;
   config: CardConfig;
   expanded: boolean;
   onToggle: () => void;
+  /** This card is a top-level message card: expanding it pins the header below
+   *  the HeaderBar while its body scrolls (task #3136). Cards inside a work
+   *  block keep their turn's sticky header instead, so two headers never pin
+   *  at the same line. */
+  stickyHeader?: boolean;
+  /** The header is currently pinned at the sticky line — drives the elevated
+   *  mask styling (same contract as the work-block header). */
+  isStuck?: boolean;
 }) {
   const t = useTranslations();
   const live = isLiveReasoning(item) || isLiveCode(item) || isLiveExecution(item);
@@ -384,6 +408,9 @@ export const CardHeader = memo(function CardHeader({
     SUMMARY_PARSE_INTERVAL_MS,
   );
   const Icon = config.icon;
+  // Sticky only while expanded: a collapsed card has nothing to scroll under
+  // its header, and the collapsed rest position must stay in flow.
+  const sticky = stickyHeader && expanded;
 
   return (
     // No title attribute — deliberately no hover tooltip on this button; the
@@ -395,10 +422,15 @@ export const CardHeader = memo(function CardHeader({
     <button
       type="button"
       onClick={onToggle}
-      className={HEADER_CLS}
+      className={cn(
+        HEADER_CLS,
+        sticky && STICKY_HEADER_CLS,
+        sticky && (isStuck ? STUCK_HEADER_CLS : UNSTUCK_HEADER_CLS),
+      )}
       aria-expanded={expanded}
       data-testid="card-toggle"
       data-expanded={expanded}
+      data-stuck={sticky && isStuck ? "true" : "false"}
     >
       {expanded ? (
         <ChevronDown className="size-3 shrink-0 opacity-60" />

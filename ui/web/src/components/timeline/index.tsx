@@ -97,7 +97,7 @@ import { BAR_HEIGHT_PX, BAR_CLEAR_TOP_PADDING_CLASS, FLEX, FLEX_1, MIN_H_0, OVER
 import { cn } from "@/lib/utils";
 
 import { ConnectionNotice } from "@/components/connection-notice";
-import { findClosestStuckTurnId, TurnBlock } from "./run-block";
+import { findClosestStuckHeaderId, TurnBlock } from "./run-block";
 import { classifyItem, groupIntoTurns, type TimelineGroup } from "./runs";
 import { LoadOlderButton, PullToLoadIndicator, ColdLoadSpinner, ScrollToBottomButton } from "./overlays";
 import { TimelineRow, cardConfigFor } from "./row";
@@ -317,16 +317,18 @@ export function TimelineView({
   // scroll event ever fires) still gets the control.
   const [atTop, setAtTop] = useState(false);
   const stuckRafRef = useRef<number | null>(null);
-  const [activeStuckTurnId, setActiveStuckTurnId] = useState<string | null>(null);
+  // The id of whichever expanded header (work block or top-level message card)
+  // is currently pinned at the sticky line — one owner for both surfaces.
+  const [activeStuckHeaderId, setActiveStuckHeaderId] = useState<string | null>(null);
 
-  const updateStuckTurn = useCallback(() => {
+  const updateStuckHeader = useCallback(() => {
     const viewport =
       viewportRef.current ??
       wrapperRef.current?.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]') ??
       null;
     if (!viewport) return;
-    const nextStuckId = findClosestStuckTurnId(viewport, BAR_HEIGHT_PX);
-    setActiveStuckTurnId((prev) => (prev === nextStuckId ? prev : nextStuckId));
+    const nextStuckId = findClosestStuckHeaderId(viewport, BAR_HEIGHT_PX);
+    setActiveStuckHeaderId((prev) => (prev === nextStuckId ? prev : nextStuckId));
   }, []);
 
   // Pointer-aware sticky thresholds: touch keeps the wide bounce-tolerant
@@ -497,7 +499,7 @@ export function TimelineView({
       measureAtTop();
       stuckRafRef.current ??= requestAnimationFrame(() => {
         stuckRafRef.current = null;
-        updateStuckTurn();
+        updateStuckHeader();
       });
     };
     viewport.addEventListener("scroll", onScroll, { passive: true });
@@ -677,7 +679,7 @@ export function TimelineView({
       if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current);
       ro.disconnect();
     };
-  }, [controller, measureAtBottom, measureAtTop, pinToBottom, updateStuckTurn, captureAnchor, schedulePullRender]);
+  }, [controller, measureAtBottom, measureAtTop, pinToBottom, updateStuckHeader, captureAnchor, schedulePullRender]);
 
   // The SINGLE force-scroll trigger. The store bumps scrollToBottomRequest on
   // exactly the two moments a scroll-to-bottom is unconditional — agent switch
@@ -946,7 +948,7 @@ export function TimelineView({
     setPrevDetailsMode(effectiveDetailsMode);
     setOverrides(new Set());
     setTurnOverrides(new Map());
-    setActiveStuckTurnId(null);
+    setActiveStuckHeaderId(null);
   }
 
   // item_ids are message indexes local to each thread, so the same ids recur
@@ -957,7 +959,7 @@ export function TimelineView({
     setPrevThreadKey(threadKey);
     setOverrides(new Set());
     setTurnOverrides(new Map());
-    setActiveStuckTurnId(null);
+    setActiveStuckHeaderId(null);
   }
 
   // Same-mode re-pick (user ruling 2026-08-06): the selector bumps this token
@@ -969,13 +971,15 @@ export function TimelineView({
     setPrevResetToken(resetToken);
     setOverrides(new Set());
     setTurnOverrides(new Map());
-    setActiveStuckTurnId(null);
+    setActiveStuckHeaderId(null);
   }
 
-  // Sync stuck turn on changes or layout shifts
+  // Sync the stuck header on changes or layout shifts. turnOverrides /
+  // overrides flip an expanded state (which arms or releases a pin); items
+  // covers content growth/removal.
   useLayoutEffect(() => {
-    updateStuckTurn();
-  }, [updateStuckTurn, turnOverrides, effectiveDetailsMode, items]);
+    updateStuckHeader();
+  }, [updateStuckHeader, turnOverrides, overrides, effectiveDetailsMode, items]);
 
   useEffect(() => {
     return () => {
@@ -1014,6 +1018,8 @@ export function TimelineView({
           streaming={streaming}
           expanded={false}
           showActions={false}
+          stickyHeader={false}
+          isStuck={false}
           onToggle={toggleExpanded}
           onFork={null}
           forkPending={false}
@@ -1051,6 +1057,11 @@ export function TimelineView({
         streaming={streaming}
         expanded={expanded}
         showActions={showActions}
+        // A primary item is always a top-level card (it breaks turns), so its
+        // header is the sticky one; the stuck id can only match while it is
+        // expanded (see TimelineRow's data-card-sticky gate).
+        stickyHeader={isPrimary}
+        isStuck={isPrimary && activeStuckHeaderId === item.item_id}
         onToggle={toggleExpanded}
         onFork={isForkRow ? onFork ?? null : null}
         forkPending={isForkRow ? forkPending ?? false : false}
@@ -1160,7 +1171,7 @@ export function TimelineView({
                   expanded={runExpanded}
                   onToggle={() => toggleTurn(turnId, runExpanded)}
                   turnActive={turnActive && isLastTurn}
-                  isStuck={activeStuckTurnId === turnId}
+                  isStuck={activeStuckHeaderId === turnId}
                 >
                   {runExpanded
                     ? group.items.map((it, i) =>
