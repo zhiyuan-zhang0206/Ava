@@ -727,7 +727,9 @@ def test_registered_plugin_model_vision_overrides_binding(
 
 def test_duplicate_prefix_rejected(provider_plugin: Callable[..., None]) -> None:
     provider_plugin()
-    # Re-registration under the same prefix (a second provider.py) fails fast.
+    # Re-registration under the same prefix (a second provider.py) fails the
+    # load: a registration-contract violation is fail-closed (not contained
+    # like a code-load failure) — the flat prefix map cannot pick a winner.
     provider_plugin(
         prefix="testp-",
         display="Other",
@@ -735,7 +737,9 @@ def test_duplicate_prefix_rejected(provider_plugin: Callable[..., None]) -> None
         model="testp-other",
         dir_name="test_provider2",
     )
-    with pytest.raises(RuntimeError) as excinfo:
+    with pytest.raises(
+        provider_api.ProviderRegistrationError, match="already claimed"
+    ) as excinfo:
         ensure_provider_plugins_loaded()
     assert "already claimed" in str(excinfo.value.__cause__)
     assert "testp-other" not in MODELS
@@ -804,7 +808,9 @@ def test_loader_reserves_core_prefixes_before_bootstrap_can_load_a_plugin(
     monkeypatch.setattr(factory, "_MODEL_KEY_MAP", {"core-": ("Core", "core_key", "CORE_KEY")})
     provider_plugin(prefix="core-", model="core-test")
     try:
-        with pytest.raises(RuntimeError) as excinfo:
+        with pytest.raises(
+            provider_api.ProviderRegistrationError, match="already claimed"
+        ) as excinfo:
             ensure_provider_plugins_loaded()
         assert "already claimed" in str(excinfo.value.__cause__)
     finally:
@@ -872,7 +878,9 @@ def test_duplicate_model_id_rejected() -> None:
 
 def test_spawnable_model_without_price_rejected(provider_plugin: Callable[..., None]) -> None:
     provider_plugin(with_price=False)
-    with pytest.raises(RuntimeError) as excinfo:
+    with pytest.raises(
+        provider_api.ProviderRegistrationError, match="no current price"
+    ) as excinfo:
         ensure_provider_plugins_loaded()
     assert "no current price" in str(excinfo.value.__cause__)
 
@@ -894,7 +902,7 @@ def test_model_validation_failure_leaves_registration_retryable() -> None:
     )
     invalid = ModelSpec(provider="testp", spawnable=True)
 
-    with pytest.raises(RuntimeError, match="missing registry facts"):
+    with pytest.raises(provider_api.ProviderRegistrationError, match="missing registry facts"):
         provider_api.register(binding, models={"testp-1": invalid}, pricing={"testp-1": price})
 
     assert "testp-1" not in pricing._PLUGIN_PRICES
@@ -977,6 +985,30 @@ def test_disabled_plugin_skipped(provider_plugin: Callable[..., None]) -> None:
     ensure_provider_plugins_loaded()
     assert "testp-1" not in MODELS
     assert "kept-1" in MODELS
+
+
+def test_broken_provider_plugin_skipped_and_others_load(
+    provider_plugin: Callable[..., None], loguru_records: list[dict]
+) -> None:
+    """Fail-soft (user ruling 2026-09-11): a provider.py that raises at import
+    is skipped with a loud report; the remaining providers still register —
+    one broken plugin must not take down every process that builds a model
+    (agent, gateway, labeler, eval)."""
+    provider_plugin(prefix="kept-", model="kept-1", dir_name="enabled_provider")
+    broken = paths.plugins_dir() / "broken_provider"
+    broken.mkdir(parents=True, exist_ok=True)
+    (broken / "plugin.py").write_text("# broken provider stub")
+    (broken / "provider.py").write_text("raise RuntimeError('provider boom')\n")
+    try:
+        ensure_provider_plugins_loaded()  # must not raise
+
+        assert "kept-1" in MODELS
+        assert any(
+            "broken_provider" in r["message"] and "failed to load" in r["message"]
+            for r in loguru_records
+        )
+    finally:
+        shutil.rmtree(broken, ignore_errors=True)
 
 
 def test_provider_missing_provider_py_is_noop(provider_plugin: Callable[..., None]) -> None:

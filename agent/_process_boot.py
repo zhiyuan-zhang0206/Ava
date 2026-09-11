@@ -153,11 +153,20 @@ def land_cluster_extensions() -> None:
 
 
 def load_process_extensions() -> None:
-    """Process-scope boot: import every external plugin under `$AVA_HOME/plugins`.
+    """Process-scope boot: import every enabled external plugin under `$AVA_HOME/plugins`.
 
     Import side effects are the registration (hooks, Layer A wraps, system-prompt
     contributions), and they must land before the first exec node runs agent code
     — plugins may monkey-patch `ava.X.y`.
+
+    The enable set comes from the same per-machine `plugins_config.json` the
+    graph-build loader reads (`plugins_config.load_for_runtime`): *disabled
+    means never imported on any path* (issue #2161). Before this, this loader
+    imported every directory on disk regardless of config — `ava plugins
+    disable` changed nothing at startup, and a hand-placed broken plugin (a
+    relative-import `plugin.py`) took the whole agent host down on every
+    restart. A plugin that fails to load is now skipped loudly by
+    `scan_and_load`'s fail-soft contract and can no longer block the boot.
 
     **Exactly once per process.** Repeating it is not a supported way to pick up
     a newly installed plugin: plugin-spec-v2's S4 dispose contract is
@@ -166,7 +175,12 @@ def load_process_extensions() -> None:
     made the module object stable, which removes a different obstacle, not this
     one). Newly installed plugins take effect on the next runner restart.
     """
-    ava._extend.scan_and_load()
+    from shared import plugins_config
+
+    known = set(plugins_config.installed_plugin_dirs())
+    config = plugins_config.load_for_runtime(known)
+    enabled = {name for name, entry in config.plugins.items() if entry.enabled}
+    ava._extend.scan_and_load(enabled=enabled)
 
 
 async def boot_agent_scope(agent_id: int) -> BaseChatModel:

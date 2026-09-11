@@ -10,7 +10,8 @@ roster stays single-source. These lock the load-bearing invariants:
   disabled via plugins_config still contributes its service);
 - no installed plugins -> nothing folded;
 - a session-name collision fails fast (the roster is keyed on `session`);
-- a `services.py` missing `services()` fails fast.
+- a broken / declaration-less `services.py` is skipped loudly, and the other
+  plugins' services still load (fail-soft, user ruling 2026-09-11).
 """
 
 from __future__ import annotations
@@ -98,14 +99,52 @@ def test_session_collision_fails_fast(monkeypatch: pytest.MonkeyPatch) -> None:
         roster.build_services()
 
 
-def test_services_py_without_declare_fails_fast(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+def test_services_py_without_declare_is_skipped_loudly(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, loguru_records: list[dict]
 ) -> None:
     """A plugin that ships a services.py with no `services()` function is a
-    misconfiguration, caught at discovery time."""
+    misconfiguration: it is skipped with a loud report (fail-soft, user ruling
+    2026-09-11) — one malformed plugin must not block `ava start` for every
+    other service."""
     plugin_dir = tmp_path / "brokenplugin"
     plugin_dir.mkdir()
     (plugin_dir / "services.py").write_text("X = 1  # no services() function\n")
     monkeypatch.setattr(pc, "installed_plugin_dirs", lambda: {"brokenplugin": plugin_dir})
-    with pytest.raises(spec.PluginServiceError, match="no `services\\(\\)`"):
-        roster.build_services()
+
+    spec._plugin_services()  # must not raise
+
+    assert any(
+        "brokenplugin" in r["message"] and "failed to load" in r["message"]
+        for r in loguru_records
+    )
+
+
+def test_broken_services_py_is_skipped_and_others_still_load(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, loguru_records: list[dict]
+) -> None:
+    """A services.py that raises at import is skipped loudly; the remaining
+    plugins' services still reach the roster."""
+    good_dir = tmp_path / "goodplugin"
+    good_dir.mkdir()
+    (good_dir / "services.py").write_text(
+        "from ops.service_spec import ServiceSpec\n"
+        "def services():\n"
+        "    return (ServiceSpec(session='probe-good', cmd='noop',\n"
+        "            capabilities=frozenset({'gateway'}), requires_db=False),)\n"
+    )
+    bad_dir = tmp_path / "brokenplugin"
+    bad_dir.mkdir()
+    (bad_dir / "services.py").write_text("raise RuntimeError('services boom')\n")
+    monkeypatch.setattr(
+        pc,
+        "installed_plugin_dirs",
+        lambda: {"brokenplugin": bad_dir, "goodplugin": good_dir},
+    )
+
+    sessions = {s.session for s in spec._plugin_services()}
+
+    assert sessions == {"probe-good"}
+    assert any(
+        "brokenplugin" in r["message"] and "failed to load" in r["message"]
+        for r in loguru_records
+    )

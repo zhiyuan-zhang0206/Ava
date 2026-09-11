@@ -48,6 +48,36 @@ def test_scaffold_runs_despite_dangling_config() -> None:
     assert (pdir / "scaffolded.marker").exists()
 
 
+def test_broken_setup_py_is_skipped_and_other_scaffolds_run(
+    loguru_records: list[dict],
+) -> None:
+    """A `setup.py` that fails to import is skipped loudly; the remaining
+    plugins still scaffold (fail-soft, user ruling 2026-09-11) — one broken
+    plugin must not block the provisioning command for every other plugin."""
+    broken = paths.plugins_dir() / "broken"
+    broken.mkdir(parents=True)
+    (broken / "plugin.py").write_text("__description__ = 'x'\n", encoding="utf-8")
+    (broken / "setup.py").write_text("raise RuntimeError('setup boom')\n", encoding="utf-8")
+    real = paths.plugins_dir() / "real"
+    real.mkdir(parents=True)
+    (real / "plugin.py").write_text("__description__ = 'x'\n", encoding="utf-8")
+    (real / "setup.py").write_text(
+        "from pathlib import Path\n"
+        "def scaffold():\n"
+        "    Path(__file__).with_name('scaffolded.marker').write_text('1')\n",
+        encoding="utf-8",
+    )
+    write_local({"plugins": {"broken": {"enabled": True}, "real": {"enabled": True}}})
+
+    result = run_plugin_scaffolds()  # must not raise
+
+    assert result.ran == ["real"]
+    assert (real / "scaffolded.marker").exists()
+    assert any(
+        "broken" in r["message"] and "failed to load" in r["message"] for r in loguru_records
+    )
+
+
 def test_converge_steps_do_not_scaffold_plugins() -> None:
     """Changing this back would reintroduce memory-repository Git work to start."""
     assert "plugin scaffolds" not in {step.name for step in _converge.CONVERGE_STEPS}

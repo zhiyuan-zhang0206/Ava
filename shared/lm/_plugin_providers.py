@@ -13,13 +13,20 @@ existing plugin discovery + enable config, and imports only ``provider.py``
 Loaded once per process, on the first registry-consulting call
 (``build_chat_model`` / ``validate_model_config`` / ``get_models`` / the
 gateway's per-model views). Import order is sorted plugin names — deterministic
-rather than filesystem-order. A provider.py that fails to import or register
-raises out of the triggering call: an enabled plugin whose provider code is
-broken fails the process loudly, never silently omits its models.
+rather than filesystem-order. A provider.py that fails to load is skipped with
+a loud report (``shared.plugin_load_report``) and the remaining providers still
+load — the fail-soft contract (user ruling 2026-09-11): one broken plugin's
+provider code must not take down every process that builds a model. The
+half-executed module is dropped from ``sys.modules`` so a later attempt retries
+cleanly. One exception, deliberately fail-closed: a `register()` contract
+violation (`provider_api.ProviderRegistrationError` — duplicate/nested prefix,
+mismatched model, bad price data) propagates, because the flat prefix and
+model-id maps cannot pick a winner between two claimants.
 
 Core registers no providers. At least one enabled provider plugin must bind at
-load time; an empty registry raises before the once flag is set, so correcting
-the enable configuration can be retried in the same process.
+load time; an empty registry still raises before the once flag is set (a
+configuration failure is not contained), so correcting the enable
+configuration can be retried in the same process.
 """
 
 from __future__ import annotations
@@ -28,6 +35,8 @@ import importlib.util
 import sys
 import threading
 from pathlib import Path
+
+from shared import plugin_load_report
 
 _lock = threading.Lock()
 
@@ -60,7 +69,17 @@ def _load_one(name: str, provider_py: Path, *, is_builtin: bool) -> None:
     provider_api._CURRENT_PLUGIN = name
     try:
         spec.loader.exec_module(module)
+    except provider_api.ProviderRegistrationError:
+        # Fail-closed by design — the loader lets this class propagate instead
+        # of containing it (a flat prefix/model map cannot pick a winner).
+        # Still drop the half-executed module: a later attempt retries clean.
+        sys.modules.pop(spec.name, None)
+        raise
     except Exception as e:
+        # A code-load failure: drop the half-executed module and wrap for the
+        # loader, which contains it loudly (the same cleanup the plugin.py
+        # loader's fail-soft contract performs).
+        sys.modules.pop(spec.name, None)
         raise RuntimeError(f"provider plugin {name!r} failed to load ({provider_py})") from e
     finally:
         provider_api._CURRENT_PLUGIN = None
@@ -101,7 +120,20 @@ def ensure_provider_plugins_loaded() -> None:
             if not provider_py.exists():
                 continue
             is_builtin = repo_dir in str(plugin_dir.resolve())
-            _load_one(name, provider_py, is_builtin=is_builtin)
+            try:
+                _load_one(name, provider_py, is_builtin=is_builtin)
+            except (KeyboardInterrupt, SystemExit):
+                raise
+            except provider_api.ProviderRegistrationError:
+                # Registration-contract violation — fail-closed, not contained
+                # (the flat maps cannot pick a winner between two claimants).
+                # Skip+loud is for code-load failures below.
+                raise
+            except BaseException as exc:
+                # Fail-soft contract (user ruling 2026-09-11): skip this
+                # provider loudly, keep the others. `_load_one` already dropped
+                # the half-executed module from sys.modules.
+                plugin_load_report.report_plugin_load_failure(name, exc)
         if not provider_api.REGISTRY.bindings:
             raise RuntimeError(
                 "no provider plugins enabled — enable at least one provider plugin "
