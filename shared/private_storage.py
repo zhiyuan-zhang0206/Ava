@@ -65,7 +65,10 @@ def converge_private_tree(path: Path) -> Path:
 
     A unit's logs, workspaces, and memory checkout can predate the private
     storage convention. Converge owns their durable permission repair, but it
-    must never follow a symlink out of the tree while doing so.
+    must never follow a symlink out of the tree while doing so, and a node it
+    cannot repair — a symlink, a foreign owner, a socket or FIFO — is warned
+    about and skipped: one unexpected node must not abort the run, because the
+    abort takes the updater (and with it the host) down (2026-09-12).
     """
     try:
         current = path.lstat()
@@ -94,7 +97,14 @@ def converge_private_tree(path: Path) -> Path:
             converge_private_tree(child)
             continue
         if not stat.S_ISREG(current.st_mode):
-            raise _private_path_error(child, "is not a regular file or directory")
+            # Unix sockets and FIFOs are live-service plumbing, not storage:
+            # there is no permission converge could repair, and raising over a
+            # dead workspace socket aborted the whole converge — and with it
+            # the updater and the host (macmini 2026-09-12). Skip like symlinks.
+            logger.warning(
+                "private storage convergence skipped non-regular file {path}", path=child
+            )
+            continue
         ensure_private_file(child)
     return path
 

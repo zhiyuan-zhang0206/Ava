@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
+import socket
 import stat
+import tempfile
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -232,3 +235,89 @@ def test_private_write_fsyncs_payload_and_parent_directory(
     private_storage.write_private_bytes(tmp_path / "secret", b"durable")
 
     assert len(calls) == 2
+
+
+def _capture_warnings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> list[tuple[str, dict[str, object]]]:
+    warnings: list[tuple[str, dict[str, object]]] = []
+
+    def _warning(message: str, **kwargs: object) -> None:
+        warnings.append((message, kwargs))
+
+    monkeypatch.setattr(private_storage, "logger", SimpleNamespace(warning=_warning), raising=False)
+    return warnings
+
+
+def test_converge_skips_foreign_owned_root(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """A foreign-owned root is warned about and left untouched with its subtree."""
+    root = tmp_path / "private"
+    root.mkdir()
+    root.chmod(0o755)
+    child = root / "secret"
+    child.write_bytes(b"secret")
+    child.chmod(0o644)
+    warnings = _capture_warnings(monkeypatch)
+
+    def _foreign(_stat_result: os.stat_result) -> bool:
+        return True
+
+    monkeypatch.setattr(private_storage, "_is_foreign_owned", _foreign)
+
+    assert private_storage.converge_private_tree(root) == root
+
+    assert _mode(root) == 0o755  # not converged: the owner alone can chmod
+    assert _mode(child) == 0o644  # subtree not visited either
+    assert warnings == [
+        ("private storage convergence skipped foreign-owned path {path}", {"path": root})
+    ]
+
+
+@pytest.mark.skipif(os.name == "nt", reason="unix sockets are POSIX-only")
+def test_private_tree_skips_live_unix_socket(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A service socket is warned about and left in place; the run completes.
+
+    The 2026-09-12 host outage: a dead workspace socket aborted the whole
+    converge, failing the updater. The tree root sits under /tmp because
+    pytest's tmp_path on macOS breaks the 104-byte AF_UNIX path limit.
+    """
+    root = Path(tempfile.mkdtemp(prefix="ava-converge-", dir="/tmp"))
+    server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        root.chmod(0o755)
+        payload = root / "result.txt"
+        payload.write_text("secret")
+        payload.chmod(0o644)
+        socket_path = root / "app.sock"
+        server.bind(str(socket_path))
+        warnings = _capture_warnings(monkeypatch)
+
+        assert private_storage.converge_private_tree(root) == root
+
+        assert stat.S_ISSOCK(socket_path.lstat().st_mode)  # still bound, not unlinked
+        assert _mode(root) == 0o700
+        assert _mode(payload) == 0o600  # the run continued past the socket
+        assert warnings == [
+            ("private storage convergence skipped non-regular file {path}", {"path": socket_path})
+        ]
+    finally:
+        server.close()
+        shutil.rmtree(root)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="fifos are POSIX-only")
+def test_private_tree_skips_fifo(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """A named pipe is warned about and left in place; the run completes."""
+    root = tmp_path / "private"
+    root.mkdir()
+    fifo = root / "queue"
+    os.mkfifo(fifo)
+    warnings = _capture_warnings(monkeypatch)
+
+    assert private_storage.converge_private_tree(root) == root
+
+    assert stat.S_ISFIFO(fifo.lstat().st_mode)
+    assert _mode(root) == 0o700
+    assert warnings == [
+        ("private storage convergence skipped non-regular file {path}", {"path": fifo})
+    ]
