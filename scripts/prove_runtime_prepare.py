@@ -349,7 +349,10 @@ def prove_broken_provider_refusal(inputs: PrepareInputs, release: VerifiedReleas
     without this face a broken provider.py would ship invisibly and the model
     registry would silently lose entries after rollout. The broken file is
     added to the sealed image around one probe run, then removed and the
-    directory seal restored — nothing else in the generation is touched.
+    directory seal restored — nothing else in the generation is touched. A
+    final probe run on the cleaned image is the positive control: the
+    rejection must come from the planted provider, not a broken probe
+    environment.
     """
     plugins = inputs.plugins
     if plugins is None:
@@ -369,6 +372,10 @@ def prove_broken_provider_refusal(inputs: PrepareInputs, release: VerifiedReleas
     finally:
         target.unlink(missing_ok=True)
         fixture_dir.chmod(0o500)
+    try:
+        _verify_plugins(plugins, release.root)
+    except ReleaseRejectedError as exc:
+        raise AssertionError("clean image probe failed after the planted provider was removed") from exc
 
 
 def prove_prepared_frontend(
