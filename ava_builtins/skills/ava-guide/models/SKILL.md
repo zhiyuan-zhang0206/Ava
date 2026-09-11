@@ -96,6 +96,12 @@ same id on its V4.1 Flash backend.
 - Other registered models (`gemini-*`, Claude, GLM, Qwen, …) sit outside the
   default policy: select one only when the user explicitly asks for that
   model, and confirm it is on the roster first (section above).
+- `gemini-3.8-flash` (trialed 2026-09-06, user order) is **stopped** under the
+  still-valid stop ruling (pool: `model-policy-v2.3-gemini-flash-stop-20260903`)
+  — do not select it. Historical caveat: switching an existing agent into
+  `gemini-3.8-flash` (its history written by another model) still 400s with
+  "Corrupted thought signature"; only a fresh spawn ever ran clean — relevant
+  only if a cross-model switch onto it is ever explicitly ordered.
 - An already-running agent still on a non-flash model is moved with
   `ava.self.restart(config_overlay={"llm_model": "deepseek-v4-flash"})`.
 - Ruling record: shared-pool note `dev/ava-agent-model-flash-ruling-20260910.md`.
@@ -123,9 +129,12 @@ deepseek-v4-flash orchestrator
 
 ## Don't
 
-- Don't select anything outside `deepseek-v4-flash` — `deepseek-v4-pro`,
+- Don't select anything outside `deepseek-v4-flash` for Ava-line agents
+  (workers, orchestrators, reviewers, synthesizers alike) — `deepseek-v4-pro`,
   `deepseek-v4-flash-vision-exp` and `gemini-*` are all withdrawn from the
-  policy, vision work included.
+  policy (user ruling 2026-09-10 14:16), vision work included. An exception
+  happens only when the user explicitly asks for a specific model (and it
+  must be on the roster).
 - Don't hand flash an open-ended judgment task and trust the output
   unverified — pair flash breadth with a flash cross-checking wave.
 - Don't scatter hardcoded model names where the cluster default would do —
