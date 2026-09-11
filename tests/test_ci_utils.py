@@ -363,9 +363,39 @@ def test_cancelled_qa_evidence_run_stays_out_of_ci_verdict(gh: Any, has_workflow
 
 
 def test_empty_rollup(gh: Any, has_workflows: Any) -> None:
+    """Empty rollup and the runs probe confirms nothing is scheduled: the real
+    NO_CHECKS."""
     gh([])
     has_workflows(True)
     assert ci_utils.check_ci("1").verdict is CIStatus.NO_CHECKS
+
+
+def test_empty_rollup_with_a_queued_run_is_pending_not_no_checks(gh: Any) -> None:
+    """2026-09-12, PR #2249 (task #3158): two seconds after a push the rollup was
+    still empty while Actions was moments from attaching its checks (the run read
+    `in_progress` ten seconds later). An empty rollup with a run in flight is the
+    just-pushed attach window, not a settled "no checks" — a watcher reading
+    NO_CHECKS here exits before the suite has begun."""
+    gh([], scheduled=["CI"])
+
+    r = ci_utils.check_ci("2249")
+
+    assert r.verdict is CIStatus.PENDING
+    assert r.pending == ["CI"]
+
+
+def test_empty_rollup_with_an_unanswerable_probe_is_error(
+    gh: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The runs probe failing must not read as a settled NO_CHECKS — the exact
+    verdict this probe exists to rule out when checks may still be attaching."""
+    gh([])
+    monkeypatch.setattr(ci_utils, "_runs_not_yet_reporting", lambda *_a, **_k: None)
+
+    r = ci_utils.check_ci("2249")
+
+    assert r.verdict is CIStatus.ERROR
+    assert "probe" in r.error_detail
 
 
 def test_gh_failure_is_an_error(monkeypatch: pytest.MonkeyPatch) -> None:
