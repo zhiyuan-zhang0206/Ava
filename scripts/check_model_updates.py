@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Fail-closed daily comparison of official provider models and Ava's registry."""
+"""Fail-closed daily comparison of official provider models and Ava's registry.
+
+`check_sources` loads the enabled provider plugins in-process first, so
+"already registered" and same-series supersession answer for the roster Ava
+actually runs (see `shared/lm/_plugin_providers.py`).
+"""
 
 from __future__ import annotations
 
@@ -22,6 +27,7 @@ from urllib3.connection import HTTPSConnection
 from urllib3.connectionpool import HTTPConnectionPool, HTTPSConnectionPool
 from urllib3.poolmanager import PoolManager
 
+from shared.lm._plugin_providers import ensure_provider_plugins_loaded
 from shared.lm.registry import MODELS
 from shared.paths import ava_home
 from shared.runtime_config import read_env_aliases
@@ -65,9 +71,16 @@ SOURCES: dict[str, SourceDescriptor] = {
     # Official docs: Anthropic Models API.
     "claude": SourceDescriptor("claude", "https://api.anthropic.com", "/v1/models", "x-api-key", "ANTHROPIC_API_KEY", "anthropic", re.compile(r"^claude-(opus|sonnet|haiku|fable)-\d"),
                                re.compile(r"^claude-(?P<series>opus|sonnet|haiku|fable)-\d"), re.compile(r"^claude-(opus|sonnet|haiku|fable)-(?P<version>\d+(?:-\d+)?)"), (("anthropic-version", "2023-06-01"),)),
-    # Official docs: Gemini Models API.
-    "gemini": SourceDescriptor("gemini", "https://generativelanguage.googleapis.com", "/v1beta/models", None, "GEMINI_API_KEY", "gemini", re.compile(r"^gemini-\d+(\.\d+)?-(pro|flash)(-preview)?$"),
-                               re.compile(r"^gemini-\d+(?:\.\d+)?-(?P<series>pro|flash)(?P<preview>-preview)?$"), re.compile(r"^gemini-(?P<version>\d+(?:\.\d+)?)-(pro|flash)(-preview)?$")),
+    # Official docs: Gemini Models API. `flash(-lite)?` keeps the numbered Flash-Lite
+    # line in the family: upstream publishes `gemini-<version>-flash-lite` ids beside
+    # the pro/flash ones, and without `-lite` they fell through to other_ids and never
+    # reached the report. The registered `gemini-flash-lite-latest` alias deliberately
+    # stays outside the numbered pattern — it carries no version, so nothing here can
+    # detect when upstream re-resolves it (it tracked 3.5 at registration, checked
+    # 2026-09-10); a newly numbered flash-lite id surfacing as a candidate is the cue
+    # to re-verify the alias facts by hand.
+    "gemini": SourceDescriptor("gemini", "https://generativelanguage.googleapis.com", "/v1beta/models", None, "GEMINI_API_KEY", "gemini", re.compile(r"^gemini-\d+(\.\d+)?-(pro|flash)(-lite)?(-preview)?$"),
+                               re.compile(r"^gemini-\d+(?:\.\d+)?-(?P<series>pro|flash(-lite)?)(?P<preview>-preview)?$"), re.compile(r"^gemini-(?P<version>\d+(?:\.\d+)?)-(pro|flash(-lite)?)(-preview)?$")),
     # Official docs: xAI Models API.
     "grok": SourceDescriptor("grok", "https://api.x.ai", "/v1/models", "Authorization", "XAI_API_KEY", "openai", re.compile(r"^grok-\d+\.\d+$"),
                              re.compile(r"^(?P<series>grok)-\d+\.\d+$"), re.compile(r"^grok-(?P<version>\d+\.\d+)$")),
@@ -510,6 +523,12 @@ def _status_changed(previous: object, current: str) -> bool:
 def check_sources(
     file_aliases: Mapping[str, str], state: dict[str, dict[str, dict[str, object]]]
 ) -> dict[str, ProviderReport]:
+    # The comparison consults MODELS twice over — a registered id is skipped, a
+    # same-series older id is suppressed against registered versions — and MODELS
+    # stays empty until a registry-consulting call loads the enabled provider
+    # plugins. Without this, the daily run compared against nothing and re-reported
+    # every registered id as new (deduped only by its own state file).
+    ensure_provider_plugins_loaded()
     reports: dict[str, ProviderReport] = {}
     providers = state["providers"]
     for provider, source in SOURCES.items():
