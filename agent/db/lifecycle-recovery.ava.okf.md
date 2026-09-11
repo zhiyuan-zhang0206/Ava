@@ -32,12 +32,24 @@ Superseded is not observed exit. Resource settlement still guards later
 admission; already-started external effects cannot be undone by a DB write.
 Later commands and chat are not acknowledged as a side effect of force.
 
+## Resurrection epochs
+
+Every resurrection records the id of its `kind='resurrect'` inbound as the
+identity's epoch fence. Earlier unapplied restart/terminate commands were
+superseded by an intent that came after them: the resurrection transaction
+settles them as superseded (the payload names the resurrect inbound), and
+acceptance settles any such row it still finds instead of adopting it. An
+applied command is never rewritten, and no observation timestamp is invented.
+A command created after the resurrect inbound is current intent and can still
+stop the new incarnation.
+
 ## Resurrection and user wakes
 
 `ops/agent_wake.py` locks home placement and the pause latch, verifies the
-terminated state and outstanding lifecycle evidence, then commits idle intent,
-its resurrection marker and optional work. Only after commit does it publish
-the wake. The agent host admits the successor; no OS launcher is involved.
+terminated state and outstanding lifecycle evidence, commits the epoch fence
+with its resurrection marker and optional work, then publishes the wake. A
+refusal rolls the whole transaction back, fence included. The agent host admits
+the successor; no OS launcher is involved.
 
 A queued wake keeps its original inbound identity. A changed home, paused
 machine or unsettled prior execution cannot be bypassed by retrying the wake.
