@@ -249,7 +249,11 @@ def graceful_signal(name: str, *, expected: SessionRecord | None = None) -> bool
                 # check; unavailable or changed ticks must still refuse delivery.
                 if expected.identifies(proc.pid) is not True:
                     return False
-            elif proc.create_time() != expected.create_time:
+            # create_time fallback: keep the record-resolution tolerance — the
+            # reading moves by whole seconds for one live process (macOS
+            # re-derives it with a boot-time correction), so a drifted reading
+            # must not refuse the process `_process_for_record` just resolved.
+            elif abs(proc.create_time() - expected.create_time) > _CREATE_TIME_TOLERANCE_S:
                 return False
         # Signal only this captured process object, never resolve the name a
         # second time into a replacement target. psutil also guards PID reuse.

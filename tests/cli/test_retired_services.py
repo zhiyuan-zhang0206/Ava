@@ -67,7 +67,9 @@ def test_changed_retired_identity_refuses_without_signalling(
     path = home / "run/sessions/ava-restarter.json"
     record = SessionRecord.read(path)
     assert record is not None
-    replace(record, create_time=record.create_time + 1, starttime=None).write(path)
+    # +60s is a genuinely different start time — not the whole-second move a
+    # live process's create_time reading can make (see proc_tree tolerance).
+    replace(record, create_time=record.create_time + 60, starttime=None).write(path)
     monkeypatch.setattr(PosixProcSessionBackend, "graceful_signal", forbidden)
     monkeypatch.setattr(PosixProcSessionBackend, "kill_session", forbidden)
 

@@ -103,7 +103,7 @@ def _terminate_owned(identity: OwnedProcess) -> bool:
     if identity.starttime is not None:
         if pid_starttime_ticks(identity.pid) != identity.starttime:
             return False
-    elif proc.create_time() != identity.birth:
+    elif not identity.birth_matches(proc):
         return False
     try:
         proc.send_signal(signal.SIGTERM)

@@ -68,7 +68,8 @@ def test_replaced_name_never_signals_replacement(
         (123, (124,), 0.0, False),
         (123, (None,), 0.0, False),
         (123, (123, 124), 0.0, False),
-        (None, (), -1.0, False),
+        (None, (), -1.0, True),
+        (None, (), -600.0, False),
         (None, (), 0.0, True),
     ],
     ids=[
@@ -76,6 +77,7 @@ def test_replaced_name_never_signals_replacement(
         "different-ticks",
         "unreadable-ticks",
         "ticks-changed-before-signal",
+        "legacy-birth-drift",
         "legacy-birth-mismatch",
         "legacy-matching-birth",
     ],
@@ -92,7 +94,9 @@ def test_expected_identity_uses_stable_ticks_before_epoch_birth(
 
     WSL can change btime while /proc start ticks remain stable. Preserve the
     old recorded epoch to reproduce that discrepancy without changing the host
-    clock. Never weaken unreadable/different ticks or the legacy birth guard.
+    clock. Unreadable or changed ticks keep refusing delivery; the legacy
+    (create_time) guard is bounded by the platform-resolution tolerance, the
+    same way a macOS reading moves by whole seconds for one live process.
     """
     import signal
     from dataclasses import replace

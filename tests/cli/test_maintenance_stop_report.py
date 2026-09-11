@@ -293,3 +293,16 @@ def test_launched_service_deadline_report_names_the_real_daemon(home: Path) -> N
         assert psutil.Process(record.pid).is_running()  # never force-killed
     finally:
         posixproc.kill_session(name, graceful=False)
+
+
+def test_identity_matches_tolerates_whole_second_create_time_drift() -> None:
+    """The report's live-fact guard agrees with signal delivery on drift.
+
+    The guard is the same birth question the stop path answers; a whole-second
+    create_time move must not strip a survivor's live facts.
+    """
+    from cli.commands._maintenance_stop_report import _identity_matches
+
+    process = psutil.Process()
+    assert _identity_matches(stop.OwnedProcess(process.pid, process.create_time() - 1.0, None))
+    assert not _identity_matches(stop.OwnedProcess(process.pid, process.create_time() + 60.0, None))

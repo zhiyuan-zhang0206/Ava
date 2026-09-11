@@ -173,7 +173,7 @@ def _identity_matches(identity: OwnedProcess) -> bool:
         if identity.starttime is not None:
             return pid_starttime_ticks(identity.pid) == identity.starttime
         process = psutil.Process(identity.pid)
-        return process.create_time() == identity.birth and process.status() not in (
+        return identity.birth_matches(process) and process.status() not in (
             psutil.STATUS_ZOMBIE,
             psutil.STATUS_DEAD,
         )
