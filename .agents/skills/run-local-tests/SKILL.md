@@ -87,8 +87,8 @@ subprocess / real Next.js dev server / real Playwright Chromium.
 Uses throwaway Postgres + Redis (reuses `tests/_containers.py`), not Docker.
 
 ```bash
-# Prerequisites
-uv sync
+# Prerequisites (discard an inherited VIRTUAL_ENV — see the worktree rule above)
+env -u VIRTUAL_ENV uv sync
 .venv/bin/playwright install chromium
 
 # Run (locally)
