@@ -45,6 +45,7 @@ These four plans co-locate with the code they plan for, per the 2026-08-12 doc r
 | [Release cadence: self-scheduling by Ava](infra/release-self-scheduling.md) | Once bootstrapping is done, Ava schedules its own releases |
 | [Living debt tracker](infra/debt-tracker.md) | Skeleton — a single "what debt is open now" view maintained by the sweeper engine |
 | [DB write batching](infra/db-write-batching.md) | Design draft |
+| [Checkpoint storage rebuild](infra/checkpoint-storage-rebuild.md) | **Everything — design + migration plan; no code.** T1 payload externalization, T2 DeltaChannel for messages (gated), T3 retention snapshot-forcing; expand-contract migration; guard-era exits for over-limit threads |
 | [Heartbeat design](infra/heartbeat-design.md) | Research record; Tier 2 shipped as a simpler opt-out design. Kept for the rejected two-tier proposal |
 | [Model providers as plugins](../shared/lm/model-providers-as-plugins.md) | **Mechanics + Grok pilot landed** — registry, dispatch, vocabularies, key channel, and lazy load are built. Left: plugin dependency installation and deciding which remaining core providers should extract |
 
