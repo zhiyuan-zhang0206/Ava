@@ -13,13 +13,16 @@
 // expanded, so a collapsed turn never mounts its inner rows (and never re-parses
 // their markdown / code on a streaming chunk).
 //
-// Sticky work block behavior:
-// When an expanded TurnBlock's top scrolls past the viewport top (accounting for
-// the floating HeaderBar offset, BAR_HEIGHT_PX), the header sticks at top-11
-// (sticky top-11 z-10) with backdrop-blur and elevation. The full detail rows
-// (thinking/code/output) continue scrolling naturally underneath the stuck header.
-// When collapsed while stuck, the content collapses in place and the viewport
-// scroll position is preserved (no jump back to block top).
+// Sticky header behavior (shared with the message cards — see card.tsx
+// CardHeader): when an expanded block's top scrolls past the viewport top
+// (accounting for the floating HeaderBar offset, BAR_HEIGHT_PX), its header
+// sticks at top-11 with backdrop-blur and elevation. The full detail rows
+// (thinking/code/output) continue scrolling naturally underneath the stuck
+// header. A top-level message card (CardHeader with stickyHeader) pins on the
+// same line; findClosestStuckHeaderId resolves which of the two, and only one
+// can be pinned at a time (sibling blocks never overlap). When collapsed while
+// stuck, the content collapses in place and the viewport scroll position is
+// preserved (no jump back to block top).
 
 import { ChevronDown, ChevronRight, Layers } from "lucide-react";
 import { useTranslations } from "next-intl";
@@ -28,46 +31,56 @@ import { type ReactNode, useEffect, useState } from "react";
 import { formatDuration, type SdkCall } from "@/lib/item-summary";
 import { cn } from "@/lib/utils";
 
-import { CallBadge, HEADER_CLS } from "./card";
+import { CallBadge, HEADER_CLS, STICKY_HEADER_CLS, STUCK_HEADER_CLS, UNSTUCK_HEADER_CLS } from "./card";
 import { formatTurnSummary, formatTurnTiming, type TurnSummary } from "./runs";
 import { BAR_HEIGHT_PX, FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0, OVERFLOW_HIDDEN } from "@/lib/layout";
 
 const LIVE_CLOCK_INTERVAL_MS = 100;
 
 /**
- * Identify which expanded turn block (if any) is currently stuck at the top of the viewport.
- * When multiple expanded blocks have scrolled past the sticky line, returns the latest/closest one
- * that crossed the viewport top (highest top position that is <= stickyLine).
+ * Identify which expanded header (if any) is currently stuck at the top of the
+ * viewport. Two surfaces share this one sticky line: a work block's header
+ * (`data-turn-expanded="true"` on the turn element) and a top-level message
+ * card's header (`data-card-sticky="true"` on the row). Card rows inside an
+ * expanded work block are deliberately NOT markers — their block's own header
+ * is the sticky one, so two headers never pin at the same line.
+ *
+ * Sibling blocks never overlap in flow, so at most one candidate is stuck at a
+ * time; when multiple cross the line (a mid-scroll intermediate state), returns
+ * the latest/closest one that crossed the viewport top (highest top position
+ * that is <= stickyLine).
  */
-export function findClosestStuckTurnId(
+export function findClosestStuckHeaderId(
   viewport: HTMLElement,
   topOffset: number = BAR_HEIGHT_PX,
 ): string | null {
-  const turnElements = viewport.querySelectorAll<HTMLElement>('[data-turn-expanded="true"]');
-  if (turnElements.length === 0) return null;
+  const elements = viewport.querySelectorAll<HTMLElement>(
+    '[data-turn-expanded="true"], [data-card-sticky="true"]',
+  );
+  if (elements.length === 0) return null;
 
   const vpRect = viewport.getBoundingClientRect();
   const stickyLine = vpRect.top + topOffset;
 
-  let closestTurnId: string | null = null;
+  let closestId: string | null = null;
   let closestTop = -Infinity;
 
-  for (const el of turnElements) {
-    const turnId = el.getAttribute("data-turn-id") ?? el.getAttribute("data-item-id");
-    if (!turnId) continue;
+  for (const el of elements) {
+    const id = el.getAttribute("data-turn-id") ?? el.getAttribute("data-item-id");
+    if (!id) continue;
 
     const r = el.getBoundingClientRect();
-    // A block's header is stuck when its top has reached or passed stickyLine,
+    // A header is stuck when its block's top has reached or passed stickyLine,
     // and its bottom has not completely scrolled past stickyLine (with header buffer).
     if (r.top <= stickyLine + 1 && r.bottom > stickyLine + 20) {
       if (r.top >= closestTop) {
         closestTop = r.top;
-        closestTurnId = turnId;
+        closestId = id;
       }
     }
   }
 
-  return closestTurnId;
+  return closestId;
 }
 
 export function TurnBlock({
@@ -201,12 +214,11 @@ export function TurnBlock({
         className={cn(
           HEADER_CLS,
           "items-start",
-          // top-11 (44px) must match BAR_HEIGHT_PX / BAR_HEIGHT_CLASS ("h-11") from @/lib/layout
-          // so the sticky header sits flush beneath the floating HeaderBar.
-          expanded && "sticky top-11 z-10",
-          expanded && isStuck
-            ? "bg-background/95 backdrop-blur-md shadow-xs border-b border-border/60 transition-[background-color,box-shadow,border-color] duration-150 ease-out motion-reduce:transition-none"
-            : "bg-transparent transition-[background-color,box-shadow,border-color] duration-150 ease-out motion-reduce:transition-none",
+          // STICKY_HEADER_CLS pins below the floating HeaderBar (top-11 =
+          // BAR_HEIGHT_PX / BAR_HEIGHT_CLASS in @/lib/layout); the stuck variant
+          // masks the detail rows scrolling beneath it. Shared with CardHeader.
+          expanded && STICKY_HEADER_CLS,
+          expanded && (isStuck ? STUCK_HEADER_CLS : UNSTUCK_HEADER_CLS),
         )}
         aria-expanded={expanded}
         data-testid="turn-toggle"

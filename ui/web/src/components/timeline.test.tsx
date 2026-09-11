@@ -4297,3 +4297,110 @@ describe("TimelineView sticky work block (task #2601)", () => {
     expect(viewport.scrollTop).toBe(450);
   });
 });
+
+describe("TimelineView sticky message header (task #3136)", () => {
+  function makeMockRect(top: number, bottom: number, height: number): DOMRect {
+    return {
+      top,
+      bottom,
+      height,
+      left: 0,
+      right: 400,
+      width: 400,
+      x: 0,
+      y: top,
+      toJSON: () => undefined,
+    };
+  }
+
+  // A top-level message card (primary) followed by one work block (secondary run).
+  const items = [
+    makeItem({ item_id: "1.0", kind: "agent_chat", payload: "hello there" }),
+    makeItem({ item_id: "2.0", kind: "agent_reasoning", payload: "thinking" }),
+    makeItem({ item_id: "2.1", kind: "agent_code", payload: "code" }),
+  ];
+
+  it("marks only the top-level message card header as sticky — work-block children are not", () => {
+    const { container } = render(<TimelineView items={items} />);
+
+    const marked = container.querySelectorAll<HTMLElement>('[data-card-sticky="true"]');
+    expect(marked.length).toBe(1);
+    expect(marked[0].getAttribute("data-item-id")).toBe("1.0");
+    const cardToggle = marked[0].querySelector('[data-testid="card-toggle"]')!;
+    expect(cardToggle.className).toContain("sticky");
+    expect(cardToggle.className).toContain("top-11");
+    expect(cardToggle.getAttribute("data-stuck")).toBe("false");
+
+    // Inside the expanded work block, no child row is a sticky-card marker —
+    // the turn's own header is the sticky one there, so two headers never pin
+    // at the same line.
+    const turn = container.querySelector('[data-turn-expanded="true"]')!;
+    const innerRows = turn.querySelectorAll<HTMLElement>(".timeline-item");
+    expect(innerRows.length).toBeGreaterThan(0);
+    for (const row of innerRows) {
+      expect(row.getAttribute("data-card-sticky")).toBe("false");
+      const toggle = row.querySelector('[data-testid="card-toggle"]')!;
+      expect(toggle.className).not.toContain("sticky");
+    }
+  });
+
+  it("activates stuck styling on the card header when its row crosses the line", async () => {
+    const { container } = render(<TimelineView items={items} />);
+    const viewport = container.querySelector('[data-slot="scroll-area-viewport"]')!;
+    vi.spyOn(viewport, "getBoundingClientRect").mockReturnValue(makeMockRect(0, 800, 800));
+
+    const cardRow = container.querySelector<HTMLElement>('[data-item-id="1.0"]')!;
+    // The card's top crossed the 44px line while its bottom is still in view.
+    vi.spyOn(cardRow, "getBoundingClientRect").mockReturnValue(makeMockRect(10, 700, 690));
+
+    fireEvent.scroll(viewport);
+
+    await waitFor(() => {
+      const cardToggle = cardRow.querySelector('[data-testid="card-toggle"]')!;
+      expect(cardToggle.getAttribute("data-stuck")).toBe("true");
+      expect(cardToggle.className).toContain("backdrop-blur-md");
+      expect(cardToggle.className).toContain("shadow-xs");
+      // The work block below stays unpinned — one stuck header at a time.
+      expect(screen.getByTestId("turn-toggle").getAttribute("data-stuck")).toBe("false");
+    });
+  });
+
+  it("releases the pin once the card's range scrolls past the line", async () => {
+    const { container } = render(<TimelineView items={items} />);
+    const viewport = container.querySelector('[data-slot="scroll-area-viewport"]')!;
+    vi.spyOn(viewport, "getBoundingClientRect").mockReturnValue(makeMockRect(0, 800, 800));
+
+    const cardRow = container.querySelector<HTMLElement>('[data-item-id="1.0"]')!;
+    const rectSpy = vi
+      .spyOn(cardRow, "getBoundingClientRect")
+      .mockReturnValue(makeMockRect(10, 700, 690));
+    fireEvent.scroll(viewport);
+    await waitFor(() => {
+      expect(
+        cardRow.querySelector('[data-testid="card-toggle"]')!.getAttribute("data-stuck"),
+      ).toBe("true");
+    });
+
+    // Scrolled fully past: bottom above the sticky line + buffer.
+    rectSpy.mockReturnValue(makeMockRect(-900, 40, 940));
+    fireEvent.scroll(viewport);
+    await waitFor(() => {
+      expect(
+        cardRow.querySelector('[data-testid="card-toggle"]')!.getAttribute("data-stuck"),
+      ).toBe("false");
+    });
+  });
+
+  it("collapsing the card drops it from the sticky scan and un-pins it", () => {
+    const { container } = render(<TimelineView items={items} />);
+    const cardRow = container.querySelector<HTMLElement>('[data-item-id="1.0"]')!;
+    const cardToggle = () => cardRow.querySelector<HTMLElement>('[data-testid="card-toggle"]')!;
+    expect(cardRow.getAttribute("data-card-sticky")).toBe("true");
+
+    fireEvent.click(cardToggle());
+
+    expect(cardRow.getAttribute("data-card-sticky")).toBe("false");
+    expect(cardToggle().className).not.toContain("sticky");
+    expect(cardToggle().getAttribute("data-stuck")).toBe("false");
+  });
+});
