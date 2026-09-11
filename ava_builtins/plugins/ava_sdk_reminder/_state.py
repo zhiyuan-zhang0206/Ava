@@ -82,12 +82,25 @@ _TRIGGERS: dict[str, re.Pattern[str]] = {
 }
 
 # Hint lines are surfaced verbatim as a system note the agent reads. English
-# only; framed as "there is a smoother primitive", not a prohibition; each
-# points at a self-serve help() entry.
+# only. wait/files/http keep the softer "there is a smoother primitive" framing
+# — a nudge, not a prohibition — and point at a self-serve help() entry. shell
+# instead names the detected native call and inlines the live `ava.shell.run`
+# signature + docstring, so the contract reads in place without spending a
+# help() lookup (user ruling 2026-09-12); the inlined copy is pinned to the
+# live wrapper by test_shell_hint_embeds_live_shell_run_contract.
 _HINTS: dict[str, str] = {
     "shell": (
-        "For running shell commands there is a handier primitive: "
-        "`ava.shell.run(...)`. See `help(ava.shell)`."
+        "subprocess detected — if you were running commands using "
+        "`subprocess`, you should favor your Ava SDK. The `ava.shell.run` "
+        "command:\n"
+        "\n"
+        "    def run(cmd: str, *, cwd: str | None = None, timeout: float = 30.0) -> str:\n"
+        '        """Non-zero exit does not raise; the command is killed after `timeout` seconds. '
+        "The returned string carries read-only `.returncode` (0 = success) and `.stderr`; "
+        "string operations on it return a plain `str` without them.\n"
+        "\n"
+        "        Runs in your tracked working directory (`ava.cwd`) unless `cwd` is passed."
+        '"""'
     ),
     "wait": (
         "Instead of a timed wait or sleep loop there is a handier "
