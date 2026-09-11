@@ -471,6 +471,15 @@ def test_run_enroll_prints_a_notice_without_a_repair_box_when_display_is_missing
         ("1", False),
         ("yes", False),
         ("on", False),
+        # Quoted and comment-carrying spellings must read as the value they
+        # denote — raw text kept the quotes and silently disabled nothing (#2973).
+        ('"false"', True),
+        ("'false'", True),
+        ("false # trailing comment", True),
+        ('"false" # trailing comment', True),
+        ("'no'", True),
+        ('"true"', False),
+        ("'on'", False),
     ],
 )
 def test_browser_explicitly_disabled_matches_pydantic_falsey_values(
@@ -482,6 +491,33 @@ def test_browser_explicitly_disabled_matches_pydantic_falsey_values(
     if value is not None:
         env_path.write_text(f"AVA_BROWSER_ENABLED = {value} \n")
     assert enroll._browser_explicitly_disabled() is expected
+
+
+def test_browser_explicitly_disabled_uses_the_last_decodable_occurrence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Duplicate keys resolve the way dotenv resolves them: the last line wins."""
+    env_path = tmp_path / ".env"
+    monkeypatch.setattr(enroll, "AVA_ENV_PATH", env_path)
+    env_path.write_text('AVA_BROWSER_ENABLED="false"\nAVA_BROWSER_ENABLED=true\n')
+    assert enroll._browser_explicitly_disabled() is False
+    env_path.write_text('AVA_BROWSER_ENABLED=true\nAVA_BROWSER_ENABLED="false" # off\n')
+    assert enroll._browser_explicitly_disabled() is True
+
+
+def test_browser_explicitly_disabled_reports_an_undecodable_value(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A value the parser cannot decode contributes no value and is never silent;
+    it does not shadow a decodable occurrence (dotenv drops the bad line)."""
+    env_path = tmp_path / ".env"
+    monkeypatch.setattr(enroll, "AVA_ENV_PATH", env_path)
+    env_path.write_text('AVA_BROWSER_ENABLED="false\n')
+    assert enroll._browser_explicitly_disabled() is False
+    assert "cannot decode" in capsys.readouterr().err
+    env_path.write_text('AVA_BROWSER_ENABLED=false\nAVA_BROWSER_ENABLED="true\n')
+    assert enroll._browser_explicitly_disabled() is True
+    assert "cannot decode" in capsys.readouterr().err
 
 
 def test_run_enroll_requires_machine_host(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
