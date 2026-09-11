@@ -34,4 +34,5 @@ drops any button whose target did not resolve, so a widget with nothing to show
 leaves the payload — see `shared/plugin_inspector.py`. An `inspector.py` that
 fails to import is skipped with a loud report (loguru ERROR + the
 `plugin_load_failed` event) and the remaining widgets still serve — fail-soft
-per the plugin-load contract (user ruling 2026-09-11).
+per the plugin-load contract (user ruling 2026-09-11); registrations from the
+failed import are dropped so the next request retries clean.
