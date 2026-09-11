@@ -78,6 +78,23 @@ def test_broken_setup_py_is_skipped_and_other_scaffolds_run(
     )
 
 
+def test_scaffold_execution_stays_fail_fast() -> None:
+    """Only the `setup.py` IMPORT is fail-soft. A `scaffold()` that raises
+    while RUNNING stops provisioning — the documented boundary stays pinned so
+    a silent per-plugin skip cannot creep in (user ruling 2026-09-11:
+    containment is for load failures, not execution)."""
+    pdir = paths.plugins_dir() / "real"
+    pdir.mkdir(parents=True)
+    (pdir / "plugin.py").write_text("__description__ = 'x'\n", encoding="utf-8")
+    (pdir / "setup.py").write_text(
+        "def scaffold():\n    raise RuntimeError('scaffold boom')\n", encoding="utf-8"
+    )
+    write_local({"plugins": {"real": {"enabled": True}}})
+
+    with pytest.raises(RuntimeError, match="scaffold boom"):
+        run_plugin_scaffolds()
+
+
 def test_converge_steps_do_not_scaffold_plugins() -> None:
     """Changing this back would reintroduce memory-repository Git work to start."""
     assert "plugin scaffolds" not in {step.name for step in _converge.CONVERGE_STEPS}

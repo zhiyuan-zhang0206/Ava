@@ -44,6 +44,7 @@ from shared.plugin_context import PluginContext
 from shared.plugin_metrics import (
     MetricSpec,
     PluginMetricError,
+    drop_plugin_metrics,
     registered_metrics,
     render_query,
     validate_metric_sql,
@@ -111,8 +112,10 @@ def _load_plugin_metrics() -> list[MetricSpec]:
     Fail-soft (user ruling 2026-09-11): a shipped metric module that fails to
     import is skipped with a loud report and the remaining plugin + core
     metrics still serve — never a 500 for the whole endpoint, never a stale
-    snapshot. importlib drops the failed module from ``sys.modules``, so a
-    fixed file is picked up on the next call."""
+    snapshot. The failed module is dropped from ``sys.modules`` and its
+    partial registrations are dropped too (``drop_plugin_metrics`` — a module
+    can raise mid-registration), so a fixed file is picked up cleanly on the
+    next call."""
     from shared import plugin_load_report
 
     for path in _plugin_metric_modules():
@@ -124,6 +127,7 @@ def _load_plugin_metrics() -> list[MetricSpec]:
             raise
         except BaseException as exc:
             plugin_load_report.report_plugin_load_failure(name, exc)
+            drop_plugin_metrics(name)
     core_metrics.collect_core_metrics()
     return registered_metrics() + core_metrics.registered_core_metrics()
 

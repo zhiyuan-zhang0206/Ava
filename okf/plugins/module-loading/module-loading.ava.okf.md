@@ -31,12 +31,18 @@ only after every import has completed, so a hook firing later always finds
 `ava._settings.plugins.<n>` populated.
 
 ## Disabled means never imported
-The enable set comes from the per-machine `plugins_config.json`, read through
-`plugins_config.load_for_runtime` by *both* loaders. A plugin with
-`enabled: false` is imported by no production path (issue #2161: the boot
-loader imported every directory on disk regardless of config, so `ava plugins
-disable` changed nothing about startup). Host boot passes the enabled set of
-the *external* plugins it scans; the graph build adds the built-ins.
+The enable set comes from the per-machine `plugins_config.json`, read by both
+loaders through `shared/plugins_config`: host boot via `load_for_runtime()`
+(a long-lived consumer — a dangling entry is warned and skipped), the graph
+loader via `load()`, falling back to `load(allow_dangling=True)` after
+reporting each dangling name through the canonical reporter. A plugin with
+`enabled: false` is imported by neither `plugin.py` loader (issue #2161: the
+boot loader imported every directory on disk regardless of config, so `ava
+plugins disable` changed nothing about startup). Host boot passes the enabled
+set of the *external* plugins it scans; the graph build adds the built-ins.
+Machine-level roster paths sit outside the enable plane by design: the
+`services.py` roster and the shipped-`metrics.py` scan key on presence, not
+enable-state (`ops/spec.py:_plugin_services`).
 
 ## The external `plugins` prefix is registered, not resolved from sys.path
 `register_plugin_parent_packages` (`ava/_extend.py`, applied by the loader for
@@ -66,17 +72,21 @@ The same containment applies at the other plugin-code load sites, each
 reporting through the one reporter: a plugin's `provider.py`
 (`shared/lm/_plugin_providers.py`), `services.py` (`ops/spec.py`), `setup.py`
 (`cli/commands/_converge_plugins.py`), a built-in plugin's `metrics.py`
-(`gateway/routers/_plugin_metrics.py`), and the launched child's
-`import ava` self-load (`ava._ensure_plugins_loaded`, plus a stderr line — a
-child usually has no log sink).
+(`gateway/routers/_plugin_metrics.py`), the gateway plugin inspector's
+`inspector.py` (`gateway/routers/_plugin_inspector.py`), and the launched
+child's `import ava` self-load (`ava._ensure_plugins_loaded`, plus a stderr
+line — a child usually has no log sink). One contained site stays off that
+reporter: `default_config.py` images surface as `error`-status entries on the
+plugin-update result (`shared/plugins_config.py:update_all_disk_images`).
 
 ## Semantics boundary: what stays fail-closed
 Containment covers *code* that fails to load; inventory and contract conflicts
 stay hard instead of guessing at the operator's intent (duplicate plugin name,
 malformed `plugins_config.json`, config schema drift, provider
 registration-contract violations, post-load revalidation) — and the release
-probe turns every contained failure back into a hard rejection. See
-[[okf/plugins/module-loading/fail-closed-boundaries.ava.okf.md]].
+probe re-raises the contained failures of the two loaders it imports (the
+`plugin.py` loader, dangling entries included, and the `services.py` roster).
+See [[okf/plugins/module-loading/fail-closed-boundaries.ava.okf.md]].
 
 ## Registration precedes execution
 The module object is placed in `sys.modules` **before** `exec_module` runs, not

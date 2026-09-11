@@ -24,5 +24,9 @@ continuing would guess at the operator's intent:
 - The post-load cross-model registry revalidation in the provider loader.
 
 The release probe (`cli/commands/_release_plugin_probe.py`) substitutes the
-canonical reporter, turning every contained load failure back into a hard
-release rejection — a candidate image with unloadable plugin code never ships.
+canonical reporter around the two loaders it imports — the `plugin.py` loader
+(dangling config entries included) and the `services.py` roster — so a
+candidate whose retained plugin code fails there is rejected at release. The
+other load sites are not probed: unloadable `provider.py`, `metrics.py`,
+`inspector.py`, `setup.py`, or `default_config.py` code still ships, contained
+loudly (skipped and reported) at runtime.

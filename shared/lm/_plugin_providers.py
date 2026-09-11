@@ -13,15 +13,19 @@ existing plugin discovery + enable config, and imports only ``provider.py``
 Loaded once per process, on the first registry-consulting call
 (``build_chat_model`` / ``validate_model_config`` / ``get_models`` / the
 gateway's per-model views). Import order is sorted plugin names — deterministic
-rather than filesystem-order. A provider.py that fails to load is skipped with
-a loud report (``shared.plugin_load_report``) and the remaining providers still
-load — the fail-soft contract (user ruling 2026-09-11): one broken plugin's
-provider code must not take down every process that builds a model. The
-half-executed module is dropped from ``sys.modules`` so a later attempt retries
-cleanly. One exception, deliberately fail-closed: a `register()` contract
-violation (`provider_api.ProviderRegistrationError` — duplicate/nested prefix,
-mismatched model, bad price data) propagates, because the flat prefix and
-model-id maps cannot pick a winner between two claimants.
+rather than filesystem-order. A provider.py whose module body raises is
+contained with a loud report (``shared.plugin_load_report``): the failure is
+recorded, the rest of that module is abandoned, and the remaining providers
+still load — the fail-soft contract (user ruling 2026-09-11): one broken
+plugin's provider code must not take down every process that builds a model.
+The half-executed module is dropped from ``sys.modules``, so a later attempt
+re-executes the module body from the top — note ``register()`` is not
+transactional, so prefixes a failing attempt registered before the raise stay
+bound and surface on that retry as a fail-closed registration-contract error
+rather than binding twice. One exception, deliberately fail-closed: a
+`register()` contract violation (`provider_api.ProviderRegistrationError` —
+duplicate/nested prefix, mismatched model, bad price data) propagates, because
+the flat prefix and model-id maps cannot pick a winner between two claimants.
 
 Core registers no providers. At least one enabled provider plugin must bind at
 load time; an empty registry still raises before the once flag is set (a
@@ -130,9 +134,9 @@ def ensure_provider_plugins_loaded() -> None:
                 # Skip+loud is for code-load failures below.
                 raise
             except BaseException as exc:
-                # Fail-soft contract (user ruling 2026-09-11): skip this
-                # provider loudly, keep the others. `_load_one` already dropped
-                # the half-executed module from sys.modules.
+                # Fail-soft contract (user ruling 2026-09-11): report this
+                # provider loudly and keep the others. `_load_one` already
+                # dropped the half-executed module from sys.modules.
                 plugin_load_report.report_plugin_load_failure(name, exc)
         if not provider_api.REGISTRY.bindings:
             raise RuntimeError(
