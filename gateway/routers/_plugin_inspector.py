@@ -32,7 +32,6 @@ family.
 
 from __future__ import annotations
 
-import contextlib
 import importlib
 import sys
 from pathlib import Path
@@ -44,7 +43,7 @@ from psycopg_pool import ConnectionPool
 
 from gateway.routers._inspect_live import notice_blocking
 from gateway.schemas import InspectWidgetButton, InspectWidgetResult
-from shared import plugins_config
+from shared import plugin_load_report, plugins_config
 from shared.plugin_context import PluginContext
 from shared.plugin_inspector import InspectButtonSpec, InspectWidgetSpec, registered_inspect_widgets
 
@@ -74,30 +73,6 @@ def _enabled_inspector_modules() -> list[Path]:
     return modules
 
 
-def _report_plugin_load_failure(plugin: str, exc: BaseException) -> None:
-    """The loud half of the fail-soft contract — a loguru ERROR carrying the
-    traceback plus one ``plugin_load_failed`` telemetry event, so ops sees
-    which plugin's ``inspector.py`` broke and why (same shape as
-    ``agent/graph/_build.py:_report_plugin_load_failure``). Never raises —
-    the failure already happened."""
-    from shared.log import logger
-    from shared.telemetry import emit
-
-    logger.error(
-        "[plugins] plugin {} inspector widgets failed to load — skipped (fail-soft); "
-        "the remaining plugins still serve",
-        plugin,
-        exc_info=exc,
-    )
-    with contextlib.suppress(Exception):
-        emit(
-            "telemetry",
-            "plugin_load_failed",
-            level="error",
-            attributes={"plugin": plugin, "error": f"{type(exc).__name__}: {exc}"},
-        )
-
-
 def _load_inspect_widgets() -> list[InspectWidgetSpec]:
     """The in-process widget registry, restricted to the plugins enabled right
     now. Importing a module is cached; a plugin disabled since its first
@@ -121,7 +96,7 @@ def _load_inspect_widgets() -> list[InspectWidgetSpec]:
             raise
         except BaseException as exc:
             sys.modules.pop(module_name, None)
-            _report_plugin_load_failure(plugin, exc)
+            plugin_load_report.report_plugin_load_failure(plugin, exc)
             continue
         enabled.add(plugin)
     return [spec for spec in registered_inspect_widgets() if spec.plugin in enabled]
