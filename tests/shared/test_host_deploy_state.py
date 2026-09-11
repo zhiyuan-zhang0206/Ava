@@ -2,7 +2,9 @@
 
 Covers the R1 host-level explicit model: the posture transitions the pause
 lifecycle drives (idle -> paused -> idle), the updater lease liveness judgment,
-Host transitions must never mutate the separate cluster UI-maintenance marker.
+the stranded-hold record and its bounded recovery budget (tasks #3132/#3142),
+and the table's migration shape. Host transitions must never mutate the
+separate cluster UI-maintenance marker.
 """
 
 from __future__ import annotations
@@ -14,9 +16,11 @@ import sys
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import LiteralString, cast
 
 import psycopg
 import pytest
+from psycopg import sql
 
 from shared import host_deploy_state as hds
 
@@ -444,3 +448,123 @@ def test_stranded_hold_mark_without_a_row_is_a_no_op() -> None:
     assert hds.read() is None
     assert hds.mark_stranded_hold("updater exited rc=1") is False
     assert hds.read() is None
+
+
+# ── the bounded recovery budget (task #3142) ─────────────────────────────────
+
+
+def _declare_stranded_hold() -> None:
+    hds.set_posture("paused")
+    assert hds.mark_stranded_hold("updater exited rc=1") is True
+
+
+def test_stranded_recovery_reserves_one_attempt_per_episode() -> None:
+    """The whole budget: the first reservation wins, every later one declines."""
+    _declare_stranded_hold()
+    assert hds.reserve_stranded_recovery(max_attempts=1, cooldown_s=900.0, note="a") == 1
+    assert hds.reserve_stranded_recovery(max_attempts=1, cooldown_s=900.0, note="b") is None
+    state = hds.read()
+    assert state is not None
+    assert state.stranded_hold_attempts == 1
+    assert state.stranded_hold_recovery_note == "a"
+
+
+def test_stranded_recovery_cooldown_gates_a_fresh_attempt() -> None:
+    """With a larger budget the clock still rules: a fresh attempt waits 900s."""
+    _declare_stranded_hold()
+    assert hds.reserve_stranded_recovery(max_attempts=3, cooldown_s=900.0, note="a") == 1
+    assert hds.reserve_stranded_recovery(max_attempts=3, cooldown_s=900.0, note="b") is None
+    state = hds.read()
+    assert state is not None
+    assert state.stranded_hold_attempts == 1
+
+
+def test_stranded_recovery_budget_resets_with_a_new_episode() -> None:
+    _declare_stranded_hold()
+    assert hds.reserve_stranded_recovery(max_attempts=1, cooldown_s=900.0, note="a") == 1
+    assert hds.clear_stranded_hold() is True
+    assert hds.mark_stranded_hold("updater died mid-flight") is True
+    state = hds.read()
+    assert state is not None
+    assert state.stranded_hold_attempts == 0
+    assert state.stranded_hold_recovery_note is None
+    assert hds.reserve_stranded_recovery(max_attempts=1, cooldown_s=900.0, note="b") == 1
+
+
+def test_stranded_recovery_never_reserves_without_the_record() -> None:
+    """A released hold cannot be reserved against, even with an unspent budget."""
+    hds.set_posture("paused")
+    assert hds.reserve_stranded_recovery(max_attempts=1, cooldown_s=900.0, note="a") is None
+
+
+def test_stranded_recovery_finish_records_without_refunding() -> None:
+    _declare_stranded_hold()
+    assert hds.reserve_stranded_recovery(max_attempts=1, cooldown_s=900.0, note="attempt") == 1
+    hds.finish_stranded_recovery("failed at start: RuntimeError('start leg exited 5')")
+    state = hds.read()
+    assert state is not None
+    assert state.stranded_hold_recovery_note == (
+        "failed at start: RuntimeError('start leg exited 5')"
+    )
+    assert state.stranded_hold_attempts == 1  # never refunded
+    hds.finish_stranded_recovery("late outcome")  # no record -> no-op covered below
+
+
+def test_stranded_recovery_finish_without_a_record_is_a_no_op() -> None:
+    hds.set_posture("paused")
+    hds.finish_stranded_recovery("late outcome")
+    state = hds.read()
+    assert state is not None
+    assert state.stranded_hold_recovery_note is None
+
+
+def test_stranded_recovery_migration_round_trips_on_a_pre_migration_table(
+    db_conn: psycopg.Connection,
+) -> None:
+    """The upgrade path a rollout takes on an older cluster: the three budget
+    columns land, reverse, and re-apply (`db/schema.sql` carries the final shape
+    and stamps the migration as already applied, so only an upgrade runs it)."""
+    migration = (
+        Path(__file__).resolve().parents[2] / "migrations/20260911T192500_stranded-hold-recovery"
+    )
+    with db_conn.transaction(force_rollback=True):
+        db_conn.execute("CREATE SCHEMA recovery_migration")
+        db_conn.execute("SET LOCAL search_path TO recovery_migration")
+        db_conn.execute(
+            "CREATE TABLE host_deploy_state ("
+            "machine TEXT PRIMARY KEY, stranded_hold_since TIMESTAMPTZ, "
+            "stranded_hold_reason TEXT)"
+        )
+        assert _budget_columns(db_conn) == []
+        db_conn.execute(_migration_body(migration, ".sql"))
+        assert _budget_columns(db_conn) == [
+            "stranded_hold_attempts",
+            "stranded_hold_attempted_at",
+            "stranded_hold_recovery_note",
+        ]
+        db_conn.execute(_migration_body(migration, ".down.sql"))
+        assert _budget_columns(db_conn) == []
+        db_conn.execute(_migration_body(migration, ".sql"))
+        assert _budget_columns(db_conn) == [
+            "stranded_hold_attempts",
+            "stranded_hold_attempted_at",
+            "stranded_hold_recovery_note",
+        ]
+
+
+def _migration_body(migration: Path, suffix: str) -> sql.SQL:
+    return sql.SQL(cast(LiteralString, migration.with_suffix(suffix).read_text()))
+
+
+def _budget_columns(conn: psycopg.Connection) -> list[str]:
+    rows = conn.execute(
+        "SELECT attname FROM pg_attribute WHERE attrelid = "
+        "to_regclass('host_deploy_state') AND NOT attisdropped AND attnum > 0 "
+        "ORDER BY attnum"
+    ).fetchall()
+    wanted = {
+        "stranded_hold_attempts",
+        "stranded_hold_attempted_at",
+        "stranded_hold_recovery_note",
+    }
+    return [name for (name,) in rows if str(name) in wanted]

@@ -39,6 +39,7 @@ def test_exempt_set_matches_the_spawn_sides_session_names() -> None:
     have no layering constraint, so this is the one place both sides meet."""
     from ops.cluster_session import (
         _CLUSTER_RESTART_SERVICE,
+        _HOLD_RECOVER_SERVICE,
         _ROLLOUT_DRYRUN_SERVICE,
         _ROLLOUT_SERVICE,
         _UPDATER_SERVICE,
@@ -52,6 +53,7 @@ def test_exempt_set_matches_the_spawn_sides_session_names() -> None:
             _ROLLOUT_DRYRUN_SERVICE,
             _UPDATER_SERVICE,
             _CLUSTER_RESTART_SERVICE,
+            _HOLD_RECOVER_SERVICE,
         )
     }
     assert spawn_side == _ORCHESTRATION_SESSIONS

@@ -73,6 +73,17 @@ waiting for was the one host forbidden to converge, so the hold could never rele
 early and lapsed on ``SETTLE_TTL_S`` (900s) every time, with ``ops.manager``'s ERROR
 escalation firing at 10 rounds along the way.
 
+**A stranded hold is recorded, and — narrowly — completed** (task #3142). The
+record (task #3132) makes the silent permanent hold loud. On top of it, an
+UPDATE-ARMED post-stop hold may spend one bounded attempt at finishing the very
+sequence its leg was running, through ``ops.hold_recovery`` — the same
+stop/start/resume an operator runs by hand, one attempt per episode, a 900s
+cooldown, a kill-switch, and never in the gateway capability's watchdog round
+(a unit that also serves `agent-runner` completes its hold in that round).
+Nothing else changes: an
+operator hold, a pre-stop phase, or any state with a live owner remains
+record-only, exactly as before.
+
 Extracted from ``services.watchdog.daemon`` (``_recover_stranded_pause`` /
 ``_stranded_pause_seconds`` + the ``_tick`` pause gate). Host-level — both
 capability watchdogs run it.
@@ -85,10 +96,11 @@ import logging
 import os
 import time
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
-from ops import cluster_session
+from ops import cluster_session, hold_recovery
 from ops.cluster import unpause_local_cluster
 from ops.controllers.base import BlockScope, ReconcileResult
 from shared import pause_owner, ui_update_state, updater_handoff
@@ -495,7 +507,7 @@ def stranded_hold_verdict(
 
 def sync_stranded_hold_record(
     handoff: updater_handoff.UpdaterHandoffSnapshot | None = None,
-) -> None:
+) -> StrandedHoldVerdict | None:
     """Bring this host's durable stranded-hold record in line with the verdict.
 
     Declares while the verdict reads `stranded` — set-once, and logged at ERROR
@@ -508,16 +520,20 @@ def sync_stranded_hold_record(
     failed write aborts this round with a warning; the record stands. Never
     raises: it is a side band beside the recovery decision, and a DB blip must
     cost a round, not the tick.
+
+    Returns this round's verdict so the caller can act on it (task #3142's
+    bounded completion), or None when the read itself failed — a round with no
+    readable verdict acts on nothing.
     """
     from shared.host_deploy_state import clear_stranded_hold, mark_stranded_hold
 
     try:
         verdict = stranded_hold_verdict(handoff)
         if verdict.kind == "unknown":
-            return
+            return verdict
         if verdict.kind == "clear":
             clear_stranded_hold()
-            return
+            return verdict
         if mark_stranded_hold(verdict.detail):
             _log.error(
                 "[ops.pause] STRANDED HOLD declared: this host has been held for %.0fs "
@@ -528,11 +544,97 @@ def sync_stranded_hold_record(
                 verdict.paused_for or 0.0,
                 verdict.detail,
             )
+        return verdict
     except Exception:
         _log.warning(
             "[ops.pause] stranded-hold record sync failed; retrying next round",
             exc_info=True,
         )
+        return None
+
+
+def maybe_spawn_stranded_recovery(
+    verdict: StrandedHoldVerdict | None, *, role: MachineRole
+) -> None:
+    """Spend this episode's one bounded attempt at completing the hold (task #3142).
+
+    The narrow exception to "an incomplete stop is never resumed automatically":
+    when nothing is executing under an update leg's hold, the host may complete
+    that leg's own sequence — the same stop / start / resume an operator runs by
+    hand (`conventions/graceful-maintenance.md`, "Recovering a stuck maintenance
+    operation"). Everything about it is bounded and reversible:
+
+    - **Narrow** — only a `stranded` verdict (which already carries the *failed
+      updater leg* evidence), only a post-stop phase, and never in the gateway
+      capability's watchdog round: the gateway watchdog does not initiate a
+      completion, while a unit that also serves `agent-runner` completes the
+      same hold through that capability's round (the drill's macmini is such a
+      unit). `role` is the capability of the ROUND being run
+      (`services/watchdog/daemon.py` runs one per capability), not a statement
+      about the machine.
+    - **Bounded** — one attempt per episode: the budget is a compare-and-set in
+      the host's durable record (`reserve_stranded_recovery`), so two racing
+      deciders cannot both spawn a leg and a spent budget is never refunded.
+    - **Observable, and switchable** — the spawn is logged, the outcome lands in
+      the record, and `settings.gateway.stranded_hold_recovery` turns it off.
+
+    A spawn that fails still spends the attempt: the episode's budget is what
+    bounds the mechanism's exposure, not the backend's success.
+    """
+    if verdict is None or verdict.kind != "stranded":
+        return
+    from shared.config import settings
+
+    if not settings.gateway.stranded_hold_recovery:
+        return
+    if role == "gateway":
+        return
+    held = _held_generation()
+    if held is None:
+        return
+    holder, acquired_at, phase = held
+    if phase not in hold_recovery.RECOVERABLE_PHASES:
+        return
+    from shared.host_deploy_state import finish_stranded_recovery, reserve_stranded_recovery
+
+    attempt = reserve_stranded_recovery(
+        max_attempts=hold_recovery.MAX_ATTEMPTS,
+        cooldown_s=hold_recovery.COOLDOWN_S,
+        note=f"attempt reserved (phase={phase})",
+    )
+    if attempt is None:
+        return  # budget spent, inside the cooldown, or the record just cleared
+    try:
+        log_path = hold_recovery.spawn_hold_recovery(holder=holder, acquired_at=acquired_at)
+    except Exception as exc:
+        _log.error(
+            "[ops.pause] stranded-hold completion session could not start "
+            "(the attempt is spent): %r",
+            exc,
+        )
+        try:
+            finish_stranded_recovery(f"spawn failed: {exc!r}"[:500])
+        except Exception:
+            _log.warning("[ops.pause] could not record the failed spawn", exc_info=True)
+        return
+    _log.warning(
+        "[ops.pause] stranded hold: bounded completion attempt #%d started "
+        "(phase=%s holder=%s) — log %s",
+        attempt,
+        phase,
+        holder,
+        log_path,
+    )
+
+
+def _held_generation() -> tuple[str, datetime, str] | None:
+    """This host's `(holder, acquired_at, phase)`, or None when no hold stands."""
+    current = pause_owner.read()
+    if current.status != "paused" or current.maintenance is None:
+        return None
+    if current.holder is None or current.acquired_at is None:
+        return None
+    return current.holder, current.acquired_at, current.maintenance.phase
 
 
 def pause_owner_verdict(
@@ -677,8 +779,12 @@ class PauseController:
                 detail="self-unpaused (stranded pause recovered)",
             )
         # Still paused and no recovery licensed: this is where a failed leg's
-        # ownerless hold would otherwise sit silent and permanent. Record it —
-        # and only record it; the no-auto-resume rule is untouched.
-        sync_stranded_hold_record()
+        # ownerless hold would otherwise sit silent and permanent. Record it,
+        # then — for an update-armed post-stop hold only — spend the episode's
+        # one bounded completion attempt (task #3142). Every other hold, and
+        # every pre-stop phase, stays record-only: the no-auto-resume rule
+        # stands untouched.
+        verdict = sync_stranded_hold_record()
+        maybe_spawn_stranded_recovery(verdict, role=role)
         _log.info("[ops.pause] host paused (posture), skipping tick")
         return ReconcileResult(dimension=self.name, blocks=BlockScope.ALL, detail="paused")
