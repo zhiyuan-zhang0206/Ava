@@ -28,10 +28,10 @@ not install new packages to satisfy a plugin. Code, sibling modules, static and
 setup resources are included in the same inventory. Manifest-required names
 also contribute to candidate identity.
 
-The CLI-owned `_release_plugin_probe` performs actual agent/service imports;
+The CLI-owned `_release_plugin_probe` performs actual extension/service/provider imports;
 the shared package only validates manifest/dependency facts, preserving import
 direction. The preparation subprocess invokes that same CLI probe.
-Actual extension/service import verification uses a separate private scratch
+Actual extension/service/provider import verification uses a separate private scratch
 unit home outside the generation and blocks socket connections. Its disk config
 is discarded afterward. This executes trusted candidate code, not production
 mutable plugin code, and is not an adversarial same-UID sandbox. No scaffold is
