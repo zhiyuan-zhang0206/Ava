@@ -161,3 +161,50 @@ still has active continuations, and records operator identity (timestamp,
 operator label, OS user/uid/pid, parent process, machine) in the journal —
 both sides of the repair CAS stay visible via `ava maintenance status`. A
 partial release after a successful repair is completed by `resume --cancel`.
+
+## Recovering a stuck maintenance operation
+
+A maintenance hold does not expire on its own. The watchdog's automatic
+release applies only to pauses it can prove are ownerless; an explicit
+maintenance hold is exempt by design (`ops/controllers/stranded_pause.py`
+reports `explicit maintenance hold (no automatic expiry)`), and an incomplete
+pause or stop retains its journal — which survives a CLI crash, a host reboot
+and an offline database — instead of unwinding. When a host is found
+mid-maintenance — services stopped or admission held, and nothing left
+running that owns the pause — recover it by hand.
+
+Read the phase first. Every explicit command takes the same `--operation` and
+timezone-aware `--acquired-at` the hold carries, and `maintenance status`
+prints both plus the phase:
+
+```
+ava maintenance status
+```
+
+| Phase found | Steps back to service |
+| --- | --- |
+| `preparing`, `draining` | `ava maintenance resume --cancel` — abandon the drain while services are still usable. |
+| `drained` | `ava maintenance resume --cancel` returns to service. To carry the planned stop through instead: `ava maintenance stop`, then `maintenance start`, then `maintenance resume`. |
+| `stopping` | The stop died or timed out mid-way: re-run `ava maintenance stop` (it re-verifies the drain and finishes the service stop), then `maintenance start`, then `maintenance resume`. |
+| `stopped` | `ava maintenance start` — the ordinary bring-up, with admission kept held — then `ava maintenance resume` to release the hold after readiness. |
+| `starting` | A bring-up died mid-way: re-run `ava maintenance start`, then `maintenance resume`. |
+
+On a gateway, `maintenance stop` requires `--gateway-last` (the operator has
+independently verified every remote stop), and it refuses live terminals
+unless `--keep-terminals` asserts a separately verified work boundary. An
+ordinary `ava start` can also complete the stopped/starting recovery end to
+end: it restores service and resumes after its readiness gate, without the
+explicit hold.
+
+`resume --cancel` refuses while blocking failed receipts remain. Fix the root
+cause first, then release the latch with the sanctioned repair — only on a
+`preparing`/`draining` hold, and only while the agent-host has no active
+continuations:
+
+```
+ava maintenance repair --operation <operation> --acquired-at <timestamp> [--operator "Ava #1234"]
+```
+
+The repair moves the failed receipts to `repaired` (both sides stay visible in
+`maintenance status`) and records operator identity in the journal; complete
+the release afterwards with `resume --cancel`.
