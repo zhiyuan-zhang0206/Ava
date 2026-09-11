@@ -102,6 +102,23 @@ def test_target_refuses_whole_cluster_flags(
     assert "cannot be combined" in err
 
 
+def test_target_with_default_mode_is_accepted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`--mode smooth` is the default value; it cannot be told apart from an
+    explicit one, so the boundary of the refusal is `--mode force` only."""
+    _gw(monkeypatch)
+
+    def fake_post(url: str, **kwargs: object) -> _Resp:
+        return _Resp(202, {"session": "s", "log": "l"})
+
+    monkeypatch.setattr("httpx.post", fake_post)
+
+    from cli.commands import cmd_update
+
+    assert cmd_update(target="macmini", mode="smooth") == 0
+
+
 def test_target_sha_requires_target(capsys: pytest.CaptureFixture[str]) -> None:
     from cli.commands import cmd_update
 
