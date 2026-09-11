@@ -16,7 +16,10 @@ that window is exactly when a poll right after pushing lands. The same gap
 affects rollups that DO carry workflow checks: in a multi-workflow repo some
 checks attach and pass long before the main run is scheduled, so every green
 verdict is gated on a runs-API probe for still-incomplete runs
-(2026-09-10 early-green window).
+(2026-09-10 early-green window). One residual gap in that distinction is noted
+at the NO_WORKFLOW_RUNS assignment in `check_ci`: a run that has not registered
+yet is invisible to the probe, so seconds after a head change a healthy PR can
+still read as NO_WORKFLOW_RUNS once — corroborate before acting on it.
 
 Usage as CLI:
     .venv/bin/python scripts/ci_utils.py <PR_NUMBER> [--repo owner/repo] [--json]
@@ -378,7 +381,11 @@ def _runs_not_yet_reporting(head_sha: str, repo: str | None) -> list[str] | None
     The runs API answers what the rollup cannot: a run in `queued` /
     `in_progress` / `requested` / `waiting` for this sha means checks are coming.
     An empty list means nothing is scheduled, which is the real failure the
-    NO_WORKFLOW_RUNS guard exists for.
+    NO_WORKFLOW_RUNS guard exists for — as far as the API can see: a run that has
+    not registered yet is invisible here, and registration lags a head change
+    (seconds; longer when the queue is busy). The residual window and how callers
+    should corroborate are documented at the NO_WORKFLOW_RUNS assignment in
+    `check_ci`.
 
     `check_ci` probes this before every would-be-green verdict — not only when
     the rollup has no workflow checks — because a rollup with part of the suite
@@ -551,6 +558,17 @@ def check_ci(pr_number: str | int, *, repo: str | None = None) -> CIResult:
             # Reporting ALL_PASSED here is how a broken `runs-on` — 2026-07-28,
             # hosted runners a private repo could not schedule — reads as green:
             # the only check left standing was a GitHub App's, and it passed.
+            #
+            # Residual false positive (2026-09-12, task #3160): in the window
+            # right after a head change (force-push or push), an app check has
+            # attached while the new run has not *registered* yet — invisible to
+            # the runs probe, so a healthy PR can read as this verdict once
+            # (2026-08-02 #1216; 2026-09-12: queue lag of minutes observed — the
+            # attached app check is the tell). It is not proof the suite will not
+            # run: corroborate with `gh run list --branch <branch>`; a queued /
+            # in_progress run means it is coming. The genuine #885 shape stays
+            # distinguishable by re-checking after a pause; read later in a
+            # watch, on a settled head, this verdict means what it says.
             result.verdict = CIStatus.NO_WORKFLOW_RUNS
         elif scheduled is None:
             # The attached checks all passed, but the probe could not answer
