@@ -167,3 +167,41 @@ def test_keep_windows_terminals_excludes_them_from_every_service_stop_scan(
     assert stop.stop_services(1, keep_terminals=True) == sorted(services)
     assert sorted(signalled) == sorted(services)
     assert names == terminals
+
+
+def test_drifted_create_time_is_not_a_replacement(
+    record: SessionRecord, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The delivery re-check carries the record-resolution tolerance.
+
+    Mirror of posixproc: a create_time reading that moved by whole seconds for
+    the same live process must not refuse delivery.
+    """
+
+    def drifted_process(_record: SessionRecord) -> SimpleNamespace:
+        return SimpleNamespace(create_time=lambda: 6.0)
+
+    monkeypatch.setattr(winproc, "_process_for_record", drifted_process)
+    monkeypatch.setattr(winproc.time, "monotonic", lambda: 100.0)
+    calls: list[tuple[list[str], float]] = []
+
+    def helper(args: list[str], *, timeout: float) -> SimpleNamespace:
+        calls.append((args, timeout))
+        return SimpleNamespace(returncode=0, stderr="")
+
+    monkeypatch.setattr(winproc, "run_job_process", helper)
+
+    assert winproc.graceful_signal("service", expected=record, timeout=0.2)
+    # The delivered identity stays the record's birth, not the drifted reading.
+    assert calls[0][0][-3:] == ["123", "5.0", "100.2"]
+
+
+def test_birth_beyond_tolerance_still_refuses_before_helper(
+    record: SessionRecord, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def replaced_process(_record: SessionRecord) -> SimpleNamespace:
+        return SimpleNamespace(create_time=lambda: 65.0)
+
+    monkeypatch.setattr(winproc, "_process_for_record", replaced_process)
+    monkeypatch.setattr(winproc, "run_job_process", forbidden)
+    assert not winproc.graceful_signal("service", expected=record)

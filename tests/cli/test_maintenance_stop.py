@@ -273,10 +273,33 @@ def test_invalid_identity_refuses_every_signal(home: Path, launch: Launcher) -> 
     path = home / "run/sessions/z-invalid.json"
     record = SessionRecord.read(path)
     assert record is not None
-    replace(record, create_time=record.create_time + 1, starttime=None).write(path)
+    # +60s is a genuinely different start time — not the whole-second move a
+    # live process's create_time reading can make (see the drift test below).
+    replace(record, create_time=record.create_time + 60, starttime=None).write(path)
     with pytest.raises(RuntimeError, match="identity changed"):
         stop.stop_services(1)
     assert first.poll() is None and other.poll() is None
+
+
+def test_whole_second_birth_drift_does_not_refuse_a_live_service(
+    home: Path, launch: Launcher
+) -> None:
+    """A one-second create_time move is the same process; the stop proceeds.
+
+    macOS psutil derives create_time from the wall clock with a boot-time
+    correction quantized to whole seconds: on 2026-09-12 the stop refused a
+    live host over exactly 1.000000s of drift. The record here carries that
+    artifact, and both the preflight validation and the delivery re-check must
+    still accept the process.
+    """
+    proc = launch("drifted", _EXIT)
+    path = home / "run/sessions/drifted.json"
+    record = SessionRecord.read(path)
+    assert record is not None
+    replace(record, create_time=record.create_time - 1.0, starttime=None).write(path)
+
+    assert stop.stop_services(3) == ["drifted"]
+    assert proc.wait(timeout=5) == -signal.SIGTERM
 
 
 def test_persistent_terminals_refuse_before_signalling(

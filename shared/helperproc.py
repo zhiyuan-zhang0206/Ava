@@ -266,8 +266,12 @@ class HelperProcSessionBackend(SessionBackend):
         if process is None:
             return False
         with contextlib.suppress(*_GONE):
+            # Mirror posixproc/winproc: the create_time comparison carries the
+            # record-resolution tolerance, so a drifted reading never refuses
+            # the process it resolved.
             if expected is not None and (
-                process.create_time() != expected.create_time or _read_record(name) != expected
+                abs(process.create_time() - expected.create_time) > _CREATE_TIME_TOLERANCE_S
+                or _read_record(name) != expected
             ):
                 return False
             os.kill(record.pid, signal.SIGTERM)

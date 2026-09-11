@@ -15,6 +15,15 @@ import psutil
 
 from shared.session_record import SessionRecord, pid_starttime_ticks
 
+# create_time is not bit-stable for one live process: psutil's macOS
+# implementation re-derives it from the wall clock and applies a boot-time
+# correction quantized to whole seconds, and WSL wall-clock steps move it too.
+# Measured 2026-09-12 (company-mini): the stop path refused a live host over
+# exactly 1.000000s of drift. Pid reuse cannot land inside a couple of seconds,
+# so the create_time fallback compares with the same 2.0s tolerance the other
+# create_time identity checks use (posixproc / winproc / proc).
+_CREATE_TIME_TOLERANCE_S = 2.0
+
 
 @dataclass(frozen=True)
 class OwnedProcess:
@@ -26,6 +35,16 @@ class OwnedProcess:
     def capture(cls, process: psutil.Process) -> OwnedProcess:
         return cls(process.pid, process.create_time(), pid_starttime_ticks(process.pid))
 
+    def birth_matches(self, process: psutil.Process) -> bool:
+        """Whether `process`'s create_time still claims this identity's birth.
+
+        The exact identity is the Linux `starttime` tick, which `live()` checks
+        first; this is the fallback used where the platform has none, and it
+        must tolerate the whole-second moves a create_time reading makes while
+        its process stays alive (see `_CREATE_TIME_TOLERANCE_S`).
+        """
+        return abs(process.create_time() - self.birth) <= _CREATE_TIME_TOLERANCE_S
+
     def live(self) -> bool:
         try:
             process = psutil.Process(self.pid)
@@ -35,7 +54,7 @@ class OwnedProcess:
                     raise RuntimeError(f"cannot verify process identity for PID {self.pid}")
                 if actual != self.starttime:
                     return False
-            elif process.create_time() != self.birth:
+            elif not self.birth_matches(process):
                 return False
             return process.status() not in (psutil.STATUS_ZOMBIE, psutil.STATUS_DEAD)
         except psutil.NoSuchProcess:
