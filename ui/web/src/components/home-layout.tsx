@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
+import { useDefaultLayout } from "react-resizable-panels";
 
 import {
   ResizableHandle,
@@ -8,31 +9,53 @@ import {
   ResizablePanelGroup,
 } from "@/components/ui/resizable";
 import { BAR_HEIGHT_PX, FLEX, FLEX_1, MIN_H_0, MIN_W_0 } from "@/lib/layout";
+import { panelLayoutStorage } from "@/lib/panel-layout-storage";
 import { cn } from "@/lib/utils";
 
+// Panel sizes are written as explicit percent strings: v4 reads a bare number
+// as PIXELS and a unit-less string as percent (v3 read numbers as percent).
 interface ColumnFrame {
-  autoSaveId: string;
-  expanded: readonly [sidebar: number, main: number];
+  layoutId: string;
+  expanded: readonly [sidebar: string, main: string];
   collapsedSidebarSize: number;
-  expandedMinimums: readonly [sidebar: number, main: number];
+  expandedMinimums: readonly [sidebar: string, main: string];
 }
 
 const DESKTOP_COLUMNS: ColumnFrame = {
-  autoSaveId: "ava.home.columns.desktop",
-  expanded: [30, 70],
+  layoutId: "ava.home.columns.desktop",
+  expanded: ["30%", "70%"],
   collapsedSidebarSize: 3,
-  expandedMinimums: [20, 45],
+  expandedMinimums: ["20%", "45%"],
 };
 
 const MOBILE_COLUMNS: ColumnFrame = {
-  autoSaveId: "ava.home.columns.mobile",
-  expanded: [40, 60],
+  layoutId: "ava.home.columns.mobile",
+  expanded: ["40%", "60%"],
   collapsedSidebarSize: 5,
-  expandedMinimums: [30, 40],
+  expandedMinimums: ["30%", "40%"],
 };
 
-const INSPECTOR_AUTO_SAVE_ID = "ava.home.inspector.desktop";
-const INSPECTOR_OPEN_SIZES = [68, 32] as const;
+const INSPECTOR_LAYOUT_ID = "ava.home.inspector.desktop";
+const INSPECTOR_OPEN_SIZES = ["68%", "32%"] as const;
+
+// v4 stores a group's layout as { <panelId>: percent }, so panel ids are part
+// of the persisted state (the library also writes them to id/data-testid on
+// the panel node — keep them unique across the app).
+const PANEL_SIDEBAR = "panel-sidebar";
+const PANEL_MAIN = "panel-main";
+const PANEL_TIMELINE = "panel-timeline";
+const PANEL_INSPECTOR = "panel-inspector";
+
+const COLUMNS_PANEL_IDS = [PANEL_SIDEBAR, PANEL_MAIN] as const;
+const TIMELINE_PANEL_IDS = [PANEL_TIMELINE] as const;
+const TIMELINE_AND_INSPECTOR_PANEL_IDS = [PANEL_TIMELINE, PANEL_INSPECTOR] as const;
+
+// One storage object per panel set — it carries the v3 -> v4 layout bridge, so
+// it must know which panels the group renders right now (see
+// lib/panel-layout-storage.ts).
+const COLUMNS_STORAGE = panelLayoutStorage(COLUMNS_PANEL_IDS);
+const TIMELINE_STORAGE = panelLayoutStorage(TIMELINE_PANEL_IDS);
+const TIMELINE_AND_INSPECTOR_STORAGE = panelLayoutStorage(TIMELINE_AND_INSPECTOR_PANEL_IDS);
 
 // The painted divider starts below the 44px shared title bar and the 40px
 // column-title row. Its 89px bottom gap ends at the composer's measured top
@@ -62,20 +85,33 @@ function HomeDividerHandle() {
 
 function DesktopMain({ main, inspector }: Pick<Props, "main" | "inspector">) {
   const inspectorVisible = inspector !== null && inspector !== undefined && inspector !== false;
-  const mainDefaultSize = inspectorVisible ? INSPECTOR_OPEN_SIZES[0] : 100;
+  const mainDefaultSize = inspectorVisible ? INSPECTOR_OPEN_SIZES[0] : "100%";
+
+  // Persist only user-driven layout commits: a mount / shape-change /
+  // constraint commit must not overwrite this shape's stored split with a
+  // normalized transient frame (the job the removed v3 mount guard did).
+  // The closed-inspector shape keeps its own panel set, so toggling the
+  // inspector never touches the dragged two-panel split.
+  const { defaultLayout, onLayoutChanged } = useDefaultLayout({
+    id: INSPECTOR_LAYOUT_ID,
+    storage: inspectorVisible ? TIMELINE_AND_INSPECTOR_STORAGE : TIMELINE_STORAGE,
+    onlySaveAfterUserInteractions: true,
+  });
 
   return (
-    // Keep this group horizontal for its whole lifetime. Changing direction
-    // on a mounted react-resizable-panels group can normalize and persist a
-    // breakpoint frame over the user's saved desktop split.
+    // Keep this group horizontal for its whole lifetime. Re-orienting (or
+    // re-shaping) a mounted react-resizable-panels group can normalize and
+    // commit a breakpoint frame over the user's saved desktop split.
     <ResizablePanelGroup
-      direction="horizontal"
-      autoSaveId={INSPECTOR_AUTO_SAVE_ID}
+      orientation="horizontal"
+      defaultLayout={defaultLayout}
+      onLayoutChanged={onLayoutChanged}
       className={cn(FLEX_1, MIN_H_0, MIN_W_0)}
     >
       <ResizablePanel
+        id={PANEL_TIMELINE}
         defaultSize={mainDefaultSize}
-        minSize={inspectorVisible ? 50 : 100}
+        minSize={inspectorVisible ? "50%" : "100%"}
         className={cn(FLEX, MIN_H_0, MIN_W_0)}
       >
         {main}
@@ -84,8 +120,9 @@ function DesktopMain({ main, inspector }: Pick<Props, "main" | "inspector">) {
         <>
           <HomeDividerHandle />
           <ResizablePanel
+            id={PANEL_INSPECTOR}
             defaultSize={INSPECTOR_OPEN_SIZES[1]}
-            minSize={25}
+            minSize="25%"
             className={cn(FLEX, MIN_H_0, MIN_W_0)}
           >
             {inspector}
@@ -106,14 +143,23 @@ export function HomeLayout({
 }: Props) {
   // useBreakpoint intentionally starts in its SSR-safe mobile frame. Delay
   // PanelGroup registration until its effects have installed the real frame;
-  // otherwise rrp v3 normalizes that transient layout and saves it over the
-  // user's dragged ratios. The full-size placeholder reserves the page box,
-  // so the gate itself does not move surrounding layout.
+  // otherwise the transient frame registers a group that immediately remounts
+  // onto the breakpoint's keyed group. The full-size placeholder reserves the
+  // page box, so the gate itself does not move surrounding layout.
   const [mounted, setMounted] = useState(false);
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- the first registered panel frame must use post-mount breakpoint state
     setMounted(true);
   }, []);
+
+  const frame = isLarge ? DESKTOP_COLUMNS : MOBILE_COLUMNS;
+  // Only user-driven commits persist (see DesktopMain) — the breakpoint's
+  // frame swap must never rewrite the other frame's saved ratios.
+  const { defaultLayout, onLayoutChanged } = useDefaultLayout({
+    id: frame.layoutId,
+    storage: COLUMNS_STORAGE,
+    onlySaveAfterUserInteractions: true,
+  });
 
   if (!mounted) {
     return (
@@ -138,14 +184,11 @@ export function HomeLayout({
     );
   }
 
-  const frame = isLarge ? DESKTOP_COLUMNS : MOBILE_COLUMNS;
-
   if (sidebarCollapsed) {
     return (
       <>
-        {/* A collapsed rail is not user-resizable, so keep it outside rrp.
-            Mounting a constrained PanelGroup here lets rrp v3 persist the
-            rail minimum over the user's expanded split during a round trip. */}
+        {/* A collapsed rail is not user-resizable, so it stays outside rrp:
+            a group here would register a shape the user can never adjust. */}
         <div className={cn("h-full w-full", FLEX, FLEX_1, MIN_H_0, MIN_W_0)}>
           <div
             className={cn(FLEX, MIN_H_0, MIN_W_0)}
@@ -173,24 +216,27 @@ export function HomeLayout({
 
   return (
     <>
-      {/* Desktop and compact frames have different autoSaveIds, so breakpoint
+      {/* Desktop and compact frames have different layout ids, so breakpoint
           transitions cannot overwrite each other's saved ratios. */}
       <ResizablePanelGroup
-        key={frame.autoSaveId}
-        direction="horizontal"
-        autoSaveId={frame.autoSaveId}
+        key={frame.layoutId}
+        orientation="horizontal"
+        defaultLayout={defaultLayout}
+        onLayoutChanged={onLayoutChanged}
         className={cn(FLEX_1, MIN_H_0, MIN_W_0)}
       >
         <ResizablePanel
+          id={PANEL_SIDEBAR}
           defaultSize={frame.expanded[0]}
           minSize={frame.expandedMinimums[0]}
-          maxSize={50}
+          maxSize="50%"
           className={cn(FLEX, MIN_H_0, MIN_W_0)}
         >
           {sidebar}
         </ResizablePanel>
         <HomeDividerHandle />
         <ResizablePanel
+          id={PANEL_MAIN}
           defaultSize={frame.expanded[1]}
           minSize={frame.expandedMinimums[1]}
           className={cn(FLEX, MIN_H_0, MIN_W_0)}

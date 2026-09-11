@@ -313,9 +313,8 @@ export const InboxQueue = memo(function InboxQueue({
   }
 
   return (
-    // The split ratio is EXEMPT from the localStorage→DB migration: a
-    // per-viewport layout value persisted by react-resizable-panels through its
-    // own synchronous Storage interface (autoSaveId). Kept per-device by design.
+    // This split is EXEMPT from the localStorage→DB migration: it is a fixed
+    // per-viewport layout value, not a durable user preference.
     <div className={cn( className, FLEX)}>
       <div className={cn("h-full w-[42%] shrink-0", FLEX, FLEX_COL, MIN_H_0, MIN_W_0)}>
         <QueueHeader total={total} onCollapse={onCollapse} stale={stale} />

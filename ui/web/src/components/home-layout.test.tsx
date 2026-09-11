@@ -1,46 +1,74 @@
-import { useEffect, type CSSProperties, type ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import { renderToString } from "react-dom/server";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+// The ui/resizable wrapper is mocked: the library's real layout engine needs a
+// measured container, so these tests pin the home frame contract instead —
+// which frames mount, with which panels and defaults, what may persist, and
+// how a v3-stored split carries over. The real persistence path runs through
+// useDefaultLayout (not mocked) + lib/panel-layout-storage.
 vi.mock("@/components/ui/resizable", () => ({
   ResizablePanelGroup: ({
-    autoSaveId,
     children,
-    direction,
+    defaultLayout,
+    onLayoutChanged,
+    orientation,
   }: {
-    autoSaveId: string;
     children: ReactNode;
-    direction: string;
-  }) => {
-    useEffect(() => {
-      localStorage.setItem(`react-resizable-panels:${autoSaveId}`, "mock persisted layout");
-    });
-
-    return (
-      <div
-        data-testid="resizable-panel-group"
-        data-slot="resizable-panel-group"
-        data-autosave-id={autoSaveId}
-        data-direction={direction}
-      >
-        {children}
-      </div>
-    );
-  },
+    defaultLayout?: Record<string, number> | undefined;
+    onLayoutChanged?: (
+      layout: Record<string, number>,
+      meta: { isUserInteraction: boolean },
+    ) => void;
+    orientation: string;
+  }) => (
+    <div
+      data-testid="resizable-panel-group"
+      data-slot="resizable-panel-group"
+      data-orientation={orientation}
+      data-default-layout={JSON.stringify(defaultLayout ?? null)}
+    >
+      {/* The library commits a layout on mount / on a shape or container
+          change (programmatic), and a real drag commits with
+          isUserInteraction: true — one button each so tests can drive both. */}
+      <button
+        data-testid="layout-commit-programmatic"
+        onClick={() =>
+          onLayoutChanged?.(
+            { "panel-sidebar": 30, "panel-main": 70 },
+            { isUserInteraction: false },
+          )
+        }
+      />
+      <button
+        data-testid="layout-commit-drag"
+        onClick={() =>
+          onLayoutChanged?.(
+            { "panel-sidebar": 41, "panel-main": 59 },
+            { isUserInteraction: true },
+          )
+        }
+      />
+      {children}
+    </div>
+  ),
   ResizablePanel: ({
     children,
     defaultSize,
+    id,
     maxSize,
     minSize,
   }: {
     children: ReactNode;
-    defaultSize: number;
-    maxSize?: number;
-    minSize: number;
+    defaultSize: string;
+    id: string;
+    maxSize?: string;
+    minSize: string;
   }) => (
     <div
       data-slot="resizable-panel"
+      data-panel-id={id}
       data-default-size={defaultSize}
       data-min-size={minSize}
       data-max-size={maxSize}
@@ -93,13 +121,33 @@ function panes() {
   };
 }
 
-function directPanelDefaults(group: HTMLElement): number[] {
-  return Array.from(group.children)
-    .filter((child) => child.getAttribute("data-slot") === "resizable-panel")
-    .map((panel) => Number(panel.getAttribute("data-default-size")));
+function directPanels(group: HTMLElement): HTMLElement[] {
+  return Array.from(group.children).filter(
+    (child) => child.getAttribute("data-slot") === "resizable-panel",
+  ) as HTMLElement[];
 }
 
-describe("HomeLayout autosave-safe responsive frames", () => {
+function directPanelDefaults(group: HTMLElement): number[] {
+  return directPanels(group).map((panel) =>
+    Number.parseFloat(panel.getAttribute("data-default-size") ?? ""),
+  );
+}
+
+function directPanelIds(group: HTMLElement): (string | null)[] {
+  return directPanels(group).map((panel) => panel.getAttribute("data-panel-id"));
+}
+
+// The inspector group nests inside the columns group, so queries must stay on
+// direct children of the group being driven.
+function clickDirect(group: HTMLElement, testId: string): void {
+  const button = Array.from(group.children).find(
+    (child) => child.getAttribute("data-testid") === testId,
+  );
+  if (!button) throw new Error(`no ${testId} among the group's direct children`);
+  fireEvent.click(button);
+}
+
+describe("HomeLayout frame contract", () => {
   it("server render reserves the layout without mounting a panel group", () => {
     const html = renderToString(
       <HomeLayout
@@ -127,14 +175,12 @@ describe("HomeLayout autosave-safe responsive frames", () => {
 
     const groups = screen.getAllByTestId("resizable-panel-group");
     expect(groups).toHaveLength(2);
-    expect(groups.map((group) => group.getAttribute("data-direction"))).toEqual([
+    expect(groups.map((group) => group.getAttribute("data-orientation"))).toEqual([
       "horizontal",
       "horizontal",
     ]);
-    expect(groups.map((group) => group.getAttribute("data-autosave-id"))).toEqual([
-      "ava.home.columns.desktop",
-      "ava.home.inspector.desktop",
-    ]);
+    expect(directPanelIds(groups[0])).toEqual(["panel-sidebar", "panel-main"]);
+    expect(directPanelIds(groups[1])).toEqual(["panel-timeline", "panel-inspector"]);
     expect(directPanelDefaults(groups[0])).toEqual([30, 70]);
     expect(directPanelDefaults(groups[0]).reduce((sum, size) => sum + size, 0)).toBe(100);
     expect(directPanelDefaults(groups[1])).toEqual([68, 32]);
@@ -203,11 +249,12 @@ describe("HomeLayout autosave-safe responsive frames", () => {
     );
 
     const groups = screen.getAllByTestId("resizable-panel-group");
+    expect(directPanelIds(groups[1])).toEqual(["panel-timeline"]);
     expect(directPanelDefaults(groups[1])).toEqual([100]);
     expect(directPanelDefaults(groups[1]).reduce((sum, size) => sum + size, 0)).toBe(100);
   });
 
-  it("compact frame has an independent storage key and keeps overlays outside its horizontal split", () => {
+  it("compact frame has an independent layout id and keeps overlays outside its horizontal split", () => {
     render(
       <HomeLayout
         {...panes()}
@@ -219,14 +266,18 @@ describe("HomeLayout autosave-safe responsive frames", () => {
 
     const groups = screen.getAllByTestId("resizable-panel-group");
     expect(groups).toHaveLength(1);
-    expect(groups[0].getAttribute("data-autosave-id")).toBe("ava.home.columns.mobile");
-    expect(groups[0].getAttribute("data-direction")).toBe("horizontal");
+    expect(groups[0].getAttribute("data-orientation")).toBe("horizontal");
+    expect(directPanelIds(groups[0])).toEqual(["panel-sidebar", "panel-main"]);
     expect(directPanelDefaults(groups[0])).toEqual([40, 60]);
     expect(directPanelDefaults(groups[0]).reduce((sum, size) => sum + size, 0)).toBe(100);
     expect(screen.getByTestId("inspector-panel").parentElement).not.toBe(groups[0]);
+
+    clickDirect(groups[0], "layout-commit-drag");
+    expect(localStorage.getItem("react-resizable-panels:ava.home.columns.mobile")).not.toBeNull();
+    expect(localStorage.getItem("react-resizable-panels:ava.home.columns.desktop")).toBeNull();
   });
 
-  it("remounts onto the independent autosave frame when the breakpoint flips", () => {
+  it("remounts onto the independent frame when the breakpoint flips", () => {
     const { rerender } = render(
       <HomeLayout
         {...panes()}
@@ -247,7 +298,57 @@ describe("HomeLayout autosave-safe responsive frames", () => {
     );
     const mobileGroup = screen.getByTestId("resizable-panel-group");
     expect(mobileGroup).not.toBe(desktopGroup);
-    expect(mobileGroup.getAttribute("data-autosave-id")).toBe("ava.home.columns.mobile");
     expect(directPanelDefaults(mobileGroup).reduce((sum, size) => sum + size, 0)).toBe(100);
+  });
+
+  it("persists only user-driven commits, under each frame's own layout id", () => {
+    render(
+      <HomeLayout
+        {...panes()}
+        isNarrow={false}
+        isLarge
+        sidebarCollapsed={false}
+      />,
+    );
+
+    const groups = screen.getAllByTestId("resizable-panel-group");
+    for (const group of groups) {
+      clickDirect(group, "layout-commit-programmatic");
+    }
+    expect(localStorage.length).toBe(0);
+
+    for (const group of groups) {
+      clickDirect(group, "layout-commit-drag");
+    }
+    expect(localStorage.getItem("react-resizable-panels:ava.home.columns.desktop")).not.toBeNull();
+    expect(localStorage.getItem("react-resizable-panels:ava.home.inspector.desktop")).not.toBeNull();
+  });
+
+  it("restores a v3-stored split by mapping its layout onto the panel ids", () => {
+    localStorage.setItem(
+      "react-resizable-panels:ava.home.columns.desktop",
+      JSON.stringify({
+        '{"minSize":20,"maxSize":50},{"minSize":45}': {
+          expandToSizes: {},
+          layout: [41, 59],
+        },
+      }),
+    );
+
+    render(
+      <HomeLayout
+        {...panes()}
+        isNarrow={false}
+        isLarge
+        sidebarCollapsed={false}
+      />,
+    );
+
+    const groups = screen.getAllByTestId("resizable-panel-group");
+    expect(JSON.parse(groups[0].getAttribute("data-default-layout")!)).toEqual({
+      "panel-sidebar": 41,
+      "panel-main": 59,
+    });
+    expect(groups[1].getAttribute("data-default-layout")).toBe("null");
   });
 });
