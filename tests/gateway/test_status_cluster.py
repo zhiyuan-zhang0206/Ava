@@ -16,6 +16,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from gateway.app import app
+from gateway.routers import _roster_rows
 from gateway.routers import status as status_router
 
 _OPS_URL = "http://wsl:18121"
@@ -659,16 +660,16 @@ class TestProbeBackoff:
 
 class TestPinVerdict:
     def test_no_pin_is_none(self) -> None:
-        assert status_router._pin_verdict("abc1234", None) is None
+        assert _roster_rows.pin_verdict("abc1234", None) is None
 
     def test_unknown_head_is_none(self) -> None:
-        assert status_router._pin_verdict(None, "abc1234") is None
+        assert _roster_rows.pin_verdict(None, "abc1234") is None
 
     def test_on_pin_true(self) -> None:
-        assert status_router._pin_verdict("abc1234", "abc1234") is True
+        assert _roster_rows.pin_verdict("abc1234", "abc1234") is True
 
     def test_off_pin_false(self) -> None:
-        assert status_router._pin_verdict("abc1234", "def5678") is False
+        assert _roster_rows.pin_verdict("abc1234", "def5678") is False
 
 
 class TestClusterPinInPanel:

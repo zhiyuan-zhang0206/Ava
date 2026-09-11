@@ -86,6 +86,17 @@ class HostDeployState:
     updated_at: _dt.datetime
     updater_lease_expires_at: _dt.datetime | None
     paused_at: _dt.datetime | None = None
+    # The stranded-hold record (task #3132): set while this host's pause is a
+    # maintenance hold that has lost its owner — the shape a failed updater leg
+    # leaves behind (its run exited non-zero, the hold was never released, and
+    # nothing is executing that could release it). It exists so the alarm
+    # (services.heartbeat.stranded_holds) and every roster surface can state
+    # that failure from the DB alone: the held host's own ops server is
+    # typically down with it, so no live probe can carry the fact. `since` is
+    # stamped once at declaration and preserved until the verdict clears;
+    # `reason` carries the updater verdict that justified it.
+    stranded_hold_since: _dt.datetime | None = None
+    stranded_hold_reason: str | None = None
     db_now: _dt.datetime = _dataclasses.field(default_factory=lambda: _dt.datetime.now(_dt.UTC))
 
     @property
@@ -146,7 +157,8 @@ def _read_with_conn(conn: Any, machine: str) -> HostDeployState | None:
     """Read one host row through a connection whose lifecycle the caller owns."""
     with conn.cursor() as cur:
         cur.execute(
-            "SELECT machine, posture, updated_at, updater_lease_expires_at, paused_at, now() "
+            "SELECT machine, posture, updated_at, updater_lease_expires_at, paused_at, "
+            "stranded_hold_since, stranded_hold_reason, now() "
             "FROM host_deploy_state WHERE machine = %s",
             (machine,),
         )
@@ -159,7 +171,9 @@ def _read_with_conn(conn: Any, machine: str) -> HostDeployState | None:
         updated_at=row[2],
         updater_lease_expires_at=row[3],
         paused_at=row[4],
-        db_now=row[5],
+        stranded_hold_since=row[5],
+        stranded_hold_reason=row[6],
+        db_now=row[7],
     )
 
 
@@ -191,7 +205,8 @@ def read_all() -> dict[str, HostDeployState]:
     """
     with shared.db.connect(autocommit=True) as conn, conn.cursor() as cur:
         cur.execute(
-            "SELECT machine, posture, updated_at, updater_lease_expires_at, paused_at, now() "
+            "SELECT machine, posture, updated_at, updater_lease_expires_at, paused_at, "
+            "stranded_hold_since, stranded_hold_reason, now() "
             "FROM host_deploy_state"
         )
         return {
@@ -201,7 +216,9 @@ def read_all() -> dict[str, HostDeployState]:
                 updated_at=row[2],
                 updater_lease_expires_at=row[3],
                 paused_at=row[4],
-                db_now=row[5],
+                stranded_hold_since=row[5],
+                stranded_hold_reason=row[6],
+                db_now=row[7],
             )
             for row in cur.fetchall()
         }
@@ -312,6 +329,59 @@ def clear_updater_lease() -> None:
             "UPDATE host_deploy_state SET updater_lease_expires_at = NULL WHERE machine = %s",
             (machine,),
         )
+
+
+def mark_stranded_hold(reason: str) -> bool:
+    """Declare this host's stranded hold; True when THIS call declared it.
+
+    Called by the pause controller every round the stranded-hold verdict holds
+    (task #3132). `since` is stamped by Postgres once and preserved by
+    `COALESCE`, so every reader — the gateway's alarm pass, every roster
+    surface — sees one stable episode start while `reason` follows the latest
+    reading. Conditional on the row existing: a hold can only follow the pause
+    that wrote the posture row, and inventing a row here would fabricate deploy
+    state no transition produced. Never touches `updated_at`: that column's
+    freshness judgments (issue #2101) must not be renewed by a standby record.
+    """
+    machine = machine_name()
+    with write_transaction() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT stranded_hold_since FROM host_deploy_state WHERE machine = %s FOR UPDATE",
+            (machine,),
+        )
+        row = cur.fetchone()
+        if row is None:
+            return False
+        newly = row[0] is None
+        cur.execute(
+            "UPDATE host_deploy_state "
+            "SET stranded_hold_since = COALESCE(stranded_hold_since, now()), "
+            "    stranded_hold_reason = %s "
+            "WHERE machine = %s",
+            (reason, machine),
+        )
+        return newly
+
+
+def clear_stranded_hold() -> bool:
+    """Clear this host's stranded-hold record when one is set; True when it did.
+
+    Called on every round the host is DECIDABLY not a stranded hold (owner
+    back, hold released, or a healthy idle window) and on the recovery path,
+    so the record cannot outlive the condition that justified it. A round whose
+    signals cannot be read is not a clear — the caller must leave the record
+    standing (task #3132; `stranded_pause.StrandedHoldVerdict`). A conditional
+    UPDATE, so the every-round call is a no-op write when nothing is declared.
+    """
+    machine = machine_name()
+    with write_transaction() as conn, conn.cursor() as cur:
+        cur.execute(
+            "UPDATE host_deploy_state SET stranded_hold_since = NULL, "
+            "stranded_hold_reason = NULL "
+            "WHERE machine = %s AND stranded_hold_since IS NOT NULL",
+            (machine,),
+        )
+        return cur.rowcount > 0
 
 
 def updater_lease_live(machine: str | None = None) -> bool:

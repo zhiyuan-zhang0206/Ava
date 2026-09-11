@@ -96,10 +96,12 @@ def _machines_rows_blocking(pool: ConnectionPool) -> list[tuple[Any, ...]]:
         return cur.fetchall()
 
 
-def _cluster_globals_blocking() -> tuple[Any, Any, Any, Any]:
-    """Sync cluster-global markers (pin / deploy lease / last-update / known-good)
-    — all small file reads, but grouped under one to_thread so a slow disk never
-    stalls the roster fan-out."""
+def _cluster_globals_blocking() -> tuple[Any, Any, Any, Any, Any]:
+    """Sync cluster-global markers (pin / deploy lease / last-update / known-good /
+    stranded holds) — small reads, grouped under one to_thread so a slow disk or
+    DB never stalls the roster fan-out. The stranded-hold map is the one per-host
+    entry here, keyed by machine; the rest stamp every row identically."""
+    from gateway.routers._roster_rows import read_stranded_holds
     from gateway.routers.status import (
         _read_cluster_pin,
         _read_deploy_lease,
@@ -112,6 +114,7 @@ def _cluster_globals_blocking() -> tuple[Any, Any, Any, Any]:
         _read_deploy_lease(),
         _read_last_update(),
         _read_known_good(),
+        read_stranded_holds(),
     )
 
 
@@ -399,9 +402,13 @@ async def get_cluster_roster(request: Request) -> list[MachineStatus]:
     # explainable from the roster (`hold` column + its banner) instead of only from
     # the cron log; the last-update record is what makes a FAILED one explainable
     # without reading a pin/head mismatch as a riddle (#1012).
-    cluster_target_sha, deploy_lease, last_update, last_known_good_sha = await asyncio.to_thread(
-        _cluster_globals_blocking
-    )
+    (
+        cluster_target_sha,
+        deploy_lease,
+        last_update,
+        last_known_good_sha,
+        stranded_holds,
+    ) = await asyncio.to_thread(_cluster_globals_blocking)
     return await gather_cluster_status(
         rows,
         machine_name(),
@@ -409,6 +416,7 @@ async def get_cluster_roster(request: Request) -> list[MachineStatus]:
         deploy_lease=deploy_lease,
         last_update=last_update,
         last_known_good_sha=last_known_good_sha,
+        stranded_holds=stranded_holds,
     )
 
 

@@ -1077,11 +1077,27 @@ CREATE TABLE host_deploy_state (
     -- updater-outcome reader uses it to scope "which log runs belong to this
     -- pause window" (replaces the cluster_paused file mtime; Task #1021).
     paused_at                 TIMESTAMPTZ,
+    -- The stranded-hold record (task #3132): set while this host's pause is a
+    -- maintenance hold that has lost its owner (a failed updater leg left it).
+    -- Read by the gateway-side alarm + every roster surface, because the held
+    -- host's own probe is usually down with it. See
+    -- migrations/20260911T180406_host-deploy-stranded-hold.sql.
+    stranded_hold_since      TIMESTAMPTZ,
+    stranded_hold_reason     TEXT,
     updated_at               TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 COMMENT ON TABLE host_deploy_state IS
     'Host-level deploy posture + updater lease, one row per machine (replaces the cluster_paused file, updating.flag, session probing and updater-log-mtime liveness; R1 wave, Task #1021).';
+
+COMMENT ON COLUMN host_deploy_state.stranded_hold_since IS
+    'When this host''s pause became a STRANDED maintenance hold — an ownerless '
+    'hold left by a failed updater leg; NULL when no such record. Stamped once '
+    'by the pause controller and preserved until the verdict clears (task #3132).';
+
+COMMENT ON COLUMN host_deploy_state.stranded_hold_reason IS
+    'The updater verdict that left the stranded hold (e.g. "updater exited '
+    'rc=1"); display/alert context, never a judgment input (task #3132).';
 
 -- ─────────────── cluster_pin ───────────────
 -- The cluster's pinned commit (cluster_target_sha) — the standing record of which
@@ -1658,3 +1674,9 @@ INSERT INTO schema_migrations (name) VALUES ('20260911T005419_add-resurrect-inbo
 -- plugin_stats is already represented above. Fresh DBs stamp the migration
 -- instead of replaying the CREATE TABLE delta.
 INSERT INTO schema_migrations (name) VALUES ('20260910T165723_plugin-stats');
+
+-- The stranded-hold columns are already represented above. Fresh DBs must not
+-- replay the strict ADD COLUMN against the baseline schema, while existing DBs
+-- without this applied marker still run the migration and fail loudly if the
+-- columns were added outside migration tracking.
+INSERT INTO schema_migrations (name) VALUES ('20260911T180406_host-deploy-stranded-hold');

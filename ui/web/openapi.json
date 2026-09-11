@@ -10509,6 +10509,29 @@
             ],
             "title": "Cluster Last Known Good Sha"
           },
+          "stranded_hold_since": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stranded Hold Since"
+          },
+          "stranded_hold_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stranded Hold Reason"
+          },
           "settle_waited_on": {
             "type": "boolean",
             "title": "Settle Waited On",

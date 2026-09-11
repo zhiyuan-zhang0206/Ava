@@ -112,13 +112,24 @@ const TONE_DOT: Record<StatusTone, string> = {
   muted: "bg-muted-foreground",
 };
 
-type MachineVerdictLabel = "identityMismatch" | "statusUnknown" | "paused" | "running" | "stopped" | "offline";
+type MachineVerdictLabel =
+  | "identityMismatch"
+  | "strandedHold"
+  | "statusUnknown"
+  | "paused"
+  | "running"
+  | "stopped"
+  | "offline";
 
 function machineVerdict(m: MachineStatus): { label: MachineVerdictLabel; tone: StatusTone } {
   // identity_mismatch is a loud state: the probe reached an ops server that
   // answered under the WRONG machine_name, so this row's gateway_url points at
   // the wrong host. It outranks online/offline — never green.
   if (m.identity_mismatch) return { label: "identityMismatch", tone: "error" };
+  // A stranded hold (task #3132) is louder than every ordinary state: an update
+  // failed and nothing will resume the host — never render it as "paused" or a
+  // plain "offline" while the record stands.
+  if (m.stranded_hold_since) return { label: "strandedHold", tone: "error" };
   if (m.online && m.paused === null) return { label: "statusUnknown", tone: "warn" };
   if (m.online && m.paused === true) return { label: "paused", tone: "warn" };
   if (m.online && m.paused === false) return { label: "running", tone: "ok" };
@@ -428,6 +439,8 @@ function ServicesPanel({ data }: { data: ClusterPanel }) {
         )}
       </div>
 
+      <StrandedHoldBanner machines={data.machines} />
+
       <LastUpdateBanner record={data.last_update ?? null} />
 
       {data.machines.length === 0 ? (
@@ -437,6 +450,37 @@ function ServicesPanel({ data }: { data: ClusterPanel }) {
       ) : (
         runners.length > 0 && <AgentRunnersCard runners={runners} />
       )}
+    </div>
+  );
+}
+
+// Hosts left held by a failed update (task #3132): the maintenance hold is
+// released only by an explicit `ava start` on the host, and the record is
+// written by the host itself — so this banner still states the failure when
+// the host cannot answer a probe. Rendered per host, above the cluster-global
+// banner: unlike the last-update record this is a live incident with a
+// one-command remedy.
+function StrandedHoldBanner({ machines }: { machines: MachineStatus[] }) {
+  const t = useTranslations("insights.status");
+  const held = machines.filter((m) => m.stranded_hold_since != null);
+  if (held.length === 0) return null;
+  return (
+    <div
+      role="alert"
+      className="mb-3 rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-xs"
+    >
+      {held.map((m) => (
+        <div key={m.name}>
+          <p className="font-semibold text-destructive">
+            {t("strandedHoldBanner", { machine: m.name })}
+          </p>
+          {m.stranded_hold_reason && (
+            <p className="mt-1 text-muted-foreground">
+              {t("strandedHoldReason", { reason: m.stranded_hold_reason })}
+            </p>
+          )}
+        </div>
+      ))}
     </div>
   );
 }

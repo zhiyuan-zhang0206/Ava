@@ -5656,6 +5656,10 @@ export interface components {
             last_update?: components["schemas"]["LastUpdate"] | null;
             /** Cluster Last Known Good Sha */
             cluster_last_known_good_sha?: string | null;
+            /** Stranded Hold Since */
+            stranded_hold_since?: string | null;
+            /** Stranded Hold Reason */
+            stranded_hold_reason?: string | null;
             /**
              * Settle Waited On
              * @default false

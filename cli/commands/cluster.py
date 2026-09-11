@@ -212,8 +212,8 @@ def cmd_cluster_status() -> int:
 
 def _render_roster(roster: list[MachineStatus]) -> list[str]:
     """Render the decoded /api/cluster/roster payload into aligned text lines
-    (the deploy-hold banner when one is live, then header + separator + one row per
-    machine).
+    (the held-host / last-update / deploy-hold banners above the table, then header +
+    separator + one row per machine).
 
     Pure and split from the HTTP fetch so the row formatting is unit-testable
     against the MachineStatus wire schema, which carries the three capability
@@ -226,7 +226,7 @@ def _render_roster(roster: list[MachineStatus]) -> list[str]:
         *(len(f"{m.name} (staging)") if m.is_staging else len(m.name) for m in roster),
         len("name"),
     )
-    lines = _last_update_banner(roster) + _hold_banner(roster)
+    lines = _stranded_hold_banner(roster) + _last_update_banner(roster) + _hold_banner(roster)
     lines += [
         f"{'name'.ljust(name_w)}  {'role':<{_ROLE_COL_W}} {'paused':<7} {'status':<10} "
         f"{'pin':<10} {'code':<10} {'hold':<{_HOLD_COL_W}} up since",
@@ -320,6 +320,35 @@ def _age_suffix(started_at: datetime | None) -> str:
     if seconds < 86400:
         return f" ({seconds / 3600:.0f}h ago)"
     return f" ({seconds / 86400:.0f}d ago)"
+
+
+def _stranded_hold_banner(roster: list[MachineStatus]) -> list[str]:
+    """Lines above the table for hosts left held by a failed update (task #3132).
+
+    A host in this state has stopped serving and nothing on it will resume the
+    host on its own — the maintenance hold is released only by an explicit
+    `ava start` — so the roster is one of the two places an operator can learn it
+    without ssh (the other is the alert IM). Read from the host's durable record
+    (`host_deploy_state.stranded_hold_*`), not from a probe: the held host's own
+    ops server is usually down with it.
+
+    Rendered per host and first, above the cluster-global banners: unlike the
+    last-update record, this is a live incident, with a one-command remedy on
+    every entry that names it.
+    """
+    held = sorted((m for m in roster if m.stranded_hold_since is not None), key=lambda m: m.name)
+    if not held:
+        return []
+    lines: list[str] = []
+    for m in held:
+        reason = f" ({m.stranded_hold_reason})" if m.stranded_hold_reason else ""
+        lines.append(
+            f"✗ {m.name}: update failed{reason} — host left held"
+            f"{_age_suffix(m.stranded_hold_since)}; nothing will resume it:"
+        )
+        lines.append(f"  run `ava start` on {m.name}")
+    lines.append("")
+    return lines
 
 
 def _hold_banner(roster: list[MachineStatus]) -> list[str]:

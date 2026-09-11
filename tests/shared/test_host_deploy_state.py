@@ -408,3 +408,39 @@ def test_the_lease_expiry_is_stamped_by_the_database_not_the_writer() -> None:
     assert timedelta(0) <= armed - state.paused_at < timedelta(seconds=5)
     assert state.updater_live is True
     assert state.updater_expired is False
+
+
+def test_stranded_hold_mark_is_set_once_and_clear_releases_it() -> None:
+    """The failed-leg record (task #3132): declared once with a stable `since`,
+    reason follows the latest reading, `updated_at` is never renewed by it, and
+    clear releases both fields exactly."""
+    hds.set_posture("paused")
+    assert hds.mark_stranded_hold("updater exited rc=1") is True
+    state = hds.read()
+    assert state is not None
+    first = state.stranded_hold_since
+    assert first is not None
+    assert state.stranded_hold_reason == "updater exited rc=1"
+    updated_at_before = state.updated_at
+
+    assert hds.mark_stranded_hold("updater exited rc=2") is False  # already declared
+    state = hds.read()
+    assert state is not None
+    assert state.stranded_hold_since == first
+    assert state.stranded_hold_reason == "updater exited rc=2"  # reason follows the latest read
+    assert state.updated_at == updated_at_before  # the record never renews freshness
+
+    assert hds.clear_stranded_hold() is True
+    state = hds.read()
+    assert state is not None
+    assert state.stranded_hold_since is None
+    assert state.stranded_hold_reason is None
+    assert hds.clear_stranded_hold() is False  # idempotent
+
+
+def test_stranded_hold_mark_without_a_row_is_a_no_op() -> None:
+    """A hold can only follow the pause that wrote the posture row; the mark must
+    not fabricate a deploy state no transition produced."""
+    assert hds.read() is None
+    assert hds.mark_stranded_hold("updater exited rc=1") is False
+    assert hds.read() is None

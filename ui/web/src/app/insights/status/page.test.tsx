@@ -733,3 +733,36 @@ describe("StatusPage sub-anchors", () => {
     }
   });
 });
+
+
+describe("stranded holds (task #3132)", () => {
+  it("a stranded-hold host renders the held banner and an update-failed verdict", async () => {
+    const held = structuredClone(STATUS_OK);
+    held.cluster.machines = held.cluster.machines.map((m) =>
+      m.name === "wsl"
+        ? {
+            ...m,
+            stranded_hold_since: "2026-09-12T01:02:00+08:00",
+            stranded_hold_reason: "updater exited rc=1",
+          }
+        : m,
+    );
+    vi.spyOn(api, "getSystemStatus").mockResolvedValue(held);
+
+    wrap(<StatusPage />);
+    await waitFor(() => screen.getByTestId("agent-runners-card"));
+    // The banner states the failure and the remedy...
+    expect(screen.getAllByText(/nothing will resume it on its own/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/run `ava start` on wsl/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Reason: updater exited rc=1/).length).toBeGreaterThan(0);
+    // ...and the row's verdict outranks the ordinary offline/paused readings.
+    const table = screen.getByTestId("agent-runners-card");
+    expect(table.textContent).toMatch(/update failed/);
+  });
+
+  it("no stranded-hold banner when no host carries the record", async () => {
+    wrap(<StatusPage />);
+    await waitFor(() => screen.getByTestId("agent-runners-card"));
+    expect(screen.queryByText(/nothing will resume it on its own/)).toBeNull();
+  });
+});
