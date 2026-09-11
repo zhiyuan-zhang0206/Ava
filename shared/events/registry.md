@@ -23,7 +23,7 @@ generated from it and never hand-synced. event_names that violate the naming rul
 
 | mechanism | table/channel | registered event_names | destination |
 |------|------|-------------|------|
-| audit (category=audit) | `events` | 23 | events table |
+| audit (category=audit) | `events` | 24 | events table |
 | telemetry (category=telemetry) | `events` | 164 | events table |
 | log (category=log) | `events` | 10 | events table |
 | file-only (destination=file) | file log | 1 | file only (not the events table) |
@@ -55,7 +55,7 @@ spans go through the trace channel (30d).
 
 ---
 
-## 2. Audit events (23 primary category=audit; 23 status_change with extra_categories)
+## 2. Audit events (24 primary category=audit; 24 status_change with extra_categories)
 
 **Meaning convention**: category=audit rows are append-only operation audits, one row
 = one agent operation fact. `source` (who triggered: `agent:N` / `user` / `system` /
@@ -74,6 +74,7 @@ Emit sites and consumers: see the comments at each emit point.
 | `cancel` | in-flight turn cancelled | business | — | events |
 | `resurrect` | terminated agent woken | business | — | events |
 | `restart_completed` | restart finished | business | — | events |
+| `hosted_legacy_adoption` | a hosted successor replaced a legacy NULL-resource owner before lease expiry on machine-local evidence (dead predecessor probe set) | business | — | events |
 | `compact` | agent context compacted | business | — | events |
 | `circuit_breaker` | heartbeat circuit breaker opened — a permanent provider rejection stopped heartbeat re-fires (context_overflow reason arms the forced-compact self-rescue) | business | — | events |
 | `report_activity` | activity report | business | — | events |
