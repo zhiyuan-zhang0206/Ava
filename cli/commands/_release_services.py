@@ -34,6 +34,7 @@ from shared.managed_writer_activation import (
 )
 from shared.managed_writer_observation import ExpectedProcess, observe_process
 from shared.managed_writer_publication import NormalService, PublishedUnit
+from shared.proc_tree import stable_create_time
 from shared.runtime_interpreter import runtime_venv
 from shared.runtime_publication_input import PreparationReceipt
 from shared.runtime_release import ReleaseRejectedError, VerifiedRelease
@@ -177,7 +178,7 @@ def _record(home: Path, name: str) -> SessionRecord:
 def _native(process: psutil.Process) -> ExpectedProcess:
     return ExpectedProcess(
         pid=process.pid,
-        create_time=process.create_time(),
+        create_time=stable_create_time(process),
         starttime=pid_starttime_ticks(process.pid),
     )
 

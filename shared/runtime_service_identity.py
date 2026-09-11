@@ -15,6 +15,7 @@ import psutil
 
 from shared.managed_writer_barrier import Digest, EvidenceModel
 from shared.managed_writer_observation import ExpectedProcess
+from shared.proc_tree import stable_create_time
 from shared.runtime_interpreter import WHEEL_RUNTIME, runtime_venv
 from shared.runtime_release import ReleaseRejectedError, file_sha256
 from shared.session_record import pid_starttime_ticks
@@ -52,7 +53,7 @@ def _identity(home: str, pid: int) -> NormalRuntimeIdentity:
         raise ReleaseRejectedError("normal service module/interpreter escapes its image")
     return NormalRuntimeIdentity(
         process=ExpectedProcess(
-            pid=pid, create_time=process.create_time(), starttime=pid_starttime_ticks(pid)
+            pid=pid, create_time=stable_create_time(process), starttime=pid_starttime_ticks(pid)
         ),
         home=home,
         artifact_digest=root.name,

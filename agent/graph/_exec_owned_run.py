@@ -40,6 +40,7 @@ from shared.incarnation_resources import (
     register_exec,
 )
 from shared.paths import exec_run_dir
+from shared.proc_tree import stable_create_time
 from shared.runtime_incarnation import RuntimeIncarnation, current_incarnation
 from shared.turn_identity import current_hosted_resources
 
@@ -248,7 +249,7 @@ async def run_owned(  # noqa: PLR0915 -- one caller retains exact allocation and
             close_fds=True,
         )
         native = psutil.Process(proc.pid)
-        birth = native.create_time()
+        birth = stable_create_time(native)
         reader = threading.Thread(target=_drain_output, args=(proc, stream), daemon=True)
         reader.start()
         while proc.poll() is None:

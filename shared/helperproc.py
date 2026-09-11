@@ -20,6 +20,7 @@ import psutil
 
 from shared.log import logger
 from shared.paths import logs_dir, run_dir
+from shared.proc_tree import stable_create_time
 from shared.session_backend import SessionBackend
 from shared.session_record import SessionRecord, pid_starttime_ticks
 
@@ -82,7 +83,7 @@ def _process_for_record(record: SessionRecord) -> psutil.Process | None:
             return None
         if record.starttime is not None:
             return process if record.identifies(record.pid) is True else None
-        if abs(process.create_time() - record.create_time) > _CREATE_TIME_TOLERANCE_S:
+        if abs(stable_create_time(process) - record.create_time) > _CREATE_TIME_TOLERANCE_S:
             return None
     except (psutil.NoSuchProcess, psutil.AccessDenied):
         return None
@@ -203,7 +204,7 @@ class HelperProcSessionBackend(SessionBackend):
         )
 
         try:
-            create_time = psutil.Process(child_pid).create_time()
+            create_time = stable_create_time(psutil.Process(child_pid))
         except psutil.NoSuchProcess:
             create_time = _DEAD_CHILD_SENTINEL
             starttime = None
@@ -266,11 +267,11 @@ class HelperProcSessionBackend(SessionBackend):
         if process is None:
             return False
         with contextlib.suppress(*_GONE):
-            # Mirror posixproc/winproc: the create_time comparison carries the
+            # Mirror posixproc/winproc: the start-time comparison carries the
             # record-resolution tolerance, so a drifted reading never refuses
             # the process it resolved.
             if expected is not None and (
-                abs(process.create_time() - expected.create_time) > _CREATE_TIME_TOLERANCE_S
+                abs(stable_create_time(process) - expected.create_time) > _CREATE_TIME_TOLERANCE_S
                 or _read_record(name) != expected
             ):
                 return False

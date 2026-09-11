@@ -2,8 +2,11 @@
 from __future__ import annotations
 
 import datetime as dt
+import importlib
 import json
 import os
+import subprocess
+import sys
 from dataclasses import replace
 from pathlib import Path
 from uuid import UUID
@@ -383,9 +386,7 @@ def test_pending_claim_records_the_childs_exact_process_identity(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     handoff.begin(expected_session="ava-updater", generation="g")
-    monkeypatch.setattr(
-        psutil, "Process", lambda _pid: type("P", (), {"create_time": lambda _self: 42.5})()
-    )
+    monkeypatch.setattr(psutil, "Process", _process_stub(42.5))
 
     assert handoff.claim_running("g", expected_session="ava-updater", owner_pid=123)
     snapshot = handoff.read()
@@ -395,9 +396,7 @@ def test_pending_claim_records_the_childs_exact_process_identity(
 
 def test_claim_is_exact_fresh_pending_cas(monkeypatch: pytest.MonkeyPatch) -> None:
     handoff.begin(expected_session="ava-updater", generation="new", ttl_s=60)
-    monkeypatch.setattr(
-        psutil, "Process", lambda _pid: type("P", (), {"create_time": lambda _self: 1.0})()
-    )
+    monkeypatch.setattr(psutil, "Process", _process_stub(1.0))
     assert not handoff.claim_running("old", expected_session="ava-updater", owner_pid=1)
     assert handoff.read().generation == "new"
 
@@ -407,9 +406,7 @@ def test_expired_pending_can_be_replaced_and_late_child_cannot_claim(
 ) -> None:
     handoff.begin(expected_session="ava-updater", generation="old", ttl_s=-1)
     replacement = handoff.begin(expected_session="ava-updater", generation="new")
-    monkeypatch.setattr(
-        psutil, "Process", lambda _pid: type("P", (), {"create_time": lambda _self: 1.0})()
-    )
+    monkeypatch.setattr(psutil, "Process", _process_stub(1.0))
     assert replacement.generation == "new"
     assert not handoff.claim_running("old", expected_session="ava-updater", owner_pid=1)
 
@@ -418,9 +415,7 @@ def test_running_owner_never_expires_while_exact_pid_is_alive(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     handoff.begin(expected_session="ava-updater", generation="g", ttl_s=1)
-    monkeypatch.setattr(
-        psutil, "Process", lambda _pid: type("P", (), {"create_time": lambda _self: 10.0})()
-    )
+    monkeypatch.setattr(psutil, "Process", _process_stub(10.0))
     assert handoff.claim_running("g", expected_session="ava-updater", owner_pid=7)
     future = dt.datetime.now(dt.UTC) + dt.timedelta(days=1)
     snapshot = handoff.read(now=future)
@@ -458,15 +453,30 @@ def test_unreadable_running_identity_fails_closed(
 
 def test_pid_reuse_is_positive_death_evidence(monkeypatch: pytest.MonkeyPatch) -> None:
     handoff.begin(expected_session="ava-updater", generation="g")
-    monkeypatch.setattr(
-        psutil, "Process", lambda _pid: type("P", (), {"create_time": lambda _self: 10.0})()
-    )
+    monkeypatch.setattr(psutil, "Process", _process_stub(10.0))
     assert handoff.claim_running("g", expected_session="ava-updater", owner_pid=7)
-    monkeypatch.setattr(
-        psutil, "Process", lambda _pid: type("P", (), {"create_time": lambda _self: 99.0})()
-    )
+    monkeypatch.setattr(psutil, "Process", _process_stub(99.0))
     assert not handoff.owner_is_live(handoff.read())
     assert handoff.begin(expected_session="ava-updater", generation="new").generation == "new"
+
+
+@pytest.mark.skipif(
+    sys.platform != "darwin", reason="psutil's macOS wall-clock correction is macOS-only"
+)
+def test_claimed_owner_spans_import_epochs(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A handoff claimed under one clock epoch stays proven-live under another."""
+    psosx = importlib.import_module("psutil._psosx")
+    base = psosx.INIT_BOOT_TIME
+    child = subprocess.Popen([sys.executable, "-I", "-c", "import time; time.sleep(60)"])
+    try:
+        monkeypatch.setattr(psosx, "INIT_BOOT_TIME", base + 3600.0)
+        handoff.begin(expected_session="ava-updater", generation="g")
+        assert handoff.claim_running("g", expected_session="ava-updater", owner_pid=child.pid)
+        monkeypatch.setattr(psosx, "INIT_BOOT_TIME", base)
+        assert handoff.owner_is_live(handoff.read())
+    finally:
+        child.kill()
+        child.wait(timeout=5)
 
 
 def test_exact_generation_clear_cannot_remove_a_replacement() -> None:
@@ -482,11 +492,19 @@ def test_marker_is_private_to_the_cluster_user() -> None:
     assert handoff.state_path().stat().st_mode & 0o777 == 0o600
 
 
-def _owner_read_stub(create_time: float):
-    """psutil.Process stand-in for owner identity re-reads (claimed pid 123)."""
+def _process_stub(create_time: float, *, pid: int = 123):
+    """psutil.Process stand-in: both identity readings return `create_time`."""
+
+    class _PlatformProcess:
+        def create_time(self, monotonic: bool = False) -> float:
+            return create_time
 
     def process(_pid: int | None = None) -> object:
-        return type("P", (), {"pid": 123, "create_time": lambda _self: create_time})()
+        return type(
+            "P",
+            (),
+            {"pid": pid, "create_time": lambda _self: create_time, "_proc": _PlatformProcess()},
+        )()
 
     return process
 
@@ -494,15 +512,15 @@ def _owner_read_stub(create_time: float):
 def test_bootstrap_writer_tolerates_whole_second_owner_create_time_drift(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(psutil, "Process", _owner_read_stub(42.5))
+    monkeypatch.setattr(psutil, "Process", _process_stub(42.5))
     handoff.begin(expected_session="ava-updater", generation="bootstrap")
     assert handoff.claim_running("bootstrap", expected_session="ava-updater", owner_pid=123)
     # The writer re-reads its own wall-clock-derived birth: 1s of drift is the same process.
-    monkeypatch.setattr(psutil, "Process", _owner_read_stub(43.5))
+    monkeypatch.setattr(psutil, "Process", _process_stub(43.5))
     handoff.write_bootstrap_recovery("bootstrap", _bootstrap_journal("prepared"))
     assert handoff.read_bootstrap_recovery() is not None
     # Beyond the tolerance the writer is no longer the recorded owner.
-    monkeypatch.setattr(psutil, "Process", _owner_read_stub(102.5))
+    monkeypatch.setattr(psutil, "Process", _process_stub(102.5))
     with pytest.raises(handoff.BootstrapRecoveryInvalidError, match="lost exact handoff ownership"):
         handoff.write_bootstrap_recovery("bootstrap", _bootstrap_journal("prepared"))
 
@@ -510,15 +528,15 @@ def test_bootstrap_writer_tolerates_whole_second_owner_create_time_drift(
 def test_normal_writer_tolerates_whole_second_owner_create_time_drift(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(psutil, "Process", _owner_read_stub(42.5))
+    monkeypatch.setattr(psutil, "Process", _process_stub(42.5))
     handoff.begin(expected_session="ava-updater", generation="bootstrap")
     assert handoff.claim_running("bootstrap", expected_session="ava-updater", owner_pid=123)
     handoff.write_bootstrap_recovery(
         "bootstrap", _bootstrap_journal("candidate_ready", normal_release_planned=True)
     )
-    monkeypatch.setattr(psutil, "Process", _owner_read_stub(43.5))
+    monkeypatch.setattr(psutil, "Process", _process_stub(43.5))
     handoff.write_normal_release_recovery("bootstrap", _normal_journal("waiting"))
-    monkeypatch.setattr(psutil, "Process", _owner_read_stub(102.5))
+    monkeypatch.setattr(psutil, "Process", _process_stub(102.5))
     with pytest.raises(
         handoff.BootstrapRecoveryInvalidError, match="normal writer lost exact handoff ownership"
     ):

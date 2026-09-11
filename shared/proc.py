@@ -97,8 +97,12 @@ def hosting_supervised_session() -> str | None:
     """
     # Deliberately method-local: the in-process updater's post-checkout stop must
     # load these from the new tree; a module-scope import leaves their old version
-    # in sys.modules before checkout. See shared/session_backend.py.
+    # in sys.modules before checkout. `shared.proc_tree` belongs here too — it
+    # imports `shared.session_record` at module scope, so importing it at module
+    # scope would put the record module back in the pre-checkout closure.
+    # See shared/session_backend.py.
     from shared import winproc
+    from shared.proc_tree import stable_create_time
     from shared.session_record import SessionRecord
 
     try:
@@ -119,7 +123,8 @@ def hosting_supervised_session() -> str | None:
                 is_record_process = record.identifies(record.pid) is True
             else:
                 is_record_process = (
-                    abs(proc.create_time() - record.create_time) <= _SESSION_CREATE_TIME_TOLERANCE_S
+                    abs(stable_create_time(proc) - record.create_time)
+                    <= _SESSION_CREATE_TIME_TOLERANCE_S
                 )
             if is_record_process and not winproc.tree_kill_would_spare(name, proc, lineage):
                 return name
