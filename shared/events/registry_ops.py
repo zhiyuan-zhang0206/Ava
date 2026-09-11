@@ -384,7 +384,7 @@ _EVENTS_OPS: dict[str, EventSpec] = {
     ),
     "chrome_page_ttl_renewed": _telemetry(
         "chrome_page_ttl_renewed",
-        "Chrome page TTL deadline renewed via the renew_page tool",
+        "Chrome page TTL deadline renewed via the renew_page tool; attributes carry page_id, ttl_s, new_expires_at",
         tier="observation",
     ),
     "watcher_reaped": EventSpec(

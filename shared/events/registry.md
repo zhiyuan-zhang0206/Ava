@@ -266,7 +266,7 @@ consumers: see the comments at each emit point.
 | `checkpoint_table_sizes` | checkpoint table physical sizes and live row counts (hourly + after each blob vacuum run) | observation | blobs_bytes, checkpoints_bytes, writes_bytes, blobs_live, checkpoints_live, writes_live | — | events |
 | `gate_auth_probe_failed` | gate auth probe failed — carries the classification (auth/timeout/network/application) and exception shape | anomaly | category, exception_type, exception_value, status, latency_ms | — | events |
 | `archive_fetch_degraded` | frozen Loki archive read degraded (lock-wait skip or failed scan) | anomaly | route, reason | — | events |
-| `chrome_page_ttl_renewed` | Chrome page TTL deadline renewed via the renew_page tool | observation | — | — | events |
+| `chrome_page_ttl_renewed` | Chrome page TTL deadline renewed via the renew_page tool; attributes carry page_id, ttl_s, new_expires_at | observation | — | — | events |
 
 ## 4. Log (bare logs, category=log)
 

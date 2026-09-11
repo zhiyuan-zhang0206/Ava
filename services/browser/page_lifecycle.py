@@ -535,9 +535,12 @@ async def reap_expired_pages(daemon: _PageDaemon) -> int:
     cleanly (the page is simply absent from the re-read listing). For a page
     still listed, the close re-checks nothing else: the deadline is the
     whole contract. After the close — whatever it said — the TTL slot and
-    any affinity slot naming the page are dropped; the deadline passed, the
-    page is done for its owner (an errored close is warned about; the reaper
-    contract is that the page is dead either way). Expiry is surfaced to the
+    any affinity slot naming the page are dropped. The deadline is terminal,
+    the same doctrine as the shell-TTL ruling's "no renewable expired
+    state": a page already closed elsewhere is filtered by the listing
+    re-check before any close attempt, so an errored close from here is
+    anomalous — warned about, never retried (a retryable slot would keep a
+    terminal deadline alive past its deadline). Expiry is surfaced to the
     agent only by the page being gone: the next page-scoped call hits the
     daemon's existing no-page path — no invented "page expired" error.
     Returns the number of pages closed.
