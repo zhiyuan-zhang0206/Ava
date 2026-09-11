@@ -83,6 +83,11 @@ _FORCE_FENCE_MIGRATION = (
     / "migrations"
     / "20260821T104519_add-force-terminate-inbound-fence.sql"
 )
+_RESURRECT_FENCE_MIGRATION = (
+    Path(__file__).resolve().parents[2]
+    / "migrations"
+    / "20260911T005419_add-resurrect-inbound-fence.sql"
+)
 _LAST_CLAIM_LOOP_MIGRATION = (
     Path(__file__).resolve().parents[2]
     / "migrations"
@@ -660,6 +665,57 @@ def test_force_terminate_fence_migration_backfills_current_death_intent() -> Non
     assert post_force_chat > current_marker
     assert no_current_marker_chat > historical_marker
     assert pre_force_chat < current_marker_after_chat
+
+
+def test_resurrect_fence_migration_backfills_retained_epochs() -> None:
+    """Upgrade records each agent's newest retained resurrection as its fence.
+
+    Only the fence itself is backfilled; the migration never rewrites inbound
+    rows. Acceptance settles below-fence commands lazily, with the same visible
+    payload the runtime writes, so an upgrade cannot silently change history.
+    """
+    with (
+        _throwaway_database("resurrect_fence") as url,
+        psycopg.connect(url, autocommit=True) as conn,
+        conn.cursor() as cur,
+    ):
+        cur.execute(sql.SQL(cast(LiteralString, _SCHEMA_SQL.read_text())), prepare=False)
+        cur.execute("ALTER TABLE agents_meta DROP COLUMN last_resurrect_inbound_id")
+        cur.execute("INSERT INTO agents (id) SELECT generate_series(1, 4)")
+        cur.execute(
+            "INSERT INTO agents_meta (id, status) VALUES "
+            "(1, 'idling'), (2, 'terminated'), (3, 'idling'), (4, 'idling')"
+        )
+
+        def _inbound(agent_id: int, kind: str) -> int:
+            cur.execute(
+                "INSERT INTO inbound_messages (agent_id, content, kind, source) "
+                "VALUES (%s, '', %s, 'user') RETURNING id",
+                (agent_id, kind),
+            )
+            row = cur.fetchone()
+            assert row is not None
+            return row[0]
+
+        first_epoch = _inbound(1, "resurrect")
+        stale = _inbound(1, "terminate")
+        second_epoch = _inbound(1, "resurrect")
+        _inbound(2, "terminate")  # never resurrected: no epoch to record
+        _inbound(3, "chat")  # chat alone is not an epoch
+        lone_epoch = _inbound(4, "resurrect")
+
+        cur.execute(
+            sql.SQL(cast(LiteralString, _RESURRECT_FENCE_MIGRATION.read_text())),
+            prepare=False,
+        )
+        cur.execute("SELECT id, last_resurrect_inbound_id FROM agents_meta ORDER BY id")
+        fences = dict(cur.fetchall())
+        cur.execute("SELECT status FROM inbound_messages WHERE id = %s", (stale,))
+        stale_status = cur.fetchone()
+
+    assert first_epoch < stale < second_epoch
+    assert fences == {1: second_epoch, 2: None, 3: None, 4: lone_epoch}
+    assert stale_status == ("pending",)
 
 
 _SKILL_MATCH_CLEANUP_MIGRATION = (

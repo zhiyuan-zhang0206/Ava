@@ -131,6 +131,7 @@ def _prepare_resurrect_attempt(
     """Commit resurrection and its optional prompt before waking the host."""
     from shared.envelope import reject_unnegotiated_caller
     from shared.exec_owner_recovery import recover_local_resources
+    from shared.lifecycle_acceptance import supersede_lifecycle_for_resurrect
 
     reject_unnegotiated_caller(resurrected_by)
     recover_local_resources(agent_id, machine_name())
@@ -158,6 +159,20 @@ def _prepare_resurrect_attempt(
                 raise ResurrectBudgetExhausted(
                     f"agent {agent_id} has exhausted its auto-resurrect budget"
                 )
+        # The resurrection inbound is inserted before the observation check so
+        # its id can fence the new incarnation's epoch: every earlier unapplied
+        # lifecycle command is settled as superseded right here (issue #2158),
+        # and a command that never applied cannot defer this resurrection. A
+        # refusal below rolls the whole transaction back - fence included.
+        cur.execute(
+            "INSERT INTO inbound_messages (agent_id, content, kind, source) "
+            "VALUES (%s, '', 'resurrect', %s) RETURNING id",
+            (agent_id, resurrected_by),
+        )
+        resurrect_row = cur.fetchone()
+        if resurrect_row is None:
+            raise RuntimeError("resurrect lifecycle inbound INSERT returned no id")
+        supersede_lifecycle_for_resurrect(conn, agent_id, resurrect_row[0])
         if not observe_applied_termination(conn, agent_id, machine_name()):
             raise ResurrectExitDeferredError(
                 "outstanding lifecycle target has not been observed ended"
@@ -167,11 +182,6 @@ def _prepare_resurrect_attempt(
             agent_id,
             trigger_inbound_id=trigger_inbound_id,
             trigger_inbound_kind=trigger_inbound_kind,
-        )
-        cur.execute(
-            "INSERT INTO inbound_messages (agent_id, content, kind, source) "
-            "VALUES (%s, '', 'resurrect', %s)",
-            (agent_id, resurrected_by),
         )
         if prompt is not None:
             cur.execute(
