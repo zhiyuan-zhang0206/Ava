@@ -31,8 +31,9 @@ NULL and whose PID/resources are empty, after proving the local host absent.
 An applied old restart and claimed ordinary work remain untouched for normal
 cold admission. `maintenance_cold.py` also recognizes retired owned idle rows
 with an expired lease, or a completed legacy restart stranded in `restarting`.
-Both require an absent native host/legacy consumer, empty PID/resources/exec
-requests, no unresolved or failed lifecycle work, and the latest persisted v4
+Both require an absent native host/legacy consumer, empty PID/resources, no
+live or unattributable exec request evidence (a provably stale envelope is
+quarantined with a receipt, not deleted), and the latest persisted v4
 checkpoint at END (halted, no ready channels or pending tasks/writes). A legacy
 restart additionally requires a done, untargeted command and a later checkpoint
 carrying its exit intent. Preparation holds the metadata row lock and rechecks

@@ -149,9 +149,11 @@ def test_category_projection_matches_telemetry_whitelist() -> None:
     # (Task #2609's crash-dead hosted rows: host_turn_corpse_marked,
     # corpse_stamp_failed, corpse_reaper_terminated, corpse_reaper_failed,
     # corpse_reaper_publish_failed) raises it to 162; shell_ttl_renewed
-    # (Task #2647's explicit shell-TTL renewal) raises it to 163.
+    # (Task #2647's explicit shell-TTL renewal) raises it to 163;
+    # exec_request_quarantine (issue #2157's stale exec-evidence preservation)
+    # raises it to 164.
     assert "restart_cas_lost" not in _TELEMETRY_KINDS
-    assert len(_TELEMETRY_KINDS) == 163
+    assert len(_TELEMETRY_KINDS) == 164
 
 
 def test_delivery_wake_suppressed_payload_names_escalation_evidence() -> None:

@@ -198,6 +198,15 @@ class ExecChildBoot(TypedDict):
     duration_ms: float
 
 
+class ExecRequestQuarantine(TypedDict):
+    """`exec_request_quarantine` payload — stale exec request evidence preserved."""
+
+    reason: str
+    event_dir: str
+    sources: list[str]
+    vanished: list[str]
+
+
 class CompactionCompleted(TypedDict):
     """`compaction_completed` payload — one applied history replacement."""
 

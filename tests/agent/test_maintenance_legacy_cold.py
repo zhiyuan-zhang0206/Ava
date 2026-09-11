@@ -1,5 +1,6 @@
 """Real persisted ENDs distinguish retired consumers from unfinished work."""
 
+import json
 import os
 import subprocess
 import sys
@@ -242,6 +243,79 @@ def test_real_unrecorded_legacy_consumer_blocks_cold_prepare(
         finally:
             process.terminate()
             process.wait(timeout=5)
+    assert db_conn.execute("SELECT status FROM agents_meta WHERE id=%s", (agent,)).fetchone() == (
+        "restarting",
+    )
+
+
+def _aged_request(
+    exec_dir: Path, agent_id: int, *, owner: object | None, age_s: float = 3600.0
+) -> Path:
+    """One request envelope whose mtime predates any live birth window."""
+    agent_dir = exec_dir / str(agent_id)
+    agent_dir.mkdir(parents=True, exist_ok=True)
+    request = agent_dir / f"req-{uuid4().hex}.json"
+    envelope: dict[str, object] = {
+        "v": 1,
+        "code": "print('x')",
+        "agent_id": agent_id,
+        "timeout_s": 30.0,
+    }
+    if owner is not None:
+        envelope["incarnation"] = {"generation": str(uuid4()), "owner": str(owner)}
+    request.write_text(json.dumps(envelope))
+    stamp = request.stat().st_mtime - age_s
+    os.utime(request, (stamp, stamp))
+    return request
+
+
+def _exec_request_dirs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, Path]:
+    exec_dir = tmp_path / "exec"
+    quarantine = tmp_path / "quarantined-exec-requests"
+    monkeypatch.setattr("shared.exec_request_evidence.exec_run_dir", lambda: exec_dir)
+    monkeypatch.setattr(
+        "shared.exec_request_evidence.quarantined_exec_requests_dir", lambda: quarantine
+    )
+    return exec_dir, quarantine
+
+
+def test_superseded_exec_envelope_is_quarantined_and_cold_prepare_parks(
+    db_conn: psycopg.Connection[Any], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A superseded incarnation's envelope no longer fences cold preparation."""
+    agent = _retired(db_conn, restart=True)
+    exec_dir, quarantine = _exec_request_dirs(tmp_path, monkeypatch)
+    request = _aged_request(exec_dir, agent, owner=uuid4())
+    before = request.read_text()
+
+    _prepare(db_conn)
+
+    assert db_conn.execute("SELECT status FROM agents_meta WHERE id=%s", (agent,)).fetchone() == (
+        "idling",
+    )
+    assert not request.exists()
+    (moved,) = quarantine.glob(f"*/{agent}/{request.name}")
+    assert moved.read_text() == before
+    receipt = json.loads((moved.parent / "receipt.json").read_text())
+    assert receipt["reason"] == "maintenance cold prepare"
+    assert receipt["entries"][0]["source"] == str(request)
+
+
+def test_unattributable_exec_envelope_refuses_cold_prepare_with_disposition(
+    db_conn: psycopg.Connection[Any], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """No incarnation attribution: refuse, name the file, keep the evidence."""
+    agent = _retired(db_conn, restart=True)
+    exec_dir, quarantine = _exec_request_dirs(tmp_path, monkeypatch)
+    request = _aged_request(exec_dir, agent, owner=None)
+
+    with pytest.raises(RuntimeError, match="unsettled exec request") as excinfo:
+        _prepare(db_conn)
+
+    message = str(excinfo.value)
+    assert request.name in message
+    assert f"--agent {agent}" in message and "shared.exec_request_evidence" in message
+    assert request.exists() and not quarantine.exists()
     assert db_conn.execute("SELECT status FROM agents_meta WHERE id=%s", (agent,)).fetchone() == (
         "restarting",
     )
