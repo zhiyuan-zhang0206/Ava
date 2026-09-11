@@ -25,6 +25,27 @@ class AgentRuntimeSettings(EnvSettings):
         },
     )
 
+    checkpoint_max_blob_bytes: int = Field(
+        default=16 * 1024 * 1024,
+        alias="AVA_CHECKPOINT_MAX_BLOB_BYTES",
+        description=(
+            "Refuse to write any single checkpoint blob whose serialized size "
+            "exceeds this many bytes. Multi-megabyte inline content (e.g. images "
+            "in the messages channel) is rewritten in full on every checkpoint, "
+            "and a cross-network write of such a blob stalls at the database "
+            "statement timeout; the guard fails that write fast and loudly with "
+            "a clear error instead. Nothing is trimmed or dropped — the write "
+            "does not happen. Raise the limit only as a stopgap."
+        ),
+        gt=0,
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
     db_notify_wait_timeout_seconds: float = Field(
         default=30.0,
         alias="AVA_DB_NOTIFY_WAIT_TIMEOUT_SECONDS",
