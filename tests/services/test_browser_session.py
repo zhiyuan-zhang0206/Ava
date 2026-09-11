@@ -1,8 +1,8 @@
 """Unit tests for services/browser.session — the CDP gateway-session injector.
 
 The CDP and HTTP surfaces are faked; nothing here dials a real browser. Also
-covers the browser-mcp daemon's injection wiring (best-effort guards, refresh
-loop), which shares this module's file for proximity.
+covers the browser-mcp daemon's gateway-session wiring (best-effort guards,
+refresh loop) as implemented by ``services.browser.gateway_session``.
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ from typing import Any
 import httpx
 import pytest
 
-from services.browser import mcp_daemon
+from services.browser import gateway_session
 from services.browser import session as sess
 
 SECRET = "test-cluster-secret"  # noqa: S105
@@ -206,7 +206,7 @@ async def test_inject_raises_when_chrome_unreachable(monkeypatch: pytest.MonkeyP
         await sess.inject_session_cookie(9222, GATEWAY, SECRET)
 
 
-# --- daemon wiring ---
+# --- gateway-session wiring ---
 
 
 async def test_inject_once_skips_when_gateway_url_unset(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -218,9 +218,9 @@ async def test_inject_once_skips_when_gateway_url_unset(monkeypatch: pytest.Monk
     async def fake_inject(port: int, url: str, secret: str) -> None:
         calls.append((port, url, secret))
 
-    monkeypatch.setattr(mcp_daemon, "gateway_api_base", raise_missing)
-    monkeypatch.setattr(mcp_daemon, "inject_session_cookie", fake_inject)
-    await mcp_daemon._inject_gateway_session_once()  # must not raise
+    monkeypatch.setattr(gateway_session, "gateway_api_base", raise_missing)
+    monkeypatch.setattr(gateway_session, "inject_session_cookie", fake_inject)
+    await gateway_session._inject_gateway_session_once()  # must not raise
     assert calls == []
 
 
@@ -230,10 +230,10 @@ async def test_inject_once_skips_on_empty_secret(monkeypatch: pytest.MonkeyPatch
     async def fake_inject(port: int, url: str, secret: str) -> None:
         calls.append((port, url, secret))
 
-    monkeypatch.setattr(mcp_daemon, "gateway_api_base", lambda: GATEWAY)
-    monkeypatch.setattr(mcp_daemon, "inject_session_cookie", fake_inject)
-    monkeypatch.setattr(mcp_daemon.settings.data_plane, "cluster_secret", "")
-    await mcp_daemon._inject_gateway_session_once()
+    monkeypatch.setattr(gateway_session, "gateway_api_base", lambda: GATEWAY)
+    monkeypatch.setattr(gateway_session, "inject_session_cookie", fake_inject)
+    monkeypatch.setattr(gateway_session.settings.data_plane, "cluster_secret", "")
+    await gateway_session._inject_gateway_session_once()
     assert calls == []
 
 
@@ -243,21 +243,21 @@ async def test_inject_once_injects_with_settings(monkeypatch: pytest.MonkeyPatch
     async def fake_inject(port: int, url: str, secret: str) -> None:
         calls.append((port, url, secret))
 
-    monkeypatch.setattr(mcp_daemon, "gateway_api_base", lambda: GATEWAY)
-    monkeypatch.setattr(mcp_daemon, "inject_session_cookie", fake_inject)
-    monkeypatch.setattr(mcp_daemon.settings.data_plane, "cluster_secret", SECRET)
-    await mcp_daemon._inject_gateway_session_once()
-    assert calls == [(mcp_daemon.settings.services.browser_cdp_port, GATEWAY, SECRET)]
+    monkeypatch.setattr(gateway_session, "gateway_api_base", lambda: GATEWAY)
+    monkeypatch.setattr(gateway_session, "inject_session_cookie", fake_inject)
+    monkeypatch.setattr(gateway_session.settings.data_plane, "cluster_secret", SECRET)
+    await gateway_session._inject_gateway_session_once()
+    assert calls == [(gateway_session.settings.services.browser_cdp_port, GATEWAY, SECRET)]
 
 
 async def test_inject_once_swallows_injection_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     async def boom(port: int, url: str, secret: str) -> None:
         raise RuntimeError("cdp down")
 
-    monkeypatch.setattr(mcp_daemon, "gateway_api_base", lambda: GATEWAY)
-    monkeypatch.setattr(mcp_daemon, "inject_session_cookie", boom)
-    monkeypatch.setattr(mcp_daemon.settings.data_plane, "cluster_secret", SECRET)
-    await mcp_daemon._inject_gateway_session_once()  # must not raise
+    monkeypatch.setattr(gateway_session, "gateway_api_base", lambda: GATEWAY)
+    monkeypatch.setattr(gateway_session, "inject_session_cookie", boom)
+    monkeypatch.setattr(gateway_session.settings.data_plane, "cluster_secret", SECRET)
+    await gateway_session._inject_gateway_session_once()  # must not raise
 
 
 async def test_session_loop_injects_then_waits(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -269,9 +269,9 @@ async def test_session_loop_injects_then_waits(monkeypatch: pytest.MonkeyPatch) 
     async def stop_after_first(stop: asyncio.Event, timeout: float) -> None:
         stop.set()
 
-    monkeypatch.setattr(mcp_daemon, "_inject_gateway_session_once", fake_inject_once)
-    monkeypatch.setattr(mcp_daemon, "_await_stop_or_timeout", stop_after_first)
-    await mcp_daemon._gateway_session_loop(asyncio.Event())
+    monkeypatch.setattr(gateway_session, "_inject_gateway_session_once", fake_inject_once)
+    monkeypatch.setattr(gateway_session, "_await_stop_or_timeout", stop_after_first)
+    await gateway_session._gateway_session_loop(asyncio.Event())
     assert calls == ["inject"]
 
 
@@ -279,13 +279,13 @@ async def test_spawn_inject_tracks_task(monkeypatch: pytest.MonkeyPatch) -> None
     async def fake_inject_once() -> None:
         pass
 
-    monkeypatch.setattr(mcp_daemon, "_inject_gateway_session_once", fake_inject_once)
-    mcp_daemon._inject_tasks.clear()
-    mcp_daemon._spawn_inject()
-    assert len(mcp_daemon._inject_tasks) == 1
+    monkeypatch.setattr(gateway_session, "_inject_gateway_session_once", fake_inject_once)
+    gateway_session._inject_tasks.clear()
+    gateway_session._spawn_inject()
+    assert len(gateway_session._inject_tasks) == 1
     # let the task finish so its done-callback clears the set
-    await asyncio.gather(*mcp_daemon._inject_tasks)
-    assert mcp_daemon._inject_tasks == set()
+    await asyncio.gather(*gateway_session._inject_tasks)
+    assert gateway_session._inject_tasks == set()
 
 
 async def test_gateway_session_is_valid_accepts_authenticated_answer(
@@ -357,7 +357,7 @@ async def test_inject_records_last_injected_cookie(monkeypatch: pytest.MonkeyPat
         sess._last_injected_cookie[0] = None
 
 
-# --- daemon early-refresh wiring ---
+# --- gateway-session early-refresh wiring ---
 
 
 async def test_verify_once_injects_when_cookie_invalid(
@@ -368,14 +368,14 @@ async def test_verify_once_injects_when_cookie_invalid(
     async def fake_inject(port: int, url: str, secret: str) -> None:
         injected.append((port, url, secret))
 
-    monkeypatch.setattr(mcp_daemon, "gateway_api_base", lambda: GATEWAY)
-    monkeypatch.setattr(mcp_daemon.settings.data_plane, "cluster_secret", SECRET)
-    monkeypatch.setattr(mcp_daemon, "inject_session_cookie", fake_inject)
-    monkeypatch.setattr(mcp_daemon, "last_injected_cookie", lambda: ("ava_session", "stale"))
-    monkeypatch.setattr(mcp_daemon, "gateway_session_is_valid", _async_false)
+    monkeypatch.setattr(gateway_session, "gateway_api_base", lambda: GATEWAY)
+    monkeypatch.setattr(gateway_session.settings.data_plane, "cluster_secret", SECRET)
+    monkeypatch.setattr(gateway_session, "inject_session_cookie", fake_inject)
+    monkeypatch.setattr(gateway_session, "last_injected_cookie", lambda: ("ava_session", "stale"))
+    monkeypatch.setattr(gateway_session, "gateway_session_is_valid", _async_false)
 
-    await mcp_daemon._verify_gateway_session_once()
-    assert injected == [(mcp_daemon.settings.services.browser_cdp_port, GATEWAY, SECRET)]
+    await gateway_session._verify_gateway_session_once()
+    assert injected == [(gateway_session.settings.services.browser_cdp_port, GATEWAY, SECRET)]
 
 
 async def test_verify_once_skips_injection_when_cookie_valid(
@@ -386,13 +386,13 @@ async def test_verify_once_skips_injection_when_cookie_valid(
     async def fake_inject(port: int, url: str, secret: str) -> None:
         injected.append((port, url, secret))
 
-    monkeypatch.setattr(mcp_daemon, "gateway_api_base", lambda: GATEWAY)
-    monkeypatch.setattr(mcp_daemon.settings.data_plane, "cluster_secret", SECRET)
-    monkeypatch.setattr(mcp_daemon, "inject_session_cookie", fake_inject)
-    monkeypatch.setattr(mcp_daemon, "last_injected_cookie", lambda: ("ava_session", "fresh"))
-    monkeypatch.setattr(mcp_daemon, "gateway_session_is_valid", _async_true)
+    monkeypatch.setattr(gateway_session, "gateway_api_base", lambda: GATEWAY)
+    monkeypatch.setattr(gateway_session.settings.data_plane, "cluster_secret", SECRET)
+    monkeypatch.setattr(gateway_session, "inject_session_cookie", fake_inject)
+    monkeypatch.setattr(gateway_session, "last_injected_cookie", lambda: ("ava_session", "fresh"))
+    monkeypatch.setattr(gateway_session, "gateway_session_is_valid", _async_true)
 
-    await mcp_daemon._verify_gateway_session_once()
+    await gateway_session._verify_gateway_session_once()
     assert injected == []
 
 
@@ -404,13 +404,13 @@ async def test_verify_once_injects_when_no_cookie_known(
     async def fake_inject(port: int, url: str, secret: str) -> None:
         injected.append((port, url, secret))
 
-    monkeypatch.setattr(mcp_daemon, "gateway_api_base", lambda: GATEWAY)
-    monkeypatch.setattr(mcp_daemon.settings.data_plane, "cluster_secret", SECRET)
-    monkeypatch.setattr(mcp_daemon, "inject_session_cookie", fake_inject)
-    monkeypatch.setattr(mcp_daemon, "last_injected_cookie", lambda: None)
+    monkeypatch.setattr(gateway_session, "gateway_api_base", lambda: GATEWAY)
+    monkeypatch.setattr(gateway_session.settings.data_plane, "cluster_secret", SECRET)
+    monkeypatch.setattr(gateway_session, "inject_session_cookie", fake_inject)
+    monkeypatch.setattr(gateway_session, "last_injected_cookie", lambda: None)
 
-    await mcp_daemon._verify_gateway_session_once()
-    assert injected == [(mcp_daemon.settings.services.browser_cdp_port, GATEWAY, SECRET)]
+    await gateway_session._verify_gateway_session_once()
+    assert injected == [(gateway_session.settings.services.browser_cdp_port, GATEWAY, SECRET)]
 
 
 async def test_verify_once_swallows_check_failure(
@@ -424,13 +424,13 @@ async def test_verify_once_swallows_check_failure(
     async def boom(url: str, value: str) -> bool:
         raise RuntimeError("gateway down")
 
-    monkeypatch.setattr(mcp_daemon, "gateway_api_base", lambda: GATEWAY)
-    monkeypatch.setattr(mcp_daemon.settings.data_plane, "cluster_secret", SECRET)
-    monkeypatch.setattr(mcp_daemon, "inject_session_cookie", fake_inject)
-    monkeypatch.setattr(mcp_daemon, "last_injected_cookie", lambda: ("ava_session", "stale"))
-    monkeypatch.setattr(mcp_daemon, "gateway_session_is_valid", boom)
+    monkeypatch.setattr(gateway_session, "gateway_api_base", lambda: GATEWAY)
+    monkeypatch.setattr(gateway_session.settings.data_plane, "cluster_secret", SECRET)
+    monkeypatch.setattr(gateway_session, "inject_session_cookie", fake_inject)
+    monkeypatch.setattr(gateway_session, "last_injected_cookie", lambda: ("ava_session", "stale"))
+    monkeypatch.setattr(gateway_session, "gateway_session_is_valid", boom)
 
-    await mcp_daemon._verify_gateway_session_once()  # must not raise
+    await gateway_session._verify_gateway_session_once()  # must not raise
     assert injected == []
 
 
@@ -440,20 +440,20 @@ async def test_verify_once_skips_when_gateway_unconfigured(
     def raise_missing() -> str:
         raise RuntimeError("gateway_url unset")
 
-    monkeypatch.setattr(mcp_daemon, "gateway_api_base", raise_missing)
-    await mcp_daemon._verify_gateway_session_once()  # must not raise
+    monkeypatch.setattr(gateway_session, "gateway_api_base", raise_missing)
+    await gateway_session._verify_gateway_session_once()  # must not raise
 
 
 async def test_spawn_verify_tracks_task(monkeypatch: pytest.MonkeyPatch) -> None:
     async def fake_verify_once() -> None:
         pass
 
-    monkeypatch.setattr(mcp_daemon, "_verify_gateway_session_once", fake_verify_once)
-    mcp_daemon._verify_tasks.clear()
-    mcp_daemon._spawn_verify()
-    assert len(mcp_daemon._verify_tasks) == 1
-    await asyncio.gather(*mcp_daemon._verify_tasks)
-    assert mcp_daemon._verify_tasks == set()
+    monkeypatch.setattr(gateway_session, "_verify_gateway_session_once", fake_verify_once)
+    gateway_session._verify_tasks.clear()
+    gateway_session._spawn_verify()
+    assert len(gateway_session._verify_tasks) == 1
+    await asyncio.gather(*gateway_session._verify_tasks)
+    assert gateway_session._verify_tasks == set()
 
 
 @pytest.mark.parametrize(
@@ -475,8 +475,8 @@ def test_navigates_to_gateway(
     args: dict[str, Any],
     expected: bool,
 ) -> None:
-    monkeypatch.setattr(mcp_daemon, "gateway_api_base", lambda: GATEWAY)
-    assert mcp_daemon._navigates_to_gateway(name, args) is expected
+    monkeypatch.setattr(gateway_session, "gateway_api_base", lambda: GATEWAY)
+    assert gateway_session._navigates_to_gateway(name, args) is expected
 
 
 def test_navigates_to_gateway_false_when_gateway_base_unset(
@@ -485,8 +485,8 @@ def test_navigates_to_gateway_false_when_gateway_base_unset(
     def raise_missing() -> str:
         raise RuntimeError("gateway_url unset")
 
-    monkeypatch.setattr(mcp_daemon, "gateway_api_base", raise_missing)
-    assert mcp_daemon._navigates_to_gateway("navigate_page", {"url": f"{GATEWAY}/x"}) is False
+    monkeypatch.setattr(gateway_session, "gateway_api_base", raise_missing)
+    assert gateway_session._navigates_to_gateway("navigate_page", {"url": f"{GATEWAY}/x"}) is False
 
 
 async def _async_true(url: str, value: str) -> bool:

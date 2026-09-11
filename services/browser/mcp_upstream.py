@@ -2,9 +2,10 @@
 
 The daemon owns the Unix-socket multiplexer and the per-connection protocol;
 this module owns the one upstream session behind it: creating it (raced
-against the stop event and the connect timeout), and every teardown await
+against the stop event and the connect timeout), every teardown await
 bounded so a wedged child or SDK cleanup can never hold the daemon past the
-operator's stop budget (2026-09-09 #2043).
+operator's stop budget (2026-09-09 #2043), and the stop-aware sleep
+(`_await_stop_or_timeout`) every loop in this family waits on.
 """
 
 from __future__ import annotations
@@ -74,6 +75,12 @@ async def _bounded_stack_close(stack: AsyncExitStack | None, what: str) -> None:
         return
     with suppress(Exception):
         await _bounded(stack.aclose(), what)
+
+
+async def _await_stop_or_timeout(stop: asyncio.Event, timeout: float) -> None:
+    """Sleep for *timeout* seconds, waking early if *stop* is set."""
+    with suppress(asyncio.TimeoutError):
+        await asyncio.wait_for(stop.wait(), timeout=timeout)
 
 
 async def _create_upstream(
