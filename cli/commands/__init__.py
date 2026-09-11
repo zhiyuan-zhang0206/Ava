@@ -100,6 +100,9 @@ from cli.commands._setup import (
     _resolve_setup_field,
     _SetupField,
 )
+from cli.commands._start_readiness_preflight import (
+    preflight_start_readiness as _preflight_start_readiness,
+)
 from cli.commands.cluster import (
     cmd_cluster_mark_staging,
     cmd_cluster_pause,
@@ -256,6 +259,7 @@ __all__ = [
     "_pidfile_path",
     "_poll_until_unpaused",
     "_preflight_probes",
+    "_preflight_start_readiness",
     "_print_missing_setup_error",
     "_print_non_critical_unready_services",
     "_print_service_row",

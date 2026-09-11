@@ -108,6 +108,7 @@ from shared.migration_layout import _list_migration_files as _list_migration_fil
 from shared.migration_layout import _migration_stem as _migration_stem
 from shared.migration_layout import _tracked_migration_paths as _tracked_migration_paths
 from shared.migration_layout import required_migration_set as required_migration_set
+from shared.migration_layout import unreadable_migration_files as unreadable_migration_files
 from shared.migration_layout import untracked_migration_files as untracked_migration_files
 from shared.migration_layout import validate_migration_layout as validate_migration_layout
 from shared.migration_layout import validate_migrations_at_ref as validate_migrations_at_ref

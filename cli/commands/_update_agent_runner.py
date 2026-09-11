@@ -431,6 +431,25 @@ def _run_agent_runner_self_update_inner(  # noqa: PLR0915 — the self-update's 
         _ns._release_self_heal_pause()
         return RESTART_DECLINED_EXIT_CODE
 
+    # 3.1) start-readiness preflight: the read-only local checks of `ava start`
+    #    (step 5), moved in front of the stop — the private-tree skeleton, the
+    #    health ports another unit answers on (#977), the port-block scan (#603),
+    #    migration-file readability, the prod-checkout anchor, and the launcher's
+    #    executability. Each of them otherwise fails only after the stop, when a
+    #    refusal has no host left to serve (task #3156; the 2026-09-12 incident
+    #    found this the hard way on this very leg). Refusal is RESTART_DECLINED,
+    #    like the probes above: nothing was stopped. No revert — the target tree
+    #    is not at fault (contrast 2.5, where it is and reverting is the repair).
+    print("\n→ start readiness preflight (validate-before-kill, local state)")
+    if _ns._preflight_start_readiness(repo) != 0:
+        print(
+            "  ✗ refusing self-update: a stop now could leave this host unable to "
+            "start again — host still serving",
+            file=sys.stderr,
+        )
+        _ns._release_self_heal_pause()
+        return RESTART_DECLINED_EXIT_CODE
+
     # 3.5) resolve + vet the `ava` launcher BEFORE the stop, for the same reason
     #    as every other gate above: step 5 is the only thing that brings this host
     #    back up, and a missing launcher there raises FileNotFoundError out of a
