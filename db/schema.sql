@@ -1090,6 +1090,15 @@ CREATE TABLE host_deploy_state (
 COMMENT ON TABLE host_deploy_state IS
     'Host-level deploy posture + updater lease, one row per machine (replaces the cluster_paused file, updating.flag, session probing and updater-log-mtime liveness; R1 wave, Task #1021).';
 
+COMMENT ON COLUMN host_deploy_state.stranded_hold_since IS
+    'When this host''s pause became a STRANDED maintenance hold — an ownerless '
+    'hold left by a failed updater leg; NULL when no such record. Stamped once '
+    'by the pause controller and preserved until the verdict clears (task #3132).';
+
+COMMENT ON COLUMN host_deploy_state.stranded_hold_reason IS
+    'The updater verdict that left the stranded hold (e.g. "updater exited '
+    'rc=1"); display/alert context, never a judgment input (task #3132).';
+
 -- ─────────────── cluster_pin ───────────────
 -- The cluster's pinned commit (cluster_target_sha) — the standing record of which
 -- git commit the whole cluster should be on. The gateway writes it after a
