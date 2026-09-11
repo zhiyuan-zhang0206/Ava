@@ -49,6 +49,30 @@ class TestGet:
             resp = client.get("/api/config/default-model")
         assert resp.json() == {"model": "claude-sonnet-5", "source": "cluster"}
 
+    def test_unset_resolves_a_withdrawn_config_model(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A config chain naming a withdrawn id reports what actually runs: the
+        spawn boundary resolves it the same way (`factory.validate_model_config`)."""
+        from shared.config import settings
+
+        monkeypatch.setattr(settings.lm, "llm_model", "deepseek-v4-pro")
+        with TestClient(app) as client:
+            resp = client.get("/api/config/default-model")
+        assert resp.status_code == 200, resp.text
+        assert resp.json() == {"model": "deepseek-v4-flash", "source": "config"}
+
+    def test_resolves_a_withdrawn_cluster_row(self, db_conn: psycopg.Connection) -> None:
+        """A row written while its model was still spawnable keeps the id; the
+        endpoint still answers with the model a new agent actually runs."""
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "UPDATE cluster_defaults SET llm_model = %s WHERE id = 1", ("deepseek-v4-pro",)
+            )
+        db_conn.commit()
+        with TestClient(app) as client:
+            resp = client.get("/api/config/default-model")
+        assert resp.status_code == 200, resp.text
+        assert resp.json() == {"model": "deepseek-v4-flash", "source": "cluster"}
+
 
 class TestPut:
     def test_accepts_a_spawnable_model(self) -> None:

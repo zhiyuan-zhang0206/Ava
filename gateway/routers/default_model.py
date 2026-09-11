@@ -31,10 +31,19 @@ router = APIRouter()
 
 def _view(stored: str | None) -> DefaultModelView:
     """The effective default: the cluster row when set, else the ordinary config
-    chain showing through."""
+    chain showing through — both resolved through the registry's availability
+    resolution, the call the spawn boundary makes
+    (`shared/lm/factory.py:validate_model_config`). A withdrawn id registered
+    with a fallback (deepseek-v4-pro after #2140) therefore reports the model a
+    new agent actually runs, never the id that is dead on the wire."""
+    from shared.lm._plugin_providers import ensure_provider_plugins_loaded
+    from shared.lm.registry import resolve_available_model
+
+    # Plugin models must be registered before the registry lookup below.
+    ensure_provider_plugins_loaded()
     if stored is not None:
-        return DefaultModelView(model=stored, source="cluster")
-    return DefaultModelView(model=settings.lm.llm_model, source="config")
+        return DefaultModelView(model=resolve_available_model(stored), source="cluster")
+    return DefaultModelView(model=resolve_available_model(settings.lm.llm_model), source="config")
 
 
 @router.get("/api/config/default-model")
