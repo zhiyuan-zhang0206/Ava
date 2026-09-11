@@ -122,6 +122,11 @@ _EVENTS_RUNTIME: dict[str, EventSpec] = {
     "cancel": _audit("cancel", "in-flight turn cancelled"),
     "resurrect": _audit("resurrect", "terminated agent woken", retention_class="lineage"),
     "restart_completed": _audit("restart_completed", "restart finished"),
+    "hosted_legacy_adoption": _audit(
+        "hosted_legacy_adoption",
+        "a hosted successor replaced a legacy NULL-resource owner before lease "
+        "expiry on machine-local evidence (dead predecessor probe set)",
+    ),
     "compact": _audit("compact", "agent context compacted"),
     "circuit_breaker": _audit(
         "circuit_breaker",

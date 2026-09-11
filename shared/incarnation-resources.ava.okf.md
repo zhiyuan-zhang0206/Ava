@@ -32,7 +32,13 @@ resource set plus its applied lifecycle decision. A same-machine hosted process
 restart is the narrow exception: while holding the metadata lock, it may transfer
 an empty, unfrozen set only after the admission-captured host PID/birth is proven
 ended. A live exact host, an expired lease, a missing host identity, a frozen set,
-or any request refuses that handoff. No spawn stamps the birth marker:
+or any request refuses that handoff. A legacy NULL row keeps its unknown set
+(admission never mints an empty one) and may still be adopted before lease
+expiry only on the explicit evidence policy: renewal silence at or beyond
+`LEGACY_HOST_ADOPTION_SILENCE_S`, no live same-home agent-host daemon, and no
+live exec child of that agent; the proposal is re-pinned to the exact row state
+under the lock and recorded as a `hosted_legacy_adoption` audit event. NULL
+evidence alone never authorizes takeover. No spawn stamps the birth marker:
 enabling new births still requires the publication/all-writer boundary, never an
 environment flag or an installed revision.
 
