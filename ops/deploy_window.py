@@ -51,6 +51,36 @@ which the row does not carry), so the permissive/conservative polarity split
 between the two questions remains. Signal 1 stays the floor and this an
 addition to it, never a substitute.
 
+## Signal 2 reads the cohort, not every row that ever registered
+
+A posture row says a host transitioned *once*; it does not say anyone is coming
+back for the transition. On a live host that gap closes by itself: the
+stranded-pause controller and the stalled-updater reaper end an owner-less
+window, and a host that returns runs `ava start`, whose final step lands the
+posture on `idle`. **A machine the operator has excluded is the shape that
+outlives the gap**: the deployment does not visit it (the pause latch, the
+staging flag and the stop announcement all survive until the operator's own
+resume / start), and an excluded machine that is actually off — which is what a
+stop means — runs no controller at all, so its last posture can sit in the
+table indefinitely. Read as "a deploy is running", one such row refused every
+subsequent cluster update until
+someone either resumed the machine or learned to pass `--force` — the exact
+"trained to suppress the protection" shape the 2026-07-30 decision ends for the
+hung updater session (2026-09-10, machine `win`, frozen at `paused` since the
+operator stopped it on 09-09; issue #2160).
+
+So signal 2 treats a posture row as *competing* only where a rollout could be: a
+row on an excluded machine counts only with a live updater lease behind it — a
+live owner is a deploy whether or not the machine is excluded. The withhold is
+never silent: every skipped row leaves a log line naming the machine, its
+exclusion (reason and date), the posture and its age (`_log_excluded_posture`),
+and a row that does block carries the same freshness in `detail` — a live
+lease's expiry, or the age of a stale row — so the refusing sentence itself
+separates a live competitor from frozen history and names the exclusion when one
+is in play. A cohort machine keeps the old reading exactly: without a latch,
+staleness may be a half-updated checkout, and the cluster's own recovery — not
+this window — is what ends that state.
+
 ## Releasing the hold when it stops being warranted
 
 A settle hold that only expires on a timer is *a state that outlives the condition
@@ -84,6 +114,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+from datetime import datetime
 
 from shared.host_deploy_state import POSTURE_IDLE, HostDeployState, read_all
 from shared.log import logger
@@ -153,6 +184,95 @@ def _machines() -> list[tuple[str, str | None]]:
         return []
 
 
+def _read_excluded() -> dict[str, tuple[str, datetime | None]]:
+    """machine -> (reason, since) for the machines an operator latch excludes
+    from the rollout cohort; {} when the read fails.
+
+    The failure direction is the opposite of the reads below: this map can only
+    *withhold* a refusal, so "could not read" must not come back as "nothing is
+    excluded" — a Postgres hiccup would pardon exactly the stale row the
+    exclusion exists to identify. It degrades to reading every posture row as
+    before the refinement existed (issue #2160): a failed read refuses more,
+    never less.
+    """
+    try:
+        from shared.machine_exclusions import list_excluded_machines
+
+        return {name: (reason, since) for name, reason, since in list_excluded_machines()}
+    except Exception as exc:
+        logger.warning("[deploy-window] could not list excluded machines: {exc!r}", exc=exc)
+        return {}
+
+
+def _stamp(moment: datetime) -> str:
+    """One timestamp at second precision — the row's own date, so a reader can
+    match it against `host_deploy_state` without parsing microseconds."""
+    return moment.isoformat(timespec="seconds")
+
+
+def _age(now: datetime, then: datetime) -> str:
+    """A compact age (`43s` / `12m` / `25h` / `3d`) — the freshness half of a
+    deploy-window diagnostic, printed beside the exact timestamp."""
+    seconds = max(0.0, (now - then).total_seconds())
+    if seconds < 120:
+        return f"{seconds:.0f}s"
+    if seconds < 7200:
+        return f"{seconds / 60:.0f}m"
+    if seconds < 172800:
+        return f"{seconds / 3600:.0f}h"
+    return f"{seconds / 86400:.0f}d"
+
+
+def _exclusion_phrase(reason: str, since: datetime | None) -> str:
+    """`operator-excluded (paused since 2026-09-09T13:54:31+00:00)` — status and
+    date in one clause; the staging flag has no date column, so it reads bare."""
+    dated = f" since {_stamp(since)}" if since is not None else ""
+    return f"operator-excluded ({reason}{dated})"
+
+
+def _mid_deploy_detail(
+    name: str, state: HostDeployState, exclusion: tuple[str, datetime | None] | None
+) -> str:
+    """The refusal sentence: the machine, its posture, and — the issue #2160
+    diagnostics — the evidence's freshness, plus the exclusion status when one
+    is in play.
+
+    A live updater lease is dated by its expiry; without one the row is stale
+    and dated by its age. The exclusion appears only alongside a live lease,
+    because that is the only combination that still blocks: a reader of a
+    refusal must never have to guess why an excluded machine is in it.
+    """
+    if state.updater_live and state.updater_lease_expires_at is not None:
+        evidence = f"live updater lease, expires {_stamp(state.updater_lease_expires_at)}"
+        if exclusion is not None:
+            evidence += f"; {_exclusion_phrase(*exclusion)} — a live updater outranks the exclusion"
+    else:
+        evidence = (
+            f"no live updater lease; posture last written {_stamp(state.updated_at)} "
+            f"({_age(state.db_now, state.updated_at)} ago)"
+        )
+    return f"machine {name!r} is mid-deploy (host_deploy_state.posture={state.posture}, {evidence})"
+
+
+def _log_excluded_posture(
+    name: str, state: HostDeployState, exclusion: tuple[str, datetime | None]
+) -> None:
+    """The trailing record for a row signal 2 deliberately did NOT read as a
+    deploy — without it, "the excluded host is not blocking" and "the excluded
+    host was never read" are the same silence in the log."""
+    reason, since = exclusion
+    logger.info(
+        "[deploy-window] ignoring stale posture: machine {name!r} is {exclusion}; "
+        "posture={posture} last written {stamp} ({age} ago), no live updater lease "
+        "— excluded machines are not rollout targets, so this is not a competing deploy",
+        name=name,
+        exclusion=_exclusion_phrase(reason, since),
+        posture=state.posture,
+        stamp=_stamp(state.updated_at),
+        age=_age(state.db_now, state.updated_at),
+    )
+
+
 def _remote_orchestration() -> DeployWindow | None:
     """Any machine mid-deploy — signal 2, read from the host_deploy_state
     table instead of probing each machine's ops server (R1, Task #1021).
@@ -165,21 +285,31 @@ def _remote_orchestration() -> DeployWindow | None:
     it survives the whole window; a machine with no row has never transitioned
     and reads as idle. A stale `converging` row (updater crashed) keeps the
     signal active until the stranded-pause recovery unpauses the host — the
-    conservative direction, since its checkout may have moved. Never raises.
+    conservative direction, since its checkout may have moved.
+
+    **Operator exclusion is the one reading this signal withholds** (issue
+    #2160): a machine the operator has excluded from the cohort — pause latch,
+    staging flag, stop announcement — is not a rollout target, so a leftover
+    posture row on it is not a competing deployment, *unless* it carries a live
+    updater lease: a live owner is a deploy wherever it runs. (A running
+    excluded host may still return its own row to `idle`; a stopped one never
+    will — the filter does not depend on which.) See the module docstring
+    ("Signal 2 reads the cohort"). Never raises.
     """
     machines = _machines()
     if not machines:
         return None
     states = _read_deploy_states()
+    excluded = _read_excluded()
     for name, _url in machines:
         state = states.get(name)
-        if state is not None and state.posture != POSTURE_IDLE:
-            return DeployWindow(
-                active=True,
-                detail=(
-                    f"machine {name!r} is mid-deploy (host_deploy_state.posture={state.posture})"
-                ),
-            )
+        if state is None or state.posture == POSTURE_IDLE:
+            continue
+        exclusion = excluded.get(name)
+        if exclusion is not None and not state.updater_live:
+            _log_excluded_posture(name, state, exclusion)
+            continue
+        return DeployWindow(active=True, detail=_mid_deploy_detail(name, state, exclusion))
     return None
 
 
