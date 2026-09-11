@@ -272,11 +272,16 @@ def test_an_http_error_status_counts_as_answered(monkeypatch: pytest.MonkeyPatch
     """urlopen raises HTTPError on 4xx/5xx; the status is still an HTTP answer,
     so it takes the identity path (an occupant holds the port) rather than the
     nothing-answered respawnable DOWN (#2692's exact churn class)."""
+    import email.message
     import urllib.error
 
     def _raise_502(*_args: object, **_kwargs: object) -> object:
         raise urllib.error.HTTPError(
-            "http://127.0.0.1:9222/json/version", 502, "Bad Gateway", None, None
+            "http://127.0.0.1:9222/json/version",
+            502,
+            "Bad Gateway",
+            email.message.Message(),
+            None,
         )
 
     monkeypatch.setattr(probe_mod.urllib.request, "urlopen", _raise_502)  # pyright: ignore[reportUnknownArgumentType]
