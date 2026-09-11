@@ -13,8 +13,10 @@ promises, clients inherit) are only as strong as this test — it is the
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Iterator
+from typing import Any
+
 import pytest
-from fastapi.routing import APIRoute
 
 from gateway import _pause_policy
 from gateway.app import app
@@ -50,14 +52,34 @@ _EXPECTED_CONTROL_PLANE = frozenset(
 )
 
 
+def _iter_effective_routes(routes: Iterable[Any]) -> Iterator[Any]:
+    """Yield leaf route entries from fastapi's effective route tree.
+
+    fastapi >= 0.141 no longer yields ``APIRoute`` objects from ``app.routes``:
+    each router include surfaces a wrapper whose ``effective_candidates()``
+    nests until it reaches a leaf. Duck-typed (the wrapper classes are
+    fastapi-private), and recursed because includes can nest.
+    """
+    for route in routes:
+        candidates = getattr(route, "effective_candidates", None)
+        if candidates is None:
+            yield route
+        else:
+            yield from _iter_effective_routes(candidates())
+
+
 def _app_route_keys() -> set[tuple[str, str]]:
     """(method, path template) for every HTTP route on the app."""
     keys: set[tuple[str, str]] = set()
-    for route in app.routes:
-        if isinstance(route, APIRoute):
-            for method in route.methods:
-                if method in ("GET", "POST", "PUT", "PATCH", "DELETE"):
-                    keys.add((method, route.path))
+    for route in _iter_effective_routes(app.routes):
+        original = getattr(route, "original_route", route)
+        path = getattr(route, "path", None) or getattr(original, "path", None)
+        methods = getattr(original, "methods", None) or ()
+        if not path:
+            continue
+        for method in methods:
+            if method in ("GET", "POST", "PUT", "PATCH", "DELETE"):
+                keys.add((method, path))
     return keys
 
 

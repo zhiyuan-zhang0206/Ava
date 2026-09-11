@@ -130,7 +130,10 @@ dev = [
     "pytest-asyncio>=1.0",
     "pytest-playwright>=0.7.0",
     "pytest-xdist>=3.8",
-    "ruff>=0.15.12",
+    # Held at 0.15.x on purpose: ruff 0.16 stabilizes new lint rules (PLR0917,
+    # RUF036) and markdown code-block formatting (55 tracked docs drift) — a
+    # policy-shaped migration tracked separately (task #3162).
+    "ruff>=0.15.12,<0.16",
     "pytest-cov>=7.0",
     # starlette 1.2+ TestClient prefers httpx2 over httpx; declaring it here
     # makes the in-process TestClient (FastAPI re-exports starlette's) run on
