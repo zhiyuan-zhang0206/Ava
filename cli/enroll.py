@@ -14,7 +14,10 @@ import argparse
 import os
 import sys
 import tempfile
+from io import StringIO
 from pathlib import Path
+
+from dotenv import dotenv_values
 
 from shared import bootstrap
 from shared.browser_deps import browser_deps_notice, browser_deps_warning, ensure_browser_deps
@@ -225,15 +228,43 @@ def _print_health_port_outcome(
 
 
 def _browser_explicitly_disabled() -> bool:
-    """Return whether this unit deliberately disables the shared browser service."""
+    """Return whether this unit deliberately disables the shared browser service.
+
+    Values are decoded through the dotenv parser, line by line — the read
+    Settings itself performs: a quoted `"false"` or a value carrying a trailing
+    comment means what it denotes. The raw text kept the quotes and silently
+    read as "not disabled", so enroll repaired browser deps on units that turn
+    the browser off (#2973, same class as the #2046/#2704 reads). The last
+    decodable occurrence wins (dotenv's duplicate-key semantics); a line the
+    parser cannot decode contributes no value and is reported on stderr — never
+    a silent read.
+    """
     if not AVA_ENV_PATH.exists():
         return False
+    decoded: str | None = None
+    undecodable = False
     for line in AVA_ENV_PATH.read_text(encoding="utf-8").splitlines():
-        key, separator, value = line.partition("=")
-        if separator and key.strip() == "AVA_BROWSER_ENABLED":
-            # Keep this raw bootstrap check aligned with Pydantic's bool coercion.
-            return value.strip().lower() in {"false", "0", "no", "off", "f", "n"}
-    return False
+        key, separator, _ = line.partition("=")
+        if not separator or key.strip() != "AVA_BROWSER_ENABLED":
+            continue
+        # Decode through the dotenv parser so a quoted or comment-carrying value
+        # reads as the value it denotes — the raw text kept the quotes and
+        # disabled nothing (#2973).
+        value = dotenv_values(stream=StringIO(line), interpolate=False).get("AVA_BROWSER_ENABLED")
+        if value is None:
+            undecodable = True
+        else:
+            decoded = value
+    if undecodable:
+        print(
+            f"cannot decode an AVA_BROWSER_ENABLED value in {AVA_ENV_PATH}; that line "
+            "contributes no value (the settings parser drops it too)",
+            file=sys.stderr,
+        )
+    if decoded is None:
+        return False
+    # Every false-y string Pydantic's bool coercion accepts means disabled.
+    return decoded.strip().lower() in {"false", "0", "no", "off", "f", "n"}
 
 
 def _check_browser_deps() -> None:
