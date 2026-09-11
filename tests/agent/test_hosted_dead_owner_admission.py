@@ -153,7 +153,9 @@ async def test_reused_pid_identifies_old_host_exit_without_touching_replacement(
 ) -> None:
     native = psutil.Process()
     current = ResourceProcess(pid=native.pid, birth=native.create_time())
-    prior = ResourceProcess(pid=current.pid, birth=current.birth - 1)
+    # A recycled pid cannot start within the 2.0s identity tolerance: the
+    # predecessor's birth must lie beyond it to model a different process.
+    prior = ResourceProcess(pid=current.pid, birth=current.birth - 60)
     agent_id, _ = _seed(db_conn, prior)
     admitted = await admit_hosted_runtime(
         aops_pool,

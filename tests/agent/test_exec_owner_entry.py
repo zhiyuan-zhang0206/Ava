@@ -119,6 +119,39 @@ def test_eof_closes_exact_domain_before_user_code(tmp_path: Path) -> None:
             proc.wait(timeout=5)
 
 
+def test_ready_receipt_tolerates_whole_second_birth_drift(tmp_path: Path) -> None:
+    """The receipt's births are written by another process than the verifier.
+
+    A re-read within the create_time tolerance is still the same process; a
+    reading beyond it refuses as before.
+    """
+    context = _context(tmp_path)
+    proc = _start(tmp_path, context)
+    try:
+        ready = _ready(tmp_path, proc)
+        owner, root = ready.allocation.owner_process, ready.allocation.root_process
+        assert owner is not None
+        assert root is not None
+        drifted = ready.model_copy(
+            update={
+                "allocation": ready.allocation.model_copy(
+                    update={
+                        "owner_process": owner.model_copy(update={"birth": owner.birth + 1.0}),
+                        "root_process": root.model_copy(update={"birth": root.birth + 1.0}),
+                    }
+                )
+            }
+        )
+        live = psutil.Process(proc.pid).create_time()
+        validate_native_ready(drifted, proc.pid, live + 1.0, tmp_path / "owner.json")
+        with pytest.raises(ValueError, match="birth changed"):
+            validate_native_ready(drifted, proc.pid, live + 60.0, tmp_path / "owner.json")
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait(timeout=5)
+
+
 def test_completed_owner_exits_while_original_host_keeps_control_open(tmp_path: Path) -> None:
     """Normal completion must not leave a daemon holding buffered stdin at exit."""
     context = _context(tmp_path)
