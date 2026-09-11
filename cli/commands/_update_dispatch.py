@@ -38,6 +38,8 @@ def cmd_update(
     origin: str | None = None,
     rollout_log: str | None = None,
     mode: str = "smooth",
+    target: str | None = None,
+    target_sha: str | None = None,
 ) -> int:
     """`ava cluster update` — POST the operation to the gateway, from any host.
 
@@ -73,10 +75,40 @@ def cmd_update(
 
     `mode` (`--mode smooth|force`) is the agent-drain policy before the
     rollout restarts processes.
+
+    `target` (`--target <machine>`) triggers ONE machine's per-host update
+    instead of the whole-cluster rollout: POSTs the gateway's
+    `/api/cluster/update` relay, whose op spawns that machine's detached
+    updater (pause-first; no cluster-wide lease — the cluster pin does not
+    move). For bootstrap/convergence chases in mixed-version windows, where a
+    cluster-wide rollout must not run. Mutually exclusive with
+    `--restart-only`, `--local`, `--force`, `--dry-run` and `--mode`;
+    `target_sha` (`--target-sha`) pins the updater's force-checkout commit.
+
+    `dry_run=True` (`--dry-run`) also prints a read-only per-target cohort
+    readiness report before dispatching (`cli/commands/_update_cohort.py`).
     """
     from shared import maintenance
 
+    if target is None and target_sha is not None:
+        print("✗ --target-sha requires --target", file=sys.stderr)
+        return 2
     maintenance.require_released("cluster update")
+    if dry_run and target is None:
+        from cli.commands._update_cohort import print_cohort_readiness
+
+        print_cohort_readiness()
+    if target is not None:
+        return _dispatch_target(
+            target=target,
+            target_sha=target_sha,
+            restart_only=restart_only,
+            local=local,
+            force=force,
+            dry_run=dry_run,
+            mode=mode,
+            origin=origin,
+        )
     if local:
         # --local wins over --restart-only (their historical combination was the
         # in-process restart-only orchestration).
@@ -90,6 +122,46 @@ def cmd_update(
     if restart_only:
         return _post_cluster_restart(origin=origin, mode=mode)
     return _post_cluster_rollout(origin=origin, mode=mode, force=force, dry_run=dry_run)
+
+
+def _dispatch_target(
+    *,
+    target: str,
+    target_sha: str | None,
+    restart_only: bool,
+    local: bool,
+    force: bool,
+    dry_run: bool,
+    mode: str,
+    origin: str | None,
+) -> int:
+    """`--target` routing: validate the flag combination, then POST the per-host relay."""
+    conflicts = [
+        flag
+        for flag, present in (
+            ("--restart-only", restart_only),
+            ("--local", local),
+            ("--force", force),
+            ("--dry-run", dry_run),
+            ("--mode", mode != "smooth"),
+        )
+        if present
+    ]
+    if conflicts:
+        print(
+            "✗ --target triggers a single machine's per-host update via "
+            "POST /api/cluster/update and cannot be combined with "
+            f"{', '.join(conflicts)}; drop the flag(s) or drop --target for a "
+            "whole-cluster rollout.",
+            file=sys.stderr,
+        )
+        return 2
+    if origin is not None:
+        print(
+            "note: --origin is not transmitted by the per-host (--target) path; ignored",
+            file=sys.stderr,
+        )
+    return _post_cluster_update_target(target=target, target_sha=target_sha)
 
 
 def _run_in_process(
@@ -277,4 +349,80 @@ def _post_cluster_restart(*, origin: str | None, mode: str) -> int:
     body = resp.json()
     print(f"  ✓ dispatched: session={body.get('session')} log={body.get('log')}")
     print("  poll `ava cluster status` for the cluster to return.")
+    return 0
+
+
+def _post_cluster_update_target(*, target: str, target_sha: str | None) -> int:
+    """`ava cluster update --target` — trigger ONE machine's detached updater via
+    the gateway's per-host primitive (POST /api/cluster/update).
+
+    The same relay a Phase-B fan-out and a watchdog off-pin self-heal dial: the
+    gateway POSTs a `cluster_update` op to the target's ops server, which spawns
+    the detached updater (pause-first, no cluster-wide lease — the cluster pin
+    does not move). 202 lands the updater session's name + log; 503 means the
+    target's ops server was unreachable; 502 means the op ran but reported
+    failure (an updater may already be in flight there).
+    """
+    import httpx
+
+    from shared.http_dial import post as dial_post
+    from shared.machine import (
+        GatewayApiBaseMissing,
+        gateway_api_base,
+        gateway_auth_headers,
+    )
+
+    try:
+        url = f"{gateway_api_base()}/api/cluster/update"
+    except GatewayApiBaseMissing as exc:
+        print(f"✗ cannot resolve gateway URL: {exc}", file=sys.stderr)
+        return 1
+    params = {"target": target}
+    if target_sha is not None:
+        params["target_sha"] = target_sha
+    try:
+        resp = dial_post(
+            url,
+            params=params,
+            timeout=CLUSTER_DISPATCH_TIMEOUT_S,
+            headers=gateway_auth_headers(),
+        )
+    except httpx.TimeoutException as exc:
+        print(
+            f"✗ gateway at {url} did not respond within {CLUSTER_DISPATCH_TIMEOUT_S:g}s: {exc}",
+            file=sys.stderr,
+        )
+        return 1
+    except httpx.TransportError as exc:
+        print(f"✗ gateway unreachable at {url}: {exc}", file=sys.stderr)
+        return 1
+    if resp.status_code in (200, 202):
+        body = resp.json()
+        print(
+            f"  ✓ dispatched: target={target} session={body.get('session')} log={body.get('log')}"
+        )
+        if target_sha is not None:
+            print(f"    pinned: {target_sha}")
+        print("  poll `ava cluster status` for the target to converge.")
+        return 0
+    if resp.status_code == 503:
+        print(
+            f"✗ {resp.json().get('detail', f'machine {target!r} ops server unreachable')}",
+            file=sys.stderr,
+        )
+        return 1
+    if resp.status_code == 502:
+        print(
+            f"✗ {resp.json().get('detail', f'machine {target!r} cluster_update failed')} — "
+            "an updater may already be in flight there; retry after it settles",
+            file=sys.stderr,
+        )
+        return 1
+    try:
+        resp.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        print(f"✗ gateway returned HTTP {resp.status_code} for {url}: {exc}", file=sys.stderr)
+        return 1
+    body = resp.json()
+    print(f"  ✓ accepted: target={target} session={body.get('session')} log={body.get('log')}")
     return 0

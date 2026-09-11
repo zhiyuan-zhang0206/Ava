@@ -1109,6 +1109,16 @@ ava cluster down --path PATH   # stop the cluster at a home path (its gateway + 
 ava cluster destroy --path PATH [--drop-db]   # stop a cluster + free its registry slot (port block) + deregister its OS-scheduled jobs (health probe, both watchdog probes, autostart, logs maintenance); --drop-db also removes its pg/redis data dirs; refused for the default home ~/.ava
 ```
 
+`ava cluster update --target MACHINE [--target-sha SHA]` triggers ONE machine's
+per-host update through the gateway relay `POST /api/cluster/update` — the same
+per-host primitive a Phase-B fan-out and a watchdog off-pin self-heal use: the
+target's ops server spawns a detached, pause-first updater that takes no
+cluster-wide lease and does not move the cluster pin. Use it for
+bootstrap/convergence chases (see
+[bootstrap-update-runbook.md](bootstrap-update-runbook.md)) instead of a
+whole-cluster rollout; it is not combinable with `--restart-only`, `--local`,
+`--force`, `--dry-run` or `--mode`.
+
 `ava cluster update --dry-run` resolves and validates the target, runs the
 non-disruptive runner fetch and prepare checks, and reports the predicted
 maintenance window. It creates no recovery snapshot, pause/stop state, pin,
@@ -1124,7 +1134,12 @@ Phase B remains recorded and shown in the breakdown, but is excluded because it
 begins after readiness, while the gateway is serving, and measures remote-runner
 convergence rather than the maintenance window. Offsite publication of a real
 rollout's verified local snapshot runs detached only after recovery/finalization,
-so it is outside the maintenance window and cannot delay resumption.
+so it is outside the maintenance window and cannot delay resumption. It
+also prints a read-only per-target cohort readiness report before dispatch: it
+classifies every agent-runner target's non-terminated cohort and flags the
+held-wake shape that stalls a pre-fix runner (`cli/commands/_update_cohort.py`).
+In a mixed-version fleet, split the wave instead of rolling the whole cluster —
+see [bootstrap-update-runbook.md](bootstrap-update-runbook.md).
 
 Down-failure drill: see [down-failure-drill.md](down-failure-drill.md).
 
