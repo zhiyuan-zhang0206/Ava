@@ -986,8 +986,15 @@ sides derive the CDP port + socket path from `settings.browser_cdp_port`
   lacks any prerequisite stays alive and retries every five seconds instead of
   starting Chrome without encryption material. The browser probe and healthcheck
   expose that state as **DEGRADED** and preserve the waiting session rather than
-  respawning it. If the wait marker cannot be written, the probe and healthcheck
-  use the same bounded read-only readiness check instead. The gate never
+  respawning it. **Exception — wrong launch domain**: a daemon launched or
+  respawned from an agent/SSH chain runs outside the GUI login session
+  (`launchctl managername` ≠ `Aqua`), where the Keychain is unreachable no
+  matter how ready it is; the marker records that as `context_missing`, and the
+  healthcheck stops the stuck session and kickstarts the cluster's GUI-domain
+  autostart job (at most twice per episode, 600 seconds apart), deferring its
+  own in-context rebuild while the relaunch lands. If the wait marker cannot be
+  written, the probe and healthcheck use the same bounded read-only readiness
+  check instead. The gate never
   unlocks a Keychain or changes Chrome data;
   `Local State` receives existence, permission, and mtime checks only,
   with warning-only results.

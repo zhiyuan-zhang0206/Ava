@@ -268,6 +268,23 @@ def test_cdp_200_with_json_missing_browser_is_unreachable(
     assert answer.answered is True
 
 
+def test_an_http_error_status_counts_as_answered(monkeypatch: pytest.MonkeyPatch) -> None:
+    """urlopen raises HTTPError on 4xx/5xx; the status is still an HTTP answer,
+    so it takes the identity path (an occupant holds the port) rather than the
+    nothing-answered respawnable DOWN (#2692's exact churn class)."""
+    import urllib.error
+
+    def _raise_502(*_args: object, **_kwargs: object) -> object:
+        raise urllib.error.HTTPError(
+            "http://127.0.0.1:9222/json/version", 502, "Bad Gateway", None, None
+        )
+
+    monkeypatch.setattr(probe_mod.urllib.request, "urlopen", _raise_502)  # pyright: ignore[reportUnknownArgumentType]
+    answer = probe_mod._cdp_unreachable(9222)
+    assert answer.answered is True
+    assert "502" in (answer.reason or "")
+
+
 def test_a_refused_dial_is_unanswered(monkeypatch: pytest.MonkeyPatch) -> None:
     """Nothing answered: the respawnable DOWN, not the identity branch."""
     import urllib.error

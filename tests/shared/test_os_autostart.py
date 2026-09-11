@@ -35,6 +35,10 @@ def _stub(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     # Pin the home-path slug (label token) + this home's legacy-cleanup tokens.
     monkeypatch.setattr(os_autostart, "_home_slug", lambda: "ava-t-cafe0123")
     monkeypatch.setattr(os_autostart, "_legacy_tokens", lambda: ["t"])
+    # `relaunch_via_gui_domain` gates on IS_MACOS and CI runs this suite on
+    # Linux; pin it here so the relaunch tests describe the macOS behaviour on
+    # any host. The off-macOS refusal test overrides it back to False.
+    monkeypatch.setattr(os_autostart, "IS_MACOS", True)
 
 
 def test_plist_runs_ava_start_at_load() -> None:
@@ -323,3 +327,28 @@ def test_relaunch_via_gui_domain_refuses_off_macos(
     assert ok is False
     assert "macOS" in detail
     assert calls == []
+
+
+def test_relaunch_via_gui_domain_reports_a_failed_bootstrap(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A bootstrap that fails (say, the job is already loaded under another
+    domain) must be reported, and no kickstart is attempted — nothing is
+    loaded to kick."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    plist = tmp_path / "Library" / "LaunchAgents" / "com.ava.ava-t-cafe0123.autostart.plist"
+    plist.parent.mkdir(parents=True)
+    plist.write_text("plist")
+    calls = _fake_launchctl(
+        monkeypatch,
+        {
+            "print": types.SimpleNamespace(returncode=1, stdout="", stderr="Could not find"),
+            "bootstrap": types.SimpleNamespace(
+                returncode=5, stdout="", stderr="Bootstrap failed: 5: Input/output error"
+            ),
+        },
+    )
+    ok, detail = os_autostart.relaunch_via_gui_domain()
+    assert ok is False
+    assert "Bootstrap failed" in detail
+    assert [cmd[1] for cmd in calls] == ["print", "bootstrap"]

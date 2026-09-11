@@ -151,6 +151,11 @@ def _cdp_unreachable(port: int) -> _CdpAnswer:
             if resp.status != 200:
                 return _CdpAnswer(f"CDP {url} returned HTTP {resp.status}", answered=True)
             body = resp.read()
+    except urllib.error.HTTPError as exc:
+        # urlopen RAISES on any non-2xx status — but a status is still an HTTP
+        # answer, so it must take the identity path (an occupant holds the
+        # port), not the nothing-answered respawnable DOWN.
+        return _CdpAnswer(f"CDP {url} returned HTTP {exc.code}", answered=True)
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
         return _CdpAnswer(f"CDP unreachable on {url}: {type(exc).__name__}: {exc}", answered=False)
     try:
