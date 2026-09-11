@@ -35,7 +35,7 @@ tags:
 ### Observers (readers)
 
 - `cli/commands/_update_phase_b.py:_probe_verdict` — the stall verdict is the row, not the probe's wire fields: `idle` (or no row) → OK; live lease → still working; `paused` + no lease → transition window / legacy chain (never a stall); `paused` + expired lease or `converging` + no live lease → STALLED (2 confirmations). A row read failure is "cannot tell" (fail-soft).
-- `ops/deploy_window.py:_remote_orchestration` — deploy-window signal 2 (another machine mid-deploy) reads `read_all()` instead of probing each host's ops server: the old probe died with the daemon it observed mid self-update; the row is written outside the restarted services and survives the window. A stale `converging` row keeps the signal active — the conservative direction.
+- `ops/deploy_window.py:_remote_orchestration` — deploy-window signal 2 (another machine mid-deploy) reads `read_all()` instead of probing each host's ops server: the old probe died with the daemon it observed mid self-update; the row is written outside the restarted services and survives the window. A stale `converging` row keeps the signal active — the conservative direction, except on an operator-excluded machine, where it counts only with a live updater lease behind it: nothing recovers that posture while the exclusion lasts (issue #2160).
 - `ops/cluster_deploy.py:_updater_hung` — the stalled-updater reaper's liveness judgment: expired lease → hung; live lease → fine; no lease → legacy updater, fall back to log-mtime.
 ### Updater mutex
 
