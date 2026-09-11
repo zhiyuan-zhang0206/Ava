@@ -1,21 +1,16 @@
-"""Packing of registered local files into provider-native media blocks.
+"""Pure packing of registered local files into provider-native media blocks.
 
 ``shared.lm.factory`` owns tiered media-capability resolution so packing and
 message-endpoint image gating use the same core, plugin, and prefix answers.
-Heavy images are downscaled and JPEG-normalized here — the one construction
-point where attachment bytes enter a message — so one packed attach message
-stays small enough to checkpoint without stalling its database write.
 """
 
 from __future__ import annotations
 
 import base64
-import io
 import stat
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from pathlib import Path
 
-from shared.config import settings
 from shared.lm import provider_api
 from shared.lm._plugin_providers import ensure_provider_plugins_loaded
 from shared.lm.factory import attach_modalities_for_model
@@ -199,11 +194,6 @@ def pack_attachments(model: str, entries: list[AttachEntry]) -> AttachmentPack |
             state.skip(index, entry.label, _skip_for(attachment, read_error))
             continue
         assert data is not None  # noqa: S101 — paired result from _read_attachment
-        if attachment.media_type == "image":
-            downscaled = _downscale_image(data)
-            if downscaled is not None:
-                data = downscaled
-                attachment = replace(attachment, mime="image/jpeg")
         if reason := _delivery_error(model, state, len(data), attachment.media_type):
             state.skip(index, entry.label, _skip_for(attachment, reason, len(data)))
             continue
@@ -297,56 +287,6 @@ def _read_attachment(attachment: _AttachmentFile) -> tuple[bytes | None, str | N
         return attachment.path.read_bytes(), None
     except OSError:
         return None, "cannot read file"
-
-
-def _downscale_image(data: bytes) -> bytes | None:
-    """Return a bounded JPEG replacement for a heavy image, or None to keep the original.
-
-    An image at or under ``AVA_ATTACH_IMAGE_DOWNSCALE_TRIGGER_BYTES`` passes
-    through untouched. A heavier one is resized so its long edge fits
-    ``AVA_ATTACH_IMAGE_MAX_EDGE``, transparency flattens onto white, and the
-    pixels are re-encoded as JPEG at ``AVA_ATTACH_IMAGE_JPEG_QUALITY`` — the
-    format normalization that keeps one packed attach message from bloating
-    the checkpointed messages channel. Animated images keep every frame (the
-    normalization is stills-only), and EXIF orientation is applied so a
-    re-encoded photo stays upright. Returns None (deliver the original bytes
-    unchanged) when the image cannot be re-encoded or the encode is not
-    smaller.
-    """
-    from PIL import Image, ImageOps
-
-    if len(data) <= settings.lm.attach_image_downscale_trigger_bytes:
-        return None
-    try:
-        with Image.open(io.BytesIO(data)) as source:
-            if getattr(source, "is_animated", False):
-                return None
-            image = ImageOps.exif_transpose(source)
-            scale = settings.lm.attach_image_max_edge / max(image.size)
-            image = (
-                image.resize(
-                    (
-                        max(1, round(image.width * scale)),
-                        max(1, round(image.height * scale)),
-                    ),
-                    Image.Resampling.LANCZOS,
-                )
-                if scale < 1
-                else image
-            )
-            if image.mode in ("RGBA", "LA") or (image.mode == "P" and "transparency" in image.info):
-                rgba = image.convert("RGBA")
-                flattened = Image.new("RGB", rgba.size, (255, 255, 255))
-                flattened.paste(rgba, mask=rgba.getchannel("A"))
-                image = flattened
-            else:
-                image = image.convert("RGB")
-            buffer = io.BytesIO()
-            image.save(buffer, format="JPEG", quality=settings.lm.attach_image_jpeg_quality)
-    except (OSError, ValueError, Image.DecompressionBombError):
-        return None
-    encoded = buffer.getvalue()
-    return encoded if len(encoded) < len(data) else None
 
 
 def _media_type_for_mime(mime: str) -> str:
