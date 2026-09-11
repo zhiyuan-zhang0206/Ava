@@ -64,7 +64,21 @@ def _restart_daemon() -> DaemonProbe:
 
 def main() -> None:
     init_gateway_process(name="agent_host-healthcheck")
-    run_keepalive("agent-host", _log, probe=_probe, respawn=_restart_daemon)
+    # Two failed rounds, not one. `/healthz` is served from the same asyncio
+    # loop as up to ~50 concurrent agent turns, so a machine-level stall
+    # (memory pressure, page-ins) starves the probe without the host being
+    # dead: on 2026-09-11 a 10.6s stall turned one probe timeout into an
+    # immediate respawn of a live host. A sustained condition still converges —
+    # a wedged loop fails every round: round 1 logs `probe failed (1/2)`,
+    # round 2 respawns, and the backoff/breaker alert path is unchanged.
+    # Mirrors the gateway check's two-round policy.
+    run_keepalive(
+        "agent-host",
+        _log,
+        probe=_probe,
+        respawn=_restart_daemon,
+        consecutive_failures_before_respawn=2,
+    )
 
 
 if __name__ == "__main__":
