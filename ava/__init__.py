@@ -133,6 +133,15 @@ def _ensure_plugins_loaded() -> None:
     string, not a static `from agent import`) so this ava-layer module keeps NO
     static dependency on agent — the layering contract stays intact while the
     launched subprocess still self-loads its plugins.
+
+    Containment: the loader's own plugin-import loop is fail-soft (see
+    `agent/graph/_build.py`); anything still escaping it is an inventory/config
+    failure — a duplicate plugin name, a malformed `plugins_config.json`, a
+    plugin-config schema drift. None of those may kill an agent-launched
+    process at `import ava` the way the 2026-08-28 ava_ledger crash did (every
+    new process died); the failure is logged loudly and this process continues
+    without the plugin surface. The agent host surfaces the same failure at its
+    own boot. KeyboardInterrupt / SystemExit are not swallowed.
     """
     global _plugins_loaded  # noqa: PLW0603 — one-shot per-process latch
     if _plugins_loaded:
@@ -143,7 +152,27 @@ def _ensure_plugins_loaded() -> None:
     _plugins_loaded = True
     import importlib
 
-    importlib.import_module("agent.graph._build")._load_extensions()
+    try:
+        importlib.import_module("agent.graph._build")._load_extensions()
+    except Exception as exc:
+        from shared.log import logger
+
+        logger.error(
+            "[plugins] plugin load failed in this launched child — continuing "
+            "without plugin namespaces (the agent host reports the same "
+            "failure at its own boot)",
+            exc_info=exc,
+        )
+        # stderr besides the logger: a launched child usually has no loguru
+        # sink configured (shared/log.py removes the default handler), and its
+        # stderr is exactly what lands in the watcher / session log — the same
+        # channel the watcher boot's orphan-guard line uses. Containment
+        # without this line would be a silent swallow.
+        _sys.stderr.write(
+            f"[plugins] plugin load failed in this launched child "
+            f"({type(exc).__name__}: {exc}) — continuing without plugin "
+            f"namespaces\n"
+        )
 
 
 def _maybe_load_plugins_for_missing(name: str) -> bool:

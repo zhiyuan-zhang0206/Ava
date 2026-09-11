@@ -20,8 +20,12 @@ config.
 
 State lives in `$AVA_HOME/plugins_config.json`, scoped to the plugins actually
 present on that machine. Reads come from the local file only; an absent or
-malformed file degrades to defaults (logged) rather than stranding boot. The
-former cluster-wide DB singleton `plugins_config_overrides` was dropped in
+empty file means "every discovered plugin enabled" (in memory — the file is
+written only by the enable/disable writers). A *malformed* file is a hard
+error, not a fallback: the same rule `install_registry.load` applies to
+`installed.json` — a corrupt config is a state-loss signal, and silently
+degrading to all-enabled would also rewrite it from nothing. The former
+cluster-wide DB singleton `plugins_config_overrides` was dropped in
 decentralized-install **step 3**, so enable state is now fully per-machine.
 
 ## Schema
@@ -40,13 +44,19 @@ decentralized-install **step 3**, so enable state is now fully per-machine.
 
 | Situation | Result |
 |---|---|
-| config empty | startup writes defaults — every discovered plugin enabled |
-| config names a plugin not on disk | fail-fast `DanglingPlugin` at startup |
-| same name in both the built-in and external dir | fail-fast `DuplicatePlugin` at startup |
-| upgrade adds a new built-in not in the old config | auto-merged `enabled=true`, written back |
+| config empty | every discovered plugin treated as enabled (in memory, not written back) |
+| config names a plugin not on disk | strict loaders raise `DanglingPlugin`; runtime loaders (`load_for_runtime` — plugin loading, the provider factory, gateway views) warn and drop the entry |
+| same name in both the built-in and external dir | fail-fast `DuplicatePlugin` at discovery — a flat name map cannot pick a winner |
+| a discovered plugin missing from the config | merged in memory as `enabled=true` (not written back) |
+| malformed JSON / schema-invalid file | fail-fast — never a silent all-enabled fallback |
+
+A plugin disabled here is imported by **no** production path: host boot and
+graph build both read the enable set through `load_for_runtime`
+(issue #2161 — the boot loader used to ignore it).
 
 The failures are deliberate fail-fast: a config referring to something that
-isn't there is a real drift, not a condition to paper over with a default.
+isn't there is a real drift, a duplicate name is an ambiguity, and a corrupt
+file is state loss — none of them gets papered over with a default.
 
 ## Notes
 

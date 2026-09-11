@@ -19,6 +19,7 @@ from __future__ import annotations
 import importlib
 import sys
 from contextlib import contextmanager
+from pathlib import Path
 from typing import Any, Literal
 
 import psycopg
@@ -32,7 +33,7 @@ from gateway.routers._plugin_metrics import (
     _render_metric_query,
     _translate_macros,
 )
-from shared.plugin_metrics import MetricSpec
+from shared.plugin_metrics import MetricSpec, registered_metrics
 
 # A valid inspector query — the static-SQL shape (task #180 PR C): the
 # template era (macros + {event_name}/{category}/{{agent_id}} placeholders)
@@ -630,3 +631,39 @@ def test_in_process_loader_imports_shipped_metrics() -> None:
     assert len(core_specs) >= 16
     # a second call is the same objects (module cache, no re-registration)
     assert _plugin_metrics._load_plugin_metrics() == specs
+
+
+def test_in_process_loader_drops_partial_registrations_and_recovers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, loguru_records: list[dict[str, Any]]
+) -> None:
+    """A metrics.py that raises after registering leaves nothing behind: the
+    loader drops the dying attempt's entries, so retrying a fixed file on the
+    next call registers cleanly instead of dying on DuplicateMetric
+    (fail-soft, user ruling 2026-09-11)."""
+    plugin_dir = tmp_path / "drop_partial"
+    plugin_dir.mkdir()
+    (plugin_dir / "__init__.py").write_text("", encoding="utf-8")
+    metrics_py = plugin_dir / "metrics.py"
+    source = (
+        "from shared.plugin_metrics import MetricSpec, register_metric\n"
+        "register_metric(MetricSpec(name='drop_partial_one', title='Drop partial one', "
+        "event_name='task_update', category='audit', output=['inspector'], "
+        f"query={_STAT_QUERY!r}))\n"
+    )
+    metrics_py.write_text(source + "raise RuntimeError('metrics boom')\n", encoding="utf-8")
+
+    monkeypatch.setattr(_plugin_metrics, "_PLUGINS_DIR", tmp_path)
+    shipped_path = importlib.import_module("ava_builtins.plugins").__path__
+    monkeypatch.setattr("ava_builtins.plugins.__path__", [*shipped_path, str(tmp_path)])
+
+    _plugin_metrics._load_plugin_metrics()  # must not raise
+    assert [s for s in registered_metrics() if s.plugin == "drop_partial"] == []
+    assert any(
+        "drop_partial" in r["message"] and "failed to load" in r["message"] for r in loguru_records
+    )
+
+    metrics_py.write_text(source, encoding="utf-8")
+    specs = _plugin_metrics._load_plugin_metrics()
+    assert [(s.plugin, s.name) for s in specs if s.plugin == "drop_partial"] == [
+        ("drop_partial", "drop_partial_one")
+    ]

@@ -14,13 +14,15 @@ Wrap primitive:
 - clear_wraps restores originals + empties the registry (the reload-free teardown)
 - target errors: malformed dotted path, non-callable target
 
-scan_and_load: dir scan + plugin.py import side effects, enabled-set filtering.
+scan_and_load: dir scan + plugin.py import side effects, enabled-set filtering,
+relative-sibling imports, and the fail-soft skip of a broken plugin.
 
 A fake `ava.probe` namespace holds the wrap targets so the real SDK is never
 patched; the fixture clears wraps then removes the namespace.
 """
 
 import inspect
+import sys
 import textwrap
 import types
 from collections.abc import Iterator
@@ -356,12 +358,43 @@ def test_scan_and_load_skips_non_directories_and_missing_plugin_py(tmp_path: Pat
     assert scan_and_load(tmp_path) == ["valid"]
 
 
-def test_scan_and_load_propagates_plugin_errors(tmp_path: Path):
+def test_scan_and_load_skips_broken_plugin_and_loads_the_rest(
+    tmp_path: Path, loguru_records: list[dict]
+):
+    """Fail-soft contract (user ruling 2026-09-11, after the 2026-08-28 and
+    2026-09-10 incidents): a plugin that raises at import is skipped with a
+    loud report; the remaining plugins still load. This loader is the agent
+    host's boot path, where a propagating error used to take the whole host
+    down on every restart."""
     bad = tmp_path / "bad"
     bad.mkdir()
     (bad / "plugin.py").write_text("raise RuntimeError('plugin bug')")
-    with pytest.raises(RuntimeError, match="plugin bug"):
-        scan_and_load(tmp_path)
+    good = tmp_path / "good"
+    good.mkdir()
+    (good / "plugin.py").write_text("LOADED = True")
+
+    assert scan_and_load(tmp_path) == ["good"]
+    # loud: an ERROR naming the plugin
+    assert any("bad" in r["message"] and "failed to load" in r["message"] for r in loguru_records)
+    # the half-executed module left nothing behind
+    assert "plugins.bad.plugin" not in sys.modules
+
+
+def test_scan_and_load_relative_sibling_import_resolves(tmp_path: Path):
+    """The boot loader execs plugin.py under the same dotted package name the
+    graph-build loader uses, so a package-relative sibling import works on
+    both production paths — one loader contract, no dev/prod mismatch
+    (issue #2161: the boot loader exec'd a top-level name and died on
+    `from . import refresh`)."""
+    plugin = tmp_path / "codex_usage"
+    plugin.mkdir()
+    (plugin / "plugin.py").write_text("from . import refresh\nMARK = refresh.MARK\n")
+    (plugin / "refresh.py").write_text("MARK = 'x'\n")
+
+    assert scan_and_load(tmp_path) == ["codex_usage"]
+    module = sys.modules["plugins.codex_usage.plugin"]
+    assert module.MARK == "x"
+    assert sys.modules["plugins.codex_usage.refresh"].MARK == "x"
 
 
 def test_scan_and_load_expands_user_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):

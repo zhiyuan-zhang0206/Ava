@@ -92,7 +92,16 @@ def _plugin_services() -> tuple[ServiceSpec, ...]:
     can register too; it must import only light deps (ops / shared), never its
     own `plugin.py`, so this load does not drag the agent kernel into the ops
     process.
+
+    Fail-soft per plugin (user ruling 2026-09-11): a ``services.py`` that fails
+    to load, a file without a ``services()`` function, or a ``services()`` call
+    that raises is skipped with a loud report
+    (``shared.plugin_load_report``) — one broken plugin must not block
+    `ava start` / the watchdog roster for every other plugin. The session-name
+    collision guard stays fail-closed: no rule can pick a winner between two
+    owners of one session name.
     """
+    from shared import plugin_load_report
     from shared.plugins_config import installed_plugin_dirs
 
     specs: list[ServiceSpec] = []
@@ -100,13 +109,28 @@ def _plugin_services() -> tuple[ServiceSpec, ...]:
         services_py = plugin_dir / "services.py"
         if not services_py.exists():
             continue
-        module = _load_plugin_module(name, services_py)
+        try:
+            module = _load_plugin_module(name, services_py)
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except BaseException as exc:
+            plugin_load_report.report_plugin_load_failure(name, exc)
+            continue
         declare = getattr(module, "services", None)
         if declare is None:
-            raise PluginServiceError(
-                f"plugin {name!r} ships a services.py but it defines no `services()` function"
+            plugin_load_report.report_plugin_load_failure(
+                name,
+                PluginServiceError(
+                    f"plugin {name!r} ships a services.py but it defines no `services()` function"
+                ),
             )
-        specs.extend(declare())
+            continue
+        try:
+            specs.extend(declare())
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except BaseException as exc:
+            plugin_load_report.report_plugin_load_failure(name, exc)
     return tuple(specs)
 
 

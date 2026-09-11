@@ -155,6 +155,34 @@ def test_ensure_plugins_loaded_idempotent(monkeypatch: pytest.MonkeyPatch) -> No
     assert ava._plugins_loaded is True
 
 
+def test_ensure_plugins_loaded_contains_a_failing_load_chain(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    loguru_records: list[dict],
+) -> None:
+    """A failure escaping the load chain — duplicate plugin name, malformed
+    config, schema drift — must not kill an agent-launched child at `import
+    ava` (the 2026-08-28 ava_ledger crash shape: every new process died). It
+    is contained, reported loudly, and the process continues without plugin
+    namespaces; the stderr line is the always-visible channel because a
+    launched child usually has no loguru sink configured."""
+    import agent.graph._build as build
+    from shared.plugins_config import DuplicatePlugin
+
+    def boom() -> None:
+        raise DuplicatePlugin("plugin 'x' exists in both builtin and external roots")
+
+    monkeypatch.setattr(build, "_load_extensions", boom)
+
+    ava._ensure_plugins_loaded()  # must not raise
+
+    assert ava._plugins_loaded is True
+    assert any("failed in this launched child" in r["message"] for r in loguru_records)
+    stderr = capsys.readouterr().err
+    assert "plugin load failed in this launched child" in stderr
+    assert "DuplicatePlugin" in stderr
+
+
 def _spy_member_loader(
     monkeypatch: pytest.MonkeyPatch, *, namespace: str, member: str
 ) -> list[int]:

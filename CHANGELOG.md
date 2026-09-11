@@ -56,6 +56,22 @@ and the matching GitHub Releases, cut by `scripts/release_cut.py`.
   regardless of sys.path/cwd, and `ava plugins install`/`upgrade` land the
   plugin tree atomically (staging + rename, previous version restored on
   failure) so a half-installed plugin can no longer exist.
+- Plugin-load containment now covers every load path, not just the graph build
+  (issue #2161, user ruling 2026-09-11). The host-boot loader imports through
+  the same primitives as the graph-build loader — same dotted module name, same
+  `sys.modules` identity, same fail-soft skip + loud `plugin_load_failed`
+  report — so a broken `plugin.py` can no longer take the agent host down on
+  every restart (2026-09-10 agent-host incident), and a plugin disabled in
+  `plugins_config.json` is imported by no production path (the boot loader
+  previously ignored the enable set). The same per-plugin containment now
+  covers `provider.py`, `services.py`, `setup.py`, a built-in `metrics.py`, and
+  the launched child's `import ava` self-load. Deliberately still fail-closed
+  (no guess at operator intent): duplicate plugin names, a malformed
+  `plugins_config.json`, plugin-config schema drift, provider
+  registration-contract violations, and the provider loader's post-load
+  cross-model revalidation. The release probe substitutes the canonical
+  fail-soft reporter, so a candidate image with unloadable plugin code is
+  rejected instead of degraded.
 - Session-revoke suffix fallback could revoke the request's own session when
   called with its masked suffix (the logout-only guard was bypassed) and
   accepted any id shape of 8+ characters as a suffix. The fallback now only

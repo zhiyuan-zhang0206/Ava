@@ -159,3 +159,19 @@ def registered_inspect_widgets() -> list[InspectWidgetSpec]:
 def clear_registry() -> None:
     """Drop every registration — test fixtures."""
     _REGISTRY.clear()
+
+
+def drop_plugin_inspect_widgets(plugin: str) -> list[str]:
+    """Drop every widget registered by ``plugin``; return the dropped ids.
+
+    The gateway's inspector loader (`gateway/routers/_plugin_inspector.py`)
+    calls this after a failed ``inspector.py`` import: registration is not
+    transactional, so without the cleanup a module that raised mid-way would
+    leave its partial entries registered while every retry of the fixed file
+    died on ``DuplicateInspectWidget`` — the plugin stuck on the failed path
+    until process restart.
+    """
+    keys = [key for key in _REGISTRY if key[0] == plugin]
+    for key in keys:
+        del _REGISTRY[key]
+    return [widget_id for _plugin, widget_id in keys]
