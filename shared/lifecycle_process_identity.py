@@ -11,6 +11,7 @@ from typing import Any, cast
 
 import psutil
 
+from shared.proc_tree import create_time_matches
 from shared.session_record import SessionRecord, pid_starttime_ticks
 
 
@@ -54,7 +55,9 @@ def target_process_ended(payload: dict[str, Any], machine: str) -> bool:
         if record.starttime is not None:
             matches = record.identifies(record.pid)
             return matches is False
-        return process.create_time() != record.create_time
+        # Within tolerance the pid is still the same live process; only a
+        # reading beyond it proves the exit/reuse this observer reports.
+        return not create_time_matches(process.create_time(), record.create_time)
     except psutil.NoSuchProcess:
         return True
     except (psutil.AccessDenied, OSError):

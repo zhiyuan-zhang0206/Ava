@@ -25,6 +25,16 @@ from shared.session_record import SessionRecord, pid_starttime_ticks
 _CREATE_TIME_TOLERANCE_S = 2.0
 
 
+def create_time_matches(live: float, birth: float) -> bool:
+    """Whether a live create_time reading still claims the recorded birth.
+
+    Every comparison of a re-read create_time must carry the tolerance a
+    reading moves by for one live process (see `_CREATE_TIME_TOLERANCE_S`);
+    comparing persisted values that were never re-derived stays exact.
+    """
+    return abs(live - birth) <= _CREATE_TIME_TOLERANCE_S
+
+
 @dataclass(frozen=True)
 class OwnedProcess:
     pid: int
@@ -43,7 +53,7 @@ class OwnedProcess:
         must tolerate the whole-second moves a create_time reading makes while
         its process stays alive (see `_CREATE_TIME_TOLERANCE_S`).
         """
-        return abs(process.create_time() - self.birth) <= _CREATE_TIME_TOLERANCE_S
+        return create_time_matches(process.create_time(), self.birth)
 
     def live(self) -> bool:
         try:

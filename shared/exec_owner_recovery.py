@@ -20,6 +20,7 @@ from shared.incarnation_resources import (
     decode_resources,
 )
 from shared.paths import exec_run_dir
+from shared.proc_tree import create_time_matches
 from shared.runtime_incarnation import RuntimeIncarnation
 
 
@@ -28,10 +29,10 @@ def process_ended(identity: ResourceProcess) -> bool:
         process = psutil.Process(identity.pid)
         # PID reuse means the exact old process ended, not permission to signal
         # the replacement. This helper never signals or scans descendants.
-        return process.create_time() != identity.birth or process.status() in {
-            psutil.STATUS_DEAD,
-            psutil.STATUS_ZOMBIE,
-        }
+        # Within the create_time tolerance the pid is still the same process
+        # (macOS whole-second moves), so only a reading beyond it proves an end.
+        ended = not create_time_matches(process.create_time(), identity.birth)
+        return ended or process.status() in {psutil.STATUS_DEAD, psutil.STATUS_ZOMBIE}
     except psutil.NoSuchProcess:
         return True
     except psutil.AccessDenied:

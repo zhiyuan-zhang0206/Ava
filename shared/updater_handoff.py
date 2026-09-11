@@ -32,6 +32,7 @@ import psutil
 import shared.paths
 from shared.deploy_timing import NO_PROGRESS_TIMEOUT_S
 from shared.platform import file_lock
+from shared.proc_tree import create_time_matches
 from shared.updater_recovery import (
     BootstrapRecoveryJournal,
     NormalReleaseRecoveryJournal,
@@ -290,7 +291,10 @@ def write_bootstrap_recovery(generation: str, journal: dict[str, object]) -> Non
             current.status != "running"
             or current.generation != generation
             or current.owner_pid != process.pid
-            or current.owner_create_time != process.create_time()
+            or current.owner_create_time is None
+            # The owner re-reads its own wall-clock-derived birth: keep the
+            # create_time tolerance (macOS whole-second moves).
+            or not create_time_matches(process.create_time(), current.owner_create_time)
         ):
             raise BootstrapRecoveryInvalidError("bootstrap writer lost exact handoff ownership")
         existing = _read_bootstrap_unlocked()
@@ -341,7 +345,10 @@ def write_normal_release_recovery(generation: str, journal: dict[str, object]) -
             current.status != "running"
             or current.generation != generation
             or current.owner_pid != process.pid
-            or current.owner_create_time != process.create_time()
+            or current.owner_create_time is None
+            # The owner re-reads its own wall-clock-derived birth: keep the
+            # create_time tolerance (macOS whole-second moves).
+            or not create_time_matches(process.create_time(), current.owner_create_time)
         ):
             raise BootstrapRecoveryInvalidError("normal writer lost exact handoff ownership")
         recovery = _read_bootstrap_unlocked()
@@ -496,7 +503,7 @@ def owner_is_live(snapshot: UpdaterHandoffSnapshot) -> bool:
         return False
     except (psutil.AccessDenied, psutil.Error, OSError):
         return True
-    return abs(actual - snapshot.owner_create_time) <= 2.0
+    return create_time_matches(actual, snapshot.owner_create_time)
 
 
 def _bootstrap_clearable_unlocked(generation: str) -> bool:
