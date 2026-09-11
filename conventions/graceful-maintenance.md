@@ -194,7 +194,8 @@ independently verified every remote stop), and it refuses live terminals
 unless `--keep-terminals` asserts a separately verified work boundary. An
 ordinary `ava start` can also complete the stopped/starting recovery end to
 end: it restores service and resumes after its readiness gate, without the
-explicit hold.
+explicit hold — unless blocking failed receipts remain, in which case it
+refuses before launching services (clear those first, as for `resume --cancel`).
 
 `resume --cancel` refuses while blocking failed receipts remain. Fix the root
 cause first, then release the latch with the sanctioned repair — only on a
@@ -206,5 +207,6 @@ ava maintenance repair --operation <operation> --acquired-at <timestamp> [--oper
 ```
 
 The repair moves the failed receipts to `repaired` (both sides stay visible in
-`maintenance status`) and records operator identity in the journal; complete
-the release afterwards with `resume --cancel`.
+`maintenance status`), records operator identity in the journal, and releases
+the hold in the same command; if that release is interrupted (a partial
+release), `resume --cancel` completes it.
