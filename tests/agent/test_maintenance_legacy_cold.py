@@ -241,7 +241,9 @@ def test_real_unrecorded_legacy_consumer_blocks_cold_prepare(
             with pytest.raises(RuntimeError, match="native consumer"):
                 _prepare(db_conn)
         finally:
-            process.terminate()
+            # SIGKILL: SIGTERM=SIG_IGN inherited from the session shell
+            # would leave the child alive and hang this teardown.
+            process.kill()
             process.wait(timeout=5)
     assert db_conn.execute("SELECT status FROM agents_meta WHERE id=%s", (agent,)).fetchone() == (
         "restarting",
