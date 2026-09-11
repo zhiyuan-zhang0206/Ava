@@ -504,7 +504,8 @@
     "pending": "{count} 条待处理",
     "user": "用户",
     "scheduled": "计划任务",
-    "system": "系统"
+    "system": "系统",
+    "imageAlt": "待处理图片"
   },
   "control": {
     "guide": "指南",

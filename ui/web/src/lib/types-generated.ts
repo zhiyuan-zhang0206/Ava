@@ -694,7 +694,9 @@ export interface paths {
          *     first. These have not been claimed yet, so they are absent from the
          *     timeline snapshot; the web UI shows them as a compact strip above the
          *     composer. Once a message is claimed it enters the agent's messages and
-         *     appears in the timeline, dropping out of this list.
+         *     appears in the timeline, dropping out of this list. A multimodal
+         *     message carries its image reference urls (`images`) so the strip can
+         *     render thumbnails before the claim.
          *
          *     Returns an empty list for a nonexistent agent (this is a plain
          *     inbound-table read with no agent-existence precondition; a missing agent
@@ -6326,6 +6328,11 @@ export interface components {
          *     the timeline snapshot; the web UI shows them as a compact strip above
          *     the composer. `source` disambiguates origin (user / agent:N /
          *     watcher:N / ...) so the UI can label who queued it.
+         *
+         *     `images` carries the image reference urls of a multimodal inbound (None
+         *     when the message has no image) — the same gateway-relative upload urls
+         *     the timeline renders for a claimed message, so the strip shows
+         *     thumbnails with one contract.
          */
         PendingInbound: {
             /** Id */
@@ -6334,6 +6341,8 @@ export interface components {
             source: string | null;
             /** Content */
             content: string;
+            /** Images */
+            images: string[] | null;
             /**
              * Created At
              * Format: date-time

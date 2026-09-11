@@ -59,6 +59,10 @@ class InboundRow(NamedTuple):
     status: str
     created_at: datetime
     claimed_at: datetime | None = None
+    # JSONB sidecar, None when the column is NULL. Only readers that need it
+    # select the column (list_pending_inbounds — the multimodal
+    # `{"content_blocks": [...]}` shape); the rest leave it defaulted.
+    payload: dict[str, Any] | None = None
 
 
 def fetch_one(cur: psycopg.Cursor, context: str) -> tuple[Any, ...]:
@@ -479,10 +483,15 @@ def list_pending_inbounds(db: psycopg.Connection, agent_id: int) -> list[Inbound
     up in the timeline snapshot, so it is intentionally excluded here — the
     web UI renders these as a compact "pending" strip above the composer,
     distinct from the timeline.
+
+    `payload` rides along (unlike the other InboundRow readers) because the
+    strip renders multimodal messages: the endpoint extracts their image
+    reference urls from the content blocks so the browser can show
+    thumbnails before the message is claimed.
     """
     with db.cursor() as cur:
         cur.execute(
-            "SELECT id, content, kind, source, status, created_at, claimed_at "
+            "SELECT id, content, kind, source, status, created_at, claimed_at, payload "
             "FROM inbound_messages "
             "WHERE agent_id = %s AND status = 'pending' AND kind = 'chat' "
             "ORDER BY created_at ASC",

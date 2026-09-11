@@ -504,7 +504,8 @@
     "pending": "{count} pending",
     "user": "User",
     "scheduled": "scheduled",
-    "system": "system"
+    "system": "system",
+    "imageAlt": "pending image"
   },
   "control": {
     "guide": "Guide",
