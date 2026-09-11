@@ -38,10 +38,16 @@ def _wire(
     listening: dict[int, bool | None],
     holder: int | None = None,
     holder_facts: tuple[str, list[str] | None] | None = None,
+    answered: bool = False,
 ) -> None:
     """CDP reachability, the cluster's Chrome pids, who holds the port, and the
-    holder's own (name, argv) for the listener-first direction."""
-    monkeypatch.setattr(probe_mod, "_cdp_unreachable", lambda _port: cdp)  # pyright: ignore[reportUnknownArgumentType]
+    holder's own (name, argv) for the listener-first direction. `answered`
+    distinguishes a dial that got an HTTP response from one that got nothing."""
+
+    def _answer(_port: int) -> probe_mod._CdpAnswer:
+        return probe_mod._CdpAnswer(cdp, answered)
+
+    monkeypatch.setattr(probe_mod, "_cdp_unreachable", _answer)
     monkeypatch.setattr(probe_mod, "find_cluster_chrome", lambda _profile: chromes)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(probe_mod, "_listens_on", lambda pid, _port: listening[pid])  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(probe_mod, "_listener_pid", lambda _port: holder)  # pyright: ignore[reportUnknownArgumentType]
@@ -237,21 +243,42 @@ def _wire_cdp_body(monkeypatch: pytest.MonkeyPatch, body: bytes) -> None:
 
 def test_cdp_200_with_empty_body_is_unreachable(monkeypatch: pytest.MonkeyPatch) -> None:
     """The 2026-09-09 swap-pressure shape: HTTP 200 with an EMPTY body. A
-    status-only probe called that alive; the body check must call it dead."""
+    status-only probe called that alive; the body check must call it dead —
+    and record that something answered, so identity (not the status) decides
+    the verdict."""
     _wire_cdp_body(monkeypatch, b"")
-    assert probe_mod._cdp_unreachable(9222) is not None
+    answer = probe_mod._cdp_unreachable(9222)
+    assert answer.reason is not None
+    assert answer.answered is True
 
 
 def test_cdp_200_with_non_json_body_is_unreachable(monkeypatch: pytest.MonkeyPatch) -> None:
     _wire_cdp_body(monkeypatch, b"<html>not json</html>")
-    assert probe_mod._cdp_unreachable(9222) is not None
+    answer = probe_mod._cdp_unreachable(9222)
+    assert answer.reason is not None
+    assert answer.answered is True
 
 
 def test_cdp_200_with_json_missing_browser_is_unreachable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _wire_cdp_body(monkeypatch, b'{"WebKit-Version": "537.36"}')
-    assert probe_mod._cdp_unreachable(9222) is not None
+    answer = probe_mod._cdp_unreachable(9222)
+    assert answer.reason is not None
+    assert answer.answered is True
+
+
+def test_a_refused_dial_is_unanswered(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Nothing answered: the respawnable DOWN, not the identity branch."""
+    import urllib.error
+
+    def _refuse(*_args: object, **_kwargs: object) -> object:
+        raise urllib.error.URLError(ConnectionRefusedError(61, "Connection refused"))
+
+    monkeypatch.setattr(probe_mod.urllib.request, "urlopen", _refuse)  # pyright: ignore[reportUnknownArgumentType]
+    answer = probe_mod._cdp_unreachable(9222)
+    assert answer.reason is not None
+    assert answer.answered is False
 
 
 def test_cdp_200_with_valid_version_body_is_reachable(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -260,7 +287,7 @@ def test_cdp_200_with_valid_version_body_is_reachable(monkeypatch: pytest.Monkey
         b'"webSocketDebuggerUrl": "ws://127.0.0.1:9222/devtools/browser/x"}'
     )
     _wire_cdp_body(monkeypatch, body)
-    assert probe_mod._cdp_unreachable(9222) is None
+    assert probe_mod._cdp_unreachable(9222).reason is None
 
 
 def test_fake_alive_verdict_is_down_even_when_our_chrome_listens(
@@ -277,6 +304,102 @@ def test_fake_alive_verdict_is_down_even_when_our_chrome_listens(
     verdict = probe_mod.probe_browser(9222, _PROFILE)
     assert verdict.verdict is ProbeVerdict.DOWN
     assert "wedged" in verdict.detail
+
+
+def test_garbage_200_with_our_own_wedged_endpoint_is_down(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The 2026-09-09 shape with the identity arms stubbed plainly: our Chrome
+    holds the port, so the sweep + rebuild can heal it — DOWN, never terminal."""
+    _wire(
+        monkeypatch,
+        cdp="CDP :9222 answered 200 but the body is not JSON — wedged DevTools endpoint",
+        answered=True,
+        chromes=[42],
+        listening={42: True},
+        holder=42,
+    )
+    verdict = probe_mod.probe_browser(9222, _PROFILE)
+    assert verdict.verdict is ProbeVerdict.DOWN
+    assert verdict.terminal is False
+    assert "42" in verdict.detail
+    assert "wedged" in verdict.detail
+
+
+def test_garbage_200_with_a_foreign_listener_is_terminal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An unusable answer still proves the port has an occupant: when the
+    listener is not this cluster's Chrome, a respawn cannot bind the port and
+    must not be attempted once every 60s (task #2692)."""
+    _wire(
+        monkeypatch,
+        cdp="CDP :9222 answered 200 but the body is not JSON — wedged DevTools endpoint",
+        answered=True,
+        chromes=[],
+        listening={},
+        holder=999,
+        holder_facts=("chrome", ["--user-data-dir=/somebody-elses-profile"]),
+    )
+    verdict = probe_mod.probe_browser(9222, _PROFILE)
+    assert verdict.verdict is ProbeVerdict.PORT_TAKEN
+    assert verdict.terminal is True
+
+
+def test_garbage_200_with_nobody_identifiable_is_terminal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Nothing identifiable holds the port but something answered: terminal, the
+    same line the valid-payload path draws — fail closed, never churn."""
+    _wire(
+        monkeypatch,
+        cdp="CDP :9222 returned HTTP 502",
+        answered=True,
+        chromes=[],
+        listening={},
+    )
+    verdict = probe_mod.probe_browser(9222, _PROFILE)
+    assert verdict.verdict is ProbeVerdict.PORT_TAKEN
+    assert verdict.terminal is True
+
+
+def test_garbage_200_listener_identified_ours_by_its_own_argv(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The listener-first arm still applies on the unusable-payload branch: a
+    holder the profile walk missed is ours when its own argv says so."""
+    _wire(
+        monkeypatch,
+        cdp="CDP :9222 answered 200 but the body is not JSON — wedged DevTools endpoint",
+        answered=True,
+        chromes=[],  # the walk missed it
+        listening={},
+        holder=42,
+        holder_facts=(
+            "Google Chrome",
+            [f"--user-data-dir={_PROFILE}", "--remote-debugging-port=9222"],
+        ),
+    )
+    verdict = probe_mod.probe_browser(9222, _PROFILE)
+    assert verdict.verdict is ProbeVerdict.DOWN
+    assert "42" in verdict.detail
+
+
+def test_unanswered_cdp_stays_the_plain_respawnable_down(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A refused dial proves nothing answered — no occupant to identify, so the
+    verdict is the plain DOWN a respawn can act on."""
+    _wire(
+        monkeypatch,
+        cdp="CDP unreachable on http://127.0.0.1:9222/json/version: URLError: refused",
+        answered=False,
+        chromes=[42],
+        listening={42: False},
+    )
+    verdict = probe_mod.probe_browser(9222, _PROFILE)
+    assert verdict.verdict is ProbeVerdict.DOWN
+    assert verdict.terminal is False
 
 
 def test_cdp_url_is_the_one_definition() -> None:

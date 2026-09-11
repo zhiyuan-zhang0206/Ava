@@ -25,7 +25,12 @@ And even "a debuggable Chrome is up" is not established by the status code alone
 `_cdp_unreachable` validates the body, not just the 200. An orphaned Chrome that
 keeps the port answered while its DevTools endpoint is wedged serves a 200 with
 an empty or invalid body (the 2026-09-09 macmini swap-pressure outage: ~8 minutes
-of CDP silence from exactly that shape), and reads as DOWN.
+of CDP silence from exactly that shape), and reads as DOWN. That verdict is
+chosen by identity, not by the body: an unusable answer still proves the port has
+an occupant, so our own wedged endpoint heals through the sweep + rebuild (DOWN),
+while an occupant that is not this cluster's Chrome is terminal (PORT_TAKEN)
+instead of churning a respawn every round — the same line the valid-payload path
+draws (task #2692).
 
 ## Identity comes from the profile, and the port ties it to the answer
 
@@ -77,6 +82,7 @@ import json
 import logging
 import urllib.error
 import urllib.request
+from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
@@ -108,9 +114,25 @@ def cdp_url(port: int) -> str:
     return f"http://127.0.0.1:{port}/json/version"
 
 
-def _cdp_unreachable(port: int) -> str | None:
-    """None when a debuggable Chrome answers 200 *and* serves a real
-    `/json/version` payload on `port`; else why it did not.
+@dataclass(frozen=True)
+class _CdpAnswer:
+    """One CDP dial's outcome.
+
+    ``reason`` is None when a debuggable Chrome answers 200 *and* serves a real
+    `/json/version` payload; otherwise why it did not. ``answered`` records
+    whether an HTTP response came back at all, whatever its status or payload:
+    an answered dial proves the port has an occupant, which is what selects the
+    identity-discriminating verdict in `_probe_browser` — a refused connect or
+    a timeout proves nothing answered and stays the plain respawnable DOWN.
+    """
+
+    reason: str | None
+    answered: bool
+
+
+def _cdp_unreachable(port: int) -> _CdpAnswer:
+    """A debuggable Chrome answers 200 with a real `/json/version` payload on
+    `port`; else the reason it did not, and whether anything answered at all.
 
     A bare 200 is not "a debuggable Chrome is up". A Chrome that survived its
     daemon being killed (macmini swap-pressure incident 2026-09-09: HTTP 200,
@@ -127,21 +149,25 @@ def _cdp_unreachable(port: int) -> str | None:
     try:
         with urllib.request.urlopen(url, timeout=_CDP_TIMEOUT_S) as resp:  # noqa: S310 — fixed loopback CDP URL
             if resp.status != 200:
-                return f"CDP {url} returned HTTP {resp.status}"
+                return _CdpAnswer(f"CDP {url} returned HTTP {resp.status}", answered=True)
             body = resp.read()
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
-        return f"CDP unreachable on {url}: {type(exc).__name__}: {exc}"
+        return _CdpAnswer(f"CDP unreachable on {url}: {type(exc).__name__}: {exc}", answered=False)
     try:
         parsed: object = json.loads(body)
     except (json.JSONDecodeError, UnicodeDecodeError):
-        return f"CDP {url} answered 200 but the body is not JSON — wedged DevTools endpoint"
+        return _CdpAnswer(
+            f"CDP {url} answered 200 but the body is not JSON — wedged DevTools endpoint",
+            answered=True,
+        )
     browser = cast("dict[str, object]", parsed).get("Browser") if isinstance(parsed, dict) else None
     if not isinstance(browser, str) or not browser:
-        return (
+        return _CdpAnswer(
             f"CDP {url} answered 200 but the body is not a valid /json/version "
-            "payload (no Browser field) — wedged DevTools endpoint"
+            "payload (no Browser field) — wedged DevTools endpoint",
+            answered=True,
         )
-    return None
+    return _CdpAnswer(None, answered=True)
 
 
 def _process_facts(pid: int) -> tuple[str, list[str] | None]:
@@ -192,6 +218,28 @@ def _listens_on(pid: int, port: int) -> bool | None:
     return any(c.status == psutil.CONN_LISTEN and c.laddr and c.laddr[1] == port for c in conns)
 
 
+def _our_chrome_holds_port(port: int, profile: Path, found: list[int]) -> int | None:
+    """The pid of this cluster's Chrome owning the LISTEN socket on `port`, if
+    any — the identity arms of the alive path collapsed to the pid.
+
+    Listener-first (whoever owns the socket is what the dial reaches), then the
+    profile walk; "our Chrome exists" is not "our Chrome holds the port" (see
+    the module docstring), so only a positive identification answers. Used by
+    the answered-but-unusable-payload branch, where the only question is who
+    must clear the port. `found` is the caller's profile walk.
+    """
+    holder = _listener_pid(port)
+    if holder is not None:
+        if holder in found:
+            return holder
+        name, argv = _process_facts(holder)
+        return holder if is_cluster_chrome(name, argv, profile) else None
+    for pid in found:
+        if _listens_on(pid, port):
+            return pid
+    return None
+
+
 def probe_browser(port: int | None = None, profile: Path | None = None) -> DaemonProbe:
     """Probe the shared headed browser and verify the Chrome answering is ours,
     ALWAYS returning a verdict.
@@ -215,10 +263,13 @@ def _probe_browser(port: int | None, profile: Path | None) -> DaemonProbe:
 
     - **CDP unreachable — refused, timed out, or a 200 whose `/json/version`
       body is not valid JSON carrying `Browser` (the wedged-DevTools shape of
-      the 2026-09-09 swap-pressure outage)** → `DOWN`. `respawn_service` kills
-      the stale session and relaunches, and when the session is already gone
-      the healthcheck sweeps this cluster's Chrome before rebuilding — either
-      way a wedged endpoint is not called alive.
+      the 2026-09-09 swap-pressure outage)** → `DOWN` when nothing answered or
+      when the occupant identified as this cluster's Chrome (`respawn_service`
+      kills the stale session and relaunches; with the session already gone the
+      healthcheck sweeps this cluster's Chrome before rebuilding — either way a
+      wedged endpoint is not called alive). An unusable answer whose occupant
+      is NOT ours → `PORT_TAKEN`: something else holds the port, so a respawn
+      cannot win and only churns once per round (task #2692).
     - **CDP answers, but no Chrome of this cluster's profile listens there** →
       `PORT_TAKEN`, terminal. The occupant is another unit's browser or a Chrome
       on someone else's profile, and `services/browser/daemon.py` refuses to
@@ -229,14 +280,32 @@ def _probe_browser(port: int | None, profile: Path | None) -> DaemonProbe:
     port = settings.services.browser_cdp_port if port is None else port
     profile = profile_dir() if profile is None else profile
 
-    unreachable = _cdp_unreachable(port)
-    if unreachable is not None:
+    answer = _cdp_unreachable(port)
+    if answer.reason is not None:
         wait_reason = macos_readiness.degraded_wait_reason()
-        if wait_reason is not None:
+        prefix = (
+            f"ava-browser waiting for macOS startup readiness: {wait_reason}; "
+            if wait_reason is not None
+            else ""
+        )
+        if not answer.answered:
+            # Nothing answered: no occupant to clear, so a respawn (and the
+            # healthcheck's sweep + rebuild behind it) is the remedy.
+            return DaemonProbe.down(prefix + answer.reason)
+        # Something answered, so the port has an occupant even though its
+        # payload is unusable (or its status was not 200). Who it is decides
+        # whether this unit can recover at all — see _our_chrome_holds_port.
+        found = find_cluster_chrome(profile)
+        ours = _our_chrome_holds_port(port, profile, found)
+        if ours is not None:
             return DaemonProbe.down(
-                f"ava-browser waiting for macOS startup readiness: {wait_reason}; {unreachable}"
+                f"{prefix}{answer.reason}; the LISTEN socket is this cluster's Chrome "
+                f"(pid {ours}) — its endpoint is dead, and the sweep + rebuild clears it"
             )
-        return DaemonProbe.down(unreachable)
+        return DaemonProbe.port_taken(
+            f"identity mismatch on CDP :{port}: {answer.reason}, and the listener is not a "
+            f"Chrome on this cluster's profile {profile} — another process occupies the port"
+        )
 
     found = find_cluster_chrome(profile)
 

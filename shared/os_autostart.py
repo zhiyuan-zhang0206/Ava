@@ -60,7 +60,7 @@ from shared.os_cron import (
     os_jobs_enabled,
     skip_os_job,
 )
-from shared.platform import crontab_lock
+from shared.platform import IS_MACOS, crontab_lock
 
 
 def _home_slug() -> str:
@@ -324,3 +324,62 @@ def unregister_autostart(home: Path | None = None) -> None:
     from shared.platform_backend import get_backend
 
     get_backend().unregister_autostart(slug_for_home(home))
+
+
+def relaunch_via_gui_domain() -> tuple[bool, str]:
+    """Run this cluster's autostart job in the GUI login session, now.
+
+    The remedy for a service chain that lost the GUI login session context: a
+    daemon respawned from an agent/SSH chain inherits launchd's "Background"
+    management domain, where securityd denies every login-Keychain query, so a
+    service that needs the Keychain (the headed browser, via its readiness
+    gate) can never recover from there. Only launchd can cross domains, so this
+    ensures the cluster's autostart LaunchAgent is loaded in ``gui/<uid>`` and
+    kickstarts it — the job's `ava start` then runs under the GUI session and
+    rebuilds the affected sessions.
+
+    Writes nothing to disk: the plist is registered by converge. This only
+    loads it when the GUI domain does not have it yet (the manual step
+    ``_register_macos`` prints at registration) and starts it. macOS only.
+
+    The caller owns the surrounding discipline (stopping the stuck session so
+    `ava start` does not skip it, and bounding repeated kicks).
+
+    Returns:
+        ``(ok, detail)`` — ``detail`` names the job and domain on success, or
+        why the relaunch could not be started.
+    """
+    if not IS_MACOS:
+        return False, "the GUI domain only exists on macOS"
+    slug = _home_slug()
+    label = _autostart_label(slug)
+    plist_path = _autostart_plist_path(slug)
+    domain = f"gui/{os.getuid()}"
+    if not plist_path.exists():
+        return False, (f"no autostart plist at {plist_path} (registered on the next `ava start`)")
+    loaded = subprocess.run(  # noqa: S603
+        ["launchctl", "print", f"{domain}/{label}"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if loaded.returncode != 0:
+        bootstrapped = subprocess.run(  # noqa: S603
+            ["launchctl", "bootstrap", domain, str(plist_path)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if bootstrapped.returncode != 0:
+            error = bootstrapped.stderr.strip() or f"exit {bootstrapped.returncode}"
+            return False, f"launchctl bootstrap {label} failed: {error}"
+    kicked = subprocess.run(  # noqa: S603
+        ["launchctl", "kickstart", "-k", f"{domain}/{label}"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if kicked.returncode != 0:
+        error = kicked.stderr.strip() or f"exit {kicked.returncode}"
+        return False, f"launchctl kickstart {label} failed: {error}"
+    return True, f"{label} relaunched in {domain}"

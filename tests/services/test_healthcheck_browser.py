@@ -44,14 +44,16 @@ def _probes(
     *,
     probe: DaemonProbe,
     session: bool,
-) -> tuple[list[str], list[str], hc._Episode, _FakeClock]:
+) -> tuple[list[str], list[str], hc._Episode, _FakeClock, hc._ContextHeal]:
     """Wire probe/session/reap/restart to fixed answers; return the restarts, the
-    reaped pids, the episode reporter and its clock. Every test gets a fresh
-    state file (tmp_path) so no episode leaks between tests."""
+    reaped pids, the episode reporter, its clock, and the context-heal reporter.
+    Every test gets fresh state files (tmp_path) so no episode leaks between
+    tests."""
     restarts: list[str] = []
     reaped: list[str] = []
     clock = _FakeClock()
     episode = hc._Episode(tmp_path / "browser.json", now=clock)
+    heal = hc._ContextHeal(tmp_path / "browser-context-heal.json", now=clock)
 
     def _restart() -> bool:
         restarts.append("restart")
@@ -63,12 +65,39 @@ def _probes(
 
     monkeypatch.setattr(hc, "_probe", lambda: probe)
     monkeypatch.setattr(hc, "_session_alive", lambda: session)
-    monkeypatch.setattr(hc.macos_readiness, "degraded_wait_reason", lambda: None)
+    monkeypatch.setattr(hc.macos_readiness, "degraded_wait_state", lambda: None)
     monkeypatch.setattr(hc, "init_gateway_process", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(hc, "_restart_daemon", _restart)
     monkeypatch.setattr(hc, "reap_cluster_chrome", _reap)
     monkeypatch.setattr(hc, "_episode_reporter", lambda: episode)
-    return restarts, reaped, episode, clock
+    monkeypatch.setattr(hc, "_context_heal_reporter", lambda: heal)
+    return restarts, reaped, episode, clock, heal
+
+
+class _FakeBackend:
+    """Just enough session backend for the heal's stop; records the stop args."""
+
+    def __init__(self, stops: list[tuple[str, dict[str, object]]], *, ok: bool = True) -> None:
+        self._stops = stops
+        self._ok = ok
+
+    def kill_session(self, name: str, **kwargs: object) -> tuple[bool, str]:
+        self._stops.append((name, kwargs))
+        return (True, "graceful") if self._ok else (False, "survived")
+
+
+def _seed_context_wait(monkeypatch: pytest.MonkeyPatch, *, context_missing: bool = True) -> None:
+    """Answer the wait question with a structured state (macOS + context flag)."""
+    monkeypatch.setattr(hc, "IS_MACOS", True)
+    monkeypatch.setattr(
+        hc.macos_readiness,
+        "degraded_wait_state",
+        lambda: hc.macos_readiness.StartupReadiness(
+            ready=False,
+            reason="this process is not in the GUI login session (launchd managername: Background)",
+            context_missing=context_missing,
+        ),
+    )
 
 
 def test_healthy_when_session_and_our_chrome_up(
@@ -113,8 +142,10 @@ def test_waiting_for_macos_keychain_is_degraded_not_restarted(
     )
     monkeypatch.setattr(
         hc.macos_readiness,
-        "degraded_wait_reason",
-        lambda: "login Keychain is not ready",
+        "degraded_wait_state",
+        lambda: hc.macos_readiness.StartupReadiness(
+            ready=False, reason="login Keychain is not ready"
+        ),
     )
     with caplog.at_level(logging.WARNING, logger="services.healthchecks.browser"):
         hc.main()
@@ -336,7 +367,7 @@ def test_terminal_re_reports_when_the_episode_changes(
 ) -> None:
     """A new failure episode after a healthy stretch is a new first sight — the
     recovery round cleared the record, so the next terminal round reports."""
-    _, _, _, clock = _probes(
+    _, _, _, clock, _heal = _probes(
         monkeypatch, tmp_path, probe=DaemonProbe.up("chrome pid 1"), session=True
     )
     hc.main()  # healthy round: no episode open
@@ -363,7 +394,7 @@ def test_recovery_after_an_episode_logs_one_info_line(
 ) -> None:
     """The episode's end is worth one line: the operator sees the condition
     cleared, not just the ERRORs that opened it."""
-    _, _, _, clock = _probes(
+    _, _, _, clock, _heal = _probes(
         monkeypatch, tmp_path, probe=DaemonProbe.port_taken("foreign"), session=False
     )
     with pytest.raises(SystemExit):
@@ -387,7 +418,7 @@ def test_terminal_reminder_re_reports_after_the_interval(
 ) -> None:
     """An episode that outlives the reminder window re-reports once per window —
     the condition never goes silent for good, it just stops shouting per round."""
-    _, _, _, clock = _probes(
+    _, _, _, clock, _heal = _probes(
         monkeypatch, tmp_path, probe=DaemonProbe.port_taken("foreign"), session=False
     )
     with (
@@ -428,3 +459,186 @@ def test_corrupt_episode_record_fails_open(
     ):
         hc.main()
     assert len([r for r in caplog.records if r.levelno >= logging.ERROR]) == 1
+
+
+# --- the GUI-domain context heal (macOS, task #3149) ---
+
+
+def test_context_missing_wait_heals_via_the_gui_domain(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A daemon chain outside the GUI login session cannot recover in place: the
+    healthcheck stops the stuck session (otherwise the GUI `ava start` skips a
+    live one) and kicks the GUI-domain autostart job instead of respawning in
+    this chain."""
+    restarts, reaped, *_ = _probes(
+        monkeypatch, tmp_path, probe=DaemonProbe.down("waiting"), session=True
+    )
+    _seed_context_wait(monkeypatch)
+    stops: list[tuple[str, dict[str, object]]] = []
+    monkeypatch.setattr(hc, "get_backend", lambda: _FakeBackend(stops))
+    kicks: list[str] = []
+    monkeypatch.setattr(
+        hc,
+        "relaunch_via_gui_domain",
+        lambda: kicks.append("kick") or (True, "com.ava.t.autostart relaunched in gui/501"),
+    )
+    with caplog.at_level(logging.INFO, logger="services.healthchecks.browser"):
+        hc.main()
+    assert [name for name, _ in stops] == [hc.session_name("browser")]
+    assert stops[0][1]["graceful"] is True
+    assert stops[0][1]["expected"] is True
+    assert kicks == ["kick"]
+    assert restarts == [] and reaped == []
+    assert any("context heal" in r.getMessage() for r in caplog.records)
+
+
+def test_context_heal_defers_the_in_context_rebuild_while_relaunching(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Between the stop and the GUI relaunch the session is briefly gone; an
+    in-context rebuild there would undo the heal (`ava start` would find the
+    live session and skip the browser)."""
+    restarts, reaped, _, _clock, heal = _probes(
+        monkeypatch, tmp_path, probe=DaemonProbe.down("gone"), session=False
+    )
+    heal.record_attempt()  # a GUI relaunch was just kicked
+    with caplog.at_level(logging.DEBUG, logger="services.healthchecks.browser"):
+        hc.main()
+    assert restarts == [] and reaped == []
+    assert any("GUI-domain relaunch" in r.getMessage() for r in caplog.records)
+
+
+def test_context_heal_gives_up_after_the_budget_and_names_the_manual_fix(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A condition two kicks did not fix is not fixed by a third; the episode
+    reports once and stops kicking (the record survives until the chain is
+    back in context)."""
+    _, _, _, _clock, heal = _probes(
+        monkeypatch, tmp_path, probe=DaemonProbe.down("waiting"), session=True
+    )
+    _seed_context_wait(monkeypatch)
+    stops: list[tuple[str, dict[str, object]]] = []
+    monkeypatch.setattr(hc, "get_backend", lambda: _FakeBackend(stops))
+    kicks: list[str] = []
+    monkeypatch.setattr(
+        hc, "relaunch_via_gui_domain", lambda: kicks.append("kick") or (True, "kicked")
+    )
+    heal.record_attempt()
+    heal.record_attempt()
+
+    with (
+        caplog.at_level(logging.ERROR, logger="services.healthchecks.browser"),
+    ):
+        hc.main()
+    assert stops == [] and kicks == []
+    assert any("NOT REVIVABLE" in r.getMessage() for r in caplog.records)
+
+    caplog.clear()
+    with caplog.at_level(logging.ERROR, logger="services.healthchecks.browser"):
+        hc.main()
+    assert [r for r in caplog.records if r.levelno >= logging.ERROR] == []
+
+
+def test_context_heal_waits_out_the_cooldown_between_attempts(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Attempts are spaced: a kick needs time to land, so the next round inside
+    the cooldown only logs DEBUG — and when the cooldown passes with budget
+    left, the heal runs again."""
+    _, _, _, clock, heal = _probes(
+        monkeypatch, tmp_path, probe=DaemonProbe.down("waiting"), session=True
+    )
+    _seed_context_wait(monkeypatch)
+    stops: list[tuple[str, dict[str, object]]] = []
+    monkeypatch.setattr(hc, "get_backend", lambda: _FakeBackend(stops))
+    monkeypatch.setattr(hc, "relaunch_via_gui_domain", lambda: (True, "kicked"))
+    heal.record_attempt()
+
+    hc.main()
+    assert stops == []  # inside the cooldown: no second stop
+
+    clock.t += hc._CONTEXT_HEAL_COOLDOWN_S
+    hc.main()
+    assert [name for name, _ in stops] == [hc.session_name("browser")]
+
+
+def test_context_heal_budget_resets_once_the_chain_is_back_in_context(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """An exhausted record must not survive the condition: a healthy round (or a
+    context-healthy wait) ends the episode, so a later recurrence heals again."""
+    _, _, _, _clock, heal = _probes(
+        monkeypatch, tmp_path, probe=DaemonProbe.up("chrome pid 1"), session=True
+    )
+    heal.record_attempt()
+    heal.record_attempt()
+    hc.main()  # healthy round
+    assert heal.exhausted() is False
+
+    stops: list[tuple[str, dict[str, object]]] = []
+    monkeypatch.setattr(hc, "get_backend", lambda: _FakeBackend(stops))
+    monkeypatch.setattr(hc, "relaunch_via_gui_domain", lambda: (True, "kicked"))
+    _seed_context_wait(monkeypatch)
+    monkeypatch.setattr(hc, "_probe", lambda: DaemonProbe.down("waiting"))
+    monkeypatch.setattr(hc, "_session_alive", lambda: True)
+    hc.main()
+    assert [name for name, _ in stops] == [hc.session_name("browser")]
+
+
+def test_context_heal_reports_a_failed_gui_relaunch(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The stop succeeded but the kick could not start (say, no autostart job):
+    the attempt is spent and the failure is reported — it cannot be silent."""
+    _, _, _, _clock, _heal = _probes(
+        monkeypatch, tmp_path, probe=DaemonProbe.down("waiting"), session=True
+    )
+    _seed_context_wait(monkeypatch)
+    monkeypatch.setattr(hc, "get_backend", lambda: _FakeBackend([]))
+    monkeypatch.setattr(
+        hc,
+        "relaunch_via_gui_domain",
+        lambda: (False, "no autostart plist at ~/Library/LaunchAgents/x.plist"),
+    )
+    with caplog.at_level(logging.ERROR, logger="services.healthchecks.browser"):
+        hc.main()
+    assert any("could not relaunch" in r.getMessage() for r in caplog.records)
+
+
+def test_context_heal_does_not_kick_when_the_stop_fails(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A survivor session would make the GUI `ava start` skip the browser, so a
+    failed stop must not kick; the attempt is spent and reported."""
+    _, _, _, _clock, _heal = _probes(
+        monkeypatch, tmp_path, probe=DaemonProbe.down("waiting"), session=True
+    )
+    _seed_context_wait(monkeypatch)
+    monkeypatch.setattr(hc, "get_backend", lambda: _FakeBackend([], ok=False))
+    kicks: list[str] = []
+    monkeypatch.setattr(
+        hc, "relaunch_via_gui_domain", lambda: kicks.append("kick") or (True, "kicked")
+    )
+    with caplog.at_level(logging.ERROR, logger="services.healthchecks.browser"):
+        hc.main()
+    assert kicks == []
+    assert any("survived" in r.getMessage() for r in caplog.records)
+
+
+def test_context_missing_on_a_non_macos_unit_stays_a_plain_wait(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The GUI domain only exists on macOS; the heal must never run elsewhere."""
+    _, _, _, _clock, _heal = _probes(
+        monkeypatch, tmp_path, probe=DaemonProbe.down("waiting"), session=True
+    )
+    _seed_context_wait(monkeypatch)
+    monkeypatch.setattr(hc, "IS_MACOS", False)
+    stops: list[tuple[str, dict[str, object]]] = []
+    monkeypatch.setattr(hc, "get_backend", lambda: _FakeBackend(stops))
+    with caplog.at_level(logging.WARNING, logger="services.healthchecks.browser"):
+        hc.main()
+    assert stops == []
+    assert any("DEGRADED" in r.getMessage() for r in caplog.records)
