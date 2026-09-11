@@ -105,6 +105,37 @@ def test_ensure_ava_home_dirs_recursively_converges_private_data_trees(home, tmp
         assert stat.S_IMODE(target.parent.parent.stat().st_mode) == 0o700
 
 
+@pytest.mark.skipif(os.name == "nt", reason="unix sockets are POSIX-only")
+def test_ensure_ava_home_dirs_survives_a_workspace_socket(tmp_path: Path):
+    """A dead workspace socket must not abort the dir-skeleton step.
+
+    The 2026-09-12 host outage: converge raised on a leftover app.sock and the
+    updater exited rc=1 before its start step. macOS needs a short root under
+    /tmp for the ~104-byte AF_UNIX path limit; pytest's tmp_path is too long.
+    """
+    import shutil
+    import socket
+    import tempfile
+
+    root = Path(tempfile.mkdtemp(prefix="ava-converge-hd-", dir="/tmp"))
+    ava_home = root / "avahome"
+    socket_dir = ava_home / "workspaces" / "6063" / "f13b-poc"
+    socket_dir.mkdir(parents=True)
+    server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        socket_path = socket_dir / "app.sock"
+        server.bind(str(socket_path))
+
+        _converge._ensure_ava_home_dirs(_ctx(root, ava_home))
+
+        assert stat.S_ISSOCK(socket_path.lstat().st_mode)  # left in place
+        assert stat.S_IMODE((ava_home / "workspaces").stat().st_mode) == 0o700
+        assert (ava_home / "logs" / ".metadata_never_index").exists()
+    finally:
+        server.close()
+        shutil.rmtree(root)
+
+
 def test_ensure_ava_home_dirs_rejects_logs_symlink_before_writing_marker(home, tmp_path: Path):
     ava_home = tmp_path / "avahome"
     outside = tmp_path / "outside"
