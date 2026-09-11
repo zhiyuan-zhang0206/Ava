@@ -38,10 +38,14 @@ from shared.config import settings
 from shared.daemon_health import EXIT_PORT_TAKEN, DaemonProbe
 
 # The healthcheck module under test, its daemon name, its `settings.services`
-# pidfile attribute, and the respawn entry point a terminal verdict must not reach.
+# pidfile attribute, and the number of consecutive failed probe rounds its
+# `main()` requires before the respawn branch. agent-host waits two rounds
+# (services/healthchecks/agent_host.py — the 2026-09-11 starvation-respawn
+# guard); everything else still respawns on the first. A change to a check's
+# policy is expected to fail these pins and be re-derived here.
 _CASES = [
-    pytest.param(agent_host_hc, "agent_host", "agent_host_pidfile", id="agent-host"),
-    pytest.param(ops_hc, "ops", "ops_pidfile", id="ops"),
+    pytest.param(agent_host_hc, "agent_host", "agent_host_pidfile", 2, id="agent-host"),
+    pytest.param(ops_hc, "ops", "ops_pidfile", 1, id="ops"),
 ]
 
 
@@ -58,6 +62,17 @@ def _quiet_and_inert(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(mod, "init_gateway_process", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
 
 
+@pytest.fixture(autouse=True)
+def _fresh_keepalive_state() -> None:
+    """`run_keepalive`'s failure count and backoff live per label in
+    `shared.service_respawn`; the tests here drive the real `main()` and share
+    labels, so each test starts clean and round counts stay exact."""
+    from shared.service_respawn import _reset_keepalive_state
+
+    for label in ("agent-host", "ops"):
+        _reset_keepalive_state(label)
+
+
 def _point_at(
     mod: object, port: int, pidfile: Path, pidfile_attr: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -72,11 +87,12 @@ def _point_at(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(("mod", "name", "pidfile_attr"), _CASES)
+@pytest.mark.parametrize(("mod", "name", "pidfile_attr", "failed_rounds_before_respawn"), _CASES)
 async def test_a_foreign_clusters_daemon_on_the_port_is_terminal(
     mod: object,
     name: str,
     pidfile_attr: str,
+    failed_rounds_before_respawn: int,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
@@ -108,11 +124,12 @@ async def test_a_foreign_clusters_daemon_on_the_port_is_terminal(
         await daemon_health.stop_health_server(server)
 
 
-@pytest.mark.parametrize(("mod", "name", "pidfile_attr"), _CASES)
+@pytest.mark.parametrize(("mod", "name", "pidfile_attr", "failed_rounds_before_respawn"), _CASES)
 def test_nothing_listening_still_respawns(
     mod: object,
     name: str,
     pidfile_attr: str,
+    failed_rounds_before_respawn: int,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -124,16 +141,21 @@ def test_nothing_listening_still_respawns(
         mod, "_restart_daemon", lambda: (respawns.append(1), DaemonProbe.up("pid 1"))[1]
     )
 
-    mod.main()  # type: ignore[attr-defined]
+    # The check's own budget of failed rounds, driven in-process the way the
+    # real watchdog drives it across 60s rounds: a check that waits two rounds
+    # must still revive the daemon on the second.
+    for _ in range(failed_rounds_before_respawn):
+        mod.main()  # type: ignore[attr-defined]
 
     assert respawns == [1]
 
 
-@pytest.mark.parametrize(("mod", "name", "pidfile_attr"), _CASES)
+@pytest.mark.parametrize(("mod", "name", "pidfile_attr", "failed_rounds_before_respawn"), _CASES)
 def test_a_respawn_that_never_comes_up_reports_and_returns(
     mod: object,
     name: str,
     pidfile_attr: str,
+    failed_rounds_before_respawn: int,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
@@ -146,18 +168,22 @@ def test_a_respawn_that_never_comes_up_reports_and_returns(
     monkeypatch.setattr(mod, "_restart_daemon", lambda: DaemonProbe.down("healthz unreachable"))
 
     with caplog.at_level("WARNING"):
-        mod.main()  # type: ignore[attr-defined] — no SystemExit
+        # Through the check's failed-round budget; the round that finally
+        # attempts the respawn is the one that reports it.
+        for _ in range(failed_rounds_before_respawn):
+            mod.main()  # type: ignore[attr-defined] — no SystemExit
     assert (
         "daemon restart FAILED (healthz unreachable) — next respawn attempt in 60s" in caplog.text
     )
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(("mod", "name", "pidfile_attr"), _CASES)
+@pytest.mark.parametrize(("mod", "name", "pidfile_attr", "failed_rounds_before_respawn"), _CASES)
 async def test_the_terminal_state_self_clears_with_no_stored_state(
     mod: object,
     name: str,
     pidfile_attr: str,
+    failed_rounds_before_respawn: int,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -180,10 +206,12 @@ async def test_the_terminal_state_self_clears_with_no_stored_state(
     finally:
         await daemon_health.stop_health_server(server)
 
-    # Round two: the occupant is gone. No reset call, no state file, no flag.
+    # Rounds two+: the occupant is gone. No reset call, no state file, no flag —
+    # only the check's own failed-round budget, then the respawn.
     respawns: list[int] = []
     monkeypatch.setattr(
         mod, "_restart_daemon", lambda: (respawns.append(1), DaemonProbe.up("pid 1"))[1]
     )
-    await asyncio.to_thread(mod.main)  # type: ignore[attr-defined]
+    for _ in range(failed_rounds_before_respawn):
+        await asyncio.to_thread(mod.main)  # type: ignore[attr-defined]
     assert respawns == [1]
