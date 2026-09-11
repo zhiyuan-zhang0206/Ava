@@ -19,6 +19,7 @@ import psutil
 
 from shared.log import logger
 from shared.platform import LockTimeoutError, file_lock
+from shared.proc_tree import stable_create_time
 from shared.pty_sessions._paths import (
     host_identity,
     host_starttime,
@@ -57,7 +58,7 @@ def _host_is_alive(path: Path) -> bool:
         recorded_starttime = host_starttime(path)
         if recorded_starttime is not None:
             return pid_starttime_ticks(host_pid) == recorded_starttime
-        return abs(proc.create_time() - host_create) <= _CREATE_TIME_TOLERANCE_S
+        return abs(stable_create_time(proc) - host_create) <= _CREATE_TIME_TOLERANCE_S
     except psutil.NoSuchProcess:
         return False
     except psutil.Error:
@@ -86,7 +87,7 @@ def _record_alive(rec: SessionRecord, path: Path) -> bool:
         if rec.starttime is not None:
             if rec.identifies(rec.pid) is not True:
                 return False
-        elif abs(proc.create_time() - rec.create_time) > _CREATE_TIME_TOLERANCE_S:
+        elif abs(stable_create_time(proc) - rec.create_time) > _CREATE_TIME_TOLERANCE_S:
             return False
     except psutil.Error:
         return False
@@ -143,7 +144,7 @@ def _kill_recorded_shell(rec: SessionRecord) -> None:
         if rec.starttime is not None:
             if rec.identifies(rec.pid) is not True:
                 return
-        elif abs(proc.create_time() - rec.create_time) > _CREATE_TIME_TOLERANCE_S:
+        elif abs(stable_create_time(proc) - rec.create_time) > _CREATE_TIME_TOLERANCE_S:
             return
     except psutil.Error:
         return

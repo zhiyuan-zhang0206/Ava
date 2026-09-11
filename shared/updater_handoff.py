@@ -32,7 +32,7 @@ import psutil
 import shared.paths
 from shared.deploy_timing import NO_PROGRESS_TIMEOUT_S
 from shared.platform import file_lock
-from shared.proc_tree import create_time_matches
+from shared.proc_tree import create_time_matches, stable_create_time
 from shared.updater_recovery import (
     BootstrapRecoveryJournal,
     NormalReleaseRecoveryJournal,
@@ -292,9 +292,9 @@ def write_bootstrap_recovery(generation: str, journal: dict[str, object]) -> Non
             or current.generation != generation
             or current.owner_pid != process.pid
             or current.owner_create_time is None
-            # The owner re-reads its own wall-clock-derived birth: keep the
-            # create_time tolerance (macOS whole-second moves).
-            or not create_time_matches(process.create_time(), current.owner_create_time)
+            # The owner re-reads its own start time; the tolerance stays for
+            # handoffs recorded by older code (whole-second wall-clock moves).
+            or not create_time_matches(stable_create_time(process), current.owner_create_time)
         ):
             raise BootstrapRecoveryInvalidError("bootstrap writer lost exact handoff ownership")
         existing = _read_bootstrap_unlocked()
@@ -346,9 +346,9 @@ def write_normal_release_recovery(generation: str, journal: dict[str, object]) -
             or current.generation != generation
             or current.owner_pid != process.pid
             or current.owner_create_time is None
-            # The owner re-reads its own wall-clock-derived birth: keep the
-            # create_time tolerance (macOS whole-second moves).
-            or not create_time_matches(process.create_time(), current.owner_create_time)
+            # The owner re-reads its own start time; the tolerance stays for
+            # handoffs recorded by older code (whole-second wall-clock moves).
+            or not create_time_matches(stable_create_time(process), current.owner_create_time)
         ):
             raise BootstrapRecoveryInvalidError("normal writer lost exact handoff ownership")
         recovery = _read_bootstrap_unlocked()
@@ -435,7 +435,7 @@ def begin_bootstrap_after_dead_owner(
                 "created_at": now.isoformat(),
                 "expires_at": (now + dt.timedelta(seconds=NO_PROGRESS_TIMEOUT_S)).isoformat(),
                 "owner_pid": process.pid,
-                "owner_create_time": process.create_time(),
+                "owner_create_time": stable_create_time(process),
             },
         )
         return _read_unlocked(path, now=now)
@@ -456,7 +456,7 @@ def claim_running(
     """
     owner_pid = os.getpid() if owner_pid is None else owner_pid
     try:
-        owner_create_time = psutil.Process(owner_pid).create_time()
+        owner_create_time = stable_create_time(psutil.Process(owner_pid))
     except (psutil.Error, OSError):
         return False
     path = state_path()
@@ -498,7 +498,7 @@ def owner_is_live(snapshot: UpdaterHandoffSnapshot) -> bool:
     if snapshot.owner_pid is None or snapshot.owner_create_time is None:
         raise ValueError("running handoff has no process identity")
     try:
-        actual = psutil.Process(snapshot.owner_pid).create_time()
+        actual = stable_create_time(psutil.Process(snapshot.owner_pid))
     except psutil.NoSuchProcess:
         return False
     except (psutil.AccessDenied, psutil.Error, OSError):
@@ -594,7 +594,7 @@ def resume_bootstrap(generation: str, *, expected_session: str) -> bool:
         payload.update(
             expected_session=expected_session,
             owner_pid=os.getpid(),
-            owner_create_time=psutil.Process().create_time(),
+            owner_create_time=stable_create_time(psutil.Process()),
         )
         _write_atomic(path, payload)
         return True

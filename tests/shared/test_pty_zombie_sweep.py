@@ -12,6 +12,14 @@ from shared.pty_sessions._paths import record_path, socket_path, transcript_path
 from shared.session_record import SessionRecord
 
 
+def _mock_process(create_time: float) -> Mock:
+    """A psutil.Process stand-in whose stable identity reading is `create_time`."""
+    proc = Mock()
+    proc.create_time.return_value = create_time
+    proc._proc.create_time.return_value = create_time
+    return proc
+
+
 @pytest.mark.parametrize("starttime", [None, 123])
 @pytest.mark.parametrize("state", ["zombie", "running", "unreadable"])
 def test_lazy_sweep_requires_proven_shell_exit(
@@ -29,9 +37,8 @@ def test_lazy_sweep_requires_proven_shell_exit(
     )
     record.write(record_path(name))
     socket_path(name).touch()
-    proc = Mock()
+    proc = _mock_process(1.0)
     proc.is_running.return_value = True
-    proc.create_time.return_value = 1.0
     if state == "unreadable":
         proc.status.side_effect = psutil.AccessDenied(record.pid)
     else:
@@ -75,9 +82,8 @@ def test_sweep_defers_while_record_lock_is_held(
     )
     record.write(record_path(name))
     socket_path(name).touch()
-    proc = Mock()
+    proc = _mock_process(1.0)
     proc.is_running.return_value = True
-    proc.create_time.return_value = 1.0
     proc.status.return_value = psutil.STATUS_ZOMBIE
 
     def inspect_process(_pid: int) -> Mock:
@@ -126,8 +132,7 @@ def test_sweep_cannot_unlink_a_record_written_under_the_lock(  # noqa: PLR0915 -
     socket_path(name).touch()
 
     def inspect_process(pid: int) -> Mock:
-        proc = Mock()
-        proc.create_time.return_value = 2.0
+        proc = _mock_process(2.0)
         if pid == old_pid:
             proc.is_running.return_value = True
             proc.status.return_value = psutil.STATUS_ZOMBIE

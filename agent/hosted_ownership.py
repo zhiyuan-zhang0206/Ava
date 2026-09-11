@@ -29,6 +29,7 @@ from shared.incarnation_resources import (
 from shared.live_announce import publish_agent_updated
 from shared.log import logger
 from shared.paths import ava_home
+from shared.proc_tree import stable_create_time
 from shared.resource_admission import admit_resources_async
 from shared.runtime_admission import (
     AdmissionDecision,
@@ -337,7 +338,7 @@ async def _dead_predecessor_evidence(
     ):
         # The row lock binds this monotonic exact-process observation to the
         # resource transfer in the same transaction.
-        current_host = ResourceProcess(pid=host.pid, birth=host.create_time())
+        current_host = ResourceProcess(pid=host.pid, birth=stable_create_time(host))
         if prior_resources.host_process != current_host:
             if not await asyncio.to_thread(process_ended, prior_resources.host_process):
                 _refuse_hosted_admission()
@@ -369,7 +370,7 @@ async def admit_hosted_runtime(
 
     await asyncio.to_thread(recover_local_resources, agent_id, machine)
     native = psutil.Process()
-    host_identity = ResourceProcess(pid=native.pid, birth=native.create_time())
+    host_identity = ResourceProcess(pid=native.pid, birth=stable_create_time(native))
     if publication is None:
         publication = await asyncio.to_thread(process_runtime_admission)
     else:

@@ -32,6 +32,7 @@ import psutil
 
 from shared.log import logger
 from shared.platform import LockTimeoutError, file_lock
+from shared.proc_tree import stable_create_time
 from shared.pty_sessions._paths import (
     DEFAULT_COLS,
     DEFAULT_ROWS,
@@ -201,7 +202,7 @@ def _bring_up_locked(
         return 1
     host._set_winsz(master, cols, rows)
     try:
-        create_time = psutil.Process(pid).create_time()
+        create_time = stable_create_time(psutil.Process(pid))
     except psutil.NoSuchProcess:
         create_time = _DEAD_CHILD_SENTINEL
     starttime = None if create_time == _DEAD_CHILD_SENTINEL else pid_starttime_ticks(pid)
@@ -226,6 +227,6 @@ def _bring_up_locked(
 
 def _own_create_time() -> float:
     try:
-        return psutil.Process(os.getpid()).create_time()
+        return stable_create_time(psutil.Process(os.getpid()))
     except psutil.Error:  # fail-fast-ok: identity extras degrade, liveness key is the shell
         return 0.0

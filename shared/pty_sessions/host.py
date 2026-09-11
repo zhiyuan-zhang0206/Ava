@@ -45,6 +45,7 @@ import psutil
 
 from shared import session_log
 from shared.log import logger
+from shared.proc_tree import stable_create_time
 from shared.pty_sessions._paths import (
     err,
     ok,
@@ -234,7 +235,9 @@ class PtySession:
                 return False
             if self.record.starttime is not None:
                 return self.record.identifies(self.pid) is True
-            return abs(proc.create_time() - self.record.create_time) <= _CREATE_TIME_TOLERANCE_S
+            return (
+                abs(stable_create_time(proc) - self.record.create_time) <= _CREATE_TIME_TOLERANCE_S
+            )
         except psutil.Error:
             return False
 

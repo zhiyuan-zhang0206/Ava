@@ -348,6 +348,32 @@ def test_starttime_identity_survives_wall_clock_drift(unit_home: Path) -> None:
             posixproc._record_path(name).unlink(missing_ok=True)
 
 
+@pytest.mark.skipif(
+    sys.platform != "darwin", reason="psutil's macOS wall-clock correction is macOS-only"
+)
+def test_session_record_spans_import_epochs(
+    unit_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A record written under one clock epoch resolves under another.
+
+    The writer's whole-second wall-clock correction used to make its record
+    disagree with a reader from a different import epoch, so resolution
+    refused a live session (the 2026-09-12 incident class).
+    """
+    import importlib
+
+    psosx = importlib.import_module("psutil._psosx")
+    base = psosx.INIT_BOOT_TIME
+    name = "ava-test-agent-epoch-span"
+    monkeypatch.setattr(psosx, "INIT_BOOT_TIME", base + 3600.0)
+    assert _new(name, _SLEEP, unit_home)
+    monkeypatch.setattr(psosx, "INIT_BOOT_TIME", base)
+    try:
+        assert posixproc.has_session(name)
+    finally:
+        posixproc.kill_session(name, graceful=False)
+
+
 @pytest.mark.skipif(not IS_LINUX, reason="Linux /proc start-time identity")
 def test_list_sessions_reaps_starttime_pid_reuse(unit_home: Path) -> None:
     """A live pid with different start ticks is a recycled pid and is reaped."""
@@ -546,9 +572,21 @@ def test_new_session_dead_child_records_sentinel(
     name = "ava-test-agent-dying"
     real_process = psutil.Process
 
-    class _NoCreateTime(real_process):
-        def create_time(self):
+    class _NoCreateTime:
+        """Start time unreadable through either reading: the child died at spawn."""
+
+        def __init__(self, pid: int | None = None) -> None:
+            self.pid = os.getpid() if pid is None else pid
+
+        @property
+        def _proc(self) -> object:
             raise psutil.NoSuchProcess(self.pid)
+
+        def create_time(self) -> float:
+            raise psutil.NoSuchProcess(self.pid)
+
+        def is_running(self) -> bool:
+            return False
 
     monkeypatch.setattr("shared.posixproc.psutil.Process", _NoCreateTime)
     argv = [sys.executable, "-c", "import time; time.sleep(300)"]
