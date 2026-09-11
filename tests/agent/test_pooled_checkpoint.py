@@ -13,6 +13,7 @@ from psycopg import AsyncConnection, Capabilities, errors
 from psycopg.pq import PipelineStatus, TransactionStatus
 from psycopg.rows import DictRow, dict_row
 from psycopg_pool import AsyncConnectionPool
+from pydantic import ValidationError
 
 from agent.impersonation import flush_checkpoint
 from agent.state import build_checkpoint_serde
@@ -258,6 +259,33 @@ def test_checkpoint_max_blob_bytes_config_default_and_metadata() -> None:
     assert extra["restart_required"] == "agent"
     assert extra["writable"] is True
 
+    overrides_field = AgentRuntimeSettings.model_fields["checkpoint_max_blob_bytes_overrides"]
+    assert overrides_field.alias == "AVA_CHECKPOINT_MAX_BLOB_BYTES_OVERRIDES"
+    assert overrides_field.default_factory is not None
+    overrides_extra = overrides_field.json_schema_extra
+    assert isinstance(overrides_extra, dict)
+    assert overrides_extra["scope"] == "cluster-pinned"
+    assert overrides_extra["restart_required"] == "agent"
+
+
+def test_blob_limit_overrides_config_parses_and_validates() -> None:
+    assert AgentRuntimeSettings.model_validate({}).checkpoint_max_blob_bytes_overrides == {}
+
+    # The operator path: the JSON-object string an env var carries.
+    configured = AgentRuntimeSettings.model_validate(
+        {"AVA_CHECKPOINT_MAX_BLOB_BYTES_OVERRIDES": '{"6093": 33554432}'}
+    )
+    assert configured.checkpoint_max_blob_bytes_overrides == {"6093": 33554432}
+
+    with pytest.raises(ValidationError, match="numeric agent id"):
+        AgentRuntimeSettings.model_validate(
+            {"AVA_CHECKPOINT_MAX_BLOB_BYTES_OVERRIDES": '{"abc": 1}'}
+        )
+    with pytest.raises(ValidationError, match="must be positive"):
+        AgentRuntimeSettings.model_validate(
+            {"AVA_CHECKPOINT_MAX_BLOB_BYTES_OVERRIDES": '{"6093": 0}'}
+        )
+
 
 def _guarded_saver() -> PooledPostgresSaver:
     """The real saver without a database: _dump_blobs/_dump_writes never touch conn."""
@@ -336,3 +364,47 @@ async def test_oversized_checkpoint_write_is_refused_and_writes_nothing(
         )
         saved_config = cast("dict[str, str]", saved.get("configurable"))
         assert saved_config["checkpoint_id"] == checkpoint["id"]
+
+
+async def test_blob_limit_override_lifts_the_limit_for_one_agent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings.agent, "checkpoint_max_blob_bytes", 4096)
+    monkeypatch.setattr(
+        settings.agent, "checkpoint_max_blob_bytes_overrides", {"6093": 1024 * 1024}
+    )
+    saver = _guarded_saver()
+
+    rows = saver._dump_blobs("6093", "", {"messages": ["x" * 8192]}, {"messages": "1"})
+    assert len(rows) == 1
+
+    with pytest.raises(Exception, match="checkpoint write refused") as excinfo:
+        saver._dump_blobs("6094", "", {"messages": ["x" * 8192]}, {"messages": "1"})
+    assert isinstance(excinfo.value, pooled_ckpt.CheckpointBlobTooLargeError)
+    assert "AVA_CHECKPOINT_MAX_BLOB_BYTES" in str(excinfo.value)
+
+
+async def test_blob_limit_override_can_lower_one_agent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings.agent, "checkpoint_max_blob_bytes", 1024 * 1024)
+    monkeypatch.setattr(settings.agent, "checkpoint_max_blob_bytes_overrides", {"6093": 4096})
+    saver = _guarded_saver()
+
+    with pytest.raises(Exception, match="checkpoint write refused") as excinfo:
+        saver._dump_blobs("6093", "", {"messages": ["x" * 8192]}, {"messages": "1"})
+    assert isinstance(excinfo.value, pooled_ckpt.CheckpointBlobTooLargeError)
+    assert "AVA_CHECKPOINT_MAX_BLOB_BYTES_OVERRIDES" in str(excinfo.value)
+
+
+async def test_blob_limit_override_applies_to_the_writes_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings.agent, "checkpoint_max_blob_bytes", 4096)
+    monkeypatch.setattr(
+        settings.agent, "checkpoint_max_blob_bytes_overrides", {"6093": 1024 * 1024}
+    )
+    saver = _guarded_saver()
+
+    rows = saver._dump_writes("6093", "", "ckpt", "task", "", [("messages", ["x" * 8192])])
+    assert len(rows) == 1

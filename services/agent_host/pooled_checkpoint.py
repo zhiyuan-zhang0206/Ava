@@ -71,7 +71,7 @@ class PooledPostgresSaver(AsyncPostgresSaver):
         rows = super()._dump_blobs(thread_id, checkpoint_ns, values, versions)
         # Row layout: thread_id, checkpoint_ns, channel, version, type, blob.
         for row in rows:
-            self._refuse_oversized_blob(row[2], row[-1])
+            self._refuse_oversized_blob(thread_id, row[2], row[-1])
         return rows
 
     def _dump_writes(
@@ -88,10 +88,10 @@ class PooledPostgresSaver(AsyncPostgresSaver):
         )
         # Row layout: thread_id, checkpoint_ns, checkpoint_id, task_id, task_path, idx, channel, type, blob.
         for row in rows:
-            self._refuse_oversized_blob(row[6], row[-1])
+            self._refuse_oversized_blob(thread_id, row[6], row[-1])
         return rows
 
-    def _refuse_oversized_blob(self, channel: object, blob: bytes | None) -> None:
+    def _refuse_oversized_blob(self, thread_id: str, channel: object, blob: bytes | None) -> None:
         """Refuse one serialized blob over the configured limit before any SQL runs.
 
         The pathological case this guards: multi-megabyte inline content (e.g.
@@ -102,16 +102,27 @@ class PooledPostgresSaver(AsyncPostgresSaver):
         an immediate, explicit error naming the channel, the size and the
         limit. Nothing is trimmed or silently dropped: the write does not
         happen at all.
+
+        ``thread_id`` is the agent id in this deployment; an entry in
+        ``AVA_CHECKPOINT_MAX_BLOB_BYTES_OVERRIDES`` replaces the base limit for
+        that thread (an agent whose history already carries an oversized blob
+        can keep writing while the storage fix lands).
         """
         if blob is None:
             return
-        limit = settings.agent.checkpoint_max_blob_bytes
+        override = settings.agent.checkpoint_max_blob_bytes_overrides.get(thread_id)
+        limit = settings.agent.checkpoint_max_blob_bytes if override is None else override
         if len(blob) <= limit:
             return
+        knob = (
+            "AVA_CHECKPOINT_MAX_BLOB_BYTES"
+            if override is None
+            else "AVA_CHECKPOINT_MAX_BLOB_BYTES_OVERRIDES"
+        )
         mib = 1024 * 1024
         raise CheckpointBlobTooLargeError(
             f"checkpoint write refused: channel {channel!r} serialized to "
             f"{len(blob) / mib:.1f} MiB, over the {limit / mib:.0f} MiB blob limit "
-            "(AVA_CHECKPOINT_MAX_BLOB_BYTES); split the content or downscale/reduce "
-            "its attached images before the next write — nothing was written"
+            f"({knob}); split the content or downscale/reduce its attached images "
+            "before the next write — nothing was written"
         )
