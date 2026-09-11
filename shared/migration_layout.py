@@ -216,6 +216,13 @@ def unreadable_migration_files() -> list[tuple[str, str]]:
     read. Raises `MigrationLayoutError`, like the loader, when the enumeration
     itself is impossible (no migrations dir / not a git worktree / bad name /
     duplicate).
+
+    Conservative by design: the applier opens only the migrations not yet
+    applied (`if name not in applied`), so a file that is already applied and
+    later loses its read mode also reports here though the apply would not need
+    it. The refusal direction is the safe one — the repair is the same `chmod`,
+    and distinguishing the two would need the DB's applied set inside a
+    read-only filesystem check.
     """
     problems: list[tuple[str, str]] = []
     for name, path in _list_migration_files():

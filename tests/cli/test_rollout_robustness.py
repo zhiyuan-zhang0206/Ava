@@ -185,6 +185,7 @@ def test_failed_restart_after_the_stop_is_not_reported_as_declined(
     """Once the stop has happened the host may be DOWN, so its code must NOT be the
     one the updater treats as "still serving"."""
     monkeypatch.setattr(_ns, "_preflight_probes", lambda: 0)
+    monkeypatch.setattr(_ns, "_preflight_start_readiness", lambda *_a, **_k: 0)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_ns, "_do_stop", lambda *_a, **_k: 0)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_ns, "_cmd_start_body", lambda **_k: 1)  # pyright: ignore[reportUnknownArgumentType]
 
