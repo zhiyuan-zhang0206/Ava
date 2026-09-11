@@ -1665,3 +1665,9 @@ INSERT INTO schema_migrations (name) VALUES ('20260911T005419_add-resurrect-inbo
 -- plugin_stats is already represented above. Fresh DBs stamp the migration
 -- instead of replaying the CREATE TABLE delta.
 INSERT INTO schema_migrations (name) VALUES ('20260910T165723_plugin-stats');
+
+-- The stranded-hold columns are already represented above. Fresh DBs must not
+-- replay the strict ADD COLUMN against the baseline schema, while existing DBs
+-- without this applied marker still run the migration and fail loudly if the
+-- columns were added outside migration tracking.
+INSERT INTO schema_migrations (name) VALUES ('20260911T180406_host-deploy-stranded-hold');
