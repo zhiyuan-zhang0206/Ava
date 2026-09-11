@@ -15,6 +15,5 @@ COMMENT ON COLUMN host_deploy_state.stranded_hold_attempted_at IS
     'Postgres timestamp of the last reserved automatic recovery attempt (task '
     '#3142).';
 COMMENT ON COLUMN host_deploy_state.stranded_hold_recovery_note IS
-    'The latest recovery attempt''s outcome or error summary, for the alarm '
-    'text and the operator; display context, never a judgment input (task '
-    '#3142).';
+    'The latest recovery attempt''s outcome or error summary, for the '
+    'operator; display context, never a judgment input (task #3142).';

@@ -78,7 +78,9 @@ record (task #3132) makes the silent permanent hold loud. On top of it, an
 UPDATE-ARMED post-stop hold may spend one bounded attempt at finishing the very
 sequence its leg was running, through ``ops.hold_recovery`` — the same
 stop/start/resume an operator runs by hand, one attempt per episode, a 900s
-cooldown, a kill-switch, and never on a gateway unit. Nothing else changes: an
+cooldown, a kill-switch, and never in the gateway capability's watchdog round
+(a unit that also serves `agent-runner` completes its hold in that round).
+Nothing else changes: an
 operator hold, a pre-stop phase, or any state with a live owner remains
 record-only, exactly as before.
 
@@ -563,8 +565,13 @@ def maybe_spawn_stranded_recovery(
     operation"). Everything about it is bounded and reversible:
 
     - **Narrow** — only a `stranded` verdict (which already carries the *failed
-      updater leg* evidence), only a post-stop phase, and never a gateway unit
-      (its stop leg needs an operator's `--gateway-last` assertion).
+      updater leg* evidence), only a post-stop phase, and never in the gateway
+      capability's watchdog round: the gateway watchdog does not initiate a
+      completion, while a unit that also serves `agent-runner` completes the
+      same hold through that capability's round (the drill's macmini is such a
+      unit). `role` is the capability of the ROUND being run
+      (`services/watchdog/daemon.py` runs one per capability), not a statement
+      about the machine.
     - **Bounded** — one attempt per episode: the budget is a compare-and-set in
       the host's durable record (`reserve_stranded_recovery`), so two racing
       deciders cannot both spawn a leg and a spent budget is never refunded.

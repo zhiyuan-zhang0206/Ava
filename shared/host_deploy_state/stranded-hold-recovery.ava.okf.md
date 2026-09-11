@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Stranded-hold recovery — the bounded completion of an update-armed hold
-description: The three `host_deploy_state` budget columns and the one bounded automatic completion they bound (task #3142) — which holds may be completed (update-armed, post-stop, non-gateway), what the completion runs (the same stop/start/resume an operator runs), the compare-and-set that makes it once-per-episode, and the kill-switch.
+description: The three `host_deploy_state` budget columns and the one bounded automatic completion they bound (task #3142) — which holds may be completed (update-armed, post-stop, never from the gateway capability's round), what the completion runs (the same stop/start/resume an operator runs), the compare-and-set that makes it once-per-episode, and the kill-switch.
 tags:
 - deploy
 - recovery
@@ -48,8 +48,8 @@ starts with a fresh budget and a spent one is never refunded.
   `shared.proc` sanctions the session as a host of an in-process host
   transition). A spawn that fails still spends the attempt.
 - `ops/controllers/stranded_pause.py:maybe_spawn_stranded_recovery` — the gate:
-  a `stranded` verdict, a post-stop phase, a non-gateway unit, the kill-switch
-  on, then the reservation. Called from the pause controller's paused branch
+  a `stranded` verdict, a post-stop phase, not the gateway capability's round,
+  the kill-switch on, then the reservation. Called from the pause controller's paused branch
   (the only local actor while the host is paused).
 - `cli/commands/_hold_recover.py` — the detached session's entry
   (`python -m cli.commands._hold_recover --operation … --acquired-at …`). It
@@ -64,9 +64,12 @@ starts with a fresh budget and a spent one is never refunded.
 
 - **Never automatic**: an operator hold, a pre-stop phase (`preparing` /
   `draining` / `drained` — an incomplete drain is `resume --cancel` work), a
-  `ready` hold, any state with a live owner, an unreadable round, and any
-  gateway unit. The last one is the conservative v1 cut: the gateway owns the
-  cluster's data plane and routing, so its completion waits for an operator.
+  `ready` hold, any state with a live owner, an unreadable round, and the
+  gateway capability's watchdog round. The last one is the conservative v1 cut:
+  the gateway watchdog never initiates a completion, and the gateway-only
+  deployment (which runs no agent-runner watchdog) waits for an operator. A
+  unit that also serves `agent-runner` — macmini, WSL — completes its own hold
+  in that capability's round.
 - **Bounded**: one attempt per episode, 900s cooldown, and a kill-switch —
   `settings.gateway.stranded_hold_recovery` (`AVA_STRANDED_HOLD_RECOVERY`,
   default on), read by the watchdogs every tick (a change applies at their next

@@ -553,9 +553,10 @@ exact generation, then runs the same legs the manual recipe prescribes — a
 `stopping` hold re-runs the stop the update leg itself runs (`keep_infra`,
 terminals and browser retained, this home's declared services only), then
 `maintenance start`, then `maintenance resume`. Nothing else changed: an
-operator hold, a pre-stop phase, a live owner, and every gateway unit stay
-record-only (a gateway stop leg needs an operator's `--gateway-last`
-assertion). Turn the mechanism off with
+operator hold, a pre-stop phase, a live owner, and the gateway capability's
+watchdog round stay record-only (the gateway watchdog never initiates a
+completion; a unit that also serves `agent-runner` — macmini, WSL — completes
+its own hold in that capability's round). Turn the mechanism off with
 `AVA_STRANDED_HOLD_RECOVERY=false` (`settings.gateway.stranded_hold_recovery`,
 read by the watchdogs each tick) — the alarm and the manual steps in
 [graceful maintenance](graceful-maintenance.md) remain the recovery path — and

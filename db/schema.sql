@@ -1116,9 +1116,8 @@ COMMENT ON COLUMN host_deploy_state.stranded_hold_attempted_at IS
     '#3142).';
 
 COMMENT ON COLUMN host_deploy_state.stranded_hold_recovery_note IS
-    'The latest recovery attempt''s outcome or error summary, for the alarm '
-    'text and the operator; display context, never a judgment input (task '
-    '#3142).';
+    'The latest recovery attempt''s outcome or error summary, for the '
+    'operator; display context, never a judgment input (task #3142).';
 
 -- ─────────────── cluster_pin ───────────────
 -- The cluster's pinned commit (cluster_target_sha) — the standing record of which

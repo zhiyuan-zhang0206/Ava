@@ -61,8 +61,11 @@ The record (task #3132) makes a stranded hold loud; one shape of it is also
 *provably resumable*, and since 2026-09-12 the pause controller completes it
 once, on its own. The shape: an **update-armed** hold (the pause window's
 updater run reads FAILED — the verdict's own evidence) at a **post-stop** phase
-(`stopping` / `stopped` / `starting`), on a unit that is NOT the gateway (a
-gateway stop leg needs an operator's `--gateway-last` assertion).
+(`stopping` / `stopped` / `starting`), never in the gateway capability's
+watchdog round — the gateway watchdog does not initiate a completion, while a
+unit that also serves `agent-runner` completes the same hold in that
+capability's round (`services/watchdog/daemon.py` runs one round per
+capability, and `role` here is the ROUND's capability, not the machine's).
 
 The sequence is the operator recipe, not a new one: for `stopping`, re-run the
 stop the update leg itself runs (`cli.commands.stop._do_stop` with
@@ -86,7 +89,8 @@ attempt's outcome lands in the host's record
 
 Every other hold stays record-only: an operator hold, a pre-stop phase
 (`preparing` / `draining` / `drained`), a `ready` hold, an unreadable round, and
-a gateway unit. The manual path (stop → start → resume, per phase) lives in
+the gateway capability's round. The manual path (stop → start → resume, per
+phase) lives in
 `conventions/graceful-maintenance.md`, "Recovering a stuck maintenance
 operation" — the automation is the same steps, so an operator can take over
 wherever an attempt stopped.

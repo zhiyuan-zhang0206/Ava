@@ -15,9 +15,14 @@ Each leg re-verifies its own preconditions under its own locks; this entry
 adds the stranded-hold gate on top: the hold must still carry the exact
 `(holder, acquired_at)` capability, its phase must still be a post-stop one,
 the stranded verdict must still stand, and the kill-switch must still be on.
-Which holds may be completed at all (update-armed, post-stop, never a gateway
-unit) is the spawner's decision — this entry only re-verifies the license it
-was spawned under.
+Which holds may be completed at all (update-armed, post-stop, and never from
+the gateway capability's watchdog round) is the spawner's decision — this entry
+only re-verifies the license it was spawned under.
+
+No `ui_update_state.lifecycle_lock()` is taken here: the three legs each take
+that same (non-reentrant) lock file themselves, and the hold is what serializes
+a transition — no other actor can get past `begin_maintenance` and this entry's
+own generation re-check while it runs.
 
 Exit codes: 0 = the hold completed (services up, hold released); 1 = the
 attempt failed, or the conditions that licensed it no longer hold. Either way

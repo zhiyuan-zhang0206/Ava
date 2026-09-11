@@ -157,13 +157,17 @@ def test_no_hold_means_no_action(monkeypatch: pytest.MonkeyPatch, spawns: _Spawn
     assert spawns.calls == [] and spawns.reservations == []
 
 
-def test_gateway_units_are_never_completed_automatically(
+def test_the_gateway_capabilitys_round_never_starts_a_completion(
     hold_at_phase: Callable[[str], None], spawns: _Spawns
 ) -> None:
-    """A gateway stop leg needs an operator's `--gateway-last` assertion."""
+    """`role` is the ROUND's capability, not the machine's: the gateway watchdog
+    never initiates a completion, while a unit that also serves `agent-runner`
+    completes the same hold in that capability's round."""
     hold_at_phase("stopping")
     sp.maybe_spawn_stranded_recovery(_verdict(), role="gateway")
     assert spawns.calls == [] and spawns.reservations == []
+    sp.maybe_spawn_stranded_recovery(_verdict(), role="agent-runner")
+    assert spawns.calls == [(_HOLDER, _AT)]
 
 
 def test_kill_switch_off_spends_nothing(
