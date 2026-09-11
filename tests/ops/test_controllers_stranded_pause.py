@@ -22,6 +22,7 @@ from __future__ import annotations
 import time
 from collections.abc import Callable, Generator
 from pathlib import Path
+from typing import Literal, cast
 
 import pytest
 
@@ -757,8 +758,22 @@ def _record_recorder(monkeypatch: pytest.MonkeyPatch) -> _Recorder:
     return rec
 
 
+def _outcome_reading(
+    kind: Literal["found", "none", "unreadable"], outcome: object | None = None
+) -> object:
+    from ops.updater_outcome import UpdaterOutcome, UpdaterOutcomeReading
+
+    return UpdaterOutcomeReading(kind=kind, outcome=cast("UpdaterOutcome | None", outcome))
+
+
+def _outcome_reading_patch(monkeypatch: pytest.MonkeyPatch, reading: object) -> None:
+    """Stub the verdict's evidence seam — the three-way reading (task #3150)."""
+    monkeypatch.setattr("ops.updater_outcome.last_updater_outcome_reading", lambda: reading)
+
+
 def _failed_outcome_patch(monkeypatch: pytest.MonkeyPatch, outcome: object) -> None:
-    monkeypatch.setattr("ops.updater_outcome.last_updater_outcome", lambda: outcome)
+    """A readable failed run, wrapped as the `found` reading it now is."""
+    _outcome_reading_patch(monkeypatch, _outcome_reading("found", outcome))
 
 
 def test_stranded_hold_declared_for_an_ownerless_failed_update(
@@ -864,9 +879,29 @@ def test_no_declaration_without_an_outcome(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     fake_pause(sp.STRANDED_HOLD_NOTICE_S + 60)
-    _failed_outcome_patch(monkeypatch, None)
+    _outcome_reading_patch(monkeypatch, _outcome_reading("none"))
     sp.sync_stranded_hold_record()
     assert _record_recorder.marks == []
+    assert _record_recorder.clears == 1  # a decided no-record keeps clearing (task #3150)
+
+
+def test_unreadable_outcome_neither_declares_nor_clears(
+    fake_pause: Callable[[float | None], None],
+    _maintenance_hold: None,
+    _ownerless: None,
+    _record_recorder: _Recorder,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Task #3150: a failed read of the updater evidence is missing evidence — the
+    round must neither declare nor erase, the last silent shape #3132 left."""
+    fake_pause(sp.STRANDED_HOLD_NOTICE_S + 60)
+    _outcome_reading_patch(monkeypatch, _outcome_reading("unreadable"))
+
+    verdict = sp.stranded_hold_verdict()
+    assert (verdict.kind, verdict.detail) == ("unknown", "updater outcome is unreadable")
+    sp.sync_stranded_hold_record()
+    assert _record_recorder.marks == []
+    assert _record_recorder.clears == 0
 
 
 def test_verdict_reads_stranded_and_clear_for_the_named_shapes(

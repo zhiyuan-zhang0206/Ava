@@ -426,9 +426,10 @@ class StrandedHoldVerdict:
       maintenance hold, no failed updater run readable in this window, or a
       live/queued owner. ``detail`` is ``""``.
     - ``"unknown"`` — the evidence is missing THIS round: the posture row could
-      not be read, or the ownership signal is an unreadable placeholder
-      (``_UNREADABLE_OWNER_READINGS``, named in ``detail``). The record must be
-      left exactly as it stands — see `sync_stranded_hold_record`.
+      not be read, the ownership signal is an unreadable placeholder
+      (``_UNREADABLE_OWNER_READINGS``, named in ``detail``), or the updater
+      outcome could not be read. The record must be left exactly as it stands —
+      see `sync_stranded_hold_record`.
 
     ``paused_for`` is the pause's age in seconds, or None when no anchor could
     be read.
@@ -456,8 +457,9 @@ def stranded_hold_verdict(
 
     Clears only on a DECIDED not-stranded reading — no pause row, too young a
     pause, no maintenance hold, a healthy/absent updater outcome, or a real
-    owner. Missing evidence (`unknown`) is deliberately not a clear: it must
-    neither erase a standing record nor invent a declaration.
+    owner. Missing evidence (`unknown`) is deliberately not a clear — an
+    unreadable ownership signal, or an unreadable updater outcome (task #3150):
+    it must neither erase a standing record nor invent a declaration.
 
     Recovery deliberately does NOT auto-release such a hold, and this verdict
     does not change that: it exists to make the state loud and visible
@@ -487,9 +489,15 @@ def stranded_hold_verdict(
     owner = _executing_owner(handoff)
     if owner is not None and not _owner_reading_is_unreadable(owner):
         return StrandedHoldVerdict(kind="clear", detail="", paused_for=paused_for)
-    from ops.updater_outcome import last_updater_outcome
+    from ops.updater_outcome import last_updater_outcome_reading
 
-    outcome = last_updater_outcome()
+    reading = last_updater_outcome_reading()
+    if reading.kind == "unreadable":
+        # Missing evidence is never a clear (task #3150): the record stands.
+        return StrandedHoldVerdict(
+            kind="unknown", detail="updater outcome is unreadable", paused_for=paused_for
+        )
+    outcome = reading.outcome
     if outcome is None or outcome.kind == "declined":
         return StrandedHoldVerdict(kind="clear", detail="", paused_for=paused_for)
     if outcome.kind == "exited" and (outcome.rc or 0) == 0:
