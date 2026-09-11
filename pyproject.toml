@@ -41,6 +41,11 @@ dependencies = [
     "watchdog>=6.0.0",
     "numpy>=2.4.4",
     "pymilvus[milvus-lite]>=3.0.0",
+    # Held: milvus-lite 3.1+ (probed 3.1.0/3.1.1/3.2.1) flips the returned
+    # COSINE "distance" from 1 - similarity to raw similarity, inverting
+    # `search_topk` order (shard 9 red on PR #2260; task #3164; probe:
+    # workspaces/6096/depsup/refs/milvus_probe.py).
+    "milvus-lite==3.0; sys_platform != 'win32'",  # mirrors pymilvus's extra marker
     # The runtime startup-hook gate retains the original locked setuptools
     # wheel — its distutils-precedence .pth is the one non-editable helper the
     # release admits (shared/runtime_release.py). It rode in transitively via
