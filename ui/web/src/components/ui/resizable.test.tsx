@@ -8,10 +8,10 @@ afterEach(cleanup);
 describe("ResizableHandle", () => {
   it("keeps a broad invisible hit target while highlighting one thin separator", () => {
     const { container } = render(
-      <ResizablePanelGroup direction="horizontal">
-        <ResizablePanel defaultSize={50} />
+      <ResizablePanelGroup orientation="horizontal">
+        <ResizablePanel defaultSize="50%" />
         <ResizableHandle />
-        <ResizablePanel defaultSize={50} />
+        <ResizablePanel defaultSize="50%" />
       </ResizablePanelGroup>,
     );
     const handle = container.querySelector<HTMLElement>('[data-slot="resizable-handle"]');
