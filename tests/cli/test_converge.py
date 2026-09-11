@@ -1199,6 +1199,24 @@ def test_redis_url_identity_step_backfills_quoted_legacy_url(
     ).read_text() == "AVA_REDIS_URL=redis://ava_main:sek@127.0.0.1:6380/0\n"
 
 
+def test_redis_url_identity_step_reads_export_prefixed_url(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """A legacy URL behind the export prefix is found and repaired, and the
+    rewrite keeps the operator's prefix instead of dropping it (#2981)."""
+    (tmp_path / ".env").write_text("export AVA_REDIS_URL='redis://:pw@127.0.0.1:6380/0'\n")
+    ctx = _redis_identity_ctx(
+        tmp_path,
+        monkeypatch,
+        db_url="postgresql://ava_main:s@127.0.0.1:5433/ava_main",
+        secret="sek",  # noqa: S106 — test fixture
+    )
+    _converge._ensure_redis_url_identity_step(ctx)
+    assert (
+        tmp_path / ".env"
+    ).read_text() == "export AVA_REDIS_URL=redis://ava_main:sek@127.0.0.1:6380/0\n"
+
+
 def test_redis_url_identity_step_rejects_malformed_url_before_write(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
@@ -1361,6 +1379,23 @@ def test_health_port_backfill_plain_values_regression(tmp_path: Path) -> None:
         f"AVA_LABELER_HEALTH_PORT={present['AVA_LABELER_HEALTH_PORT']}\n"
     )
     _run_health_backfill(tmp_path)
+    _assert_health_block_healed(tmp_path, full, present)
+
+
+def test_health_port_backfill_reads_export_prefixed_values(tmp_path: Path) -> None:
+    """`export AVA_OPS_HEALTH_PORT="18121"` reads as the port it denotes: the
+    quoted-and-prefixed forms must decode exactly like the plain line (#2981)."""
+    full = _health_block(_HEALTH_BACKFILL_BASE)
+    present = _health_block_present(full)
+    lines = [
+        f"export AVA_OPS_HEALTH_PORT='{present['AVA_OPS_HEALTH_PORT']}'",
+        f'export\tAVA_LABELER_HEALTH_PORT="{present["AVA_LABELER_HEALTH_PORT"]}"',
+    ]
+    (tmp_path / ".env").write_text("\n".join(lines) + "\n")
+    _run_health_backfill(tmp_path)
+    env = (tmp_path / ".env").read_text()
+    for line in lines:  # the operator's lines stay byte-identical
+        assert f"{line}\n" in env
     _assert_health_block_healed(tmp_path, full, present)
 
 

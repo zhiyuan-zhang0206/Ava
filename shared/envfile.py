@@ -1,7 +1,8 @@
 """Idempotent KEY=VALUE upsert into a unit's .env, preserving unrelated lines.
 
 Lives in `shared` (stdlib-only, no settings import) so both `cli.commands.cluster_lifecycle`
-and the settings-free `cli.enroll` can use one copy.
+and the settings-free `cli.enroll` can use one copy. `env_line_key` reads a line's key with the
+same grammar the settings parser uses (`export KEY=v` sets `KEY`; #2981).
 """
 
 from __future__ import annotations
@@ -9,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
+import re
 import tempfile
 from datetime import datetime
 from pathlib import Path
@@ -36,6 +38,59 @@ def env_lock_path(env_path: Path) -> Path:
     secrets outright.
     """
     return env_path.with_name(env_path.name + ".lock")
+
+
+_EXPORT_PREFIX = re.compile(r"export[^\S\r\n]+")
+_UNQUOTED_KEY = re.compile(r"[^=\s#]+")
+
+
+def env_line_key(line: str) -> str | None:
+    """The key a `.env` assignment line targets, in the parser's own grammar.
+
+    `export KEY=v` targets `KEY` — `export` plus whitespace is a prefix, never
+    part of the key; `exportKEY=v` keeps its name. `'KEY'=v` is dotenv's
+    single-quoted-key form; `"KEY"=v` keeps its quotes, as the parser leaves
+    them. Comments, blank lines, and lines that carry no assignment (`KEY`, or
+    junk after the key) return `None` — a bare key binds no value, and trailing
+    junk makes the parser drop the binding wholesale.
+
+    Only the KEY is read here, never the value: a line whose value does not
+    decode still reports its key, so a reader can tell "not set" from "set to
+    something the parser cannot read" and never silently ignores the latter
+    (#2981).
+    """
+    stripped = line.strip()
+    if not stripped or stripped.startswith("#"):
+        return None
+    prefix = _EXPORT_PREFIX.match(stripped)
+    if prefix is not None:
+        stripped = stripped[prefix.end() :]
+    if stripped.startswith("'"):
+        end = stripped.find("'", 1)
+        if end <= 1:
+            return None
+        key, rest = stripped[1:end], stripped[end + 1 :]
+    else:
+        unquoted = _UNQUOTED_KEY.match(stripped)
+        if unquoted is None:
+            return None
+        key, rest = unquoted.group(0), stripped[unquoted.end() :]
+    rest = rest.lstrip()
+    if not rest.startswith("="):
+        return None
+    return key
+
+
+def env_line_export_prefix(line: str) -> str:
+    """The normalized `export ` prefix a rewrite of `line` must keep, else `""`.
+
+    Purely textual, and only meaningful for a line whose key was matched (the
+    writer is about to replace it): a shell consumer treats `export KEY=v` and
+    `KEY=v` differently, so a rewrite keeps the operator's prefix instead of
+    silently dropping it. Whitespace variants normalize to one space; `exportKEY=`
+    and `export=1` carry no prefix.
+    """
+    return "export " if _EXPORT_PREFIX.match(line.lstrip()) else ""
 
 
 def capture_env_bytes(path: Path) -> bytes:
@@ -112,9 +167,9 @@ def upsert_env(path: Path, updates: dict[str, str], *, audit_site: str | None = 
         remaining = dict(updates)
         out: list[str] = []
         for line in lines:
-            key = line.split("=", 1)[0].strip() if "=" in line else None
-            if key in remaining:
-                out.append(f"{key}={remaining.pop(key)}")
+            key = env_line_key(line)
+            if key is not None and key in remaining:
+                out.append(f"{env_line_export_prefix(line)}{key}={remaining.pop(key)}")
             else:
                 out.append(line)
         for k, v in remaining.items():
@@ -147,7 +202,7 @@ def remove_env(path: Path, keys: set[str], *, audit_site: str | None = None) -> 
         return
     with file_lock(env_lock_path(path), timeout_s=ENV_LOCK_TIMEOUT_S):
         lines = path.read_text().splitlines()
-        out = [line for line in lines if line.split("=", 1)[0].strip() not in keys]
+        out = [line for line in lines if env_line_key(line) not in keys]
         if len(out) == len(lines):
             return  # nothing to remove — no snapshot churn
         snapshot_env(path)
@@ -196,14 +251,10 @@ def replace_env_bytes_cas(
                 from shared.env_audit import record_env_write
 
                 before_keys = {
-                    line.split("=", 1)[0].strip()
-                    for line in current.decode().splitlines()
-                    if line.strip() and not line.lstrip().startswith("#") and "=" in line
+                    key for line in current.decode().splitlines() if (key := env_line_key(line))
                 }
                 after_keys = {
-                    line.split("=", 1)[0].strip()
-                    for line in payload.decode().splitlines()
-                    if line.strip() and not line.lstrip().startswith("#") and "=" in line
+                    key for line in payload.decode().splitlines() if (key := env_line_key(line))
                 }
                 record_env_write(path, after_keys, before_keys - after_keys, site=audit_site)
         finally:
