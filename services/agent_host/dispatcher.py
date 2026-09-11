@@ -51,6 +51,7 @@ import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from functools import partial
 from typing import Protocol, cast
 
 from agent._turn_progress import turn_progress_age_s, turn_progress_snapshot
@@ -183,6 +184,30 @@ class TurnScheduler:
     def _start(self, agent_id: int) -> None:
         task = asyncio.create_task(self._pump(agent_id), name=f"turn-{agent_id}")
         self._tasks[agent_id] = task
+        task.add_done_callback(partial(self._reap_unstarted_task, agent_id))
+
+    def _reap_unstarted_task(self, agent_id: int, task: asyncio.Task[None]) -> None:
+        """Release a slot whose task was cancelled before it ever ran, re-arming its wake.
+
+        `_pump`'s `finally` releases the registry entry — but a cancel can land
+        before the task's first event-loop slice, and a task that never started
+        executes no line of `_pump`, not even the `finally`. The slot would
+        leak: the agent stays in `active_agents`, the stale-turn scan's
+        post-cancel check reads that as a refused unwind and exits the host,
+        and `wake()` starts no successor while the stale entry holds the slot
+        (task #3085, from the PR #2217 review). The wake the task never got to
+        consume is still in `_pending`, so the successor is started here — the
+        same guarantee `wake()` makes.
+
+        A task that ran already released its slot inside `_pump` (this callback
+        then finds a successor or nothing, and returns); a task that refuses to
+        unwind is not done, so a wedged turn keeps its slot.
+        """
+        if self._tasks.get(agent_id) is not task:
+            return
+        self._tasks.pop(agent_id)
+        if not self._closed and agent_id in self._pending:
+            self._start(agent_id)
 
     async def _pump(self, agent_id: int) -> None:
         """One Task owns one actual turn; a queued successor gets a new Task.
@@ -622,8 +647,11 @@ class InboundWakeDispatcher:
                 and (age := turn_progress_age_s(candidate.agent_id)) is not None
                 and age >= self._stale_after_s
             ):
-                await self._scheduler.cancel_agent(candidate.agent_id)
-                if candidate.agent_id in self._scheduler.active_agents:
+                # The unwind verdict is the captured task's own done-state
+                # (`cancel_agent`'s return) — registry membership is not it:
+                # a pre-start reap releases the slot the moment the task ends.
+                unwound = await self._scheduler.cancel_agent(candidate.agent_id)
+                if not unwound:
                     raise HostRestartRequiredError(
                         f"hosted turn for agent {candidate.agent_id} did not unwind"
                     )
@@ -650,8 +678,19 @@ class InboundWakeDispatcher:
             age = turn_progress_age_s(agent_id)
             if age is None or age < self._stale_after_s:
                 continue
-            await self._scheduler.cancel_agent(agent_id)
-            if agent_id in self._scheduler.active_agents:
+            # This loop walks a snapshot of the active set; an earlier
+            # candidate's cancel awaits its unwind (up to
+            # CANCEL_UNWIND_TIMEOUT_S), and a turn that completes naturally
+            # inside that window is gone from the registry by its turn here.
+            # `cancel_agent` reports the missing task as False — "nothing
+            # left to unwind", not "refused to unwind" — so the verdict
+            # below must not read it as a straggler. The membership read
+            # shares one tick with `cancel_agent`'s lookup (no await
+            # between): presence here is presence there.
+            if agent_id not in self._scheduler.active_agents:
+                continue
+            unwound = await self._scheduler.cancel_agent(agent_id)
+            if not unwound:
                 raise HostRestartRequiredError(f"hosted turn for agent {agent_id} did not unwind")
             logger.warning(
                 "hosted turn for agent {agent_id} showed no progress for "
