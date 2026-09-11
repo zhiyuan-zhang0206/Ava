@@ -1516,6 +1516,42 @@ CREATE TRIGGER agent_impersonations_restore_native_owner
           AND NEW.status IN ('released', 'expired'))
     EXECUTE FUNCTION restore_native_impersonation_owner();
 
+-- ─────────────── plugin_stats ───────────────
+-- Runtime values behind declared statistics-panel cards
+-- (`contributions.ui.stats`): one upsert-only row per (plugin, id), written by
+-- the plugin's own refresh code through shared/plugin_stats.py and read into
+-- GET /api/stats/dashboard. A declared card with no row is the console's
+-- empty state; a failed refresh writes status=error with the reason in detail,
+-- and a value that stops being refreshed keeps its row so staleness is visible.
+CREATE TABLE plugin_stats (
+    plugin      TEXT        NOT NULL,
+    id          TEXT        NOT NULL,
+    value       TEXT        NOT NULL,
+    detail      TEXT,
+    status      TEXT        NOT NULL DEFAULT 'ok'
+                            CHECK (status IN ('ok', 'warn', 'error')),
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_by  TEXT,
+    PRIMARY KEY (plugin, id)
+);
+
+COMMENT ON TABLE plugin_stats IS
+    'Runtime values behind declared statistics-panel cards (contributions.ui.stats): one upsert-only row per (plugin, id). A declared card with no row is the console''s empty state; a failed refresh writes status=error with the reason in detail.';
+
+-- ava_runner surface: a plugin's refresh code runs in the runner process
+-- (agent-process hook or daemon) and upserts its own cards — INSERT, UPDATE,
+-- SELECT; no DELETE (a card that stops being reported keeps its last value and
+-- updated_at, which is what makes staleness visible). Gated on the role's
+-- existence: fresh bootstrap applies this baseline before install birth
+-- creates ava_runner, and shared/cluster/provision.py's ensure_runner_role
+-- grants the same surface at birth.
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ava_runner') THEN
+        GRANT SELECT, INSERT, UPDATE ON plugin_stats TO ava_runner;
+    END IF;
+END $$;
+
 -- ─────────────── schema_migrations ───────────────
 -- Applied-migration registry — maintained by `shared.migrations`. Keyed by
 -- migration NAME (an applied SET, not a high-water integer). This whole file is
@@ -1618,3 +1654,7 @@ INSERT INTO schema_migrations (name) VALUES ('20260909T171240_agents-meta-preset
 -- The resurrection epoch fence is already represented above. Fresh DBs stamp
 -- the migration instead of replaying the strict ALTER ADD COLUMN delta.
 INSERT INTO schema_migrations (name) VALUES ('20260911T005419_add-resurrect-inbound-fence');
+
+-- plugin_stats is already represented above. Fresh DBs stamp the migration
+-- instead of replaying the CREATE TABLE delta.
+INSERT INTO schema_migrations (name) VALUES ('20260910T165723_plugin-stats');

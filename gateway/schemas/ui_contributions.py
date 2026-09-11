@@ -5,9 +5,9 @@ The wire form of what the cluster's enabled plugins declare under
 name-attributed: the console labels provenance, and an operator tracing a
 surface back to the plugin that put it there reads one field.
 
-Themes and nav entries today — the slice that carries agent-inspect sections
-adds its own array beside these (additive, so an alternative frontend built
-against today's spec keeps working).
+Themes, nav entries, and statistics-panel cards today — the slice that carries
+agent-inspect sections adds its own array beside these (additive, so an
+alternative frontend built against today's spec keeps working).
 """
 
 from __future__ import annotations
@@ -55,8 +55,25 @@ class UiNavContribution(BaseModel):
     page: str
 
 
+class UiStatContribution(BaseModel):
+    """One statistics-panel card a plugin declares.
+
+    Declaration only: the card's existence and label. Its value is runtime
+    data keyed by `(plugin, id)` in `plugin_stats` (written by the plugin's own
+    refresh code, read through `GET /api/stats/dashboard`), and the panel joins
+    the two halves on `(plugin, id)`. A declared card with no value row is an
+    explicit empty state — a card can exist on a machine whose credentials do
+    not, which is the case this split exists to serve.
+    """
+
+    plugin: str
+    id: str
+    label: str
+
+
 class UiContributionsResponse(BaseModel):
     """Every console contribution the cluster's enabled plugins declare."""
 
     themes: list[UiThemeContribution]
     nav: list[UiNavContribution]
+    stats: list[UiStatContribution]

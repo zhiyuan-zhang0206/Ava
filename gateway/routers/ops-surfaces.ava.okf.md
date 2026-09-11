@@ -40,6 +40,7 @@ are mounted. `hours` is the aggregation window, whitelisted to
 | `live_count`, lifetime event estimate | Postgres metadata |
 | windowed tokens, cost, turn duration, warning/error counts | Loki event history |
 | warning/error `*_dismissed` / `*_net` split | active `event_dismissals` rows (Postgres) applied to the same window's Loki class counts |
+| `plugin_stats` (plugin-declared cards) | `plugin_stats` rows (`shared/plugin_stats.py`), joined by the console against the `contributions.ui.stats` declarations; NOT windowed — a plugin value is a point in time |
 
 No standalone daemon: the gateway aggregates on demand. Loki work runs before
 the short Postgres metadata read, so waiting for the global Loki budget never

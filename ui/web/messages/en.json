@@ -111,6 +111,8 @@
     "statisticsUpdating": "Statistics are updating",
     "statisticsUpdatingFor": "Updating for {win}…",
     "statisticsRetry": "Retry",
+    "pluginStatNoData": "No data yet",
+    "pluginStatUpdated": "Updated {ago}",
     "searchAgents": "Search agents",
     "collapseSidebar": "Collapse sidebar",
     "closeSidebar": "Close sidebar",

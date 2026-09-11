@@ -4,9 +4,9 @@ Split out of the former monolithic ops/schemas.py; FastAPI registers these
 unchanged, so the OpenAPI codegen is byte-identical to the wire before.
 """
 
-from datetime import timedelta
+from datetime import datetime, timedelta
 from enum import IntEnum
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import (
     BaseModel,
@@ -62,6 +62,38 @@ class StatsTokens(BaseModel):
     cache_hit_pct: float = Field(ge=0, le=100)
 
 
+# The plugin-stats status vocabulary, mirrored from `shared.plugin_stats`
+# (the DB-side writer + check constraint). There is deliberately no "empty":
+# a card with no row IS the frontend's empty state, and a second spelling of
+# that would be a second fact to keep in sync.
+PluginStatStatus = Literal["ok", "warn", "error"]
+
+
+class PluginStat(BaseModel):
+    """One declared statistics-panel card's current value (task #2911).
+
+    The declaration half (existence, label) arrives via
+    `GET /api/ui/contributions` (`UiStatContribution`); this is the runtime
+    half, keyed by `(plugin, id)` and joined against the declaration by the
+    console. Values are NOT windowed: the window selector governs the
+    console's own aggregates, while a usage meter's "current" is a
+    point-in-time fact and would be meaningless averaged over a horizon.
+
+    `updated_at` is when the plugin last wrote the row — the console renders
+    its age, so a refresh that stopped running cannot pass for a fresh value.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    plugin: str
+    id: str
+    value: str
+    detail: str | None
+    status: PluginStatStatus
+    updated_at: datetime
+    updated_by: str | None
+
+
 class StatsDashboard(BaseModel):
     """GET /api/stats/dashboard response — sidebar-top stats card data pulled in one shot.
 
@@ -97,7 +129,11 @@ class StatsDashboard(BaseModel):
       stopped growing at the LGTM cutover; not a live gauge)
 
     `avg_turn_seconds` None = zero turns in the window (new DB / no
-    activity); frontend renders "—"."""
+    activity); frontend renders "—".
+
+    `plugin_stats` is not windowed (see `PluginStat`): the runtime values
+    behind cards that plugins declare under `contributions.ui.stats`, joined
+    by the console on `(plugin, id)`."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -114,6 +150,7 @@ class StatsDashboard(BaseModel):
     errors_dismissed: NonNegativeInt
     errors_net: NonNegativeInt
     total_events: NonNegativeInt
+    plugin_stats: list[PluginStat]
 
 
 class MetricsMeta(BaseModel):

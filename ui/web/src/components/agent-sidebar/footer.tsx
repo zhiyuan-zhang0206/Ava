@@ -19,12 +19,17 @@ import { WindowSelect } from "@/components/window-select";
 import { errMsg as formatErrMsg } from "@/lib/errors";
 import { formatTokensCompact } from "@/lib/format-number";
 import {
+  formatRelativeTime,
   STATS_WINDOW_LABELS,
   STATS_WINDOWS,
   useStatsDashboard,
   useStatsWindow,
   type StatsWindowHours,
 } from "@/lib/sidebar";
+import {
+  usePluginStatCards,
+  type PluginStatCard as PluginStatCardModel,
+} from "@/lib/plugin-stats";
 import type { StatsDashboard } from "@/lib/types";
 import { FLEX, FLEX_COL } from "@/lib/layout";
 import { cn } from "@/lib/utils";
@@ -49,6 +54,7 @@ export function StatsCards({
   onRetry: () => void;
 }) {
   const t = useTranslations("sidebar");
+  const pluginCards = usePluginStatCards(stats?.plugin_stats);
   const errMsg = error ? formatErrMsg(error) : null;
   const failedWithoutData = errMsg !== null && stats === undefined;
   const firstLoad = stats === undefined && error === null && fetching;
@@ -214,6 +220,66 @@ export function StatsCards({
           ),
         )}
       </div>
+      {pluginCards.length > 0 ? (
+        // Plugin-declared cards (`contributions.ui.stats` + the values the
+        // dashboard carried). Not windowed: a plugin value is a point in
+        // time, so the window selector deliberately does not apply — the
+        // section sits below the windowed grid precisely to say so.
+        <div className="border-t border-border px-3 py-2">
+          <div className="grid grid-cols-2 gap-1">
+            {pluginCards.map((card) => (
+              <PluginStatCard key={card.key} card={card} />
+            ))}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+// ── Plugin stat card (task #2911) ──
+
+// One declared plugin card: label + the plugin's own value text + an optional
+// detail line. The empty state ("—") means the card is declared but no value
+// row exists yet (no credential, or no refresh has run); `stale` dims a value
+// whose last write is old, so a stopped refresh cannot pass for a fresh one —
+// the age itself rides the tooltip.
+function PluginStatCard({ card }: { card: PluginStatCardModel }) {
+  const t = useTranslations("sidebar");
+  const age = card.updatedAt !== null ? formatRelativeTime(card.updatedAt) : null;
+  const title =
+    card.value === null
+      ? t("pluginStatNoData")
+      : age !== null
+        ? t("pluginStatUpdated", { ago: age })
+        : undefined;
+  return (
+    <div
+      title={title}
+      className={cn(
+        "gap-0.5 px-2 py-1.5 rounded bg-sidebar-accent/40",
+        FLEX,
+        FLEX_COL,
+        card.stale && "opacity-60",
+      )}
+    >
+      <span className="truncate text-[10px] tracking-wide text-muted-foreground">
+        {card.label}
+      </span>
+      <span
+        className={cn(
+          "font-mono tabular-nums text-sm",
+          card.status === "error" && "text-destructive",
+          card.status === "warn" && "text-amber-600 dark:text-amber-400",
+        )}
+      >
+        {card.value ?? "—"}
+      </span>
+      {card.detail ? (
+        <span className="truncate text-[10px] text-muted-foreground" title={card.detail}>
+          {card.detail}
+        </span>
+      ) : null}
     </div>
   );
 }

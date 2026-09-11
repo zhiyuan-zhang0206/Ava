@@ -6387,6 +6387,42 @@ export interface components {
             /** Series */
             series?: components["schemas"]["MetricPoint"][];
         };
+        /**
+         * PluginStat
+         * @description One declared statistics-panel card's current value (task #2911).
+         *
+         *     The declaration half (existence, label) arrives via
+         *     `GET /api/ui/contributions` (`UiStatContribution`); this is the runtime
+         *     half, keyed by `(plugin, id)` and joined against the declaration by the
+         *     console. Values are NOT windowed: the window selector governs the
+         *     console's own aggregates, while a usage meter's "current" is a
+         *     point-in-time fact and would be meaningless averaged over a horizon.
+         *
+         *     `updated_at` is when the plugin last wrote the row — the console renders
+         *     its age, so a refresh that stopped running cannot pass for a fresh value.
+         */
+        PluginStat: {
+            /** Plugin */
+            plugin: string;
+            /** Id */
+            id: string;
+            /** Value */
+            value: string;
+            /** Detail */
+            detail: string | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "ok" | "warn" | "error";
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** Updated By */
+            updated_by: string | null;
+        };
         /** PresetCreate */
         PresetCreate: {
             /** Name */
@@ -7259,6 +7295,10 @@ export interface components {
          *
          *     `avg_turn_seconds` None = zero turns in the window (new DB / no
          *     activity); frontend renders "—".
+         *
+         *     `plugin_stats` is not windowed (see `PluginStat`): the runtime values
+         *     behind cards that plugins declare under `contributions.ui.stats`, joined
+         *     by the console on `(plugin, id)`.
          */
         StatsDashboard: {
             /** Live Count */
@@ -7285,6 +7325,8 @@ export interface components {
             errors_net: number;
             /** Total Events */
             total_events: number;
+            /** Plugin Stats */
+            plugin_stats: components["schemas"]["PluginStat"][];
         };
         /**
          * StatsTokens
@@ -7733,6 +7775,8 @@ export interface components {
             themes: components["schemas"]["UiThemeContribution"][];
             /** Nav */
             nav: components["schemas"]["UiNavContribution"][];
+            /** Stats */
+            stats: components["schemas"]["UiStatContribution"][];
         };
         /**
          * UiNavContribution
@@ -7754,6 +7798,25 @@ export interface components {
             icon: string;
             /** Page */
             page: string;
+        };
+        /**
+         * UiStatContribution
+         * @description One statistics-panel card a plugin declares.
+         *
+         *     Declaration only: the card's existence and label. Its value is runtime
+         *     data keyed by `(plugin, id)` in `plugin_stats` (written by the plugin's own
+         *     refresh code, read through `GET /api/stats/dashboard`), and the panel joins
+         *     the two halves on `(plugin, id)`. A declared card with no value row is an
+         *     explicit empty state — a card can exist on a machine whose credentials do
+         *     not, which is the case this split exists to serve.
+         */
+        UiStatContribution: {
+            /** Plugin */
+            plugin: string;
+            /** Id */
+            id: string;
+            /** Label */
+            label: string;
         };
         /**
          * UiThemeContribution

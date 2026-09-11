@@ -53,7 +53,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(api.getSettings).mockResolvedValue({ settings: [] });
   vi.mocked(api.getModels).mockResolvedValue({ providers: {}, models: {}, default: "" });
-  vi.mocked(api.getUiContributions).mockResolvedValue({ themes: [], nav: [] });
+  vi.mocked(api.getUiContributions).mockResolvedValue({ themes: [], nav: [], stats: [] });
 });
 
 describe("DisplaySettingsPage", () => {
@@ -241,6 +241,7 @@ describe("DisplaySettingsPage", () => {
   it("lists contributed skins and persists the chosen pack", async () => {
     vi.mocked(api.getUiContributions).mockResolvedValue({
       nav: [],
+      stats: [],
       themes: [
         { plugin: "skins", name: "solarized", tokens: { "--background": "#fdf6e3" } },
         { plugin: "other", name: "solarized", tokens: { "--background": "#111111" } },
@@ -270,6 +271,7 @@ describe("DisplaySettingsPage", () => {
     // the user is choosing between skins where that matters.
     vi.mocked(api.getUiContributions).mockResolvedValue({
       nav: [],
+      stats: [],
       themes: [
         { plugin: "skins", name: "flat", tokens: { "--background": "#fdf6e3" } },
         {
@@ -298,6 +300,7 @@ describe("DisplaySettingsPage", () => {
     });
     vi.mocked(api.getUiContributions).mockResolvedValue({
       nav: [],
+      stats: [],
       themes: [{ plugin: "skins", name: "solarized", tokens: { "--background": "#fdf6e3" } }],
     });
     renderPage();
