@@ -25,7 +25,6 @@ from mcp.types import CONNECTION_CLOSED, REQUEST_TIMEOUT
 
 from services.browser import page_lifecycle
 from services.browser.mcp_daemon import (
-    _AGENT_AFFINITY,
     ChromeMcpDaemon,
     _handle_client,
     _no_page_result,
@@ -33,10 +32,13 @@ from services.browser.mcp_daemon import (
     _text_of,
 )
 from services.browser.page_lifecycle import (
+    _AGENT_AFFINITY,
+    get_agent_page,
     local_host_port,
     parse_page_listing,
     port_listening,
     reap_dead_agent_pages,
+    set_agent_page,
 )
 from shared.config import settings
 
@@ -316,9 +318,10 @@ async def test_socket_in_use_true_when_listener_present() -> None:
 
 @pytest.fixture(autouse=True)
 def _fresh_agent_affinity() -> Iterator[None]:
-    """The per-agent registry is module-level (must survive upstream
-    reconnects); a test session outlives every test, so clear it around each
-    one the way the production process would start fresh."""
+    """The per-agent registries are module-level (entries survive upstream
+    reconnects only within their generation); a test session outlives every
+    test, so clear them around each one the way the production process would
+    start fresh."""
     _AGENT_AFFINITY.clear()
     page_lifecycle._AGENT_LAST_USE.clear()
     page_lifecycle._PAGE_TTL_DEADLINES.clear()
@@ -335,7 +338,7 @@ async def test_agent_affinity_shares_page_across_connections() -> None:
     d, up = _daemon()
     # connection 1: the agent opens its tab
     await d.call_tool_for_agent("new_page", {"url": "a"}, 7)
-    assert _AGENT_AFFINITY[7] == 1
+    assert get_agent_page(7, d.generation) == 1
     # connection 2 (fresh): a page-scoped call lands on the agent's page
     res = await d.call_tool_for_agent("take_snapshot", {}, 7)
     assert res.is_error is False
@@ -365,7 +368,7 @@ async def test_agent_affinity_repin_failure_drops_slot() -> None:
     up.selected = None
     res = await d.call_tool_for_agent("take_snapshot", {}, 7)
     assert res.is_error is True
-    assert _AGENT_AFFINITY[7] is None
+    assert get_agent_page(7, d.generation) is None
 
 
 async def test_agent_affinity_management_tools_update_slot() -> None:
@@ -374,11 +377,11 @@ async def test_agent_affinity_management_tools_update_slot() -> None:
     d, _up = _daemon()
     await d.call_tool_for_agent("new_page", {"url": "a"}, 7)  # -> page 1
     await d.call_tool_for_agent("new_page", {"url": "b"}, 7)  # -> page 2
-    assert _AGENT_AFFINITY[7] == 2
+    assert get_agent_page(7, d.generation) == 2
     await d.call_tool_for_agent("select_page", {"pageId": 1}, 7)
-    assert _AGENT_AFFINITY[7] == 1
+    assert get_agent_page(7, d.generation) == 1
     await d.call_tool_for_agent("close_page", {"pageId": 1}, 7)
-    assert _AGENT_AFFINITY[7] is None
+    assert get_agent_page(7, d.generation) is None
 
 
 async def test_handle_client_agent_id_adopts_agent_page(tmp_path: Path) -> None:
@@ -452,8 +455,8 @@ async def test_release_agent_page_closes_only_that_agent() -> None:
     assert ("close_page", {"pageId": 1}, 2) in up.calls
     assert 1 not in up.pages
     assert up.pages == {2: "b"}  # the other agent's tab untouched
-    assert _AGENT_AFFINITY[7] is None
-    assert _AGENT_AFFINITY[8] == 2
+    assert get_agent_page(7, d.generation) is None
+    assert get_agent_page(8, d.generation) == 2
 
 
 async def test_release_agent_page_idempotent_and_no_slot() -> None:
@@ -473,10 +476,10 @@ async def test_release_agent_page_keeps_slot_when_upstream_down() -> None:
     """The upstream dying mid-release must not clear the slot — the page is
     still open and the reaper needs to find it after the reconnect."""
     d = ChromeMcpDaemon(DeadUpstream())  # type: ignore[arg-type]
-    _AGENT_AFFINITY[7] = 1
+    set_agent_page(7, 1, d.generation)
     with pytest.raises(RuntimeError, match="upstream session is down"):
         await page_lifecycle.release_agent_page(d, 7)
-    assert _AGENT_AFFINITY[7] == 1  # slot survives for the reaper
+    assert get_agent_page(7, d.generation) == 1  # slot survives for the reaper
 
 
 async def test_release_agent_page_wire_method() -> None:
@@ -509,7 +512,9 @@ async def test_release_agent_page_wire_method() -> None:
     resp = await roundtrip({"id": 2, "method": "release_agent_page", "agent_id": 7})
     assert resp["ok"] is True
     assert resp["result"]["page_id"] == 1
-    assert _AGENT_AFFINITY[7] is None
+    released_daemon = daemon_ref[0]
+    assert released_daemon is not None
+    assert get_agent_page(7, released_daemon.generation) is None
 
     bad = await roundtrip({"id": 3, "method": "release_agent_page"})
     assert bad["ok"] is False
@@ -588,10 +593,10 @@ async def test_reap_dead_agent_pages_closes_dead_local_only(
         3: "https://github.com/ava/ava",
         4: "http://localhost:3101/dead2",
     }
-    assert _AGENT_AFFINITY[7] is None
-    assert _AGENT_AFFINITY[8] == 2
-    assert _AGENT_AFFINITY[9] == 3
-    assert _AGENT_AFFINITY[10] == 4
+    assert get_agent_page(7, d.generation) is None
+    assert get_agent_page(8, d.generation) == 2
+    assert get_agent_page(9, d.generation) == 3
+    assert get_agent_page(10, d.generation) == 4
     # exactly the local candidates were probed; the foreign URL was never touched
     assert ("localhost", 3111) in probes and ("localhost", 3112) in probes
     assert ("localhost", 3101) in probes
@@ -626,7 +631,7 @@ async def test_reap_dead_agent_pages_idempotent(
     assert up.pages == {}
     # slots cleared to None (same shape as an agent closing its own page) —
     # nothing left to sweep
-    assert _AGENT_AFFINITY == {7: None, 8: None}
+    assert {agent: get_agent_page(agent, d.generation) for agent in (7, 8)} == {7: None, 8: None}
 
 
 async def test_reap_dead_agent_pages_never_touches_slotless_page(
@@ -698,7 +703,7 @@ async def test_reap_dead_agent_pages_midpass_navigation_skips_live_repurpose(
     assert up.pages == {1: "http://localhost:3311/live"}
     closes = [c[:2] for c in up.calls if c[0] == "close_page"]
     assert closes == []
-    assert _AGENT_AFFINITY[7] == 1
+    assert get_agent_page(7, d.generation) == 1
 
 
 async def test_reap_dead_agent_pages_midpass_slot_move_keeps_live_affinity(
@@ -725,7 +730,7 @@ async def test_reap_dead_agent_pages_midpass_slot_move_keeps_live_affinity(
     assert up.pages == {2: "http://localhost:3311/live"}
     closes = [c[:2] for c in up.calls if c[0] == "close_page"]
     assert closes == [("close_page", {"pageId": 1})]
-    assert _AGENT_AFFINITY[7] == 2
+    assert get_agent_page(7, d.generation) == 2
 
 
 # ── Idle-tab recycling (task #2618) ──────────────────────────────────────
@@ -765,8 +770,8 @@ async def test_reap_idle_agent_pages_closes_only_idle_owned_pages() -> None:
         2: "https://example.com/live",
         99: "https://user.example.com/mine",
     }
-    assert _AGENT_AFFINITY[7] is None
-    assert _AGENT_AFFINITY[8] == 2
+    assert get_agent_page(7, d.generation) is None
+    assert get_agent_page(8, d.generation) == 2
     assert 7 not in page_lifecycle._AGENT_LAST_USE
     assert [c[:2] for c in up.calls if c[0] == "close_page"] == [("close_page", {"pageId": 1})]
 
@@ -782,7 +787,7 @@ async def test_reap_idle_agent_pages_idempotent() -> None:
     await page_lifecycle.reap_idle_agent_pages(d)
 
     assert [c[:2] for c in up.calls if c[0] == "close_page"] == [("close_page", {"pageId": 1})]
-    assert _AGENT_AFFINITY == {7: None}
+    assert {7: get_agent_page(7, d.generation)} == {7: None}
 
 
 async def test_reap_idle_agent_pages_within_timeout_keeps_page() -> None:
@@ -795,7 +800,7 @@ async def test_reap_idle_agent_pages_within_timeout_keeps_page() -> None:
 
     assert await page_lifecycle.reap_idle_agent_pages(d) == 0
     assert up.pages == {1: "https://example.com/x"}
-    assert _AGENT_AFFINITY[7] == 1
+    assert get_agent_page(7, d.generation) == 1
 
 
 async def test_release_agent_page_clears_idle_stamp() -> None:
@@ -812,8 +817,9 @@ async def test_release_agent_page_clears_idle_stamp() -> None:
 
 
 def _expire(page_id: int) -> None:
-    """Force a page's TTL deadline into the past."""
-    page_lifecycle._PAGE_TTL_DEADLINES[page_id] = time.monotonic() - 1.0
+    """Force a page's TTL deadline into the past (generation preserved)."""
+    _deadline, generation = page_lifecycle._PAGE_TTL_DEADLINES[page_id]
+    page_lifecycle._PAGE_TTL_DEADLINES[page_id] = (time.monotonic() - 1.0, generation)
 
 
 def _record_emits(events: list[tuple[tuple[Any, ...], dict[str, Any]]]) -> Any:
@@ -826,7 +832,8 @@ def _record_emits(events: list[tuple[tuple[Any, ...], dict[str, Any]]]) -> Any:
 
 
 def _ttl_remaining(page_id: int) -> float:
-    return page_lifecycle._PAGE_TTL_DEADLINES[page_id] - time.monotonic()
+    deadline, _generation = page_lifecycle._PAGE_TTL_DEADLINES[page_id]
+    return deadline - time.monotonic()
 
 
 async def test_new_page_registers_ttl_on_both_creation_paths() -> None:
@@ -870,8 +877,8 @@ async def test_reap_expired_pages_closes_only_expired_stack_pages() -> None:
     assert [(c[0], c[1]) for c in up.calls if c[0] == "close_page"] == [
         ("close_page", {"pageId": 1})
     ]
-    assert _AGENT_AFFINITY[7] is None
-    assert _AGENT_AFFINITY[8] == 2
+    assert get_agent_page(7, d.generation) is None
+    assert get_agent_page(8, d.generation) == 2
     assert 1 not in page_lifecycle._PAGE_TTL_DEADLINES
     assert 2 in page_lifecycle._PAGE_TTL_DEADLINES
 
@@ -921,7 +928,8 @@ async def test_renew_page_extends_deadline_and_sweep_keeps_it() -> None:
     renewed before its old deadline survives the next sweep."""
     d, up = _daemon()
     await d.call_tool_for_agent("new_page", {"url": "x"}, 7)
-    page_lifecycle._PAGE_TTL_DEADLINES[1] = time.monotonic() + 1.0  # near deadline
+    # near deadline, same generation (a renewal under this daemon must see it)
+    page_lifecycle._PAGE_TTL_DEADLINES[1] = (time.monotonic() + 1.0, d.generation)
     up.calls.clear()
 
     res = await d.call_tool_for_agent("renew_page", {"ttl": 3600}, 7)
@@ -986,7 +994,7 @@ async def test_renew_page_rejects_unmanaged_page() -> None:
     has no TTL slot and no renewal path."""
     d, up = _daemon()
     up.pages[99] = "https://user.example.com/mine"
-    _AGENT_AFFINITY[7] = 99  # as if select_page had adopted the user's tab
+    set_agent_page(7, 99, d.generation)  # as if select_page had adopted the user's tab
 
     res = await d.call_tool_for_agent("renew_page", {"ttl": 60}, 7)
 
@@ -1015,7 +1023,7 @@ async def test_ttl_expiry_surfaces_native_no_page_red_green() -> None:
     nav = await d.call_tool_for_agent("navigate_page", {"url": "https://example.com/app"}, 7)
     assert not nav.is_error
     assert up.pages == {2: "https://example.com/app"}  # the expired tab is gone
-    assert _AGENT_AFFINITY[7] == 2
+    assert get_agent_page(7, d.generation) == 2
     assert 2 in page_lifecycle._PAGE_TTL_DEADLINES  # the new page has its own TTL
     assert 1 not in page_lifecycle._PAGE_TTL_DEADLINES
 
@@ -1143,6 +1151,191 @@ async def test_handle_client_renew_page_wire_roundtrip() -> None:
         assert renewed["result"]["is_error"] is False
         assert "renewed" in renewed["result"]["content"][0]["text"]
     finally:
+        server.close()
+        await server.wait_closed()
+        sock_path.unlink(missing_ok=True)
+
+
+# ── Upstream reconnect: page ids are per-process (task #3048) ────────────────
+
+
+def _restart_with_drift() -> tuple[ChromeMcpDaemon, FakeUpstream]:
+    """A replacement upstream whose numbering drifted: id 1 names a foreign tab.
+
+    Reconnecting chrome-devtools-mcp (Chrome restart / crash / OOM) starts a
+    fresh process that renumbers pages from 1, so a surviving pre-reconnect id
+    can point at any tab — here, a tab this stack never created. Any stale-slot
+    action (re-pin / close / renew) would land on it; the tests below are the
+    red side of that scenario.
+    """
+    up = FakeUpstream()
+    up.next_id = 2
+    up.pages = {1: "https://user.example.com/other-tab"}
+    return ChromeMcpDaemon(up), up  # type: ignore[arg-type]
+
+
+def test_new_generation_scopes_agent_page_entries() -> None:
+    """The primitive: an entry is only visible to the generation that wrote it
+    — a later generation reads the stale slot as absent."""
+    g1 = page_lifecycle.new_generation()
+    page_lifecycle.set_agent_page(7, 5, g1)
+    assert page_lifecycle.get_agent_page(7, g1) == 5
+
+    g2 = page_lifecycle.new_generation()
+
+    assert g2 > g1
+    assert page_lifecycle.get_agent_page(7, g2) is None
+
+
+async def test_reconnect_affinity_never_repins_stale_id() -> None:
+    """After an upstream restart the old id must not be re-pinned: pre-fix the
+    surviving slot selects id 1 — which now names a foreign tab — and the call
+    runs there; now the slot reads as no-page and the agent rebuilds through
+    the existing cold-start path."""
+    d1, _up1 = _daemon()
+    await d1.call_tool_for_agent("new_page", {"url": "https://example.com/mine"}, 7)  # page 1
+
+    d2, up2 = _restart_with_drift()
+    assert 1 in up2.pages  # the reused id exists: a stale re-pin WOULD land somewhere
+
+    res = await d2.call_tool_for_agent("take_snapshot", {}, 7)
+
+    assert res.is_error  # no-page — not the foreign tab
+    assert not [c for c in up2.calls if c[0] == "select_page"]
+    assert up2.selected is None  # nothing was ever selected
+
+    nav = await d2.call_tool_for_agent("navigate_page", {"url": "https://example.com/mine"}, 7)
+
+    assert not nav.is_error
+    assert up2.calls[-1][0] == "new_page"  # cold start, its own fresh tab
+    assert get_agent_page(7, d2.generation) == 2
+
+
+async def test_reconnect_ttl_sweep_never_closes_reused_id() -> None:
+    """A TTL slot minted before the reconnect must not close whatever tab now
+    holds that id: pre-fix the expired deadline kills the foreign tab; now the
+    stale slot is dropped, untouched."""
+    d1, _up1 = _daemon()
+    await d1.call_tool_for_agent("new_page", {"url": "https://example.com/mine"}, 7)
+
+    d2, up2 = _restart_with_drift()
+    _expire(1)  # the pre-reconnect deadline has passed
+
+    closed = await page_lifecycle.reap_expired_pages(d2)
+
+    assert closed == 0
+    assert not [c for c in up2.calls if c[0] == "close_page"]
+    assert up2.pages == {1: "https://user.example.com/other-tab"}  # untouched
+    assert 1 not in page_lifecycle._PAGE_TTL_DEADLINES  # the stale slot is dropped
+
+
+async def test_reconnect_renew_page_reads_stale_slot_as_no_page() -> None:
+    """renew_page across a reconnect: the pre-reconnect slot reads as no-page
+    (open a page first), never renewed against the new process's unrelated id."""
+    d1, _up1 = _daemon()
+    await d1.call_tool_for_agent("new_page", {"url": "x"}, 7)
+
+    d2, up2 = _restart_with_drift()
+    res = await d2.call_tool_for_agent("renew_page", {"ttl": 60}, 7)
+
+    assert res.is_error
+    assert "no current page" in _text_of(res)
+    assert up2.calls == []  # daemon-owned: nothing forwarded
+
+
+async def test_reconnect_sweeps_drop_stale_slots(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The dead sweep drops entries from an earlier connection instead of
+    treating them as candidates: the stale id is never probed or closed."""
+
+    async def fake_probe(host: str, port: int) -> bool:
+        return False  # everything dead
+
+    monkeypatch.setattr("services.browser.page_lifecycle.port_listening", fake_probe)
+
+    d1, _up1 = _daemon()
+    await d1.call_tool_for_agent("new_page", {"url": "http://localhost:3111/x"}, 7)
+
+    d2, up2 = _restart_with_drift()
+    up2.calls.clear()
+
+    await reap_dead_agent_pages(d2)
+
+    assert _AGENT_AFFINITY == {}  # the stale slot was dropped, not probed
+    assert not [c for c in up2.calls if c[0] == "close_page"]
+
+
+async def test_reconnect_idle_sweep_drops_stale_slot_without_closing() -> None:
+    """The idle sweep reads a stale slot as no-page: no close, no stamp use —
+    the entry is simply dropped."""
+    d1, _up1 = _daemon()
+    await d1.call_tool_for_agent("new_page", {"url": "https://example.com/x"}, 7)
+    _stamp_idle(7, page_lifecycle._TAB_IDLE_TIMEOUT_S + 1)
+
+    d2, up2 = _restart_with_drift()
+    up2.calls.clear()
+
+    closed = await page_lifecycle.reap_idle_agent_pages(d2)
+
+    assert closed == 0
+    assert [c[0] for c in up2.calls] == ["list_pages"]  # never a close
+    assert _AGENT_AFFINITY == {}
+
+
+async def test_late_write_from_dead_connection_is_inert() -> None:
+    """The race the generation closes structurally: a call resolved by the old
+    connection can write its page slot after the new connection is installed —
+    the write carries the dead generation, so no reader acts on it."""
+    d1, _up1 = _daemon()
+    d2, up2 = _restart_with_drift()
+
+    set_agent_page(7, 1, d1.generation)  # the late write
+
+    assert get_agent_page(7, d2.generation) is None
+
+    res = await d2.call_tool_for_agent("take_snapshot", {}, 7)
+
+    assert res.is_error
+    assert not [c for c in up2.calls if c[0] == "select_page"]
+
+
+async def test_handle_client_legacy_page_not_repinned_across_reconnect() -> None:
+    """Wire-level, legacy path: a connection's OWN current page is stamped with
+    the generation that resolved it, so after the upstream swap the same
+    connection cold-starts instead of re-pinning the stale id."""
+    import contextlib
+
+    up1 = FakeUpstream()
+    d2, up2 = _restart_with_drift()
+    daemon_ref: list[ChromeMcpDaemon | None] = [ChromeMcpDaemon(up1)]  # type: ignore[arg-type]
+    sock_path = Path(tempfile.gettempdir()) / f"ava-bmd-{uuid4().hex}.sock"
+    server = await asyncio.start_unix_server(
+        lambda r, w: _handle_client(r, w, daemon_ref), path=sock_path
+    )
+    reader, writer = await asyncio.open_unix_connection(path=sock_path)
+
+    async def send(payload: dict[str, Any]) -> dict[str, Any]:
+        writer.write((json.dumps(payload) + "\n").encode())
+        await writer.drain()
+        return json.loads(await reader.readline())
+
+    try:
+        opened = await send(
+            {"id": 1, "method": "call_tool", "tool": "new_page", "args": {"url": "x"}}
+        )
+        assert opened["ok"] is True  # connection's page = 1, daemon 1's generation
+
+        daemon_ref[0] = d2  # the upstream restarted in place
+
+        blank = await send({"id": 2, "method": "call_tool", "tool": "take_snapshot", "args": {}})
+        assert blank["ok"] is True
+        assert blank["result"]["is_error"] is True  # no-page — not the foreign tab
+        assert not [c for c in up2.calls if c[0] == "select_page"]
+    finally:
+        writer.close()
+        with contextlib.suppress(Exception):
+            await writer.wait_closed()
         server.close()
         await server.wait_closed()
         sock_path.unlink(missing_ok=True)
