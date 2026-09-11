@@ -376,6 +376,17 @@ _EVENTS_OPS: dict[str, EventSpec] = {
         tier="observation",
         doc="the gateway TTL reaper killed a persistent shell whose declared TTL passed; attributes carry agent_id, session_id, mode",
     ),
+    "chrome_page_ttl_expired": EventSpec(
+        name="chrome_page_ttl_expired",
+        category="log",
+        tier="observation",
+        doc="the browser-mcp TTL sweep closed a Chrome page whose hard deadline passed; attributes carry page_id, url, agent_id (None when no affinity slot still named the page)",
+    ),
+    "chrome_page_ttl_renewed": _telemetry(
+        "chrome_page_ttl_renewed",
+        "Chrome page TTL deadline renewed via the renew_page tool",
+        tier="observation",
+    ),
     "watcher_reaped": EventSpec(
         name="watcher_reaped",
         category="log",
