@@ -13,6 +13,7 @@ import { Loader2, MessageSquare, RefreshCw } from "lucide-react";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useDefaultLayout } from "react-resizable-panels";
 
 import { Button } from "@/components/ui/button";
 import { ChatMarkdown } from "@/components/markdown";
@@ -36,6 +37,7 @@ import {
 import type { MemoryGraphNode, MemoryGraphResponse, MemoryNoteResponse } from "@/lib/types";
 import { useBreakpoint } from "@/lib/breakpoint";
 import { BAR_HEIGHT_CLASS, FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0 } from "@/lib/layout";
+import { panelLayoutStorage } from "@/lib/panel-layout-storage";
 import { cn } from "@/lib/utils";
 
 // ── Memory graph force defaults ──
@@ -146,6 +148,14 @@ export default function MemoryGraphPage() {
   );
 }
 
+// v4 stores the split as { <panelId>: percent }; panel ids are part of the
+// persisted state (the library also writes them to id/data-testid on the panel
+// node — keep them unique across the app).
+const PANEL_GRAPH = "panel-memory-graph";
+const PANEL_SIDE = "panel-memory-side";
+const MEMORY_GRAPH_SPLIT_LAYOUT_ID = "ava.memory.graph.split";
+const MEMORY_GRAPH_SPLIT_STORAGE = panelLayoutStorage([PANEL_GRAPH, PANEL_SIDE]);
+
 function MemoryGraphShell({
   graph,
   selectedId,
@@ -165,15 +175,22 @@ function MemoryGraphShell({
 
   // The resizable panel group mounts only after the breakpoint is known
   // (QA #1169 F1): useBreakpoint's pre-mount default is isLarge=false, and a
-  // group mounting with that default would paint defaultSize 50+38=88 on the
-  // first frame — react-resizable-panels normalizes a <100 total and
-  // *persists* the normalized layout, clobbering the user's dragged split on
-  // every reload. Both modes below sum to 100, so no normalization ever runs.
+  // group mounting under it would register a vertical frame first and
+  // immediately re-register when the breakpoint resolves. Only user-driven
+  // commits persist (see the hook below) and both modes below sum to 100, so a
+  // transient frame can no longer overwrite the user's dragged split — the
+  // gate keeps the first *painted* frame correct either way.
   const [mounted, setMounted] = useState(false);
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- SSR-safe: must run once after mount so the first *painted* frame has the real breakpoint
     setMounted(true);
   }, []);
+
+  const splitLayout = useDefaultLayout({
+    id: MEMORY_GRAPH_SPLIT_LAYOUT_ID,
+    storage: MEMORY_GRAPH_SPLIT_STORAGE,
+    onlySaveAfterUserInteractions: true,
+  });
   if (!mounted) {
     // Pre-paint placeholder (graph only): identical tree shape on client and
     // server so hydration does not mismatch.
@@ -192,11 +209,12 @@ function MemoryGraphShell({
 
   return (
     <ResizablePanelGroup
-      direction={isLarge ? "horizontal" : "vertical"}
-      autoSaveId="ava.memory.graph.split"
+      orientation={isLarge ? "horizontal" : "vertical"}
+      defaultLayout={splitLayout.defaultLayout}
+      onLayoutChanged={splitLayout.onLayoutChanged}
       className={cn(FLEX_1, MIN_H_0)}
     >
-      <ResizablePanel defaultSize={isLarge ? 62 : 50} minSize={30}>
+      <ResizablePanel id={PANEL_GRAPH} defaultSize={isLarge ? "62%" : "50%"} minSize="30%">
         <section className={cn("relative h-full", MIN_H_0)}>
           <MemoryForceGraph
             graph={graph}
@@ -206,7 +224,7 @@ function MemoryGraphShell({
         </section>
       </ResizablePanel>
       <ResizableHandle />
-      <ResizablePanel defaultSize={isLarge ? 38 : 50} minSize={25}>
+      <ResizablePanel id={PANEL_SIDE} defaultSize={isLarge ? "38%" : "50%"} minSize="25%">
         <aside className={cn("h-full overflow-y-auto px-4 py-3 text-sm", MIN_H_0)}>
           {selected ? (
             <MemorySidePanel

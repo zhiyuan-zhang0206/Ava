@@ -2,13 +2,18 @@
 /**
  * Build-artifact integrity assertion for the minified production bundle.
  *
- * Guards the failure class behind task #2654 (postmortems/0007): a dependency
- * whose dist marks a side-effectful call `@__PURE__` (radix's esbuild
- * keep-names emit, @radix-ui/react-scroll-area >= 1.2.16) is silently emptied
+ * Guards the failure class behind task #2654 (build-pipeline integrity
+ * companion: task #2656): a dependency whose dist marks a side-effectful call
+ * `@__PURE__` (radix's esbuild keep-names emit; @radix-ui/react-scroll-area
+ * 1.2.15+ — bisected 2026-09-12, 1.2.14 clean) is silently emptied
  * by the production minifier. SWC compress trusts the annotation and drops the
  * whole rAF polling IIFE of `addUnlinkedScrollListener` as an unused pure call,
  * then constant-folds the corpse: the bundle still builds and loads, the
  * scrollbar thumb just stops tracking.
+ *
+ * Containment: package.json holds `@radix-ui/react-scroll-area >=1.2.10
+ * <1.2.15` until radix's emit is fixed; lift the cap only with this check
+ * green.
  *
  * Tripwire: deny `cancelAnimationFrame(0)` in any emitted chunk. rAF ids start
  * at 1, so canceling frame 0 is only ever the corpse of an eliminated loop
