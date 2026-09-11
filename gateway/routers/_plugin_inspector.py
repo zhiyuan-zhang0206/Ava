@@ -45,7 +45,12 @@ from gateway.routers._inspect_live import notice_blocking
 from gateway.schemas import InspectWidgetButton, InspectWidgetResult
 from shared import plugin_load_report, plugins_config
 from shared.plugin_context import PluginContext
-from shared.plugin_inspector import InspectButtonSpec, InspectWidgetSpec, registered_inspect_widgets
+from shared.plugin_inspector import (
+    InspectButtonSpec,
+    InspectWidgetSpec,
+    drop_plugin_inspect_widgets,
+    registered_inspect_widgets,
+)
 
 # The shipped-plugin inspector directory — every builtin plugin dir with an
 # inspector.py is part of the in-process registry (the metric loader's
@@ -81,8 +86,10 @@ def _load_inspect_widgets() -> list[InspectWidgetSpec]:
     Fail-soft per plugin (user ruling 2026-09-11): a plugin whose
     ``inspector.py`` fails to import, or whose registration raises, is
     reported loudly and skipped — the remaining widgets still serve. The
-    half-executed module is dropped from ``sys.modules`` so a later request
-    retries from a clean slate."""
+    half-executed module is dropped from ``sys.modules`` and its partial
+    registrations are dropped too (``drop_plugin_inspect_widgets`` — a module
+    can raise mid-registration), so a fixed file is picked up cleanly on a
+    later request."""
     modules = _enabled_inspector_modules()
     enabled: set[str] = set()
     for module in modules:
@@ -97,6 +104,7 @@ def _load_inspect_widgets() -> list[InspectWidgetSpec]:
         except BaseException as exc:
             sys.modules.pop(module_name, None)
             plugin_load_report.report_plugin_load_failure(plugin, exc)
+            drop_plugin_inspect_widgets(plugin)
             continue
         enabled.add(plugin)
     return [spec for spec in registered_inspect_widgets() if spec.plugin in enabled]
