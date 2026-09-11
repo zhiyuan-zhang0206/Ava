@@ -6,7 +6,7 @@ import os
 
 import psutil
 
-from shared.proc_tree import OwnedProcess
+from shared.proc_tree import OwnedProcess, create_time_matches
 
 
 def _identity_with_drift(offset: float) -> OwnedProcess:
@@ -37,3 +37,20 @@ def test_birth_matches_exposes_the_same_rule() -> None:
     process = psutil.Process()
     assert OwnedProcess(process.pid, process.create_time() + 1.0, None).birth_matches(process)
     assert not OwnedProcess(process.pid, process.create_time() + 60.0, None).birth_matches(process)
+
+
+def test_create_time_matches_accepts_whole_second_moves() -> None:
+    """One live process can move by whole seconds in either direction.
+
+    The 2.0s span itself is still the same process; .5 fractions are exact in
+    binary, so the boundary assertion does not depend on float rounding.
+    """
+    assert create_time_matches(99.5, 98.5)
+    assert create_time_matches(98.5, 99.5)
+    assert create_time_matches(100.5, 98.5)
+
+
+def test_create_time_matches_rejects_readings_beyond_the_tolerance() -> None:
+    """A reading outside the tolerance is positive evidence of a different process."""
+    assert not create_time_matches(101.5, 98.5)
+    assert not create_time_matches(158.5, 98.5)

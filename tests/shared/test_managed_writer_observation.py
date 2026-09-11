@@ -138,7 +138,7 @@ def test_exact_live_exited_and_reused_identity() -> None:
         )
         assert observe_process(expected) == "alive"
         mismatch = expected.model_copy(
-            update={"starttime": None, "create_time": expected.create_time + 1}
+            update={"starttime": None, "create_time": expected.create_time + 60}
         )
         assert observe_process(mismatch) == "identity_mismatch"
         assert child.stdin is not None
@@ -225,3 +225,19 @@ async def test_actual_observation_socket_requires_fresh_authenticated_challenge(
     finally:
         server.close()
         await server.wait_closed()
+
+
+def test_whole_second_create_time_drift_is_still_the_expected_process() -> None:
+    """A create_time re-read within the tolerance is the expected process, not a reuse."""
+    child = subprocess.Popen(
+        [sys.executable, "-I", "-c", "import sys;sys.stdin.read()"], stdin=subprocess.PIPE
+    )
+    try:
+        live = psutil.Process(child.pid).create_time()
+        for offset in (-1.0, 1.0):
+            expected = ExpectedProcess(pid=child.pid, create_time=live + offset, starttime=None)
+            assert observe_process(expected) == "alive"
+    finally:
+        if child.poll() is None:
+            child.kill()
+            child.wait(timeout=5)

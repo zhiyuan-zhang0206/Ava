@@ -480,3 +480,46 @@ def test_exact_generation_clear_cannot_remove_a_replacement() -> None:
 def test_marker_is_private_to_the_cluster_user() -> None:
     handoff.begin(expected_session="ava-updater", generation="g")
     assert handoff.state_path().stat().st_mode & 0o777 == 0o600
+
+
+def _owner_read_stub(create_time: float):
+    """psutil.Process stand-in for owner identity re-reads (claimed pid 123)."""
+
+    def process(_pid: int | None = None) -> object:
+        return type("P", (), {"pid": 123, "create_time": lambda _self: create_time})()
+
+    return process
+
+
+def test_bootstrap_writer_tolerates_whole_second_owner_create_time_drift(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(psutil, "Process", _owner_read_stub(42.5))
+    handoff.begin(expected_session="ava-updater", generation="bootstrap")
+    assert handoff.claim_running("bootstrap", expected_session="ava-updater", owner_pid=123)
+    # The writer re-reads its own wall-clock-derived birth: 1s of drift is the same process.
+    monkeypatch.setattr(psutil, "Process", _owner_read_stub(43.5))
+    handoff.write_bootstrap_recovery("bootstrap", _bootstrap_journal("prepared"))
+    assert handoff.read_bootstrap_recovery() is not None
+    # Beyond the tolerance the writer is no longer the recorded owner.
+    monkeypatch.setattr(psutil, "Process", _owner_read_stub(102.5))
+    with pytest.raises(handoff.BootstrapRecoveryInvalidError, match="lost exact handoff ownership"):
+        handoff.write_bootstrap_recovery("bootstrap", _bootstrap_journal("prepared"))
+
+
+def test_normal_writer_tolerates_whole_second_owner_create_time_drift(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(psutil, "Process", _owner_read_stub(42.5))
+    handoff.begin(expected_session="ava-updater", generation="bootstrap")
+    assert handoff.claim_running("bootstrap", expected_session="ava-updater", owner_pid=123)
+    handoff.write_bootstrap_recovery(
+        "bootstrap", _bootstrap_journal("candidate_ready", normal_release_planned=True)
+    )
+    monkeypatch.setattr(psutil, "Process", _owner_read_stub(43.5))
+    handoff.write_normal_release_recovery("bootstrap", _normal_journal("waiting"))
+    monkeypatch.setattr(psutil, "Process", _owner_read_stub(102.5))
+    with pytest.raises(
+        handoff.BootstrapRecoveryInvalidError, match="normal writer lost exact handoff ownership"
+    ):
+        handoff.write_normal_release_recovery("bootstrap", _normal_journal("waiting"))
