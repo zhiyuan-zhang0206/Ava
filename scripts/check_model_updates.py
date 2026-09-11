@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Fail-closed daily comparison of official provider models and Ava's registry."""
+"""Fail-closed daily comparison of official provider models and Ava's registry.
+
+`check_sources` loads the enabled provider plugins in-process first, so
+"already registered" and same-series supersession answer for the roster Ava
+actually runs (see `shared/lm/_plugin_providers.py`).
+"""
 
 from __future__ import annotations
 
@@ -22,6 +27,7 @@ from urllib3.connection import HTTPSConnection
 from urllib3.connectionpool import HTTPConnectionPool, HTTPSConnectionPool
 from urllib3.poolmanager import PoolManager
 
+from shared.lm._plugin_providers import ensure_provider_plugins_loaded
 from shared.lm.registry import MODELS
 from shared.paths import ava_home
 from shared.runtime_config import read_env_aliases
@@ -517,6 +523,12 @@ def _status_changed(previous: object, current: str) -> bool:
 def check_sources(
     file_aliases: Mapping[str, str], state: dict[str, dict[str, dict[str, object]]]
 ) -> dict[str, ProviderReport]:
+    # The comparison consults MODELS twice over — a registered id is skipped, a
+    # same-series older id is suppressed against registered versions — and MODELS
+    # stays empty until a registry-consulting call loads the enabled provider
+    # plugins. Without this, the daily run compared against nothing and re-reported
+    # every registered id as new (deduped only by its own state file).
+    ensure_provider_plugins_loaded()
     reports: dict[str, ProviderReport] = {}
     providers = state["providers"]
     for provider, source in SOURCES.items():
