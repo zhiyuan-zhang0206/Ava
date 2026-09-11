@@ -64,8 +64,17 @@ _DRAIN_TIMEOUT_S = 5.0
 # keep this leaf module below `shared.cluster` in the import graph. The dry-run
 # exemption lets its detached child reach the non-mutating `--local --dry-run`
 # leg; it remains outside the deploy in-flight scan in `ops.cluster_session`.
+# `ava-hold-recover` (task #3142) is the bounded completion of a stranded update
+# hold: it runs the same stop/start/resume an operator runs by hand, hosted by
+# its own detached session for exactly the same reason the updater is.
 _ORCHESTRATION_SESSIONS = frozenset(
-    {"ava-rollout", "ava-rollout-dryrun", "ava-updater", "ava-cluster-restart"}
+    {
+        "ava-rollout",
+        "ava-rollout-dryrun",
+        "ava-updater",
+        "ava-cluster-restart",
+        "ava-hold-recover",
+    }
 )
 
 # A recorded pid counts as the recorded session only while the live process's

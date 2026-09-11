@@ -1084,6 +1084,14 @@ CREATE TABLE host_deploy_state (
     -- migrations/20260911T180406_host-deploy-stranded-hold.sql.
     stranded_hold_since      TIMESTAMPTZ,
     stranded_hold_reason     TEXT,
+    -- The bounded automatic recovery of that hold (task #3142): per-episode
+    -- attempt budget + the latest attempt's outcome note. Written by the pause
+    -- controller (reservation) and the detached recovery executor; cleared with
+    -- the record above, so each episode starts with a fresh budget. See
+    -- ops/hold_recovery.py and cli/commands/_hold_recover.py.
+    stranded_hold_attempts      INTEGER NOT NULL DEFAULT 0,
+    stranded_hold_attempted_at  TIMESTAMPTZ,
+    stranded_hold_recovery_note TEXT,
     updated_at               TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -1098,6 +1106,19 @@ COMMENT ON COLUMN host_deploy_state.stranded_hold_since IS
 COMMENT ON COLUMN host_deploy_state.stranded_hold_reason IS
     'The updater verdict that left the stranded hold (e.g. "updater exited '
     'rc=1"); display/alert context, never a judgment input (task #3132).';
+
+COMMENT ON COLUMN host_deploy_state.stranded_hold_attempts IS
+    'Automatic recovery attempts this stranded-hold episode has consumed (task '
+    '#3142); reset when the record clears.';
+
+COMMENT ON COLUMN host_deploy_state.stranded_hold_attempted_at IS
+    'Postgres timestamp of the last reserved automatic recovery attempt (task '
+    '#3142).';
+
+COMMENT ON COLUMN host_deploy_state.stranded_hold_recovery_note IS
+    'The latest recovery attempt''s outcome or error summary, for the alarm '
+    'text and the operator; display context, never a judgment input (task '
+    '#3142).';
 
 -- ─────────────── cluster_pin ───────────────
 -- The cluster's pinned commit (cluster_target_sha) — the standing record of which
@@ -1680,3 +1701,7 @@ INSERT INTO schema_migrations (name) VALUES ('20260910T165723_plugin-stats');
 -- without this applied marker still run the migration and fail loudly if the
 -- columns were added outside migration tracking.
 INSERT INTO schema_migrations (name) VALUES ('20260911T180406_host-deploy-stranded-hold');
+
+-- The stranded-hold recovery columns are already represented above. Fresh DBs
+-- must not replay the strict ADD COLUMN against the baseline schema.
+INSERT INTO schema_migrations (name) VALUES ('20260911T192500_stranded-hold-recovery');

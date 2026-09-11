@@ -49,6 +49,11 @@ _UPDATER_SERVICE = "updater"
 _ROLLOUT_SERVICE = "rollout"
 _ROLLOUT_DRYRUN_SERVICE = "rollout-dryrun"
 _CLUSTER_RESTART_SERVICE = "cluster-restart"
+# The bounded completion of a stranded update hold (task #3142): a detached
+# session like the four above — `shared.proc` sanctions it as a host of an
+# in-process host transition, and the sync guard in
+# tests/cli/test_update_dispatch_guard.py keeps the two sides in step.
+_HOLD_RECOVER_SERVICE = "hold-recover"
 
 # What an in-flight orchestration is, as a status consumer (the Settings panel)
 # shows it. Sourced from the deployment-state lease's `kind` (rollout/restart)

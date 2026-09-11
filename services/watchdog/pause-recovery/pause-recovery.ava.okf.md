@@ -55,6 +55,42 @@ still has a live owner, so a live rollout's restart leg is never raced. A
 declined round resets the keepalive's failure count and breaker: a decline is
 "not yet allowed", never "a respawn cannot cure it".
 
+## Bounded completion of a stranded update hold (task #3142)
+
+The record (task #3132) makes a stranded hold loud; one shape of it is also
+*provably resumable*, and since 2026-09-12 the pause controller completes it
+once, on its own. The shape: an **update-armed** hold (the pause window's
+updater run reads FAILED — the verdict's own evidence) at a **post-stop** phase
+(`stopping` / `stopped` / `starting`), on a unit that is NOT the gateway (a
+gateway stop leg needs an operator's `--gateway-last` assertion).
+
+The sequence is the operator recipe, not a new one: for `stopping`, re-run the
+stop the update leg itself runs (`cli.commands.stop._do_stop` with
+`keep_infra`, terminals and browser retained, this home's declared services
+only — which is why the recovery session and the browser survive it), then
+`maintenance start`, then `maintenance resume`. `ops/hold_recovery.py` spawns
+the detached `ava-hold-recover` session (a sanctioned host of an in-process
+host transition — `shared.proc` exempts it like the updater's pane);
+`cli/commands/_hold_recover.py` runs inside it and re-verifies the hold's exact
+`(holder, acquired_at)` generation, its phase, the verdict, the role and the
+switch before touching anything.
+
+Bounds: **one attempt per episode** — reserved by a compare-and-set in
+`host_deploy_state` (`reserve_stranded_recovery`, so two racers cannot both
+spawn, and a failed spawn still spends the attempt), a **900s cooldown** before
+any later attempt, and a **kill-switch** (`settings.gateway.stranded_hold_recovery`,
+default on; read by the watchdogs every tick, so a change applies at their next
+restart — the field's restart hint is the runner-side `ops` daemon). Every
+attempt's outcome lands in the host's record
+(`stranded_hold_recovery_note`) and in `$AVA_HOME/logs/hold-recover-<epoch>.log`.
+
+Every other hold stays record-only: an operator hold, a pre-stop phase
+(`preparing` / `draining` / `drained`), a `ready` hold, an unreadable round, and
+a gateway unit. The manual path (stop → start → resume, per phase) lives in
+`conventions/graceful-maintenance.md`, "Recovering a stuck maintenance
+operation" — the automation is the same steps, so an operator can take over
+wherever an attempt stopped.
+
 ## Off-pin converge-back
 
 A dead rollout can leave the gateway host off-pin (checkout on the target, pin

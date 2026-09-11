@@ -97,6 +97,13 @@ class HostDeployState:
     # `reason` carries the updater verdict that justified it.
     stranded_hold_since: _dt.datetime | None = None
     stranded_hold_reason: str | None = None
+    # The bounded automatic recovery of that hold (task #3142): the per-episode
+    # attempt budget (`reserve_stranded_recovery` is the compare-and-set that
+    # spends it) and the latest attempt's outcome note for the operator. Both
+    # clear with the record, so a new episode starts with a fresh budget.
+    stranded_hold_attempts: int = 0
+    stranded_hold_attempted_at: _dt.datetime | None = None
+    stranded_hold_recovery_note: str | None = None
     db_now: _dt.datetime = _dataclasses.field(default_factory=lambda: _dt.datetime.now(_dt.UTC))
 
     @property
@@ -158,7 +165,8 @@ def _read_with_conn(conn: Any, machine: str) -> HostDeployState | None:
     with conn.cursor() as cur:
         cur.execute(
             "SELECT machine, posture, updated_at, updater_lease_expires_at, paused_at, "
-            "stranded_hold_since, stranded_hold_reason, now() "
+            "stranded_hold_since, stranded_hold_reason, stranded_hold_attempts, "
+            "stranded_hold_attempted_at, stranded_hold_recovery_note, now() "
             "FROM host_deploy_state WHERE machine = %s",
             (machine,),
         )
@@ -173,7 +181,10 @@ def _read_with_conn(conn: Any, machine: str) -> HostDeployState | None:
         paused_at=row[4],
         stranded_hold_since=row[5],
         stranded_hold_reason=row[6],
-        db_now=row[7],
+        stranded_hold_attempts=row[7],
+        stranded_hold_attempted_at=row[8],
+        stranded_hold_recovery_note=row[9],
+        db_now=row[10],
     )
 
 
@@ -206,7 +217,8 @@ def read_all() -> dict[str, HostDeployState]:
     with shared.db.connect(autocommit=True) as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT machine, posture, updated_at, updater_lease_expires_at, paused_at, "
-            "stranded_hold_since, stranded_hold_reason, now() "
+            "stranded_hold_since, stranded_hold_reason, stranded_hold_attempts, "
+            "stranded_hold_attempted_at, stranded_hold_recovery_note, now() "
             "FROM host_deploy_state"
         )
         return {
@@ -218,7 +230,10 @@ def read_all() -> dict[str, HostDeployState]:
                 paused_at=row[4],
                 stranded_hold_since=row[5],
                 stranded_hold_reason=row[6],
-                db_now=row[7],
+                stranded_hold_attempts=row[7],
+                stranded_hold_attempted_at=row[8],
+                stranded_hold_recovery_note=row[9],
+                db_now=row[10],
             )
             for row in cur.fetchall()
         }
@@ -353,10 +368,22 @@ def mark_stranded_hold(reason: str) -> bool:
         if row is None:
             return False
         newly = row[0] is None
+        # A new episode starts with a fresh recovery budget: reset the attempt
+        # counters in the same statement that stamps `since` (PostgreSQL reads
+        # every right-hand side against the pre-update row, so the CASEs see
+        # the old `stranded_hold_since`).
         cur.execute(
             "UPDATE host_deploy_state "
             "SET stranded_hold_since = COALESCE(stranded_hold_since, now()), "
-            "    stranded_hold_reason = %s "
+            "    stranded_hold_reason = %s, "
+            "    stranded_hold_attempts = "
+            "        CASE WHEN stranded_hold_since IS NULL THEN 0 ELSE stranded_hold_attempts END, "
+            "    stranded_hold_attempted_at = "
+            "        CASE WHEN stranded_hold_since IS NULL THEN NULL "
+            "             ELSE stranded_hold_attempted_at END, "
+            "    stranded_hold_recovery_note = "
+            "        CASE WHEN stranded_hold_since IS NULL THEN NULL "
+            "             ELSE stranded_hold_recovery_note END "
             "WHERE machine = %s",
             (reason, machine),
         )
@@ -377,11 +404,58 @@ def clear_stranded_hold() -> bool:
     with write_transaction() as conn, conn.cursor() as cur:
         cur.execute(
             "UPDATE host_deploy_state SET stranded_hold_since = NULL, "
-            "stranded_hold_reason = NULL "
+            "stranded_hold_reason = NULL, stranded_hold_attempts = 0, "
+            "stranded_hold_attempted_at = NULL, stranded_hold_recovery_note = NULL "
             "WHERE machine = %s AND stranded_hold_since IS NOT NULL",
             (machine,),
         )
         return cur.rowcount > 0
+
+
+def reserve_stranded_recovery(*, max_attempts: int, cooldown_s: float, note: str) -> int | None:
+    """Reserve one bounded automatic recovery attempt (task #3142).
+
+    Returns this attempt's number when THIS call won the reservation, else
+    None. The compare-and-set is the whole reservation: two racing deciders
+    cannot both spawn a recovery leg, and the budgets — attempts below
+    `max_attempts`, and `cooldown_s` since the last attempt — are enforced
+    atomically in the same UPDATE against Postgres' clock (`attempted_at` is
+    written by the DB, never by the caller). The note seeds the outcome
+    column; `finish_stranded_recovery` overwrites it with the result.
+    """
+    machine = machine_name()
+    with write_transaction() as conn, conn.cursor() as cur:
+        cur.execute(
+            "UPDATE host_deploy_state "
+            "SET stranded_hold_attempts = stranded_hold_attempts + 1, "
+            "    stranded_hold_attempted_at = now(), "
+            "    stranded_hold_recovery_note = %s "
+            "WHERE machine = %s "
+            "  AND stranded_hold_since IS NOT NULL "
+            "  AND stranded_hold_attempts < %s "
+            "  AND (stranded_hold_attempted_at IS NULL "
+            "       OR stranded_hold_attempted_at < now() - make_interval(secs => %s)) "
+            "RETURNING stranded_hold_attempts",
+            (note, machine, max_attempts, cooldown_s),
+        )
+        row = cur.fetchone()
+        return int(row[0]) if row is not None else None
+
+
+def finish_stranded_recovery(note: str) -> None:
+    """Record the latest recovery attempt's outcome (success or failure text).
+
+    A no-op when no record stands (the episode ended while the attempt ran —
+    its outcome is then moot) and deliberately attempts-preserving: the
+    budget was spent at reservation time and is never refunded.
+    """
+    machine = machine_name()
+    with write_transaction() as conn, conn.cursor() as cur:
+        cur.execute(
+            "UPDATE host_deploy_state SET stranded_hold_recovery_note = %s "
+            "WHERE machine = %s AND stranded_hold_since IS NOT NULL",
+            (note, machine),
+        )
 
 
 def updater_lease_live(machine: str | None = None) -> bool:

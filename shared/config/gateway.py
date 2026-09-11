@@ -161,6 +161,28 @@ class GatewaySettings(EnvSettings):
         },
     )
 
+    stranded_hold_recovery: bool = Field(
+        default=True,
+        alias="AVA_STRANDED_HOLD_RECOVERY",
+        description=(
+            "Bounded automatic completion of a stranded update hold (task #3142). "
+            "When an update leg's maintenance hold outlives its owner past the "
+            "stranded-hold bound, the pause controller may spend ONE bounded attempt "
+            "at the same stop/start/resume sequence an operator would run by hand "
+            "(one attempt per episode, 900s cooldown, post-stop phases only; gateway "
+            "units are never completed automatically). False disables the mechanism "
+            "outright — the task #3132 alarm and the manual recipe in "
+            "conventions/graceful-maintenance.md remain the recovery path. Read by "
+            "the watchdogs on every tick; a change takes effect at their next restart."
+        ),
+        json_schema_extra={
+            "restart_required": "ops",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
     schedule_stall_timeout_seconds: float = Field(
         default=1200.0,
         alias="AVA_SCHEDULE_STALL_TIMEOUT_SECONDS",
