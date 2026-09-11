@@ -63,6 +63,7 @@ from mcp import ClientSession, types
 from mcp.shared.exceptions import MCPError
 from mcp.types import CONNECTION_CLOSED, REQUEST_TIMEOUT
 
+from services.browser import page_lifecycle
 from services.browser.mcp_upstream import (
     _bounded,
     _bounded_stack_close,
@@ -70,7 +71,6 @@ from services.browser.mcp_upstream import (
     _StoppingError,
 )
 from services.browser.page_lifecycle import (
-    _AGENT_AFFINITY,
     RENEW_PAGE_TOOL,
     _text_of,
     dead_page_reaper,
@@ -193,7 +193,7 @@ class ChromeMcpDaemon:
     no-page error on its next call, never another client's tab).
 
     Two affinity shapes: requests carrying an `agent_id` resolve their page
-    from the per-agent registry (`_AGENT_AFFINITY`, survives connections);
+    from the per-agent registry (generation-stamped — see page_lifecycle);
     requests without one fall back to the caller-supplied per-connection page.
     """
 
@@ -204,6 +204,7 @@ class ChromeMcpDaemon:
         # Set when an upstream call hits a closed session; run() watches it to
         # trigger a reconnect instead of exiting.
         self.dead = asyncio.Event()
+        self.generation = page_lifecycle.new_generation()  # page ids are per process
 
     async def _call(self, name: str, args: dict[str, Any]) -> types.CallToolResult:
         """Forward to the upstream, turning a dead session into a clean signal:
@@ -277,8 +278,9 @@ class ChromeMcpDaemon:
             # (either its stamp is visible before the candidate phase, or the
             # page is already closed and the next call cold-starts).
             touch_agent_page(agent_id)
-            result, updated = await self._affinity_call(name, args, _AGENT_AFFINITY.get(agent_id))
-            _AGENT_AFFINITY[agent_id] = updated
+            page = page_lifecycle.get_agent_page(agent_id, self.generation)
+            result, updated = await self._affinity_call(name, args, page)
+            page_lifecycle.set_agent_page(agent_id, updated, self.generation)
             return result
 
     async def _affinity_call(
@@ -311,7 +313,7 @@ class ChromeMcpDaemon:
                         # The auto-created page gets its TTL deadline like an
                         # explicit new_page (the two creation paths are the
                         # whole coverage of the TTL registry).
-                        register_created_page(_selected_id(result))
+                        register_created_page(_selected_id(result), self.generation)
                     if verify_after and not result.is_error:
                         _spawn_verify()
                     return result, (_selected_id(result) or current_page)
@@ -324,7 +326,7 @@ class ChromeMcpDaemon:
             if name == "new_page":
                 # Page created -> TTL slot (see `page_lifecycle`); a listing
                 # that drifted off the parseable shape registers nothing.
-                register_created_page(_selected_id(result))
+                register_created_page(_selected_id(result), self.generation)
             elif name == "close_page":
                 # A clean close drops the TTL slot with the page; bool is
                 # rejected so a JSON `true` can never alias page id 1.
@@ -358,11 +360,11 @@ async def _handle_client(
 ) -> None:
     """One agent bridge connection. Requests carrying an `agent_id` resolve
     their page from the per-agent registry (a fresh connection — exec
-    subprocess child — inherits the agent's page); the rest track
-    `current_page` per connection (legacy fallback). `daemon_ref` is a mutable
-    cell so the handler always sees the current daemon across upstream
-    reconnects; when None (reconnecting), returns a transient error."""
-    current_page: int | None = None
+    subprocess child — inherits the agent's page); the rest track their own
+    ``(page, generation)`` (see ``forward_legacy_call``). `daemon_ref` is a
+    mutable cell so the handler always sees the current daemon across
+    reconnects; when None (reconnecting), it returns a transient error."""
+    conn_page: tuple[int, int] | None = None  # (page, generation)
     try:
         with suppress(ConnectionResetError, BrokenPipeError):
             while line := await reader.readline():
@@ -422,8 +424,8 @@ async def _handle_client(
                                     tool, req.get("args") or {}, agent_id
                                 )
                             else:
-                                result, current_page = await daemon.call_tool(
-                                    tool, req.get("args") or {}, current_page
+                                result, conn_page = await page_lifecycle.forward_legacy_call(
+                                    daemon, tool, req.get("args") or {}, conn_page
                                 )
                             resp = {
                                 "id": req_id,
@@ -724,7 +726,7 @@ async def run() -> None:  # noqa: PLR0915 — upstream watchdog lifecycle keeps 
             watchdog_task = asyncio.create_task(_upstream_watchdog(daemon_ref[0], stop))
             reaper_task = asyncio.create_task(dead_page_reaper(daemon_ref[0], stop))
             reconnect_delay = _RECONNECT_INITIAL_DELAY_S
-            logger.info(f"[browser-mcp] upstream connected ({browser_url})")
+            logger.info(f"[browser-mcp] upstream connected, gen {daemon_ref[0].generation}")
 
             # Chrome is confirmed up here — inject the gateway session cookie
             # right away (the periodic loop covers expiry; this covers the

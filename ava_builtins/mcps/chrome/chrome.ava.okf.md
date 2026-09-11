@@ -32,6 +32,7 @@ Every page this stack **creates** — an explicit `new_page`, or the auto-create
 
 - **Renewal** — `renew_page`, the daemon-owned tool: moves the caller's deadline to `now + ttl` (default: the configured TTL; max 24h per call), mirroring the shell `renew()` ruling. A passed deadline is not renewable — the sweep owns the page.
 - **Scoping** — only pages this stack created have a slot, so the user's own tabs are never inspected, closed, or renewable (a selected user tab has no slot; `renew_page` refuses it).
+- **Connection scope** — page ids are per upstream process (`chrome-devtools-mcp` renumbers from 1 on every restart), so page-keyed state is stamped with the connection generation that minted it (`services/browser/page_lifecycle.py:new_generation`); after a reconnect a stale slot reads as no-page/expired — never re-pinned, closed, or renewed — and the agent rebuilds through the cold-start paths.
 - **Expiry surface** — no invented "page expired" error: the next page-scoped call takes the existing no-page path; a fresh navigate cold-starts a new page with its own TTL.
 - **Cleanup** — a `close_page`, release, or dead/idle-sweep close drops the page's TTL slot with it.
 
