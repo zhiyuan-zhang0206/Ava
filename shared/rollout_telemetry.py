@@ -202,7 +202,7 @@ def stage(name: str) -> Generator[None, None, None]:
 @contextmanager
 def updater_stage(name: str) -> Generator[None, None, None]:
     """Time one agent-runner updater stage (checkout / uv_sync / skills /
-    quiesce / stop / start / preflight).
+    quiesce / stop / start / preflight / readiness).
 
     Prints two lines — `[updater] stage=<name> t=<monotonic>` on entry and
     `[updater] stage=<name> dur=..s` on exit. The exit line is what
