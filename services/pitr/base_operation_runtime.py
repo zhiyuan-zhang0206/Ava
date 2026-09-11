@@ -34,6 +34,7 @@ from shared.config import settings
 from shared.db import direct_db_url
 from shared.paths import ava_home
 from shared.pg_tools import pg_tool
+from shared.proc_tree import create_time_matches, stable_create_time
 from shared.process_env import restricted_process_env
 
 _EMERGENCY_FLOOR_BYTES = 4 * 1024**3
@@ -199,7 +200,7 @@ async def run_restore_input(inputs: RestoreWorkerInput) -> dict[str, str]:
         close_fds=True,
         text=True,
     )
-    leader_created_at = psutil.Process(process.pid).create_time()
+    leader_created_at = stable_create_time(psutil.Process(process.pid))
     try:
         while not result.is_file():
             if process.poll() is not None:
@@ -232,7 +233,7 @@ def reap_restore_group(process: subprocess.Popen[str], leader_created_at: float)
         raise RuntimeError("refusing to signal the controller process group")
     try:
         leader = psutil.Process(process.pid)
-        if abs(leader.create_time() - leader_created_at) >= 0.01:
+        if not create_time_matches(stable_create_time(leader), leader_created_at):
             raise RuntimeError("restricted restore worker PID identity changed")
     except psutil.NoSuchProcess as exc:
         if group_members(process.pid):
