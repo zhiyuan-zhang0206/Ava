@@ -81,21 +81,25 @@ def _run_watcher(
     fake_ava = _FakeAva()
     monkeypatch.chdir(tmp_path)
 
-    code = (
-        _TEMPLATE.read_text()
-        .replace('REPO_ROOT = ""', f'REPO_ROOT = "{tmp_path}"')
-        .replace('PR_NUMBER = ""', 'PR_NUMBER = "1234"')
-        .replace('CI_UTILS = ""', f'CI_UTILS = "{tmp_path}"')
-        .replace("WATCHER_ID = 0", "WATCHER_ID = 42")
+    code = _TEMPLATE.read_text()
+    substitutions = (
+        ('REPO_ROOT = ""', f'REPO_ROOT = "{tmp_path}"'),
+        ('PR_NUMBER = ""', 'PR_NUMBER = "1234"'),
+        ('CI_UTILS = ""', f'CI_UTILS = "{tmp_path}"'),
+        ("WATCHER_ID = 0", "WATCHER_ID = 42"),
         # The retry window is behavior; its wall clock is not. Sleep-free polls
-        # keep this test instant.
-        .replace("CHECK_EVERY = 60", "CHECK_EVERY = 0")
+        # keep this test instant — and a template whose default moves must fail
+        # here loudly, not silently sleep the real 60s per retry.
+        ("CHECK_EVERY = 60", "CHECK_EVERY = 0"),
         # The two imports are substituted rather than patched through
         # sys.modules: a stub left there leaks into fixture teardown, which
         # re-imports `ava` (same substitution the generated-watcher tests use).
-        .replace("import ava\n", "")
-        .replace("from ci_utils import CIStatus, check_ci  # noqa: E402\n", "")
+        ("import ava\n", ""),
+        ("from ci_utils import CIStatus, check_ci  # noqa: E402\n", ""),
     )
+    for old, new in substitutions:
+        assert old in code, f"template no longer contains {old!r} — update this test"
+        code = code.replace(old, new)
     try:
         exec(
             compile(code, str(_TEMPLATE), "exec"),
@@ -146,13 +150,15 @@ def test_persistent_no_checks_is_reported_after_bounded_retries(
     assert "re-polled 3 times" in wakes[0][1]
 
 
+@pytest.mark.parametrize("member", ["FAILED", "ERROR"])
 def test_settled_verdict_wakes_on_the_first_poll(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, member: str
 ) -> None:
-    """Retries are confined to NO_CHECKS: a red PR wakes immediately."""
+    """Retries are confined to NO_CHECKS: any other settled verdict — a red PR or
+    a failed probe — wakes on the first poll."""
     statuses = _ci_status()
-    wakes, polled = _run_watcher(monkeypatch, tmp_path, [statuses.FAILED])
+    wakes, polled = _run_watcher(monkeypatch, tmp_path, [getattr(statuses, member)])
 
     assert len(polled) == 1
     assert len(wakes) == 1
-    assert "failed" in wakes[0][1]
+    assert member.lower() in wakes[0][1]
