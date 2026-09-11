@@ -54,6 +54,7 @@ from dataclasses import dataclass
 
 from langchain_core.messages import AIMessage, BaseMessage
 
+from shared.lm._plugin_providers import ensure_provider_plugins_loaded
 from shared.lm.registry import MODELS, resolve_setting
 
 
@@ -82,9 +83,21 @@ def resolve_context_budget(model: str) -> ContextBudget:
     ``min(auto_compact_fraction * window, auto_compact_ceiling_tokens)`` and the
     soft threshold scaled by the same factor the ceiling applied.
 
+    The provider plugins are ensured loaded first, so the lookup below sees the
+    registry a model build would see even when this call is the process's first
+    registry use.
+
     Raises:
         UnknownModelWindowError: ``model`` has no registry ``context_window``.
+        RuntimeError: no provider plugin is enabled — the loader's fail-loud
+            startup error, surfaced here when this call triggers the load.
     """
+    # Registry-consulting call: make it self-sufficient. MODELS starts empty and
+    # is filled by the provider-plugin loader; without this, a process whose
+    # first registry use is the budget (a test process, the compact gate before
+    # any model build, an endpoint) raised UnknownModelWindowError for a model
+    # that is registered (task #3138).
+    ensure_provider_plugins_loaded()
     spec = MODELS.get(model)
     if spec is None or spec.context_window is None:
         raise UnknownModelWindowError(
