@@ -52,6 +52,8 @@ _SQL_OR_DYNAMIC_KINDS = frozenset(
         "watchdog_tick",  # services/watchdog/daemon.py:_TickProgress.record_completed (positional emit)
         "heartbeat_paused",  # ava/self.py:258 telemetry.emit("telemetry", ...)
         "shell_ttl_renewed",  # ava/shell/sessions.py:_record_renewal telemetry.emit("telemetry", ...)
+        "chrome_page_ttl_expired",  # services/browser/page_lifecycle.py:reap_expired_pages telemetry.emit("log", ...)
+        "chrome_page_ttl_renewed",  # services/browser/page_lifecycle.py:renew_agent_page telemetry.emit("telemetry", ...)
         "frontend_interaction",  # gateway/routers/frontend_telemetry.py telemetry.emit("telemetry", ...)
         "pgbouncer_repaired",  # services/healthchecks/pgbouncer.py:_emit_repaired
         "editable_pth_repaired",  # shared/editable_install.py:repair_editable_ava_pth

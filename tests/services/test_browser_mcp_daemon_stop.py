@@ -30,7 +30,7 @@ import threading
 import time
 from contextlib import suppress
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import psutil
 import pytest
@@ -155,6 +155,10 @@ def _daemon_env(home: Path, bin_dir: Path, chrome: _ChromeFake, mode: str) -> di
         f"AVA_BROWSER_CDP_PORT={chrome.port}\nAVA_MCP_CONNECT_TIMEOUT_SECONDS=120\n",
         encoding="utf-8",
     )
+    # A real unit always carries a machine identity (`ava start
+    # --machine-name` persists this file); the daemon's boot seam
+    # (init_gateway_process) stamps the name into every event record.
+    (home / "machine_name").write_text("browser-mcp-test\n", encoding="utf-8")
     env = dict(os.environ)
     env.update(
         {
@@ -283,9 +287,11 @@ def test_sigterm_normal_connection_closes_everything_except_chrome(
     try:
         _wait_socket(sock_path, daemon, daemon_log)
         # A real round-trip proves the upstream is connected (list_tools goes
-        # through the fake npx subprocess).
+        # through the fake npx subprocess, which serves an empty list); the
+        # daemon-owned renew_page tool rides after the verbatim passthrough.
         resp = _client_roundtrip_until_ok(sock_path, {"id": 1, "method": "list_tools"})
-        assert resp["result"] == []
+        tools = cast("list[dict[str, Any]]", resp["result"])
+        assert [t["name"] for t in tools] == ["renew_page"]
 
         child_pid = _upstream_child_pid(daemon)
         assert child_pid, "no upstream child — the fake npx did not spawn"

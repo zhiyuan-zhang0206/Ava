@@ -7,6 +7,18 @@ and the matching GitHub Releases, cut by `scripts/release_cut.py`.
 
 ## [Unreleased]
 
+### Added
+- Chrome pages created through the shared browser (an explicit `new_page`, or
+  the auto-created page on a page-less first navigate) carry a hard TTL —
+  `AVA_CHROME_PAGE_DEFAULT_TTL_SECONDS`, 24h default — and the browser-mcp
+  daemon's sweep closes them once the deadline passes; activity never extends
+  it. A daemon-owned `renew_page` tool, appended after the upstream tool list,
+  moves the caller's page deadline to now + ttl (at most 24h per call); a page
+  already past its deadline is not renewable. Only pages this stack created
+  are ever inspected or closed, expiry surfaces as the existing no-page path
+  rather than an invented "expired page" error, and each expiry/renewal emits
+  a `chrome_page_ttl_expired` / `chrome_page_ttl_renewed` event (task #3035).
+
 ### Changed
 - PR merge automation now uses Trunk Merge Queue: queued PRs are tested
   together in batches (target 4, max wait 5 min) via draft-PR runs on `trunk-merge/*`
