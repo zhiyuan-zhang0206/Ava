@@ -141,7 +141,10 @@ contract (2026-08-28 ava_ledger incident; restated for plugins 2026-09-11):
 an `inspector.py` that fails to import, or a spec that fails registration, is
 reported (loguru ERROR + the `plugin_load_failed` event) and skipped — the
 endpoint keeps serving the remaining widgets, never a 500, never a silently
-shrunken panel.
+shrunken panel. Registrations that landed before the failure are dropped, so
+the next request's retry starts clean instead of dying on
+`DuplicateInspectWidget`; a fixed `inspector.py` is picked up without a
+gateway restart.
 
 **Widget order keys.** A widget's `order` is any int; the panel's built-in
 sections carry fixed keys, so a value slots a widget anywhere between them:
