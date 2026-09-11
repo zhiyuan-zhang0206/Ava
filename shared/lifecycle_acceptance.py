@@ -3,6 +3,10 @@
 Callers establish their distinct authority before calling: a current owner with
 a fresh lease, or a local controller that positively proved no admitted owner.
 Both use this exact transaction and target fence. Chat never participates.
+
+Acceptance also owns the incarnation-epoch boundary: a lifecycle command whose
+intent predates the latest resurrection is settled as superseded instead of
+being adopted, so a resurrect can never replay an older terminate (issue #2158).
 """
 
 from dataclasses import dataclass
@@ -27,6 +31,23 @@ FAILED_RESTART_FOR_CURRENT_TARGET: LiteralString = (
     "AND failed.payload->'lifecycle_result'->>'reason'='restart_deadline_expired')"
 )
 
+# Every unapplied lifecycle command whose intent predates the recorded
+# resurrection is closed by it, visibly (the payload names the resurrect inbound
+# that superseded it), never silently dropped. Applied commands are preserved:
+# an in-flight external effect cannot be undone, and no observation timestamp is
+# invented for a command that never ran.
+_SUPERSEDED_BY_RESURRECT: LiteralString = (
+    "UPDATE inbound_messages i SET status='done', "
+    "payload=COALESCE(i.payload,'{}'::jsonb)||jsonb_build_object('lifecycle_result',"
+    "jsonb_build_object('outcome','superseded','reason','resurrect',"
+    "'resurrect_inbound_id',m.last_resurrect_inbound_id)) "
+    "FROM agents_meta m "
+    "WHERE i.agent_id=%s AND m.id=i.agent_id AND m.last_resurrect_inbound_id IS NOT NULL "
+    "AND i.kind IN ('restart','terminate') AND i.status IN ('pending','claimed') "
+    "AND i.applied_at IS NULL AND i.id < m.last_resurrect_inbound_id "
+    "RETURNING i.id"
+)
+
 
 @dataclass(frozen=True)
 class LifecycleIntent:
@@ -40,12 +61,15 @@ class LifecycleIntent:
 
 _ACCEPT = """
 WITH target AS MATERIALIZED (
- SELECT id,lifecycle_command_id,runtime_generation,runtime_owner FROM agents_meta
+ SELECT id,lifecycle_command_id,runtime_generation,runtime_owner,last_resurrect_inbound_id
+ FROM agents_meta
  WHERE id=%s AND runtime_generation=%s AND runtime_owner=%s FOR UPDATE
 ), pending AS (
  SELECT i.id FROM inbound_messages i JOIN target t ON t.id=i.agent_id
  WHERE t.lifecycle_command_id IS NULL AND i.status='pending'
- AND i.kind IN ('restart','terminate') ORDER BY i.id LIMIT 1 FOR UPDATE OF i
+ AND i.kind IN ('restart','terminate')
+ AND i.id > COALESCE(t.last_resurrect_inbound_id, 0)
+ ORDER BY i.id LIMIT 1 FOR UPDATE OF i
 ), accepted AS (
  UPDATE inbound_messages i SET status='claimed',claimed_at=clock_timestamp(),
  target_generation=t.runtime_generation,target_owner=t.runtime_owner
@@ -84,6 +108,7 @@ def accept_lifecycle_command(
     """Caller retains its ownership/absence proof lock through this write."""
     if conn.info.transaction_status != TransactionStatus.INTRANS:
         raise RuntimeError("lifecycle acceptance requires an explicit transaction")
+    _settle_superseded_by_resurrect(conn, target.agent_id)
     return _decode(
         conn.execute(_ACCEPT, (target.agent_id, target.generation, target.owner)).fetchone()
     )
@@ -95,8 +120,61 @@ async def accept_lifecycle_command_async(
     """Async transport for the same SQL writer; no alternate admission rules."""
     if conn.info.transaction_status != TransactionStatus.INTRANS:
         raise RuntimeError("lifecycle acceptance requires an explicit transaction")
+    # The fence is also on the selection below; settling first closes rows the
+    # resurrect transaction could not see (they committed after it) so pending
+    # counts and the unfinished-command pointer stay consistent in this pass.
+    await _settle_superseded_by_resurrect_async(conn, target.agent_id)
     cursor = await conn.execute(_ACCEPT, (target.agent_id, target.generation, target.owner))
     return _decode(await cursor.fetchone())
+
+
+def _settle_superseded_by_resurrect(conn: psycopg.Connection, agent_id: int) -> None:
+    """Close every unapplied command below the agent's resurrection fence.
+
+    The caller holds the agents_meta row lock, so the fence it reads is stable.
+    A pointer to a command this settles is cleared in the same transaction: an
+    unfinished-command pointer must never outlive the command it names.
+    """
+    rows = conn.execute(_SUPERSEDED_BY_RESURRECT, (agent_id,)).fetchall()
+    if rows:
+        conn.execute(
+            "UPDATE agents_meta SET lifecycle_command_id=NULL WHERE id=%s "
+            "AND lifecycle_command_id=ANY(%s)",
+            (agent_id, [row[0] for row in rows]),
+        )
+
+
+async def _settle_superseded_by_resurrect_async(
+    conn: psycopg.AsyncConnection, agent_id: int
+) -> None:
+    cursor = await conn.execute(_SUPERSEDED_BY_RESURRECT, (agent_id,))
+    rows = await cursor.fetchall()
+    if rows:
+        await conn.execute(
+            "UPDATE agents_meta SET lifecycle_command_id=NULL WHERE id=%s "
+            "AND lifecycle_command_id=ANY(%s)",
+            (agent_id, [row[0] for row in rows]),
+        )
+
+
+def supersede_lifecycle_for_resurrect(
+    conn: psycopg.Connection, agent_id: int, resurrect_id: int
+) -> None:
+    """Record a resurrection's epoch fence, then settle every earlier command.
+
+    Called by the resurrection transaction under the agents_meta row lock and
+    before its observation check: a command that never applied cannot defer the
+    new incarnation, and must not be able to kill it after admission either. A
+    command created after the resurrect inbound stays current intent and is left
+    alone.
+    """
+    if conn.info.transaction_status != TransactionStatus.INTRANS:
+        raise RuntimeError("resurrect supersession requires an explicit transaction")
+    conn.execute(
+        "UPDATE agents_meta SET last_resurrect_inbound_id=%s WHERE id=%s",
+        (resurrect_id, agent_id),
+    )
+    _settle_superseded_by_resurrect(conn, agent_id)
 
 
 def supersede_lifecycle_for_force(conn: psycopg.Connection, agent_id: int, force_id: int) -> None:

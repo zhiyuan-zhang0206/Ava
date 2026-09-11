@@ -14,7 +14,10 @@ accept different lifecycle states.
   normally, flushes and applies its command; the next host admission creates
   the successor incarnation.
 - Explicit resurrection changes a terminated identity to idle atomically with
-  its notification and optional message, then publishes a host wake.
+  its notification, optional message and an epoch fence: every earlier
+  unapplied restart/terminate command is settled as superseded, so a delayed
+  older terminate can never be replayed onto the successor incarnation
+  (issue #2158). Then it publishes a host wake.
 - Automatic resurrection requires actual pending work newer than the current
   death and above the force-terminate inbound fence. The home-machine lock,
   automatic-wake policy and suppression window guard that transition. A stale
