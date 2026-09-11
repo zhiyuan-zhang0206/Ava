@@ -790,6 +790,9 @@ _PER_TEST_TRUNCATE_TABLES = (
     # would otherwise survive into the next test.
     "extensions",
     "extension_blobs",
+    # Plugin stat values (task #2911): no FKs, but a leaked row would render in
+    # the next test's dashboard response.
+    "plugin_stats",
 )
 
 

@@ -137,6 +137,58 @@ def test_plugin_without_a_manifest_or_without_ui_is_skipped() -> None:
         assert _themes(client) == []
 
 
+def _stats(client: TestClient) -> list[dict[str, object]]:
+    r = client.get("/api/ui/contributions")
+    assert r.status_code == 200, r.text
+    return r.json()["stats"]
+
+
+# ── statistics-panel cards ─────────────────────────────────────────────
+
+
+def test_stat_cards_reach_the_console_attributed() -> None:
+    """A declared card's identity and label reach the console; the value half
+    arrives separately through the dashboard (keyed by plugin + id)."""
+    _write_plugin(
+        "usage",
+        {
+            "stats": [
+                {"id": "codex-zhang0206", "label": "Codex zhiyuan0206"},
+                {"id": "deepseek-balance", "label": "DeepSeek balance"},
+            ]
+        },
+    )
+    write_local({"plugins": {"usage": {"enabled": True}}})
+
+    with TestClient(app) as client:
+        assert _stats(client) == [
+            {"plugin": "usage", "id": "codex-zhang0206", "label": "Codex zhiyuan0206"},
+            {"plugin": "usage", "id": "deepseek-balance", "label": "DeepSeek balance"},
+        ]
+
+
+def test_stat_cards_from_two_plugins_merge_in_plugin_order() -> None:
+    _write_plugin("deepseek", {"stats": [{"id": "balance", "label": "DeepSeek balance"}]})
+    _write_plugin("codex", {"stats": [{"id": "codex-a", "label": "Codex A"}]})
+    write_local({"plugins": {"deepseek": {"enabled": True}, "codex": {"enabled": True}}})
+
+    with TestClient(app) as client:
+        assert [(s["plugin"], s["id"]) for s in _stats(client)] == [
+            ("codex", "codex-a"),
+            ("deepseek", "balance"),
+        ]
+
+
+def test_plugin_without_stat_cards_yields_an_empty_list() -> None:
+    """The response always carries the array — the panel renders nothing extra
+    rather than the console guessing at a missing key."""
+    _write_plugin("skins", {"themes": [{"name": "x", "tokens": {"--primary": "#111111"}}]})
+    write_local({"plugins": {"skins": {"enabled": True}}})
+
+    with TestClient(app) as client:
+        assert _stats(client) == []
+
+
 def test_invalid_manifest_names_the_plugin() -> None:
     """The install gate already validated it, so a manifest that fails now means
     the on-disk copy changed under the cluster — loud, not skipped."""

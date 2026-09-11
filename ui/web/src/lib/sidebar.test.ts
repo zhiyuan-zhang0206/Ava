@@ -107,6 +107,7 @@ describe("useStatsDashboard shared polling", () => {
       warnings: 0,
       errors: 0,
       total_events: 0,
+      plugin_stats: [],
     });
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false } },

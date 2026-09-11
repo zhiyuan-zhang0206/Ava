@@ -16,7 +16,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BAR_DIVIDER_CLASS, BAR_HEIGHT_CLASS } from "@/lib/layout";
 import { SIDEBAR_SORT_DEFAULT, type StatsWindowHours } from "@/lib/sidebar";
 import type * as SidebarModule from "@/lib/sidebar";
-import type { AgentRow, OpenNotice, StatsDashboard } from "@/lib/types";
+import type { AgentRow, OpenNotice, PluginStat, StatsDashboard, UiStatContribution } from "@/lib/types";
+import type * as PluginStatsModule from "@/lib/plugin-stats";
 
 // -- Hoisted state for mocks --
 const state = {
@@ -32,6 +33,7 @@ const state = {
   statsFetching: false,
   statsRefetch: vi.fn(),
   statsWindowHours: 24 as StatsWindowHours,
+  pluginStatDeclarations: [] as UiStatContribution[],
   showTerminated: false,
   sidebarViewMode: "tree" as "tree" | "flat",
   searchQuery: "",
@@ -106,6 +108,18 @@ vi.mock("@/lib/api", () => ({
     patchAgentLabel: vi.fn().mockResolvedValue(undefined),
   },
 }));
+
+// Plugin stat cards: the hook is stubbed to the shared declaration state, and
+// the join stays real (`buildPluginStatCards`), so these tests exercise
+// declaration x value rendering including the empty state and orphans.
+vi.mock("@/lib/plugin-stats", async () => {
+  const actual = await vi.importActual<typeof PluginStatsModule>("@/lib/plugin-stats");
+  return {
+    ...actual,
+    usePluginStatCards: (values: PluginStat[] | undefined) =>
+      actual.buildPluginStatCards(state.pluginStatDeclarations, values),
+  };
+});
 
 // happy-dom lacks localStorage on some platforms; provide a deterministic
 // in-memory one so any incidental storage access stays isolated per test.
@@ -323,6 +337,7 @@ beforeEach(() => {
   state.statsFetching = false;
   state.statsRefetch = vi.fn();
   state.statsWindowHours = 24;
+  state.pluginStatDeclarations = [];
   state.showTerminated = false;
   state.sidebarViewMode = "tree";
   state.isLoading = false;
@@ -670,6 +685,7 @@ describe("StatsCards tri-state (loading / data / error)", () => {
       errors_dismissed: 1,
       errors_net: 0,
       total_events: 100,
+      plugin_stats: [],
     };
     wrap(<AgentSidebar {...handlers} />);
     openStats();
@@ -704,6 +720,7 @@ describe("StatsCards tri-state (loading / data / error)", () => {
       errors_dismissed: 2,
       errors_net: 0,
       total_events: 100,
+      plugin_stats: [],
     };
     wrap(<AgentSidebar {...handlers} />);
     openStats();
@@ -742,6 +759,7 @@ describe("StatsCards tri-state (loading / data / error)", () => {
       errors_dismissed: 1,
       errors_net: 0,
       total_events: 100,
+      plugin_stats: [],
     };
     state.statsError = new Error("stats endpoint 500");
     wrap(<AgentSidebar {...handlers} />);
@@ -767,6 +785,7 @@ describe("StatsCards tri-state (loading / data / error)", () => {
       errors_dismissed: 0,
       errors_net: 0,
       total_events: 0,
+      plugin_stats: [],
     };
     wrap(<AgentSidebar {...handlers} />);
     openStats();
@@ -788,10 +807,126 @@ describe("StatsCards tri-state (loading / data / error)", () => {
       errors_dismissed: 0,
       errors_net: 0,
       total_events: 0,
+      plugin_stats: [],
     };
     wrap(<AgentSidebar {...handlers} />);
     openStats();
     expect(screen.queryByText(/NaN/)).toBeNull();
+  });
+});
+
+describe("plugin stat cards", () => {
+  function statsWith(pluginStats: StatsDashboard["plugin_stats"]): StatsDashboard {
+    return {
+      live_count: 7,
+      window_hours: 24,
+      tokens: { input: 100, output: 50, cache_read: 0, cache_hit_pct: 0 },
+      cost_usd: 0,
+      avg_turn_seconds: null,
+      warnings: 0,
+      errors: 0,
+      warnings_dismissed: 0,
+      warnings_net: 0,
+      errors_dismissed: 0,
+      errors_net: 0,
+      total_events: 0,
+      plugin_stats: pluginStats,
+    };
+  }
+
+  it("a declared card renders the plugin's value and detail below the built-in grid", () => {
+    state.agents = [makeAgent({ agent_id: 1 })];
+    state.pluginStatDeclarations = [{ plugin: "codex_usage", id: "codex-a", label: "Codex A" }];
+    state.stats = statsWith([
+      {
+        plugin: "codex_usage",
+        id: "codex-a",
+        value: "6%",
+        detail: "94% used - weekly",
+        status: "ok",
+        updated_at: new Date().toISOString(),
+        updated_by: "macmini",
+      },
+    ]);
+    wrap(<AgentSidebar {...handlers} />);
+    openStats();
+    expect(screen.getByText("Codex A")).toBeTruthy();
+    expect(screen.getByText("6%")).toBeTruthy();
+    expect(screen.getByText("94% used - weekly")).toBeTruthy();
+  });
+
+  it("a declared card with no value row is the empty state; orphan values stay hidden", () => {
+    state.agents = [makeAgent({ agent_id: 1 })];
+    state.pluginStatDeclarations = [
+      { plugin: "codex_usage", id: "codex-b", label: "Codex B" },
+      { plugin: "codex_usage", id: "codex-a", label: "Codex A" },
+    ];
+    state.stats = statsWith([
+      {
+        plugin: "codex_usage",
+        id: "codex-a",
+        value: "71%",
+        detail: null,
+        status: "ok",
+        updated_at: new Date().toISOString(),
+        updated_by: null,
+      },
+      {
+        plugin: "codex_usage",
+        id: "retired",
+        value: "orphan-value",
+        detail: null,
+        status: "ok",
+        updated_at: new Date().toISOString(),
+        updated_by: null,
+      },
+    ]);
+    wrap(<AgentSidebar {...handlers} />);
+    openStats();
+    expect(screen.getByText("Codex B")).toBeTruthy();
+    expect(screen.getByText("71%")).toBeTruthy();
+    expect(screen.queryByText("orphan-value")).toBeNull();
+    expect(screen.getByTitle("No data yet")).toBeTruthy();
+  });
+
+  it("error status colors the value and keeps the plugin's message", () => {
+    state.agents = [makeAgent({ agent_id: 1 })];
+    state.pluginStatDeclarations = [{ plugin: "codex_usage", id: "codex-b", label: "Codex B" }];
+    state.stats = statsWith([
+      {
+        plugin: "codex_usage",
+        id: "codex-b",
+        value: "!",
+        detail: "token revoked",
+        status: "error",
+        updated_at: new Date().toISOString(),
+        updated_by: null,
+      },
+    ]);
+    wrap(<AgentSidebar {...handlers} />);
+    openStats();
+    expect(screen.getByText("!").className).toContain("text-destructive");
+    expect(screen.getByText("token revoked")).toBeTruthy();
+  });
+
+  it("a stale value is dimmed and its tooltip carries the age", () => {
+    state.agents = [makeAgent({ agent_id: 1 })];
+    state.pluginStatDeclarations = [{ plugin: "deepseek_balance", id: "balance", label: "Balance" }];
+    state.stats = statsWith([
+      {
+        plugin: "deepseek_balance",
+        id: "balance",
+        value: "custom-42",
+        detail: null,
+        status: "ok",
+        updated_at: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
+        updated_by: null,
+      },
+    ]);
+    wrap(<AgentSidebar {...handlers} />);
+    openStats();
+    expect(screen.getByText("custom-42").closest("div")?.className).toContain("opacity-60");
+    expect(screen.getByTitle("Updated 2h ago")).toBeTruthy();
   });
 });
 
@@ -812,6 +947,7 @@ describe("StatsCards window selector", () => {
       errors_dismissed: 1,
       errors_net: 0,
       total_events: 100,
+      plugin_stats: [],
     };
 
     wrap(<AgentSidebar {...handlers} />);
@@ -856,6 +992,7 @@ describe("StatsCards window selector", () => {
       errors_dismissed: 0,
       errors_net: 0,
       total_events: 100,
+      plugin_stats: [],
     };
 
     wrap(<AgentSidebar {...handlers} />);

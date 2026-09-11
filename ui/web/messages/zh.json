@@ -111,6 +111,8 @@
     "statisticsUpdating": "统计更新中",
     "statisticsUpdatingFor": "正在更新 {win}…",
     "statisticsRetry": "重试",
+    "pluginStatNoData": "尚无数据",
+    "pluginStatUpdated": "更新于 {ago}",
     "searchAgents": "搜索 agents",
     "collapseSidebar": "收起侧边栏",
     "closeSidebar": "关闭侧边栏",

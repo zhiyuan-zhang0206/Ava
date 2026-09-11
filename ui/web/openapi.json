@@ -12049,6 +12049,70 @@
         "title": "PluginMetricResult",
         "description": "One plugin metric rendered for the inspector surface — an element of\nGET /api/agents/{id}/inspect/metrics.\n\nMirrors the registered MetricSpec (see `shared/plugin_metrics.py`):\n`panel` selects the payload — `timeseries` / `barchart` metrics carry\n`series` (a bounded recent window, 24h in 1h buckets by default, so at\nmost a couple of dozen points), `stat` metrics carry `value` (the single\naggregate). `error` is set (with `series`/`value` empty) when the metric's\nquery failed at execution time — the panel shows the rest of the metrics\nand surfaces the failure inline instead of 500ing the whole request;\nregistry-level problems (missing/malformed/tampered file, a template that\nfails the safety re-validation) are HTTP errors instead."
       },
+      "PluginStat": {
+        "properties": {
+          "plugin": {
+            "type": "string",
+            "title": "Plugin"
+          },
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "value": {
+            "type": "string",
+            "title": "Value"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "warn",
+              "error"
+            ],
+            "title": "Status"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          },
+          "updated_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated By"
+          }
+        },
+        "type": "object",
+        "required": [
+          "plugin",
+          "id",
+          "value",
+          "detail",
+          "status",
+          "updated_at",
+          "updated_by"
+        ],
+        "title": "PluginStat",
+        "description": "One declared statistics-panel card's current value (task #2911).\n\nThe declaration half (existence, label) arrives via\n`GET /api/ui/contributions` (`UiStatContribution`); this is the runtime\nhalf, keyed by `(plugin, id)` and joined against the declaration by the\nconsole. Values are NOT windowed: the window selector governs the\nconsole's own aggregates, while a usage meter's \"current\" is a\npoint-in-time fact and would be meaningless averaged over a horizon.\n\n`updated_at` is when the plugin last wrote the row — the console renders\nits age, so a refresh that stopped running cannot pass for a fresh value."
+      },
       "PresetCreate": {
         "properties": {
           "name": {
@@ -13920,6 +13984,13 @@
             "type": "integer",
             "minimum": 0.0,
             "title": "Total Events"
+          },
+          "plugin_stats": {
+            "items": {
+              "$ref": "#/components/schemas/PluginStat"
+            },
+            "type": "array",
+            "title": "Plugin Stats"
           }
         },
         "type": "object",
@@ -13935,10 +14006,11 @@
           "warnings_net",
           "errors_dismissed",
           "errors_net",
-          "total_events"
+          "total_events",
+          "plugin_stats"
         ],
         "title": "StatsDashboard",
-        "description": "GET /api/stats/dashboard response — sidebar-top stats card data pulled in one shot.\n\nAll windowed fields (`tokens` / `cost_usd` / `avg_turn_seconds` /\n`warnings` / `errors`) aggregate over the `applied_window_hours` horizon.\n`window_hours` echoes the selected value — `0` means five minutes; all\nother values are hours.\n`applied_window_hours` is the actually served window in hours, no greater\nthan `window_hours` and clamped to the Loki retention horizon.\n\n- `live_count`: current non-terminated count (from agents_meta, not\n  events; not windowed)\n- `tokens`: windowed telemetry LLM token usage (cached for at most 60s)\n- `cost_usd`: windowed LLM spend in USD, summed from the usage-time\n  `cost_usd` snapshots carried by telemetry Loki `llm_usage` events;\n  events that pre-date the snapshot field contribute 0 (cached for at\n  most 60s with `tokens`)\n- `avg_turn_seconds`: windowed avg LLM call wall time\n  (event=turn_end + ok=true)\n- `warnings` / `errors`: raw level totals over the window (critical\n  folds into error). Agent trial-and-error (exec_failed) logs at INFO\n  and is deliberately NOT counted — these numbers are operator-facing\n  alerts, not agent activity.\n- `warnings_dismissed` / `warnings_net` / `errors_dismissed` /\n  `errors_net`: the three-way resolution split (task #1935). The\n  arithmetic is the events-maintenance daemon's class subtraction\n  (`services.events_maintenance.resolution.level_splits`) applied to the\n  SELECTED window instead of the daemon's fixed six hours: events whose\n  (category, level, event_name, source) class has an active dismissal in\n  `event_dismissals` count as dismissed, the rest as net, and\n  dismissed + net == the raw total by construction.\n- `total_events`: archived event row count (frozen — the PG events copy\n  stopped growing at the LGTM cutover; not a live gauge)\n\n`avg_turn_seconds` None = zero turns in the window (new DB / no\nactivity); frontend renders \"—\"."
+        "description": "GET /api/stats/dashboard response — sidebar-top stats card data pulled in one shot.\n\nAll windowed fields (`tokens` / `cost_usd` / `avg_turn_seconds` /\n`warnings` / `errors`) aggregate over the `applied_window_hours` horizon.\n`window_hours` echoes the selected value — `0` means five minutes; all\nother values are hours.\n`applied_window_hours` is the actually served window in hours, no greater\nthan `window_hours` and clamped to the Loki retention horizon.\n\n- `live_count`: current non-terminated count (from agents_meta, not\n  events; not windowed)\n- `tokens`: windowed telemetry LLM token usage (cached for at most 60s)\n- `cost_usd`: windowed LLM spend in USD, summed from the usage-time\n  `cost_usd` snapshots carried by telemetry Loki `llm_usage` events;\n  events that pre-date the snapshot field contribute 0 (cached for at\n  most 60s with `tokens`)\n- `avg_turn_seconds`: windowed avg LLM call wall time\n  (event=turn_end + ok=true)\n- `warnings` / `errors`: raw level totals over the window (critical\n  folds into error). Agent trial-and-error (exec_failed) logs at INFO\n  and is deliberately NOT counted — these numbers are operator-facing\n  alerts, not agent activity.\n- `warnings_dismissed` / `warnings_net` / `errors_dismissed` /\n  `errors_net`: the three-way resolution split (task #1935). The\n  arithmetic is the events-maintenance daemon's class subtraction\n  (`services.events_maintenance.resolution.level_splits`) applied to the\n  SELECTED window instead of the daemon's fixed six hours: events whose\n  (category, level, event_name, source) class has an active dismissal in\n  `event_dismissals` count as dismissed, the rest as net, and\n  dismissed + net == the raw total by construction.\n- `total_events`: archived event row count (frozen — the PG events copy\n  stopped growing at the LGTM cutover; not a live gauge)\n\n`avg_turn_seconds` None = zero turns in the window (new DB / no\nactivity); frontend renders \"—\".\n\n`plugin_stats` is not windowed (see `PluginStat`): the runtime values\nbehind cards that plugins declare under `contributions.ui.stats`, joined\nby the console on `(plugin, id)`."
       },
       "StatsTokens": {
         "properties": {
@@ -14824,12 +14896,20 @@
             },
             "type": "array",
             "title": "Nav"
+          },
+          "stats": {
+            "items": {
+              "$ref": "#/components/schemas/UiStatContribution"
+            },
+            "type": "array",
+            "title": "Stats"
           }
         },
         "type": "object",
         "required": [
           "themes",
-          "nav"
+          "nav",
+          "stats"
         ],
         "title": "UiContributionsResponse",
         "description": "Every console contribution the cluster's enabled plugins declare."
@@ -14867,6 +14947,30 @@
         ],
         "title": "UiNavContribution",
         "description": "One nav entry opening a plugin-served page.\n\n`page` is a path under the plugin's own mount (`/api/plugin-ui/<plugin>/`),\n`icon` a lucide icon name from the closed set the console imports, and\n`location` names which of the console's nav surfaces carries the entry —\nall three validated at manifest load."
+      },
+      "UiStatContribution": {
+        "properties": {
+          "plugin": {
+            "type": "string",
+            "title": "Plugin"
+          },
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          }
+        },
+        "type": "object",
+        "required": [
+          "plugin",
+          "id",
+          "label"
+        ],
+        "title": "UiStatContribution",
+        "description": "One statistics-panel card a plugin declares.\n\nDeclaration only: the card's existence and label. Its value is runtime\ndata keyed by `(plugin, id)` in `plugin_stats` (written by the plugin's own\nrefresh code, read through `GET /api/stats/dashboard`), and the panel joins\nthe two halves on `(plugin, id)`. A declared card with no value row is an\nexplicit empty state — a card can exist on a machine whose credentials do\nnot, which is the case this split exists to serve."
       },
       "UiThemeContribution": {
         "properties": {

@@ -26,6 +26,7 @@ from gateway import loki_events, loki_query_budget
 from gateway.app import app
 from gateway.routers import _stats_dashboard, status
 from gateway.schemas import StatsWindowHours, window_delta
+from shared import plugin_stats
 from shared.cluster import home_label
 from shared.loki_index_labels import EVENT_STREAM_RETENTION, retention_floor
 from shared.paths import ava_home
@@ -915,3 +916,48 @@ def test_dashboard_invalid_hours_422(db_conn: psycopg.Connection, bad: str) -> N
     with TestClient(app) as client:
         resp = client.get("/api/stats/dashboard", params={"hours": bad})
     assert resp.status_code == 422
+
+
+# ── plugin stat values (task #2911) ────────────────────────────────────
+
+
+def test_dashboard_carries_plugin_stat_values_unwindowed() -> None:
+    """The runtime half of collected plugin cards rides this response: every
+    row, its status, and its freshness metadata. Not windowed — the plugin's
+    value is a point-in-time fact and the window selector must not pretend to
+    aggregate it. Declarations are joined by the console from
+    /api/ui/contributions on (plugin, id)."""
+    plugin_stats.upsert(
+        plugin="codex_usage",
+        id="codex-zhang0206",
+        value="6%",
+        detail="94% used - weekly",
+        status="warn",
+        updated_by="macmini",
+    )
+    plugin_stats.upsert(
+        plugin="codex_usage",
+        id="codex-wuji",
+        value="!",
+        detail="token revoked",
+        status="error",
+        updated_by="macmini",
+    )
+
+    with TestClient(app) as client:
+        body = client.get("/api/stats/dashboard", params={"hours": 6}).json()
+
+    rows = body["plugin_stats"]
+    assert [
+        (r["plugin"], r["id"], r["value"], r["detail"], r["status"], r["updated_by"]) for r in rows
+    ] == [
+        ("codex_usage", "codex-wuji", "!", "token revoked", "error", "macmini"),
+        ("codex_usage", "codex-zhang0206", "6%", "94% used - weekly", "warn", "macmini"),
+    ]
+    assert all(r["updated_at"] for r in rows)
+
+
+def test_dashboard_plugin_stats_is_empty_without_writers() -> None:
+    with TestClient(app) as client:
+        body = client.get("/api/stats/dashboard").json()
+    assert body["plugin_stats"] == []

@@ -83,11 +83,19 @@ def test_full_declaration_normalizes() -> None:
     parsed = _ui(
         agentInspect=[{"title": "Memory pool", "source": "api/inspect", "render": "kv"}],
         nav=[{"location": "sidebar", "label": "Task board", "icon": "kanban", "page": "board/"}],
+        stats=[
+            {"id": "codex-zhang0206", "label": "Codex · zhiyuan0206"},
+            {"id": "deepseek-balance", "label": "DeepSeek balance"},
+        ],
         themes=[{"name": "solarized", "tokens": {"--background": "oklch(0.99 0.02 90)"}}],
     )
     assert parsed == {
         "agentInspect": [{"title": "Memory pool", "source": "api/inspect", "render": "kv"}],
         "nav": [{"location": "sidebar", "label": "Task board", "icon": "kanban", "page": "board/"}],
+        "stats": [
+            {"id": "codex-zhang0206", "label": "Codex · zhiyuan0206"},
+            {"id": "deepseek-balance", "label": "DeepSeek balance"},
+        ],
         "themes": [{"name": "solarized", "tokens": {"--background": "oklch(0.99 0.02 90)"}}],
     }
 
@@ -162,6 +170,36 @@ def test_every_renderer_and_location_is_accepted() -> None:
         _ui(agentInspect=[{"title": "T", "source": "x", "render": render}])
     for location in ui.NAV_LOCATIONS:
         _ui(nav=[{"location": location, "label": "L", "icon": "activity", "page": "p"}])
+
+
+# ── statistics-panel cards ─────────────────────────────────────────────
+
+
+def test_stat_cards_keep_declaration_order() -> None:
+    """Order is the manifest's: the panel renders plugin cards in it."""
+    parsed = _ui(
+        stats=[
+            {"id": "b", "label": "B"},
+            {"id": "a", "label": "A"},
+        ]
+    )
+    assert parsed == {"stats": [{"id": "b", "label": "B"}, {"id": "a", "label": "A"}]}
+
+
+def test_stat_card_id_keys_the_value_row() -> None:
+    """The id shape is enforced, not sanitized: it must be reproducible as a
+    `plugin_stats` primary key by the plugin's own writer."""
+    _rejects("must match", stats=[{"id": "Codex A", "label": "x"}])
+    _rejects("must match", stats=[{"id": "-lead", "label": "x"}])
+    _ui(stats=[{"id": "codex-zhang0206", "label": "x"}, {"id": "a_b-1", "label": "y"}])
+
+
+def test_stat_card_duplicate_and_fields() -> None:
+    _rejects("duplicate stat card", stats=[{"id": "a", "label": "x"}, {"id": "a", "label": "y"}])
+    _rejects("missing required field", stats=[{"id": "a"}])
+    _rejects("unknown field", stats=[{"id": "a", "label": "x", "icon": "zap"}])
+    _rejects("expected a list", stats={"id": "a"})
+    _rejects("expected an object", stats=["a"])
 
 
 # ── the closed sets are closed ─────────────────────────────────────────

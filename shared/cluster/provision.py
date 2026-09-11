@@ -658,6 +658,16 @@ def ensure_runner_role(identity: str, *, base_admin_url: str, runner_password: s
                 pgsql.Identifier(RUNNER_ROLE)
             )
         )
+        # A plugin's statistics-card refresh (shared/plugin_stats.py upsert)
+        # runs in the runner process: INSERT+UPDATE+SELECT, no DELETE — a card
+        # that stops being reported keeps its last row so stale values age in
+        # place instead of vanishing. Same surface the plugin-stats migration
+        # grants on existing clusters; this entry is what fresh bootstraps get.
+        conn.execute(
+            pgsql.SQL("GRANT SELECT, INSERT, UPDATE ON plugin_stats TO {}").format(
+                pgsql.Identifier(RUNNER_ROLE)
+            )
+        )
         for table in ("checkpoints", "checkpoint_blobs", "checkpoint_writes"):
             conn.execute(
                 pgsql.SQL("GRANT ALL ON {} TO {}").format(

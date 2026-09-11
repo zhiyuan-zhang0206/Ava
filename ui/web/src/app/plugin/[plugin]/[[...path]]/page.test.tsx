@@ -31,6 +31,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(api.getUiContributions).mockResolvedValue({
     themes: [],
+    stats: [],
     nav: [
       {
         plugin: "board",

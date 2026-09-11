@@ -229,6 +229,7 @@ def get_stats_dashboard(
         errors_dismissed=error.dismissed,
         errors_net=error.net,
         total_events=total_events,
+        plugin_stats=_stats_dashboard.plugin_stat_rows(request.app.state.db_pool),
     )
     _stats_dashboard.cache_put(hours, response)
     return response
