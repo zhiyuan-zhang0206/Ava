@@ -565,10 +565,14 @@ def check_ci(pr_number: str | int, *, repo: str | None = None) -> CIResult:
             # the runs probe, so a healthy PR can read as this verdict once
             # (2026-08-02 #1216; 2026-09-12: queue lag of minutes observed — the
             # attached app check is the tell). It is not proof the suite will not
-            # run: corroborate with `gh run list --branch <branch>`; a queued /
-            # in_progress run means it is coming. The genuine #885 shape stays
-            # distinguishable by re-checking after a pause; read later in a
-            # watch, on a settled head, this verdict means what it says.
+            # run: corroborate head-precisely — `gh run list --commit <head-sha>`
+            # (add `--repo <owner/repo>` when cwd is not the checkout) — a
+            # queued / in_progress run there means it is coming. `--branch` is not
+            # an equivalent check: it also lists the runs of the head this one
+            # replaced, and a force-push leaves those completed, which reads as
+            # either answer. The genuine #885 shape stays distinguishable by
+            # re-checking after a pause; read later in a watch, on a settled
+            # head, this verdict means what it says.
             result.verdict = CIStatus.NO_WORKFLOW_RUNS
         elif scheduled is None:
             # The attached checks all passed, but the probe could not answer
