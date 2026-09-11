@@ -1750,13 +1750,17 @@ archive suffix is today's UTC date; an existing archive makes that file a
 same-day idempotent no-op. Copytruncate preserves the live path and inode, so a
 writer keeps its open file descriptor.
 
-`ava logs retention` removes expired allowlisted files from those same two
-top-level roots. The allowlist covers agent-main `ava-agent-<id>.out.log`, named
-PTY `ava-agent-<id>-shell-<n>-<name>.{out,host}.log`, every service
+`ava logs retention` removes expired allowlisted files from those two
+top-level roots plus the nested computer-use snapshot dir
+`$AVA_HOME/logs/computer/snapshots/`. The allowlist covers agent-main
+`ava-agent-<id>.out.log`, named PTY
+`ava-agent-<id>-shell-<n>-<name>.{out,host}.log`, every service
 `ava-*.out.log`, Loguru rotations named
-`<service>.YYYY-MM-DD_HH-MM-SS_<pid>.log`, and the dated service/native archives
-created by `ava logs rotate`. Neither command traverses subdirectories or
-follows symlinks; retention also skips every file held open by a visible process.
+`<service>.YYYY-MM-DD_HH-MM-SS_<pid>.log`, the dated service/native archives
+created by `ava logs rotate`, and computer-use snapshots `agent-<id>-<stamp>.png`
+(7 days). Rotation stays top-level-only; retention reads the fixed roots above
+without general recursion, and neither command follows symlinks; retention also
+skips every file held open by a visible process.
 
 Preview the exact paths, UTC mtimes, sizes, and total bytes before deleting:
 
@@ -1767,7 +1771,7 @@ ava logs retention --dry-run
 ava logs retention
 AVA_LOG_RETENTION_DAYS=21 ava logs retention --dry-run
 ava logs retention --older-than 21
-ava logs retention --family-days agent=15,shell=7,gateway=30,ops=30,watchdog=30,other=3 --dry-run
+ava logs retention --family-days agent=15,shell=7,gateway=30,ops=30,watchdog=30,snapshot=7,other=3 --dry-run
 ```
 
 The age is a positive integer number of days. `--older-than` and
@@ -1775,8 +1779,9 @@ The age is a positive integer number of days. `--older-than` and
 threshold remains: `AVA_LOG_RETENTION_DAYS`, otherwise 14 days. `--older-than`
 is the explicit global override. `--family-days` activates the C baseline:
 agent-main, `ava-agent-*` service stdout, and their archives 15 days; named PTY
-shell transcript/host files 7 days; `gateway*`, `ops*`, and `*-watchdog` /
-`*_watchdog` service files and rotations 30 days; all other service and native
+shell transcript/host files and computer-use snapshots 7 days; `gateway*`,
+`ops*`, and `*-watchdog` / `*_watchdog` service files and rotations 30 days;
+all other service and native
 archives 3 days. The rotation shape also admits underscores, so
 `delivery_watchdog` is in the watchdog family. Supply only the family values
 that differ; omitted values retain that baseline. In a mapping, `default=N`

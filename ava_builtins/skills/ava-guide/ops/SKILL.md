@@ -272,10 +272,10 @@ agent main logs; updater/rollout tees use `filelog/orchestration`. Loki's
 Explore (LogQL), `logcli --addr http://127.0.0.1:3100`, or the Loki HTTP API;
 local managed logs are pruned only when `ava logs retention` runs. No age flag
 keeps the configurable 14-day global fallback; deployment jobs use
-`--family-days` for 15d agent, 7d named-PTY shell, 30d gateway/ops/watchdog,
-and 3d other service rotations. The command scans only `$AVA_HOME/logs` itself,
-admits exact agent, named-PTY, and Loguru-rotation shapes (including underscores),
-rejects symlinks, and skips open handles. Register it daily; see `deploy/lgtm/README.md`.
+`--family-days` for 15d agent, 7d named-PTY shell and snapshots, 30d gateway/ops/watchdog,
+and 3d other service rotations. The command scans `$AVA_HOME/logs` (top level) plus the
+nested computer-use snapshot dir, admits agent/named-PTY/Loguru/snapshot shapes, rejects
+symlinks, and skips open handles. Register it daily; see `deploy/lgtm/README.md`.
 
 ### Environment forwarding
 

@@ -198,13 +198,14 @@ Local cleanup is explicit and converge-owned: a daily 04:40 job runs `ava logs
 rotate` and then `ava logs retention --family-days ...`. Rotation copytruncates
 service `.out.log` files and native backend logs at each UTC-day boundary or
 when they reach the 64 MiB trigger, so writers keep their open file descriptor.
-Retention prunes the resulting archives using agent 15d, named PTY shell 7d,
-gateway/ops/watchdog 30d, and other/native archives 3d. With neither age flag,
-the legacy global threshold remains `AVA_LOG_RETENTION_DAYS` (14d fallback),
-and `--older-than` remains its mutually exclusive global override. Both commands
-stay top-level-only, do not follow symlinks, and retention excludes files held
-open by a process. Structured agent logs carry no `log.file.name`, so the
-filelog transform leaves them untouched.
+Retention prunes the resulting archives using agent 15d, named PTY shell and
+computer-use snapshots 7d, gateway/ops/watchdog 30d, and other/native archives
+3d. With neither age flag, the legacy global threshold remains
+`AVA_LOG_RETENTION_DAYS` (14d fallback), and `--older-than` remains its mutually
+exclusive global override. Rotation stays top-level-only; retention reads the
+top-level roots plus the fixed nested snapshot dir. Neither follows symlinks,
+and retention excludes files held open by a process. Structured agent logs
+carry no `log.file.name`, so the filelog transform leaves them untouched.
 
 ## Environment overrides
 
