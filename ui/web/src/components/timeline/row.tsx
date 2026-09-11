@@ -43,6 +43,8 @@ export const TimelineRow = memo(function TimelineRow({
   streaming,
   expanded,
   showActions,
+  stickyHeader,
+  isStuck,
   onToggle,
   onFork,
   forkPending,
@@ -52,6 +54,12 @@ export const TimelineRow = memo(function TimelineRow({
   streaming: boolean;
   expanded: boolean;
   showActions: boolean;
+  /** This row is a top-level message card whose header pins while expanded
+   *  (primary items only — work-block children keep their turn's header, so
+   *  pass false there; see runs.classifyItem). */
+  stickyHeader: boolean;
+  /** The header is currently pinned at the sticky line (task #3136). */
+  isStuck: boolean;
   onToggle: (id: string, kind: BackendTimelineItem["kind"]) => void;
   onFork: (() => void) | null;
   forkPending: boolean;
@@ -95,13 +103,28 @@ export const TimelineRow = memo(function TimelineRow({
   ) : null;
 
   return (
-    <div data-item-id={item.item_id} aria-live="off" className="timeline-item">
+    // data-card-sticky marks a row whose header may pin — the scan target for
+    // findClosestStuckHeaderId (see run-block.tsx); expanded is required for
+    // the pin, so a collapsed row drops out of the scan by itself.
+    <div
+      data-item-id={item.item_id}
+      data-card-sticky={stickyHeader && expanded}
+      aria-live="off"
+      className="timeline-item"
+    >
       {/* Boundary wraps header + content together: the header's summary
           derivation parses the payload too, so a malformed payload must
           not escape the per-item fallback. */}
       <ItemErrorBoundary resetKey={item.payload}>
         <MessageCard config={config} actions={actions}>
-          <CardHeader item={item} config={config} expanded={expanded} onToggle={handleToggle} />
+          <CardHeader
+            item={item}
+            config={config}
+            expanded={expanded}
+            onToggle={handleToggle}
+            stickyHeader={stickyHeader}
+            isStuck={isStuck}
+          />
           {expanded ? (
             <div className="px-3 pb-2 pt-0.5">
               <ItemView item={item} streaming={streaming} />

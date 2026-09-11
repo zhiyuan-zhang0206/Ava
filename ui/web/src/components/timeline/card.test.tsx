@@ -10,8 +10,8 @@
  * afterEach(cleanup), which unmounts and clears those intervals per test.
  * De-quarantined 2026-08-24.
  */
-import { describe, expect, it } from "vitest";
-import { render } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+import { fireEvent, render } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 import { CardHeader, MessageCard, messageCardConfig, type CardConfig } from "./card";
@@ -481,5 +481,82 @@ describe("CardHeader", () => {
       <CardHeader item={oItem} config={cfg} expanded={false} onToggle={noop} />,
     );
     expect(container.textContent).toContain("Running for");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// CardHeader sticky header (task #3136)
+// ---------------------------------------------------------------------------
+
+describe("CardHeader sticky header (task #3136)", () => {
+  const chatItem = item("agent_chat", { payload: "hello" });
+
+  it("plain cards (stickyHeader unset) keep the resting header — no sticky classes", () => {
+    const cfg = messageCardConfig(chatItem)!;
+    const { container } = renderWithQuery(
+      <CardHeader item={chatItem} config={cfg} expanded={true} onToggle={noop} />,
+    );
+    const btn = container.querySelector("button")!;
+    expect(btn.className).not.toContain("sticky");
+    expect(btn.getAttribute("data-stuck")).toBe("false");
+  });
+
+  it("expanded sticky card pins the header at top-11 while resting", () => {
+    const cfg = messageCardConfig(chatItem)!;
+    const { container } = renderWithQuery(
+      <CardHeader item={chatItem} config={cfg} expanded={true} onToggle={noop} stickyHeader={true} />,
+    );
+    const btn = container.querySelector("button")!;
+    expect(btn.className).toContain("sticky");
+    expect(btn.className).toContain("top-11");
+    expect(btn.className).toContain("z-10");
+    expect(btn.getAttribute("data-stuck")).toBe("false");
+    expect(btn.className).not.toContain("backdrop-blur-md");
+  });
+
+  it("collapsed sticky card does not pin (the rest position stays in flow)", () => {
+    const cfg = messageCardConfig(chatItem)!;
+    const { container } = renderWithQuery(
+      <CardHeader item={chatItem} config={cfg} expanded={false} onToggle={noop} stickyHeader={true} />,
+    );
+    const btn = container.querySelector("button")!;
+    expect(btn.className).not.toContain("sticky");
+  });
+
+  it("stuck state switches to the elevated mask styling", () => {
+    const cfg = messageCardConfig(chatItem)!;
+    const { container } = renderWithQuery(
+      <CardHeader
+        item={chatItem}
+        config={cfg}
+        expanded={true}
+        onToggle={noop}
+        stickyHeader={true}
+        isStuck={true}
+      />,
+    );
+    const btn = container.querySelector("button")!;
+    expect(btn.getAttribute("data-stuck")).toBe("true");
+    expect(btn.className).toContain("backdrop-blur-md");
+    expect(btn.className).toContain("shadow-xs");
+    expect(btn.className).toContain("border-b");
+    expect(btn.className).toContain("motion-reduce:transition-none");
+  });
+
+  it("stays clickable while stuck — the toggle still fires", () => {
+    const onToggle = vi.fn();
+    const cfg = messageCardConfig(chatItem)!;
+    const { container } = renderWithQuery(
+      <CardHeader
+        item={chatItem}
+        config={cfg}
+        expanded={true}
+        onToggle={onToggle}
+        stickyHeader={true}
+        isStuck={true}
+      />,
+    );
+    fireEvent.click(container.querySelector("button")!);
+    expect(onToggle).toHaveBeenCalledTimes(1);
   });
 });
