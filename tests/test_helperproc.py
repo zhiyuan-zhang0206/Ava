@@ -6,6 +6,7 @@ import inspect
 import os
 import signal
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 import psutil
@@ -188,6 +189,41 @@ def test_kill_signals_record_pid_and_unlinks_only_after_confirmed_death(
     ) == (True, "graceful")
     assert sent == [(record.pid, signal.SIGTERM)]
     assert not path.exists()
+
+
+def test_graceful_delivery_tolerates_whole_second_create_time_drift(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A drifted reading must not refuse the process resolution accepted.
+
+    Mirror of posixproc / winproc delivery: `_process_for_record` accepts the
+    create_time within tolerance, so the final re-check must not be stricter
+    (macOS re-derives create_time with a whole-second boot-time correction).
+    """
+    drifted = replace(_current_process_record(), create_time=psutil.Process().create_time() - 1.0)
+    sent: list[tuple[int, int]] = []
+
+    monkeypatch.setattr(helperproc, "_read_record", lambda _name: drifted)
+    monkeypatch.setattr(helperproc.os, "kill", lambda pid, sig: sent.append((pid, sig)))
+
+    assert helperproc.HelperProcSessionBackend().graceful_signal("ava-live", expected=drifted)
+    assert sent == [(drifted.pid, signal.SIGTERM)]
+
+
+def test_graceful_delivery_refuses_a_birth_beyond_the_tolerance(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    replaced = replace(_current_process_record(), create_time=psutil.Process().create_time() + 60.0)
+    sent: list[tuple[int, int]] = []
+
+    monkeypatch.setattr(helperproc, "_read_record", lambda _name: replaced)
+    monkeypatch.setattr(
+        helperproc, "_process_for_record", lambda _record: psutil.Process(replaced.pid)
+    )
+    monkeypatch.setattr(helperproc.os, "kill", lambda pid, sig: sent.append((pid, sig)))
+
+    assert not helperproc.HelperProcSessionBackend().graceful_signal("ava-live", expected=replaced)
+    assert sent == []
 
 
 @pytest.mark.parametrize(

@@ -419,8 +419,11 @@ def graceful_signal(
     proc = _process_for_record(rec)
     if proc is None:
         return False
+    # Mirror posixproc: the create_time comparison carries the record-resolution
+    # tolerance, so a drifted reading never refuses the process it resolved.
     if expected is not None and (
-        proc.create_time() != expected.create_time or _read_record(name) != expected
+        abs(proc.create_time() - expected.create_time) > _CREATE_TIME_TOLERANCE_S
+        or _read_record(name) != expected
     ):
         return False
     if rec.control_mode != "private-console-v1":
