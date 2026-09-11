@@ -12,7 +12,8 @@ existing plugin discovery + enable config, and imports only ``provider.py``
 
 Loaded once per process, on the first registry-consulting call
 (``build_chat_model`` / ``validate_model_config`` / ``get_models`` /
-``resolve_context_budget`` / the gateway's per-model views). Import order is sorted plugin names — deterministic
+``resolve_context_budget`` / the config-overlay validation / the
+gateway's per-model views). Import order is sorted plugin names — deterministic
 rather than filesystem-order. A provider.py whose module body raises is
 contained with a loud report (``shared.plugin_load_report``): the failure is
 recorded, the rest of that module is abandoned, and the remaining providers

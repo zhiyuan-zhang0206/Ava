@@ -415,8 +415,14 @@ def _validate_model_membership(value: object) -> str | None:
     MODELS, plugin-registered models included). An unregistered id would pass
     the Pydantic str type check, persist, and crash the next boot at model
     build (Task #1704 — the deepseek-v4-flash-vision incident)."""
+    from shared.lm._plugin_providers import ensure_provider_plugins_loaded
     from shared.lm.registry import MODELS
 
+    # Registry-consulting check: make it self-sufficient. MODELS starts empty
+    # and is filled by the provider-plugin loader; without this, a process whose
+    # first registry use is overlay validation false-rejected every valid id
+    # ("valid models: " empty — task #3138).
+    ensure_provider_plugins_loaded()
     if isinstance(value, str) and value in MODELS:
         return None
     valid_models = ", ".join(sorted(MODELS))
