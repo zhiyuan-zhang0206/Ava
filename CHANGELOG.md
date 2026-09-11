@@ -28,6 +28,18 @@ and the matching GitHub Releases, cut by `scripts/release_cut.py`.
   admission).
 
 ### Fixed
+- A browser daemon chain that lost the GUI login session no longer waits
+  forever for a Keychain it can never read: the macOS readiness probe names
+  the missing context (`launchctl managername` ≠ `Aqua` — the state a respawn
+  from an agent or SSH chain lands in, where securityd denies every
+  login-Keychain query), and the healthcheck reacts by stopping the stuck
+  session and kickstarting the cluster's GUI-domain autostart job instead of
+  waiting in place — bounded to two attempts per episode, with its own
+  in-context rebuild deferred while that relaunch lands. The CDP probe also
+  stops treating every unusable `/json/version` answer as "respawn him": an
+  answered port that is not this cluster's Chrome is `PORT_TAKEN` (no
+  respawn churn), while our own wedged endpoint stays `DOWN` and heals
+  through the existing sweep + rebuild (tasks #3149, #2692).
 - Page ids are no longer trusted across an upstream reconnect: the browser-mcp
   daemon reconnects `chrome-devtools-mcp` in place, and the new process
   renumbers pages from 1 — a surviving page id could previously re-pin an
