@@ -437,6 +437,10 @@ markers = [
     # Tests that are timing-sensitive, race-prone, or use real DB LISTEN/NOTIFY —
     # run serial (-n 1) while stable tests run parallel (-n auto).
     "flaky: timing-sensitive or race-prone test that must run serially",
+    # e2e fake-LLM scenario selector; registered globally (not only in
+    # tests/e2e/conftest.py): tests outside tests/e2e import e2e modules, and
+    # --ignore=tests/e2e runs never load that conftest.
+    "scenario(module_factory): specify fake LLM scenario module:factory string",
 ]
 # The kernel goes fully async (psycopg AsyncConnection / AsyncPostgresSaver / aioredis
 # / asyncio.create_subprocess_exec) — tests written as `async def test_...` auto-run,
