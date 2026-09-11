@@ -1,8 +1,15 @@
 """Tests for `shared/lm/context_budget.py` — per-model compaction thresholds
 derived from each model's context window, and the provider-truth occupancy read.
+The file-level-isolation test runs a fresh interpreter: the budget call must
+trigger the provider-plugin load itself (task #3138).
 """
 
 from __future__ import annotations
+
+import subprocess
+import sys
+import textwrap
+from pathlib import Path
 
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
@@ -144,6 +151,36 @@ def test_every_supported_model_resolves() -> None:
             )
             # And it actually resolves without raising.
             resolve_context_budget(model)
+
+
+def test_resolve_is_self_sufficient_in_a_fresh_process() -> None:
+    """File-level isolation (task #3138): a process whose FIRST registry use is
+    the budget must resolve it — the provider loader is triggered by this call,
+    not assumed from an earlier model build. This test process already loaded
+    the providers via the module fixture, which would mask the failure, so the
+    scenario runs in a fresh interpreter (pre-fix it raised
+    UnknownModelWindowError against the empty registry)."""
+    model = settings.lm.llm_model
+    code = textwrap.dedent(
+        f"""
+        from shared.lm.context_budget import resolve_context_budget
+        from shared.lm.registry import MODELS
+
+        assert not MODELS, "fresh process must start with an empty registry"
+        budget = resolve_context_budget({model!r})
+        print(budget.max_context_tokens)
+        """
+    )
+    result = subprocess.run(  # noqa: S603 — our own venv python + a literal script
+        [sys.executable, "-c", code],
+        cwd=Path(__file__).resolve().parents[2],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=180,
+    )
+    assert result.returncode == 0, result.stderr
+    assert int(result.stdout.strip()) > 0
 
 
 def test_latest_input_tokens_reads_most_recent_usage() -> None:

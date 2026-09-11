@@ -59,5 +59,5 @@ retryable after the enable configuration is fixed.
   settings, cluster identity/data-plane aliases, and the runner database
   password. It is deliberately not a Settings field. `build_chat_model`,
   `validate_model_config`, model-list and context
-  endpoints, and vision checks ensure the loader has run before they consult
-  registration state.
+  endpoints, vision checks, and the compact gate's `resolve_context_budget`
+  ensure the loader has run before they consult registration state.
