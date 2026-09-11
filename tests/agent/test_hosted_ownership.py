@@ -267,7 +267,9 @@ async def test_new_host_owner_requires_exact_old_host_exit_for_managed_set(
             )
             is None
         )
-        old_host.terminate()
+        # SIGKILL: SIGTERM=SIG_IGN is inherited from a shell session, so a
+        # graceful terminate would never reap this look-alike host.
+        old_host.kill()
         old_host.wait(timeout=5)
 
         successor = await admit_hosted_runtime(

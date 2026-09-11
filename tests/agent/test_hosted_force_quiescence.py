@@ -433,7 +433,9 @@ async def test_exclusive_host_boot_defers_while_a_live_child_references_the_requ
             "SELECT status,observed_at FROM inbound_messages WHERE id=%s", (command,)
         ).fetchone() == ("claimed", None)
     finally:
-        child.terminate()
+        # SIGKILL: a SIGTERM-ignoring session (SIG_IGN is inherited from
+        # Ava shell sessions) would leave this child alive and hang here.
+        child.kill()
         child.wait(timeout=5)
     # The child ended and a later boot sees the same evidence: recovery proceeds.
     stamp = request.stat().st_mtime - 3600.0
