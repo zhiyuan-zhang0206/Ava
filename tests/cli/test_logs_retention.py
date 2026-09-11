@@ -575,3 +575,16 @@ def test_snapshot_retention_scans_the_nested_computer_dir(
     assert fresh.exists()
     assert unmanaged.exists()
     assert "retention_summary\tmode=delete\tdeleted=1\tbytes=" in capsys.readouterr().out
+
+
+def test_retention_family_sets_stay_in_sync() -> None:
+    from cli.commands.logs import _FAMILY_DEFAULT_DAYS
+    from cli.parsers.logs import _FAMILY_DAYS_NAMES
+    from shared.os_logs_job import FAMILY_DAYS
+
+    assert set(_FAMILY_DEFAULT_DAYS) == set(_FAMILY_DAYS_NAMES) - {"default"}
+    job_families: dict[str, str] = {}
+    for item in FAMILY_DAYS.split(","):
+        family, _, days = item.partition("=")
+        job_families[family] = days
+    assert job_families == {family: str(days) for family, days in _FAMILY_DEFAULT_DAYS.items()}
