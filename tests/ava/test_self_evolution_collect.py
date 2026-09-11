@@ -275,6 +275,7 @@ class _FakeClient:
         self.rows = rows
         self.error = error
         self.requests: list[tuple[str, dict[str, object], dict[str, object]]] = []
+        self.client_kwargs: dict[str, Any] = {}
 
     def __enter__(self) -> "_FakeClient":
         return self
@@ -340,8 +341,9 @@ def _ts_after(seconds: float) -> datetime:
     return _BASE + timedelta(seconds=seconds)
 
 
-def _patch_client(collect_mod: Any, monkeypatch: pytest.MonkeyPatch, client: _FakeClient) -> None:
-    def factory(timeout: Any = None) -> _FakeClient:
+def _patch_client(collect_mod: Any, monkeypatch: pytest.MonkeyPatch, client: Any) -> None:
+    def factory(**kwargs: Any) -> Any:
+        client.client_kwargs = kwargs
         return client
 
     monkeypatch.setattr(collect_mod.httpx, "Client", factory)
@@ -438,6 +440,194 @@ def test_fetch_requests_are_count_free(collect_mod: Any, monkeypatch: pytest.Mon
     assert client.requests
     for _, p, _h in client.requests:
         assert "with_total" not in p
+
+
+# ── retry budget + failure diagnostics (Task #3126) ────────────────────────
+
+
+class _Status:
+    """Scripted error reply: HTTP status + response headers + body."""
+
+    def __init__(self, code: int, *, headers: dict[str, str] | None = None, body: str = "") -> None:
+        self.code = code
+        self.headers = headers or {}
+        self.body = body
+
+
+class _ScriptedClient:
+    """Scripted /api/events server for retry tests — one outcome per request.
+
+    An outcome is "ok" (the canned success payload), a `_Status` (a real
+    httpx.Response, so raise_for_status carries the status/headers/body a
+    real reply would), or an Exception instance (raised from `get` — a
+    transport failure). Running past the script raises, so an unexpected
+    extra request is a loud test failure.
+    """
+
+    def __init__(self, outcomes: list[object], payload: dict[str, object] | None = None) -> None:
+        self.outcomes = list(outcomes)
+        self.payload = payload or {"items": [], "meta": {"has_more": False}}
+        self.calls = 0
+        self.client_kwargs: dict[str, Any] = {}
+
+    def __enter__(self) -> "_ScriptedClient":
+        return self
+
+    def __exit__(self, *exc: object) -> bool:
+        return False
+
+    def get(
+        self,
+        url: str,
+        *,
+        params: dict[str, object] | None = None,
+        headers: dict[str, object] | None = None,
+        timeout: object = None,
+    ) -> Any:
+        assert self.calls < len(self.outcomes), "unexpected extra /api/events request"
+        outcome = self.outcomes[self.calls]
+        self.calls += 1
+        if isinstance(outcome, Exception):
+            raise outcome
+        if outcome == "ok":
+            return _FakeResp(dict(self.payload))
+        status = cast(_Status, outcome)
+        return httpx.Response(
+            status.code,
+            headers=status.headers,
+            content=status.body.encode(),
+            request=httpx.Request("GET", url),
+        )
+
+
+def _capture_sleeps(monkeypatch: pytest.MonkeyPatch) -> list[float]:
+    """Pin shared.resilience's sleep seam (its own tests' pattern) so retry
+    tests assert the wait budget instead of sleeping it."""
+    sleeps: list[float] = []
+    monkeypatch.setattr("shared.resilience._sleep", sleeps.append)
+    return sleeps
+
+
+def test_fetch_client_disables_env_proxy(collect_mod: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """2026-09-12 regression: httpx honored the env proxy for cluster-internal
+    reads (a no_proxy form it does not match), so /api/events went to a local
+    forward proxy and came back 502 while the gateway was healthy. The client
+    must be built with trust_env=False, like ops/cluster_rpc.py."""
+    client = _FakeClient([])
+    _patch_client(collect_mod, monkeypatch, client)
+
+    collect_mod._fetch_events_window("telemetry", _ts_after(0), _ts_after(3600))
+
+    assert client.client_kwargs["trust_env"] is False
+
+
+def test_fetch_retries_transient_then_succeeds(
+    collect_mod: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A blip inside the budget must not cost the day's dataset."""
+    rows = [_row(1, _ts_after(0))]
+    client = _ScriptedClient(
+        [_Status(502), httpx.ReadTimeout("slow"), "ok"],
+        payload={"items": rows, "meta": {"has_more": False}},
+    )
+    _patch_client(collect_mod, monkeypatch, client)
+    sleeps = _capture_sleeps(monkeypatch)
+
+    out = collect_mod._fetch_events_window("telemetry", _ts_after(0), _ts_after(3600))
+
+    assert [r["id"] for r in out] == [1]
+    assert client.calls == 3
+    assert sleeps == [5.0, 10.0]
+
+
+@pytest.mark.parametrize("code", [502, 503, 504])
+def test_fetch_retryable_status_exhausts_budget_with_diagnostics(
+    collect_mod: Any, monkeypatch: pytest.MonkeyPatch, code: int
+) -> None:
+    """2026-09-12 regression: a spent budget must raise with the responder's
+    status, headers, and body — the evidence that tells a local forward
+    proxy's 502 from the gateway's own 503 — on the 5/10/20/40 s schedule."""
+    reply = _Status(
+        code,
+        headers={"content-type": "text/html", "server": "forward-proxy"},
+        body="<html>Bad Gateway</html>",
+    )
+    client = _ScriptedClient([reply] * 5)
+    _patch_client(collect_mod, monkeypatch, client)
+    sleeps = _capture_sleeps(monkeypatch)
+
+    with pytest.raises(RuntimeError) as err:
+        collect_mod._fetch_events_window("telemetry", _ts_after(0), _ts_after(3600))
+
+    message = str(err.value)
+    assert f"HTTP {code}" in message
+    assert "server" in message and "forward-proxy" in message
+    assert "<html>Bad Gateway</html>" in message
+    assert "after 5 attempts" in message
+    assert client.calls == 5
+    assert sleeps == [5.0, 10.0, 20.0, 40.0]
+    assert isinstance(err.value.__cause__, httpx.HTTPStatusError)
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [httpx.ConnectError("connection refused"), httpx.ReadTimeout("read timed out")],
+    ids=["connect-error", "timeout"],
+)
+def test_fetch_transport_failure_exhausts_budget_with_diagnostics(
+    collect_mod: Any, monkeypatch: pytest.MonkeyPatch, failure: Exception
+) -> None:
+    """Transport errors (httpx.TransportError includes TimeoutException) run
+    the same budget, and the spent-budget error names the failure."""
+    client = _ScriptedClient([failure] * 5)
+    _patch_client(collect_mod, monkeypatch, client)
+    sleeps = _capture_sleeps(monkeypatch)
+
+    with pytest.raises(RuntimeError) as err:
+        collect_mod._fetch_events_window("telemetry", _ts_after(0), _ts_after(3600))
+
+    message = str(err.value)
+    assert type(failure).__name__ in message
+    assert str(failure) in message
+    assert client.calls == 5
+    assert sleeps == [5.0, 10.0, 20.0, 40.0]
+
+
+def test_fetch_exhausted_diagnostics_are_bounded(
+    collect_mod: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A huge body / header block must not flood the scan's log line: each
+    diagnostic field is capped, with an explicit truncation marker."""
+    reply = _Status(503, headers={"x-note": "h" * 1000}, body="b" * 1000)
+    client = _ScriptedClient([reply] * 5)
+    _patch_client(collect_mod, monkeypatch, client)
+    _capture_sleeps(monkeypatch)
+
+    with pytest.raises(RuntimeError) as err:
+        collect_mod._fetch_events_window("telemetry", _ts_after(0), _ts_after(3600))
+
+    message = str(err.value)
+    assert "b" * 300 in message and "(+700 chars)" in message  # body capped at 300
+    assert message.count("(+") == 2  # the header block is capped too
+    assert len(message) < 800
+
+
+@pytest.mark.parametrize("code", [429, 500, 404])
+def test_fetch_permanent_status_fails_fast(
+    collect_mod: Any, monkeypatch: pytest.MonkeyPatch, code: int
+) -> None:
+    """Task #3126: only 502/503/504 are retryable. 429/500 (transient in the
+    shared default) and every other status are structural for this read —
+    one attempt, no sleep, the original HTTPStatusError."""
+    client = _ScriptedClient([_Status(code)] * 5)
+    _patch_client(collect_mod, monkeypatch, client)
+    sleeps = _capture_sleeps(monkeypatch)
+
+    with pytest.raises(httpx.HTTPStatusError):
+        collect_mod._fetch_events_window("telemetry", _ts_after(0), _ts_after(3600))
+
+    assert client.calls == 1
+    assert sleeps == []
 
 
 # ── plugin attribution (issue #40) ──────────────────────────────────────────
