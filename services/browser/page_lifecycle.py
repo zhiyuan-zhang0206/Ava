@@ -31,14 +31,18 @@ Scoping: the reapers' candidate sources are the affinity registry and the TTL
 registry — both contain only pages this stack created — so the user's tabs and
 pages this stack never created are never inspected or closed. A user tab the
 agent merely selected has no TTL slot and no renewal path; it is out of scope
-by construction. The registries are module-level so they survive
+by construction. The registries are module-level — they survive
 ``ChromeMcpDaemon`` replacement across upstream reconnects (the daemon
-re-imports them; the objects are shared).
+re-imports them; the objects are shared) — but every entry is stamped with the
+connection generation that minted it: chrome-devtools-mcp numbers pages per
+process, so after a reconnect the new upstream renumbers from scratch and
+every pre-reconnect slot must read as no-page/expired (``new_generation``).
 """
 
 from __future__ import annotations
 
 import asyncio
+import itertools
 import math
 import re
 import time
@@ -54,22 +58,48 @@ from shared import telemetry
 from shared.config import settings
 from shared.log import logger
 
-# Per-agent page affinity — agent id -> that agent's current page. The
+# The upstream connection generation. chrome-devtools-mcp mints page ids from
+# a process-local counter — they restart at 1 in every new upstream process —
+# so an id is only meaningful within the process that minted it, and the
+# daemon replaces the upstream in place (same daemon process, new upstream).
+# Every page-keyed entry below therefore carries the generation it was written
+# under, minted once per successful upstream connect. A generation may only
+# act on its own entries: a read through a different generation sees no entry
+# (no-page/expired), so a stale id is never re-pinned, closed, or renewed, and
+# a late write from a dead connection is inert.
+_GENERATIONS = itertools.count(1)
+
+
+def new_generation() -> int:
+    """Mint the identity of one upstream connection (monotonic, from 1).
+
+    Called once per successful ``_create_upstream``; ``ChromeMcpDaemon``
+    stamps it at construction and every page-keyed registry entry records it.
+    """
+    return next(_GENERATIONS)
+
+
+# Per-agent page affinity — agent id -> (current page id, generation). The
 # selected-page state belongs to the AGENT, not to a TCP connection: an exec
 # subprocess child re-connecting mid-turn (or the agent process itself after a
 # session rebuild) must land on the same tab the agent selected, not cold-start
 # with "No page selected" on every exec. Module-level on purpose: the
-# ChromeMcpDaemon object is replaced on upstream reconnect, and this registry
-# must survive that. One int per agent that has used the browser — bounded by
-# the machine's agent count; a closed/crashed page drops the slot naturally
-# via the existing re-pin failure path. Requests without an agent id (legacy
-# wrapper clients) keep the per-connection fallback in the daemon.
-_AGENT_AFFINITY: dict[int, int | None] = {}
+# ChromeMcpDaemon object is replaced on upstream reconnect, and the entry must
+# survive that — but only within its generation: after a reconnect the id may
+# name a different tab, so the slot reads as no-page and the agent rebuilds
+# through the existing cold-start paths. One entry per agent that has used the
+# browser — bounded by the machine's agent count; a closed/crashed page drops
+# the slot naturally via the existing re-pin failure path. Requests without an
+# agent id (legacy wrapper clients) keep the per-connection fallback in the
+# daemon.
+_AGENT_AFFINITY: dict[int, tuple[int | None, int]] = {}
 
 # Monotonic last-use stamp per agent, updated on every agent-keyed browser
 # call (``touch_agent_page``). The idle sweep reads it; an agent with no
 # affinity page (None) is not a candidate. Module-level for the same reason
-# as the affinity registry — it must survive daemon replacement.
+# as the affinity registry — it must survive daemon replacement. Agent-keyed,
+# so no generation stamp: it records browser use, not a page id, and the idle
+# sweep consults it only for current-generation slots.
 _AGENT_LAST_USE: dict[int, float] = {}
 
 # Dead-page sweep cadence: agent-owned pages pointing at localhost /
@@ -100,16 +130,17 @@ _LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1"})
 # is the configured default, `chrome_page_default_ttl_seconds`.
 _MAX_TTL_SECONDS = 86_400.0
 
-# TTL deadline per page — page id -> monotonic deadline. Every page THIS STACK
-# created (an explicit new_page call, or the auto-created page on a page-less
-# first navigate) gets a slot from ``register_created_page``; the expiry sweep
-# closes a page once its deadline passes. Monotonic (never wall clock): a
-# clock step must not move a deadline. The registry is the ONLY candidate
-# source for the TTL sweep, so pages this stack never created (the user's own
-# tabs) are never inspected or closed. Module-level for the same reason as the
-# affinity registry: it must survive daemon replacement across upstream
-# reconnects.
-_PAGE_TTL_DEADLINES: dict[int, float] = {}
+# TTL deadline per page — page id -> (monotonic deadline, generation). Every
+# page THIS STACK created (an explicit new_page call, or the auto-created page
+# on a page-less first navigate) gets a slot from ``register_created_page``;
+# the expiry sweep closes a page once its deadline passes. Monotonic (never
+# wall clock): a clock step must not move a deadline. The registry is the ONLY
+# candidate source for the TTL sweep, so pages this stack never created (the
+# user's own tabs) are never inspected or closed. Module-level for the same
+# reason as the affinity registry — it must survive daemon replacement — and
+# generation-stamped like it: the id is only meaningful within the upstream
+# process that minted it (see ``new_generation``).
+_PAGE_TTL_DEADLINES: dict[int, tuple[float, int]] = {}
 
 # The ``renew_page`` tool this module owns. Lives beside the TTL machinery
 # because the daemon appends it to the upstream tool list verbatim passthrough
@@ -164,12 +195,49 @@ class _PageDaemon(Protocol):
     """
 
     _lock: asyncio.Lock
+    generation: int
 
     async def _call(self, name: str, args: dict[str, Any]) -> types.CallToolResult: ...
+
+    async def call_tool(
+        self, name: str, args: dict[str, Any], current_page: int | None
+    ) -> tuple[types.CallToolResult, int | None]: ...
 
 
 def _text_of(result: types.CallToolResult) -> str:
     return "".join(c.text for c in result.content if isinstance(c, types.TextContent))
+
+
+def get_agent_page(agent_id: int, generation: int) -> int | None:
+    """The agent's current page — or None when its slot was minted by a
+    different upstream connection (a stale id must never be acted on)."""
+    entry = _AGENT_AFFINITY.get(agent_id)
+    if entry is None or entry[1] != generation:
+        return None
+    return entry[0]
+
+
+def set_agent_page(agent_id: int, page_id: int | None, generation: int) -> None:
+    """Record the agent's current page for the serving connection generation."""
+    _AGENT_AFFINITY[agent_id] = (page_id, generation)
+
+
+async def forward_legacy_call(
+    daemon: _PageDaemon,
+    tool: str,
+    args: dict[str, Any],
+    conn_page: tuple[int, int] | None,
+) -> tuple[types.CallToolResult, tuple[int, int] | None]:
+    """Forward one agent-less call with the connection's own page.
+
+    The page is used only when it was minted by THIS upstream connection — a
+    reconnect renumbers pages, so a stale id must not be re-pinned (see
+    ``new_generation``). Returns the result and the connection's updated
+    ``(page, generation)``.
+    """
+    page = conn_page[0] if conn_page is not None and conn_page[1] == daemon.generation else None
+    result, updated = await daemon.call_tool(tool, args, page)
+    return result, None if updated is None else (updated, daemon.generation)
 
 
 async def release_agent_page(daemon: _PageDaemon, agent_id: int) -> int | None:
@@ -179,10 +247,12 @@ async def release_agent_page(daemon: _PageDaemon, agent_id: int) -> int | None:
     sent by the agent's exit hook) and by the dead-page reaper. Idempotent: an
     agent with no slot (never used the browser, or already released) is a
     no-op. Only the exact page id is closed — never the globally selected page
-    — so no other agent's or the user's tab can be affected.
+    — so no other agent's or the user's tab can be affected. A slot minted by
+    a different upstream connection reads as no-page (see ``new_generation``):
+    a stale id is never closed.
     """
     async with daemon._lock:
-        page_id = _AGENT_AFFINITY.get(agent_id)
+        page_id = get_agent_page(agent_id, daemon.generation)
         if page_id is None:
             return None
         result = await daemon._call("close_page", {"pageId": page_id})
@@ -195,7 +265,7 @@ async def release_agent_page(daemon: _PageDaemon, agent_id: int) -> int | None:
                 f"[browser-mcp] release of agent {agent_id} page {page_id} "
                 f"errored ({_text_of(result)!r}); clearing the slot"
             )
-        _AGENT_AFFINITY[agent_id] = None
+        set_agent_page(agent_id, None, daemon.generation)
         _AGENT_LAST_USE.pop(agent_id, None)
         drop_page_ttl(page_id)
         return page_id
@@ -297,7 +367,10 @@ async def reap_dead_agent_pages(daemon: _PageDaemon) -> None:
             return
         page_urls = parse_page_listing(_text_of(listing))
         candidates: list[tuple[int, int, str]] = []
-        for agent_id, page_id in list(_AGENT_AFFINITY.items()):
+        for agent_id, (page_id, entry_generation) in list(_AGENT_AFFINITY.items()):
+            if entry_generation != daemon.generation:
+                _AGENT_AFFINITY.pop(agent_id, None)  # minted by an earlier upstream
+                continue
             if page_id is None:
                 continue
             url = page_urls.get(page_id)
@@ -336,8 +409,8 @@ async def reap_dead_agent_pages(daemon: _PageDaemon) -> None:
                     f"[browser-mcp] reaper could not close dead page {page_id} ({url}): "
                     f"{_text_of(result)!r}"
                 )
-            if _AGENT_AFFINITY.get(agent_id) == page_id:
-                _AGENT_AFFINITY[agent_id] = None
+            if get_agent_page(agent_id, daemon.generation) == page_id:
+                set_agent_page(agent_id, None, daemon.generation)
             drop_page_ttl(page_id)
             logger.info(
                 f"[browser-mcp] reaper closed dead page {page_id} ({url}) for agent {agent_id}"
@@ -367,37 +440,46 @@ def _tool_error(text: str) -> types.CallToolResult:
     return types.CallToolResult(content=[types.TextContent(type="text", text=text)], is_error=True)
 
 
-def register_created_page(page_id: int | None) -> None:
+def register_created_page(page_id: int | None, generation: int) -> None:
     """Give a freshly created page its initial TTL deadline.
 
     Called by the daemon right after a ``new_page`` it forwarded (an explicit
     call, or the auto-created page on a page-less first navigate) resolved to
     a page id. Best-effort like the affinity parse it rides on: a listing
     that drifted off the parseable shape yields ``None`` and the page simply
-    carries no TTL. Callers hold the daemon's serial lock.
+    carries no TTL. Stamped with the serving connection generation, like every
+    other page-keyed entry (see ``new_generation``). Callers hold the daemon's
+    serial lock.
     """
     if page_id is None:
         return
-    _PAGE_TTL_DEADLINES[page_id] = time.monotonic() + _default_page_ttl_seconds()
+    deadline = time.monotonic() + _default_page_ttl_seconds()
+    _PAGE_TTL_DEADLINES[page_id] = (deadline, generation)
 
 
 def drop_page_ttl(page_id: int | None) -> None:
-    """Forget the page's TTL slot — the page is closed (or was never ours)."""
+    """Forget the page's TTL slot — the page is closed (or was never ours).
+
+    No generation check: the caller has just closed page ``page_id`` in its
+    own numbering, and forgetting a deadline can never mis-target anything —
+    a stale entry dropped here is garbage dropped early.
+    """
     if page_id is not None:
         _PAGE_TTL_DEADLINES.pop(page_id, None)
 
 
-def _clear_affinity_for_page(page_id: int) -> int | None:
+def _clear_affinity_for_page(page_id: int, generation: int) -> int | None:
     """Clear every agent slot naming ``page_id`` (the page is gone);
 
     returns one cleared owner for logs / the expiry event (None when no slot
     named the page). Every slot is cleared — a slot left naming a closed page
-    would make the owner's next call re-pin against a dead id first.
+    would make the owner's next call re-pin against a dead id first; a
+    stale-generation slot naming the same id is inert but cleared with it.
     """
     owner: int | None = None
-    for agent_id, current in list(_AGENT_AFFINITY.items()):
+    for agent_id, (current, _entry_generation) in list(_AGENT_AFFINITY.items()):
         if current == page_id:
-            _AGENT_AFFINITY[agent_id] = None
+            set_agent_page(agent_id, None, generation)
             if owner is None:
                 owner = agent_id
     return owner
@@ -416,7 +498,9 @@ async def renew_agent_page(
     CALLER's current page: a page this stack never created has no TTL slot
     and no renewal path, so the user's tabs are out of scope by construction.
     Runs under the serial lock, so a renewal and the expiry sweep can never
-    interleave — a successful renewal proves the deadline had not passed.
+    interleave — a successful renewal proves the deadline had not passed. A
+    slot minted by an earlier upstream connection reads as no-page, like every
+    other page-keyed entry (see ``new_generation``).
     """
     unknown = set(args) - {"ttl"}
     if unknown:
@@ -437,21 +521,24 @@ async def renew_agent_page(
         return _tool_error(f"ttl must be at most {_MAX_TTL_SECONDS:.0f} seconds (24 hours)")
     async with daemon._lock:
         touch_agent_page(agent_id)
-        page_id = _AGENT_AFFINITY.get(agent_id)
+        page_id = get_agent_page(agent_id, daemon.generation)
         if page_id is None:
             return _tool_error("this agent has no current page to renew; open one first")
-        deadline = _PAGE_TTL_DEADLINES.get(page_id)
-        if deadline is None:
+        entry = _PAGE_TTL_DEADLINES.get(page_id)
+        if entry is None or entry[1] != daemon.generation:
+            # No slot, or one minted by an earlier upstream connection: the id
+            # may name a different tab now, so there is nothing renewable here.
             return _tool_error(
                 f"page {page_id} has no page TTL to renew (not created through this "
                 "browser, or already closed); open a new page"
             )
+        deadline = entry[0]
         now = time.monotonic()
         if now >= deadline:
             return _tool_error(
                 f"page {page_id} is past its TTL deadline and cannot be renewed; open a new page"
             )
-        _PAGE_TTL_DEADLINES[page_id] = now + ttl
+        _PAGE_TTL_DEADLINES[page_id] = (now + ttl, daemon.generation)
         new_expires = datetime.now(UTC) + timedelta(seconds=ttl)
         telemetry.emit(
             "telemetry",
@@ -492,12 +579,16 @@ async def reap_idle_agent_pages(daemon: _PageDaemon) -> int:
         if listing.is_error:
             return 0
         page_urls = parse_page_listing(_text_of(listing))
-        candidates: list[tuple[int, int]] = [
-            (agent_id, page_id)
-            for agent_id, page_id in list(_AGENT_AFFINITY.items())
-            if page_id is not None
-            and now - _AGENT_LAST_USE.get(agent_id, now) > _TAB_IDLE_TIMEOUT_S
-        ]
+        candidates: list[tuple[int, int]] = []
+        for agent_id, (page_id, entry_generation) in list(_AGENT_AFFINITY.items()):
+            if entry_generation != daemon.generation:
+                _AGENT_AFFINITY.pop(agent_id, None)  # minted by an earlier upstream
+                continue
+            if (
+                page_id is not None
+                and now - _AGENT_LAST_USE.get(agent_id, now) > _TAB_IDLE_TIMEOUT_S
+            ):
+                candidates.append((agent_id, page_id))
         if not candidates:
             return 0
         closed = 0
@@ -514,8 +605,8 @@ async def reap_idle_agent_pages(daemon: _PageDaemon) -> int:
                     f"for agent {agent_id}: {_text_of(result)!r}"
                 )
                 continue
-            if _AGENT_AFFINITY.get(agent_id) == page_id:
-                _AGENT_AFFINITY[agent_id] = None
+            if get_agent_page(agent_id, daemon.generation) == page_id:
+                set_agent_page(agent_id, None, daemon.generation)
             _AGENT_LAST_USE.pop(agent_id, None)
             drop_page_ttl(page_id)
             closed += 1
@@ -542,14 +633,22 @@ async def reap_expired_pages(daemon: _PageDaemon) -> int:
     anomalous — warned about, never retried (a retryable slot would keep a
     terminal deadline alive past its deadline). Expiry is surfaced to the
     agent only by the page being gone: the next page-scoped call hits the
-    daemon's existing no-page path — no invented "page expired" error.
-    Returns the number of pages closed.
+    daemon's existing no-page path — no invented "page expired" error. A slot
+    minted by an earlier upstream connection (see ``new_generation``) is
+    dropped on sight, never closed: after a reconnect the id may name a
+    different tab. Returns the number of pages closed.
     """
     async with daemon._lock:
         now = time.monotonic()
-        expired = [
-            page_id for page_id, deadline in list(_PAGE_TTL_DEADLINES.items()) if now >= deadline
-        ]
+        expired: list[int] = []
+        for page_id, (deadline, entry_generation) in list(_PAGE_TTL_DEADLINES.items()):
+            if entry_generation != daemon.generation:
+                # Minted by an earlier upstream connection: the id may name a
+                # different tab now — never close it, just drop the stale slot.
+                _PAGE_TTL_DEADLINES.pop(page_id, None)
+                continue
+            if now >= deadline:
+                expired.append(page_id)
         if not expired:
             return 0
         listing = await daemon._call("list_pages", {})
@@ -571,7 +670,7 @@ async def reap_expired_pages(daemon: _PageDaemon) -> int:
                     f"{_text_of(result)!r}"
                 )
             drop_page_ttl(page_id)
-            owner = _clear_affinity_for_page(page_id)
+            owner = _clear_affinity_for_page(page_id, daemon.generation)
             telemetry.emit(
                 "log",
                 "chrome_page_ttl_expired",

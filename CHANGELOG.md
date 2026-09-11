@@ -28,6 +28,14 @@ and the matching GitHub Releases, cut by `scripts/release_cut.py`.
   admission).
 
 ### Fixed
+- Page ids are no longer trusted across an upstream reconnect: the browser-mcp
+  daemon reconnects `chrome-devtools-mcp` in place, and the new process
+  renumbers pages from 1 — a surviving page id could previously re-pin an
+  agent's next call onto a different tab, or let the page-TTL sweep close one.
+  Page-keyed state (per-agent affinity, TTL slots, the legacy per-connection
+  page) now carries the upstream connection generation that minted it; after a
+  reconnect stale slots read as no-page/expired and agents rebuild through the
+  existing cold-start paths (task #3048).
 - Listener discovery no longer reads a restricted inspection context as
   absence: the lsof fallback resolves through standard absolute locations when
   a context's PATH omits it (macOS keeps lsof in /usr/sbin, which cron's
