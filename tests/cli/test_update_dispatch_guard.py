@@ -304,6 +304,9 @@ def test_restart_refused_inside_supervised_session(
     write_session_record(_HOSTING_SESSION)
     monkeypatch.setattr("cli.commands.stop._release_self_heal_pause", lambda: None)
     monkeypatch.setattr(_cli, "_preflight_probes", _fail_if_called("the preflight"))
+    monkeypatch.setattr(
+        _cli, "_preflight_start_readiness", _fail_if_called("the readiness preflight")
+    )
     monkeypatch.setattr(_cli, "_do_stop", _fail_if_called("_do_stop"))
 
     rc = _cli.cmd_restart()
@@ -336,6 +339,7 @@ def test_restart_proceeds_when_windows_stop_would_spare_its_lineage(
     write_session_record("ava-ops", pid=os.getppid())
     monkeypatch.setattr("shared.winproc.tree_kill_would_spare", _spares)
     monkeypatch.setattr(_cli, "_preflight_probes", _success)
+    monkeypatch.setattr(_cli, "_preflight_start_readiness", _success)
     monkeypatch.setattr(_cli, "_do_stop", _success)
     monkeypatch.setattr(_cli, "_cmd_start_body", _success)
 
@@ -359,6 +363,9 @@ def test_restart_refuses_when_the_service_tree_would_not_spare_its_lineage(
     monkeypatch.setattr("shared.winproc.tree_kill_would_spare", _does_not_spare)
     monkeypatch.setattr("cli.commands.stop._release_self_heal_pause", lambda: None)
     monkeypatch.setattr(_cli, "_preflight_probes", _fail_if_called("the preflight"))
+    monkeypatch.setattr(
+        _cli, "_preflight_start_readiness", _fail_if_called("the readiness preflight")
+    )
     monkeypatch.setattr(_cli, "_do_stop", _fail_if_called("_do_stop"))
 
     assert _cli.cmd_restart() == RESTART_DECLINED_EXIT_CODE

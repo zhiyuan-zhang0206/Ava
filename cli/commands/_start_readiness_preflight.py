@@ -1,12 +1,21 @@
-"""Read-only `ava start` state checks, run by the update leg before it stops.
+"""Read-only `ava start` state checks, run before a stop that a start must follow.
 
-`ava start` is the only step that brings a stopped host back, and on the
-self-update leg it runs AFTER the stop. A check that fails there fails on a
-host whose services are already down — the 2026-09-12 incident shape, where a
+Two callers, one rule — a check that can only fail AFTER the stop fails on a
+host whose services are already down (the 2026-09-12 incident shape, where a
 stray workspace socket aborted converge an hour after the stop took the
-fleet's coordinator offline (macmini). This module is the local-state half of
-"validate before kill": the read-only parts of what start checks, moved in
-front of the stop, so a failure refuses the update while the host still serves.
+fleet's coordinator offline on macmini):
+
+- the self-update leg (`_update_agent_runner` step 3.1) — `ava start` is step 5
+  there, so every local check it makes lands after the stop;
+- `ava restart` (`cli/commands/stop.py`, task #3165) — the same stop→start
+  shape on the operator verb and, on Windows, on the updater ladder's restart
+  step. Every category this gate refuses on would also fail that restart's own
+  start leg, so a refusal never blocks a viable bounce — the listed repairs are
+  the path, and a refusal leaves the host exactly as it was.
+
+This module is the local-state half of "validate before kill": the read-only
+parts of what start checks, moved in front of the stop, so a failure refuses
+the stop while the host still serves.
 
 What it forwards (each item read-only; nothing here repairs or launches):
 
@@ -23,8 +32,10 @@ What it forwards (each item read-only; nothing here repairs or launches):
   applier opens them inside start, and the pre-stop layout gate
   (`validate_migrations_at_ref`) vets names only;
 - the two start prerequisites no other pre-stop gate covers: the
-  prod-checkout anchoring rule, and the launcher's executability (its presence
-  is the update runner's step 3.5).
+  prod-checkout anchoring rule, and the venv entry points — `.venv/bin/python`
+  (what every service session launches through) always, `.venv/bin/ava` (what
+  the update leg's step 5 execs; its presence is step 3.5's report) only when
+  the caller's start would exec it (`check_launcher`).
 
 Contract: read-only, never raises for a finding — findings are data. Returns 0
 to proceed with the update, 1 to refuse it. The caller answers a refusal with
@@ -49,11 +60,16 @@ from shared.private_storage import (
 _TREE_ROOTS = ("logs", "workspaces", "memory")
 
 
-def preflight_start_readiness(repo: Path) -> int:
-    """Vet the local state `ava start` needs, before the update stops anything.
+def preflight_start_readiness(repo: Path, *, check_launcher: bool = True) -> int:
+    """Vet the local state the coming `ava start` needs, before the stop.
 
     0 = proceed (any observations are printed); 1 = refuse, with every finding
     printed. See the module docstring for what is checked and why.
+
+    `check_launcher=False` drops the `.venv/bin/ava` entry-point check for a
+    caller whose start runs in-process and never execs it (`ava restart`);
+    `.venv/bin/python` — what every service session DOES launch through — is
+    checked for every caller.
     """
     from shared.paths import ava_home
 
@@ -81,7 +97,7 @@ def preflight_start_readiness(repo: Path) -> int:
     observations += tree_observations
 
     fatal += _migration_findings()
-    fatal += _launcher_findings(repo)
+    fatal += _venv_findings(repo, check_launcher=check_launcher)
 
     return _report(fatal, observations)
 
@@ -232,27 +248,52 @@ def _migration_findings() -> list[str]:
     ]
 
 
-def _launcher_findings(repo: Path) -> list[str]:
-    """The `ava` launcher's executability, the uncovered half of step 3.5.
+def _venv_findings(repo: Path, *, check_launcher: bool) -> list[str]:
+    """The venv entry points the coming start needs, keyed to who runs it.
 
-    Step 3.5 vets presence; a launcher that exists but cannot be executed makes
-    step 5's `subprocess.run` raise PermissionError — the "vanished (or is not
-    executable) inside the stop window" case the leg's OSError handler names.
-    Windows runs `.exe` files and has no exec bit to read; presence is the
-    whole check there.
+    - `.venv/bin/python` — the interpreter every service session launches
+      through (`ops/roster.py` builds `<venv>/bin/python -m ...`). Checked for
+      every caller: `ava restart` has no `uv sync` verification behind it, so a
+      damaged venv is exactly the "stopped and cannot come back" class this
+      gate exists for.
+    - `.venv/bin/ava` — the launcher the update leg's step 5 execs: a file that
+      exists but cannot be executed makes its `subprocess.run` raise
+      PermissionError (the OSError handler's "vanished (or is not executable)
+      inside the stop window"). Step 3.5 vets presence; this adds the exec bit.
+      Skipped where the start is in-process (`check_launcher=False`): an
+      `ava restart` never execs it, and refusing a bounce over an entry point it
+      does not use would block a viable restart.
     """
     from shared.platform_backend import get_backend
 
-    ava_bin = get_backend().venv_launcher("ava", root=repo)
-    if not ava_bin.is_file():
-        return []  # presence is step 3.5's report; do not double-report it
-    if os.name == "nt" or os.access(ava_bin, os.X_OK):
-        return []
-    return [
-        f"{ava_bin} is not executable — `ava start` (step 5) would fail with "
-        "PermissionError on a host with no services left; `chmod +x` it, or re-run "
-        "`uv sync`"
-    ]
+    backend = get_backend()
+    findings = _entrypoint_findings(
+        backend.venv_launcher("python", root=repo),
+        label="the interpreter every service session launches through",
+        fix="re-run `uv sync`",
+    )
+    if check_launcher:
+        ava_bin = backend.venv_launcher("ava", root=repo)
+        if ava_bin.is_file():  # a missing launcher is step 3.5's report
+            findings += _entrypoint_findings(
+                ava_bin,
+                label="the launcher the update leg execs next",
+                fix="`chmod +x` it, or re-run `uv sync`",
+            )
+    return findings
+
+
+def _entrypoint_findings(binary: Path, *, label: str, fix: str) -> list[str]:
+    """Why `binary` would fail the coming start, or [] when it is usable.
+
+    Windows runs `.exe` files and has no exec bit to read; presence is the
+    whole check there.
+    """
+    if not binary.is_file():
+        return [f"{binary} is missing — {label} would fail after the stop; {fix}"]
+    if os.name != "nt" and not os.access(binary, os.X_OK):
+        return [f"{binary} is not executable — {label} would fail after the stop; {fix}"]
+    return []
 
 
 def _report(fatal: list[str], observations: list[str]) -> int:
