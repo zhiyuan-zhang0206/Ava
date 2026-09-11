@@ -245,7 +245,8 @@ Failure modes and interactions (required evidence for a go/no-go):
 5. **Read paths.** Pregel's load is delta-aware already; `shared/checkpoint.py` readers
    (messages, message-count via raw blob header, compact-segment reads, trace reads) and the
    gateway timeline/state endpoints must use the delta-aware API; the message-count header
-   trick survives (array header) but must be verified per case.
+   reader survives T1 unchanged (the blob stays a msgpack array header) but NOT T2 — a
+delta version has no blob row, so it must switch to reconstruct-based counting.
 6. **Beta + version coupling.** The channel is documented beta ("on-disk representation may
    change"); the repo pins langgraph 1.2.4 and the D dependency line (#6096, task #3099) may
    touch langgraph. Adopting it is a pinned-contract decision, not a drop-in.
