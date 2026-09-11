@@ -23,7 +23,7 @@ _SECRET = "redisacltestsecret"  # noqa: S105 — test fixture, not a real creden
 
 def _acl_users(admin_url: str) -> list[str]:
     with redis.Redis.from_url(admin_url, decode_responses=True) as r:  # pyright: ignore[reportUnknownMemberType]
-        return r.execute_command("ACL", "LIST")  # pyright: ignore[reportUnknownMemberType]
+        return r.execute_command("ACL", "LIST")  # pyright: ignore[reportUnknownMemberType,reportReturnType]
 
 
 def test_ensure_creates_enabled_channel_scoped_user() -> None:

@@ -41,6 +41,17 @@ dependencies = [
     "watchdog>=6.0.0",
     "numpy>=2.4.4",
     "pymilvus[milvus-lite]>=3.0.0",
+    # Held: milvus-lite 3.1+ (probed 3.1.0/3.1.1/3.2.1) flips the returned
+    # COSINE "distance" from 1 - similarity to raw similarity, inverting
+    # `search_topk` order (shard 9 red on PR #2260; task #3164; probe:
+    # workspaces/6096/depsup/refs/milvus_probe.py).
+    "milvus-lite==3.0; sys_platform != 'win32'",  # mirrors pymilvus's extra marker
+    # The runtime startup-hook gate retains the original locked setuptools
+    # wheel — its distutils-precedence .pth is the one non-editable helper the
+    # release admits (shared/runtime_release.py). It rode in transitively via
+    # pymilvus until pymilvus 3.0.1 dropped the requirement; declared
+    # explicitly so the lock always carries exactly one wheel.
+    "setuptools>=82",
     "pyte>=0.8.0",  # terminal emulation screen model for PTY sessions (S6 step 2)
     "traceloop-sdk>=0.61",
     # Imported directly: shared/trace.py (span exporter, OTLP protobuf encode)
@@ -130,7 +141,10 @@ dev = [
     "pytest-asyncio>=1.0",
     "pytest-playwright>=0.7.0",
     "pytest-xdist>=3.8",
-    "ruff>=0.15.12",
+    # Held at 0.15.x on purpose: ruff 0.16 stabilizes new lint rules (PLR0917,
+    # RUF036) and markdown code-block formatting (55 tracked docs drift) — a
+    # policy-shaped migration tracked separately (task #3162).
+    "ruff>=0.15.12,<0.16",
     "pytest-cov>=7.0",
     # starlette 1.2+ TestClient prefers httpx2 over httpx; declaring it here
     # makes the in-process TestClient (FastAPI re-exports starlette's) run on
@@ -428,6 +442,10 @@ markers = [
     # Tests that are timing-sensitive, race-prone, or use real DB LISTEN/NOTIFY —
     # run serial (-n 1) while stable tests run parallel (-n auto).
     "flaky: timing-sensitive or race-prone test that must run serially",
+    # e2e fake-LLM scenario selector; registered globally (not only in
+    # tests/e2e/conftest.py): tests outside tests/e2e import e2e modules, and
+    # --ignore=tests/e2e runs never load that conftest.
+    "scenario(module_factory): specify fake LLM scenario module:factory string",
 ]
 # The kernel goes fully async (psycopg AsyncConnection / AsyncPostgresSaver / aioredis
 # / asyncio.create_subprocess_exec) — tests written as `async def test_...` auto-run,

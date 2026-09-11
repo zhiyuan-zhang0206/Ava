@@ -769,16 +769,6 @@ def e2e_env(
     )
 
 
-# ---- markers ------------------------------------------------------------
-
-
-def pytest_configure(config: pytest.Config) -> None:
-    config.addinivalue_line(
-        "markers",
-        "scenario(module_factory): specify fake LLM scenario module:factory string",
-    )
-
-
 # socket / subprocess references to avoid ruff treating as unused imports erroneously removed (only type hints usage)
 _ = socket
 _ = subprocess
