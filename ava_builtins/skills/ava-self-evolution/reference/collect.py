@@ -32,7 +32,6 @@ import json
 import os
 import re
 import sys
-import time
 from collections import Counter, defaultdict
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -49,6 +48,7 @@ from record import LeakPaths, _plugins_activated, _transcript, build_record  # n
 from shared.config import settings
 from shared.db import connect
 from shared.paths import ava_home
+from shared.resilience import ExponentialBackoff, Policy, http_classifier, retry
 
 # Task-origin inbound sources — capture every real task prompt, whether from
 # the user ("user") or a spawner / peer agent ("agent:<id>"). System and
@@ -88,7 +88,12 @@ def _events_page(
     to: datetime,
     agent_id: int | None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    """One /api/events page (offset always 0). Returns (items, meta)."""
+    """One /api/events page (offset always 0). Returns (items, meta).
+
+    Runs on `_EVENTS_RETRY_POLICY`: a transient failure (502/503/504 or a
+    transport error) is retried inside the wait budget; a spent budget
+    raises the diagnostics-carrying error, any other status fails fast.
+    """
     params: dict[str, Any] = {
         "category": category,
         "from": from_.isoformat(),
@@ -98,23 +103,19 @@ def _events_page(
     }
     if agent_id is not None:
         params["agent_id"] = agent_id
-    last_exc: Exception | None = None
-    for attempt in range(_RETRIES + 1):
-        try:
-            resp = client.get(
-                _gateway_url() + _EVENTS_PATH,
-                params=params,
-                headers=_gateway_headers(),
-                timeout=_HTTP_TIMEOUT_S,
-            )
-            resp.raise_for_status()
-            payload = resp.json()
-            return payload.get("items", []), payload.get("meta", {})
-        except (httpx.TimeoutException, httpx.HTTPStatusError) as exc:
-            last_exc = exc
-            if attempt < _RETRIES:
-                time.sleep(_RETRY_BACKOFF_S * (attempt + 1))
-    raise last_exc  # type: ignore[misc]
+
+    def fetch() -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        resp = client.get(
+            _gateway_url() + _EVENTS_PATH,
+            params=params,
+            headers=_gateway_headers(),
+            timeout=_HTTP_TIMEOUT_S,
+        )
+        resp.raise_for_status()
+        payload = resp.json()
+        return payload.get("items", []), payload.get("meta", {})
+
+    return retry(_EVENTS_RETRY_POLICY)(fetch)
 
 
 def _fetch_events_window(
@@ -132,12 +133,19 @@ def _fetch_events_window(
     only, and a missing `has_more` raises instead of silently truncating. Rows are deduped by surrogate row id across slice boundaries (the
     API window is inclusive on both ends) and sorted by `ts` (the API
     returns newest-first). Raises on persistent HTTP errors — a partial
-    window must not silently become a partial dataset.
+    window must not silently become a partial dataset; a spent retry
+    budget raises with the responder's status, headers, and body snippet.
     """
     out: list[dict[str, Any]] = []
     seen: set[int] = set()
 
-    with httpx.Client(timeout=_HTTP_TIMEOUT_S) as client:
+    # trust_env=False (2026-09-12): cluster-internal reads must not be
+    # routed through an env-configured proxy. httpx otherwise honors
+    # HTTP(S)_PROXY / NO_PROXY, and a no_proxy form it does not match hands
+    # these requests to a local forward proxy that cannot reach the gateway
+    # — which answered 502 while the gateway was healthy. Same pattern as
+    # ops/cluster_rpc.py and cli/commands/trace.py, for the same reason.
+    with httpx.Client(timeout=_HTTP_TIMEOUT_S, trust_env=False) as client:
 
         def rec(start: datetime, end: datetime) -> None:
             if start >= end:
@@ -231,10 +239,82 @@ def _subprocess_call_count(events: list[tuple]) -> int:
 # agent 3012) and is timeout-prone, so offsets are never used.
 _PAGE = 1000  # /api/events limit cap — each slice fits exactly one page
 _HTTP_TIMEOUT_S = 120.0
-_RETRIES = 2
-_RETRY_BACKOFF_S = 5.0
 _EVENTS_PATH = "/api/events"
 _MIN_SLICE = timedelta(seconds=1)
+
+
+# ─────── /api/events retry budget + failure diagnostics ─────────────────────
+# Task #3126 (2026-09-12): a transient blip at the daily scan must not cost
+# the day's dataset. Only 502/503/504 and transport errors are retryable: a
+# forwarding hop that failed (2026-09-12: an env-configured local proxy
+# answered 502 for a healthy gateway) or the gateway shedding (503/504).
+# Narrower than the shared 429/5xx default on purpose — any other status is
+# structural for this once-a-day read: fail fast so the scan reports the
+# real error instead of spending the budget on it.
+_EVENTS_CLASSIFY = http_classifier.with_(
+    transient={502, 503, 504},
+    permanent={429, 500},  # the shared default's other transient statuses
+)
+
+# Length cap for one diagnostic field (headers / body): a proxy's HTML page
+# or a Loki error payload must not flood the scan's log line.
+_DIAG_FIELD_CHARS = 300
+
+
+def _bounded(text: str) -> str:
+    """One-line, length-bounded excerpt of a diagnostic field."""
+    text = " ".join(text.split())
+    if len(text) <= _DIAG_FIELD_CHARS:
+        return text
+    return f"{text[:_DIAG_FIELD_CHARS]}... (+{len(text) - _DIAG_FIELD_CHARS} chars)"
+
+
+def _exhausted_fetch_error(exc: Exception) -> RuntimeError:
+    """The error raised once the retry budget is spent.
+
+    Carries the evidence that identifies the responder without re-running
+    the scan: for an HTTP failure the status line plus bounded header/body
+    excerpts — a local forward proxy's 502 and the gateway's own 503 are
+    otherwise indistinguishable — and for a transport failure its own name
+    and message.
+    """
+    if isinstance(exc, httpx.HTTPStatusError):
+        response = exc.response
+        detail = (
+            f"HTTP {response.status_code} {response.reason_phrase}; "
+            f"headers: {_bounded(str(dict(response.headers)))}; "
+            f"body: {_bounded(response.text)}"
+        )
+    else:
+        detail = f"{type(exc).__name__}: {exc}"
+    attempts = _EVENTS_RETRY_POLICY.max_attempts
+    return RuntimeError(f"/api/events read failed after {attempts} attempts: {detail}")
+
+
+def _convert_retry_exhausted(exc: Exception) -> None:
+    """on_final_failure hook: convert a spent budget, pass a fail-fast through.
+
+    The retry executor calls this on every final failure; a retryable class
+    reaches it only with the budget spent (otherwise it would have been
+    retried), while a permanent class failed fast on the first attempt and
+    re-raises untouched.
+    """
+    if _EVENTS_CLASSIFY(exc):
+        raise _exhausted_fetch_error(exc) from exc
+
+
+# Five attempts, sleeps 5/10/20/40 s — a ~75 s total wait budget (task
+# #3126: 60-90 s). Jitter is off (a single scheduled runner, nobody to
+# de-phase) and Retry-After is not honored: the budget is exactly this
+# schedule, so the worst case stays known.
+_EVENTS_RETRY_POLICY = Policy(
+    max_attempts=5,
+    backoff=ExponentialBackoff(base=5.0, factor=2.0, cap=40.0),
+    classify=_EVENTS_CLASSIFY,
+    jitter="none",
+    respect_retry_after=False,
+    on_final_failure=_convert_retry_exhausted,
+)
 
 
 def _inbounds_by_agent(
