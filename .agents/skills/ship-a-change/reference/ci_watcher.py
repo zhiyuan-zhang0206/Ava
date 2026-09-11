@@ -17,6 +17,12 @@ raw gh output):
 - **PENDING is never green** — only a non-PENDING verdict wakes the agent.
 - **NO_WORKFLOW_RUNS is NOT green** — Actions never scheduled; the agent gets
   the verdict and must find out why the workflow did not run.
+- **NO_CHECKS is re-polled before it is reported** — the rollup is also empty
+  during the attach window right after a push (checks take a moment to appear,
+  and a run that has not registered yet is invisible to the runs-API probe
+  too), so the first NO_CHECKS is not yet evidence of "nothing scheduled". Up
+  to NO_CHECKS_RETRIES consecutive NO_CHECKS verdicts are retried before the
+  agent is woken (task #3158).
 - **MERGE_CONFLICT is NOT green** — the agent must rebase before CI can start.
 - **gh needs a git repo context** — watcher processes run from the agent
   workspace, so the template `os.chdir`s into the repo before polling.
@@ -41,6 +47,7 @@ REPO_ROOT = ""  # e.g. "/home/user/ava/.worktrees/ava-1234-task" — the worktre
 PR_NUMBER = ""  # e.g. "1234"
 CI_UTILS = ""  # e.g. "/home/user/ava/scripts" — directory containing ci_utils.py
 CHECK_EVERY = 60  # seconds between polls
+NO_CHECKS_RETRIES = 3  # consecutive NO_CHECKS verdicts tolerated before waking
 TIMEOUT_S = 7200  # hard stop; reports "timed out" instead of a verdict
 WATCHER_ID = 0  # agent to wake (ava.self.AGENT_ID of the launching agent)
 
@@ -54,6 +61,7 @@ def wake(message: str) -> None:
 
 
 start = time.time()
+no_checks_retries = 0
 while time.time() - start < TIMEOUT_S:
     try:
         status = check_ci(PR_NUMBER)
@@ -63,15 +71,31 @@ while time.time() - start < TIMEOUT_S:
 
     verdict = status.verdict
     if verdict == CIStatus.PENDING:
+        no_checks_retries = 0  # checks are attached — a later NO_CHECKS is a new window
+        time.sleep(CHECK_EVERY)
+        continue
+
+    if verdict == CIStatus.NO_CHECKS and no_checks_retries < NO_CHECKS_RETRIES:
+        # The first poll after a push can land inside the attach window: the
+        # rollup is empty and the run may not even be registered yet, so this
+        # NO_CHECKS is not yet evidence that nothing was scheduled. Re-poll a
+        # bounded number of times before treating it as settled (task #3158).
+        no_checks_retries += 1
         time.sleep(CHECK_EVERY)
         continue
 
     # Settled — wake the agent with the full picture. FAILED, MERGE_CONFLICT,
-    # NO_WORKFLOW_RUNS, NO_CHECKS and ERROR all land here; only PENDING loops.
+    # NO_WORKFLOW_RUNS, ERROR and NO_CHECKS (retry budget spent) all land here;
+    # only PENDING loops.
     lines = [
         f"PR #{PR_NUMBER} CI settled: {verdict.value}",
         f"mergeable: {status.mergeable}",
     ]
+    if verdict == CIStatus.NO_CHECKS and no_checks_retries:
+        lines.append(
+            f"re-polled {no_checks_retries} times over ~"
+            f"{no_checks_retries * CHECK_EVERY}s and the rollup stayed empty"
+        )
     if status.failed:
         failed_names = ", ".join(c.get("name", "?") for c in status.failed)
         lines.append(f"failed checks: {failed_names}")

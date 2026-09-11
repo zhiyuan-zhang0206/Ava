@@ -84,7 +84,7 @@ class CIStatus(Enum):
     FAILED = "failed"  # at least one COMPLETED check has a failing conclusion
     PENDING = "pending"  # some checks are still QUEUED / IN_PROGRESS / PENDING
     MERGE_CONFLICT = "merge_conflict"  # PR has merge conflicts — CI blocked
-    NO_CHECKS = "no_checks"  # statusCheckRollup is empty
+    NO_CHECKS = "no_checks"  # rollup empty AND no run scheduled for the head
     NO_WORKFLOW_RUNS = "no_workflow_runs"  # checks exist, but Actions produced none
     ERROR = "error"  # gh CLI / network / JSON error
 
@@ -384,7 +384,8 @@ def _runs_not_yet_reporting(head_sha: str, repo: str | None) -> list[str] | None
     the rollup has no workflow checks — because a rollup with part of the suite
     attached and green is otherwise indistinguishable from a finished suite
     (2026-09-10: MonsoraV2 #774 reported ALL_PASSED while its main run sat
-    queued).
+    queued). The empty-rollup branch probes it too: with no check attached yet,
+    a run in flight is the only evidence that checks are coming at all.
 
     On any error this returns None — distinct from [] ("nothing is
     scheduled"), because an unanswerable probe must never read as green. The
@@ -415,6 +416,35 @@ def _runs_not_yet_reporting(head_sha: str, repo: str | None) -> list[str] | None
     return [str(n) for n in names] if isinstance(names, list) else None
 
 
+def _empty_rollup_verdict(result: CIResult, head_sha: str, repo: str | None) -> None:
+    """Resolve an empty `statusCheckRollup` into a verdict on `result`.
+
+    The rollup alone cannot tell "Actions has not attached the first check of a
+    run yet" from "nothing was scheduled for this head". The first is the state
+    of every PR in the seconds after a push — exactly when an agent launches a
+    watcher — and reading it as settled ends the watch before the suite has
+    begun (2026-09-12: PR #2249 read NO_CHECKS 2s after the push; 16 checks were
+    running 10s later). The runs API answers it: a run still scheduled for the
+    head means checks are coming (PENDING); only a confirmed-empty answer is
+    NO_CHECKS.
+
+    An unanswerable probe (None) is ERROR, not NO_CHECKS — the same asymmetry
+    the all-green path encodes: a gh / network failure must not produce the very
+    settled NO_CHECKS the probe exists to rule out.
+    """
+    scheduled = _runs_not_yet_reporting(head_sha, repo)
+    if scheduled is None:
+        result.verdict = CIStatus.ERROR
+        result.error_detail = (
+            "runs API probe failed: cannot confirm whether checks for this head are still to attach"
+        )
+    elif scheduled:
+        result.pending.extend(scheduled)
+        result.verdict = CIStatus.PENDING
+    else:
+        result.verdict = CIStatus.NO_CHECKS
+
+
 def check_ci(pr_number: str | int, *, repo: str | None = None) -> CIResult:
     """Poll one PR's CI status and mergeability via `gh pr view --json`.
 
@@ -425,6 +455,11 @@ def check_ci(pr_number: str | int, *, repo: str | None = None) -> CIResult:
     ``statusCheckRollup``.  When mergeable == "CONFLICTING" the verdict
     is MERGE_CONFLICT — CI runs are blocked until the conflict is
     resolved, so there is no point waiting.
+
+    An empty rollup is probed against the runs API before it is called
+    settled: a run still queued / in progress for this head means checks are
+    coming (PENDING), a confirmed-empty answer is NO_CHECKS, and an
+    unanswerable probe is ERROR — never a settled NO_CHECKS.
 
     The key rule: only COMPLETED checks are evaluated.  Checks that are
     QUEUED / IN_PROGRESS / PENDING are correctly identified as such and
@@ -483,7 +518,10 @@ def check_ci(pr_number: str | int, *, repo: str | None = None) -> CIResult:
     result.checks = checks
 
     if not checks:
-        result.verdict = CIStatus.NO_CHECKS
+        # An empty rollup is probed before it is called settled: only a
+        # confirmed-empty runs API makes NO_CHECKS true (the attach window right
+        # after a push looks identical to it — 2026-09-12, PR #2249).
+        _empty_rollup_verdict(result, data.get("headRefOid", ""), repo)
         return result
 
     _partition_checks(checks, result)
