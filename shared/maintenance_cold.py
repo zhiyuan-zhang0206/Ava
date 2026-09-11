@@ -14,8 +14,10 @@ import psycopg
 from langgraph.checkpoint.postgres import PostgresSaver
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 
+from shared import exec_request_evidence
 from shared.checkpoint_serde import STATIC_CHECKPOINT_MSGPACK_TYPES
-from shared.paths import ava_home, exec_run_dir
+from shared.paths import ava_home
+from shared.runtime_incarnation import RuntimeIncarnation
 from shared.session_backend import get_backend
 
 _CONSUMER_MODULES = frozenset(
@@ -30,20 +32,47 @@ _CONSUMER_MODULES = frozenset(
 )
 
 
-def require_no_consumers(agent_id: int) -> None:
+def require_no_consumers(conn: psycopg.Connection[Any], agent_id: int) -> None:
     """Reject native consumers and unsettled exec requests; retain all PTYs.
 
     Reuse the native session backend and the host probe's module/home scan.
     Unknown home ownership is not proof of absence. Nothing here signals a
     process or treats a persistent shell, watcher or browser as an exec child.
+
+    Exec request envelopes are judged by incarnation attribution and process
+    proof (shared/exec_request_evidence.py). The caller established the retired
+    host is absent, so a provably stale envelope is quarantined — preserved
+    with a receipt, never deleted — while evidence that is still live or
+    unattributable refuses with its file, attribution and disposition commands.
     """
     backend = get_backend()
     if backend.has_session(f"ava-agent-{agent_id}") or backend.list_sessions(
         prefix=f"ava-boot-{agent_id}-"
     ):
         raise RuntimeError(f"legacy native consumer still owns agent {agent_id}")
-    if any((exec_run_dir() / str(agent_id)).glob("req-*.json")):
-        raise RuntimeError(f"agent {agent_id} still has an unsettled exec request")
+    row = conn.execute(
+        "SELECT runtime_generation,runtime_owner,incarnation_resources FROM agents_meta "
+        "WHERE id=%s",
+        (agent_id,),
+    ).fetchone()
+    incumbent = (
+        RuntimeIncarnation(agent_id, row[0], row[1])
+        if row is not None and row[0] is not None and row[1] is not None
+        else None
+    )
+    report = exec_request_evidence.quarantine_stale(
+        agent_id,
+        incumbent=incumbent,
+        resources=None if row is None else row[2],
+        reason="maintenance cold prepare",
+    )
+    if report.retained:
+        raise RuntimeError(
+            f"agent {agent_id} still has an unsettled exec request: "
+            + "; ".join(entry.describe() for entry in report.retained)
+            + ". "
+            + exec_request_evidence.disposition_hint(agent_id)
+        )
     home = ava_home().resolve()
     for process in psutil.process_iter(["pid", "cmdline"]):
         argv = cast(list[str], process.info["cmdline"] or [])
@@ -122,7 +151,7 @@ def normalize_retired_intent(
     conn: psycopg.Connection[Any], agent_id: int, *, restarting: bool
 ) -> None:
     """Only restore the parked status; preserve the lease, identities and history."""
-    require_no_consumers(agent_id)
+    require_no_consumers(conn, agent_id)
     checkpoint_id = require_persisted_end(conn, agent_id, restarting=restarting)
     # A writer outside native admission must not replace the evidence between
     # the read and normalization. The original row lock still binds all owner

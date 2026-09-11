@@ -36,16 +36,24 @@ evidence; a new cache, elapsed grace or retry count cannot clear it.
 ## Remaining boundary
 
 On exclusive agent-host boot, an applied force left by the dead host is observed
-only when no persistent `req-*.json` envelope remains for that agent. The
-envelope is created before a disposable exec child and removed after close,
-root reap, and reader completion, so its absence is the durable resource-free
-witness. Request and Windows gate leftovers are not age-pruned; normal exact
+only when no persistent `req-*.json` envelope that could still belong to a live
+exec domain remains for that agent. The envelope is created before a disposable
+exec child and removed after close, root reap, and reader completion, so it is
+the durable resource witness. `shared/exec_request_evidence.py` classifies each
+leftover envelope against the incarnation that wrote it and against live process
+proof. It quarantine-moves — never deletes — an envelope only when it parses
+with its exact incarnation attribution, no live process references it (the
+child and its env-inheriting descendants carry `AVA_EXEC_REQUEST_FILE`, and an
+environment this kernel will not show is never absence), and the row's stored
+host identity does not contradict the boot premise; the files land under
+`$AVA_HOME/quarantined-exec-requests/<reason>-<stamp>/<agent_id>/` beside a JSON
+receipt. Anything live or unattributable keeps recovery deferred.
+
+This does not establish hard-host-death recovery with active exec: independent
+POSIX children may survive and the parent's unreaped root pin may be lost, and
+host PID/birth, lease expiry, or owner UUID alone cannot prove managed-domain
+completion. Request and Windows gate leftovers are not age-pruned; normal exact
 resource settlement removes them. The database settlement re-locks the exact
 target generation, owner, and command before clearing its active pointer.
-
-This does not establish hard-host-death recovery with active exec. Any surviving
-request envelope keeps recovery deferred: independent POSIX children may survive
-and the parent's unreaped root pin may be lost. Host PID/birth, lease expiry, or
-owner UUID alone cannot prove managed-domain completion. Persistent shell
-sessions deliberately retain their separate ownership and are not disposable
-exec descendants to kill wholesale.
+Persistent shell sessions deliberately retain their separate ownership and are
+not disposable exec descendants to kill wholesale.

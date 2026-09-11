@@ -68,6 +68,7 @@ from shared import paths
 from shared.config import settings
 from shared.daemon_health import Liveness, health_port, start_health_server, stop_health_server
 from shared.daemon_shutdown import install_graceful_shutdown
+from shared.exec_request_evidence import disposition_hint
 from shared.helper_chain_guard import parent_chain_intact
 from shared.hosted_force import recover_orphaned_hosted_forces
 from shared.log import init_gateway_process, logger
@@ -421,10 +422,11 @@ async def _recover_hosted_forces_at_boot(
     logger.info("hosted boot recovery: observed {n} orphaned force(s)", n=len(recovered))
     for agent_id, evidence in deferred.items():
         logger.warning(
-            "hosted boot recovery deferred for agent {agent_id}: "
-            "persistent exec request evidence {evidence}",
+            "hosted boot recovery deferred for agent {agent_id}: retained exec request "
+            "evidence [{evidence}]. {hint}",
             agent_id=agent_id,
-            evidence=[str(path) for path in evidence],
+            evidence="; ".join(entry.describe() for entry in evidence),
+            hint=disposition_hint(agent_id),
         )
 
 

@@ -19,6 +19,7 @@ from shared.events.payloads import (
     ExecEnvelope,
     ExecFailed,
     ExecPayload,
+    ExecRequestQuarantine,
     ExecSubprocessKilled,
     FrontendInteraction,
     Halt,
@@ -228,6 +229,11 @@ _EVENTS_RUNTIME: dict[str, EventSpec] = {
         "exec child bootstrap duration before agent-authored code",
         payload=ExecChildBoot,
         tier="noise",
+    ),
+    "exec_request_quarantine": _telemetry(
+        "exec_request_quarantine",
+        "stale exec request evidence preserved under the explicit quarantine",
+        payload=ExecRequestQuarantine,
     ),
     "compaction_completed": _telemetry(
         "compaction_completed",
