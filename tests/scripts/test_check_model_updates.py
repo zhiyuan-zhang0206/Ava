@@ -19,9 +19,15 @@ _SCRIPT = _REPO_ROOT / "scripts" / "check_model_updates.py"
 def _load_script() -> Any:
     spec = importlib.util.spec_from_file_location("check_model_updates", _SCRIPT)
     assert spec and spec.loader
-    module = importlib.util.module_from_spec(spec)
+    module: Any = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
+    # `check_sources` loads the host's provider plugins; these tests drive every
+    # comparison with a registry of their own, so keep the suite independent of
+    # the machine's plugin configuration (and of the shared MODELS table other
+    # test files assert against). The load path itself is covered by
+    # test_check_sources_loads_the_provider_registry_before_comparing.
+    module.ensure_provider_plugins_loaded = lambda: None
     return module
 
 
@@ -302,6 +308,34 @@ def test_candidate_is_reported_once_then_recorded_in_state(
     assert state["providers"]["glm"]["reported"] == ["glm-5.4"]
 
 
+def test_check_sources_loads_the_provider_registry_before_comparing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The comparison must see the registry the enabled provider plugins fill:
+    an id that load registers is skipped, not surfaced as a new candidate.
+    Without the load in `check_sources` the daily run compared against an empty
+    MODELS and re-reported every registered id once."""
+    tracker = _load_script()
+    registered = type("Spec", (), {"provider": "gemini"})()
+
+    def load_providers() -> None:
+        monkeypatch.setitem(tracker.MODELS, "gemini-3.5-flash-lite", registered)
+
+    monkeypatch.setattr(tracker, "ensure_provider_plugins_loaded", load_providers)
+    monkeypatch.setattr(
+        tracker,
+        "fetch_provider_models",
+        _stub_fetcher(tracker, {"gemini": ["gemini-3.5-flash-lite", "gemini-3.6-flash-lite"]}),
+    )
+    env_file = tmp_path / ".env"
+    _write_env_file(tracker, env_file)
+    monkeypatch.setattr(tracker, "_environment_value", _missing_environment_value)
+
+    reports = tracker.check_sources(tracker._read_env_file(env_file), {"providers": {}})
+
+    assert reports["gemini"].candidates == ["gemini-3.6-flash-lite"]
+
+
 def test_gpt6_family_ids_are_classified_not_dropped_as_other() -> None:
     """gpt-6-* must stay inside the gpt family patterns: a registered gpt-6
     member is skipped, and a same-series gpt-6 variant compares against the
@@ -339,6 +373,58 @@ def test_newer_same_series_is_actionable_while_older_upstream_member_is_suppress
     assert comparison.candidates == ["gemini-3.8-flash"]
     assert comparison.suppressed == ["gemini-3.6-flash"]
     assert comparison.series_models["gemini-3.8-flash"] == ["gemini-3.7-flash"]
+
+
+def test_gemini_flash_lite_ids_are_classified_not_dropped_as_other() -> None:
+    """Flash-Lite is a roster family Ava evaluates: its numbered upstream ids
+    must reach the report (registered member skipped, unregistered member a
+    candidate against the registered head) instead of falling through to
+    other_ids. The unversioned `gemini-flash-lite-latest` alias stays in
+    other_ids: it is the registered id, and an alias with no version cannot
+    take part in the version compare — a newly numbered flash-lite id showing
+    up as a candidate is what signals the alias moved."""
+    tracker = _load_script()
+    registry = {
+        "gemini-3.5-flash-lite": type("Spec", (), {"provider": "gemini"})(),
+        "gemini-flash-lite-latest": type("Spec", (), {"provider": "gemini"})(),
+    }
+
+    comparison = tracker.compare_models(
+        tracker.SOURCES["gemini"],
+        [
+            "gemini-3.5-flash-lite",
+            "gemini-3.6-flash-lite",
+            "gemini-flash-lite-latest",
+            "gemini-3.1-flash-lite-image",
+        ],
+        registry,
+    )
+
+    assert comparison.candidates == ["gemini-3.6-flash-lite"]
+    assert comparison.suppressed == []
+    assert comparison.series_models["gemini-3.6-flash-lite"] == ["gemini-3.5-flash-lite"]
+    assert comparison.other_ids == ["gemini-flash-lite-latest", "gemini-3.1-flash-lite-image"]
+
+
+def test_older_flash_lite_member_is_suppressed_while_preview_series_is_separate() -> None:
+    """Supersession and series splitting behave inside Flash-Lite exactly as in
+    the pro/flash families: an older GA member of the registered series is
+    suppressed, and a `-preview` member is its own series (never compared
+    against the GA head)."""
+    tracker = _load_script()
+    registry = {
+        "gemini-3.5-flash-lite": type("Spec", (), {"provider": "gemini"})(),
+    }
+
+    comparison = tracker.compare_models(
+        tracker.SOURCES["gemini"],
+        ["gemini-3.1-flash-lite", "gemini-3.1-flash-lite-preview", "gemini-3.5-flash-lite"],
+        registry,
+    )
+
+    assert comparison.candidates == ["gemini-3.1-flash-lite-preview"]
+    assert comparison.suppressed == ["gemini-3.1-flash-lite"]
+    assert comparison.series_models["gemini-3.1-flash-lite-preview"] == []
 
 
 def test_qwen_major_only_variant_is_suppressed_but_same_version_variant_is_actionable() -> None:
