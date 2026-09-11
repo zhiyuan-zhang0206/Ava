@@ -342,3 +342,47 @@ class PluginMetricResult(BaseModel):
     error: str | None = None
     value: float | None = None
     series: list[MetricPoint] = Field(default_factory=list)
+
+
+class InspectWidgetButton(BaseModel):
+    """One button of a resolved inspector widget — an element of
+    `InspectWidgetResult.buttons` (GET /api/agents/{id}/inspect/widgets).
+
+    `target` is the closed console vocabulary the kernel resolved (see
+    `shared/plugin_inspector.py`): "notice" carries `notice_id` (the agent's
+    open notice), "task" carries `task_id` (the notice's task, else the
+    agent's first real task). Both id fields stay optional because the payload
+    is data, not policy: a button whose target did not resolve is dropped
+    server-side (so a carried target always has its id), but the console
+    still skips an unknown target rather than interpreting it. `label` /
+    `icon` are the plugin's presentation overrides; without them the console
+    uses its own localized default copy and icon for the target."""
+
+    model_config = ConfigDict(frozen=True)
+
+    target: Literal["notice", "task"]
+    label: str | None = None
+    icon: str | None = None
+    notice_id: int | None = None
+    task_id: int | None = None
+
+
+class InspectWidgetResult(BaseModel):
+    """One plugin widget rendered for the inspector panel — an element of
+    GET /api/agents/{id}/inspect/widgets.
+
+    The resolved twin of a registered `InspectWidgetSpec`
+    (`shared/plugin_inspector.py`): `plugin` + `id` name the registration,
+    `kind` selects the console renderer (a closed set; an unknown kind is
+    skipped by the console), and `buttons` carries only targets that
+    resolved, so a widget without anything to show is dropped from the
+    response entirely (the panel's empty-section rule)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    plugin: str
+    id: str
+    kind: Literal["jumpButtons"]
+    order: int
+    title: str | None = None
+    buttons: list[InspectWidgetButton] = Field(default_factory=list[InspectWidgetButton])

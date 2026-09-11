@@ -1064,6 +1064,37 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/agents/{agent_id}/inspect/widgets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Agent Inspect Widgets
+         * @description The agent's plugin widgets for the inspector panel — the extension
+         *     surface where enabled plugins embed widgets (see `shared/plugin_inspector.py`;
+         *     registration mirrors the plugin-metric system).
+         *
+         *     Builds the widget registry in process (shipped builtin plugins'
+         *     ``inspector.py`` modules imported under their plugin context, restricted
+         *     to the plugins currently enabled), resolves the closed target vocabulary
+         *     for this agent — the open notice and the queue's task-ownership rule —
+         *     and projects each widget, dropping a button whose target did not resolve
+         *     and a widget left without buttons. Unknown agents return 404 like the
+         *     rest of the /inspect family. Implementation in
+         *     ``gateway/routers/_plugin_inspector.py``.
+         */
+        get: operations["get_agent_inspect_widgets_api_agents__agent_id__inspect_widgets_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/agents/{agent_id}/shell/{session_id}": {
         parameters: {
             query?: never;
@@ -5178,6 +5209,65 @@ export interface components {
             url: string;
         };
         /**
+         * InspectWidgetButton
+         * @description One button of a resolved inspector widget — an element of
+         *     `InspectWidgetResult.buttons` (GET /api/agents/{id}/inspect/widgets).
+         *
+         *     `target` is the closed console vocabulary the kernel resolved (see
+         *     `shared/plugin_inspector.py`): "notice" carries `notice_id` (the agent's
+         *     open notice), "task" carries `task_id` (the notice's task, else the
+         *     agent's first real task). Both id fields stay optional because the payload
+         *     is data, not policy: a button whose target did not resolve is dropped
+         *     server-side (so a carried target always has its id), but the console
+         *     still skips an unknown target rather than interpreting it. `label` /
+         *     `icon` are the plugin's presentation overrides; without them the console
+         *     uses its own localized default copy and icon for the target.
+         */
+        InspectWidgetButton: {
+            /**
+             * Target
+             * @enum {string}
+             */
+            target: "notice" | "task";
+            /** Label */
+            label?: string | null;
+            /** Icon */
+            icon?: string | null;
+            /** Notice Id */
+            notice_id?: number | null;
+            /** Task Id */
+            task_id?: number | null;
+        };
+        /**
+         * InspectWidgetResult
+         * @description One plugin widget rendered for the inspector panel — an element of
+         *     GET /api/agents/{id}/inspect/widgets.
+         *
+         *     The resolved twin of a registered `InspectWidgetSpec`
+         *     (`shared/plugin_inspector.py`): `plugin` + `id` name the registration,
+         *     `kind` selects the console renderer (a closed set; an unknown kind is
+         *     skipped by the console), and `buttons` carries only targets that
+         *     resolved, so a widget without anything to show is dropped from the
+         *     response entirely (the panel's empty-section rule).
+         */
+        InspectWidgetResult: {
+            /** Plugin */
+            plugin: string;
+            /** Id */
+            id: string;
+            /**
+             * Kind
+             * @constant
+             */
+            kind: "jumpButtons";
+            /** Order */
+            order: number;
+            /** Title */
+            title?: string | null;
+            /** Buttons */
+            buttons?: components["schemas"]["InspectWidgetButton"][];
+        };
+        /**
          * InventoryAggregate
          * @description GET /api/inventory response — the cross-machine plugin + MCP matrix.
          *
@@ -8984,6 +9074,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PluginMetricResult"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_agent_inspect_widgets_api_agents__agent_id__inspect_widgets_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                agent_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InspectWidgetResult"][];
                 };
             };
             /** @description Validation Error */

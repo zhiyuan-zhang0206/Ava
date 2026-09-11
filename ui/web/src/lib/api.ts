@@ -14,6 +14,7 @@ import type { NoticesFeed,
   AgentInspect,
   AgentInspectLive,
   AgentMachineRow,
+  InspectWidget,
   AgentMessageEnqueued,
   AgentRow,
   WireAgentSummary,
@@ -282,6 +283,22 @@ export const api = {
       INSPECT_REQUEST_TIMEOUT_MS,
       signal,
       "Inspector live request",
+    );
+  },
+
+  // The panel's plugin widgets (task #2909) — what the enabled plugins embed
+  // for this agent, with the notice/task targets already resolved kernel-side.
+  // Same cheap, window-independent shape as the live half.
+  getAgentInspectWidgets: (
+    agentId: number,
+    signal?: AbortSignal,
+  ): Promise<InspectWidget[]> => {
+    return jsonWithTimeout<InspectWidget[]>(
+      `/api/agents/${agentId}/inspect/widgets`,
+      {},
+      INSPECT_REQUEST_TIMEOUT_MS,
+      signal,
+      "Inspector widgets request",
     );
   },
 

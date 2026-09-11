@@ -241,6 +241,50 @@ describe("TaskGraph (graph mode)", () => {
     expect(onSelect).not.toHaveBeenCalled();
   });
 
+  it("propagates the owner of an externally selected task (route jump, task #2909)", async () => {
+    // A task selected from outside a board click (the inspector's jump button
+    // deep-links /fleet?task=<id>) propagates its owner exactly like a click.
+    const onSelectAgent = vi.fn();
+    useTasks.mockReturnValue(
+      ok([
+        task(1, { title: "root", status: "ongoing" }),
+        task(2, { title: "jumped-into", parent_id: 1, owner: 7 }),
+      ]),
+    );
+    render(
+      <TaskGraph
+        selectedAgentId={null}
+        onSelectAgent={onSelectAgent}
+        selectedTaskId={2}
+        onSelectTask={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => expect(onSelectAgent).toHaveBeenCalledWith(7));
+  });
+
+  it("does not re-propagate the owner when the agent is already selected", async () => {
+    const onSelectAgent = vi.fn();
+    useTasks.mockReturnValue(
+      ok([
+        task(1, { title: "root", status: "ongoing" }),
+        task(2, { title: "jumped-into", parent_id: 1, owner: 7 }),
+      ]),
+    );
+    render(
+      <TaskGraph
+        selectedAgentId={7}
+        onSelectAgent={onSelectAgent}
+        selectedTaskId={2}
+        onSelectTask={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => expect(useTasks).toHaveBeenCalled());
+    await new Promise((r) => setTimeout(r, 0));
+    expect(onSelectAgent).not.toHaveBeenCalled();
+  });
+
   it("renders parent-child edges hanging under the root node", async () => {
     useTasks.mockReturnValue(ok(sampleTasks()));
     const { container } = render(<TaskGraph selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />);

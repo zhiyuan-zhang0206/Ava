@@ -70,6 +70,7 @@ export const InboxQueue = memo(function InboxQueue({
   compact,
   onCollapse,
   anchorAgentId,
+  focusNoticeId,
 }: {
   agents: AgentRow[];
   className?: string;
@@ -78,6 +79,7 @@ export const InboxQueue = memo(function InboxQueue({
   compact?: boolean;
   onCollapse?: () => void;
   anchorAgentId?: number | null;
+  focusNoticeId?: number | null;
 }) {
   const t = useTranslations("fleet");
   const {
@@ -189,6 +191,27 @@ export const InboxQueue = memo(function InboxQueue({
     },
     [],
   );
+
+  // A route-driven jump (task #2909, the inspector's notification button)
+  // opens the notice it names — once, after the queue loads, like the agent
+  // anchor above. An open notice wins its exact row; a resolved one is shown
+  // from the loaded history page. A notice in neither (gone, or beyond the
+  // history page) leaves the default selection alone and is not retried. The
+  // selection propagates its agent through the sync effect below.
+  const attemptedFocusRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (focusNoticeId == null || isLoading || attemptedFocusRef.current === focusNoticeId) {
+      return;
+    }
+    attemptedFocusRef.current = focusNoticeId;
+    if (openItems.some((item) => item.notice.id === focusNoticeId)) {
+      setSelectedKey(openKey(focusNoticeId));
+      return;
+    }
+    if (resolved.some((notice) => notice.id === focusNoticeId)) {
+      setSelectedKey(resolvedKey(focusNoticeId));
+    }
+  }, [focusNoticeId, isLoading, openItems, resolved]);
 
   // Resolve the selection; default to the top open notice so the detail pane is
   // never blank while work is waiting. A just-resolved selection (dropped from

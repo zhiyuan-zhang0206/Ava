@@ -19,13 +19,19 @@ import { InspectorPanel } from "./inspector-panel";
 import { InspectorToggle } from "./inspector-toggle";
 import { BAR_DIVIDER_CLASS, BAR_HEIGHT_CLASS } from "@/lib/layout";
 import { formatAbsolute, formatRelative } from "@/lib/time";
-import type { AgentInspect, AgentInspectLive, PageRow } from "@/lib/types";
+import type { AgentInspect, AgentInspectLive, InspectWidget, PageRow } from "@/lib/types";
 
 // vi.hoisted so the mock fn is initialized before the hoisted vi.mock factory
 // runs (the factory fires during the InspectorPanel import, before module-body
 // consts would otherwise initialize).
-const { getAgentInspect, getAgentInspectLive, listPages, listPresets, resolveNotice } =
-  vi.hoisted(() => ({
+const {
+  getAgentInspect,
+  getAgentInspectLive,
+  getAgentInspectWidgets,
+  listPages,
+  listPresets,
+  resolveNotice,
+} = vi.hoisted(() => ({
     getAgentInspect:
       vi.fn<
         (
@@ -37,6 +43,11 @@ const { getAgentInspect, getAgentInspectLive, listPages, listPresets, resolveNot
       >(),
     getAgentInspectLive:
       vi.fn<(agentId: number, signal?: AbortSignal) => Promise<AgentInspectLive>>(),
+    // Plugin widgets (task #2909): default to none so the render tests stay
+    // focused; the widget tests drive it.
+    getAgentInspectWidgets: vi.fn<(agentId: number, signal?: AbortSignal) => Promise<InspectWidget[]>>(
+      () => Promise.resolve([]),
+    ),
     // useAgentPages fetches the open-pages list; default to none so the Page
     // section stays hidden and these render tests stay focused on the
     // /inspect sections. The dedicated use-agent-pages.test.ts covers the fetch +
@@ -49,7 +60,14 @@ const { getAgentInspect, getAgentInspectLive, listPages, listPresets, resolveNot
     resolveNotice: vi.fn(() => Promise.resolve({ status: "ok" })),
   }));
 vi.mock("@/lib/api", () => ({
-  api: { getAgentInspect, getAgentInspectLive, listPages, listPresets, resolveNotice },
+  api: {
+    getAgentInspect,
+    getAgentInspectLive,
+    getAgentInspectWidgets,
+    listPages,
+    listPresets,
+    resolveNotice,
+  },
 }));
 
 // useAgentPages subscribes to the global SSE stream; stub it to a no-op so the
@@ -109,6 +127,7 @@ vi.mock("@/lib/breakpoint", () => ({
 beforeEach(() => {
   getAgentInspect.mockResolvedValue(fixture());
   getAgentInspectLive.mockResolvedValue(liveFixture());
+  getAgentInspectWidgets.mockResolvedValue([]);
 });
 
 afterEach(() => {
@@ -116,6 +135,7 @@ afterEach(() => {
   cleanup();
   getAgentInspect.mockReset();
   getAgentInspectLive.mockReset();
+  getAgentInspectWidgets.mockReset();
   resolveNotice.mockClear();
   toggle.mockReset();
   panelState.open = true;
@@ -1441,5 +1461,80 @@ describe("InspectorPanel agent switch (task #1939)", () => {
     );
     await waitFor(() => expect(getAgentInspectLive).toHaveBeenCalledTimes(3));
     await waitFor(() => expect(getAgentInspect).toHaveBeenCalledTimes(3));
+  });
+});
+
+
+// Plugin widgets (task #2909): the panel renders what the enabled plugins
+// embed, slotted into the documented section order.
+function widgetFixture(over: Partial<InspectWidget> = {}): InspectWidget {
+  return {
+    plugin: "ava_fleet",
+    id: "jump-buttons",
+    kind: "jumpButtons",
+    order: 50,
+    title: null,
+    buttons: [
+      { target: "notice", label: null, icon: null, notice_id: 7, task_id: null },
+      { target: "task", label: null, icon: null, notice_id: null, task_id: 42 },
+    ],
+    ...over,
+  };
+}
+
+const widgetNotice = {
+  id: 92,
+  title: "Needs a call",
+  content: null,
+  priority: "P1" as const,
+  require_response: true,
+  blocking: false,
+  created_at: "2026-06-14T12:00:00Z",
+};
+
+describe("InspectorPanel plugin widgets", () => {
+  it("renders a jumpButtons widget as links to the resolved targets", async () => {
+    getAgentInspectWidgets.mockResolvedValue([widgetFixture()]);
+    render(<InspectorPanel agentId={1} />);
+
+    const noticeLink = await screen.findByRole("link", { name: /Notification/ });
+    expect(noticeLink.getAttribute("href")).toBe("/fleet?notice=7");
+    expect(screen.getByRole("link", { name: /Task/ }).getAttribute("href")).toBe("/fleet?task=42");
+  });
+
+  it("slots a widget into the section order (750: between the run link and the notice)", async () => {
+    getAgentInspectLive.mockResolvedValue(liveFixture({ notice: widgetNotice }));
+    getAgentInspectWidgets.mockResolvedValue([widgetFixture({ order: 750 })]);
+    render(<InspectorPanel agentId={1} />);
+
+    const runLink = await screen.findByRole("link", { name: "Open run timeline" });
+    const widgetLink = await screen.findByRole("link", { name: /Notification/ });
+    const reply = screen.getByRole("textbox");
+    // Document order follows the order keys: 700 (run link) < 750 (widget) <
+    // 800 (notice).
+    expect(
+      runLink.compareDocumentPosition(widgetLink) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      widgetLink.compareDocumentPosition(reply) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it("renders no widget area when no plugin registers one", async () => {
+    render(<InspectorPanel agentId={1} />);
+    await waitFor(() => expect(getAgentInspectWidgets).toHaveBeenCalled());
+    expect(screen.queryByRole("link", { name: /Notification/ })).toBeNull();
+    expect(screen.queryByRole("link", { name: /Task/ })).toBeNull();
+  });
+
+  it("a widgets fetch failure leaves the rest of the panel intact", async () => {
+    getAgentInspectWidgets.mockRejectedValue(new Error("HTTP 500: widgets unavailable"));
+    render(<InspectorPanel agentId={1} />);
+
+    // The panel's own sections still render.
+    await screen.findByRole("link", { name: "Open run timeline" });
+    await screen.findAllByText("Cost");
+    expect(screen.getAllByText("Activity").length).toBeGreaterThan(0);
+    expect(screen.queryByRole("link", { name: /Notification/ })).toBeNull();
   });
 });

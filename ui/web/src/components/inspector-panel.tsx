@@ -15,14 +15,11 @@ import {
 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
-import { useCallback, type ReactNode, useEffect, useRef } from "react";
+import { Fragment, useCallback, type ReactNode, useEffect, useRef } from "react";
 
-import {
-  InspectorPanelSkeleton,
-  LiveSectionsSkeleton,
-  SectionSkeleton,
-  WindowedSectionsSkeleton,
-} from "@/components/inspector-panel-skeleton";
+import { SectionSkeleton } from "@/components/inspector-panel-skeleton";
+import { InspectWidgetSection } from "@/components/inspector-widgets";
+import { Section } from "@/components/inspector-section";
 import { OpenNoticeDetail } from "@/components/open-notice-detail";
 import { WindowSelect } from "@/components/window-select";
 import { api } from "@/lib/api";
@@ -35,8 +32,10 @@ import {
   COMPACT_INSPECT_WINDOW,
   fetchWindowedInspect,
   inspectLiveQueryKey,
+  inspectWidgetsQueryKey,
   inspectWindowedQueryKey,
 } from "@/lib/inspector-prefetch";
+import { INSPECT_SECTION_ORDER } from "@/lib/inspector-widgets";
 import type {
   AgentInspect,
   AgentInspectLive,
@@ -131,6 +130,17 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
     refetchOnMount: "always",
     placeholderData: keepPreviousData,
   });
+  // Plugin widgets (task #2909): cheap and window-independent like the live
+  // half. A failure renders nothing extra — the widget area disappears, the
+  // rest of the panel is unaffected.
+  const widgetsQuery = useQuery({
+    queryKey: inspectWidgetsQueryKey(agentId),
+    queryFn: ({ signal }) => api.getAgentInspectWidgets(agentId, signal),
+    enabled: open,
+    retry: false,
+    refetchInterval: open ? 60_000 : false,
+    refetchOnMount: "always",
+  });
 
   // Both query keys include the agent id, but keep explicit response identity
   // guards: a malformed/misrouted response must never render under another
@@ -142,7 +152,8 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
   const windowedData = matchesInspectWindow(windowedQuery.data, agentId, hours)
     ? windowedQuery.data
     : undefined;
-  const isFetching = liveQuery.isFetching || windowedQuery.isFetching;
+  const isFetching =
+    liveQuery.isFetching || windowedQuery.isFetching || widgetsQuery.isFetching;
   const hasStaleError =
     (liveQuery.error !== null && liveData !== undefined) ||
     (windowedQuery.error !== null && windowedData !== undefined);
@@ -150,7 +161,8 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
   const refresh = useCallback(() => {
     void liveQuery.refetch();
     void windowedQuery.refetch();
-  }, [liveQuery, windowedQuery]);
+    void widgetsQuery.refetch();
+  }, [liveQuery, windowedQuery, widgetsQuery]);
 
   // Disabling an observer does not itself guarantee transport cancellation.
   // Consume React Query's AbortSignal above and explicitly cancel when the
@@ -160,6 +172,7 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
     if (!open) {
       void queryClient.cancelQueries({ queryKey: inspectLiveQueryKey(agentId) });
       void queryClient.cancelQueries({ queryKey: ["agent-inspect", agentId] });
+      void queryClient.cancelQueries({ queryKey: inspectWidgetsQueryKey(agentId) });
     }
   }, [agentId, open, queryClient]);
 
@@ -170,6 +183,7 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
   const invalidateInspect = useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: inspectLiveQueryKey(agentId) });
     void queryClient.invalidateQueries({ queryKey: ["agent-inspect", agentId] });
+    void queryClient.invalidateQueries({ queryKey: inspectWidgetsQueryKey(agentId) });
   }, [agentId, queryClient]);
 
   // Agent switch must show the NEW agent's data immediately (task #1939).
@@ -197,8 +211,13 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
       if (ev.role === "notice_posted" || ev.role === "notice_resolved") {
         invalidateInspect();
       }
+      // Task movement can change the task a widget button points at; the
+      // widgets query is the only thing that needs to reconcile.
+      if (ev.role === "task_created" || ev.role === "task_updated") {
+        void queryClient.invalidateQueries({ queryKey: inspectWidgetsQueryKey(agentId) });
+      }
     },
-    [agentId, invalidateInspect],
+    [agentId, invalidateInspect, queryClient],
   );
   const onConnectionEvent = useCallback(
     (_ev: { type: string }) => {
@@ -215,6 +234,88 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
   // and mobile removes the overlay. All hooks run regardless (rules-of-hooks),
   // but the query is disabled so a closed panel cannot produce inspect traffic.
   if (!open) return null;
+
+  // The panel's one ordered list (task #2909): built-in sections carry their
+  // documented keys (`INSPECT_SECTION_ORDER`), plugin widgets slot in by their
+  // own `order`, and the merged list is sorted here so DOM order is visual
+  // order. Ties stack built-in sections first, then widgets by (plugin, id) —
+  // deterministic regardless of registration order.
+  const sections: { order: number; tie: number; key: string; node: ReactNode }[] = [
+    { order: INSPECT_SECTION_ORDER.page, tie: 0, key: "page", node: <PageSection pages={pages} /> },
+  ];
+  if (liveData) {
+    sections.push(
+      { order: INSPECT_SECTION_ORDER.shells, tie: 0, key: "shells", node: <ShellsSection inspect={liveData} /> },
+      { order: INSPECT_SECTION_ORDER.liveness, tie: 0, key: "liveness", node: <LivenessSection inspect={liveData} /> },
+      { order: INSPECT_SECTION_ORDER.configOverlay, tie: 0, key: "config-overlay", node: <ConfigOverlaySection inspect={liveData} /> },
+    );
+  } else if (liveQuery.isPending) {
+    sections.push(
+      { order: INSPECT_SECTION_ORDER.shells, tie: 0, key: "shells", node: <SectionSkeleton title={t("sectionShells")} rows={1} /> },
+      { order: INSPECT_SECTION_ORDER.liveness, tie: 0, key: "liveness", node: <SectionSkeleton title={t("sectionLiveness")} rows={3} /> },
+      { order: INSPECT_SECTION_ORDER.configOverlay, tie: 0, key: "config-overlay", node: <SectionSkeleton title={t("sectionConfigOverlay")} rows={1} /> },
+    );
+  } else {
+    sections.push({
+      order: INSPECT_SECTION_ORDER.shells,
+      tie: 0,
+      key: "no-data",
+      node: <p className="font-mono text-[11px] text-muted-foreground">{t("noData")}</p>,
+    });
+  }
+  if (windowedData) {
+    sections.push(
+      { order: INSPECT_SECTION_ORDER.cost, tie: 0, key: "cost", node: <CostSection inspect={windowedData} /> },
+      { order: INSPECT_SECTION_ORDER.activity, tie: 0, key: "activity", node: <ActivitySection inspect={windowedData} /> },
+    );
+  } else if (windowedQuery.error) {
+    sections.push({
+      order: INSPECT_SECTION_ORDER.cost,
+      tie: 0,
+      key: "windowed-error",
+      node: <WindowedSectionsError onRetry={() => void windowedQuery.refetch()} />,
+    });
+  } else {
+    sections.push(
+      { order: INSPECT_SECTION_ORDER.cost, tie: 0, key: "cost", node: <SectionSkeleton title={t("sectionCost")} rows={4} /> },
+      { order: INSPECT_SECTION_ORDER.activity, tie: 0, key: "activity", node: <SectionSkeleton title={t("sectionActivity")} rows={4} /> },
+    );
+  }
+  sections.push({
+    order: INSPECT_SECTION_ORDER.runLink,
+    tie: 0,
+    key: "run-link",
+    node: (
+      <Link
+        href={`/insights/run/${agentId}`}
+        className="inline-flex items-center gap-1 font-mono text-[11px] text-muted-foreground underline underline-offset-2 hover:text-foreground"
+      >
+        {t("openRunTimeline")}
+        <ExternalLink className="size-3" aria-hidden />
+      </Link>
+    ),
+  });
+  if (liveData?.notice) {
+    sections.push({
+      order: INSPECT_SECTION_ORDER.notice,
+      tie: 0,
+      key: "notice",
+      node: <NoticeReplySection agentId={agentId} notice={liveData.notice} />,
+    });
+  } else if (liveQuery.isPending) {
+    sections.push({ order: INSPECT_SECTION_ORDER.notice, tie: 0, key: "notice", node: <SectionSkeleton title={t("sectionNotice")} /> });
+  }
+  for (const widget of widgetsQuery.data ?? []) {
+    sections.push({
+      order: widget.order,
+      tie: 1,
+      key: `widget:${widget.plugin}/${widget.id}`,
+      node: <InspectWidgetSection widget={widget} />,
+    });
+  }
+  sections.sort(
+    (a, b) => a.order - b.order || a.tie - b.tie || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0),
+  );
 
   const body = (
     <>
@@ -282,40 +383,9 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
           </div>
         ) : (
           <div className="space-y-4">
-            <PageSection pages={pages} />
-            {liveData ? (
-              <>
-                <ShellsSection inspect={liveData} />
-                <LivenessSection inspect={liveData} />
-                <ConfigOverlaySection inspect={liveData} />
-              </>
-            ) : liveQuery.isPending ? (
-              <LiveSectionsSkeleton />
-            ) : (
-              <p className="font-mono text-[11px] text-muted-foreground">{t("noData")}</p>
-            )}
-            {windowedData ? (
-              <>
-                <CostSection inspect={windowedData} />
-                <ActivitySection inspect={windowedData} />
-              </>
-            ) : windowedQuery.error ? (
-              <WindowedSectionsError onRetry={() => void windowedQuery.refetch()} />
-            ) : (
-              <WindowedSectionsSkeleton />
-            )}
-            <Link
-              href={`/insights/run/${agentId}`}
-              className="inline-flex items-center gap-1 font-mono text-[11px] text-muted-foreground underline underline-offset-2 hover:text-foreground"
-            >
-              {t("openRunTimeline")}
-              <ExternalLink className="size-3" aria-hidden />
-            </Link>
-            {liveData?.notice ? (
-              <NoticeReplySection agentId={agentId} notice={liveData.notice} />
-            ) : liveQuery.isPending ? (
-              <SectionSkeleton title={t("sectionNotice")} />
-            ) : null}
+            {sections.map((section) => (
+              <Fragment key={section.key}>{section.node}</Fragment>
+            ))}
           </div>
         )}
       </div>
@@ -349,40 +419,6 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
 // ---------------------------------------------------------------------------
 // Sections
 // ---------------------------------------------------------------------------
-
-function Section({
-  icon,
-  title,
-  badge,
-  children,
-}: {
-  icon: ReactNode;
-  title: string;
-  badge?: string;
-  children: ReactNode;
-}) {
-  return (
-    <section className="space-y-1.5">
-      <div className={cn("items-center gap-1.5 text-[10px] tracking-wide text-muted-foreground", FLEX)}>
-        {icon}
-        <span>{title}</span>
-        {badge != null && (
-          <span className="ml-auto font-mono text-[11px] tabular-nums text-foreground normal-case">
-            {badge}
-          </span>
-        )}
-      </div>
-      {children}
-    </section>
-  );
-}
-
-export {
-  InspectorPanelSkeleton,
-  LiveSectionsSkeleton,
-  SectionSkeleton,
-  WindowedSectionsSkeleton,
-};
 
 function WindowedSectionsError({ onRetry }: { onRetry: () => void }) {
   const t = useTranslations("inspector");
