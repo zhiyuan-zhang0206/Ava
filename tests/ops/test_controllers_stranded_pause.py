@@ -869,6 +869,85 @@ def test_no_declaration_without_an_outcome(
     assert _record_recorder.marks == []
 
 
+def test_verdict_reads_stranded_and_clear_for_the_named_shapes(
+    fake_pause: Callable[[float | None], None],
+    _maintenance_hold: None,
+    _ownerless: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The reading's shape: the incident is `stranded` with its reason; a decided
+    healthy window is `clear`."""
+    fake_pause(sp.STRANDED_HOLD_NOTICE_S + 60)
+    _failed_outcome_patch(monkeypatch, _outcome("exited", 1))
+    verdict = sp.stranded_hold_verdict()
+    assert (verdict.kind, verdict.detail) == ("stranded", "updater exited rc=1")
+    _failed_outcome_patch(monkeypatch, _outcome("exited", 0))
+    assert sp.stranded_hold_verdict().kind == "clear"
+
+
+def test_unknown_owner_reading_neither_declares_nor_clears(
+    fake_pause: Callable[[float | None], None],
+    _maintenance_hold: None,
+    _record_recorder: _Recorder,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An unreadable ownership signal is an unanswerable round, not a clear: the
+    half that would justify erasing the record is the missing half, and erasing
+    on it is the silent shape this record exists to remove (task #3132)."""
+    fake_pause(sp.STRANDED_HOLD_NOTICE_S + 60)
+    _failed_outcome_patch(monkeypatch, _outcome("exited", 1))
+    monkeypatch.setattr(sp.updater_handoff, "read", _benign_handoff)
+
+    def _boom() -> object:
+        raise RuntimeError("DB unreachable")
+
+    monkeypatch.setattr(sp, "read_update_lease", _boom)
+    verdict = sp.stranded_hold_verdict()
+    assert (verdict.kind, verdict.detail) == ("unknown", "unreadable update lock")
+    sp.sync_stranded_hold_record()
+    assert _record_recorder.marks == []
+    assert _record_recorder.clears == 0
+
+
+def test_unknown_handoff_reading_neither_declares_nor_clears(
+    fake_pause: Callable[[float | None], None],
+    _maintenance_hold: None,
+    _record_recorder: _Recorder,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from shared.updater_handoff import UpdaterHandoffSnapshot
+
+    fake_pause(sp.STRANDED_HOLD_NOTICE_S + 60)
+    _failed_outcome_patch(monkeypatch, _outcome("exited", 1))
+    monkeypatch.setattr(sp, "read_update_lease", lambda: None)
+    monkeypatch.setattr(
+        sp.updater_handoff, "read", lambda: UpdaterHandoffSnapshot(status="invalid")
+    )
+    verdict = sp.stranded_hold_verdict()
+    assert (verdict.kind, verdict.detail) == ("unknown", "updater handoff is unreadable")
+    sp.sync_stranded_hold_record()
+    assert _record_recorder.marks == []
+    assert _record_recorder.clears == 0
+
+
+def test_unknown_posture_row_neither_declares_nor_clears(
+    _record_recorder: _Recorder,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A posture row that cannot be read is missing evidence too — same round
+    discipline as the owner placeholders."""
+
+    def _boom(**kwargs: object) -> object:
+        raise RuntimeError("DB unreachable")
+
+    monkeypatch.setattr("shared.host_deploy_state.read", _boom)
+    verdict = sp.stranded_hold_verdict()
+    assert (verdict.kind, verdict.detail) == ("unknown", "unreadable host deploy state")
+    sp.sync_stranded_hold_record()
+    assert _record_recorder.marks == []
+    assert _record_recorder.clears == 0
+
+
 def test_pause_owner_still_refuses_to_resume_a_maintenance_hold(
     _maintenance_hold: None,
 ) -> None:

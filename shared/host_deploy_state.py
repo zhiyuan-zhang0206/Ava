@@ -366,11 +366,12 @@ def mark_stranded_hold(reason: str) -> bool:
 def clear_stranded_hold() -> bool:
     """Clear this host's stranded-hold record when one is set; True when it did.
 
-    Called on every round the host is NOT a stranded hold (owner back, hold
-    released, or healthy idle) and on the recovery path, so the record's
-    lifetime is exactly the verdict's — it cannot outlive the condition that
-    justified it. A conditional UPDATE, so the every-round call is a no-op
-    write when nothing is declared.
+    Called on every round the host is DECIDABLY not a stranded hold (owner
+    back, hold released, or a healthy idle window) and on the recovery path,
+    so the record cannot outlive the condition that justified it. A round whose
+    signals cannot be read is not a clear — the caller must leave the record
+    standing (task #3132; `stranded_pause.StrandedHoldVerdict`). A conditional
+    UPDATE, so the every-round call is a no-op write when nothing is declared.
     """
     machine = machine_name()
     with write_transaction() as conn, conn.cursor() as cur:
