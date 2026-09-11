@@ -16,6 +16,16 @@ in seconds:
 The report is READ-ONLY (SELECTs only) and best-effort by contract: when the
 database is unreachable, the dry run it annotates prints ``(skipped: ...)``
 instead of failing.
+
+It is a coarse PRE-FLIGHT PROXY of the drain's own classification
+(``shared/maintenance_cohort.py``): it reads ``agents_meta`` fields quickly and
+errs toward showing rows as ordinary — an owner present with a live lease that
+is not the *active* native owner still renders as ``running`` / ``idle-hosted``,
+while the real drain refuses it ("maintenance requires the live original native
+owner"). The drain's classification remains the authority: a clean report is no
+guarantee, a blocked report is a strong signal. ``lifecycle-pending`` here means
+a non-null ``agents_meta.lifecycle_command_id`` — not the ``maintenance_cold``
+"unsettled exec request" signal.
 """
 
 from __future__ import annotations
