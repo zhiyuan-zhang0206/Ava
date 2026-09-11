@@ -39,7 +39,6 @@ def test_deepseek_budget_is_374k_soft_512k_hard() -> None:
         "deepseek-v4-pro",
         "deepseek-v4-flash",
         "deepseek-v4-flash-vision-exp",
-        "deepseek-v4.1-flash-expires-on-0910",
     ):
         budget = resolve_context_budget(model)
         assert budget.max_context_tokens == 1_000_000
@@ -68,7 +67,6 @@ def test_every_non_deepseek_spawnable_model_runs_the_flat_thirty_forty_rule() ->
                 "deepseek-v4-pro",
                 "deepseek-v4-flash",
                 "deepseek-v4-flash-vision-exp",
-                "deepseek-v4.1-flash-expires-on-0910",
             ):
                 continue
             budget = resolve_context_budget(model)
