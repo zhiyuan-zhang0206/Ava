@@ -233,6 +233,17 @@ class AgentHost:
         at the next turn boundary, the hosted replacement for "the process exits
         and boots with the merged config".
         """
+        # A new turn starts a fresh progress window HERE, before any await:
+        # without this, a long-idle agent's stale clock entry would read as
+        # "stalled" during this turn's runtime (re)build — whose startup
+        # reconcile can be slow — and the dispatcher's turn-level scan would
+        # cancel the very recovery turn it just scheduled. First-line, not
+        # merely before the build: the scan also runs during the
+        # pre-admission reads below, and a task cancelled there refuses its
+        # bounded unwind in teardown and takes the whole host down with it
+        # (2026-09-11: a resurrect wake for a terminated agent was cancelled
+        # on its predecessor's 3.5h-old clock two seconds after it started).
+        reset_turn_progress(agent_id)
         stored = await self._read_stored_config(agent_id)
         if stored is None or not self._is_runnable(agent_id, stored):
             self._watcher_recovery_pending.discard(agent_id)
@@ -250,13 +261,6 @@ class AgentHost:
         if await active_lease(self._control_pool, agent_id):
             await self._run_held_controls(agent_id, stored.status)
             return
-
-        # A new turn starts a fresh progress window the moment it is entered:
-        # without this, a long-idle agent's stale clock entry would read as
-        # "stalled" during this turn's runtime (re)build — whose startup
-        # reconcile can be slow — and the dispatcher's turn-level scan would
-        # cancel the very recovery turn it just scheduled.
-        reset_turn_progress(agent_id)
 
         async with self._turn_slots:
             pins = resolve_agent_config_pins(stored.config_overlay, stored.birth_config)
