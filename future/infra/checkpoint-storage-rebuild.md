@@ -37,9 +37,11 @@ This document designs the storage-model change and its migration, staged:
   following the existing two-phase rollout pattern (workspace-6087
   `bootstrap-manual-final.md` semantics).
 
-The near-term write guard (task #3096 / #6094, in flight) makes over-limit threads fail fast
-instead of stalling; Section 6 gives those threads (today: 6093, 6089) concrete exits —
-stopgap limit raise, offline repair (= T1 backfill), or fork-fresh — and the detection query.
+The near-term write guard (task #3096 / #6094, PR #2226) landed via the merge queue on
+2026-09-11T17:51:21Z — one second before the user's recall — and was fully reverted by user
+ruling the same night (task #3139): no cap or downscale mitigation is in the codebase, and
+Section 6's exit list reflects that. Over-limit threads (today: 6093, 6089) remain writable
+as before — slowly.
 
 ## 1. Current state (measured)
 
@@ -123,18 +125,19 @@ compressible content because TOAST pzips it).
   correct ONLY while every channel stores a self-contained full value. Delta channels
   violate it; the module already carries the warning.
 
-### 1.5 The guard boundary (task #3096 / #6094, in flight)
+### 1.5 Mitigation status — guard landed, then reverted (task #3139)
 
-The short-term mitigation (branch `ava-6094-cksave`, unmerged) adds
-`AVA_CHECKPOINT_MAX_BLOB_BYTES` (default **16 MiB**, cluster-pinned, restart-required) and
-refuses any single serialized blob over it with `CheckpointBlobTooLargeError`, before any
-SQL. It converts the stall into a fast, explicit failure; it does not repair old data:
-"An existing thread that already holds an oversized blob keeps failing this way until its
-content shrinks."
+PR #2226 (task #3096 / #6094) added `AVA_CHECKPOINT_MAX_BLOB_BYTES` (default 16 MiB), attach-
+image downscaling and per-agent overrides. The Trunk queue landed it at 2026-09-11T17:51:21Z
+(squash 740627d06) — one second before the recall; the user thereupon ruled caps/downscaling
+wrong for this problem and task #3139 reverted the whole PR (guard, downscaling, overrides,
+tests). **None of it is in the codebase.**
 
-Threads over the limit today (max blob octet_length): **6093 = 25.7 MiB (live, writing),
-6089 = 23.3 MiB (killed/dormant)**. Next: 6041 = 9.6 MiB (in the 8-16 MiB watch band).
-Section 6 covers their exits.
+Threads over 16 MiB today (max blob octet_length): **6093 = 25.7 MiB (live, writing),
+6089 = 23.3 MiB (killed/dormant)**. Next: 6041 = 9.6 MiB (the 8-16 MiB watch band). With no
+guard in place these threads stay writable; their writes remain slow and a cross-network
+write can still stall. No mitigation is in place while the structural direction is
+re-decided; Section 6 keeps the exits that do not depend on the guard.
 
 ## 2. Failure anatomy
 
@@ -382,7 +385,7 @@ code takes over; readers tolerate old and new shapes throughout):
 4. **Step 3 — backfill.** Batched job: for each blob version with payloads >= T, rewrite the
    blob in place to refs + CAS rows (idempotent, paced, restart-safe, per-thread bounded).
    Down path: re-inline from CAS (CAS retained through the rollback window). Gate: all
-   readers new; the guard-era over-limit threads are the first batch (Section 6b).
+   readers new; the over-limit threads are the first batch (Section 6).
 5. **Step 4 — contract (later).** Drop the re-inline down path after the rollback window;
    monitoring cleanup. Schema stays otherwise; nothing else to remove (additive design).
 
@@ -399,30 +402,27 @@ content; survivor refs keep content), fork under refs, trim under refs, guard bo
 
 ## 6. Transition period and the short-term mitigation boundary
 
-Facts (Section 1.5): the guard refuses any single blob > 16 MiB, loudly and fast; it does not
-repair. Live today: **6093 (25.7 MiB, active)** — its next checkpoint write fast-fails;
+Facts (Section 1.5): the guard no longer exists (reverted, task #3139); over-limit threads
+write slowly rather than failing fast. Live today: **6093 (25.7 MiB, active)**;
 **6089 (23.3 MiB, dormant)**; **6041 (9.6 MiB, watch band)**.
 
 Exits for an over-limit thread (decision paths, in order of preference):
 
 - **(a) Offline repair (durable; = targeted Step 3).** Externalize the oversized payloads in
-  the thread's retained blob versions; the max blob drops under the guard and the thread
-  becomes writable again. Lossless (expansion returns the same bytes; timeline renders the
+  the thread's retained blob versions; the max blob drops and the thread stops shipping
+  multi-megabyte rewrites. Lossless (expansion returns the same bytes; timeline renders the
   same content). Requires the reader-first sequencing; run per thread, batched.
-- **(b) Stopgap limit raise (temporary).** `AVA_CHECKPOINT_MAX_BLOB_BYTES` is
-  cluster-pinned; raising it cluster-wide admits the thread for a recovery turn, after which
-  a compact turn shrinks state to `[system prompt, summary]` (Section 1.4) and the limit is
-  reverted. Blast radius: every over-limit thread is admitted during the window — acceptable
-  only while the affected set is small and known; needs #405/user sign-off.
+- **(b) Stopgap limit raise — voided.** This path presupposed the reverted guard
+  (task #3139); there is no cap in the codebase to raise.
 - **(c) Fork-fresh fallback.** Spawn a successor with a handoff; the old thread stays frozen
   (cold history). Resumability is lost; last resort.
-- **(d) Detection + triage.** Query (run read-only, low frequency):
+- **(d) Detection + triage.** Query (run read-only, low frequency; 16 MiB kept as a rounded
+  watch line):
   `SELECT thread_id, max(octet_length(blob)) FROM checkpoint_blobs GROUP BY 1 HAVING
-  max(octet_length(blob)) > 16*1024*1024;` — route the result to (a)/(b)/(c) by liveness and
+  max(octet_length(blob)) > 16*1024*1024;` — route the result to (a)/(c) by liveness and
   user value.
-- **(e) Guard extension (open decision for #405/user).** A per-agent override (or one-shot
-  admit) would let a single thread take its recovery turn without a cluster-wide window.
-  Not required for any path above; flagged as the smaller-blast-radius alternative to (b).
+- **(e) Guard extension — voided.** It presupposed the reverted guard (task #3139); no
+  cap/admit machinery is in the codebase.
 
 Monsora-line benefit (explicit): the standing ruling parks the Monsora line on WSL until
 large cross-network writes are addressed; after T1 (and further with T2) per-step bytes stop
