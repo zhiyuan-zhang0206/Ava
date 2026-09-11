@@ -28,6 +28,7 @@ from fastapi import APIRouter, HTTPException
 from gateway.schemas import (
     UiContributionsResponse,
     UiNavContribution,
+    UiStatContribution,
     UiThemeContribution,
 )
 from shared import plugins_config
@@ -66,6 +67,7 @@ def get_ui_contributions() -> UiContributionsResponse:
     """Every console contribution the cluster's enabled plugins declare."""
     themes: list[UiThemeContribution] = []
     nav: list[UiNavContribution] = []
+    stats: list[UiStatContribution] = []
     for plugin, ui in _enabled_ui_declarations():
         for theme in cast(list[dict[str, Any]], ui.get("themes", [])):
             # Absent darkTokens is carried as None, not as an empty map: the
@@ -90,4 +92,14 @@ def get_ui_contributions() -> UiContributionsResponse:
                     page=cast(str, entry["page"]),
                 )
             )
-    return UiContributionsResponse(themes=themes, nav=nav)
+        for card in cast(list[dict[str, Any]], ui.get("stats", [])):
+            # Declaration half only — the value half is the plugin_stats row
+            # the console joins by (plugin, id) (see plugin_stats.py).
+            stats.append(
+                UiStatContribution(
+                    plugin=plugin,
+                    id=cast(str, card["id"]),
+                    label=cast(str, card["label"]),
+                )
+            )
+    return UiContributionsResponse(themes=themes, nav=nav, stats=stats)

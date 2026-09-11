@@ -47,6 +47,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(api.getUiContributions).mockResolvedValue({
     themes: [],
+    stats: [],
     nav: [BOARD, LEDGER, FLEET],
   });
 });
@@ -90,7 +91,7 @@ describe("plugin nav", () => {
   });
 
   it("renders nothing when no plugin declares an entry for the location", async () => {
-    vi.mocked(api.getUiContributions).mockResolvedValue({ themes: [], nav: [] });
+    vi.mocked(api.getUiContributions).mockResolvedValue({ themes: [], nav: [], stats: [] });
 
     const { container } = renderNav(<PluginNavIcons location="fleet-toolbar" />);
 

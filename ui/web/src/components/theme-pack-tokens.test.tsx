@@ -78,6 +78,7 @@ beforeEach(() => {
   vi.mocked(api.getUiContributions).mockResolvedValue({
     themes: [SOLARIZED, MIDNIGHT, DUSK, ASYM],
     nav: [],
+    stats: [],
   });
 });
 

@@ -6,11 +6,12 @@ import threading
 import time
 from datetime import UTC, date, datetime, timedelta
 from datetime import time as datetime_time
-from typing import Any, NamedTuple
+from typing import Any, NamedTuple, cast
 
 from psycopg_pool import ConnectionPool
 
-from gateway.schemas import StatsDashboard, StatsWindowHours
+from gateway.schemas import PluginStat, PluginStatStatus, StatsDashboard, StatsWindowHours
+from shared import plugin_stats
 from shared.loki_index_labels import ledger_gap_plan, retention_floor
 
 # The sidebar polls every 30 seconds. Caching the complete response for 60
@@ -34,6 +35,28 @@ def cache_clear() -> None:
     """Test seam: drop all windowed dashboard responses."""
     with _cache_lock:
         _cache.clear()
+
+
+def plugin_stat_rows(pool: ConnectionPool[Any]) -> list[PluginStat]:
+    """The runtime values behind plugin-declared statistics cards, for the response.
+
+    Not windowed: a plugin value is a point in time (`PluginStat`), and the
+    console joins these rows against the `contributions.ui.stats`
+    declarations by `(plugin, id)` — a declared card with no row here renders
+    as an explicit empty state.
+    """
+    return [
+        PluginStat(
+            plugin=row.plugin,
+            id=row.id,
+            value=row.value,
+            detail=row.detail,
+            status=cast(PluginStatStatus, row.status),
+            updated_at=row.updated_at,
+            updated_by=row.updated_by,
+        )
+        for row in plugin_stats.read_all(pool)
+    ]
 
 
 def cache_get(hours: StatsWindowHours) -> StatsDashboard | None:

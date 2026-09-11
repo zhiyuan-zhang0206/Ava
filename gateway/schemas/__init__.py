@@ -135,6 +135,8 @@ from gateway.schemas.stats import (
     ContextSection,
     MetricsMeta,
     MetricsReport,
+    PluginStat,
+    PluginStatStatus,
     StatsDashboard,
     StatsTokens,
     StatsWindowHours,
@@ -162,6 +164,7 @@ from gateway.schemas.tasks import (
 from gateway.schemas.ui_contributions import (
     UiContributionsResponse,
     UiNavContribution,
+    UiStatContribution,
     UiThemeContribution,
 )
 from gateway.schemas.uploads import (
@@ -273,6 +276,8 @@ __all__ = [
     "PageRegisterRequest",
     "PendingInbound",
     "PluginMetricResult",
+    "PluginStat",
+    "PluginStatStatus",
     "ResolveNoticeIn",
     "ResolvedConfigView",
     "ResolvedFieldView",
@@ -303,6 +308,7 @@ __all__ = [
     "TraceCheckpointMessagesResponse",
     "UiContributionsResponse",
     "UiNavContribution",
+    "UiStatContribution",
     "UiThemeContribution",
     "UploadedBatch",
     "UploadedFile",

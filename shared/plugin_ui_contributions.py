@@ -2,8 +2,10 @@
 
 Design: [`future/frontend-plugin-contributions.md`](../future/frontend-plugin-contributions.md).
 A plugin contributes to the web console as **data**: agent-inspect sections,
-nav entries, and theme token packs that the console's own generic components
-render. The frontend never executes third-party JavaScript as part of its own
+nav entries, statistics-panel cards, and theme token packs that the console's
+own generic components render. A stat card is a declaration (identity and
+label); its value is runtime data the plugin writes through
+`shared/plugin_stats`, never part of the manifest. The frontend never executes third-party JavaScript as part of its own
 composition, so every field validated here is a closed-set enum, a relative
 path the gateway proxies, or a CSS color literal — nothing that can carry
 behavior into the app bundle.
@@ -39,7 +41,7 @@ import re
 from typing import Any, cast
 
 # Contribution types (v1). Closed — see the module docstring.
-UI_KEYS = ("agentInspect", "nav", "themes")
+UI_KEYS = ("agentInspect", "nav", "stats", "themes")
 
 # How an agent-inspect section's `source` payload is rendered by the host's
 # generic components. `page` is the escape hatch: the section embeds the
@@ -148,6 +150,12 @@ THEME_TOKENS = (
 NON_THEMABLE_TOKENS = ("--radius",)
 
 _THEME_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
+
+# A stat card id. Same shape as a theme name, and the stricter spelling
+# matters for the same class of reason: the id is the (plugin, id) key of the
+# plugin's value row in `plugin_stats`, so a card whose id a writer cannot
+# reproduce renders as a permanently empty card instead of an error.
+_STAT_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 
 # Color literals a token value may take: the two forms the console's own token
 # layer uses. Deliberately narrow — a theme is a token pack, never CSS, and
@@ -291,6 +299,44 @@ def _validate_nav(value: object, errors: list[str]) -> list[dict[str, Any]]:
     return entries
 
 
+def _validate_stats(value: object, errors: list[str]) -> list[dict[str, Any]]:
+    """`stats` — cards the Statistics Panel renders, in declaration order.
+
+    A card is identity + label only. The card's value is not declared here:
+    it is runtime data keyed by `(plugin, id)` in `plugin_stats`, written by
+    the plugin's own code and joined into the panel by the console. A card
+    with no value row renders as an explicit empty state, which is what makes
+    the declaration the right place for the card's existence — a machine with
+    the plugin installed but no credentials shows the card, not nothing.
+    """
+    if not isinstance(value, list):
+        errors.append("contributions.ui.stats: expected a list of stat cards")
+        return []
+    cards: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for i, entry in enumerate(cast(list[Any], value)):
+        what = f"contributions.ui.stats[{i}]"
+        data = _entry_fields(entry, what, ("id", "label"), errors)
+        if data is None:
+            continue
+        raw_id = data["id"]
+        if not isinstance(raw_id, str) or _STAT_ID_RE.match(raw_id) is None:
+            errors.append(
+                f"{what}.id: {raw_id!r} must match {_STAT_ID_RE.pattern} "
+                "(it keys the plugin's value row in plugin_stats)"
+            )
+            continue
+        if raw_id in seen:
+            errors.append(f"{what}.id: duplicate stat card {raw_id!r}")
+            continue
+        label = _non_empty_str(data["label"], f"{what}.label", errors)
+        if label is None:
+            continue
+        seen.add(raw_id)
+        cards.append({"id": raw_id, "label": label})
+    return cards
+
+
 def _validate_theme_tokens(value: object, what: str, errors: list[str]) -> dict[str, str] | None:
     if not isinstance(value, dict):
         errors.append(f"{what}: expected an object of token -> color literal")
@@ -381,6 +427,8 @@ def validate_ui_contributions(value: object, errors: list[str]) -> dict[str, obj
             parsed[key] = _validate_agent_inspect(raw, errors)
         elif key == "nav":
             parsed[key] = _validate_nav(raw, errors)
+        elif key == "stats":
+            parsed[key] = _validate_stats(raw, errors)
         else:
             parsed[key] = _validate_themes(raw, errors)
     return parsed

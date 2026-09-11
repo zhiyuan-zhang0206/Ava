@@ -104,6 +104,7 @@ export type PendingInbound = Schemas["PendingInbound"];
 
 export type StatsDashboard = Schemas["StatsDashboard"];
 export type StatsTokens = Schemas["StatsTokens"];
+export type PluginStat = Schemas["PluginStat"];
 
 // --- Metrics (settings Metrics tab) ---
 //
@@ -568,6 +569,7 @@ export type SystemStatus = Schemas["SystemStatus"];
 
 export type UiThemeContribution = Schemas["UiThemeContribution"];
 export type UiNavContribution = Schemas["UiNavContribution"];
+export type UiStatContribution = Schemas["UiStatContribution"];
 export type UiContributionsResponse = Schemas["UiContributionsResponse"];
 
 // --- File Upload ---
