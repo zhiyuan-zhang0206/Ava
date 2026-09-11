@@ -273,8 +273,10 @@ def gate_unset_command() -> str:
 
 def require_inactive_gate_posture(boundary: str) -> None:
     """The activation starts from — and freezes its baseline in — the inactive
-    posture: the four config-owned gate keys stay off until the activation
-    provisions them (all four absent), and a rollback never reverts them."""
+    posture: every PITR service flag is off. This guard checks the three
+    service flags; provisioning at apply time separately needs all four
+    config-owned gate keys absent (a present key is never re-provisioned), and
+    a rollback never reverts them."""
     config = settings.physical_backup
     enabled = [
         name

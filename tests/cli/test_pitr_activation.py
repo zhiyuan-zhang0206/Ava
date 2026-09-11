@@ -508,6 +508,22 @@ def test_inactive_gate_posture_names_the_enabled_flags_and_the_unset_path(
         activation_config.require_inactive_gate_posture("shadow readiness")
 
 
+def test_rollback_gate_hint_stays_silent_when_no_gate_key_is_set(tmp_path: Path) -> None:
+    """The hint only speaks about keys the operator actually set: a missing
+    .env and an env carrying none of the four gate aliases are both silent,
+    while a set alias yields the unset path."""
+    assert activation_config.rollback_gate_hint(tmp_path) is None
+
+    env = tmp_path / ".env"
+    env.write_text("OTHER=kept\n")
+    assert activation_config.rollback_gate_hint(tmp_path) is None
+
+    env.write_text("OTHER=kept\nAVA_PITR_ENABLED=false\n")
+    hint = activation_config.rollback_gate_hint(tmp_path)
+    assert hint is not None
+    assert activation_config.gate_unset_command() in hint
+
+
 def test_config_apply_journals_intent_before_alter_and_resumes_partial_crash(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
