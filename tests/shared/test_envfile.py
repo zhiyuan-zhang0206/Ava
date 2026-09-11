@@ -5,7 +5,14 @@ import pytest
 import shared.private_storage
 from shared.config import settings
 from shared.config.general import GeneralSettings
-from shared.envfile import ENV_BACKUP_KEEP, remove_env, snapshot_env, upsert_env
+from shared.envfile import (
+    ENV_BACKUP_KEEP,
+    env_line_export_prefix,
+    env_line_key,
+    remove_env,
+    snapshot_env,
+    upsert_env,
+)
 
 
 def _backups(env_path: Path) -> list[Path]:
@@ -180,3 +187,102 @@ def test_upsert_atomically_replaces_the_complete_env(
     upsert_env(env, {"SECRET": "new"})
 
     assert replaced == [env]
+
+
+# ─── env_line_key: the settings parser's key grammar (export prefix, #2981) ───
+
+
+@pytest.mark.parametrize(
+    ("line", "expected"),
+    [
+        ("KEY=1", "KEY"),
+        ("KEY = 1", "KEY"),
+        ("  KEY=1", "KEY"),
+        ("export KEY=1", "KEY"),
+        ("export  KEY=1", "KEY"),
+        ("export\tKEY=1", "KEY"),
+        ("\texport KEY = 1", "KEY"),
+        ("export 'KEY'=7", "KEY"),
+        ("'KEY'=1", "KEY"),
+        ('"KEY"=1', '"KEY"'),
+        ("exportKEY=1", "exportKEY"),
+        ("export=1", "export"),
+        ("exportED_KEY=1", "exportED_KEY"),
+        ("KEY=1 # note", "KEY"),
+        ('KEY="18133', "KEY"),
+        ("# KEY=1", None),
+        ("", None),
+        ("KEY", None),
+        ("KEY # note", None),
+        ("EXPORT KEY=1", None),
+        ("export KEY # note", None),
+        ("''=1", None),
+        ("'KEY=1", None),
+    ],
+)
+def test_env_line_key_follows_the_parser_grammar(line: str, expected: str | None) -> None:
+    """`export` plus whitespace is a prefix, never part of the key — and never
+    the bare `removeprefix("export")` trap (`exported_*` keeps its name). A
+    double-quoted key keeps its quotes, exactly as the parser leaves it, and an
+    undecodable value still reports its key so a reader can say so (#2981)."""
+    assert env_line_key(line) == expected
+
+
+def test_env_line_key_agrees_with_dotenv_on_assignments() -> None:
+    """The extractor and python-dotenv must not drift: for every line the parser
+    itself parses into an assignment, the key we report is the parser's key."""
+    from io import StringIO
+
+    from dotenv import dotenv_values
+
+    for line in (
+        "KEY=1",
+        "KEY = 1",
+        "export KEY=1",
+        'export  KEY = "2"',
+        "export\tKEY=6",
+        "export 'KEY'=5",
+        "'KEY'=3",
+        '"KEY"=4',
+        "exportKEY=7",
+        "export=8",
+        "KEY= # c",
+    ):
+        parsed = list(dotenv_values(stream=StringIO(line), interpolate=False))
+        assert env_line_key(line) == parsed[0], line
+
+
+def test_upsert_rewrites_an_export_prefixed_line_in_place(tmp_path: Path) -> None:
+    """An export-prefixed assignment is the same key: it is replaced in place —
+    no duplicate appended — and the operator's prefix survives (a shell consumer
+    of the file would otherwise be silently switched off)."""
+    f = tmp_path / ".env"
+    f.write_text("export AVA_DB_URL=old\nKEEP=1\nexport\tAVA_CLUSTER=old2\n")
+    upsert_env(f, {"AVA_DB_URL": "new", "AVA_CLUSTER": "t1"})
+    assert f.read_text() == "export AVA_DB_URL=new\nKEEP=1\nexport AVA_CLUSTER=t1\n"
+
+
+def test_upsert_leaves_lookalike_export_keys_alone(tmp_path: Path) -> None:
+    """`exportED_KEY` is a key of its own — stripping the prefix must not eat it."""
+    f = tmp_path / ".env"
+    f.write_text("exportED_KEY=keep\n")
+    upsert_env(f, {"AVA_DB_URL": "new"})
+    assert f.read_text() == "exportED_KEY=keep\nAVA_DB_URL=new\n"
+
+
+def test_remove_env_drops_export_prefixed_lines(tmp_path: Path) -> None:
+    """A retired key actually leaves the surface even when it was hand-written
+    with the export prefix — Settings reads both forms as the same key."""
+    f = tmp_path / ".env"
+    f.write_text("export AVA_PGBOUNCER_PORT=6543\nKEEP=1\n")
+    remove_env(f, {"AVA_PGBOUNCER_PORT"})
+    assert f.read_text() == "KEEP=1\n"
+
+
+def test_env_line_export_prefix_flags_only_real_export_prefixed_lines() -> None:
+    assert env_line_export_prefix("export KEY=1") == "export "
+    assert env_line_export_prefix("export\tKEY=1") == "export "
+    assert env_line_export_prefix("  export  KEY=1") == "export "
+    assert env_line_export_prefix("exportKEY=1") == ""
+    assert env_line_export_prefix("export=1") == ""
+    assert env_line_export_prefix("KEY=1") == ""

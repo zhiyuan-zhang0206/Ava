@@ -185,3 +185,11 @@ def test_record_env_write_tolerates_non_utf8_env_bytes(audit_home: Path) -> None
     record = last_env_write_record()
     assert record is not None
     assert record["keys_after"] == ["AVA_MODEL"]
+
+
+def test_env_key_names_read_export_prefixed_assignments(audit_home: Path) -> None:
+    """The audited key-name surface matches the settings parser: `export KEY=v`
+    records KEY (never `export KEY`), and comments/bare keys stay out (#2981)."""
+    env_path = audit_home / ".env"
+    env_path.write_text("export AVA_DB_URL=postgresql://x\n# export AVA_SKIP_ME=1\nBARE_KEY\n")
+    assert env_audit._env_key_names(env_path) == ["AVA_DB_URL"]

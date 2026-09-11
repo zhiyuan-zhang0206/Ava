@@ -186,15 +186,15 @@ _PITR_ENV_FIELDS = {
 
 
 def _pitr_env_baseline(payload: bytes | None = None) -> dict[str, str]:
+    from shared.envfile import capture_env_bytes, env_line_key
+
     path = ava_home() / ".env"
     if payload is None:
-        from shared.envfile import capture_env_bytes
-
         payload = capture_env_bytes(path)
     lines = payload.decode().splitlines()
     return {
         field: json.dumps(
-            [line for line in lines if line.split("=", 1)[0].strip() == alias],
+            [line for line in lines if env_line_key(line) == alias],
             separators=(",", ":"),
         )
         for field, alias in _PITR_ENV_FIELDS.items()

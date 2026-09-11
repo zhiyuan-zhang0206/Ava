@@ -199,8 +199,9 @@ def _ensure_redis_url_identity_step(ctx: ConvergeCtx) -> None:
 
     The URL is read from the .env FILE, never from settings — the in-memory dial
     value is host-rewritten (loopback self-dial), and persisting that would
-    clobber the reachable host. The value is decoded through the dotenv parser
-    before the identity check, so a quoted URL reads as itself (#2046). The
+    clobber the reachable host. The line's key and value both go through the
+    dotenv parser, so a quoted or `export`-prefixed URL reads as itself
+    (#2046, #2981). The
     intended replacement is validated before the write, so malformed input fails
     loudly instead of corrupting an otherwise recoverable .env. Idempotent: a
     URL already carrying a username is left byte-identical. A repaired URL is
@@ -214,7 +215,7 @@ def _ensure_redis_url_identity_step(ctx: ConvergeCtx) -> None:
 
     from shared.cluster import DATA_PLANE_IDENTITY, identity_from_url, redis_password_from_env
     from shared.config.data_plane import DataPlaneSettings
-    from shared.envfile import upsert_env
+    from shared.envfile import env_line_key, upsert_env
     from shared.process_env import update_process_env
     from shared.url_secret import redacted_url, url_with_userinfo
 
@@ -223,7 +224,7 @@ def _ensure_redis_url_identity_step(ctx: ConvergeCtx) -> None:
         return
     line = ""
     for candidate in env_path.read_text().splitlines():
-        if candidate.split("=", 1)[0].strip() == "AVA_REDIS_URL" and "=" in candidate:
+        if env_line_key(candidate) == "AVA_REDIS_URL":
             line = candidate
             break
     if not line:
@@ -292,9 +293,10 @@ def _backfill_health_port_keys_step(ctx: ConvergeCtx) -> None:
     A legacy unit's fixed 8102-8111 pins are not offset-consistent, so it is
     never touched; a complete key set is a no-op. Idempotent by construction.
 
-    Values are read through the dotenv parser (the same decode
-    `_ensure_redis_url_identity_step` uses): a quoted port or a value with a
-    trailing comment must read as the port it denotes — the raw text kept the
+    Keys and values are read through the dotenv parser (the same read
+    `_ensure_redis_url_identity_step` uses — `export`-prefixed lines included,
+    #2981): a quoted port or a value with a trailing comment must read as the
+    port it denotes — the raw text kept the
     quotes, `int()` rejected it downstream, and the whole backfill was silently
     suppressed (#2704). A value the parser cannot decode makes this run write
     nothing at all (never mis-write) and is reported on stderr instead of being
@@ -308,7 +310,7 @@ def _backfill_health_port_keys_step(ctx: ConvergeCtx) -> None:
         backfill_missing_health_ports,
         health_port_env_aliases,
     )
-    from shared.envfile import upsert_env
+    from shared.envfile import env_line_key, upsert_env
 
     env_path = ctx.ava_home / ".env"
     if not env_path.exists():
@@ -317,9 +319,8 @@ def _backfill_health_port_keys_step(ctx: ConvergeCtx) -> None:
     existing: dict[str, str] = {}
     undecodable: list[str] = []
     for line in env_path.read_text().splitlines():
-        key, sep, _ = line.partition("=")
-        key = key.strip()
-        if not sep or key not in wanted:
+        key = env_line_key(line)
+        if key is None or key not in wanted:
             continue
         # Decode through the dotenv parser so a quoted port (or one carrying a
         # trailing comment) reads as the port it denotes — not as the raw text

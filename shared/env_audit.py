@@ -20,7 +20,7 @@ from typing import cast
 
 import psutil
 
-from shared.envfile import ENV_LOCK_TIMEOUT_S, env_lock_path
+from shared.envfile import ENV_LOCK_TIMEOUT_S, env_line_key, env_lock_path
 from shared.log import logger
 from shared.platform import file_lock
 from shared.private_storage import write_private_bytes
@@ -51,9 +51,9 @@ def _env_key_names(env_path: Path) -> list[str]:
         return []
     names: set[str] = set()
     for line in env_path.read_text(encoding="utf-8", errors="replace").splitlines():
-        stripped = line.strip()
-        if stripped and not stripped.startswith("#") and "=" in stripped:
-            names.add(stripped.split("=", 1)[0].strip())
+        key = env_line_key(line)
+        if key is not None:
+            names.add(key)
     return sorted(names)
 
 

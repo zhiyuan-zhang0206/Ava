@@ -198,6 +198,35 @@ def test_skip_migration_leaves_unparseable_value(fake_ava_home: Path) -> None:
     assert "AVA_SKIP_AUTH=banana" in (fake_ava_home / ".env").read_text()
 
 
+def test_skip_migration_reads_an_export_prefixed_quoted_value(fake_ava_home: Path) -> None:
+    """An export-prefixed, quoted legacy value decodes as the boolean it denotes:
+    it migrates (inverted, prefix kept) instead of silently staying behind."""
+    env_path = fake_ava_home / ".env"
+    env_path.write_text('export AVA_SKIP_AUTH="true"\n')
+    assert rt.migrate_skip_alias_env_keys(env_path) == [
+        "AVA_SKIP_AUTH=true -> AVA_AUTH_MIDDLEWARE_ENABLED=false"
+    ]
+    assert env_path.read_text() == "export AVA_AUTH_MIDDLEWARE_ENABLED=false\n"
+
+
+def test_skip_migration_keeps_the_following_line_on_its_own_line(fake_ava_home: Path) -> None:
+    """The rewritten line keeps its ending: the next key must not concatenate
+    onto it (a dropped newline folded `...=falseKEEP=1` into one line)."""
+    env_path = fake_ava_home / ".env"
+    env_path.write_text("AVA_SKIP_AUTH=true\nKEEP=1\n")
+    rt.migrate_skip_alias_env_keys(env_path)
+    assert env_path.read_text() == "AVA_AUTH_MIDDLEWARE_ENABLED=false\nKEEP=1\n"
+
+
+def test_rename_env_keys_finds_and_keeps_an_export_prefixed_line(fake_ava_home: Path) -> None:
+    """A legacy key behind the export prefix is the same key to the parser: the
+    rename finds it, keeps the prefix, and leaves lookalikes alone (#2981)."""
+    env_path = fake_ava_home / ".env"
+    env_path.write_text("export OLD_KEY=v1\nKEEP=1\nexportED_OLD_KEY=v2\n")
+    assert rt.rename_env_keys(env_path, {"OLD_KEY": "NEW_KEY"}) == ["OLD_KEY -> NEW_KEY"]
+    assert env_path.read_text() == "export NEW_KEY=v1\nKEEP=1\nexportED_OLD_KEY=v2\n"
+
+
 # ─── migrate_primary_gateway_url_key (deprecated alias rename) ───
 
 
