@@ -673,7 +673,7 @@
     },
     "textMode": "auto"
    },
-   "title": "Reported cache-read share",
+   "title": "Cache hit",
    "type": "stat",
    "targets": [
     {
