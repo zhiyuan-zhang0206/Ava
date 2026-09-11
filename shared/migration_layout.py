@@ -202,6 +202,30 @@ def untracked_migration_files() -> list[str]:
     )
 
 
+def unreadable_migration_files() -> list[tuple[str, str]]:
+    """Tracked up-migrations in this checkout whose files cannot be read.
+
+    The apply-side half of validate-before-kill: `validate_migrations_at_ref`
+    vets a target's migration NAMES before the update stops anything; this vets
+    that the files the applier will actually open are readable on disk — a mode
+    the checkout carried, a scrubber, a disk error. The applier runs inside
+    `ava start`, after the stop on the self-update leg, so an unreadable file
+    found there costs the host its services.
+
+    Returns `(name, error)` per unreadable file, in name order; empty when all
+    read. Raises `MigrationLayoutError`, like the loader, when the enumeration
+    itself is impossible (no migrations dir / not a git worktree / bad name /
+    duplicate).
+    """
+    problems: list[tuple[str, str]] = []
+    for name, path in _list_migration_files():
+        try:
+            path.read_bytes()
+        except OSError as exc:
+            problems.append((name, str(exc)))
+    return problems
+
+
 def validate_migration_layout(names: Iterable[str]) -> None:
     """Validate a set of migration filenames (basenames) for the on-disk layout
     invariants — each up-migration matches `YYYYMMDDTHHMMSS_<kebab-name>.sql`,

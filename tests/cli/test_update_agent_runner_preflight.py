@@ -97,6 +97,7 @@ def test_agent_runner_proceeds_to_stop_on_valid_layout(
     monkeypatch.setattr(ar, "validate_migrations_at_ref", lambda _ref, **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_ns, "_do_stop", lambda *_a, **_k: stopped.append(True) or 0)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_ns, "_preflight_probes", lambda: 0)  # skip real gateway probe
+    monkeypatch.setattr(_ns, "_preflight_start_readiness", lambda *_a, **_k: 0)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_ns, "_quiesce_local_agents", lambda _mode: True)  # pyright: ignore[reportUnknownArgumentType]
 
     rc = ar._run_agent_runner_self_update(
@@ -139,12 +140,43 @@ def test_agent_runner_aborts_when_preflight_probes_fail(
     assert stopped == [], "must not stop services when preflight fails"
 
 
+def test_agent_runner_aborts_when_start_readiness_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A readiness refusal stops nothing: the same RESTART_DECLINED contract as the
+    probes, with the stop never reached. This is the task-#3156 forward gate — the
+    categories (private-tree roots, port occupancy, migration readability, launcher)
+    that otherwise fail `ava start` only after the stop."""
+    stopped: list[bool] = []
+
+    monkeypatch.setattr(host_deploy_state, "try_acquire_updater_lock", lambda: False)
+    monkeypatch.setattr(ar, "git_checkout_sha", lambda _sha: "oldsha0000")  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(ar.subprocess, "run", lambda *_a, **_k: _FakeCompleted())  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(ar, "run_uv_sync_verified", _sync_verified)
+    monkeypatch.setattr(ar, "validate_migrations_at_ref", lambda _ref, **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_ns, "_do_stop", lambda *_a, **_k: stopped.append(True) or 0)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_ns, "_preflight_probes", lambda: 0)
+    monkeypatch.setattr(_ns, "_preflight_start_readiness", lambda *_a, **_k: 1)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_ns, "_release_self_heal_pause", lambda: None)
+
+    rc = ar._run_agent_runner_self_update(
+        Path("/unused"),
+        target_sha="newsha1111",
+        from_sha="oldsha0000",
+        post_checkout=True,
+    )
+
+    assert rc == RESTART_DECLINED_EXIT_CODE, "a readiness refusal must decline, not fail"
+    assert stopped == [], "must not stop services when the readiness gate refuses"
+
+
 def test_agent_runner_restart_only_also_runs_preflight(
     monkeypatch: pytest.MonkeyPatch, repo: Path
 ) -> None:
     """restart_only path also runs preflight before stopping."""
     stopped: list[bool] = []
     preflight_called: list[bool] = []
+    readiness_called: list[bool] = []
 
     def fake_preflight() -> int:
         preflight_called.append(True)
@@ -152,6 +184,11 @@ def test_agent_runner_restart_only_also_runs_preflight(
 
     monkeypatch.setattr(_ns, "_do_stop", lambda *_a, **_k: stopped.append(True) or 0)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_ns, "_preflight_probes", fake_preflight)
+    monkeypatch.setattr(
+        _ns,
+        "_preflight_start_readiness",
+        lambda *_a, **_k: readiness_called.append(True) or 0,  # pyright: ignore[reportUnknownArgumentType]
+    )
     monkeypatch.setattr(_ns, "_quiesce_local_agents", lambda _mode: True)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(ar.subprocess, "run", lambda *_a, **_k: _FakeCompleted())  # pyright: ignore[reportUnknownArgumentType]
 
@@ -159,6 +196,7 @@ def test_agent_runner_restart_only_also_runs_preflight(
 
     assert rc == 0
     assert preflight_called == [True], "restart_only must still run preflight"
+    assert readiness_called == [True], "restart_only must still run the readiness gate"
     assert stopped == [True], "services must be stopped after successful preflight"
 
 
@@ -173,6 +211,7 @@ class TestLauncherGate:
         stopped: list[bool] = []
         monkeypatch.setattr(_ns, "_do_stop", lambda *_a, **_k: stopped.append(True) or 0)  # pyright: ignore[reportUnknownArgumentType]
         monkeypatch.setattr(_ns, "_preflight_probes", lambda: 0)
+        monkeypatch.setattr(_ns, "_preflight_start_readiness", lambda *_a, **_k: 0)  # pyright: ignore[reportUnknownArgumentType]
         monkeypatch.setattr(ar.subprocess, "run", lambda *_a, **_k: _FakeCompleted())  # pyright: ignore[reportUnknownArgumentType]
 
         rc = ar._run_agent_runner_self_update(tmp_path, restart_only=True)
@@ -192,6 +231,7 @@ class TestLauncherGate:
 
         monkeypatch.setattr(_ns, "_do_stop", lambda *_a, **_k: 0)  # pyright: ignore[reportUnknownArgumentType]
         monkeypatch.setattr(_ns, "_preflight_probes", lambda: 0)
+        monkeypatch.setattr(_ns, "_preflight_start_readiness", lambda *_a, **_k: 0)  # pyright: ignore[reportUnknownArgumentType]
         monkeypatch.setattr(_ns, "_quiesce_local_agents", lambda _mode: True)  # pyright: ignore[reportUnknownArgumentType]
         monkeypatch.setattr(ar.subprocess, "run", _run)  # pyright: ignore[reportUnknownArgumentType]
 
@@ -221,6 +261,7 @@ class TestLauncherGate:
 
         monkeypatch.setattr(_ns, "_do_stop", lambda *_a, **_k: 0)  # pyright: ignore[reportUnknownArgumentType]
         monkeypatch.setattr(_ns, "_preflight_probes", lambda: 0)
+        monkeypatch.setattr(_ns, "_preflight_start_readiness", lambda *_a, **_k: 0)  # pyright: ignore[reportUnknownArgumentType]
         monkeypatch.setattr(_ns, "_quiesce_local_agents", lambda _mode: True)  # pyright: ignore[reportUnknownArgumentType]
         monkeypatch.setattr(ar.subprocess, "run", _run)  # pyright: ignore[reportUnknownArgumentType]
 
@@ -236,6 +277,7 @@ class TestLauncherGate:
         stopped: list[bool] = []
         monkeypatch.setattr(_ns, "_do_stop", lambda *_a, **_k: stopped.append(True) or 0)  # pyright: ignore[reportUnknownArgumentType]
         monkeypatch.setattr(_ns, "_preflight_probes", lambda: 0)
+        monkeypatch.setattr(_ns, "_preflight_start_readiness", lambda *_a, **_k: 0)  # pyright: ignore[reportUnknownArgumentType]
         monkeypatch.setattr(ar.subprocess, "run", lambda *_a, **_k: _FakeCompleted())  # pyright: ignore[reportUnknownArgumentType]
 
         assert ar._run_agent_runner_self_update(repo, restart_only=True) == 1
@@ -248,6 +290,7 @@ class TestLauncherGate:
         path and the recovery instruction instead of a bare traceback."""
         monkeypatch.setattr(_ns, "_do_stop", lambda *_a, **_k: 0)  # pyright: ignore[reportUnknownArgumentType]
         monkeypatch.setattr(_ns, "_preflight_probes", lambda: 0)
+        monkeypatch.setattr(_ns, "_preflight_start_readiness", lambda *_a, **_k: 0)  # pyright: ignore[reportUnknownArgumentType]
         monkeypatch.setattr(_ns, "_quiesce_local_agents", lambda _mode: True)  # pyright: ignore[reportUnknownArgumentType]
 
         def _run(argv, *_a, **_k):  # type: ignore[no-untyped-def]

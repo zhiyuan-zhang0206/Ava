@@ -18,6 +18,7 @@ agent-runner's ordinary `ava start`).
 
 from __future__ import annotations
 
+import os
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -246,3 +247,35 @@ def test_untracked_migration_files_empty_outside_a_worktree(
     from shared import migrations as m
 
     assert m.untracked_migration_files() == []
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root reads through mode 0")
+def test_unreadable_migration_files_names_a_denied_tracked_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The apply-side vet: a tracked migration the applier cannot open is named
+    before an update stops the host (`validate_migrations_at_ref` vets names)."""
+    locked = tmp_path / "20260808T010000_locked.sql"
+    locked.write_text("-- up")
+    _as_git_worktree(tmp_path)
+    locked.chmod(0)
+    monkeypatch.setattr("shared.migrations.MIGRATIONS_DIR", tmp_path)
+
+    from shared import migrations as m
+
+    problems = m.unreadable_migration_files()
+    assert [name for name, _ in problems] == ["20260808T010000_locked"]
+    assert problems[0][1]
+
+
+def test_unreadable_migration_files_empty_when_every_tracked_file_reads(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    (tmp_path / "20260808T010000_ok.sql").write_text("-- up")
+    (tmp_path / "20260808T010000_ok.down.sql").write_text("-- down")
+    _as_git_worktree(tmp_path)
+    monkeypatch.setattr("shared.migrations.MIGRATIONS_DIR", tmp_path)
+
+    from shared import migrations as m
+
+    assert m.unreadable_migration_files() == []
