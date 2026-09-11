@@ -366,7 +366,8 @@ def _add_cluster_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]
         "detached updater (pause-first; no cluster-wide lease — the cluster pin is not "
         "moved). For bootstrap/convergence chases in mixed-version windows, where a "
         "cluster-wide rollout must not run. Not combinable with --restart-only, --local, "
-        "--force, --dry-run or --mode.",
+        "--force, --dry-run, or an explicit --mode force (the default --mode smooth "
+        "cannot be told apart from an explicit one).",
     )
     cluster_update_p.add_argument(
         "--target-sha",

@@ -82,8 +82,10 @@ def cmd_update(
     updater (pause-first; no cluster-wide lease — the cluster pin does not
     move). For bootstrap/convergence chases in mixed-version windows, where a
     cluster-wide rollout must not run. Mutually exclusive with
-    `--restart-only`, `--local`, `--force`, `--dry-run` and `--mode`;
-    `target_sha` (`--target-sha`) pins the updater's force-checkout commit.
+    `--restart-only`, `--local`, `--force`, `--dry-run`, and an explicit
+    `--mode force` (the default `smooth` cannot be told apart from an explicit
+    one); `target_sha` (`--target-sha`) pins the updater's force-checkout
+    commit.
 
     `dry_run=True` (`--dry-run`) also prints a read-only per-target cohort
     readiness report before dispatching (`cli/commands/_update_cohort.py`).
