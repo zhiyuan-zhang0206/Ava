@@ -507,6 +507,31 @@ def _cmd_restart_body(
             lifecycle_status.finish(RESTART_DECLINED_EXIT_CODE, error="preflight probes failed")
         return RESTART_DECLINED_EXIT_CODE
 
+    # Start-readiness preflight (task #3165): the read-only local checks of the
+    # start leg below. Same refusal contract as the probes above — nothing was
+    # stopped, and rc=3 tells any settled caller "do not start over it" — and
+    # every category it refuses on would also fail this restart's own start
+    # leg, so a refusal never blocks a viable bounce (the findings name the
+    # repairs; a restart could not have made it past them either).
+    # `check_launcher=False`: this start is in-process and never execs
+    # `.venv/bin/ava`; the gate's interpreter check covers the venv seam the
+    # session launches actually use.
+    print("\n→ start readiness preflight (validate-before-kill, local state)")
+    with updater_stage("readiness"), lifecycle_status.phase("preflight"):
+        rc = _ns._preflight_start_readiness(repo, check_launcher=False)
+    if rc != 0:
+        print(
+            "  ✗ refusing restart: start-readiness preflight failed — host still serving; "
+            "nothing was stopped. Fix the findings above, then retry.",
+            file=sys.stderr,
+        )
+        _release_self_heal_pause()
+        if owns_journal:
+            lifecycle_status.finish(
+                RESTART_DECLINED_EXIT_CODE, error="start-readiness preflight failed"
+            )
+        return RESTART_DECLINED_EXIT_CODE
+
     # Every restart uses the shared hosted pause kernel; a timeout never
     # silently authorizes force.
 

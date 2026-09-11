@@ -822,6 +822,7 @@ def test_cmd_restart_succeeds_non_interactively(monkeypatch: pytest.MonkeyPatch)
         _git_aware(lambda *_a, **_kw: _FakeResult(returncode=0)),  # pyright: ignore[reportUnknownArgumentType]
     )
     monkeypatch.setattr(_cli, "_do_stop", MagicMock(return_value=0))
+    monkeypatch.setattr(_cli, "_preflight_start_readiness", lambda *_a, **_k: 0)  # pyright: ignore[reportUnknownArgumentType]
     rc = _cli.cmd_restart()
     assert rc == 0
 
@@ -849,6 +850,7 @@ def test_cmd_restart_calls_stop_then_start(monkeypatch: pytest.MonkeyPatch) -> N
 
     monkeypatch.setattr(_cli, "_do_stop", fake_do_stop)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_cli, "_cmd_start_body", fake_cmd_start_body)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_cli, "_preflight_start_readiness", lambda *_a, **_k: 0)  # pyright: ignore[reportUnknownArgumentType]
     rc = _cli.cmd_restart()
     assert order == ["stop", "start"]
     assert rc == 0
@@ -872,6 +874,7 @@ def test_cmd_restart_records_its_full_wall_time_as_an_updater_stage(
 
     monkeypatch.setattr(stop_mod, "updater_stage", _stage)
     monkeypatch.setattr(_cli, "_preflight_probes", lambda: 0)
+    monkeypatch.setattr(_cli, "_preflight_start_readiness", lambda *_a, **_k: 0)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_cli, "_do_stop", lambda *_args, **_kwargs: 0)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_cli, "_cmd_start_body", lambda **_kwargs: 0)  # pyright: ignore[reportUnknownArgumentType]
 
@@ -887,6 +890,7 @@ def test_cmd_restart_finishes_the_journal_only_when_it_owns_it(
     from shared import lifecycle_status
 
     monkeypatch.setattr(_cli, "_preflight_probes", lambda: 0)
+    monkeypatch.setattr(_cli, "_preflight_start_readiness", lambda *_a, **_k: 0)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_cli, "_do_stop", lambda *_args, **_kwargs: 0)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_cli, "_cmd_start_body", lambda **_kwargs: 0)  # pyright: ignore[reportUnknownArgumentType]
     finished: list[int] = []
@@ -942,6 +946,38 @@ def test_cmd_restart_aborts_when_preflight_fails(monkeypatch: pytest.MonkeyPatch
     assert rc == RESTART_DECLINED_EXIT_CODE, "preflight failure must propagate non-zero"
     assert stopped == [], "must not stop services when preflight fails"
     assert start_called == [], "must not start when preflight fails"
+
+
+def test_cmd_restart_aborts_when_start_readiness_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Task #3165: a start-readiness refusal (private-tree roots, ports, venv
+    entry points, migrations) stops nothing — the same decline contract as the
+    probes gate, with stop and start neither run. The gate is called with
+    `check_launcher=False`: this start is in-process and never execs
+    `.venv/bin/ava`."""
+    from shared.exit_codes import RESTART_DECLINED_EXIT_CODE
+
+    stopped: list[bool] = []
+    start_called: list[bool] = []
+    gate_calls: list[dict[str, bool]] = []
+
+    def _gate(_repo, **kwargs: bool) -> int:
+        gate_calls.append(kwargs)
+        return 1
+
+    monkeypatch.setattr(_cli, "_preflight_probes", lambda: 0)
+    monkeypatch.setattr(_cli, "_preflight_start_readiness", _gate)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_cli, "_do_stop", lambda *_a, **_kw: stopped.append(True) or 0)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_cli, "_cmd_start_body", lambda **_kw: start_called.append(True) or 0)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_cli, "_release_self_heal_pause", lambda: None)
+
+    rc = _cli.cmd_restart()
+
+    assert rc == RESTART_DECLINED_EXIT_CODE, "a readiness refusal must decline, not fail"
+    assert stopped == [], "must not stop services when the readiness gate refuses"
+    assert start_called == [], "must not start after a declined restart"
+    assert gate_calls == [{"check_launcher": False}], (
+        "the restart caller must skip the ava-launcher check (in-process start)"
+    )
 
 
 # ─── stop (stdin confirmation) ────────────────────────────────────────────────────────
