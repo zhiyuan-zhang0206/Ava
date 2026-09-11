@@ -104,6 +104,7 @@ def test_runner_leg_refreshes_after_checkout(monkeypatch: pytest.MonkeyPatch, re
     monkeypatch.setattr(_runner, "platform_backend", _FakeBackend)
     monkeypatch.setattr(_runner, "_refresh_builtin_skills", _record)
     monkeypatch.setattr(_cli, "_preflight_probes", lambda: 0)
+    monkeypatch.setattr(_cli, "_preflight_start_readiness", lambda *_a, **_kw: 0)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_cli, "_do_stop", lambda *_a, **_kw: 0)  # pyright: ignore[reportUnknownArgumentType]
 
     class _FakeSubprocess:
@@ -153,6 +154,7 @@ def test_runner_leg_skips_refresh_on_restart_only(
     monkeypatch.setattr(_runner, "platform_backend", _FakeBackend)
     monkeypatch.setattr(_runner, "_refresh_builtin_skills", _record)
     monkeypatch.setattr(_cli, "_preflight_probes", lambda: 0)
+    monkeypatch.setattr(_cli, "_preflight_start_readiness", lambda *_a, **_kw: 0)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_cli, "_do_stop", lambda *_a, **_kw: 0)  # pyright: ignore[reportUnknownArgumentType]
 
     class _FakeSubprocess:

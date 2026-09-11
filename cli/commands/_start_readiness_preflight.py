@@ -1,0 +1,273 @@
+"""Read-only `ava start` state checks, run by the update leg before it stops.
+
+`ava start` is the only step that brings a stopped host back, and on the
+self-update leg it runs AFTER the stop. A check that fails there fails on a
+host whose services are already down — the 2026-09-12 incident shape, where a
+stray workspace socket aborted converge an hour after the stop took the
+fleet's coordinator offline (macmini). This module is the local-state half of
+"validate before kill": the read-only parts of what start checks, moved in
+front of the stop, so a failure refuses the update while the host still serves.
+
+What it forwards (each item read-only; nothing here repairs or launches):
+
+- the `$AVA_HOME` private-tree skeleton — a `logs` / `workspaces` / `memory`
+  root that converge would ABORT on (a symlink, or not a directory), and the
+  `logs/.metadata_never_index` marker whose converge write requires a regular
+  file. Non-regular nodes INSIDE the trees (sockets, FIFOs, devices) are
+  reported as observations only: converge skips them, so start survives them;
+- daemon health ports another unit already answers on — the blocking pre-bind
+  gate of `start._refuse_occupied_health_ports` (issue #977), which otherwise
+  runs only after the stop. Its warning-only sibling — the full port block plus
+  `.env`/registry drift (issue #603) — rides along as observations;
+- tracked migration files in the checked-out tree that cannot be read: the
+  applier opens them inside start, and the pre-stop layout gate
+  (`validate_migrations_at_ref`) vets names only;
+- the two start prerequisites no other pre-stop gate covers: the
+  prod-checkout anchoring rule, and the launcher's executability (its presence
+  is the update runner's step 3.5).
+
+Contract: read-only, never raises for a finding — findings are data. Returns 0
+to proceed with the update, 1 to refuse it. The caller answers a refusal with
+RESTART_DECLINED ("nothing was stopped, host still serving"): unlike the
+migrations-layout gate there is no revert, because the target tree is not at
+fault — the host's local state is, and a retry re-checks it.
+"""
+
+from __future__ import annotations
+
+import os
+import sys
+from pathlib import Path
+
+from shared.machine import MachineRoles
+from shared.private_storage import (
+    private_file_problem,
+    private_tree_root_problem,
+    scan_non_regular_nodes,
+)
+
+_TREE_ROOTS = ("logs", "workspaces", "memory")
+
+
+def preflight_start_readiness(repo: Path) -> int:
+    """Vet the local state `ava start` needs, before the update stops anything.
+
+    0 = proceed (any observations are printed); 1 = refuse, with every finding
+    printed. See the module docstring for what is checked and why.
+    """
+    from shared.paths import ava_home
+
+    home = ava_home()
+    fatal: list[str] = []
+    observations: list[str] = []
+
+    checkout_problem = _prod_checkout_problem(repo)
+    if checkout_problem is not None:
+        fatal.append(checkout_problem)
+
+    roles = _machine_roles()
+    if roles is None:
+        observations.append(
+            "machine role did not resolve — port checks skipped (the probe gate "
+            "ahead of this one reports the same condition)"
+        )
+    else:
+        port_fatal, port_observations = _port_findings(repo, home, roles)
+        fatal += port_fatal
+        observations += port_observations
+
+    tree_fatal, tree_observations = _private_tree_findings(home)
+    fatal += tree_fatal
+    observations += tree_observations
+
+    fatal += _migration_findings()
+    fatal += _launcher_findings(repo)
+
+    return _report(fatal, observations)
+
+
+def _prod_checkout_problem(repo: Path) -> str | None:
+    """`ava start`'s first refusal — the prod home may only launch from its own
+    anchored checkout (`shared.paths.prod_service_checkout_error`) — moved ahead
+    of the stop. Cheap and read-only; a non-prod unit always passes it."""
+    from shared.paths import prod_service_checkout_error
+
+    return prod_service_checkout_error(repo)
+
+
+def _machine_roles() -> MachineRoles | None:
+    """Resolve this host's roles read-only, like `_preflight_probes` does.
+
+    None when the identity is not resolvable — the caller then skips the port
+    checks: the probe gate that runs just before this one already refuses on
+    that condition, so this gate does not have to fail twice for it.
+    """
+    from cli.commands._setup import _collect_setup_values
+
+    resolved, missing = _collect_setup_values(
+        {
+            "machine_name": None,
+            "machine_serve_gateway": None,
+            "machine_serve_agent_runner": None,
+            "machine_serve_observability_station": None,
+            "machine_description": None,
+            "memory_remote": None,
+            "gateway_url": None,
+        }
+    )
+    if missing:
+        return None
+    roles_raw = resolved.get("machine_role", "")
+    return frozenset(roles_raw.split(",")) if roles_raw else frozenset()
+
+
+def _port_findings(repo: Path, home: Path, roles: MachineRoles) -> tuple[list[str], list[str]]:
+    """(fatal, observations) for the two port layers, checked on the roster that
+    the update's own `ava start` will launch with.
+
+    The fatal layer is the blocking pre-bind gate (#977): a daemon health port
+    answered by another unit refuses the whole start, and after the stop that
+    refusal has no host left to serve. Only a *terminal* verdict counts — this
+    unit's own daemons are ALIVE — so an idempotent restart still passes. The
+    observation layer is the warning-only scan (#603): the full port block plus
+    `.env`/registry drift, surfaced here while the operator is watching the
+    updater instead of only inside the post-stop converge.
+
+    Detection failures are observations, not refusals, mirroring
+    `_port_preflight.ensure_port_preflight`'s contract: a preflight must never
+    be the thing that takes the host down.
+    """
+    import cli.commands as _ns
+    from cli.commands._converge_spec import ConvergeCtx
+    from cli.commands._port_preflight import collect_port_conflicts
+    from shared import cluster
+    from shared.disabled_services import resolve_launch_skip
+    from shared.port_preflight import env_port_drift
+
+    try:
+        roster = _ns._launch_roster(roles, resolve_launch_skip(set(), persist=False))
+        occupied = _ns._occupied_health_ports(roster)
+    except Exception as exc:  # a preflight must not fail the update
+        return [], [f"health-port check skipped: {exc}"]
+
+    fatal = [
+        f"{port.spec.session}: health port answered by {port.detail} — `ava start` "
+        "refuses the whole launch on this (#977); after the stop that refusal leaves "
+        "no host serving. Free the port, or move this unit's block: `ava enroll "
+        "--gateway <url> --machine-name <name> --machine-host <host> "
+        "--health-port-base <N>`"
+        for port in occupied
+    ]
+
+    try:
+        ctx = ConvergeCtx(repo=repo, ava_home=home, roles=roles)
+        observations = list(collect_port_conflicts(ctx))
+        record = cluster.get_record(home)
+        if record is not None:
+            observations += env_port_drift(home, record)
+    except Exception as exc:  # same contract as the outer guard
+        observations = [f"port-block scan skipped: {exc}"]
+    return fatal, observations
+
+
+def _private_tree_findings(home: Path) -> tuple[list[str], list[str]]:
+    """(fatal, observations) for the private trees converge owns.
+
+    Fatal is what `ensure_private_dir` / `ensure_private_file` would raise on:
+    a root that is a symlink or not a directory, and the metadata marker being
+    anything but a regular file. Observations are the non-regular nodes inside
+    the trees — converge skips them, so they cannot fail a start, but they are
+    exactly the class that aborted the 2026-09-12 update after its stop, and
+    seeing them before the stop is the point.
+    """
+    fatal: list[str] = []
+    observations: list[str] = []
+
+    for name in _TREE_ROOTS:
+        root = home / name
+        problem = private_tree_root_problem(root)
+        if problem is not None:
+            fatal.append(
+                f"{root} {problem} — converge aborts the whole start on this root; "
+                "fix the path (or move it aside) so a real directory can be created"
+            )
+        try:
+            skipped = scan_non_regular_nodes(root)
+        except OSError as exc:
+            observations.append(f"could not scan {root} for non-regular files: {exc}")
+            continue
+        for node in skipped:
+            observations.append(
+                f"{node} is a socket/FIFO/device — converge skips it (no permission "
+                "repair exists); remove it, or stop the process that owns it"
+            )
+
+    marker = home / "logs" / ".metadata_never_index"
+    problem = private_file_problem(marker)
+    if problem is not None:
+        fatal.append(
+            f"{marker} {problem} — converge's marker write refuses to run, aborting "
+            "the start; replace it with a regular file"
+        )
+    return fatal, observations
+
+
+def _migration_findings() -> list[str]:
+    """Tracked migration files this checkout cannot read (the apply-side vet).
+
+    `validate_migrations_at_ref` already vets the target's names before the
+    stop; this asks the next question the applier will ask — can the file be
+    opened — while the answer is still free.
+    """
+    from shared.migrations import MigrationLayoutError, unreadable_migration_files
+
+    try:
+        problems = unreadable_migration_files()
+    except MigrationLayoutError as exc:
+        return [f"migrations/ cannot be enumerated: {exc}"]
+    return [
+        f"migrations/{name} is not readable ({error}) — `ava start`'s apply would "
+        "fail on the stopped host; fix its mode, or restore the file"
+        for name, error in problems
+    ]
+
+
+def _launcher_findings(repo: Path) -> list[str]:
+    """The `ava` launcher's executability, the uncovered half of step 3.5.
+
+    Step 3.5 vets presence; a launcher that exists but cannot be executed makes
+    step 5's `subprocess.run` raise PermissionError — the "vanished (or is not
+    executable) inside the stop window" case the leg's OSError handler names.
+    Windows runs `.exe` files and has no exec bit to read; presence is the
+    whole check there.
+    """
+    from shared.platform_backend import get_backend
+
+    ava_bin = get_backend().venv_launcher("ava", root=repo)
+    if not ava_bin.is_file():
+        return []  # presence is step 3.5's report; do not double-report it
+    if os.name == "nt" or os.access(ava_bin, os.X_OK):
+        return []
+    return [
+        f"{ava_bin} is not executable — `ava start` (step 5) would fail with "
+        "PermissionError on a host with no services left; `chmod +x` it, or re-run "
+        "`uv sync`"
+    ]
+
+
+def _report(fatal: list[str], observations: list[str]) -> int:
+    if observations:
+        print("\n→ start-readiness observations (not blocking):")
+        for line in observations:
+            print(f"  ! {line}")
+    if fatal:
+        print(
+            f"\n✗ start-readiness preflight: {len(fatal)} problem(s) would fail "
+            "`ava start` only after the stop:",
+            file=sys.stderr,
+        )
+        for line in fatal:
+            print(f"    ✗ {line}", file=sys.stderr)
+        return 1
+    print("  ✓ start-readiness preflight passed")
+    return 0

@@ -24,6 +24,32 @@ def _is_foreign_owned(current: os.stat_result) -> bool:
     return os.name != "nt" and current.st_uid != os.geteuid()
 
 
+def _dir_refusal(current: os.stat_result) -> str | None:
+    """Why a private-directory candidate is unusable, or None.
+
+    One definition for the three readers of the rule: the writer
+    (`ensure_private_dir`), the converge walk, and the read-only predicates the
+    update leg's pre-stop gate consults — so a repair and a pre-flight cannot
+    disagree about what is broken.
+    """
+    if stat.S_ISLNK(current.st_mode):
+        return "is a symlink"
+    if not stat.S_ISDIR(current.st_mode):
+        return "is not a directory"
+    if _is_foreign_owned(current):
+        return "is not owned by the current user"
+    return None
+
+
+def _file_refusal(current: os.stat_result) -> str | None:
+    """Why a private-file candidate is unusable, or None (see `_dir_refusal`)."""
+    if stat.S_ISLNK(current.st_mode):
+        return "is a symlink"
+    if not stat.S_ISREG(current.st_mode):
+        return "is not a regular file"
+    return None
+
+
 def ensure_private_dir(path: Path) -> Path:
     """Create `path` if needed, then require an owner-only real directory."""
     try:
@@ -31,18 +57,14 @@ def ensure_private_dir(path: Path) -> Path:
     except FileNotFoundError:
         path.mkdir(parents=True, mode=0o700, exist_ok=True)
     else:
-        if stat.S_ISLNK(before.st_mode):
-            raise _private_path_error(path, "is a symlink")
-        if not stat.S_ISDIR(before.st_mode):
-            raise _private_path_error(path, "is not a directory")
+        refusal = _dir_refusal(before)
+        if refusal is not None:
+            raise _private_path_error(path, refusal)
 
     current = path.lstat()
-    if stat.S_ISLNK(current.st_mode):
-        raise _private_path_error(path, "is a symlink")
-    if not stat.S_ISDIR(current.st_mode):
-        raise _private_path_error(path, "is not a directory")
-    if os.name != "nt" and current.st_uid != os.geteuid():
-        raise _private_path_error(path, "is not owned by the current user")
+    refusal = _dir_refusal(current)
+    if refusal is not None:
+        raise _private_path_error(path, refusal)
     path.chmod(0o700)
     return path
 
@@ -53,11 +75,25 @@ def ensure_private_file(path: Path) -> None:
         current = path.lstat()
     except FileNotFoundError:
         return
-    if stat.S_ISLNK(current.st_mode):
-        raise _private_path_error(path, "is a symlink")
-    if not stat.S_ISREG(current.st_mode):
-        raise _private_path_error(path, "is not a regular file")
+    refusal = _file_refusal(current)
+    if refusal is not None:
+        raise _private_path_error(path, refusal)
     path.chmod(0o700 if current.st_mode & stat.S_IXUSR else 0o600)
+
+
+def private_file_problem(path: Path) -> str | None:
+    """Read-only twin of `ensure_private_file`'s refusal: why it would raise, or None.
+
+    Used by the update leg's pre-stop gate to see — without the chmod repair —
+    the failure `ava start` would hit later: a marker or secrets file the
+    converge writer refuses because a symlink or a non-regular node sits at its
+    path. A missing file is not a problem (the writer creates it).
+    """
+    try:
+        current = path.lstat()
+    except FileNotFoundError:
+        return None
+    return _file_refusal(current)
 
 
 def converge_private_tree(path: Path) -> Path:
@@ -107,6 +143,56 @@ def converge_private_tree(path: Path) -> Path:
             continue
         ensure_private_file(child)
     return path
+
+
+def private_tree_root_problem(path: Path) -> str | None:
+    """Read-only: why `converge_private_tree(path)` would ABORT on this root, or None.
+
+    The root half of the pre-stop check, without the repair: a missing root is
+    fine (converge creates it), and a foreign-owned root is fine here too —
+    converge warns and skips it rather than aborting. What remains is exactly
+    what `ensure_private_dir` refuses: a symlink, or a path that is not a
+    directory.
+    """
+    try:
+        current = path.lstat()
+    except FileNotFoundError:
+        return None
+    if _is_foreign_owned(current):
+        return None
+    return _dir_refusal(current)
+
+
+def scan_non_regular_nodes(root: Path) -> list[Path]:
+    """Read-only: the nodes `converge_private_tree(root)` would skip as non-regular.
+
+    Sockets, FIFOs, and device nodes are live-service plumbing, not storage:
+    converge has no permission repair for them and skips them (macmini
+    2026-09-12). The walk mirrors that traversal — symlinks and foreign-owned
+    paths are not descended, exactly as converge does not follow them — so the
+    pre-stop report and the converge log cannot disagree about what will be
+    skipped. A missing or unsuitable root yields [] (converge handles the root
+    itself; `private_tree_root_problem` is its predicate). Read-only; the
+    returned paths are in traversal order.
+    """
+    out: list[Path] = []
+    try:
+        current = root.lstat()
+    except FileNotFoundError:
+        return out
+    if stat.S_ISLNK(current.st_mode) or not stat.S_ISDIR(current.st_mode):
+        return out
+    if _is_foreign_owned(current):
+        return out
+    for child in root.iterdir():
+        child_stat = child.lstat()
+        if stat.S_ISLNK(child_stat.st_mode) or _is_foreign_owned(child_stat):
+            continue
+        if stat.S_ISDIR(child_stat.st_mode):
+            out += scan_non_regular_nodes(child)
+        elif not stat.S_ISREG(child_stat.st_mode):
+            out.append(child)
+    return out
 
 
 def write_private_bytes(path: Path, data: bytes) -> None:

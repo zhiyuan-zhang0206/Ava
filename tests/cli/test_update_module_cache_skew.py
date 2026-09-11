@@ -248,6 +248,11 @@ def test_post_checkout_leg_runs_validate_to_start(
     monkeypatch.setattr(_cli, "_preflight_probes", lambda: steps.append("preflight") or 0)
     monkeypatch.setattr(
         _cli,
+        "_preflight_start_readiness",
+        lambda *_args, **_kwargs: steps.append("readiness") or 0,  # pyright: ignore[reportUnknownArgumentType]
+    )
+    monkeypatch.setattr(
+        _cli,
         "_quiesce_local_agents",
         lambda _mode: steps.append("quiesce") or True,  # pyright: ignore[reportUnknownArgumentType]
     )
@@ -268,7 +273,16 @@ def test_post_checkout_leg_runs_validate_to_start(
         )
         == 0
     )
-    assert steps == ["validate", "preflight", "launcher", "skills", "quiesce", "stop", "start"]
+    assert steps == [
+        "validate",
+        "preflight",
+        "readiness",
+        "launcher",
+        "skills",
+        "quiesce",
+        "stop",
+        "start",
+    ]
 
 
 def test_post_checkout_fails_fast_when_the_flock_did_not_survive(

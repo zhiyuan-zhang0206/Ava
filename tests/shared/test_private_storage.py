@@ -321,3 +321,74 @@ def test_private_tree_skips_fifo(monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     assert warnings == [
         ("private storage convergence skipped non-regular file {path}", {"path": fifo})
     ]
+
+
+def test_scan_non_regular_nodes_matches_what_converge_skips(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The pre-stop scan reports exactly what converge would warn about: a nested
+    FIFO is found; a symlink and its target are not (converge does not follow them)."""
+    root = tmp_path / "private"
+    nested = root / "agent"
+    nested.mkdir(parents=True)
+    (nested / "result.txt").write_text("secret")
+    fifo = nested / "queue"
+    os.mkfifo(fifo)
+    target = tmp_path / "outside"
+    target.mkdir()
+    (root / "link").symlink_to(target, target_is_directory=True)
+
+    assert private_storage.scan_non_regular_nodes(root) == [fifo]
+
+    warnings = _capture_warnings(monkeypatch)
+    assert private_storage.converge_private_tree(root) == root
+    assert (
+        "private storage convergence skipped non-regular file {path}",
+        {"path": fifo},
+    ) in warnings
+
+
+def test_scan_non_regular_nodes_missing_root_is_empty(tmp_path: Path) -> None:
+    assert private_storage.scan_non_regular_nodes(tmp_path / "absent") == []
+
+
+@pytest.mark.skipif(os.name == "nt", reason="fifos are POSIX-only")
+def test_scan_non_regular_nodes_does_not_follow_a_symlinked_root(tmp_path: Path) -> None:
+    target = tmp_path / "target"
+    target.mkdir()
+    os.mkfifo(target / "queue")
+    link = tmp_path / "link"
+    link.symlink_to(target, target_is_directory=True)
+
+    assert private_storage.scan_non_regular_nodes(link) == []
+
+
+def test_private_tree_root_problem_matches_converges_refusals(tmp_path: Path) -> None:
+    """The read-only predicate names converge's own refusal (symlink / not a
+    directory) and, like converge, does not refuse a missing root."""
+    root = tmp_path / "root"
+    assert private_storage.private_tree_root_problem(root) is None
+
+    root.write_text("file")
+    assert private_storage.private_tree_root_problem(root) == "is not a directory"
+
+    root.unlink()
+    target = tmp_path / "target"
+    target.mkdir()
+    root.symlink_to(target, target_is_directory=True)
+    assert private_storage.private_tree_root_problem(root) == "is a symlink"
+
+
+def test_private_file_problem_matches_the_writer_refusal(tmp_path: Path) -> None:
+    path = tmp_path / "marker"
+    assert private_storage.private_file_problem(path) is None
+
+    path.symlink_to(tmp_path / "elsewhere")
+    assert private_storage.private_file_problem(path) == "is a symlink"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="fifos are POSIX-only")
+def test_private_file_problem_sees_a_fifo(tmp_path: Path) -> None:
+    path = tmp_path / "marker"
+    os.mkfifo(path)
+    assert private_storage.private_file_problem(path) == "is not a regular file"
