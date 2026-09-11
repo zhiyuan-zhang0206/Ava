@@ -737,9 +737,7 @@ def test_duplicate_prefix_rejected(provider_plugin: Callable[..., None]) -> None
         model="testp-other",
         dir_name="test_provider2",
     )
-    with pytest.raises(
-        provider_api.ProviderRegistrationError, match="already claimed"
-    ) as excinfo:
+    with pytest.raises(provider_api.ProviderRegistrationError, match="already claimed") as excinfo:
         ensure_provider_plugins_loaded()
     assert "already claimed" in str(excinfo.value.__cause__)
     assert "testp-other" not in MODELS
@@ -878,9 +876,7 @@ def test_duplicate_model_id_rejected() -> None:
 
 def test_spawnable_model_without_price_rejected(provider_plugin: Callable[..., None]) -> None:
     provider_plugin(with_price=False)
-    with pytest.raises(
-        provider_api.ProviderRegistrationError, match="no current price"
-    ) as excinfo:
+    with pytest.raises(provider_api.ProviderRegistrationError, match="no current price") as excinfo:
         ensure_provider_plugins_loaded()
     assert "no current price" in str(excinfo.value.__cause__)
 

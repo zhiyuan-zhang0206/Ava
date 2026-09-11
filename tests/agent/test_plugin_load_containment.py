@@ -170,6 +170,8 @@ def test_host_boot_restart_loop_survives_a_broken_plugin(loguru_records: list[di
 
     assert "plugins.codex_usage.plugin" not in sys.modules
     reports = [
-        r for r in loguru_records if "codex_usage" in r["message"] and "failed to load" in r["message"]
+        r
+        for r in loguru_records
+        if "codex_usage" in r["message"] and "failed to load" in r["message"]
     ]
     assert len(reports) == 3

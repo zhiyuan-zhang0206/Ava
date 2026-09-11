@@ -114,8 +114,7 @@ def test_services_py_without_declare_is_skipped_loudly(
     spec._plugin_services()  # must not raise
 
     assert any(
-        "brokenplugin" in r["message"] and "failed to load" in r["message"]
-        for r in loguru_records
+        "brokenplugin" in r["message"] and "failed to load" in r["message"] for r in loguru_records
     )
 
 
@@ -145,6 +144,5 @@ def test_broken_services_py_is_skipped_and_others_still_load(
 
     assert sessions == {"probe-good"}
     assert any(
-        "brokenplugin" in r["message"] and "failed to load" in r["message"]
-        for r in loguru_records
+        "brokenplugin" in r["message"] and "failed to load" in r["message"] for r in loguru_records
     )

@@ -375,9 +375,7 @@ def test_scan_and_load_skips_broken_plugin_and_loads_the_rest(
 
     assert scan_and_load(tmp_path) == ["good"]
     # loud: an ERROR naming the plugin
-    assert any(
-        "bad" in r["message"] and "failed to load" in r["message"] for r in loguru_records
-    )
+    assert any("bad" in r["message"] and "failed to load" in r["message"] for r in loguru_records)
     # the half-executed module left nothing behind
     assert "plugins.bad.plugin" not in sys.modules
 
