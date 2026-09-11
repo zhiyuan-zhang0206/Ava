@@ -23,6 +23,7 @@ from shared.runtime_prepare import (
     PrepareInputs,
     _copy_python,
     _python_input_inventory,
+    _verify_plugins,
     inventory_digest,
     prepare_release,
     tree_inventory,
@@ -341,6 +342,35 @@ def prove_copy_race(
         raise AssertionError("copy-race rejection changed serving pointer")
 
 
+def prove_broken_provider_refusal(inputs: PrepareInputs, release: VerifiedRelease) -> None:
+    """The probe refuses a prepared image whose retained provider.py raises.
+
+    Provider registration is fail-soft at runtime (skip + loud report), so
+    without this face a broken provider.py would ship invisibly and the model
+    registry would silently lose entries after rollout. The broken file is
+    added to the sealed image around one probe run, then removed and the
+    directory seal restored — nothing else in the generation is touched.
+    """
+    plugins = inputs.plugins
+    if plugins is None:
+        raise AssertionError("plugin proof input missing")
+    fixture_dir = release.root / "plugins/runtime_fixture"
+    target = fixture_dir / "provider.py"
+    fixture_dir.chmod(0o700)  # Sealed 0o500: unseal just this directory around the probe.
+    try:
+        target.write_text("raise RuntimeError('provider poison')\n")
+        try:
+            _verify_plugins(plugins, release.root)
+        except ReleaseRejectedError as exc:
+            if not str(exc).startswith("preparation command failed:"):
+                raise AssertionError("broken provider failed for the wrong reason") from exc
+        else:
+            raise AssertionError("prepared image with a broken provider was accepted")
+    finally:
+        target.unlink(missing_ok=True)
+        fixture_dir.chmod(0o500)
+
+
 def prove_prepared_frontend(
     inputs: PrepareInputs, release: VerifiedRelease, checkout: Path, root: Path
 ) -> None:
@@ -441,6 +471,7 @@ def main() -> None:  # noqa: PLR0915 — ordered prepare/retire/failure evidence
             ),
         )
     prove_half_plugin_refusal(store, inputs)
+    prove_broken_provider_refusal(inputs, release)
     if serving.read_bytes() != original:
         raise AssertionError("successful preparation changed serving pointer")
     # Remove the input locations from their original names, proving that a
@@ -485,6 +516,7 @@ def main() -> None:  # noqa: PLR0915 — ordered prepare/retire/failure evidence
         "input_paths_retired_imports": True,
         "checkout_absent_imports_and_existing_cli": True,
         "serving_pointer_unchanged_success_and_failure": True,
+        "retained_broken_provider_rejected": True,
         "artifact_digest": release.digest,
         "manifest_digest": release.manifest_digest,
         "platform": platform.platform(),
