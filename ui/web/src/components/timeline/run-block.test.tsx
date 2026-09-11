@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 
-import { findClosestStuckTurnId, TurnBlock } from "./run-block";
+import { findClosestStuckHeaderId, TurnBlock } from "./run-block";
 import type { TurnSummary } from "./runs";
 
 const sampleSummary: TurnSummary = {
@@ -37,13 +37,13 @@ function mockRect(top: number, bottom: number, height: number): DOMRect {
   };
 }
 
-describe("findClosestStuckTurnId", () => {
+describe("findClosestStuckHeaderId", () => {
   it("returns null when no expanded turn block is in the container", () => {
     const container = document.createElement("div");
     container.innerHTML = `
       <div data-item-id="turn-1" data-turn-id="turn-1" data-turn-expanded="false"></div>
     `;
-    expect(findClosestStuckTurnId(container, 44)).toBeNull();
+    expect(findClosestStuckHeaderId(container, 44)).toBeNull();
   });
 
   it("returns null when expanded block has not reached the sticky line", () => {
@@ -57,7 +57,7 @@ describe("findClosestStuckTurnId", () => {
     vi.spyOn(block, "getBoundingClientRect").mockReturnValue(mockRect(100, 900, 800));
     container.appendChild(block);
 
-    expect(findClosestStuckTurnId(container, 44)).toBeNull();
+    expect(findClosestStuckHeaderId(container, 44)).toBeNull();
   });
 
   it("returns turnId when expanded block has scrolled past the sticky line", () => {
@@ -71,7 +71,7 @@ describe("findClosestStuckTurnId", () => {
     vi.spyOn(block, "getBoundingClientRect").mockReturnValue(mockRect(20, 700, 680));
     container.appendChild(block);
 
-    expect(findClosestStuckTurnId(container, 44)).toBe("turn-1");
+    expect(findClosestStuckHeaderId(container, 44)).toBe("turn-1");
   });
 
   it("returns null when block has completely scrolled past the sticky line", () => {
@@ -85,7 +85,7 @@ describe("findClosestStuckTurnId", () => {
     vi.spyOn(block, "getBoundingClientRect").mockReturnValue(mockRect(-900, 40, 940));
     container.appendChild(block);
 
-    expect(findClosestStuckTurnId(container, 44)).toBeNull();
+    expect(findClosestStuckHeaderId(container, 44)).toBeNull();
   });
 
   it("selects the closest/latest expanded block when multiple blocks cross the top", () => {
@@ -108,7 +108,7 @@ describe("findClosestStuckTurnId", () => {
     container.appendChild(block2);
 
     // Block 2 has top = 10 >= Block 1's top = -400, so Block 2 is the closest stuck block
-    expect(findClosestStuckTurnId(container, 44)).toBe("turn-2");
+    expect(findClosestStuckHeaderId(container, 44)).toBe("turn-2");
   });
 
   it("ignores collapsed blocks even if their top is above sticky line", () => {
@@ -121,7 +121,56 @@ describe("findClosestStuckTurnId", () => {
     vi.spyOn(block, "getBoundingClientRect").mockReturnValue(mockRect(-100, 200, 300));
     container.appendChild(block);
 
-    expect(findClosestStuckTurnId(container, 44)).toBeNull();
+    expect(findClosestStuckHeaderId(container, 44)).toBeNull();
+  });
+
+  it("returns the row id when a marked message-card row has crossed the sticky line", () => {
+    const container = document.createElement("div");
+    vi.spyOn(container, "getBoundingClientRect").mockReturnValue(mockRect(0, 800, 800));
+
+    const row = document.createElement("div");
+    row.setAttribute("data-item-id", "2.0");
+    row.setAttribute("data-card-sticky", "true");
+    // Row top is at 20 (crossed sticky line 44), bottom at 900 (still in view).
+    vi.spyOn(row, "getBoundingClientRect").mockReturnValue(mockRect(20, 900, 880));
+    container.appendChild(row);
+
+    expect(findClosestStuckHeaderId(container, 44)).toBe("2.0");
+  });
+
+  it("ignores message-card rows that are not marked (collapsed or work-block children)", () => {
+    const container = document.createElement("div");
+    vi.spyOn(container, "getBoundingClientRect").mockReturnValue(mockRect(0, 800, 800));
+
+    const row = document.createElement("div");
+    row.setAttribute("data-item-id", "2.0");
+    row.setAttribute("data-card-sticky", "false");
+    vi.spyOn(row, "getBoundingClientRect").mockReturnValue(mockRect(-100, 700, 800));
+    container.appendChild(row);
+
+    expect(findClosestStuckHeaderId(container, 44)).toBeNull();
+  });
+
+  it("picks the closest candidate across both surfaces when a card and a turn cross the line", () => {
+    const container = document.createElement("div");
+    vi.spyOn(container, "getBoundingClientRect").mockReturnValue(mockRect(0, 800, 800));
+
+    // An earlier turn scrolled higher (top = -300).
+    const turn = document.createElement("div");
+    turn.setAttribute("data-turn-id", "turn-1");
+    turn.setAttribute("data-turn-expanded", "true");
+    vi.spyOn(turn, "getBoundingClientRect").mockReturnValue(mockRect(-300, 200, 500));
+
+    // A later message card closer to the sticky line (top = 10).
+    const row = document.createElement("div");
+    row.setAttribute("data-item-id", "2.0");
+    row.setAttribute("data-card-sticky", "true");
+    vi.spyOn(row, "getBoundingClientRect").mockReturnValue(mockRect(10, 800, 790));
+
+    container.appendChild(turn);
+    container.appendChild(row);
+
+    expect(findClosestStuckHeaderId(container, 44)).toBe("2.0");
   });
 });
 
