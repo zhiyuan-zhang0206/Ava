@@ -5,7 +5,9 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-_FAMILY_DAYS_NAMES = frozenset({"agent", "shell", "gateway", "ops", "watchdog", "other", "default"})
+_FAMILY_DAYS_NAMES = frozenset(
+    {"agent", "shell", "gateway", "ops", "watchdog", "snapshot", "other", "default"}
+)
 
 
 def _positive_days(value: str) -> int:
@@ -38,7 +40,7 @@ def _family_days(value: str) -> dict[str, int]:
             )
         if family not in _FAMILY_DAYS_NAMES:
             raise argparse.ArgumentTypeError(
-                "family must be agent, shell, gateway, ops, watchdog, other, or default"
+                "family must be agent, shell, gateway, ops, watchdog, snapshot, other, or default"
             )
         if family == "default":
             family = "other"
@@ -77,8 +79,9 @@ def _add_logs_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -
         "retention",
         help="delete expired service and native log archives",
         description=(
-            "Delete expired managed files from the top level of $AVA_HOME/logs "
-            "and $AVA_HOME/lgtm/native/logs while preserving active open files."
+            "Delete expired managed files from the top level of $AVA_HOME/logs, "
+            "$AVA_HOME/lgtm/native/logs, and the nested computer-use snapshot "
+            "dir while preserving active open files."
         ),
     )
     age_mode = retention_p.add_mutually_exclusive_group()
@@ -98,8 +101,9 @@ def _add_logs_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -
         metavar="FAMILY=DAYS,...",
         help=(
             "comma-separated retention overrides; mutually exclusive with --older-than. "
-            "Tier defaults: agent=15, shell=7, gateway=30, ops=30, watchdog=30, other=3 "
-            "days (the no-flag fallback remains AVA_LOG_RETENTION_DAYS, otherwise 14 days)"
+            "Tier defaults: agent=15, shell=7, gateway=30, ops=30, watchdog=30, "
+            "snapshot=7, other=3 days (the no-flag fallback remains "
+            "AVA_LOG_RETENTION_DAYS, otherwise 14 days)"
         ),
     )
     retention_p.add_argument(

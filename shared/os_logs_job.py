@@ -22,7 +22,7 @@ import shared.os_cron
 import shared.platform
 from shared.platform import crontab_lock
 
-FAMILY_DAYS = "agent=15,shell=7,gateway=30,ops=30,watchdog=30,other=3"
+FAMILY_DAYS = "agent=15,shell=7,gateway=30,ops=30,watchdog=30,snapshot=7,other=3"
 _CRON_MARKER = "# ava-logs-maintenance"
 _HOUR = 4
 _MINUTE = 40
