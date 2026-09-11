@@ -54,9 +54,10 @@ from __future__ import annotations
 
 import re
 import time
+from dataclasses import dataclass
 from itertools import pairwise
 from pathlib import Path
-from typing import cast
+from typing import Literal, cast
 
 from pydantic import BaseModel, Field
 
@@ -461,15 +462,40 @@ def _classify(tail: str, log: Path) -> UpdaterOutcome:
     )
 
 
+@dataclass(frozen=True)
+class UpdaterOutcomeReading:
+    """One read's answer, keeping which nothing a `None` was (task #3150).
+
+    `last_updater_outcome` collapses four readings into `None`; two of them are
+    decidable answers — nothing speaks for this window — and one is missing
+    evidence: the record exists but could not be read. The stranded-hold verdict
+    may clear on the former and must never act on the latter, so it asks for this
+    reading instead.
+
+    - ``"found"`` — an outcome speaks for this window; `outcome` carries it.
+    - ``"none"`` — decidably no outcome to report; `detail` names which nothing
+      (no log, a stale one, no pause anchor). A decided clear may proceed.
+    - ``"unreadable"`` — the evidence could not be read (`detail` carries the
+      failure); missing evidence is never a clear.
+    """
+
+    kind: Literal["found", "none", "unreadable"]
+    outcome: UpdaterOutcome | None = None
+    detail: str = ""
+
+
 def last_updater_outcome(
     state: shared.host_deploy_state.HostDeployState | None | object = _UNSET,
 ) -> UpdaterOutcome | None:
     """This host's last updater outcome, or None when no log speaks for *this* update.
 
-    None covers three readings that an operator must not be handed as an outcome: no
-    updater log exists at all, the newest log is stale, and the host is neither
-    paused nor freshly-idle (no update in flight and none just finished). The pause
-    is the anchor for a paused/converging host; a freshly-idle host keeps the
+    None covers four readings that an operator must not be handed as an outcome:
+    no updater log exists at all, the newest log is stale, the host is neither
+    paused nor freshly-idle (no update in flight and none just finished), and the
+    read itself failed. Consumers that must act on that last distinction — an
+    absent record may clear a claim, missing evidence may not — use the sibling
+    `last_updater_outcome_reading`; this function is its outcome-or-None face. The
+    pause is the anchor for a paused/converging host; a freshly-idle host keeps the
     reading for a while (NO_PROGRESS_TIMEOUT_S window) so the rollout poll can
     harvest the completed stage breakdown after convergence — Task #1820.
 
@@ -481,6 +507,23 @@ def last_updater_outcome(
     Never raises. It is called from `status_snapshot`, which answers the probe the
     whole rollout poll depends on — a status endpoint that 500s because a log line
     could not be parsed would turn a diagnosable stall into an unreachable host.
+    """
+    return last_updater_outcome_reading(state).outcome
+
+
+def last_updater_outcome_reading(
+    state: shared.host_deploy_state.HostDeployState | None | object = _UNSET,
+) -> UpdaterOutcomeReading:
+    """The same read as `last_updater_outcome`, keeping what the nothing was.
+
+    The reader's two callers want different faces of one answer: `status_snapshot`
+    renders outcome-or-nothing, while `stranded_hold_verdict` decides whether a
+    standing record may be erased — and there, "no record" (decidable) and "the
+    record could not be read" (missing evidence) are opposite instructions
+    (task #3132's doctrine, closed for this half by task #3150).
+
+    Never raises — a failed read is reported as `kind == "unreadable"`, not as an
+    exception; `kind == "found"` always carries the outcome.
     """
     from ops.cluster_session import _UPDATER_SERVICE
     from shared.cluster import session_name
@@ -497,7 +540,7 @@ def last_updater_outcome(
         else:
             resolved_state = cast(shared.host_deploy_state.HostDeployState | None, state)
         if resolved_state is None:
-            return None
+            return UpdaterOutcomeReading(kind="none", detail="no host deploy state")
         if resolved_state.paused_at is not None:
             paused_at = resolved_state.paused_at.timestamp()
         else:
@@ -511,20 +554,24 @@ def last_updater_outcome(
             # a log written within it belongs to THIS host's just-finished
             # update, and `_anchor_to_this_run` still slices it by run marker.
             if resolved_state.posture != shared.host_deploy_state.POSTURE_IDLE:
-                return None
+                return UpdaterOutcomeReading(kind="none", detail="no pause anchor")
             paused_at = time.time() - NO_PROGRESS_TIMEOUT_S
         log = _newest_log(session_name(_UPDATER_SERVICE))
-        if log is None or log.stat().st_mtime < paused_at:
-            return None
+        if log is None:
+            return UpdaterOutcomeReading(kind="none", detail="no updater log")
+        if log.stat().st_mtime < paused_at:
+            return UpdaterOutcomeReading(kind="none", detail="stale updater log")
         with log.open("rb") as fh:
             fh.seek(max(0, log.stat().st_size - _TAIL_BYTES))
             tail = fh.read().decode("utf-8", errors="replace")
-        return _classify(_anchor_to_this_run(tail, paused_at), log)
-    except Exception:  # fail-fast-ok: a diagnostic must never break the status probe
+        return UpdaterOutcomeReading(
+            kind="found", outcome=_classify(_anchor_to_this_run(tail, paused_at), log)
+        )
+    except Exception as exc:  # fail-fast-ok: a diagnostic must never break the status probe
         import logging
 
         logging.getLogger(__name__).warning("last_updater_outcome read failed", exc_info=True)
-        return None
+        return UpdaterOutcomeReading(kind="unreadable", detail=f"read failed: {type(exc).__name__}")
 
 
 def updater_outcome_declined(outcome: UpdaterOutcome | None) -> bool:

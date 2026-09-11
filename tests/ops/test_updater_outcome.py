@@ -369,6 +369,32 @@ def test_the_read_never_raises_into_the_status_probe(
     monkeypatch.setattr(uo, "_newest_log", _boom)
 
     assert uo.last_updater_outcome() is None
+    reading = uo.last_updater_outcome_reading()
+    assert (reading.kind, reading.outcome) == ("unreadable", None)
+    assert reading.detail == "read failed: RuntimeError"
+
+
+def test_the_reading_names_which_nothing(home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Task #3150: `None` is both "no record" and "record unreadable"; the reading
+    tells them apart so a failed read cannot pass for a decided clear."""
+
+    def _boom(_session: str) -> Path:
+        raise RuntimeError("log directory unreadable")
+
+    _paused(home)
+
+    missing = uo.last_updater_outcome_reading()
+    assert (missing.kind, missing.outcome, missing.detail) == ("none", None, "no updater log")
+
+    _write_log(home / "logs" / "updater-1785000200.log", _FAILED_LOG)
+    found = uo.last_updater_outcome_reading()
+    outcome = found.outcome
+    assert found.kind == "found"
+    assert outcome is not None
+    assert (outcome.kind, outcome.rc) == ("exited", 1)
+
+    monkeypatch.setattr(uo, "_newest_log", _boom)
+    assert uo.last_updater_outcome_reading().kind == "unreadable"
 
 
 # ─── the run anchor: on a log holding every run, which lines are THIS run's ──────
