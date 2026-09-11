@@ -1,13 +1,14 @@
 {
   "schema_version": 2,
-  "catalog_version": "2026-09-10.1",
+  "catalog_version": "2026-09-11.1",
   "currency": "USD",
   "unit_tokens": 1000000,
   "models": {
     "deepseek-v4-pro": {
       "vendor": "deepseek",
       "source_url": "https://api-docs.deepseek.com/quick_start/pricing/",
-      "source_checked_at": "2026-08-18",
+      "source_checked_at": "2026-09-11",
+      "effective_time_note": "DeepSeek retires V4 Pro into V4.1 Flash: requests route to V4.1 Flash and bill at its price from 12:00 Beijing Time on 2026-09-14 = 2026-09-14T04:00:00Z (pricing-page footnote (2)); the final period records that succession.",
       "periods": [
         {
           "effective_from": null,
@@ -27,7 +28,7 @@
         },
         {
           "effective_from": "2026-08-16T16:00:00Z",
-          "effective_until": null,
+          "effective_until": "2026-09-14T04:00:00Z",
           "tiers": [
             {
               "input_tokens_min": 0,
@@ -59,13 +60,49 @@
               ]
             }
           ]
+        },
+        {
+          "effective_from": "2026-09-14T04:00:00Z",
+          "effective_until": null,
+          "tiers": [
+            {
+              "input_tokens_min": 0,
+              "input_tokens_max": null,
+              "rates": {
+                "input": "0.15",
+                "cache_read": "0.003",
+                "output": "0.6"
+              },
+              "utc_daily_overrides": [
+                {
+                  "start": "01:00:00",
+                  "end": "04:00:00",
+                  "rates": {
+                    "input": "0.3",
+                    "cache_read": "0.006",
+                    "output": "1.2"
+                  }
+                },
+                {
+                  "start": "06:00:00",
+                  "end": "10:00:00",
+                  "rates": {
+                    "input": "0.3",
+                    "cache_read": "0.006",
+                    "output": "1.2"
+                  }
+                }
+              ]
+            }
+          ]
         }
       ]
     },
     "deepseek-v4-flash": {
       "vendor": "deepseek",
       "source_url": "https://api-docs.deepseek.com/quick_start/pricing/",
-      "source_checked_at": "2026-08-18",
+      "source_checked_at": "2026-09-11",
+      "effective_time_note": "DeepSeek publishes no instant for the V4.1-Flash price reduction, only the 2026-09-10 Change Log date; Ava activates it at the start of that date in Beijing time (UTC+8) = 2026-09-09T16:00:00Z, the same midnight convention as the prior DeepSeek boundary.",
       "periods": [
         {
           "effective_from": null,
@@ -85,7 +122,7 @@
         },
         {
           "effective_from": "2026-08-16T16:00:00Z",
-          "effective_until": null,
+          "effective_until": "2026-09-09T16:00:00Z",
           "tiers": [
             {
               "input_tokens_min": 0,
@@ -117,13 +154,49 @@
               ]
             }
           ]
+        },
+        {
+          "effective_from": "2026-09-09T16:00:00Z",
+          "effective_until": null,
+          "tiers": [
+            {
+              "input_tokens_min": 0,
+              "input_tokens_max": null,
+              "rates": {
+                "input": "0.15",
+                "cache_read": "0.003",
+                "output": "0.6"
+              },
+              "utc_daily_overrides": [
+                {
+                  "start": "01:00:00",
+                  "end": "04:00:00",
+                  "rates": {
+                    "input": "0.3",
+                    "cache_read": "0.006",
+                    "output": "1.2"
+                  }
+                },
+                {
+                  "start": "06:00:00",
+                  "end": "10:00:00",
+                  "rates": {
+                    "input": "0.3",
+                    "cache_read": "0.006",
+                    "output": "1.2"
+                  }
+                }
+              ]
+            }
+          ]
         }
       ]
     },
     "deepseek-v4-flash-vision-exp": {
       "vendor": "deepseek",
       "source_url": "https://api-docs.deepseek.com/quick_start/pricing/",
-      "source_checked_at": "2026-08-21",
+      "source_checked_at": "2026-09-11",
+      "effective_time_note": "DeepSeek publishes no instant for the V4.1-Flash price reduction, only the 2026-09-10 Change Log date; Ava activates it at the start of that date in Beijing time (UTC+8) = 2026-09-09T16:00:00Z, the same midnight convention as the prior DeepSeek boundary.",
       "periods": [
         {
           "effective_from": null,
@@ -143,7 +216,7 @@
         },
         {
           "effective_from": "2026-08-16T16:00:00Z",
-          "effective_until": null,
+          "effective_until": "2026-09-09T16:00:00Z",
           "tiers": [
             {
               "input_tokens_min": 0,
@@ -170,6 +243,41 @@
                     "input": "0.44",
                     "cache_read": "0.014",
                     "output": "1.32"
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "effective_from": "2026-09-09T16:00:00Z",
+          "effective_until": null,
+          "tiers": [
+            {
+              "input_tokens_min": 0,
+              "input_tokens_max": null,
+              "rates": {
+                "input": "0.15",
+                "cache_read": "0.003",
+                "output": "0.6"
+              },
+              "utc_daily_overrides": [
+                {
+                  "start": "01:00:00",
+                  "end": "04:00:00",
+                  "rates": {
+                    "input": "0.3",
+                    "cache_read": "0.006",
+                    "output": "1.2"
+                  }
+                },
+                {
+                  "start": "06:00:00",
+                  "end": "10:00:00",
+                  "rates": {
+                    "input": "0.3",
+                    "cache_read": "0.006",
+                    "output": "1.2"
                   }
                 }
               ]

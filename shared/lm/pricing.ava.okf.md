@@ -34,6 +34,7 @@ tags:
 ## Sourcing
 
 - **gpt-5.6-sol carries its promotional price** ($4 in / $0.4 cached / $20 out per 1M, official model page checked 2026-09-06, valid at least through 2026-11-21). The revert to the standard rates ($5 / $0.5 / $30) is a deliberate manual flip in the plugin + archive, not an automatic period boundary (405 ruling 2026-09-07).
+- **DeepSeek's 2026-09-10 V4.1-Flash release cut Flash prices to `$0.003/$0.006` cache hit, `$0.15/$0.30` cache miss, `$0.60/$1.20` output (off-peak/peak)** from 2026-09-09T16:00:00Z — the Beijing-midnight boundary for the Change Log date the page publishes in place of an instant — and retired the V4 Flash names: `deepseek-v4-flash` and `deepseek-v4-flash-vision-exp` keep working and bill at the Flash price. V4 Pro routes to V4.1 Flash from 2026-09-14T04:00:00Z; the archive records that succession as the entry's final period. The page scopes peak hours Monday-Friday while the archive's UTC windows recur daily, so weekends bill at peak rates — a known overestimate.
 
 ## Notes
 

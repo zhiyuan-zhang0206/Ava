@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+from copy import deepcopy
 from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
@@ -28,16 +29,18 @@ pricing_updater = _load_script()
 _DEEPSEEK_TABLE = """
 <html><main>
 <table>
-  <tr><td colspan="3">MODEL</td><td>deepseek-v4-flash</td><td>deepseek-v4-pro</td><td>deepseek-v4-flash-vision-exp</td></tr>
-  <tr><td colspan="3">MODEL VERSION</td><td>DeepSeek-V4-Flash-0731</td><td>DeepSeek-V4-Pro-0813</td><td>DeepSeek-V4-Flash-Vision-Exp</td></tr>
-  <tr><td rowspan="6">PRICING</td><td rowspan="2">1M INPUT TOKENS (CACHE HIT)</td><td>OFF-PEAK</td><td>$0.007</td><td>$0.022</td><td>$0.007</td></tr>
-  <tr><td>PEAK</td><td>$0.014</td><td>$0.044</td><td>$0.014</td></tr>
-  <tr><td rowspan="2">1M INPUT TOKENS (CACHE MISS)</td><td>OFF-PEAK</td><td>$0.22</td><td>$0.66</td><td>$0.22</td></tr>
-  <tr><td>PEAK</td><td>$0.44</td><td>$1.32</td><td>$0.44</td></tr>
-  <tr><td rowspan="2">1M OUTPUT TOKENS</td><td>OFF-PEAK</td><td>$0.66</td><td>$1.98</td><td>$0.66</td></tr>
-  <tr><td>PEAK</td><td>$1.32</td><td>$3.96</td><td>$1.32</td></tr>
+  <tr><td colspan="3">MODEL</td><td>deepseek-flash (1)</td><td>deepseek-v4-pro (2)</td></tr>
+  <tr><td colspan="3">MODEL VERSION</td><td>DeepSeek-V4.1-Flash</td><td>DeepSeek-V4-Pro-0813</td></tr>
+  <tr><td rowspan="6">PRICING (3)</td><td rowspan="2">1M INPUT TOKENS (CACHE HIT)</td><td>OFF-PEAK</td><td>$0.003</td><td>$0.022</td></tr>
+  <tr><td>PEAK</td><td>$0.006</td><td>$0.044</td></tr>
+  <tr><td rowspan="2">1M INPUT TOKENS (CACHE MISS)</td><td>OFF-PEAK</td><td>$0.15</td><td>$0.66</td></tr>
+  <tr><td>PEAK</td><td>$0.3</td><td>$1.32</td></tr>
+  <tr><td rowspan="2">1M OUTPUT TOKENS</td><td>OFF-PEAK</td><td>$0.6</td><td>$1.98</td></tr>
+  <tr><td>PEAK</td><td>$1.2</td><td>$3.96</td></tr>
 </table>
-<p>Off-peak rates are half of the peak rates. Peak hours are 01:00 - 04:00 and 06:00 - 10:00 UTC.</p>
+<p>Off-peak rates are half of the peak rates. Peak hours are 01:00 - 04:00 and 06:00 - 10:00 UTC, Monday through Friday (all other hours are off-peak).</p>
+<p>(1) Use deepseek-flash as the model name. The legacy names deepseek-v4-flash and deepseek-v4-flash-vision-exp are still accepted, but the corresponding models have been retired, their requests are served by the DeepSeek-V4.1-Flash model and billed at the Flash price.</p>
+<p>(2) After 12:00 Beijing Time on September 14, 2026, requests to deepseek-v4-pro will all be routed to V4.1 Flash and billed at the V4.1 Flash price.</p>
 </main></html>
 """
 
@@ -156,16 +159,18 @@ def test_deepseek_parser_preserves_models_meters_and_decimal_units() -> None:
     prices = catalog.models
 
     assert catalog.peak_windows == (("01:00:00", "04:00:00"), ("06:00:00", "10:00:00"))
+    # Column labels carry footnote markers; parsing yields the official model ids.
+    assert list(prices) == ["deepseek-flash", "deepseek-v4-pro"]
 
-    assert prices["deepseek-v4-flash"].peak == pricing_updater.Rates(
-        input=Decimal("0.44"),
-        cache_read=Decimal("0.014"),
-        output=Decimal("1.32"),
+    assert prices["deepseek-flash"].peak == pricing_updater.Rates(
+        input=Decimal("0.3"),
+        cache_read=Decimal("0.006"),
+        output=Decimal("1.2"),
     )
-    assert prices["deepseek-v4-flash"].off_peak == pricing_updater.Rates(
-        input=Decimal("0.22"),
-        cache_read=Decimal("0.007"),
-        output=Decimal("0.66"),
+    assert prices["deepseek-flash"].off_peak == pricing_updater.Rates(
+        input=Decimal("0.15"),
+        cache_read=Decimal("0.003"),
+        output=Decimal("0.6"),
     )
     assert prices["deepseek-v4-pro"].peak == pricing_updater.Rates(
         input=Decimal("1.32"),
@@ -177,22 +182,30 @@ def test_deepseek_parser_preserves_models_meters_and_decimal_units() -> None:
         cache_read=Decimal("0.022"),
         output=Decimal("1.98"),
     )
-    # The vision variant bills at v4-flash rates (its images count as input tokens).
-    assert prices["deepseek-v4-flash-vision-exp"].peak == pricing_updater.Rates(
-        input=Decimal("0.44"),
-        cache_read=Decimal("0.014"),
-        output=Decimal("1.32"),
+
+
+def test_deepseek_parser_strips_column_footnote_markers() -> None:
+    """The 2026-09-10 page labels its columns `deepseek-flash (1)`; the marker
+    must never leak into a model id (that mismatch failed the daily workflow)."""
+    marked = pricing_updater.parse_deepseek_pricing(_DEEPSEEK_TABLE)
+    unmarked = pricing_updater.parse_deepseek_pricing(
+        _DEEPSEEK_TABLE.replace("deepseek-flash (1)", "deepseek-flash")
     )
-    assert prices["deepseek-v4-flash-vision-exp"].off_peak == pricing_updater.Rates(
-        input=Decimal("0.22"),
-        cache_read=Decimal("0.007"),
-        output=Decimal("0.66"),
-    )
+
+    assert set(marked.models) == {"deepseek-flash", "deepseek-v4-pro"}
+    assert marked == unmarked
+
+
+def test_deepseek_parser_rejects_an_empty_column_label() -> None:
+    html = _DEEPSEEK_TABLE.replace("deepseek-v4-pro (2)", "(2)")
+
+    with pytest.raises(ValueError, match="empty model id"):
+        pricing_updater.parse_deepseek_pricing(html)
 
 
 def test_deepseek_parser_fails_closed_when_a_meter_disappears() -> None:
     html = _DEEPSEEK_TABLE.replace(
-        '<tr><td rowspan="2">1M OUTPUT TOKENS</td><td>OFF-PEAK</td><td>$0.66</td><td>$1.98</td><td>$0.66</td></tr>',
+        '<tr><td rowspan="2">1M OUTPUT TOKENS</td><td>OFF-PEAK</td><td>$0.6</td><td>$1.98</td></tr>',
         "",
     )
 
@@ -209,7 +222,7 @@ def test_deepseek_parser_rejects_an_unannounced_peak_ratio() -> None:
 
 def test_deepseek_parser_rejects_a_missing_peak_hour_statement() -> None:
     html = _DEEPSEEK_TABLE.replace(
-        "Peak hours are 01:00 - 04:00 and 06:00 - 10:00 UTC.",
+        "Peak hours are 01:00 - 04:00 and 06:00 - 10:00 UTC,",
         "Peak hours are documented elsewhere.",
     )
 
@@ -217,9 +230,9 @@ def test_deepseek_parser_rejects_a_missing_peak_hour_statement() -> None:
         pricing_updater.parse_deepseek_pricing(html)
 
 
-@pytest.mark.parametrize("bad_price", ["0.007", "$Infinity"])
+@pytest.mark.parametrize("bad_price", ["0.003", "$Infinity"])
 def test_deepseek_parser_requires_finite_dollar_prices(bad_price: str) -> None:
-    html = _DEEPSEEK_TABLE.replace("$0.007", bad_price)
+    html = _DEEPSEEK_TABLE.replace("<td>$0.003</td>", f"<td>{bad_price}</td>")
 
     with pytest.raises(ValueError, match="invalid USD"):
         pricing_updater.parse_deepseek_pricing(html)
@@ -228,8 +241,8 @@ def test_deepseek_parser_requires_finite_dollar_prices(bad_price: str) -> None:
 def test_deepseek_parser_rejects_duplicate_meter_rows() -> None:
     duplicate = (
         '<tr><td rowspan="2">1M INPUT TOKENS (CACHE HIT)</td>'
-        "<td>OFF-PEAK</td><td>$0.007</td><td>$0.022</td></tr>"
-        "<tr><td>PEAK</td><td>$0.014</td><td>$0.044</td></tr>"
+        "<td>OFF-PEAK</td><td>$0.003</td><td>$0.022</td></tr>"
+        "<tr><td>PEAK</td><td>$0.006</td><td>$0.044</td></tr>"
     )
     html = _DEEPSEEK_TABLE.replace("</table>", f"{duplicate}</table>")
 
@@ -241,8 +254,8 @@ def test_deepseek_parser_rejects_duplicate_meter_rows() -> None:
 def test_deepseek_parser_rejects_an_unknown_pricing_meter(band: str) -> None:
     unknown = (
         '<tr><td rowspan="2">1M REASONING TOKENS</td>'
-        f"<td>{band}</td><td>$0.10</td><td>$0.20</td></tr>"
-        "<tr><td>PEAK</td><td>$0.20</td><td>$0.40</td></tr>"
+        f"<td>{band}</td><td>$0.10</td><td>$0.10</td></tr>"
+        "<tr><td>PEAK</td><td>$0.20</td><td>$0.20</td></tr>"
     )
     html = _DEEPSEEK_TABLE.replace("</table>", f"{unknown}</table>")
 
@@ -250,56 +263,85 @@ def test_deepseek_parser_rejects_an_unknown_pricing_meter(band: str) -> None:
         pricing_updater.parse_deepseek_pricing(html)
 
 
+def _reviewed_catalog() -> dict[str, Any]:
+    return json.loads((_REPO_ROOT / "shared/lm/pricing_catalog_archive.json").read_text())
+
+
+def _without_recorded_succession(catalog: dict[str, Any]) -> dict[str, Any]:
+    """Drop deepseek-v4-pro's succession period to exercise the generation path."""
+    periods = catalog["models"]["deepseek-v4-pro"]["periods"]
+    periods.pop()
+    periods[-1]["effective_until"] = None
+    return catalog
+
+
 def test_reconcile_is_a_noop_when_the_reviewed_catalog_matches() -> None:
-    catalog = json.loads((_REPO_ROOT / "shared/lm/pricing_catalog_archive.json").read_text())
+    """The reviewed ledger already carries the V4.1-Flash bands and the
+    recorded succession, so the daily workflow must see no drift."""
     fetched = pricing_updater.parse_deepseek_pricing(_DEEPSEEK_TABLE)
 
     assert (
         pricing_updater.reconcile_deepseek_catalog(
-            catalog,
+            _reviewed_catalog(),
             fetched,
-            detected_at="2026-08-18T12:34:56Z",
+            detected_at="2026-09-11T12:34:56Z",
         )
         is None
     )
 
 
+def test_reconcile_rejects_an_unexpected_column_roster() -> None:
+    fetched = pricing_updater.parse_deepseek_pricing(
+        _DEEPSEEK_TABLE.replace("deepseek-flash (1)", "deepseek-v4.1-flash (1)")
+    )
+
+    with pytest.raises(ValueError, match="must contain exactly"):
+        pricing_updater.reconcile_deepseek_catalog(
+            _reviewed_catalog(),
+            fetched,
+            detected_at="2026-09-11T12:34:56Z",
+        )
+
+
 def test_reconcile_appends_a_new_effective_period_without_rewriting_history() -> None:
-    catalog = json.loads((_REPO_ROOT / "shared/lm/pricing_catalog_archive.json").read_text())
+    catalog = _reviewed_catalog()
     fetched = pricing_updater.parse_deepseek_pricing(
-        _DEEPSEEK_TABLE.replace("$3.96", "$4.00").replace("$1.98", "$2.00")
-    )
-
-    updated = pricing_updater.reconcile_deepseek_catalog(
-        catalog,
-        fetched,
-        detected_at="2026-08-19T12:34:56Z",
-    )
-
-    assert updated is not None
-    periods = updated["models"]["deepseek-v4-pro"]["periods"]
-    assert periods[-2]["effective_until"] == "2026-08-19T12:34:56Z"
-    assert periods[-1]["effective_from"] == "2026-08-19T12:34:56Z"
-    assert periods[-1]["tiers"][0]["rates"]["output"] == "2.00"
-    assert periods[-1]["tiers"][0]["utc_daily_overrides"][0]["rates"]["output"] == "4.00"
-    # Reconciliation works on a copy; a failed workflow cannot partially
-    # mutate the catalog object its caller loaded.
-    assert catalog["models"]["deepseek-v4-pro"]["periods"][-1]["effective_until"] is None
-
-
-def test_reconcile_appends_a_period_when_peak_windows_change() -> None:
-    catalog = json.loads((_REPO_ROOT / "shared/lm/pricing_catalog_archive.json").read_text())
-    fetched = pricing_updater.parse_deepseek_pricing(
-        _DEEPSEEK_TABLE.replace(
-            "Peak hours are 01:00 - 04:00 and 06:00 - 10:00 UTC.",
-            "Peak hours are 02:00 - 05:00 and 07:00 - 11:00 UTC.",
+        _DEEPSEEK_TABLE.replace("<td>$1.2</td>", "<td>$1.28</td>").replace(
+            "<td>$0.6</td>", "<td>$0.64</td>"
         )
     )
 
     updated = pricing_updater.reconcile_deepseek_catalog(
         catalog,
         fetched,
-        detected_at="2026-08-19T12:34:56Z",
+        detected_at="2026-09-15T12:34:56Z",
+    )
+
+    assert updated is not None
+    # One flash column prices both legacy names (footnote (1)).
+    for model in ("deepseek-v4-flash", "deepseek-v4-flash-vision-exp"):
+        periods = updated["models"][model]["periods"]
+        assert periods[-2]["effective_until"] == "2026-09-15T12:34:56Z"
+        assert periods[-1]["effective_from"] == "2026-09-15T12:34:56Z"
+        assert periods[-1]["tiers"][0]["rates"]["output"] == "0.64"
+        assert periods[-1]["tiers"][0]["utc_daily_overrides"][0]["rates"]["output"] == "1.28"
+    # Reconciliation works on a copy; a failed workflow cannot partially
+    # mutate the catalog object its caller loaded.
+    assert catalog["models"]["deepseek-v4-flash"]["periods"][-1]["effective_until"] is None
+
+
+def test_reconcile_appends_a_period_when_peak_windows_change() -> None:
+    fetched = pricing_updater.parse_deepseek_pricing(
+        _DEEPSEEK_TABLE.replace(
+            "Peak hours are 01:00 - 04:00 and 06:00 - 10:00 UTC,",
+            "Peak hours are 02:00 - 05:00 and 07:00 - 11:00 UTC,",
+        )
+    )
+
+    updated = pricing_updater.reconcile_deepseek_catalog(
+        _reviewed_catalog(),
+        fetched,
+        detected_at="2026-09-15T12:34:56Z",
     )
 
     assert updated is not None
@@ -310,6 +352,78 @@ def test_reconcile_appends_a_period_when_peak_windows_change() -> None:
         ("02:00:00", "05:00:00"),
         ("07:00:00", "11:00:00"),
     ]
+
+
+def test_reconcile_records_the_pro_succession_as_a_future_period() -> None:
+    """Footnote (2): from 2026-09-14T04:00:00Z deepseek-v4-pro is routed to
+    V4.1 Flash and billed at the Flash price."""
+    reviewed = _reviewed_catalog()
+    frozen = deepcopy(reviewed["models"]["deepseek-v4-pro"]["periods"][:-1])
+    catalog = _without_recorded_succession(_reviewed_catalog())
+    fetched = pricing_updater.parse_deepseek_pricing(_DEEPSEEK_TABLE)
+
+    updated = pricing_updater.reconcile_deepseek_catalog(
+        catalog,
+        fetched,
+        detected_at="2026-09-11T12:34:56Z",
+    )
+
+    assert updated is not None
+    periods = updated["models"]["deepseek-v4-pro"]["periods"]
+    # Own-rate history is preserved; the succession closes it at the published
+    # instant and appends the Flash column's rates as the future period.
+    assert periods[:-1] == frozen
+    assert periods[-2]["effective_until"] == "2026-09-14T04:00:00Z"
+    assert periods[-1]["effective_from"] == "2026-09-14T04:00:00Z"
+    assert periods[-1]["tiers"][0]["rates"] == {
+        "input": "0.15",
+        "cache_read": "0.003",
+        "output": "0.6",
+    }
+    assert [
+        (item["start"], item["end"]) for item in periods[-1]["tiers"][0]["utc_daily_overrides"]
+    ] == [("01:00:00", "04:00:00"), ("06:00:00", "10:00:00")]
+
+    assert (
+        pricing_updater.reconcile_deepseek_catalog(
+            updated,
+            fetched,
+            detected_at="2026-09-11T12:34:56Z",
+        )
+        is None
+    )
+
+
+def test_reconcile_fails_closed_when_a_retired_column_changes() -> None:
+    """Nothing bills from the retired pro column again: a source change there
+    must stop for review instead of rewriting frozen history."""
+    fetched = pricing_updater.parse_deepseek_pricing(
+        _DEEPSEEK_TABLE.replace("<td>$0.022</td>", "<td>$0.024</td>").replace(
+            "<td>$0.044</td>", "<td>$0.048</td>"
+        )
+    )
+
+    with pytest.raises(ValueError, match="retired"):
+        pricing_updater.reconcile_deepseek_catalog(
+            _reviewed_catalog(),
+            fetched,
+            detected_at="2026-09-11T12:34:56Z",
+        )
+
+
+def test_reconcile_fails_closed_when_a_retired_column_drifts_before_its_succession() -> None:
+    fetched = pricing_updater.parse_deepseek_pricing(
+        _DEEPSEEK_TABLE.replace("<td>$0.022</td>", "<td>$0.024</td>").replace(
+            "<td>$0.044</td>", "<td>$0.048</td>"
+        )
+    )
+
+    with pytest.raises(ValueError, match="before its recorded retirement"):
+        pricing_updater.reconcile_deepseek_catalog(
+            _without_recorded_succession(_reviewed_catalog()),
+            fetched,
+            detected_at="2026-09-11T12:34:56Z",
+        )
 
 
 def test_plugin_sync_rewrites_drift_and_is_idempotent(
