@@ -83,7 +83,7 @@ def test_default_window_returns_raw_message_dicts(
     from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
     tid = create_agent(db_conn)
-    ai_blocks: list[str | dict] = [
+    ai_blocks: list[str | dict[str, str]] = [
         {"type": "thinking", "thinking": "hm"},
         {"type": "text", "text": "on it"},
     ]

@@ -60,8 +60,7 @@ _TAILNET_IP_RE = re.compile(
 # scanned (user ruling 2026-08-20).
 _FROZEN_PATH_PREFIXES = ("decisions/",)
 
-# Inline opt-out marker, same convention as the other repo lints
-# (# env-ok: / # wrap-ok: / # emoji-ok:).
+# Inline opt-out marker "<name>-ok:", same convention as the other repo lints.
 _OPT_OUT_MARKER = "tailnet-ip-ok:"
 
 

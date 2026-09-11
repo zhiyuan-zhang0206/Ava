@@ -7,6 +7,7 @@ from collections.abc import Mapping
 
 import anthropic
 import httpx
+import httpx2
 import openai
 import pytest
 
@@ -96,7 +97,7 @@ def test_unrecognized_status_is_unknown_not_guessed(status: int) -> None:
 def test_transport_errors_are_transient() -> None:
     """Connection / timeout failures carry no HTTP status; the SDKs' own base
     classes (+ builtins) classify them TRANSIENT so the retry path covers them."""
-    req = httpx.Request("POST", "http://x")
+    req = httpx2.Request("POST", "http://x")
     transport_excs: list[BaseException] = [
         anthropic.APIConnectionError(request=req),
         anthropic.APITimeoutError(request=req),  # subclass of APIConnectionError
@@ -168,7 +169,7 @@ def test_error_type_none_on_malformed_body(body: object) -> None:
 
 def test_provider_label_from_module() -> None:
     """provider is the top-level package that raised — the coarse postmortem label."""
-    req = httpx.Request("POST", "http://x")
+    req = httpx2.Request("POST", "http://x")
     assert classify_error(anthropic.APIConnectionError(request=req)).provider == "anthropic"
     assert classify_error(openai.APIConnectionError(request=req)).provider == "openai"
     assert classify_error(httpx.ReadError("x")).provider == "httpx"
