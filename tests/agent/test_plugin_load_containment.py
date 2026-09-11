@@ -22,6 +22,7 @@ from __future__ import annotations
 import sys
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -68,7 +69,7 @@ def _write_plugin(root: Path, name: str, body: str, extra: dict[str, str] | None
         (plugin_dir / filename).write_text(content)
 
 
-def test_boot_loader_never_imports_a_disabled_plugin(loguru_records: list[dict]) -> None:
+def test_boot_loader_never_imports_a_disabled_plugin(loguru_records: list[dict[str, Any]]) -> None:
     """Issue #2161's first half: `ava plugins disable` did not stop the boot
     loader — it imported every directory on disk, so the disabled broken plugin
     still crashed startup. Disabled must mean never imported, on both paths."""
@@ -97,7 +98,7 @@ def test_boot_loader_never_imports_a_disabled_plugin(loguru_records: list[dict])
 
 
 def test_boot_loader_contains_broken_plugins_and_keeps_going(
-    loguru_records: list[dict],
+    loguru_records: list[dict[str, Any]],
 ) -> None:
     """The incident matrix at the boot loader: relative import with no parent
     package, syntax error, top-level raise, missing sibling — each is skipped
@@ -156,7 +157,9 @@ def test_both_loaders_agree_on_module_identity_and_relative_imports() -> None:
     assert sys.modules["plugins.codex_usage.plugin"] is boot_module
 
 
-def test_host_boot_restart_loop_survives_a_broken_plugin(loguru_records: list[dict]) -> None:
+def test_host_boot_restart_loop_survives_a_broken_plugin(
+    loguru_records: list[dict[str, Any]],
+) -> None:
     """Issue #2161's second half: the host failed to start on EVERY restart
     while the broken package sat on disk. Consecutive boots must each survive,
     each report, and each leave no half-executed module behind."""
