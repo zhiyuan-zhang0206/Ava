@@ -27,6 +27,8 @@ def _h_cluster_update(args: argparse.Namespace) -> int:
         origin=args.origin,
         rollout_log=args.rollout_log,
         mode=args.mode,
+        target=args.target,
+        target_sha=args.target_sha,
     )
 
 
@@ -354,6 +356,24 @@ def _add_cluster_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]
         default="smooth",
         help="both modes require every native agent to finish restart/checkpoint drain "
         "before migration; 'force' explicitly permits forced resource shutdown afterward",
+    )
+    cluster_update_p.add_argument(
+        "--target",
+        metavar="MACHINE",
+        default=None,
+        help="trigger ONE machine's per-host update instead of the whole-cluster rollout: "
+        "POSTs the gateway's /api/cluster/update relay, whose op spawns that machine's "
+        "detached updater (pause-first; no cluster-wide lease — the cluster pin is not "
+        "moved). For bootstrap/convergence chases in mixed-version windows, where a "
+        "cluster-wide rollout must not run. Not combinable with --restart-only, --local, "
+        "--force, --dry-run or --mode.",
+    )
+    cluster_update_p.add_argument(
+        "--target-sha",
+        metavar="SHA",
+        default=None,
+        help="with --target: pin the force-checkout commit (the updater converges to exactly "
+        "this commit instead of the moving origin/main tip).",
     )
     cluster_update_p.set_defaults(func=_h_cluster_update)
 
