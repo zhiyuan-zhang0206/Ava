@@ -82,6 +82,9 @@ from ops.cluster_pause import (
     is_paused as is_paused,
 )
 from ops.cluster_pause import (
+    local_resume_refusal as local_resume_refusal,
+)
+from ops.cluster_pause import (
     pause_local_cluster as pause_local_cluster,
 )
 from ops.cluster_pause import (
@@ -186,6 +189,7 @@ __all__ = [
     "UpdateCheck",
     "current_orchestration",
     "is_paused",
+    "local_resume_refusal",
     "pause_local_cluster",
     "reap_stalled_updater_if_hung",
     "spawn_restart",

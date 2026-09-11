@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 
 from cli import commands as _cli
+from cli.commands import _update_finalize as _fin
 from cli.commands import _update_recover as _rec
 from cli.commands import update as _up
 
@@ -577,3 +578,83 @@ def test_finalize_rollout_never_raises_when_resume_dial_raises(
     assert "resume unconfirmed: ['a']" in err
     assert "STILL PAUSED" not in err
     assert "'a'" in err
+
+
+# --- _unpause_local_via_tree: skip a refused unit, report every reason ---------
+
+
+def _stopped_held_unit(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Fabricate the state a timed-out stop leaves: held, phase `stopping`, not
+    serving — the unit the 2026-09-10 incident (issue #2162) compensated into."""
+    from datetime import UTC, datetime
+
+    from shared import pause_owner
+    from shared.maintenance_state import MaintenanceHold
+
+    monkeypatch.setattr(pause_owner, "state_path", lambda: tmp_path / "pause.json")
+    monkeypatch.setattr(pause_owner, "lock_path", lambda: tmp_path / "pause.lock")
+    when = datetime(2026, 9, 10, tzinfo=UTC)
+    pause_owner.begin_maintenance("wsl:pid1", when)
+    pause_owner.change_maintenance("wsl:pid1", when, MaintenanceHold(), MaintenanceHold("stopping"))
+    monkeypatch.setattr("shared.start_serving.is_serving", lambda: False)
+
+
+def _tree_python(repo: Path, body: str) -> None:
+    """Install a fake deployed-tree interpreter — a script, so whether the tree was
+    even spawned is observable."""
+    python = repo / ".venv" / "bin" / "python"
+    python.parent.mkdir(parents=True)
+    python.write_text(body)
+    python.chmod(0o755)
+
+
+def test_compensating_unpause_skips_a_stopped_held_unit(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Issue #2162 (task #2966): once the stop stage has taken this host's gateway
+    down and left it held, no compensation attempt can resume it — `ava start` must
+    pass readiness first. The finalize tail must skip both hops and state that
+    recovery path once, not walk the incident's ladder (deployed tree `rc=1`, then
+    an anonymous `RuntimeError`) whose warnings dropped the cause."""
+    _stopped_held_unit(monkeypatch, tmp_path)
+    attempts: list[str] = []
+    monkeypatch.setattr("ops.cluster.unpause_local_cluster", lambda: attempts.append("in-process"))
+    repo = tmp_path / "repo"
+    marker = tmp_path / "tree-ran"
+    _tree_python(repo, f"#!/bin/sh\ntouch {marker}\n")
+
+    _fin._unpause_local_via_tree(repo)
+
+    err = capsys.readouterr().err
+    assert attempts == []
+    assert not marker.exists(), "a refused unit must not spawn the deployed tree"
+    assert "local compensating unpause skipped" in err
+    assert "services have stopped; ava start must pass readiness before resume" in err
+
+
+def test_compensating_unpause_reports_each_attempts_reason(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Both masked warnings must name the cause: the deployed tree's own stderr
+    reason, then the in-process exception's message. `rc=1` and `RuntimeError`
+    alone hid `ava start` / `ava maintenance repair` from the operator."""
+    monkeypatch.setattr("ops.cluster.local_resume_refusal", lambda: None)
+    repo = tmp_path / "repo"
+    _tree_python(
+        repo,
+        "#!/bin/sh\n"
+        'echo "RuntimeError: services have stopped; ava start must pass readiness" >&2\n'
+        "exit 1\n",
+    )
+
+    def _refuse() -> None:
+        raise RuntimeError("receipts failed; run ava maintenance repair --operation wsl:pid1")
+
+    monkeypatch.setattr("ops.cluster.unpause_local_cluster", _refuse)
+
+    _fin._unpause_local_via_tree(repo)
+
+    err = capsys.readouterr().err
+    assert "rc=1" in err
+    assert "services have stopped; ava start must pass readiness" in err
+    assert "RuntimeError: receipts failed; run ava maintenance repair --operation wsl:pid1" in err
