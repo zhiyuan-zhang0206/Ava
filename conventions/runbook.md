@@ -164,11 +164,12 @@ An editable install is a pointer stored in the **active virtualenv**, not a fact
 derived from the shell's current directory. A worktree's `.venv` must be a
 real directory inside that worktree, never a symlink. Before **every** worktree
 sync, run the dependency-free preflight; it refuses an external environment,
-a symlinked `.venv`, or editable records naming another checkout. Then discard
-an inherited `VIRTUAL_ENV` for the `uv` command:
+a symlinked `.venv`, or editable records naming another checkout. Discard an
+inherited `VIRTUAL_ENV` first — for the preflight too, since the guard refuses a
+leaked environment before it checks anything else:
 
 ```bash
-python scripts/guard_editable_venv.py .
+env -u VIRTUAL_ENV python scripts/guard_editable_venv.py .
 env -u VIRTUAL_ENV uv sync
 env -u VIRTUAL_ENV uv pip install -e .
 ```

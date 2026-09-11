@@ -22,8 +22,8 @@ description: Runs the Ava repo's Python, frontend, and end-to-end checks and dia
   re-points the shared venv's editable `.pth` here — breaking every other
   checkout that uses that venv
   ([rationale](../../../conventions/dev-setup.md#per-worktree-cluster-dev-flow)).
-  No venv yet? Build the worktree's own
-  (`python scripts/guard_editable_venv.py . && env -u VIRTUAL_ENV uv sync`),
+  No venv yet? Build the worktree's own (`env -u VIRTUAL_ENV python
+  scripts/guard_editable_venv.py . && env -u VIRTUAL_ENV uv sync`),
   or for a test-only run reuse another worktree's real venv:
   `PYTHONPATH=<this-worktree> <other-worktree>/.venv/bin/python -m pytest ...`
   (PYTHONPATH outranks that venv's `.pth`, so the tests run against this
@@ -87,8 +87,8 @@ subprocess / real Next.js dev server / real Playwright Chromium.
 Uses throwaway Postgres + Redis (reuses `tests/_containers.py`), not Docker.
 
 ```bash
-# Prerequisites
-uv sync
+# Prerequisites (discard an inherited VIRTUAL_ENV — see the worktree rule above)
+env -u VIRTUAL_ENV uv sync
 .venv/bin/playwright install chromium
 
 # Run (locally)
