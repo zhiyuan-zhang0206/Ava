@@ -1014,6 +1014,26 @@ class TestTurnLoop:
         age = turn_progress_age_s(11)
         assert age is not None and age < 5.0, f"clock not reset, age={age}"
 
+    async def test_a_skipped_wake_still_starts_a_fresh_progress_window(self, wired: _Build) -> None:
+        """The reset must precede every await in `_run_turn`.
+
+        A task created between two dispatcher scans — a resurrect wake for a
+        terminated agent — is otherwise judged on its predecessor incarnation's
+        clock, and the dispatcher's stale-turn cancel lands before the new turn
+        can open its window (2026-09-11: the bounded unwind was refused in
+        teardown and the host exited). A non-runnable wake skips admission but
+        is still a fresh task and must reset the clock.
+        """
+        import time as _time
+
+        from agent._turn_progress import _PROGRESS, turn_progress_age_s
+
+        host, _, _ = wired({11: _Row(status="terminated")})
+        _PROGRESS[11] = [_time.monotonic() - 99999.0]
+        await asyncio.wait_for(host.run_turn(11), 2)
+        age = turn_progress_age_s(11)
+        assert age is not None and age < 5.0, f"clock not reset, age={age}"
+
     async def test_a_crashing_turn_drops_the_runtime(self, wired: _Build) -> None:
         """A crash is the hosted equivalent of a process dying mid-turn, and a
         respawn re-runs the startup reconcile. Keeping the cached runtime would
