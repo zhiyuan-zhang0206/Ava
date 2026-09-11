@@ -37,7 +37,6 @@ from services.pitr.restore_manifest import (
 )
 from services.pitr.restore_object_store import GenerationPinnedObjectReader
 from services.pitr.wal_validate import validate_wal_file
-from shared.proc_tree import create_time_matches, stable_create_time
 
 
 class RestoreProofError(RuntimeError):
@@ -291,6 +290,12 @@ def _is_zombie(process: psutil.Process) -> bool:
 
 
 def _matching_process(pid: int, created_at: float) -> psutil.Process | None:
+    # Method-local: this module sits inside the updater's pre-checkout import
+    # closure, and `shared.proc_tree` imports `shared.session_record` — a
+    # module-scope import here would pull that module back into the closure.
+    # Same arrangement as shared/proc.py.
+    from shared.proc_tree import create_time_matches, stable_create_time
+
     try:
         process = psutil.Process(pid)
         if not create_time_matches(stable_create_time(process), created_at):
@@ -598,6 +603,9 @@ def prove_candidate(  # noqa: PLR0915
         raise RestoreProofError("restore proof must run as its process-group leader")
     if owner.exists() or owner.is_symlink():
         raise RestoreProofError("restore proof owner evidence already exists")
+    # Method-local for the same closure reason as `_matching_process`.
+    from shared.proc_tree import stable_create_time
+
     _atomic_owner(
         owner,
         {
