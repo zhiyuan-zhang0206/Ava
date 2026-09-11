@@ -597,6 +597,79 @@ class TestCancelAgent:
         assert 5 not in sched.active_agents, "only actual unwind releases the slot"
 
 
+class TestCancelBeforeTheFirstSlice:
+    """A cancel landing before the task's first loop slice must not leave a
+    phantom slot (task #3085, found in the PR #2217 review): `_pump`'s
+    `finally` never runs for a task that never started, so the reaper callback
+    releases the slot and re-arms the wake the task never consumed."""
+
+    async def test_the_unstarted_slot_is_released_and_the_wake_rearmed(self) -> None:
+        rec = _Recorder()
+        sched = TurnScheduler(rec)
+
+        sched.wake(7)  # queued; not one slice has run
+        assert await asyncio.wait_for(sched.cancel_agent(7), 2) is True
+        await _settle()
+
+        # Pre-fix the entry leaked: the agent stayed in `active_agents` (the
+        # scan reads that as a straggler) and the recorded wake went nowhere.
+        assert rec.started == [7], "the unconsumed wake must be re-armed, not dropped"
+        assert sched.active_agents == frozenset()
+
+    async def test_force_cancel_before_the_first_slice_releases_the_slot(self) -> None:
+        rec = _Recorder()
+        sched = TurnScheduler(rec)
+
+        async def _validate(_agent_id: int, _command_id: int) -> bool:
+            return True
+
+        sched.wake(7)
+        assert await asyncio.wait_for(sched.cancel_exact_force(7, 1, _validate), 2) is True
+        await _settle()
+
+        assert rec.started == [7]
+        assert sched.active_agents == frozenset()
+
+    async def test_aclose_does_not_rearm_after_a_prestart_cancel(self) -> None:
+        """Shutdown must stay quiet: the closed flag outranks any pending wake,
+        so a pre-start cancel during `aclose` never starts a successor."""
+        rec = _Recorder()
+        sched = TurnScheduler(rec)
+
+        sched.wake(7)
+        await sched.aclose()
+        await _settle()
+
+        assert rec.started == [], "a closed scheduler must not start a successor"
+        assert sched.active_agents == frozenset()
+
+    async def test_a_cancelled_before_start_turn_never_reads_as_a_straggler(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The scan's post-cancel check judges the captured task, not registry
+        membership: pre-fix, the staging below exits the host with a false
+        `did not unwind`."""
+        monkeypatch.setattr(dispatcher, "turn_progress_age_s", _stale_age)
+        rec = _Recorder()
+        sched = TurnScheduler(rec)
+
+        async def _pending(_stale_after_s: float) -> list[dispatcher.PendingInboundWake]:
+            return [dispatcher.PendingInboundWake(agent_id=7, stale=True)]
+
+        disp = InboundWakeDispatcher(
+            "redis://unused", sched, pending_scan=_pending, stale_after_s=180.0
+        )
+
+        sched.wake(7)
+        await asyncio.wait_for(sched.cancel_agent(7), 2)
+        await _settle()
+
+        await disp.scan_once()  # must not raise: no straggler exists
+        await _settle()
+
+        assert rec.started.count(7) >= 1, "the scan must re-drive the agent it saw stale"
+
+
 async def test_stuck_fixture_releases_after_failed_assertion() -> None:
     """A useful failure must not strand an unkillable task in pytest teardown."""
     turn: _StuckTurn | None = None
@@ -757,7 +830,7 @@ class _ScanScheduler:
         self.cancelled.append(agent_id)
         if self._unwinds_on_cancel:
             self._active.discard(agent_id)
-        return True
+        return self._unwinds_on_cancel
 
 
 class TestPendingScan:
@@ -965,6 +1038,52 @@ class TestTurnLevelStaleScan:
 
         assert scheduler.cancelled == [23]
         assert scheduler.woken == []
+
+    async def test_a_turn_completing_during_an_earlier_unwind_is_not_a_straggler(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The loop walks a snapshot of the active set; while an earlier
+        candidate's cancel awaits its unwind, another turn can complete
+        naturally. `cancel_agent` reports the missing task as False — nothing
+        left to unwind, not a straggler — so the verdict must not raise a
+        false HostRestartRequiredError (QA #3242, task #3085)."""
+        order = list(frozenset({1, 2}))
+        hang_id, quick_id = order[0], order[1]
+        completed: list[int] = []
+        cancelled: list[int] = []
+
+        async def run_turn(agent_id: int) -> None:
+            if agent_id == hang_id:
+                try:
+                    await asyncio.Event().wait()
+                except asyncio.CancelledError:
+                    cancelled.append(agent_id)
+                    await asyncio.sleep(0.2)  # slow unwind — the window
+                    raise
+            else:
+                await asyncio.sleep(0.05)  # completes naturally mid-window
+                completed.append(agent_id)
+
+        scheduler = dispatcher.TurnScheduler(run_turn)
+        scheduler.wake(hang_id)
+        scheduler.wake(quick_id)
+        for _ in range(6):
+            await asyncio.sleep(0)
+
+        monkeypatch.setattr(dispatcher, "turn_progress_age_s", _stale_age)
+
+        async def _pending(_stale_after_s: float) -> list[dispatcher.PendingInboundWake]:
+            return []
+
+        disp = InboundWakeDispatcher(
+            "redis://unused", scheduler, pending_scan=_pending, stale_after_s=180.0
+        )
+
+        await disp.scan_once()  # must not raise
+
+        assert cancelled == [hang_id]
+        assert completed == [quick_id]
+        await scheduler.aclose()
 
 
 class _QueueingPubSub:
