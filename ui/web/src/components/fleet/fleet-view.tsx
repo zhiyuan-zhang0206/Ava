@@ -20,6 +20,7 @@ import { MessageSquare, PanelRightOpen } from "lucide-react";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { useDefaultLayout } from "react-resizable-panels";
 
 import { GraphView } from "@/components/fleet/graph-view";
 import { InboxQueue } from "@/components/fleet/inbox-queue";
@@ -38,6 +39,7 @@ import { useBreakpoint } from "@/lib/breakpoint";
 import { useUserSettings } from "@/lib/use-user-settings";
 import { cn } from "@/lib/utils";
 import { FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0 } from "@/lib/layout";
+import { panelLayoutStorage } from "@/lib/panel-layout-storage";
 
 // Which mobile tab is on screen is an EPHEMERAL, per-device selection ("which
 // surface am I looking at right now"), not a durable preference — so it stays
@@ -46,6 +48,13 @@ import { FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0 } from "@/lib/layout";
 // would mismatch hydration). The Inbox deep link is the exception: it writes
 // the tab because it is the user's current surface choice.
 const LS_MOBILE_TAB = "ava.fleet.mobileTab";
+// v4 stores the split as { <panelId>: percent }; panel ids are part of the
+// persisted state (the library also writes them to id/data-testid on the panel
+// node — keep them unique across the app).
+const PANEL_GRAPH = "panel-graph";
+const PANEL_QUEUE = "panel-queue";
+const FLEET_SPLIT_LAYOUT_ID = "ava.fleet.split";
+const FLEET_SPLIT_STORAGE = panelLayoutStorage([PANEL_GRAPH, PANEL_QUEUE]);
 // The desktop left-panel view (Graph vs Task Graph) and the collapsed-queue
 // choice ARE durable preferences — DB-backed (display.fleet_left_view /
 // display.fleet_queue_collapsed) so they follow the user across frontends.
@@ -185,6 +194,14 @@ const DesktopLayout = memo(function DesktopLayout({
   const queueCollapsed = settings["display.fleet_queue_collapsed"] === true;
   const setQueueCollapsed = (v: boolean) => setSetting("display.fleet_queue_collapsed", v);
 
+  // Only user-driven commits persist: mount / window-resize / shape commits
+  // must not overwrite the user's dragged split.
+  const splitLayout = useDefaultLayout({
+    id: FLEET_SPLIT_LAYOUT_ID,
+    storage: FLEET_SPLIT_STORAGE,
+    onlySaveAfterUserInteractions: true,
+  });
+
   return (
     <>
       <header className={cn("shrink-0 items-center gap-3 border-b border-border px-6 py-3", FLEX)}>
@@ -233,14 +250,15 @@ const DesktopLayout = memo(function DesktopLayout({
       ) : (
         // The split ratio is EXEMPT from the localStorage→DB migration: it is a
         // per-viewport layout value persisted by react-resizable-panels through
-        // its own synchronous Storage interface (autoSaveId), which does not
-        // bridge to the async user_settings API. Kept per-device by design.
+        // its own synchronous Storage interface (useDefaultLayout), which does
+        // not bridge to the async user_settings API. Kept per-device by design.
         <ResizablePanelGroup
-          direction="horizontal"
-          autoSaveId="ava.fleet.split"
+          orientation="horizontal"
+          defaultLayout={splitLayout.defaultLayout}
+          onLayoutChanged={splitLayout.onLayoutChanged}
           className={cn(FLEX_1, MIN_H_0)}
         >
-          <ResizablePanel defaultSize={52} minSize={25}>
+          <ResizablePanel id={PANEL_GRAPH} defaultSize="52%" minSize="25%">
             <LeftGraphPanel
               selectedAgentId={selectedAgentId}
               setSelectedAgentId={setSelectedAgentId}
@@ -250,7 +268,7 @@ const DesktopLayout = memo(function DesktopLayout({
             />
           </ResizablePanel>
           <ResizableHandle />
-          <ResizablePanel defaultSize={48} minSize={30}>
+          <ResizablePanel id={PANEL_QUEUE} defaultSize="48%" minSize="30%">
             <InboxQueue
               agents={agents}
               className="h-full"

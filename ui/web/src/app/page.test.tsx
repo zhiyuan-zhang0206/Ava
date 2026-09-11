@@ -493,15 +493,17 @@ describe("HomePage top-level render", () => {
     };
     wrap(<HomePage />);
 
+    // v4 nests each Panel: the group's direct child is the sizing node
+    // ([data-panel]); the element that carries the panel's className wraps the
+    // content inside it.
     const main = screen.getByRole("main");
     const homeContent = screen.getByTestId("timeline-surface").closest("section");
     const panel = await screen.findByTestId("inspector-panel");
-    const timelinePanel = homeContent?.parentElement;
-    const inspectorPanel = panel.parentElement;
-    const inspectorGroup = timelinePanel?.parentElement;
-    expect(inspectorGroup).toBeTruthy();
-    expect(main.contains(inspectorGroup!)).toBe(true);
-    expect(inspectorPanel?.parentElement).toBe(inspectorGroup);
+    const timelineGroup = homeContent?.closest('[data-slot="resizable-panel-group"]');
+    const inspectorPanel = panel.closest("[data-panel]");
+    expect(timelineGroup).toBeTruthy();
+    expect(main.contains(timelineGroup!)).toBe(true);
+    expect(inspectorPanel?.parentElement).toBe(timelineGroup);
     expect(inspectorPanel?.previousElementSibling?.getAttribute("role")).toBe("separator");
     const toggle = screen.getByTestId("inspector-toggle");
     expect(screen.getByRole("banner").contains(toggle)).toBe(true);

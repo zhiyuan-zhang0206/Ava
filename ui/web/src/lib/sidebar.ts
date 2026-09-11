@@ -167,7 +167,7 @@ function subscribeStatsPoll(queryClient: QueryClient, windowHours: StatsWindowHo
   if (entry === undefined) {
     const timer = setInterval(() => {
       void queryClient
-        .fetchQuery({
+        .query({
           queryKey: ["stats", "dashboard", windowHours],
           queryFn: () => api.getStatsDashboard(windowHours),
           retry: 1,

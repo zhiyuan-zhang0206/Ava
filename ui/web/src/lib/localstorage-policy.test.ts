@@ -23,8 +23,8 @@ const SETITEM_ALLOWLIST = new Set<string>([
   "lib/use-agents.ts", // ava.active.agent_id — last-viewed agent
 ]);
 
-// Files permitted to use react-resizable-panels' autoSaveId (a per-viewport
-// split ratio persisted by the library through its own sync Storage).
+// Files permitted to configure a react-resizable-panels split layout through
+// useDefaultLayout (a per-viewport ratio persisted by the library itself).
 const AUTOSAVE_ALLOWLIST = new Set<string>([
   "components/fleet/fleet-view.tsx", // ava.fleet.split
   "components/fleet/inbox-queue/index.tsx", // ava.fleet.queue-split (dir split, task #1010)
@@ -69,9 +69,9 @@ describe("localStorage state policy", () => {
     expect(offenders, "new localStorage.setItem writer — persist to the DB (user_settings) instead").toEqual([]);
   });
 
-  it("only allowlisted files use react-resizable-panels autoSaveId", () => {
+  it("only allowlisted files configure react-resizable-panels layouts", () => {
     const offenders = SOURCE_FILES
-      .filter(({ src }) => /autoSaveId\s*=/.test(src))
+      .filter(({ src }) => src.includes("useDefaultLayout("))
       .map(({ rel }) => rel)
       .filter((rel) => !AUTOSAVE_ALLOWLIST.has(rel));
     expect(offenders).toEqual([]);
