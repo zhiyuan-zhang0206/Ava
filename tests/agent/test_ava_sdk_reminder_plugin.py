@@ -17,7 +17,8 @@ Covered:
   stdlib + content via ava.files never triggers). A sleep cell that already names `watcher` marks
   the wait category seen WITHOUT emitting (the agent is using the watcher
   primitive itself) while any other matched category still hints; the pure
-  mentions_watcher matcher.
+  mentions_watcher matcher; the shell hint's inlined signature + docstring are
+  pinned to the live wrapped `ava.shell.run`.
 - after_exec (assumed-persistence NameError): an undefined identifier hints
   only when its whole name appeared in an earlier execute_code cell; the
   current cell, builtins, keywords, disabled config, and repeated same-name
@@ -30,6 +31,7 @@ Covered:
   matcher (incl. stop-at-prior-AIMessage boundary).
 """
 
+import inspect
 import sys
 from collections.abc import Iterator
 from typing import Any
@@ -217,11 +219,56 @@ def test_detect_categories_multi_in_order():
 
 
 def test_categories_cover_all_hints():
-    """Every category has a hint that points at an `ava` primitive via help()."""
+    """Every category has a hint that names its `ava` primitive. wait/files/http
+    point at a self-serve help() entry; shell inlines the `ava.shell.run`
+    contract instead (drift-guarded below)."""
     for cat in CATEGORIES:
         h = hint_for(cat)
         assert "ava" in h
-        assert "help(" in h
+        if cat != "shell":
+            assert "help(" in h
+
+
+@pytest.fixture
+def _load_ava_code_plugin() -> Iterator[None]:
+    """Load plugins.ava_code so `ava.shell.run` carries the same wrap the agent
+    runtime installs — the drift guard below reads the agent-facing signature +
+    docstring off that live object. Teardown clears registrations (wraps
+    included) so nothing leaks into the next test."""
+    from importlib import import_module
+
+    from shared.plugin_context import PluginContext
+
+    clear_plugin_registrations()
+    for name in list(sys.modules):
+        if name.startswith("ava_builtins.plugins.ava_code"):
+            del sys.modules[name]
+    with PluginContext("ava_code"):
+        import_module("ava_builtins.plugins.ava_code.plugin")
+
+    yield
+
+    clear_plugin_registrations()
+
+
+def test_shell_hint_embeds_live_shell_run_contract(_load_ava_code_plugin: None):
+    """The shell hint's inlined signature + docstring track the live
+    `ava.shell.run` (the ava_code wrap is the agent-facing contract): when the
+    wrapper's signature or docstring drifts, this goes red and the hint follows
+    (user ruling 2026-09-12)."""
+    import ava as ava_sdk
+    from ava import _format_signature
+
+    hint = hint_for("shell")
+
+    # Signature line: rendered by the same helper as ava.help()'s stub, so a
+    # changed parameter set or annotation fails here.
+    assert f"def run{_format_signature(ava_sdk.shell.run)}:" in hint
+
+    # Docstring block: verbatim modulo line wrapping.
+    doc = inspect.getdoc(ava_sdk.shell.run)
+    assert doc is not None
+    assert " ".join(doc.split()) in " ".join(hint.split())
 
 
 @pytest.mark.parametrize(

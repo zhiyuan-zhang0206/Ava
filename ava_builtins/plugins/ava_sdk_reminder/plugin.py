@@ -1,4 +1,4 @@
-"""SDK reminder plugin — gently surface the matching SDK primitive when the
+"""SDK reminder plugin — surface the matching SDK primitive when the
 agent reaches for a native-Python equivalent.
 
 Three reminder families share one `reminded` set. Each hint surfaces as its own
@@ -8,7 +8,7 @@ aside rather than mistaking it for the code cell's stdout:
 - Four code-cell categories (shell/wait/files/http): when an executed code
   cell uses a native idiom that has a smoother SDK primitive
   (subprocess/os.system, time.sleep loops, open()/pathlib/shutil
-  file-content ops, requests/httpx/urllib), the after_exec hook injects a one-line note pointing
+  file-content ops, requests/httpx/urllib), the after_exec hook injects a note pointing
   at the primitive (`ava.shell.run` / `ava.watcher` / `ava.files` / `ava.web`)
   after the cell's output, leaving that output untouched.
 - Assumed-persistence NameErrors: when an undefined non-builtin identifier

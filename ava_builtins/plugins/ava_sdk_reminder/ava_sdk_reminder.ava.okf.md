@@ -12,7 +12,7 @@ tags:
 
 ## What is it
 
-`ava_sdk_reminder` gently reminds the agent to use smoother SDK primitives when it uses native Python equivalents, explains cross-cell NameErrors caused by fresh interpreters, and points agent replies at the delivery primitive.
+`ava_sdk_reminder` reminds the agent to use smoother SDK primitives when it uses native Python equivalents, explains cross-cell NameErrors caused by fresh interpreters, and points agent replies at the delivery primitive.
 
 ## Registered Hooks
 
