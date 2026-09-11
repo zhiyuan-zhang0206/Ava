@@ -9,6 +9,10 @@ Covers:
 """
 
 import json
+import subprocess
+import sys
+import textwrap
+from pathlib import Path
 
 import pytest
 from pydantic import BaseModel, ConfigDict, Field
@@ -275,6 +279,34 @@ def test_validate_config_overlay_unknown_llm_model_raises(isolated_registry, uni
 
 def test_validate_config_overlay_registered_llm_model_passes(isolated_registry, unit_home):
     validate_config_overlay({"llm_model": "claude-opus-4-6"})
+
+
+def test_validate_overlay_is_self_sufficient_in_a_fresh_process() -> None:
+    """File-level isolation (task #3138, same class as the compact gate's budget):
+    a process whose FIRST registry use is this validation must pass a registered
+    model id — pre-fix the empty MODELS false-rejected it ("valid models: "
+    empty). This test process already has the registry loaded (the other overlay
+    tests here depend on it), so the scenario runs in a fresh interpreter."""
+    code = textwrap.dedent(
+        """
+        from shared.lm.registry import MODELS
+        from shared.plugin_config_registry import validate_config_overlay
+
+        assert not MODELS, "fresh process must start with an empty registry"
+        validate_config_overlay({"llm_model": "deepseek-v4-flash"})
+        print("ok")
+        """
+    )
+    result = subprocess.run(  # noqa: S603 — our own venv python + a literal script
+        [sys.executable, "-c", code],
+        cwd=Path(__file__).resolve().parents[2],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=180,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "ok"
 
 
 def test_validate_config_overlay_unknown_reasoning_effort_raises(isolated_registry, unit_home):
