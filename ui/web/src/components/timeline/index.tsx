@@ -862,7 +862,7 @@ export function TimelineView({
       if (nextTop === anchorTop) break;
       anchorTop = nextTop;
     }
-    void viewport.offsetHeight; // force synchronous layout
+    void viewport.getBoundingClientRect(); // force synchronous layout
     const node = findNode();
     if (!node) {
       for (const { el, cv } of cvSaved) el.style.contentVisibility = cv;

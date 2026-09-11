@@ -61,18 +61,24 @@ export function useInspectorPrefetch(agentId: number) {
     clearTimer();
     if (!open) return;
     startedRef.current = true;
-    void queryClient.prefetchQuery({
-      queryKey: inspectLiveQueryKey(agentId),
-      queryFn: ({ signal }) => api.getAgentInspectLive(agentId, signal),
-    });
-    void queryClient.prefetchQuery({
-      queryKey: inspectWindowedQueryKey(agentId, inspectorHours),
-      queryFn: ({ signal }) => fetchWindowedInspect(agentId, inspectorHours, signal),
-    });
-    void queryClient.prefetchQuery({
-      queryKey: inspectWidgetsQueryKey(agentId),
-      queryFn: ({ signal }) => api.getAgentInspectWidgets(agentId, signal),
-    });
+    void queryClient
+      .query({
+        queryKey: inspectLiveQueryKey(agentId),
+        queryFn: ({ signal }) => api.getAgentInspectLive(agentId, signal),
+      })
+      .catch(() => undefined);
+    void queryClient
+      .query({
+        queryKey: inspectWindowedQueryKey(agentId, inspectorHours),
+        queryFn: ({ signal }) => fetchWindowedInspect(agentId, inspectorHours, signal),
+      })
+      .catch(() => undefined);
+    void queryClient
+      .query({
+        queryKey: inspectWidgetsQueryKey(agentId),
+        queryFn: ({ signal }) => api.getAgentInspectWidgets(agentId, signal),
+      })
+      .catch(() => undefined);
   }, [agentId, clearTimer, inspectorHours, open, queryClient]);
 
   const schedule = useCallback(() => {
