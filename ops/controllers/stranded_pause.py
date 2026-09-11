@@ -84,7 +84,9 @@ import contextlib
 import logging
 import os
 import time
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 from ops import cluster_session
 from ops.cluster import unpause_local_cluster
@@ -92,6 +94,7 @@ from ops.controllers.base import BlockScope, ReconcileResult
 from shared import pause_owner, ui_update_state, updater_handoff
 from shared.cluster_lock import read_update_lease
 from shared.deploy_timing import GATEWAY_DOWN_OWNER_GRACE_S
+from shared.host_deploy_state import HostDeployState
 from shared.machine import MachineRole, machine_name
 from shared.platform import LockTimeoutError
 
@@ -110,6 +113,22 @@ _log = logging.getLogger("ops.controllers.stranded_pause")
 # watchdog round. Every second beyond that is a second `ops.manager` blocks this
 # host's whole roster on a pause nobody is coming back for.
 STRANDED_PAUSE_TIMEOUT_S = 120.0  # 2 min
+
+# How long an ownerless maintenance hold must persist before the controller
+# DECLARES it stranded (task #3132) — the failure state a dead updater leg
+# leaves. Recovery deliberately does not touch a maintenance hold (an
+# incomplete stop is never resumed by a controller), so before this record the
+# state was silent, permanent and roster-invisible; the declaration is what the
+# gateway-side alarm and the roster read (host_deploy_state.stranded_hold_*).
+#
+# The bound reuses `ops.manager`'s standing judgment — ten rounds, no
+# legitimate transition holds this host longer (_BLOCKED_ROUND_ALARM_ROUNDS,
+# ten minutes at the 60s round) — rather than inventing a second one. It only
+# ever needs to outlast the ownerless gaps a healthy transition has (the
+# spawn gap inside `spawn_update`, observed tens of seconds worst case) plus
+# one watchdog round of clock slack; anything below the manager's bound would
+# alarm on states the manager still treats as ordinary.
+STRANDED_HOLD_NOTICE_S = 600.0  # 10 min
 
 # The reachability-evidence grace (value, ordering and rationale live in the
 # clock lattice — see the module-level import of `GATEWAY_DOWN_OWNER_GRACE_S`).
@@ -204,27 +223,36 @@ def is_paused() -> bool:
     return state is not None and state.posture in ("paused", "converging")
 
 
-def _stranded_pause_seconds() -> float | None:
-    """How long this host has been paused/converging, or None when it is not
-    paused or the row cannot be read.
+def _paused_age(state: HostDeployState | None) -> float | None:
+    """Seconds since `state`'s pause anchor, or None when it is not paused.
 
     The anchor is `paused_at` (set when the posture enters `paused`, preserved
     through `converging`), NOT `updated_at`: every transition inside the pause
     window bumps `updated_at`, including each updater-lease renewal — which is
     what kept a stranded 2026-09-10 pause reading "fresh" for 122 rounds while
     its owner was dead, so the owner check never ran (issue #2101). Rows from
-    before the `paused_at` column existed fall back to `updated_at`."""
-    from shared.host_deploy_state import read
+    before the `paused_at` column existed fall back to `updated_at`.
 
-    try:
-        state = read()
-    except Exception:
-        _log.warning("[ops.pause] cannot read host_deploy_state; skipping stranded-pause check")
-        return None
+    Pure — the read and its failure shape belong to the caller: recovery reads
+    a failed read as "no reading, no action", while the stranded-hold verdict
+    must tell "not paused" (clear) from "cannot read" (unknown, record stands)."""
     if state is None or state.posture not in ("paused", "converging"):
         return None
     anchor = state.paused_at if state.paused_at is not None else state.updated_at
     return time.time() - anchor.timestamp()
+
+
+def _stranded_pause_seconds() -> float | None:
+    """How long this host has been paused/converging, or None when it is not
+    paused or the row cannot be read — recovery's direction is the same reading
+    either way, so it does not need the distinction the verdict does."""
+    from shared.host_deploy_state import read
+
+    try:
+        return _paused_age(read())
+    except Exception:
+        _log.warning("[ops.pause] cannot read host_deploy_state; skipping stranded-pause check")
+        return None
 
 
 def _pause_owner(
@@ -260,9 +288,57 @@ def _pause_owner(
 
     if maintenance.held():
         return "explicit maintenance hold (no automatic expiry)"
+    return _executing_owner(handoff)
+
+
+# `_executing_owner`'s "cannot read it" placeholders: answers that exist because
+# the evidence was missing, not because anything was seen executing. Recovery
+# treats them like any other owner (defer — missing evidence must never license
+# an unpause). The stranded-hold record treats them as an UNANSWERABLE round: it
+# neither declares nor clears on them (task #3132), because erasing the record
+# on missing evidence is the silent shape the record exists to remove. Keep this
+# set complete when adding a placeholder: the two disciplines split here, and a
+# string that drops out of it silently becomes a "clear".
+_HANDOFF_UNREADABLE = "updater handoff is unreadable"
+_UPDATE_LOCK_UNREADABLE = "unreadable update lock"
+_MACHINE_NAME_UNRESOLVABLE = "unresolvable machine name"
+_ORCHESTRATION_SESSION_UNREADABLE = "unreadable orchestration session"
+_UNREADABLE_OWNER_READINGS = frozenset(
+    {
+        _HANDOFF_UNREADABLE,
+        _UPDATE_LOCK_UNREADABLE,
+        _MACHINE_NAME_UNRESOLVABLE,
+        _ORCHESTRATION_SESSION_UNREADABLE,
+    }
+)
+
+
+def _owner_reading_is_unreadable(owner: str) -> bool:
+    """Whether an `_executing_owner` answer is a missing-evidence placeholder."""
+    return owner in _UNREADABLE_OWNER_READINGS
+
+
+def _executing_owner(
+    handoff: updater_handoff.UpdaterHandoffSnapshot | None = None,
+) -> str | None:
+    """Who is still executing a transition here, ignoring the maintenance hold.
+
+    The body of the two-signal owner determination minus the hold short-circuit:
+    `_pause_owner` answers "may this pause be resumed", and any maintenance hold
+    is an owner of that question (nobody resumes a held unit but the explicit
+    `ava start`). The stranded-hold verdict (task #3132) asks the narrower
+    question behind it — is anything executing DESPITE the hold — because a hold
+    with no live handoff, session, deploy lease or orchestration is exactly the
+    failure state a dead updater leg leaves, and it is the one state nothing
+    else on the host can see. Same placeholder-on-unreadable discipline as
+    `_pause_owner`: only `None` is proof that nothing is executing. The
+    unreadable subset of those placeholders (`_UNREADABLE_OWNER_READINGS`) is
+    also what the stranded-hold verdict reports as `unknown` — a round the
+    record must survive untouched — see `StrandedHoldVerdict`.
+    """
     handoff = updater_handoff.read() if handoff is None else handoff
     if handoff.status == "invalid":
-        return "updater handoff is unreadable"
+        return _HANDOFF_UNREADABLE
     if handoff.status == "pending" and not handoff.expired:
         return f"updater handoff {handoff.generation} is pending"
     if handoff.status == "running" and updater_handoff.owner_is_live(handoff):
@@ -271,7 +347,7 @@ def _pause_owner(
         lease = read_update_lease()
     except Exception:
         _log.warning("[ops.pause] could not read update lock; deferring stranded-pause recovery")
-        return "unreadable update lock"
+        return _UPDATE_LOCK_UNREADABLE
     try:
         awaited = lease is not None and lease.awaits(machine_name())
     except Exception:
@@ -281,7 +357,7 @@ def _pause_owner(
             "[ops.pause] could not resolve this machine's name, so whether the deploy lease "
             "names this host is unanswerable; deferring stranded-pause recovery"
         )
-        return "unresolvable machine name"
+        return _MACHINE_NAME_UNRESOLVABLE
     if lease is not None and awaited:
         _log.warning(
             "[ops.pause] the deploy lease is a settle hold waiting for THIS host (%s) — nothing "
@@ -308,7 +384,7 @@ def _pause_owner(
             "[ops.pause] could not probe local orchestration sessions; deferring "
             "stranded-pause recovery"
         )
-        return "unreadable orchestration session"
+        return _ORCHESTRATION_SESSION_UNREADABLE
     if live_session is not None:
         return f"local orchestration session {live_session} is in flight"
     from ops.cluster import current_orchestration
@@ -320,8 +396,143 @@ def _pause_owner(
             "[ops.pause] could not read the orchestration session; deferring stranded-pause "
             "recovery"
         )
-        return "unreadable orchestration session"
+        return _ORCHESTRATION_SESSION_UNREADABLE
     return f"a local {orchestration} is in flight" if orchestration is not None else None
+
+
+@dataclass(frozen=True)
+class StrandedHoldVerdict:
+    """One round's reading of the stranded-hold question (task #3132).
+
+    A reading, not a boolean, because the durable record is a claim that must
+    never be asserted or erased on missing evidence:
+
+    - ``"stranded"`` — declare/keep: a maintenance hold past the notice bound,
+      a failed updater run under it, and nothing executing. ``detail`` is the
+      declaration reason (e.g. ``"updater exited rc=1"``).
+    - ``"clear"`` — decidably not stranded: no pause (or too young a one), no
+      maintenance hold, no failed updater run readable in this window, or a
+      live/queued owner. ``detail`` is ``""``.
+    - ``"unknown"`` — the evidence is missing THIS round: the posture row could
+      not be read, or the ownership signal is an unreadable placeholder
+      (``_UNREADABLE_OWNER_READINGS``, named in ``detail``). The record must be
+      left exactly as it stands — see `sync_stranded_hold_record`.
+
+    ``paused_for`` is the pause's age in seconds, or None when no anchor could
+    be read.
+    """
+
+    kind: Literal["stranded", "clear", "unknown"]
+    detail: str
+    paused_for: float | None
+
+
+def stranded_hold_verdict(
+    handoff: updater_handoff.UpdaterHandoffSnapshot | None = None,
+) -> StrandedHoldVerdict:
+    """This round's reading of the stranded-hold question (task #3132).
+
+    The failure state itself: a maintenance hold — the deliberately
+    non-expiring pause a stop arms, releasable only by an explicit authorized
+    `ava start` — whose owning process is gone. Three facts together:
+    nothing executes under it (`_executing_owner` reads no live handoff,
+    session, deploy lease or orchestration), this host's own updater record
+    says the run that armed it FAILED (`exited` non-zero, or `unknown` — died
+    mid-flight; a `declined` run stopped nothing and a successful one would
+    have released the hold), and the state has outlived
+    `STRANDED_HOLD_NOTICE_S` so no in-flight transition can be misread as one.
+
+    Clears only on a DECIDED not-stranded reading — no pause row, too young a
+    pause, no maintenance hold, a healthy/absent updater outcome, or a real
+    owner. Missing evidence (`unknown`) is deliberately not a clear: it must
+    neither erase a standing record nor invent a declaration.
+
+    Recovery deliberately does NOT auto-release such a hold, and this verdict
+    does not change that: it exists to make the state loud and visible
+    (`sync_stranded_hold_record`, the gateway-side alarm, the roster) instead
+    of silent and permanent. An operator's own `ava maintenance stop` produces
+    no failed updater outcome, so it never matches — deliberately held units
+    stay quiet.
+    """
+    from shared import maintenance
+    from shared.host_deploy_state import read as read_host_deploy_state
+
+    try:
+        state = read_host_deploy_state()
+    except Exception:
+        _log.warning(
+            "[ops.pause] cannot read host_deploy_state; the stranded-hold reading is "
+            "unknown this round"
+        )
+        return StrandedHoldVerdict(
+            kind="unknown", detail="unreadable host deploy state", paused_for=None
+        )
+    paused_for = _paused_age(state)
+    if paused_for is None or paused_for < STRANDED_HOLD_NOTICE_S:
+        return StrandedHoldVerdict(kind="clear", detail="", paused_for=paused_for)
+    if not maintenance.held():
+        return StrandedHoldVerdict(kind="clear", detail="", paused_for=paused_for)
+    owner = _executing_owner(handoff)
+    if owner is not None and not _owner_reading_is_unreadable(owner):
+        return StrandedHoldVerdict(kind="clear", detail="", paused_for=paused_for)
+    from ops.updater_outcome import last_updater_outcome
+
+    outcome = last_updater_outcome()
+    if outcome is None or outcome.kind == "declined":
+        return StrandedHoldVerdict(kind="clear", detail="", paused_for=paused_for)
+    if outcome.kind == "exited" and (outcome.rc or 0) == 0:
+        return StrandedHoldVerdict(kind="clear", detail="", paused_for=paused_for)
+    if owner is not None:
+        # The failed-updater half is proven; the ownership half could not be
+        # read. Leaving the record untouched is the only reading that neither
+        # asserts nor erases anything on missing evidence.
+        return StrandedHoldVerdict(kind="unknown", detail=owner, paused_for=paused_for)
+    reason = (
+        f"updater exited rc={outcome.rc}" if outcome.kind == "exited" else "updater died mid-flight"
+    )
+    return StrandedHoldVerdict(kind="stranded", detail=reason, paused_for=paused_for)
+
+
+def sync_stranded_hold_record(
+    handoff: updater_handoff.UpdaterHandoffSnapshot | None = None,
+) -> None:
+    """Bring this host's durable stranded-hold record in line with the verdict.
+
+    Declares while the verdict reads `stranded` — set-once, and logged at ERROR
+    on the transition so the log carries the incident boundary and the
+    recourse — and clears on a DECIDED not-stranded reading (including every
+    unpaused round), so the record cannot outlive the condition that justified
+    it. An `unknown` reading changes nothing: missing evidence neither declares
+    nor erases the record (erasing it there is the silent shape the record
+    exists to remove). A raised read (an unreadable maintenance journal) or a
+    failed write aborts this round with a warning; the record stands. Never
+    raises: it is a side band beside the recovery decision, and a DB blip must
+    cost a round, not the tick.
+    """
+    from shared.host_deploy_state import clear_stranded_hold, mark_stranded_hold
+
+    try:
+        verdict = stranded_hold_verdict(handoff)
+        if verdict.kind == "unknown":
+            return
+        if verdict.kind == "clear":
+            clear_stranded_hold()
+            return
+        if mark_stranded_hold(verdict.detail):
+            _log.error(
+                "[ops.pause] STRANDED HOLD declared: this host has been held for %.0fs "
+                "(%s) with nothing executing under the pause — the state a failed "
+                "update leg leaves. Not unpausing (an incomplete stop is never resumed "
+                "automatically); nothing else will resume it either — run `ava start` "
+                "on this host.",
+                verdict.paused_for or 0.0,
+                verdict.detail,
+            )
+    except Exception:
+        _log.warning(
+            "[ops.pause] stranded-hold record sync failed; retrying next round",
+            exc_info=True,
+        )
 
 
 def pause_owner_verdict(
@@ -454,6 +665,9 @@ class PauseController:
         if role == "gateway":
             record_gateway_reachability()
         if not is_paused():
+            # Not paused: the stranded-hold verdict (task #3132) is definitionally
+            # absent, so any record of it must go with it.
+            sync_stranded_hold_record()
             return ReconcileResult(dimension=self.name, blocks=BlockScope.NONE)
         if recover_stranded_pause():
             return ReconcileResult(
@@ -462,5 +676,9 @@ class PauseController:
                 acted=True,
                 detail="self-unpaused (stranded pause recovered)",
             )
+        # Still paused and no recovery licensed: this is where a failed leg's
+        # ownerless hold would otherwise sit silent and permanent. Record it —
+        # and only record it; the no-auto-resume rule is untouched.
+        sync_stranded_hold_record()
         _log.info("[ops.pause] host paused (posture), skipping tick")
         return ReconcileResult(dimension=self.name, blocks=BlockScope.ALL, detail="paused")

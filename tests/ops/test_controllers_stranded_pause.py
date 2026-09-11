@@ -696,3 +696,284 @@ def test_controller_proceeds_when_unpaused(fake_pause: Callable[[float | None], 
     fake_pause(None)
     res = sp.PauseController().reconcile("gateway")
     assert res.blocks is BlockScope.NONE and res.acted is False
+
+
+# ─── the stranded-hold record (task #3132) ────────────────────────────────────
+
+
+def _benign_handoff() -> object:
+    from shared.updater_handoff import UpdaterHandoffSnapshot
+
+    return UpdaterHandoffSnapshot(status="inactive")
+
+
+def _outcome(kind: str, rc: int | None) -> object:
+    from ops.updater_outcome import UpdaterOutcome
+
+    return UpdaterOutcome(kind=kind, rc=rc)
+
+
+@pytest.fixture
+def _ownerless(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Nothing executing: no deploy lease (sessions/orchestration come from the
+    autouse `_no_local_orchestration` fixture)."""
+    monkeypatch.setattr(sp, "read_update_lease", lambda: None)
+    monkeypatch.setattr(sp.updater_handoff, "read", _benign_handoff)
+
+
+@pytest.fixture
+def _maintenance_hold(monkeypatch: pytest.MonkeyPatch) -> None:
+    """This unit is held by an explicit maintenance hold (the pause_owner payload)."""
+    from shared import maintenance
+
+    monkeypatch.setattr(maintenance, "held", lambda: True)
+
+
+class _Recorder:
+    """Typed capture of the mark/clear calls (strict-mode pyright on tests)."""
+
+    def __init__(self) -> None:
+        self.marks: list[str] = []
+        self.clears = 0
+
+
+@pytest.fixture
+def _record_recorder(monkeypatch: pytest.MonkeyPatch) -> _Recorder:
+    """Capture mark/clear calls instead of writing the DB."""
+    import shared.host_deploy_state as hds
+
+    rec = _Recorder()
+
+    def _mark(reason: str) -> bool:
+        rec.marks.append(reason)
+        return True
+
+    def _clear() -> bool:
+        rec.clears += 1
+        return False
+
+    monkeypatch.setattr(hds, "mark_stranded_hold", _mark)
+    monkeypatch.setattr(hds, "clear_stranded_hold", _clear)
+    return rec
+
+
+def _failed_outcome_patch(monkeypatch: pytest.MonkeyPatch, outcome: object) -> None:
+    monkeypatch.setattr("ops.updater_outcome.last_updater_outcome", lambda: outcome)
+
+
+def test_stranded_hold_declared_for_an_ownerless_failed_update(
+    fake_pause: Callable[[float | None], None],
+    _maintenance_hold: None,
+    _ownerless: None,
+    _record_recorder: _Recorder,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The incident shape: a maintenance hold past the notice bound, nothing
+    executing under it, and the pause window's updater run exited rc=1."""
+    fake_pause(sp.STRANDED_HOLD_NOTICE_S + 60)
+    _failed_outcome_patch(monkeypatch, _outcome("exited", 1))
+    with caplog.at_level("ERROR"):
+        sp.sync_stranded_hold_record()
+    assert _record_recorder.marks == ["updater exited rc=1"]
+    assert _record_recorder.clears == 0
+    assert any("STRANDED HOLD declared" in r.message for r in caplog.records)
+
+
+def test_stranded_hold_declared_for_a_mid_flight_death(
+    fake_pause: Callable[[float | None], None],
+    _maintenance_hold: None,
+    _ownerless: None,
+    _record_recorder: _Recorder,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_pause(sp.STRANDED_HOLD_NOTICE_S + 60)
+    _failed_outcome_patch(monkeypatch, _outcome("unknown", None))
+    sp.sync_stranded_hold_record()
+    assert _record_recorder.marks == ["updater died mid-flight"]
+
+
+def test_no_declaration_before_the_notice_bound(
+    fake_pause: Callable[[float | None], None],
+    _maintenance_hold: None,
+    _ownerless: None,
+    _record_recorder: _Recorder,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_pause(sp.STRANDED_HOLD_NOTICE_S - 60)
+    _failed_outcome_patch(monkeypatch, _outcome("exited", 1))
+    sp.sync_stranded_hold_record()
+    assert _record_recorder.marks == []
+    assert _record_recorder.clears == 1
+
+
+def test_no_declaration_while_an_owner_is_executing(
+    fake_pause: Callable[[float | None], None],
+    _maintenance_hold: None,
+    _record_recorder: _Recorder,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_pause(sp.STRANDED_HOLD_NOTICE_S + 60)
+    monkeypatch.setattr(sp.cluster_session, "live_orchestration_session", lambda: "ava-updater")
+    monkeypatch.setattr(sp, "read_update_lease", lambda: None)
+    monkeypatch.setattr(sp.updater_handoff, "read", _benign_handoff)
+    _failed_outcome_patch(monkeypatch, _outcome("exited", 1))
+    sp.sync_stranded_hold_record()
+    assert _record_recorder.marks == []
+
+
+@pytest.mark.parametrize(
+    "outcome",
+    [("exited", 0), ("declined", 3), ("declined", None)],
+)
+def test_no_declaration_without_a_failed_updater_run(
+    outcome: tuple[str, int | None],
+    fake_pause: Callable[[float | None], None],
+    _maintenance_hold: None,
+    _ownerless: None,
+    _record_recorder: _Recorder,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A successful run would have released the hold; a declined one stopped
+    nothing (the host is serving its old code). Neither is the failure class."""
+    fake_pause(sp.STRANDED_HOLD_NOTICE_S + 60)
+    _failed_outcome_patch(monkeypatch, _outcome(*outcome))
+    sp.sync_stranded_hold_record()
+    assert _record_recorder.marks == []
+
+
+def test_no_declaration_without_a_maintenance_hold(
+    fake_pause: Callable[[float | None], None],
+    _ownerless: None,
+    _record_recorder: _Recorder,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An operator's own maintenance stop leaves no failed updater outcome, and a
+    plain unowned pause is the recovery path's business — neither declares."""
+    fake_pause(sp.STRANDED_HOLD_NOTICE_S + 60)
+    _failed_outcome_patch(monkeypatch, _outcome("exited", 1))
+    sp.sync_stranded_hold_record()
+    assert _record_recorder.marks == []
+
+
+def test_no_declaration_without_an_outcome(
+    fake_pause: Callable[[float | None], None],
+    _maintenance_hold: None,
+    _ownerless: None,
+    _record_recorder: _Recorder,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_pause(sp.STRANDED_HOLD_NOTICE_S + 60)
+    _failed_outcome_patch(monkeypatch, None)
+    sp.sync_stranded_hold_record()
+    assert _record_recorder.marks == []
+
+
+def test_verdict_reads_stranded_and_clear_for_the_named_shapes(
+    fake_pause: Callable[[float | None], None],
+    _maintenance_hold: None,
+    _ownerless: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The reading's shape: the incident is `stranded` with its reason; a decided
+    healthy window is `clear`."""
+    fake_pause(sp.STRANDED_HOLD_NOTICE_S + 60)
+    _failed_outcome_patch(monkeypatch, _outcome("exited", 1))
+    verdict = sp.stranded_hold_verdict()
+    assert (verdict.kind, verdict.detail) == ("stranded", "updater exited rc=1")
+    _failed_outcome_patch(monkeypatch, _outcome("exited", 0))
+    assert sp.stranded_hold_verdict().kind == "clear"
+
+
+def test_unknown_owner_reading_neither_declares_nor_clears(
+    fake_pause: Callable[[float | None], None],
+    _maintenance_hold: None,
+    _record_recorder: _Recorder,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An unreadable ownership signal is an unanswerable round, not a clear: the
+    half that would justify erasing the record is the missing half, and erasing
+    on it is the silent shape this record exists to remove (task #3132)."""
+    fake_pause(sp.STRANDED_HOLD_NOTICE_S + 60)
+    _failed_outcome_patch(monkeypatch, _outcome("exited", 1))
+    monkeypatch.setattr(sp.updater_handoff, "read", _benign_handoff)
+
+    def _boom() -> object:
+        raise RuntimeError("DB unreachable")
+
+    monkeypatch.setattr(sp, "read_update_lease", _boom)
+    verdict = sp.stranded_hold_verdict()
+    assert (verdict.kind, verdict.detail) == ("unknown", "unreadable update lock")
+    sp.sync_stranded_hold_record()
+    assert _record_recorder.marks == []
+    assert _record_recorder.clears == 0
+
+
+def test_unknown_handoff_reading_neither_declares_nor_clears(
+    fake_pause: Callable[[float | None], None],
+    _maintenance_hold: None,
+    _record_recorder: _Recorder,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from shared.updater_handoff import UpdaterHandoffSnapshot
+
+    fake_pause(sp.STRANDED_HOLD_NOTICE_S + 60)
+    _failed_outcome_patch(monkeypatch, _outcome("exited", 1))
+    monkeypatch.setattr(sp, "read_update_lease", lambda: None)
+    monkeypatch.setattr(
+        sp.updater_handoff, "read", lambda: UpdaterHandoffSnapshot(status="invalid")
+    )
+    verdict = sp.stranded_hold_verdict()
+    assert (verdict.kind, verdict.detail) == ("unknown", "updater handoff is unreadable")
+    sp.sync_stranded_hold_record()
+    assert _record_recorder.marks == []
+    assert _record_recorder.clears == 0
+
+
+def test_unknown_posture_row_neither_declares_nor_clears(
+    _record_recorder: _Recorder,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A posture row that cannot be read is missing evidence too — same round
+    discipline as the owner placeholders."""
+
+    def _boom(**kwargs: object) -> object:
+        raise RuntimeError("DB unreachable")
+
+    monkeypatch.setattr("shared.host_deploy_state.read", _boom)
+    verdict = sp.stranded_hold_verdict()
+    assert (verdict.kind, verdict.detail) == ("unknown", "unreadable host deploy state")
+    sp.sync_stranded_hold_record()
+    assert _record_recorder.marks == []
+    assert _record_recorder.clears == 0
+
+
+def test_pause_owner_still_refuses_to_resume_a_maintenance_hold(
+    _maintenance_hold: None,
+) -> None:
+    """The record is visibility only: the no-auto-resume rule is untouched."""
+    assert sp._pause_owner() == "explicit maintenance hold (no automatic expiry)"
+
+
+def test_controller_records_the_stranded_hold_while_still_blocking(
+    fake_pause: Callable[[float | None], None],
+    _maintenance_hold: None,
+    _ownerless: None,
+    _record_recorder: _Recorder,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_pause(sp.STRANDED_HOLD_NOTICE_S + 60)
+    _failed_outcome_patch(monkeypatch, _outcome("exited", 1))
+    result = sp.PauseController().reconcile("agent-runner")
+    assert result.blocks is BlockScope.ALL
+    assert _record_recorder.marks == ["updater exited rc=1"]
+
+
+def test_controller_clears_the_record_when_unpaused(
+    fake_pause: Callable[[float | None], None],
+    _record_recorder: _Recorder,
+) -> None:
+    fake_pause(None)
+    result = sp.PauseController().reconcile("agent-runner")
+    assert result.blocks is BlockScope.NONE
+    assert _record_recorder.clears == 1

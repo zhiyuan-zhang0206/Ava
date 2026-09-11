@@ -35,6 +35,7 @@ import shared.db
 from services._pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 from services.heartbeat import JITTER_SPAN_S, STALE_PENDING_S
 from services.heartbeat.liveness import _PASS_INTERVAL_S, run_liveness_pass
+from services.heartbeat.stranded_holds import grade_stranded_holds
 from shared import telemetry
 from shared.config import settings
 from shared.daemon_health import Liveness, health_port, start_health_server, stop_health_server
@@ -548,17 +549,21 @@ async def _dispatch_loop(pool: ConnectionPool, liveness: Liveness) -> None:
 
 
 async def _liveness_loop(pool: ConnectionPool, liveness: Liveness) -> None:
-    """Slow loop running the agent-liveness pass (Task #1174) — see
-    `services.heartbeat.liveness`. Catches per-pass failures so one bad pass
-    (e.g. a DB blip) never takes down the daemon; the next pass retries."""
+    """Slow loop running the agent-liveness pass (Task #1174) and the
+    stranded-hold grading pass (task #3132) — see `services.heartbeat.liveness`
+    and `services.heartbeat.stranded_holds`. Catches per-pass failures so one bad
+    pass (e.g. a DB blip) never takes down the daemon; the next pass retries."""
     while True:
         try:
             await _sleep_with_liveness(liveness, _PASS_INTERVAL_S)
             await run_liveness_pass(pool)
+            # The stranded-hold pass is a DB read plus an alerts upsert; off the
+            # event loop because its IM fan-out can block on HTTP.
+            await asyncio.to_thread(grade_stranded_holds, pool)
         except asyncio.CancelledError:
             raise
         except Exception:
-            _log.exception("[heartbeat] liveness pass failed")
+            _log.exception("[heartbeat] liveness loop iteration failed")
 
 
 async def run() -> None:

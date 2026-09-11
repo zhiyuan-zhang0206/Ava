@@ -109,6 +109,16 @@ class MachineStatus(BaseModel):
     # shown nowhere until now, which is why a rollback read as the pin
     # inexplicably moving backwards instead of as a fall back to this commit.
     cluster_last_known_good_sha: str | None = None
+    # The host's durable stranded-hold record (`host_deploy_state.stranded_hold_*`,
+    # task #3132): set while this host's pause is a maintenance hold that lost its
+    # owner — the state a failed update leg leaves — and cleared when the hold is
+    # released. Read from the DB, not from the probe, deliberately: the held
+    # host's own ops server is usually down with it, so only the row the host
+    # wrote before going quiet can carry the fact. `since` renders the banner and
+    # the alarm; `reason` names the updater verdict ("updater exited rc=1",
+    # "updater died mid-flight") for context. Both None = no record.
+    stranded_hold_since: datetime | None = None
+    stranded_hold_reason: str | None = None
     # This row's name appears in the live settle hold's recorded waiting-for set
     # (`shared.cluster_lock.settle_hosts` over the lease note) — the hosts that acked
     # their self-update and were still converging when the rollout's Phase B poll gave
