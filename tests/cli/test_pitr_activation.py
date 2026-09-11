@@ -332,6 +332,19 @@ def test_pre_activation_env_evidence_and_baseline_share_one_exact_capture(
     ]
 
 
+def test_pitr_env_baseline_reads_export_prefixed_lines(tmp_path: Path) -> None:
+    """`export AVA_PITR_ENABLED=...` is the same assignment to the parser: the
+    evidence baseline captures its raw line instead of missing it (#2981)."""
+    path = tmp_path / ".env"
+    path.write_bytes(b'export AVA_PITR_ENABLED="false"\nOTHER=x\n')
+
+    encoded, digest, baseline = activation.capture_pitr_env_baseline(path)
+
+    assert base64.b64decode(encoded) == path.read_bytes()
+    assert digest == hashlib.sha256(path.read_bytes()).hexdigest()
+    assert json.loads(baseline["pitr_enabled"]) == ['export AVA_PITR_ENABLED="false"']
+
+
 def test_archiver_target_is_timeline_aware_and_allows_later_success() -> None:
     target = "00000001000000000000000A"
     assert archiver_reached_target(

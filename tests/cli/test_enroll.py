@@ -221,6 +221,27 @@ def test_write_bootstrap_env_preserves_machine_local_keys(tmp_path: Path) -> Non
     assert "AVA_GATEWAY_URL=https://cp" in text
 
 
+def test_write_bootstrap_env_drops_export_prefixed_cluster_keys(tmp_path: Path) -> None:
+    """A dropped key is dropped in every form the parser accepts: an
+    export-prefixed cluster fact must not survive as a silent second source
+    (#2981)."""
+    p = tmp_path / ".env"
+    p.write_text(
+        "export AVA_DB_URL=postgresql://stale@old:5433/ava\n"
+        "export AVA_AGENT_HOST_HEALTH_PORT=18117\n"
+    )
+    enroll.write_bootstrap_env(
+        p,
+        gateway="https://cp",
+        machine_name="n",
+        cluster_secret="sek",  # noqa: S106 — inert test credential
+        cluster_keys=frozenset({"AVA_DB_URL"}),
+    )
+    text = p.read_text()
+    assert "AVA_DB_URL" not in text
+    assert "export AVA_AGENT_HOST_HEALTH_PORT=18117" in text
+
+
 def test_write_bootstrap_env_rewrite_is_idempotent(tmp_path: Path) -> None:
     p = tmp_path / ".env"
     p.write_text("ANTHROPIC_API_KEY=sk-local\n")
@@ -518,6 +539,19 @@ def test_browser_explicitly_disabled_reports_an_undecodable_value(
     env_path.write_text('AVA_BROWSER_ENABLED=false\nAVA_BROWSER_ENABLED="true\n')
     assert enroll._browser_explicitly_disabled() is True
     assert "cannot decode" in capsys.readouterr().err
+
+
+def test_browser_explicitly_disabled_reads_export_prefixed_lines(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`export AVA_BROWSER_ENABLED="false"` disables the browser: the export
+    prefix is part of neither the key nor the value (#2981 on top of #2973)."""
+    env_path = tmp_path / ".env"
+    monkeypatch.setattr(enroll, "AVA_ENV_PATH", env_path)
+    env_path.write_text('export AVA_BROWSER_ENABLED="false" # off\n')
+    assert enroll._browser_explicitly_disabled() is True
+    env_path.write_text("export AVA_BROWSER_ENABLED=true\n")
+    assert enroll._browser_explicitly_disabled() is False
 
 
 def test_run_enroll_requires_machine_host(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -905,6 +939,19 @@ def test_run_enroll_explicit_flag_wins_over_wsl_auto_default(
     env = env_path.read_text()
     assert "AVA_AGENT_HOST_HEALTH_PORT=18131" in env
     assert f"AVA_AGENT_HOST_HEALTH_PORT={WSL_DEFAULT_HEALTH_PORT_BASE + 19}" not in env
+
+
+def test_existing_health_port_env_reads_export_prefixed_lines(tmp_path: Path) -> None:
+    """A block written in export form still counts as this unit's block — a bare
+    re-enroll must keep it instead of re-deriving over it (#2981)."""
+    env_path = tmp_path / ".env"
+    env_path.write_text(
+        'export AVA_OPS_HEALTH_PORT=18121\nexport\tAVA_LABELER_HEALTH_PORT="18116"\nOTHER=1\n'
+    )
+    assert enroll._existing_health_port_env(env_path) == {
+        "AVA_OPS_HEALTH_PORT": "18121",
+        "AVA_LABELER_HEALTH_PORT": '"18116"',
+    }
 
 
 def test_run_enroll_preserves_existing_health_port_block_on_bare_reenroll(

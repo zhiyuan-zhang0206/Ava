@@ -27,7 +27,13 @@ from shared.env_registry import (
     health_port_env,
     health_port_env_aliases,
 )
-from shared.envfile import ENV_LOCK_TIMEOUT_S, env_lock_path, snapshot_env, upsert_env
+from shared.envfile import (
+    ENV_LOCK_TIMEOUT_S,
+    env_line_key,
+    env_lock_path,
+    snapshot_env,
+    upsert_env,
+)
 from shared.platform import IS_WSL, file_lock
 
 
@@ -63,11 +69,9 @@ def _preserved_env_lines(path: Path, dropped_keys: frozenset[str]) -> list[str]:
         return []
     kept: list[str] = []
     for line in path.read_text(encoding="utf-8").splitlines():
-        stripped = line.strip()
-        if stripped and not stripped.startswith("#"):
-            key = stripped.split("=", 1)[0].strip()
-            if key in dropped_keys:
-                continue
+        key = env_line_key(line)
+        if key is not None and key in dropped_keys:
+            continue
         kept.append(line)
     # Trim the edges so the block separator this writer adds is not itself
     # preserved and re-added on the next rewrite (byte-idempotence).
@@ -170,12 +174,9 @@ def _existing_health_port_env(path: Path) -> dict[str, str]:
     keys = set(health_port_env_aliases().values())
     found: dict[str, str] = {}
     for line in path.read_text().splitlines():
-        if "=" not in line:
-            continue
-        key, _, value = line.partition("=")
-        key = key.strip()
+        key = env_line_key(line)
         if key in keys:
-            found[key] = value
+            found[key] = line.split("=", 1)[1]
     return found
 
 
@@ -244,12 +245,12 @@ def _browser_explicitly_disabled() -> bool:
     decoded: str | None = None
     undecodable = False
     for line in AVA_ENV_PATH.read_text(encoding="utf-8").splitlines():
-        key, separator, _ = line.partition("=")
-        if not separator or key.strip() != "AVA_BROWSER_ENABLED":
+        if env_line_key(line) != "AVA_BROWSER_ENABLED":
             continue
         # Decode through the dotenv parser so a quoted or comment-carrying value
         # reads as the value it denotes — the raw text kept the quotes and
-        # disabled nothing (#2973).
+        # disabled nothing (#2973); the key match reads the same parser grammar,
+        # so an `export`-prefixed line counts as the key it sets (#2981).
         value = dotenv_values(stream=StringIO(line), interpolate=False).get("AVA_BROWSER_ENABLED")
         if value is None:
             undecodable = True

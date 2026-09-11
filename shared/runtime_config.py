@@ -40,12 +40,19 @@ from __future__ import annotations
 import json
 import logging
 import os
+from io import StringIO
 from pathlib import Path
 from typing import Any, cast, get_origin
 
 from dotenv import dotenv_values, set_key, unset_key
 
-from shared.envfile import ENV_LOCK_TIMEOUT_S, env_lock_path, snapshot_env
+from shared.envfile import (
+    ENV_LOCK_TIMEOUT_S,
+    env_line_export_prefix,
+    env_line_key,
+    env_lock_path,
+    snapshot_env,
+)
 from shared.platform import file_lock
 
 _log = logging.getLogger(__name__)
@@ -251,7 +258,9 @@ def rename_env_keys(path: Path, renames: dict[str, str]) -> list[str]:
     left in place is a silent second source. Rewrite it here, once; a second
     run finds no legacy keys and is a no-op. When both names exist the new one
     is authoritative and the legacy line is dropped (mirrors the
-    disabled-services marker rule). Returns one line per changed/dropped key.
+    disabled-services marker rule). Keys are matched the way Settings parses
+    them, so an `export`-prefixed legacy line is found too, and its rewrite keeps
+    the prefix (#2981). Returns one line per changed/dropped key.
     """
     if not path.exists():
         return []
@@ -263,7 +272,7 @@ def rename_env_keys(path: Path, renames: dict[str, str]) -> list[str]:
         lines = path.read_text().splitlines(keepends=True)
         out: list[str] = []
         for line in lines:
-            key = line.split("=", 1)[0].strip()
+            key = env_line_key(line)
             if key in renames:
                 new_key = renames[key]
                 if new_key in raw and raw[new_key] is not None:
@@ -271,7 +280,9 @@ def rename_env_keys(path: Path, renames: dict[str, str]) -> list[str]:
                     changed.append(f"{key} dropped ({new_key} authoritative)")
                     keys_removed.add(key)
                     continue
-                out.append(f"{new_key}={line.split('=', 1)[1]}")
+                # The verbatim value tail (newline included) and the operator's
+                # export prefix both survive the rename.
+                out.append(f"{env_line_export_prefix(line)}{new_key}={line.split('=', 1)[1]}")
                 changed.append(f"{key} -> {new_key}")
                 keys_removed.add(key)
                 keys_written.add(new_key)
@@ -319,7 +330,10 @@ def migrate_skip_alias_env_keys(env_path: Path) -> list[str]:
 
     The 2026-07-06 affirmative-naming refactor (#315) renamed
     skip_auth_middleware -> auth_middleware_enabled and skip_security_scan ->
-    security_scan_enabled with the default INVERTED. Settings keeps reading the
+    security_scan_enabled with the default INVERTED. Keys are matched and values
+    read through the dotenv parser (`export` prefix included; a quoted boolean
+    decodes as itself), so those forms migrate instead of silently staying
+    behind (#2981, #2704-class). Settings keeps reading the
     legacy keys (translated at boot), but the canonical name must win ON DISK:
     the config panel writes the canonical alias, and a legacy key left in the
     file is a silent second source that outranks it (AliasChoices resolves the
@@ -339,7 +353,7 @@ def migrate_skip_alias_env_keys(env_path: Path) -> list[str]:
         lines = env_path.read_text().splitlines(keepends=True)
         out: list[str] = []
         for line in lines:
-            key = line.split("=", 1)[0].strip()
+            key = env_line_key(line)
             if key not in _SKIP_ALIAS_RENAMES:
                 out.append(line)
                 continue
@@ -349,15 +363,19 @@ def migrate_skip_alias_env_keys(env_path: Path) -> list[str]:
                 changed.append(f"{key} dropped ({new_key} authoritative)")
                 keys_removed.add(key)
                 continue
-            value = line.split("=", 1)[1] if "=" in line else ""
-            token = value.strip().lower()
+            decoded = dotenv_values(stream=StringIO(line), interpolate=False).get(key)
+            token = (decoded or "").strip().lower()
+            prefix = env_line_export_prefix(line)
+            # The rewritten line keeps its original ending: dropping it folded the
+            # NEXT key onto this line (`...=falseKEEP=1`), corrupting the unit env.
+            line_end = line[len(line.rstrip("\r\n")) :]
             if token in _SKIP_ALIAS_TRUE:
-                out.append(f"{new_key}=false")
+                out.append(f"{prefix}{new_key}=false{line_end}")
                 changed.append(f"{key}=true -> {new_key}=false")
                 keys_removed.add(key)
                 keys_written.add(new_key)
             elif token in _SKIP_ALIAS_FALSE:
-                out.append(f"{new_key}=true")
+                out.append(f"{prefix}{new_key}=true{line_end}")
                 changed.append(f"{key}=false -> {new_key}=true")
                 keys_removed.add(key)
                 keys_written.add(new_key)
