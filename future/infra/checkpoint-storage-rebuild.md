@@ -246,7 +246,7 @@ Failure modes and interactions (required evidence for a go/no-go):
    (messages, message-count via raw blob header, compact-segment reads, trace reads) and the
    gateway timeline/state endpoints must use the delta-aware API; the message-count header
    reader survives T1 unchanged (the blob stays a msgpack array header) but NOT T2 — a
-delta version has no blob row, so it must switch to reconstruct-based counting.
+   delta version has no blob row, so it must switch to reconstruct-based counting.
 6. **Beta + version coupling.** The channel is documented beta ("on-disk representation may
    change"); the repo pins langgraph 1.2.4 and the D dependency line (#6096, task #3099) may
    touch langgraph. Adopting it is a pinned-contract decision, not a drop-in.
@@ -342,12 +342,12 @@ subclass.
 matter); all other channels keep full snapshots. Migration note: upstream 4.2.0 / 3.1.2
 make delta-history walks recognize plain-value seeds, so a hybrid thread (pre-delta full
 snapshots + post-delta writes) stays reconstructible mid-migration without a forced
-re-snapshot - re-verify on the frozen pins before relying on it. Required companions: T3, wrapper retirement
-for the delta channel (deltas must persist every super-step; the throttle's merge is a no-op
-there), fork snapshot materialization, impersonation/recovery forced snapshots, reader audit,
-snapshot cadence tuned to bound ancestor walks (candidate: much lower than the 1000 default;
-the 5000-superstep system bound stays). Every knob gets config + tests, following this
-document's measured harness.
+re-snapshot - re-verify on the frozen pins before relying on it. Required companions:
+T3, wrapper retirement for the delta channel (deltas must persist every super-step; the
+throttle's merge is a no-op there), fork snapshot materialization, impersonation/recovery
+forced snapshots, reader audit, snapshot cadence tuned to bound ancestor walks (candidate:
+much lower than the 1000 default; the 5000-superstep system bound stays). Every knob gets
+config + tests, following this document's measured harness.
 
 ### 4.4 Interactions (T1; deltas noted where they change)
 
