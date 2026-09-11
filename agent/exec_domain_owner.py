@@ -30,6 +30,7 @@ from shared.exec_owner_protocol import (
 from shared.exec_process_domain import KILL_GRACE_S, ExecProcessDomain
 from shared.incarnation_resources import ResourceProcess
 from shared.platform import CREATE_NO_WINDOW, IS_WINDOWS
+from shared.proc_tree import stable_create_time
 from shared.winjob import WindowsJob
 from shared.winjob_pipes import PipedJobChild, start_piped_job_process
 
@@ -152,9 +153,11 @@ def run(context_path: Path) -> None:  # noqa: PLR0915 -- one native owner retain
         allocation = allocation.model_copy(
             update={
                 "owner_process": ResourceProcess(
-                    pid=owner_identity.pid, birth=owner_identity.create_time()
+                    pid=owner_identity.pid, birth=stable_create_time(owner_identity)
                 ),
-                "root_process": ResourceProcess(pid=root.pid, birth=root_identity.create_time()),
+                "root_process": ResourceProcess(
+                    pid=root.pid, birth=stable_create_time(root_identity)
+                ),
             }
         )
         reader.start()

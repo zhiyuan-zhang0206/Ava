@@ -72,6 +72,7 @@ import psutil
 from shared.log import logger
 from shared.paths import run_dir
 from shared.platform import LockTimeoutError
+from shared.proc_tree import stable_create_time
 from shared.pty_sessions._paths import (
     host_identity,
     host_log_path,
@@ -568,7 +569,7 @@ def _kill_by_record(name: str) -> int:
             matches = (
                 pid_starttime_ticks(host_pid) == recorded_starttime
                 if recorded_starttime is not None
-                else abs(proc.create_time() - host_create) <= _CREATE_TIME_TOLERANCE_S
+                else abs(stable_create_time(proc) - host_create) <= _CREATE_TIME_TOLERANCE_S
             )
             if proc.is_running() and matches:
                 proc.kill()

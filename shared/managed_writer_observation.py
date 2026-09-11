@@ -27,7 +27,7 @@ from shared.native_job_observation import (
     observe_crontab,
     observe_launchd,
 )
-from shared.proc_tree import create_time_matches
+from shared.proc_tree import create_time_matches, stable_create_time
 from shared.session_record import pid_starttime_ticks
 
 
@@ -83,7 +83,7 @@ def observe_process(expected: ExpectedProcess) -> ProcessVerdict:
                 return "unknown"
             if actual != expected.starttime:
                 return "identity_mismatch"
-        elif not create_time_matches(process.create_time(), expected.create_time):
+        elif not create_time_matches(stable_create_time(process), expected.create_time):
             # A reading within tolerance is still the expected process; only a
             # moved birth (reuse) is a mismatch.
             return "identity_mismatch"

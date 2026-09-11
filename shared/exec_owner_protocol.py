@@ -12,7 +12,7 @@ import psutil
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from shared.incarnation_resources import ExecAllocation
-from shared.proc_tree import create_time_matches
+from shared.proc_tree import create_time_matches, stable_create_time
 
 MAX_OWNER_MESSAGE = 16 * 1024
 
@@ -73,11 +73,12 @@ def validate_native_ready(
         raise ValueError("ready receipt lacks owner/root identities")
     launcher = psutil.Process(launcher_pid)
     actual = psutil.Process(owner.pid)
-    # The owner writes its own receipt and the launcher reads it back, so the
-    # birth pair carries the create_time tolerance across the two readers.
-    if not create_time_matches(launcher.create_time(), launcher_birth) or not create_time_matches(
-        actual.create_time(), owner.birth
-    ):
+    # The owner writes its own receipt and the launcher reads it back: both
+    # sides read the stable start time; the tolerance stays for receipts
+    # written by older code.
+    if not create_time_matches(
+        stable_create_time(launcher), launcher_birth
+    ) or not create_time_matches(stable_create_time(actual), owner.birth):
         raise ValueError("ready owner or launcher native birth changed")
     if owner.pid != launcher_pid:
         arguments = [
@@ -98,7 +99,7 @@ def validate_native_ready(
         ):
             raise ValueError("ready owner is not the exact launched Python/redirector")
     child = psutil.Process(root.pid)
-    if not create_time_matches(child.create_time(), root.birth) or child.ppid() != owner.pid:
+    if not create_time_matches(stable_create_time(child), root.birth) or child.ppid() != owner.pid:
         raise ValueError("ready root is not the exact owner's direct child")
 
 

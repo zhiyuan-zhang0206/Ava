@@ -1,12 +1,15 @@
-"""Birth identity: starttime ticks are exact; create_time reads carry the tolerance."""
+"""Birth identity: the stable key is exact; legacy create_time reads carry the tolerance."""
 
 from __future__ import annotations
 
+import importlib
 import os
+import sys
 
 import psutil
+import pytest
 
-from shared.proc_tree import OwnedProcess, create_time_matches
+from shared.proc_tree import OwnedProcess, create_time_matches, stable_create_time
 
 
 def _identity_with_drift(offset: float) -> OwnedProcess:
@@ -54,3 +57,44 @@ def test_create_time_matches_rejects_readings_beyond_the_tolerance() -> None:
     """A reading outside the tolerance is positive evidence of a different process."""
     assert not create_time_matches(101.5, 98.5)
     assert not create_time_matches(158.5, 98.5)
+
+
+@pytest.mark.skipif(
+    sys.platform != "darwin", reason="psutil's macOS wall-clock correction is macOS-only"
+)
+@pytest.mark.parametrize("seconds", (60.0, 3600.0))
+def test_stable_create_time_ignores_a_simulated_clock_step(
+    monkeypatch: pytest.MonkeyPatch, seconds: float
+) -> None:
+    """The identity key must not move when the wall clock (boot epoch) steps.
+
+    psutil's public create_time() adds `INIT_BOOT_TIME - boot_time()`, so the
+    simulated step moves the public reading — the artifact a 2s tolerance
+    cannot absorb — while the key stays identical.
+    """
+    psosx = importlib.import_module("psutil._psosx")
+    key_before = stable_create_time(psutil.Process())
+    monkeypatch.setattr(psosx, "INIT_BOOT_TIME", psosx.INIT_BOOT_TIME + seconds)
+    public_moved = psutil.Process().create_time()
+    assert stable_create_time(psutil.Process()) == key_before
+    assert abs(public_moved - key_before) > 2.0
+
+
+@pytest.mark.skipif(
+    sys.platform != "darwin", reason="psutil's macOS wall-clock correction is macOS-only"
+)
+@pytest.mark.parametrize("seconds", (60.0, 3600.0))
+def test_capture_and_verify_span_clock_epochs(
+    monkeypatch: pytest.MonkeyPatch, seconds: float
+) -> None:
+    """A record captured under one import epoch still verifies under another.
+
+    One side stays unpatched on purpose: psutil's correction adds |diff| in
+    either direction, so a -N patch models the same epoch as +N.
+    """
+    psosx = importlib.import_module("psutil._psosx")
+    base = psosx.INIT_BOOT_TIME
+    monkeypatch.setattr(psosx, "INIT_BOOT_TIME", base + seconds)
+    identity = OwnedProcess.capture(psutil.Process())
+    monkeypatch.setattr(psosx, "INIT_BOOT_TIME", base)
+    assert identity.live()

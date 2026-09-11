@@ -47,6 +47,7 @@ import psutil
 from shared.log import logger
 from shared.paths import logs_dir, run_dir
 from shared.platform import CREATE_NO_WINDOW
+from shared.proc_tree import stable_create_time
 from shared.session_record import SessionRecord, pid_starttime_ticks
 
 # psutil exceptions that mean "the process is already gone / not ours to touch" —
@@ -59,10 +60,9 @@ _GONE = (psutil.NoSuchProcess, psutil.AccessDenied, OSError)
 _CREATE_TIME_TOLERANCE_S = 2.0
 
 # create_time stamped on a session whose child died before the record was
-# written. No real process start time is negative, so `_process_for_record`
-# (|proc.create_time() - rec.create_time| > tolerance) can never match it —
-# the record reads as dead from birth instead of claiming the pid's next
-# occupant (see new_session).
+# written. No real process start time is negative, so `_process_for_record`'s
+# start-time check can never match it — the record reads as dead from birth
+# instead of claiming the pid's next occupant (see new_session).
 _DEAD_CHILD_SENTINEL = -1.0
 
 # The reparent helper double-forks + execs in microseconds; it must never hang
@@ -116,9 +116,10 @@ def _process_for_record(rec: SessionRecord) -> psutil.Process | None:
             return None
         if rec.starttime is not None:
             return proc if rec.identifies(rec.pid) is True else None
-        # create_time defeats pid recycling for legacy records and platforms
-        # without Linux's clock-stable `/proc/<pid>/stat` field 22.
-        if abs(proc.create_time() - rec.create_time) > _CREATE_TIME_TOLERANCE_S:
+        # The stable start time defeats pid recycling for legacy records and
+        # platforms without Linux's clock-stable `/proc/<pid>/stat` field 22;
+        # the tolerance covers pre-stable-key records written by older code.
+        if abs(stable_create_time(proc) - rec.create_time) > _CREATE_TIME_TOLERANCE_S:
             return None
     except (psutil.NoSuchProcess, psutil.AccessDenied):
         return None
@@ -194,7 +195,7 @@ def new_session(
     child_pid = int(child_pid_str)
 
     try:
-        create_time = psutil.Process(child_pid).create_time()
+        create_time = stable_create_time(psutil.Process(child_pid))
     except psutil.NoSuchProcess:
         # The child already exited (instant failure). Record a sentinel that
         # can never match a real process start time: a pid freed by an
@@ -249,11 +250,11 @@ def graceful_signal(name: str, *, expected: SessionRecord | None = None) -> bool
                 # check; unavailable or changed ticks must still refuse delivery.
                 if expected.identifies(proc.pid) is not True:
                     return False
-            # create_time fallback: keep the record-resolution tolerance — the
-            # reading moves by whole seconds for one live process (macOS
-            # re-derives it with a boot-time correction), so a drifted reading
+            # Start-time fallback: keep the record-resolution tolerance — a
+            # reading may drift for legacy records written before the stable
+            # key (whole-second wall-clock corrections), so a drifted reading
             # must not refuse the process `_process_for_record` just resolved.
-            elif abs(proc.create_time() - expected.create_time) > _CREATE_TIME_TOLERANCE_S:
+            elif abs(stable_create_time(proc) - expected.create_time) > _CREATE_TIME_TOLERANCE_S:
                 return False
         # Signal only this captured process object, never resolve the name a
         # second time into a replacement target. psutil also guards PID reuse.

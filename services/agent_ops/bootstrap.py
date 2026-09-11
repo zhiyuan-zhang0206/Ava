@@ -28,6 +28,7 @@ from shared.managed_writer_observation import (
     ObservationChallenge,
     UnitObserver,
 )
+from shared.proc_tree import stable_create_time
 from shared.runtime_release import ReleaseRejectedError, VerifiedRelease, verify_release
 from shared.session_record import pid_starttime_ticks
 from shared.transport_encryption import verify_transport_encryption_declaration
@@ -55,7 +56,7 @@ def runtime_identity(context: PreparedObservation) -> BootstrapRuntimeIdentity:
     return BootstrapRuntimeIdentity(
         process=ExpectedProcess(
             pid=process.pid,
-            create_time=process.create_time(),
+            create_time=stable_create_time(process),
             starttime=pid_starttime_ticks(process.pid),
         ),
         module=str(Path(__file__).resolve(strict=True)),

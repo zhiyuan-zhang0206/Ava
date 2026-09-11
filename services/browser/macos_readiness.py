@@ -27,6 +27,7 @@ import shared.paths
 import shared.private_storage
 import shared.proc
 from shared.platform import IS_MACOS
+from shared.proc_tree import stable_create_time
 
 try:  # `pwd` is absent on Windows, where this module remains import-safe.
     import pwd
@@ -140,7 +141,7 @@ def _marker_path() -> Path:
 
 
 def _current_process_started_at() -> float:
-    return psutil.Process(os.getpid()).create_time()
+    return stable_create_time(psutil.Process(os.getpid()))
 
 
 def mark_waiting(reason: str) -> None:
@@ -175,7 +176,7 @@ def _owner_is_alive(pid: int, started_at: float) -> bool:
     """True only while `pid` still names the marker's original process."""
     try:
         process = psutil.Process(pid)
-        return process.is_running() and abs(process.create_time() - started_at) < 2.0
+        return process.is_running() and abs(stable_create_time(process) - started_at) < 2.0
     except psutil.Error:
         return False
 

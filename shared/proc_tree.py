@@ -9,19 +9,22 @@ ops layer reaching through services into cli (issue #2123).
 
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass
+from typing import Any, cast
 
 import psutil
 
 from shared.session_record import SessionRecord, pid_starttime_ticks
 
-# create_time is not bit-stable for one live process: psutil's macOS
-# implementation re-derives it from the wall clock and applies a boot-time
-# correction quantized to whole seconds, and WSL wall-clock steps move it too.
-# Measured 2026-09-12 (company-mini): the stop path refused a live host over
-# exactly 1.000000s of drift. Pid reuse cannot land inside a couple of seconds,
-# so the create_time fallback compares with the same 2.0s tolerance the other
-# create_time identity checks use (posixproc / winproc / proc).
+# Identity reads use the stable start timestamp (stable_create_time): on macOS
+# the uncorrected kernel value, elsewhere the public create_time(). The public
+# macOS value re-derives from the wall clock with a boot-time correction
+# quantized to whole seconds (measured 2026-09-12: one live process read
+# 1.000000s apart by two import epochs), and WSL wall-clock steps move the
+# Linux value too. Records written before the stable key existed — and any
+# platform without one — still compare with a 2.0s tolerance; new records read
+# back exactly. Pid reuse cannot land inside a couple of seconds.
 _CREATE_TIME_TOLERANCE_S = 2.0
 
 
@@ -35,6 +38,26 @@ def create_time_matches(live: float, birth: float) -> bool:
     return abs(live - birth) <= _CREATE_TIME_TOLERANCE_S
 
 
+def stable_create_time(process: psutil.Process) -> float:
+    """The stable start timestamp of a live process: the identity key.
+
+    psutil's public `create_time()` is not bit-stable across readers on macOS:
+    it adds a whole-second wall-clock correction on top of the kernel value
+    (and, since psutil 7.2, caches it per `Process` instance), so two readings
+    of one live process taken by different import epochs disagree by exactly
+    the correction. The uncorrected kernel value is what psutil itself keys
+    pid reuse on — `Process._proc.create_time(monotonic=True)`, documented
+    "stable over changes to system time" — and identity records must be
+    written and compared through that same value. Elsewhere the public value
+    already is the kernel start timestamp.
+    """
+    if sys.platform == "darwin":
+        # psutil's per-platform object is untyped in the public stubs; its
+        # monotonic create_time is the pid-reuse key used above.
+        return float(cast("Any", process)._proc.create_time(monotonic=True))
+    return process.create_time()
+
+
 @dataclass(frozen=True)
 class OwnedProcess:
     pid: int
@@ -43,17 +66,17 @@ class OwnedProcess:
 
     @classmethod
     def capture(cls, process: psutil.Process) -> OwnedProcess:
-        return cls(process.pid, process.create_time(), pid_starttime_ticks(process.pid))
+        return cls(process.pid, stable_create_time(process), pid_starttime_ticks(process.pid))
 
     def birth_matches(self, process: psutil.Process) -> bool:
-        """Whether `process`'s create_time still claims this identity's birth.
+        """Whether `process`'s stable start time still claims this birth.
 
         The exact identity is the Linux `starttime` tick, which `live()` checks
-        first; this is the fallback used where the platform has none, and it
-        must tolerate the whole-second moves a create_time reading makes while
-        its process stays alive (see `_CREATE_TIME_TOLERANCE_S`).
+        first; this is the fallback where the platform has none, reading the
+        stable start time (`stable_create_time`) and keeping the 2.0s
+        tolerance for records written before it existed.
         """
-        return create_time_matches(process.create_time(), self.birth)
+        return create_time_matches(stable_create_time(process), self.birth)
 
     def live(self) -> bool:
         try:

@@ -23,6 +23,7 @@ from typing import Any, cast
 import psutil
 
 from shared.log import logger
+from shared.proc_tree import stable_create_time
 from shared.pty_sessions._paths import (
     host_identity,
     host_starttime,
@@ -119,7 +120,7 @@ def _record_owns_host(host: psutil.Process, name: str) -> bool:
         recorded_starttime = host_starttime(record_path(name))
         if recorded_starttime is not None:
             return pid_starttime_ticks(host.pid) == recorded_starttime
-        return abs(host.create_time() - identity[1]) <= _RECORD_OWNER_TOLERANCE_S
+        return abs(stable_create_time(host) - identity[1]) <= _RECORD_OWNER_TOLERANCE_S
     except psutil.Error:
         return False
 
