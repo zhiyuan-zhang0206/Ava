@@ -366,7 +366,6 @@ def test_deepseek_carries_per_model_compact_thresholds() -> None:
         "deepseek-v4-pro",
         "deepseek-v4-flash",
         "deepseek-v4-flash-vision-exp",
-        "deepseek-v4.1-flash-expires-on-0910",
     ):
         assert resolve_setting("auto_compact_fraction", model=model) == 0.512, model
         assert resolve_setting("compact_reminder_fraction", model=model) == 0.374, model
