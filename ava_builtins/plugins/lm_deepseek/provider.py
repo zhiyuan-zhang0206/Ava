@@ -152,10 +152,12 @@ register(
     models={
         # Withdrawn from new selections 2026-09-10 (user order): DeepSeek serves
         # only the flash tier now, and its pricing page confirms V4 Pro's
-        # orderly retirement — from 2026-09-14, requests to `deepseek-v4-pro`
-        # are routed to V4.1 Flash. The entry stays registered so its facts,
-        # tuning and final price remain; existing configurations keep working
-        # by resolving to `deepseek-v4-flash` before provider construction.
+        # orderly retirement — from 12:00 Beijing Time on 2026-09-14 (=
+        # 04:00 UTC), requests to `deepseek-v4-pro` are routed to V4.1 Flash and
+        # billed at the V4.1 Flash price (the pricing periods below record that
+        # succession). The entry stays registered so its facts, tuning and final
+        # price remain; existing configurations keep working by resolving to
+        # `deepseek-v4-flash` before provider construction.
         "deepseek-v4-pro": ModelSpec(
             provider="deepseek",
             spawnable=False,
@@ -241,7 +243,7 @@ register(
             cache_hit=0.022,
             output=1.98,
             source_url="https://api-docs.deepseek.com/quick_start/pricing/",
-            source_checked_at="2026-08-18",
+            source_checked_at="2026-09-11",
             vendor="deepseek",
             periods=(
                 PricePeriod(
@@ -259,7 +261,7 @@ register(
                 ),
                 PricePeriod(
                     effective_from="2026-08-16T16:00:00Z",
-                    effective_until=None,
+                    effective_until="2026-09-14T04:00:00Z",
                     tiers=(
                         PriceTier(
                             input_tokens_min=0,
@@ -286,14 +288,43 @@ register(
                         ),
                     ),
                 ),
+                PricePeriod(
+                    effective_from="2026-09-14T04:00:00Z",
+                    effective_until=None,
+                    tiers=(
+                        PriceTier(
+                            input_tokens_min=0,
+                            input_tokens_max=None,
+                            cache_miss="0.15",
+                            cache_hit="0.003",
+                            output="0.6",
+                            windows=(
+                                PriceWindow(
+                                    start="01:00:00",
+                                    end="04:00:00",
+                                    cache_miss="0.3",
+                                    cache_hit="0.006",
+                                    output="1.2",
+                                ),
+                                PriceWindow(
+                                    start="06:00:00",
+                                    end="10:00:00",
+                                    cache_miss="0.3",
+                                    cache_hit="0.006",
+                                    output="1.2",
+                                ),
+                            ),
+                        ),
+                    ),
+                ),
             ),
         ),
         "deepseek-v4-flash": PriceRates(
-            cache_miss=0.22,
-            cache_hit=0.007,
-            output=0.66,
+            cache_miss=0.15,
+            cache_hit=0.003,
+            output=0.6,
             source_url="https://api-docs.deepseek.com/quick_start/pricing/",
-            source_checked_at="2026-08-18",
+            source_checked_at="2026-09-11",
             vendor="deepseek",
             periods=(
                 PricePeriod(
@@ -311,7 +342,7 @@ register(
                 ),
                 PricePeriod(
                     effective_from="2026-08-16T16:00:00Z",
-                    effective_until=None,
+                    effective_until="2026-09-09T16:00:00Z",
                     tiers=(
                         PriceTier(
                             input_tokens_min=0,
@@ -338,14 +369,43 @@ register(
                         ),
                     ),
                 ),
+                PricePeriod(
+                    effective_from="2026-09-09T16:00:00Z",
+                    effective_until=None,
+                    tiers=(
+                        PriceTier(
+                            input_tokens_min=0,
+                            input_tokens_max=None,
+                            cache_miss="0.15",
+                            cache_hit="0.003",
+                            output="0.6",
+                            windows=(
+                                PriceWindow(
+                                    start="01:00:00",
+                                    end="04:00:00",
+                                    cache_miss="0.3",
+                                    cache_hit="0.006",
+                                    output="1.2",
+                                ),
+                                PriceWindow(
+                                    start="06:00:00",
+                                    end="10:00:00",
+                                    cache_miss="0.3",
+                                    cache_hit="0.006",
+                                    output="1.2",
+                                ),
+                            ),
+                        ),
+                    ),
+                ),
             ),
         ),
         "deepseek-v4-flash-vision-exp": PriceRates(
-            cache_miss=0.22,
-            cache_hit=0.007,
-            output=0.66,
+            cache_miss=0.15,
+            cache_hit=0.003,
+            output=0.6,
             source_url="https://api-docs.deepseek.com/quick_start/pricing/",
-            source_checked_at="2026-08-21",
+            source_checked_at="2026-09-11",
             vendor="deepseek",
             periods=(
                 PricePeriod(
@@ -363,7 +423,7 @@ register(
                 ),
                 PricePeriod(
                     effective_from="2026-08-16T16:00:00Z",
-                    effective_until=None,
+                    effective_until="2026-09-09T16:00:00Z",
                     tiers=(
                         PriceTier(
                             input_tokens_min=0,
@@ -385,6 +445,35 @@ register(
                                     cache_miss="0.44",
                                     cache_hit="0.014",
                                     output="1.32",
+                                ),
+                            ),
+                        ),
+                    ),
+                ),
+                PricePeriod(
+                    effective_from="2026-09-09T16:00:00Z",
+                    effective_until=None,
+                    tiers=(
+                        PriceTier(
+                            input_tokens_min=0,
+                            input_tokens_max=None,
+                            cache_miss="0.15",
+                            cache_hit="0.003",
+                            output="0.6",
+                            windows=(
+                                PriceWindow(
+                                    start="01:00:00",
+                                    end="04:00:00",
+                                    cache_miss="0.3",
+                                    cache_hit="0.006",
+                                    output="1.2",
+                                ),
+                                PriceWindow(
+                                    start="06:00:00",
+                                    end="10:00:00",
+                                    cache_miss="0.3",
+                                    cache_hit="0.006",
+                                    output="1.2",
                                 ),
                             ),
                         ),

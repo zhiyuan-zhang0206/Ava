@@ -4,6 +4,15 @@
 Provider adapters are intentionally strict and independent. A changed page
 shape, missing model, unknown meter, or unit invariant is an error: automation
 must never turn an upstream parsing mistake into a price used for billing.
+
+The page prices three catalog entries through two columns: `deepseek-flash`
+prices the retired deepseek-v4-flash / deepseek-v4-flash-vision-exp names
+(DeepSeek keeps accepting and billing them at the Flash price), and
+`deepseek-v4-pro` retires onto the Flash column at the page's published
+instant, recorded as the entry's future period. Peak windows are the page's
+daily UTC hours; the page scopes them Monday through Friday, so this ledger
+bills weekend hours at peak rates — a known overestimate the archive's
+daily-recurrence windows cannot express yet.
 """
 
 from __future__ import annotations
@@ -54,22 +63,47 @@ _METERS = {
     "1M INPUT TOKENS (CACHE HIT)": "cache_read",
     "1M OUTPUT TOKENS": "output",
 }
-# Models refreshed from the official pricing page. deepseek-v4.1-flash-
-# expires-on-0910 is deliberately NOT here: it is an internal beta that the
-# page does not list (announced 2026-09-08, same pricing as v4-flash), so its
-# rates are pinned manually in the plugin + archive ledger entries, and it
-# expires 2026-09-10 — no auto-refresh is wired for a ~2-day model. An
-# equality check below keeps the fetched page in lockstep with this roster.
-_DEEPSEEK_MODELS = {
-    "deepseek-v4-flash",
-    "deepseek-v4-flash-vision-exp",
-    "deepseek-v4-pro",
+# Official page columns → the catalog entries each column prices. Since the
+# V4.1-Flash release (2026-09-10) three entries are priced through two
+# columns: footnote (1) keeps the retired deepseek-v4-flash and
+# deepseek-v4-flash-vision-exp names accepted and billed at the Flash price.
+# deepseek-v4.1-flash-expires-on-0910 is deliberately NOT priced from the
+# page: it is an internal beta the page never listed (announced 2026-09-08,
+# same pricing as v4-flash), its rates are pinned manually in the plugin +
+# archive ledger entries, and it expired 2026-09-10 — no auto-refresh is
+# wired for a ~2-day model. An equality check below keeps the fetched page in
+# lockstep with this roster.
+_DEEPSEEK_COLUMNS: dict[str, tuple[str, ...]] = {
+    "deepseek-flash": ("deepseek-v4-flash", "deepseek-v4-flash-vision-exp"),
+    "deepseek-v4-pro": ("deepseek-v4-pro",),
+}
+
+
+class Succession(NamedTuple):
+    """A page column whose model another column prices from an instant on."""
+
+    successor: str
+    effective_from: str
+
+
+# Footnote (2): after 12:00 Beijing Time on 2026-09-14 (= 04:00 UTC) requests
+# to deepseek-v4-pro are routed to V4.1 Flash and billed at the V4.1 Flash
+# price. The reconcile records that succession as the entry's future period,
+# closing the pro band at the published instant; afterwards the pro column is
+# frozen history — nothing bills from it again, so the adapter never rewrites
+# the retired entry.
+_DEEPSEEK_SUCCESSION: dict[str, Succession] = {
+    "deepseek-v4-pro": Succession(
+        successor="deepseek-flash",
+        effective_from="2026-09-14T04:00:00Z",
+    ),
 }
 _PEAK_HOURS = re.compile(
     r"\bPeak hours are\s+(\d{2}:\d{2})\s*-\s*(\d{2}:\d{2})\s+"
     r"and\s+(\d{2}:\d{2})\s*-\s*(\d{2}:\d{2})\s+UTC\b"
 )
 _USD = re.compile(r"\$(?:0|[1-9]\d*)(?:\.\d+)?")
+_MODEL_LABEL_FOOTNOTE = re.compile(r"\s*\(\d+\)$")
 _DEEPSEEK_PRICING_URL = "https://api-docs.deepseek.com/quick_start/pricing/"
 _CATALOG_PATH = Path(__file__).resolve().parents[1] / "shared/lm/pricing_catalog_archive.json"
 _REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -92,8 +126,10 @@ def parse_deepseek_pricing(html: str) -> DeepSeekCatalog:
     """Parse DeepSeek's official pricing table into exact USD/M rates.
 
     The table uses rowspans, so a peak row inherits the meter named by the
-    preceding off-peak row. All three meters and the documented 50% off-peak
-    relationship are required before any value is returned.
+    preceding off-peak row, and column labels carry footnote markers
+    (`deepseek-flash (1)`) that are stripped to the official model id. All
+    three meters and the documented 50% off-peak relationship are required
+    before any value is returned.
     """
     soup = BeautifulSoup(html, "lxml")
     page_text = soup.get_text(" ", strip=True)
@@ -111,7 +147,9 @@ def parse_deepseek_pricing(html: str) -> DeepSeekCatalog:
     model_row = next((row for row in rows if row and row[0] == "MODEL"), None)
     if model_row is None or len(model_row) < 3:
         raise ValueError("DeepSeek MODEL row is missing or incomplete")
-    models = model_row[1:]
+    models = [_MODEL_LABEL_FOOTNOTE.sub("", cell) for cell in model_row[1:]]
+    if not all(models):
+        raise ValueError("DeepSeek MODEL row contains an empty model id")
     if len(models) != len(set(models)):
         raise ValueError("DeepSeek MODEL row contains duplicate model ids")
 
@@ -168,29 +206,36 @@ def _catalog_rates(raw: dict[str, str]) -> Rates:
         raise ValueError("catalog rates must contain decimal input/cache_read/output") from exc
 
 
+def _period_deepseek_prices(
+    period: dict[str, Any],
+) -> tuple[DeepSeekPrices, tuple[tuple[str, str], ...]]:
+    """Read one catalog period back into fetched-shape prices and windows."""
+    tiers = period["tiers"]
+    if (
+        len(tiers) != 1
+        or tiers[0]["input_tokens_min"] != 0
+        or tiers[0]["input_tokens_max"] is not None
+    ):
+        raise ValueError("DeepSeek pricing must have one unbounded token tier")
+    tier = tiers[0]
+    overrides = tier["utc_daily_overrides"]
+    windows = tuple((override["start"], override["end"]) for override in overrides)
+    if not windows:
+        raise ValueError("DeepSeek pricing must carry UTC peak windows")
+    peak_rates = {_catalog_rates(override["rates"]) for override in overrides}
+    if len(peak_rates) != 1:
+        raise ValueError("DeepSeek UTC peak windows disagree on rates")
+    prices = DeepSeekPrices(peak=peak_rates.pop(), off_peak=_catalog_rates(tier["rates"]))
+    return prices, windows
+
+
 def _current_deepseek_prices(
     entry: dict[str, Any],
 ) -> tuple[DeepSeekPrices, tuple[tuple[str, str], ...]]:
     current = [period for period in entry["periods"] if period["effective_until"] is None]
     if len(current) != 1:
         raise ValueError("DeepSeek catalog entry must have exactly one current period")
-    tiers = current[0]["tiers"]
-    if (
-        len(tiers) != 1
-        or tiers[0]["input_tokens_min"] != 0
-        or tiers[0]["input_tokens_max"] is not None
-    ):
-        raise ValueError("DeepSeek current pricing must have one unbounded token tier")
-    tier = tiers[0]
-    overrides = tier["utc_daily_overrides"]
-    windows = tuple((override["start"], override["end"]) for override in overrides)
-    if not windows:
-        raise ValueError("DeepSeek current pricing must carry UTC peak windows")
-    peak_rates = {_catalog_rates(override["rates"]) for override in overrides}
-    if len(peak_rates) != 1:
-        raise ValueError("DeepSeek UTC peak windows disagree on rates")
-    prices = DeepSeekPrices(peak=peak_rates.pop(), off_peak=_catalog_rates(tier["rates"]))
-    return prices, windows
+    return _period_deepseek_prices(current[0])
 
 
 def _rates_json(rates: Rates) -> dict[str, str]:
@@ -223,6 +268,73 @@ def _new_deepseek_period(
     }
 
 
+def _append_reviewed_period(
+    entry: dict[str, Any],
+    prices: DeepSeekPrices,
+    peak_windows: tuple[tuple[str, str], ...],
+    detected_at: str,
+) -> bool:
+    """Append fetched rates as a new period when the open one differs."""
+    current_prices, current_windows = _current_deepseek_prices(entry)
+    if current_prices == prices and current_windows == peak_windows:
+        return False
+    current = next(period for period in entry["periods"] if period["effective_until"] is None)
+    current["effective_until"] = detected_at
+    entry["periods"].append(_new_deepseek_period(prices, detected_at, peak_windows))
+    entry["source_checked_at"] = detected_at[:10]
+    return True
+
+
+def _record_succession(
+    entry: dict[str, Any],
+    fetched: DeepSeekCatalog,
+    *,
+    column: str,
+    succession: Succession,
+    detected_at: str,
+) -> bool:
+    """Close a retired column's band at its succession instant onto the successor's rates.
+
+    Returns True when the successor period was appended. Once recorded the
+    retired column is frozen history: its closed band's rates must keep
+    matching the official column (any change fails closed for review; the peak
+    windows are a global page property the live columns reconcile), and the
+    successor period is never repriced — nothing bills from the retired column
+    after the succession instant.
+    """
+    own_prices = fetched.models[column]
+    periods = entry["periods"]
+    last = periods[-1]
+    if last["effective_from"] == succession.effective_from:
+        if (
+            last["effective_until"] is not None
+            or len(periods) < 2
+            or periods[-2]["effective_until"] != succession.effective_from
+        ):
+            raise ValueError(f"DeepSeek {column!r} succession periods are malformed")
+        frozen_prices, _frozen_windows = _period_deepseek_prices(periods[-2])
+        if frozen_prices != own_prices:
+            raise ValueError(
+                f"DeepSeek {column!r} is retired to {succession.successor!r}; its official "
+                "column no longer matches the frozen period — review manually"
+            )
+        return False
+    current_prices, _current_windows = _current_deepseek_prices(entry)
+    if current_prices != own_prices:
+        raise ValueError(
+            f"DeepSeek {column!r} changed before its recorded retirement; review manually"
+        )
+    current = next(period for period in periods if period["effective_until"] is None)
+    current["effective_until"] = succession.effective_from
+    periods.append(
+        _new_deepseek_period(
+            fetched.models[succession.successor], succession.effective_from, fetched.peak_windows
+        )
+    )
+    entry["source_checked_at"] = detected_at[:10]
+    return True
+
+
 def reconcile_deepseek_catalog(
     catalog: dict[str, Any],
     fetched: DeepSeekCatalog,
@@ -239,23 +351,28 @@ def reconcile_deepseek_catalog(
     instant = datetime.fromisoformat(detected_at.replace("Z", "+00:00"))
     if instant.tzinfo is None or instant.utcoffset() is None or not detected_at.endswith("Z"):
         raise ValueError("detected_at must be an ISO-8601 UTC instant ending in Z")
-    if set(fetched.models) != _DEEPSEEK_MODELS:
-        raise ValueError(f"DeepSeek source must contain exactly {sorted(_DEEPSEEK_MODELS)}")
+    if set(fetched.models) != set(_DEEPSEEK_COLUMNS):
+        raise ValueError(f"DeepSeek source must contain exactly {sorted(_DEEPSEEK_COLUMNS)}")
 
     updated = deepcopy(catalog)
     changed = False
-    for model in sorted(_DEEPSEEK_MODELS):
-        entry = updated["models"][model]
-        current_prices, current_windows = _current_deepseek_prices(entry)
-        if current_prices == fetched.models[model] and current_windows == fetched.peak_windows:
-            continue
-        current = next(period for period in entry["periods"] if period["effective_until"] is None)
-        current["effective_until"] = detected_at
-        entry["periods"].append(
-            _new_deepseek_period(fetched.models[model], detected_at, fetched.peak_windows)
-        )
-        entry["source_checked_at"] = detected_at[:10]
-        changed = True
+    for column, models in sorted(_DEEPSEEK_COLUMNS.items()):
+        succession = _DEEPSEEK_SUCCESSION.get(column)
+        for model in models:
+            entry = updated["models"][model]
+            if succession is None:
+                appended = _append_reviewed_period(
+                    entry, fetched.models[column], fetched.peak_windows, detected_at
+                )
+            else:
+                appended = _record_succession(
+                    entry,
+                    fetched,
+                    column=column,
+                    succession=succession,
+                    detected_at=detected_at,
+                )
+            changed = changed or appended
 
     if not changed:
         return None
