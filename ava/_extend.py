@@ -386,11 +386,14 @@ def load_plugin_module(plugin_py: Path, *, name: str, pkg: str) -> ModuleType:
     # globals — bind fresh.
     existing = sys.modules.get(spec.name)
     recorded = getattr(existing, "__file__", None)
-    module = (
-        existing
-        if recorded is not None and os.path.realpath(recorded) == os.path.realpath(plugin_py)
-        else importlib.util.module_from_spec(spec)
-    )
+    if (
+        existing is not None
+        and recorded is not None
+        and os.path.realpath(recorded) == os.path.realpath(plugin_py)
+    ):
+        module = existing
+    else:
+        module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
     if pkg == "plugins":
         # External plugins only: built-in plugins resolve through the real

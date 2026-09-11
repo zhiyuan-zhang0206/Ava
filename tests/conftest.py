@@ -1799,7 +1799,7 @@ def milvus_client(milvus_server: str, monkeypatch: pytest.MonkeyPatch) -> Iterat
 
 
 @pytest.fixture
-def loguru_records() -> Iterator[list[dict]]:
+def loguru_records() -> Iterator[list[dict[str, Any]]]:
     """Capture loguru output for tests. pytest's built-in caplog captures stdlib logging,
     loguru doesn't go through stdlib, requires separate bridging.
 
@@ -1810,7 +1810,7 @@ def loguru_records() -> Iterator[list[dict]]:
     """
     from loguru import logger as _logger
 
-    captured: list[dict] = []
+    captured: list[dict[str, Any]] = []
     handler_id = _logger.add(lambda msg: captured.append(dict(msg.record)), level="DEBUG")
     try:
         yield captured
