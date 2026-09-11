@@ -15,6 +15,9 @@ export const inspectLiveQueryKey = (agentId: number) =>
 export const inspectWindowedQueryKey = (agentId: number, hours: number | null) =>
   ["agent-inspect", agentId, hours] as const;
 
+export const inspectWidgetsQueryKey = (agentId: number) =>
+  ["agent-inspect-widgets", agentId] as const;
+
 export function fetchWindowedInspect(
   agentId: number,
   hours: number | null,
@@ -51,6 +54,7 @@ export function useInspectorPrefetch(agentId: number) {
     void queryClient.cancelQueries({
       queryKey: inspectWindowedQueryKey(agentId, inspectorHours),
     });
+    void queryClient.cancelQueries({ queryKey: inspectWidgetsQueryKey(agentId) });
   }, [agentId, clearTimer, inspectorHours, queryClient]);
 
   const prefetch = useCallback(() => {
@@ -64,6 +68,10 @@ export function useInspectorPrefetch(agentId: number) {
     void queryClient.prefetchQuery({
       queryKey: inspectWindowedQueryKey(agentId, inspectorHours),
       queryFn: ({ signal }) => fetchWindowedInspect(agentId, inspectorHours, signal),
+    });
+    void queryClient.prefetchQuery({
+      queryKey: inspectWidgetsQueryKey(agentId),
+      queryFn: ({ signal }) => api.getAgentInspectWidgets(agentId, signal),
     });
   }, [agentId, clearTimer, inspectorHours, open, queryClient]);
 

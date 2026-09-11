@@ -457,6 +457,17 @@ export function TaskGraph({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only react to selectedAgentId changes
   }, [selectedAgentId]);
 
+  // A task selected from outside a board click (a route jump, task #2909)
+  // propagates its owner the same way a click does — the surfaces stay
+  // bidirectionally synced however the selection arrived.
+  useEffect(() => {
+    if (selectedTaskId == null) return;
+    const task = tasks.find((t) => t.id === selectedTaskId);
+    if (task?.owner != null && task.owner !== selectedAgentId) {
+      onSelectAgent(task.owner);
+    }
+  }, [selectedTaskId, tasks, selectedAgentId, onSelectAgent]);
+
   // When user clicks a task, sync its owner as the selected agent (bidirectional).
   const handleSelectTask = useCallback((taskId: number | null) => {
     onSelectTask(taskId);

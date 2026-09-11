@@ -16,7 +16,7 @@ from opentelemetry import metrics
 from psycopg_pool import ConnectionPool
 
 from gateway import loki_events, loki_query_budget, neighbors
-from gateway.routers import _agent_cost, _inspect_stats, _plugin_metrics
+from gateway.routers import _agent_cost, _inspect_stats, _plugin_inspector, _plugin_metrics
 from gateway.routers._agent_cost import _query_timeout, window_bounds
 from gateway.routers._backend_failure import raise_backend_unavailable
 from gateway.routers._inspect_cache import InspectCacheFullError, InspectQueryCache
@@ -27,6 +27,7 @@ from gateway.schemas import (
     AgentInspectLive,
     AgentTps,
     HeartbeatLastPause,
+    InspectWidgetResult,
     NeighborRow,
     NeighborsResponse,
     PluginMetricResult,
@@ -762,4 +763,24 @@ async def get_agent_plugin_metrics(agent_id: int, request: Request) -> list[Plug
     """
     return await asyncio.to_thread(
         _plugin_metrics.metrics_for_agent, request.app.state.db_pool, agent_id
+    )
+
+
+@router.get("/api/agents/{agent_id}/inspect/widgets")
+async def get_agent_inspect_widgets(agent_id: int, request: Request) -> list[InspectWidgetResult]:
+    """The agent's plugin widgets for the inspector panel — the extension
+    surface where enabled plugins embed widgets (see `shared/plugin_inspector.py`;
+    registration mirrors the plugin-metric system).
+
+    Builds the widget registry in process (shipped builtin plugins'
+    ``inspector.py`` modules imported under their plugin context, restricted
+    to the plugins currently enabled), resolves the closed target vocabulary
+    for this agent — the open notice and the queue's task-ownership rule —
+    and projects each widget, dropping a button whose target did not resolve
+    and a widget left without buttons. Unknown agents return 404 like the
+    rest of the /inspect family. Implementation in
+    ``gateway/routers/_plugin_inspector.py``.
+    """
+    return await asyncio.to_thread(
+        _plugin_inspector.widgets_for_agent, request.app.state.db_pool, agent_id
     )

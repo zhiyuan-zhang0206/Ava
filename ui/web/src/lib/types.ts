@@ -176,6 +176,11 @@ export type AgentStats = Schemas["AgentStats"];
 export type AgentTps = Schemas["AgentTps"];
 export type HeartbeatInfo = Schemas["HeartbeatInfo"];
 export type HeartbeatLastPause = Schemas["HeartbeatLastPause"];
+// Plugin widgets embedded in the panel (GET /api/agents/{id}/inspect/widgets):
+// closed-set data rendered by the console's own components — a kind the
+// console does not know is skipped at render time, never interpreted.
+export type InspectWidget = Schemas["InspectWidgetResult"];
+export type InspectWidgetButton = Schemas["InspectWidgetButton"];
 
 // --- Shell monitor page (GET /api/agents/{id}/shell/{sid}) ---
 //

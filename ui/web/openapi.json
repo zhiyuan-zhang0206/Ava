@@ -1658,6 +1658,50 @@
         }
       }
     },
+    "/api/agents/{agent_id}/inspect/widgets": {
+      "get": {
+        "summary": "Get Agent Inspect Widgets",
+        "description": "The agent's plugin widgets for the inspector panel — the extension\nsurface where enabled plugins embed widgets (see `shared/plugin_inspector.py`;\nregistration mirrors the plugin-metric system).\n\nBuilds the widget registry in process (shipped builtin plugins'\n``inspector.py`` modules imported under their plugin context, restricted\nto the plugins currently enabled), resolves the closed target vocabulary\nfor this agent — the open notice and the queue's task-ownership rule —\nand projects each widget, dropping a button whose target did not resolve\nand a widget left without buttons. Unknown agents return 404 like the\nrest of the /inspect family. Implementation in\n``gateway/routers/_plugin_inspector.py``.",
+        "operationId": "get_agent_inspect_widgets_api_agents__agent_id__inspect_widgets_get",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Agent Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/InspectWidgetResult"
+                  },
+                  "title": "Response Get Agent Inspect Widgets Api Agents  Agent Id  Inspect Widgets Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/agents/{agent_id}/shell/{session_id}": {
       "get": {
         "summary": "Get Agent Shell",
@@ -9470,6 +9514,116 @@
         ],
         "title": "ImageUrlRef",
         "description": "The `image_url` object of an image content block."
+      },
+      "InspectWidgetButton": {
+        "properties": {
+          "target": {
+            "type": "string",
+            "enum": [
+              "notice",
+              "task"
+            ],
+            "title": "Target"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "icon": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Icon"
+          },
+          "notice_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notice Id"
+          },
+          "task_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "target"
+        ],
+        "title": "InspectWidgetButton",
+        "description": "One button of a resolved inspector widget — an element of\n`InspectWidgetResult.buttons` (GET /api/agents/{id}/inspect/widgets).\n\n`target` is the closed console vocabulary the kernel resolved (see\n`shared/plugin_inspector.py`): \"notice\" carries `notice_id` (the agent's\nopen notice), \"task\" carries `task_id` (the notice's task, else the\nagent's first real task). Both id fields stay optional because the payload\nis data, not policy: a button whose target did not resolve is dropped\nserver-side (so a carried target always has its id), but the console\nstill skips an unknown target rather than interpreting it. `label` /\n`icon` are the plugin's presentation overrides; without them the console\nuses its own localized default copy and icon for the target."
+      },
+      "InspectWidgetResult": {
+        "properties": {
+          "plugin": {
+            "type": "string",
+            "title": "Plugin"
+          },
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "kind": {
+            "type": "string",
+            "const": "jumpButtons",
+            "title": "Kind"
+          },
+          "order": {
+            "type": "integer",
+            "title": "Order"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "buttons": {
+            "items": {
+              "$ref": "#/components/schemas/InspectWidgetButton"
+            },
+            "type": "array",
+            "title": "Buttons"
+          }
+        },
+        "type": "object",
+        "required": [
+          "plugin",
+          "id",
+          "kind",
+          "order"
+        ],
+        "title": "InspectWidgetResult",
+        "description": "One plugin widget rendered for the inspector panel — an element of\nGET /api/agents/{id}/inspect/widgets.\n\nThe resolved twin of a registered `InspectWidgetSpec`\n(`shared/plugin_inspector.py`): `plugin` + `id` name the registration,\n`kind` selects the console renderer (a closed set; an unknown kind is\nskipped by the console), and `buttons` carries only targets that\nresolved, so a widget without anything to show is dropped from the\nresponse entirely (the panel's empty-section rule)."
       },
       "InventoryAggregate": {
         "properties": {

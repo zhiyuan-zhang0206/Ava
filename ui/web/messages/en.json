@@ -864,6 +864,8 @@
     "due": "due",
     "windowedUnavailable": "Windowed inspector data unavailable",
     "retryWindowed": "Retry windowed data",
-    "openRunTimeline": "Open run timeline"
+    "openRunTimeline": "Open run timeline",
+    "jumpNotice": "Notification",
+    "jumpTask": "Task"
   }
 }
