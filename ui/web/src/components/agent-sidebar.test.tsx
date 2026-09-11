@@ -638,7 +638,7 @@ describe("StatsCards tri-state (loading / data / error)", () => {
     expect(screen.getAllByText("—").length).toBeGreaterThanOrEqual(6);
     expect(screen.getByText("Live agents")).toBeTruthy();
     expect(screen.getByText("Tokens")).toBeTruthy();
-    expect(screen.getByText("Cache-read share")).toBeTruthy();
+    expect(screen.getByText("Cache hit")).toBeTruthy();
     expect(screen.getByText("Cost")).toBeTruthy();
     expect(screen.getByText("Average turn time")).toBeTruthy();
     expect(screen.getByText("Warnings / errors")).toBeTruthy();
