@@ -44,7 +44,9 @@ def exited_host() -> ResourceProcess:
         native = psutil.Process(process.pid)
         identity = ResourceProcess(pid=native.pid, birth=stable_create_time(native))
     finally:
-        process.terminate()
+        # kill(), not terminate(): a SIGTERM-ignoring session (Ava shell
+        # sessions inherit SIG_IGN) would leave the child alive and hang here.
+        process.kill()
         process.wait(timeout=5)
     return identity
 

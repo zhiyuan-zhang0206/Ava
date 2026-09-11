@@ -128,7 +128,9 @@ def _look_alike(argv_tail: list[str], env_overrides: dict[str, str | None]) -> G
         )
         yield process.pid
     finally:
-        process.terminate()
+        # SIGKILL: SIGTERM=SIG_IGN inherited from the session shell would
+        # leave this look-alike alive and hang the fixture teardown.
+        process.kill()
         process.wait(timeout=5)
 
 
