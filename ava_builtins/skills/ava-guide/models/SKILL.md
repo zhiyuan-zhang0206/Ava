@@ -98,10 +98,10 @@ same id on its V4.1 Flash backend.
   model, and confirm it is on the roster first (section above).
 - `gemini-3.8-flash` (trialed 2026-09-06, user order) is **stopped** under the
   still-valid stop ruling (pool: `model-policy-v2.3-gemini-flash-stop-20260903`)
-  — do not select it. Historical caveat: switching an existing agent across
-  models still 400s with "Corrupted thought signature"; switch only fresh
-  agents — relevant only if an explicitly ordered exception ever switches
-  models.
+  — do not select it. Historical caveat: switching an existing agent into
+  `gemini-3.8-flash` (its history written by another model) still 400s with
+  "Corrupted thought signature"; only a fresh spawn ever ran clean — relevant
+  only if a cross-model switch onto it is ever explicitly ordered.
 - An already-running agent still on a non-flash model is moved with
   `ava.self.restart(config_overlay={"llm_model": "deepseek-v4-flash"})`.
 - Ruling record: shared-pool note `dev/ava-agent-model-flash-ruling-20260910.md`.
