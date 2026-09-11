@@ -396,7 +396,7 @@ core_metrics.register_core_metric(
 core_metrics.register_core_metric(
     MetricSpec(
         name="core_cache_hit_rate_24h",
-        title="Reported cache-read share",
+        title="Cache hit",
         event_name="llm_usage",
         category="telemetry",
         unit="percent",
