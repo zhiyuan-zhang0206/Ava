@@ -26,6 +26,7 @@ from services.pitr.restore_proof import (
     _is_zombie,
     update_restore_owner,
 )
+from shared.proc_tree import create_time_matches, stable_create_time
 
 
 def _migration_hash(conn: psycopg.Connection[tuple[object, ...]]) -> str:
@@ -80,7 +81,7 @@ def _live_identity(db_url: str, data_directory: str) -> LivePostgresIdentity:
             raise RestoreProofError("live PostgreSQL read probe failed")
     pid_path = Path(data_directory) / "postmaster.pid"
     pid = int(pid_path.read_text().splitlines()[0])
-    created_at = psutil.Process(pid).create_time()
+    created_at = stable_create_time(psutil.Process(pid))
     fingerprint = hashlib.sha256(
         f"{data_directory}\n{system_identifier}\n{started_at}\n1".encode()
     ).hexdigest()
@@ -286,7 +287,7 @@ def _sandbox_identity(pgdata: Path) -> SandboxPostgresIdentity:
         pid = int(lines[0])
         recorded_data_directory = Path(lines[1]).resolve()
         process = psutil.Process(pid)
-        created_at = process.create_time()
+        created_at = stable_create_time(process)
         pgid = os.getpgid(pid)
     except (OSError, IndexError, ValueError, psutil.Error) as exc:
         raise RestoreProofError("cannot establish sandbox PostgreSQL identity") from exc
@@ -301,7 +302,7 @@ def _sandbox_identity(pgdata: Path) -> SandboxPostgresIdentity:
 def _matching_sandbox(identity: SandboxPostgresIdentity) -> psutil.Process | None:
     try:
         process = psutil.Process(identity.pid)
-        if abs(process.create_time() - identity.created_at) >= 0.01:
+        if not create_time_matches(stable_create_time(process), identity.created_at):
             return None
         # A zombie postmaster is dead, not live — and it fails the pgid probe
         # below on macOS anyway (getpgid raises on zombies). Only the run()
@@ -324,7 +325,7 @@ def _stop_process_tree(identity: SandboxPostgresIdentity) -> None:
     owned: dict[tuple[int, float], psutil.Process] = {}
     try:
         members = [leader, *leader.children(recursive=True)]
-        owned = {(item.pid, item.create_time()): item for item in members}
+        owned = {(item.pid, stable_create_time(item)): item for item in members}
     except (psutil.AccessDenied, psutil.NoSuchProcess) as exc:
         raise RestoreProofError("cannot enumerate sandbox PostgreSQL descendants") from exc
     for member in reversed(list(owned.values())):
@@ -335,7 +336,7 @@ def _stop_process_tree(identity: SandboxPostgresIdentity) -> None:
     while alive and time.monotonic() < deadline:
         with suppress(psutil.NoSuchProcess):
             for child in leader.children(recursive=True):
-                owned[(child.pid, child.create_time())] = child
+                owned[(child.pid, stable_create_time(child))] = child
         _gone, alive = psutil.wait_procs(
             list(owned.values()), timeout=min(0.25, max(0, deadline - time.monotonic()))
         )

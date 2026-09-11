@@ -10,6 +10,8 @@ from pathlib import Path
 
 import psutil
 
+from shared.proc_tree import stable_create_time
+
 
 def _publish(path: Path, value: dict[str, object]) -> None:
     fd, raw = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
@@ -48,7 +50,7 @@ def main() -> None:
             "state": "running",
             "pid": process.pid,
             "pgid": os.getpgrp(),
-            "created_at": process.create_time(),
+            "created_at": stable_create_time(process),
             "deadline": args.deadline,
             "expected_token": command[0],
         },

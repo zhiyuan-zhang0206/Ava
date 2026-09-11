@@ -182,6 +182,16 @@ def test_prove_candidate_publishes_only_after_restore_and_live_identity_match(
     class Process:
         pid = 1234
 
+        class _Native:
+            # Darwin identity reads go through the uncorrected kernel value
+            # (`stable_create_time`); the stub keeps both paths at 1.0.
+            @staticmethod
+            def create_time(*, monotonic: bool = False) -> float:
+                assert monotonic
+                return 1.0
+
+        _proc = _Native
+
         @staticmethod
         def create_time() -> float:
             return 1.0

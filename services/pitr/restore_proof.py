@@ -290,9 +290,15 @@ def _is_zombie(process: psutil.Process) -> bool:
 
 
 def _matching_process(pid: int, created_at: float) -> psutil.Process | None:
+    # Method-local: this module sits inside the updater's pre-checkout import
+    # closure, and `shared.proc_tree` imports `shared.session_record` — a
+    # module-scope import here would pull that module back into the closure.
+    # Same arrangement as shared/proc.py.
+    from shared.proc_tree import create_time_matches, stable_create_time
+
     try:
         process = psutil.Process(pid)
-        if abs(process.create_time() - created_at) >= 0.01:
+        if not create_time_matches(stable_create_time(process), created_at):
             return None
         if _is_zombie(process):
             return None
@@ -597,6 +603,9 @@ def prove_candidate(  # noqa: PLR0915
         raise RestoreProofError("restore proof must run as its process-group leader")
     if owner.exists() or owner.is_symlink():
         raise RestoreProofError("restore proof owner evidence already exists")
+    # Method-local for the same closure reason as `_matching_process`.
+    from shared.proc_tree import stable_create_time
+
     _atomic_owner(
         owner,
         {
@@ -605,7 +614,7 @@ def prove_candidate(  # noqa: PLR0915
             "run_id": run_id,
             "partial": str(partial),
             "pid": process.pid,
-            "created_at": process.create_time(),
+            "created_at": stable_create_time(process),
             "pgid": pgid,
             "deadline": time.time() + 6 * 3600,
         },
